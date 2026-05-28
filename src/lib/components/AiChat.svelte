@@ -431,7 +431,10 @@
 
   /** Reactive store for async-rendered diagrams (from full mermaid.js). */
   /** @type {Record<string, string>} */
+  /** Capped LRU object for async mermaid SVGs — prevents unbounded memory growth. */
+  const ASYNC_DIAGRAMS_MAX = 20
   let _asyncDiagrams = $state({})
+  let _asyncDiagramKeys = /** @type {string[]} */ ([])
   let _mermaidJsInit = false
 
   async function _ensureMermaidJs() {
@@ -443,6 +446,14 @@
   async function _renderWithMermaidJs(code, asyncKey) {
     if (_asyncDiagrams[asyncKey] !== undefined) return
     _asyncDiagrams[asyncKey] = '' // mark as pending
+    _asyncDiagramKeys.push(asyncKey)
+    if (_asyncDiagramKeys.length > ASYNC_DIAGRAMS_MAX) {
+      const evicted = _asyncDiagramKeys.shift()
+      if (evicted) {
+        const { [evicted]: _, ...rest } = _asyncDiagrams
+        _asyncDiagrams = rest
+      }
+    }
     try {
       await _ensureMermaidJs()
       const id = `mermaid-${Math.random().toString(36).slice(2)}`

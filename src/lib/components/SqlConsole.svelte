@@ -27,7 +27,7 @@
     loadLayout,
     saveLayout,
   } from "$lib/stores/layout.js";
-  import { untrack } from "svelte";
+  import { untrack, onDestroy } from "svelte";
   import { chatCompletionStream, parseAssistantMessage, buildSystemPrompt } from "$lib/ai.js";
   import { loadAiSettings } from "$lib/stores/ai-settings.js";
 
@@ -286,6 +286,13 @@
       savingQuery = false;
     }
   }
+
+  onDestroy(() => {
+    // Abort any in-flight AI fix request so it doesn't stream into a dead component
+    fixAbort?.abort()
+    // Clear ORM copy feedback timer so it doesn't fire after unmount
+    if (ormCopiedTimer) clearTimeout(ormCopiedTimer)
+  })
 </script>
 
 <div class="flex min-h-0 flex-1 overflow-hidden">

@@ -1,5 +1,5 @@
 <script>
-  import { tick } from "svelte";
+  import { tick, onDestroy, untrack } from "svelte";
   import { toast } from "svelte-sonner";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
@@ -724,6 +724,9 @@
     return map
   })
   const useVirtual = $derived(rows.length > VIRTUAL_THRESHOLD && !embedded)
+  // Stable key that changes only when column names change — prevents the
+  // column-widths $effect from re-running on every row fetch (same columns, new array ref).
+  const _columnNamesKey = $derived(columns.map((c) => c.name).join('\x00'))
   // Split into separate primitives so Svelte only re-runs the {#each} when an
   // index actually crosses a row boundary (every 28px), not on every scroll pixel.
   const virtualStart = $derived.by(() => {
@@ -808,19 +811,18 @@
   }
 
   $effect(() => {
-    const key = columnWidthsKey;
-    const cols = columns;
-    const stored = key ? loadColumnWidths(key) : {};
+    const key = columnWidthsKey
+    _columnNamesKey  // re-run when column names change, but not on row fetches
+    const cols = untrack(() => columns)
+    const stored = key ? loadColumnWidths(key) : {}
     /** @type {Record<string, number>} */
-    const next = {};
+    const next = {}
     for (const col of cols) {
-      const dt = col.dataType ?? col.data_type ?? "";
-      next[col.name] = clampColumnWidth(
-        stored[col.name] ?? defaultColumnWidth(dt),
-      );
+      const dt = col.dataType ?? col.data_type ?? ""
+      next[col.name] = clampColumnWidth(stored[col.name] ?? defaultColumnWidth(dt))
     }
-    columnWidths = next;
-  });
+    columnWidths = next
+  })
 
   /** @param {string} colName */
   function startColumnResize(colName) {
@@ -1107,6 +1109,11 @@
       }
     }
   }
+
+  onDestroy(() => {
+    if (previewShowTimer) clearTimeout(previewShowTimer)
+    if (previewHideTimer) clearTimeout(previewHideTimer)
+  })
 </script>
 
 {#if loading}

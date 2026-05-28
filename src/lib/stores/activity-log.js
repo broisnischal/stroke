@@ -18,7 +18,7 @@
  * }} ActivityEntry
  */
 
-const MAX_ENTRIES = 300
+const MAX_ENTRIES = 100
 
 /** @type {ActivityEntry[]} */
 let _log = []
