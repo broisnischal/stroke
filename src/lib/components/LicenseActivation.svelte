@@ -1,11 +1,9 @@
 <script>
-  import { activateLicense, licenseStatus } from '$lib/stores/license.js'
-  import Sparkles from '@lucide/svelte/icons/sparkles'
+  import { activateLicense } from '$lib/stores/license.js'
   import KeyRound from '@lucide/svelte/icons/key-round'
   import Loader2 from '@lucide/svelte/icons/loader-2'
   import Check from '@lucide/svelte/icons/check'
   import AlertTriangle from '@lucide/svelte/icons/alert-triangle'
-  import ExternalLink from '@lucide/svelte/icons/external-link'
 
   let { onactivated = () => {}, compact = false } = $props()
 
@@ -15,79 +13,80 @@
   let success = $state(false)
 
   async function submit() {
-    if (!key.trim() || loading) return
+    if (!key.trim() || loading || success) return
     loading = true
     error = ''
-    const result = await activateLicense(key)
+    const result = await activateLicense(key.trim())
     loading = false
     if (result.ok) {
       success = true
-      setTimeout(() => onactivated(), 1200)
+      setTimeout(() => onactivated(), 1400)
     } else {
       error = result.error.replace(/^Error invoking remote method '[^']+': /, '')
     }
   }
 
-  function handleKeydown(/** @type {KeyboardEvent} */ e) {
-    if (e.key === 'Enter') submit()
+  /** @param {KeyboardEvent} e */
+  function handleKeydown(e) {
+    if (e.key === 'Enter') void submit()
   }
 </script>
 
-<div class="flex flex-col gap-4 {compact ? '' : 'p-6'}">
+<div class="flex flex-col gap-3 {compact ? 'p-5' : 'p-6'}">
   {#if !compact}
-    <div class="flex flex-col gap-1">
-      <h2 class="text-base font-semibold text-foreground">Activate License</h2>
-      <p class="text-sm text-muted-foreground">
-        Enter the license key from your purchase email.
-      </p>
+    <div class="flex flex-col gap-0.5">
+      <p class="text-sm font-semibold text-foreground">Enter your license key</p>
+      <p class="text-xs text-muted-foreground">Sent to your email after purchase.</p>
     </div>
   {/if}
 
-  <div class="flex flex-col gap-2">
-    <div class="relative">
-      <KeyRound class="absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/50" />
-      <input
-        type="text"
-        bind:value={key}
-        onkeydown={handleKeydown}
-        placeholder="Paste your license key…"
-        spellcheck="false"
-        autocomplete="off"
-        class="h-9 w-full rounded-lg border border-border bg-background pl-9 pr-3 font-mono text-sm text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-ring focus:ring-2 focus:ring-ring/20 disabled:opacity-50"
-        disabled={loading || success}
-      />
-    </div>
-
-    {#if error}
-      <div class="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/8 px-3 py-2 text-xs text-destructive">
-        <AlertTriangle class="mt-0.5 size-3.5 shrink-0" />
-        <span>{error}</span>
-      </div>
-    {/if}
-
-    {#if success}
-      <div class="flex items-center gap-2 rounded-lg border border-green-500/30 bg-green-500/8 px-3 py-2 text-xs text-green-600 dark:text-green-400">
-        <Check class="size-3.5 shrink-0" />
-        License activated! Welcome.
-      </div>
-    {/if}
+  <!-- Key input -->
+  <div class="relative">
+    <KeyRound class="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/40" />
+    <input
+      type="text"
+      bind:value={key}
+      onkeydown={handleKeydown}
+      placeholder="XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
+      spellcheck="false"
+      autocomplete="off"
+      disabled={loading || success}
+      class="h-10 w-full rounded-lg border border-border bg-muted/30 pl-9 pr-3 font-mono text-sm tracking-wider text-foreground outline-none transition-all placeholder:font-sans placeholder:tracking-normal placeholder:text-muted-foreground/35 focus:border-ring focus:bg-background focus:ring-2 focus:ring-ring/20 disabled:opacity-50"
+    />
   </div>
 
+  <!-- Error -->
+  {#if error}
+    <div class="flex items-start gap-2 rounded-lg border border-destructive/25 bg-destructive/[0.06] px-3 py-2.5 text-xs text-destructive">
+      <AlertTriangle class="mt-px size-3.5 shrink-0" />
+      <span class="leading-relaxed">{error}</span>
+    </div>
+  {/if}
+
+  <!-- Success -->
+  {#if success}
+    <div class="flex items-center gap-2 rounded-lg border border-green-500/25 bg-green-500/[0.07] px-3 py-2.5 text-xs text-green-600 dark:text-green-400">
+      <Check class="size-3.5 shrink-0" />
+      <span>License activated — welcome aboard!</span>
+    </div>
+  {/if}
+
+  <!-- Submit -->
   <button
     type="button"
-    class="inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
     disabled={!key.trim() || loading || success}
-    onclick={submit}
+    onclick={() => void submit()}
+    class="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-primary text-sm font-semibold text-primary-foreground shadow-sm transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
   >
     {#if loading}
       <Loader2 class="size-4 animate-spin" />
       Verifying…
     {:else if success}
       <Check class="size-4" />
-      Activated
+      Activated!
     {:else}
       <KeyRound class="size-4" />
-      Activate
+      Activate License
     {/if}
   </button>
 </div>

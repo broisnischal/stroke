@@ -4,14 +4,18 @@
     licenseStatus,
     isBlocked,
     isTrialActive,
-    isLicensed,
     refreshLicenseStatus,
   } from '$lib/stores/license.js'
   import LicenseActivation from './LicenseActivation.svelte'
-  import Sparkles from '@lucide/svelte/icons/sparkles'
-  import KeyRound from '@lucide/svelte/icons/key-round'
+  import * as Dialog from '$lib/components/ui/dialog/index.js'
+  import Database from '@lucide/svelte/icons/database'
   import Clock from '@lucide/svelte/icons/clock'
+  import KeyRound from '@lucide/svelte/icons/key-round'
   import X from '@lucide/svelte/icons/x'
+  import Check from '@lucide/svelte/icons/check'
+  import Zap from '@lucide/svelte/icons/zap'
+  import ShieldCheck from '@lucide/svelte/icons/shield-check'
+  import RefreshCw from '@lucide/svelte/icons/refresh-cw'
 
   let { children } = $props()
 
@@ -24,77 +28,102 @@
     showActivationDialog = false
   }
 
-  const daysColor = $derived.by(() => {
-    const s = $licenseStatus
-    if (s?.status !== 'Trial') return ''
-    const d = s.days_remaining
-    if (d <= 1) return 'border-destructive/40 bg-destructive/5 text-destructive'
-    if (d <= 3) return 'border-amber-500/40 bg-amber-500/5 text-amber-600 dark:text-amber-400'
-    return 'border-border/60 bg-muted/30 text-muted-foreground'
-  })
+  const days = $derived(
+    $licenseStatus?.status === 'Trial' ? $licenseStatus.days_remaining : 0
+  )
+
+  const bannerUrgency = $derived(
+    days <= 1
+      ? 'border-destructive/30 bg-destructive/[0.04] text-destructive'
+      : days <= 3
+        ? 'border-amber-500/30 bg-amber-500/[0.05] text-amber-700 dark:text-amber-400'
+        : 'border-border/50 bg-muted/30 text-muted-foreground'
+  )
 </script>
 
-<!-- Pass-through while status is loading -->
+<!-- Loading — pass through -->
 {#if $licenseStatus === null}
   {@render children()}
 
-<!-- Blocked: trial expired, no license -->
+<!-- Blocked — full-page activation -->
 {:else if $isBlocked}
-  <div class="flex h-full min-h-0 flex-col items-center justify-center bg-background p-8">
-    <div class="flex w-full max-w-md flex-col gap-6">
-      <!-- Logo / hero -->
-      <div class="flex flex-col items-center gap-3 text-center">
-        <div class="flex size-14 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/20">
-          <Sparkles class="size-7 text-primary" />
+  <div class="relative flex h-full min-h-0 flex-col items-center justify-center overflow-hidden bg-background p-6">
+
+    <!-- Subtle radial fade -->
+    <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_-10%,hsl(var(--primary)/0.07),transparent)]"></div>
+
+    <div class="relative flex w-full max-w-[400px] flex-col gap-8">
+
+      <!-- Branding -->
+      <div class="flex flex-col items-center gap-4 text-center">
+        <div class="relative flex size-[60px] items-center justify-center rounded-2xl border border-primary/20 bg-primary/8 shadow-lg shadow-primary/10 ring-4 ring-primary/5">
+          <Database class="size-7 text-primary" />
         </div>
-        <div>
-          <h1 class="text-xl font-semibold text-foreground">Your trial has ended</h1>
-          <p class="mt-1 text-sm text-muted-foreground">
-            Activate a license to keep using DB Studio.
-          </p>
+        <div class="flex flex-col gap-1">
+          <h1 class="text-2xl font-bold tracking-tight text-foreground">DB Studio</h1>
+          <p class="text-sm text-muted-foreground">Your trial has ended. Activate a license to continue.</p>
         </div>
       </div>
 
-      <!-- Activation form -->
-      <div class="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      <!-- Card -->
+      <div class="overflow-hidden rounded-2xl border border-border bg-card shadow-xl shadow-black/5">
+
+        <!-- What's included -->
+        <div class="border-b border-border/60 bg-muted/20 px-5 py-3.5">
+          <div class="flex flex-wrap gap-x-5 gap-y-1.5">
+            {#each [
+              [Zap, 'All features'],
+              [RefreshCw, 'Future updates'],
+              [ShieldCheck, 'Unlimited connections'],
+            ] as [Icon, label] (label)}
+              <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Icon class="size-3 shrink-0 text-primary/70" />
+                {label}
+              </span>
+            {/each}
+          </div>
+        </div>
+
+        <!-- Form -->
         <LicenseActivation onactivated={handleActivated} />
       </div>
 
-      <!-- Footer -->
-      <p class="text-center text-xs text-muted-foreground/60">
-        Don't have a key yet? Purchase one at
+      <!-- Purchase link -->
+      <p class="text-center text-xs text-muted-foreground/50">
+        No license yet? &nbsp;
         <a
           href="https://dbstudio.app"
           target="_blank"
           rel="noopener noreferrer"
-          class="text-primary underline underline-offset-2 hover:opacity-80"
-        >dbstudio.app</a>
+          class="font-medium text-primary/80 underline-offset-2 transition-opacity hover:opacity-70 hover:underline"
+        >
+          Get one at dbstudio.app →
+        </a>
       </p>
     </div>
   </div>
 
-<!-- Active: show app + optional banners/badges -->
+<!-- Active — app + optional banner -->
 {:else}
   <div class="flex h-full min-h-0 flex-col">
 
     <!-- Trial banner -->
     {#if $isTrialActive && !trialBannerDismissed}
-      {@const days = $licenseStatus?.status === 'Trial' ? $licenseStatus.days_remaining : 0}
-      <div class="flex shrink-0 items-center gap-2 border-b {daysColor} px-3 py-1.5 text-xs">
+      <div class="flex shrink-0 items-center gap-2.5 border-b {bannerUrgency} px-4 py-1.5 text-xs font-medium">
         <Clock class="size-3.5 shrink-0" />
         <span class="flex-1">
-          <strong>{days} {days === 1 ? 'day' : 'days'}</strong> left in your free trial.
+          <strong>{days} {days === 1 ? 'day' : 'days'}</strong> left in your trial.
         </span>
         <button
           type="button"
-          class="rounded px-2 py-0.5 font-medium underline underline-offset-2 hover:opacity-70"
+          class="shrink-0 rounded-md border border-current/25 bg-current/5 px-2.5 py-1 text-[11px] font-semibold transition-opacity hover:opacity-70"
           onclick={() => (showActivationDialog = true)}
         >
-          Activate License
+          Activate
         </button>
         <button
           type="button"
-          class="inline-flex size-5 items-center justify-center rounded opacity-50 hover:opacity-100"
+          class="inline-flex size-5 shrink-0 items-center justify-center rounded opacity-40 transition-opacity hover:opacity-90"
           onclick={() => (trialBannerDismissed = true)}
           title="Dismiss"
         >
@@ -103,34 +132,45 @@
       </div>
     {/if}
 
-    <!-- Main app content -->
     <div class="min-h-0 flex-1 overflow-hidden">
       {@render children()}
     </div>
   </div>
 
+  <!-- Activation dialog (trial) -->
+  <Dialog.Root bind:open={showActivationDialog}>
+    <Dialog.Portal>
+      <Dialog.Overlay class="fixed inset-0 z-[70] bg-background/60 backdrop-blur-sm" />
+      <Dialog.Content showCloseButton={false} class="fixed left-1/2 top-1/2 z-[71] w-full max-w-[420px] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border border-border bg-card p-0 shadow-2xl outline-none">
 
-  <!-- Activation dialog (during trial) -->
-  {#if showActivationDialog}
-    <button
-      type="button"
-      class="fixed inset-0 z-[70] bg-background/60 backdrop-blur-sm"
-      onclick={() => (showActivationDialog = false)}
-      aria-label="Close"
-    ></button>
-    <div class="fixed left-1/2 top-1/2 z-[71] w-full max-w-md -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
-      <div class="flex items-center justify-between border-b border-border/60 px-5 py-3.5">
-        <div class="flex items-center gap-2">
-          <KeyRound class="size-4 text-primary" />
-          <span class="font-semibold text-sm">Activate License</span>
+        <!-- Dialog header -->
+        <div class="flex items-center justify-between border-b border-border/60 px-5 py-4">
+          <div class="flex items-center gap-2.5">
+            <div class="flex size-7 items-center justify-center rounded-lg bg-primary/10">
+              <KeyRound class="size-3.5 text-primary" />
+            </div>
+            <div>
+              <Dialog.Title class="text-sm font-semibold leading-none text-foreground">Activate License</Dialog.Title>
+              <Dialog.Description class="mt-0.5 text-xs text-muted-foreground">Enter your key to unlock all features.</Dialog.Description>
+            </div>
+          </div>
+          <Dialog.Close class="inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+            <X class="size-4" />
+          </Dialog.Close>
         </div>
-        <button
-          type="button"
-          class="inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
-          onclick={() => (showActivationDialog = false)}
-        ><X class="size-4" /></button>
-      </div>
-      <LicenseActivation compact onactivated={() => { showActivationDialog = false }} />
-    </div>
-  {/if}
+
+        <!-- Form -->
+        <LicenseActivation compact onactivated={() => { showActivationDialog = false }} />
+
+        <!-- Footer -->
+        <div class="border-t border-border/60 px-5 py-3">
+          <p class="text-xs text-muted-foreground/50">
+            No license?
+            <a href="https://dbstudio.app" target="_blank" rel="noopener noreferrer"
+               class="text-primary/70 underline-offset-2 hover:underline">dbstudio.app →</a>
+          </p>
+        </div>
+      </Dialog.Content>
+    </Dialog.Portal>
+  </Dialog.Root>
 {/if}
