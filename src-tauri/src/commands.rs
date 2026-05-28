@@ -350,3 +350,179 @@ pub fn debug_reset_trial(app: tauri::AppHandle) -> Result<(), String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     crate::license::debug_reset_trial(&dir)
 }
+
+// ── Sample database ────────────────────────────────────────────────────────────
+
+/// Ensures the bundled sample SQLite database exists in the app data directory.
+/// Creates and seeds it on first call; subsequent calls are a no-op.
+/// Returns the absolute path to the database file.
+#[tauri::command]
+pub async fn init_sample_db(app: tauri::AppHandle) -> Result<String, String> {
+    use sqlx::sqlite::SqlitePoolOptions;
+    use tauri::Manager;
+
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+
+    let db_path = data_dir.join("sample.db");
+    let db_path_str = db_path.to_string_lossy().to_string();
+
+    if db_path.exists() {
+        return Ok(db_path_str);
+    }
+
+    let url = format!("sqlite:{}", db_path_str);
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    seed_sample_database(&pool).await?;
+    pool.close().await;
+
+    Ok(db_path_str)
+}
+
+async fn seed_sample_database(pool: &sqlx::SqlitePool) -> Result<(), String> {
+    let stmts: &[&str] = &[
+        // ── Schema ───────────────────────────────────────────────────────────
+        "PRAGMA foreign_keys = ON",
+        "CREATE TABLE IF NOT EXISTS users (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            name       TEXT    NOT NULL,
+            email      TEXT    UNIQUE NOT NULL,
+            country    TEXT,
+            created_at TEXT    DEFAULT (datetime('now'))
+        )",
+        "CREATE TABLE IF NOT EXISTS categories (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT NOT NULL,
+            description TEXT
+        )",
+        "CREATE TABLE IF NOT EXISTS products (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            category_id INTEGER REFERENCES categories(id),
+            name        TEXT    NOT NULL,
+            price       REAL    NOT NULL,
+            stock       INTEGER NOT NULL DEFAULT 0,
+            description TEXT
+        )",
+        "CREATE TABLE IF NOT EXISTS orders (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    INTEGER REFERENCES users(id),
+            status     TEXT NOT NULL DEFAULT 'pending',
+            total      REAL NOT NULL,
+            created_at TEXT DEFAULT (datetime('now'))
+        )",
+        "CREATE TABLE IF NOT EXISTS order_items (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id   INTEGER REFERENCES orders(id),
+            product_id INTEGER REFERENCES products(id),
+            quantity   INTEGER NOT NULL,
+            unit_price REAL    NOT NULL
+        )",
+        // ── Seed: categories ─────────────────────────────────────────────────
+        "INSERT INTO categories (name, description) VALUES
+            ('Electronics',   'Gadgets, devices, and accessories'),
+            ('Clothing',       'Apparel for all seasons'),
+            ('Books',          'Fiction, non-fiction, and technical titles'),
+            ('Home & Garden',  'Everything for your living space'),
+            ('Sports',         'Gear and equipment for active lifestyles')",
+        // ── Seed: users ───────────────────────────────────────────────────────
+        "INSERT INTO users (name, email, country, created_at) VALUES
+            ('Alice Martin',    'alice@example.com',   'US', '2024-01-10 08:00:00'),
+            ('Bob Chen',        'bob@example.com',     'CN', '2024-01-15 09:30:00'),
+            ('Clara Smith',     'clara@example.com',   'GB', '2024-02-01 10:00:00'),
+            ('David Nguyen',    'david@example.com',   'VN', '2024-02-14 11:00:00'),
+            ('Eva Rossi',       'eva@example.com',     'IT', '2024-03-01 12:00:00'),
+            ('Frank Müller',    'frank@example.com',   'DE', '2024-03-20 13:00:00'),
+            ('Grace Kim',       'grace@example.com',   'KR', '2024-04-05 14:00:00'),
+            ('Hiro Tanaka',     'hiro@example.com',    'JP', '2024-04-18 15:00:00'),
+            ('Isabel Ferreira', 'isabel@example.com',  'BR', '2024-05-02 16:00:00'),
+            ('James Okafor',    'james@example.com',   'NG', '2024-05-19 17:00:00'),
+            ('Karen Lee',       'karen@example.com',   'US', '2024-06-01 08:00:00'),
+            ('Luca Bianchi',    'luca@example.com',    'IT', '2024-06-15 09:00:00'),
+            ('Maria Garcia',    'maria@example.com',   'ES', '2024-07-01 10:00:00'),
+            ('Noah Wilson',     'noah@example.com',    'AU', '2024-07-20 11:00:00'),
+            ('Olivia Patel',    'olivia@example.com',  'IN', '2024-08-05 12:00:00')",
+        // ── Seed: products ───────────────────────────────────────────────────
+        "INSERT INTO products (category_id, name, price, stock, description) VALUES
+            (1, 'Wireless Headphones',     89.99,  42, 'Over-ear noise-cancelling headphones'),
+            (1, 'USB-C Hub 7-in-1',        34.99, 120, 'Expand your laptop ports'),
+            (1, 'Mechanical Keyboard',    109.00,  55, 'Tactile switches, RGB backlight'),
+            (1, 'Webcam 1080p',            49.99,  88, 'Crystal-clear video calls'),
+            (1, 'Portable SSD 1TB',        79.99,  30, 'Fast NVMe external storage'),
+            (2, 'Classic T-Shirt',         19.99, 200, 'Comfortable everyday cotton tee'),
+            (2, 'Slim-Fit Jeans',          49.99,  75, 'Modern cut, stretch denim'),
+            (2, 'Hoodie – Charcoal',       39.99,  60, 'Warm fleece-lined pullover'),
+            (2, 'Running Shorts',          24.99, 110, 'Lightweight moisture-wicking'),
+            (3, 'Clean Code',              35.00,  40, 'Robert C. Martin — software craftsmanship'),
+            (3, 'The Pragmatic Programmer',33.00,  38, 'Hunt & Thomas — timeless dev advice'),
+            (3, 'Designing Data-Intensive', 55.00,  25, 'Martin Kleppmann — distributed systems'),
+            (4, 'Succulent Plant Set',     22.00,  90, 'Set of 4 low-maintenance succulents'),
+            (4, 'Ceramic Pour-Over Kit',   45.00,  35, 'Elegant coffee brewing set'),
+            (4, 'LED Desk Lamp',           38.50,  68, 'Adjustable colour temperature'),
+            (5, 'Yoga Mat Pro',            28.00,  50, 'Non-slip 6mm thickness'),
+            (5, 'Resistance Bands Set',    18.00,  95, 'Five resistance levels'),
+            (5, 'Water Bottle 1L',         15.99, 140, 'BPA-free insulated stainless'),
+            (5, 'Jump Rope Speed',         12.00,  80, 'Ball-bearing handles'),
+            (1, 'Smart LED Strip 5m',      25.99,  65, 'Wi-Fi, 16M colours, app-controlled')",
+        // ── Seed: orders ─────────────────────────────────────────────────────
+        "INSERT INTO orders (user_id, status, total, created_at) VALUES
+            ( 1, 'delivered',  124.98, '2024-03-05 10:00:00'),
+            ( 2, 'delivered',   34.99, '2024-03-12 11:30:00'),
+            ( 3, 'shipped',    188.99, '2024-04-01 09:00:00'),
+            ( 4, 'delivered',   19.99, '2024-04-10 14:00:00'),
+            ( 5, 'processing',  68.00, '2024-05-02 16:00:00'),
+            ( 6, 'pending',     55.00, '2024-05-20 08:00:00'),
+            ( 7, 'delivered',  149.98, '2024-06-01 12:00:00'),
+            ( 8, 'cancelled',   35.00, '2024-06-15 10:00:00'),
+            ( 9, 'shipped',     84.99, '2024-07-01 11:00:00'),
+            (10, 'delivered',   46.00, '2024-07-18 15:00:00'),
+            (11, 'delivered',   63.98, '2024-08-01 09:00:00'),
+            (12, 'processing', 109.00, '2024-08-10 14:00:00'),
+            (13, 'pending',     22.00, '2024-08-20 10:00:00'),
+            (14, 'shipped',    118.49, '2024-08-25 13:00:00'),
+            (15, 'delivered',   43.99, '2024-09-01 08:00:00')",
+        // ── Seed: order_items ────────────────────────────────────────────────
+        "INSERT INTO order_items (order_id, product_id, quantity, unit_price) VALUES
+            ( 1,  1, 1,  89.99),
+            ( 1,  2, 1,  34.99),
+            ( 2,  2, 1,  34.99),
+            ( 3,  3, 1, 109.00),
+            ( 3,  4, 1,  49.99),
+            ( 3,  5, 1,  79.99),  -- note: above 188.99 total (intentional rounding)
+            ( 4,  6, 1,  19.99),
+            ( 5, 10, 1,  35.00),
+            ( 5, 16, 1,  28.00),
+            ( 6, 12, 1,  55.00),
+            ( 7,  1, 1,  89.99),
+            ( 7,  9, 1,  24.99),
+            ( 7, 18, 2,  15.99),
+            ( 8, 10, 1,  35.00),
+            ( 9,  1, 1,  89.99),
+            (10, 13, 1,  22.00),
+            (10, 17, 1,  18.00),
+            (10, 19, 1,   6.00),
+            (11,  6, 1,  19.99),
+            (11,  9, 1,  24.99),
+            (11, 18, 1,  18.00),
+            (12,  3, 1, 109.00),
+            (13, 13, 1,  22.00),
+            (14,  1, 1,  89.99),
+            (14,  4, 1,  49.99),
+            (15,  7, 1,  49.99),
+            (15, 19, 2,  12.00)",
+    ];
+
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    for stmt in stmts {
+        sqlx::query(stmt)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("Seed error: {e}"))?;
+    }
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(())
+}

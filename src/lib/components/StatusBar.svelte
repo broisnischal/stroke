@@ -294,16 +294,21 @@
   <!-- ── Right group ────────────────────────────────────────────────── -->
   <div class="flex shrink-0 items-center gap-0.5">
     {#if connection}
-      <!-- Connection-specific tool icons -->
-      <button type="button" class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground" onclick={onopenSchema} title="Schema Explorer">
-        <LayoutTemplate class="size-3.5" />
-      </button>
+      <!-- Connection-specific tool icons — visibility depends on db capabilities -->
+      {@const dbT = connection.type ?? 'postgres'}
+      {#if dbT === 'postgres' || dbT === 'mysql'}
+        <button type="button" class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground" onclick={onopenSchema} title="Schema Explorer">
+          <LayoutTemplate class="size-3.5" />
+        </button>
+      {/if}
       <button type="button" class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground" onclick={onopenlogs} title="Activity log">
         <History class="size-3.5" />
       </button>
-      <button type="button" class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground" onclick={onopensecurity} title="Security">
-        <ShieldCheck class="size-3.5" />
-      </button>
+      {#if dbT === 'postgres'}
+        <button type="button" class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground" onclick={onopensecurity} title="Security (RLS & Policies)">
+          <ShieldCheck class="size-3.5" />
+        </button>
+      {/if}
       <button type="button" class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground" onclick={onopenorm} title="ORM Runner">
         <Code2 class="size-3.5" />
       </button>

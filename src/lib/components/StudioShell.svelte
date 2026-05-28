@@ -110,6 +110,7 @@
     listEnums,
     truncateTable,
     dropTable,
+    initSampleDb,
   } from '$lib/api.js'
   import {
     remapNullableRowIndex,
@@ -143,6 +144,8 @@
   }
 
   const ONBOARDING_KEY = 'db-studio:onboarded'
+  const SAMPLE_SEEDED_KEY = 'db-studio:sample-seeded'
+  const SAMPLE_DB_ID = 'db-studio:sample-sqlite'
   let showOnboarding = $state(false)
 
   // Dev-only: Alt+Shift+O resets and re-shows the onboarding. Dead code in prod.
@@ -168,6 +171,13 @@
   let showAiModelSettings = $state(false)
   let commandOpen = $state(false)
   let commandPage = $state(/** @type {'root'|'docker'|'connections'|'tables'} */ ('root'))
+
+  // ── DB-type capability flags ───────────────────────────────────────────────
+  const dbType = $derived(connection?.type ?? 'postgres')
+  /** Schema Explorer is useful for postgres + mysql; sqlite/d1 have no meaningful schema pages. */
+  const hasSchemaExplorer = $derived(dbType === 'postgres' || dbType === 'mysql')
+  /** Security (RLS, policies, roles) is PostgreSQL-only. */
+  const hasSecurity = $derived(dbType === 'postgres')
   /** @type {import('./UpdateDialog.svelte').default | null} */
   let updateDialog = $state(null)
   let statusBarHasUpdate = $state(false)
@@ -710,17 +720,20 @@
   })
 
   createHotkey('Escape', (e) => {
-    if (commandOpen) {
-      e.preventDefault()
-      commandOpen = false
-      return
-    }
-    if (showShortcutsModal) {
-      e.preventDefault()
-      showShortcutsModal = false
-      return
-    }
-    if (showConnectionModal || showSettingsModal) return
+    // Close dialogs in reverse z-index order (topmost first).
+    // Each branch prevents lower-priority handlers from firing.
+    if (commandOpen)           { e.preventDefault(); commandOpen = false;           return }
+    if (showShortcutsModal)    { e.preventDefault(); showShortcutsModal = false;    return }
+    if (showAiModelSettings)   { e.preventDefault(); showAiModelSettings = false;   return }
+    if (showAboutModal)        { e.preventDefault(); showAboutModal = false;        return }
+    if (showInsiderModal)      { e.preventDefault(); showInsiderModal = false;      return }
+    if (showDisconnectDialog)  { e.preventDefault(); showDisconnectDialog = false;  return }
+    if (showCreateTableDialog) { e.preventDefault(); showCreateTableDialog = false; return }
+    if (insertRowOpen)         { e.preventDefault(); insertRowOpen = false;         return }
+    if (showDockerModal)       { e.preventDefault(); showDockerModal = false;       return }
+    if (showMcpPanel)          { e.preventDefault(); showMcpPanel = false;          return }
+    if (showConnectionModal)   { e.preventDefault(); showConnectionModal = false;   return }
+    if (showSettingsModal)     { e.preventDefault(); showSettingsModal = false;     return }
     if (editingCell) {
       e.preventDefault()
       editingCell = null
@@ -958,6 +971,7 @@
   }
 
   function openSchemaTab() {
+    if (!hasSchemaExplorer) return
     const existing = findSchemaTab(tabs)
     if (existing) {
       void activateTab(existing.id)
@@ -986,6 +1000,7 @@
   }
 
   function openSecurityTab() {
+    if (!hasSecurity) return
     const existing = findSecurityTab(tabs)
     if (existing) {
       void activateTab(existing.id)
@@ -1520,6 +1535,19 @@
   onMount(() => installInputShortcuts())
 
   onMount(async () => {
+    // Seed the sample SQLite database once on first launch (any install, any user).
+    // Uses a sentinel key so re-seeding is skipped if the user later deletes the connection.
+    try {
+      if (!localStorage.getItem(SAMPLE_SEEDED_KEY)) {
+        const filePath = await initSampleDb()
+        upsertConnection({ id: SAMPLE_DB_ID, type: 'sqlite', name: 'Sample Database', filePath })
+        savedConnections = loadSavedConnections()
+        localStorage.setItem(SAMPLE_SEEDED_KEY, '1')
+      }
+    } catch {
+      // Non-critical — don't block app start if Tauri backend unavailable (browser dev)
+    }
+
     // First-time user — show onboarding instead of bare connection modal
     try {
       if (!localStorage.getItem(ONBOARDING_KEY)) {
@@ -1630,6 +1658,30 @@
     } catch (e) {
       error = String(e)
       showDockerModal = false
+      showConnectionModal = true
+    } finally {
+      autoConnecting = false
+    }
+  }
+
+  async function handleSampleConnect() {
+    disconnectPostgres().catch(() => {})
+    connection = null
+    schemas = []; tables = []; indexes = []; enums = []; activeSchema = 'public'; activeTable = null; tableFilter = ''
+    resetTabs()
+    autoConnecting = true
+    try {
+      const filePath = await initSampleDb()
+      const sample = /** @type {import('$lib/stores/connections.js').SavedConnection} */ ({
+        id: SAMPLE_DB_ID, type: 'sqlite', name: 'Sample Database', filePath,
+      })
+      upsertConnection(sample)
+      savedConnections = loadSavedConnections()
+      localStorage.setItem(SAMPLE_SEEDED_KEY, '1')
+      await connectSqlite(sample)
+      await onConnected(sample, sample.id)
+    } catch (e) {
+      error = String(e)
       showConnectionModal = true
     } finally {
       autoConnecting = false
@@ -1913,7 +1965,7 @@
   }
 </script>
 
-<Onboarding bind:open={showOnboarding} onconnect={() => (showConnectionModal = true)} />
+<Onboarding bind:open={showOnboarding} onconnect={() => (showConnectionModal = true)} onsample={handleSampleConnect} />
 <ConnectionModal bind:open={showConnectionModal} onconnected={(conn, id) => onConnected(conn, id)} />
 <DisconnectDialog bind:open={showDisconnectDialog} connectionName={connection?.name ?? ''} ondisconnect={handleDisconnect} />
 <CreateTableDialog
@@ -1982,6 +2034,8 @@
   onopenSchema={() => { if (aiMode) exitAiMode(); openSchemaTab() }}
   onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
   onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
+  {hasSchemaExplorer}
+  {hasSecurity}
   onopenJsonViewer={() => { if (aiMode) exitAiMode(); openJsonTab() }}
   onopenshortcuts={() => (showShortcutsModal = true)}
   onopenabout={() => (showAboutModal = true)}
@@ -2373,21 +2427,23 @@
               </div>
             </button>
 
-            <button
-              onclick={openSchemaTab}
-              class="group flex flex-col gap-3 rounded-xl border border-border/50 bg-card p-4 text-left transition-all hover:border-border hover:bg-accent/20 hover:shadow-sm"
-            >
-              <div class="flex items-center justify-between">
-                <div class="flex size-8 items-center justify-center rounded-lg border border-border/60 bg-background text-muted-foreground transition-colors group-hover:text-foreground">
-                  <LayoutTemplate size={14} />
+            {#if hasSchemaExplorer}
+              <button
+                onclick={openSchemaTab}
+                class="group flex flex-col gap-3 rounded-xl border border-border/50 bg-card p-4 text-left transition-all hover:border-border hover:bg-accent/20 hover:shadow-sm"
+              >
+                <div class="flex items-center justify-between">
+                  <div class="flex size-8 items-center justify-center rounded-lg border border-border/60 bg-background text-muted-foreground transition-colors group-hover:text-foreground">
+                    <LayoutTemplate size={14} />
+                  </div>
+                  <kbd class="rounded border border-border/40 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground/50">{mod}⇧E</kbd>
                 </div>
-                <kbd class="rounded border border-border/40 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground/50">{mod}⇧E</kbd>
-              </div>
-              <div>
-                <p class="text-ui-sm font-medium text-foreground">Schema Explorer</p>
-                <p class="mt-0.5 text-ui-xs text-muted-foreground">Visualize your database</p>
-              </div>
-            </button>
+                <div>
+                  <p class="text-ui-sm font-medium text-foreground">Schema Explorer</p>
+                  <p class="mt-0.5 text-ui-xs text-muted-foreground">Visualize your database</p>
+                </div>
+              </button>
+            {/if}
           </div>
 
           <div class="w-full max-w-md rounded-xl border border-border/40 bg-muted/15 p-4">

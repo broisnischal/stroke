@@ -251,6 +251,17 @@ async fn open_mysql(config: &MysqlConfig) -> Result<MySqlPool, String> {
         .acquire_timeout(std::time::Duration::from_secs(30))
         .idle_timeout(std::time::Duration::from_secs(600))
         .max_lifetime(std::time::Duration::from_secs(1800))
+        // Enable ANSI_QUOTES on every connection so double-quoted identifiers
+        // ("col") work the same as backtick identifiers (`col`). This makes
+        // standard SQL and AI-generated queries work without rewriting syntax.
+        .after_connect(|conn, _meta| {
+            Box::pin(async move {
+                sqlx::query("SET sql_mode = CONCAT(@@sql_mode, ',ANSI_QUOTES')")
+                    .execute(conn)
+                    .await
+                    .map(|_| ())
+            })
+        })
         .connect(&config.connection_url())
         .await
         .map_err(|e| format!("Connection failed: {e}"))

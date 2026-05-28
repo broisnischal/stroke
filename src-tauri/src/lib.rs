@@ -108,6 +108,7 @@ pub fn run() {
             commands::check_license_status,
             commands::activate_license,
             commands::deactivate_license,
+            commands::init_sample_db,
             #[cfg(debug_assertions)]
             commands::debug_set_trial_days_ago,
             #[cfg(debug_assertions)]

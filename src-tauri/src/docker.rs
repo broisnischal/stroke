@@ -3,6 +3,50 @@ use tauri::Emitter;
 use tokio::io::AsyncBufReadExt;
 use tokio::process::Command as Cmd;
 
+// ── DB-level readiness checks ─────────────────────────────────────────────────
+// TCP-open ≠ database-ready. MySQL/Postgres accept TCP connections seconds before
+// they finish initialization. We retry actual SQL pings to confirm readiness.
+
+async fn wait_mysql_ready(host_port: u16, password: &str) -> bool {
+    let url = format!(
+        "mysql://root:{password}@127.0.0.1:{host_port}/mysql?ssl-mode=disabled"
+    );
+    for _ in 0..60u32 {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        if let Ok(pool) = sqlx::mysql::MySqlPoolOptions::new()
+            .max_connections(1)
+            .acquire_timeout(std::time::Duration::from_secs(2))
+            .connect(&url)
+            .await
+        {
+            let ok = sqlx::query("SELECT 1").execute(&pool).await.is_ok();
+            pool.close().await;
+            if ok { return true; }
+        }
+    }
+    false
+}
+
+async fn wait_postgres_ready(host_port: u16, password: &str) -> bool {
+    let url = format!(
+        "postgres://postgres:{password}@127.0.0.1:{host_port}/postgres?sslmode=disable"
+    );
+    for _ in 0..60u32 {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        if let Ok(pool) = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(1)
+            .acquire_timeout(std::time::Duration::from_secs(2))
+            .connect(&url)
+            .await
+        {
+            let ok = sqlx::query("SELECT 1").execute(&pool).await.is_ok();
+            pool.close().await;
+            if ok { return true; }
+        }
+    }
+    false
+}
+
 #[derive(serde::Serialize, Clone)]
 pub struct DockerLog {
     pub line: String,
@@ -142,7 +186,11 @@ pub async fn docker_run_db(
                 .arg("-e")
                 .arg("MYSQL_ROOT_PASSWORD=mysql")
                 .arg("-e")
-                .arg("MYSQL_DATABASE=mysql");
+                .arg("MYSQL_DATABASE=mysql")
+                // MySQL 8.4 uses caching_sha2_password by default which requires SSL or
+                // RSA key exchange. Enable mysql_native_password so sqlx can connect
+                // without TLS on loopback connections.
+                .arg("--mysql-native-password=ON");
         }
         _ => {}
     }
@@ -175,28 +223,25 @@ pub async fn docker_run_db(
         "info",
     );
 
-    // ── Wait for ready (TCP poll) ──────────────────────────────────────────────
-    let addr = format!("127.0.0.1:{host_port}");
-    let mut ready = false;
-    for attempt in 1..=30u32 {
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        if tokio::net::TcpStream::connect(&addr).await.is_ok() {
-            emit_log(
-                &app,
-                &evt,
-                &format!("Database ready after {attempt}s"),
-                "info",
-            );
-            ready = true;
-            break;
-        }
-    }
+    // ── Wait for DB-level readiness ───────────────────────────────────────────
+    // TCP-open is not enough — the database process needs more time to finish
+    // initialization after the port starts accepting connections. We retry actual
+    // SQL connections so the caller gets a fully usable database, not just an open port.
+    emit_log(&app, &evt, "Waiting for database to accept connections…", "info");
+
+    let ready = match db_type.as_str() {
+        "mysql"    => wait_mysql_ready(host_port, password).await,
+        "postgres" => wait_postgres_ready(host_port, password).await,
+        _          => false,
+    };
 
     if !ready {
         return Err(format!(
-            "Database did not become ready within 30s. Container: {container_name}"
+            "Database did not become ready within 60s. Container: {container_name}"
         ));
     }
+
+    emit_log(&app, &evt, "Database is ready.", "info");
 
     let label = if db_type == "postgres" {
         "PostgreSQL"

@@ -55,6 +55,8 @@
     onopenorm = () => {},
     onopenSchema = () => {},
     onopensecurity = () => {},
+    hasSchemaExplorer = true,
+    hasSecurity = true,
     onopenlogs = () => {},
     onopenJsonViewer = () => {},
     onopenshortcuts = () => {},
@@ -101,22 +103,19 @@
     if (!open) page = 'root'
   })
 
-  // Re-focus the search input after the Dialog's focus trap has settled.
-  // tick() alone is too early — bits-ui's focus trap runs in a rAF after open,
-  // overriding any focus we set in a microtask. Double rAF beats the trap.
+  // Focus the search input when the dialog opens or navigates to a sub-page.
+  // Command.Input is now first in DOM order so bits-ui's focus trap lands on it
+  // directly. A single rAF is still used as a safety net for async rendering.
   $effect(() => {
     open  // dependency
     page  // dependency
     if (!open) return
-    let id1 = requestAnimationFrame(() => {
-      let id2 = requestAnimationFrame(() => {
-        /** @type {HTMLInputElement | null} */
-        const input = document.querySelector('[data-slot="command-input"] input')
-        input?.focus()
-      })
-      return () => cancelAnimationFrame(id2)
+    const id = requestAnimationFrame(() => {
+      /** @type {HTMLInputElement | null} */
+      const input = document.querySelector('[data-slot="command-input"] input')
+      input?.focus()
     })
-    return () => cancelAnimationFrame(id1)
+    return () => cancelAnimationFrame(id)
   })
 
   // Derived table groups — used in both the root page and the dedicated tables page
@@ -158,24 +157,11 @@
   class="sm:max-w-lg"
 >
   {#snippet children()}
-    <!-- breadcrumb shown when in a sub-page -->
-    {#if page !== 'root'}
-      <div class="flex items-center gap-1.5 border-b border-border px-3 py-2">
-        <button
-          type="button"
-          class="flex items-center gap-1 rounded text-ui-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none"
-          onclick={goBack}
-        >
-          <ChevronLeft class="size-3.5" />
-          Back
-        </button>
-        <span class="text-ui-xs text-muted-foreground/40">/</span>
-        <span class="text-ui-xs font-medium text-foreground">{pageLabel[page]}</span>
-      </div>
-    {/if}
-
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div onkeydown={handleKeydown}>
+    <!-- Command.Input is FIRST in DOM so bits-ui's focus trap always lands on it.
+         The breadcrumb is rendered after but floated to the top visually via order-first,
+         keeping it above the input without disrupting the focus-trap scan order. -->
+    <div class="flex flex-col" onkeydown={handleKeydown}>
       <Command.Input
         placeholder={
           page === 'root' ? 'Search tables, schemas, commands…'
@@ -183,6 +169,21 @@
           : `Search ${pageLabel[page]}…`
         }
       />
+
+      {#if page !== 'root'}
+        <div class="order-first flex items-center gap-1.5 border-b border-border px-3 py-2">
+          <button
+            type="button"
+            class="flex items-center gap-1 rounded text-ui-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none"
+            onclick={goBack}
+          >
+            <ChevronLeft class="size-3.5" />
+            Back
+          </button>
+          <span class="text-ui-xs text-muted-foreground/40">/</span>
+          <span class="text-ui-xs font-medium text-foreground">{pageLabel[page]}</span>
+        </div>
+      {/if}
 
       <Command.List class="max-h-[min(400px,55vh)]">
         <Command.Empty>No results.</Command.Empty>
@@ -207,14 +208,18 @@
                 <span data-slot="command-label" class="truncate">ORM Runner</span>
                 <Command.Shortcut keys="⌘⇧O" />
               </Command.Item>
-              <Command.Item value="open schema explorer indexes enums views materialized" onSelect={() => run(onopenSchema)}>
-                <LayoutTemplate class="size-4 shrink-0 opacity-60" />
-                <span data-slot="command-label" class="truncate">Schema Explorer</span>
-              </Command.Item>
-              <Command.Item value="open security roles users policies rls row level" onSelect={() => run(onopensecurity)}>
-                <ShieldCheck class="size-4 shrink-0 opacity-60" />
-                <span data-slot="command-label" class="truncate">Security</span>
-              </Command.Item>
+              {#if hasSchemaExplorer}
+                <Command.Item value="open schema explorer indexes enums views materialized" onSelect={() => run(onopenSchema)}>
+                  <LayoutTemplate class="size-4 shrink-0 opacity-60" />
+                  <span data-slot="command-label" class="truncate">Schema Explorer</span>
+                </Command.Item>
+              {/if}
+              {#if hasSecurity}
+                <Command.Item value="open security roles users policies rls row level" onSelect={() => run(onopensecurity)}>
+                  <ShieldCheck class="size-4 shrink-0 opacity-60" />
+                  <span data-slot="command-label" class="truncate">Security</span>
+                </Command.Item>
+              {/if}
               <Command.Item value="open activity log events history operations" onSelect={() => run(onopenlogs)}>
                 <History class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">Activity Log</span>

@@ -62,6 +62,15 @@ export async function connectSqlite(config) {
   return inv('connect_sqlite_db', { config: { name: String(config.name || 'SQLite'), filePath: String(config.filePath || '') } })
 }
 
+/**
+ * Creates the sample SQLite database in the app data directory if it doesn't
+ * exist yet, then returns its absolute file path.
+ * @returns {Promise<string>}
+ */
+export async function initSampleDb() {
+  return inv('init_sample_db')
+}
+
 // ── MySQL ─────────────────────────────────────────────────────────────────────
 
 /** @param {{ name: string, host: string, port: number, database: string, user: string, password: string, ssl: boolean }} config */

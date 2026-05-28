@@ -7,6 +7,9 @@
   import Clock     from '@lucide/svelte/icons/clock'
   import Loader    from '@lucide/svelte/icons/loader'
   import Plus      from '@lucide/svelte/icons/plus'
+  import CheckCircle2 from '@lucide/svelte/icons/check-circle-2'
+  import AlertCircle  from '@lucide/svelte/icons/alert-circle'
+  import Link2        from '@lucide/svelte/icons/link-2'
   import {
     testPostgresConnection, connectPostgres,
     testSqliteConnection,   connectSqlite,
@@ -37,10 +40,10 @@
   } = $props()
 
   const DRIVERS = [
-    { id: 'postgres', label: 'PostgreSQL',    icon: Database,  color: 'text-blue-500'   },
-    { id: 'mysql',    label: 'MySQL',         icon: Database,  color: 'text-orange-400' },
-    { id: 'sqlite',   label: 'SQLite',        icon: HardDrive, color: 'text-green-500'  },
-    { id: 'd1',       label: 'D1',            icon: Cloud,     color: 'text-orange-500' },
+    { id: 'postgres', label: 'PostgreSQL',    icon: Database,  color: '#3b82f6' },
+    { id: 'mysql',    label: 'MySQL',         icon: Database,  color: '#f97316' },
+    { id: 'sqlite',   label: 'SQLite',        icon: HardDrive, color: '#22c55e' },
+    { id: 'd1',       label: 'D1',            icon: Cloud,     color: '#f59e0b' },
   ]
 
   /** @type {import('$lib/stores/connections.js').SavedConnection[]} */
@@ -258,68 +261,83 @@
 
 <Dialog.Root bind:open>
   <Dialog.Content
-    class="flex max-h-[min(90vh,800px)] w-[min(850px,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-[850px]"
-    showCloseButton={true}
+    showCloseButton={false}
+    class="flex max-h-[min(88vh,780px)] w-[min(860px,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden rounded-2xl border border-border/60 bg-background p-0 shadow-2xl sm:max-w-[860px]"
   >
-    <!-- Two-panel body -->
-    <div class="grid min-h-0 min-w-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[220px_minmax(0,1fr)]">
+    <div class="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[240px_minmax(0,1fr)]">
 
-      <!-- Left: saved / recent -->
-      <section class="flex min-h-0 flex-col border-b border-border md:border-b-0 md:border-r">
-        <div class="shrink-0 px-4 pt-5 pb-3">
-          <h2 class="text-sm font-semibold text-foreground">Connect</h2>
-          <p class="mt-0.5 text-xs text-muted-foreground">Select a recent connection or create new</p>
+      <!-- ── Left: saved connections ──────────────────────────────────────── -->
+      <aside class="flex min-h-0 flex-col border-b border-border/50 bg-muted/[0.03] md:border-b-0 md:border-r md:border-border/50">
+
+        <!-- Header -->
+        <div class="shrink-0 px-4 pt-5 pb-4">
+          <div class="flex items-center justify-between">
+            <h2 class="text-sm font-semibold tracking-tight text-foreground">Connections</h2>
+            {#if saved.length > 0}
+              <span class="flex h-4.5 min-w-[1.125rem] items-center justify-center rounded-full bg-muted px-1 font-mono text-[10px] text-muted-foreground">{saved.length}</span>
+            {/if}
+          </div>
+          <p class="mt-0.5 text-[11px] leading-tight text-muted-foreground/70">Recent and saved databases</p>
         </div>
 
-        <ScrollArea class="min-h-0 flex-1 px-2 pb-3">
+        <ScrollArea class="min-h-0 flex-1 px-2 pb-2">
           {#if saved.length === 0}
-            <div class="mx-2 flex flex-col items-center justify-center rounded-lg border border-dashed border-border/60 px-4 py-8 text-center">
-              <Clock class="mb-2 size-6 text-muted-foreground/40" />
-              <p class="text-xs font-medium text-foreground">No saved connections</p>
-              <p class="mt-0.5 text-[11px] text-muted-foreground">Set up a new connection →</p>
+            <div class="mx-2 my-1 flex flex-col items-center gap-2 rounded-xl border border-dashed border-border/50 px-4 py-7 text-center">
+              <div class="flex size-9 items-center justify-center rounded-full bg-muted">
+                <Clock class="size-4 text-muted-foreground/50" />
+              </div>
+              <div>
+                <p class="text-xs font-medium text-foreground/70">No saved connections</p>
+                <p class="mt-0.5 text-[11px] text-muted-foreground/50">Create one on the right →</p>
+              </div>
             </div>
           {:else}
-            <div class="flex flex-col">
+            <div class="flex flex-col gap-0.5">
               {#each saved as conn (conn.id)}
                 {@const d = driver(conn.type)}
                 {@const Icon = d.icon}
-                {@const isLast = conn.id === lastId}
                 {@const isSelected = conn.id === editingId}
                 {@const isBusy = connecting === conn.id}
+                {@const isLast = conn.id === lastId}
                 <div
                   class={cn(
-                    "group relative flex cursor-pointer items-start gap-2.5 rounded-lg px-3 py-2.5 transition-colors",
-                    isSelected ? "bg-accent" : "hover:bg-accent/50"
+                    "group relative flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 transition-colors",
+                    isSelected
+                      ? "bg-accent ring-1 ring-border/40"
+                      : "hover:bg-accent/60"
                   )}
                   role="button"
                   tabindex="0"
                   onclick={() => selectSaved(conn)}
                   onkeydown={(e) => e.key === 'Enter' && selectSaved(conn)}
                 >
-                  <div class={cn(
-                    "mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md",
-                    isSelected ? "bg-background/60" : "bg-muted"
-                  )}>
-                    <Icon class="size-3 {d.color}" />
+                  <!-- DB icon tile -->
+                  <div
+                    class="flex size-7 shrink-0 items-center justify-center rounded-lg border border-border/40 bg-background/60"
+                    style="box-shadow: inset 0 0 0 1px {d.color}22"
+                  >
+                    <Icon class="size-3.5" style="color: {d.color}" />
                   </div>
 
                   <div class="min-w-0 flex-1">
                     <div class="flex min-w-0 items-center gap-1.5">
-                      <span class="min-w-0 truncate text-xs font-medium text-foreground leading-snug">{conn.name}</span>
+                      <span class="min-w-0 truncate text-[12px] font-medium leading-tight text-foreground">{conn.name}</span>
                       {#if isLast}
-                        <span class="shrink-0 rounded-full bg-primary/10 px-1.5 py-px text-[9px] font-medium text-primary">Last</span>
+                        <span class="shrink-0 rounded-full px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide" style="background: {d.color}22; color: {d.color}">Last</span>
                       {/if}
                     </div>
-                    <p class="truncate font-mono text-[10px] text-muted-foreground/70 leading-snug">{connDetail(conn)}</p>
-                    <!-- time: shows when not hovered; actions: show on hover — no layout shift -->
-                    <div class="mt-1 flex items-center gap-1">
-                      <span class="text-[10px] text-muted-foreground/50 group-hover:hidden">
-                        {relativeTime(conn.lastConnectedAt) || ''}
+                    <p class="mt-px truncate font-mono text-[10px] leading-tight text-muted-foreground/60">{connDetail(conn)}</p>
+
+                    <!-- Time / hover actions -->
+                    <div class="mt-1 flex h-4 items-center">
+                      <span class="text-[10px] text-muted-foreground/40 group-hover:hidden">
+                        {relativeTime(conn.lastConnectedAt)}
                       </span>
                       <div class="hidden items-center gap-1 group-hover:flex">
                         <button
                           type="button"
-                          class="inline-flex h-5 items-center gap-1 rounded-md bg-primary px-2 text-[10px] font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                          class="inline-flex h-5 items-center rounded-md px-2 text-[10px] font-semibold text-primary-foreground transition-opacity hover:opacity-85 disabled:opacity-50"
+                          style="background: {d.color}"
                           disabled={!!connecting}
                           onclick={(e) => { e.stopPropagation(); void connectWith(conn) }}
                         >
@@ -331,9 +349,9 @@
                         </button>
                         <button
                           type="button"
-                          class="inline-flex size-5 items-center justify-center rounded-md text-muted-foreground/60 hover:bg-destructive/10 hover:text-destructive"
+                          class="inline-flex size-5 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-destructive/10 hover:text-destructive"
                           onclick={(e) => { e.stopPropagation(); handleDelete(conn.id) }}
-                          aria-label="Delete"
+                          aria-label="Remove"
                         ><X class="size-3" /></button>
                       </div>
                     </div>
@@ -343,208 +361,301 @@
             </div>
           {/if}
 
-          <!-- New connection entry -->
+          <!-- New connection button -->
           <button
             type="button"
             class={cn(
-              "mt-1.5 flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left transition-colors",
-              !editingId ? "bg-accent/60 text-foreground" : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+              "mt-1.5 flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-xs font-medium transition-colors",
+              !editingId
+                ? "bg-accent ring-1 ring-border/40 text-foreground"
+                : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
             )}
             onclick={() => resetForm(null)}
           >
-            <div class="flex size-7 shrink-0 items-center justify-center rounded-md border border-dashed border-border/60 bg-transparent">
+            <div class={cn(
+              "flex size-7 shrink-0 items-center justify-center rounded-lg border transition-colors",
+              !editingId ? "border-border/60 bg-background/60" : "border-dashed border-border/50"
+            )}>
               <Plus class="size-3.5" />
             </div>
-            <span class="text-xs font-medium">New connection</span>
+            New connection
           </button>
         </ScrollArea>
-      </section>
+      </aside>
 
-      <!-- Right: form -->
-      <section class="flex min-h-0 min-w-0 flex-col overflow-hidden">
-        <ScrollArea class="min-h-0 min-w-0 flex-1">
-          <div class="flex min-w-0 flex-col gap-5 px-6 py-5">
+      <!-- ── Right: form ──────────────────────────────────────────────────── -->
+      <div class="flex min-h-0 min-w-0 flex-col">
+        <ScrollArea class="min-h-0 flex-1">
+          <div class="flex flex-col gap-5 px-6 py-5">
 
-            <!-- DB type pill selector -->
-            <div class="flex gap-1 rounded-lg bg-muted p-1">
+            <!-- DB type selector -->
+            <div class="grid grid-cols-4 gap-1.5">
               {#each DRIVERS as d (d.id)}
                 {@const Icon = d.icon}
+                {@const active = dbType === d.id}
                 <button
                   type="button"
                   class={cn(
-                    "flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-all",
-                    dbType === d.id
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
+                    "group relative flex flex-col items-center gap-1.5 rounded-xl border px-2 py-2.5 text-center transition-all",
+                    active
+                      ? "border-border/60 bg-card shadow-sm"
+                      : "border-transparent bg-muted/30 hover:bg-muted/60 hover:border-border/30"
                   )}
                   onclick={() => switchDriver(d.id)}
                 >
-                  <Icon class="size-3 {dbType === d.id ? d.color : ''}" />
-                  {d.label}
+                  {#if active}
+                    <!-- Colored accent line at bottom -->
+                    <span class="absolute inset-x-3 bottom-0 h-[2px] rounded-full" style="background: {d.color}"></span>
+                  {/if}
+                  <div
+                    class={cn(
+                      "flex size-7 items-center justify-center rounded-lg transition-colors",
+                      active ? "bg-background/80 shadow-sm" : "bg-muted/50 group-hover:bg-muted"
+                    )}
+                  >
+                    <Icon class="size-3.5 transition-colors" style={active ? `color: ${d.color}` : ''} />
+                  </div>
+                  <span class={cn("text-[11px] font-medium leading-none transition-colors", active ? "text-foreground" : "text-muted-foreground")}>
+                    {d.label}
+                  </span>
                 </button>
               {/each}
             </div>
 
             <!-- Connection name -->
             <div class="flex flex-col gap-1.5">
-              <Label for="cn-name" class="text-xs font-medium">Connection name</Label>
-              <Input id="cn-name" bind:value={name} class="h-9 text-sm" />
+              <Label for="cn-name" class="text-xs font-medium text-foreground/80">Connection name</Label>
+              <Input id="cn-name" bind:value={name} class="h-9 bg-muted/30 text-sm focus-visible:bg-background" />
             </div>
 
+            <!-- ── Postgres fields ── -->
             {#if dbType === 'postgres'}
+
               <!-- URI quick-fill -->
               <div class="flex flex-col gap-1.5">
-                <Label for="cn-uri" class="text-xs font-medium text-muted-foreground">
-                  Connection string <span class="font-normal">(optional)</span>
-                </Label>
+                <div class="flex items-center gap-1.5">
+                  <Link2 class="size-3 text-muted-foreground/50" />
+                  <Label for="cn-uri" class="text-xs font-medium text-muted-foreground/70">
+                    Connection string <span class="font-normal opacity-60">(optional)</span>
+                  </Label>
+                </div>
                 <div class="flex gap-2">
                   <Input
                     id="cn-uri"
                     bind:value={connectionUri}
                     placeholder="postgresql://user:pass@host:5432/db"
-                    class="h-9 flex-1 font-mono text-xs"
+                    class="h-9 flex-1 bg-muted/30 font-mono text-xs focus-visible:bg-background"
                     onpaste={handleUriPaste}
                     onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); applyConnectionUri() } }}
                   />
-                  <Button type="button" variant="outline" size="sm" class="shrink-0 text-xs" onclick={applyConnectionUri} disabled={!connectionUri.trim()}>
+                  <Button type="button" variant="outline" size="sm" class="h-9 shrink-0 bg-muted/30 text-xs hover:bg-muted/60" onclick={applyConnectionUri} disabled={!connectionUri.trim()}>
                     Parse
                   </Button>
                 </div>
                 {#if uriHint}
-                  <p class="text-[11px] {uriHintIsError(uriHint) ? 'text-destructive' : 'text-emerald-600 dark:text-emerald-400'}">{uriHint}</p>
+                  <p class={cn("flex items-center gap-1 text-[11px]", uriHintIsError(uriHint) ? 'text-destructive' : 'text-emerald-600 dark:text-emerald-400')}>
+                    {#if uriHintIsError(uriHint)}
+                      <AlertCircle class="size-3 shrink-0" />
+                    {:else}
+                      <CheckCircle2 class="size-3 shrink-0" />
+                    {/if}
+                    {uriHint}
+                  </p>
                 {/if}
               </div>
 
-              <!-- Host / Port / DB -->
-              <div class="grid grid-cols-[1fr_80px] gap-2">
+              <!-- Divider -->
+              <div class="flex items-center gap-3">
+                <div class="h-px flex-1 bg-border/40"></div>
+                <span class="text-[10px] font-medium uppercase tracking-widest text-muted-foreground/40">or fill manually</span>
+                <div class="h-px flex-1 bg-border/40"></div>
+              </div>
+
+              <!-- Host + Port -->
+              <div class="grid grid-cols-[1fr_90px] gap-2">
                 <div class="flex flex-col gap-1.5">
-                  <Label for="cn-host" class="text-xs font-medium">Host</Label>
-                  <Input id="cn-host" bind:value={host} class="h-9 text-sm" />
+                  <Label for="cn-host" class="text-xs font-medium text-foreground/80">Host</Label>
+                  <Input id="cn-host" bind:value={host} class="h-9 bg-muted/30 text-sm focus-visible:bg-background" />
                 </div>
                 <div class="flex flex-col gap-1.5">
-                  <Label for="cn-port" class="text-xs font-medium">Port</Label>
-                  <Input id="cn-port" type="number" bind:value={port} class="h-9 text-sm" />
+                  <Label for="cn-port" class="text-xs font-medium text-foreground/80">Port</Label>
+                  <Input id="cn-port" type="number" bind:value={port} class="h-9 bg-muted/30 text-sm focus-visible:bg-background" />
                 </div>
               </div>
+
+              <!-- DB + User + Password -->
               <div class="grid grid-cols-3 gap-2">
                 <div class="flex flex-col gap-1.5">
-                  <Label for="cn-db" class="text-xs font-medium">Database</Label>
-                  <Input id="cn-db" bind:value={database} class="h-9 text-sm" />
+                  <Label for="cn-db" class="text-xs font-medium text-foreground/80">Database</Label>
+                  <Input id="cn-db" bind:value={database} class="h-9 bg-muted/30 text-sm focus-visible:bg-background" />
                 </div>
                 <div class="flex flex-col gap-1.5">
-                  <Label for="cn-user" class="text-xs font-medium">User</Label>
-                  <Input id="cn-user" bind:value={user} autocomplete="username" class="h-9 text-sm" />
+                  <Label for="cn-user" class="text-xs font-medium text-foreground/80">User</Label>
+                  <Input id="cn-user" bind:value={user} autocomplete="username" class="h-9 bg-muted/30 text-sm focus-visible:bg-background" />
                 </div>
                 <div class="flex flex-col gap-1.5">
-                  <Label for="cn-pass" class="text-xs font-medium">Password</Label>
-                  <Input id="cn-pass" type="password" bind:value={password} autocomplete="current-password" class="h-9 text-sm" />
+                  <Label for="cn-pass" class="text-xs font-medium text-foreground/80">Password</Label>
+                  <Input id="cn-pass" type="password" bind:value={password} autocomplete="current-password" class="h-9 bg-muted/30 text-sm focus-visible:bg-background" />
                 </div>
               </div>
-              <div class="flex items-center gap-2">
+
+              <label class="flex cursor-pointer items-center gap-2.5 rounded-lg border border-border/40 bg-muted/20 px-3 py-2.5 transition-colors hover:bg-muted/40">
                 <Checkbox id="cn-ssl" checked={ssl} onCheckedChange={(v) => (ssl = v === true)} />
-                <Label for="cn-ssl" class="cursor-pointer text-xs font-normal text-muted-foreground">Use SSL (sslmode=require)</Label>
-              </div>
+                <div>
+                  <p class="text-xs font-medium text-foreground/80">Use SSL</p>
+                  <p class="text-[11px] text-muted-foreground/60">Enables sslmode=require for encrypted connections</p>
+                </div>
+              </label>
 
+            <!-- ── MySQL fields ── -->
             {:else if dbType === 'mysql'}
-              <div class="grid grid-cols-[1fr_80px] gap-2">
+
+              <div class="grid grid-cols-[1fr_90px] gap-2">
                 <div class="flex flex-col gap-1.5">
-                  <Label for="cn-mysql-host" class="text-xs font-medium">Host</Label>
-                  <Input id="cn-mysql-host" bind:value={host} class="h-9 text-sm" />
+                  <Label for="cn-mysql-host" class="text-xs font-medium text-foreground/80">Host</Label>
+                  <Input id="cn-mysql-host" bind:value={host} class="h-9 bg-muted/30 text-sm focus-visible:bg-background" />
                 </div>
                 <div class="flex flex-col gap-1.5">
-                  <Label for="cn-mysql-port" class="text-xs font-medium">Port</Label>
-                  <Input id="cn-mysql-port" type="number" bind:value={port} class="h-9 text-sm" />
+                  <Label for="cn-mysql-port" class="text-xs font-medium text-foreground/80">Port</Label>
+                  <Input id="cn-mysql-port" type="number" bind:value={port} class="h-9 bg-muted/30 text-sm focus-visible:bg-background" />
                 </div>
               </div>
               <div class="grid grid-cols-3 gap-2">
                 <div class="flex flex-col gap-1.5">
-                  <Label for="cn-mysql-db" class="text-xs font-medium">Database</Label>
-                  <Input id="cn-mysql-db" bind:value={database} class="h-9 text-sm" />
+                  <Label for="cn-mysql-db" class="text-xs font-medium text-foreground/80">Database</Label>
+                  <Input id="cn-mysql-db" bind:value={database} class="h-9 bg-muted/30 text-sm focus-visible:bg-background" />
                 </div>
                 <div class="flex flex-col gap-1.5">
-                  <Label for="cn-mysql-user" class="text-xs font-medium">User</Label>
-                  <Input id="cn-mysql-user" bind:value={user} autocomplete="username" class="h-9 text-sm" />
+                  <Label for="cn-mysql-user" class="text-xs font-medium text-foreground/80">User</Label>
+                  <Input id="cn-mysql-user" bind:value={user} autocomplete="username" class="h-9 bg-muted/30 text-sm focus-visible:bg-background" />
                 </div>
                 <div class="flex flex-col gap-1.5">
-                  <Label for="cn-mysql-pass" class="text-xs font-medium">Password</Label>
-                  <Input id="cn-mysql-pass" type="password" bind:value={password} autocomplete="current-password" class="h-9 text-sm" />
+                  <Label for="cn-mysql-pass" class="text-xs font-medium text-foreground/80">Password</Label>
+                  <Input id="cn-mysql-pass" type="password" bind:value={password} autocomplete="current-password" class="h-9 bg-muted/30 text-sm focus-visible:bg-background" />
                 </div>
               </div>
-              <div class="flex items-center gap-2">
+              <label class="flex cursor-pointer items-center gap-2.5 rounded-lg border border-border/40 bg-muted/20 px-3 py-2.5 transition-colors hover:bg-muted/40">
                 <Checkbox id="cn-mysql-ssl" checked={ssl} onCheckedChange={(v) => (ssl = v === true)} />
-                <Label for="cn-mysql-ssl" class="cursor-pointer text-xs font-normal text-muted-foreground">Use SSL (ssl-mode=required)</Label>
-              </div>
+                <div>
+                  <p class="text-xs font-medium text-foreground/80">Use SSL</p>
+                  <p class="text-[11px] text-muted-foreground/60">Enables ssl-mode=required for encrypted connections</p>
+                </div>
+              </label>
 
+            <!-- ── SQLite fields ── -->
             {:else if dbType === 'sqlite'}
+
               <div class="flex flex-col gap-1.5">
-                <Label for="cn-sqlite-uri" class="text-xs font-medium text-muted-foreground">
-                  URI <span class="font-normal">(optional)</span>
-                </Label>
+                <div class="flex items-center gap-1.5">
+                  <Link2 class="size-3 text-muted-foreground/50" />
+                  <Label for="cn-sqlite-uri" class="text-xs font-medium text-muted-foreground/70">
+                    URI <span class="font-normal opacity-60">(optional)</span>
+                  </Label>
+                </div>
                 <div class="flex gap-2">
                   <Input
                     id="cn-sqlite-uri"
                     bind:value={connectionUri}
                     placeholder="sqlite:///path/to/database.db"
-                    class="h-9 flex-1 font-mono text-xs"
+                    class="h-9 flex-1 bg-muted/30 font-mono text-xs focus-visible:bg-background"
                     onpaste={handleUriPaste}
                     onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); applyConnectionUri() } }}
                   />
-                  <Button type="button" variant="outline" size="sm" class="shrink-0 text-xs" onclick={applyConnectionUri} disabled={!connectionUri.trim()}>
+                  <Button type="button" variant="outline" size="sm" class="h-9 shrink-0 bg-muted/30 text-xs" onclick={applyConnectionUri} disabled={!connectionUri.trim()}>
                     Parse
                   </Button>
                 </div>
                 {#if uriHint}
-                  <p class="text-[11px] {uriHintIsError(uriHint) ? 'text-destructive' : 'text-emerald-600 dark:text-emerald-400'}">{uriHint}</p>
+                  <p class={cn("flex items-center gap-1 text-[11px]", uriHintIsError(uriHint) ? 'text-destructive' : 'text-emerald-600 dark:text-emerald-400')}>
+                    {#if uriHintIsError(uriHint)}<AlertCircle class="size-3" />{:else}<CheckCircle2 class="size-3" />{/if}
+                    {uriHint}
+                  </p>
                 {/if}
               </div>
+
               <div class="flex flex-col gap-1.5">
-                <Label for="cn-path" class="text-xs font-medium">File path</Label>
-                <Input id="cn-path" bind:value={filePath} placeholder="/path/to/database.db" class="h-9 font-mono text-sm" />
-                <p class="text-[11px] text-muted-foreground">Absolute path or <code class="font-mono">:memory:</code></p>
+                <Label for="cn-path" class="text-xs font-medium text-foreground/80">File path</Label>
+                <Input id="cn-path" bind:value={filePath} placeholder="/path/to/database.db" class="h-9 bg-muted/30 font-mono text-sm focus-visible:bg-background" />
+                <p class="text-[11px] text-muted-foreground/50">Absolute path or <code class="rounded bg-muted px-1 font-mono text-[10px]">:memory:</code> for in-memory</p>
               </div>
 
+            <!-- ── D1 fields ── -->
             {:else if dbType === 'd1'}
+
+              <div class="rounded-xl border border-amber-500/20 bg-amber-500/[0.04] px-4 py-3">
+                <p class="text-[11px] leading-relaxed text-amber-600/80 dark:text-amber-400/80">
+                  Connect to a Cloudflare D1 database via REST API. Find your credentials in the <strong>Cloudflare Dashboard → Workers & Pages → D1</strong>.
+                </p>
+              </div>
+
               <div class="grid grid-cols-2 gap-3">
                 <div class="flex flex-col gap-1.5">
-                  <Label for="cn-acct" class="text-xs font-medium">Account ID</Label>
-                  <Input id="cn-acct" bind:value={accountId} placeholder="abcdef1234…" class="h-9 font-mono text-sm" />
+                  <Label for="cn-acct" class="text-xs font-medium text-foreground/80">Account ID</Label>
+                  <Input id="cn-acct" bind:value={accountId} placeholder="abcdef1234…" class="h-9 bg-muted/30 font-mono text-xs focus-visible:bg-background" />
                 </div>
                 <div class="flex flex-col gap-1.5">
-                  <Label for="cn-dbid" class="text-xs font-medium">Database ID</Label>
-                  <Input id="cn-dbid" bind:value={databaseId} placeholder="xxxxxxxx-xxxx-…" class="h-9 font-mono text-sm" />
+                  <Label for="cn-dbid" class="text-xs font-medium text-foreground/80">Database ID</Label>
+                  <Input id="cn-dbid" bind:value={databaseId} placeholder="xxxxxxxx-xxxx-…" class="h-9 bg-muted/30 font-mono text-xs focus-visible:bg-background" />
                 </div>
               </div>
               <div class="flex flex-col gap-1.5">
-                <Label for="cn-tok" class="text-xs font-medium">API Token</Label>
-                <Input id="cn-tok" type="password" bind:value={apiToken} placeholder="Cloudflare API token (D1:Edit)" class="h-9 text-sm" />
+                <Label for="cn-tok" class="text-xs font-medium text-foreground/80">API Token</Label>
+                <Input id="cn-tok" type="password" bind:value={apiToken} placeholder="Cloudflare API token (D1:Edit)" class="h-9 bg-muted/30 text-sm focus-visible:bg-background" />
               </div>
             {/if}
+
           </div>
         </ScrollArea>
 
-        <!-- Footer -->
-        <div class="shrink-0 border-t border-border/60 px-6 py-4">
+        <!-- ── Footer ─────────────────────────────────────────────────────── -->
+        <div class="shrink-0 border-t border-border/50 bg-muted/[0.03] px-6 py-4">
+
+          <!-- Error / success messages -->
           {#if error}
-            <div class="mb-3 rounded-md bg-destructive/8 px-3 py-2 text-xs text-destructive">{error}</div>
+            <div class="mb-3 flex items-start gap-2.5 rounded-xl border border-destructive/20 bg-destructive/[0.06] px-3.5 py-2.5">
+              <AlertCircle class="mt-px size-3.5 shrink-0 text-destructive/70" />
+              <p class="text-[11px] leading-relaxed text-destructive/90">{error}</p>
+            </div>
           {/if}
-          {#if testOk}
-            <div class="mb-3 rounded-md bg-emerald-500/10 px-3 py-2 text-xs text-emerald-600 dark:text-emerald-400">Connection test successful</div>
+          {#if testOk && !error}
+            <div class="mb-3 flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] px-3.5 py-2.5">
+              <CheckCircle2 class="size-3.5 shrink-0 text-emerald-500" />
+              <p class="text-[11px] text-emerald-600 dark:text-emerald-400">Connection successful</p>
+            </div>
           {/if}
-          <div class="flex items-center justify-between gap-2">
-            <div class="flex items-center gap-2">
+
+          <div class="flex items-center justify-between gap-3">
+            <div>
               {#if editingId}
-                <Button type="button" variant="ghost" size="sm" class="text-xs text-muted-foreground" onclick={() => resetForm(null)}>
-                  Clear
-                </Button>
+                <button type="button" class="text-[11px] text-muted-foreground/60 transition-colors hover:text-muted-foreground" onclick={() => resetForm(null)}>
+                  Clear form
+                </button>
               {/if}
             </div>
             <div class="flex items-center gap-2">
               {#if dbType !== 'd1'}
-                <Button type="button" variant="outline" size="sm" class="text-xs" onclick={handleTest} disabled={testing || !!connecting}>
-                  {testing ? 'Testing…' : 'Test'}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  class="h-8 bg-muted/30 px-3.5 text-xs hover:bg-muted/60"
+                  onclick={handleTest}
+                  disabled={testing || !!connecting}
+                >
+                  {#if testing}
+                    <Loader class="mr-1.5 size-3 animate-spin" />Testing…
+                  {:else}
+                    Test connection
+                  {/if}
                 </Button>
               {/if}
-              <Button type="button" size="sm" class="text-xs" onclick={handleConnect} disabled={!!connecting || testing}>
+              <Button
+                type="button"
+                size="sm"
+                class="h-8 px-4 text-xs font-semibold"
+                onclick={handleConnect}
+                disabled={!!connecting || testing}
+              >
                 {#if connecting === (editingId ?? '__new__')}
                   <Loader class="mr-1.5 size-3 animate-spin" />Connecting…
                 {:else}
@@ -554,7 +665,12 @@
             </div>
           </div>
         </div>
-      </section>
+      </div>
     </div>
+
+    <!-- Close button -->
+    <Dialog.Close class="absolute right-3.5 top-3.5 inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
+      <X class="size-4" />
+    </Dialog.Close>
   </Dialog.Content>
 </Dialog.Root>

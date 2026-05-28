@@ -1,15 +1,16 @@
 <script>
   import { fly, fade } from 'svelte/transition'
   import { cubicOut, quintOut } from 'svelte/easing'
-  import Database   from '@lucide/svelte/icons/database'
-  import Table2     from '@lucide/svelte/icons/table-2'
-  import Bot        from '@lucide/svelte/icons/bot'
-  import Terminal   from '@lucide/svelte/icons/terminal'
-  import ArrowRight from '@lucide/svelte/icons/arrow-right'
-  import Plus       from '@lucide/svelte/icons/plus'
-  import Zap        from '@lucide/svelte/icons/zap'
+  import Database      from '@lucide/svelte/icons/database'
+  import Table2        from '@lucide/svelte/icons/table-2'
+  import Bot           from '@lucide/svelte/icons/bot'
+  import Terminal      from '@lucide/svelte/icons/terminal'
+  import ArrowRight    from '@lucide/svelte/icons/arrow-right'
+  import Plus          from '@lucide/svelte/icons/plus'
+  import Zap           from '@lucide/svelte/icons/zap'
+  import FlaskConical  from '@lucide/svelte/icons/flask-conical'
 
-  let { open = $bindable(false), onconnect = () => {} } = $props()
+  let { open = $bindable(false), onconnect = () => {}, onsample = () => {} } = $props()
 
   let step = $state(1)
   let prev = $state(0)
@@ -32,6 +33,12 @@
     try { localStorage.setItem(KEY, '1') } catch {}
     open = false
     if (connect) onconnect()
+  }
+
+  function trySample() {
+    try { localStorage.setItem(KEY, '1') } catch {}
+    open = false
+    onsample()
   }
 </script>
 
@@ -157,7 +164,7 @@
               <div class="flex flex-col gap-3">
                 <h2 class="text-3xl font-bold tracking-tight text-foreground">You're all set</h2>
                 <p class="text-base leading-relaxed text-muted-foreground">
-                  Add your first database connection to start exploring your data.
+                  Connect a real database, or explore with sample data first.
                 </p>
               </div>
 
@@ -171,6 +178,16 @@
                   Add Connection
                   <ArrowRight class="size-5 shrink-0 transition-transform duration-200 group-hover:translate-x-1" />
                 </button>
+
+                <button
+                  type="button"
+                  class="group flex w-full items-center justify-center gap-2.5 rounded-xl border border-border bg-muted/40 px-6 py-3.5 text-base font-semibold text-foreground transition-all hover:bg-muted active:scale-[0.98]"
+                  onclick={trySample}
+                >
+                  <FlaskConical class="size-5 shrink-0 text-primary" />
+                  Try Sample Database
+                </button>
+
                 <button
                   type="button"
                   class="py-2 text-sm text-muted-foreground transition-colors hover:text-foreground"

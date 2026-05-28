@@ -194,7 +194,9 @@ pub async fn get_table_rows(
 
     let table_ref = format!("{}.{}", bt(schema), bt(table));
     let count_sql = format!("SELECT COUNT(*) FROM {table_ref}{}", where_clause.sql);
-    let mut count_q = sqlx::query_scalar::<_, i64>(&count_sql);
+    // MySQL returns COUNT(*) as BIGINT UNSIGNED (u64). Decoding as i64 causes a
+    // type-mismatch error; fetch as u64 then cast.
+    let mut count_q = sqlx::query_scalar::<_, u64>(&count_sql);
     for b in &where_clause.binds {
         count_q = count_q.bind(b.as_str());
     }
@@ -218,7 +220,7 @@ pub async fn get_table_rows(
         data_q.fetch_all(pool),
         meta_q.fetch_all(pool),
     );
-    let total: i64 = total_res.map_err(|e| format!("Failed to count rows: {e}"))?;
+    let total: i64 = total_res.map_err(|e| format!("Failed to count rows: {e}"))? as i64;
     let rows = rows_res.map_err(|e| format!("Failed to fetch rows: {e}"))?;
     let meta_rows = meta_res.unwrap_or_default();
 
@@ -325,7 +327,7 @@ pub async fn execute_sql(pool: &MySqlPool, sql: &str) -> Result<SqlResult, Strin
     let query_ms = || started.elapsed().as_millis() as u64;
 
     let head = sql.trim_start().split_whitespace().next().unwrap_or("").to_ascii_lowercase();
-    let is_select = matches!(head.as_str(), "select" | "show" | "explain" | "with" | "call");
+    let is_select = matches!(head.as_str(), "select" | "show" | "explain" | "describe" | "desc" | "with" | "call");
 
     if is_select {
         let mut stream = sqlx::query(sql).fetch(pool);
