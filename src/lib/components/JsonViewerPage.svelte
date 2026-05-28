@@ -19,7 +19,7 @@
   const stored = loadLayout()
   // Reuse sqlEditorHeight as the input panel height for the JSON page
   let inputHeight = $state(Math.max(PANEL_MIN, Math.min(stored.sqlEditorHeight, 480)))
-  let resizeStart = inputHeight
+  let resizeStart = $state(Math.max(PANEL_MIN, Math.min(stored.sqlEditorHeight, 480)))
 
   /** @type {HTMLElement | null} */
   let pageEl = $state(null)
@@ -257,6 +257,7 @@
 
     <!-- Autocomplete dropdown -->
     {#if pathFocused && completions.length > 0}
+      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
       <ul
         class="absolute left-0 top-full z-50 mt-px min-w-48 overflow-hidden rounded-b-md border border-border bg-popover shadow-lg"
         onmousedown={(e) => e.preventDefault()}

@@ -720,9 +720,18 @@
         >
           <X class="size-3" />
         </button>
-        <span class="w-10 shrink-0 select-none text-right font-mono text-ui-xs text-muted-foreground">
-          {i === 0 ? 'where' : 'and'}
-        </span>
+        {#if i === 0}
+          <span class="w-10 shrink-0 select-none text-right font-mono text-ui-xs text-muted-foreground">where</span>
+        {:else}
+          <button
+            type="button"
+            class="inline-flex h-5 w-10 shrink-0 items-center justify-center rounded border font-mono text-ui-2xs font-semibold uppercase tracking-wide transition-colors {filter.conjunct === 'or' ? 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/20' : 'border-border/60 bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground'}"
+            title="Toggle AND / OR"
+            onclick={() => patchFilter(filter.id, { conjunct: filter.conjunct === 'or' ? 'and' : 'or' })}
+          >
+            {filter.conjunct === 'or' ? 'or' : 'and'}
+          </button>
+        {/if}
         <Select.Root
           type="single"
           value={filter.column}

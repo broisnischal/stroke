@@ -42,12 +42,12 @@
   import AiChartRenderer from '$lib/components/AiChartRenderer.svelte'
   import {
     chatCompletionStream,
+    manageHistory,
     MAX_AI_RETRIES,
     AI_TOOLS,
     isDestructiveSql,
     parseAssistantMessage,
     buildSystemPrompt,
-    manageHistory,
     classifyDbError,
     filterSchemaForQuery,
     stripThinkTags,
@@ -192,6 +192,7 @@
       )
     )
     apiHistory = /** @type {import('$lib/ai.js').ApiMessage[]} */ (conv.apiHistory ?? [])
+    rawApiHistory = /** @type {import('$lib/ai.js').ApiMessage[]} */ (conv.apiHistory ?? [])
     error = ''
     await scrollBottom()
   }
@@ -202,6 +203,7 @@
     activeConvId = null
     items = []
     apiHistory = []
+    rawApiHistory = []
     error = ''
     await tick()
     inputRef?.focus()
@@ -215,6 +217,7 @@
       activeConvId = null
       items = []
       apiHistory = []
+      rawApiHistory = []
       error = ''
     }
   }
@@ -244,7 +247,7 @@
         ? firstUser.text.slice(0, 60) + (firstUser.text.length > 60 ? '…' : '')
         : 'Conversation'
     const plainItems = $state.snapshot(saveable)
-    const plainHistory = $state.snapshot(apiHistory)
+    const plainHistory = $state.snapshot(rawApiHistory)
     if (activeConvId) {
       await updateConversation(activeConvId, { title, items: plainItems, apiHistory: plainHistory })
       // Patch title in place — no re-sort, no visual shuffle
@@ -273,6 +276,8 @@
   let items = $state([])
   /** @type {import('$lib/ai.js').ApiMessage[]} */
   let apiHistory = $state([])
+  /** Full uncompressed history — never trimmed, always saved to IndexedDB */
+  let rawApiHistory = $state([])
   let loading = $state(false)
   let error = $state('')
   /** Shown on the thinking row while waiting on rate-limit retries */
@@ -805,9 +810,9 @@
     }
   }
 
-  /** Open a result card, honouring the user's collapsed preference */
-  function autoOpenResult(/** @type {string} */ id) {
-    if (!userPrefersCollapsed) openResultId = id
+  /** Open a result card. Schema results (isSchema=true) are always kept collapsed. */
+  function autoOpenResult(/** @type {string} */ id, isSchema = false) {
+    if (!userPrefersCollapsed && !isSchema) openResultId = id
   }
 
   /** Code blocks collapsed by user (in set = collapsed; default open) */
@@ -897,9 +902,11 @@
     try {
       const scSafe = sc.replace(/'/g, "''")
       // One query fetches all missing tables at once
+      // For PostgreSQL, resolve USER-DEFINED to the actual enum/type name so the AI
+      // sees 'account_status' instead of 'USER-DEFINED' and can query enum values.
       const sql = isMysql
         ? `SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '${scSafe}' ORDER BY TABLE_NAME, ORDINAL_POSITION`
-        : `SELECT table_name, column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema = '${scSafe}' ORDER BY table_name, ordinal_position`
+        : `SELECT c.table_name, c.column_name, CASE WHEN c.data_type = 'USER-DEFINED' THEN c.udt_name ELSE c.data_type END AS data_type, c.is_nullable FROM information_schema.columns c WHERE c.table_schema = '${scSafe}' ORDER BY c.table_name, c.ordinal_position`
       const data = await executeSql(sql)
       /** @type {Record<string, {name:string, dataType:string, nullable:boolean}[]>} */
       const byTable = {}
@@ -924,6 +931,7 @@
 
     items.push(/** @type {ChatItem} */ ({ id: uid(), kind: 'user', text }))
     apiHistory.push({ role: 'user', content: text })
+    rawApiHistory.push({ role: 'user', content: text })
     await scrollBottom()
 
     const thinkingId = uid()
@@ -938,19 +946,25 @@
     // Proactively fetch column definitions for all tables into session cache
     // only when the query looks like it's asking about data (not a trivial message).
     const looksLikeDataQuery = text.length > 4 || /select|from|show|list|count|table|schema|column|insert|update|delete/i.test(text)
-    if (looksLikeDataQuery) await ensureFullSchemaCache()
+    if (looksLikeDataQuery) {
+      aiStatusHint = 'Analyzing schema…'
+      await ensureFullSchemaCache()
+      aiStatusHint = ''
+    }
 
     // Build query-filtered system prompt for this turn (merge session cache)
     const filteredCtx = filterSchemaForQuery({ ...schemaContext, allTableColumns: { ...schemaContext.allTableColumns, ...fetchedSchemas }, userSkills: skills }, text)
     turnSystemPrompt = buildSystemPrompt(filteredCtx)
 
-    // Smart context management: sliding window + optional summarization
+    // Smart context management: sliding window + optional summarization.
+    // managedLen marks where new messages start after the turn — used to append to rawApiHistory.
     const { history: managedHistory, summarized } = await manageHistory(settings, apiHistory, {
-      maxChars: 120_000,
-      keepLastN: 10,
-      summarizeThreshold: 40_000,
+      maxChars: 200_000,
+      keepLastN: 14,
+      summarizeThreshold: 60_000,
       onStatus: (msg) => { aiStatusHint = msg },
     })
+    const managedLen = managedHistory.length
     if (summarized) {
       apiHistory = managedHistory
       aiStatusHint = ''
@@ -960,6 +974,8 @@
 
     try {
       await runAiTurn(0)
+      // Append all messages added during this turn to the full uncompressed history
+      rawApiHistory.push(...apiHistory.slice(managedLen))
       await persistCurrent()
     } catch (e) {
       if (/** @type {any} */ (e)?.name !== 'AbortError') error = String(e)
@@ -985,6 +1001,7 @@
       }
       abortController = null
       loading = false
+      openResultId = null
       await tick()
       inputRef?.focus()
     }
@@ -1186,7 +1203,7 @@
         const execIdx = items.findIndex((i) => i.id === execId)
         if (execIdx >= 0) items.splice(execIdx, 1, schemaResultItem)
         else items.push(schemaResultItem)
-        autoOpenResult(schemaResultId)
+        autoOpenResult(schemaResultId, true)
         await scrollBottom()
         toolResult = JSON.stringify({
           table: `${schema}.${table}`,
@@ -1362,6 +1379,7 @@
     activeConvId = null
     items = []
     apiHistory = []
+    rawApiHistory = []
     error = ''
     loadConvList()
   })
@@ -2173,7 +2191,7 @@
                 <button
                   type="button"
                   class="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-destructive/30 text-ui-xs text-destructive transition-colors hover:bg-destructive/8 hover:border-destructive/50"
-                  onclick={() => { apiHistory = []; fetchedSchemas = {}; error = '' }}
+                  onclick={() => { apiHistory = []; rawApiHistory = []; fetchedSchemas = {}; error = '' }}
                 >
                   <Trash2 class="size-3.5" />
                   Clear history & schema cache

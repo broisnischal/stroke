@@ -4,7 +4,7 @@
 
 /** @typedef {'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains' | 'not_contains' | 'starts_with' | 'ends_with' | 'is_null' | 'is_not_null' | 'between'} FilterOp */
 
-/** @typedef {{ id: string, column: string, op: FilterOp, value: string }} TableFilter */
+/** @typedef {{ id: string, column: string, op: FilterOp, value: string, conjunct: 'and' | 'or' }} TableFilter */
 
 export const PAGE_SIZE_OPTIONS = [25, 50, 100, 250]
 
@@ -52,7 +52,7 @@ export function nextFilterId() {
 
 /** @returns {TableFilter} */
 export function createFilter(column = '', op = /** @type {FilterOp} */ ('contains')) {
-  return { id: nextFilterId(), column, op, value: '' }
+  return { id: nextFilterId(), column, op, value: '', conjunct: 'and' }
 }
 
 /** @param {TableFilter[]} filters */
@@ -68,10 +68,12 @@ export function activeFilters(filters) {
 
 /** @param {TableFilter[]} filters */
 export function filtersForApi(filters) {
-  return activeFilters(filters).map(({ column, op, value }) => ({
+  return activeFilters(filters).map(({ column, op, value, conjunct }, i) => ({
     column,
     op,
     value: value.trim() || undefined,
+    // first filter has no conjunct (it's the first WHERE term)
+    conjunct: i === 0 ? undefined : (conjunct ?? 'and'),
   }))
 }
 

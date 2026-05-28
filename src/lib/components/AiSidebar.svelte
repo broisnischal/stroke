@@ -27,12 +27,12 @@
   import ResizeHandle from "$lib/components/ResizeHandle.svelte";
   import {
     chatCompletionStream,
+    manageHistory,
     MAX_AI_RETRIES,
     AI_TOOLS,
     isDestructiveSql,
     parseAssistantMessage,
     buildSystemPrompt,
-    manageHistory,
     classifyDbError,
     filterSchemaForQuery,
   } from "$lib/ai.js";
@@ -112,6 +112,8 @@
   let items = $state([]);
   /** @type {import('$lib/ai.js').ApiMessage[]} */
   let apiHistory = $state([]);
+  /** Full uncompressed history — never trimmed, always saved to IndexedDB */
+  let rawApiHistory = $state([]);
   let loading = $state(false);
   let error = $state("");
   let aiStatusHint = $state("");
@@ -124,6 +126,8 @@
   let fetchedSchemas = $state({});
   /** @type {Set<string>} */
   let collapsed = $state(new Set());
+  /** SQL blocks expanded by user — empty means all collapsed by default */
+  let sqlExpanded = $state(new Set());
   /** @type {string | null} */
   let openResultId = $state(null);
 
@@ -174,6 +178,9 @@
     apiHistory = /** @type {import('$lib/ai.js').ApiMessage[]} */ (
       latest.apiHistory ?? []
     );
+    rawApiHistory = /** @type {import('$lib/ai.js').ApiMessage[]} */ (
+      latest.apiHistory ?? []
+    );
     await tick();
     if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
   }
@@ -194,7 +201,7 @@
         ? firstUser.text.slice(0, 60) + (firstUser.text.length > 60 ? "…" : "")
         : "Conversation";
     const plainItems = $state.snapshot(saveable);
-    const plainHistory = $state.snapshot(apiHistory);
+    const plainHistory = $state.snapshot(rawApiHistory);
     if (activeConvId) {
       await updateConversation(activeConvId, {
         title,
@@ -240,6 +247,9 @@
     apiHistory = /** @type {import('$lib/ai.js').ApiMessage[]} */ (
       conv.apiHistory ?? []
     );
+    rawApiHistory = /** @type {import('$lib/ai.js').ApiMessage[]} */ (
+      conv.apiHistory ?? []
+    );
     error = "";
     historyOpen = false;
     await tick();
@@ -253,6 +263,7 @@
       activeConvId = null;
       items = [];
       apiHistory = [];
+      rawApiHistory = [];
       error = "";
     }
   }
@@ -263,6 +274,7 @@
     activeConvId = null;
     items = [];
     apiHistory = [];
+    rawApiHistory = [];
     error = "";
     historyOpen = false;
   }
@@ -343,11 +355,16 @@
     next.has(key) ? next.delete(key) : next.add(key);
     collapsed = next;
   }
+  function toggleSqlExpand(key) {
+    const next = new Set(sqlExpanded);
+    next.has(key) ? next.delete(key) : next.add(key);
+    sqlExpanded = next;
+  }
   function toggleResult(id) {
     openResultId = openResultId === id ? null : id;
   }
-  function autoOpenResult(/** @type {string} */ id) {
-    openResultId = id;
+  function autoOpenResult(/** @type {string} */ id, isSchema = false) {
+    if (!isSchema) openResultId = id;
   }
 
   async function newChat() {
@@ -356,6 +373,7 @@
     activeConvId = null;
     items = [];
     apiHistory = [];
+    rawApiHistory = [];
     error = "";
     aiStatusHint = "";
     inputText = "";
@@ -476,6 +494,7 @@
 
     items.push(/** @type {ChatItem} */ ({ id: uid(), kind: "user", text }));
     apiHistory.push({ role: "user", content: text });
+    rawApiHistory.push({ role: "user", content: text });
     await scrollBottom();
 
     const thinkingId = uid();
@@ -513,14 +532,15 @@
       $aiSettings,
       apiHistory,
       {
-        maxChars: 120_000,
-        keepLastN: 10,
-        summarizeThreshold: 40_000,
+        maxChars: 200_000,
+        keepLastN: 14,
+        summarizeThreshold: 60_000,
         onStatus: (msg) => {
           aiStatusHint = msg;
         },
       },
     );
+    const managedLen = managedHistory.length;
     apiHistory = managedHistory;
 
     try {
@@ -553,7 +573,9 @@
       }
       abortController = null;
       loading = false;
+      openResultId = null;
       aiStatusHint = "";
+      rawApiHistory.push(...apiHistory.slice(managedLen));
       void persistCurrent();
       await tick();
       inputRef?.focus();
@@ -795,7 +817,7 @@
             isSchema: true,
           }),
         );
-        autoOpenResult(schemaResultId);
+        autoOpenResult(schemaResultId, true);
         await scrollBottom();
         toolResult = JSON.stringify({
           table: `${schema}.${table}`,
@@ -1262,7 +1284,7 @@
                   <AiMarkdown content={part.content} class="text-ui-xs" />
                 {:else if part.type === "sql"}
                   {@const sqlKey = `${item.id}-${pi}`}
-                  {@const sqlOpen = !collapsed.has(sqlKey)}
+                  {@const sqlOpen = sqlExpanded.has(sqlKey)}
                   <div class="overflow-hidden rounded-lg border border-border">
                     <div
                       class="flex items-center justify-between gap-1 border-b border-border/50 bg-muted/40 px-2 py-1"
@@ -1270,7 +1292,7 @@
                       <button
                         type="button"
                         class="flex items-center gap-1 text-ui-2xs text-muted-foreground hover:text-foreground"
-                        onclick={() => toggleCollapse(sqlKey)}
+                        onclick={() => toggleSqlExpand(sqlKey)}
                       >
                         {#if sqlOpen}<ChevronDown
                             class="size-3"

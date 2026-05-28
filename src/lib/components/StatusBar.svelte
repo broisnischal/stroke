@@ -130,7 +130,7 @@
       <!-- Connection switcher -->
       <DropdownMenu.Root bind:open={connOpen}>
         <DropdownMenu.Trigger
-          class="flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors hover:bg-accent hover:text-foreground outline-none data-[state=open]:bg-accent data-[state=open]:text-foreground"
+          class="flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none data-[state=open]:bg-accent data-[state=open]:text-foreground"
           title="Switch connection"
         >
           <Wifi class="size-3 shrink-0 text-green-500" />
@@ -181,7 +181,7 @@
         onOpenChange={(o) => { if (o && databases.length === 0) void fetchDatabases(); if (!o) dbSearch = '' }}
       >
         <DropdownMenu.Trigger
-          class="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors hover:bg-accent hover:text-foreground outline-none data-[state=open]:bg-accent data-[state=open]:text-foreground"
+          class="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none data-[state=open]:bg-accent data-[state=open]:text-foreground"
           title="Switch database"
         >
           {#if connection?.type === 'sqlite'}
@@ -201,7 +201,7 @@
               <input
                 type="text"
                 placeholder="Filter…"
-                class="h-7 w-full rounded-md border border-border/60 bg-muted/40 px-2.5 text-xs outline-none placeholder:text-muted-foreground/40 focus:border-ring"
+                class="h-7 w-full rounded-md border border-border/60 bg-muted/40 px-2.5 text-xs outline-none placeholder:text-muted-foreground/40 focus:border-ring focus:ring-2 focus:ring-ring/20"
                 bind:value={dbSearch}
               />
             </div>
@@ -369,7 +369,7 @@
     <!-- AI model picker -->
     <DropdownMenu.Root>
       <DropdownMenu.Trigger
-        class="flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors hover:bg-accent hover:text-foreground outline-none data-[state=open]:bg-accent data-[state=open]:text-foreground"
+        class="flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none data-[state=open]:bg-accent data-[state=open]:text-foreground"
         title="Switch AI model"
       >
         <Bot class="size-3 shrink-0" />

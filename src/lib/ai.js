@@ -95,7 +95,7 @@ export async function summarizeHistory(settings, messages) {
     .map((m) => {
       const role = m.role === 'tool' ? 'tool_result' : m.role
       const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content ?? '')
-      return `[${role.toUpperCase()}]: ${content.slice(0, 800)}`
+      return `[${role.toUpperCase()}]: ${content.slice(0, 2000)}`
     })
     .join('\n\n')
 
@@ -103,9 +103,16 @@ export async function summarizeHistory(settings, messages) {
     {
       role: 'system',
       content:
-        'You are a memory compression assistant. Summarize the following database conversation into a dense factual memory block. ' +
-        'Include: which tables were queried, key results found (row counts, important values), SQL queries that worked, errors encountered and how they were resolved, and what the user accomplished. ' +
-        'Be factual and terse. Output ONLY the summary — no intro, no "Here is a summary".',
+        'You are a memory compression assistant for a database assistant AI. Compress the following database conversation into a dense factual memory block that the AI will use to continue working. ' +
+        'Include ALL of the following that appear:\n' +
+        '- Which tables were queried and their schemas (column names, types)\n' +
+        '- Key data findings: counts, important values, patterns discovered\n' +
+        '- Exact SQL queries that worked (copy them verbatim)\n' +
+        '- Errors encountered and how they were resolved\n' +
+        '- What the user asked for and what was accomplished\n' +
+        '- Any pending tasks or follow-ups the user requested\n' +
+        '- Enum/type values discovered (e.g. status = active|inactive|pending)\n' +
+        'Be factual, complete, and terse. Output ONLY the memory block — no intro, no commentary.',
     },
     { role: 'user', content: formatted },
   ]
@@ -127,7 +134,7 @@ export async function summarizeHistory(settings, messages) {
  * @returns {Promise<{ history: ApiMessage[], summarized: boolean }>}
  */
 export async function manageHistory(settings, history, opts = {}) {
-  const { maxChars = 60_000, keepLastN = 8, summarizeThreshold = 25_000, onStatus } = opts
+  const { maxChars = 200_000, keepLastN = 14, summarizeThreshold = 60_000, onStatus } = opts
 
   const size = (/** @type {ApiMessage[]} */ msgs) =>
     msgs.reduce((s, m) => s + (typeof m.content === 'string' ? m.content.length : JSON.stringify(m.content ?? '').length), 0)
@@ -498,7 +505,7 @@ export async function chatCompletionRaw(settings, messages, tools = null) {
   const url = base.endsWith('/chat/completions') ? base : `${base}/chat/completions`
 
   /** @type {Record<string, unknown>} */
-  const body = { model: settings.model, messages, temperature: 0, max_tokens: 4096 }
+  const body = { model: settings.model, messages, temperature: 0, max_tokens: 16384 }
   if (tools?.length) {
     body.tools = tools
     body.tool_choice = 'auto'
@@ -543,7 +550,7 @@ export async function* chatCompletionStream(settings, messages, tools = null, si
   const url = base.endsWith('/chat/completions') ? base : `${base}/chat/completions`
 
   /** @type {Record<string, unknown>} */
-  const body = { model: settings.model, messages, stream: true, temperature: 0, max_tokens: 4096 }
+  const body = { model: settings.model, messages, stream: true, temperature: 0, max_tokens: 16384 }
   if (tools?.length) { body.tools = tools; body.tool_choice = 'auto' }
 
   const res = await fetchWithAiRetry(
@@ -1215,17 +1222,20 @@ ${otherTablesSection}
 === SQL GENERATION RULES ===
 Before writing any SQL, reason through it in <think> tags (the UI strips these — the user never sees them):
 <think>
-- Which tables are involved? Are they listed in the schema above?
-- If any table's columns are NOT listed, I must call describe_table first.
+- Which tables are involved? Are they in the schema above?
+- If a table's columns are NOT listed, call describe_table BEFORE writing SQL.
+- Are any columns USER-DEFINED / enum types? If so, I MUST query the enum values first:
+  SELECT enumlabel FROM pg_enum JOIN pg_type ON pg_enum.enumtypid = pg_type.oid WHERE pg_type.typname = '<type_name>' ORDER BY enumsortorder;
 - What JOIN conditions apply? Do the foreign keys support this join?
 - Are there aggregations, window functions, or subqueries needed?
-- What could go wrong? (NULL handling, type mismatches, missing LIMIT)
+- What could go wrong? (NULL handling, type mismatches, missing LIMIT, enum value casing)
 </think>
 Then output the final SQL after </think>. Never write SQL without this reasoning step.
 
 === GUARDRAILS ===
-- NEVER hallucinate column names. Only use columns from the schema sections above, the AUTO-FETCHED SCHEMA block, or from describe_table/get_schema results. If a table's columns are not listed anywhere in context, call describe_table BEFORE writing any query.
+- NEVER hallucinate column names. Only use columns from the schema sections above or from describe_table/get_schema results. If a table's columns are not listed anywhere in context, call describe_table BEFORE writing any query.
 - Column naming convention: databases use snake_case (created_at, user_id, first_name). NEVER write camelCase (createdAt, userId, firstName) — PostgreSQL will silently lowercase it and the column will not be found.
+- NEVER guess enum values. If a column type is a named enum (e.g., account_status, order_state), query the exact values first: SELECT enumlabel FROM pg_enum JOIN pg_type ON pg_enum.enumtypid = pg_type.oid WHERE pg_type.typname = '<type_name>' ORDER BY enumsortorder; Then use those exact values (respecting case) in WHERE clauses.
 - NEVER run DROP, TRUNCATE, or DELETE without first writing a <confirm>plain-text description of what will be deleted</confirm>. Put ONLY a short human description inside <confirm>…</confirm> — never SQL code. The SQL goes in a separate fenced sql block. The execution layer will intercept it and prompt the user.
 - LIMIT is mandatory on every SELECT. Use LIMIT 100 for exploration; higher only when the user explicitly requests it. Omitting LIMIT on large tables causes timeouts.
 - Never retry the exact same failing query. Diagnose the error, check the exact column names with describe_table, and produce a corrected version.

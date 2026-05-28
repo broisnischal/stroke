@@ -163,8 +163,7 @@
       <div class="flex items-center gap-1.5 border-b border-border px-3 py-2">
         <button
           type="button"
-          tabindex="-1"
-          class="flex items-center gap-1 text-ui-xs text-muted-foreground transition-colors hover:text-foreground"
+          class="flex items-center gap-1 rounded text-ui-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none"
           onclick={goBack}
         >
           <ChevronLeft class="size-3.5" />

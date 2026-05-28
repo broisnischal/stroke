@@ -484,6 +484,10 @@ pub struct RowFilter {
     pub op: String,
     #[serde(default)]
     pub value: Option<String>,
+    /// How this filter joins to the previous one. None / "and" → AND, "or" → OR.
+    /// The first filter in a list has no conjunct (it is the root WHERE term).
+    #[serde(default)]
+    pub conjunct: Option<String>,
 }
 
 struct WhereClause {
@@ -492,16 +496,14 @@ struct WhereClause {
 }
 
 struct QueryBuilder {
-    conditions: Vec<String>,
+    /// (conjunct, sql_fragment) — conjunct is None for the first condition.
+    conditions: Vec<(Option<String>, String)>,
     binds: Vec<String>,
 }
 
 impl QueryBuilder {
     fn new() -> Self {
-        Self {
-            conditions: Vec::new(),
-            binds: Vec::new(),
-        }
+        Self { conditions: Vec::new(), binds: Vec::new() }
     }
 
     fn push_bind(&mut self, value: String) -> String {
@@ -509,16 +511,30 @@ impl QueryBuilder {
         format!("${}", self.binds.len())
     }
 
+    /// Push a condition with an explicit conjunct (AND/OR). The first condition
+    /// always uses None so it becomes the bare first term after WHERE.
+    fn push_condition(&mut self, cond: String, conjunct: Option<&str>) {
+        let c = if self.conditions.is_empty() {
+            None
+        } else {
+            Some(conjunct.unwrap_or("AND").to_uppercase())
+        };
+        self.conditions.push((c, cond));
+    }
+
     fn build(self) -> WhereClause {
         let sql = if self.conditions.is_empty() {
             String::new()
         } else {
-            format!(" WHERE {}", self.conditions.join(" AND "))
+            let parts: Vec<String> = self.conditions.into_iter().map(|(conj, cond)| {
+                match conj {
+                    None => cond,
+                    Some(c) => format!("{c} {cond}"),
+                }
+            }).collect();
+            format!(" WHERE {}", parts.join(" "))
         };
-        WhereClause {
-            sql,
-            binds: self.binds,
-        }
+        WhereClause { sql, binds: self.binds }
     }
 }
 
@@ -577,74 +593,65 @@ fn build_filter_condition(
     column: &str,
     op: &str,
     value: Option<&str>,
+    conjunct: Option<&str>,
 ) -> Result<(), String> {
     let col = quoted_column(column)?;
     match op {
         "is_null" => {
-            builder.conditions.push(format!("{col} IS NULL"));
+            builder.push_condition(format!("{col} IS NULL"), conjunct);
         }
         "is_not_null" => {
-            builder.conditions.push(format!("{col} IS NOT NULL"));
+            builder.push_condition(format!("{col} IS NOT NULL"), conjunct);
         }
         "eq" => {
             let v = value.unwrap_or("").to_string();
             let p = builder.push_bind(v);
-            builder.conditions.push(format!("{col}::text = {p}"));
+            builder.push_condition(format!("{col}::text = {p}"), conjunct);
         }
         "neq" => {
             let v = value.unwrap_or("").to_string();
             let p = builder.push_bind(v);
-            builder
-                .conditions
-                .push(format!("{col}::text IS DISTINCT FROM {p}"));
+            builder.push_condition(format!("{col}::text IS DISTINCT FROM {p}"), conjunct);
         }
         "gt" => {
             let v = value.unwrap_or("").to_string();
             let p = builder.push_bind(v);
-            builder.conditions.push(format!("{col}::text > {p}"));
+            builder.push_condition(format!("{col}::text > {p}"), conjunct);
         }
         "gte" => {
             let v = value.unwrap_or("").to_string();
             let p = builder.push_bind(v);
-            builder.conditions.push(format!("{col}::text >= {p}"));
+            builder.push_condition(format!("{col}::text >= {p}"), conjunct);
         }
         "lt" => {
             let v = value.unwrap_or("").to_string();
             let p = builder.push_bind(v);
-            builder.conditions.push(format!("{col}::text < {p}"));
+            builder.push_condition(format!("{col}::text < {p}"), conjunct);
         }
         "lte" => {
             let v = value.unwrap_or("").to_string();
             let p = builder.push_bind(v);
-            builder.conditions.push(format!("{col}::text <= {p}"));
+            builder.push_condition(format!("{col}::text <= {p}"), conjunct);
         }
         "contains" => {
             let raw = value.unwrap_or("");
             let p = builder.push_bind(format!("%{}%", escape_ilike_pattern(raw)));
-            builder
-                .conditions
-                .push(format!("{col}::text ILIKE {p} ESCAPE '\\'"));
+            builder.push_condition(format!("{col}::text ILIKE {p} ESCAPE '\\'"), conjunct);
         }
         "not_contains" => {
             let raw = value.unwrap_or("");
             let p = builder.push_bind(format!("%{}%", escape_ilike_pattern(raw)));
-            builder
-                .conditions
-                .push(format!("NOT ({col}::text ILIKE {p} ESCAPE '\\')"));
+            builder.push_condition(format!("NOT ({col}::text ILIKE {p} ESCAPE '\\')"), conjunct);
         }
         "starts_with" => {
             let raw = value.unwrap_or("");
             let p = builder.push_bind(format!("{}%", escape_ilike_pattern(raw)));
-            builder
-                .conditions
-                .push(format!("{col}::text ILIKE {p} ESCAPE '\\'"));
+            builder.push_condition(format!("{col}::text ILIKE {p} ESCAPE '\\'"), conjunct);
         }
         "ends_with" => {
             let raw = value.unwrap_or("");
             let p = builder.push_bind(format!("%{}", escape_ilike_pattern(raw)));
-            builder
-                .conditions
-                .push(format!("{col}::text ILIKE {p} ESCAPE '\\'"));
+            builder.push_condition(format!("{col}::text ILIKE {p} ESCAPE '\\'"), conjunct);
         }
         "between" => {
             let raw = value.unwrap_or("");
@@ -653,7 +660,7 @@ fn build_filter_condition(
             let to = parts.next().unwrap_or("").trim().to_string();
             let p1 = builder.push_bind(from);
             let p2 = builder.push_bind(to);
-            builder.conditions.push(format!("{col}::text >= {p1} AND {col}::text <= {p2}"));
+            builder.push_condition(format!("({col}::text >= {p1} AND {col}::text <= {p2})"), conjunct);
         }
         _ => return Err(format!("Unsupported filter operator: {op}")),
     }
@@ -674,21 +681,22 @@ fn build_where(
             .filter_map(|c| quoted_column(c).ok().map(|col| format!("{col}::text ILIKE {pattern} ESCAPE '\\'")))
             .collect();
         if !parts.is_empty() {
-            builder.conditions.push(format!("({})", parts.join(" OR ")));
+            builder.push_condition(format!("({})", parts.join(" OR ")), None);
         }
     }
 
     for filter in filters {
         ensure_column(&filter.column, columns)?;
         let op = filter.op.as_str();
+        let conjunct = filter.conjunct.as_deref();
         if op != "is_null" && op != "is_not_null" {
             let value = filter.value.as_deref().unwrap_or("").trim();
             if value.is_empty() {
                 continue;
             }
-            build_filter_condition(&mut builder, &filter.column, op, Some(value))?;
+            build_filter_condition(&mut builder, &filter.column, op, Some(value), conjunct)?;
         } else {
-            build_filter_condition(&mut builder, &filter.column, op, None)?;
+            build_filter_condition(&mut builder, &filter.column, op, None, conjunct)?;
         }
     }
 
@@ -1481,16 +1489,23 @@ async fn get_table_rows_d1(
     sort_direction: Option<String>,
     filters: Option<Vec<RowFilter>>,
 ) -> Result<TableRows, String> {
-    use super::d1::query as d1q;
-
     let t0 = std::time::Instant::now();
     let tq = format!("\"{}\"", table.replace('"', "\"\""));
 
-    // Column names from PRAGMA
-    let pragma = d1q(cfg, &format!("PRAGMA table_info({tq})"), vec![]).await?;
+    // ── Phase 1: PRAGMA queries — run concurrently ────────────────────────────
+    // Both are independent so we fire them at the same time. The shared HTTP
+    // client reuses the pooled TLS connection for the second request.
+    let pragma_sql = format!("PRAGMA table_info({tq})");
+    let fk_sql     = format!("PRAGMA foreign_key_list({tq})");
+    let (pragma_res, fk_res) = tokio::join!(
+        super::d1::query(cfg, &pragma_sql, vec![]),
+        super::d1::query(cfg, &fk_sql, vec![]),
+    );
+    let pragma = pragma_res?;
+    let fk_res = fk_res?;
+
     let name_idx = pragma.columns.iter().position(|c| c.name == "name").unwrap_or(1);
-    let pk_idx = pragma.columns.iter().position(|c| c.name == "pk").unwrap_or(5);
-    let fk_res = d1q(cfg, &format!("PRAGMA foreign_key_list({tq})"), vec![]).await?;
+    let pk_idx   = pragma.columns.iter().position(|c| c.name == "pk").unwrap_or(5);
 
     let col_names: Vec<String> = pragma.rows.iter()
         .filter_map(|r| r.get(name_idx)?.as_str().map(|s| s.to_string()))
@@ -1505,7 +1520,6 @@ async fn get_table_rows_d1(
     pk.sort_by_key(|(p, _)| *p);
     let primary_key: Vec<String> = pk.into_iter().map(|(_, n)| n).collect();
 
-    // FK grouping
     let mut fk_map: std::collections::BTreeMap<i64, ForeignKeyInfo> = Default::default();
     if let (Some(id_col), Some(tbl_col), Some(from_col), Some(to_col)) = (
         fk_res.columns.iter().position(|c| c.name == "id"),
@@ -1528,7 +1542,7 @@ async fn get_table_rows_d1(
     }
     let foreign_keys: Vec<ForeignKeyInfo> = fk_map.into_values().collect();
 
-    // WHERE
+    // ── WHERE / ORDER build ───────────────────────────────────────────────────
     let mut conditions: Vec<String> = vec![];
     let mut params: Vec<Value> = vec![];
     if let Some(ref s) = search {
@@ -1544,7 +1558,7 @@ async fn get_table_rows_d1(
         for f in fs {
             let qcol = format!("\"{}\"", f.column.replace('"', "\"\""));
             match f.op.as_str() {
-                "is_null" => conditions.push(format!("{qcol} IS NULL")),
+                "is_null"     => conditions.push(format!("{qcol} IS NULL")),
                 "is_not_null" => conditions.push(format!("{qcol} IS NOT NULL")),
                 _ => if let Some(ref v) = f.value {
                     let (cond, bp) = super::sqlite::build_d1_filter(&qcol, &f.op, v);
@@ -1562,15 +1576,21 @@ async fn get_table_rows_d1(
         format!("ORDER BY \"{}\" {dir}", col.replace('"', "\"\""))
     } else { String::new() };
 
+    // ── Phase 2: COUNT + rows — run concurrently ─────────────────────────────
     let count_sql = format!("SELECT COUNT(*) FROM {tq} {where_clause}");
-    let count_res = d1q(cfg, &count_sql, params.clone()).await?;
-    let total = count_res.rows.first().and_then(|r| r.first()).and_then(|v| v.as_i64()).unwrap_or(0);
-
-    let rows_sql = format!("SELECT * FROM {tq} {where_clause} {order_clause} LIMIT ? OFFSET ?");
-    let mut row_params = params;
+    let rows_sql  = format!("SELECT * FROM {tq} {where_clause} {order_clause} LIMIT ? OFFSET ?");
+    let mut row_params = params.clone();
     row_params.push(Value::Number(limit.into()));
     row_params.push(Value::Number(offset.into()));
-    let rows_res = d1q(cfg, &rows_sql, row_params).await?;
+
+    let (count_res, rows_res) = tokio::join!(
+        super::d1::query(cfg, &count_sql, params),
+        super::d1::query(cfg, &rows_sql, row_params),
+    );
+    let count_res = count_res?;
+    let rows_res  = rows_res?;
+
+    let total = count_res.rows.first().and_then(|r| r.first()).and_then(|v| v.as_i64()).unwrap_or(0);
 
     Ok(TableRows {
         columns: rows_res.columns,

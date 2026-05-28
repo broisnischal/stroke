@@ -180,6 +180,7 @@
 
     <!-- Autocomplete dropdown -->
     {#if pathFocused && completions.length > 0}
+      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
       <ul
         class="absolute left-0 top-full z-50 mt-px min-w-48 overflow-hidden rounded-b-md border border-border bg-popover shadow-lg"
         onmousedown={(e) => e.preventDefault()}
