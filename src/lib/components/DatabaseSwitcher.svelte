@@ -133,6 +133,8 @@
       bind:this={panelEl}
       class="absolute bottom-full left-0 right-0 z-50 mb-1 flex flex-col overflow-hidden rounded-lg border border-border/60 bg-popover shadow-lg"
       style="max-height: min(300px,55vh)"
+      role="menu"
+      tabindex="-1"
       onkeydown={(e) => {
         if (e.key === "Escape") close();
       }}

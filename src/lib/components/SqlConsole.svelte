@@ -63,9 +63,10 @@
    * @typedef {{ id: string, name: string, content: string }} SqlTab
    */
 
+  const initialTabId = crypto.randomUUID();
   /** @type {SqlTab[]} */
-  let sqlTabs = $state([{ id: crypto.randomUUID(), name: 'Query 1', content: sql }])
-  let activeTabId = $state(sqlTabs[0].id)
+  let sqlTabs = $state([{ id: initialTabId, name: 'Query 1', content: sql }])
+  let activeTabId = $state(initialTabId)
   let tabCounter = $state(1)
 
   const activeTab = $derived(sqlTabs.find((t) => t.id === activeTabId) ?? sqlTabs[0])

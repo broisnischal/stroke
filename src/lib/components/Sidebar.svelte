@@ -692,6 +692,7 @@
                             <span
                               class="relative size-3 shrink-0"
                               onclick={(e) => { e.stopPropagation(); toggleSelect(table.name) }}
+                              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); toggleSelect(table.name); } }}
                               role="checkbox"
                               aria-checked={isSelected}
                               tabindex="-1"
@@ -807,6 +808,7 @@
                               <span
                                 class="relative size-3 shrink-0"
                                 onclick={(e) => { e.stopPropagation(); toggleSelect(view.name) }}
+                                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); toggleSelect(view.name); } }}
                                 role="checkbox"
                                 aria-checked={isSelected}
                                 tabindex="-1"
@@ -900,6 +902,7 @@
                               <span
                                 class="relative size-3 shrink-0"
                                 onclick={(e) => { e.stopPropagation(); toggleSelect(mv.name) }}
+                                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); toggleSelect(mv.name); } }}
                                 role="checkbox"
                                 aria-checked={isSelected}
                                 tabindex="-1"
