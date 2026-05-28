@@ -4,22 +4,24 @@
   import Code2          from '@lucide/svelte/icons/code-2'
   import LayoutTemplate from '@lucide/svelte/icons/layout-template'
   import Settings       from '@lucide/svelte/icons/settings'
-  import Unplug      from '@lucide/svelte/icons/unplug'
-  import Database    from '@lucide/svelte/icons/database'
-  import HardDrive   from '@lucide/svelte/icons/hard-drive'
-  import Cloud       from '@lucide/svelte/icons/cloud'
-  import RefreshCw   from '@lucide/svelte/icons/refresh-cw'
-  import CornerDownLeft from '@lucide/svelte/icons/corner-down-left'
-  import Bot         from '@lucide/svelte/icons/bot'
-  import Sparkles    from '@lucide/svelte/icons/sparkles'
-  import Keyboard    from '@lucide/svelte/icons/keyboard'
+  import Unplug         from '@lucide/svelte/icons/unplug'
+  import Database       from '@lucide/svelte/icons/database'
+  import HardDrive      from '@lucide/svelte/icons/hard-drive'
+  import Cloud          from '@lucide/svelte/icons/cloud'
+  import RefreshCw      from '@lucide/svelte/icons/refresh-cw'
+  import Bot            from '@lucide/svelte/icons/bot'
+  import Sparkles       from '@lucide/svelte/icons/sparkles'
+  import Keyboard       from '@lucide/svelte/icons/keyboard'
   import ArrowLeftRight from '@lucide/svelte/icons/arrow-left-right'
   import ArrowDownToLine from '@lucide/svelte/icons/arrow-down-to-line'
-  import Info from '@lucide/svelte/icons/info'
-  import History from '@lucide/svelte/icons/history'
-  import Bookmark from '@lucide/svelte/icons/bookmark'
-  import ShieldCheck from '@lucide/svelte/icons/shield-check'
-  import Package from '@lucide/svelte/icons/package'
+  import Info           from '@lucide/svelte/icons/info'
+  import History        from '@lucide/svelte/icons/history'
+  import Bookmark       from '@lucide/svelte/icons/bookmark'
+  import ShieldCheck    from '@lucide/svelte/icons/shield-check'
+  import Package        from '@lucide/svelte/icons/package'
+  import ChevronRight   from '@lucide/svelte/icons/chevron-right'
+  import ChevronLeft    from '@lucide/svelte/icons/chevron-left'
+  import Eye            from '@lucide/svelte/icons/eye'
   import * as Command from '$lib/components/ui/command/index.js'
   import { formatTableRowCount } from '$lib/table-list.js'
 
@@ -67,6 +69,43 @@
     onopenqueryhistory = () => {},
   } = $props()
 
+  /** @type {'root' | 'docker' | 'connections'} */
+  let page = $state('root')
+
+  /** @param {'docker' | 'connections'} target */
+  function navigate(target) {
+    page = target
+  }
+
+  function goBack() {
+    page = 'root'
+  }
+
+  /** @param {KeyboardEvent} e */
+  function handleKeydown(e) {
+    if (page !== 'root' && e.key === 'Backspace') {
+      const input = /** @type {HTMLInputElement | null} */ (
+        e.currentTarget instanceof Element
+          ? e.currentTarget.querySelector('[data-slot="command-input"]')
+          : null
+      )
+      if (!input || input.value === '') {
+        e.preventDefault()
+        goBack()
+      }
+    }
+  }
+
+  $effect(() => {
+    if (!open) page = 'root'
+  })
+
+  /** @param {() => void} action */
+  function run(action) {
+    open = false
+    action()
+  }
+
   /** @param {'postgres'|'sqlite'|'d1'} type */
   function driverIcon(type) {
     if (type === 'sqlite') return HardDrive
@@ -81,10 +120,10 @@
     return `${conn.user ?? ''}@${conn.host ?? ''}:${conn.port ?? ''}/${conn.database ?? ''}`
   }
 
-  function run(action) {
-    open = false
-    action()
-  }
+  const pageLabel = /** @type {Record<string, string>} */ ({
+    docker: 'Docker',
+    connections: 'Connections',
+  })
 </script>
 
 <Command.Dialog
@@ -94,219 +133,257 @@
   class="sm:max-w-lg"
 >
   {#snippet children()}
-    <Command.Input placeholder="Search tables, schemas, commands…" />
-    <Command.List class="max-h-[min(400px,55vh)]">
-      <Command.Empty>No results.</Command.Empty>
+    <!-- breadcrumb shown when in a sub-page -->
+    {#if page !== 'root'}
+      <div class="flex items-center gap-1.5 border-b border-border px-3 py-2">
+        <button
+          type="button"
+          class="flex items-center gap-1 text-ui-xs text-muted-foreground transition-colors hover:text-foreground"
+          onclick={goBack}
+        >
+          <ChevronLeft class="size-3.5" />
+          Back
+        </button>
+        <span class="text-ui-xs text-muted-foreground/40">/</span>
+        <span class="text-ui-xs font-medium text-foreground">{pageLabel[page]}</span>
+      </div>
+    {/if}
 
-      {#if connected}
-        <Command.Group heading="Views">
-          <Command.Item value="open table data browser" onSelect={() => run(onopentable)}>
-            <Table2 class="size-4 shrink-0 opacity-60" />
-            <span data-slot="command-label" class="truncate">Table data</span>
-            <Command.Shortcut keys="⌘⇧D" />
-          </Command.Item>
-          <Command.Item value="open sql editor query console" onSelect={() => run(onopensql)}>
-            <Terminal class="size-4 shrink-0 opacity-60" />
-            <span data-slot="command-label" class="truncate">SQL editor</span>
-            <Command.Shortcut keys="⌘⇧S" />
-          </Command.Item>
-          <Command.Item value="open orm runner drizzle prisma query builder" onSelect={() => run(onopenorm)}>
-            <Code2 class="size-4 shrink-0 opacity-60" />
-            <span data-slot="command-label" class="truncate">ORM Runner</span>
-            <Command.Shortcut keys="⌘⇧O" />
-          </Command.Item>
-          <Command.Item value="open schema explorer indexes enums views materialized" onSelect={() => run(onopenSchema)}>
-            <LayoutTemplate class="size-4 shrink-0 opacity-60" />
-            <span data-slot="command-label" class="truncate">Schema Explorer</span>
-          </Command.Item>
-          <Command.Item value="open security roles users policies rls row level" onSelect={() => run(onopensecurity)}>
-            <ShieldCheck class="size-4 shrink-0 opacity-60" />
-            <span data-slot="command-label" class="truncate">Security</span>
-          </Command.Item>
-          <Command.Item value="open activity log events history operations" onSelect={() => run(onopenlogs)}>
-            <History class="size-4 shrink-0 opacity-60" />
-            <span data-slot="command-label" class="truncate">Activity Log</span>
-          </Command.Item>
-        </Command.Group>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div onkeydown={handleKeydown}>
+      <Command.Input
+        placeholder={page === 'root' ? 'Search tables, schemas, commands…' : `Search ${pageLabel[page]}…`}
+      />
 
-        {#if schemas.length > 0}
-          <Command.Group heading="Schemas">
-            {#each schemas as schema (schema)}
-              <Command.Item
-                value="schema {schema}"
-                onSelect={() => run(() => onschemachange(schema))}
-              >
-                <Database class="size-4 shrink-0 opacity-60" />
-                <span data-slot="command-label" class="truncate font-mono">{schema}</span>
-                {#if schema === activeSchema}
-                  <span data-slot="command-trailing" class="shrink-0 text-ui-xs text-muted-foreground">current</span>
-                {/if}
-              </Command.Item>
-            {/each}
-          </Command.Group>
-        {/if}
+      <Command.List class="max-h-[min(400px,55vh)]">
+        <Command.Empty>No results.</Command.Empty>
 
-        {#if tables.length > 0}
-          <Command.Group heading="Tables">
-            {#each tables as table (table.name)}
-              <Command.Item
-                value="table {activeSchema} {table.name}"
-                onSelect={() => run(() => ontableselect(table.name))}
-              >
+        <!-- ── ROOT PAGE ─────────────────────────────────────────────── -->
+        {#if page === 'root'}
+
+          {#if connected}
+            <Command.Group heading="Views">
+              <Command.Item value="open table data browser" onSelect={() => run(onopentable)}>
                 <Table2 class="size-4 shrink-0 opacity-60" />
-                <span data-slot="command-label" class="truncate font-mono">{table.name}</span>
-                <span
-                  data-slot="command-trailing"
-                  class="shrink-0 font-mono text-ui-xs tabular-nums text-muted-foreground"
-                  title={table.rowCount != null ? Number(table.rowCount).toLocaleString('en-US') : undefined}
-                >
-                  {formatTableRowCount(table.rowCount)}
-                </span>
+                <span data-slot="command-label" class="truncate">Table data</span>
+                <Command.Shortcut keys="⌘⇧D" />
               </Command.Item>
-            {/each}
-          </Command.Group>
-        {/if}
-
-        <Command.Group heading="AI">
-          <Command.Item value="ask ai assistant chat query" onSelect={() => run(onopenai)}>
-            <Bot class="size-4 shrink-0 opacity-60" />
-            <span data-slot="command-label" class="truncate">Ask AI</span>
-            <Command.Shortcut keys="⌘⇧E" />
-          </Command.Item>
-          <Command.Item value="toggle ai sidebar inline assistant context" onSelect={() => run(onopenaisidebar)}>
-            <Sparkles class="size-4 shrink-0 opacity-60" />
-            <span data-slot="command-label" class="truncate">AI sidebar</span>
-            <Command.Shortcut keys="⌘I" />
-          </Command.Item>
-          <Command.Item
-            value={aiMode ? "close ai panel hide assistant" : "open ai panel show assistant chat"}
-            onSelect={() => run(ontoggleaimode)}
-          >
-            <ArrowLeftRight class="size-4 shrink-0 opacity-60" />
-            <span data-slot="command-label" class="truncate">{aiMode ? 'Close AI panel' : 'Open AI panel'}</span>
-            <Command.Shortcut keys="⌘⇧E" />
-          </Command.Item>
-        </Command.Group>
-
-        <Command.Group heading="Queries">
-          <Command.Item
-            value="open query history sql statements"
-            onSelect={() => run(onopenqueryhistory)}
-          >
-            <History class="size-4 shrink-0 opacity-60" />
-            <span data-slot="command-label" class="truncate">Query history</span>
-          </Command.Item>
-        </Command.Group>
-
-        {#if savedQueries.length > 0}
-          <Command.Group heading="Saved queries">
-            {#each savedQueries as entry (entry.id)}
-              <Command.Item
-                value="saved query {entry.name} {entry.sql}"
-                onSelect={() => run(() => onqueryselect(entry.sql))}
-              >
-                <Bookmark class="size-4 shrink-0 opacity-60" />
-                <span data-slot="command-label" class="min-w-0 truncate font-mono text-ui-xs">{entry.name}</span>
+              <Command.Item value="open sql editor query console" onSelect={() => run(onopensql)}>
+                <Terminal class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">SQL editor</span>
+                <Command.Shortcut keys="⌘⇧S" />
               </Command.Item>
-            {/each}
-          </Command.Group>
-        {/if}
-
-        {#if queryHistory.length > 0}
-          <Command.Group heading="Recent queries">
-            {#each queryHistory.slice(0, 20) as entry (entry.id)}
-              <Command.Item
-                value="recent query {entry.title} {entry.sql}"
-                onSelect={() => run(() => onqueryselect(entry.sql))}
-              >
+              <Command.Item value="open orm runner drizzle prisma query builder" onSelect={() => run(onopenorm)}>
+                <Code2 class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">ORM Runner</span>
+                <Command.Shortcut keys="⌘⇧O" />
+              </Command.Item>
+              <Command.Item value="open schema explorer indexes enums views materialized" onSelect={() => run(onopenSchema)}>
+                <LayoutTemplate class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">Schema Explorer</span>
+              </Command.Item>
+              <Command.Item value="open security roles users policies rls row level" onSelect={() => run(onopensecurity)}>
+                <ShieldCheck class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">Security</span>
+              </Command.Item>
+              <Command.Item value="open activity log events history operations" onSelect={() => run(onopenlogs)}>
                 <History class="size-4 shrink-0 opacity-60" />
-                <span data-slot="command-label" class="min-w-0 truncate font-mono text-ui-xs">{entry.title}</span>
+                <span data-slot="command-label" class="truncate">Activity Log</span>
               </Command.Item>
-            {/each}
+            </Command.Group>
+
+            {#if schemas.length > 0}
+              <Command.Group heading="Schemas">
+                {#each schemas as schema (schema)}
+                  <Command.Item value="schema {schema}" onSelect={() => run(() => onschemachange(schema))}>
+                    <Database class="size-4 shrink-0 opacity-60" />
+                    <span data-slot="command-label" class="truncate font-mono">{schema}</span>
+                    {#if schema === activeSchema}
+                      <span data-slot="command-trailing" class="shrink-0 text-ui-xs text-muted-foreground">current</span>
+                    {/if}
+                  </Command.Item>
+                {/each}
+              </Command.Group>
+            {/if}
+
+            {#if tables.length > 0}
+              <Command.Group heading="Tables">
+                {#each tables as table (table.name)}
+                  <Command.Item value="table {activeSchema} {table.name}" onSelect={() => run(() => ontableselect(table.name))}>
+                    {#if table.tableKind === 'view' || table.tableKind === 'materialized_view'}
+                      <Eye class="size-4 shrink-0 opacity-60" />
+                    {:else}
+                      <Table2 class="size-4 shrink-0 opacity-60" />
+                    {/if}
+                    <span data-slot="command-label" class="truncate font-mono">{table.name}</span>
+                    <span
+                      data-slot="command-trailing"
+                      class="shrink-0 font-mono text-ui-xs tabular-nums text-muted-foreground"
+                      title={table.rowCount != null ? Number(table.rowCount).toLocaleString('en-US') : undefined}
+                    >
+                      {formatTableRowCount(table.rowCount)}
+                    </span>
+                  </Command.Item>
+                {/each}
+              </Command.Group>
+            {/if}
+
+            <Command.Group heading="AI">
+              <Command.Item value="ask ai assistant chat query" onSelect={() => run(onopenai)}>
+                <Bot class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">Ask AI</span>
+                <Command.Shortcut keys="⌘⇧E" />
+              </Command.Item>
+              <Command.Item value="toggle ai sidebar inline assistant context" onSelect={() => run(onopenaisidebar)}>
+                <Sparkles class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">AI sidebar</span>
+                <Command.Shortcut keys="⌘I" />
+              </Command.Item>
+              <Command.Item
+                value={aiMode ? "close ai panel hide assistant" : "open ai panel show assistant chat"}
+                onSelect={() => run(ontoggleaimode)}
+              >
+                <ArrowLeftRight class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">{aiMode ? 'Close AI panel' : 'Open AI panel'}</span>
+              </Command.Item>
+            </Command.Group>
+
+            <Command.Group heading="Queries">
+              <Command.Item value="open query history sql statements" onSelect={() => run(onopenqueryhistory)}>
+                <History class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">Query history</span>
+              </Command.Item>
+            </Command.Group>
+
+            {#if savedQueries.length > 0}
+              <Command.Group heading="Saved queries">
+                {#each savedQueries as entry (entry.id)}
+                  <Command.Item value="saved query {entry.name} {entry.sql}" onSelect={() => run(() => onqueryselect(entry.sql))}>
+                    <Bookmark class="size-4 shrink-0 opacity-60" />
+                    <span data-slot="command-label" class="min-w-0 truncate font-mono text-ui-xs">{entry.name}</span>
+                  </Command.Item>
+                {/each}
+              </Command.Group>
+            {/if}
+
+            {#if queryHistory.length > 0}
+              <Command.Group heading="Recent queries">
+                {#each queryHistory.slice(0, 20) as entry (entry.id)}
+                  <Command.Item value="recent query {entry.title} {entry.sql}" onSelect={() => run(() => onqueryselect(entry.sql))}>
+                    <History class="size-4 shrink-0 opacity-60" />
+                    <span data-slot="command-label" class="min-w-0 truncate font-mono text-ui-xs">{entry.title}</span>
+                  </Command.Item>
+                {/each}
+              </Command.Group>
+            {/if}
+
+            <Command.Group heading="Actions">
+              <Command.Item value="refresh schema tables" onSelect={() => run(onrefresh)}>
+                <RefreshCw class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">Refresh tables</span>
+              </Command.Item>
+              <Command.Item value="open settings preferences" onSelect={() => run(onopensettings)}>
+                <Settings class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">Settings</span>
+              </Command.Item>
+              <Command.Item value="keyboard shortcuts keybindings hotkeys help" onSelect={() => run(onopenshortcuts)}>
+                <Keyboard class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">Keyboard shortcuts</span>
+                <Command.Shortcut keys="?" />
+              </Command.Item>
+              <Command.Item value="about license version info app" onSelect={() => run(onopenabout)}>
+                <Info class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">About DB Studio</span>
+              </Command.Item>
+              <Command.Item value="check for updates upgrade version" onSelect={() => run(oncheckupdate)}>
+                <ArrowDownToLine class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">Check for updates</span>
+              </Command.Item>
+              <Command.Item value="disconnect database" onSelect={() => run(ondisconnect)}>
+                <Unplug class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">Disconnect</span>
+              </Command.Item>
+            </Command.Group>
+          {/if}
+
+          <!-- ── Drill-in: Connections ───────────────────────────────── -->
+          <Command.Group heading="Database">
+            <Command.Item
+              value="connections switch database connect postgres mysql sqlite saved {savedConnections.map(c => c.name).join(' ')}"
+              onSelect={() => navigate('connections')}
+            >
+              <Database class="size-4 shrink-0 opacity-60" />
+              <span data-slot="command-label" class="truncate">Connections</span>
+              {#if savedConnections.length > 0}
+                <span class="shrink-0 font-mono text-ui-xs text-muted-foreground">{savedConnections.length}</span>
+              {/if}
+              <ChevronRight class="size-3.5 shrink-0 text-muted-foreground/40" />
+            </Command.Item>
+          </Command.Group>
+
+          <!-- ── Drill-in: Docker ───────────────────────────────────── -->
+          <Command.Group heading="Launch">
+            <Command.Item value="docker containers postgresql mysql launch run" onSelect={() => navigate('docker')}>
+              <Package class="size-4 shrink-0 opacity-60" />
+              <span data-slot="command-label" class="truncate">Docker</span>
+              <ChevronRight class="size-3.5 shrink-0 text-muted-foreground/40" />
+            </Command.Item>
+          </Command.Group>
+
+        <!-- ── DOCKER PAGE ────────────────────────────────────────────── -->
+        {:else if page === 'docker'}
+          <Command.Group heading="Docker containers">
+            <Command.Item
+              value="launch postgresql postgres container pull run 5433"
+              onSelect={() => run(() => ondockerlaunch('postgres'))}
+            >
+              <Package class="size-4 shrink-0 opacity-60" />
+              <span data-slot="command-label" class="truncate">PostgreSQL container</span>
+              <span data-slot="command-trailing" class="shrink-0 font-mono text-ui-2xs text-muted-foreground">:5433</span>
+            </Command.Item>
+            <Command.Item
+              value="launch mysql container pull run 3307"
+              onSelect={() => run(() => ondockerlaunch('mysql'))}
+            >
+              <Package class="size-4 shrink-0 opacity-60" />
+              <span data-slot="command-label" class="truncate">MySQL container</span>
+              <span data-slot="command-trailing" class="shrink-0 font-mono text-ui-2xs text-muted-foreground">:3307</span>
+            </Command.Item>
+          </Command.Group>
+
+        <!-- ── CONNECTIONS PAGE ───────────────────────────────────────── -->
+        {:else if page === 'connections'}
+          {#if savedConnections.length > 0}
+            <Command.Group heading="Saved connections">
+              {#each savedConnections as conn (conn.id)}
+                {@const Icon = driverIcon(conn.type ?? 'postgres')}
+                {@const isActive = conn.id === activeConnectionId}
+                <Command.Item
+                  value="connection {conn.name} {connSubtitle(conn)} {conn.type}"
+                  onSelect={() => run(() => onswitchdatabase(conn))}
+                  disabled={isActive}
+                >
+                  <Icon class="size-4 shrink-0 opacity-60" />
+                  <div data-slot="command-label" class="flex min-w-0 flex-1 flex-col">
+                    <span class="truncate">{conn.name}</span>
+                    <span class="truncate font-mono text-[11px] text-muted-foreground">{connSubtitle(conn)}</span>
+                  </div>
+                  {#if isActive}
+                    <span data-slot="command-trailing" class="shrink-0 text-xs text-muted-foreground">connected</span>
+                  {/if}
+                </Command.Item>
+              {/each}
+            </Command.Group>
+          {/if}
+          <Command.Group heading="Add">
+            <Command.Item value="new connection add connect database" onSelect={() => run(onopenconnection)}>
+              <Database class="size-4 shrink-0 opacity-60" />
+              <span data-slot="command-label" class="truncate">New connection…</span>
+            </Command.Item>
           </Command.Group>
         {/if}
 
-        <Command.Group heading="Actions">
-          <Command.Item value="refresh schema tables" onSelect={() => run(onrefresh)}>
-            <RefreshCw class="size-4 shrink-0 opacity-60" />
-            <span data-slot="command-label" class="truncate">Refresh tables</span>
-          </Command.Item>
-          <Command.Item value="open settings preferences" onSelect={() => run(onopensettings)}>
-            <Settings class="size-4 shrink-0 opacity-60" />
-            <span data-slot="command-label" class="truncate">Settings</span>
-          </Command.Item>
-          <Command.Item value="keyboard shortcuts keybindings hotkeys help" onSelect={() => run(onopenshortcuts)}>
-            <Keyboard class="size-4 shrink-0 opacity-60" />
-            <span data-slot="command-label" class="truncate">Keyboard shortcuts</span>
-            <Command.Shortcut keys="?" />
-          </Command.Item>
-          <Command.Item value="about license version info app" onSelect={() => run(onopenabout)}>
-            <Info class="size-4 shrink-0 opacity-60" />
-            <span data-slot="command-label" class="truncate">About DB Studio</span>
-          </Command.Item>
-          <Command.Item value="check for updates upgrade version" onSelect={() => run(oncheckupdate)}>
-            <ArrowDownToLine class="size-4 shrink-0 opacity-60" />
-            <span data-slot="command-label" class="truncate">Check for updates</span>
-          </Command.Item>
-          <Command.Item value="disconnect database" onSelect={() => run(ondisconnect)}>
-            <Unplug class="size-4 shrink-0 opacity-60" />
-            <span data-slot="command-label" class="truncate">Disconnect</span>
-          </Command.Item>
-        </Command.Group>
-      {:else if savedConnections.length === 0}
-        <Command.Group heading="Connection">
-          <Command.Item value="add connection connect postgres" onSelect={() => run(onopenconnection)}>
-            <Database class="size-4 shrink-0 opacity-60" />
-            <span data-slot="command-label" class="truncate">Add connection</span>
-          </Command.Item>
-        </Command.Group>
-      {/if}
-
-      <!-- ── Docker ──────────────────────────────────────────────────── -->
-      <Command.Group heading="Docker">
-        <Command.Item value="docker launch postgresql postgres pull run container" onSelect={() => run(() => ondockerlaunch('postgres'))}>
-          <Package class="size-4 shrink-0 opacity-60" />
-          <span data-slot="command-label" class="truncate">Launch PostgreSQL container</span>
-          <span data-slot="command-trailing" class="shrink-0 font-mono text-ui-2xs text-muted-foreground">:5433</span>
-        </Command.Item>
-        <Command.Item value="docker launch mysql pull run container" onSelect={() => run(() => ondockerlaunch('mysql'))}>
-          <Package class="size-4 shrink-0 opacity-60" />
-          <span data-slot="command-label" class="truncate">Launch MySQL container</span>
-          <span data-slot="command-trailing" class="shrink-0 font-mono text-ui-2xs text-muted-foreground">:3307</span>
-        </Command.Item>
-      </Command.Group>
-
-      <!-- ── Switch database — always at the bottom ─────────────────── -->
-      {#if savedConnections.length > 0}
-        <Command.Group heading="Switch database">
-          {#each savedConnections as conn (conn.id)}
-            {@const Icon = driverIcon(conn.type ?? 'postgres')}
-            {@const isActive = conn.id === activeConnectionId}
-            <Command.Item
-              value="switch database connection {conn.name} {connSubtitle(conn)} {conn.type}"
-              onSelect={() => run(() => onswitchdatabase(conn))}
-              disabled={isActive}
-            >
-              <Icon class="size-4 shrink-0 opacity-60" />
-              <div data-slot="command-label" class="flex min-w-0 flex-1 flex-col">
-                <span class="truncate">{conn.name}</span>
-                <span class="truncate font-mono text-[11px] text-muted-foreground">{connSubtitle(conn)}</span>
-              </div>
-              {#if isActive}
-                <span data-slot="command-trailing" class="shrink-0 text-xs text-muted-foreground">connected</span>
-              {/if}
-            </Command.Item>
-          {/each}
-
-          <Command.Item
-            value="new connection add connect database"
-            onSelect={() => run(onopenconnection)}
-          >
-            <Database class="size-4 shrink-0 opacity-60" />
-            <span data-slot="command-label" class="truncate">New connection…</span>
-          </Command.Item>
-        </Command.Group>
-      {/if}
-    </Command.List>
+      </Command.List>
+    </div>
   {/snippet}
 </Command.Dialog>

@@ -1,6 +1,6 @@
 pkgname=discerns
 pkgver=0.1.22
-pkgrel=3
+pkgrel=4
 pkgdesc="Cross-database desktop studio built with Tauri"
 arch=('x86_64')
 url="https://github.com/broisnischal/studio"
@@ -19,6 +19,7 @@ package() {
 # Work around WebKitGTK/EGL allocation failures seen on some Arch Wayland setups.
 export WEBKIT_DISABLE_DMABUF_RENDERER=1
 export GDK_BACKEND=x11
+export GSK_RENDERER=cairo
 exec /opt/discerns/discerns.AppImage "$@"
 EOF
 }

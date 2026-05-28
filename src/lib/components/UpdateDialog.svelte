@@ -10,6 +10,10 @@
   import AlertCircle from '@lucide/svelte/icons/alert-circle'
   import Loader2 from '@lucide/svelte/icons/loader-2'
 
+  let {
+    onupdatefound = /** @type {() => void} */ (() => {}),
+  } = $props()
+
   /** @type {'idle'|'available'|'downloading'|'done'|'error'|'up-to-date'} */
   let status = $state('idle')
   let updateVersion = $state('')
@@ -68,6 +72,7 @@
       updateVersion = update.version
       releaseNotes = update.body ?? ''
       status = 'available'
+      onupdatefound()
     } catch (e) {
       // Always log so issues are visible via devtools. Only show the error UI
       // when manually triggered — background checks shouldn't interrupt the user.

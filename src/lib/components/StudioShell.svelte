@@ -30,6 +30,7 @@
   import InsiderDialog from './InsiderDialog.svelte'
   import AboutDialog from './AboutDialog.svelte'
   import UpdateDialog from './UpdateDialog.svelte'
+  import StatusBar from './StatusBar.svelte'
   import DisconnectDialog from './DisconnectDialog.svelte'
   import InsertRowDialog from './InsertRowDialog.svelte'
   import McpPanel from './McpPanel.svelte'
@@ -51,6 +52,7 @@
     toggleDevtools,
     mcpStart,
     mcpStop,
+    mcpUpdateConnections,
   } from '$lib/api.js'
   import {
     createTableTab,
@@ -163,6 +165,7 @@
   let commandOpen = $state(false)
   /** @type {import('./UpdateDialog.svelte').default | null} */
   let updateDialog = $state(null)
+  let statusBarHasUpdate = $state(false)
   let sidebarOpen = $state(loadLayout().navSidebarOpen)
   let sidebarEverOpened = $state(loadLayout().navSidebarOpen)
   let aiSidebarOpen = $state(loadLayout().aiSidebarOpen)
@@ -319,6 +322,11 @@
   )
 
   const persistConnectionId = $derived(activeConnectionId || connectionId)
+
+  // Keep MCP layer in sync with saved connections + active connection (no passwords sent).
+  $effect(() => {
+    void mcpUpdateConnections(savedConnections, activeConnectionId || null)
+  })
 
   const QUERY_HISTORY_OPEN_KEY = 'db-studio:query-history-open'
   function loadQueryHistoryPref() {
@@ -1908,7 +1916,7 @@
 
 <AboutDialog bind:open={showAboutModal} />
 
-<UpdateDialog bind:this={updateDialog} />
+<UpdateDialog bind:this={updateDialog} onupdatefound={() => (statusBarHasUpdate = true)} />
 
 <CommandPalette
   bind:open={commandOpen}
@@ -1959,7 +1967,8 @@
 {/if}
 
 
-<div class="flex h-full min-h-0 w-full overflow-hidden bg-background">
+<div class="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
+<div class="flex min-h-0 flex-1 overflow-hidden">
   {#if sidebarEverOpened}
     <div
       style={sidebarOpen && !aiMode ? '' : 'display:none'}
@@ -2354,4 +2363,19 @@
       />
     </div>
   {/if}
+</div>
+
+<StatusBar
+  {connection}
+  {mcpRunning}
+  hasUpdate={statusBarHasUpdate}
+  onopenmcp={() => (showMcpPanel = true)}
+  onconnect={() => (showConnectionModal = true)}
+  onswitchtodb={(dbName) => {
+    if (!connection) return
+    void handleSwitchDatabase({ ...connection, database: dbName, name: `${connection.host ?? connection.name}/${dbName}` })
+  }}
+  oncheckupdate={() => updateDialog?.checkNow()}
+  onopenmodelsettings={() => (showAiModelSettings = true)}
+/>
 </div>

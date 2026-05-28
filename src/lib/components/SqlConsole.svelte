@@ -497,7 +497,7 @@
     <div class="shrink-0 border-b border-destructive/20 bg-destructive/5">
       <div class="flex items-start gap-2 px-3 py-2">
         <span class="mt-px shrink-0 font-mono text-ui-2xs font-bold uppercase tracking-wide text-destructive/70">error</span>
-        <pre class="min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap break-all font-mono text-ui-xs leading-relaxed text-destructive">{error}</pre>
+        <pre class="max-h-24 min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-all font-mono text-ui-xs leading-relaxed text-destructive">{error}</pre>
         <div class="flex shrink-0 items-center gap-1.5">
           {#if fixStatus === 'idle' || fixStatus === 'error'}
             <button

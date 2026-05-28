@@ -306,6 +306,26 @@ export async function mcpStart() {
   return inv('mcp_start')
 }
 
+/**
+ * Sync credential-free connection metadata to the MCP layer so AI tools can
+ * call list_databases / current_database.
+ * Strip passwords/tokens before calling — this data flows into the MCP server.
+ * @param {import('$lib/stores/connections.js').SavedConnection[]} connections
+ * @param {string | null} activeId
+ */
+export async function mcpUpdateConnections(connections, activeId) {
+  const safe = connections.map(({ id, name, type: t, host, port, database, filePath }) => ({
+    id,
+    name,
+    type: t ?? 'postgres',
+    ...(host ? { host } : {}),
+    ...(port ? { port } : {}),
+    ...(database ? { database } : {}),
+    ...(filePath ? { file_path: filePath } : {}),
+  }))
+  return inv('mcp_update_connections', { connections: safe, activeId: activeId ?? null })
+}
+
 export async function mcpStop() {
   return inv('mcp_stop')
 }

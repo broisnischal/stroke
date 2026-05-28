@@ -9,6 +9,23 @@ use tauri::{AppHandle, Manager, State};
 /// Port we always try first — stable so AI clients don't need reconfiguration.
 const PREFERRED_PORT: u16 = 39847;
 
+/// Credential-free metadata about a saved connection — safe to pass to the MCP layer.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ConnMeta {
+    pub id: String,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub conn_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub database: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<String>,
+}
+
 pub struct McpState {
     pub conn: Arc<Mutex<Option<ActiveConnection>>>,
     shutdown_tx: Mutex<Option<oneshot::Sender<()>>>,
@@ -16,6 +33,10 @@ pub struct McpState {
     pub port: Mutex<u16>,
     /// Persistent token — loaded from disk once in `init_token`, never regenerated.
     token: Mutex<String>,
+    /// Credential-free list of all saved connections — synced from frontend.
+    pub connections: Arc<Mutex<Vec<ConnMeta>>>,
+    /// ID of the currently active connection (matches one entry in `connections`).
+    pub active_conn_id: Arc<Mutex<Option<String>>>,
 }
 
 impl McpState {
@@ -25,6 +46,8 @@ impl McpState {
             shutdown_tx: Mutex::new(None),
             port: Mutex::new(0),
             token: Mutex::new(String::new()),
+            connections: Arc::new(Mutex::new(Vec::new())),
+            active_conn_id: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -99,10 +122,12 @@ pub async fn mcp_start(mcp: State<'_, McpState>) -> Result<McpStatus, String> {
     let token = mcp.token.lock().map_err(|e| e.to_string())?.clone();
 
     let conn = Arc::clone(&mcp.conn);
+    let connections = Arc::clone(&mcp.connections);
+    let active_conn_id = Arc::clone(&mcp.active_conn_id);
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
     let token_clone = token.clone();
     tokio::spawn(async move {
-        server::run(port, token_clone, conn, shutdown_rx).await;
+        server::run(port, token_clone, conn, connections, active_conn_id, shutdown_rx).await;
     });
 
     *mcp.port.lock().map_err(|e| e.to_string())? = port;
@@ -138,6 +163,19 @@ pub fn mcp_status(mcp: State<'_, McpState>) -> Result<McpStatus, String> {
         url: format!("http://127.0.0.1:{port}"),
         token,
     })
+}
+
+/// Called by the frontend to sync credential-free connection metadata into the MCP layer.
+/// Must be called on app start and whenever the connection list or active connection changes.
+#[tauri::command]
+pub fn mcp_update_connections(
+    connections: Vec<ConnMeta>,
+    active_id: Option<String>,
+    mcp: State<'_, McpState>,
+) -> Result<(), String> {
+    *mcp.connections.lock().map_err(|e| e.to_string())? = connections;
+    *mcp.active_conn_id.lock().map_err(|e| e.to_string())? = active_id;
+    Ok(())
 }
 
 async fn find_free_port(preferred: u16) -> Result<u16, String> {

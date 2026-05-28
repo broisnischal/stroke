@@ -11,11 +11,13 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
 use tower_http::cors::{Any, CorsLayer};
 use crate::db::ActiveConnection;
-use super::tools;
+use super::{tools, ConnMeta};
 
 #[derive(Clone)]
 struct AppState {
     conn: Arc<Mutex<Option<ActiveConnection>>>,
+    connections: Arc<Mutex<Vec<ConnMeta>>>,
+    active_conn_id: Arc<Mutex<Option<String>>>,
     token: String,
 }
 
@@ -71,9 +73,11 @@ pub async fn run(
     port: u16,
     token: String,
     conn: Arc<Mutex<Option<ActiveConnection>>>,
+    connections: Arc<Mutex<Vec<ConnMeta>>>,
+    active_conn_id: Arc<Mutex<Option<String>>>,
     shutdown_rx: oneshot::Receiver<()>,
 ) {
-    let state = AppState { conn, token };
+    let state = AppState { conn, connections, active_conn_id, token };
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
@@ -158,12 +162,21 @@ async fn dispatch(
             let p = params.ok_or("Missing params")?;
             let name = p["name"].as_str().ok_or("Missing tool name")?;
             let args = p.get("arguments").cloned().unwrap_or(json!({}));
+
+            // These tools don't require an active connection.
+            if name == "list_databases" || name == "current_database" {
+                let connections = state.connections.lock().map_err(|e| e.to_string())?.clone();
+                let active_id = state.active_conn_id.lock().map_err(|e| e.to_string())?.clone();
+                let text = tools::call_meta_tool(name, &connections, active_id.as_deref())?;
+                return Ok(json!({ "content": [{ "type": "text", "text": text }] }));
+            }
+
             let conn = state
                 .conn
                 .lock()
                 .map_err(|e| e.to_string())?
                 .clone()
-                .ok_or("Not connected to a database")?;
+                .ok_or("Not connected to a database. Call list_databases to see available connections and ask the user to select one in DB Studio.")?;
             let text = tools::call_tool(&conn, name, &args).await?;
             Ok(json!({ "content": [{ "type": "text", "text": text }] }))
         }

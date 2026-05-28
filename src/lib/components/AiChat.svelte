@@ -799,8 +799,10 @@
     if (!userPrefersCollapsed) openResultId = id
   }
 
-  /** Collapsed SQL code blocks (independent per-block toggle) */
+  /** Code blocks collapsed by user (in set = collapsed; default open) */
   let collapsed = $state(/** @type {Set<string>} */ (new Set()))
+  /** SQL blocks expanded by user (in set = expanded; default collapsed) */
+  let sqlExpanded = $state(/** @type {Set<string>} */ (new Set()))
 
   /** @param {string} key */
   function toggleCollapse(key) {
@@ -808,6 +810,14 @@
     if (next.has(key)) next.delete(key)
     else next.add(key)
     collapsed = next
+  }
+
+  /** @param {string} key */
+  function toggleSqlExpand(key) {
+    const next = new Set(sqlExpanded)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    sqlExpanded = next
   }
 
   // ── Input auto-resize ──────────────────────────────────────────────────────
@@ -1654,13 +1664,13 @@
                         </div>
                       {:else if part.type === 'sql'}
                         {@const sqlKey = `${item.id}-${pi}`}
-                        {@const sqlOpen = !collapsed.has(sqlKey)}
+                        {@const sqlOpen = sqlExpanded.has(sqlKey)}
                         <div class="overflow-hidden rounded-lg border border-border">
                           <div class="flex items-center justify-between gap-2 border-b border-border/50 bg-muted/40 px-3 py-1.5">
                             <button
                               type="button"
                               class="flex items-center gap-1.5 text-ui-xs text-muted-foreground hover:text-foreground"
-                              onclick={() => toggleCollapse(sqlKey)}
+                              onclick={() => toggleSqlExpand(sqlKey)}
                             >
                               {#if sqlOpen}<ChevronDown class="size-3" />{:else}<ChevronRight class="size-3" />{/if}
                               <span class="font-mono">SQL</span>

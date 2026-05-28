@@ -1,4 +1,5 @@
 use crate::db::connection::ActiveConnection;
+use crate::mcp::ConnMeta;
 use serde_json::{json, Value};
 use sqlx::{Column, Row, TypeInfo};
 
@@ -6,6 +7,22 @@ use sqlx::{Column, Row, TypeInfo};
 
 pub fn tool_list() -> Value {
     json!([
+        {
+            "name": "list_databases",
+            "description": "List all saved database connections and show which one is currently active. Call this at the start of a session when the user hasn't specified a database, or when you need to know what databases are available. If multiple databases exist, ask the user which one to use and instruct them to switch in DB Studio.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
+        },
+        {
+            "name": "current_database",
+            "description": "Show which database is currently connected and active. All data tools (execute_sql, list_tables, etc.) operate on this database.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
+        },
         {
             "name": "execute_sql",
             "description": "Execute a SQL query and return the results as JSON. Use this for any data retrieval or DML.",
@@ -74,7 +91,79 @@ pub fn tool_list() -> Value {
     ])
 }
 
-// ── Tool dispatcher ───────────────────────────────────────────────────────────
+// ── Tool dispatchers ──────────────────────────────────────────────────────────
+
+/// Handle tools that don't require an active DB connection.
+pub fn call_meta_tool(
+    name: &str,
+    connections: &[ConnMeta],
+    active_id: Option<&str>,
+) -> Result<String, String> {
+    match name {
+        "list_databases" => {
+            let list: Vec<Value> = connections
+                .iter()
+                .map(|c| {
+                    let mut v = json!({
+                        "id": c.id,
+                        "name": c.name,
+                        "type": c.conn_type,
+                    });
+                    if let Some(h) = &c.host { v["host"] = json!(h); }
+                    if let Some(p) = c.port    { v["port"] = json!(p); }
+                    if let Some(d) = &c.database { v["database"] = json!(d); }
+                    if let Some(f) = &c.file_path { v["file_path"] = json!(f); }
+                    if active_id.map(|id| id == c.id).unwrap_or(false) {
+                        v["active"] = json!(true);
+                    }
+                    v
+                })
+                .collect();
+
+            let active_name = active_id
+                .and_then(|id| connections.iter().find(|c| c.id == id))
+                .map(|c| c.name.as_str());
+
+            Ok(json!({
+                "databases": list,
+                "total": list.len(),
+                "active_id": active_id,
+                "active_name": active_name,
+                "note": if connections.len() > 1 {
+                    "Multiple databases available. To switch, open DB Studio and connect to the desired database. Then retry your request."
+                } else if connections.is_empty() {
+                    "No saved connections found. Open DB Studio and add a connection first."
+                } else {
+                    "One database configured."
+                }
+            }).to_string())
+        }
+
+        "current_database" => {
+            let active = active_id.and_then(|id| connections.iter().find(|c| c.id == id));
+            match active {
+                Some(c) => {
+                    let mut v = json!({
+                        "connected": true,
+                        "name": c.name,
+                        "type": c.conn_type,
+                    });
+                    if let Some(h) = &c.host { v["host"] = json!(h); }
+                    if let Some(p) = c.port    { v["port"] = json!(p); }
+                    if let Some(d) = &c.database { v["database"] = json!(d); }
+                    if let Some(f) = &c.file_path { v["file_path"] = json!(f); }
+                    Ok(v.to_string())
+                }
+                None => Ok(json!({
+                    "connected": false,
+                    "note": "No database is currently connected. Open DB Studio and connect to a database, then retry."
+                }).to_string()),
+            }
+        }
+
+        _ => Err(format!("Unknown meta tool: {name}")),
+    }
+}
 
 pub async fn call_tool(
     conn: &ActiveConnection,

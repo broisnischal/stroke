@@ -5,7 +5,11 @@
   import { appThemeId } from '$lib/stores/settings.js'
   import { highlightCode } from '$lib/shiki-highlighter.js'
   import { formatJsonValue } from '$lib/row-inspector.js'
-  import { linkifyJsonInElement } from '$lib/json-inspector.js'
+  import {
+    linkifyJsonInElement,
+    getTextOffsetInRoot,
+    getJsonValueRangeAtOffset,
+  } from '$lib/json-inspector.js'
 
   const TRUNCATE_LIMIT = 200
 
@@ -21,35 +25,21 @@
   let copiedTimer = null
   /** @type {HTMLDivElement | null} */
   let rootEl = $state(null)
-  /** True only when content actually overflows the max-height — flips overflow:auto on. */
   let scrollable = $state(false)
 
-  /**
-   * Measure whether content exceeds the viewer's max-height.
-   *
-   * Why: in WebKitGTK an element with `overflow:auto` claims wheel events even
-   * when content fits — so short JSON would absorb wheel and the table couldn't
-   * scroll. By only enabling overflow:auto when content genuinely overflows, we
-   * keep the wheel routing clean.
-   */
+  /** @type {{ x: number, y: number, value: string | null } | null} */
+  let contextMenu = $state(null)
+
   function remeasure() {
     if (!rootEl) return
-    // scrollHeight is the natural content height regardless of overflow style.
-    // clientHeight is the rendered box height (which max-height caps).
     scrollable = rootEl.scrollHeight > rootEl.clientHeight + 1
   }
 
-  /** Full JSON — used for copying. */
   const jsonText = $derived(formatJsonValue(record))
-
-  /** JSON with long strings truncated — used for display / highlighting. */
   const displayText = $derived(formatJsonValue(truncateDeep(record, TRUNCATE_LIMIT)))
-
   const appTheme = $derived($appThemeId)
 
   /**
-   * Recursively truncate string values longer than `limit` chars.
-   * Copies the structure; does not mutate the original.
    * @param {unknown} value
    * @param {number} limit
    * @returns {unknown}
@@ -95,7 +85,6 @@
     })
   })
 
-  // ResizeObserver catches viewport/font-size changes that affect max-height (vh, rem).
   $effect(() => {
     if (!rootEl) return
     const ro = new ResizeObserver(remeasure)
@@ -118,22 +107,90 @@
       /* clipboard unavailable */
     }
   }
+
+  /** @param {string} text */
+  async function copyText(text) {
+    try {
+      await navigator.clipboard.writeText(text)
+      copied = true
+      if (copiedTimer) clearTimeout(copiedTimer)
+      copiedTimer = setTimeout(() => { copied = false }, 2000)
+    } catch {
+      /* clipboard unavailable */
+    }
+  }
+
+  /**
+   * Find the JSON value text at a mouse click position.
+   * Returns the raw source slice, with surrounding quotes stripped for strings.
+   * @param {number} clientX
+   * @param {number} clientY
+   * @returns {string | null}
+   */
+  function valueAtPoint(clientX, clientY) {
+    const pre = rootEl?.querySelector('pre')
+    if (!pre) return null
+
+    /** @type {Node | null} */
+    let node = null
+    let offset = 0
+
+    if ('caretPositionFromPoint' in document) {
+      const pos = /** @type {any} */ (document).caretPositionFromPoint(clientX, clientY)
+      if (pos) { node = pos.offsetNode; offset = pos.offset }
+    } else if ('caretRangeFromPoint' in document) {
+      const r = /** @type {any} */ (document).caretRangeFromPoint(clientX, clientY)
+      if (r) { node = r.startContainer; offset = r.startOffset }
+    }
+
+    if (!node || !pre.contains(node)) return null
+
+    const srcOffset = getTextOffsetInRoot(pre, node, offset)
+    const range = getJsonValueRangeAtOffset(displayText, srcOffset)
+    if (!range) return null
+
+    const raw = displayText.slice(range.start, range.end)
+
+    // Strip surrounding double-quotes for JSON strings
+    if (raw.length >= 2 && raw[0] === '"' && raw[raw.length - 1] === '"') {
+      try {
+        const parsed = JSON.parse(raw)
+        if (typeof parsed === 'string') return parsed
+      } catch {
+        return raw.slice(1, -1)
+      }
+    }
+
+    return raw
+  }
+
+  /** @param {MouseEvent} e */
+  function handleContextMenu(e) {
+    e.preventDefault()
+    const value = valueAtPoint(e.clientX, e.clientY)
+    contextMenu = { x: e.clientX, y: e.clientY, value }
+  }
+
+  function dismissMenu() {
+    contextMenu = null
+  }
+
+  /**
+   * Portal action — moves the element to document.body so it escapes any
+   * `will-change:transform` ancestor (DataTable uses it for scroll perf),
+   * which otherwise makes position:fixed relative to that ancestor.
+   * @param {HTMLElement} node
+   */
+  function portal(node) {
+    document.body.appendChild(node)
+    return {
+      destroy() {
+        if (node.isConnected) node.remove()
+      },
+    }
+  }
 </script>
 
-<!--
-  Plain block layout with `max-height` on the scroll container itself.
-  Critical UX insight: the expand area should size to its CONTENT, not to a
-  fixed height. Fixed-height made the area huge even for tiny JSON, and the
-  empty area still counted as `overflow:auto` territory — WebKit absorbed
-  wheel events there even with nothing to scroll, blocking table scroll.
-
-  With max-height:
-    Short JSON  → rootEl is content-sized, no overflow exists, wheel events
-                  bubble up naturally and scroll the table.
-    Tall JSON   → rootEl is capped at max-height, content overflows, browser
-                  creates a real scroll viewport; overscroll-behavior keeps
-                  the scroll local once the user is actively scrolling JSON.
--->
 <div class="border-t border-border/50 bg-background">
   <div class="studio-chrome flex items-center justify-between border-b border-border/50 bg-panel px-3 py-0.5">
     {#if rowLabel}
@@ -153,19 +210,13 @@
       {/if}
     </button>
   </div>
-  <!--
-    overflow toggles dynamically:
-      - scrollable=false → overflow:visible. Not a scroll container. Wheel events
-        bubble up and scroll the table.
-      - scrollable=true  → overflow:auto with scroll chaining (default
-        overscroll-behavior). When the user scrolls past the top or bottom of
-        the JSON, the scroll continues into the table seamlessly.
-  -->
+
   <div
     bind:this={rootEl}
     data-studio-selectable="text"
     class="px-3 py-2"
     style="display:block;max-height:{maxHeight};overflow:{scrollable ? 'auto' : 'visible'}"
+    oncontextmenu={handleContextMenu}
   >
     {#if !html}
       <p class="font-mono text-ui-2xs text-muted-foreground/50">Loading…</p>
@@ -178,3 +229,39 @@
     {/if}
   </div>
 </div>
+
+<!-- context menu — portalled to body to escape will-change:transform on DataTable -->
+{#if contextMenu}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    use:portal
+    style="position:fixed;inset:0;z-index:9999"
+    onmousedown={dismissMenu}
+    oncontextmenu={(e) => e.preventDefault()}
+  >
+    <div
+      class="min-w-40 overflow-hidden rounded-md border border-border bg-popover py-1 shadow-lg"
+      style="position:fixed;left:{contextMenu.x}px;top:{contextMenu.y}px"
+      onmousedown={(e) => e.stopPropagation()}
+    >
+      {#if contextMenu.value !== null}
+        <button
+          type="button"
+          class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-ui-sm text-foreground hover:bg-accent hover:text-accent-foreground"
+          onclick={() => { copyText(/** @type {string} */ (contextMenu?.value)); dismissMenu() }}
+        >
+          <Copy class="size-3.5 shrink-0 text-muted-foreground" />
+          Copy value
+        </button>
+      {/if}
+      <button
+        type="button"
+        class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-ui-sm text-foreground hover:bg-accent hover:text-accent-foreground"
+        onclick={() => { copyJson(); dismissMenu() }}
+      >
+        <Copy class="size-3.5 shrink-0 text-muted-foreground" />
+        Copy JSON
+      </button>
+    </div>
+  </div>
+{/if}
