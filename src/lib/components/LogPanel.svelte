@@ -136,7 +136,7 @@
   <!-- Log feed -->
   <div
     bind:this={logEl}
-    class="app-scroll min-h-0 flex-1 overflow-y-auto p-1"
+    class="app-scroll min-h-0 flex-1 overflow-y-auto p-1 [will-change:transform] [overflow-anchor:none]"
     onscroll={handleScroll}
   >
     {#if displayed.length === 0}

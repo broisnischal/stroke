@@ -9,7 +9,6 @@
   import Eye from '@lucide/svelte/icons/eye'
   import X from '@lucide/svelte/icons/x'
   import Plus from '@lucide/svelte/icons/plus'
-  import CircleDot from '@lucide/svelte/icons/circle-dot'
   import { cn } from '$lib/utils.js'
   import { tabDisplayTitle } from '$lib/studio-tabs.js'
   import * as ContextMenu from '$lib/components/ui/context-menu/index.js'
@@ -24,8 +23,6 @@
     oncloseothers = /** @param {string} _id */ (_id) => {},
     oncloseall = () => {},
     onnew = () => {},
-    ontogglelogpanel = () => {},
-    logPanelOpen = false,
   } = $props()
 
   /** @type {HTMLElement | null} */
@@ -141,21 +138,7 @@
     {/each}
   </div>
 
-  <div class="flex shrink-0 items-center gap-0.5 border-l border-border pl-1 pr-0.5">
-    <button
-      type="button"
-      class={cn(
-        'inline-flex size-7 items-center justify-center rounded-md transition-colors',
-        logPanelOpen
-          ? 'bg-primary/10 text-primary hover:bg-primary/15'
-          : 'text-muted-foreground/60 hover:bg-muted/60 hover:text-foreground',
-      )}
-      title="Toggle activity log (⌘⇧L)"
-      aria-label="Toggle activity log"
-      onclick={ontogglelogpanel}
-    >
-      <CircleDot class="size-3.5" />
-    </button>
+  <div class="flex shrink-0 items-center border-l border-border pl-1 pr-0.5">
     <button
       type="button"
       class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-muted/60 hover:text-foreground"

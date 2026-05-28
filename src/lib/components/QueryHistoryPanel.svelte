@@ -155,7 +155,7 @@
       </div>
     </div>
 
-    <div class="app-scroll flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-1.5">
+    <div class="app-scroll flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-1.5 [will-change:transform]">
       {#if tab === 'history'}
         {#each filteredHistory as entry (entry.id)}
           <div class="group relative flex items-stretch">
@@ -171,9 +171,7 @@
                 </span>
                 <span class="flex items-center gap-1.5 text-[10px] text-muted-foreground">
                   <span>{relativeTime(entry.executedAt)}</span>
-                  {#if entry.success === false}
-                    <span class="text-destructive">failed</span>
-                  {:else if entry.queryMs}
+                  {#if entry.queryMs}
                     <span class="tabular-nums">{entry.queryMs}ms</span>
                   {/if}
                 </span>

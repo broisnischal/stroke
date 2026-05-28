@@ -2,7 +2,7 @@ const STORAGE_KEY = 'db-studio:layout'
 
 /** @typedef {'normal' | 'json'} InspectorView */
 
-/** @typedef {{ navSidebarWidth: number, navSidebarOpen: boolean, inspectorWidth: number, inspectorView: InspectorView, sqlEditorHeight: number, logPanelWidth: number, logPanelOpen: boolean }} PanelLayout */
+/** @typedef {{ navSidebarWidth: number, navSidebarOpen: boolean, inspectorWidth: number, inspectorView: InspectorView, sqlEditorHeight: number, logPanelWidth: number, logPanelOpen: boolean, aiSidebarWidth: number, aiSidebarOpen: boolean }} PanelLayout */
 
 export const DEFAULT_LAYOUT = {
   navSidebarWidth: 220,
@@ -12,6 +12,8 @@ export const DEFAULT_LAYOUT = {
   sqlEditorHeight: 320,
   logPanelWidth: 300,
   logPanelOpen: false,
+  aiSidebarWidth: 400,
+  aiSidebarOpen: false,
 }
 
 export const NAV_SIDEBAR_MIN = 180
@@ -22,6 +24,8 @@ export const SQL_EDITOR_MIN = 120
 export const SQL_EDITOR_RESULTS_MIN = 120
 export const LOG_PANEL_MIN = 220
 export const LOG_PANEL_MAX = 600
+export const AI_SIDEBAR_MIN = 320
+export const AI_SIDEBAR_MAX = 720
 
 /** @param {number} width */
 export function clampNavSidebarWidth(width) {
@@ -36,6 +40,11 @@ export function clampInspectorWidth(width) {
 /** @param {number} width */
 export function clampLogPanelWidth(width) {
   return Math.round(Math.min(LOG_PANEL_MAX, Math.max(LOG_PANEL_MIN, width)))
+}
+
+/** @param {number} width */
+export function clampAiSidebarWidth(width) {
+  return Math.round(Math.min(AI_SIDEBAR_MAX, Math.max(AI_SIDEBAR_MIN, width)))
 }
 
 /** @param {number} height @param {number} [containerHeight] */
@@ -57,13 +66,16 @@ export function loadLayout() {
     let inspectorWidth = Number(parsed.inspectorWidth)
     let sqlEditorHeight = Number(parsed.sqlEditorHeight)
     let logPanelWidth = Number(parsed.logPanelWidth)
+    let aiSidebarWidth = Number(parsed.aiSidebarWidth)
     if (!Number.isFinite(navSidebarWidth)) navSidebarWidth = DEFAULT_LAYOUT.navSidebarWidth
     if (!Number.isFinite(inspectorWidth)) inspectorWidth = DEFAULT_LAYOUT.inspectorWidth
     if (!Number.isFinite(sqlEditorHeight)) sqlEditorHeight = DEFAULT_LAYOUT.sqlEditorHeight
     if (!Number.isFinite(logPanelWidth)) logPanelWidth = DEFAULT_LAYOUT.logPanelWidth
+    if (!Number.isFinite(aiSidebarWidth)) aiSidebarWidth = DEFAULT_LAYOUT.aiSidebarWidth
     const inspectorView = parsed.inspectorView === 'json' ? 'json' : 'normal'
     const navSidebarOpen = parsed.navSidebarOpen !== false
     const logPanelOpen = parsed.logPanelOpen === true
+    const aiSidebarOpen = parsed.aiSidebarOpen === true
     return {
       navSidebarWidth: clampNavSidebarWidth(navSidebarWidth),
       navSidebarOpen,
@@ -72,6 +84,8 @@ export function loadLayout() {
       sqlEditorHeight: clampSqlEditorHeight(sqlEditorHeight),
       logPanelWidth: clampLogPanelWidth(logPanelWidth),
       logPanelOpen,
+      aiSidebarWidth: clampAiSidebarWidth(aiSidebarWidth),
+      aiSidebarOpen,
     }
   } catch {
     return { ...DEFAULT_LAYOUT }

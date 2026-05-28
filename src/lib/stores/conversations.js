@@ -12,6 +12,7 @@ const STORE = STORES.conversations
  *   connectionId: string
  *   items: unknown[]
  *   apiHistory: unknown[]
+ *   source?: 'chat' | 'sidebar'
  * }} Conversation
  */
 
@@ -21,12 +22,17 @@ function getDb() {
 
 /**
  * @param {string} [connectionId] when provided, only return conversations for that connection
+ * @param {'chat' | 'sidebar'} [source] when 'sidebar', return only sidebar chats; otherwise
+ *   return full-chat conversations (excludes sidebar) so the two surfaces stay separate.
  * @returns {Promise<Conversation[]>} sorted newest first
  */
-export async function listConversations(connectionId) {
+export async function listConversations(connectionId, source) {
   const db = await getDb()
   const all = await db.getAll(STORE)
-  const filtered = connectionId ? all.filter((c) => c.connectionId === connectionId) : all
+  let filtered = connectionId ? all.filter((c) => c.connectionId === connectionId) : all
+  filtered = source === 'sidebar'
+    ? filtered.filter((c) => c.source === 'sidebar')
+    : filtered.filter((c) => c.source !== 'sidebar')
   return filtered.sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
@@ -62,4 +68,15 @@ export async function updateConversation(id, patch) {
 export async function deleteConversation(id) {
   const db = await getDb()
   await db.delete(STORE, id)
+}
+
+/**
+ * Delete every conversation matching the given connection + source.
+ * @param {string} [connectionId]
+ * @param {'chat' | 'sidebar'} [source]
+ */
+export async function clearConversations(connectionId, source) {
+  const list = await listConversations(connectionId, source)
+  const db = await getDb()
+  await Promise.all(list.map((c) => db.delete(STORE, c.id)))
 }

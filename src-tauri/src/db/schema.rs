@@ -10,6 +10,8 @@ pub struct TableInfo {
     pub row_count: i64,
     /// "table" | "view" | "materialized_view" | "foreign_table"
     pub kind: String,
+    /// Row-level security enabled (PostgreSQL only; None for other backends)
+    pub rls_enabled: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -54,7 +56,8 @@ const LIST_TABLES_SQL: &str = r#"
             WHEN s.n_live_tup IS NOT NULL THEN GREATEST(s.n_live_tup::bigint, 0)
             WHEN c.reltuples >= 0 THEN c.reltuples::bigint
             ELSE -1
-        END AS row_count
+        END AS row_count,
+        CASE WHEN c.relkind IN ('r', 'p') THEN c.relrowsecurity ELSE false END AS rls_enabled
     FROM pg_catalog.pg_class c
     JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
     LEFT JOIN pg_stat_user_tables s
@@ -139,6 +142,7 @@ async fn list_tables_pg(pool: &PgPool, schema: &str) -> Result<Vec<TableInfo>, S
                 name: r.try_get(0).ok()?,
                 kind: r.try_get::<String, _>(1).unwrap_or_else(|_| "table".to_string()),
                 row_count: r.try_get::<i64, _>(2).unwrap_or(-1),
+                rls_enabled: r.try_get::<bool, _>(3).ok(),
             })
         })
         .collect();
@@ -185,7 +189,7 @@ async fn list_tables_sqlite(pool: &sqlx::SqlitePool) -> Result<Vec<TableInfo>, S
             let name = r.try_get::<Option<String>, _>(0).ok().flatten()?;
             let ty = r.try_get::<Option<String>, _>(1).ok().flatten().unwrap_or_default();
             let kind = if ty == "view" { "view".to_string() } else { "table".to_string() };
-            Some(TableInfo { name, kind, row_count: -1 })
+            Some(TableInfo { name, kind, row_count: -1, rls_enabled: None })
         })
         .collect();
 
@@ -248,7 +252,7 @@ async fn list_tables_d1(cfg: &super::connection::D1Config) -> Result<Vec<TableIn
             let name = r.get(name_idx)?.as_str()?.to_string();
             let ty = r.get(type_idx).and_then(|v| v.as_str()).unwrap_or("table");
             let kind = if ty == "view" { "view".to_string() } else { "table".to_string() };
-            Some(TableInfo { name, kind, row_count: -1 })
+            Some(TableInfo { name, kind, row_count: -1, rls_enabled: None })
         })
         .collect();
 
@@ -330,7 +334,7 @@ async fn list_tables_mysql(pool: &MySqlPool, schema: &str) -> Result<Vec<TableIn
             let ty: String = r.try_get(1).unwrap_or_else(|_| "BASE TABLE".to_string());
             let row_count: i64 = r.try_get::<Option<u64>, _>(2).ok().flatten().unwrap_or(0) as i64;
             let kind = if ty == "VIEW" { "view" } else { "table" }.to_string();
-            Some(TableInfo { name, kind, row_count })
+            Some(TableInfo { name, kind, row_count, rls_enabled: None })
         })
         .collect())
 }
@@ -452,4 +456,43 @@ pub async fn list_enums(state: State<'_, DbState>, schema: String) -> Result<Vec
         // MySQL / SQLite / D1 have no enum types accessible this way
         _ => Ok(vec![]),
     }
+}
+
+pub async fn truncate_table(state: State<'_, DbState>, schema: String, table: String) -> Result<(), String> {
+    validate_ident(&schema)?;
+    validate_ident(&table)?;
+    match require_conn(&state)? {
+        ActiveConnection::Postgres(pool) => {
+            let sql = format!(r#"TRUNCATE TABLE "{schema}"."{table}""#);
+            sqlx::query(&sql).execute(&pool).await
+                .map_err(|e| format!("Failed to truncate table: {e}"))?;
+        }
+        ActiveConnection::Sqlite(pool) => {
+            let sql = format!(r#"DELETE FROM "{table}""#);
+            sqlx::query(&sql).execute(&pool).await
+                .map_err(|e| format!("Failed to truncate table: {e}"))?;
+        }
+        _ => return Err("TRUNCATE not supported for this database type".to_string()),
+    }
+    Ok(())
+}
+
+pub async fn drop_table(state: State<'_, DbState>, schema: String, table: String, cascade: bool) -> Result<(), String> {
+    validate_ident(&schema)?;
+    validate_ident(&table)?;
+    match require_conn(&state)? {
+        ActiveConnection::Postgres(pool) => {
+            let cascade_clause = if cascade { " CASCADE" } else { "" };
+            let sql = format!(r#"DROP TABLE "{schema}"."{table}"{cascade_clause}"#);
+            sqlx::query(&sql).execute(&pool).await
+                .map_err(|e| format!("Failed to drop table: {e}"))?;
+        }
+        ActiveConnection::Sqlite(pool) => {
+            let sql = format!(r#"DROP TABLE "{table}""#);
+            sqlx::query(&sql).execute(&pool).await
+                .map_err(|e| format!("Failed to drop table: {e}"))?;
+        }
+        _ => return Err("DROP TABLE not supported for this database type".to_string()),
+    }
+    Ok(())
 }

@@ -6,6 +6,7 @@
   import X         from '@lucide/svelte/icons/x'
   import Clock     from '@lucide/svelte/icons/clock'
   import Loader    from '@lucide/svelte/icons/loader'
+  import Plus      from '@lucide/svelte/icons/plus'
   import {
     testPostgresConnection, connectPostgres,
     testSqliteConnection,   connectSqlite,
@@ -26,6 +27,7 @@
   import { Checkbox }   from '$lib/components/ui/checkbox/index.js'
   import { ScrollArea } from '$lib/components/ui/scroll-area/index.js'
   import * as Dialog    from '$lib/components/ui/dialog/index.js'
+  import { cn }         from '$lib/utils.js'
   import { parseConnectionUri } from '$lib/connection-uri.js'
 
   let {
@@ -38,7 +40,7 @@
     { id: 'postgres', label: 'PostgreSQL',    icon: Database,  color: 'text-blue-500'   },
     { id: 'mysql',    label: 'MySQL',         icon: Database,  color: 'text-orange-400' },
     { id: 'sqlite',   label: 'SQLite',        icon: HardDrive, color: 'text-green-500'  },
-    { id: 'd1',       label: 'Cloudflare D1', icon: Cloud,     color: 'text-orange-500' },
+    { id: 'd1',       label: 'D1',            icon: Cloud,     color: 'text-orange-500' },
   ]
 
   /** @type {import('$lib/stores/connections.js').SavedConnection[]} */
@@ -143,8 +145,8 @@
 
   function connDetail(conn) {
     if (conn.type === 'sqlite') return conn.filePath || '—'
-    if (conn.type === 'd1')     return `${conn.accountId?.slice(0,8) ?? ''}… · ${conn.databaseId?.slice(0,8) ?? ''}…`
-    return `${conn.user ?? ''}@${conn.host ?? ''}:${conn.port ?? ''}/${conn.database ?? ''}`
+    if (conn.type === 'd1')     return `${conn.accountId?.slice(0,8) ?? ''}…`
+    return `${conn.host ?? ''}/${conn.database ?? ''}`
   }
 
   function defaultPortForType(t) {
@@ -243,44 +245,41 @@
     } catch (e) { error = String(e) }
     finally { connecting = null }
   }
+
+  function switchDriver(id) {
+    const AUTO = ['Local PostgreSQL', 'Local MySQL', 'Local SQLite', 'Cloudflare D1']
+    if (AUTO.includes(name)) name = defaultName(id)
+    dbType = id
+    port = defaultPortForType(id)
+    connectionUri = ''
+    uriHint = ''
+  }
 </script>
 
 <Dialog.Root bind:open>
   <Dialog.Content
-    class="flex max-h-[min(90vh,820px)] w-[min(980px,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-[980px]"
+    class="flex max-h-[min(90vh,800px)] w-[min(850px,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-[850px]"
     showCloseButton={true}
   >
-    <!-- Header -->
-    <div class="shrink-0 border-b border-border px-6 py-4">
-      <h2 class="text-lg font-semibold text-foreground">Connect to database</h2>
-      <p class="mt-0.5 text-sm text-muted-foreground">
-        Resume a recent connection or configure a new one.
-      </p>
-    </div>
-
     <!-- Two-panel body -->
-    <div class="grid min-h-0 min-w-0 flex-1 grid-cols-1 md:grid-cols-[minmax(260px,320px)_minmax(0,1fr)]">
+    <div class="grid min-h-0 min-w-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[220px_minmax(0,1fr)]">
 
       <!-- Left: saved / recent -->
-      <section class="flex min-h-[320px] min-w-0 flex-col border-b border-border bg-muted/20 md:min-h-0 md:border-b-0 md:border-r">
-        <div class="flex shrink-0 items-center justify-between gap-2 px-5 py-4">
-          <div>
-            <h3 class="text-sm font-semibold text-foreground">Recent</h3>
-            <p class="text-xs text-muted-foreground">{saved.length} saved connection{saved.length === 1 ? '' : 's'}</p>
-          </div>
+      <section class="flex min-h-0 flex-col border-b border-border md:border-b-0 md:border-r">
+        <div class="shrink-0 px-4 pt-5 pb-3">
+          <h2 class="text-sm font-semibold text-foreground">Connect</h2>
+          <p class="mt-0.5 text-xs text-muted-foreground">Select a recent connection or create new</p>
         </div>
 
-        <ScrollArea class="min-h-0 flex-1 px-3 pb-4">
+        <ScrollArea class="min-h-0 flex-1 px-2 pb-3">
           {#if saved.length === 0}
-            <div class="mx-2 flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-background/50 px-4 py-10 text-center">
-              <Clock class="mb-3 size-8 text-muted-foreground/50" />
-              <p class="text-sm font-medium text-foreground">No saved connections</p>
-              <p class="mt-1 max-w-[200px] text-xs text-muted-foreground">
-                Configure a connection on the right — it will appear here next time.
-              </p>
+            <div class="mx-2 flex flex-col items-center justify-center rounded-lg border border-dashed border-border/60 px-4 py-8 text-center">
+              <Clock class="mb-2 size-6 text-muted-foreground/40" />
+              <p class="text-xs font-medium text-foreground">No saved connections</p>
+              <p class="mt-0.5 text-[11px] text-muted-foreground">Set up a new connection →</p>
             </div>
           {:else}
-            <div class="flex flex-col gap-2 px-2">
+            <div class="flex flex-col">
               {#each saved as conn (conn.id)}
                 {@const d = driver(conn.type)}
                 {@const Icon = d.icon}
@@ -288,238 +287,227 @@
                 {@const isSelected = conn.id === editingId}
                 {@const isBusy = connecting === conn.id}
                 <div
-                  class="group relative rounded-xl border transition-all
-                         {isSelected
-                           ? 'border-ring bg-accent/40 shadow-sm'
-                           : isLast
-                             ? 'border-primary/25 bg-background hover:border-ring/40 hover:bg-accent/20'
-                             : 'border-border/80 bg-background hover:border-ring/40 hover:bg-accent/20'}"
+                  class={cn(
+                    "group relative flex cursor-pointer items-start gap-2.5 rounded-lg px-3 py-2.5 transition-colors",
+                    isSelected ? "bg-accent" : "hover:bg-accent/50"
+                  )}
+                  role="button"
+                  tabindex="0"
+                  onclick={() => selectSaved(conn)}
+                  onkeydown={(e) => e.key === 'Enter' && selectSaved(conn)}
                 >
-                  <button
-                    type="button"
-                    class="flex w-full items-start gap-3 px-3.5 py-3 text-left"
-                    onclick={() => selectSaved(conn)}
-                  >
-                    <div class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted">
-                      <Icon class="size-4 {d.color}" />
-                    </div>
-                    <div class="min-w-0 flex-1 pt-0.5">
-                      <div class="flex items-center gap-2">
-                        <span class="truncate text-sm font-medium text-foreground">{conn.name}</span>
-                        {#if isLast}
-                          <span class="shrink-0 rounded-full bg-primary/15 px-1.5 py-px text-[10px] font-medium text-primary">Last used</span>
-                        {/if}
-                      </div>
-                      <p class="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{connDetail(conn)}</p>
-                      {#if conn.lastConnectedAt}
-                        <p class="mt-1 text-[10px] text-muted-foreground/70">{relativeTime(conn.lastConnectedAt)}</p>
-                      {/if}
-                    </div>
-                  </button>
+                  <div class={cn(
+                    "mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md",
+                    isSelected ? "bg-background/60" : "bg-muted"
+                  )}>
+                    <Icon class="size-3 {d.color}" />
+                  </div>
 
-                  <div class="flex items-center gap-1 border-t border-border/60 px-2 py-1.5">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      class="h-7 flex-1 text-xs"
-                      disabled={!!connecting}
-                      onclick={() => connectWith(conn)}
-                    >
-                      {#if isBusy}
-                        <Loader class="mr-1 size-3 animate-spin" />Connecting…
-                      {:else if isLast}
-                        Resume
-                      {:else}
-                        Connect
+                  <div class="min-w-0 flex-1">
+                    <div class="flex min-w-0 items-center gap-1.5">
+                      <span class="min-w-0 truncate text-xs font-medium text-foreground leading-snug">{conn.name}</span>
+                      {#if isLast}
+                        <span class="shrink-0 rounded-full bg-primary/10 px-1.5 py-px text-[9px] font-medium text-primary">Last</span>
                       {/if}
-                    </Button>
-                    <button
-                      type="button"
-                      class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
-                      onclick={(e) => { e.stopPropagation(); handleDelete(conn.id) }}
-                      aria-label="Delete connection"
-                      title="Delete"
-                    ><X class="size-3.5" /></button>
+                    </div>
+                    <p class="truncate font-mono text-[10px] text-muted-foreground/70 leading-snug">{connDetail(conn)}</p>
+                    <!-- time: shows when not hovered; actions: show on hover — no layout shift -->
+                    <div class="mt-1 flex items-center gap-1">
+                      <span class="text-[10px] text-muted-foreground/50 group-hover:hidden">
+                        {relativeTime(conn.lastConnectedAt) || ''}
+                      </span>
+                      <div class="hidden items-center gap-1 group-hover:flex">
+                        <button
+                          type="button"
+                          class="inline-flex h-5 items-center gap-1 rounded-md bg-primary px-2 text-[10px] font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                          disabled={!!connecting}
+                          onclick={(e) => { e.stopPropagation(); void connectWith(conn) }}
+                        >
+                          {#if isBusy}
+                            <Loader class="size-2.5 animate-spin" />
+                          {:else}
+                            Connect
+                          {/if}
+                        </button>
+                        <button
+                          type="button"
+                          class="inline-flex size-5 items-center justify-center rounded-md text-muted-foreground/60 hover:bg-destructive/10 hover:text-destructive"
+                          onclick={(e) => { e.stopPropagation(); handleDelete(conn.id) }}
+                          aria-label="Delete"
+                        ><X class="size-3" /></button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               {/each}
             </div>
           {/if}
+
+          <!-- New connection entry -->
+          <button
+            type="button"
+            class={cn(
+              "mt-1.5 flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left transition-colors",
+              !editingId ? "bg-accent/60 text-foreground" : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+            )}
+            onclick={() => resetForm(null)}
+          >
+            <div class="flex size-7 shrink-0 items-center justify-center rounded-md border border-dashed border-border/60 bg-transparent">
+              <Plus class="size-3.5" />
+            </div>
+            <span class="text-xs font-medium">New connection</span>
+          </button>
         </ScrollArea>
       </section>
 
-      <!-- Right: new / edit connection -->
+      <!-- Right: form -->
       <section class="flex min-h-0 min-w-0 flex-col overflow-hidden">
-        <div class="flex shrink-0 items-center justify-between gap-3 border-b border-border px-6 py-4">
-          <div>
-            <h3 class="text-sm font-semibold text-foreground">
-              {editingId ? 'Edit connection' : 'New connection'}
-            </h3>
-            <p class="text-xs text-muted-foreground">
-              {editingId ? 'Update details and connect, or start fresh.' : 'Set up a database connection.'}
-            </p>
-          </div>
-          {#if editingId}
-            <Button type="button" variant="outline" size="sm" onclick={() => resetForm(null)}>
-              Start fresh
-            </Button>
-          {/if}
-        </div>
-
         <ScrollArea class="min-h-0 min-w-0 flex-1">
           <div class="flex min-w-0 flex-col gap-5 px-6 py-5">
 
-            <div class="grid grid-cols-4 gap-2">
+            <!-- DB type pill selector -->
+            <div class="flex gap-1 rounded-lg bg-muted p-1">
               {#each DRIVERS as d (d.id)}
                 {@const Icon = d.icon}
                 <button
                   type="button"
-                  class="flex flex-col items-center gap-1.5 rounded-xl border py-3 transition-colors
-                         {dbType === d.id ? 'border-ring bg-accent/50 shadow-sm' : 'border-border hover:bg-accent/30'}"
-                  onclick={() => {
-                    const AUTO = ['Local PostgreSQL', 'Local MySQL', 'Local SQLite', 'Cloudflare D1']
-                    if (AUTO.includes(name)) name = defaultName(d.id)
-                    dbType = d.id
-                    port = defaultPortForType(d.id)
-                    connectionUri = ''
-                    uriHint = ''
-                  }}
+                  class={cn(
+                    "flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-all",
+                    dbType === d.id
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                  onclick={() => switchDriver(d.id)}
                 >
-                  <Icon class="size-4 {dbType === d.id ? d.color : 'text-muted-foreground'}" />
-                  <span class="text-[11px] font-medium {dbType === d.id ? 'text-foreground' : 'text-muted-foreground'}">{d.label}</span>
+                  <Icon class="size-3 {dbType === d.id ? d.color : ''}" />
+                  {d.label}
                 </button>
               {/each}
             </div>
 
+            <!-- Connection name -->
             <div class="flex flex-col gap-1.5">
               <Label for="cn-name" class="text-xs font-medium">Connection name</Label>
               <Input id="cn-name" bind:value={name} class="h-9 text-sm" />
             </div>
 
             {#if dbType === 'postgres'}
+              <!-- URI quick-fill -->
               <div class="flex flex-col gap-1.5">
-                <Label for="cn-uri" class="text-xs font-medium">Connection URI</Label>
+                <Label for="cn-uri" class="text-xs font-medium text-muted-foreground">
+                  Connection string <span class="font-normal">(optional)</span>
+                </Label>
                 <div class="flex gap-2">
                   <Input
                     id="cn-uri"
                     bind:value={connectionUri}
-                    placeholder="postgresql://user:password@127.0.0.1:5432/postgres"
-                    class="h-9 flex-1 font-mono text-sm"
+                    placeholder="postgresql://user:pass@host:5432/db"
+                    class="h-9 flex-1 font-mono text-xs"
                     onpaste={handleUriPaste}
                     onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); applyConnectionUri() } }}
                   />
-                  <Button type="button" variant="outline" size="sm" class="shrink-0" onclick={applyConnectionUri} disabled={!connectionUri.trim()}>
+                  <Button type="button" variant="outline" size="sm" class="shrink-0 text-xs" onclick={applyConnectionUri} disabled={!connectionUri.trim()}>
                     Parse
                   </Button>
                 </div>
                 {#if uriHint}
-                  <p class="text-xs {uriHintIsError(uriHint) ? 'text-destructive' : 'text-emerald-600 dark:text-emerald-400'}">{uriHint}</p>
-                {:else}
-                  <p class="text-xs text-muted-foreground">Paste a <code class="font-mono">postgresql://</code> URL to auto-fill fields.</p>
+                  <p class="text-[11px] {uriHintIsError(uriHint) ? 'text-destructive' : 'text-emerald-600 dark:text-emerald-400'}">{uriHint}</p>
                 {/if}
               </div>
 
-              <div class="grid grid-cols-2 gap-4">
-                <div class="flex flex-col gap-3">
-                  <div class="grid grid-cols-[1fr_88px] gap-2">
-                    <div class="flex flex-col gap-1.5">
-                      <Label for="cn-host" class="text-xs font-medium">Host</Label>
-                      <Input id="cn-host" bind:value={host} class="h-9 text-sm" />
-                    </div>
-                    <div class="flex flex-col gap-1.5">
-                      <Label for="cn-port" class="text-xs font-medium">Port</Label>
-                      <Input id="cn-port" type="number" bind:value={port} class="h-9 text-sm" />
-                    </div>
-                  </div>
-                  <div class="flex flex-col gap-1.5">
-                    <Label for="cn-db" class="text-xs font-medium">Database</Label>
-                    <Input id="cn-db" bind:value={database} class="h-9 text-sm" />
-                  </div>
+              <!-- Host / Port / DB -->
+              <div class="grid grid-cols-[1fr_80px] gap-2">
+                <div class="flex flex-col gap-1.5">
+                  <Label for="cn-host" class="text-xs font-medium">Host</Label>
+                  <Input id="cn-host" bind:value={host} class="h-9 text-sm" />
                 </div>
-                <div class="flex flex-col gap-3">
-                  <div class="flex flex-col gap-1.5">
-                    <Label for="cn-user" class="text-xs font-medium">User</Label>
-                    <Input id="cn-user" bind:value={user} autocomplete="username" class="h-9 text-sm" />
-                  </div>
-                  <div class="flex flex-col gap-1.5">
-                    <Label for="cn-pass" class="text-xs font-medium">Password</Label>
-                    <Input id="cn-pass" type="password" bind:value={password} autocomplete="current-password" class="h-9 text-sm" />
-                  </div>
-                  <div class="flex items-center gap-2 pt-1">
-                    <Checkbox id="cn-ssl" checked={ssl} onCheckedChange={(v) => (ssl = v === true)} />
-                    <Label for="cn-ssl" class="text-xs font-normal text-muted-foreground cursor-pointer">Use SSL (sslmode=require)</Label>
-                  </div>
+                <div class="flex flex-col gap-1.5">
+                  <Label for="cn-port" class="text-xs font-medium">Port</Label>
+                  <Input id="cn-port" type="number" bind:value={port} class="h-9 text-sm" />
                 </div>
+              </div>
+              <div class="grid grid-cols-3 gap-2">
+                <div class="flex flex-col gap-1.5">
+                  <Label for="cn-db" class="text-xs font-medium">Database</Label>
+                  <Input id="cn-db" bind:value={database} class="h-9 text-sm" />
+                </div>
+                <div class="flex flex-col gap-1.5">
+                  <Label for="cn-user" class="text-xs font-medium">User</Label>
+                  <Input id="cn-user" bind:value={user} autocomplete="username" class="h-9 text-sm" />
+                </div>
+                <div class="flex flex-col gap-1.5">
+                  <Label for="cn-pass" class="text-xs font-medium">Password</Label>
+                  <Input id="cn-pass" type="password" bind:value={password} autocomplete="current-password" class="h-9 text-sm" />
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <Checkbox id="cn-ssl" checked={ssl} onCheckedChange={(v) => (ssl = v === true)} />
+                <Label for="cn-ssl" class="cursor-pointer text-xs font-normal text-muted-foreground">Use SSL (sslmode=require)</Label>
               </div>
 
             {:else if dbType === 'mysql'}
-              <div class="grid grid-cols-2 gap-4">
-                <div class="flex flex-col gap-3">
-                  <div class="grid grid-cols-[1fr_88px] gap-2">
-                    <div class="flex flex-col gap-1.5">
-                      <Label for="cn-mysql-host" class="text-xs font-medium">Host</Label>
-                      <Input id="cn-mysql-host" bind:value={host} class="h-9 text-sm" />
-                    </div>
-                    <div class="flex flex-col gap-1.5">
-                      <Label for="cn-mysql-port" class="text-xs font-medium">Port</Label>
-                      <Input id="cn-mysql-port" type="number" bind:value={port} class="h-9 text-sm" />
-                    </div>
-                  </div>
-                  <div class="flex flex-col gap-1.5">
-                    <Label for="cn-mysql-db" class="text-xs font-medium">Database</Label>
-                    <Input id="cn-mysql-db" bind:value={database} class="h-9 text-sm" />
-                  </div>
+              <div class="grid grid-cols-[1fr_80px] gap-2">
+                <div class="flex flex-col gap-1.5">
+                  <Label for="cn-mysql-host" class="text-xs font-medium">Host</Label>
+                  <Input id="cn-mysql-host" bind:value={host} class="h-9 text-sm" />
                 </div>
-                <div class="flex flex-col gap-3">
-                  <div class="flex flex-col gap-1.5">
-                    <Label for="cn-mysql-user" class="text-xs font-medium">User</Label>
-                    <Input id="cn-mysql-user" bind:value={user} autocomplete="username" class="h-9 text-sm" />
-                  </div>
-                  <div class="flex flex-col gap-1.5">
-                    <Label for="cn-mysql-pass" class="text-xs font-medium">Password</Label>
-                    <Input id="cn-mysql-pass" type="password" bind:value={password} autocomplete="current-password" class="h-9 text-sm" />
-                  </div>
-                  <div class="flex items-center gap-2 pt-1">
-                    <Checkbox id="cn-mysql-ssl" checked={ssl} onCheckedChange={(v) => (ssl = v === true)} />
-                    <Label for="cn-mysql-ssl" class="text-xs font-normal text-muted-foreground cursor-pointer">Use SSL (ssl-mode=required)</Label>
-                  </div>
+                <div class="flex flex-col gap-1.5">
+                  <Label for="cn-mysql-port" class="text-xs font-medium">Port</Label>
+                  <Input id="cn-mysql-port" type="number" bind:value={port} class="h-9 text-sm" />
                 </div>
+              </div>
+              <div class="grid grid-cols-3 gap-2">
+                <div class="flex flex-col gap-1.5">
+                  <Label for="cn-mysql-db" class="text-xs font-medium">Database</Label>
+                  <Input id="cn-mysql-db" bind:value={database} class="h-9 text-sm" />
+                </div>
+                <div class="flex flex-col gap-1.5">
+                  <Label for="cn-mysql-user" class="text-xs font-medium">User</Label>
+                  <Input id="cn-mysql-user" bind:value={user} autocomplete="username" class="h-9 text-sm" />
+                </div>
+                <div class="flex flex-col gap-1.5">
+                  <Label for="cn-mysql-pass" class="text-xs font-medium">Password</Label>
+                  <Input id="cn-mysql-pass" type="password" bind:value={password} autocomplete="current-password" class="h-9 text-sm" />
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <Checkbox id="cn-mysql-ssl" checked={ssl} onCheckedChange={(v) => (ssl = v === true)} />
+                <Label for="cn-mysql-ssl" class="cursor-pointer text-xs font-normal text-muted-foreground">Use SSL (ssl-mode=required)</Label>
               </div>
 
             {:else if dbType === 'sqlite'}
               <div class="flex flex-col gap-1.5">
-                <Label for="cn-uri" class="text-xs font-medium">Connection URI</Label>
+                <Label for="cn-sqlite-uri" class="text-xs font-medium text-muted-foreground">
+                  URI <span class="font-normal">(optional)</span>
+                </Label>
                 <div class="flex gap-2">
                   <Input
-                    id="cn-uri"
+                    id="cn-sqlite-uri"
                     bind:value={connectionUri}
                     placeholder="sqlite:///path/to/database.db"
-                    class="h-9 flex-1 font-mono text-sm"
+                    class="h-9 flex-1 font-mono text-xs"
                     onpaste={handleUriPaste}
                     onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); applyConnectionUri() } }}
                   />
-                  <Button type="button" variant="outline" size="sm" class="shrink-0" onclick={applyConnectionUri} disabled={!connectionUri.trim()}>
+                  <Button type="button" variant="outline" size="sm" class="shrink-0 text-xs" onclick={applyConnectionUri} disabled={!connectionUri.trim()}>
                     Parse
                   </Button>
                 </div>
                 {#if uriHint}
-                  <p class="text-xs {uriHintIsError(uriHint) ? 'text-destructive' : 'text-emerald-600 dark:text-emerald-400'}">{uriHint}</p>
-                {:else}
-                  <p class="text-xs text-muted-foreground">Paste a <code class="font-mono">sqlite://</code> or <code class="font-mono">file://</code> URI.</p>
+                  <p class="text-[11px] {uriHintIsError(uriHint) ? 'text-destructive' : 'text-emerald-600 dark:text-emerald-400'}">{uriHint}</p>
                 {/if}
               </div>
               <div class="flex flex-col gap-1.5">
                 <Label for="cn-path" class="text-xs font-medium">File path</Label>
                 <Input id="cn-path" bind:value={filePath} placeholder="/path/to/database.db" class="h-9 font-mono text-sm" />
-                <p class="text-xs text-muted-foreground">Absolute path or <code class="font-mono">:memory:</code></p>
+                <p class="text-[11px] text-muted-foreground">Absolute path or <code class="font-mono">:memory:</code></p>
               </div>
 
             {:else if dbType === 'd1'}
-              <div class="grid grid-cols-2 gap-4">
+              <div class="grid grid-cols-2 gap-3">
                 <div class="flex flex-col gap-1.5">
                   <Label for="cn-acct" class="text-xs font-medium">Account ID</Label>
-                  <Input id="cn-acct" bind:value={accountId} placeholder="abcdef1234567890…" class="h-9 font-mono text-sm" />
+                  <Input id="cn-acct" bind:value={accountId} placeholder="abcdef1234…" class="h-9 font-mono text-sm" />
                 </div>
                 <div class="flex flex-col gap-1.5">
                   <Label for="cn-dbid" class="text-xs font-medium">Database ID</Label>
@@ -534,27 +522,36 @@
           </div>
         </ScrollArea>
 
-        <!-- Footer actions -->
-        <div class="shrink-0 border-t border-border bg-muted/10 px-6 py-4">
+        <!-- Footer -->
+        <div class="shrink-0 border-t border-border/60 px-6 py-4">
           {#if error}
             <div class="mb-3 rounded-md bg-destructive/8 px-3 py-2 text-xs text-destructive">{error}</div>
           {/if}
           {#if testOk}
             <div class="mb-3 rounded-md bg-emerald-500/10 px-3 py-2 text-xs text-emerald-600 dark:text-emerald-400">Connection test successful</div>
           {/if}
-          <div class="flex items-center justify-end gap-2">
-            {#if dbType !== 'd1'}
-              <Button type="button" variant="outline" size="sm" onclick={handleTest} disabled={testing || !!connecting}>
-                {testing ? 'Testing…' : 'Test connection'}
-              </Button>
-            {/if}
-            <Button type="button" size="sm" onclick={handleConnect} disabled={!!connecting || testing}>
-              {#if connecting === (editingId ?? '__new__')}
-                <Loader class="mr-1.5 size-3 animate-spin" />Connecting…
-              {:else}
-                {editingId ? 'Save & connect' : 'Connect'}
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+              {#if editingId}
+                <Button type="button" variant="ghost" size="sm" class="text-xs text-muted-foreground" onclick={() => resetForm(null)}>
+                  Clear
+                </Button>
               {/if}
-            </Button>
+            </div>
+            <div class="flex items-center gap-2">
+              {#if dbType !== 'd1'}
+                <Button type="button" variant="outline" size="sm" class="text-xs" onclick={handleTest} disabled={testing || !!connecting}>
+                  {testing ? 'Testing…' : 'Test'}
+                </Button>
+              {/if}
+              <Button type="button" size="sm" class="text-xs" onclick={handleConnect} disabled={!!connecting || testing}>
+                {#if connecting === (editingId ?? '__new__')}
+                  <Loader class="mr-1.5 size-3 animate-spin" />Connecting…
+                {:else}
+                  {editingId ? 'Save & connect' : 'Connect'}
+                {/if}
+              </Button>
+            </div>
           </div>
         </div>
       </section>

@@ -9,6 +9,7 @@
   import History from "@lucide/svelte/icons/history";
   import Bookmark from "@lucide/svelte/icons/bookmark";
   import Code2 from "@lucide/svelte/icons/code-2";
+  import Plus from "@lucide/svelte/icons/plus";
   import SqlEditor from "./SqlEditor.svelte";
   import { sqlToDrizzle, sqlToPrisma } from "$lib/orm-builder.js";
   import QueryHistoryPanel from "./QueryHistoryPanel.svelte";
@@ -18,9 +19,9 @@
   import { queryTitle } from "$lib/stores/query-history.js";
   import DataTable from "./DataTable.svelte";
   import DataTableSkeleton from "./DataTableSkeleton.svelte";
+  import TableLoading from "./TableLoading.svelte";
   import ResizeHandle from "./ResizeHandle.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
-  import * as Alert from "$lib/components/ui/alert/index.js";
   import {
     clampSqlEditorHeight,
     loadLayout,
@@ -57,6 +58,59 @@
     /** @param {string} name @param {string} sql */
     onsavequery = async (name, sql) => {},
   } = $props();
+
+  /**
+   * @typedef {{ id: string, name: string, content: string }} SqlTab
+   */
+
+  /** @type {SqlTab[]} */
+  let sqlTabs = $state([{ id: crypto.randomUUID(), name: 'Query 1', content: sql }])
+  let activeTabId = $state(sqlTabs[0].id)
+  let tabCounter = $state(1)
+
+  const activeTab = $derived(sqlTabs.find((t) => t.id === activeTabId) ?? sqlTabs[0])
+
+  // Sentinel to break bidirectional sync cycles
+  let _lastSyncedSql = sql
+
+  // External write (history select, AI fix) → update active tab
+  $effect(() => {
+    const incoming = sql
+    if (incoming !== _lastSyncedSql) {
+      _lastSyncedSql = incoming
+      untrack(() => {
+        const tab = sqlTabs.find((t) => t.id === activeTabId)
+        if (tab) tab.content = incoming
+      })
+    }
+  })
+
+  // Active tab content → sync back to bindable so parent stays in sync
+  $effect(() => {
+    const content = activeTab.content
+    untrack(() => {
+      if (content !== _lastSyncedSql) {
+        _lastSyncedSql = content
+        sql = content
+      }
+    })
+  })
+
+  function addTab() {
+    tabCounter += 1
+    const id = crypto.randomUUID()
+    sqlTabs = [...sqlTabs, { id, name: `Query ${tabCounter}`, content: '' }]
+    activeTabId = id
+  }
+
+  /** @param {string} id */
+  function closeTab(id) {
+    if (sqlTabs.length === 1) return
+    const idx = sqlTabs.findIndex((t) => t.id === id)
+    const next = sqlTabs[idx === 0 ? 1 : idx - 1]
+    sqlTabs = sqlTabs.filter((t) => t.id !== id)
+    if (activeTabId === id) activeTabId = next.id
+  }
 
   let selected = $state(new Set());
   /** @type {HTMLElement | null} */
@@ -361,97 +415,61 @@
     </div>
   </div>
 
-  {#if error}
-    <div class="mx-3 mt-2 shrink-0 flex flex-col gap-1.5">
-      <Alert.Root variant="destructive" class="py-2.5">
-        <Alert.Description class="flex items-start gap-2 text-ui-sm">
-          <span class="flex-1 leading-relaxed">{error}</span>
-          {#if fixStatus === 'idle' || fixStatus === 'error'}
-            <button
-              type="button"
-              onclick={() => void fixWithAi()}
-              class="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-destructive-foreground/10 px-2.5 py-1 text-ui-xs font-medium text-destructive-foreground ring-1 ring-inset ring-destructive-foreground/20 transition-colors hover:bg-destructive-foreground/20"
-            >
-              <Wand2 class="size-3 shrink-0" />
-              Fix with AI
-            </button>
-          {:else if fixStatus === 'fixing'}
-            <button
-              type="button"
-              onclick={dismissFix}
-              class="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-destructive-foreground/10 px-2.5 py-1 text-ui-xs font-medium text-destructive-foreground/70 ring-1 ring-inset ring-destructive-foreground/20"
-            >
-              <Loader2 class="size-3 shrink-0 animate-spin" />
-              Fixing…
-            </button>
-          {/if}
-        </Alert.Description>
-      </Alert.Root>
-
-      {#if fixStatus === 'fixing' && fixedSql}
-        <!-- Live SQL preview while streaming -->
-        <div class="rounded-lg border border-border bg-muted/40 p-3">
-          <p class="mb-1.5 font-mono text-ui-2xs text-muted-foreground">Generating fix…</p>
-          <pre class="overflow-auto rounded bg-card px-3 py-2 font-mono text-ui-xs leading-relaxed text-foreground">{fixedSql}</pre>
-        </div>
-      {/if}
-
-      {#if fixStatus === 'done'}
-        <div class="rounded-lg border border-border bg-card shadow-sm">
-          <div class="flex items-center gap-2 border-b border-border px-3 py-2">
-            <Wand2 class="size-3.5 shrink-0 text-primary/70" />
-            <span class="flex-1 text-ui-xs font-medium text-foreground">AI Fix</span>
-            <button
-              type="button"
-              onclick={dismissFix}
-              class="inline-flex size-5 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-              aria-label="Dismiss"
-            >
-              <X class="size-3" />
-            </button>
-          </div>
-          {#if fixExplanation}
-            <p class="px-3 pt-2.5 text-ui-xs leading-relaxed text-muted-foreground">{fixExplanation}</p>
-          {/if}
-          <pre class="mx-3 my-2.5 overflow-auto rounded bg-muted px-3 py-2 font-mono text-ui-xs leading-relaxed text-foreground">{fixedSql}</pre>
-          <div class="flex items-center justify-end gap-2 border-t border-border px-3 py-2">
-            <button
-              type="button"
-              onclick={dismissFix}
-              class="rounded-md px-3 py-1.5 text-ui-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              Dismiss
-            </button>
-            <button
-              type="button"
-              onclick={applyFix}
-              class="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-ui-xs font-medium text-primary-foreground transition-opacity hover:opacity-90"
-            >
-              <CheckCheck class="size-3 shrink-0" />
-              Apply to editor
-            </button>
-          </div>
-        </div>
-      {/if}
-
-      {#if fixStatus === 'error'}
-        <p class="px-1 font-mono text-ui-xs text-destructive">{fixErrMsg}</p>
-      {/if}
-    </div>
-  {/if}
+  <!-- SQL Tabs -->
+  <div class="flex h-8 shrink-0 items-stretch gap-0 overflow-x-auto border-b border-border bg-panel px-1" style="scrollbar-width:none">
+    {#each sqlTabs as tab (tab.id)}
+      {@const isActive = tab.id === activeTabId}
+      <div
+        class="group relative flex min-w-0 shrink-0 items-stretch"
+      >
+        <button
+          type="button"
+          class="flex min-w-0 items-center gap-1.5 rounded-t py-1 pl-3 font-mono text-ui-xs transition-colors {sqlTabs.length > 1 ? 'pr-5' : 'pr-3'} {isActive ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground'}"
+          onclick={() => (activeTabId = tab.id)}
+          title={tab.name}
+        >
+          <span class="max-w-[100px] truncate">{tab.name}</span>
+        </button>
+        {#if sqlTabs.length > 1}
+          <button
+            type="button"
+            class="absolute right-1 top-1/2 -translate-y-1/2 flex size-4 items-center justify-center rounded opacity-0 transition-[opacity,color] hover:text-foreground group-hover:opacity-100 {isActive ? 'text-muted-foreground' : 'text-muted-foreground/60'}"
+            onclick={(e) => { e.stopPropagation(); closeTab(tab.id) }}
+            title="Close tab"
+          >
+            <X class="size-2.5" />
+          </button>
+        {/if}
+      </div>
+    {/each}
+    <button
+      type="button"
+      class="flex shrink-0 items-center justify-center px-1.5 text-muted-foreground/50 transition-colors hover:text-foreground"
+      onclick={addTab}
+      title="New tab"
+    >
+      <Plus class="size-3.5" />
+    </button>
+  </div>
 
   <div
     class="relative shrink-0 overflow-hidden border-b border-border bg-panel"
     style="height: {editorHeight}px"
   >
     <SqlEditor
-      bind:value={sql}
+      bind:value={activeTab.content}
       class="absolute inset-0"
       {schemaHints}
       {onmodk}
       onmodenter={onmodenter ?? (() => onrun())}
       onmodr={() => onrun()}
       {onmods}
+      onchange={(content) => {
+        if (content !== _lastSyncedSql) {
+          _lastSyncedSql = content
+          sql = content
+        }
+      }}
       onactionsready={(actions) => {
         formatSql = actions.format;
       }}
@@ -473,11 +491,86 @@
     }}
   />
 
+  {#if error}
+    <!-- Console-style error strip between editor and results -->
+    <div class="shrink-0 border-b border-destructive/20 bg-destructive/5">
+      <div class="flex items-start gap-2 px-3 py-2">
+        <span class="mt-px shrink-0 font-mono text-ui-2xs font-bold uppercase tracking-wide text-destructive/70">error</span>
+        <pre class="min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap break-all font-mono text-ui-xs leading-relaxed text-destructive">{error}</pre>
+        <div class="flex shrink-0 items-center gap-1.5">
+          {#if fixStatus === 'idle' || fixStatus === 'error'}
+            <button
+              type="button"
+              onclick={() => void fixWithAi()}
+              class="inline-flex items-center gap-1 rounded border border-destructive/25 bg-destructive/8 px-2 py-0.5 font-mono text-ui-2xs text-destructive transition-colors hover:bg-destructive/15"
+            >
+              <Wand2 class="size-2.5 shrink-0" />
+              fix with ai
+            </button>
+          {:else if fixStatus === 'fixing'}
+            <button
+              type="button"
+              onclick={dismissFix}
+              class="inline-flex items-center gap-1 rounded border border-destructive/25 bg-destructive/8 px-2 py-0.5 font-mono text-ui-2xs text-destructive/60"
+            >
+              <Loader2 class="size-2.5 shrink-0 animate-spin" />
+              fixing…
+            </button>
+          {:else if fixStatus === 'done'}
+            <button
+              type="button"
+              onclick={dismissFix}
+              class="inline-flex items-center justify-center rounded border border-border/60 px-2 py-0.5 font-mono text-ui-2xs text-muted-foreground transition-colors hover:bg-muted"
+            >
+              <X class="size-2.5" />
+            </button>
+          {/if}
+        </div>
+      </div>
+
+      {#if fixStatus === 'fixing' && fixedSql}
+        <div class="border-t border-destructive/10 px-3 py-2">
+          <p class="mb-1 font-mono text-ui-2xs text-muted-foreground">generating fix…</p>
+          <pre class="overflow-x-auto rounded bg-muted/60 px-2.5 py-2 font-mono text-ui-xs leading-relaxed text-foreground">{fixedSql}</pre>
+        </div>
+      {/if}
+
+      {#if fixStatus === 'done'}
+        <div class="border-t border-destructive/10 px-3 py-2">
+          <div class="flex items-center gap-2 pb-1.5">
+            <Wand2 class="size-3 shrink-0 text-primary/60" />
+            <span class="flex-1 font-mono text-ui-2xs text-muted-foreground">{fixExplanation || 'suggested fix'}</span>
+          </div>
+          <pre class="overflow-x-auto rounded bg-muted/60 px-2.5 py-2 font-mono text-ui-xs leading-relaxed text-foreground">{fixedSql}</pre>
+          <div class="flex items-center justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onclick={dismissFix}
+              class="font-mono text-ui-2xs text-muted-foreground transition-colors hover:text-foreground"
+            >dismiss</button>
+            <button
+              type="button"
+              onclick={applyFix}
+              class="inline-flex items-center gap-1 rounded bg-primary px-2.5 py-1 font-mono text-ui-2xs font-medium text-primary-foreground transition-opacity hover:opacity-90"
+            >
+              <CheckCheck class="size-2.5 shrink-0" />
+              apply fix
+            </button>
+          </div>
+        </div>
+      {/if}
+
+      {#if fixStatus === 'error'}
+        <p class="border-t border-destructive/10 px-3 pb-2 font-mono text-ui-2xs text-destructive/70">{fixErrMsg}</p>
+      {/if}
+    </div>
+  {/if}
+
   <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-panel">
     {#if columns.length > 0}
       <DataTable {columns} {rows} {loading} bind:selected />
     {:else if loading}
-      <DataTableSkeleton columnCount={6} rowCount={10} />
+      <TableLoading />
     {:else}
       <div class="flex h-full flex-col items-center justify-center gap-2 text-center">
         <Play class="size-6 text-muted-foreground/20" />

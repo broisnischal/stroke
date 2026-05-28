@@ -152,8 +152,9 @@
     font-size: var(--app-font-size);
   }
 
-  /* Sonner — macOS-style stack (shadcn toaster group + frosted cards) */
+  /* Sonner — frosted notifications */
   .toaster,
+  .studio-toaster,
   [data-sonner-toaster] {
     font-family: var(--font-sans);
     font-size: var(--app-font-size);
@@ -163,6 +164,7 @@
   [data-sonner-toaster] [data-sonner-toast] {
     font-family: inherit;
     font-size: inherit;
+    -webkit-font-smoothing: antialiased;
   }
 
   [data-sonner-toaster] [data-sonner-toast][data-styled='false'] [data-description] {
@@ -177,11 +179,6 @@
       :has([data-description]:not(:empty))
     ) {
     display: none;
-  }
-
-  /* Tighter macOS-like stack spacing */
-  [data-sonner-toaster][data-expanded='false'] [data-sonner-toast][data-front='false'] {
-    opacity: 0.92;
   }
 
   [data-sonner-toaster] [data-sonner-toast][data-expanded='true'] {
@@ -353,6 +350,13 @@
   :is(.app-scroll, .overflow-auto, .overflow-y-auto, .overflow-x-auto) {
     scrollbar-width: thin;
     scrollbar-color: color-mix(in oklch, var(--muted-foreground) 35%, transparent) transparent;
+    /* Prevent scroll from chaining to the parent when this container hits its boundary */
+    overscroll-behavior: contain;
+  }
+
+  /* bits-ui ScrollArea viewport */
+  [data-slot='scroll-area-viewport'] {
+    overscroll-behavior: contain;
   }
 
   :is(.app-scroll, .overflow-auto, .overflow-y-auto, .overflow-x-auto)::-webkit-scrollbar {

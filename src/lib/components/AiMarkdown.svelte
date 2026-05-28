@@ -6,9 +6,34 @@
 
   let { content = '', class: className = '', debounceMs = 0, streaming = false } = $props()
 
+  /** Style markdown images and replace broken ones with a link fallback (no "?" placeholder). */
+  function enhanceImages(/** @type {HTMLElement} */ node) {
+    node.querySelectorAll('img:not([data-img-enhanced])').forEach((el) => {
+      const img = /** @type {HTMLImageElement} */ (el)
+      img.setAttribute('data-img-enhanced', '1')
+      img.loading = 'lazy'
+      img.style.maxWidth = '100%'
+      img.style.height = 'auto'
+      img.style.borderRadius = '8px'
+      img.style.cursor = 'zoom-in'
+      img.addEventListener('error', () => {
+        const url = img.getAttribute('src') ?? ''
+        const link = document.createElement('a')
+        link.href = url
+        link.target = '_blank'
+        link.rel = 'noopener noreferrer'
+        link.textContent = img.getAttribute('alt') ? `Image: ${img.getAttribute('alt')}` : 'Open image'
+        link.className =
+          'inline-flex max-w-full items-center gap-1 truncate rounded-md border border-[var(--border)] bg-[var(--muted)]/30 px-2 py-1 text-[var(--muted-foreground)] no-underline hover:text-[var(--foreground)]'
+        img.replaceWith(link)
+      }, { once: true })
+    })
+  }
+
   /** @param {HTMLElement} node */
   function copyButtons(node) {
     function inject() {
+      enhanceImages(node)
       node.querySelectorAll('pre.shiki:not([data-copy-injected])').forEach((pre) => {
         pre.setAttribute('data-copy-injected', '1')
         pre.style.position = 'relative'
@@ -38,10 +63,46 @@
       })
     }
 
+    /**
+     * Forward vertical-dominant wheel events out of <pre> code blocks.
+     *
+     * The `.prose-ai pre` global CSS sets `overflow-x: auto` so wide code can
+     * scroll horizontally. But WebKitGTK treats that as a wheel-event consumer
+     * for ALL wheel directions, so vertical scrolling over a code block dies
+     * inside the <pre> and never reaches the AI chat scroll container.
+     *
+     * Capture-phase listener intercepts the wheel before <pre>'s default scroll
+     * runs, redirects deltaY to the nearest vertically-scrollable ancestor, and
+     * leaves horizontal wheel untouched so horizontal code scroll still works.
+     */
+    function onWheelCapture(/** @type {WheelEvent} */ e) {
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return
+      const target = e.target instanceof Element ? e.target : null
+      if (!target?.closest('pre')) return
+      let parent = /** @type {HTMLElement | null} */ (node.parentElement)
+      while (parent) {
+        if (parent.scrollHeight > parent.clientHeight) {
+          const oy = getComputedStyle(parent).overflowY
+          if (oy === 'auto' || oy === 'scroll' || oy === 'overlay') {
+            e.preventDefault()
+            parent.scrollTop += e.deltaY
+            return
+          }
+        }
+        parent = parent.parentElement
+      }
+    }
+
     const obs = new MutationObserver(inject)
     obs.observe(node, { childList: true, subtree: true })
     inject()
-    return { destroy() { obs.disconnect() } }
+    node.addEventListener('wheel', onWheelCapture, { capture: true, passive: false })
+    return {
+      destroy() {
+        obs.disconnect()
+        node.removeEventListener('wheel', onWheelCapture, true)
+      },
+    }
   }
 
   let html = $state('')
@@ -49,17 +110,22 @@
 
   const appTheme = $derived($appThemeId)
 
+  // Streaming: re-render on every content change using fast synchronous parse.
+  // No syntax highlighting — when streaming ends, item is replaced with a fully
+  // highlighted assistant item anyway.
   $effect(() => {
+    if (!streaming) return
+    const md = content
+    if (!md.trim()) { html = ''; return }
+    const result = marked.parse(md, { breaks: true, gfm: true })
+    html = typeof result === 'string' ? result : ''
+  })
+
+  // Non-streaming: full async render with syntax highlighting + optional debounce.
+  $effect(() => {
+    if (streaming) return
     const md = content
     const theme = appTheme
-    // During streaming: render synchronously without highlighting to keep up with tokens.
-    // After streaming ends the item is replaced so no re-render needed here.
-    if (streaming) {
-      if (!md.trim()) { html = ''; return }
-      html = /** @type {string} */ (marked.parse(md, { breaks: true, gfm: true }))
-      return
-    }
-
     const wait = debounceMs
     let cancelled = false
     /** @type {ReturnType<typeof setTimeout> | undefined} */

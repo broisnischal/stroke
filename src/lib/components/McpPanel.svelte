@@ -229,7 +229,7 @@
       </div>
     </Dialog.Header>
 
-    <div class="app-scroll min-h-0 flex-1 overflow-y-auto">
+    <div class="app-scroll min-h-0 flex-1 overflow-y-auto [will-change:transform]">
       <div class="flex flex-col gap-3 border-b border-border px-6 py-4">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <Label class="text-muted-foreground">Server</Label>

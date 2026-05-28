@@ -1,7 +1,10 @@
 <script>
   import { onMount, untrack } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { createHotkey } from "@tanstack/svelte-hotkeys";
   import Search from "@lucide/svelte/icons/search";
+  import Pin from "@lucide/svelte/icons/pin";
+  import PinOff from "@lucide/svelte/icons/pin-off";
   import Table2 from "@lucide/svelte/icons/table-2";
   import Eye from "@lucide/svelte/icons/eye";
   import Layers from "@lucide/svelte/icons/layers";
@@ -9,6 +12,12 @@
   import Terminal from "@lucide/svelte/icons/terminal";
   import Command from "@lucide/svelte/icons/command";
   import ListFilter from "@lucide/svelte/icons/list-filter";
+  import Lock from "@lucide/svelte/icons/lock";
+  import Square from "@lucide/svelte/icons/square";
+  import SquareCheck from "@lucide/svelte/icons/square-check";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
+  import Eraser from "@lucide/svelte/icons/eraser";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Plus from "@lucide/svelte/icons/plus";
   import Settings from "@lucide/svelte/icons/settings";
@@ -19,11 +28,11 @@
   import History from "@lucide/svelte/icons/history";
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import DatabaseSwitcher from "./DatabaseSwitcher.svelte";
-  import CheckCircle from "@lucide/svelte/icons/check-circle";
-  import XCircle from "@lucide/svelte/icons/x-circle";
+  import DangerousActionDialog from "./DangerousActionDialog.svelte";
   import { ScrollArea } from "$lib/components/ui/scroll-area/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import * as Tabs from "$lib/components/ui/tabs/index.js";
+  import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
   import ResizeHandle from "./ResizeHandle.svelte";
   import { cn } from "$lib/utils.js";
   import { formatTableRowCount } from "$lib/table-list.js";
@@ -116,6 +125,7 @@
     onopenSchema = () => {},
     onopenorm = () => {},
     onopenaimode = () => {},
+    onnewtable = () => {},
     aiMode = false,
     /** @type {import('$lib/stores/query-history.js').QueryHistoryEntry[]} */
     queryHistory = [],
@@ -125,6 +135,8 @@
     /** @type {import('$lib/stores/connections.js').SavedConnection | null} */
     connection = null,
     onswitchtodb = /** @type {(db: string) => void} */ (() => {}),
+    ontruncatetable = /** @type {(table: string) => void} */ (() => {}),
+    ondroptable = /** @type {(table: string, cascade: boolean) => void} */ (() => {}),
   } = $props();
 
   let localFilter = $state(untrack(() => tableFilter));
@@ -152,20 +164,106 @@
   let tablesOpen = $state(_initial.tables ?? true);
   let viewsOpen = $state(_initial.views ?? false);
   let matViewsOpen = $state(_initial.matViews ?? false);
-  let logsOpen = $state(false);
-
-  /** @param {number} ts */
-  function timeAgo(ts) {
-    const s = Math.floor((Date.now() - ts) / 1000)
-    if (s < 60) return `${s}s ago`
-    if (s < 3600) return `${Math.floor(s / 60)}m ago`
-    if (s < 86400) return `${Math.floor(s / 3600)}h ago`
-    return `${Math.floor(s / 86400)}d ago`
-  }
-
   $effect(() => { saveSidebarSection('tables', tablesOpen) })
   $effect(() => { saveSidebarSection('views', viewsOpen) })
   $effect(() => { saveSidebarSection('matViews', matViewsOpen) })
+
+  // ── Pinned tables ─────────────────────────────────────────────────────────
+  const PINNED_KEY = 'db-studio:pinned-tables'
+
+  function loadPinnedAll() {
+    try {
+      const raw = localStorage.getItem(PINNED_KEY)
+      return raw ? JSON.parse(raw) : {}
+    } catch { return {} }
+  }
+
+  function savePinnedAll(data) {
+    try { localStorage.setItem(PINNED_KEY, JSON.stringify(data)) } catch {}
+  }
+
+  let _allPinned = $state(loadPinnedAll())
+  const _connKey = $derived(connection?.id ?? '')
+  const pinnedTables = $derived(_allPinned[_connKey] ?? [])
+
+  // Only show pinned tables that still exist in the current table list
+  const _tableNameSet = $derived(new Set(tables.map((t) => t.name)))
+  const visiblePinnedTables = $derived(pinnedTables.filter((n) => _tableNameSet.has(n)))
+
+  function togglePin(tableName) {
+    const current = _allPinned[_connKey] ?? []
+    const next = current.includes(tableName)
+      ? current.filter((n) => n !== tableName)
+      : [...current, tableName]
+    _allPinned = { ..._allPinned, [_connKey]: next }
+    savePinnedAll(_allPinned)
+  }
+
+  function clearAllPins() {
+    _allPinned = { ..._allPinned, [_connKey]: [] }
+    savePinnedAll(_allPinned)
+  }
+
+  // ── Display preferences ───────────────────────────────────────────────────
+  const DISPLAY_PREFS_KEY = 'db-studio:sidebar-display'
+  function loadDisplayPrefs() {
+    try {
+      const raw = localStorage.getItem(DISPLAY_PREFS_KEY)
+      if (raw) return JSON.parse(raw)
+    } catch {}
+    return { showTables: true, showViews: true, showMatViews: true, sortBy: 'name' }
+  }
+  function saveDisplayPrefs(prefs) {
+    try { localStorage.setItem(DISPLAY_PREFS_KEY, JSON.stringify(prefs)) } catch {}
+  }
+
+  const _dp = loadDisplayPrefs()
+  let showTables = $state(_dp.showTables ?? true)
+  let showViews = $state(_dp.showViews ?? true)
+  let showMatViews = $state(_dp.showMatViews ?? true)
+  /** @type {'name' | 'rowCount'} */
+  let sortBy = $state(_dp.sortBy ?? 'name')
+
+  $effect(() => { saveDisplayPrefs({ showTables, showViews, showMatViews, sortBy }) })
+
+  // ── Selection state ───────────────────────────────────────────────────────
+  /** @type {Set<string>} */
+  let selectedItems = $state(new Set())
+
+  /** @param {string} name */
+  function toggleSelect(name) {
+    const next = new Set(selectedItems)
+    if (next.has(name)) next.delete(name)
+    else next.add(name)
+    selectedItems = next
+  }
+
+  // ── Dangerous action dialog ───────────────────────────────────────────────
+  /** @type {'drop' | 'truncate'} */
+  let dangerAction = $state('drop')
+  let dangerTable = $state('')
+  let dangerCascade = $state(false)
+  let dangerOpen = $state(false)
+
+  /** @param {'drop' | 'truncate'} kind @param {string} tableName */
+  function openDangerDialog(kind, tableName) {
+    dangerAction = kind
+    dangerTable = tableName
+    dangerCascade = false
+    dangerOpen = true
+  }
+
+  function confirmDanger(cascade) {
+    if (dangerAction === 'drop') ondroptable(dangerTable, cascade)
+    else ontruncatetable(dangerTable)
+  }
+
+  // Alt+Shift+1-5 to focus pinned tables (only existing ones)
+  createHotkey('Alt+Shift+1', (e) => { e.preventDefault(); const t = visiblePinnedTables[0]; if (t) ontableselect(t) })
+  createHotkey('Alt+Shift+2', (e) => { e.preventDefault(); const t = visiblePinnedTables[1]; if (t) ontableselect(t) })
+  createHotkey('Alt+Shift+3', (e) => { e.preventDefault(); const t = visiblePinnedTables[2]; if (t) ontableselect(t) })
+  createHotkey('Alt+Shift+4', (e) => { e.preventDefault(); const t = visiblePinnedTables[3]; if (t) ontableselect(t) })
+  createHotkey('Alt+Shift+5', (e) => { e.preventDefault(); const t = visiblePinnedTables[4]; if (t) ontableselect(t) })
 
   // Sync from parent when it resets externally (e.g. connection change)
   $effect(() => {
@@ -194,14 +292,22 @@
     tables.filter((t) => t.kind === "materialized_view"),
   );
 
+  /** @param {any[]} list */
+  function applySortBy(list) {
+    if (sortBy === 'rowCount') {
+      return [...list].sort((a, b) => (b.rowCount ?? 0) - (a.rowCount ?? 0))
+    }
+    return list
+  }
+
   const filteredRegularTables = $derived(
-    regularTables.filter((t) => t.name.toLowerCase().includes(lf)),
+    applySortBy(regularTables.filter((t) => !pinnedTables.includes(t.name) && t.name.toLowerCase().includes(lf))),
   );
   const filteredViews = $derived(
-    views.filter((t) => t.name.toLowerCase().includes(lf)),
+    applySortBy(views.filter((t) => t.name.toLowerCase().includes(lf))),
   );
   const filteredMatViews = $derived(
-    matViews.filter((t) => t.name.toLowerCase().includes(lf)),
+    applySortBy(matViews.filter((t) => t.name.toLowerCase().includes(lf))),
   );
   /** Shared field chrome for schema select + table filter (aligned in sidebar grid) */
   const sidebarFieldClass =
@@ -382,14 +488,35 @@
               </Select.Root>
             {/if}
           </div>
-          <button
-            type="button"
-            class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            title="Filter tables"
-            disabled
-          >
-            <ListFilter class="size-3.5" />
-          </button>
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger
+              class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
+              title="Display options"
+            >
+              <ListFilter class="size-3.5" />
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Content align="start" class="w-48 p-1 text-ui-sm">
+              <DropdownMenu.Label class="px-2 py-1 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Show</DropdownMenu.Label>
+              <DropdownMenu.CheckboxItem
+                checked={showTables}
+                onCheckedChange={(v) => (showTables = v)}
+              >Tables</DropdownMenu.CheckboxItem>
+              <DropdownMenu.CheckboxItem
+                checked={showViews}
+                onCheckedChange={(v) => (showViews = v)}
+              >Views</DropdownMenu.CheckboxItem>
+              <DropdownMenu.CheckboxItem
+                checked={showMatViews}
+                onCheckedChange={(v) => (showMatViews = v)}
+              >Materialized Views</DropdownMenu.CheckboxItem>
+              <DropdownMenu.Separator />
+              <DropdownMenu.Label class="px-2 py-1 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Sort by</DropdownMenu.Label>
+              <DropdownMenu.RadioGroup value={sortBy} onValueChange={(v) => { if (v === 'name' || v === 'rowCount') sortBy = v }}>
+                <DropdownMenu.RadioItem value="name">Name</DropdownMenu.RadioItem>
+                <DropdownMenu.RadioItem value="rowCount">Row count</DropdownMenu.RadioItem>
+              </DropdownMenu.RadioGroup>
+            </DropdownMenu.Content>
+          </DropdownMenu.Root>
           <button
             type="button"
             class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
@@ -403,9 +530,10 @@
           </button>
           <button
             type="button"
-            class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
             title="New table"
-            disabled
+            disabled={!connectionName}
+            onclick={onnewtable}
           >
             <Plus class="size-3.5" />
           </button>
@@ -451,7 +579,57 @@
               </span>
             </div>
           {:else}
+            <!-- ── Pinned ─────────────────────────────────────────── -->
+            {#if visiblePinnedTables.length > 0 && connectionName}
+              <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
+                <Pin class="size-3 shrink-0 text-primary/60" />
+                <span class="text-ui-2xs font-medium tracking-wide text-muted-foreground uppercase">Pinned</span>
+                <span class="ml-1 font-mono text-ui-2xs text-muted-foreground/60">{visiblePinnedTables.length}</span>
+                {#if pinnedTables.length > 5}
+                  <button
+                    type="button"
+                    class="ml-auto font-mono text-ui-2xs text-muted-foreground/50 hover:text-destructive transition-colors"
+                    onclick={clearAllPins}
+                    title="Clear all pinned tables"
+                  >Clear all</button>
+                {/if}
+              </div>
+              <ul class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
+                {#each visiblePinnedTables as tableName, idx (tableName)}
+                  <li>
+                    <ContextMenu.Root>
+                      <ContextMenu.Trigger class="w-full">
+                        <button
+                          type="button"
+                          class={cn(
+                            "grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 text-left transition-colors",
+                            activeTable === tableName
+                              ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                              : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
+                          )}
+                          onclick={() => ontableselect(tableName)}
+                        >
+                          <Pin class="size-3 shrink-0 text-primary/50" />
+                          <span class="min-w-0 truncate font-mono text-ui-sm leading-none">{tableName}</span>
+                          {#if idx < 5}
+                            <span class="shrink-0 font-mono text-ui-2xs text-muted-foreground/40 tabular-nums">⌥⇧{idx + 1}</span>
+                          {/if}
+                        </button>
+                      </ContextMenu.Trigger>
+                      <ContextMenu.Content class="w-44 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                        <ContextMenu.Item onSelect={() => togglePin(tableName)}>
+                          <PinOff />
+                          Unpin table
+                        </ContextMenu.Item>
+                      </ContextMenu.Content>
+                    </ContextMenu.Root>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+
             <!-- ── Tables ─────────────────────────────────────────── -->
+            {#if showTables}
             <button
               type="button"
               class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1 text-left"
@@ -487,7 +665,7 @@
                       No tables in {activeSchema || "schema"}
                     </p>
                   </li>
-                {:else if filteredRegularTables.length === 0}
+                {:else if filteredRegularTables.length === 0 && lf}
                   <li
                     class="px-3 py-3 text-center text-ui-xs text-muted-foreground"
                   >
@@ -495,39 +673,87 @@
                   </li>
                 {:else}
                   {#each filteredRegularTables as table (table.name)}
+                    {@const isSelected = selectedItems.has(table.name)}
                     <li>
-                      <button
-                        type="button"
-                        class={cn(
-                          "grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 text-left transition-colors",
-                          activeTable === table.name
-                            ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                            : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
-                        )}
-                        onclick={() => ontableselect(table.name)}
-                      >
-                        <Table2 class="size-3 shrink-0 opacity-50" />
-                        <span
-                          class="min-w-0 truncate font-mono text-ui-sm leading-none"
-                          >{table.name}</span
-                        >
-                        <span
-                          class="shrink-0 text-right font-mono text-ui-xs leading-none tabular-nums text-muted-foreground"
-                          title={table.rowCount != null
-                            ? Number(table.rowCount).toLocaleString("en-US")
-                            : undefined}
-                        >
-                          {formatTableRowCount(table.rowCount)}
-                        </span>
-                      </button>
+                      <ContextMenu.Root>
+                        <ContextMenu.Trigger class="w-full">
+                          <button
+                            type="button"
+                            class={cn(
+                              "group grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 text-left transition-colors",
+                              isSelected
+                                ? "bg-primary/10 text-foreground"
+                                : activeTable === table.name
+                                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                                  : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
+                            )}
+                            onclick={() => ontableselect(table.name)}
+                          >
+                            <span
+                              class="relative size-3 shrink-0"
+                              onclick={(e) => { e.stopPropagation(); toggleSelect(table.name) }}
+                              role="checkbox"
+                              aria-checked={isSelected}
+                              tabindex="-1"
+                            >
+                              {#if isSelected}
+                                <SquareCheck class="size-3 text-primary" />
+                              {:else}
+                                <Table2 class="size-3 opacity-50 group-hover:hidden" />
+                                <Square class="size-3 hidden opacity-40 group-hover:block" />
+                              {/if}
+                            </span>
+                            <span class="flex min-w-0 items-center gap-1.5">
+                              <span class="min-w-0 truncate font-mono text-ui-sm leading-none">{table.name}</span>
+                              {#if table.rlsEnabled}
+                                <Lock class="size-2.5 shrink-0 text-muted-foreground/50" title="Row-level security enabled" />
+                              {/if}
+                            </span>
+                            <span
+                              class="shrink-0 text-right font-mono text-ui-xs leading-none tabular-nums text-muted-foreground"
+                              title={table.rowCount != null ? Number(table.rowCount).toLocaleString("en-US") : undefined}
+                            >{formatTableRowCount(table.rowCount)}</span>
+                          </button>
+                        </ContextMenu.Trigger>
+                        <ContextMenu.Content class="w-44 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                          <ContextMenu.Item onSelect={() => togglePin(table.name)}>
+                            {#if pinnedTables.includes(table.name)}
+                              <PinOff />
+                              Unpin table
+                            {:else}
+                              <Pin />
+                              Pin table
+                            {/if}
+                          </ContextMenu.Item>
+                          <ContextMenu.Item onSelect={() => toggleSelect(table.name)}>
+                            {#if isSelected}
+                              <Square />
+                              Deselect
+                            {:else}
+                              <SquareCheck />
+                              Select
+                            {/if}
+                          </ContextMenu.Item>
+                          <ContextMenu.Separator />
+                          <ContextMenu.Item onSelect={() => openDangerDialog('truncate', table.name)}>
+                            <Eraser />
+                            Truncate table
+                          </ContextMenu.Item>
+                          <ContextMenu.Item variant="destructive" onSelect={() => openDangerDialog('drop', table.name)}>
+                            <Trash2 />
+                            Drop table
+                          </ContextMenu.Item>
+                        </ContextMenu.Content>
+                      </ContextMenu.Root>
                     </li>
                   {/each}
                 {/if}
               </ul>
             {/if}
+            {/if}
 
             <!-- ── Views ──────────────────────────────────────────── -->
-            {#if views.length > 0 || filteredViews.length > 0}
+            {#if showViews && (views.length > 0 || filteredViews.length > 0)}
               <button
                 type="button"
                 class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1 text-left"
@@ -562,23 +788,56 @@
                     </li>
                   {:else}
                     {#each filteredViews as view (view.name)}
+                      {@const isSelected = selectedItems.has(view.name)}
                       <li>
-                        <button
-                          type="button"
-                          class={cn(
-                            "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors",
-                            activeTable === view.name
-                              ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                              : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
-                          )}
-                          onclick={() => ontableselect(view.name)}
-                        >
-                          <Eye class="size-3 shrink-0 opacity-50" />
-                          <span
-                            class="min-w-0 truncate font-mono text-ui-sm leading-none"
-                            >{view.name}</span
-                          >
-                        </button>
+                        <ContextMenu.Root>
+                          <ContextMenu.Trigger class="w-full">
+                            <button
+                              type="button"
+                              class={cn(
+                                "group grid w-full grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 rounded-md px-2 py-1.5 text-left transition-colors",
+                                isSelected
+                                  ? "bg-primary/10 text-foreground"
+                                  : activeTable === view.name
+                                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                                    : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
+                              )}
+                              onclick={() => ontableselect(view.name)}
+                            >
+                              <span
+                                class="relative size-3 shrink-0"
+                                onclick={(e) => { e.stopPropagation(); toggleSelect(view.name) }}
+                                role="checkbox"
+                                aria-checked={isSelected}
+                                tabindex="-1"
+                              >
+                                {#if isSelected}
+                                  <SquareCheck class="size-3 text-primary" />
+                                {:else}
+                                  <Eye class="size-3 opacity-50 group-hover:hidden" />
+                                  <Square class="size-3 hidden opacity-40 group-hover:block" />
+                                {/if}
+                              </span>
+                              <span class="min-w-0 truncate font-mono text-ui-sm leading-none">{view.name}</span>
+                            </button>
+                          </ContextMenu.Trigger>
+                          <ContextMenu.Content class="w-44 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                            <ContextMenu.Item onSelect={() => toggleSelect(view.name)}>
+                              {#if isSelected}
+                                <Square />
+                                Deselect
+                              {:else}
+                                <SquareCheck />
+                                Select
+                              {/if}
+                            </ContextMenu.Item>
+                            <ContextMenu.Separator />
+                            <ContextMenu.Item variant="destructive" onSelect={() => openDangerDialog('drop', view.name)}>
+                              <Trash2 />
+                              Drop view
+                            </ContextMenu.Item>
+                          </ContextMenu.Content>
+                        </ContextMenu.Root>
                       </li>
                     {/each}
                   {/if}
@@ -587,7 +846,7 @@
             {/if}
 
             <!-- ── Materialized Views ─────────────────────────────── -->
-            {#if matViews.length > 0 || filteredMatViews.length > 0}
+            {#if showMatViews && (matViews.length > 0 || filteredMatViews.length > 0)}
               <button
                 type="button"
                 class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1 text-left"
@@ -622,28 +881,59 @@
                     </li>
                   {:else}
                     {#each filteredMatViews as mv (mv.name)}
+                      {@const isSelected = selectedItems.has(mv.name)}
                       <li>
-                        <button
-                          type="button"
-                          class={cn(
-                            "grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 text-left transition-colors",
-                            activeTable === mv.name
-                              ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                              : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
-                          )}
-                          onclick={() => ontableselect(mv.name)}
-                        >
-                          <Layers class="size-3 shrink-0 opacity-50" />
-                          <span
-                            class="min-w-0 truncate font-mono text-ui-sm leading-none"
-                            >{mv.name}</span
-                          >
-                          <span
-                            class="shrink-0 text-right font-mono text-ui-xs leading-none tabular-nums text-muted-foreground"
-                          >
-                            {formatTableRowCount(mv.rowCount)}
-                          </span>
-                        </button>
+                        <ContextMenu.Root>
+                          <ContextMenu.Trigger class="w-full">
+                            <button
+                              type="button"
+                              class={cn(
+                                "group grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 text-left transition-colors",
+                                isSelected
+                                  ? "bg-primary/10 text-foreground"
+                                  : activeTable === mv.name
+                                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                                    : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
+                              )}
+                              onclick={() => ontableselect(mv.name)}
+                            >
+                              <span
+                                class="relative size-3 shrink-0"
+                                onclick={(e) => { e.stopPropagation(); toggleSelect(mv.name) }}
+                                role="checkbox"
+                                aria-checked={isSelected}
+                                tabindex="-1"
+                              >
+                                {#if isSelected}
+                                  <SquareCheck class="size-3 text-primary" />
+                                {:else}
+                                  <Layers class="size-3 opacity-50 group-hover:hidden" />
+                                  <Square class="size-3 hidden opacity-40 group-hover:block" />
+                                {/if}
+                              </span>
+                              <span class="min-w-0 truncate font-mono text-ui-sm leading-none">{mv.name}</span>
+                              <span class="shrink-0 text-right font-mono text-ui-xs leading-none tabular-nums text-muted-foreground">
+                                {formatTableRowCount(mv.rowCount)}
+                              </span>
+                            </button>
+                          </ContextMenu.Trigger>
+                          <ContextMenu.Content class="w-44 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                            <ContextMenu.Item onSelect={() => toggleSelect(mv.name)}>
+                              {#if isSelected}
+                                <Square />
+                                Deselect
+                              {:else}
+                                <SquareCheck />
+                                Select
+                              {/if}
+                            </ContextMenu.Item>
+                            <ContextMenu.Separator />
+                            <ContextMenu.Item variant="destructive" onSelect={() => openDangerDialog('drop', mv.name)}>
+                              <Trash2 />
+                              Drop view
+                            </ContextMenu.Item>
+                          </ContextMenu.Content>
+                        </ContextMenu.Root>
                       </li>
                     {/each}
                   {/if}
@@ -652,62 +942,6 @@
             {/if}
 
 
-          {/if}
-
-          <!-- ── Logs ─────────────────────────────────────────── -->
-          {#if logsOpen}
-            <div class="border-t border-sidebar-border">
-              <div class="flex items-center">
-                <button
-                  type="button"
-                  class="flex flex-1 items-center gap-1 px-2.5 pt-2 pb-1 text-left"
-                  onclick={() => { logsOpen = false }}
-                >
-                  <ChevronDown class="size-3 shrink-0 text-muted-foreground/60 transition-transform duration-150" />
-                  <span class="text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground">Activity Log</span>
-                  {#if queryHistory.length > 0}
-                    <span class="ml-1 font-mono text-ui-2xs text-muted-foreground/60">{queryHistory.length}</span>
-                  {/if}
-                </button>
-                <button
-                  type="button"
-                  class="mr-2 font-mono text-ui-2xs text-muted-foreground/50 hover:text-primary pt-1.5"
-                  onclick={onopenlogs}
-                  title="Open full activity log"
-                >Open all →</button>
-              </div>
-              <ul class="flex w-full flex-col gap-px px-1.5 pb-2">
-                {#if queryHistory.length === 0}
-                  <li class="px-3 py-3 text-center text-ui-xs text-muted-foreground">No queries yet</li>
-                {:else}
-                  {#each queryHistory.slice(0, 50) as entry (entry.id)}
-                    <li>
-                      <button
-                        type="button"
-                        class="group flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-sidebar-accent/50"
-                        onclick={() => onqueryselect(entry.sql)}
-                        title={entry.sql}
-                      >
-                        <div class="flex w-full items-center gap-1.5 min-w-0">
-                          {#if entry.success === false}
-                            <XCircle class="size-2.5 shrink-0 text-destructive" />
-                          {:else}
-                            <CheckCircle class="size-2.5 shrink-0 text-primary/60" />
-                          {/if}
-                          <span class="min-w-0 flex-1 truncate font-mono text-ui-xs text-foreground/80">{entry.title}</span>
-                        </div>
-                        <div class="flex items-center gap-2 pl-4">
-                          <span class="font-mono text-ui-2xs text-muted-foreground/60">{timeAgo(entry.executedAt)}</span>
-                          {#if entry.queryMs != null}
-                            <span class="font-mono text-ui-2xs text-muted-foreground/50">{entry.queryMs}ms</span>
-                          {/if}
-                        </div>
-                      </button>
-                    </li>
-                  {/each}
-                {/if}
-              </ul>
-            </div>
           {/if}
 
         </ScrollArea>
@@ -733,12 +967,9 @@
 
         <button
           type="button"
-          class={cn(
-            'inline-flex size-7 items-center justify-center rounded-md transition-colors',
-            logsOpen ? 'bg-primary/10 text-primary hover:bg-primary/15' : 'text-muted-foreground/70 hover:bg-accent hover:text-foreground',
-          )}
+          class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
           title="Activity log"
-          onclick={() => { logsOpen = !logsOpen }}
+          onclick={onopenlogs}
         ><History class="size-3.5" /></button>
 
         <button
@@ -761,7 +992,7 @@
             'inline-flex size-7 items-center justify-center rounded-md transition-colors',
             aiMode ? 'bg-primary/10 text-primary hover:bg-primary/15' : 'text-muted-foreground/70 hover:bg-accent hover:text-foreground',
           )}
-          title={aiMode ? 'Close AI panel (⌘⌥E)' : 'Open AI panel (⌘⌥E)'}
+          title={aiMode ? 'Close AI panel (⌘⇧E)' : 'Open AI panel (⌘⇧E)'}
           onclick={onopenaimode}
         ><Bot class="size-3.5" /></button>
 
@@ -806,6 +1037,15 @@
     }}
   />
 </div>
+
+<DangerousActionDialog
+  bind:open={dangerOpen}
+  action={dangerAction}
+  schema={activeSchema}
+  table={dangerTable}
+  bind:cascade={dangerCascade}
+  onconfirm={(c) => confirmDanger(c)}
+/>
 
 <style>
   .traffic-dot {

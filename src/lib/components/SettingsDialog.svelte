@@ -1,12 +1,12 @@
 <script>
-  import Minus from '@lucide/svelte/icons/minus'
-  import Plus from '@lucide/svelte/icons/plus'
-  import ChevronRight from '@lucide/svelte/icons/chevron-right'
-  import { Button } from '$lib/components/ui/button/index.js'
-  import * as Dialog from '$lib/components/ui/dialog/index.js'
-  import * as Select from '$lib/components/ui/select/index.js'
-  import ThemeSwatch from '$lib/components/ThemeSwatch.svelte'
-  import { getThemeDefinition, themesByGroup } from '$lib/themes/registry.js'
+  import Minus from "@lucide/svelte/icons/minus";
+  import Plus from "@lucide/svelte/icons/plus";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
+  import ThemeSwatch from "$lib/components/ThemeSwatch.svelte";
+  import { getThemeDefinition, themesByGroup } from "$lib/themes/registry.js";
   import {
     appThemeId,
     loadSettings,
@@ -16,60 +16,69 @@
     resetZoom,
     canIncreaseZoom,
     canDecreaseZoom,
-  } from '$lib/stores/settings.js'
-  import { cn } from '$lib/utils.js'
+  } from "$lib/stores/settings.js";
+  import { cn } from "$lib/utils.js";
 
   let {
     open = $bindable(false),
     onopenmcp = () => {},
-  } = $props()
+    onopenmodelconfiguration = () => {},
+    onopenabout = () => {},
+  } = $props();
 
-  let settings = $state(loadSettings())
+  let settings = $state(loadSettings());
 
-  const themeGroups = $derived(themesByGroup())
+  const themeGroups = $derived(themesByGroup());
   /** Kept in sync with applySettings / ⌘M via appThemeId store */
-  const activeTheme = $derived(getThemeDefinition($appThemeId))
+  const activeTheme = $derived(getThemeDefinition($appThemeId));
 
   $effect(() => {
-    const id = $appThemeId
+    const id = $appThemeId;
     if (settings.theme !== id) {
-      settings = { ...settings, theme: id }
+      settings = { ...settings, theme: id };
     }
-  })
+  });
 
   const themeSelectTrigger =
-    'h-8 w-[11.5rem] justify-between gap-2 border-border/80 bg-background px-2 text-ui-xs font-normal shadow-none'
+    "h-8 w-[11.5rem] justify-between gap-2 border-border/80 bg-background px-2 text-ui-xs font-normal shadow-none";
 
   function refreshSettings() {
-    settings = loadSettings()
+    settings = loadSettings();
   }
 
   /** @param {boolean} next */
   function handleOpenChange(next) {
-    if (next) refreshSettings()
+    if (next) refreshSettings();
   }
 
   /** @param {import('$lib/themes/registry.js').ThemeId} themeId */
   function setTheme(themeId) {
-    if (themeId === $appThemeId) return
-    settings = updateSettings({ theme: themeId })
+    if (themeId === $appThemeId) return;
+    settings = updateSettings({ theme: themeId });
   }
 
   function bumpZoom(delta) {
-    settings = delta > 0 ? increaseZoom() : decreaseZoom()
+    settings = delta > 0 ? increaseZoom() : decreaseZoom();
   }
 
   function toggleMcpAutoStart() {
-    settings = updateSettings({ mcpAutoStart: !settings.mcpAutoStart })
+    settings = updateSettings({ mcpAutoStart: !settings.mcpAutoStart });
   }
 
-  const zoomLabel = $derived(`${Math.round(settings.zoom * 100)}%`)
+  function openModelConfiguration() {
+    open = false;
+    onopenmodelconfiguration();
+  }
+
+  const zoomLabel = $derived(`${Math.round(settings.zoom * 100)}%`);
 </script>
 
 <Dialog.Root bind:open onOpenChange={handleOpenChange}>
   <Dialog.Content class="gap-0 overflow-hidden p-0 sm:max-w-[22rem]">
     <Dialog.Header class="space-y-1 px-5 pt-5 pb-1">
-      <Dialog.Title class="text-sm font-semibold tracking-tight">Settings</Dialog.Title>
+      <Dialog.Title class="text-sm font-semibold tracking-tight"
+        >Settings</Dialog.Title
+      >
       <Dialog.Description class="text-xs text-muted-foreground">
         Appearance and integrations
       </Dialog.Description>
@@ -83,7 +92,10 @@
             type="single"
             value={$appThemeId}
             onValueChange={(v) => {
-              if (v) setTheme(/** @type {import('$lib/themes/registry.js').ThemeId} */ (v))
+              if (v)
+                setTheme(
+                  /** @type {import('$lib/themes/registry.js').ThemeId} */ (v),
+                );
             }}
           >
             <Select.Trigger
@@ -121,10 +133,17 @@
                     >
                       {#snippet children()}
                         <span class="flex min-w-0 items-center gap-2">
-                          <ThemeSwatch bg={theme.preview.bg} accent={theme.preview.accent} />
+                          <ThemeSwatch
+                            bg={theme.preview.bg}
+                            accent={theme.preview.accent}
+                          />
                           <span class="min-w-0">
-                            <span class="block truncate text-xs font-medium">{theme.name}</span>
-                            <span class="block truncate text-[10px] text-muted-foreground">
+                            <span class="block truncate text-xs font-medium"
+                              >{theme.name}</span
+                            >
+                            <span
+                              class="block truncate text-[10px] text-muted-foreground"
+                            >
                               {theme.description}
                             </span>
                           </span>
@@ -177,7 +196,9 @@
         <div class="flex items-center justify-between gap-3 px-3 py-2.5">
           <div class="min-w-0">
             <p class="text-xs text-muted-foreground">MCP auto-start</p>
-            <p class="text-[10px] text-muted-foreground/80">On database connect</p>
+            <p class="text-[10px] text-muted-foreground/80">
+              On database connect
+            </p>
           </div>
           <button
             type="button"
@@ -185,15 +206,15 @@
             aria-label="Toggle MCP auto-start"
             aria-checked={settings.mcpAutoStart}
             class={cn(
-              'relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors',
-              settings.mcpAutoStart ? 'bg-foreground' : 'bg-muted',
+              "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors",
+              settings.mcpAutoStart ? "bg-foreground" : "bg-muted",
             )}
             onclick={toggleMcpAutoStart}
           >
             <span
               class={cn(
-                'pointer-events-none block size-4 rounded-full bg-background shadow-sm transition-transform',
-                settings.mcpAutoStart ? 'translate-x-4' : 'translate-x-0.5',
+                "pointer-events-none block size-4 rounded-full bg-background shadow-sm transition-transform",
+                settings.mcpAutoStart ? "translate-x-4" : "translate-x-0.5",
               )}
             ></span>
           </button>
@@ -203,16 +224,34 @@
           type="button"
           class="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
           onclick={() => {
-            open = false
-            onopenmcp()
+            open = false;
+            onopenmcp();
           }}
         >
           <span>MCP configuration</span>
           <ChevronRight class="size-3.5 shrink-0 opacity-60" />
         </button>
+        <button
+          type="button"
+          class="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+          onclick={openModelConfiguration}
+        >
+          <span>Model Configuration</span>
+          <ChevronRight class="size-3.5 shrink-0 opacity-60" />
+        </button>
+        <button
+          type="button"
+          class="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+          onclick={() => { open = false; onopenabout() }}
+        >
+          <span>About DB Studio</span>
+          <ChevronRight class="size-3.5 shrink-0 opacity-60" />
+        </button>
       </div>
 
-      <p class="mt-3 px-0.5 text-[10px] leading-relaxed text-muted-foreground/80">
+      <p
+        class="mt-3 px-0.5 text-[10px] leading-relaxed text-muted-foreground/80"
+      >
         ⌘M cycle theme · ⌘⇧M previous theme · ⌘+ / ⌘− zoom · ⌘0 reset
       </p>
     </div>

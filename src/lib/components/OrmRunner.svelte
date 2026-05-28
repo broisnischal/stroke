@@ -1,127 +1,149 @@
 <script>
-  import { onMount } from 'svelte'
-  import * as monaco from 'monaco-editor'
-  import { configureMonacoWorkers } from '$lib/monaco-env.js'
-  import { defineDbStudioMonacoThemes, monacoThemeId, readEditorFontOptions } from '$lib/monaco-themes.js'
-  import { normalizeThemeId } from '$lib/themes/registry.js'
-  import Play from '@lucide/svelte/icons/play'
-  import Code2 from '@lucide/svelte/icons/code-2'
-  import Copy from '@lucide/svelte/icons/copy'
-  import ChevronDown from '@lucide/svelte/icons/chevron-down'
-  import ChevronRight from '@lucide/svelte/icons/chevron-right'
-  import CheckCheck from '@lucide/svelte/icons/check-check'
-  import Loader2 from '@lucide/svelte/icons/loader-2'
-  import Table2 from '@lucide/svelte/icons/table-2'
-  import Braces from '@lucide/svelte/icons/braces'
-  import { Button } from '$lib/components/ui/button/index.js'
-  import DataTable from './DataTable.svelte'
-  import DataTableSkeleton from './DataTableSkeleton.svelte'
-  import JsonViewer from './JsonViewer.svelte'
-  import ResizeHandle from './ResizeHandle.svelte'
-  import { cn } from '$lib/utils.js'
-  import { evalDrizzleQuery, evalPrismaQuery } from '$lib/orm-builder.js'
-  import { clampSqlEditorHeight, loadLayout, saveLayout } from '$lib/stores/layout.js'
+  import { onMount } from "svelte";
+  import * as monaco from "monaco-editor";
+  import { configureMonacoWorkers } from "$lib/monaco-env.js";
+  import {
+    defineDbStudioMonacoThemes,
+    monacoThemeId,
+    readEditorFontOptions,
+  } from "$lib/monaco-themes.js";
+  import { normalizeThemeId } from "$lib/themes/registry.js";
+  import Play from "@lucide/svelte/icons/play";
+  import Code2 from "@lucide/svelte/icons/code-2";
+  import Copy from "@lucide/svelte/icons/copy";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import CheckCheck from "@lucide/svelte/icons/check-check";
+  import Loader2 from "@lucide/svelte/icons/loader-2";
+  import Table2 from "@lucide/svelte/icons/table-2";
+  import Braces from "@lucide/svelte/icons/braces";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import DataTable from "./DataTable.svelte";
+  import DataTableSkeleton from "./DataTableSkeleton.svelte";
+  import JsonViewer from "./JsonViewer.svelte";
+  import ResizeHandle from "./ResizeHandle.svelte";
+  import { cn } from "$lib/utils.js";
+  import { evalDrizzleQuery, evalPrismaQuery } from "$lib/orm-builder.js";
+  import {
+    clampSqlEditorHeight,
+    loadLayout,
+    saveLayout,
+  } from "$lib/stores/layout.js";
 
   /** @typedef {import('$lib/monaco-sql-complete.js').SqlSchemaHints} SqlSchemaHints */
 
   let {
-    code = $bindable(''),
-    mode = $bindable(/** @type {'drizzle' | 'prisma'} */ ('drizzle')),
+    code = $bindable(""),
+    mode = $bindable(/** @type {'drizzle' | 'prisma'} */ ("drizzle")),
     columns = [],
     rows = [],
     loading = false,
-    error = '',
+    error = "",
     queryMs = 0,
     schemaHints = /** @type {SqlSchemaHints} */ ({}),
-    onrun = /** @type {(detail: { sql: string, mode: string }) => void} */ (() => {}),
-  } = $props()
+    onrun = /** @type {(detail: { sql: string, mode: string }) => void} */ (
+      () => {}
+    ),
+  } = $props();
 
   /** @type {HTMLElement | null} */
-  let container = $state(null)
+  let container = $state(null);
   /** @type {HTMLElement | null} */
-  let consoleEl = $state(null)
+  let consoleEl = $state(null);
   /** @type {monaco.editor.IStandaloneCodeEditor | null} */
-  let editor = null
+  let editor = null;
 
-  const initialLayout = loadLayout()
-  let editorHeight = $state(initialLayout.sqlEditorHeight)
-  let resizeStartHeight = initialLayout.sqlEditorHeight
+  const initialLayout = loadLayout();
+  let editorHeight = $state(initialLayout.sqlEditorHeight);
+  let resizeStartHeight = initialLayout.sqlEditorHeight;
 
-  let generatedSql = $state('')
-  let sqlPreviewOpen = $state(true)
-  let parseError = $state('')
+  let generatedSql = $state("");
+  let sqlPreviewOpen = $state(true);
+  let parseError = $state("");
 
   /** @type {'table' | 'json'} */
-  let outputView = $state('table')
+  let outputView = $state("table");
 
-  let copied = $state(/** @type {'sql' | 'code' | 'json' | 'error' | 'parse' | null} */ (null))
+  let copied = $state(
+    /** @type {'sql' | 'code' | 'json' | 'error' | 'parse' | null} */ (null),
+  );
   /** @type {ReturnType<typeof setTimeout> | null} */
-  let copiedTimer = null
+  let copiedTimer = null;
 
   /** Per-mode code storage so switching modes doesn't wipe user code. */
   /** @type {{ drizzle: string; prisma: string }} */
-  const codeByMode = { drizzle: '', prisma: '' }
+  const codeByMode = { drizzle: "", prisma: "" };
 
   /** @param {string} text @param {'sql' | 'code' | 'json' | 'error' | 'parse'} kind */
   function copyWithFeedback(text, kind) {
-    if (!text.trim()) return
+    if (!text.trim()) return;
     navigator.clipboard.writeText(text).then(() => {
-      copied = kind
-      if (copiedTimer) clearTimeout(copiedTimer)
-      copiedTimer = setTimeout(() => { copied = null }, 2000)
-    })
+      copied = kind;
+      if (copiedTimer) clearTimeout(copiedTimer);
+      copiedTimer = setTimeout(() => {
+        copied = null;
+      }, 2000);
+    });
   }
 
   /** @param {number} height */
   function clampEditorHeight(height) {
-    return clampSqlEditorHeight(height, consoleEl?.clientHeight ?? 0)
+    return clampSqlEditorHeight(height, consoleEl?.clientHeight ?? 0);
   }
 
   function currentTheme() {
-    return normalizeThemeId(document.documentElement.dataset.theme)
+    return normalizeThemeId(document.documentElement.dataset.theme);
   }
 
   /** @param {'drizzle' | 'prisma'} newMode */
   function switchMode(newMode) {
-    if (newMode === mode) return
-    codeByMode[mode] = code
-    mode = newMode
-    code = codeByMode[newMode]
+    if (newMode === mode) return;
+    codeByMode[mode] = code;
+    mode = newMode;
+    code = codeByMode[newMode];
     // If code is empty, the defaultCode $effect will fill it in
   }
 
   /** @param {monaco.editor.IStandaloneCodeEditor} ed */
   function registerShortcuts(ed) {
-    ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => void handleRun())
+    ed.addCommand(
+      monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
+      () => void handleRun(),
+    );
     ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-      ed.getAction('editor.action.formatDocument')?.run()
-    })
+      ed.getAction("editor.action.formatDocument")?.run();
+    });
   }
 
   // ── Valid JS identifier table names only ──────────────────────────────────
   /** @param {string} name */
   function isValidIdentifier(name) {
-    return /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(name)
+    return /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(name);
   }
 
   function getTableNames() {
     /** @type {string[]} */
-    let names = []
-    const hints = /** @type {any} */ (schemaHints)
+    let names = [];
+    const hints = /** @type {any} */ (schemaHints);
     if (hints?.tables && Array.isArray(hints.tables)) {
-      names = hints.tables
-    } else if (hints?.columnsByTable && typeof hints.columnsByTable === 'object') {
-      names = Object.keys(hints.columnsByTable).filter((k) => !k.startsWith('__') && !k.includes('.'))
+      names = hints.tables;
+    } else if (
+      hints?.columnsByTable &&
+      typeof hints.columnsByTable === "object"
+    ) {
+      names = Object.keys(hints.columnsByTable).filter(
+        (k) => !k.startsWith("__") && !k.includes("."),
+      );
     }
-    return names.filter(isValidIdentifier)
+    return names.filter(isValidIdentifier);
   }
 
   function defaultCode() {
-    const tables = getTableNames()
-    const t = tables[0] ?? 'tableName'
-    return mode === 'prisma'
+    const tables = getTableNames();
+    const t = tables[0] ?? "tableName";
+    return mode === "prisma"
       ? `prisma.${t}.findMany({ take: 10 })`
-      : `db.select().from(${t}).limit(10)`
+      : `db.select().from(${t}).limit(10)`;
   }
 
   // ── JSON output ───────────────────────────────────────────────────────────
@@ -129,15 +151,18 @@
     columns.length > 0 && rows.length > 0
       ? rows.map((row) =>
           Object.fromEntries(
-            /** @type {any[]} */ (columns).map((col, i) => [col.name ?? col, /** @type {any[]} */ (row)[i]])
-          )
+            /** @type {any[]} */ (columns).map((col, i) => [
+              col.name ?? col,
+              /** @type {any[]} */ (row)[i],
+            ]),
+          ),
         )
-      : []
-  )
+      : [],
+  );
 
   const jsonText = $derived(
-    rowObjects.length > 0 ? JSON.stringify(rowObjects, null, 2) : '[]'
-  )
+    rowObjects.length > 0 ? JSON.stringify(rowObjects, null, 2) : "[]",
+  );
 
   // ── Monaco type declarations ──────────────────────────────────────────────
 
@@ -195,17 +220,19 @@
       `declare function asc(col: DbCol | string): OrderSpec;`,
       `declare function desc(col: DbCol | string): OrderSpec;`,
       `declare function sql(strings: TemplateStringsArray | string, ...vals: any[]): SqlCond;`,
-    ]
+    ];
     for (const name of tableNames) {
-      if (!isValidIdentifier(name)) continue
-      const cols = /** @type {string[]} */ (columnsByTable?.[name] ?? [])
+      if (!isValidIdentifier(name)) continue;
+      const cols = /** @type {string[]} */ (columnsByTable?.[name] ?? []);
       if (cols.length > 0) {
-        lines.push(`declare const ${name}: { ${cols.map((c) => `${c}: DbCol`).join('; ')}; [col: string]: DbCol; };`)
+        lines.push(
+          `declare const ${name}: { ${cols.map((c) => `${c}: DbCol`).join("; ")}; [col: string]: DbCol; };`,
+        );
       } else {
-        lines.push(`declare const ${name}: Record<string, DbCol>;`)
+        lines.push(`declare const ${name}: Record<string, DbCol>;`);
       }
     }
-    return lines.join('\n')
+    return lines.join("\n");
   }
 
   function buildPrismaTypes(tableNames) {
@@ -223,107 +250,125 @@
       `  count(args?: { where?: WhereClause }): QueryResult;`,
       `  upsert(args: { create: Record<string, any>; update: Record<string, any>; where?: WhereClause }): QueryResult;`,
       `}`,
-    ]
+    ];
     if (tableNames.length > 0) {
-      lines.push(`declare const prisma: {`)
+      lines.push(`declare const prisma: {`);
       for (const name of tableNames) {
-        if (isValidIdentifier(name)) lines.push(`  ${name}: PrismaModel;`)
+        if (isValidIdentifier(name)) lines.push(`  ${name}: PrismaModel;`);
       }
-      lines.push(`  [model: string]: PrismaModel;`)
-      lines.push(`};`)
+      lines.push(`  [model: string]: PrismaModel;`);
+      lines.push(`};`);
     } else {
-      lines.push(`declare const prisma: { [model: string]: PrismaModel; };`)
+      lines.push(`declare const prisma: { [model: string]: PrismaModel; };`);
     }
-    return lines.join('\n')
+    return lines.join("\n");
   }
 
   function updateMonacoTypes() {
-    const tableNames = getTableNames()
-    const columnsByTable = /** @type {any} */ (schemaHints)?.columnsByTable ?? {}
-    const dts = mode === 'drizzle'
-      ? buildDrizzleTypes(tableNames, columnsByTable)
-      : buildPrismaTypes(tableNames)
+    const tableNames = getTableNames();
+    const columnsByTable =
+      /** @type {any} */ (schemaHints)?.columnsByTable ?? {};
+    const dts =
+      mode === "drizzle"
+        ? buildDrizzleTypes(tableNames, columnsByTable)
+        : buildPrismaTypes(tableNames);
     try {
       monaco.languages.typescript.javascriptDefaults.setExtraLibs([
-        { content: dts, filePath: 'ts:orm-defs.d.ts' },
-      ])
-    } catch { /* monaco not ready */ }
+        { content: dts, filePath: "ts:orm-defs.d.ts" },
+      ]);
+    } catch {
+      /* monaco not ready */
+    }
   }
 
   // ── Parse / run ────────────────────────────────────────────────────────────
 
   function parseQuery() {
-    const tableNames = getTableNames()
-    const trimmed = code.trim()
-    if (!trimmed) { parseError = ''; generatedSql = ''; return null }
+    const tableNames = getTableNames();
+    const trimmed = code.trim();
+    if (!trimmed) {
+      parseError = "";
+      generatedSql = "";
+      return null;
+    }
     try {
-      const result = mode === 'drizzle'
-        ? evalDrizzleQuery(trimmed, tableNames)
-        : evalPrismaQuery(trimmed, tableNames)
-      parseError = ''
-      generatedSql = result.sql
-      return result
+      const result =
+        mode === "drizzle"
+          ? evalDrizzleQuery(trimmed, tableNames)
+          : evalPrismaQuery(trimmed, tableNames);
+      parseError = "";
+      generatedSql = result.sql;
+      return result;
     } catch (/** @type {any} */ e) {
-      parseError = e instanceof Error ? e.message : String(e)
-      generatedSql = ''
-      return null
+      parseError = e instanceof Error ? e.message : String(e);
+      generatedSql = "";
+      return null;
     }
   }
 
   // Live SQL preview on every code/mode change
   $effect(() => {
-    void code; void mode
-    parseQuery()
-  })
+    void code;
+    void mode;
+    parseQuery();
+  });
 
   async function handleRun() {
-    const result = parseQuery()
-    if (!result) return
-    onrun({ sql: result.sql, mode })
+    const result = parseQuery();
+    if (!result) return;
+    onrun({ sql: result.sql, mode });
   }
 
   function handleCopySql() {
-    const result = parseQuery()
-    if (!result) return
-    copyWithFeedback(result.sql, 'sql')
+    const result = parseQuery();
+    if (!result) return;
+    copyWithFeedback(result.sql, "sql");
   }
 
   function handleCopyCode() {
-    copyWithFeedback(code, 'code')
+    copyWithFeedback(code, "code");
   }
 
   function handleCopyError() {
-    copyWithFeedback(error, 'error')
+    copyWithFeedback(error, "error");
   }
 
   function handleCopyParseError() {
-    copyWithFeedback(parseError, 'parse')
+    copyWithFeedback(parseError, "parse");
   }
 
   function copyJson() {
-    copyWithFeedback(jsonText, 'json')
+    copyWithFeedback(jsonText, "json");
   }
 
-  $effect(() => { void schemaHints; void mode; updateMonacoTypes() })
-  $effect(() => { codeByMode[mode] = code })
+  $effect(() => {
+    void schemaHints;
+    void mode;
+    updateMonacoTypes();
+  });
+  $effect(() => {
+    codeByMode[mode] = code;
+  });
 
   $effect(() => {
-    void mode
+    void mode;
     if (!code.trim()) {
-      const next = defaultCode()
-      code = next
-      if (editor && editor.getValue() !== next) editor.setValue(next)
+      const next = defaultCode();
+      code = next;
+      if (editor && editor.getValue() !== next) editor.setValue(next);
     }
-  })
+  });
 
-  const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().includes('MAC')
-  const mod = isMac ? '⌘' : 'Ctrl'
+  const isMac =
+    typeof navigator !== "undefined" &&
+    navigator.platform.toUpperCase().includes("MAC");
+  const mod = isMac ? "⌘" : "Ctrl";
 
   onMount(() => {
-    configureMonacoWorkers()
-    defineDbStudioMonacoThemes()
+    configureMonacoWorkers();
+    defineDbStudioMonacoThemes();
 
-    if (!code.trim()) code = defaultCode()
+    if (!code.trim()) code = defaultCode();
 
     monaco.languages.typescript.javascriptDefaults.setCompilerOptions({
       target: monaco.languages.typescript.ScriptTarget.ES2020,
@@ -331,19 +376,19 @@
       noLib: false,
       allowJs: true,
       checkJs: false,
-    })
+    });
     monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions({
       noSemanticValidation: true,
       noSyntaxValidation: false,
-    })
-    updateMonacoTypes()
+    });
+    updateMonacoTypes();
 
-    if (!container) return
-    const { fontSize, lineHeight } = readEditorFontOptions()
+    if (!container) return;
+    const { fontSize, lineHeight } = readEditorFontOptions();
 
     editor = monaco.editor.create(container, {
       value: code,
-      language: 'javascript',
+      language: "javascript",
       theme: monacoThemeId(currentTheme()),
       automaticLayout: true,
       minimap: { enabled: false },
@@ -351,12 +396,12 @@
       fontSize,
       lineHeight,
       fontLigatures: false,
-      fontWeight: 'normal',
+      fontWeight: "normal",
       padding: { top: 12, bottom: 12 },
       scrollBeyondLastLine: false,
-      wordWrap: 'on',
-      renderLineHighlight: 'line',
-      lineNumbers: 'on',
+      wordWrap: "on",
+      renderLineHighlight: "line",
+      lineNumbers: "on",
       lineNumbersMinChars: 3,
       glyphMargin: false,
       folding: false,
@@ -364,44 +409,52 @@
       overviewRulerLanes: 0,
       hideCursorInOverviewRuler: true,
       overviewRulerBorder: false,
-      cursorBlinking: 'smooth',
-      cursorSmoothCaretAnimation: 'on',
+      cursorBlinking: "smooth",
+      cursorSmoothCaretAnimation: "on",
       smoothScrolling: true,
       bracketPairColorization: { enabled: true },
       suggest: { showWords: false },
-    })
+    });
 
-    registerShortcuts(editor)
+    registerShortcuts(editor);
     editor.onDidChangeModelContent(() => {
-      const next = editor?.getValue() ?? ''
-      if (next !== code) code = next
-    })
+      const next = editor?.getValue() ?? "";
+      if (next !== code) code = next;
+    });
 
     const themeObs = new MutationObserver(() => {
-      monaco.editor.setTheme(monacoThemeId(currentTheme()))
-    })
-    themeObs.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-theme'] })
+      monaco.editor.setTheme(monacoThemeId(currentTheme()));
+    });
+    themeObs.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "data-theme"],
+    });
 
-    return () => { editor?.dispose(); editor = null; themeObs.disconnect() }
-  })
+    return () => {
+      editor?.dispose();
+      editor = null;
+      themeObs.disconnect();
+    };
+  });
 
   $effect(() => {
-    if (!editor) return
-    if (editor.getValue() !== code) editor.setValue(code)
-  })
+    if (!editor) return;
+    if (editor.getValue() !== code) editor.setValue(code);
+  });
 </script>
 
 <div bind:this={consoleEl} class="flex min-h-0 flex-1 flex-col overflow-hidden">
-
   <!-- ── Toolbar ─────────────────────────────────────────────────────────── -->
   <div
     class="studio-chrome flex h-9 shrink-0 items-center gap-3 border-b border-border bg-panel px-3"
     data-studio-chrome
   >
-
     <!-- ORM mode -->
     <div class="flex h-7 shrink-0 items-center gap-2">
-      <Code2 class="size-3.5 shrink-0 text-muted-foreground/60" aria-hidden="true" />
+      <Code2
+        class="size-3.5 shrink-0 text-muted-foreground/60"
+        aria-hidden="true"
+      />
       <div
         role="tablist"
         aria-label="ORM"
@@ -410,30 +463,30 @@
         <button
           type="button"
           role="tab"
-          aria-selected={mode === 'drizzle'}
+          aria-selected={mode === "drizzle"}
           class={cn(
-            'inline-flex h-6 items-center rounded-[5px] px-2.5 font-mono text-ui-xs font-medium transition-all',
-            mode === 'drizzle'
-              ? 'bg-card text-foreground shadow-sm ring-1 ring-border/50'
-              : 'text-muted-foreground hover:text-foreground',
+            "inline-flex h-6 items-center rounded-[5px] px-2.5 font-mono text-ui-xs font-medium transition-all",
+            mode === "drizzle"
+              ? "bg-card text-foreground shadow-sm ring-1 ring-border/50"
+              : "text-muted-foreground hover:text-foreground",
           )}
-          onclick={() => switchMode('drizzle')}
+          onclick={() => switchMode("drizzle")}
         >
-          Drizzle
+          drizzle
         </button>
         <button
           type="button"
           role="tab"
-          aria-selected={mode === 'prisma'}
+          aria-selected={mode === "prisma"}
           class={cn(
-            'inline-flex h-6 items-center rounded-[5px] px-2.5 font-mono text-ui-xs font-medium transition-all',
-            mode === 'prisma'
-              ? 'bg-card text-foreground shadow-sm ring-1 ring-border/50'
-              : 'text-muted-foreground hover:text-foreground',
+            "inline-flex h-6 items-center rounded-[5px] px-2.5 font-mono text-ui-xs font-medium transition-all",
+            mode === "prisma"
+              ? "bg-card text-foreground shadow-sm ring-1 ring-border/50"
+              : "text-muted-foreground hover:text-foreground",
           )}
-          onclick={() => switchMode('prisma')}
+          onclick={() => switchMode("prisma")}
         >
-          Prisma
+          prisma
         </button>
       </div>
     </div>
@@ -462,7 +515,7 @@
       class="h-7 shrink-0 px-2.5 font-mono text-ui-xs text-muted-foreground hover:text-foreground"
       disabled={!code.trim()}
       title={`Format code (${mod}S)`}
-      onclick={() => editor?.getAction('editor.action.formatDocument')?.run()}
+      onclick={() => editor?.getAction("editor.action.formatDocument")?.run()}
     >
       Format
     </Button>
@@ -483,14 +536,19 @@
         title="Copy generated SQL"
         onclick={handleCopySql}
       >
-        {#if copied === 'sql'}
+        {#if copied === "sql"}
           <CheckCheck class="size-3.5 shrink-0 text-green-500" />
         {:else}
           <Copy class="size-3.5 shrink-0" />
         {/if}
-        <span class="text-ui-xs">{copied === 'sql' ? 'Copied!' : 'Copy SQL'}</span>
+        <span class="text-ui-xs"
+          >{copied === "sql" ? "Copied!" : "Copy SQL"}</span
+        >
       </Button>
-      <div class="mx-0.5 h-3.5 w-px shrink-0 bg-border/70" aria-hidden="true"></div>
+      <div
+        class="mx-0.5 h-3.5 w-px shrink-0 bg-border/70"
+        aria-hidden="true"
+      ></div>
       <Button
         type="button"
         variant="ghost"
@@ -500,18 +558,22 @@
         title="Copy ORM code"
         onclick={handleCopyCode}
       >
-        {#if copied === 'code'}
+        {#if copied === "code"}
           <CheckCheck class="size-3.5 shrink-0 text-green-500" />
         {:else}
           <Copy class="size-3.5 shrink-0" />
         {/if}
-        <span class="text-ui-xs">{copied === 'code' ? 'Copied!' : 'Copy Code'}</span>
+        <span class="text-ui-xs"
+          >{copied === "code" ? "Copied!" : "Copy Code"}</span
+        >
       </Button>
     </div>
 
     <div class="ml-auto flex items-center gap-2">
       {#if queryMs > 0}
-        <span class="shrink-0 rounded-md bg-muted/40 px-1.5 py-0.5 font-mono text-ui-2xs tabular-nums text-muted-foreground ring-1 ring-inset ring-border/40">
+        <span
+          class="shrink-0 rounded-md bg-muted/40 px-1.5 py-0.5 font-mono text-ui-2xs tabular-nums text-muted-foreground ring-1 ring-inset ring-border/40"
+        >
           {queryMs}ms
         </span>
       {/if}
@@ -523,26 +585,37 @@
     class="relative shrink-0 overflow-hidden border-b border-border bg-panel"
     style="height: {editorHeight}px"
   >
-    <div bind:this={container} class="absolute inset-0 h-full w-full overflow-hidden"></div>
+    <div
+      bind:this={container}
+      class="absolute inset-0 h-full w-full overflow-hidden"
+    ></div>
   </div>
 
   <!-- Parse error — inline below editor -->
   {#if parseError}
-    <div class="group/console-error shrink-0 border-b border-destructive/20 bg-destructive/5 px-3 py-2">
+    <div
+      class="group/console-error shrink-0 border-b border-destructive/20 bg-destructive/5 px-3 py-2"
+    >
       <div class="flex items-start gap-2">
-        <p class="min-w-0 flex-1 font-mono text-ui-xs leading-relaxed text-destructive">{parseError}</p>
+        <p
+          class="min-w-0 flex-1 font-mono text-ui-xs leading-relaxed text-destructive"
+        >
+          {parseError}
+        </p>
         <button
           type="button"
           class="inline-flex h-6 shrink-0 items-center gap-1 rounded px-1.5 text-ui-2xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
           title="Copy error"
           onclick={handleCopyParseError}
         >
-          {#if copied === 'parse'}
-            <CheckCheck class="size-3 shrink-0 text-green-600 dark:text-green-500" />
+          {#if copied === "parse"}
+            <CheckCheck
+              class="size-3 shrink-0 text-green-600 dark:text-green-500"
+            />
           {:else}
             <Copy class="size-3 shrink-0" />
           {/if}
-          <span>{copied === 'parse' ? 'Copied' : 'Copy'}</span>
+          <span>{copied === "parse" ? "Copied" : "Copy"}</span>
         </button>
       </div>
     </div>
@@ -552,9 +625,16 @@
   <ResizeHandle
     axis="y"
     edge="end"
-    onresizestart={() => { resizeStartHeight = editorHeight }}
-    onresize={(dy) => { editorHeight = clampEditorHeight(resizeStartHeight + dy) }}
-    onresizeend={() => { resizeStartHeight = editorHeight; saveLayout({ sqlEditorHeight: editorHeight }) }}
+    onresizestart={() => {
+      resizeStartHeight = editorHeight;
+    }}
+    onresize={(dy) => {
+      editorHeight = clampEditorHeight(resizeStartHeight + dy);
+    }}
+    onresizeend={() => {
+      resizeStartHeight = editorHeight;
+      saveLayout({ sqlEditorHeight: editorHeight });
+    }}
   />
 
   <!-- ── Generated SQL preview ─────────────────────────────────────────── -->
@@ -564,17 +644,31 @@
       class="flex w-full items-center gap-1.5 px-3 py-1.5 text-left transition-colors hover:bg-muted/30"
       onclick={() => (sqlPreviewOpen = !sqlPreviewOpen)}
     >
-      <ChevronDown class={cn('size-3 shrink-0 text-muted-foreground/50 transition-transform duration-150', !sqlPreviewOpen && '-rotate-90')} />
-      <span class="font-mono text-ui-2xs font-medium tracking-wide text-muted-foreground/70 uppercase">Generated SQL</span>
+      <ChevronDown
+        class={cn(
+          "size-3 shrink-0 text-muted-foreground/50 transition-transform duration-150",
+          !sqlPreviewOpen && "-rotate-90",
+        )}
+      />
+      <span
+        class="font-mono text-ui-2xs font-medium tracking-wide text-muted-foreground/70 uppercase"
+        >Generated SQL</span
+      >
       {#if generatedSql && !sqlPreviewOpen}
-        <span class="ml-2 min-w-0 flex-1 truncate font-mono text-ui-2xs text-muted-foreground/40">{generatedSql}</span>
+        <span
+          class="ml-2 min-w-0 flex-1 truncate font-mono text-ui-2xs text-muted-foreground/40"
+          >{generatedSql}</span
+        >
       {:else if !generatedSql && !parseError}
-        <span class="ml-2 font-mono text-ui-2xs text-muted-foreground/30">type a query to preview</span>
+        <span class="ml-2 font-mono text-ui-2xs text-muted-foreground/30"
+          >type a query to preview</span
+        >
       {/if}
     </button>
     {#if sqlPreviewOpen && generatedSql}
       <div class="px-3 pb-2">
-        <pre class="overflow-x-auto rounded border border-border/60 bg-muted/30 px-3 py-2 font-mono text-ui-xs leading-relaxed text-foreground/80">{generatedSql}</pre>
+        <pre
+          class="overflow-x-auto rounded border border-border/60 bg-muted/30 px-3 py-2 font-mono text-ui-xs leading-relaxed text-foreground/80">{generatedSql}</pre>
       </div>
     {/if}
   </div>
@@ -584,13 +678,21 @@
     {#if loading}
       <DataTableSkeleton columnCount={6} rowCount={10} />
     {:else if columns.length > 0}
-      {#if outputView === 'table'}
-        <DataTable {columns} {rows} {loading} primaryKey={[]} foreignKeys={[]} />
+      {#if outputView === "table"}
+        <DataTable
+          {columns}
+          {rows}
+          {loading}
+          primaryKey={[]}
+          foreignKeys={[]}
+        />
         <!-- JSON toggle overlay — top right, matching JsonViewer toolbar style -->
-        <div class="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-end p-2">
+        <div
+          class="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-end p-2"
+        >
           <button
             type="button"
-            onclick={() => (outputView = 'json')}
+            onclick={() => (outputView = "json")}
             class="pointer-events-auto inline-flex items-center gap-1.5 rounded-md border border-border/50 bg-background/85 px-2 py-1 font-mono text-ui-2xs text-muted-foreground shadow-md backdrop-blur-sm transition-colors hover:text-foreground"
           >
             <Braces class="size-3 shrink-0" />
@@ -598,33 +700,48 @@
           </button>
         </div>
       {:else}
-        <JsonViewer json={jsonText} rowCount={rows.length} onshowtable={() => (outputView = 'table')} />
+        <JsonViewer
+          json={jsonText}
+          rowCount={rows.length}
+          onshowtable={() => (outputView = "table")}
+        />
       {/if}
     {:else if error}
-      <div class="group/console-error min-h-0 flex-1 overflow-auto border-t border-destructive/15 bg-destructive/[0.03]">
+      <div
+        class="group/console-error min-h-0 flex-1 overflow-auto border-t border-destructive/15 bg-destructive/[0.03]"
+      >
         <div class="flex items-start gap-2 px-3 py-2.5">
-          <pre class="min-w-0 flex-1 whitespace-pre-wrap font-mono text-ui-xs leading-relaxed text-destructive">{error}</pre>
+          <pre
+            class="min-w-0 flex-1 whitespace-pre-wrap font-mono text-ui-xs leading-relaxed text-destructive">{error}</pre>
           <button
             type="button"
             class="inline-flex h-6 shrink-0 items-center gap-1 rounded px-1.5 text-ui-2xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
             title="Copy error"
             onclick={handleCopyError}
           >
-            {#if copied === 'error'}
-              <CheckCheck class="size-3 shrink-0 text-green-600 dark:text-green-500" />
+            {#if copied === "error"}
+              <CheckCheck
+                class="size-3 shrink-0 text-green-600 dark:text-green-500"
+              />
             {:else}
               <Copy class="size-3 shrink-0" />
             {/if}
-            <span>{copied === 'error' ? 'Copied' : 'Copy'}</span>
+            <span>{copied === "error" ? "Copied" : "Copy"}</span>
           </button>
         </div>
       </div>
     {:else}
-      <div class="flex h-full flex-col items-center justify-center gap-2 text-center">
+      <div
+        class="flex h-full flex-col items-center justify-center gap-2 text-center"
+      >
         <Play class="size-6 text-muted-foreground/20" />
-        <p class="font-mono text-ui-sm text-muted-foreground/50">Run a query to see results</p>
+        <p class="font-mono text-ui-sm text-muted-foreground/50">
+          Run a query to see results
+        </p>
         <p class="font-mono text-ui-xs text-muted-foreground/30">
-          {mode === 'drizzle' ? `db.select().from(users).limit(10)` : `prisma.users.findMany({ take: 10 })`}
+          {mode === "drizzle"
+            ? `db.select().from(users).limit(10)`
+            : `prisma.users.findMany({ take: 10 })`}
         </p>
       </div>
     {/if}

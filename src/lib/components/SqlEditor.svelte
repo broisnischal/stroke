@@ -24,6 +24,8 @@
     onmodenter = undefined,
     onmodr = undefined,
     onmods = undefined,
+    /** @param {string} content */
+    onchange = undefined,
     /** @type {(actions: { format: () => Promise<void> }) => void} */
     onactionsready = undefined,
   } = $props()
@@ -112,7 +114,10 @@
 
     editor.onDidChangeModelContent(() => {
       const next = editor?.getValue() ?? ''
-      if (next !== value) value = next
+      if (next !== value) {
+        value = next
+        onchange?.(next)
+      }
     })
 
     // Watch <html class="dark"> changes — reliable regardless of mode-watcher internals

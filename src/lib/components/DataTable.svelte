@@ -98,6 +98,10 @@
     indexes = [],
     /** Column names pinned to the left. Bindable so the parent can persist. */
     pinnedColumns = $bindable(/** @type {Set<string>} */ (new Set())),
+    /** Active sort. null = unsorted. */
+    rowSort = /** @type {{ column: string, direction: 'asc' | 'desc' } | null} */ (null),
+    /** Called when user clicks a column header to sort. */
+    onsortchange = /** @type {(sort: { column: string, direction: 'asc' | 'desc' } | null) => void} */ (() => {}),
   } = $props();
 
   /** @type {HTMLInputElement | HTMLSelectElement | HTMLButtonElement | null} */
@@ -145,9 +149,16 @@
   let collapsedColumns = $state(/** @type {Set<string>} */ (new Set()))
 
   // ── Virtual scroll ────────────────────────────────────────────────────────
-  const VIRTUAL_THRESHOLD = 500
-  const ROW_HEIGHT = 28
-  const OVERSCAN = 15
+  // Threshold lowered so 100+ row tables get virtualization instead of full DOM render.
+  // ROW_HEIGHT matches actual rendered height: text-ui-sm (~14.77px) × line-height 1.25
+  // = ~18.5px content + 4px py-0.5 padding = ~23px; 24 gives a safe 1px margin.
+  // OVERSCAN at 10 pre-renders ~240px outside the viewport on each side — enough
+  // buffer for fast scrolling without keeping hundreds of offscreen rows alive.
+  const VIRTUAL_THRESHOLD = 100
+  // Row height: gutter-inner has min-height 1.75rem; at --app-font-size:14px that is
+  // 1.75 × 14 = 24.5px → 25px rendered. Add 1px for subpixel headroom → 26.
+  const ROW_HEIGHT = 26
+  const OVERSCAN = 10
   let _scrollTop = $state(0)
   let _viewportHeight = $state(600)
 
@@ -867,6 +878,17 @@
     collapsedColumns = next
   }
 
+  /** Cycle sort: none → asc → desc → none */
+  function handleHeaderSort(colName) {
+    if (rowSort?.column !== colName) {
+      onsortchange({ column: colName, direction: 'desc' })
+    } else if (rowSort.direction === 'desc') {
+      onsortchange({ column: colName, direction: 'asc' })
+    } else {
+      onsortchange(null)
+    }
+  }
+
   /** Toggle pinning a column to the left. */
   function toggleColumnPin(colName) {
     const next = new Set(pinnedColumns)
@@ -911,14 +933,20 @@
       if (rafId) return
       rafId = requestAnimationFrame(() => {
         rafId = 0
-        _scrollTop = container.scrollTop
+        const st = container.scrollTop
+        if (st !== _scrollTop) _scrollTop = st
       })
     }
-    const ro = new ResizeObserver(() => { _viewportHeight = container.clientHeight })
+    let roRafId = 0
+    const ro = new ResizeObserver(() => {
+      if (roRafId) return
+      roRafId = requestAnimationFrame(() => { roRafId = 0; _viewportHeight = container.clientHeight })
+    })
     container.addEventListener('scroll', onScroll, { passive: true })
     ro.observe(container)
     return () => {
       if (rafId) cancelAnimationFrame(rafId)
+      if (roRafId) cancelAnimationFrame(roRafId)
       container.removeEventListener('scroll', onScroll)
       ro.disconnect()
     }
@@ -1104,7 +1132,7 @@
           {...props}
           tabindex={-1}
           class={cn(
-            "app-scroll relative overflow-auto bg-panel select-none outline-none [scrollbar-gutter:stable] [contain:layout] [will-change:scroll-position]",
+            "app-scroll relative overflow-auto bg-panel select-none outline-none [scrollbar-gutter:stable] [contain:layout] [will-change:transform] [overflow-anchor:none]",
             embedded ? "max-h-80" : "min-h-0 flex-1",
             resizingColName && "cursor-col-resize",
           )}
@@ -1204,15 +1232,24 @@
                       </div>
                     </th>
                   {:else}
+                    {@const isSorted = rowSort?.column === col.name}
                     <th
                       class={cn(
-                        "group/th relative overflow-hidden px-3 py-1 text-left font-normal",
+                        "group/th relative overflow-hidden px-0 py-1 text-left font-normal",
                         resizingColName === col.name && "bg-accent/30",
                         isPinned && "sticky z-[1] bg-panel shadow-[1px_0_0_hsl(var(--border)/0.6)]",
                       )}
                       style="width: {colW}px; min-width: {colW}px; max-width: {colW}px{isPinned ? `; left: ${pinLeft}px` : ''}"
                     >
-                      <div class="flex min-w-0 items-center gap-1.5">
+                      <button
+                        type="button"
+                        class={cn(
+                          "flex w-full min-w-0 cursor-pointer items-center gap-1.5 px-3 py-0.5 text-left transition-colors hover:bg-accent/40",
+                          isSorted && "bg-accent/20",
+                        )}
+                        onclick={() => handleHeaderSort(col.name)}
+                        title="Sort by {col.name}"
+                      >
                         <div class="flex min-w-0 flex-1 flex-col gap-px leading-tight">
                           <div class="flex min-w-0 items-center gap-1">
                             <span
@@ -1262,8 +1299,18 @@
                             >{col.dataType ?? col.data_type}</span
                           >
                         </div>
-                        <ArrowUpDown class="size-3 shrink-0 opacity-30" />
-                      </div>
+                        {#if isSorted}
+                          <span class="shrink-0 text-primary/70">
+                            {#if rowSort?.direction === 'asc'}
+                              <svg class="size-3" viewBox="0 0 12 12" fill="none"><path d="M6 9V3M3 6l3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            {:else}
+                              <svg class="size-3" viewBox="0 0 12 12" fill="none"><path d="M6 3v6M3 6l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            {/if}
+                          </span>
+                        {:else}
+                          <ArrowUpDown class="size-3 shrink-0 opacity-0 transition-opacity group-hover/th:opacity-30" />
+                        {/if}
+                      </button>
                       <ColumnResizeHandle
                         onresizestart={() => startColumnResize(col.name)}
                         onresize={applyColumnResize}

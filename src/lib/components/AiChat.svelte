@@ -57,7 +57,8 @@
   import { mermaidThemeFor, normalizeThemeId } from '$lib/themes/registry.js'
   import mermaid from 'mermaid'
   import { toast } from 'svelte-sonner'
-  import { loadAiSettings, saveAiSettings } from '$lib/stores/ai-settings.js'
+  import { aiSettings, aiProfiles, activeProfileId } from '$lib/stores/ai-settings.js'
+  import AiModelPicker from './AiModelPicker.svelte'
   import {
     listConversations,
     createConversation,
@@ -98,6 +99,8 @@
     onexit = /** @type {(() => void) | null} */ (null),
     /** @param {string} sql */
     onwritesql = (sql) => {},
+    /** Open the dedicated AI model settings dialog. */
+    onopenmodelsettings = () => {},
   } = $props()
 
   $effect(() => {
@@ -108,16 +111,13 @@
   })
 
   // ── Settings ──────────────────────────────────────────────────────────────
-  let settings = $state(loadAiSettings())
+  /** Model config is the shared reactive store, edited in the dedicated dialog. */
+  const settings = $derived($aiSettings)
   let settingsOpen = $state(false)
   /** @type {string | null} */
   let imageViewerSrc = $state(null)
   /** @type {'model'|'skills'|'context'} */
   let settingsTab = $state('model')
-
-  function saveSettings() {
-    saveAiSettings(settings)
-  }
 
   // ── Skills ────────────────────────────────────────────────────────────────
   /** @type {import('$lib/stores/ai-skills.js').AiSkill[]} */
@@ -290,29 +290,37 @@
   // ── Streaming & abort ──────────────────────────────────────────────────────
   /** Accumulates text for the currently-streaming assistant turn */
   let streamingContent = $state('')
-  /** Buffered full content waiting for next rAF before being written to state */
+  /** Buffered full content waiting to be committed to state */
   let _pendingStreamContent = ''
-  /** rAF handle for batching streamingContent updates (null = no pending update) */
-  let _streamRafId = /** @type {number | null} */ (null)
+  /** Pending commit timer (null = no pending update) */
+  let _streamTimer = /** @type {ReturnType<typeof setTimeout> | null} */ (null)
+  let _lastStreamCommit = 0
+  /** Min ms between streaming commits — caps marked.parse churn so long answers (tables/diagrams) stay smooth. */
+  const STREAM_COMMIT_MS = 90
 
   /**
-   * Throttle streaming content updates to one per animation frame.
-   * Without this every token triggers a Svelte re-render + regex derivation.
+   * Throttle streaming content updates. Re-parsing the full growing markdown on
+   * every token is O(n²) and janks the UI; committing at most every ~90ms keeps
+   * generation smooth even for large tables and diagrams.
    */
   function scheduleStreamingUpdate(content) {
     _pendingStreamContent = content
-    if (_streamRafId !== null) return
-    _streamRafId = requestAnimationFrame(() => {
-      _streamRafId = null
+    if (_streamTimer !== null) return
+    const elapsed = performance.now() - _lastStreamCommit
+    const delay = elapsed >= STREAM_COMMIT_MS ? 0 : STREAM_COMMIT_MS - elapsed
+    _streamTimer = setTimeout(() => {
+      _streamTimer = null
+      _lastStreamCommit = performance.now()
       streamingContent = _pendingStreamContent
-    })
+    }, delay)
   }
 
   /** Flush any buffered streaming content immediately (called by stop() and finally block). */
   function flushStreamingContent() {
-    if (_streamRafId !== null) {
-      cancelAnimationFrame(_streamRafId)
-      _streamRafId = null
+    if (_streamTimer !== null) {
+      clearTimeout(_streamTimer)
+      _streamTimer = null
+      _lastStreamCommit = performance.now()
       streamingContent = _pendingStreamContent
     }
   }
@@ -380,7 +388,7 @@
   }
 
   function abortCurrentRequest() {
-    if (_streamRafId !== null) { cancelAnimationFrame(_streamRafId); _streamRafId = null }
+    if (_streamTimer !== null) { clearTimeout(_streamTimer); _streamTimer = null }
     if (abortController) {
       abortController.abort()
       abortController = null
@@ -714,6 +722,10 @@
 
   const hasPendingConfirm = $derived(items.some((i) => i.kind === 'confirm'))
   const suggestions = $derived(generateSuggestions(schemaContext))
+  /** Show a persistent activity row while loading when no thinking/streaming/executing row is already visible. */
+  const showWorking = $derived(
+    loading && !items.some((i) => i.kind === 'thinking' || i.kind === 'streaming' || i.kind === 'executing'),
+  )
 
   /** System prompt for the current AI turn — built fresh each send() with selective schema injection */
   let turnSystemPrompt = $state('')
@@ -938,7 +950,7 @@
         const partial = streamingContent.trim()
         const sid = streamingId
         items = items
-          .filter((i) => i.id !== thinkingId && i.kind !== 'executing')
+          .filter((i) => i.kind !== 'thinking' && i.kind !== 'executing')
           .map((i) =>
             i.id === sid
               ? /** @type {ChatItem} */ ({ id: sid, kind: 'assistant', parts: parseAssistantMessage(partial || '…') })
@@ -948,7 +960,7 @@
         streamingContent = ''
         _pendingStreamContent = ''
       } else {
-        items = items.filter((i) => i.id !== thinkingId && i.kind !== 'executing')
+        items = items.filter((i) => i.kind !== 'thinking' && i.kind !== 'executing')
       }
       abortController = null
       loading = false
@@ -1045,10 +1057,15 @@
     }
 
     if (toolCalls.length > 0) {
+      // Drop the "Thinking…" placeholder so the executing rows are the live indicator.
+      const thinkIdx = items.findIndex((i) => i.kind === 'thinking')
+      if (thinkIdx >= 0) items.splice(thinkIdx, 1)
       apiHistory.push({ role: 'assistant', content: fullContent || null, tool_calls: toolCalls })
       for (const call of toolCalls) {
         await runToolCall(call)
       }
+      items.push(/** @type {ChatItem} */ ({ id: uid(), kind: 'thinking' }))
+      scrollBottomSoon()
       await runAiTurn(depth + 1)
     } else if (fullContent) {
       apiHistory.push({ role: 'assistant', content: fullContent })
@@ -1339,7 +1356,7 @@
     document.removeEventListener('keydown', handleGlobalKey)
     // Cancel any pending rAF handles to avoid callbacks on destroyed DOM
     if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null }
-    if (_streamRafId !== null) { cancelAnimationFrame(_streamRafId); _streamRafId = null }
+    if (_streamTimer !== null) { clearTimeout(_streamTimer); _streamTimer = null }
     if (historyTimer) { clearTimeout(historyTimer); historyTimer = null }
   })
 </script>
@@ -1451,7 +1468,7 @@
       {/if}
 
       <!-- ── Main chat area ─────────────────────────────────────────────── -->
-      <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div class="relative flex min-h-0 min-w-0 flex-1 flex-col">
 
         <!-- Header -->
         <div class="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
@@ -1497,7 +1514,7 @@
               <button
                 type="button"
                 class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                title="Close AI panel (⌘⌥E)"
+                title="Close AI panel (⌘⇧E)"
                 onclick={onexit}
               >
                 <X class="size-3.5" />
@@ -1509,7 +1526,7 @@
         <!-- Messages -->
         <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
         <!-- svelte-ignore a11y_click_events_have_key_events -->
-        <div bind:this={scrollEl} onscroll={onScrollAreaScroll} class="app-scroll min-h-0 flex-1 overflow-y-auto relative"
+        <div bind:this={scrollEl} onscroll={onScrollAreaScroll} class="app-scroll min-h-0 flex-1 overflow-y-auto relative [will-change:transform] [overflow-anchor:none]"
           onclick={(e) => {
             const img = /** @type {HTMLElement} */ (e.target)?.closest?.('img')
             if (img instanceof HTMLImageElement && img.closest('.prose-ai')) {
@@ -1797,28 +1814,35 @@
                 {/if}
 
               {/each}
+
+              {#if showWorking}
+                <div class="flex items-center gap-2.5 text-ui-xs text-muted-foreground">
+                  <Loader2 class="size-3.5 shrink-0 animate-spin text-primary/70" />
+                  <span class="animate-pulse">{aiStatusHint || 'Working…'}</span>
+                </div>
+              {/if}
             </div>
           {/if}
           </div>
 
-          <!-- Jump-to-bottom button: shown when user has scrolled up during streaming -->
-          {#if userScrolledUp && loading}
-            <div class="pointer-events-none sticky bottom-3 flex justify-center">
-              <button
-                type="button"
-                onclick={jumpToBottom}
-                class="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5 text-ui-xs font-medium text-foreground shadow-md transition-all hover:bg-accent"
-              >
-                <ChevronDown class="size-3.5" />
-                Jump to latest
-              </button>
-            </div>
-          {/if}
         </div>
 
         <!-- Error bar -->
         {#if error}
           <div class="shrink-0 border-t border-destructive/30 bg-destructive/8 px-3 py-2 text-ui-xs text-destructive">{error}</div>
+        {/if}
+
+        <!-- Jump-to-bottom button: shown whenever user has scrolled away from bottom -->
+        {#if userScrolledUp}
+          <div class="pointer-events-none absolute inset-x-0 bottom-24 z-10 flex justify-center">
+            <button
+              type="button"
+              onclick={jumpToBottom}
+              class="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5 text-ui-xs font-medium text-foreground shadow-lg transition-all hover:bg-accent"
+            >
+              <ChevronDown class="size-3.5" />Jump to bottom
+            </button>
+          </div>
         {/if}
 
         <!-- Input -->
@@ -1857,16 +1881,8 @@
                 disabled={hasPendingConfirm}
               ></textarea>
 
-              <!-- Model selector -->
-              <button
-                type="button"
-                class="mb-0.5 inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground select-none"
-                onclick={() => { settingsOpen = true; settingsTab = 'model' }}
-                title="Model settings"
-              >
-                {settings.model.split('/').pop()?.split('-').slice(0,2).join('-') ?? settings.model}
-                <ChevronDown class="size-3 opacity-60" />
-              </button>
+              <!-- Model picker -->
+              <AiModelPicker onopenSettings={onopenmodelsettings} />
 
               <!-- Send / Stop button -->
               {#if loading}
@@ -1959,72 +1975,40 @@
 
             <!-- ── Model tab ── -->
             {#if settingsTab === 'model'}
-              <div class="flex flex-col gap-4 p-3">
+              <div class="flex flex-col gap-3 p-3">
 
                 <!-- Status badge: not configured -->
                 {#if !settings.apiKey && !settings.baseUrl.includes('localhost')}
                   <div class="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/8 px-3 py-2.5">
                     <AlertTriangle class="mt-0.5 size-3.5 shrink-0 text-amber-500" />
-                    <p class="text-ui-xs text-amber-600 dark:text-amber-400">No API key set. Add a key below or use a local Ollama endpoint.</p>
+                    <p class="text-ui-xs text-amber-600 dark:text-amber-400">No model configured yet.</p>
                   </div>
                 {/if}
 
-                <!-- Endpoint -->
-                <div class="flex flex-col gap-1.5">
-                  <label for="ai-endpoint" class="text-ui-xs font-medium text-foreground">API Endpoint</label>
-                  <Input id="ai-endpoint" class="h-7 font-mono text-ui-xs" placeholder="https://api.mistral.ai/v1" bind:value={settings.baseUrl} />
-                </div>
-
-                <!-- API key -->
-                <div class="flex flex-col gap-1.5">
-                  <label for="ai-apikey" class="text-ui-xs font-medium text-foreground">API Key</label>
-                  <Input id="ai-apikey" class="h-7 font-mono text-ui-xs" type="password" placeholder="sk-… (empty for Ollama/local)" bind:value={settings.apiKey} />
-                </div>
-
-                <!-- Model -->
-                <div class="flex flex-col gap-1.5">
-                  <label for="ai-model" class="text-ui-xs font-medium text-foreground">Model</label>
-                  <Input id="ai-model" class="h-7 font-mono text-ui-xs" placeholder="mistral-small-latest" bind:value={settings.model} />
-                </div>
-
-                <!-- Presets -->
-                <div class="flex flex-col gap-2">
-                  <p class="text-ui-xs font-medium text-muted-foreground">Quick presets</p>
-                  <div class="grid grid-cols-2 gap-1.5">
-                    {#each [
-                      { label: 'Claude Haiku', url: 'https://openrouter.ai/api/v1', model: 'anthropic/claude-haiku-4-5', tag: 'fast' },
-                      { label: 'Claude Sonnet', url: 'https://openrouter.ai/api/v1', model: 'anthropic/claude-sonnet-4-5', tag: 'smart' },
-                      { label: 'GPT-4o mini', url: 'https://api.openai.com/v1', model: 'gpt-4o-mini', tag: 'fast' },
-                      { label: 'GPT-4o', url: 'https://api.openai.com/v1', model: 'gpt-4o', tag: 'smart' },
-                      { label: 'Mistral Small', url: 'https://api.mistral.ai/v1', model: 'mistral-small-latest', tag: 'fast' },
-                      { label: 'Mistral Large', url: 'https://api.mistral.ai/v1', model: 'mistral-large-latest', tag: 'smart' },
-                      { label: 'Ollama Llama3', url: 'http://localhost:11434/v1', model: 'llama3', tag: 'local' },
-                      { label: 'Ollama Gemma3', url: 'http://localhost:11434/v1', model: 'gemma3', tag: 'local' },
-                    ] as p (p.label)}
-
-                      <button
-                        type="button"
-                        class={cn(
-                          'flex flex-col gap-0.5 rounded-lg border px-2.5 py-2 text-left transition-colors hover:border-ring/60 hover:bg-accent',
-                          settings.model === p.model && settings.baseUrl === p.url
-                            ? 'border-primary/40 bg-primary/5 text-foreground'
-                            : 'border-border text-muted-foreground',
-                        )}
-                        onclick={() => { settings.baseUrl = p.url; settings.model = p.model }}
-                      >
-                        <span class="text-ui-xs font-medium leading-snug text-foreground">{p.label}</span>
-                        <span class={cn(
-                          'inline-block rounded px-1 py-0 font-mono text-[9px]',
-                          p.tag === 'fast' ? 'bg-green-500/12 text-green-600 dark:text-green-400'
-                            : p.tag === 'smart' ? 'bg-blue-500/12 text-blue-600 dark:text-blue-400'
-                            : 'bg-muted text-muted-foreground',
-                        )}>{p.tag}</span>
-                      </button>
-                    {/each}
+                <!-- Current model summary -->
+                <div class="flex flex-col gap-2 rounded-lg border border-border/70 bg-background p-3">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">Profile</span>
+                    <span class="min-w-0 truncate text-ui-xs font-medium text-foreground">{($aiProfiles.find((p) => p.id === $activeProfileId) ?? $aiProfiles[0])?.name ?? '—'}</span>
+                  </div>
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">Model</span>
+                    <span class="min-w-0 truncate font-mono text-ui-xs text-foreground">{settings.model}</span>
+                  </div>
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">Endpoint</span>
+                    <span class="min-w-0 truncate font-mono text-[10px] text-muted-foreground">{settings.baseUrl}</span>
+                  </div>
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">API key</span>
+                    <span class="font-mono text-[10px] text-muted-foreground">{settings.apiKey ? '•••• set' : 'none'}</span>
                   </div>
                 </div>
 
-                <Button class="w-full h-8 text-ui-xs" onclick={saveSettings}>Save settings</Button>
+                <Button class="h-8 w-full text-ui-xs" onclick={onopenmodelsettings}>Configure model…</Button>
+                <p class="px-0.5 text-[10px] leading-relaxed text-muted-foreground/70">
+                  Shared with the AI sidebar (⌘I).
+                </p>
               </div>
 
             <!-- ── Skills tab ── -->

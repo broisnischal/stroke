@@ -110,12 +110,21 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
+<!--
+  Embedded mode: no scroll container. Long lines wrap so users see the whole
+  code without horizontal scroll. This eliminates the WebKitGTK wheel-absorption
+  issue (overflow-x:auto on inner blocks blocks vertical chat scroll) and keeps
+  the browser's native momentum/smoothness on the AI chat scroll.
+
+  Full mode (SQL console): keeps the scroll container — that surface is wide
+  and benefits from horizontal scroll without a vertical-scroll parent above it.
+-->
 <div
   bind:this={rootEl}
   data-studio-selectable="text"
   class={cn(
     embedded
-      ? 'shiki-block-embedded relative overflow-x-auto bg-transparent'
+      ? 'shiki-block-embedded relative bg-transparent'
       : 'app-scroll group relative min-h-0 flex-1 overflow-auto bg-panel',
     className,
   )}

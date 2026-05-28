@@ -45,8 +45,13 @@
   }
 
   onMount(() => {
-    // Skip in dev (http://localhost) — no GitHub release/latest.json exists there
-    if (window.location.protocol === 'http:') return
+    // Skip in Vite dev mode — no GitHub release/latest.json exists for local builds.
+    // Don't use `location.protocol === 'http:'` here: macOS Tauri 2 uses `tauri:`,
+    // but Linux (WebKitGTK) and Windows (WebView2) production builds use
+    // `http://tauri.localhost` — so a protocol check would silently disable the
+    // updater on those platforms. import.meta.env.DEV is set at compile time
+    // by Vite and is reliable across all platforms.
+    if (import.meta.env.DEV) return
     const t = setTimeout(() => void checkForUpdate(), 3000)
     return () => clearTimeout(t)
   })
@@ -54,14 +59,19 @@
   async function checkForUpdate() {
     try {
       const update = await check()
-      if (!update) return
+      if (!update) {
+        console.info('[updater] no update available')
+        return
+      }
+      console.info('[updater] update available:', update.version)
       pendingUpdate = update
       updateVersion = update.version
       releaseNotes = update.body ?? ''
       status = 'available'
     } catch (e) {
-      // Only surface the error when manually triggered (checkNow); background
-      // checks fail silently so a network hiccup doesn't interrupt the user.
+      // Always log so issues are visible via devtools. Only show the error UI
+      // when manually triggered — background checks shouldn't interrupt the user.
+      console.error('[updater] check failed:', e)
       if (checking) {
         errorMsg = String(e)
         status = 'error'

@@ -11,12 +11,15 @@
   import RefreshCw   from '@lucide/svelte/icons/refresh-cw'
   import CornerDownLeft from '@lucide/svelte/icons/corner-down-left'
   import Bot         from '@lucide/svelte/icons/bot'
+  import Sparkles    from '@lucide/svelte/icons/sparkles'
   import Keyboard    from '@lucide/svelte/icons/keyboard'
   import ArrowLeftRight from '@lucide/svelte/icons/arrow-left-right'
   import ArrowDownToLine from '@lucide/svelte/icons/arrow-down-to-line'
+  import Info from '@lucide/svelte/icons/info'
   import History from '@lucide/svelte/icons/history'
   import Bookmark from '@lucide/svelte/icons/bookmark'
   import ShieldCheck from '@lucide/svelte/icons/shield-check'
+  import Package from '@lucide/svelte/icons/package'
   import * as Command from '$lib/components/ui/command/index.js'
   import { formatTableRowCount } from '$lib/table-list.js'
 
@@ -39,6 +42,7 @@
     ondisconnect = () => {},
     onrefresh = () => {},
     onopenai = () => {},
+    onopenaisidebar = () => {},
     /** Whether the app is currently in AI mode (fullscreen chat) */
     aiMode = false,
     /** Toggle between AI mode and dev mode */
@@ -48,7 +52,10 @@
     onopensecurity = () => {},
     onopenlogs = () => {},
     onopenshortcuts = () => {},
+    onopenabout = () => {},
     oncheckupdate = () => {},
+    /** @param {'postgres'|'mysql'} dbType */
+    ondockerlaunch = (dbType) => {},
     /** @param {import('$lib/stores/connections.js').SavedConnection} conn */
     onswitchdatabase = (conn) => {},
     /** @type {import('$lib/stores/query-history.js').QueryHistoryEntry[]} */
@@ -111,7 +118,6 @@
           <Command.Item value="open schema explorer indexes enums views materialized" onSelect={() => run(onopenSchema)}>
             <LayoutTemplate class="size-4 shrink-0 opacity-60" />
             <span data-slot="command-label" class="truncate">Schema Explorer</span>
-            <Command.Shortcut keys="⌘⇧E" />
           </Command.Item>
           <Command.Item value="open security roles users policies rls row level" onSelect={() => run(onopensecurity)}>
             <ShieldCheck class="size-4 shrink-0 opacity-60" />
@@ -165,7 +171,12 @@
           <Command.Item value="ask ai assistant chat query" onSelect={() => run(onopenai)}>
             <Bot class="size-4 shrink-0 opacity-60" />
             <span data-slot="command-label" class="truncate">Ask AI</span>
-            <Command.Shortcut keys="⌘⌥E" />
+            <Command.Shortcut keys="⌘⇧E" />
+          </Command.Item>
+          <Command.Item value="toggle ai sidebar inline assistant context" onSelect={() => run(onopenaisidebar)}>
+            <Sparkles class="size-4 shrink-0 opacity-60" />
+            <span data-slot="command-label" class="truncate">AI sidebar</span>
+            <Command.Shortcut keys="⌘I" />
           </Command.Item>
           <Command.Item
             value={aiMode ? "close ai panel hide assistant" : "open ai panel show assistant chat"}
@@ -173,7 +184,7 @@
           >
             <ArrowLeftRight class="size-4 shrink-0 opacity-60" />
             <span data-slot="command-label" class="truncate">{aiMode ? 'Close AI panel' : 'Open AI panel'}</span>
-            <Command.Shortcut keys="⌘⌥E" />
+            <Command.Shortcut keys="⌘⇧E" />
           </Command.Item>
         </Command.Group>
 
@@ -229,6 +240,10 @@
             <span data-slot="command-label" class="truncate">Keyboard shortcuts</span>
             <Command.Shortcut keys="?" />
           </Command.Item>
+          <Command.Item value="about license version info app" onSelect={() => run(onopenabout)}>
+            <Info class="size-4 shrink-0 opacity-60" />
+            <span data-slot="command-label" class="truncate">About DB Studio</span>
+          </Command.Item>
           <Command.Item value="check for updates upgrade version" onSelect={() => run(oncheckupdate)}>
             <ArrowDownToLine class="size-4 shrink-0 opacity-60" />
             <span data-slot="command-label" class="truncate">Check for updates</span>
@@ -246,6 +261,20 @@
           </Command.Item>
         </Command.Group>
       {/if}
+
+      <!-- ── Docker ──────────────────────────────────────────────────── -->
+      <Command.Group heading="Docker">
+        <Command.Item value="docker launch postgresql postgres pull run container" onSelect={() => run(() => ondockerlaunch('postgres'))}>
+          <Package class="size-4 shrink-0 opacity-60" />
+          <span data-slot="command-label" class="truncate">Launch PostgreSQL container</span>
+          <span data-slot="command-trailing" class="shrink-0 font-mono text-ui-2xs text-muted-foreground">:5433</span>
+        </Command.Item>
+        <Command.Item value="docker launch mysql pull run container" onSelect={() => run(() => ondockerlaunch('mysql'))}>
+          <Package class="size-4 shrink-0 opacity-60" />
+          <span data-slot="command-label" class="truncate">Launch MySQL container</span>
+          <span data-slot="command-trailing" class="shrink-0 font-mono text-ui-2xs text-muted-foreground">:3307</span>
+        </Command.Item>
+      </Command.Group>
 
       <!-- ── Switch database — always at the bottom ─────────────────── -->
       {#if savedConnections.length > 0}

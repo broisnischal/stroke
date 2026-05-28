@@ -19,18 +19,24 @@
   import SqlConsole from './SqlConsole.svelte'
   import CommandPalette from './CommandPalette.svelte'
   import AiChat from './AiChat.svelte'
+  import AiSidebar from './AiSidebar.svelte'
+  import AiSettingsDialog from './AiSettingsDialog.svelte'
   import ConnectionModal from './ConnectionModal.svelte'
+  import DockerLaunchModal from './DockerLaunchModal.svelte'
+  import CreateTableDialog from './CreateTableDialog.svelte'
+  import Onboarding from './Onboarding.svelte'
   import SettingsDialog from './SettingsDialog.svelte'
   import KeyboardShortcutsDialog from './KeyboardShortcutsDialog.svelte'
   import InsiderDialog from './InsiderDialog.svelte'
+  import AboutDialog from './AboutDialog.svelte'
   import UpdateDialog from './UpdateDialog.svelte'
+  import DisconnectDialog from './DisconnectDialog.svelte'
   import InsertRowDialog from './InsertRowDialog.svelte'
   import McpPanel from './McpPanel.svelte'
   import OrmRunner from './OrmRunner.svelte'
   import SchemaPage from './SchemaPage.svelte'
   import SecurityPage from './SecurityPage.svelte'
   import LogsPage from './LogsPage.svelte'
-  import LogPanel from './LogPanel.svelte'
   import { Button } from '$lib/components/ui/button/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
   import {
@@ -83,7 +89,6 @@
     normalizeForeignKeys,
   } from '$lib/foreign-key-nav.js'
   import { loadLayout, saveLayout } from '$lib/stores/layout.js'
-  import { clampLogPanelWidth } from '$lib/stores/layout.js'
   import {
     getLastConnection,
     loadSavedConnections,
@@ -97,6 +102,8 @@
     connectMysql,
     listIndexes,
     listEnums,
+    truncateTable,
+    dropTable,
   } from '$lib/api.js'
   import {
     remapNullableRowIndex,
@@ -110,6 +117,7 @@
     createSavedQuery,
   } from '$lib/stores/query-history.js'
   import { recordActivity } from '$lib/stores/activity-log.js'
+  import { installInputShortcuts } from '$lib/input-shortcuts.js'
 
   /** @typedef {import('$lib/studio-tabs.js').StudioTab} StudioTab */
   /** @typedef {import('$lib/studio-tabs.js').TableTabState} TableTabState */
@@ -128,18 +136,37 @@
     if (map.size > COLUMNS_CACHE_MAX) map.delete(/** @type {string} */ (map.keys().next().value))
   }
 
+  const ONBOARDING_KEY = 'db-studio:onboarded'
+  let showOnboarding = $state(false)
+
+  // Dev-only: Alt+Shift+O resets and re-shows the onboarding. Dead code in prod.
+  if (import.meta.env.DEV) {
+    createHotkey('Alt+Shift+O', () => {
+      try { localStorage.removeItem(ONBOARDING_KEY) } catch {}
+      showOnboarding = true
+    })
+  }
+
   let connection = $state(null)
   let autoConnecting = $state(false)
   let showConnectionModal = $state(false)
+  let showDockerModal = $state(false)
+  let dockerInitialDb = $state(/** @type {string | null} */ (null))
+  let showCreateTableDialog = $state(false)
   let savedConnections = $state(loadSavedConnections())
   let showSettingsModal = $state(false)
   let showShortcutsModal = $state(false)
   let showInsiderModal = $state(false)
+  let showAboutModal = $state(false)
+  let showDisconnectDialog = $state(false)
+  let showAiModelSettings = $state(false)
   let commandOpen = $state(false)
   /** @type {import('./UpdateDialog.svelte').default | null} */
   let updateDialog = $state(null)
   let sidebarOpen = $state(loadLayout().navSidebarOpen)
-  let showLogPanel = $state(loadLayout().logPanelOpen)
+  let sidebarEverOpened = $state(loadLayout().navSidebarOpen)
+  let aiSidebarOpen = $state(loadLayout().aiSidebarOpen)
+  let aiSidebarEverOpened = $state(loadLayout().aiSidebarOpen)
 
   /** @type {StudioTab[]} */
   let tabs = $state([])
@@ -161,6 +188,8 @@
   let aiMode = $state(loadAiMode())
   let aiEverOpened = $state(loadAiMode())
   $effect(() => { if (aiMode) aiEverOpened = true })
+  $effect(() => { if (sidebarOpen) sidebarEverOpened = true })
+  $effect(() => { if (aiSidebarOpen) aiSidebarEverOpened = true })
 
   // Keep Monaco-heavy tabs mounted once opened so the editor isn't destroyed on tab switch.
   let sqlEverOpened = $state(false)
@@ -201,6 +230,7 @@
   let rowSearch = $state('')
   let rowSort = $state(/** @type {TableSort | null} */ (null))
   let rowFilters = $state(/** @type {TableFilter[]} */ ([]))
+  let filterBarOpen = $state(false)
   /** @type {{ focusRowSearch?: () => void } | null} */
   let tableToolbar = $state(null)
   /** @type {ReturnType<typeof setTimeout> | null} */
@@ -404,6 +434,7 @@
       editingCell: editingCell ? { ...editingCell } : null,
       savingCell: false,
       hiddenColumns: new Set(hiddenColumns),
+      filterBarOpen,
     }
   }
 
@@ -429,6 +460,7 @@
     savingCell = false
     activeTable = s.table
     hiddenColumns = new Set(s.hiddenColumns)
+    filterBarOpen = s.filterBarOpen ?? false
   }
 
   /** @returns {SqlTabState} */
@@ -526,7 +558,7 @@
     commandOpen = true
   })
 
-  createHotkey('Mod+Alt+E', (e) => {
+  createHotkey('Mod+Shift+E', (e) => {
     if (!connection) return
     e.preventDefault()
     if (aiMode) exitAiMode()
@@ -590,7 +622,7 @@
 
   createHotkey('Mod+Shift+L', (e) => {
     e.preventDefault()
-    toggleLogPanel()
+    openLogsTab()
   })
 
   createHotkey('Mod+M', (e) => {
@@ -619,12 +651,6 @@
     if (!connection) return
     e.preventDefault()
     openOrmTab()
-  })
-
-  createHotkey('Mod+Shift+E', (e) => {
-    if (!connection) return
-    e.preventDefault()
-    openSchemaTab()
   })
 
   createHotkey('Mod+Shift+F', (e) => {
@@ -762,6 +788,14 @@
   })
 
   createHotkey('Mod+I', (e) => {
+    if (!connection) return
+    if (commandOpen || showConnectionModal || showSettingsModal) return
+    if (document.activeElement?.closest('.monaco-editor')) return
+    e.preventDefault()
+    toggleAiSidebar()
+  })
+
+  createHotkey('Alt+I', (e) => {
     if (commandOpen || showConnectionModal || showSettingsModal) return
     e.preventDefault()
     showInsiderModal = !showInsiderModal
@@ -802,9 +836,27 @@
     saveLayout({ navSidebarOpen: sidebarOpen })
   }
 
-  function toggleLogPanel() {
-    showLogPanel = !showLogPanel
-    saveLayout({ logPanelOpen: showLogPanel })
+
+  function toggleAiSidebar() {
+    if (!connection) return
+    aiSidebarOpen = !aiSidebarOpen
+    saveLayout({ aiSidebarOpen })
+  }
+
+  /** Context-aware Accept from the AI sidebar — routes into the right editor. */
+  /** @param {{ kind: 'sql' | 'code', lang?: string, content: string }} detail */
+  async function handleAiSidebarAccept(detail) {
+    if (detail.kind === 'code' && activeTab?.kind === 'orm') {
+      const lang = (detail.lang ?? '').toLowerCase()
+      if (lang === 'prisma' || /\bprisma\./.test(detail.content)) ormMode = 'prisma'
+      else if (lang === 'drizzle' || /\bdb\.(select|insert|update|delete)\b/.test(detail.content)) ormMode = 'drizzle'
+      ormCode = detail.content
+      openOrmTab()
+      toast.success(`Inserted into ${ormMode} editor`)
+      return
+    }
+    await openQueryInEditor(detail.content)
+    toast.success('Inserted into SQL editor')
   }
 
   /** @param {1 | -1} direction */
@@ -847,7 +899,9 @@
       void activateTab(existing.id)
       return
     }
-    const tab = createSqlTab()
+    // If SqlConsole is already mounted (keep-alive), seed the new tab with the
+    // current active content so applySqlSnapshot doesn't overwrite Q2/Q3/etc.
+    const tab = createSqlTab(sqlEverOpened ? sqlText : undefined)
     tabs = [...tabs, tab]
     activeTabId = tab.id
     clearTableEditor()
@@ -990,6 +1044,7 @@
           rowSort = null
         }
         rowFilters = filters.map((f) => ({ ...f }))
+        filterBarOpen = filters.length > 0
         page = 1
         await loadRows()
       } else if (activeTable === table && columns.length === 0) {
@@ -1013,6 +1068,7 @@
     rowSearch = ''
     rowSort = null
     rowFilters = filters ? filters.map((f) => ({ ...f })) : []
+    filterBarOpen = filters ? filters.length > 0 : false
     columns = []
     primaryKey = []
     foreignKeys = []
@@ -1106,6 +1162,7 @@
           name: t.name ?? t.table_name ?? '',
           rowCount: normalizeTableRowCount(t.rowCount ?? t.row_count),
           kind: t.kind ?? 'table',
+          rlsEnabled: t.rlsEnabled ?? null,
         }))
         .filter((t) => t.name)
       if (activeTable && !tables.find((t) => t.name === activeTable)) {
@@ -1370,11 +1427,10 @@
     } finally {
       sqlLoading = false
       recordActivity({ type: 'sql_exec', title: sqlRan.trim().slice(0, 80) + (sqlRan.trim().length > 80 ? '…' : ''), detail: sqlRan, durationMs: sqlQueryMs, rowCount: sqlRows.length || undefined, success: !sqlError, error: sqlError || undefined })
-      if (persistConnectionId) {
+      if (persistConnectionId && !sqlError) {
         await recordQueryExecution(persistConnectionId, sqlRan, {
-          success: !sqlError,
+          success: true,
           queryMs: sqlQueryMs,
-          error: sqlError ? sqlError.slice(0, 200) : undefined,
         })
         await refreshQueryStores()
       }
@@ -1414,7 +1470,17 @@
     } catch { /* ignore */ }
   }
 
+  onMount(() => installInputShortcuts())
+
   onMount(async () => {
+    // First-time user — show onboarding instead of bare connection modal
+    try {
+      if (!localStorage.getItem(ONBOARDING_KEY)) {
+        showOnboarding = true
+        return
+      }
+    } catch {}
+
     const last = getLastConnection()
     if (!last) { showConnectionModal = true; return }
     autoConnecting = true
@@ -1467,6 +1533,10 @@
     saveAiMode(false)
   }
 
+  function requestDisconnect() {
+    showDisconnectDialog = true
+  }
+
   async function handleDisconnect() {
     recordActivity({ type: 'disconnect', title: `Disconnected from ${connection?.name ?? 'database'}`, success: true })
     try {
@@ -1484,6 +1554,39 @@
     tableFilter = ''
     resetTabs()
     showConnectionModal = true
+  }
+
+  /** @param {{ db_type: string, host: string, port: number, user: string, password: string, database: string, name: string }} info */
+  async function handleDockerConnect(info) {
+    const conn = /** @type {import('$lib/stores/connections.js').SavedConnection} */ ({
+      id: crypto.randomUUID(),
+      type: info.db_type === 'mysql' ? 'mysql' : 'postgres',
+      name: info.name,
+      host: info.host,
+      port: info.port,
+      user: info.user,
+      password: info.password,
+      database: info.database,
+      ssl: false,
+    })
+    upsertConnection(conn)
+    disconnectPostgres().catch(() => {})
+    connection = null
+    schemas = []; tables = []; indexes = []; enums = []; activeSchema = 'public'; activeTable = null; tableFilter = ''
+    resetTabs()
+    autoConnecting = true
+    try {
+      if (conn.type === 'mysql') await connectMysql(conn)
+      else await connectPostgres(conn)
+      await onConnected(conn, conn.id)
+      showDockerModal = false
+    } catch (e) {
+      error = String(e)
+      showDockerModal = false
+      showConnectionModal = true
+    } finally {
+      autoConnecting = false
+    }
   }
 
   /** @param {import('$lib/stores/connections.js').SavedConnection} conn */
@@ -1515,6 +1618,34 @@
     await loadTables()
     if (activeTab?.kind === 'table' && activeTable) {
       await loadRows()
+    }
+  }
+
+  /** @param {string} tableName */
+  async function handleTruncateTable(tableName) {
+    try {
+      await truncateTable(activeSchema, tableName)
+      toast.success(`Truncated "${tableName}"`)
+      if (activeTable === tableName) await loadRows()
+    } catch (err) {
+      toast.error('Truncate failed', { description: String(err) })
+    }
+  }
+
+  /**
+   * @param {string} tableName
+   * @param {boolean} [cascade]
+   */
+  async function handleDropTable(tableName, cascade = false) {
+    try {
+      await dropTable(activeSchema, tableName, cascade)
+      toast.success(`Dropped table "${tableName}"`)
+      await loadTables()
+      if (activeTable === tableName) {
+        activeTable = null
+      }
+    } catch (err) {
+      toast.error('Drop failed', { description: String(err) })
     }
   }
 
@@ -1735,7 +1866,21 @@
   }
 </script>
 
+<Onboarding bind:open={showOnboarding} onconnect={() => (showConnectionModal = true)} />
 <ConnectionModal bind:open={showConnectionModal} onconnected={(conn, id) => onConnected(conn, id)} />
+<DisconnectDialog bind:open={showDisconnectDialog} connectionName={connection?.name ?? ''} ondisconnect={handleDisconnect} />
+<CreateTableDialog
+  bind:open={showCreateTableDialog}
+  {activeSchema}
+  dbType={connection?.type ?? 'postgres'}
+  onexecute={async (sql) => { await executeSql(sql) }}
+  oncreated={async () => { await loadTables() }}
+/>
+<DockerLaunchModal
+  bind:open={showDockerModal}
+  initialDbType={dockerInitialDb}
+  onconnect={handleDockerConnect}
+/>
 
 <InsertRowDialog
   bind:open={insertRowOpen}
@@ -1748,11 +1893,20 @@
 
 <McpPanel bind:open={showMcpPanel} connected={!!connection} />
 
-<SettingsDialog bind:open={showSettingsModal} onopenmcp={() => (showMcpPanel = true)} />
+<SettingsDialog
+  bind:open={showSettingsModal}
+  onopenmcp={() => (showMcpPanel = true)}
+  onopenmodelconfiguration={() => (showAiModelSettings = true)}
+  onopenabout={() => (showAboutModal = true)}
+/>
+
+<AiSettingsDialog bind:open={showAiModelSettings} />
 
 <KeyboardShortcutsDialog bind:open={showShortcutsModal} />
 
 <InsiderDialog bind:open={showInsiderModal} />
+
+<AboutDialog bind:open={showAboutModal} />
 
 <UpdateDialog bind:this={updateDialog} />
 
@@ -1770,9 +1924,10 @@
   onopentable={() => { if (aiMode) exitAiMode(); void focusDataView() }}
   onopensettings={() => (showSettingsModal = true)}
   onopenconnection={() => (showConnectionModal = true)}
-  ondisconnect={handleDisconnect}
+  ondisconnect={requestDisconnect}
   onrefresh={handleRefresh}
   onopenai={() => openAiTab()}
+  onopenaisidebar={() => { if (aiMode) exitAiMode(); toggleAiSidebar() }}
   {aiMode}
   ontoggleaimode={() => aiMode ? exitAiMode() : enterAiMode()}
   onopenorm={() => { if (aiMode) exitAiMode(); openOrmTab() }}
@@ -1780,7 +1935,9 @@
   onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
   onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
   onopenshortcuts={() => (showShortcutsModal = true)}
+  onopenabout={() => (showAboutModal = true)}
   oncheckupdate={() => void updateDialog?.checkNow()}
+  ondockerlaunch={(dbType) => { commandOpen = false; dockerInitialDb = dbType; showDockerModal = true }}
   onswitchdatabase={handleSwitchDatabase}
   {queryHistory}
   {savedQueries}
@@ -1803,38 +1960,46 @@
 
 
 <div class="flex h-full min-h-0 w-full overflow-hidden bg-background">
-  {#if sidebarOpen && !aiMode}
-    <Sidebar
-      connectionName={connection?.name ?? ''}
-      {schemas}
-      {tables}
-      bind:activeSchema
-      {activeTable}
-      {activeView}
-      {tableFilter}
-      {loadingTables}
-      onschemachange={handleSchemaChange}
-      ontableselect={handleTableSelect}
-      ontablefilter={(v) => (tableFilter = v)}
-      onviewchange={handleSidebarViewChange}
-      onrefresh={handleRefresh}
-      ondisconnect={handleDisconnect}
-      onopensettings={() => (showSettingsModal = true)}
-      onopencommand={() => (commandOpen = true)}
-      onopenSchema={openSchemaTab}
-      onopenorm={openOrmTab}
-      {aiMode}
-      onopenaimode={() => (aiMode ? exitAiMode() : enterAiMode())}
-      {queryHistory}
-      onqueryselect={(sql) => { if (aiMode) exitAiMode(); void openQueryInEditor(sql) }}
-      onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
-      onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
-      {connection}
-      onswitchtodb={(dbName) => {
-        if (!connection) return
-        void handleSwitchDatabase({ ...connection, database: dbName, name: `${connection.host ?? connection.name}/${dbName}` })
-      }}
-    />
+  {#if sidebarEverOpened}
+    <div
+      style={sidebarOpen && !aiMode ? '' : 'display:none'}
+      inert={!sidebarOpen || aiMode || undefined}
+    >
+      <Sidebar
+        connectionName={connection?.name ?? ''}
+        {schemas}
+        {tables}
+        bind:activeSchema
+        {activeTable}
+        {activeView}
+        {tableFilter}
+        {loadingTables}
+        onschemachange={handleSchemaChange}
+        ontableselect={handleTableSelect}
+        ontablefilter={(v) => (tableFilter = v)}
+        onviewchange={handleSidebarViewChange}
+        onrefresh={handleRefresh}
+        ondisconnect={requestDisconnect}
+        onopensettings={() => (showSettingsModal = true)}
+        onopencommand={() => (commandOpen = true)}
+        onopenSchema={openSchemaTab}
+        onopenorm={openOrmTab}
+        {aiMode}
+        onopenaimode={() => (aiMode ? exitAiMode() : enterAiMode())}
+        {queryHistory}
+        onqueryselect={(sql) => { if (aiMode) exitAiMode(); void openQueryInEditor(sql) }}
+        onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
+        onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
+        {connection}
+        onswitchtodb={(dbName) => {
+          if (!connection) return
+          void handleSwitchDatabase({ ...connection, database: dbName, name: `${connection.host ?? connection.name}/${dbName}` })
+        }}
+        onnewtable={() => (showCreateTableDialog = true)}
+        ontruncatetable={handleTruncateTable}
+        ondroptable={(t, c) => void handleDropTable(t, c)}
+      />
+    </div>
   {/if}
 
   <main class="flex min-h-0 min-w-0 flex-1 flex-col bg-panel" data-studio-region="main">
@@ -1868,6 +2033,7 @@
             mode="full"
             onexit={exitAiMode}
             onwritesql={(sql) => void handleAiWriteSql(sql)}
+            onopenmodelsettings={() => (showAiModelSettings = true)}
           />
         </div>
       {/if}
@@ -1884,8 +2050,6 @@
         oncloseothers={closeOtherTabs}
         oncloseall={closeAllTabs}
         onnew={openWelcomeTab}
-        ontogglelogpanel={toggleLogPanel}
-        logPanelOpen={showLogPanel}
       />
 
       {#if activeTab?.kind === 'ai'}
@@ -1896,6 +2060,7 @@
           {enums}
           {tables}
           loading={loadingTables}
+          active={activeTab?.kind === 'schema'}
           onrefresh={async () => { await loadSchemas(); await loadTables() }}
         />
       {/if}
@@ -1916,7 +2081,7 @@
           class={activeTab?.kind === 'logs' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
           inert={activeTab?.kind !== 'logs' || undefined}
         >
-          <LogsPage />
+          <LogsPage active={activeTab?.kind === 'logs'} />
         </div>
       {/if}
 
@@ -1987,6 +2152,7 @@
         {:else}
           <TableToolbar
             bind:this={tableToolbar}
+            bind:filterBarOpen
             {sidebarOpen}
             {queryMs}
             {page}
@@ -2040,6 +2206,8 @@
                 bind:focusedRow
                 bind:inspectorRow
                 bind:editingCell
+                {rowSort}
+                onsortchange={(s) => void handleRowSortChange(s)}
                 onsave={handleSaveCell}
                 ondelete={handleDeleteRow}
                 onfollowforeignkey={(d) => void handleFollowForeignKey(d)}
@@ -2109,7 +2277,7 @@
                 <div class="flex size-8 items-center justify-center rounded-lg border border-border/60 bg-background text-muted-foreground transition-colors group-hover:text-foreground">
                   <Bot size={14} />
                 </div>
-                <kbd class="rounded border border-border/40 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground/50">{mod}⌥E</kbd>
+                <kbd class="rounded border border-border/40 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground/50">{mod}⇧E</kbd>
               </div>
               <div>
                 <p class="text-ui-sm font-medium text-foreground">AI Assistant</p>
@@ -2166,7 +2334,24 @@
     {/if}
   </main>
 
-  {#if showLogPanel && !aiMode}
-    <LogPanel onclose={toggleLogPanel} />
+
+  {#if aiSidebarEverOpened && connection}
+    <div
+      style={aiSidebarOpen && !aiMode ? '' : 'display:none'}
+      inert={!aiSidebarOpen || aiMode || undefined}
+    >
+      <AiSidebar
+        schemaContext={aiSchemaContext}
+        {connectionId}
+        isActive={aiSidebarOpen && !aiMode}
+        currentView={activeTab?.kind ?? 'welcome'}
+        currentSql={sqlText}
+        currentCode={ormCode}
+        {ormMode}
+        onclose={toggleAiSidebar}
+        onaccept={(d) => void handleAiSidebarAccept(d)}
+        onopensettings={() => (showAiModelSettings = true)}
+      />
+    </div>
   {/if}
 </div>

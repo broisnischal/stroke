@@ -11,9 +11,7 @@ const MAX_HISTORY_PER_CONNECTION = 100
  *   sql: string
  *   title: string
  *   executedAt: number
- *   success?: boolean
  *   queryMs?: number
- *   error?: string
  * }} QueryHistoryEntry
  */
 
@@ -41,7 +39,7 @@ export function queryTitle(sql) {
 /**
  * @param {string} connectionId
  * @param {string} sql
- * @param {{ success?: boolean, queryMs?: number, error?: string }} [meta]
+ * @param {{ queryMs?: number }} [meta]
  */
 export async function recordQueryExecution(connectionId, sql, meta = {}) {
   const trimmed = sql.trim()

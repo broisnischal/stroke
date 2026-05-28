@@ -759,10 +759,9 @@ pub async fn get_table_rows(
     validate_ident(&table)?;
     let filters = filters.unwrap_or_default();
 
-    // Only fetch column names when needed to build WHERE clause (search/filter).
-    // For the common case (no search, no filters) this saves one full round-trip.
     let has_search = search.as_deref().map(str::trim).is_some_and(|s| !s.is_empty());
-    let table_columns = if has_search || !filters.is_empty() {
+    let has_sort = sort_column.as_deref().map(str::trim).is_some_and(|s| !s.is_empty());
+    let table_columns = if has_search || has_sort || !filters.is_empty() {
         fetch_table_column_names(&pool, &schema, &table).await?
     } else {
         vec![]
@@ -1362,84 +1361,110 @@ async fn execute_sql_pg(pool: &sqlx::PgPool, sql: &str) -> Result<SqlResult, Str
     let started = std::time::Instant::now();
     let query_ms = || started.elapsed().as_millis() as u64;
 
-    if is_row_returning_sql(sql) {
-        // Use a transaction so SET LOCAL statement_timeout is scoped to this query only.
-        let mut tx = pool
-            .begin()
-            .await
-            .map_err(|e| format!("Failed to begin transaction: {e}"))?;
+    // Split into individual statements — the extended query protocol rejects multi-statement input.
+    let stmts: Vec<&str> = sql
+        .split(';')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
 
-        // Kill the query server-side if it runs too long — prevents blocking the pool.
-        let _ = sqlx::query(&format!("SET LOCAL statement_timeout = {EXECUTE_SQL_TIMEOUT_MS}"))
-            .execute(&mut *tx)
-            .await;
-
-        // Stream rows and stop at the cap — never pulls the full result set into memory.
-        let mut stream = sqlx::query(sql).fetch(&mut *tx);
-        let mut pg_rows: Vec<sqlx::postgres::PgRow> = Vec::new();
-        let mut capped = false;
-
-        loop {
-            match stream.try_next().await {
-                Ok(Some(row)) => {
-                    pg_rows.push(row);
-                    if pg_rows.len() >= EXECUTE_SQL_MAX_ROWS {
-                        capped = true;
-                        break;
-                    }
-                }
-                Ok(None) => break,
-                Err(e) => {
-                    drop(stream);
-                    let _ = tx.rollback().await;
-                    return Err(format!("Query failed: {e}"));
-                }
-            }
-        }
-        drop(stream);
-        let _ = tx.rollback().await;
-
-        let columns: Vec<ColumnInfo> = pg_rows
-            .first()
-            .map(|r| {
-                r.columns()
-                    .iter()
-                    .map(|c| ColumnInfo::new(c.name(), pg_type_label(c.type_info().name())))
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        let data: Vec<Vec<Value>> = pg_rows
-            .iter()
-            .map(|row| (0..row.len()).map(|i| cell_to_json(row, i)).collect())
-            .collect();
-
-        let row_count = data.len() as i64;
-        return Ok(SqlResult {
-            columns,
-            rows: data,
-            row_count: Some(row_count),
-            message: if capped {
-                Some(format!(
-                    "Showing first {EXECUTE_SQL_MAX_ROWS} rows — query returned more. Add a LIMIT clause to fetch a specific range."
-                ))
-            } else {
-                None
-            },
-            query_ms: query_ms(),
-        });
+    if stmts.is_empty() {
+        return Err("Query is empty".into());
     }
 
-    let result = sqlx::query(sql)
-        .execute(pool)
+    let mut tx = pool
+        .begin()
         .await
-        .map_err(|e| format!("Statement failed: {e}"))?;
-    let affected = result.rows_affected() as i64;
+        .map_err(|e| format!("Failed to begin transaction: {e}"))?;
+
+    let _ = sqlx::query(&format!("SET LOCAL statement_timeout = {EXECUTE_SQL_TIMEOUT_MS}"))
+        .execute(&mut *tx)
+        .await;
+
+    let last_idx = stmts.len() - 1;
+
+    for (i, stmt) in stmts.iter().enumerate() {
+        if i == last_idx && is_row_returning_sql(stmt) {
+            // Last statement returns rows — stream and return.
+            let mut stream = sqlx::query(stmt).fetch(&mut *tx);
+            let mut pg_rows: Vec<sqlx::postgres::PgRow> = Vec::new();
+            let mut capped = false;
+
+            loop {
+                match stream.try_next().await {
+                    Ok(Some(row)) => {
+                        pg_rows.push(row);
+                        if pg_rows.len() >= EXECUTE_SQL_MAX_ROWS {
+                            capped = true;
+                            break;
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(e) => {
+                        drop(stream);
+                        let _ = tx.rollback().await;
+                        return Err(format!("Query failed: {e}"));
+                    }
+                }
+            }
+            drop(stream);
+            let _ = tx.rollback().await;
+
+            let columns: Vec<ColumnInfo> = pg_rows
+                .first()
+                .map(|r| {
+                    r.columns()
+                        .iter()
+                        .map(|c| ColumnInfo::new(c.name(), pg_type_label(c.type_info().name())))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let data: Vec<Vec<Value>> = pg_rows
+                .iter()
+                .map(|row| (0..row.len()).map(|i| cell_to_json(row, i)).collect())
+                .collect();
+
+            let row_count = data.len() as i64;
+            return Ok(SqlResult {
+                columns,
+                rows: data,
+                row_count: Some(row_count),
+                message: if capped {
+                    Some(format!(
+                        "Showing first {EXECUTE_SQL_MAX_ROWS} rows — query returned more. Add a LIMIT clause to fetch a specific range."
+                    ))
+                } else {
+                    None
+                },
+                query_ms: query_ms(),
+            });
+        } else {
+            let result = sqlx::query(stmt)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("Statement {} failed: {e}", i + 1))?;
+
+            if i == last_idx {
+                let affected = result.rows_affected() as i64;
+                let _ = tx.commit().await;
+                return Ok(SqlResult {
+                    columns: vec![],
+                    rows: vec![],
+                    row_count: Some(affected),
+                    message: Some(format!("{affected} row(s) affected")),
+                    query_ms: query_ms(),
+                });
+            }
+        }
+    }
+
+    let _ = tx.commit().await;
     Ok(SqlResult {
         columns: vec![],
         rows: vec![],
-        row_count: Some(affected),
-        message: Some(format!("{affected} row(s) affected")),
+        row_count: Some(0),
+        message: Some("Done".into()),
         query_ms: query_ms(),
     })
 }

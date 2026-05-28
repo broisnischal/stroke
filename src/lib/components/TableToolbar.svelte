@@ -73,6 +73,7 @@
     hiddenColumns = new Set(),
     /** @type {(next: Set<string>) => void} */
     onhiddencolumnschange = () => {},
+    filterBarOpen = $bindable(false),
   } = $props();
 
   const deleteLabel = $derived(
@@ -94,7 +95,6 @@
       : "Sort",
   );
 
-  let filterMenuOpen = $state(false);
   let sortMenuOpen = $state(false);
   let columnsMenuOpen = $state(false);
   let limitOffsetOpen = $state(false);
@@ -153,12 +153,6 @@
   /** Compact shadcn select trigger for pagination */
   const pageSelectTrigger =
     "h-7 min-w-0 gap-1 px-2 text-ui-sm font-normal tabular-nums shadow-none";
-
-  const filterSelectTrigger =
-    "h-7 min-w-0 flex-1 gap-1 px-2 text-ui-sm font-normal shadow-none";
-
-  const filterOpTrigger =
-    "h-7 w-[7.5rem] shrink-0 gap-1 px-2 text-ui-sm font-normal shadow-none";
 
   /** @typedef {'text' | 'boolean' | 'date' | 'number'} ColKind */
 
@@ -232,7 +226,6 @@
     const col = columns[0]?.name ?? "";
     const op = col ? defaultOpForCol(col) : 'contains'
     onfilterschange([...rowFilters, createFilter(col, op)]);
-    filterMenuOpen = true;
   }
 
   /** @param {string} id */
@@ -267,6 +260,7 @@
   }
 </script>
 
+<div class="flex shrink-0 flex-col">
 <header
   class="studio-chrome studio-table-toolbar flex min-h-9 shrink-0 flex-wrap items-center gap-x-2 gap-y-1.5 bg-panel px-3 py-1 md:flex-nowrap"
   data-studio-chrome
@@ -320,15 +314,23 @@
       </button>
     </div>
 
-    <DropdownMenu.Root bind:open={filterMenuOpen}>
-      <DropdownMenu.Trigger
+      <button
+        type="button"
         class={cn(
           iconBtn,
           "relative shrink-0",
-          (filterCount > 0 || filterMenuOpen) && "bg-accent text-foreground",
+          (filterCount > 0 || filterBarOpen) && "bg-accent text-foreground",
         )}
         title="Filter rows"
         disabled={loading || columns.length === 0}
+        onclick={() => {
+          if (!filterBarOpen) {
+            filterBarOpen = true;
+            if (rowFilters.length === 0) addFilter();
+          } else {
+            filterBarOpen = false;
+          }
+        }}
       >
         <ListFilter class="size-3.5" />
         {#if filterCount > 0}
@@ -339,204 +341,7 @@
             {formatCompactCount(filterCount)}
           </span>
         {/if}
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Content
-        align="center"
-        class="w-[min(22rem,calc(100vw-1.5rem))] p-0 text-ui-sm"
-        onInteractOutside={(e) => {
-          const t = /** @type {HTMLElement | null} */ (e.target);
-          if (t?.closest('[data-slot="select-content"]')) e.preventDefault();
-        }}
-      >
-        <div class="border-b border-border px-3 py-2.5">
-          <p class="font-medium text-foreground">Filters</p>
-          <p class="mt-0.5 text-ui-xs leading-snug text-muted-foreground">
-            Rules apply once a column, condition, and value (if needed) are set.
-          </p>
-        </div>
-
-        {#if columns.length === 0}
-          <p class="px-3 py-4 text-ui-xs text-muted-foreground">
-            Open a table to filter rows.
-          </p>
-        {:else}
-          <div class="max-h-[22rem] overflow-y-auto p-2">
-            {#if rowFilters.length === 0}
-              <p class="px-2 py-6 text-center text-ui-xs text-muted-foreground">
-                No filters yet. Add a rule to narrow results.
-              </p>
-            {:else}
-              <ul class="flex flex-col gap-2">
-                {#each rowFilters as filter (filter.id)}
-                  {@const colKind = getColKind(filter.column)}
-                  {@const colOps = opsForCol(filter.column)}
-                  <li class="flex items-start gap-1.5 rounded-lg border border-border/60 bg-muted/20 p-2">
-                    <div class="flex min-w-0 flex-1 flex-col gap-1.5">
-
-                      <!-- column + op row -->
-                      <div class="flex min-w-0 items-center gap-1.5">
-                        <Select.Root
-                          type="single"
-                          value={filter.column}
-                          onValueChange={(v) => {
-                            if (!v) return
-                            const newOps = opsForCol(v)
-                            const newOp = newOps.some((o) => o.value === filter.op)
-                              ? filter.op
-                              : defaultOpForCol(v)
-                            patchFilter(filter.id, { column: v, op: /** @type {FilterOp} */ (newOp), value: '' })
-                          }}
-                        >
-                          <Select.Trigger size="sm" class={filterSelectTrigger} title="Column">
-                            <span class="truncate">{filter.column || "Column"}</span>
-                          </Select.Trigger>
-                          <Select.Content class="max-h-56">
-                            {#each columns as col (col.name)}
-                              {@const kind = getColKind(col.name)}
-                              <Select.Item value={col.name} label={col.name}>
-                                <span class="flex min-w-0 items-center gap-2 w-full">
-                                  <span class="truncate">{col.name}</span>
-                                  <span class={cn(
-                                    "ml-auto shrink-0 rounded px-1 text-ui-3xs font-medium uppercase tracking-wide",
-                                    kind === 'boolean' && "bg-amber-500/15 text-amber-600 dark:text-amber-400",
-                                    kind === 'date' && "bg-blue-500/15 text-blue-600 dark:text-blue-400",
-                                    kind === 'number' && "bg-purple-500/15 text-purple-600 dark:text-purple-400",
-                                    kind === 'text' && "bg-muted text-muted-foreground",
-                                  )}>{kind}</span>
-                                </span>
-                              </Select.Item>
-                            {/each}
-                          </Select.Content>
-                        </Select.Root>
-
-                        <Select.Root
-                          type="single"
-                          value={filter.op}
-                          onValueChange={(v) => {
-                            if (v) patchFilter(filter.id, { op: /** @type {FilterOp} */ (v), value: '' })
-                          }}
-                        >
-                          <Select.Trigger size="sm" class={filterOpTrigger} title="Condition">
-                            <span class="truncate">{filterOpLabel(filter.op)}</span>
-                          </Select.Trigger>
-                          <Select.Content class="max-h-56">
-                            {#each colOps as op (op.value)}
-                              <Select.Item value={op.value} label={op.label} />
-                            {/each}
-                          </Select.Content>
-                        </Select.Root>
-                      </div>
-
-                      <!-- type-aware value input -->
-                      {#if filterNeedsValue(filter.id)}
-                        {#if colKind === 'boolean'}
-                          <div class="flex gap-1.5">
-                            {#each [{ label: 'True', value: 'true' }, { label: 'False', value: 'false' }] as opt (opt.value)}
-                              <button
-                                type="button"
-                                class={cn(
-                                  "flex h-7 flex-1 items-center justify-center gap-1.5 rounded-md border text-ui-sm transition-colors",
-                                  filter.value === opt.value
-                                    ? "border-primary bg-primary text-primary-foreground"
-                                    : "border-border bg-input/30 text-muted-foreground hover:bg-accent hover:text-foreground",
-                                )}
-                                onclick={() => patchFilter(filter.id, { value: opt.value })}
-                              >
-                                <span class={cn(
-                                  "size-2 rounded-full",
-                                  opt.value === 'true'
-                                    ? (filter.value === 'true' ? "bg-primary-foreground" : "bg-green-500")
-                                    : (filter.value === 'false' ? "bg-primary-foreground" : "bg-red-500"),
-                                )}></span>
-                                {opt.label}
-                              </button>
-                            {/each}
-                          </div>
-
-                        {:else if colKind === 'date'}
-                          {#if filter.op === 'between'}
-                            <div class="flex items-center gap-1.5">
-                              <input
-                                type="date"
-                                value={betweenFrom(filter.value)}
-                                class="h-7 flex-1 min-w-0 rounded-md border border-input bg-input/30 px-2 text-ui-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
-                                oninput={(e) => patchFilter(filter.id, { value: betweenJoin(e.currentTarget.value, betweenTo(filter.value)) })}
-                              />
-                              <span class="shrink-0 text-ui-xs text-muted-foreground">to</span>
-                              <input
-                                type="date"
-                                value={betweenTo(filter.value)}
-                                class="h-7 flex-1 min-w-0 rounded-md border border-input bg-input/30 px-2 text-ui-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
-                                oninput={(e) => patchFilter(filter.id, { value: betweenJoin(betweenFrom(filter.value), e.currentTarget.value) })}
-                              />
-                            </div>
-                          {:else}
-                            <input
-                              type="date"
-                              value={filter.value}
-                              class="h-7 w-full rounded-md border border-input bg-input/30 px-2 text-ui-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
-                              oninput={(e) => patchFilter(filter.id, { value: e.currentTarget.value })}
-                            />
-                          {/if}
-
-                        {:else if colKind === 'number'}
-                          <Input
-                            type="number"
-                            class="h-7 border-input bg-input/30 text-ui-sm shadow-none"
-                            value={filter.value}
-                            placeholder="Value…"
-                            oninput={(e) => patchFilter(filter.id, { value: e.currentTarget.value })}
-                          />
-
-                        {:else}
-                          <Input
-                            class="h-7 border-input bg-input/30 text-ui-sm shadow-none"
-                            value={filter.value}
-                            placeholder="Value…"
-                            oninput={(e) => patchFilter(filter.id, { value: e.currentTarget.value })}
-                          />
-                        {/if}
-                      {/if}
-                    </div>
-
-                    <button
-                      type="button"
-                      class="mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-                      aria-label="Remove filter"
-                      onclick={() => removeFilter(filter.id)}
-                    >
-                      <X class="size-3" />
-                    </button>
-                  </li>
-                {/each}
-              </ul>
-            {/if}
-          </div>
-
-          <div
-            class="flex items-center justify-between gap-2 border-t border-border px-2 py-2"
-          >
-            <button
-              type="button"
-              class="inline-flex h-7 items-center gap-1 rounded-md px-2 text-ui-sm text-foreground hover:bg-accent"
-              onclick={addFilter}
-            >
-              <Plus class="size-3.5" />
-              Add filter
-            </button>
-            {#if rowFilters.length > 0}
-              <button
-                type="button"
-                class="inline-flex h-7 items-center gap-1 rounded-md px-2 text-ui-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-                onclick={clearFilters}
-              >
-                Clear all
-              </button>
-            {/if}
-          </div>
-        {/if}
-      </DropdownMenu.Content>
-    </DropdownMenu.Root>
+      </button>
 
     <DropdownMenu.Root bind:open={sortMenuOpen}>
       <DropdownMenu.Trigger
@@ -899,3 +704,142 @@
     </DropdownMenu.Root>
   </div>
 </header>
+
+<!-- Inline filter bar -->
+{#if filterBarOpen && columns.length > 0}
+  <div class="border-b border-border/50 bg-panel">
+    {#each rowFilters as filter, i (filter.id)}
+      {@const colKind = getColKind(filter.column)}
+      {@const colOps = opsForCol(filter.column)}
+      <div class="flex items-center gap-2 border-b border-border/30 px-3 py-1.5 last:border-b-0">
+        <button
+          type="button"
+          class="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-destructive/10 hover:text-destructive"
+          aria-label="Remove filter"
+          onclick={() => removeFilter(filter.id)}
+        >
+          <X class="size-3" />
+        </button>
+        <span class="w-10 shrink-0 select-none text-right font-mono text-ui-xs text-muted-foreground">
+          {i === 0 ? 'where' : 'and'}
+        </span>
+        <Select.Root
+          type="single"
+          value={filter.column}
+          onValueChange={(v) => {
+            if (!v) return
+            const newOps = opsForCol(v)
+            const newOp = newOps.some((o) => o.value === filter.op) ? filter.op : defaultOpForCol(v)
+            patchFilter(filter.id, { column: v, op: /** @type {FilterOp} */ (newOp), value: '' })
+          }}
+        >
+          <Select.Trigger size="sm" class="h-7 w-32 shrink-0 gap-1 px-2 text-ui-sm font-normal shadow-none" title="Column">
+            <span class="truncate">{filter.column || 'Column'}</span>
+          </Select.Trigger>
+          <Select.Content class="max-h-56">
+            {#each columns as col (col.name)}
+              <Select.Item value={col.name} label={col.name} />
+            {/each}
+          </Select.Content>
+        </Select.Root>
+        <Select.Root
+          type="single"
+          value={filter.op}
+          onValueChange={(v) => {
+            if (v) patchFilter(filter.id, { op: /** @type {FilterOp} */ (v), value: '' })
+          }}
+        >
+          <Select.Trigger size="sm" class="h-7 w-28 shrink-0 gap-1 px-2 text-ui-sm font-normal shadow-none" title="Condition">
+            <span class="truncate">{filterOpLabel(filter.op)}</span>
+          </Select.Trigger>
+          <Select.Content class="max-h-56">
+            {#each colOps as op (op.value)}
+              <Select.Item value={op.value} label={op.label} />
+            {/each}
+          </Select.Content>
+        </Select.Root>
+        {#if filterNeedsValue(filter.id)}
+          {#if colKind === 'boolean'}
+            <div class="flex gap-1">
+              {#each [{ label: 'True', value: 'true' }, { label: 'False', value: 'false' }] as opt (opt.value)}
+                <button
+                  type="button"
+                  class={cn(
+                    "inline-flex h-7 items-center gap-1 rounded-md border px-2.5 text-ui-sm transition-colors",
+                    filter.value === opt.value
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
+                  )}
+                  onclick={() => patchFilter(filter.id, { value: opt.value })}
+                >{opt.label}</button>
+              {/each}
+            </div>
+          {:else if colKind === 'date'}
+            {#if filter.op === 'between'}
+              <div class="flex min-w-0 flex-1 items-center gap-1.5">
+                <input
+                  type="date"
+                  value={betweenFrom(filter.value)}
+                  class="h-7 min-w-0 flex-1 rounded-md border border-input bg-input/30 px-2 text-ui-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+                  oninput={(e) => patchFilter(filter.id, { value: betweenJoin(e.currentTarget.value, betweenTo(filter.value)) })}
+                />
+                <span class="shrink-0 text-ui-xs text-muted-foreground">to</span>
+                <input
+                  type="date"
+                  value={betweenTo(filter.value)}
+                  class="h-7 min-w-0 flex-1 rounded-md border border-input bg-input/30 px-2 text-ui-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+                  oninput={(e) => patchFilter(filter.id, { value: betweenJoin(betweenFrom(filter.value), e.currentTarget.value) })}
+                />
+              </div>
+            {:else}
+              <input
+                type="date"
+                value={filter.value}
+                class="h-7 w-36 shrink-0 rounded-md border border-input bg-input/30 px-2 text-ui-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+                oninput={(e) => patchFilter(filter.id, { value: e.currentTarget.value })}
+              />
+            {/if}
+          {:else if colKind === 'number'}
+            <Input
+              type="number"
+              class="h-7 min-w-[6rem] flex-1 border-input bg-input/30 text-ui-sm shadow-none"
+              value={filter.value}
+              placeholder="Value…"
+              oninput={(e) => patchFilter(filter.id, { value: e.currentTarget.value })}
+            />
+          {:else}
+            <Input
+              class="h-7 min-w-[6rem] flex-1 border-input bg-input/30 text-ui-sm shadow-none"
+              value={filter.value}
+              placeholder="Value…"
+              oninput={(e) => patchFilter(filter.id, { value: e.currentTarget.value })}
+            />
+          {/if}
+        {:else}
+          <div class="flex-1"></div>
+        {/if}
+      </div>
+    {/each}
+    <div class="flex items-center gap-1 px-3 py-1.5">
+      <button
+        type="button"
+        class="inline-flex h-7 items-center gap-1 rounded-md px-2 text-ui-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        onclick={addFilter}
+      >
+        <Plus class="size-3.5" />
+        Add filter
+      </button>
+      <div class="flex-1"></div>
+      {#if rowFilters.length > 0}
+        <button
+          type="button"
+          class="inline-flex h-7 items-center gap-1 rounded-md px-2 text-ui-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          onclick={clearFilters}
+        >
+          Clear filters
+        </button>
+      {/if}
+    </div>
+  </div>
+{/if}
+</div>

@@ -21,6 +21,23 @@
   let copiedTimer = null
   /** @type {HTMLDivElement | null} */
   let rootEl = $state(null)
+  /** True only when content actually overflows the max-height — flips overflow:auto on. */
+  let scrollable = $state(false)
+
+  /**
+   * Measure whether content exceeds the viewer's max-height.
+   *
+   * Why: in WebKitGTK an element with `overflow:auto` claims wheel events even
+   * when content fits — so short JSON would absorb wheel and the table couldn't
+   * scroll. By only enabling overflow:auto when content genuinely overflows, we
+   * keep the wheel routing clean.
+   */
+  function remeasure() {
+    if (!rootEl) return
+    // scrollHeight is the natural content height regardless of overflow style.
+    // clientHeight is the rendered box height (which max-height caps).
+    scrollable = rootEl.scrollHeight > rootEl.clientHeight + 1
+  }
 
   /** Full JSON — used for copying. */
   const jsonText = $derived(formatJsonValue(record))
@@ -74,7 +91,16 @@
     void tick().then(() => {
       const pre = rootEl?.querySelector('pre')
       if (pre instanceof HTMLElement) linkifyJsonInElement(pre, source)
+      remeasure()
     })
+  })
+
+  // ResizeObserver catches viewport/font-size changes that affect max-height (vh, rem).
+  $effect(() => {
+    if (!rootEl) return
+    const ro = new ResizeObserver(remeasure)
+    ro.observe(rootEl)
+    return () => ro.disconnect()
   })
 
   /** @param {string} s */
@@ -94,8 +120,22 @@
   }
 </script>
 
-<div class="border-t border-border/50" style:max-height={maxHeight} style="overflow-y:auto">
-  <div class="studio-chrome sticky top-0 z-10 flex items-center justify-between border-b border-border/50 bg-panel px-3 py-0.5">
+<!--
+  Plain block layout with `max-height` on the scroll container itself.
+  Critical UX insight: the expand area should size to its CONTENT, not to a
+  fixed height. Fixed-height made the area huge even for tiny JSON, and the
+  empty area still counted as `overflow:auto` territory — WebKit absorbed
+  wheel events there even with nothing to scroll, blocking table scroll.
+
+  With max-height:
+    Short JSON  → rootEl is content-sized, no overflow exists, wheel events
+                  bubble up naturally and scroll the table.
+    Tall JSON   → rootEl is capped at max-height, content overflows, browser
+                  creates a real scroll viewport; overscroll-behavior keeps
+                  the scroll local once the user is actively scrolling JSON.
+-->
+<div class="border-t border-border/50 bg-background">
+  <div class="studio-chrome flex items-center justify-between border-b border-border/50 bg-panel px-3 py-0.5">
     {#if rowLabel}
       <span class="font-mono text-ui-2xs text-muted-foreground/40 select-none">{rowLabel}</span>
     {/if}
@@ -113,10 +153,19 @@
       {/if}
     </button>
   </div>
+  <!--
+    overflow toggles dynamically:
+      - scrollable=false → overflow:visible. Not a scroll container. Wheel events
+        bubble up and scroll the table.
+      - scrollable=true  → overflow:auto with scroll chaining (default
+        overscroll-behavior). When the user scrolls past the top or bottom of
+        the JSON, the scroll continues into the table seamlessly.
+  -->
   <div
     bind:this={rootEl}
     data-studio-selectable="text"
-    class="overflow-x-auto px-3 py-2"
+    class="px-3 py-2"
+    style="display:block;max-height:{maxHeight};overflow:{scrollable ? 'auto' : 'visible'}"
   >
     {#if !html}
       <p class="font-mono text-ui-2xs text-muted-foreground/50">Loading…</p>

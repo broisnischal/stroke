@@ -30,8 +30,8 @@
         { keys: [mod, shift, 'D'], desc: 'Data view' },
         { keys: [mod, shift, 'S'], desc: 'SQL editor' },
         { keys: [mod, shift, 'O'], desc: 'ORM Runner' },
-        { keys: [mod, shift, 'E'], desc: 'Schema Explorer' },
-        { keys: [mod, shift, 'A'], desc: 'AI chat' },
+        { keys: [mod, shift, 'E'], desc: 'AI panel' },
+        { keys: [mod, 'I'], desc: 'AI sidebar' },
       ],
     },
     {

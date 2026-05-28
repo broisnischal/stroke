@@ -27,6 +27,7 @@
  * @property {{ rowIdx: number, colIdx: number, draft: string, original: string } | null} editingCell
  * @property {boolean} savingCell
  * @property {Set<string>} hiddenColumns
+ * @property {boolean} filterBarOpen
  */
 
 /** @typedef {object} SqlTabState
@@ -109,6 +110,7 @@ export function createTableTabState(schema = 'public', table = null, tableKind =
     editingCell: null,
     savingCell: false,
     hiddenColumns: new Set(),
+    filterBarOpen: false,
   }
 }
 

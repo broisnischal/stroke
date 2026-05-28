@@ -106,6 +106,22 @@ export async function connectD1(config) {
   return inv('connect_d1_db', { config })
 }
 
+// ── Docker ────────────────────────────────────────────────────────────────────
+
+/** Returns Docker server version string, or throws a user-facing error. */
+export async function dockerCheck() {
+  return inv('docker_check')
+}
+
+/**
+ * Pull + run a database container. Streams log events as `docker-log:{eventId}`.
+ * @param {'postgres'|'mysql'} dbType
+ * @param {string} eventId
+ */
+export async function dockerRunDb(dbType, eventId) {
+  return inv('docker_run_db', { dbType, eventId })
+}
+
 // ── Shared disconnect ─────────────────────────────────────────────────────────
 
 export async function disconnectPostgres() {
@@ -142,6 +158,31 @@ export async function listIndexes(schema) {
 export async function listEnums(schema) {
   try {
     return await invoke('pg_list_enums', { schema })
+  } catch (err) {
+    throw new Error(formatInvokeError(err))
+  }
+}
+
+/**
+ * @param {string} schema
+ * @param {string} table
+ */
+export async function truncateTable(schema, table) {
+  try {
+    return await invoke('pg_truncate_table', { schema, table })
+  } catch (err) {
+    throw new Error(formatInvokeError(err))
+  }
+}
+
+/**
+ * @param {string} schema
+ * @param {string} table
+ * @param {boolean} [cascade]
+ */
+export async function dropTable(schema, table, cascade = false) {
+  try {
+    return await invoke('pg_drop_table', { schema, table, cascade })
   } catch (err) {
     throw new Error(formatInvokeError(err))
   }
@@ -272,4 +313,21 @@ export async function mcpStop() {
 /** @returns {Promise<{ running: boolean, port: number, url: string, token: string }>} */
 export async function mcpStatus() {
   return inv('mcp_status')
+}
+
+// ── AI Secrets (secure key storage in app data dir, not localStorage) ────────
+
+/** @param {string} profileId @param {string} apiKey */
+export async function aiStoreKey(profileId, apiKey) {
+  return inv('ai_store_key', { profileId, apiKey })
+}
+
+/** @param {string} profileId @returns {Promise<string>} */
+export async function aiLoadKey(profileId) {
+  return inv('ai_load_key', { profileId })
+}
+
+/** @param {string} profileId */
+export async function aiDeleteKey(profileId) {
+  return inv('ai_delete_key', { profileId })
 }

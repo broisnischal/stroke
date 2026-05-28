@@ -90,14 +90,14 @@ pub fn toggle_devtools(window: tauri::WebviewWindow) {
 use crate::db::{
     connect, connect_d1, connect_mysql, connect_sqlite, disconnect,
     delete_table_row, delete_table_rows, execute_sql, get_table_rows, insert_table_row,
-    list_schemas, list_tables, list_indexes, list_enums,
+    list_schemas, list_tables, list_indexes, list_enums, truncate_table, drop_table,
     test_connection, test_d1_connection, test_mysql_connection, test_sqlite_connection,
     update_table_cell, ConnectionConfig, D1Config, DbState, EnumInfo, IndexInfo, InsertRowResult,
     MysqlConfig, SqlResult, SqliteConfig, TableInfo, TableRows,
 };
 use serde_json::Value;
 use std::collections::HashMap;
-use tauri::State;
+use tauri::{Manager, State};
 
 // ── PostgreSQL ────────────────────────────────────────────────────────────────
 
@@ -198,6 +198,25 @@ pub async fn pg_list_enums(
 }
 
 #[tauri::command]
+pub async fn pg_truncate_table(
+    state: State<'_, DbState>,
+    schema: String,
+    table: String,
+) -> Result<(), String> {
+    truncate_table(state, schema, table).await
+}
+
+#[tauri::command]
+pub async fn pg_drop_table(
+    state: State<'_, DbState>,
+    schema: String,
+    table: String,
+    cascade: bool,
+) -> Result<(), String> {
+    drop_table(state, schema, table, cascade).await
+}
+
+#[tauri::command]
 pub async fn pg_get_table_rows(
     state: State<'_, DbState>,
     schema: String,
@@ -268,4 +287,66 @@ pub async fn pg_insert_table_row(
     values: HashMap<String, Value>,
 ) -> Result<InsertRowResult, String> {
     insert_table_row(state, schema, table, values).await
+}
+
+// ── License ───────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn check_license_status(app: tauri::AppHandle) -> crate::license::LicenseStatus {
+    match app.path().app_data_dir() {
+        Ok(dir) => crate::license::check_status(&dir),
+        Err(e) => crate::license::LicenseStatus::Error {
+            message: e.to_string(),
+        },
+    }
+}
+
+#[tauri::command]
+pub fn activate_license(app: tauri::AppHandle, key: String) -> Result<serde_json::Value, String> {
+    let parsed = crate::license::verify_key(&key)?;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let lic = crate::license::LicenseFile {
+        version: 1,
+        key,
+        email: parsed.email.clone(),
+        plan: parsed.plan.clone(),
+        issued_at: parsed.issued_at,
+        expires_at: parsed.expires_at,
+        device_id: crate::license::device_id(),
+        activated_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+    };
+    crate::license::save_license(&dir, &lic)?;
+    Ok(serde_json::json!({
+        "email": parsed.email,
+        "plan": parsed.plan,
+        "issued_at": parsed.issued_at,
+        "expires_at": parsed.expires_at,
+    }))
+}
+
+#[tauri::command]
+pub fn deactivate_license(app: tauri::AppHandle) -> Result<(), String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    crate::license::delete_license(&dir)
+}
+
+// ── License debug helpers (debug builds only) ─────────────────────────────────
+
+/// Backdate the trial file so the UI shows it as expired (or N days elapsed).
+/// Only compiled in debug mode — stripped from release builds entirely.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn debug_set_trial_days_ago(app: tauri::AppHandle, days_ago: u64) -> Result<(), String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    crate::license::debug_set_trial_days_ago(&dir, days_ago)
+}
+
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn debug_reset_trial(app: tauri::AppHandle) -> Result<(), String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    crate::license::debug_reset_trial(&dir)
 }
