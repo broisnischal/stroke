@@ -38,8 +38,10 @@
   import SchemaPage from './SchemaPage.svelte'
   import SecurityPage from './SecurityPage.svelte'
   import LogsPage from './LogsPage.svelte'
+  import JsonViewerPage from './JsonViewerPage.svelte'
   import { Button } from '$lib/components/ui/button/index.js'
-  import * as Alert from '$lib/components/ui/alert/index.js'
+  import AlertTriangle from '@lucide/svelte/icons/triangle-alert'
+  import X from '@lucide/svelte/icons/x'
   import {
     disconnectPostgres,
     listSchemas,
@@ -63,6 +65,7 @@
     createOrmTab,
     createSecurityTab,
     createLogsTab,
+    createJsonTab,
     findTableTab,
     findSqlTab,
     findAiTab,
@@ -70,6 +73,7 @@
     findOrmTab,
     findSecurityTab,
     findLogsTab,
+    findJsonTab,
     findLastTableTab,
     tableTabTitle,
     cycleTabIndex,
@@ -200,11 +204,13 @@
   let ormEverOpened = $state(false)
   let securityEverOpened = $state(false)
   let logsEverOpened = $state(false)
+  let jsonEverOpened = $state(false)
   $effect(() => {
     if (activeTab?.kind === 'sql') sqlEverOpened = true
     if (activeTab?.kind === 'orm') ormEverOpened = true
     if (activeTab?.kind === 'security') securityEverOpened = true
     if (activeTab?.kind === 'logs') logsEverOpened = true
+    if (activeTab?.kind === 'json') jsonEverOpened = true
   })
 
   let columns = $state([])
@@ -1002,6 +1008,20 @@
     saveActiveTabState()
     dropWelcomeTabs()
     const tab = createLogsTab()
+    tabs = [...tabs, tab]
+    activeTabId = tab.id
+    clearTableEditor()
+  }
+
+  function openJsonTab() {
+    const existing = findJsonTab(tabs)
+    if (existing) {
+      void activateTab(existing.id)
+      return
+    }
+    saveActiveTabState()
+    dropWelcomeTabs()
+    const tab = createJsonTab()
     tabs = [...tabs, tab]
     activeTabId = tab.id
     clearTableEditor()
@@ -1962,6 +1982,7 @@
   onopenSchema={() => { if (aiMode) exitAiMode(); openSchemaTab() }}
   onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
   onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
+  onopenJsonViewer={() => { if (aiMode) exitAiMode(); openJsonTab() }}
   onopenshortcuts={() => (showShortcutsModal = true)}
   onopenabout={() => (showAboutModal = true)}
   oncheckupdate={() => void updateDialog?.checkNow()}
@@ -2114,6 +2135,16 @@
         </div>
       {/if}
 
+      <!-- JSON Viewer tab - mount once, keep alive -->
+      {#if jsonEverOpened}
+        <div
+          class={activeTab?.kind === 'json' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+          inert={activeTab?.kind !== 'json' || undefined}
+        >
+          <JsonViewerPage active={activeTab?.kind === 'json'} />
+        </div>
+      {/if}
+
       <!-- ORM tab: mount once, keep alive so Monaco is not destroyed on tab switch -->
       {#if ormEverOpened}
         <div
@@ -2183,9 +2214,18 @@
 
       {#if activeTab?.kind === 'table'}
         {#if error}
-          <Alert.Root variant="destructive" class="mx-3 mt-2 shrink-0">
-            <Alert.Description class="text-ui-sm">{error}</Alert.Description>
-          </Alert.Root>
+          <div class="flex shrink-0 items-start gap-2.5 border-b border-destructive/15 bg-destructive/[0.04] px-3 py-2">
+            <AlertTriangle class="mt-px size-3.5 shrink-0 text-destructive/70" />
+            <p class="min-w-0 flex-1 font-mono text-ui-xs leading-relaxed text-destructive/90">{error}</p>
+            <button
+              type="button"
+              class="mt-px shrink-0 text-destructive/40 transition-colors hover:text-destructive"
+              onclick={() => (error = '')}
+              title="Dismiss"
+            >
+              <X class="size-3.5" />
+            </button>
+          </div>
         {/if}
 
         {#if !activeTable}
@@ -2194,6 +2234,10 @@
               Select a table from the sidebar or press
               <kbd class="rounded border border-border px-1 font-mono text-ui-xs">⌘K</kbd>
             </p>
+          </div>
+        {:else if error}
+          <div class="flex flex-1 items-center justify-center">
+            <p class="font-mono text-ui-sm text-muted-foreground/40">Dismiss the error above to continue.</p>
           </div>
         {:else}
           <TableToolbar
@@ -2402,6 +2446,9 @@
 
 <StatusBar
   {connection}
+  {savedConnections}
+  {activeConnectionId}
+  onswitchconnection={handleSwitchDatabase}
   {mcpRunning}
   hasUpdate={statusBarHasUpdate}
   {activeView}

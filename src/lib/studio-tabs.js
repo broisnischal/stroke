@@ -1,4 +1,4 @@
-/** @typedef {'table' | 'sql' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs'} StudioTabKind */
+/** @typedef {'table' | 'sql' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'json'} StudioTabKind */
 
 /** @typedef {import('$lib/table-query.js').TableSort} TableSort */
 /** @typedef {import('$lib/table-query.js').TableFilter} TableFilter */
@@ -222,6 +222,20 @@ export function findLogsTab(tabs) {
   return tabs.find((t) => t.kind === 'logs') ?? null
 }
 
+export function createJsonTab() {
+  return /** @type {StudioTab} */ ({
+    id: nextTabId(),
+    kind: 'json',
+    title: 'JSON Viewer',
+    state: null,
+  })
+}
+
+/** @param {StudioTab[]} tabs */
+export function findJsonTab(tabs) {
+  return tabs.find((t) => t.kind === 'json') ?? null
+}
+
 /** @param {TableTabState} state */
 export function tableTabTitle(state) {
   if (!state.table) return 'Table'
@@ -237,6 +251,7 @@ export function tabDisplayTitle(tab) {
   if (tab.kind === 'orm') return 'ORM Runner'
   if (tab.kind === 'security') return 'Security'
   if (tab.kind === 'logs') return 'Activity Log'
+  if (tab.kind === 'json') return 'JSON Viewer'
   return tab.title
 }
 

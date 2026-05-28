@@ -1,28 +1,46 @@
 <script>
   import { onMount } from 'svelte'
   import * as monaco from 'monaco-editor'
+  import { configureMonacoWorkers } from '$lib/monaco-env.js'
   import { defineDbStudioMonacoThemes, monacoThemeId, readEditorFontOptions } from '$lib/monaco-themes.js'
   import { normalizeThemeId } from '$lib/themes/registry.js'
-  import Table2 from '@lucide/svelte/icons/table-2'
+  import ResizeHandle from './ResizeHandle.svelte'
+  import { loadLayout, saveLayout } from '$lib/stores/layout.js'
   import Copy from '@lucide/svelte/icons/copy'
-  import Download from '@lucide/svelte/icons/download'
   import CheckCheck from '@lucide/svelte/icons/check-check'
+  import Braces from '@lucide/svelte/icons/braces'
   import { evalJsonPath, getCompletions, applyCompletion, describeResult } from '$lib/jsonpath.js'
+  import { cn } from '$lib/utils.js'
 
-  let {
-    json = '[]',
-    rowCount = 0,
-    onshowtable = () => {},
-    ondownload = /** @type {(() => void) | undefined} */ (undefined),
-  } = $props()
+  let { active = false } = $props()
+
+  // ── Layout ────────────────────────────────────────────────────────────────
+  const PANEL_MIN = 120
+  const stored = loadLayout()
+  // Reuse sqlEditorHeight as the input panel height for the JSON page
+  let inputHeight = $state(Math.max(PANEL_MIN, Math.min(stored.sqlEditorHeight, 480)))
+  let resizeStart = inputHeight
 
   /** @type {HTMLElement | null} */
-  let container = $state(null)
+  let pageEl = $state(null)
+
+  function clampHeight(h) {
+    const total = pageEl?.clientHeight ?? 0
+    const max = total > 0 ? Math.max(PANEL_MIN, total - PANEL_MIN) : 720
+    return Math.round(Math.min(max, Math.max(PANEL_MIN, h)))
+  }
+
+  // ── Input Monaco ─────────────────────────────────────────────────────────
+  /** @type {HTMLElement | null} */
+  let inputContainer = $state(null)
   /** @type {monaco.editor.IStandaloneCodeEditor | null} */
-  let editor = null
-  let copied = $state(false)
-  /** @type {ReturnType<typeof setTimeout> | null} */
-  let copiedTimer = null
+  let inputEditor = null
+
+  // ── Result Monaco ─────────────────────────────────────────────────────────
+  /** @type {HTMLElement | null} */
+  let resultContainer = $state(null)
+  /** @type {monaco.editor.IStandaloneCodeEditor | null} */
+  let resultEditor = null
 
   // ── JSONPath ──────────────────────────────────────────────────────────────
   let jsonPath = $state('')
@@ -30,9 +48,13 @@
   let activeIdx = $state(-1)
   /** @type {HTMLInputElement | null} */
   let pathInput = $state(null)
+  let rawJson = $state('')
+  let copied = $state(false)
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let copiedTimer = null
 
   const parsedJson = $derived.by(() => {
-    try { return JSON.parse(json) } catch { return null }
+    try { return JSON.parse(rawJson) } catch { return null }
   })
 
   const pathResult = $derived.by(() => {
@@ -42,8 +64,8 @@
     return evalJsonPath(parsedJson, p)
   })
 
-  const displayedJson = $derived.by(() => {
-    if (!pathResult?.ok) return json
+  const resultJson = $derived.by(() => {
+    if (!pathResult?.ok) return rawJson
     return JSON.stringify(pathResult.value, null, 2)
   })
 
@@ -54,6 +76,11 @@
 
   $effect(() => {
     if (!pathFocused || completions.length === 0) activeIdx = -1
+  })
+
+  $effect(() => {
+    if (!resultEditor) return
+    if (resultEditor.getValue() !== resultJson) resultEditor.setValue(resultJson)
   })
 
   /** @param {string} completion */
@@ -82,60 +109,86 @@
     }
   }
 
-  function currentTheme() {
-    return normalizeThemeId(document.documentElement.dataset.theme)
-  }
-
   function handleCopy() {
-    navigator.clipboard.writeText(displayedJson).then(() => {
+    navigator.clipboard.writeText(resultJson).then(() => {
       copied = true
       if (copiedTimer) clearTimeout(copiedTimer)
       copiedTimer = setTimeout(() => { copied = false }, 2000)
     })
   }
 
+  function currentTheme() {
+    return normalizeThemeId(document.documentElement.dataset.theme)
+  }
+
+  const MONACO_BASE = {
+    language: 'json',
+    automaticLayout: true,
+    minimap: { enabled: false },
+    fontFamily: '"Geist Mono Variable", ui-monospace, monospace',
+    fontLigatures: false,
+    fontWeight: 'normal',
+    scrollBeyondLastLine: false,
+    wordWrap: 'off',
+    lineNumbers: /** @type {'on'} */ ('on'),
+    lineNumbersMinChars: 3,
+    glyphMargin: false,
+    folding: true,
+    foldingHighlight: false,
+    scrollbar: { verticalScrollbarSize: 8, horizontalScrollbarSize: 8 },
+    overviewRulerLanes: 0,
+    hideCursorInOverviewRuler: true,
+    overviewRulerBorder: false,
+    smoothScrolling: true,
+    renderLineHighlight: /** @type {'none'} */ ('none'),
+    contextmenu: false,
+    selectionHighlight: false,
+    occurrencesHighlight: /** @type {'off'} */ ('off'),
+    codeLens: false,
+    renderValidationDecorations: /** @type {'off'} */ ('off'),
+  }
+
   onMount(() => {
+    configureMonacoWorkers()
     defineDbStudioMonacoThemes()
-    if (!container) return
+    if (!inputContainer || !resultContainer) return
 
     const { fontSize, lineHeight } = readEditorFontOptions()
+    const theme = monacoThemeId(currentTheme())
 
-    editor = monaco.editor.create(container, {
-      value: json,
-      language: 'json',
-      theme: monacoThemeId(currentTheme()),
-      readOnly: true,
-      automaticLayout: true,
-      minimap: { enabled: false },
-      fontFamily: '"Geist Mono Variable", ui-monospace, monospace',
+    inputEditor = monaco.editor.create(inputContainer, {
+      ...MONACO_BASE,
+      value: '',
+      theme,
+      readOnly: false,
       fontSize,
       lineHeight,
-      fontLigatures: false,
-      fontWeight: 'normal',
       padding: { top: 12, bottom: 12 },
-      scrollBeyondLastLine: false,
-      wordWrap: 'off',
-      renderLineHighlight: 'none',
-      lineNumbers: 'on',
-      lineNumbersMinChars: 3,
-      glyphMargin: false,
-      folding: true,
-      foldingHighlight: false,
-      scrollbar: { verticalScrollbarSize: 8, horizontalScrollbarSize: 8 },
-      overviewRulerLanes: 0,
-      hideCursorInOverviewRuler: true,
-      overviewRulerBorder: false,
-      smoothScrolling: true,
-      cursorStyle: 'line-thin',
-      contextmenu: false,
-      selectionHighlight: false,
-      occurrencesHighlight: 'off',
-      codeLens: false,
-      renderValidationDecorations: 'off',
+      cursorBlinking: 'smooth',
+      cursorSmoothCaretAnimation: 'on',
+      bracketPairColorization: { enabled: true },
+      quickSuggestions: false,
+      suggest: { showWords: false },
+    })
+
+    resultEditor = monaco.editor.create(resultContainer, {
+      ...MONACO_BASE,
+      value: '',
+      theme,
+      readOnly: true,
+      fontSize,
+      lineHeight,
+      padding: { top: 12, bottom: 12 },
+      cursorStyle: /** @type {'line-thin'} */ ('line-thin'),
+    })
+
+    inputEditor.onDidChangeModelContent(() => {
+      rawJson = inputEditor?.getValue() ?? ''
     })
 
     const themeObs = new MutationObserver(() => {
-      monaco.editor.setTheme(monacoThemeId(currentTheme()))
+      const t = monacoThemeId(currentTheme())
+      monaco.editor.setTheme(t)
     })
     themeObs.observe(document.documentElement, {
       attributes: true,
@@ -143,19 +196,43 @@
     })
 
     return () => {
-      editor?.dispose()
-      editor = null
+      inputEditor?.dispose()
+      resultEditor?.dispose()
+      inputEditor = null
+      resultEditor = null
       themeObs.disconnect()
     }
   })
-
-  $effect(() => {
-    if (!editor) return
-    if (editor.getValue() !== displayedJson) editor.setValue(displayedJson)
-  })
 </script>
 
-<div class="flex min-h-0 flex-1 flex-col overflow-hidden">
+<div bind:this={pageEl} class="flex min-h-0 flex-1 flex-col overflow-hidden">
+  <!-- Input panel header -->
+  <div class="studio-chrome flex h-8 shrink-0 items-center gap-2 border-b border-border bg-panel px-3">
+    <Braces class="size-3.5 shrink-0 text-muted-foreground/60" />
+    <span class="font-mono text-ui-xs text-muted-foreground/70">JSON Input</span>
+    <span class="font-mono text-ui-2xs text-muted-foreground/40">— paste or type JSON here</span>
+    {#if parsedJson === null && rawJson.trim()}
+      <span class="ml-auto font-mono text-ui-2xs text-destructive">invalid JSON</span>
+    {:else if parsedJson !== null}
+      <span class="ml-auto font-mono text-ui-2xs text-muted-foreground/50">
+        {Array.isArray(parsedJson) ? `${parsedJson.length} items` : `${Object.keys(parsedJson).length} keys`}
+      </span>
+    {/if}
+  </div>
+
+  <!-- Input Monaco editor -->
+  <div class="relative shrink-0 overflow-hidden" style="height: {inputHeight}px">
+    <div bind:this={inputContainer} class="absolute inset-0 h-full w-full"></div>
+  </div>
+
+  <ResizeHandle
+    axis="y"
+    edge="end"
+    onresizestart={() => { resizeStart = inputHeight }}
+    onresize={(dy) => { inputHeight = clampHeight(resizeStart + dy) }}
+    onresizeend={() => { saveLayout({ sqlEditorHeight: inputHeight }) }}
+  />
+
   <!-- JSONPath bar -->
   <div class="studio-chrome relative flex h-8 shrink-0 items-center gap-1.5 border-b border-border bg-panel px-3">
     <span class="select-none font-mono text-ui-xs text-muted-foreground/60">$</span>
@@ -204,16 +281,10 @@
       </ul>
     {/if}
 
-    <!-- toolbar right side -->
+    <!-- Right side actions -->
     <div class="ml-auto flex shrink-0 items-center gap-0.5">
-      {#if rowCount > 0}
-        <span class="select-none px-2 font-mono text-ui-2xs text-muted-foreground">{rowCount} rows</span>
-        <div class="h-4 w-px bg-border/60"></div>
-      {/if}
-
       <button
         type="button"
-        title="Copy JSON"
         class="inline-flex items-center gap-1.5 rounded-md px-2 py-1 font-mono text-ui-2xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         onclick={handleCopy}
       >
@@ -222,37 +293,23 @@
           <span>Copied</span>
         {:else}
           <Copy class="size-3 shrink-0" />
-          <span>Copy</span>
+          <span>Copy result</span>
         {/if}
-      </button>
-
-      {#if ondownload}
-        <button
-          type="button"
-          title="Download JSON"
-          class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          onclick={ondownload}
-        >
-          <Download class="size-3 shrink-0" />
-        </button>
-      {/if}
-
-      <div class="h-4 w-px bg-border/60"></div>
-
-      <button
-        type="button"
-        class="inline-flex items-center gap-1.5 rounded-md px-2 py-1 font-mono text-ui-2xs font-medium text-foreground transition-colors hover:bg-muted"
-        onclick={onshowtable}
-      >
-        <Table2 class="size-3 shrink-0" />
-        Show table
       </button>
     </div>
   </div>
 
-  <!-- Monaco JSON editor -->
+  <!-- Result Monaco editor -->
   <div class="relative min-h-0 flex-1 overflow-hidden">
-    <div bind:this={container} class="absolute inset-0 h-full w-full"></div>
+    <div bind:this={resultContainer} class="absolute inset-0 h-full w-full"></div>
+
+    {#if !rawJson.trim()}
+      <div class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 text-center">
+        <Braces class="size-8 text-muted-foreground/15" />
+        <p class="font-mono text-ui-sm text-muted-foreground/40">Paste JSON in the editor above</p>
+        <p class="font-mono text-ui-2xs text-muted-foreground/25">Then use the path bar to explore it</p>
+      </div>
+    {/if}
   </div>
 </div>
 

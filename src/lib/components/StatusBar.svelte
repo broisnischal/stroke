@@ -19,6 +19,7 @@
   import Settings from '@lucide/svelte/icons/settings'
   import Unplug from '@lucide/svelte/icons/unplug'
   import Command from '@lucide/svelte/icons/command'
+  import Cloud from '@lucide/svelte/icons/cloud'
   import { cn } from '$lib/utils.js'
   import { aiProfiles, activeProfileId, setActiveProfile } from '$lib/stores/ai-settings.js'
   import { executeSql } from '$lib/api.js'
@@ -27,11 +28,15 @@
   let {
     /** @type {import('$lib/stores/connections.js').SavedConnection | null} */
     connection = null,
+    /** @type {import('$lib/stores/connections.js').SavedConnection[]} */
+    savedConnections = [],
+    activeConnectionId = '',
     mcpRunning = false,
     hasUpdate = false,
     onopenmcp = /** @type {() => void} */ (() => {}),
     onconnect = /** @type {() => void} */ (() => {}),
     onswitchtodb = /** @type {(db: string) => void} */ ((_db) => {}),
+    onswitchconnection = /** @type {(conn: import('$lib/stores/connections.js').SavedConnection) => void} */ ((_c) => {}),
     oncheckupdate = /** @type {() => void} */ (() => {}),
     onopenmodelsettings = /** @type {() => void} */ (() => {}),
     aiMode = false,
@@ -100,6 +105,14 @@
       : 'PostgreSQL',
   )
   const connLabel = $derived(connection?.name ?? connection?.host ?? '')
+  let connOpen = $state(false)
+
+  /** @param {import('$lib/stores/connections.js').SavedConnection} c */
+  function connIcon(c) {
+    if (c.type === 'sqlite') return HardDrive
+    if (c.type === 'd1') return Cloud
+    return Database
+  }
 </script>
 
 <!-- Separator helper -->
@@ -114,18 +127,51 @@
   <!-- ── Left group ─────────────────────────────────────────────────── -->
   <div class="flex min-w-0 flex-1 items-center gap-0.5">
     {#if connection}
-      <!-- Connection status -->
-      <button
-        type="button"
-        class="flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors hover:bg-accent hover:text-foreground"
-        title="{connType} · {connLabel}"
-      >
-        <Wifi class="size-3 shrink-0 text-green-500" />
-        <span class="max-w-[9rem] truncate font-medium">{connType}</span>
-        {#if connLabel}
-          <span class="max-w-[8rem] truncate text-muted-foreground/60">· {connLabel}</span>
+      <!-- Connection switcher -->
+      <DropdownMenu.Root bind:open={connOpen}>
+        <DropdownMenu.Trigger
+          class="flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors hover:bg-accent hover:text-foreground outline-none data-[state=open]:bg-accent data-[state=open]:text-foreground"
+          title="Switch connection"
+        >
+          <Wifi class="size-3 shrink-0 text-green-500" />
+          <span class="max-w-[9rem] truncate font-medium">{connType}</span>
+          {#if connLabel}
+            <span class="max-w-[8rem] truncate text-muted-foreground/60">· {connLabel}</span>
+          {/if}
+          {#if savedConnections.length > 1}
+            <ChevronDown class={cn('size-3 shrink-0 opacity-50 transition-transform', connOpen && 'rotate-180')} />
+          {/if}
+        </DropdownMenu.Trigger>
+
+        {#if savedConnections.length > 0}
+          <DropdownMenu.Content side="top" align="start" class="w-64 p-1">
+            {#each savedConnections as conn (conn.id)}
+              {@const isCurrent = conn.id === activeConnectionId}
+              {@const Icon = connIcon(conn)}
+              <DropdownMenu.Item
+                class={cn('flex cursor-pointer items-center gap-2 text-xs', isCurrent && 'font-semibold')}
+                onclick={() => { if (!isCurrent) onswitchconnection(conn); connOpen = false }}
+              >
+                <Icon class={cn('size-3.5 shrink-0', isCurrent ? 'text-foreground' : 'text-muted-foreground/40')} />
+                <div class="min-w-0 flex-1">
+                  <div class="truncate">{conn.name ?? conn.host ?? conn.filePath ?? 'Connection'}</div>
+                  {#if conn.database && conn.database !== (conn.name ?? conn.host)}
+                    <div class="truncate font-mono text-[10px] text-muted-foreground/50">{conn.database}</div>
+                  {/if}
+                </div>
+                {#if isCurrent}<Check class="ml-auto size-3.5 shrink-0 text-green-500" />{/if}
+              </DropdownMenu.Item>
+            {/each}
+
+            <DropdownMenu.Separator />
+
+            <DropdownMenu.Item class="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground" onclick={() => { connOpen = false; onconnect() }}>
+              <WifiOff class="size-3.5 shrink-0" />
+              Manage connections…
+            </DropdownMenu.Item>
+          </DropdownMenu.Content>
         {/if}
-      </button>
+      </DropdownMenu.Root>
 
       {@render sep()}
 

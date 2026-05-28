@@ -19,6 +19,7 @@
   import Bookmark       from '@lucide/svelte/icons/bookmark'
   import ShieldCheck    from '@lucide/svelte/icons/shield-check'
   import Package        from '@lucide/svelte/icons/package'
+  import Braces         from '@lucide/svelte/icons/braces'
   import ChevronRight   from '@lucide/svelte/icons/chevron-right'
   import ChevronLeft    from '@lucide/svelte/icons/chevron-left'
   import Eye            from '@lucide/svelte/icons/eye'
@@ -55,6 +56,7 @@
     onopenSchema = () => {},
     onopensecurity = () => {},
     onopenlogs = () => {},
+    onopenJsonViewer = () => {},
     onopenshortcuts = () => {},
     onopenabout = () => {},
     oncheckupdate = () => {},
@@ -217,6 +219,10 @@
               <Command.Item value="open activity log events history operations" onSelect={() => run(onopenlogs)}>
                 <History class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">Activity Log</span>
+              </Command.Item>
+              <Command.Item value="open json viewer explorer jsonpath tool" onSelect={() => run(onopenJsonViewer)}>
+                <Braces class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">JSON Viewer</span>
               </Command.Item>
             </Command.Group>
 

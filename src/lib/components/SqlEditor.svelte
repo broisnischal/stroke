@@ -4,7 +4,6 @@
   import { configureMonacoWorkers } from '$lib/monaco-env.js'
   import { registerMonacoSqlFormatter } from '$lib/format-sql.js'
   import { registerMonacoSqlCompletion } from '$lib/monaco-sql-complete.js'
-  import { registerMonacoAiCompletion } from '$lib/monaco-ai-complete.js'
   import {
     defineDbStudioMonacoThemes,
     monacoThemeId,
@@ -52,7 +51,7 @@
   /** @param {monaco.editor.IStandaloneCodeEditor} ed */
   function registerAppShortcuts(ed) {
     const { CtrlCmd, Shift } = monaco.KeyMod
-    const { KeyK, KeyR, KeyS, KeyI, KeyB, KeyW, KeyN, KeyM, KeyT, KeyD, KeyO, Enter } = monaco.KeyCode
+    const { KeyK, KeyR, KeyS, KeyI, KeyB, KeyW, KeyN, KeyM, KeyT, KeyD, KeyO, KeyE, Enter } = monaco.KeyCode
 
     /** @param {() => void | undefined} fn */
     const run = (fn) => fn?.()
@@ -87,7 +86,6 @@
     defineDbStudioMonacoThemes()
     registerMonacoSqlFormatter(monaco)
     registerMonacoSqlCompletion(monaco, () => schemaHints)
-    registerMonacoAiCompletion(monaco, () => schemaHints)
     if (!container) return
 
     const { fontSize, lineHeight } = readEditorFontOptions()
@@ -127,7 +125,7 @@
       snippetSuggestions: 'inline',
       renderWhitespace: 'none',
       bracketPairColorization: { enabled: true },
-      inlineSuggest: { enabled: true, mode: 'subword' },
+      inlineSuggest: { enabled: false },
     })
 
     registerAppShortcuts(editor)

@@ -20,6 +20,7 @@
   import DataTable from "./DataTable.svelte";
   import DataTableSkeleton from "./DataTableSkeleton.svelte";
   import TableLoading from "./TableLoading.svelte";
+  import JsonViewer from "./JsonViewer.svelte";
   import ResizeHandle from "./ResizeHandle.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import {
@@ -123,6 +124,21 @@
   }
 
   let selected = $state(new Set());
+  /** @type {'table' | 'json'} */
+  let outputView = $state('table')
+
+  const rowObjects = $derived(
+    columns.length > 0 && rows.length > 0
+      ? rows.map((row) =>
+          Object.fromEntries(
+            /** @type {any[]} */ (columns).map((col, i) => [col.name ?? col, /** @type {any[]} */ (row)[i]])
+          )
+        )
+      : []
+  )
+
+  const jsonText = $derived(rowObjects.length > 0 ? JSON.stringify(rowObjects, null, 2) : '[]')
+
   /** @type {HTMLElement | null} */
   let consoleEl = $state(null);
   const initialLayout = loadLayout();
@@ -592,9 +608,27 @@
     </div>
   {/if}
 
-  <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-panel">
+  <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-panel">
     {#if columns.length > 0}
-      <DataTable {columns} {rows} {loading} bind:selected />
+      {#if outputView === 'json'}
+        <JsonViewer
+          json={jsonText}
+          rowCount={rows.length}
+          onshowtable={() => (outputView = 'table')}
+        />
+      {:else}
+        <DataTable {columns} {rows} {loading} bind:selected />
+        <div class="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-end p-2">
+          <button
+            type="button"
+            onclick={() => (outputView = 'json')}
+            class="pointer-events-auto inline-flex items-center gap-1.5 rounded-md border border-border/50 bg-background/85 px-2 py-1 font-mono text-ui-2xs text-muted-foreground shadow-md backdrop-blur-sm transition-colors hover:text-foreground"
+          >
+            <Braces class="size-3 shrink-0" />
+            JSON
+          </button>
+        </div>
+      {/if}
     {:else if loading}
       <TableLoading />
     {:else}
