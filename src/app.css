@@ -221,17 +221,13 @@ html[data-os="windows"] { --radius: 0.4375rem; } /* 7 px — Windows 11 rounding
     text-decoration-color: color-mix(in oklch, currentColor 40%, transparent);
   }
 
-  /* Data grid — always-visible column/row lines (stronger than --border on dark UI) */
-  .studio-table-toolbar {
-    border-bottom: 1px solid var(--table-grid);
-  }
-
   .studio-data-table {
     border-collapse: collapse;
     border-spacing: 0;
     line-height: 1.25;
     user-select: none;
   }
+
 
   /* Re-enable selection inside active edit inputs / selects / buttons */
   .studio-data-table input,
@@ -246,6 +242,7 @@ html[data-os="windows"] { --radius: 0.4375rem; } /* 7 px — Windows 11 rounding
     border-bottom: 1px solid var(--table-grid);
     vertical-align: middle;
   }
+
 
   /* Gutter cells: inner wrapper must fill the cell so place-items-center is truly symmetric */
   .studio-data-table :is(th, td).studio-table-gutter {

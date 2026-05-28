@@ -262,7 +262,7 @@
 
 <div class="flex shrink-0 flex-col">
 <header
-  class="studio-chrome studio-table-toolbar flex min-h-9 shrink-0 flex-wrap items-center gap-x-2 gap-y-1.5 bg-panel px-3 py-1 md:flex-nowrap"
+  class="studio-chrome studio-table-toolbar flex min-h-9 shrink-0 flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-border bg-panel px-3 py-1 md:flex-nowrap"
   data-studio-chrome
 >
   <!-- Left -->
