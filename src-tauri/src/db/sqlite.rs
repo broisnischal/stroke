@@ -205,51 +205,52 @@ pub async fn get_table_rows(
         .collect();
 
     // Build WHERE clause (using ? placeholders)
-    let mut conditions: Vec<String> = vec![];
+    // Each entry: (conjunct — None for first, Some("AND"/"OR") for rest, condition SQL, binds)
+    let mut cond_parts: Vec<(Option<String>, String)> = vec![];
     let mut binds: Vec<String> = vec![];
 
     if let Some(ref s) = search {
         if !s.is_empty() && !col_names.is_empty() {
+            let escaped = escape_like(s);
+            let pattern = format!("%{escaped}%");
             let parts: Vec<String> = col_names
                 .iter()
-                .map(|c| format!("LOWER(CAST(\"{}\" AS TEXT)) LIKE LOWER(?)", c.replace('"', "\"\"")))
+                .map(|c| format!("LOWER(CAST(\"{}\" AS TEXT)) LIKE LOWER(?) ESCAPE '\\'", c.replace('"', "\"\"")))
                 .collect();
-            conditions.push(format!("({})", parts.join(" OR ")));
-            let pattern = format!("%{s}%");
-            for _ in &col_names {
-                binds.push(pattern.clone());
-            }
+            cond_parts.push((None, format!("({})", parts.join(" OR "))));
+            for _ in &col_names { binds.push(pattern.clone()); }
         }
     }
 
     if let Some(ref fs) = filters {
         for f in fs {
             let qcol = format!("\"{}\"", f.column.replace('"', "\"\""));
+            let conj = if cond_parts.is_empty() { None }
+                       else { Some(f.conjunct.as_deref().unwrap_or("and").to_uppercase()) };
             match f.op.as_str() {
-                "is_null" => conditions.push(format!("{qcol} IS NULL")),
-                "is_not_null" => conditions.push(format!("{qcol} IS NOT NULL")),
-                _ => {
-                    if let Some(ref v) = f.value {
-                        let (cond, extra_binds) = build_filter_condition(&qcol, &f.op, v);
-                        conditions.push(cond);
-                        binds.extend(extra_binds);
-                    }
-                }
+                "is_null"     => cond_parts.push((conj, format!("{qcol} IS NULL"))),
+                "is_not_null" => cond_parts.push((conj, format!("{qcol} IS NOT NULL"))),
+                _ => if let Some(ref v) = f.value {
+                    let (cond, extra_binds) = build_filter_condition(&qcol, &f.op, v);
+                    cond_parts.push((conj, cond));
+                    binds.extend(extra_binds);
+                },
             }
         }
     }
 
-    let where_clause = if conditions.is_empty() {
-        String::new()
-    } else {
-        format!("WHERE {}", conditions.join(" AND "))
+    let where_clause = if cond_parts.is_empty() { String::new() } else {
+        let parts: Vec<String> = cond_parts.into_iter().map(|(c, s)| {
+            match c { None => s, Some(conj) => format!("{conj} {s}") }
+        }).collect();
+        format!("WHERE {}", parts.join(" "))
     };
 
-    // ORDER BY
+    // ORDER BY — NULLS LAST ensures consistent ordering when column has NULLs
     let order_clause = if let Some(col) = sort_column {
         let dir = sort_direction.as_deref().unwrap_or("asc").to_ascii_uppercase();
         let dir = if dir == "DESC" { "DESC" } else { "ASC" };
-        format!("ORDER BY \"{}\" {dir}", col.replace('"', "\"\""))
+        format!("ORDER BY \"{}\" {dir} NULLS LAST", col.replace('"', "\"\""))
     } else {
         String::new()
     };
@@ -324,6 +325,15 @@ pub async fn get_table_rows(
     })
 }
 
+/// Escape special characters in a SQLite/D1 LIKE pattern.
+/// The escape character used is `\` (set via `ESCAPE '\'` in the query).
+pub fn escape_like(input: &str) -> String {
+    input
+        .replace('\\', "\\\\")
+        .replace('%',  "\\%")
+        .replace('_',  "\\_")
+}
+
 /// Same logic as build_filter_condition but returns JSON Values for D1 HTTP params.
 pub fn build_d1_filter(qcol: &str, op: &str, val: &str) -> (String, Vec<serde_json::Value>) {
     let (cond, binds) = build_filter_condition(qcol, op, val);
@@ -332,21 +342,37 @@ pub fn build_d1_filter(qcol: &str, op: &str, val: &str) -> (String, Vec<serde_js
 
 fn build_filter_condition(qcol: &str, op: &str, val: &str) -> (String, Vec<String>) {
     match op {
-        "eq" => (format!("{qcol} = ?"), vec![val.to_string()]),
+        // Comparison operators: SQLite is dynamically typed — no cast needed.
+        // Direct comparison works correctly for integers, reals, and text alike.
+        "eq"  => (format!("{qcol} = ?"),  vec![val.to_string()]),
         "neq" => (format!("{qcol} != ?"), vec![val.to_string()]),
-        "gt" => (format!("{qcol} > ?"), vec![val.to_string()]),
+        "gt"  => (format!("{qcol} > ?"),  vec![val.to_string()]),
         "gte" => (format!("{qcol} >= ?"), vec![val.to_string()]),
-        "lt" => (format!("{qcol} < ?"), vec![val.to_string()]),
+        "lt"  => (format!("{qcol} < ?"),  vec![val.to_string()]),
         "lte" => (format!("{qcol} <= ?"), vec![val.to_string()]),
-        "contains" => (format!("LOWER(CAST({qcol} AS TEXT)) LIKE LOWER(?)"), vec![format!("%{val}%")]),
-        "not_contains" => (format!("LOWER(CAST({qcol} AS TEXT)) NOT LIKE LOWER(?)"), vec![format!("%{val}%")]),
-        "starts_with" => (format!("LOWER(CAST({qcol} AS TEXT)) LIKE LOWER(?)"), vec![format!("{val}%")]),
-        "ends_with" => (format!("LOWER(CAST({qcol} AS TEXT)) LIKE LOWER(?)"), vec![format!("%{val}")]),
+        // Text-search operators: cast to TEXT for LIKE, escape wildcards so user
+        // input containing `%` or `_` is treated as literals, not LIKE wildcards.
+        "contains" => (
+            format!("LOWER(CAST({qcol} AS TEXT)) LIKE LOWER(?) ESCAPE '\\'"),
+            vec![format!("%{}%", escape_like(val))],
+        ),
+        "not_contains" => (
+            format!("LOWER(CAST({qcol} AS TEXT)) NOT LIKE LOWER(?) ESCAPE '\\'"),
+            vec![format!("%{}%", escape_like(val))],
+        ),
+        "starts_with" => (
+            format!("LOWER(CAST({qcol} AS TEXT)) LIKE LOWER(?) ESCAPE '\\'"),
+            vec![format!("{}%", escape_like(val))],
+        ),
+        "ends_with" => (
+            format!("LOWER(CAST({qcol} AS TEXT)) LIKE LOWER(?) ESCAPE '\\'"),
+            vec![format!("%{}", escape_like(val))],
+        ),
         "between" => {
             let mut parts = val.splitn(2, ',');
             let from = parts.next().unwrap_or("").trim().to_string();
-            let to = parts.next().unwrap_or("").trim().to_string();
-            (format!("{qcol} >= ? AND {qcol} <= ?"), vec![from, to])
+            let to   = parts.next().unwrap_or("").trim().to_string();
+            (format!("({qcol} >= ? AND {qcol} <= ?)"), vec![from, to])
         }
         _ => (format!("{qcol} = ?"), vec![val.to_string()]),
     }

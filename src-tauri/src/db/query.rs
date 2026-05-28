@@ -485,9 +485,13 @@ pub struct RowFilter {
     #[serde(default)]
     pub value: Option<String>,
     /// How this filter joins to the previous one. None / "and" → AND, "or" → OR.
-    /// The first filter in a list has no conjunct (it is the root WHERE term).
     #[serde(default)]
     pub conjunct: Option<String>,
+    /// PostgreSQL column data type (e.g. "integer", "timestamptz").
+    /// When present, the query casts the *parameter* (`$1::integer`) instead of the
+    /// *column* (`col::text`), enabling index scans on typed columns.
+    #[serde(default)]
+    pub data_type: Option<String>,
 }
 
 struct WhereClause {
@@ -588,14 +592,39 @@ fn ensure_column(column: &str, allowed: &[String]) -> Result<(), String> {
     }
 }
 
+/// Map a PostgreSQL data type name to the cast suffix for a bound `TEXT` parameter.
+/// Casting the *parameter* (`$1::integer`) lets the query planner use indexes on
+/// the column; casting the *column* (`col::text`) makes every condition non-SARGable.
+fn pg_param_cast(data_type: Option<&str>) -> &'static str {
+    match data_type.unwrap_or("").to_lowercase().as_str() {
+        "integer" | "int" | "int2" | "int4" | "int8" | "smallint" | "bigint"
+        | "serial" | "smallserial" | "bigserial" => "::bigint",
+        "real" | "float4" | "float8" | "double precision" => "::float8",
+        "numeric" | "decimal" | "money" => "::numeric",
+        "date" => "::date",
+        "timestamp" | "timestamp without time zone" | "timestamp with time zone"
+        | "timestamptz" => "::timestamptz",
+        "time" | "time without time zone" | "time with time zone" | "timetz" => "::timetz",
+        "boolean" | "bool" => "::boolean",
+        "uuid" => "::uuid",
+        _ => "", // text / varchar / unknown: bind as text, compare as text
+    }
+}
+
 fn build_filter_condition(
     builder: &mut QueryBuilder,
     column: &str,
     op: &str,
     value: Option<&str>,
     conjunct: Option<&str>,
+    data_type: Option<&str>,
 ) -> Result<(), String> {
     let col = quoted_column(column)?;
+    let cast = pg_param_cast(data_type);
+    // When the column type is known we can cast the *parameter* and leave the
+    // column uncast, making the condition SARGable (index-eligible).
+    // For unknown types we fall back to casting the column to text.
+    let typed = !cast.is_empty();
     match op {
         "is_null" => {
             builder.push_condition(format!("{col} IS NULL"), conjunct);
@@ -604,34 +633,40 @@ fn build_filter_condition(
             builder.push_condition(format!("{col} IS NOT NULL"), conjunct);
         }
         "eq" => {
-            let v = value.unwrap_or("").to_string();
-            let p = builder.push_bind(v);
-            builder.push_condition(format!("{col}::text = {p}"), conjunct);
+            let p = builder.push_bind(value.unwrap_or("").to_string());
+            let cond = if typed { format!("{col} = {p}{cast}") }
+                       else    { format!("{col}::text = {p}") };
+            builder.push_condition(cond, conjunct);
         }
         "neq" => {
-            let v = value.unwrap_or("").to_string();
-            let p = builder.push_bind(v);
-            builder.push_condition(format!("{col}::text IS DISTINCT FROM {p}"), conjunct);
+            let p = builder.push_bind(value.unwrap_or("").to_string());
+            let cond = if typed { format!("{col} IS DISTINCT FROM {p}{cast}") }
+                       else    { format!("{col}::text IS DISTINCT FROM {p}") };
+            builder.push_condition(cond, conjunct);
         }
         "gt" => {
-            let v = value.unwrap_or("").to_string();
-            let p = builder.push_bind(v);
-            builder.push_condition(format!("{col}::text > {p}"), conjunct);
+            let p = builder.push_bind(value.unwrap_or("").to_string());
+            let cond = if typed { format!("{col} > {p}{cast}") }
+                       else    { format!("{col}::text > {p}") };
+            builder.push_condition(cond, conjunct);
         }
         "gte" => {
-            let v = value.unwrap_or("").to_string();
-            let p = builder.push_bind(v);
-            builder.push_condition(format!("{col}::text >= {p}"), conjunct);
+            let p = builder.push_bind(value.unwrap_or("").to_string());
+            let cond = if typed { format!("{col} >= {p}{cast}") }
+                       else    { format!("{col}::text >= {p}") };
+            builder.push_condition(cond, conjunct);
         }
         "lt" => {
-            let v = value.unwrap_or("").to_string();
-            let p = builder.push_bind(v);
-            builder.push_condition(format!("{col}::text < {p}"), conjunct);
+            let p = builder.push_bind(value.unwrap_or("").to_string());
+            let cond = if typed { format!("{col} < {p}{cast}") }
+                       else    { format!("{col}::text < {p}") };
+            builder.push_condition(cond, conjunct);
         }
         "lte" => {
-            let v = value.unwrap_or("").to_string();
-            let p = builder.push_bind(v);
-            builder.push_condition(format!("{col}::text <= {p}"), conjunct);
+            let p = builder.push_bind(value.unwrap_or("").to_string());
+            let cond = if typed { format!("{col} <= {p}{cast}") }
+                       else    { format!("{col}::text <= {p}") };
+            builder.push_condition(cond, conjunct);
         }
         "contains" => {
             let raw = value.unwrap_or("");
@@ -657,10 +692,15 @@ fn build_filter_condition(
             let raw = value.unwrap_or("");
             let mut parts = raw.splitn(2, ',');
             let from = parts.next().unwrap_or("").trim().to_string();
-            let to = parts.next().unwrap_or("").trim().to_string();
+            let to   = parts.next().unwrap_or("").trim().to_string();
             let p1 = builder.push_bind(from);
             let p2 = builder.push_bind(to);
-            builder.push_condition(format!("({col}::text >= {p1} AND {col}::text <= {p2})"), conjunct);
+            let cond = if typed {
+                format!("({col} >= {p1}{cast} AND {col} <= {p2}{cast})")
+            } else {
+                format!("({col}::text >= {p1} AND {col}::text <= {p2})")
+            };
+            builder.push_condition(cond, conjunct);
         }
         _ => return Err(format!("Unsupported filter operator: {op}")),
     }
@@ -688,15 +728,16 @@ fn build_where(
     for filter in filters {
         ensure_column(&filter.column, columns)?;
         let op = filter.op.as_str();
-        let conjunct = filter.conjunct.as_deref();
+        let conjunct   = filter.conjunct.as_deref();
+        let data_type  = filter.data_type.as_deref();
         if op != "is_null" && op != "is_not_null" {
             let value = filter.value.as_deref().unwrap_or("").trim();
             if value.is_empty() {
                 continue;
             }
-            build_filter_condition(&mut builder, &filter.column, op, Some(value), conjunct)?;
+            build_filter_condition(&mut builder, &filter.column, op, Some(value), conjunct, data_type)?;
         } else {
-            build_filter_condition(&mut builder, &filter.column, op, None, conjunct)?;
+            build_filter_condition(&mut builder, &filter.column, op, None, conjunct, data_type)?;
         }
     }
 
@@ -1543,33 +1584,42 @@ async fn get_table_rows_d1(
     let foreign_keys: Vec<ForeignKeyInfo> = fk_map.into_values().collect();
 
     // ── WHERE / ORDER build ───────────────────────────────────────────────────
-    let mut conditions: Vec<String> = vec![];
+    // Each entry: (conjunct — None for first, Some("AND"/"OR") for rest, condition SQL)
+    let mut cond_parts: Vec<(Option<String>, String)> = vec![];
     let mut params: Vec<Value> = vec![];
+
     if let Some(ref s) = search {
         if !s.is_empty() && !col_names.is_empty() {
+            let escaped = super::sqlite::escape_like(s);
             let parts: Vec<String> = col_names.iter()
-                .map(|c| format!("LOWER(CAST(\"{}\" AS TEXT)) LIKE LOWER(?)", c.replace('"', "\"\"")))
+                .map(|c| format!("LOWER(CAST(\"{}\" AS TEXT)) LIKE LOWER(?) ESCAPE '\\'", c.replace('"', "\"\"")))
                 .collect();
-            conditions.push(format!("({})", parts.join(" OR ")));
-            for _ in &col_names { params.push(Value::String(format!("%{s}%"))); }
+            cond_parts.push((None, format!("({})", parts.join(" OR "))));
+            for _ in &col_names { params.push(Value::String(format!("%{escaped}%"))); }
         }
     }
     if let Some(ref fs) = filters {
         for f in fs {
             let qcol = format!("\"{}\"", f.column.replace('"', "\"\""));
+            let conj = if cond_parts.is_empty() { None }
+                       else { Some(f.conjunct.as_deref().unwrap_or("and").to_uppercase()) };
             match f.op.as_str() {
-                "is_null"     => conditions.push(format!("{qcol} IS NULL")),
-                "is_not_null" => conditions.push(format!("{qcol} IS NOT NULL")),
+                "is_null"     => cond_parts.push((conj, format!("{qcol} IS NULL"))),
+                "is_not_null" => cond_parts.push((conj, format!("{qcol} IS NOT NULL"))),
                 _ => if let Some(ref v) = f.value {
                     let (cond, bp) = super::sqlite::build_d1_filter(&qcol, &f.op, v);
-                    conditions.push(cond);
+                    cond_parts.push((conj, cond));
                     params.extend(bp);
                 },
             }
         }
     }
-    let where_clause = if conditions.is_empty() { String::new() }
-                       else { format!("WHERE {}", conditions.join(" AND ")) };
+    let where_clause = if cond_parts.is_empty() { String::new() } else {
+        let parts: Vec<String> = cond_parts.into_iter().map(|(c, s)| {
+            match c { None => s, Some(conj) => format!("{conj} {s}") }
+        }).collect();
+        format!("WHERE {}", parts.join(" "))
+    };
 
     let order_clause = if let Some(col) = sort_column {
         let dir = match sort_direction.as_deref() { Some("desc") => "DESC", _ => "ASC" };

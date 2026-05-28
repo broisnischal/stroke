@@ -1413,7 +1413,7 @@
         search: rowSearch,
         sortColumn,
         sortDirection,
-        filters: filtersForApi(rowFilters),
+        filters: filtersForApi(rowFilters, columns),
       })
       columns = data.columns ?? []
       if (activeTable) {

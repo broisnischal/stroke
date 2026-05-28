@@ -66,14 +66,22 @@ export function activeFilters(filters) {
   })
 }
 
-/** @param {TableFilter[]} filters */
-export function filtersForApi(filters) {
+/**
+ * @param {TableFilter[]} filters
+ * @param {{ name: string, dataType?: string }[]} [columns] — when provided, the
+ *   column's dataType is included so the backend can cast parameters correctly
+ *   and keep filter conditions SARGable (index-eligible) on typed columns.
+ */
+export function filtersForApi(filters, columns) {
+  const typeMap = columns
+    ? Object.fromEntries(columns.map((c) => [c.name, c.dataType ?? c.data_type]))
+    : {}
   return activeFilters(filters).map(({ column, op, value, conjunct }, i) => ({
     column,
     op,
     value: value.trim() || undefined,
-    // first filter has no conjunct (it's the first WHERE term)
     conjunct: i === 0 ? undefined : (conjunct ?? 'and'),
+    dataType: typeMap[column] || undefined,
   }))
 }
 

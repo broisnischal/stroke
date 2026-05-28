@@ -88,49 +88,65 @@ struct WhereClause {
 }
 
 fn build_where(columns: &[String], search: Option<&str>, filters: &[RowFilter]) -> Result<WhereClause, String> {
-    let mut conditions: Vec<String> = Vec::new();
+    // (conjunct — None for first condition, Some("AND"/"OR") for subsequent)
+    let mut cond_parts: Vec<(Option<String>, String)> = Vec::new();
     let mut binds: Vec<String> = Vec::new();
 
     if let Some(term) = search.map(str::trim).filter(|s| !s.is_empty()) {
         let pattern = format!("%{}%", escape_like(term));
+        // CAST to CHAR is required for LIKE since MySQL LIKE only works on strings.
         let parts: Vec<String> = columns
             .iter()
             .map(|c| format!("CAST({} AS CHAR) LIKE ? ESCAPE '\\\\'", bt(c)))
             .collect();
         if !parts.is_empty() {
-            conditions.push(format!("({})", parts.join(" OR ")));
-            for _ in columns {
-                binds.push(pattern.clone());
-            }
+            cond_parts.push((None, format!("({})", parts.join(" OR "))));
+            for _ in columns { binds.push(pattern.clone()); }
         }
     }
 
     for f in filters {
         let col = bt(&f.column);
+        let conj = if cond_parts.is_empty() { None }
+                   else { Some(f.conjunct.as_deref().unwrap_or("and").to_uppercase()) };
         match f.op.as_str() {
-            "is_null" => conditions.push(format!("{col} IS NULL")),
-            "is_not_null" => conditions.push(format!("{col} IS NOT NULL")),
+            "is_null"     => cond_parts.push((conj, format!("{col} IS NULL"))),
+            "is_not_null" => cond_parts.push((conj, format!("{col} IS NOT NULL"))),
             op => {
                 let v = f.value.as_deref().unwrap_or("").trim();
-                if v.is_empty() {
-                    continue;
-                }
+                if v.is_empty() { continue; }
+                // Comparison operators: NO CAST — MySQL performs implicit type coercion
+                // from the string parameter to the column's actual type, which means the
+                // database can use indexes on typed columns (INT, DECIMAL, DATETIME, etc.).
+                // Only text-search ops (LIKE) need CAST since LIKE is inherently string-only.
                 match op {
-                    "eq" => { conditions.push(format!("CAST({col} AS CHAR) = ?")); binds.push(v.to_string()); }
-                    "neq" => { conditions.push(format!("CAST({col} AS CHAR) != ?")); binds.push(v.to_string()); }
-                    "gt" => { conditions.push(format!("CAST({col} AS CHAR) > ?")); binds.push(v.to_string()); }
-                    "gte" => { conditions.push(format!("CAST({col} AS CHAR) >= ?")); binds.push(v.to_string()); }
-                    "lt" => { conditions.push(format!("CAST({col} AS CHAR) < ?")); binds.push(v.to_string()); }
-                    "lte" => { conditions.push(format!("CAST({col} AS CHAR) <= ?")); binds.push(v.to_string()); }
-                    "contains" => { conditions.push(format!("CAST({col} AS CHAR) LIKE ? ESCAPE '\\\\'")); binds.push(format!("%{}%", escape_like(v))); }
-                    "not_contains" => { conditions.push(format!("CAST({col} AS CHAR) NOT LIKE ? ESCAPE '\\\\'")); binds.push(format!("%{}%", escape_like(v))); }
-                    "starts_with" => { conditions.push(format!("CAST({col} AS CHAR) LIKE ? ESCAPE '\\\\'")); binds.push(format!("{}%", escape_like(v))); }
-                    "ends_with" => { conditions.push(format!("CAST({col} AS CHAR) LIKE ? ESCAPE '\\\\'")); binds.push(format!("%{}", escape_like(v))); }
+                    "eq"  => { cond_parts.push((conj, format!("{col} = ?"))); binds.push(v.to_string()); }
+                    "neq" => { cond_parts.push((conj, format!("{col} != ?"))); binds.push(v.to_string()); }
+                    "gt"  => { cond_parts.push((conj, format!("{col} > ?"))); binds.push(v.to_string()); }
+                    "gte" => { cond_parts.push((conj, format!("{col} >= ?"))); binds.push(v.to_string()); }
+                    "lt"  => { cond_parts.push((conj, format!("{col} < ?"))); binds.push(v.to_string()); }
+                    "lte" => { cond_parts.push((conj, format!("{col} <= ?"))); binds.push(v.to_string()); }
+                    "contains" => {
+                        cond_parts.push((conj, format!("CAST({col} AS CHAR) LIKE ? ESCAPE '\\\\'")));
+                        binds.push(format!("%{}%", escape_like(v)));
+                    }
+                    "not_contains" => {
+                        cond_parts.push((conj, format!("CAST({col} AS CHAR) NOT LIKE ? ESCAPE '\\\\'")));
+                        binds.push(format!("%{}%", escape_like(v)));
+                    }
+                    "starts_with" => {
+                        cond_parts.push((conj, format!("CAST({col} AS CHAR) LIKE ? ESCAPE '\\\\'")));
+                        binds.push(format!("{}%", escape_like(v)));
+                    }
+                    "ends_with" => {
+                        cond_parts.push((conj, format!("CAST({col} AS CHAR) LIKE ? ESCAPE '\\\\'")));
+                        binds.push(format!("%{}", escape_like(v)));
+                    }
                     "between" => {
                         let mut parts = v.splitn(2, ',');
                         let from = parts.next().unwrap_or("").trim().to_string();
-                        let to = parts.next().unwrap_or("").trim().to_string();
-                        conditions.push(format!("CAST({col} AS CHAR) >= ? AND CAST({col} AS CHAR) <= ?"));
+                        let to   = parts.next().unwrap_or("").trim().to_string();
+                        cond_parts.push((conj, format!("({col} >= ? AND {col} <= ?)")));
                         binds.push(from);
                         binds.push(to);
                     }
@@ -140,10 +156,11 @@ fn build_where(columns: &[String], search: Option<&str>, filters: &[RowFilter]) 
         }
     }
 
-    let sql = if conditions.is_empty() {
-        String::new()
-    } else {
-        format!(" WHERE {}", conditions.join(" AND "))
+    let sql = if cond_parts.is_empty() { String::new() } else {
+        let parts: Vec<String> = cond_parts.into_iter().map(|(c, s)| {
+            match c { None => s, Some(conj) => format!("{conj} {s}") }
+        }).collect();
+        format!(" WHERE {}", parts.join(" "))
     };
     Ok(WhereClause { sql, binds })
 }
@@ -169,7 +186,8 @@ pub async fn get_table_rows(
             "desc" => "DESC",
             _ => "ASC",
         };
-        format!(" ORDER BY {} {dir}", bt(col))
+        // NULLS LAST (MySQL 8.0.22+) keeps NULL rows at the bottom for both ASC and DESC.
+        format!(" ORDER BY {} {dir} NULLS LAST", bt(col))
     } else {
         String::new()
     };
