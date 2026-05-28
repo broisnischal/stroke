@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "db-studio",
-  "version": "0.1.22",
+  "version": "0.1.23",
   "identifier": "com.broisnischal.studio",
   "build": {
     "frontendDist": "../dist",
