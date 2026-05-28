@@ -19,7 +19,7 @@
   import Braces from "@lucide/svelte/icons/braces";
   import { Button } from "$lib/components/ui/button/index.js";
   import DataTable from "./DataTable.svelte";
-  import DataTableSkeleton from "./DataTableSkeleton.svelte";
+  import TableLoading from "./TableLoading.svelte";
   import JsonViewer from "./JsonViewer.svelte";
   import ResizeHandle from "./ResizeHandle.svelte";
   import { cn } from "$lib/utils.js";
@@ -195,14 +195,22 @@
       `interface SelectBuilder {`,
       `  from(table: any): SelectBuilder;`,
       `  where(cond: SqlCond | string): SelectBuilder;`,
-      `  orderBy(...args: OrderSpec[]): SelectBuilder;`,
+      `  orderBy(...args: (OrderSpec | SqlCond | string)[]): SelectBuilder;`,
+      `  groupBy(...cols: (DbCol | string)[]): SelectBuilder;`,
+      `  having(cond: SqlCond | string): SelectBuilder;`,
       `  limit(n: number): SelectBuilder;`,
       `  offset(n: number): SelectBuilder;`,
+      `  leftJoin(table: any, on: SqlCond | string): SelectBuilder;`,
+      `  innerJoin(table: any, on: SqlCond | string): SelectBuilder;`,
+      `  rightJoin(table: any, on: SqlCond | string): SelectBuilder;`,
+      `  fullJoin(table: any, on: SqlCond | string): SelectBuilder;`,
       `  toSQL(): QueryResult;`,
       `}`,
       `interface InsertBuilder {`,
       `  values(data: Record<string, any> | Record<string, any>[]): InsertBuilder;`,
       `  returning(): InsertBuilder;`,
+      `  onConflictDoNothing(): InsertBuilder;`,
+      `  onConflictDoUpdate(opts: { target: DbCol | DbCol[]; set: Record<string, any> }): InsertBuilder;`,
       `  toSQL(): QueryResult;`,
       `}`,
       `interface UpdateBuilder {`,
@@ -234,55 +242,94 @@
       `declare function isNotNull(col: DbCol | string): SqlCond;`,
       `declare function inArray(col: DbCol | string, vals: any[]): SqlCond;`,
       `declare function notInArray(col: DbCol | string, vals: any[]): SqlCond;`,
-      `declare function and(...conds: SqlCond[]): SqlCond;`,
-      `declare function or(...conds: SqlCond[]): SqlCond;`,
+      `declare function between(col: DbCol | string, min: any, max: any): SqlCond;`,
+      `declare function and(...conds: (SqlCond | undefined)[]): SqlCond;`,
+      `declare function or(...conds: (SqlCond | undefined)[]): SqlCond;`,
       `declare function not(cond: SqlCond): SqlCond;`,
       `declare function asc(col: DbCol | string): OrderSpec;`,
       `declare function desc(col: DbCol | string): OrderSpec;`,
+      `declare function count(col?: DbCol | string): DbCol;`,
+      `declare function sum(col: DbCol | string): DbCol;`,
+      `declare function avg(col: DbCol | string): DbCol;`,
+      `declare function max(col: DbCol | string): DbCol;`,
+      `declare function min(col: DbCol | string): DbCol;`,
       `declare function sql(strings: TemplateStringsArray | string, ...vals: any[]): SqlCond;`,
     ];
     for (const name of tableNames) {
       if (!isValidIdentifier(name)) continue;
       const cols = /** @type {string[]} */ (columnsByTable?.[name] ?? []);
       if (cols.length > 0) {
-        lines.push(
-          `declare const ${name}: { ${cols.map((c) => `${c}: DbCol`).join("; ")}; [col: string]: DbCol; };`,
-        );
+        // No index signature — named properties give proper autocomplete in Monaco
+        lines.push(`declare const ${name}: { ${cols.map((c) => `${c}: DbCol`).join("; ")}; };`);
       } else {
-        lines.push(`declare const ${name}: Record<string, DbCol>;`);
+        lines.push(`declare const ${name}: { [col: string]: DbCol; };`);
       }
     }
     return lines.join("\n");
   }
 
-  function buildPrismaTypes(tableNames) {
+  function buildPrismaTypes(tableNames, columnsByTable) {
     const lines = [
       `interface QueryResult { sql: string; params: any[]; }`,
-      `interface WhereClause { [field: string]: any; }`,
+      `interface StringFilter { equals?: string; contains?: string; startsWith?: string; endsWith?: string; not?: string; in?: string[]; notIn?: string[]; }`,
+      `interface NumberFilter { equals?: number; gt?: number; gte?: number; lt?: number; lte?: number; not?: number; in?: number[]; notIn?: number[]; }`,
       `interface OrderByClause { [field: string]: 'asc' | 'desc'; }`,
       `interface PrismaModel {`,
-      `  findMany(args?: { where?: WhereClause; orderBy?: OrderByClause | OrderByClause[]; take?: number; skip?: number }): QueryResult;`,
-      `  findFirst(args?: { where?: WhereClause }): QueryResult;`,
-      `  findUnique(args: { where: WhereClause }): QueryResult;`,
+      `  findMany(args?: { where?: Record<string, any>; orderBy?: OrderByClause | OrderByClause[]; take?: number; skip?: number; select?: Record<string, boolean> }): QueryResult;`,
+      `  findFirst(args?: { where?: Record<string, any>; orderBy?: OrderByClause | OrderByClause[] }): QueryResult;`,
+      `  findUnique(args: { where: Record<string, any> }): QueryResult;`,
       `  create(args: { data: Record<string, any> }): QueryResult;`,
-      `  update(args: { data: Record<string, any>; where: WhereClause }): QueryResult;`,
-      `  delete(args: { where: WhereClause }): QueryResult;`,
-      `  count(args?: { where?: WhereClause }): QueryResult;`,
-      `  upsert(args: { create: Record<string, any>; update: Record<string, any>; where?: WhereClause }): QueryResult;`,
+      `  createMany(args: { data: Record<string, any>[] }): QueryResult;`,
+      `  update(args: { data: Record<string, any>; where: Record<string, any> }): QueryResult;`,
+      `  updateMany(args: { data: Record<string, any>; where?: Record<string, any> }): QueryResult;`,
+      `  delete(args: { where: Record<string, any> }): QueryResult;`,
+      `  deleteMany(args?: { where?: Record<string, any> }): QueryResult;`,
+      `  count(args?: { where?: Record<string, any> }): QueryResult;`,
+      `  upsert(args: { create: Record<string, any>; update: Record<string, any>; where?: Record<string, any> }): QueryResult;`,
       `}`,
     ];
+    // Per-model typed interface with column-aware where/select
+    for (const name of tableNames) {
+      if (!isValidIdentifier(name)) continue;
+      const cols = /** @type {string[]} */ ((columnsByTable ?? {})[name] ?? []);
+      if (cols.length > 0) {
+        const colFields = cols.map((c) => `${c}?: any`).join('; ');
+        const selectFields = cols.map((c) => `${c}?: boolean`).join('; ');
+        lines.push(
+          `interface ${name}Where { ${colFields}; AND?: ${name}Where[]; OR?: ${name}Where[]; NOT?: ${name}Where; }`,
+          `interface ${name}Select { ${selectFields}; }`,
+          `interface ${name}Model {`,
+          `  findMany(args?: { where?: ${name}Where; orderBy?: OrderByClause | OrderByClause[]; take?: number; skip?: number; select?: ${name}Select }): QueryResult;`,
+          `  findFirst(args?: { where?: ${name}Where; select?: ${name}Select }): QueryResult;`,
+          `  findUnique(args: { where: ${name}Where; select?: ${name}Select }): QueryResult;`,
+          `  create(args: { data: Partial<${name}Where> }): QueryResult;`,
+          `  createMany(args: { data: Partial<${name}Where>[] }): QueryResult;`,
+          `  update(args: { data: Partial<${name}Where>; where: ${name}Where }): QueryResult;`,
+          `  updateMany(args: { data: Partial<${name}Where>; where?: ${name}Where }): QueryResult;`,
+          `  delete(args: { where: ${name}Where }): QueryResult;`,
+          `  deleteMany(args?: { where?: ${name}Where }): QueryResult;`,
+          `  count(args?: { where?: ${name}Where }): QueryResult;`,
+          `  upsert(args: { create: Partial<${name}Where>; update: Partial<${name}Where>; where?: ${name}Where }): QueryResult;`,
+          `}`,
+        );
+      }
+    }
     if (tableNames.length > 0) {
       lines.push(`declare const prisma: {`);
       for (const name of tableNames) {
-        if (isValidIdentifier(name)) lines.push(`  ${name}: PrismaModel;`);
+        if (!isValidIdentifier(name)) continue;
+        const cols = /** @type {string[]} */ ((columnsByTable ?? {})[name] ?? []);
+        lines.push(`  ${name}: ${cols.length > 0 ? `${name}Model` : 'PrismaModel'};`);
       }
-      lines.push(`  [model: string]: PrismaModel;`);
       lines.push(`};`);
     } else {
       lines.push(`declare const prisma: { [model: string]: PrismaModel; };`);
     }
     return lines.join("\n");
   }
+
+  /** @type {import('monaco-editor').IDisposable | null} */
+  let _extraLibDisposable = null
 
   function updateMonacoTypes() {
     const tableNames = getTableNames();
@@ -291,11 +338,10 @@
     const dts =
       mode === "drizzle"
         ? buildDrizzleTypes(tableNames, columnsByTable)
-        : buildPrismaTypes(tableNames);
+        : buildPrismaTypes(tableNames, columnsByTable);
     try {
-      monaco.languages.typescript.javascriptDefaults.setExtraLibs([
-        { content: dts, filePath: "ts:orm-defs.d.ts" },
-      ]);
+      if (_extraLibDisposable) { _extraLibDisposable.dispose(); _extraLibDisposable = null; }
+      _extraLibDisposable = monaco.languages.typescript.javascriptDefaults.addExtraLib(dts, "file:///orm-defs.d.ts");
     } catch {
       /* monaco not ready */
     }
@@ -378,6 +424,7 @@
       if (editor && editor.getValue() !== next) editor.setValue(next);
     }
   });
+
 
   const isMac =
     typeof navigator !== "undefined" &&
@@ -605,10 +652,7 @@
     class="relative shrink-0 overflow-hidden border-b border-border bg-panel"
     style="height: {editorHeight}px"
   >
-    <div
-      bind:this={container}
-      class="absolute inset-0 h-full w-full overflow-hidden"
-    ></div>
+    <div bind:this={container} class="absolute inset-0 h-full w-full overflow-hidden"></div>
   </div>
 
   <!-- Parse error — inline below editor -->
@@ -696,7 +740,7 @@
   <!-- ── Results ────────────────────────────────────────────────────────── -->
   <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-panel">
     {#if loading}
-      <DataTableSkeleton columnCount={6} rowCount={10} />
+      <TableLoading />
     {:else if columns.length > 0}
       {#if outputView === "table"}
         <DataTable
@@ -783,4 +827,5 @@
   div :global(.monaco-editor .monaco-editor-background) {
     outline: none !important;
   }
+
 </style>

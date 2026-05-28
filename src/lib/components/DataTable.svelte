@@ -158,9 +158,13 @@
   // Row height: gutter-inner has min-height 1.75rem; at --app-font-size:14px that is
   // 1.75 × 14 = 24.5px → 25px rendered. Add 1px for subpixel headroom → 26.
   const ROW_HEIGHT = 26
-  const OVERSCAN = 10
+  // 15 rows = ~390px overscan buffer on each side — enough for fast touchpad/wheel
+  // scrolling without creating too many extra DOM nodes per replenishment cycle.
+  const OVERSCAN = 15
   let _scrollTop = $state(0)
-  let _viewportHeight = $state(600)
+  // Start high so the first virtual render covers any reasonable screen height
+  // before the ResizeObserver fires with the real value.
+  let _viewportHeight = $state(1200)
 
   // ── URL preview / lightbox ────────────────────────────────────────────────
   /** @type {string | null} */
@@ -947,15 +951,15 @@
     if (!container || !useVirtual) return
     _viewportHeight = container.clientHeight
     _scrollTop = container.scrollTop
-    let rafId = 0
+
+    // Update synchronously — no RAF delay so the virtual window always matches
+    // the scroll position before the browser paints the next frame.
     const onScroll = () => {
-      if (rafId) return
-      rafId = requestAnimationFrame(() => {
-        rafId = 0
-        const st = container.scrollTop
-        if (st !== _scrollTop) _scrollTop = st
-      })
+      const st = container.scrollTop
+      if (st !== _scrollTop) _scrollTop = st
     }
+
+    // Resize is rare; one RAF is fine here to avoid hammering during window drag.
     let roRafId = 0
     const ro = new ResizeObserver(() => {
       if (roRafId) return
@@ -964,7 +968,6 @@
     container.addEventListener('scroll', onScroll, { passive: true })
     ro.observe(container)
     return () => {
-      if (rafId) cancelAnimationFrame(rafId)
       if (roRafId) cancelAnimationFrame(roRafId)
       container.removeEventListener('scroll', onScroll)
       ro.disconnect()
