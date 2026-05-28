@@ -9,8 +9,6 @@
   import Eye from "@lucide/svelte/icons/eye";
   import Layers from "@lucide/svelte/icons/layers";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
-  import Terminal from "@lucide/svelte/icons/terminal";
-  import Command from "@lucide/svelte/icons/command";
   import ListFilter from "@lucide/svelte/icons/list-filter";
   import Lock from "@lucide/svelte/icons/lock";
   import Square from "@lucide/svelte/icons/square";
@@ -20,18 +18,8 @@
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Plus from "@lucide/svelte/icons/plus";
-  import Settings from "@lucide/svelte/icons/settings";
-  import Unplug from "@lucide/svelte/icons/unplug";
-  import LayoutTemplate from "@lucide/svelte/icons/layout-template";
-  import Code2 from "@lucide/svelte/icons/code-2";
-  import Bot from "@lucide/svelte/icons/bot";
-  import History from "@lucide/svelte/icons/history";
-  import ShieldCheck from "@lucide/svelte/icons/shield-check";
-  import DatabaseSwitcher from "./DatabaseSwitcher.svelte";
   import DangerousActionDialog from "./DangerousActionDialog.svelte";
-  import { ScrollArea } from "$lib/components/ui/scroll-area/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
-  import * as Tabs from "$lib/components/ui/tabs/index.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
   import ResizeHandle from "./ResizeHandle.svelte";
   import { cn } from "$lib/utils.js";
@@ -115,26 +103,15 @@
     tableFilter = "",
     loadingTables = false,
     onschemachange = () => {},
-    onviewchange = () => {},
-    onopencommand = () => {},
     ontableselect = () => {},
     ontablefilter = () => {},
     onrefresh = () => {},
-    onopensettings = () => {},
-    ondisconnect = () => {},
-    onopenSchema = () => {},
-    onopenorm = () => {},
-    onopenaimode = () => {},
     onnewtable = () => {},
-    aiMode = false,
     /** @type {import('$lib/stores/query-history.js').QueryHistoryEntry[]} */
     queryHistory = [],
     onqueryselect = /** @type {(sql: string) => void} */ (() => {}),
-    onopensecurity = () => {},
-    onopenlogs = () => {},
     /** @type {import('$lib/stores/connections.js').SavedConnection | null} */
     connection = null,
-    onswitchtodb = /** @type {(db: string) => void} */ (() => {}),
     ontruncatetable = /** @type {(table: string) => void} */ (() => {}),
     ondroptable = /** @type {(table: string, cascade: boolean) => void} */ (() => {}),
   } = $props();
@@ -323,7 +300,7 @@
     class="studio-chrome flex h-full min-w-0 flex-1 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
     data-studio-chrome
   >
-    {#if isTauri}
+    {#if isTauri && !fullscreen}
       <!--
       Traffic light row: buttons sit outside the drag region so they always
       receive click events; the flex-1 filler to the right is the drag target.
@@ -407,38 +384,6 @@
       </div>
     {/if}
     <div class="flex min-h-0 flex-1 flex-col">
-      {#if connectionName}
-        <div
-          class="flex h-9 shrink-0 items-center border-b border-sidebar-border px-2"
-        >
-          <Tabs.Root
-            value={activeView}
-            onValueChange={(v) => {
-              if (v === "table" || v === "sql") onviewchange(v);
-            }}
-            class="w-full"
-          >
-            <Tabs.List class="h-7 w-full gap-0.5 rounded-md bg-muted/50 p-0.5">
-              <Tabs.Trigger
-                value="table"
-                class="h-full flex-1 gap-1.5 rounded-sm text-ui-xs font-medium data-[state=active]:bg-card data-[state=active]:shadow-sm data-[state=active]:text-foreground data-[state=inactive]:text-muted-foreground/70"
-                title="Data view (⌘⇧D)"
-              >
-                <Table2 class="size-3 shrink-0 opacity-60" />
-                Data
-              </Tabs.Trigger>
-              <Tabs.Trigger
-                value="sql"
-                class="h-full flex-1 gap-1.5 rounded-sm text-ui-xs font-medium data-[state=active]:bg-card data-[state=active]:shadow-sm data-[state=active]:text-foreground data-[state=inactive]:text-muted-foreground/70"
-                title="SQL editor (⌘⇧S)"
-              >
-                <Terminal class="size-3 shrink-0 opacity-60" />
-                SQL
-              </Tabs.Trigger>
-            </Tabs.List>
-          </Tabs.Root>
-        </div>
-      {/if}
 
       <div
         class="flex shrink-0 flex-col gap-1.5 border-b border-sidebar-border px-2 py-2"
@@ -556,7 +501,7 @@
       </div>
 
       <div class="flex min-h-0 flex-1 flex-col">
-        <ScrollArea class="min-h-0 w-full flex-1">
+        <div class="app-scroll min-h-0 w-full flex-1 overflow-y-auto">
           {#if loadingTables}
             <div
               class="flex items-center justify-center py-8"
@@ -947,84 +892,10 @@
 
           {/if}
 
-        </ScrollArea>
+        </div>
       </div>
     </div>
 
-    <footer class="flex flex-col gap-0 border-t border-sidebar-border">
-      <!-- Database switcher -->
-      {#if connectionName}
-        <div class="px-2 pt-2 pb-1">
-          <DatabaseSwitcher {connection} {onswitchtodb} />
-        </div>
-      {/if}
-
-      <!-- Icon toolbar -->
-      <div class="flex items-center gap-0.5 px-2 pb-2 pt-0.5">
-        <button
-          type="button"
-          class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
-          title="Schema Explorer"
-          onclick={onopenSchema}
-        ><LayoutTemplate class="size-3.5" /></button>
-
-        <button
-          type="button"
-          class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
-          title="Activity log"
-          onclick={onopenlogs}
-        ><History class="size-3.5" /></button>
-
-        <button
-          type="button"
-          class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
-          title="Security"
-          onclick={onopensecurity}
-        ><ShieldCheck class="size-3.5" /></button>
-
-        <button
-          type="button"
-          class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
-          title="ORM Runner"
-          onclick={onopenorm}
-        ><Code2 class="size-3.5" /></button>
-
-        <button
-          type="button"
-          class={cn(
-            'inline-flex size-7 items-center justify-center rounded-md transition-colors',
-            aiMode ? 'bg-primary/10 text-primary hover:bg-primary/15' : 'text-muted-foreground/70 hover:bg-accent hover:text-foreground',
-          )}
-          title={aiMode ? 'Close AI panel (⌘⇧E)' : 'Open AI panel (⌘⇧E)'}
-          onclick={onopenaimode}
-        ><Bot class="size-3.5" /></button>
-
-        <div class="flex-1"></div>
-
-        <button
-          type="button"
-          class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
-          title="Command menu (⌘K)"
-          onclick={onopencommand}
-        ><Command class="size-3.5" /></button>
-
-        <button
-          type="button"
-          class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
-          title="Settings"
-          onclick={onopensettings}
-        ><Settings class="size-3.5" /></button>
-
-        {#if connectionName}
-          <button
-            type="button"
-            class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-destructive"
-            title="Disconnect"
-            onclick={ondisconnect}
-          ><Unplug class="size-3.5" /></button>
-        {/if}
-      </div>
-    </footer>
   </aside>
   <ResizeHandle
     edge="end"

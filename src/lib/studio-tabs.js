@@ -143,7 +143,7 @@ export function createSqlTab(sqlText) {
   return /** @type {StudioTab} */ ({
     id: nextTabId(),
     kind: 'sql',
-    title: 'SQL',
+    title: 'Query Editor',
     state: createSqlTabState(sqlText),
   })
 }
@@ -236,7 +236,7 @@ export function tableTabTitle(state) {
 /** @param {StudioTab} tab */
 export function tabDisplayTitle(tab) {
   if (tab.kind === 'table' && tab.state) return tableTabTitle(/** @type {TableTabState} */ (tab.state))
-  if (tab.kind === 'sql') return 'SQL'
+  if (tab.kind === 'sql') return 'Query Editor'
   if (tab.kind === 'ai') return 'AI Chat'
   if (tab.kind === 'schema') return 'Schema Explorer'
   if (tab.kind === 'orm') return 'ORM Runner'

@@ -16,6 +16,11 @@
   --editor-line-height: 26px;
 }
 
+/* OS-native border-radius conventions */
+html[data-os="macos"]   { --radius: 0.5rem; }   /* 8 px — macOS rounded controls */
+html[data-os="windows"] { --radius: 0.4375rem; } /* 7 px — Windows 11 rounding */
+/* linux keeps the default 6 px */
+
 @theme inline {
   --radius-sm: calc(var(--radius) - 2px);
   --radius-md: var(--radius);

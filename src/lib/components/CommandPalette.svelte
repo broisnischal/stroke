@@ -27,6 +27,8 @@
 
   let {
     open = $bindable(false),
+    /** @type {'root' | 'docker' | 'connections' | 'tables'} */
+    page = $bindable('root'),
     connected = false,
     schemas = [],
     tables = [],
@@ -69,10 +71,7 @@
     onopenqueryhistory = () => {},
   } = $props()
 
-  /** @type {'root' | 'docker' | 'connections'} */
-  let page = $state('root')
-
-  /** @param {'docker' | 'connections'} target */
+  /** @param {'docker' | 'connections' | 'tables'} target */
   function navigate(target) {
     page = target
   }
@@ -100,6 +99,29 @@
     if (!open) page = 'root'
   })
 
+  // Re-focus the search input after the Dialog's focus trap has settled.
+  // tick() alone is too early — bits-ui's focus trap runs in a rAF after open,
+  // overriding any focus we set in a microtask. Double rAF beats the trap.
+  $effect(() => {
+    open  // dependency
+    page  // dependency
+    if (!open) return
+    let id1 = requestAnimationFrame(() => {
+      let id2 = requestAnimationFrame(() => {
+        /** @type {HTMLInputElement | null} */
+        const input = document.querySelector('[data-slot="command-input"] input')
+        input?.focus()
+      })
+      return () => cancelAnimationFrame(id2)
+    })
+    return () => cancelAnimationFrame(id1)
+  })
+
+  // Derived table groups — used in both the root page and the dedicated tables page
+  const regularTables = $derived(tables.filter((t) => !t.tableKind || t.tableKind === 'table' || t.tableKind === 'foreign_table'))
+  const viewTables    = $derived(tables.filter((t) => t.tableKind === 'view'))
+  const matViewTables = $derived(tables.filter((t) => t.tableKind === 'materialized_view'))
+
   /** @param {() => void} action */
   function run(action) {
     open = false
@@ -123,6 +145,7 @@
   const pageLabel = /** @type {Record<string, string>} */ ({
     docker: 'Docker',
     connections: 'Connections',
+    tables: 'Tables',
   })
 </script>
 
@@ -138,6 +161,7 @@
       <div class="flex items-center gap-1.5 border-b border-border px-3 py-2">
         <button
           type="button"
+          tabindex="-1"
           class="flex items-center gap-1 text-ui-xs text-muted-foreground transition-colors hover:text-foreground"
           onclick={goBack}
         >
@@ -152,7 +176,11 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div onkeydown={handleKeydown}>
       <Command.Input
-        placeholder={page === 'root' ? 'Search tables, schemas, commands…' : `Search ${pageLabel[page]}…`}
+        placeholder={
+          page === 'root' ? 'Search tables, schemas, commands…'
+          : page === 'tables' ? 'Search tables and views…'
+          : `Search ${pageLabel[page]}…`
+        }
       />
 
       <Command.List class="max-h-[min(400px,55vh)]">
@@ -208,23 +236,27 @@
 
             {#if tables.length > 0}
               <Command.Group heading="Tables">
-                {#each tables as table (table.name)}
+                {#each regularTables.slice(0, 8) as table (table.name)}
                   <Command.Item value="table {activeSchema} {table.name}" onSelect={() => run(() => ontableselect(table.name))}>
-                    {#if table.tableKind === 'view' || table.tableKind === 'materialized_view'}
-                      <Eye class="size-4 shrink-0 opacity-60" />
-                    {:else}
-                      <Table2 class="size-4 shrink-0 opacity-60" />
-                    {/if}
+                    <Table2 class="size-4 shrink-0 opacity-60" />
                     <span data-slot="command-label" class="truncate font-mono">{table.name}</span>
-                    <span
-                      data-slot="command-trailing"
-                      class="shrink-0 font-mono text-ui-xs tabular-nums text-muted-foreground"
-                      title={table.rowCount != null ? Number(table.rowCount).toLocaleString('en-US') : undefined}
-                    >
-                      {formatTableRowCount(table.rowCount)}
-                    </span>
+                    <span data-slot="command-trailing" class="shrink-0 font-mono text-ui-xs tabular-nums text-muted-foreground">{formatTableRowCount(table.rowCount)}</span>
                   </Command.Item>
                 {/each}
+                {#each viewTables.slice(0, 4) as table (table.name)}
+                  <Command.Item value="view {activeSchema} {table.name}" onSelect={() => run(() => ontableselect(table.name))}>
+                    <Eye class="size-4 shrink-0 opacity-60" />
+                    <span data-slot="command-label" class="truncate font-mono">{table.name}</span>
+                    <span data-slot="command-trailing" class="shrink-0 text-ui-xs text-muted-foreground">view</span>
+                  </Command.Item>
+                {/each}
+                {#if tables.length > 12}
+                  <Command.Item value="browse all tables views search" onSelect={() => navigate('tables')}>
+                    <Table2 class="size-4 shrink-0 opacity-40" />
+                    <span data-slot="command-label" class="truncate text-muted-foreground">All {tables.length} tables & views…</span>
+                    <ChevronRight class="size-3.5 shrink-0 text-muted-foreground/40" />
+                  </Command.Item>
+                {/if}
               </Command.Group>
             {/if}
 
@@ -329,6 +361,48 @@
               <ChevronRight class="size-3.5 shrink-0 text-muted-foreground/40" />
             </Command.Item>
           </Command.Group>
+
+        <!-- ── TABLES PAGE ───────────────────────────────────────────── -->
+        {:else if page === 'tables'}
+          {#if regularTables.length > 0}
+            <Command.Group heading="Tables">
+              {#each regularTables as table (table.name)}
+                <Command.Item value="table {activeSchema} {table.name} {table.name}" onSelect={() => run(() => ontableselect(table.name))}>
+                  <Table2 class="size-4 shrink-0 opacity-60" />
+                  <span data-slot="command-label" class="truncate font-mono">{table.name}</span>
+                  <span
+                    data-slot="command-trailing"
+                    class="shrink-0 font-mono text-ui-xs tabular-nums text-muted-foreground"
+                    title={table.rowCount != null ? Number(table.rowCount).toLocaleString('en-US') : undefined}
+                  >{formatTableRowCount(table.rowCount)}</span>
+                </Command.Item>
+              {/each}
+            </Command.Group>
+          {/if}
+          {#if viewTables.length > 0}
+            <Command.Group heading="Views">
+              {#each viewTables as table (table.name)}
+                <Command.Item value="view {activeSchema} {table.name} {table.name}" onSelect={() => run(() => ontableselect(table.name))}>
+                  <Eye class="size-4 shrink-0 opacity-60" />
+                  <span data-slot="command-label" class="truncate font-mono">{table.name}</span>
+                </Command.Item>
+              {/each}
+            </Command.Group>
+          {/if}
+          {#if matViewTables.length > 0}
+            <Command.Group heading="Materialized views">
+              {#each matViewTables as table (table.name)}
+                <Command.Item value="materialized view {activeSchema} {table.name} {table.name}" onSelect={() => run(() => ontableselect(table.name))}>
+                  <Eye class="size-4 shrink-0 opacity-60" />
+                  <span data-slot="command-label" class="truncate font-mono">{table.name}</span>
+                  <span
+                    data-slot="command-trailing"
+                    class="shrink-0 font-mono text-ui-xs tabular-nums text-muted-foreground"
+                  >{formatTableRowCount(table.rowCount)}</span>
+                </Command.Item>
+              {/each}
+            </Command.Group>
+          {/if}
 
         <!-- ── DOCKER PAGE ────────────────────────────────────────────── -->
         {:else if page === 'docker'}

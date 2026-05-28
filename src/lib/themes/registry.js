@@ -1,6 +1,6 @@
-/** @typedef {'light' | 'studio' | 'product' | 'editor' | 'classic'} ThemeGroup */
+/** @typedef {'light' | 'studio' | 'product' | 'editor' | 'classic' | 'mono'} ThemeGroup */
 
-/** @typedef {'light' | 'notion' | 'github-light' | 'vscode-light' | 'linear-light' | 'linear' | 'cursor' | 'raycast' | 'vercel' | 'vscode' | 'github' | 'onedark' | 'catppuccin' | 'rosepine' | 'dark' | 'vitesse' | 'midnight' | 'slate' | 'nord' | 'dracula' | 'forest' | 'solarized'} ThemeId */
+/** @typedef {'light' | 'notion' | 'github-light' | 'vscode-light' | 'linear-light' | 'broisnees-light' | 'linear' | 'cursor' | 'raycast' | 'vercel' | 'vscode' | 'github' | 'onedark' | 'catppuccin' | 'rosepine' | 'tokyonight' | 'gruvbox' | 'monokai' | 'ayu' | 'dark' | 'vitesse' | 'midnight' | 'slate' | 'nord' | 'dracula' | 'forest' | 'solarized' | 'broisnees'} ThemeId */
 
 /** @typedef {{ id: ThemeId, name: string, description: string, isDark: boolean, group: ThemeGroup, preview: { bg: string, fg: string, accent: string } }} ThemeDefinition */
 
@@ -9,6 +9,7 @@ export const DEFAULT_THEME_ID = /** @type {const} */ ('dark')
 /** @type {Record<ThemeGroup, string>} */
 export const THEME_GROUP_LABELS = {
   light: 'Light',
+  mono: 'Mono',
   product: 'Product',
   editor: 'Code editors',
   studio: 'Studio',
@@ -16,10 +17,26 @@ export const THEME_GROUP_LABELS = {
 }
 
 /** @type {readonly ThemeGroup[]} */
-export const THEME_GROUP_ORDER = ['light', 'product', 'editor', 'studio', 'classic']
+export const THEME_GROUP_ORDER = ['mono', 'light', 'product', 'editor', 'studio', 'classic']
 
 /** @type {readonly ThemeDefinition[]} */
 export const APP_THEMES = [
+  {
+    id: 'broisnees',
+    name: 'Broisnees',
+    description: 'Pure black',
+    isDark: true,
+    group: 'mono',
+    preview: { bg: '#1c1c1c', fg: '#fafafa', accent: '#fafafa' },
+  },
+  {
+    id: 'broisnees-light',
+    name: 'Broisnees Light',
+    description: 'Pure white',
+    isDark: false,
+    group: 'mono',
+    preview: { bg: '#ffffff', fg: '#0a0a0a', accent: '#0a0a0a' },
+  },
   {
     id: 'light',
     name: 'Light',
@@ -131,6 +148,38 @@ export const APP_THEMES = [
     isDark: true,
     group: 'editor',
     preview: { bg: '#232136', fg: '#e0def4', accent: '#c4a7e7' },
+  },
+  {
+    id: 'tokyonight',
+    name: 'Tokyo Night',
+    description: 'Blue-purple night',
+    isDark: true,
+    group: 'editor',
+    preview: { bg: '#1a1b26', fg: '#a9b1d6', accent: '#7aa2f7' },
+  },
+  {
+    id: 'gruvbox',
+    name: 'Gruvbox',
+    description: 'Warm retro dark',
+    isDark: true,
+    group: 'editor',
+    preview: { bg: '#282828', fg: '#ebdbb2', accent: '#fabd2f' },
+  },
+  {
+    id: 'monokai',
+    name: 'Monokai',
+    description: 'Classic vibrant',
+    isDark: true,
+    group: 'editor',
+    preview: { bg: '#272822', fg: '#f8f8f2', accent: '#a6e22e' },
+  },
+  {
+    id: 'ayu',
+    name: 'Ayu Mirage',
+    description: 'Cool blue-gray',
+    isDark: true,
+    group: 'editor',
+    preview: { bg: '#1f2430', fg: '#cbccc6', accent: '#ffcc66' },
   },
   {
     id: 'dark',
@@ -351,6 +400,38 @@ export function mermaidThemeFor(id) {
       accent: '#c4a7e7',
       border: '#393552',
     },
+    tokyonight: {
+      bg: '#1a1b26',
+      fg: '#a9b1d6',
+      muted: '#545c7e',
+      line: '#292e42',
+      accent: '#7aa2f7',
+      border: '#1f2335',
+    },
+    gruvbox: {
+      bg: '#282828',
+      fg: '#ebdbb2',
+      muted: '#928374',
+      line: '#504945',
+      accent: '#fabd2f',
+      border: '#3c3836',
+    },
+    monokai: {
+      bg: '#272822',
+      fg: '#f8f8f2',
+      muted: '#8f908a',
+      line: '#49483e',
+      accent: '#a6e22e',
+      border: '#3e3d32',
+    },
+    ayu: {
+      bg: '#1f2430',
+      fg: '#cbccc6',
+      muted: '#5c6270',
+      line: '#2d3447',
+      accent: '#ffcc66',
+      border: '#252a38',
+    },
     dark: {
       bg: '#1c1c1c',
       fg: '#ebebeb',
@@ -414,6 +495,22 @@ export function mermaidThemeFor(id) {
       line: '#094552',
       accent: '#2aa198',
       border: '#073642',
+    },
+    broisnees: {
+      bg: '#1c1c1c',
+      fg: '#fafafa',
+      muted: '#737373',
+      line: '#404040',
+      accent: '#fafafa',
+      border: '#2e2e2e',
+    },
+    'broisnees-light': {
+      bg: '#ffffff',
+      fg: '#0a0a0a',
+      muted: '#737373',
+      line: '#e5e5e5',
+      accent: '#0a0a0a',
+      border: '#e5e5e5',
     },
   }
   return map[id]

@@ -163,6 +163,7 @@
   let showDisconnectDialog = $state(false)
   let showAiModelSettings = $state(false)
   let commandOpen = $state(false)
+  let commandPage = $state(/** @type {'root'|'docker'|'connections'|'tables'} */ ('root'))
   /** @type {import('./UpdateDialog.svelte').default | null} */
   let updateDialog = $state(null)
   let statusBarHasUpdate = $state(false)
@@ -593,10 +594,17 @@
     if (activeTabId) closeTab(activeTabId)
   })
 
-  createHotkey('Mod+T', (e) => {
+  createHotkey('Mod+N', (e) => {
     if (!connection) return
     e.preventDefault()
     openWelcomeTab()
+  })
+
+  createHotkey('Mod+T', (e) => {
+    if (!connection) return
+    e.preventDefault()
+    commandPage = 'tables'
+    commandOpen = true
   })
 
   createHotkey('Mod+Tab', (e) => {
@@ -1920,6 +1928,7 @@
 
 <CommandPalette
   bind:open={commandOpen}
+  bind:page={commandPage}
   connected={!!connection}
   {schemas}
   {tables}
@@ -2369,6 +2378,7 @@
   {connection}
   {mcpRunning}
   hasUpdate={statusBarHasUpdate}
+  {activeView}
   onopenmcp={() => (showMcpPanel = true)}
   onconnect={() => (showConnectionModal = true)}
   onswitchtodb={(dbName) => {
@@ -2377,5 +2387,15 @@
   }}
   oncheckupdate={() => updateDialog?.checkNow()}
   onopenmodelsettings={() => (showAiModelSettings = true)}
+  onviewchange={handleSidebarViewChange}
+  {aiMode}
+  onopenaimode={() => (aiMode ? exitAiMode() : enterAiMode())}
+  onopenSchema={openSchemaTab}
+  onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
+  onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
+  onopenorm={openOrmTab}
+  onopensettings={() => (showSettingsModal = true)}
+  onopencommand={() => (commandOpen = true)}
+  ondisconnect={requestDisconnect}
 />
 </div>
