@@ -47,6 +47,15 @@
     onmodk = undefined,
     onmodenter = undefined,
     onmods = undefined,
+    onmodi = undefined,
+    onmodb = undefined,
+    onmodw = undefined,
+    onmodn = undefined,
+    onmodm = undefined,
+    onmodt = undefined,
+    onmodshifte = undefined,
+    onmodshiftd = undefined,
+    onmodshifto = undefined,
     queryHistoryVisible = $bindable(false),
     /** @type {import('$lib/stores/query-history.js').QueryHistoryEntry[]} */
     queryHistory = [],
@@ -472,6 +481,15 @@
       onmodenter={onmodenter ?? (() => onrun())}
       onmodr={() => onrun()}
       {onmods}
+      {onmodi}
+      {onmodb}
+      {onmodw}
+      {onmodn}
+      {onmodm}
+      {onmodt}
+      {onmodshifte}
+      {onmodshiftd}
+      {onmodshifto}
       onchange={(content) => {
         if (content !== _lastSyncedSql) {
           _lastSyncedSql = content

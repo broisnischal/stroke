@@ -24,6 +24,16 @@
     onmodenter = undefined,
     onmodr = undefined,
     onmods = undefined,
+    // Global app shortcuts — registered inside Monaco so they work when editor is focused
+    onmodi = undefined,
+    onmodb = undefined,
+    onmodw = undefined,
+    onmodn = undefined,
+    onmodm = undefined,
+    onmodt = undefined,
+    onmodshifte = undefined,
+    onmodshiftd = undefined,
+    onmodshifto = undefined,
     /** @param {string} content */
     onchange = undefined,
     /** @type {(actions: { format: () => Promise<void> }) => void} */
@@ -41,18 +51,28 @@
 
   /** @param {monaco.editor.IStandaloneCodeEditor} ed */
   function registerAppShortcuts(ed) {
-    const KeyMod = monaco.KeyMod
-    const KeyCode = monaco.KeyCode
+    const { CtrlCmd, Shift } = monaco.KeyMod
+    const { KeyK, KeyR, KeyS, KeyI, KeyB, KeyW, KeyN, KeyM, KeyT, KeyD, KeyO, Enter } = monaco.KeyCode
 
     /** @param {() => void | undefined} fn */
-    function run(fn) { fn?.() }
+    const run = (fn) => fn?.()
 
-    ed.addCommand(KeyMod.CtrlCmd | KeyCode.KeyK, () => run(onmodk))
-    ed.addCommand(KeyMod.CtrlCmd | KeyCode.Enter, () => run(onmodenter))
-    ed.addCommand(KeyMod.CtrlCmd | KeyCode.KeyR, () => run(onmodr))
-    ed.addCommand(KeyMod.CtrlCmd | KeyCode.KeyS, async () => {
-      await formatDocument()
-    })
+    // Editor-local shortcuts
+    ed.addCommand(CtrlCmd | KeyK,     () => run(onmodk))
+    ed.addCommand(CtrlCmd | Enter,    () => run(onmodenter))
+    ed.addCommand(CtrlCmd | KeyR,     () => run(onmodr))
+    ed.addCommand(CtrlCmd | KeyS,     async () => { await formatDocument() })
+
+    // Global app shortcuts — work even when Monaco has focus
+    ed.addCommand(CtrlCmd | KeyI,           () => run(onmodi))
+    ed.addCommand(CtrlCmd | KeyB,           () => run(onmodb))
+    ed.addCommand(CtrlCmd | KeyW,           () => run(onmodw))
+    ed.addCommand(CtrlCmd | KeyN,           () => run(onmodn))
+    ed.addCommand(CtrlCmd | KeyM,           () => run(onmodm))
+    ed.addCommand(CtrlCmd | KeyT,           () => run(onmodt))
+    ed.addCommand(CtrlCmd | Shift | KeyD,   () => run(onmodshiftd))
+    ed.addCommand(CtrlCmd | Shift | KeyE,   () => run(onmodshifte))
+    ed.addCommand(CtrlCmd | Shift | KeyO,   () => run(onmodshifto))
 
     async function formatDocument() {
       await ed.getAction('editor.action.formatDocument')?.run()

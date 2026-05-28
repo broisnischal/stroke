@@ -806,7 +806,6 @@
   createHotkey('Mod+I', (e) => {
     if (!connection) return
     if (commandOpen || showConnectionModal || showSettingsModal) return
-    if (document.activeElement?.closest('.monaco-editor')) return
     e.preventDefault()
     toggleAiSidebar()
   })
@@ -2119,6 +2118,14 @@
             queryMs={ormQueryMs}
             schemaHints={sqlSchemaHints}
             onrun={(d) => void runOrm(d)}
+            onmodi={() => { if (connection) toggleAiSidebar() }}
+            onmodb={() => { sidebarOpen = !sidebarOpen }}
+            onmodw={() => { if (activeTabId) closeTab(activeTabId) }}
+            onmodn={() => { if (connection) openWelcomeTab() }}
+            onmodm={() => cycleTheme()}
+            onmodt={() => { if (connection) { commandPage = 'tables'; commandOpen = true } }}
+            onmodshifte={() => { if (connection) aiMode ? exitAiMode() : enterAiMode() }}
+            onmodshiftd={() => { if (connection) void focusDataView() }}
           />
         </div>
       {/if}
@@ -2146,6 +2153,15 @@
             onmodk={() => { commandOpen = true }}
             onmodenter={() => runSql()}
             onmods={() => saveActiveTabState()}
+            onmodi={() => { if (connection) toggleAiSidebar() }}
+            onmodb={() => { sidebarOpen = !sidebarOpen }}
+            onmodw={() => { if (activeTabId) closeTab(activeTabId) }}
+            onmodn={() => { if (connection) openWelcomeTab() }}
+            onmodm={() => cycleTheme()}
+            onmodt={() => { if (connection) { commandPage = 'tables'; commandOpen = true } }}
+            onmodshifte={() => { if (connection) aiMode ? exitAiMode() : enterAiMode() }}
+            onmodshiftd={() => { if (connection) void focusDataView() }}
+            onmodshifto={() => { if (connection) openOrmTab() }}
             onqueryrefresh={refreshQueryStores}
             onhistoryselect={(sql) => void openQueryInEditor(sql)}
             onsavequery={handleSaveQuery}

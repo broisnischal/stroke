@@ -44,6 +44,15 @@
     onrun = /** @type {(detail: { sql: string, mode: string }) => void} */ (
       () => {}
     ),
+    onmodi = undefined,
+    onmodb = undefined,
+    onmodw = undefined,
+    onmodn = undefined,
+    onmodm = undefined,
+    onmodt = undefined,
+    onmodshifte = undefined,
+    onmodshiftd = undefined,
+    onmodshifts = undefined,
   } = $props();
 
   /** @type {HTMLElement | null} */
@@ -106,13 +115,24 @@
 
   /** @param {monaco.editor.IStandaloneCodeEditor} ed */
   function registerShortcuts(ed) {
-    ed.addCommand(
-      monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
-      () => void handleRun(),
-    );
-    ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-      ed.getAction("editor.action.formatDocument")?.run();
-    });
+    const { CtrlCmd, Shift } = monaco.KeyMod
+    const { Enter, KeyS, KeyI, KeyB, KeyW, KeyN, KeyM, KeyT, KeyD, KeyE, KeyO } = monaco.KeyCode
+    const run = (/** @type {(() => void) | undefined} */ fn) => fn?.()
+
+    // Editor-local
+    ed.addCommand(CtrlCmd | Enter, () => void handleRun())
+    ed.addCommand(CtrlCmd | KeyS,  () => { ed.getAction("editor.action.formatDocument")?.run(); run(onmodshifts) })
+
+    // Global app shortcuts
+    ed.addCommand(CtrlCmd | KeyI,         () => run(onmodi))
+    ed.addCommand(CtrlCmd | KeyB,         () => run(onmodb))
+    ed.addCommand(CtrlCmd | KeyW,         () => run(onmodw))
+    ed.addCommand(CtrlCmd | KeyN,         () => run(onmodn))
+    ed.addCommand(CtrlCmd | KeyM,         () => run(onmodm))
+    ed.addCommand(CtrlCmd | KeyT,         () => run(onmodt))
+    ed.addCommand(CtrlCmd | Shift | KeyD, () => run(onmodshiftd))
+    ed.addCommand(CtrlCmd | Shift | KeyE, () => run(onmodshifte))
+    ed.addCommand(CtrlCmd | Shift | KeyO, () => run(onrun.bind(null, { sql: '', mode })))
   }
 
   // ── Valid JS identifier table names only ──────────────────────────────────
