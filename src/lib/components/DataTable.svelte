@@ -727,23 +727,24 @@
   // Stable key that changes only when column names change — prevents the
   // column-widths $effect from re-running on every row fetch (same columns, new array ref).
   const _columnNamesKey = $derived(columns.map((c) => c.name).join('\x00'))
-  // Split into separate primitives so Svelte only re-runs the {#each} when an
-  // index actually crosses a row boundary (every 28px), not on every scroll pixel.
+
+  // O(1) min/max of expandedRows — recomputed only when the set changes,
+  // not on every scroll tick (which was the O(n) per-scroll culprit).
+  const _expandedMin = $derived(expandedRows.size ? Math.min(...expandedRows) : Infinity)
+  const _expandedMax = $derived(expandedRows.size ? Math.max(...expandedRows) : -Infinity)
+
   const virtualStart = $derived.by(() => {
     if (!useVirtual) return 0
     let start = Math.max(0, Math.floor(_scrollTop / ROW_HEIGHT) - OVERSCAN)
-    for (const idx of expandedRows) if (idx < start) start = Math.max(0, idx)
+    if (_expandedMin < start) start = Math.max(0, _expandedMin)
     if (focusedRow !== null && focusedRow < start) start = Math.max(0, focusedRow)
     if (editingCell && editingCell.rowIdx < start) start = Math.max(0, editingCell.rowIdx)
     return start
   })
   const virtualEnd = $derived.by(() => {
     if (!useVirtual) return rows.length - 1
-    let end = Math.min(
-      rows.length - 1,
-      Math.ceil((_scrollTop + _viewportHeight) / ROW_HEIGHT) + OVERSCAN,
-    )
-    for (const idx of expandedRows) if (idx > end) end = Math.min(rows.length - 1, idx)
+    let end = Math.min(rows.length - 1, Math.ceil((_scrollTop + _viewportHeight) / ROW_HEIGHT) + OVERSCAN)
+    if (_expandedMax > end) end = Math.min(rows.length - 1, _expandedMax)
     if (focusedRow !== null && focusedRow > end) end = Math.min(rows.length - 1, focusedRow)
     if (editingCell && editingCell.rowIdx > end) end = Math.min(rows.length - 1, editingCell.rowIdx)
     return end
@@ -764,20 +765,36 @@
    * Keyed by column name.
    * @type {Map<string, { pk: boolean, fk: boolean, indexed: boolean, unique: boolean, nullable: boolean }>}
    */
+  // Pre-build a column→indexes lookup once so colMeta is O(1) per column
+  // instead of O(columns × indexes) on every schema load.
+  const _indexesByCol = $derived.by(() => {
+    /** @type {Map<string, typeof indexes>} */
+    const m = new Map()
+    for (const idx of indexes) {
+      for (const col of idx.columns.split(',').map((s) => s.trim())) {
+        const list = m.get(col) ?? []
+        list.push(idx)
+        m.set(col, list)
+      }
+    }
+    return m
+  })
+
+  const _pkSet = $derived(new Set(primaryKey))
+  const _fkCols = $derived(new Set(foreignKeys.flatMap((fk) => fk.columns)))
+
   const colMeta = $derived.by(() => {
     /** @type {Map<string, { pk: boolean, fk: boolean, indexed: boolean, unique: boolean, nullable: boolean }>} */
     const map = new Map()
     for (const col of columns) {
-      const isPk = primaryKey.includes(col.name)
-      const isFk = foreignKeys.some((fk) => fk.columns.includes(col.name))
-      // Parse index column strings (format: "col1, col2" or "col1,col2")
-      const colIndexes = indexes.filter((idx) =>
-        idx.columns.split(',').map((s) => s.trim()).includes(col.name),
-      )
-      const isUnique = colIndexes.some((idx) => idx.isUnique && !idx.isPrimary)
-      const isIndexed = colIndexes.some((idx) => !idx.isPrimary && !idx.isUnique)
-      const isNullable = col.nullable !== false
-      map.set(col.name, { pk: isPk, fk: isFk, indexed: isIndexed, unique: isUnique, nullable: isNullable })
+      const colIndexes = _indexesByCol.get(col.name) ?? []
+      map.set(col.name, {
+        pk: _pkSet.has(col.name),
+        fk: _fkCols.has(col.name),
+        unique: colIndexes.some((idx) => idx.isUnique && !idx.isPrimary),
+        indexed: colIndexes.some((idx) => !idx.isPrimary && !idx.isUnique),
+        nullable: col.nullable !== false,
+      })
     }
     return map
   })

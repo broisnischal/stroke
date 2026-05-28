@@ -58,30 +58,25 @@ export function nextTabId() {
 export function cloneTableTabState(state) {
   return {
     ...state,
-    columns: [...state.columns],
-    primaryKey: [...state.primaryKey],
-    foreignKeys: state.foreignKeys.map((fk) => ({
-      columns: [...fk.columns],
-      referencedColumns: [...(fk.referencedColumns ?? fk.referenced_columns ?? [])],
-      referencedSchema: fk.referencedSchema ?? fk.referenced_schema ?? '',
-      referencedTable: fk.referencedTable ?? fk.referenced_table ?? '',
-    })),
-    rows: [...state.rows],
-    rowFilters: state.rowFilters.map((f) => ({ ...f })),
-    rowSort: state.rowSort ? { ...state.rowSort } : null,
+    // Shallow-copy mutable primitives only — rows/columns/foreignKeys are
+    // treated as immutable value arrays; no deep clone needed.
+    columns: state.columns,
+    primaryKey: state.primaryKey,
+    foreignKeys: state.foreignKeys,
+    rows: state.rows,
+    rowFilters: state.rowFilters,
+    rowSort: state.rowSort,
+    // Sets must be new instances so mutations don't bleed between tabs
     selected: new Set(state.selected),
-    editingCell: state.editingCell ? { ...state.editingCell } : null,
     hiddenColumns: new Set(state.hiddenColumns),
+    editingCell: state.editingCell ? { ...state.editingCell } : null,
   }
 }
 
 /** @param {SqlTabState} state */
 export function cloneSqlTabState(state) {
-  return {
-    ...state,
-    sqlColumns: [...state.sqlColumns],
-    sqlRows: [...state.sqlRows],
-  }
+  // Arrays are immutable value objects; no copy needed
+  return { ...state }
 }
 
 /** @returns {TableTabState} */

@@ -275,34 +275,36 @@
   const activeTab = $derived(tabs.find((t) => t.id === activeTabId) ?? null)
 
   let welcomeTip = $state(pickRandomTip())
+  let _lastWelcomeTabId = ''
   $effect(() => {
-    if (activeTab?.kind === 'welcome') welcomeTip = pickRandomTip()
+    if (activeTab?.kind === 'welcome' && activeTab.id !== _lastWelcomeTabId) {
+      _lastWelcomeTabId = activeTab.id
+      welcomeTip = pickRandomTip()
+    }
   })
 
   const activeView = $derived(activeTab?.kind === 'sql' ? 'sql' : 'table')
 
+  // Stable name arrays derived separately so sqlSchemaHints doesn't rebuild
+  // on every row fetch — only rebuilds when the column set actually changes.
+  const _activeColNames = $derived(columns.map((c) => c.name))
+  const _sqlColNames = $derived(sqlColumns.map((c) => c.name))
+  const _tableNames = $derived(tables.map((t) => t.name))
+
   const sqlSchemaHints = $derived.by(() => {
     /** @type {Record<string, string[]>} */
     const columnsByTable = {}
-    // Include all browsed tables so completion works across the whole schema
     for (const [key, cols] of tableColumnsCache) {
       columnsByTable[key] = cols.map((c) => c.name)
     }
-    // Active table columns always override the cache with the freshest data
-    if (activeTable && columns.length) {
-      const cols = columns.map((c) => c.name)
-      columnsByTable[activeTable] = cols
-      columnsByTable[`${activeSchema}.${activeTable}`] = cols
+    if (activeTable && _activeColNames.length) {
+      columnsByTable[activeTable] = _activeColNames
+      columnsByTable[`${activeSchema}.${activeTable}`] = _activeColNames
     }
-    if (sqlColumns.length) {
-      columnsByTable.__result__ = sqlColumns.map((c) => c.name)
+    if (_sqlColNames.length) {
+      columnsByTable.__result__ = _sqlColNames
     }
-    return {
-      schemas: [...schemas],
-      activeSchema,
-      tables: tables.map((t) => t.name),
-      columnsByTable,
-    }
+    return { schemas, activeSchema, tables: _tableNames, columnsByTable }
   })
 
   const connectionId = $derived(
@@ -378,34 +380,48 @@
     showShortcutsModal = false
   })
 
-  const aiSchemaContext = $derived.by(() => ({
-    schemas: [...schemas],
-    activeSchema,
-    tables: tables.map((t) => ({ name: t.name, rowCount: t.rowCount })),
-    activeTable,
-    columns: columns.map((c) => ({
-      name: c.name,
-      dataType: c.dataType ?? c.data_type ?? '',
-      nullable: c.nullable ?? true,
-      enumValues: c.enumValues ?? c.enum_values ?? undefined,
-    })),
-    primaryKey: [...primaryKey],
-    foreignKeys: foreignKeys.map((fk) => ({ ...fk })),
-    /** @type {Record<string, { name: string, dataType: string, nullable: boolean, enumValues?: string[] }[]>} */
-    allTableColumns: Object.fromEntries(
-      untrack(() => [...tableColumnsCache.entries()]).map(([key, cols]) => [
-        key,
-        cols.map((c) => ({
-          name: c.name,
-          dataType: c.dataType ?? c.data_type ?? '',
-          nullable: c.nullable ?? true,
-          enumValues: c.enumValues ?? c.enum_values ?? undefined,
-        })),
-      ]),
-    ),
-    /** @type {'postgres' | 'sqlite' | 'd1'} */
-    dbType: /** @type {any} */ (connection)?.type ?? 'postgres',
-  }))
+  const _aiActive = $derived(aiMode || aiSidebarOpen)
+
+  const aiSchemaContext = $derived.by(() => {
+    // Only rebuild the expensive schema context when AI is actually visible.
+    // When AI is hidden, return a cheap stable object — components using it
+    // are either hidden or inert, so stale data is fine.
+    if (!_aiActive) {
+      return {
+        schemas, activeSchema, tables: _tableNames,
+        activeTable, columns: [], primaryKey: [], foreignKeys: [],
+        allTableColumns: {}, dbType: /** @type {any} */ (connection)?.type ?? 'postgres',
+      }
+    }
+    return {
+      schemas,
+      activeSchema,
+      tables: tables.map((t) => ({ name: t.name, rowCount: t.rowCount })),
+      activeTable,
+      columns: columns.map((c) => ({
+        name: c.name,
+        dataType: c.dataType ?? c.data_type ?? '',
+        nullable: c.nullable ?? true,
+        enumValues: c.enumValues ?? c.enum_values ?? undefined,
+      })),
+      primaryKey,
+      foreignKeys,
+      /** @type {Record<string, { name: string, dataType: string, nullable: boolean, enumValues?: string[] }[]>} */
+      allTableColumns: Object.fromEntries(
+        untrack(() => [...tableColumnsCache.entries()]).map(([key, cols]) => [
+          key,
+          cols.map((c) => ({
+            name: c.name,
+            dataType: c.dataType ?? c.data_type ?? '',
+            nullable: c.nullable ?? true,
+            enumValues: c.enumValues ?? c.enum_values ?? undefined,
+          })),
+        ]),
+      ),
+      /** @type {'postgres' | 'sqlite' | 'd1'} */
+      dbType: /** @type {any} */ (connection)?.type ?? 'postgres',
+    }
+  })
 
   const inspectorTarget = $derived.by(() => {
     if (activeTab?.kind !== 'table') return null
@@ -520,17 +536,22 @@
 
   function saveActiveTabState() {
     if (!activeTabId) return
-    tabs = tabs.map((t) => {
-      if (t.id !== activeTabId) return t
-      if (t.kind === 'table') {
-        const state = cloneTableTabState(captureTableSnapshot())
-        return { ...t, state, title: tableTabTitle(state) }
-      }
-      if (t.kind === 'sql') {
-        return { ...t, state: cloneSqlTabState(captureSqlSnapshot()) }
-      }
-      return t
-    })
+    const idx = tabs.findIndex((t) => t.id === activeTabId)
+    if (idx === -1) return
+    const t = tabs[idx]
+    /** @type {StudioTab | null} */
+    let updated = null
+    if (t.kind === 'table') {
+      const state = cloneTableTabState(captureTableSnapshot())
+      updated = { ...t, state, title: tableTabTitle(state) }
+    } else if (t.kind === 'sql') {
+      updated = { ...t, state: cloneSqlTabState(captureSqlSnapshot()) }
+    }
+    if (updated) {
+      const next = [...tabs]
+      next[idx] = updated
+      tabs = next
+    }
   }
 
   /** @param {StudioTab} tab */
@@ -545,15 +566,18 @@
       return
     }
     if (tab.kind === 'table' && tab.state) {
-      const s = cloneTableTabState(/** @type {TableTabState} */ (tab.state))
-      if (s.schema && s.schema !== activeSchema) {
-        activeSchema = s.schema
+      const raw = /** @type {TableTabState} */ (tab.state)
+      if (raw.schema && raw.schema !== activeSchema) {
+        activeSchema = raw.schema
         await loadTables()
       }
-      applyTableSnapshot(s)
-      if (s.table && !fetchingTabIds.has(tab.id) && s.columns.length === 0) {
-        // No background fetch in flight and no cached data — kick one off
-        void fetchRowsForTab(tab.id)
+      if (raw.columns.length === 0) {
+        // No cached data — apply lightweight snapshot (no need to clone rows)
+        applyTableSnapshot(raw)
+        if (raw.table && !fetchingTabIds.has(tab.id)) void fetchRowsForTab(tab.id)
+      } else {
+        // Has cached data — clone Sets so mutations don't bleed between tabs
+        applyTableSnapshot(cloneTableTabState(raw))
       }
     }
   }
@@ -1276,12 +1300,18 @@
       return
     }
 
-    // Mark the tab itself as loading so switching to it shows a spinner
-    tabs = tabs.map((t) =>
-      t.id === tabId && t.kind === 'table'
-        ? { ...t, state: { .../** @type {TableTabState} */ (t.state), loadingRows: true, error: '' } }
-        : t,
-    )
+    // Single helper to patch the tab state — avoids multiple tabs.map() calls per fetch
+    /** @param {Partial<TableTabState>} patch */
+    function patchTab(patch) {
+      const i = tabs.findIndex((t) => t.id === tabId)
+      if (i === -1) return
+      const next = [...tabs]
+      next[i] = { ...next[i], state: { .../** @type {TableTabState} */ (next[i].state), ...patch } }
+      tabs = next
+    }
+
+    // Mark loading — one tabs write
+    patchTab({ loadingRows: true, error: '' })
     if (tabId === activeTabId) { loadingRows = true; error = '' }
 
     try {
@@ -1309,12 +1339,8 @@
         editingCell: null,
       }
 
-      // Always persist to the tab's own state
-      tabs = tabs.map((t) =>
-        t.id === tabId && t.kind === 'table'
-          ? { ...t, state: { .../** @type {TableTabState} */ (t.state), ...result } }
-          : t,
-      )
+      // Persist result to tab — one tabs write
+      patchTab(result)
 
       // Update AI schema cache (LRU, capped)
       lruSet(tableColumnsCache, `${s.schema}.${s.table}`, result.columns)
@@ -1332,21 +1358,7 @@
       }
     } catch (e) {
       const errStr = String(e)
-      tabs = tabs.map((t) =>
-        t.id === tabId && t.kind === 'table'
-          ? {
-              ...t,
-              state: {
-                .../** @type {TableTabState} */ (t.state),
-                loadingRows: false,
-                error: errStr,
-                columns: [],
-                rows: [],
-                total: 0,
-              },
-            }
-          : t,
-      )
+      patchTab({ loadingRows: false, error: errStr, columns: [], rows: [], total: 0 })
       if (tabId === activeTabId) {
         loadingRows = false
         error = errStr
@@ -2225,7 +2237,6 @@
           />
 
           <div class="flex min-h-0 min-w-0 flex-1">
-            {#key activeTabId}
               <DataTable
                 {columns}
                 {rows}
@@ -2246,7 +2257,6 @@
                 ondelete={handleDeleteRow}
                 onfollowforeignkey={(d) => void handleFollowForeignKey(d)}
               />
-            {/key}
             <RowDetailPanel
               {columns}
               {rows}

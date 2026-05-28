@@ -1,5 +1,4 @@
 <script>
-  import { tick } from 'svelte'
   import Table2 from '@lucide/svelte/icons/table-2'
   import Terminal from '@lucide/svelte/icons/terminal'
   import FileText from '@lucide/svelte/icons/file-text'
@@ -30,10 +29,11 @@
 
   $effect(() => {
     const _id = activeTabId
-    tick().then(() => {
+    let raf = requestAnimationFrame(() => {
       const active = scrollEl?.querySelector('[aria-selected="true"]')
       active?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
     })
+    return () => cancelAnimationFrame(raf)
   })
 
   /** @param {StudioTab} tab */
