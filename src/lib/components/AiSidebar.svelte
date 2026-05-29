@@ -333,12 +333,14 @@
     void restoreLatest();
   });
 
+  let rafId = /** @type {number | null} */ (null);
+
   // Best-effort save when the panel unmounts (e.g. closed mid-thought).
   onDestroy(() => {
     void persistCurrent();
+    if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
   });
 
-  let rafId = /** @type {number | null} */ (null);
   function scrollBottomSoon() {
     if (userScrolledUp) return;
     if (rafId !== null) return;
