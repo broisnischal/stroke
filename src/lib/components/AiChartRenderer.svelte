@@ -82,7 +82,13 @@
       data: { labels, datasets },
       options: {
         responsive: true,
-        maintainAspectRatio: true,
+        // Fill the fixed-height container instead of deriving height from the
+        // aspect ratio. With maintainAspectRatio:true in a non-fixed-height
+        // box, the canvas resize feeds back into the container size and Chart.js
+        // ResizeObserver loops forever, pegging the CPU. resizeDelay debounces
+        // any legitimate resizes.
+        maintainAspectRatio: false,
+        resizeDelay: 100,
         animation: { duration: 350 },
         plugins: {
           legend: {
@@ -142,8 +148,10 @@
 </script>
 
 {#if spec?.data?.length}
-  <div class="relative w-full" style="max-height: 320px;">
-    <canvas bind:this={canvasEl} style="max-height: 320px;"></canvas>
+  <!-- Fixed height (not max-height) so maintainAspectRatio:false has a definite
+       box to fill and the canvas never feeds its size back into the layout. -->
+  <div class="relative w-full" style="height: 320px;">
+    <canvas bind:this={canvasEl}></canvas>
   </div>
 {:else}
   <div class="flex items-center justify-center rounded-lg border border-border bg-muted/20 px-4 py-8 text-sm text-muted-foreground">
