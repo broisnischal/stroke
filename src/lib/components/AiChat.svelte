@@ -332,12 +332,16 @@
 
   /** Streaming display strips <think>...</think> blocks in real time */
   const displayStreamingContent = $derived(
-    streamingContent
-      // Complete think blocks — hide entirely
-      .replace(/<think>[\s\S]*?<\/think>/g, '')
-      // Partial/open think block currently being written — hide from cursor onwards
-      .replace(/<think>[\s\S]*$/, '')
-      .trim()
+    // Fast path: most models never emit <think>, so skip the regex scans over
+    // the (growing) streamed string entirely unless a think tag is present.
+    streamingContent.includes('<think>')
+      ? streamingContent
+          // Complete think blocks — hide entirely
+          .replace(/<think>[\s\S]*?<\/think>/g, '')
+          // Partial/open think block currently being written — hide from cursor onwards
+          .replace(/<think>[\s\S]*$/, '')
+          .trim()
+      : streamingContent.trim()
   )
   /** ID of the `streaming` ChatItem in `items` (null when not streaming) */
   let streamingId = $state(/** @type {string | null} */ (null))
@@ -549,13 +553,6 @@
       applyTransform()
     }
 
-    const onDown = (/** @type {MouseEvent} */ e) => {
-      if (e.button !== 0) return
-      dragging = true
-      ox = e.clientX - tx; oy = e.clientY - ty
-      node.classList.add('is-dragging')
-    }
-
     let rafId = 0
     const onMove = (/** @type {MouseEvent} */ e) => {
       if (!dragging) return
@@ -568,6 +565,19 @@
       if (!dragging) return
       dragging = false
       node.classList.remove('is-dragging')
+      // Detach the global move/up listeners until the next drag begins, so we
+      // don't run a window-wide mousemove handler whenever a diagram is shown.
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+
+    const onDown = (/** @type {MouseEvent} */ e) => {
+      if (e.button !== 0) return
+      dragging = true
+      ox = e.clientX - tx; oy = e.clientY - ty
+      node.classList.add('is-dragging')
+      window.addEventListener('mousemove', onMove)
+      window.addEventListener('mouseup', onUp)
     }
 
     const onDblClick = () => {
@@ -581,8 +591,6 @@
 
     node.addEventListener('wheel', onWheel, { passive: false })
     node.addEventListener('mousedown', onDown)
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
     node.addEventListener('dblclick', onDblClick)
     node.addEventListener('diagram:zoomin', onZoomIn)
     node.addEventListener('diagram:zoomout', onZoomOut)

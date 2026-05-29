@@ -315,10 +315,13 @@
   }
 
   const displayStreamingContent = $derived(
-    streamingContent
-      .replace(/<think>[\s\S]*?<\/think>/g, "")
-      .replace(/<think>[\s\S]*$/, "")
-      .trim(),
+    // Skip the regex scans over the growing stream unless a think tag is present.
+    streamingContent.includes("<think>")
+      ? streamingContent
+          .replace(/<think>[\s\S]*?<\/think>/g, "")
+          .replace(/<think>[\s\S]*$/, "")
+          .trim()
+      : streamingContent.trim(),
   );
 
   $effect(() => {
