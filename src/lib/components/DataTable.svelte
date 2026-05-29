@@ -116,6 +116,10 @@
    * @type {Map<string, { rowIdx: number, colIdx: number, value: unknown, original: unknown }>}
    */
   let pendingEdits = $state(new Map());
+  /** Cheap gate so per-cell staged-edit lookups are skipped entirely when there
+   *  are no unsaved edits (the common case) — avoids a string alloc + Map.get
+   *  on every cell of large tables. */
+  const hasPendingEdits = $derived(pendingEdits.size > 0);
 
   /** @type {HTMLInputElement | HTMLSelectElement | HTMLButtonElement | null} */
   let editInput = $state(null);
@@ -162,10 +166,11 @@
   let collapsedColumns = $state(/** @type {Set<string>} */ (new Set()))
 
   // ── Virtual scroll ────────────────────────────────────────────────────────
-  // Threshold lowered so 100+ row tables get virtualization instead of full DOM render.
-  // ROW_HEIGHT matches actual rendered height: text-ui-sm (~14.77px) × line-height 1.25
-  // = ~18.5px content + 4px py-0.5 padding = ~23px; 24 gives a safe 1px margin.
-  const VIRTUAL_THRESHOLD = 100
+  // Native scroll of static rows is smoother than windowing (no scroll-time JS),
+  // and rows are now cheap to mount (delegated handlers). So only virtualize once
+  // the full DOM would get large — below this, render everything and let the
+  // browser's native scroll handle it (buttery up to a few hundred rows).
+  const VIRTUAL_THRESHOLD = 300
   // Row height: gutter-inner has min-height 1.75rem; at --app-font-size:14px that is
   // 1.75 × 14 = 24.5px → 25px rendered. Add 1px for subpixel headroom → 26.
   const ROW_HEIGHT = 26
@@ -176,6 +181,15 @@
   // Start high so the first virtual render covers any reasonable screen height
   // before the ResizeObserver fires with the real value.
   let _viewportHeight = $state(1200)
+  // True while the user is actively scrolling (reset shortly after they stop).
+  // Newly-entering rows render as cheap skeletons during a scroll so the heavy
+  // real cells never mount mid-scroll; they swap in once scrolling settles.
+  let isScrolling = $state(false)
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let _scrollIdleTimer = null
+  /** Row indices already rendered as real content — kept real during scroll so
+   *  rows you've seen don't flicker back to skeletons. Refreshed when idle. */
+  let realizedRows = $state(new Set())
 
   // ── URL preview / lightbox ────────────────────────────────────────────────
   /** @type {string | null} */
@@ -883,24 +897,57 @@
   const _expandedMin = $derived(expandedRows.size ? Math.min(...expandedRows) : Infinity)
   const _expandedMax = $derived(expandedRows.size ? Math.max(...expandedRows) : -Infinity)
 
+  // Block-quantized window: snap start/end to BLOCK-row boundaries so the
+  // rendered set only changes when the scroll crosses a block edge (~every BLOCK
+  // rows), not on every single row. Between block edges the DOM is 100% static,
+  // so the browser uses its fast compositor-only scroll path (no per-row mount
+  // = no style/layout/paint on scroll = native-smooth). A few buffer blocks keep
+  // the viewport covered while crossing.
+  const BLOCK = 20
   const virtualStart = $derived.by(() => {
     if (!useVirtual) return 0
-    let start = Math.max(0, Math.floor(_scrollTop / ROW_HEIGHT) - OVERSCAN)
+    const firstVisible = Math.floor(_scrollTop / ROW_HEIGHT)
+    // Snap down to a block boundary, keep one block of buffer above.
+    let start = Math.max(0, (Math.floor(firstVisible / BLOCK) - 1) * BLOCK)
+    // NOTE: do NOT extend the window to a focused (but not editing) row — that
+    // would render everything between the focus and the viewport and lock up
+    // large tables. scrollRowIntoView() handles keyboard nav to off-screen rows.
     if (_expandedMin < start) start = Math.max(0, _expandedMin)
-    if (focusedRow !== null && focusedRow < start) start = Math.max(0, focusedRow)
     if (editingCell && editingCell.rowIdx < start) start = Math.max(0, editingCell.rowIdx)
     return start
   })
   const virtualEnd = $derived.by(() => {
     if (!useVirtual) return rows.length - 1
-    let end = Math.min(rows.length - 1, Math.ceil((_scrollTop + _viewportHeight) / ROW_HEIGHT) + OVERSCAN)
+    const lastVisible = Math.ceil((_scrollTop + _viewportHeight) / ROW_HEIGHT)
+    // Snap up to a block boundary, keep two blocks of buffer below.
+    let end = Math.min(rows.length - 1, (Math.floor(lastVisible / BLOCK) + 2) * BLOCK - 1)
     if (_expandedMax > end) end = Math.min(rows.length - 1, _expandedMax)
-    if (focusedRow !== null && focusedRow > end) end = Math.min(rows.length - 1, focusedRow)
     if (editingCell && editingCell.rowIdx > end) end = Math.min(rows.length - 1, editingCell.rowIdx)
     return end
   })
   const virtualTopPad = $derived(virtualStart * ROW_HEIGHT)
   const virtualBottomPad = $derived((rows.length - 1 - virtualEnd) * ROW_HEIGHT)
+
+  // Iterate ABSOLUTE row indices (not a sliced array + loop index). Keyed by the
+  // index itself, a reused row keeps a constant `idx` across scroll shifts, so
+  // its block does NOT re-run — only the row entering/leaving the window mounts
+  // or unmounts. (With a sliced array the loop index shifts for every row each
+  // step, forcing all visible rows — and all their cells — to re-render.)
+  const visibleRowIndexes = $derived.by(() => {
+    if (!useVirtual) return rows.map((_, i) => i)
+    /** @type {number[]} */
+    const out = []
+    for (let i = virtualStart; i <= virtualEnd; i++) out.push(i)
+    return out
+  })
+
+  // While idle, mark the whole visible window as "realized" (real content). When
+  // a scroll starts this set is frozen, so rows already on screen stay real and
+  // only the newly-entering rows render as skeletons until scrolling settles.
+  $effect(() => {
+    if (isScrolling) return
+    realizedRows = new Set(visibleRowIndexes)
+  })
 
   const allSelected = $derived(
     rows.length > 0 && selected.size === rows.length,
@@ -1119,9 +1166,16 @@
 
     // Update synchronously — no RAF delay so the virtual window always matches
     // the scroll position before the browser paints the next frame.
+    // Synchronous update — keeps the virtual window exactly matched to the
+    // scroll position before paint (rAF coalescing was measurably worse here).
     const onScroll = () => {
       const st = container.scrollTop
       if (st !== _scrollTop) _scrollTop = st
+      if (useVirtual) {
+        if (!isScrolling) isScrolling = true
+        if (_scrollIdleTimer) clearTimeout(_scrollIdleTimer)
+        _scrollIdleTimer = setTimeout(() => { isScrolling = false; _scrollIdleTimer = null }, 140)
+      }
     }
 
     // Resize is rare; one RAF is fine here to avoid hammering during window drag.
@@ -1298,6 +1352,7 @@
   onDestroy(() => {
     if (previewShowTimer) clearTimeout(previewShowTimer)
     if (previewHideTimer) clearTimeout(previewHideTimer)
+    if (_scrollIdleTimer) clearTimeout(_scrollIdleTimer)
     // Clear staged-edit state in the parent so the StatusBar buttons don't linger.
     pendingEditCount = 0
     applyEdits = () => {}
@@ -1328,7 +1383,7 @@
           {...props}
           tabindex={-1}
           class={cn(
-            "app-scroll relative overflow-auto bg-panel select-none outline-none [scrollbar-gutter:stable] [contain:layout] [will-change:transform] [overflow-anchor:none]",
+            "app-scroll relative overflow-auto bg-panel select-none outline-none [scrollbar-gutter:stable] [contain:layout] [overflow-anchor:none]",
             embedded ? "max-h-80" : "min-h-0 flex-1",
             resizingColName && "cursor-col-resize",
           )}
@@ -1546,23 +1601,53 @@
                     <td colspan={totalColSpan} class="border-0 p-0"></td>
                   </tr>
                 {/if}
-                {#each rows.slice(virtualStart, virtualEnd + 1) as row, relIdx (virtualStart + relIdx)}
-                  {@const idx = virtualStart + relIdx}
+                {#each visibleRowIndexes as idx (idx)}
+                  {@const row = rows[idx]}
+                  {@const showSkeleton = isScrolling && !realizedRows.has(idx)}
+                  {#if showSkeleton}
+                    <!-- Cheap loading placeholder shown for rows entering during
+                         an active scroll; swapped for real cells when idle. -->
+                    <tr data-row-idx={idx} class="border-b border-border/40" aria-hidden="true" style="height: {ROW_HEIGHT}px">
+                      <td colspan={totalColSpan} class="px-3 align-middle">
+                        <div class="h-2.5 rounded bg-muted/50" style="width: {[42, 58, 34, 50, 38][idx % 5]}%"></div>
+                      </td>
+                    </tr>
+                  {:else}
                   <tr
                     data-row-idx={idx}
                     class={rowClass(idx)}
                     onclick={(e) => {
                       if (e.button !== 0) return;
+                      const target = e.target instanceof Element ? e.target : null;
+                      // Copy button — delegated so the button itself needs no listener.
+                      const copyBtn = target?.closest("[data-copy-cell]");
+                      if (copyBtn) {
+                        e.stopPropagation();
+                        void copyCellValue(idx, Number(copyBtn.getAttribute("data-copy-cell")));
+                        return;
+                      }
                       if (editingCell) cancelEdit();
                       focusedRow = idx;
-                      const cellEl = e.target instanceof Element ? e.target.closest("td[data-col-idx]") : null;
+                      const cellEl = target?.closest("td[data-col-idx]");
                       if (cellEl) {
-                        const vi = actualToVisColIdx(Number(cellEl.getAttribute("data-col-idx")));
+                        const ci = Number(cellEl.getAttribute("data-col-idx"));
+                        const vi = actualToVisColIdx(ci);
                         if (vi >= 0) focusedCol = vi;
+                        // Ctrl/Cmd-click follows a foreign key (formerly on the cell).
+                        if (tryFollowForeignKey(idx, ci, e, { requireModifier: true })) return;
                       } else if (focusedCol === null) {
                         focusedCol = 0;
                       }
                       tableContainer?.focus({ preventScroll: true });
+                    }}
+                    ondblclick={(e) => {
+                      const cellEl = e.target instanceof Element ? e.target.closest("td[data-col-idx]") : null;
+                      if (!cellEl) return;
+                      e.preventDefault();
+                      const ci = Number(cellEl.getAttribute("data-col-idx"));
+                      // FK cell with a value → follow; otherwise start editing.
+                      if (tryFollowForeignKey(idx, ci, e)) return;
+                      startEdit(idx, ci);
                     }}
                     onauxclick={(e) => {
                       if (e.button !== 1) return;
@@ -1645,7 +1730,7 @@
                         {@const col = columns[colIdx]}
                         {@const colType = col?.dataType ?? col?.data_type ?? ""}
                         {@const enumValues = getColumnEnumValues(col)}
-                        {@const stagedEdit = pendingEdits.get(idx + ":" + colIdx)}
+                        {@const stagedEdit = hasPendingEdits ? pendingEdits.get(idx + ":" + colIdx) : undefined}
                         {@const isDirty = !!stagedEdit}
                         {@const cellValue = stagedEdit ? stagedEdit.value : cell}
                         {@const cellFk = foreignKeyForCell(idx, colIdx)}
@@ -1680,29 +1765,6 @@
                           )}
                           style={isEditing ? "border: 0" : cellPinned ? `left: ${cellPinLeft}px` : undefined}
                           data-font="mono"
-                          onclick={(e) => {
-                            if (
-                              tryFollowForeignKey(idx, colIdx, e, {
-                                requireModifier: true,
-                              })
-                            )
-                              return;
-                          }}
-                          ondblclick={(e) => {
-                            e.preventDefault();
-                            if (activeFk) {
-                              tryFollowForeignKey(idx, colIdx, e);
-                              return;
-                            }
-                            startEdit(idx, colIdx);
-                          }}
-                          onkeydown={(e) => {
-                            if (isEditing) return;
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              startEdit(idx, colIdx);
-                            }
-                          }}
                         >
                           {#if isEditing && editingCell}
                             {@const isNullable = col?.nullable ?? true}
@@ -1870,8 +1932,8 @@
                             <button
                               type="button"
                               tabindex={-1}
-                              class="absolute right-0.5 top-1/2 z-10 -translate-y-1/2 inline-flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover/cell:opacity-70 hover:!opacity-100 hover:bg-accent/60 hover:text-foreground"
-                              onclick={(e) => { e.stopPropagation(); void copyCellValue(idx, colIdx); }}
+                              data-copy-cell={colIdx}
+                              class="absolute right-0.5 top-1/2 z-10 hidden size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground group-hover/cell:inline-flex hover:bg-accent/60 hover:text-foreground"
                             >
                               <Copy class="size-3" />
                             </button>
@@ -1903,6 +1965,7 @@
                         />
                       </td>
                     </tr>
+                  {/if}
                   {/if}
                 {/each}
                 {#if useVirtual && virtualBottomPad > 0}
