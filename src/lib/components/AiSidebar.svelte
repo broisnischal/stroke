@@ -315,10 +315,13 @@
   }
 
   const displayStreamingContent = $derived(
-    streamingContent
-      .replace(/<think>[\s\S]*?<\/think>/g, "")
-      .replace(/<think>[\s\S]*$/, "")
-      .trim(),
+    // Skip the regex scans over the growing stream unless a think tag is present.
+    streamingContent.includes("<think>")
+      ? streamingContent
+          .replace(/<think>[\s\S]*?<\/think>/g, "")
+          .replace(/<think>[\s\S]*$/, "")
+          .trim()
+      : streamingContent.trim(),
   );
 
   $effect(() => {
@@ -330,12 +333,14 @@
     void restoreLatest();
   });
 
+  let rafId = /** @type {number | null} */ (null);
+
   // Best-effort save when the panel unmounts (e.g. closed mid-thought).
   onDestroy(() => {
     void persistCurrent();
+    if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
   });
 
-  let rafId = /** @type {number | null} */ (null);
   function scrollBottomSoon() {
     if (userScrolledUp) return;
     if (rafId !== null) return;

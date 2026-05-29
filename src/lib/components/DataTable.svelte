@@ -11,6 +11,7 @@
   import Circle from "@lucide/svelte/icons/circle";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import ChevronsDownUp from "@lucide/svelte/icons/chevrons-down-up";
   import Copy from "@lucide/svelte/icons/copy";
   import Pencil from "@lucide/svelte/icons/pencil";
   import CircleSlash from "@lucide/svelte/icons/circle-slash";
@@ -37,7 +38,7 @@
     defaultColumnWidth,
   } from "$lib/table-column-widths.js";
   import { formatCompactCount } from "$lib/table-list.js";
-  import { cn } from "$lib/utils.js";
+  import { cn, cx } from "$lib/utils.js";
   import {
     formatJsonValue,
     formatNormalValue,
@@ -102,7 +103,38 @@
     rowSort = /** @type {{ column: string, direction: 'asc' | 'desc' } | null} */ (null),
     /** Called when user clicks a column header to sort. */
     onsortchange = /** @type {(sort: { column: string, direction: 'asc' | 'desc' } | null) => void} */ (() => {}),
+    /** Number of staged (unsaved) cell edits. Bindable so the StatusBar can show Apply/Reset. */
+    pendingEditCount = $bindable(0),
+    /** Assigned by this component; the parent calls these to flush / discard staged edits. */
+    applyEdits = $bindable(/** @type {() => void | Promise<void>} */ (() => {})),
+    resetEdits = $bindable(/** @type {() => void} */ (() => {})),
+    /** Assigned by this component; the parent (StatusBar) calls these to jump the
+     *  table to the top / bottom. */
+    scrollToTop = $bindable(/** @type {() => void} */ (() => {})),
+    scrollToBottom = $bindable(/** @type {() => void} */ (() => {})),
   } = $props();
+
+  /** Brief overscroll hint: 'top' / 'bottom' when the user wheels past an edge. */
+  let overscrollEdge = $state(/** @type {'top' | 'bottom' | null} */ (null));
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let _overscrollTimer = null;
+  /** @param {'top' | 'bottom'} edge */
+  function flashOverscroll(edge) {
+    if (overscrollEdge !== edge) overscrollEdge = edge;
+    if (_overscrollTimer) clearTimeout(_overscrollTimer);
+    _overscrollTimer = setTimeout(() => { overscrollEdge = null; _overscrollTimer = null; }, 450);
+  }
+
+  /**
+   * Staged cell edits not yet written to the database, keyed by "rowIdx:colIdx".
+   * The cell shows the staged value (marked dirty) until the user clicks Apply.
+   * @type {Map<string, { rowIdx: number, colIdx: number, value: unknown, original: unknown }>}
+   */
+  let pendingEdits = $state(new Map());
+  /** Cheap gate so per-cell staged-edit lookups are skipped entirely when there
+   *  are no unsaved edits (the common case) — avoids a string alloc + Map.get
+   *  on every cell of large tables. */
+  const hasPendingEdits = $derived(pendingEdits.size > 0);
 
   /** @type {HTMLInputElement | HTMLSelectElement | HTMLButtonElement | null} */
   let editInput = $state(null);
@@ -149,12 +181,18 @@
   let collapsedColumns = $state(/** @type {Set<string>} */ (new Set()))
 
   // ── Virtual scroll ────────────────────────────────────────────────────────
-  // Threshold lowered so 100+ row tables get virtualization instead of full DOM render.
-  // ROW_HEIGHT matches actual rendered height: text-ui-sm (~14.77px) × line-height 1.25
-  // = ~18.5px content + 4px py-0.5 padding = ~23px; 24 gives a safe 1px margin.
-  // OVERSCAN at 10 pre-renders ~240px outside the viewport on each side — enough
-  // buffer for fast scrolling without keeping hundreds of offscreen rows alive.
-  const VIRTUAL_THRESHOLD = 100
+  // Two competing goals:
+  //   • Fast tab switch — mounting all rows up front is slow, so on a fresh
+  //     table we mount VIRTUALIZED (only the visible window ≈ a few dozen rows).
+  //   • Smooth scroll — native scroll of a fully-rendered table beats windowing,
+  //     so a moment after mount we EXPAND to render every row (up to a cap).
+  // The expansion runs off the switch's critical path, so switching feels instant
+  // and scrolling is smooth once the page settles. Very large pages stay
+  // windowed forever to keep the DOM/memory bounded.
+  const VIRTUAL_THRESHOLD = 100   // above this, mount windowed for a fast switch
+  const FULL_RENDER_MAX = 2000    // expand to a full render up to this many rows
+  // Defer the full render until just after the tab switch settles.
+  let _deferFullRender = $state(true)
   // Row height: gutter-inner has min-height 1.75rem; at --app-font-size:14px that is
   // 1.75 × 14 = 24.5px → 25px rendered. Add 1px for subpixel headroom → 26.
   const ROW_HEIGHT = 26
@@ -267,9 +305,20 @@
 
   const CELL_DISPLAY_LIMIT = 400
 
+  // Cache stringified object/array cells — row values are stable references
+  // until a refetch, so we stringify each once instead of on every re-render
+  // (focus/selection/scroll all re-evaluate visible cells).
+  /** @type {WeakMap<object, string>} */
+  const _formatCache = new WeakMap();
   function formatCell(value) {
     if (value === null || value === undefined) return "NULL";
-    if (typeof value === "object") return JSON.stringify(value);
+    if (typeof value === "object") {
+      const cached = _formatCache.get(value);
+      if (cached !== undefined) return cached;
+      const s = JSON.stringify(value);
+      _formatCache.set(value, s);
+      return s;
+    }
     return String(value);
   }
 
@@ -400,9 +449,10 @@
     }
 
     focusedRow = rowIdx;
-    lastEditOriginalValue = rows[rowIdx]?.[colIdx];
+    const startValue = effectiveCellValue(rowIdx, colIdx);
+    lastEditOriginalValue = startValue;
     selectOnEditFocus = initialChar === undefined;
-    const original = valueToEditString(rows[rowIdx]?.[colIdx]);
+    const original = valueToEditString(startValue);
     editingCell = {
       rowIdx,
       colIdx,
@@ -415,6 +465,42 @@
     if (!editingCell) return;
     editingCell = null;
     tick().then(() => tableContainer?.focus({ preventScroll: true }));
+  }
+
+  /** Stable map key for a staged edit. */
+  const editKey = (/** @type {number} */ rowIdx, /** @type {number} */ colIdx) => `${rowIdx}:${colIdx}`;
+
+  /** The value a cell currently shows: the staged edit if any, else the DB value. */
+  function effectiveCellValue(/** @type {number} */ rowIdx, /** @type {number} */ colIdx) {
+    const staged = pendingEdits.get(editKey(rowIdx, colIdx));
+    return staged ? staged.value : rows[rowIdx]?.[colIdx];
+  }
+
+  /**
+   * Stage (or unstage) a cell edit locally — does not touch the DB.
+   * If the value matches the row's persisted value, the staged edit is dropped.
+   * @param {number} rowIdx @param {number} colIdx @param {unknown} value
+   */
+  function stageEdit(rowIdx, colIdx, value) {
+    const next = new Map(pendingEdits);
+    const key = editKey(rowIdx, colIdx);
+    const dbValue = rows[rowIdx]?.[colIdx];
+    if (valuesEqual(value, dbValue)) {
+      next.delete(key);
+    } else {
+      next.set(key, { rowIdx, colIdx, value, original: dbValue });
+    }
+    pendingEdits = next;
+  }
+
+  /** Loose equality for cell values (handles object/array via JSON). */
+  function valuesEqual(/** @type {unknown} */ a, /** @type {unknown} */ b) {
+    if (a === b) return true;
+    if (a === null || b === null || a === undefined || b === undefined) return false;
+    if (typeof a === "object" || typeof b === "object") {
+      try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
+    }
+    return false;
   }
 
   /** @param {'down' | 'right' | 'left' | null} afterAction */
@@ -442,11 +528,58 @@
       return;
     }
 
+    // Stage the change instead of writing immediately — the user applies all
+    // pending edits at once from the StatusBar (or discards them with Reset).
+    const prevValue = effectiveCellValue(rowIdx, colIdx);
+    stageEdit(rowIdx, colIdx, parsed.value);
+    pastEdits = [...pastEdits.slice(-49), { rowIdx, colIdx, oldValue: prevValue, newValue: parsed.value }];
+    futureEdits = [];
+    editingCell = null;
+    if (afterAction) navigateAfterEdit(rowIdx, colIdx, afterAction);
+    else tick().then(() => tableContainer?.focus({ preventScroll: true }));
+  }
+
+  async function commitEdit() {
+    return commitEditWithAction(null);
+  }
+
+  /**
+   * Commit the current edit straight to the database, skipping the staged
+   * Apply/Reset queue (Ctrl/Cmd+Shift+Enter).
+   * @param {'down' | 'right' | 'left' | null} afterAction
+   */
+  async function commitEditImmediate(afterAction) {
+    if (!editingCell || saving) return;
+    const { rowIdx, colIdx, draft } = editingCell;
+    const col = columns[colIdx];
+    if (!col) return;
+
+    if (draft === editingCell.original) {
+      editingCell = null;
+      if (afterAction) navigateAfterEdit(rowIdx, colIdx, afterAction);
+      else tick().then(() => tableContainer?.focus({ preventScroll: true }));
+      return;
+    }
+
+    const parsed = parseCellInput(
+      draft,
+      col.dataType ?? col.data_type ?? "text",
+      getColumnEnumValues(col),
+    );
+    if (!parsed.ok) {
+      toast.error("Invalid value", { description: parsed.message });
+      return;
+    }
+
     try {
-      const oldVal = lastEditOriginalValue;
       await onsave({ rowIdx, colIdx, value: parsed.value });
-      pastEdits = [...pastEdits.slice(-49), { rowIdx, colIdx, oldValue: oldVal, newValue: parsed.value }];
-      futureEdits = [];
+      // Drop any staged edit for this cell — it's now persisted.
+      const key = editKey(rowIdx, colIdx);
+      if (pendingEdits.has(key)) {
+        const next = new Map(pendingEdits);
+        next.delete(key);
+        pendingEdits = next;
+      }
       editingCell = null;
       toast.success("Saved", { description: `${col.name} updated` });
       if (afterAction) navigateAfterEdit(rowIdx, colIdx, afterAction);
@@ -456,9 +589,73 @@
     }
   }
 
-  async function commitEdit() {
-    return commitEditWithAction(null);
+  /** Flush all staged edits to the database. */
+  async function applyPendingEdits() {
+    if (pendingEdits.size === 0 || saving) return;
+    const entries = [...pendingEdits.values()];
+    /** @type {typeof entries} */
+    const failed = [];
+    let okCount = 0;
+    for (const edit of entries) {
+      try {
+        await onsave({ rowIdx: edit.rowIdx, colIdx: edit.colIdx, value: edit.value });
+        okCount++;
+      } catch (err) {
+        failed.push(edit);
+        toast.error("Save failed", { description: String(err) });
+      }
+    }
+    // Keep only the edits that failed so the user can retry / reset them.
+    const next = new Map();
+    for (const edit of failed) next.set(editKey(edit.rowIdx, edit.colIdx), edit);
+    pendingEdits = next;
+    pastEdits = [];
+    futureEdits = [];
+    if (okCount > 0) {
+      toast.success("Changes applied", { description: `${okCount} cell${okCount === 1 ? "" : "s"} updated` });
+    }
   }
+
+  /** Discard all staged edits. */
+  function resetPendingEdits() {
+    if (pendingEdits.size === 0) return;
+    pendingEdits = new Map();
+    pastEdits = [];
+    futureEdits = [];
+  }
+
+  // Surface staged-edit state to the parent (→ StatusBar Apply/Reset buttons).
+  $effect(() => {
+    applyEdits = applyPendingEdits;
+    resetEdits = resetPendingEdits;
+  });
+  $effect(() => { pendingEditCount = pendingEdits.size; });
+
+  // Surface scroll-to-top / scroll-to-bottom to the parent (→ StatusBar buttons).
+  $effect(() => {
+    scrollToTop = () => tableContainer?.scrollTo({ top: 0 });
+    scrollToBottom = () => { if (tableContainer) tableContainer.scrollTo({ top: tableContainer.scrollHeight }); };
+  });
+
+  // Overscroll hint: a brief edge glow when the wheel pushes past the top/bottom.
+  // Passive wheel listener doing only a cheap scrollTop read (plus an edge metric
+  // read that's a no-op layout in the common non-virtualized case) — it never
+  // touches the scroll position, so it can't affect scroll smoothness.
+  $effect(() => {
+    const container = tableContainer;
+    if (!container) return;
+    const onWheel = (/** @type {WheelEvent} */ e) => {
+      // Only hint the scroll boundary on larger tables — pointless for short lists.
+      if (rows.length <= 50) return;
+      if (e.deltaY < 0) {
+        if (container.scrollTop <= 0) flashOverscroll('top');
+      } else if (e.deltaY > 0) {
+        if (container.scrollTop + container.clientHeight >= container.scrollHeight - 1) flashOverscroll('bottom');
+      }
+    };
+    container.addEventListener('wheel', onWheel, { passive: true });
+    return () => container.removeEventListener('wheel', onWheel);
+  });
 
   async function copyCellValue(rowIdx, colIdx) {
     const value = rows[rowIdx]?.[colIdx];
@@ -480,19 +677,17 @@
     }
   }
 
-  async function setCellNull(rowIdx, colIdx) {
+  function setCellNull(rowIdx, colIdx) {
     const col = columns[colIdx];
     if (!col || !canEditColumn(colIdx)) return;
-    if (rows[rowIdx]?.[colIdx] === null) {
+    if (effectiveCellValue(rowIdx, colIdx) === null) {
       toast.message("Already NULL");
       return;
     }
-    try {
-      await onsave({ rowIdx, colIdx, value: null });
-      toast.success("Set to NULL", { description: col.name });
-    } catch (err) {
-      toast.error("Update failed", { description: String(err) });
-    }
+    const prevValue = effectiveCellValue(rowIdx, colIdx);
+    stageEdit(rowIdx, colIdx, null);
+    pastEdits = [...pastEdits.slice(-49), { rowIdx, colIdx, oldValue: prevValue, newValue: null }];
+    futureEdits = [];
   }
 
   /** @param {number} rowIdx */
@@ -543,42 +738,31 @@
     tick().then(() => tableContainer?.focus({ preventScroll: true }));
   }
 
-  async function undoEdit() {
+  function undoEdit() {
     if (!pastEdits.length) return;
     const last = pastEdits[pastEdits.length - 1];
     pastEdits = pastEdits.slice(0, -1);
     futureEdits = [last, ...futureEdits];
-    try {
-      await onsave({ rowIdx: last.rowIdx, colIdx: last.colIdx, value: last.oldValue });
-      focusedRow = last.rowIdx;
-      const vi = actualToVisColIdx(last.colIdx);
-      focusedCol = vi >= 0 ? vi : 0;
-      scrollRowIntoView(last.rowIdx);
-      tick().then(() => tableContainer?.focus({ preventScroll: true }));
-    } catch (err) {
-      pastEdits = [...pastEdits, last];
-      futureEdits = futureEdits.slice(1);
-      toast.error("Undo failed", { description: String(err) });
-    }
+    // Undo restages the prior value (still unsaved — Apply persists it).
+    stageEdit(last.rowIdx, last.colIdx, last.oldValue);
+    focusedRow = last.rowIdx;
+    const vi = actualToVisColIdx(last.colIdx);
+    focusedCol = vi >= 0 ? vi : 0;
+    scrollRowIntoView(last.rowIdx);
+    tick().then(() => tableContainer?.focus({ preventScroll: true }));
   }
 
-  async function redoEdit() {
+  function redoEdit() {
     if (!futureEdits.length) return;
     const next = futureEdits[0];
     futureEdits = futureEdits.slice(1);
     pastEdits = [...pastEdits, next];
-    try {
-      await onsave({ rowIdx: next.rowIdx, colIdx: next.colIdx, value: next.newValue });
-      focusedRow = next.rowIdx;
-      const vi = actualToVisColIdx(next.colIdx);
-      focusedCol = vi >= 0 ? vi : 0;
-      scrollRowIntoView(next.rowIdx);
-      tick().then(() => tableContainer?.focus({ preventScroll: true }));
-    } catch (err) {
-      futureEdits = [next, ...futureEdits];
-      pastEdits = pastEdits.slice(0, -1);
-      toast.error("Redo failed", { description: String(err) });
-    }
+    stageEdit(next.rowIdx, next.colIdx, next.newValue);
+    focusedRow = next.rowIdx;
+    const vi = actualToVisColIdx(next.colIdx);
+    focusedCol = vi >= 0 ? vi : 0;
+    scrollRowIntoView(next.rowIdx);
+    tick().then(() => tableContainer?.focus({ preventScroll: true }));
   }
 
   $effect(() => {
@@ -644,8 +828,19 @@
       void commitEditWithAction(e.shiftKey ? "left" : "right");
       return;
     }
-    if (e.key === "Enter" && !(e.shiftKey || e.altKey)) {
+    // Ctrl/Cmd+Shift+Enter saves this cell straight to the database, bypassing
+    // the staged Apply/Reset queue.
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "Enter") {
       e.preventDefault();
+      e.stopPropagation();
+      void commitEditImmediate("down");
+      return;
+    }
+    // Enter (or Ctrl/Cmd+Enter) confirms the edit into the staged queue and
+    // moves to the next row.
+    if (e.key === "Enter" && !e.altKey) {
+      e.preventDefault();
+      e.stopPropagation();
       void commitEditWithAction("down");
       return;
     }
@@ -700,23 +895,27 @@
     expandedRows = next;
   }
 
+  /** Collapse every expanded JSON row at once. */
+  function collapseAllRows() {
+    if (expandedRows.size === 0) return;
+    expandedRows = new Set();
+  }
+
   const ROW_EXPAND_COL_WIDTH = 32;
   /** Fits 16px checkbox with equal inset; no extra horizontal padding in cells */
   const ROW_SELECT_COL_WIDTH = 32;
   const visibleColumns = $derived(
     columns.filter((c) => !hiddenColumns.has(c.name)),
   );
-  const dataColSpan = $derived(visibleColumns.length);
+  // +1 for the trailing auto-width spacer column (keeps real columns stable).
+  const dataColSpan = $derived(visibleColumns.length + 1);
   const totalColSpan = $derived(
-    (showRowExpand ? 1 : 0) + (showSelection ? 1 : 0) + visibleColumns.length,
+    (showRowExpand ? 1 : 0) + (showSelection ? 1 : 0) + visibleColumns.length + 1,
   )
   /** Columns visible to the keyboard — excludes collapsed strips. */
   const navigableColumns = $derived(visibleColumns.filter((c) => !collapsedColumns.has(c.name)))
-  /** Total gutter width before the first data column. */
-  const gutterTotalWidth = $derived(
-    (showRowExpand ? ROW_EXPAND_COL_WIDTH : 0) + (showSelection ? ROW_SELECT_COL_WIDTH : 0),
-  )
-  /** Map of pinned column name → sticky left offset in px. */
+  /** Map of pinned column name → sticky left offset in px. Gutters are not
+   *  sticky, so pinned columns stick from the left edge (0). */
   const pinnedOffsets = $derived.by(() => {
     const map = new Map()
     let left = 0
@@ -727,7 +926,25 @@
     }
     return map
   })
-  const useVirtual = $derived(rows.length > VIRTUAL_THRESHOLD && !embedded)
+  // Windowed when: not embedded, big enough to matter, AND either we're still
+  // deferring the full render (just switched in) or the page is too big to ever
+  // fully render. Otherwise render every row for native-smooth scroll.
+  const useVirtual = $derived(
+    !embedded &&
+    rows.length > VIRTUAL_THRESHOLD &&
+    (_deferFullRender || rows.length > FULL_RENDER_MAX)
+  )
+
+  // On a fresh table / new page, mount windowed (fast switch) then expand to a
+  // full render shortly after, so scrolling is smooth. Keyed on table identity +
+  // row count so it does NOT re-trigger on in-place cell edits (which keep both).
+  $effect(() => {
+    void columnWidthsKey
+    void rows.length
+    _deferFullRender = true
+    const id = setTimeout(() => { _deferFullRender = false }, 200)
+    return () => clearTimeout(id)
+  })
   // Stable key that changes only when column names change — prevents the
   // column-widths $effect from re-running on every row fetch (same columns, new array ref).
   const _columnNamesKey = $derived(columns.map((c) => c.name).join('\x00'))
@@ -740,8 +957,12 @@
   const virtualStart = $derived.by(() => {
     if (!useVirtual) return 0
     let start = Math.max(0, Math.floor(_scrollTop / ROW_HEIGHT) - OVERSCAN)
+    // Only the active edit input and expanded (tall) rows must stay mounted when
+    // off-screen. A focused (non-editing) row is NOT extended into the window —
+    // that would render everything between focus and viewport and lock up large
+    // tables; the highlight only matters on-screen and scrollRowIntoView() covers
+    // keyboard nav to off-screen rows.
     if (_expandedMin < start) start = Math.max(0, _expandedMin)
-    if (focusedRow !== null && focusedRow < start) start = Math.max(0, focusedRow)
     if (editingCell && editingCell.rowIdx < start) start = Math.max(0, editingCell.rowIdx)
     return start
   })
@@ -749,12 +970,24 @@
     if (!useVirtual) return rows.length - 1
     let end = Math.min(rows.length - 1, Math.ceil((_scrollTop + _viewportHeight) / ROW_HEIGHT) + OVERSCAN)
     if (_expandedMax > end) end = Math.min(rows.length - 1, _expandedMax)
-    if (focusedRow !== null && focusedRow > end) end = Math.min(rows.length - 1, focusedRow)
     if (editingCell && editingCell.rowIdx > end) end = Math.min(rows.length - 1, editingCell.rowIdx)
     return end
   })
   const virtualTopPad = $derived(virtualStart * ROW_HEIGHT)
   const virtualBottomPad = $derived((rows.length - 1 - virtualEnd) * ROW_HEIGHT)
+
+  // Iterate ABSOLUTE row indices (not a sliced array + loop index). Keyed by the
+  // index itself, a reused row keeps a constant `idx` across scroll shifts, so
+  // its block does NOT re-run — only the row entering/leaving the window mounts
+  // or unmounts. (With a sliced array the loop index shifts for every row each
+  // step, forcing all visible rows — and all their cells — to re-render.)
+  const visibleRowIndexes = $derived.by(() => {
+    if (!useVirtual) return rows.map((_, i) => i)
+    /** @type {number[]} */
+    const out = []
+    for (let i = virtualStart; i <= virtualEnd; i++) out.push(i)
+    return out
+  })
 
   const allSelected = $derived(
     rows.length > 0 && selected.size === rows.length,
@@ -816,7 +1049,8 @@
     const isFocused = focusedRow === idx;
     const isSelected = selected.has(idx);
     const isExpanded = isRowExpanded(idx);
-    return cn(
+    // cx (no tailwind-merge): these classes never conflict and this runs per row.
+    return cx(
       "group/row outline-none hover:bg-accent/25",
       isExpanded && "[&>td]:border-b-0",
       isSelected && "bg-accent/20",
@@ -903,6 +1137,15 @@
 
   /** Cycle sort: none → asc → desc → none */
   function handleHeaderSort(colName) {
+    // Staged edits are keyed by row index; sorting would reorder rows and
+    // desync them. Ask the user to apply or reset first instead of silently
+    // dropping their changes.
+    if (pendingEdits.size > 0) {
+      toast.error("Unsaved changes", {
+        description: "Apply or reset your edits before sorting.",
+      })
+      return
+    }
     if (rowSort?.column !== colName) {
       onsortchange({ column: colName, direction: 'desc' })
     } else if (rowSort.direction === 'desc') {
@@ -927,6 +1170,15 @@
     focusedCol = null;
     pastEdits = [];
     futureEdits = [];
+  });
+
+  // Drop staged edits when the table changes or rows are reordered (sort),
+  // since edits are keyed by row index — applying them afterwards could target
+  // the wrong rows.
+  $effect(() => {
+    void columnWidthsKey;
+    void (rowSort ? `${rowSort.column}:${rowSort.direction}` : "");
+    untrack(() => { if (pendingEdits.size) pendingEdits = new Map(); });
   });
 
   // Document-level capture so undo/redo fires even during the brief window between
@@ -954,6 +1206,8 @@
 
     // Update synchronously — no RAF delay so the virtual window always matches
     // the scroll position before the browser paints the next frame.
+    // Synchronous update — keeps the virtual window exactly matched to the
+    // scroll position before paint (rAF coalescing was measurably worse here).
     const onScroll = () => {
       const st = container.scrollTop
       if (st !== _scrollTop) _scrollTop = st
@@ -1133,6 +1387,13 @@
   onDestroy(() => {
     if (previewShowTimer) clearTimeout(previewShowTimer)
     if (previewHideTimer) clearTimeout(previewHideTimer)
+    if (_overscrollTimer) clearTimeout(_overscrollTimer)
+    // Clear staged-edit state in the parent so the StatusBar buttons don't linger.
+    pendingEditCount = 0
+    applyEdits = () => {}
+    resetEdits = () => {}
+    scrollToTop = () => {}
+    scrollToBottom = () => {}
   })
 </script>
 
@@ -1159,7 +1420,7 @@
           {...props}
           tabindex={-1}
           class={cn(
-            "app-scroll relative overflow-auto bg-panel select-none outline-none [scrollbar-gutter:stable] [contain:layout] [will-change:transform] [overflow-anchor:none]",
+            "app-scroll relative overflow-auto bg-panel select-none outline-none [scrollbar-gutter:stable] [contain:layout] [overflow-anchor:none]",
             embedded ? "max-h-80" : "min-h-0 flex-1",
             resizingColName && "cursor-col-resize",
           )}
@@ -1197,25 +1458,31 @@
             }
           }}
         >
+          <!-- Overscroll hint: brief glow pinned to the top edge when wheeling past the top. -->
+          <div aria-hidden="true" class="pointer-events-none sticky top-0 z-30 h-0">
+            <div class="absolute inset-x-0 top-0 h-10 bg-gradient-to-b from-primary/25 to-transparent transition-opacity duration-200 {overscrollEdge === 'top' ? 'opacity-100' : 'opacity-0'}"></div>
+          </div>
+          {#if visibleColumns.length === 0}{:else}
           <table
-            class="studio-data-table w-max min-w-full table-fixed text-ui-sm"
+            class="studio-data-table w-full table-fixed text-ui-sm"
           >
             <colgroup>
-
               {#if showRowExpand}
-                <col style="width: {ROW_EXPAND_COL_WIDTH}px" />
+                <col style="width: {ROW_EXPAND_COL_WIDTH}px; min-width: {ROW_EXPAND_COL_WIDTH}px; max-width: {ROW_EXPAND_COL_WIDTH}px" />
               {/if}
               {#if showSelection}
-                <col style="width: {ROW_SELECT_COL_WIDTH}px" />
+                <col style="width: {ROW_SELECT_COL_WIDTH}px; min-width: {ROW_SELECT_COL_WIDTH}px; max-width: {ROW_SELECT_COL_WIDTH}px" />
               {/if}
               {#each visibleColumns as col (col.name)}
-                <col
-                  style="width: {widthForColumn(
-                    col.name,
-                    col.dataType ?? col.data_type ?? '',
-                  )}px"
-                />
+                {@const isCollapsed = collapsedColumns.has(col.name)}
+                {@const colW = isCollapsed ? COLLAPSED_COL_WIDTH : widthForColumn(col.name, col.dataType ?? col.data_type ?? "")}
+                <col style="width: {colW}px" />
               {/each}
+              <!-- Auto-width spacer: absorbs any leftover panel width so the
+                   real columns keep their exact, stable widths (no reflow on
+                   data / column-count / sidebar changes). Collapses to 0 when
+                   columns overflow, letting the horizontal scrollbar take over. -->
+              <col class="studio-spacer-col" />
             </colgroup>
             <thead class="studio-chrome sticky top-0 z-20 bg-panel">
               <tr>
@@ -1224,7 +1491,21 @@
                     class="studio-table-gutter bg-panel"
                     style="width: {ROW_EXPAND_COL_WIDTH}px; min-width: {ROW_EXPAND_COL_WIDTH}px; max-width: {ROW_EXPAND_COL_WIDTH}px"
                     aria-label="Expand row"
-                  ></th>
+                  >
+                    {#if expandedRows.size > 0}
+                      <div class="studio-table-gutter-inner">
+                        <button
+                          type="button"
+                          class="flex size-full items-center justify-center text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+                          title="Collapse all expanded rows ({expandedRows.size})"
+                          aria-label="Collapse all expanded rows"
+                          onclick={(e) => { e.stopPropagation(); collapseAllRows(); }}
+                        >
+                          <ChevronsDownUp class="size-3.5" />
+                        </button>
+                      </div>
+                    {/if}
+                  </th>
                 {/if}
                 {#if showSelection}
                   <th
@@ -1262,7 +1543,7 @@
                     {@const isSorted = rowSort?.column === col.name}
                     <th
                       class={cn(
-                        "group/th relative overflow-hidden px-0 py-1 text-left font-normal",
+                        "group/th relative overflow-hidden px-0 py-0 text-left font-normal",
                         resizingColName === col.name && "bg-accent/30",
                         isPinned && "sticky z-[1] bg-panel shadow-[1px_0_0_hsl(var(--border)/0.6)]",
                       )}
@@ -1271,7 +1552,7 @@
                       <button
                         type="button"
                         class={cn(
-                          "flex w-full min-w-0 cursor-pointer items-center gap-1.5 px-3 py-0.5 text-left transition-colors hover:bg-accent/40",
+                          "flex h-full w-full min-w-0 cursor-pointer items-center gap-1.5 px-3 py-1 text-left transition-colors hover:bg-accent/40",
                           isSorted && "bg-accent/20",
                         )}
                         onclick={() => handleHeaderSort(col.name)}
@@ -1280,7 +1561,10 @@
                         <div class="flex min-w-0 flex-1 flex-col gap-px leading-tight">
                           <div class="flex min-w-0 items-center gap-1">
                             <span
-                              class="min-w-0 truncate font-mono text-ui-sm text-foreground"
+                              class={cx(
+                                "min-w-0 overflow-hidden whitespace-nowrap font-mono text-ui-sm text-foreground",
+                                col.name.length > 100 && "text-ellipsis",
+                              )}
                               data-font="mono"
                               title={col.name}>{col.name}</span
                             >
@@ -1338,14 +1622,17 @@
                           <ArrowUpDown class="size-3 shrink-0 opacity-0 transition-opacity group-hover/th:opacity-30" />
                         {/if}
                       </button>
-                      <ColumnResizeHandle
-                        onresizestart={() => startColumnResize(col.name)}
-                        onresize={applyColumnResize}
-                        onresizeend={endColumnResize}
-                      />
+                      {#if visibleColumns.length > 1}
+                        <ColumnResizeHandle
+                          onresizestart={() => startColumnResize(col.name)}
+                          onresize={applyColumnResize}
+                          onresizeend={endColumnResize}
+                        />
+                      {/if}
                     </th>
                   {/if}
                 {/each}
+                <th aria-hidden="true" class="studio-spacer-cell bg-panel"></th>
               </tr>
             </thead>
             {#if rows.length > 0}
@@ -1355,23 +1642,43 @@
                     <td colspan={totalColSpan} class="border-0 p-0"></td>
                   </tr>
                 {/if}
-                {#each rows.slice(virtualStart, virtualEnd + 1) as row, relIdx (virtualStart + relIdx)}
-                  {@const idx = virtualStart + relIdx}
+                {#each visibleRowIndexes as idx (idx)}
+                  {@const row = rows[idx]}
                   <tr
                     data-row-idx={idx}
                     class={rowClass(idx)}
                     onclick={(e) => {
                       if (e.button !== 0) return;
+                      const target = e.target instanceof Element ? e.target : null;
+                      // Copy button — delegated so the button itself needs no listener.
+                      const copyBtn = target?.closest("[data-copy-cell]");
+                      if (copyBtn) {
+                        e.stopPropagation();
+                        void copyCellValue(idx, Number(copyBtn.getAttribute("data-copy-cell")));
+                        return;
+                      }
                       if (editingCell) cancelEdit();
                       focusedRow = idx;
-                      const cellEl = e.target instanceof Element ? e.target.closest("td[data-col-idx]") : null;
+                      const cellEl = target?.closest("td[data-col-idx]");
                       if (cellEl) {
-                        const vi = actualToVisColIdx(Number(cellEl.getAttribute("data-col-idx")));
+                        const ci = Number(cellEl.getAttribute("data-col-idx"));
+                        const vi = actualToVisColIdx(ci);
                         if (vi >= 0) focusedCol = vi;
+                        // Ctrl/Cmd-click follows a foreign key (formerly on the cell).
+                        if (tryFollowForeignKey(idx, ci, e, { requireModifier: true })) return;
                       } else if (focusedCol === null) {
                         focusedCol = 0;
                       }
                       tableContainer?.focus({ preventScroll: true });
+                    }}
+                    ondblclick={(e) => {
+                      const cellEl = e.target instanceof Element ? e.target.closest("td[data-col-idx]") : null;
+                      if (!cellEl) return;
+                      e.preventDefault();
+                      const ci = Number(cellEl.getAttribute("data-col-idx"));
+                      // FK cell with a value → follow; otherwise start editing.
+                      if (tryFollowForeignKey(idx, ci, e)) return;
+                      startEdit(idx, ci);
                     }}
                     onauxclick={(e) => {
                       if (e.button !== 1) return;
@@ -1454,50 +1761,41 @@
                         {@const col = columns[colIdx]}
                         {@const colType = col?.dataType ?? col?.data_type ?? ""}
                         {@const enumValues = getColumnEnumValues(col)}
+                        {@const stagedEdit = hasPendingEdits ? pendingEdits.get(idx + ":" + colIdx) : undefined}
+                        {@const isDirty = !!stagedEdit}
+                        {@const cellValue = stagedEdit ? stagedEdit.value : cell}
                         {@const cellFk = foreignKeyForCell(idx, colIdx)}
-                        {@const cellIsNull = row[colIdx] === null || row[colIdx] === undefined}
+                        {@const cellIsNull = cellValue === null || cellValue === undefined}
                         {@const activeFk = cellFk && !cellIsNull}
                         {@const isFocusedCell = !isEditing && focusedRow === idx && focusedCol !== null && columns[colIdx]?.name === navigableColumns[focusedCol]?.name}
                         {@const cellPinned = pinnedColumns.has(col?.name ?? '')}
                         {@const cellPinLeft = cellPinned ? (pinnedOffsets.get(col?.name ?? '') ?? 0) : 0}
+                        <!-- Background / text / shadow resolved by priority so the hot
+                             cell class avoids tailwind-merge (cx = clsx only). Order
+                             matches the previous cn() last-wins behavior exactly. -->
+                        {@const cellBg = isEditing ? "bg-background"
+                          : cellPinned ? "bg-panel"
+                          : isDirty ? "bg-amber-400/15"
+                          : isFocusedCell ? "bg-primary/10"
+                          : activeFk ? "bg-accent/15" : ""}
+                        {@const cellTextColor = isEditing ? ""
+                          : (isFocusedCell || isDirty) ? "text-foreground" : "text-muted-foreground"}
+                        {@const cellShadow = isEditing ? ""
+                          : cellPinned ? "shadow-[1px_0_0_hsl(var(--border)/0.6)]"
+                          : isDirty ? "shadow-[inset_2px_0_0_#f59e0b]" : ""}
                         <td
                           data-col-idx={colIdx}
-                          class={cn(
+                          class={cx(
                             "overflow-hidden font-mono",
                             isEditing
-                              ? "relative p-0 align-middle ring-2 ring-inset ring-primary bg-background"
-                              : "group/cell relative whitespace-nowrap px-3 py-0.5 text-muted-foreground",
-                            activeFk &&
-                              !isEditing &&
-                              "group/fk cursor-pointer bg-accent/15 transition-colors hover:bg-accent/30",
-                            isFocusedCell && "bg-primary/10 text-foreground",
-                            cellPinned && !isEditing && "sticky z-[1] bg-panel shadow-[1px_0_0_hsl(var(--border)/0.6)]",
+                              ? "relative p-0 align-middle ring-2 ring-inset ring-primary"
+                              : "group/cell relative whitespace-nowrap px-3 py-0.5",
+                            !isEditing && activeFk && "group/fk cursor-pointer transition-colors hover:bg-accent/30",
+                            !isEditing && cellPinned && "sticky z-[1]",
+                            cellBg, cellTextColor, cellShadow,
                           )}
                           style={isEditing ? "border: 0" : cellPinned ? `left: ${cellPinLeft}px` : undefined}
                           data-font="mono"
-                          onclick={(e) => {
-                            if (
-                              tryFollowForeignKey(idx, colIdx, e, {
-                                requireModifier: true,
-                              })
-                            )
-                              return;
-                          }}
-                          ondblclick={(e) => {
-                            e.preventDefault();
-                            if (activeFk) {
-                              tryFollowForeignKey(idx, colIdx, e);
-                              return;
-                            }
-                            startEdit(idx, colIdx);
-                          }}
-                          onkeydown={(e) => {
-                            if (isEditing) return;
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              startEdit(idx, colIdx);
-                            }
-                          }}
                         >
                           {#if isEditing && editingCell}
                             {@const isNullable = col?.nullable ?? true}
@@ -1582,26 +1880,29 @@
                               />
                             {/if}
                           {:else}
-                            {@const cellText = formatCell(cell)}
-                            {@const cellDisplay = displayCell(cell)}
-                            {@const isJsonCell = cell !== null && typeof cell === 'object'}
+                            {@const cellText = formatCell(cellValue)}
+                            {@const cellDisplay = displayCell(cellValue)}
+                            {@const isJsonCell = cellValue !== null && typeof cellValue === 'object'}
                             {@const cellHref = !activeFk && !isJsonCell
                               ? cellLinkHref(cellText)
                               : null}
-                            {@const urlType = cellUrlType(cellHref)}
+                            {@const urlType = cellUrlType(cellHref, col?.name ?? "")}
                             {#if isJsonCell}
-                              <button
-                                type="button"
-                                class="group/json flex min-w-0 cursor-pointer items-center gap-1 truncate bg-transparent p-0 text-left"
-                                onclick={(e) => openJsonLightbox(cell, col?.name ?? 'json', e)}
-                                title="Click to view JSON"
-                              >
+                              <span class="flex min-w-0 items-center gap-1.5">
                                 <span class="truncate font-mono text-muted-foreground">{cellDisplay}</span>
-                                <Braces class="size-3 shrink-0 text-muted-foreground/30 transition-colors group-hover/json:text-muted-foreground" />
-                              </button>
+                                <button
+                                  type="button"
+                                  class="inline-flex shrink-0 items-center gap-0.5 rounded border border-border/60 bg-muted/40 px-1 py-px font-mono text-[10px] leading-none text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                                  title="View JSON"
+                                  aria-label="View JSON"
+                                  onclick={(e) => openJsonLightbox(cellValue, col?.name ?? 'json', e)}
+                                >
+                                  <Braces class="size-2.5" /> JSON
+                                </button>
+                              </span>
                             {:else}
                             <span
-                              class={cn(
+                              class={cx(
                                 "flex items-center gap-1.5 truncate",
                                 activeFk && "text-foreground",
                               )}
@@ -1614,7 +1915,7 @@
                                   href={cellHref}
                                   data-cell-url
                                   tabindex={-1}
-                                  class={cn(
+                                  class={cx(
                                     "truncate",
                                     urlType === "image" && "cursor-zoom-in",
                                   )}
@@ -1662,8 +1963,8 @@
                             <button
                               type="button"
                               tabindex={-1}
-                              class="absolute right-0.5 top-1/2 z-10 -translate-y-1/2 inline-flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover/cell:opacity-70 hover:!opacity-100 hover:bg-accent/60 hover:text-foreground"
-                              onclick={(e) => { e.stopPropagation(); void copyCellValue(idx, colIdx); }}
+                              data-copy-cell={colIdx}
+                              class="absolute right-0.5 top-1/2 z-10 hidden size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground group-hover/cell:inline-flex hover:bg-accent/60 hover:text-foreground"
                             >
                               <Copy class="size-3" />
                             </button>
@@ -1671,17 +1972,18 @@
                         </td>
                       {/if}
                     {/each}
+                    <td aria-hidden="true" class="studio-spacer-cell"></td>
                   </tr>
                   {#if showRowExpand && isRowExpanded(idx)}
                     <tr>
                       <td
-                        class="studio-table-gutter"
+                        class="studio-table-gutter bg-panel"
                         style="width: {ROW_EXPAND_COL_WIDTH}px; min-width: {ROW_EXPAND_COL_WIDTH}px; max-width: {ROW_EXPAND_COL_WIDTH}px"
                         aria-hidden="true"
                       ></td>
                       {#if showSelection}
                         <td
-                          class="studio-table-gutter"
+                          class="studio-table-gutter bg-panel"
                           style="width: {ROW_SELECT_COL_WIDTH}px; min-width: {ROW_SELECT_COL_WIDTH}px; max-width: {ROW_SELECT_COL_WIDTH}px"
                           aria-hidden="true"
                         ></td>
@@ -1704,7 +2006,8 @@
               </tbody>
             {/if}
           </table>
-          {#if rows.length === 0}
+          {/if}
+          {#if visibleColumns.length === 0}
             <div
               class="pointer-events-none absolute inset-0 flex items-center justify-center"
               role="status"
@@ -1712,12 +2015,25 @@
             >
               <div class="flex flex-col items-center gap-2 px-4 text-center">
                 <Table2 class="size-8 text-muted-foreground/25" />
-                <p class="text-ui-sm text-muted-foreground">
-                  No rows in this table
-                </p>
+                <p class="text-ui-sm text-muted-foreground">No columns visible</p>
+              </div>
+            </div>
+          {:else if rows.length === 0}
+            <div
+              class="pointer-events-none absolute inset-0 flex items-center justify-center"
+              role="status"
+              aria-live="polite"
+            >
+              <div class="flex flex-col items-center gap-2 px-4 text-center">
+                <Table2 class="size-8 text-muted-foreground/25" />
+                <p class="text-ui-sm text-muted-foreground">No rows in this table</p>
               </div>
             </div>
           {/if}
+          <!-- Overscroll hint: brief glow pinned to the bottom edge when wheeling past the bottom. -->
+          <div aria-hidden="true" class="pointer-events-none sticky bottom-0 z-30 h-0">
+            <div class="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-primary/25 to-transparent transition-opacity duration-200 {overscrollEdge === 'bottom' ? 'opacity-100' : 'opacity-0'}"></div>
+          </div>
         </div>
       {/snippet}
     </ContextMenu.Trigger>

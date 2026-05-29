@@ -332,12 +332,16 @@
 
   /** Streaming display strips <think>...</think> blocks in real time */
   const displayStreamingContent = $derived(
-    streamingContent
-      // Complete think blocks — hide entirely
-      .replace(/<think>[\s\S]*?<\/think>/g, '')
-      // Partial/open think block currently being written — hide from cursor onwards
-      .replace(/<think>[\s\S]*$/, '')
-      .trim()
+    // Fast path: most models never emit <think>, so skip the regex scans over
+    // the (growing) streamed string entirely unless a think tag is present.
+    streamingContent.includes('<think>')
+      ? streamingContent
+          // Complete think blocks — hide entirely
+          .replace(/<think>[\s\S]*?<\/think>/g, '')
+          // Partial/open think block currently being written — hide from cursor onwards
+          .replace(/<think>[\s\S]*$/, '')
+          .trim()
+      : streamingContent.trim()
   )
   /** ID of the `streaming` ChatItem in `items` (null when not streaming) */
   let streamingId = $state(/** @type {string | null} */ (null))
@@ -549,13 +553,6 @@
       applyTransform()
     }
 
-    const onDown = (/** @type {MouseEvent} */ e) => {
-      if (e.button !== 0) return
-      dragging = true
-      ox = e.clientX - tx; oy = e.clientY - ty
-      node.classList.add('is-dragging')
-    }
-
     let rafId = 0
     const onMove = (/** @type {MouseEvent} */ e) => {
       if (!dragging) return
@@ -568,6 +565,19 @@
       if (!dragging) return
       dragging = false
       node.classList.remove('is-dragging')
+      // Detach the global move/up listeners until the next drag begins, so we
+      // don't run a window-wide mousemove handler whenever a diagram is shown.
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+
+    const onDown = (/** @type {MouseEvent} */ e) => {
+      if (e.button !== 0) return
+      dragging = true
+      ox = e.clientX - tx; oy = e.clientY - ty
+      node.classList.add('is-dragging')
+      window.addEventListener('mousemove', onMove)
+      window.addEventListener('mouseup', onUp)
     }
 
     const onDblClick = () => {
@@ -581,8 +591,6 @@
 
     node.addEventListener('wheel', onWheel, { passive: false })
     node.addEventListener('mousedown', onDown)
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
     node.addEventListener('dblclick', onDblClick)
     node.addEventListener('diagram:zoomin', onZoomIn)
     node.addEventListener('diagram:zoomout', onZoomOut)
@@ -1637,12 +1645,12 @@
               {/if}
             </div>
           {:else}
-            <div class="flex flex-col gap-4" data-studio-selectable="text">
+            <div class="flex flex-col gap-5" data-studio-selectable="text">
               {#each items as item (item.id)}
 
                 {#if item.kind === 'user'}
                   <div class="flex justify-end">
-                    <div class="max-w-[85%] rounded-2xl rounded-tr-sm bg-primary px-4 py-2.5 text-ui leading-relaxed text-primary-foreground">
+                    <div class="max-w-[85%] rounded-2xl rounded-tr-md bg-primary px-3.5 py-2 text-ui leading-relaxed text-primary-foreground shadow-sm">
                       {item.text}
                     </div>
                   </div>
@@ -1771,26 +1779,38 @@
                     item.error ? 'border-destructive/40 bg-destructive/5' : 'border-border/70',
                     item.isSchema && 'border-primary/25',
                   )}>
-                    <button
-                      type="button"
+                    <div
                       class={cn(
-                        'flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-muted/20',
+                        'group/res flex w-full items-center gap-2 px-3 py-2 transition-colors hover:bg-muted/20',
                         item.error ? 'bg-destructive/8'
                           : item.isSchema ? 'bg-primary/6'
                           : 'bg-muted/20',
                         resOpen && 'border-b border-border/40',
                       )}
-                      onclick={() => toggleResult(item.id)}
                     >
-                      {#if resOpen}<ChevronDown class="size-3 shrink-0 text-muted-foreground/60" />{:else}<ChevronRight class="size-3 shrink-0 text-muted-foreground/60" />{/if}
-                      <Table2 class={cn('size-3 shrink-0', item.isSchema ? 'text-primary/60' : 'text-muted-foreground/60')} />
-                      <span class="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground/70">{item.sql || 'Query'}</span>
+                      <button
+                        type="button"
+                        class="flex min-w-0 flex-1 items-center gap-2 text-left"
+                        onclick={() => toggleResult(item.id)}
+                      >
+                        {#if resOpen}<ChevronDown class="size-3 shrink-0 text-muted-foreground/60" />{:else}<ChevronRight class="size-3 shrink-0 text-muted-foreground/60" />{/if}
+                        <Table2 class={cn('size-3 shrink-0', item.isSchema ? 'text-primary/60' : 'text-muted-foreground/60')} />
+                        <span class="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground/70">{item.sql || 'Query'}</span>
+                      </button>
+                      {#if item.sql}
+                        <button type="button" class="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 transition-colors group-hover/res:inline-flex hover:bg-accent hover:text-foreground" title="Copy SQL" onclick={() => copyText(item.sql)}>
+                          <Copy class="size-3" />
+                        </button>
+                        <button type="button" class="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 transition-colors group-hover/res:inline-flex hover:bg-accent hover:text-foreground" title="Write to editor" onclick={() => onwritesql(item.sql)}>
+                          <PenLine class="size-3" />
+                        </button>
+                      {/if}
                       {#if !item.error}
                         <span class="shrink-0 rounded-full bg-muted/60 px-1.5 py-0.5 font-mono text-[9px] tabular-nums text-muted-foreground">
                           {formatCompactCount(item.total)} {item.total === 1 ? 'row' : 'rows'}
                         </span>
                       {/if}
-                    </button>
+                    </div>
                     {#if resOpen}
                       {#if item.error}
                         <div class="flex items-start gap-2 px-3 py-2.5">

@@ -500,6 +500,9 @@
     return () => {
       editor?.dispose();
       editor = null;
+      // Dispose the Monaco global TS extra-lib too — it lives on the shared
+      // javascriptDefaults and would otherwise outlive this component.
+      if (_extraLibDisposable) { _extraLibDisposable.dispose(); _extraLibDisposable = null; }
       themeObs.disconnect();
     };
   });
