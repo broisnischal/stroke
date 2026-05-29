@@ -541,7 +541,7 @@
               </div>
               <ul class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
                 {#each visiblePinnedTables as tableName, idx (tableName)}
-                  <li>
+                  <li class="[content-visibility:auto] [contain-intrinsic-size:auto_28px]">
                     <ContextMenu.Root>
                       <ContextMenu.Trigger class="w-full">
                         <button
@@ -619,7 +619,7 @@
                 {:else}
                   {#each filteredRegularTables as table (table.name)}
                     {@const isSelected = selectedItems.has(table.name)}
-                    <li>
+                    <li class="[content-visibility:auto] [contain-intrinsic-size:auto_28px]">
                       <ContextMenu.Root>
                         <ContextMenu.Trigger class="w-full">
                           <button
@@ -735,7 +735,7 @@
                   {:else}
                     {#each filteredViews as view (view.name)}
                       {@const isSelected = selectedItems.has(view.name)}
-                      <li>
+                      <li class="[content-visibility:auto] [contain-intrinsic-size:auto_28px]">
                         <ContextMenu.Root>
                           <ContextMenu.Trigger class="w-full">
                             <button
@@ -829,7 +829,7 @@
                   {:else}
                     {#each filteredMatViews as mv (mv.name)}
                       {@const isSelected = selectedItems.has(mv.name)}
-                      <li>
+                      <li class="[content-visibility:auto] [contain-intrinsic-size:auto_28px]">
                         <ContextMenu.Root>
                           <ContextMenu.Trigger class="w-full">
                             <button

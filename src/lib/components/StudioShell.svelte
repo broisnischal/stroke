@@ -7,7 +7,7 @@
   import LayoutTemplate from '@lucide/svelte/icons/layout-template'
   import Command from '@lucide/svelte/icons/command'
   import Lightbulb from '@lucide/svelte/icons/lightbulb'
-  import { createHotkey } from '@tanstack/svelte-hotkeys'
+  import { createHotkey, createHotkeySequence } from '@tanstack/svelte-hotkeys'
   import { cycleTheme, restorePreviousTheme } from '$lib/stores/settings.js'
   import { pickRandomTip } from '$lib/insider-tips.js'
   import { toast } from 'svelte-sonner'
@@ -259,6 +259,11 @@
   let applyEdits = $state(() => {})
   /** @type {() => void} */
   let resetEdits = $state(() => {})
+  // ── Table scroll controls (StatusBar go-to-top / go-to-bottom) ──
+  /** @type {() => void} */
+  let scrollTableTop = $state(() => {})
+  /** @type {() => void} */
+  let scrollTableBottom = $state(() => {})
   let total = $state(0)
   let queryMs = $state(0)
   let loadingRows = $state(false)
@@ -651,6 +656,15 @@
     e.preventDefault()
     if (aiMode) { exitAiMode(); return }
     if (activeTabId) closeTab(activeTabId)
+  })
+
+  // Chord: Ctrl/⌘+K then W → close all tabs. (Mod+K opens the command palette;
+  // the W step dismisses it and closes everything.)
+  createHotkeySequence(['Mod+K', 'W'], (e) => {
+    if (!connection) return
+    e.preventDefault()
+    commandOpen = false
+    void closeAllTabs()
   })
 
   createHotkey('Mod+N', (e) => {
@@ -2178,17 +2192,38 @@
         onnew={openWelcomeTab}
       />
 
+      {#snippet tabError(/** @type {unknown} */ error, /** @type {() => void} */ reset)}
+        <div class="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
+          <AlertTriangle class="size-8 text-destructive/60" />
+          <div class="flex flex-col gap-1">
+            <p class="text-ui-sm font-medium text-foreground">This view hit an error</p>
+            <p class="max-w-md break-words font-mono text-ui-xs text-muted-foreground">
+              {error instanceof Error ? error.message : String(error)}
+            </p>
+          </div>
+          <button
+            type="button"
+            class="rounded-md border border-border bg-muted/40 px-3 py-1.5 text-ui-xs font-medium transition-colors hover:bg-accent hover:text-foreground"
+            onclick={reset}
+          >
+            Reload this view
+          </button>
+        </div>
+      {/snippet}
+
       {#if activeTab?.kind === 'ai'}
         <!-- AI is handled via AI mode toggle -->
       {:else if activeTab?.kind === 'schema'}
-        <SchemaPage
-          {indexes}
-          {enums}
-          {tables}
-          loading={loadingTables}
-          active={activeTab?.kind === 'schema'}
-          onrefresh={async () => { await loadSchemas(); await loadTables() }}
-        />
+        <svelte:boundary failed={tabError}>
+          <SchemaPage
+            {indexes}
+            {enums}
+            {tables}
+            loading={loadingTables}
+            active={activeTab?.kind === 'schema'}
+            onrefresh={async () => { await loadSchemas(); await loadTables() }}
+          />
+        </svelte:boundary>
       {/if}
 
       <!-- Security tab - mount once, keep alive -->
@@ -2197,7 +2232,9 @@
           class={activeTab?.kind === 'security' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
           inert={activeTab?.kind !== 'security' || undefined}
         >
-          <SecurityPage active={activeTab?.kind === 'security'} />
+          <svelte:boundary failed={tabError}>
+            <SecurityPage active={activeTab?.kind === 'security'} />
+          </svelte:boundary>
         </div>
       {/if}
 
@@ -2207,7 +2244,9 @@
           class={activeTab?.kind === 'logs' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
           inert={activeTab?.kind !== 'logs' || undefined}
         >
-          <LogsPage active={activeTab?.kind === 'logs'} />
+          <svelte:boundary failed={tabError}>
+            <LogsPage active={activeTab?.kind === 'logs'} />
+          </svelte:boundary>
         </div>
       {/if}
 
@@ -2217,7 +2256,9 @@
           class={activeTab?.kind === 'json' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
           inert={activeTab?.kind !== 'json' || undefined}
         >
-          <JsonViewerPage active={activeTab?.kind === 'json'} />
+          <svelte:boundary failed={tabError}>
+            <JsonViewerPage active={activeTab?.kind === 'json'} />
+          </svelte:boundary>
         </div>
       {/if}
 
@@ -2227,6 +2268,7 @@
           class={activeTab?.kind === 'orm' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
           inert={activeTab?.kind !== 'orm' || undefined}
         >
+          <svelte:boundary failed={tabError}>
           <OrmRunner
             bind:code={ormCode}
             bind:mode={ormMode}
@@ -2246,6 +2288,7 @@
             onmodshifte={() => { if (connection) aiMode ? exitAiMode() : enterAiMode() }}
             onmodshiftd={() => { if (connection) void focusDataView() }}
           />
+          </svelte:boundary>
         </div>
       {/if}
 
@@ -2255,6 +2298,7 @@
           class={activeTab?.kind === 'sql' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
           inert={activeTab?.kind !== 'sql' || undefined}
         >
+          <svelte:boundary failed={tabError}>
           <SqlConsole
             bind:sql={sqlText}
             bind:queryHistoryVisible
@@ -2285,6 +2329,7 @@
             onhistoryselect={(sql) => void openQueryInEditor(sql)}
             onsavequery={handleSaveQuery}
           />
+          </svelte:boundary>
         </div>
       {/if}
 
@@ -2360,6 +2405,7 @@
           />
 
           <div class="flex min-h-0 min-w-0 flex-1">
+            <svelte:boundary failed={tabError}>
               <DataTable
                 {columns}
                 {rows}
@@ -2377,12 +2423,15 @@
                 bind:pendingEditCount
                 bind:applyEdits
                 bind:resetEdits
+                bind:scrollToTop={scrollTableTop}
+                bind:scrollToBottom={scrollTableBottom}
                 {rowSort}
                 onsortchange={(s) => void handleRowSortChange(s)}
                 onsave={handleSaveCell}
                 ondelete={handleDeleteRow}
                 onfollowforeignkey={(d) => void handleFollowForeignKey(d)}
               />
+            </svelte:boundary>
             <RowDetailPanel
               {columns}
               {rows}
@@ -2535,6 +2584,9 @@
   {pendingEditCount}
   onapplyedits={() => void applyEdits()}
   onresetedits={() => resetEdits()}
+  showTableNav={activeTab?.kind === 'table' && total > 0}
+  onscrolltabletop={() => scrollTableTop()}
+  onscrolltablebottom={() => scrollTableBottom()}
   onswitchconnection={handleSwitchDatabase}
   {mcpRunning}
   hasUpdate={statusBarHasUpdate}

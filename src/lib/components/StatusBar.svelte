@@ -21,6 +21,8 @@
   import Command from '@lucide/svelte/icons/command'
   import Cloud from '@lucide/svelte/icons/cloud'
   import Undo2 from '@lucide/svelte/icons/undo-2'
+  import ChevronsUp from '@lucide/svelte/icons/chevrons-up'
+  import ChevronsDown from '@lucide/svelte/icons/chevrons-down'
   import { cn } from '$lib/utils.js'
   import { aiProfiles, activeProfileId, setActiveProfile } from '$lib/stores/ai-settings.js'
   import { executeSql } from '$lib/api.js'
@@ -54,6 +56,9 @@
     pendingEditCount = 0,
     onapplyedits = /** @type {() => void} */ (() => {}),
     onresetedits = /** @type {() => void} */ (() => {}),
+    showTableNav = false,
+    onscrolltabletop = /** @type {() => void} */ (() => {}),
+    onscrolltablebottom = /** @type {() => void} */ (() => {}),
   } = $props()
 
   // ── Model picker ──────────────────────────────────────────────────────────────
@@ -282,6 +287,31 @@
           <span class={cn('font-medium', activeView !== 'sql' && 'font-normal')}>Query</span>
         </button>
       </div>
+
+      <!-- Table scroll: go to top / bottom -->
+      {#if showTableNav}
+        {@render sep()}
+        <div class="flex items-center gap-px">
+          <button
+            type="button"
+            class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
+            onclick={onscrolltabletop}
+            title="Go to top"
+            aria-label="Scroll table to top"
+          >
+            <ChevronsUp class="size-3.5" />
+          </button>
+          <button
+            type="button"
+            class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
+            onclick={onscrolltablebottom}
+            title="Go to bottom"
+            aria-label="Scroll table to bottom"
+          >
+            <ChevronsDown class="size-3.5" />
+          </button>
+        </div>
+      {/if}
     {:else}
       <button
         type="button"

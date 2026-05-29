@@ -108,7 +108,22 @@
     /** Assigned by this component; the parent calls these to flush / discard staged edits. */
     applyEdits = $bindable(/** @type {() => void | Promise<void>} */ (() => {})),
     resetEdits = $bindable(/** @type {() => void} */ (() => {})),
+    /** Assigned by this component; the parent (StatusBar) calls these to jump the
+     *  table to the top / bottom. */
+    scrollToTop = $bindable(/** @type {() => void} */ (() => {})),
+    scrollToBottom = $bindable(/** @type {() => void} */ (() => {})),
   } = $props();
+
+  /** Brief overscroll hint: 'top' / 'bottom' when the user wheels past an edge. */
+  let overscrollEdge = $state(/** @type {'top' | 'bottom' | null} */ (null));
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let _overscrollTimer = null;
+  /** @param {'top' | 'bottom'} edge */
+  function flashOverscroll(edge) {
+    if (overscrollEdge !== edge) overscrollEdge = edge;
+    if (_overscrollTimer) clearTimeout(_overscrollTimer);
+    _overscrollTimer = setTimeout(() => { overscrollEdge = null; _overscrollTimer = null; }, 450);
+  }
 
   /**
    * Staged cell edits not yet written to the database, keyed by "rowIdx:colIdx".
@@ -166,11 +181,18 @@
   let collapsedColumns = $state(/** @type {Set<string>} */ (new Set()))
 
   // ── Virtual scroll ────────────────────────────────────────────────────────
-  // Native scroll of static rows is smoother than windowing (no scroll-time JS),
-  // and rows are now cheap to mount (delegated handlers). So only virtualize once
-  // the full DOM would get large — below this, render everything and let the
-  // browser's native scroll handle it (buttery up to a few hundred rows).
-  const VIRTUAL_THRESHOLD = 300
+  // Two competing goals:
+  //   • Fast tab switch — mounting all rows up front is slow, so on a fresh
+  //     table we mount VIRTUALIZED (only the visible window ≈ a few dozen rows).
+  //   • Smooth scroll — native scroll of a fully-rendered table beats windowing,
+  //     so a moment after mount we EXPAND to render every row (up to a cap).
+  // The expansion runs off the switch's critical path, so switching feels instant
+  // and scrolling is smooth once the page settles. Very large pages stay
+  // windowed forever to keep the DOM/memory bounded.
+  const VIRTUAL_THRESHOLD = 100   // above this, mount windowed for a fast switch
+  const FULL_RENDER_MAX = 2000    // expand to a full render up to this many rows
+  // Defer the full render until just after the tab switch settles.
+  let _deferFullRender = $state(true)
   // Row height: gutter-inner has min-height 1.75rem; at --app-font-size:14px that is
   // 1.75 × 14 = 24.5px → 25px rendered. Add 1px for subpixel headroom → 26.
   const ROW_HEIGHT = 26
@@ -181,15 +203,6 @@
   // Start high so the first virtual render covers any reasonable screen height
   // before the ResizeObserver fires with the real value.
   let _viewportHeight = $state(1200)
-  // True while the user is actively scrolling (reset shortly after they stop).
-  // Newly-entering rows render as cheap skeletons during a scroll so the heavy
-  // real cells never mount mid-scroll; they swap in once scrolling settles.
-  let isScrolling = $state(false)
-  /** @type {ReturnType<typeof setTimeout> | null} */
-  let _scrollIdleTimer = null
-  /** Row indices already rendered as real content — kept real during scroll so
-   *  rows you've seen don't flicker back to skeletons. Refreshed when idle. */
-  let realizedRows = $state(new Set())
 
   // ── URL preview / lightbox ────────────────────────────────────────────────
   /** @type {string | null} */
@@ -618,6 +631,32 @@
   });
   $effect(() => { pendingEditCount = pendingEdits.size; });
 
+  // Surface scroll-to-top / scroll-to-bottom to the parent (→ StatusBar buttons).
+  $effect(() => {
+    scrollToTop = () => tableContainer?.scrollTo({ top: 0 });
+    scrollToBottom = () => { if (tableContainer) tableContainer.scrollTo({ top: tableContainer.scrollHeight }); };
+  });
+
+  // Overscroll hint: a brief edge glow when the wheel pushes past the top/bottom.
+  // Passive wheel listener doing only a cheap scrollTop read (plus an edge metric
+  // read that's a no-op layout in the common non-virtualized case) — it never
+  // touches the scroll position, so it can't affect scroll smoothness.
+  $effect(() => {
+    const container = tableContainer;
+    if (!container) return;
+    const onWheel = (/** @type {WheelEvent} */ e) => {
+      // Only hint the scroll boundary on larger tables — pointless for short lists.
+      if (rows.length <= 50) return;
+      if (e.deltaY < 0) {
+        if (container.scrollTop <= 0) flashOverscroll('top');
+      } else if (e.deltaY > 0) {
+        if (container.scrollTop + container.clientHeight >= container.scrollHeight - 1) flashOverscroll('bottom');
+      }
+    };
+    container.addEventListener('wheel', onWheel, { passive: true });
+    return () => container.removeEventListener('wheel', onWheel);
+  });
+
   async function copyCellValue(rowIdx, colIdx) {
     const value = rows[rowIdx]?.[colIdx];
     try {
@@ -887,7 +926,25 @@
     }
     return map
   })
-  const useVirtual = $derived(rows.length > VIRTUAL_THRESHOLD && !embedded)
+  // Windowed when: not embedded, big enough to matter, AND either we're still
+  // deferring the full render (just switched in) or the page is too big to ever
+  // fully render. Otherwise render every row for native-smooth scroll.
+  const useVirtual = $derived(
+    !embedded &&
+    rows.length > VIRTUAL_THRESHOLD &&
+    (_deferFullRender || rows.length > FULL_RENDER_MAX)
+  )
+
+  // On a fresh table / new page, mount windowed (fast switch) then expand to a
+  // full render shortly after, so scrolling is smooth. Keyed on table identity +
+  // row count so it does NOT re-trigger on in-place cell edits (which keep both).
+  $effect(() => {
+    void columnWidthsKey
+    void rows.length
+    _deferFullRender = true
+    const id = setTimeout(() => { _deferFullRender = false }, 200)
+    return () => clearTimeout(id)
+  })
   // Stable key that changes only when column names change — prevents the
   // column-widths $effect from re-running on every row fetch (same columns, new array ref).
   const _columnNamesKey = $derived(columns.map((c) => c.name).join('\x00'))
@@ -897,30 +954,21 @@
   const _expandedMin = $derived(expandedRows.size ? Math.min(...expandedRows) : Infinity)
   const _expandedMax = $derived(expandedRows.size ? Math.max(...expandedRows) : -Infinity)
 
-  // Block-quantized window: snap start/end to BLOCK-row boundaries so the
-  // rendered set only changes when the scroll crosses a block edge (~every BLOCK
-  // rows), not on every single row. Between block edges the DOM is 100% static,
-  // so the browser uses its fast compositor-only scroll path (no per-row mount
-  // = no style/layout/paint on scroll = native-smooth). A few buffer blocks keep
-  // the viewport covered while crossing.
-  const BLOCK = 20
   const virtualStart = $derived.by(() => {
     if (!useVirtual) return 0
-    const firstVisible = Math.floor(_scrollTop / ROW_HEIGHT)
-    // Snap down to a block boundary, keep one block of buffer above.
-    let start = Math.max(0, (Math.floor(firstVisible / BLOCK) - 1) * BLOCK)
-    // NOTE: do NOT extend the window to a focused (but not editing) row — that
-    // would render everything between the focus and the viewport and lock up
-    // large tables. scrollRowIntoView() handles keyboard nav to off-screen rows.
+    let start = Math.max(0, Math.floor(_scrollTop / ROW_HEIGHT) - OVERSCAN)
+    // Only the active edit input and expanded (tall) rows must stay mounted when
+    // off-screen. A focused (non-editing) row is NOT extended into the window —
+    // that would render everything between focus and viewport and lock up large
+    // tables; the highlight only matters on-screen and scrollRowIntoView() covers
+    // keyboard nav to off-screen rows.
     if (_expandedMin < start) start = Math.max(0, _expandedMin)
     if (editingCell && editingCell.rowIdx < start) start = Math.max(0, editingCell.rowIdx)
     return start
   })
   const virtualEnd = $derived.by(() => {
     if (!useVirtual) return rows.length - 1
-    const lastVisible = Math.ceil((_scrollTop + _viewportHeight) / ROW_HEIGHT)
-    // Snap up to a block boundary, keep two blocks of buffer below.
-    let end = Math.min(rows.length - 1, (Math.floor(lastVisible / BLOCK) + 2) * BLOCK - 1)
+    let end = Math.min(rows.length - 1, Math.ceil((_scrollTop + _viewportHeight) / ROW_HEIGHT) + OVERSCAN)
     if (_expandedMax > end) end = Math.min(rows.length - 1, _expandedMax)
     if (editingCell && editingCell.rowIdx > end) end = Math.min(rows.length - 1, editingCell.rowIdx)
     return end
@@ -939,14 +987,6 @@
     const out = []
     for (let i = virtualStart; i <= virtualEnd; i++) out.push(i)
     return out
-  })
-
-  // While idle, mark the whole visible window as "realized" (real content). When
-  // a scroll starts this set is frozen, so rows already on screen stay real and
-  // only the newly-entering rows render as skeletons until scrolling settles.
-  $effect(() => {
-    if (isScrolling) return
-    realizedRows = new Set(visibleRowIndexes)
   })
 
   const allSelected = $derived(
@@ -1171,11 +1211,6 @@
     const onScroll = () => {
       const st = container.scrollTop
       if (st !== _scrollTop) _scrollTop = st
-      if (useVirtual) {
-        if (!isScrolling) isScrolling = true
-        if (_scrollIdleTimer) clearTimeout(_scrollIdleTimer)
-        _scrollIdleTimer = setTimeout(() => { isScrolling = false; _scrollIdleTimer = null }, 140)
-      }
     }
 
     // Resize is rare; one RAF is fine here to avoid hammering during window drag.
@@ -1352,11 +1387,13 @@
   onDestroy(() => {
     if (previewShowTimer) clearTimeout(previewShowTimer)
     if (previewHideTimer) clearTimeout(previewHideTimer)
-    if (_scrollIdleTimer) clearTimeout(_scrollIdleTimer)
+    if (_overscrollTimer) clearTimeout(_overscrollTimer)
     // Clear staged-edit state in the parent so the StatusBar buttons don't linger.
     pendingEditCount = 0
     applyEdits = () => {}
     resetEdits = () => {}
+    scrollToTop = () => {}
+    scrollToBottom = () => {}
   })
 </script>
 
@@ -1421,6 +1458,10 @@
             }
           }}
         >
+          <!-- Overscroll hint: brief glow pinned to the top edge when wheeling past the top. -->
+          <div aria-hidden="true" class="pointer-events-none sticky top-0 z-30 h-0">
+            <div class="absolute inset-x-0 top-0 h-10 bg-gradient-to-b from-primary/25 to-transparent transition-opacity duration-200 {overscrollEdge === 'top' ? 'opacity-100' : 'opacity-0'}"></div>
+          </div>
           {#if visibleColumns.length === 0}{:else}
           <table
             class="studio-data-table w-full table-fixed text-ui-sm"
@@ -1603,16 +1644,6 @@
                 {/if}
                 {#each visibleRowIndexes as idx (idx)}
                   {@const row = rows[idx]}
-                  {@const showSkeleton = isScrolling && !realizedRows.has(idx)}
-                  {#if showSkeleton}
-                    <!-- Cheap loading placeholder shown for rows entering during
-                         an active scroll; swapped for real cells when idle. -->
-                    <tr data-row-idx={idx} class="border-b border-border/40" aria-hidden="true" style="height: {ROW_HEIGHT}px">
-                      <td colspan={totalColSpan} class="px-3 align-middle">
-                        <div class="h-2.5 rounded bg-muted/50" style="width: {[42, 58, 34, 50, 38][idx % 5]}%"></div>
-                      </td>
-                    </tr>
-                  {:else}
                   <tr
                     data-row-idx={idx}
                     class={rowClass(idx)}
@@ -1966,7 +1997,6 @@
                       </td>
                     </tr>
                   {/if}
-                  {/if}
                 {/each}
                 {#if useVirtual && virtualBottomPad > 0}
                   <tr aria-hidden="true" style="height: {virtualBottomPad}px">
@@ -2000,6 +2030,10 @@
               </div>
             </div>
           {/if}
+          <!-- Overscroll hint: brief glow pinned to the bottom edge when wheeling past the bottom. -->
+          <div aria-hidden="true" class="pointer-events-none sticky bottom-0 z-30 h-0">
+            <div class="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-primary/25 to-transparent transition-opacity duration-200 {overscrollEdge === 'bottom' ? 'opacity-100' : 'opacity-0'}"></div>
+          </div>
         </div>
       {/snippet}
     </ContextMenu.Trigger>

@@ -61,6 +61,10 @@
   }
 </script>
 
+<!-- A resize splitter is a focusable, keyboard/pointer-operable control; the
+     separator role is correct here even though Svelte flags it as non-interactive. -->
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div
   role="separator"
   aria-orientation={axis === 'x' ? 'vertical' : 'horizontal'}
