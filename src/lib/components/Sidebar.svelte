@@ -556,9 +556,9 @@
                         >
                           <Pin class="size-3 shrink-0 text-primary/50" />
                           <span class="min-w-0 truncate font-mono text-ui-sm leading-none">{tableName}</span>
-                          {#if idx < 5}
-                            <span class="shrink-0 font-mono text-ui-2xs text-muted-foreground/40 tabular-nums">⌥⇧{idx + 1}</span>
-                          {/if}
+                          <span class="shrink-0 text-right font-mono text-ui-xs leading-none tabular-nums text-muted-foreground/60">
+                            {formatTableRowCount(tables.find((t) => t.name === tableName)?.rowCount)}
+                          </span>
                         </button>
                       </ContextMenu.Trigger>
                       <ContextMenu.Content class="w-44 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">

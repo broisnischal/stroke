@@ -412,41 +412,40 @@
           </span>
         {/if}
       </DropdownMenu.Trigger>
-      <DropdownMenu.Content align="center" class="w-44 p-0 text-ui-sm">
-        <div class="border-b border-border px-3 py-2">
-          <p class="font-medium text-foreground">Columns</p>
+      <DropdownMenu.Content align="center" class="w-36 rounded-sm p-0 text-ui-sm">
+        <div class="flex items-center justify-between border-b border-border px-2 py-1.5">
+          <p class="text-ui-xs font-medium text-foreground">Columns</p>
+          <button
+            type="button"
+            class="text-ui-2xs text-muted-foreground transition-colors hover:text-foreground"
+            onclick={() => {
+              if (hiddenCount > 0) {
+                showAllColumns()
+              } else {
+                onhiddencolumnschange(new Set(columns.slice(1).map(c => c.name)))
+              }
+            }}
+          >
+            {hiddenCount > 0 ? "Show" : "Hide"}
+          </button>
         </div>
-        <div class="max-h-64 overflow-y-auto p-1">
+        <div class="max-h-48 overflow-y-auto p-0.5">
           {#each columns as col (col.name)}
             {@const hidden = hiddenColumns.has(col.name)}
             <button
               type="button"
-              class="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-ui-sm hover:bg-accent hover:text-foreground"
+              class="flex w-full items-center gap-1.5 rounded-[2px] px-1.5 py-1 text-left text-ui-xs hover:bg-accent hover:text-foreground"
               onclick={() => toggleColumn(col.name)}
             >
               {#if hidden}
-                <EyeOff class="size-3.5 shrink-0 text-muted-foreground" />
+                <EyeOff class="size-3 shrink-0 text-muted-foreground" />
               {:else}
-                <Eye class="size-3.5 shrink-0" />
+                <Eye class="size-3 shrink-0" />
               {/if}
-              <span class={cn("truncate", hidden && "text-muted-foreground")}
-                >{col.name}</span
-              >
+              <span class={cn("truncate", hidden && "text-muted-foreground")}>{col.name}</span>
             </button>
           {/each}
         </div>
-        {#if hiddenCount > 0}
-          <div class="border-t border-border p-1">
-            <button
-              type="button"
-              class="flex w-full items-center gap-1 rounded-sm px-2 py-1.5 text-ui-sm hover:bg-accent hover:text-foreground"
-              onclick={showAllColumns}
-            >
-              <Eye class="size-3.5" />
-              Show all columns
-            </button>
-          </div>
-        {/if}
       </DropdownMenu.Content>
     </DropdownMenu.Root>
 

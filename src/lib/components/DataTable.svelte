@@ -11,6 +11,7 @@
   import Circle from "@lucide/svelte/icons/circle";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import ChevronsDownUp from "@lucide/svelte/icons/chevrons-down-up";
   import Copy from "@lucide/svelte/icons/copy";
   import Pencil from "@lucide/svelte/icons/pencil";
   import CircleSlash from "@lucide/svelte/icons/circle-slash";
@@ -37,7 +38,7 @@
     defaultColumnWidth,
   } from "$lib/table-column-widths.js";
   import { formatCompactCount } from "$lib/table-list.js";
-  import { cn } from "$lib/utils.js";
+  import { cn, cx } from "$lib/utils.js";
   import {
     formatJsonValue,
     formatNormalValue,
@@ -267,9 +268,20 @@
 
   const CELL_DISPLAY_LIMIT = 400
 
+  // Cache stringified object/array cells — row values are stable references
+  // until a refetch, so we stringify each once instead of on every re-render
+  // (focus/selection/scroll all re-evaluate visible cells).
+  /** @type {WeakMap<object, string>} */
+  const _formatCache = new WeakMap();
   function formatCell(value) {
     if (value === null || value === undefined) return "NULL";
-    if (typeof value === "object") return JSON.stringify(value);
+    if (typeof value === "object") {
+      const cached = _formatCache.get(value);
+      if (cached !== undefined) return cached;
+      const s = JSON.stringify(value);
+      _formatCache.set(value, s);
+      return s;
+    }
     return String(value);
   }
 
@@ -700,23 +712,27 @@
     expandedRows = next;
   }
 
+  /** Collapse every expanded JSON row at once. */
+  function collapseAllRows() {
+    if (expandedRows.size === 0) return;
+    expandedRows = new Set();
+  }
+
   const ROW_EXPAND_COL_WIDTH = 32;
   /** Fits 16px checkbox with equal inset; no extra horizontal padding in cells */
   const ROW_SELECT_COL_WIDTH = 32;
   const visibleColumns = $derived(
     columns.filter((c) => !hiddenColumns.has(c.name)),
   );
-  const dataColSpan = $derived(visibleColumns.length);
+  // +1 for the trailing auto-width spacer column (keeps real columns stable).
+  const dataColSpan = $derived(visibleColumns.length + 1);
   const totalColSpan = $derived(
-    (showRowExpand ? 1 : 0) + (showSelection ? 1 : 0) + visibleColumns.length,
+    (showRowExpand ? 1 : 0) + (showSelection ? 1 : 0) + visibleColumns.length + 1,
   )
   /** Columns visible to the keyboard — excludes collapsed strips. */
   const navigableColumns = $derived(visibleColumns.filter((c) => !collapsedColumns.has(c.name)))
-  /** Total gutter width before the first data column. */
-  const gutterTotalWidth = $derived(
-    (showRowExpand ? ROW_EXPAND_COL_WIDTH : 0) + (showSelection ? ROW_SELECT_COL_WIDTH : 0),
-  )
-  /** Map of pinned column name → sticky left offset in px. */
+  /** Map of pinned column name → sticky left offset in px. Gutters are not
+   *  sticky, so pinned columns stick from the left edge (0). */
   const pinnedOffsets = $derived.by(() => {
     const map = new Map()
     let left = 0
@@ -816,7 +832,8 @@
     const isFocused = focusedRow === idx;
     const isSelected = selected.has(idx);
     const isExpanded = isRowExpanded(idx);
-    return cn(
+    // cx (no tailwind-merge): these classes never conflict and this runs per row.
+    return cx(
       "group/row outline-none hover:bg-accent/25",
       isExpanded && "[&>td]:border-b-0",
       isSelected && "bg-accent/20",
@@ -1197,25 +1214,27 @@
             }
           }}
         >
+          {#if visibleColumns.length === 0}{:else}
           <table
-            class="studio-data-table w-max min-w-full table-fixed text-ui-sm"
+            class="studio-data-table w-full table-fixed text-ui-sm"
           >
             <colgroup>
-
               {#if showRowExpand}
-                <col style="width: {ROW_EXPAND_COL_WIDTH}px" />
+                <col style="width: {ROW_EXPAND_COL_WIDTH}px; min-width: {ROW_EXPAND_COL_WIDTH}px; max-width: {ROW_EXPAND_COL_WIDTH}px" />
               {/if}
               {#if showSelection}
-                <col style="width: {ROW_SELECT_COL_WIDTH}px" />
+                <col style="width: {ROW_SELECT_COL_WIDTH}px; min-width: {ROW_SELECT_COL_WIDTH}px; max-width: {ROW_SELECT_COL_WIDTH}px" />
               {/if}
               {#each visibleColumns as col (col.name)}
-                <col
-                  style="width: {widthForColumn(
-                    col.name,
-                    col.dataType ?? col.data_type ?? '',
-                  )}px"
-                />
+                {@const isCollapsed = collapsedColumns.has(col.name)}
+                {@const colW = isCollapsed ? COLLAPSED_COL_WIDTH : widthForColumn(col.name, col.dataType ?? col.data_type ?? "")}
+                <col style="width: {colW}px" />
               {/each}
+              <!-- Auto-width spacer: absorbs any leftover panel width so the
+                   real columns keep their exact, stable widths (no reflow on
+                   data / column-count / sidebar changes). Collapses to 0 when
+                   columns overflow, letting the horizontal scrollbar take over. -->
+              <col class="studio-spacer-col" />
             </colgroup>
             <thead class="studio-chrome sticky top-0 z-20 bg-panel">
               <tr>
@@ -1224,7 +1243,21 @@
                     class="studio-table-gutter bg-panel"
                     style="width: {ROW_EXPAND_COL_WIDTH}px; min-width: {ROW_EXPAND_COL_WIDTH}px; max-width: {ROW_EXPAND_COL_WIDTH}px"
                     aria-label="Expand row"
-                  ></th>
+                  >
+                    {#if expandedRows.size > 0}
+                      <div class="studio-table-gutter-inner">
+                        <button
+                          type="button"
+                          class="flex size-full items-center justify-center text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+                          title="Collapse all expanded rows ({expandedRows.size})"
+                          aria-label="Collapse all expanded rows"
+                          onclick={(e) => { e.stopPropagation(); collapseAllRows(); }}
+                        >
+                          <ChevronsDownUp class="size-3.5" />
+                        </button>
+                      </div>
+                    {/if}
+                  </th>
                 {/if}
                 {#if showSelection}
                   <th
@@ -1262,7 +1295,7 @@
                     {@const isSorted = rowSort?.column === col.name}
                     <th
                       class={cn(
-                        "group/th relative overflow-hidden px-0 py-1 text-left font-normal",
+                        "group/th relative overflow-hidden px-0 py-0 text-left font-normal",
                         resizingColName === col.name && "bg-accent/30",
                         isPinned && "sticky z-[1] bg-panel shadow-[1px_0_0_hsl(var(--border)/0.6)]",
                       )}
@@ -1271,7 +1304,7 @@
                       <button
                         type="button"
                         class={cn(
-                          "flex w-full min-w-0 cursor-pointer items-center gap-1.5 px-3 py-0.5 text-left transition-colors hover:bg-accent/40",
+                          "flex h-full w-full min-w-0 cursor-pointer items-center gap-1.5 px-3 py-1 text-left transition-colors hover:bg-accent/40",
                           isSorted && "bg-accent/20",
                         )}
                         onclick={() => handleHeaderSort(col.name)}
@@ -1280,7 +1313,10 @@
                         <div class="flex min-w-0 flex-1 flex-col gap-px leading-tight">
                           <div class="flex min-w-0 items-center gap-1">
                             <span
-                              class="min-w-0 truncate font-mono text-ui-sm text-foreground"
+                              class={cx(
+                                "min-w-0 overflow-hidden whitespace-nowrap font-mono text-ui-sm text-foreground",
+                                col.name.length > 100 && "text-ellipsis",
+                              )}
                               data-font="mono"
                               title={col.name}>{col.name}</span
                             >
@@ -1338,14 +1374,17 @@
                           <ArrowUpDown class="size-3 shrink-0 opacity-0 transition-opacity group-hover/th:opacity-30" />
                         {/if}
                       </button>
-                      <ColumnResizeHandle
-                        onresizestart={() => startColumnResize(col.name)}
-                        onresize={applyColumnResize}
-                        onresizeend={endColumnResize}
-                      />
+                      {#if visibleColumns.length > 1}
+                        <ColumnResizeHandle
+                          onresizestart={() => startColumnResize(col.name)}
+                          onresize={applyColumnResize}
+                          onresizeend={endColumnResize}
+                        />
+                      {/if}
                     </th>
                   {/if}
                 {/each}
+                <th aria-hidden="true" class="studio-spacer-cell bg-panel"></th>
               </tr>
             </thead>
             {#if rows.length > 0}
@@ -1588,7 +1627,7 @@
                             {@const cellHref = !activeFk && !isJsonCell
                               ? cellLinkHref(cellText)
                               : null}
-                            {@const urlType = cellUrlType(cellHref)}
+                            {@const urlType = cellUrlType(cellHref, col?.name ?? "")}
                             {#if isJsonCell}
                               <button
                                 type="button"
@@ -1601,7 +1640,7 @@
                               </button>
                             {:else}
                             <span
-                              class={cn(
+                              class={cx(
                                 "flex items-center gap-1.5 truncate",
                                 activeFk && "text-foreground",
                               )}
@@ -1614,7 +1653,7 @@
                                   href={cellHref}
                                   data-cell-url
                                   tabindex={-1}
-                                  class={cn(
+                                  class={cx(
                                     "truncate",
                                     urlType === "image" && "cursor-zoom-in",
                                   )}
@@ -1671,17 +1710,18 @@
                         </td>
                       {/if}
                     {/each}
+                    <td aria-hidden="true" class="studio-spacer-cell"></td>
                   </tr>
                   {#if showRowExpand && isRowExpanded(idx)}
                     <tr>
                       <td
-                        class="studio-table-gutter"
+                        class="studio-table-gutter bg-panel"
                         style="width: {ROW_EXPAND_COL_WIDTH}px; min-width: {ROW_EXPAND_COL_WIDTH}px; max-width: {ROW_EXPAND_COL_WIDTH}px"
                         aria-hidden="true"
                       ></td>
                       {#if showSelection}
                         <td
-                          class="studio-table-gutter"
+                          class="studio-table-gutter bg-panel"
                           style="width: {ROW_SELECT_COL_WIDTH}px; min-width: {ROW_SELECT_COL_WIDTH}px; max-width: {ROW_SELECT_COL_WIDTH}px"
                           aria-hidden="true"
                         ></td>
@@ -1704,7 +1744,8 @@
               </tbody>
             {/if}
           </table>
-          {#if rows.length === 0}
+          {/if}
+          {#if visibleColumns.length === 0}
             <div
               class="pointer-events-none absolute inset-0 flex items-center justify-center"
               role="status"
@@ -1712,9 +1753,18 @@
             >
               <div class="flex flex-col items-center gap-2 px-4 text-center">
                 <Table2 class="size-8 text-muted-foreground/25" />
-                <p class="text-ui-sm text-muted-foreground">
-                  No rows in this table
-                </p>
+                <p class="text-ui-sm text-muted-foreground">No columns visible</p>
+              </div>
+            </div>
+          {:else if rows.length === 0}
+            <div
+              class="pointer-events-none absolute inset-0 flex items-center justify-center"
+              role="status"
+              aria-live="polite"
+            >
+              <div class="flex flex-col items-center gap-2 px-4 text-center">
+                <Table2 class="size-8 text-muted-foreground/25" />
+                <p class="text-ui-sm text-muted-foreground">No rows in this table</p>
               </div>
             </div>
           {/if}

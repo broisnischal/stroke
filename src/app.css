@@ -222,7 +222,7 @@ html[data-os="windows"] { --radius: 0.4375rem; } /* 7 px — Windows 11 rounding
   }
 
   .studio-data-table {
-    border-collapse: collapse;
+    border-collapse: separate;
     border-spacing: 0;
     line-height: 1.25;
     user-select: none;
@@ -241,6 +241,14 @@ html[data-os="windows"] { --radius: 0.4375rem; } /* 7 px — Windows 11 rounding
     border-right: 1px solid var(--table-grid);
     border-bottom: 1px solid var(--table-grid);
     vertical-align: middle;
+  }
+
+  /* Trailing spacer cell: fills leftover panel width while keeping every real
+     column at a stable, fixed width. Keep the horizontal row line so the grid
+     reads as complete, but drop the right border (no stray edge line). */
+  .studio-data-table :is(thead th, tbody td).studio-spacer-cell {
+    border-right: 0;
+    padding: 0;
   }
 
 

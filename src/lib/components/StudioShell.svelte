@@ -203,6 +203,19 @@
   // AI Mode — full-screen chat, hides sidebar and tabs
   function loadAiMode() { try { return localStorage.getItem('db-studio:ai-mode') === '1' } catch { return false } }
   function saveAiMode(v) { try { localStorage.setItem('db-studio:ai-mode', v ? '1' : '0') } catch {} }
+
+  // Hidden columns — persisted per connection+schema+table
+  /** @param {string} connId @param {string} schema @param {string} table */
+  function hiddenColsKey(connId, schema, table) { return `db-studio:hidden-cols:${connId}:${schema}.${table}` }
+  /** @param {string} connId @param {string} schema @param {string} table @returns {Set<string>} */
+  function loadHiddenCols(connId, schema, table) {
+    try { const v = localStorage.getItem(hiddenColsKey(connId, schema, table)); if (v) return new Set(JSON.parse(v)) } catch {}
+    return new Set()
+  }
+  /** @param {string} connId @param {string} schema @param {string} table @param {Set<string>} cols */
+  function saveHiddenCols(connId, schema, table, cols) {
+    try { localStorage.setItem(hiddenColsKey(connId, schema, table), JSON.stringify([...cols])) } catch {}
+  }
   let aiMode = $state(loadAiMode())
   let aiEverOpened = $state(loadAiMode())
   $effect(() => { if (aiMode) aiEverOpened = true })
@@ -938,6 +951,12 @@
   }
 
   function openWelcomeTab() {
+    const existing = tabs.find((t) => t.kind === 'welcome')
+    if (existing) {
+      activeTabId = existing.id
+      clearTableEditor()
+      return
+    }
     saveActiveTabState()
     const tab = createWelcomeTab()
     tabs = [...tabs, tab]
@@ -1154,6 +1173,7 @@
     focusedRow = null
     inspectorRow = null
     editingCell = null
+    hiddenColumns = loadHiddenCols(persistConnectionId, schema, table)
     if (schema !== activeSchema) {
       activeSchema = schema
       await loadTables()
@@ -1517,11 +1537,7 @@
     await loadSchemas()
     await loadTables()
     tabs = []
-    if (tables.length) {
-      await openTableTab(activeSchema, tables[0].name)
-    } else {
-      openWelcomeTab()
-    }
+    openWelcomeTab()
     await refreshQueryStores()
     try {
       const { loadSettings } = await import('$lib/stores/settings.js')
@@ -2323,7 +2339,10 @@
             onexport={handleExport}
             onaddrow={() => (insertRowOpen = true)}
             {hiddenColumns}
-            onhiddencolumnschange={(next) => { hiddenColumns = next }}
+            onhiddencolumnschange={(next) => {
+              hiddenColumns = next
+              if (activeTable) saveHiddenCols(persistConnectionId, activeSchema, activeTable, next)
+            }}
             onprev={async () => {
               if (page <= 1) return
               await handlePageChange(page - 1)
