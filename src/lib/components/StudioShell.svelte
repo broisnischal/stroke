@@ -253,6 +253,12 @@
   let mcpRunning = $state(false)
   /** @type {{ rowIdx: number, colIdx: number, draft: string } | null} */
   let editingCell = $state(null)
+  // ── Staged (unsaved) cell edits — surfaced as Apply/Reset in the StatusBar ──
+  let pendingEditCount = $state(0)
+  /** @type {() => void | Promise<void>} */
+  let applyEdits = $state(() => {})
+  /** @type {() => void} */
+  let resetEdits = $state(() => {})
   let total = $state(0)
   let queryMs = $state(0)
   let loadingRows = $state(false)
@@ -2368,6 +2374,9 @@
                 bind:focusedRow
                 bind:inspectorRow
                 bind:editingCell
+                bind:pendingEditCount
+                bind:applyEdits
+                bind:resetEdits
                 {rowSort}
                 onsortchange={(s) => void handleRowSortChange(s)}
                 onsave={handleSaveCell}
@@ -2523,6 +2532,9 @@
   {connection}
   {savedConnections}
   {activeConnectionId}
+  {pendingEditCount}
+  onapplyedits={() => void applyEdits()}
+  onresetedits={() => resetEdits()}
   onswitchconnection={handleSwitchDatabase}
   {mcpRunning}
   hasUpdate={statusBarHasUpdate}

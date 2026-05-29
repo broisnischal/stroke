@@ -103,7 +103,19 @@
     rowSort = /** @type {{ column: string, direction: 'asc' | 'desc' } | null} */ (null),
     /** Called when user clicks a column header to sort. */
     onsortchange = /** @type {(sort: { column: string, direction: 'asc' | 'desc' } | null) => void} */ (() => {}),
+    /** Number of staged (unsaved) cell edits. Bindable so the StatusBar can show Apply/Reset. */
+    pendingEditCount = $bindable(0),
+    /** Assigned by this component; the parent calls these to flush / discard staged edits. */
+    applyEdits = $bindable(/** @type {() => void | Promise<void>} */ (() => {})),
+    resetEdits = $bindable(/** @type {() => void} */ (() => {})),
   } = $props();
+
+  /**
+   * Staged cell edits not yet written to the database, keyed by "rowIdx:colIdx".
+   * The cell shows the staged value (marked dirty) until the user clicks Apply.
+   * @type {Map<string, { rowIdx: number, colIdx: number, value: unknown, original: unknown }>}
+   */
+  let pendingEdits = $state(new Map());
 
   /** @type {HTMLInputElement | HTMLSelectElement | HTMLButtonElement | null} */
   let editInput = $state(null);
@@ -153,8 +165,6 @@
   // Threshold lowered so 100+ row tables get virtualization instead of full DOM render.
   // ROW_HEIGHT matches actual rendered height: text-ui-sm (~14.77px) × line-height 1.25
   // = ~18.5px content + 4px py-0.5 padding = ~23px; 24 gives a safe 1px margin.
-  // OVERSCAN at 10 pre-renders ~240px outside the viewport on each side — enough
-  // buffer for fast scrolling without keeping hundreds of offscreen rows alive.
   const VIRTUAL_THRESHOLD = 100
   // Row height: gutter-inner has min-height 1.75rem; at --app-font-size:14px that is
   // 1.75 × 14 = 24.5px → 25px rendered. Add 1px for subpixel headroom → 26.
@@ -412,9 +422,10 @@
     }
 
     focusedRow = rowIdx;
-    lastEditOriginalValue = rows[rowIdx]?.[colIdx];
+    const startValue = effectiveCellValue(rowIdx, colIdx);
+    lastEditOriginalValue = startValue;
     selectOnEditFocus = initialChar === undefined;
-    const original = valueToEditString(rows[rowIdx]?.[colIdx]);
+    const original = valueToEditString(startValue);
     editingCell = {
       rowIdx,
       colIdx,
@@ -427,6 +438,42 @@
     if (!editingCell) return;
     editingCell = null;
     tick().then(() => tableContainer?.focus({ preventScroll: true }));
+  }
+
+  /** Stable map key for a staged edit. */
+  const editKey = (/** @type {number} */ rowIdx, /** @type {number} */ colIdx) => `${rowIdx}:${colIdx}`;
+
+  /** The value a cell currently shows: the staged edit if any, else the DB value. */
+  function effectiveCellValue(/** @type {number} */ rowIdx, /** @type {number} */ colIdx) {
+    const staged = pendingEdits.get(editKey(rowIdx, colIdx));
+    return staged ? staged.value : rows[rowIdx]?.[colIdx];
+  }
+
+  /**
+   * Stage (or unstage) a cell edit locally — does not touch the DB.
+   * If the value matches the row's persisted value, the staged edit is dropped.
+   * @param {number} rowIdx @param {number} colIdx @param {unknown} value
+   */
+  function stageEdit(rowIdx, colIdx, value) {
+    const next = new Map(pendingEdits);
+    const key = editKey(rowIdx, colIdx);
+    const dbValue = rows[rowIdx]?.[colIdx];
+    if (valuesEqual(value, dbValue)) {
+      next.delete(key);
+    } else {
+      next.set(key, { rowIdx, colIdx, value, original: dbValue });
+    }
+    pendingEdits = next;
+  }
+
+  /** Loose equality for cell values (handles object/array via JSON). */
+  function valuesEqual(/** @type {unknown} */ a, /** @type {unknown} */ b) {
+    if (a === b) return true;
+    if (a === null || b === null || a === undefined || b === undefined) return false;
+    if (typeof a === "object" || typeof b === "object") {
+      try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
+    }
+    return false;
   }
 
   /** @param {'down' | 'right' | 'left' | null} afterAction */
@@ -454,11 +501,58 @@
       return;
     }
 
+    // Stage the change instead of writing immediately — the user applies all
+    // pending edits at once from the StatusBar (or discards them with Reset).
+    const prevValue = effectiveCellValue(rowIdx, colIdx);
+    stageEdit(rowIdx, colIdx, parsed.value);
+    pastEdits = [...pastEdits.slice(-49), { rowIdx, colIdx, oldValue: prevValue, newValue: parsed.value }];
+    futureEdits = [];
+    editingCell = null;
+    if (afterAction) navigateAfterEdit(rowIdx, colIdx, afterAction);
+    else tick().then(() => tableContainer?.focus({ preventScroll: true }));
+  }
+
+  async function commitEdit() {
+    return commitEditWithAction(null);
+  }
+
+  /**
+   * Commit the current edit straight to the database, skipping the staged
+   * Apply/Reset queue (Ctrl/Cmd+Shift+Enter).
+   * @param {'down' | 'right' | 'left' | null} afterAction
+   */
+  async function commitEditImmediate(afterAction) {
+    if (!editingCell || saving) return;
+    const { rowIdx, colIdx, draft } = editingCell;
+    const col = columns[colIdx];
+    if (!col) return;
+
+    if (draft === editingCell.original) {
+      editingCell = null;
+      if (afterAction) navigateAfterEdit(rowIdx, colIdx, afterAction);
+      else tick().then(() => tableContainer?.focus({ preventScroll: true }));
+      return;
+    }
+
+    const parsed = parseCellInput(
+      draft,
+      col.dataType ?? col.data_type ?? "text",
+      getColumnEnumValues(col),
+    );
+    if (!parsed.ok) {
+      toast.error("Invalid value", { description: parsed.message });
+      return;
+    }
+
     try {
-      const oldVal = lastEditOriginalValue;
       await onsave({ rowIdx, colIdx, value: parsed.value });
-      pastEdits = [...pastEdits.slice(-49), { rowIdx, colIdx, oldValue: oldVal, newValue: parsed.value }];
-      futureEdits = [];
+      // Drop any staged edit for this cell — it's now persisted.
+      const key = editKey(rowIdx, colIdx);
+      if (pendingEdits.has(key)) {
+        const next = new Map(pendingEdits);
+        next.delete(key);
+        pendingEdits = next;
+      }
       editingCell = null;
       toast.success("Saved", { description: `${col.name} updated` });
       if (afterAction) navigateAfterEdit(rowIdx, colIdx, afterAction);
@@ -468,9 +562,47 @@
     }
   }
 
-  async function commitEdit() {
-    return commitEditWithAction(null);
+  /** Flush all staged edits to the database. */
+  async function applyPendingEdits() {
+    if (pendingEdits.size === 0 || saving) return;
+    const entries = [...pendingEdits.values()];
+    /** @type {typeof entries} */
+    const failed = [];
+    let okCount = 0;
+    for (const edit of entries) {
+      try {
+        await onsave({ rowIdx: edit.rowIdx, colIdx: edit.colIdx, value: edit.value });
+        okCount++;
+      } catch (err) {
+        failed.push(edit);
+        toast.error("Save failed", { description: String(err) });
+      }
+    }
+    // Keep only the edits that failed so the user can retry / reset them.
+    const next = new Map();
+    for (const edit of failed) next.set(editKey(edit.rowIdx, edit.colIdx), edit);
+    pendingEdits = next;
+    pastEdits = [];
+    futureEdits = [];
+    if (okCount > 0) {
+      toast.success("Changes applied", { description: `${okCount} cell${okCount === 1 ? "" : "s"} updated` });
+    }
   }
+
+  /** Discard all staged edits. */
+  function resetPendingEdits() {
+    if (pendingEdits.size === 0) return;
+    pendingEdits = new Map();
+    pastEdits = [];
+    futureEdits = [];
+  }
+
+  // Surface staged-edit state to the parent (→ StatusBar Apply/Reset buttons).
+  $effect(() => {
+    applyEdits = applyPendingEdits;
+    resetEdits = resetPendingEdits;
+  });
+  $effect(() => { pendingEditCount = pendingEdits.size; });
 
   async function copyCellValue(rowIdx, colIdx) {
     const value = rows[rowIdx]?.[colIdx];
@@ -492,19 +624,17 @@
     }
   }
 
-  async function setCellNull(rowIdx, colIdx) {
+  function setCellNull(rowIdx, colIdx) {
     const col = columns[colIdx];
     if (!col || !canEditColumn(colIdx)) return;
-    if (rows[rowIdx]?.[colIdx] === null) {
+    if (effectiveCellValue(rowIdx, colIdx) === null) {
       toast.message("Already NULL");
       return;
     }
-    try {
-      await onsave({ rowIdx, colIdx, value: null });
-      toast.success("Set to NULL", { description: col.name });
-    } catch (err) {
-      toast.error("Update failed", { description: String(err) });
-    }
+    const prevValue = effectiveCellValue(rowIdx, colIdx);
+    stageEdit(rowIdx, colIdx, null);
+    pastEdits = [...pastEdits.slice(-49), { rowIdx, colIdx, oldValue: prevValue, newValue: null }];
+    futureEdits = [];
   }
 
   /** @param {number} rowIdx */
@@ -555,42 +685,31 @@
     tick().then(() => tableContainer?.focus({ preventScroll: true }));
   }
 
-  async function undoEdit() {
+  function undoEdit() {
     if (!pastEdits.length) return;
     const last = pastEdits[pastEdits.length - 1];
     pastEdits = pastEdits.slice(0, -1);
     futureEdits = [last, ...futureEdits];
-    try {
-      await onsave({ rowIdx: last.rowIdx, colIdx: last.colIdx, value: last.oldValue });
-      focusedRow = last.rowIdx;
-      const vi = actualToVisColIdx(last.colIdx);
-      focusedCol = vi >= 0 ? vi : 0;
-      scrollRowIntoView(last.rowIdx);
-      tick().then(() => tableContainer?.focus({ preventScroll: true }));
-    } catch (err) {
-      pastEdits = [...pastEdits, last];
-      futureEdits = futureEdits.slice(1);
-      toast.error("Undo failed", { description: String(err) });
-    }
+    // Undo restages the prior value (still unsaved — Apply persists it).
+    stageEdit(last.rowIdx, last.colIdx, last.oldValue);
+    focusedRow = last.rowIdx;
+    const vi = actualToVisColIdx(last.colIdx);
+    focusedCol = vi >= 0 ? vi : 0;
+    scrollRowIntoView(last.rowIdx);
+    tick().then(() => tableContainer?.focus({ preventScroll: true }));
   }
 
-  async function redoEdit() {
+  function redoEdit() {
     if (!futureEdits.length) return;
     const next = futureEdits[0];
     futureEdits = futureEdits.slice(1);
     pastEdits = [...pastEdits, next];
-    try {
-      await onsave({ rowIdx: next.rowIdx, colIdx: next.colIdx, value: next.newValue });
-      focusedRow = next.rowIdx;
-      const vi = actualToVisColIdx(next.colIdx);
-      focusedCol = vi >= 0 ? vi : 0;
-      scrollRowIntoView(next.rowIdx);
-      tick().then(() => tableContainer?.focus({ preventScroll: true }));
-    } catch (err) {
-      futureEdits = [next, ...futureEdits];
-      pastEdits = pastEdits.slice(0, -1);
-      toast.error("Redo failed", { description: String(err) });
-    }
+    stageEdit(next.rowIdx, next.colIdx, next.newValue);
+    focusedRow = next.rowIdx;
+    const vi = actualToVisColIdx(next.colIdx);
+    focusedCol = vi >= 0 ? vi : 0;
+    scrollRowIntoView(next.rowIdx);
+    tick().then(() => tableContainer?.focus({ preventScroll: true }));
   }
 
   $effect(() => {
@@ -656,8 +775,19 @@
       void commitEditWithAction(e.shiftKey ? "left" : "right");
       return;
     }
-    if (e.key === "Enter" && !(e.shiftKey || e.altKey)) {
+    // Ctrl/Cmd+Shift+Enter saves this cell straight to the database, bypassing
+    // the staged Apply/Reset queue.
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "Enter") {
       e.preventDefault();
+      e.stopPropagation();
+      void commitEditImmediate("down");
+      return;
+    }
+    // Enter (or Ctrl/Cmd+Enter) confirms the edit into the staged queue and
+    // moves to the next row.
+    if (e.key === "Enter" && !e.altKey) {
+      e.preventDefault();
+      e.stopPropagation();
       void commitEditWithAction("down");
       return;
     }
@@ -920,6 +1050,15 @@
 
   /** Cycle sort: none → asc → desc → none */
   function handleHeaderSort(colName) {
+    // Staged edits are keyed by row index; sorting would reorder rows and
+    // desync them. Ask the user to apply or reset first instead of silently
+    // dropping their changes.
+    if (pendingEdits.size > 0) {
+      toast.error("Unsaved changes", {
+        description: "Apply or reset your edits before sorting.",
+      })
+      return
+    }
     if (rowSort?.column !== colName) {
       onsortchange({ column: colName, direction: 'desc' })
     } else if (rowSort.direction === 'desc') {
@@ -944,6 +1083,15 @@
     focusedCol = null;
     pastEdits = [];
     futureEdits = [];
+  });
+
+  // Drop staged edits when the table changes or rows are reordered (sort),
+  // since edits are keyed by row index — applying them afterwards could target
+  // the wrong rows.
+  $effect(() => {
+    void columnWidthsKey;
+    void (rowSort ? `${rowSort.column}:${rowSort.direction}` : "");
+    untrack(() => { if (pendingEdits.size) pendingEdits = new Map(); });
   });
 
   // Document-level capture so undo/redo fires even during the brief window between
@@ -1150,6 +1298,10 @@
   onDestroy(() => {
     if (previewShowTimer) clearTimeout(previewShowTimer)
     if (previewHideTimer) clearTimeout(previewHideTimer)
+    // Clear staged-edit state in the parent so the StatusBar buttons don't linger.
+    pendingEditCount = 0
+    applyEdits = () => {}
+    resetEdits = () => {}
   })
 </script>
 
@@ -1493,24 +1645,38 @@
                         {@const col = columns[colIdx]}
                         {@const colType = col?.dataType ?? col?.data_type ?? ""}
                         {@const enumValues = getColumnEnumValues(col)}
+                        {@const stagedEdit = pendingEdits.get(idx + ":" + colIdx)}
+                        {@const isDirty = !!stagedEdit}
+                        {@const cellValue = stagedEdit ? stagedEdit.value : cell}
                         {@const cellFk = foreignKeyForCell(idx, colIdx)}
-                        {@const cellIsNull = row[colIdx] === null || row[colIdx] === undefined}
+                        {@const cellIsNull = cellValue === null || cellValue === undefined}
                         {@const activeFk = cellFk && !cellIsNull}
                         {@const isFocusedCell = !isEditing && focusedRow === idx && focusedCol !== null && columns[colIdx]?.name === navigableColumns[focusedCol]?.name}
                         {@const cellPinned = pinnedColumns.has(col?.name ?? '')}
                         {@const cellPinLeft = cellPinned ? (pinnedOffsets.get(col?.name ?? '') ?? 0) : 0}
+                        <!-- Background / text / shadow resolved by priority so the hot
+                             cell class avoids tailwind-merge (cx = clsx only). Order
+                             matches the previous cn() last-wins behavior exactly. -->
+                        {@const cellBg = isEditing ? "bg-background"
+                          : cellPinned ? "bg-panel"
+                          : isDirty ? "bg-amber-400/15"
+                          : isFocusedCell ? "bg-primary/10"
+                          : activeFk ? "bg-accent/15" : ""}
+                        {@const cellTextColor = isEditing ? ""
+                          : (isFocusedCell || isDirty) ? "text-foreground" : "text-muted-foreground"}
+                        {@const cellShadow = isEditing ? ""
+                          : cellPinned ? "shadow-[1px_0_0_hsl(var(--border)/0.6)]"
+                          : isDirty ? "shadow-[inset_2px_0_0_#f59e0b]" : ""}
                         <td
                           data-col-idx={colIdx}
-                          class={cn(
+                          class={cx(
                             "overflow-hidden font-mono",
                             isEditing
-                              ? "relative p-0 align-middle ring-2 ring-inset ring-primary bg-background"
-                              : "group/cell relative whitespace-nowrap px-3 py-0.5 text-muted-foreground",
-                            activeFk &&
-                              !isEditing &&
-                              "group/fk cursor-pointer bg-accent/15 transition-colors hover:bg-accent/30",
-                            isFocusedCell && "bg-primary/10 text-foreground",
-                            cellPinned && !isEditing && "sticky z-[1] bg-panel shadow-[1px_0_0_hsl(var(--border)/0.6)]",
+                              ? "relative p-0 align-middle ring-2 ring-inset ring-primary"
+                              : "group/cell relative whitespace-nowrap px-3 py-0.5",
+                            !isEditing && activeFk && "group/fk cursor-pointer transition-colors hover:bg-accent/30",
+                            !isEditing && cellPinned && "sticky z-[1]",
+                            cellBg, cellTextColor, cellShadow,
                           )}
                           style={isEditing ? "border: 0" : cellPinned ? `left: ${cellPinLeft}px` : undefined}
                           data-font="mono"
@@ -1621,23 +1787,26 @@
                               />
                             {/if}
                           {:else}
-                            {@const cellText = formatCell(cell)}
-                            {@const cellDisplay = displayCell(cell)}
-                            {@const isJsonCell = cell !== null && typeof cell === 'object'}
+                            {@const cellText = formatCell(cellValue)}
+                            {@const cellDisplay = displayCell(cellValue)}
+                            {@const isJsonCell = cellValue !== null && typeof cellValue === 'object'}
                             {@const cellHref = !activeFk && !isJsonCell
                               ? cellLinkHref(cellText)
                               : null}
                             {@const urlType = cellUrlType(cellHref, col?.name ?? "")}
                             {#if isJsonCell}
-                              <button
-                                type="button"
-                                class="group/json flex min-w-0 cursor-pointer items-center gap-1 truncate bg-transparent p-0 text-left"
-                                onclick={(e) => openJsonLightbox(cell, col?.name ?? 'json', e)}
-                                title="Click to view JSON"
-                              >
+                              <span class="flex min-w-0 items-center gap-1.5">
                                 <span class="truncate font-mono text-muted-foreground">{cellDisplay}</span>
-                                <Braces class="size-3 shrink-0 text-muted-foreground/30 transition-colors group-hover/json:text-muted-foreground" />
-                              </button>
+                                <button
+                                  type="button"
+                                  class="inline-flex shrink-0 items-center gap-0.5 rounded border border-border/60 bg-muted/40 px-1 py-px font-mono text-[10px] leading-none text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                                  title="View JSON"
+                                  aria-label="View JSON"
+                                  onclick={(e) => openJsonLightbox(cellValue, col?.name ?? 'json', e)}
+                                >
+                                  <Braces class="size-2.5" /> JSON
+                                </button>
+                              </span>
                             {:else}
                             <span
                               class={cx(
