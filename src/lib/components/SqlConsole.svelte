@@ -21,6 +21,8 @@
   import DataTableSkeleton from "./DataTableSkeleton.svelte";
   import TableLoading from "./TableLoading.svelte";
   import JsonViewer from "./JsonViewer.svelte";
+  import ChartView from "./ChartView.svelte";
+  import BarChart2 from "@lucide/svelte/icons/bar-chart-2";
   import ResizeHandle from "./ResizeHandle.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import {
@@ -124,7 +126,7 @@
   }
 
   let selected = $state(new Set());
-  /** @type {'table' | 'json'} */
+  /** @type {'table' | 'json' | 'chart'} */
   let outputView = $state('table')
 
   const rowObjects = $derived(
@@ -616,19 +618,44 @@
           rowCount={rows.length}
           onshowtable={() => (outputView = 'table')}
         />
+      {:else if outputView === 'chart'}
+        <ChartView {columns} {rows} />
       {:else}
         <DataTable {columns} {rows} {loading} bind:selected />
-        <div class="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-end p-2">
+      {/if}
+
+      <!-- View switcher — top-right overlay -->
+      <div class="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-end gap-1 p-2">
+        <div class="pointer-events-auto flex items-center gap-1 rounded-md border border-border/50 bg-background/85 px-1 py-0.5 shadow-md backdrop-blur-sm">
+          <button
+            type="button"
+            onclick={() => (outputView = 'table')}
+            class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-ui-2xs transition-colors {outputView === 'table' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}"
+            title="Table view"
+          >
+            Table
+          </button>
+          <button
+            type="button"
+            onclick={() => (outputView = 'chart')}
+            class="inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 font-mono text-ui-2xs transition-colors {outputView === 'chart' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}"
+            title="Chart view"
+          >
+            <BarChart2 class="size-3 shrink-0" />
+            Chart
+          </button>
           <button
             type="button"
             onclick={() => (outputView = 'json')}
-            class="pointer-events-auto inline-flex items-center gap-1.5 rounded-md border border-border/50 bg-background/85 px-2 py-1 font-mono text-ui-2xs text-muted-foreground shadow-md backdrop-blur-sm transition-colors hover:text-foreground"
+            class="inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 font-mono text-ui-2xs transition-colors {outputView === 'json' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}"
+            title="JSON view"
           >
             <Braces class="size-3 shrink-0" />
             JSON
           </button>
         </div>
-      {/if}
+      </div>
+
     {:else if loading}
       <TableLoading />
     {:else}
