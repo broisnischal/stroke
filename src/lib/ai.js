@@ -258,41 +258,43 @@ export const AI_TOOLS = [
     function: {
       name: 'render_chart',
       description:
-        'Render an interactive chart from data you have already queried. ' +
-        'Use this AFTER execute_sql to visualize results. ' +
-        'Supported types: bar, line, pie, doughnut, area, scatter. ' +
-        'For time-series use line or area. For comparisons use bar. For proportions use pie/doughnut.',
+        'Render an interactive ECharts visualisation from query results. ' +
+        'ALWAYS call execute_sql first. Then pass the `rows` array from that result DIRECTLY as the `data` parameter here — do NOT omit it or pass an empty array. ' +
+        'The rows are already objects (e.g. [{month:"Jan",revenue:1000},...]) — use them as-is. ' +
+        'Pick the chart type that best matches the data shape (see CHART TYPES section in the system prompt). ' +
+        'Supported types: bar, bar-horizontal, bar-grouped, bar-stacked, bar-stacked-100, bar-floating, ' +
+        'lollipop, lollipop-h, line, area, area-stacked, combo, ' +
+        'scatter, bubble, heatmap, radar, ' +
+        'pie, donut, funnel, gauge, bullet, ' +
+        'treemap, tree, circle-pack, sankey, ' +
+        'histogram, box-plot, word-cloud.',
       parameters: {
         type: 'object',
         properties: {
           type: {
             type: 'string',
-            enum: ['bar', 'line', 'pie', 'doughnut', 'area', 'scatter'],
-            description: 'Chart type',
+            enum: [
+              'bar','bar-horizontal','bar-grouped','bar-stacked','bar-stacked-100','bar-floating',
+              'lollipop','lollipop-h','line','area','area-stacked','combo',
+              'scatter','bubble','heatmap','radar',
+              'pie','donut','funnel','gauge','bullet',
+              'treemap','tree','circle-pack','sankey',
+              'histogram','box-plot','word-cloud',
+            ],
+            description: 'ECharts chart type. Match to data shape described in system prompt.',
           },
-          title: { type: 'string', description: 'Chart title shown above the chart' },
+          title: { type: 'string', description: 'Chart title' },
           data: {
             type: 'array',
-            description: 'Array of data objects. Each object should have a label/x key plus one or more numeric value keys.',
+            description: 'Array of row objects from execute_sql. Keys become column names.',
             items: { type: 'object' },
           },
-          x_key: {
-            type: 'string',
-            description: 'The data key to use for x-axis labels (e.g. "month", "name", "date")',
-          },
-          y_keys: {
-            type: 'array',
-            description: 'Array of series configs: [{ "key": "revenue", "label": "Revenue" }, ...]',
-            items: {
-              type: 'object',
-              properties: {
-                key: { type: 'string' },
-                label: { type: 'string' },
-              },
-            },
-          },
+          x_col: { type: 'string', description: 'Column name for X axis / category / label' },
+          y_col: { type: 'string', description: 'Column name for Y axis / primary numeric value' },
+          z_col: { type: 'string', description: 'Optional: bubble size, combo line series, bar-floating max, or bullet target' },
+          group_col: { type: 'string', description: 'Optional: column for series grouping, heatmap Y axis, sankey target, tree parent' },
         },
-        required: ['type', 'title', 'data', 'x_key', 'y_keys'],
+        required: ['type', 'title', 'data', 'x_col', 'y_col'],
       },
     },
   },
@@ -942,6 +944,59 @@ stateDiagram-v2
 \`usecaseDiagram\` is NOT a real Mermaid syntax and will cause a render error. Use \`flowchart TD\` to represent use cases and actors instead.
 `
 
+// ── Chart types skill ─────────────────────────────────────────────────────────
+
+const SKILL_CHARTS = `
+## Chart Workflow
+
+**ALWAYS follow this exact sequence:**
+1. Call \`execute_sql(sql)\` — returns \`{ columns, rows, total_rows }\` where \`rows\` is an array of objects.
+2. Immediately call \`render_chart(type, title, rows, x_col, y_col)\` — pass the \`rows\` array from step 1 directly as \`data\`. NEVER skip this step or pass an empty array.
+
+Example:
+- execute_sql returns: \`{ rows: [{month:"Jan",revenue:1000},{month:"Feb",revenue:1200}] }\`
+- render_chart call: \`render_chart("bar","Revenue",rows,"month","revenue")\`
+
+## Chart Types & Required Data
+
+Use \`render_chart\` after \`execute_sql\`. Match chart type to data shape:
+
+**Comparisons (category → numeric)**
+- \`bar\` / \`lollipop\`: { category, value } — SQL: SELECT col, COUNT(*) … GROUP BY col
+- \`bar-horizontal\` / \`lollipop-h\`: same data, bars go sideways
+- \`bar-grouped\` / \`bar-stacked\` / \`bar-stacked-100\`: { category, value } + group_col for series
+
+**Trends over time**
+- \`line\` / \`area\` / \`area-stacked\`: { date, value } — SQL: SELECT date_trunc('month',ts) as month, SUM(amount) … GROUP BY 1 ORDER BY 1
+
+**Dual-axis (bar + line overlay)**
+- \`combo\`: { category, bar_value, line_value } — y_col=bar series, z_col=line series
+
+**Proportions / ranking**
+- \`pie\` / \`donut\`: { label, value } — SQL: SELECT status, COUNT(*) FROM … GROUP BY status
+- \`funnel\`: same as pie, sorted largest→smallest
+- \`gauge\`: single numeric value (0–100). data=[{label:"KPI", value:72}], x_col="label", y_col="value"
+- \`bullet\`: { category, actual, target } — y_col=actual, z_col=target
+
+**Correlation / distribution**
+- \`scatter\`: { x, y } — both numeric — SQL: SELECT numeric_col1 as x, numeric_col2 as y FROM …
+- \`bubble\`: { x, y, size } — z_col=size column
+- \`heatmap\`: { x_cat, value, y_cat } — x_col=x_cat, y_col=value, group_col=y_cat — SQL: SELECT dow, hour, COUNT(*) FROM … GROUP BY 1,2
+- \`radar\`: { indicator, value } — SQL: SELECT metric_name, score FROM … (one row per axis)
+- \`histogram\`: numeric column only — SQL: SELECT numeric_col FROM table LIMIT 2000 (x_col=numeric_col, no y_col needed)
+- \`box-plot\`: { group, value } — SQL: SELECT category, metric FROM … (raw rows, aggregated automatically)
+
+**Hierarchical**
+- \`treemap\` / \`circle-pack\`: { name, value } — SQL: SELECT category, SUM(amount) as value FROM … GROUP BY category
+- \`tree\`: { name, parent } — group_col=parent column — SQL: SELECT name, parent_name FROM hierarchy_table
+
+**Flow**
+- \`sankey\`: { source, target, value } — x_col=source, group_col=target, y_col=value — SQL: SELECT from_step, to_step, COUNT(*) FROM funnel GROUP BY 1,2
+
+**Text**
+- \`word-cloud\`: { word, count } — SQL: SELECT word, COUNT(*) as count FROM … GROUP BY word ORDER BY count DESC LIMIT 60
+`
+
 // ── Main prompt builder ───────────────────────────────────────────────────────
 
 /**
@@ -1204,6 +1259,7 @@ SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() ORDER B
     dbType === 'mysql' ? SKILL_MYSQL : null,
     (dbType === 'sqlite' || dbType === 'd1') ? SKILL_SQLITE : null,
     SKILL_MERMAID,
+    SKILL_CHARTS,
   ].filter(Boolean).join('\n')
 
   // User-uploaded skills
@@ -1232,7 +1288,7 @@ ${otherTablesSection}
 - \`describe_table(schema, table)\` — Get column definitions. Call this before querying an unfamiliar table.
 - \`list_tables()\` — List all tables and views in the active schema.
 - \`get_schema(table?)\` — Get full column info (type, nullable, default) for one or all tables.
-- \`render_chart(type, title, data, x_key, y_keys)\` — Render an interactive chart. Always call \`execute_sql\` first to get real data, then pass it here.
+- \`render_chart(type, title, data, x_col, y_col, z_col?, group_col?)\` — Render an interactive ECharts chart. Call \`execute_sql\` first, then pass its \`rows\` array DIRECTLY as \`data\`. Never call render_chart with an empty or missing data array.
 
 === OUTPUT RULES ===
 1. Output directly — never open with "Sure!", "Great!", "Here is your chart", "Certainly!" or any filler phrase.

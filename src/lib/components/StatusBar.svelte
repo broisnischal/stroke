@@ -15,6 +15,7 @@
   import LayoutTemplate from '@lucide/svelte/icons/layout-template'
   import History from '@lucide/svelte/icons/history'
   import Archive from '@lucide/svelte/icons/archive'
+  import BarChart2 from '@lucide/svelte/icons/bar-chart-2'
   import ShieldCheck from '@lucide/svelte/icons/shield-check'
   import Code2 from '@lucide/svelte/icons/code-2'
   import Settings from '@lucide/svelte/icons/settings'
@@ -55,6 +56,7 @@
     onopensecurity = /** @type {() => void} */ (() => {}),
     onopenorm = /** @type {() => void} */ (() => {}),
     onopenbackup = /** @type {() => void} */ (() => {}),
+    onopenchartspage = /** @type {() => void} */ (() => {}),
     onopensettings = /** @type {() => void} */ (() => {}),
     onopencommand = /** @type {() => void} */ (() => {}),
     ondisconnect = /** @type {() => void} */ (() => {}),
@@ -405,6 +407,9 @@
       </button>
       <button type="button" class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground" onclick={onopenbackup} title="Backup & Restore">
         <Archive class="size-3.5" />
+      </button>
+      <button type="button" class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground" onclick={onopenchartspage} title="Saved Charts">
+        <BarChart2 class="size-3.5" />
       </button>
       {@render sep()}
     {/if}

@@ -74,7 +74,7 @@
    *   | { id: string, kind: 'assistant', parts: import('$lib/ai.js').AssistantPart[] }
    *   | { id: string, kind: 'streaming' }
    *   | { id: string, kind: 'result', sql: string, columns: {name:string,dataType?:string}[], rows: unknown[][], total: number, error: string|null, isSchema?: boolean, capped?: boolean }
-   *   | { id: string, kind: 'chart', spec: { type: string, title: string, data: object[], x_key: string, y_keys: {key:string,label:string}[] }, error: string|null }
+   *   | { id: string, kind: 'chart', spec: { type: string, title: string, data: object[], x_col: string, y_col: string, z_col?: string, group_col?: string }, error: string|null }
    *   | { id: string, kind: 'confirm', sql: string, resolve: (ok: boolean) => void }
    *   | { id: string, kind: 'thinking' }
    *   | { id: string, kind: 'executing', sql: string }
@@ -1176,9 +1176,15 @@
           else items.push(resultItem)
           autoOpenResult(resultId)
           await scrollBottom()
+          // Return rows as objects (not arrays) so the AI can pass `rows`
+          // directly to render_chart without needing to transform the data.
+          const colNames = cols.map((c) => c.name)
+          const rowObjects = rows.slice(0, 60).map(
+            (r) => Object.fromEntries(colNames.map((n, i) => [n, /** @type {any[]} */ (r)[i]]))
+          )
           toolResult = JSON.stringify({
-            columns: cols.map((c) => c.name),
-            rows: rows.slice(0, 30),
+            columns: colNames,
+            rows: rowObjects,
             total_rows: total,
             ...(backendCapped ? { notice: data.message ?? 'Results capped. Use WHERE or LIMIT to narrow results.' } : {}),
             message: data.message ?? null,

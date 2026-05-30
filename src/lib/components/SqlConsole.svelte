@@ -619,7 +619,7 @@
           onshowtable={() => (outputView = 'table')}
         />
       {:else if outputView === 'chart'}
-        <ChartView {columns} {rows} />
+        <ChartView {columns} {rows} {sql} />
       {:else}
         <DataTable {columns} {rows} {loading} bind:selected />
       {/if}

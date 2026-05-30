@@ -41,6 +41,7 @@
   import BackupPage from './BackupPage.svelte'
   import LogsPage from './LogsPage.svelte'
   import JsonViewerPage from './JsonViewerPage.svelte'
+  import ChartsPage from './ChartsPage.svelte'
   import { Button } from '$lib/components/ui/button/index.js'
   import AlertTriangle from '@lucide/svelte/icons/triangle-alert'
   import X from '@lucide/svelte/icons/x'
@@ -71,6 +72,7 @@
     createLogsTab,
     createJsonTab,
     createBackupTab,
+    createChartsTab,
     findTableTab,
     findSqlTab,
     findAiTab,
@@ -80,6 +82,7 @@
     findLogsTab,
     findBackupTab,
     findJsonTab,
+    findChartsTab,
     findLastTableTab,
     tableTabTitle,
     cycleTabIndex,
@@ -244,6 +247,7 @@
   let logsEverOpened = $state(false)
   let jsonEverOpened = $state(false)
   let backupEverOpened = $state(false)
+  let chartsEverOpened = $state(false)
   $effect(() => {
     if (activeTab?.kind === 'sql') sqlEverOpened = true
     if (activeTab?.kind === 'orm') ormEverOpened = true
@@ -251,6 +255,7 @@
     if (activeTab?.kind === 'logs') logsEverOpened = true
     if (activeTab?.kind === 'json') jsonEverOpened = true
     if (activeTab?.kind === 'backup') backupEverOpened = true
+    if (activeTab?.kind === 'charts') chartsEverOpened = true
   })
 
   let columns = $state([])
@@ -1147,6 +1152,20 @@
     saveActiveTabState()
     dropWelcomeTabs()
     const tab = createJsonTab()
+    tabs = [...tabs, tab]
+    activeTabId = tab.id
+    clearTableEditor()
+  }
+
+  function openChartsTab() {
+    const existing = findChartsTab(tabs)
+    if (existing) {
+      void activateTab(existing.id)
+      return
+    }
+    saveActiveTabState()
+    dropWelcomeTabs()
+    const tab = createChartsTab()
     tabs = [...tabs, tab]
     activeTabId = tab.id
     clearTableEditor()
@@ -2510,6 +2529,21 @@
         </div>
       {/if}
 
+      <!-- Charts tab - mount once, keep alive -->
+      {#if chartsEverOpened}
+        <div
+          class={activeTab?.kind === 'charts' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+          inert={activeTab?.kind !== 'charts' || undefined}
+        >
+          <svelte:boundary failed={tabError}>
+            <ChartsPage
+              {connection}
+              onrunsql={(sql) => { if (aiMode) exitAiMode(); void openQueryInEditor(sql) }}
+            />
+          </svelte:boundary>
+        </div>
+      {/if}
+
       <!-- ORM tab: mount once, keep alive so Monaco is not destroyed on tab switch -->
       {#if ormEverOpened}
         <div
@@ -2920,6 +2954,7 @@
   onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
   onopenorm={openOrmTab}
         onopenbackup={openBackupTab}
+  onopenchartspage={() => { if (aiMode) exitAiMode(); openChartsTab() }}
   onopensettings={() => (showSettingsModal = true)}
   onopencommand={() => (commandOpen = true)}
   ondisconnect={requestDisconnect}
