@@ -13,7 +13,11 @@
           'nord', 'dracula', 'forest', 'solarized',
         ]
         let theme = parsed?.theme
-        if (!valid.includes(theme)) theme = theme === 'light' ? 'light' : 'dark'
+        if (!valid.includes(theme)) {
+          // No saved preference — follow the OS
+          const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches !== false
+          theme = prefersDark ? 'dark' : 'light'
+        }
         document.documentElement.dataset.theme = theme
         if (theme !== 'light') document.documentElement.classList.add('dark')
         let zoom = 1
@@ -26,8 +30,9 @@
           root.style.setProperty('--app-font-size', fontPx + 'px')
         }
       } catch (_) {
-        document.documentElement.dataset.theme = 'dark'
-        document.documentElement.classList.add('dark')
+        const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches !== false
+        document.documentElement.dataset.theme = prefersDark ? 'dark' : 'light'
+        if (prefersDark) document.documentElement.classList.add('dark')
       }
       ;(function () {
         var ua = navigator.userAgent || ''

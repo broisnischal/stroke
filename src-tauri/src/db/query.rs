@@ -870,14 +870,18 @@ pub async fn get_table_rows(
             .map(|c| ColumnInfo::new(c.name(), pg_type_label(c.type_info().name())))
             .collect()
     } else {
-        let meta = sqlx::query(&format!(
+        let meta = sqlx::query(
             r#"
-            SELECT column_name, data_type
-            FROM information_schema.columns
-            WHERE table_schema = $1 AND table_name = $2
-            ORDER BY ordinal_position
+            SELECT a.attname::text, t.typname::text
+            FROM pg_catalog.pg_attribute a
+            JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+            JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+            JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
+            WHERE n.nspname = $1 AND c.relname = $2
+              AND a.attnum > 0 AND NOT a.attisdropped
+            ORDER BY a.attnum
             "#
-        ))
+        )
         .bind(&schema)
         .bind(&table)
         .fetch_all(&pool)
@@ -888,7 +892,7 @@ pub async fn get_table_rows(
             .filter_map(|r| {
                 Some(ColumnInfo::new(
                     r.try_get::<String, _>(0).ok()?,
-                    r.try_get::<String, _>(1).ok()?.to_lowercase(),
+                    r.try_get::<String, _>(1).ok()?,
                 ))
             })
             .collect()
@@ -962,9 +966,18 @@ pub async fn update_table_cell(
 
     let meta_rows = sqlx::query(
         r#"
-        SELECT column_name::text, data_type::text, udt_schema::text, udt_name::text
-        FROM information_schema.columns
-        WHERE table_schema = $1 AND table_name = $2
+        SELECT
+            a.attname::text,
+            CASE WHEN t.typtype IN ('e','c','d') THEN 'USER-DEFINED' ELSE t.typname::text END,
+            tn.nspname::text,
+            t.typname::text
+        FROM pg_catalog.pg_attribute a
+        JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
+        JOIN pg_catalog.pg_namespace tn ON tn.oid = t.typnamespace
+        WHERE n.nspname = $1 AND c.relname = $2
+          AND a.attnum > 0 AND NOT a.attisdropped
         "#,
     )
     .bind(&schema)
@@ -1066,16 +1079,22 @@ pub async fn insert_table_row(
     let meta_rows = sqlx::query(
         r#"
         SELECT
-            column_name::text,
-            data_type::text,
-            is_nullable::text,
-            column_default::text,
-            is_identity::text,
-            udt_schema::text,
-            udt_name::text
-        FROM information_schema.columns
-        WHERE table_schema = $1 AND table_name = $2
-        ORDER BY ordinal_position
+            a.attname::text,
+            CASE WHEN t.typtype IN ('e','c','d') THEN 'USER-DEFINED' ELSE t.typname::text END,
+            NOT a.attnotnull,
+            pg_get_expr(ad.adbin, ad.adrelid),
+            a.attidentity IN ('a', 'd'),
+            tn.nspname::text,
+            t.typname::text
+        FROM pg_catalog.pg_attribute a
+        JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
+        JOIN pg_catalog.pg_namespace tn ON tn.oid = t.typnamespace
+        LEFT JOIN pg_catalog.pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
+        WHERE n.nspname = $1 AND c.relname = $2
+          AND a.attnum > 0 AND NOT a.attisdropped
+        ORDER BY a.attnum
         "#,
     )
     .bind(&schema)
@@ -1096,15 +1115,9 @@ pub async fn insert_table_row(
             .try_get(0)
             .map_err(|e| format!("Invalid column name: {e}"))?;
         let data_type: String = row.try_get(1).unwrap_or_else(|_| "text".into());
-        let is_nullable = row
-            .try_get::<String, _>(2)
-            .map(|s| s.eq_ignore_ascii_case("YES"))
-            .unwrap_or(true);
+        let is_nullable = row.try_get::<bool, _>(2).unwrap_or(true);
         let column_default: Option<String> = row.try_get(3).ok();
-        let is_identity = row
-            .try_get::<String, _>(4)
-            .map(|s| s.eq_ignore_ascii_case("YES"))
-            .unwrap_or(false);
+        let is_identity = row.try_get::<bool, _>(4).unwrap_or(false);
         let optional =
             pg_column_optional_when_omitted(is_nullable, column_default.as_deref(), is_identity, &data_type);
 
@@ -1247,9 +1260,13 @@ pub async fn delete_table_rows(
 
     let meta_rows = sqlx::query(
         r#"
-        SELECT column_name::text, data_type::text
-        FROM information_schema.columns
-        WHERE table_schema = $1 AND table_name = $2
+        SELECT a.attname::text, t.typname::text
+        FROM pg_catalog.pg_attribute a
+        JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
+        WHERE n.nspname = $1 AND c.relname = $2
+          AND a.attnum > 0 AND NOT a.attisdropped
         "#,
     )
     .bind(&schema)

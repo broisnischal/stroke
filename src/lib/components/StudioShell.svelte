@@ -1347,7 +1347,7 @@
           WHERE n.nspname = '${s}' AND c.relname = '${t}'
             AND a.attnum > 0 AND NOT a.attisdropped
           ORDER BY a.attnum
-        \`)
+        `)
         rows = r?.rows ?? []
 
       // ── MySQL ─────────────────────────────────────────────────────────
@@ -1370,7 +1370,7 @@
            AND kcu.COLUMN_NAME = c.COLUMN_NAME AND kcu.REFERENCED_TABLE_NAME IS NOT NULL
           WHERE c.TABLE_SCHEMA = '${s}' AND c.TABLE_NAME = '${t}'
           ORDER BY c.ORDINAL_POSITION
-        \`)
+        `)
         rows = r?.rows ?? []
 
       // ── SQLite / D1 ───────────────────────────────────────────────────

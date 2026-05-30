@@ -546,70 +546,55 @@ async fn get_column_structure_pg(
     schema: &str,
     table: &str,
 ) -> Result<Vec<ColumnStructureRow>, String> {
-    // Use information_schema.columns as the sole base table to avoid JOIN failures
-    // on partitioned/inherited tables. FK and comment are looked up via safe correlated
-    // subqueries that reference catalog tables by name instead of OID.
+    // pg_catalog.pg_attribute is 10-100x faster than information_schema.columns on hosted
+    // PostgreSQL (Supabase, RDS, etc.). FK lookups use OID-based matching; comments use
+    // the built-in col_description() index function.
     let rows = sqlx::query(r#"
         SELECT
-            c.ordinal_position::int                                          AS ordinal_position,
-            c.column_name                                                    AS name,
-            COALESCE(
-                CASE
-                    WHEN c.character_maximum_length IS NOT NULL
-                    THEN c.udt_name || '(' || c.character_maximum_length::text || ')'
-                    ELSE NULLIF(c.udt_name, c.data_type)
-                END,
-                c.data_type
-            )                                                                AS data_type,
-            (c.is_nullable = 'YES')                                          AS is_nullable,
-            c.column_default                                                 AS column_default,
+            a.attnum::int,
+            a.attname::text,
+            CASE
+                WHEN t.typtype = 'b' AND t.typelem <> 0 AND t.typname LIKE '\_%'
+                    THEN (SELECT bt.typname FROM pg_catalog.pg_type bt WHERE bt.oid = t.typelem) || '[]'
+                WHEN a.atttypmod > 0 AND t.typname IN ('varchar','bpchar')
+                    THEN t.typname || '(' || (a.atttypmod - 4)::text || ')'
+                WHEN a.atttypmod > 0 AND t.typname = 'numeric' AND a.atttypmod <> -1
+                    THEN 'numeric(' || (((a.atttypmod - 4) >> 16) & 65535)::text
+                        || ',' || ((a.atttypmod - 4) & 65535)::text || ')'
+                WHEN a.atttypmod > 0 AND t.typname IN ('bit','varbit')
+                    THEN t.typname || '(' || a.atttypmod::text || ')'
+                ELSE t.typname
+            END,
+            NOT a.attnotnull,
+            pg_get_expr(ad.adbin, ad.adrelid),
             (
                 SELECT rns.nspname || '.' || rt.relname || '.' || ra.attname
-                FROM pg_catalog.pg_constraint  pc
-                JOIN pg_catalog.pg_class        lt  ON lt.oid  = pc.conrelid
-                JOIN pg_catalog.pg_namespace    lns ON lns.oid = lt.relnamespace
-                JOIN pg_catalog.pg_attribute    la  ON la.attrelid = lt.oid
-                                                   AND la.attnum   = pc.conkey[1]
-                JOIN pg_catalog.pg_class        rt  ON rt.oid  = pc.confrelid
-                JOIN pg_catalog.pg_namespace    rns ON rns.oid = rt.relnamespace
-                JOIN pg_catalog.pg_attribute    ra  ON ra.attrelid = rt.oid
-                                                   AND ra.attnum   = pc.confkey[1]
-                WHERE pc.contype     = 'f'
-                  AND lns.nspname    = c.table_schema
-                  AND lt.relname     = c.table_name
-                  AND la.attname     = c.column_name
+                FROM pg_catalog.pg_constraint pc
+                JOIN pg_catalog.pg_class rt ON rt.oid = pc.confrelid
+                JOIN pg_catalog.pg_namespace rns ON rns.oid = rt.relnamespace
+                JOIN pg_catalog.pg_attribute ra ON ra.attrelid = rt.oid AND ra.attnum = pc.confkey[1]
+                WHERE pc.contype = 'f'
+                  AND pc.conrelid = a.attrelid
+                  AND pc.conkey[1] = a.attnum
                 LIMIT 1
-            )                                                                AS foreign_key,
+            ),
             (
                 SELECT pc.conname
-                FROM pg_catalog.pg_constraint  pc
-                JOIN pg_catalog.pg_class        lt  ON lt.oid  = pc.conrelid
-                JOIN pg_catalog.pg_namespace    lns ON lns.oid = lt.relnamespace
-                JOIN pg_catalog.pg_attribute    la  ON la.attrelid = lt.oid
-                                                   AND la.attnum   = pc.conkey[1]
-                WHERE pc.contype  = 'f'
-                  AND lns.nspname = c.table_schema
-                  AND lt.relname  = c.table_name
-                  AND la.attname  = c.column_name
+                FROM pg_catalog.pg_constraint pc
+                WHERE pc.contype = 'f'
+                  AND pc.conrelid = a.attrelid
+                  AND pc.conkey[1] = a.attnum
                 LIMIT 1
-            )                                                                AS fk_constraint_name,
-            (
-                SELECT pd.description
-                FROM pg_catalog.pg_description pd
-                JOIN pg_catalog.pg_class     pc ON pc.oid = pd.objoid
-                JOIN pg_catalog.pg_namespace pn ON pn.oid = pc.relnamespace
-                JOIN pg_catalog.pg_attribute pa ON pa.attrelid = pc.oid
-                                               AND pa.attnum   = pd.objsubid
-                WHERE pn.nspname   = c.table_schema
-                  AND pc.relname   = c.table_name
-                  AND pa.attname   = c.column_name
-                  AND pd.objsubid  > 0
-                LIMIT 1
-            )                                                                AS comment
-        FROM information_schema.columns c
-        WHERE c.table_schema = $1
-          AND c.table_name   = $2
-        ORDER BY c.ordinal_position
+            ),
+            col_description(a.attrelid, a.attnum)
+        FROM pg_catalog.pg_attribute a
+        JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
+        LEFT JOIN pg_catalog.pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
+        WHERE n.nspname = $1 AND c.relname = $2
+          AND a.attnum > 0 AND NOT a.attisdropped
+        ORDER BY a.attnum
     "#)
     .bind(schema)
     .bind(table)

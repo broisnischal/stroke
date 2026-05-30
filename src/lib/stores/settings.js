@@ -63,7 +63,12 @@ function recordThemeBeforeChange(theme) {
 export function loadSettings() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return { ...DEFAULT_SETTINGS }
+    if (!raw) {
+      // First launch — follow the OS theme, don't save so we keep tracking it
+      const mq = window.matchMedia?.('(prefers-color-scheme: dark)')
+      const prefersDark = mq ? mq.matches : true
+      return { ...DEFAULT_SETTINGS, theme: normalizeThemeId(prefersDark ? 'dark' : 'light') }
+    }
     const parsed = JSON.parse(raw)
     const theme = normalizeThemeId(parsed.theme)
     let zoom = DEFAULT_ZOOM
