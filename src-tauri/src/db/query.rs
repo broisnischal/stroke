@@ -391,6 +391,12 @@ impl PgColumnMeta {
             let type_ref = pg_cast_type_ref(udt_schema, udt_name)?;
             return Ok(format!(r#""{column}" = $1::{type_ref}"#));
         }
+        // json/jsonb bindings arrive as text strings; an explicit cast tells
+        // PostgreSQL to interpret the parameter as json/jsonb instead of text.
+        let norm = normalize_pg_type(&self.data_type);
+        if norm == "json" || norm == "jsonb" {
+            return Ok(format!(r#""{column}" = $1::{norm}"#));
+        }
         if let Some(cast) = pg_datetime_cast(&self.data_type) {
             return Ok(format!(r#""{column}" = $1::{cast}"#));
         }
@@ -406,6 +412,10 @@ impl PgColumnMeta {
             let udt_schema = self.udt_schema.as_deref().unwrap_or("public");
             let type_ref = pg_cast_type_ref(udt_schema, udt_name)?;
             return Ok(format!("${bind_idx}::{type_ref}"));
+        }
+        let norm = normalize_pg_type(&self.data_type);
+        if norm == "json" || norm == "jsonb" {
+            return Ok(format!("${bind_idx}::{norm}"));
         }
         if let Some(cast) = pg_datetime_cast(&self.data_type) {
             return Ok(format!("${bind_idx}::{cast}"));

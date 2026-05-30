@@ -87,6 +87,7 @@ pub fn run() {
             commands::pg_list_schemas,
             commands::pg_list_tables,
             commands::pg_list_indexes,
+            commands::pg_get_table_column_structure,
             commands::pg_list_enums,
             commands::pg_truncate_table,
             commands::pg_drop_table,

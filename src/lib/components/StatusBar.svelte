@@ -25,8 +25,11 @@
   import ChevronsDown from '@lucide/svelte/icons/chevrons-down'
   import { cn } from '$lib/utils.js'
   import { aiProfiles, activeProfileId, setActiveProfile } from '$lib/stores/ai-settings.js'
+  import { toggleLightDark, isCurrentThemeDark } from '$lib/stores/settings.js'
   import { executeSql } from '$lib/api.js'
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js'
+  import Sun from '@lucide/svelte/icons/sun'
+  import Moon from '@lucide/svelte/icons/moon'
 
   let {
     /** @type {import('$lib/stores/connections.js').SavedConnection | null} */
@@ -387,6 +390,18 @@
 
     <button type="button" class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground" onclick={onopencommand} title="Command menu (⌘K)">
       <Command class="size-3.5" />
+    </button>
+    <button
+      type="button"
+      class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
+      title={$isCurrentThemeDark ? 'Switch to light theme (⌘M)' : 'Switch to dark theme (⌘M)'}
+      onclick={() => toggleLightDark()}
+    >
+      {#if $isCurrentThemeDark}
+        <Sun class="size-3.5" />
+      {:else}
+        <Moon class="size-3.5" />
+      {/if}
     </button>
     <button type="button" class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground" onclick={onopensettings} title="Settings (⌘,)">
       <Settings class="size-3.5" />

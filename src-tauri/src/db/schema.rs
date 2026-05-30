@@ -25,6 +25,23 @@ pub struct IndexInfo {
     pub index_type: String,
     pub is_unique: bool,
     pub is_primary: bool,
+    /// Partial index WHERE clause expression, if any
+    pub condition: Option<String>,
+    /// Index comment
+    pub comment: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ColumnStructureRow {
+    pub ordinal_position: i32,
+    pub name: String,
+    pub data_type: String,
+    pub is_nullable: bool,
+    pub column_default: Option<String>,
+    pub foreign_key: Option<String>,
+    pub fk_constraint_name: Option<String>,
+    pub comment: Option<String>,
 }
 
 pub(crate) fn validate_ident(name: &str) -> Result<(), String> {
@@ -73,10 +90,12 @@ const LIST_INDEXES_SQL: &str = r#"
     SELECT
         i.relname::text AS name,
         t.relname::text AS table_name,
-        COALESCE(string_agg(a.attname, ', ' ORDER BY x.ordinality), '') AS columns,
+        COALESCE(string_agg(a.attname, ', ' ORDER BY x.ordinality) FILTER (WHERE x.attnum > 0), '') AS columns,
         am.amname::text AS index_type,
         ix.indisunique AS is_unique,
-        ix.indisprimary AS is_primary
+        ix.indisprimary AS is_primary,
+        MAX(pg_get_expr(ix.indpred, ix.indrelid)) AS condition,
+        MAX(obj_description(i.oid, 'pg_class')) AS comment
     FROM pg_catalog.pg_index ix
     JOIN pg_catalog.pg_class i ON i.oid = ix.indexrelid
     JOIN pg_catalog.pg_class t ON t.oid = ix.indrelid
@@ -87,7 +106,7 @@ const LIST_INDEXES_SQL: &str = r#"
         ON a.attrelid = t.oid AND a.attnum = x.attnum AND x.attnum > 0
     WHERE n.nspname = $1
       AND t.relkind IN ('r', 'p', 'm')
-    GROUP BY i.relname, t.relname, am.amname, ix.indisunique, ix.indisprimary
+    GROUP BY i.relname, i.oid, t.relname, am.amname, ix.indisunique, ix.indisprimary
     ORDER BY t.relname, ix.indisprimary DESC, i.relname
     "#;
 
@@ -168,6 +187,8 @@ async fn list_indexes_pg(pool: &PgPool, schema: &str) -> Result<Vec<IndexInfo>, 
                 index_type: r.try_get::<String, _>(3).unwrap_or_else(|_| "btree".to_string()),
                 is_unique: r.try_get::<bool, _>(4).unwrap_or(false),
                 is_primary: r.try_get::<bool, _>(5).unwrap_or(false),
+                condition: r.try_get::<Option<String>, _>(6).ok().flatten(),
+                comment: r.try_get::<Option<String>, _>(7).ok().flatten(),
             })
         })
         .collect())
@@ -229,6 +250,8 @@ async fn list_indexes_sqlite(pool: &sqlx::SqlitePool) -> Result<Vec<IndexInfo>, 
                 index_type: "btree".to_string(),
                 is_unique,
                 is_primary,
+                condition: None,
+                comment: None,
             })
         })
         .collect())
@@ -299,6 +322,8 @@ async fn list_indexes_d1(cfg: &super::connection::D1Config) -> Result<Vec<IndexI
                 index_type: "btree".to_string(),
                 is_unique,
                 is_primary,
+                condition: None,
+                comment: None,
             })
         })
         .collect())
@@ -374,6 +399,8 @@ async fn list_indexes_mysql(pool: &MySqlPool, schema: &str) -> Result<Vec<IndexI
                 index_type: index_type.to_lowercase(),
                 is_unique: non_unique == 0,
                 is_primary: is_primary_i != 0,
+                condition: None,
+                comment: None,
             })
         })
         .collect())
@@ -497,4 +524,113 @@ pub async fn drop_table(state: State<'_, DbState>, schema: String, table: String
         _ => return Err("DROP TABLE not supported for this database type".to_string()),
     }
     Ok(())
+}
+
+pub async fn get_table_column_structure(
+    state: State<'_, DbState>,
+    schema: String,
+    table: String,
+) -> Result<Vec<ColumnStructureRow>, String> {
+    validate_ident(&schema)?;
+    validate_ident(&table)?;
+    match require_conn(&state)? {
+        ActiveConnection::Postgres(pool) => {
+            get_column_structure_pg(&pool, &schema, &table).await
+        }
+        _ => Err("Structure view is only supported for PostgreSQL".to_string()),
+    }
+}
+
+async fn get_column_structure_pg(
+    pool: &PgPool,
+    schema: &str,
+    table: &str,
+) -> Result<Vec<ColumnStructureRow>, String> {
+    // Use information_schema.columns as the sole base table to avoid JOIN failures
+    // on partitioned/inherited tables. FK and comment are looked up via safe correlated
+    // subqueries that reference catalog tables by name instead of OID.
+    let rows = sqlx::query(r#"
+        SELECT
+            c.ordinal_position::int                                          AS ordinal_position,
+            c.column_name                                                    AS name,
+            COALESCE(
+                CASE
+                    WHEN c.character_maximum_length IS NOT NULL
+                    THEN c.udt_name || '(' || c.character_maximum_length::text || ')'
+                    ELSE NULLIF(c.udt_name, c.data_type)
+                END,
+                c.data_type
+            )                                                                AS data_type,
+            (c.is_nullable = 'YES')                                          AS is_nullable,
+            c.column_default                                                 AS column_default,
+            (
+                SELECT rns.nspname || '.' || rt.relname || '.' || ra.attname
+                FROM pg_catalog.pg_constraint  pc
+                JOIN pg_catalog.pg_class        lt  ON lt.oid  = pc.conrelid
+                JOIN pg_catalog.pg_namespace    lns ON lns.oid = lt.relnamespace
+                JOIN pg_catalog.pg_attribute    la  ON la.attrelid = lt.oid
+                                                   AND la.attnum   = pc.conkey[1]
+                JOIN pg_catalog.pg_class        rt  ON rt.oid  = pc.confrelid
+                JOIN pg_catalog.pg_namespace    rns ON rns.oid = rt.relnamespace
+                JOIN pg_catalog.pg_attribute    ra  ON ra.attrelid = rt.oid
+                                                   AND ra.attnum   = pc.confkey[1]
+                WHERE pc.contype     = 'f'
+                  AND lns.nspname    = c.table_schema
+                  AND lt.relname     = c.table_name
+                  AND la.attname     = c.column_name
+                LIMIT 1
+            )                                                                AS foreign_key,
+            (
+                SELECT pc.conname
+                FROM pg_catalog.pg_constraint  pc
+                JOIN pg_catalog.pg_class        lt  ON lt.oid  = pc.conrelid
+                JOIN pg_catalog.pg_namespace    lns ON lns.oid = lt.relnamespace
+                JOIN pg_catalog.pg_attribute    la  ON la.attrelid = lt.oid
+                                                   AND la.attnum   = pc.conkey[1]
+                WHERE pc.contype  = 'f'
+                  AND lns.nspname = c.table_schema
+                  AND lt.relname  = c.table_name
+                  AND la.attname  = c.column_name
+                LIMIT 1
+            )                                                                AS fk_constraint_name,
+            (
+                SELECT pd.description
+                FROM pg_catalog.pg_description pd
+                JOIN pg_catalog.pg_class     pc ON pc.oid = pd.objoid
+                JOIN pg_catalog.pg_namespace pn ON pn.oid = pc.relnamespace
+                JOIN pg_catalog.pg_attribute pa ON pa.attrelid = pc.oid
+                                               AND pa.attnum   = pd.objsubid
+                WHERE pn.nspname   = c.table_schema
+                  AND pc.relname   = c.table_name
+                  AND pa.attname   = c.column_name
+                  AND pd.objsubid  > 0
+                LIMIT 1
+            )                                                                AS comment
+        FROM information_schema.columns c
+        WHERE c.table_schema = $1
+          AND c.table_name   = $2
+        ORDER BY c.ordinal_position
+    "#)
+    .bind(schema)
+    .bind(table)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("Column structure query failed: {e}"))?;
+
+    let result = rows
+        .iter()
+        .map(|r| {
+            let ordinal: i32 = r.try_get(0).unwrap_or(0);
+            let name: String = r.try_get(1).unwrap_or_default();
+            let data_type: String = r.try_get(2).unwrap_or_default();
+            let is_nullable: bool = r.try_get(3).unwrap_or(true);
+            let column_default: Option<String> = r.try_get(4).ok().flatten();
+            let foreign_key: Option<String> = r.try_get(5).ok().flatten();
+            let fk_constraint_name: Option<String> = r.try_get(6).ok().flatten();
+            let comment: Option<String> = r.try_get(7).ok().flatten();
+            ColumnStructureRow { ordinal_position: ordinal, name, data_type, is_nullable, column_default, foreign_key, fk_constraint_name, comment }
+        })
+        .collect();
+
+    Ok(result)
 }

@@ -172,12 +172,15 @@ async fn close_existing(state: &State<'_, DbState>) {
 async fn open_pg(config: &PgConfig) -> Result<PgPool, String> {
     PgPoolOptions::new()
         // A single get_table_rows fires 6 queries; multiple open tabs multiply that.
-        // 20 connections comfortably handles 3–4 concurrent tab loads in parallel.
-        .max_connections(20)
-        .min_connections(2)
-        .acquire_timeout(std::time::Duration::from_secs(30))
-        .idle_timeout(std::time::Duration::from_secs(600))
-        .max_lifetime(std::time::Duration::from_secs(1800))
+        // 10 connections comfortably handles 3–4 concurrent tab loads in parallel.
+        .max_connections(10)
+        // No min_connections: keeping idle connections alive causes ping failures
+        // after network changes or laptop sleep/wake (os error 60), then a 27 s
+        // stall while the pool replaces the dead connection.
+        .acquire_timeout(std::time::Duration::from_secs(10))
+        // Stay well under typical firewall/managed-DB idle connection timeouts (~5 min).
+        .idle_timeout(std::time::Duration::from_secs(60))
+        .max_lifetime(std::time::Duration::from_secs(300))
         // Kill runaway queries automatically so they don't pin connections forever.
         .after_connect(|conn, _meta| {
             Box::pin(async move {
@@ -246,11 +249,10 @@ pub async fn connect_sqlite(state: State<'_, DbState>, config: SqliteConfig) -> 
 
 async fn open_mysql(config: &MysqlConfig) -> Result<MySqlPool, String> {
     MySqlPoolOptions::new()
-        .max_connections(20)
-        .min_connections(2)
-        .acquire_timeout(std::time::Duration::from_secs(30))
-        .idle_timeout(std::time::Duration::from_secs(600))
-        .max_lifetime(std::time::Duration::from_secs(1800))
+        .max_connections(10)
+        .acquire_timeout(std::time::Duration::from_secs(10))
+        .idle_timeout(std::time::Duration::from_secs(60))
+        .max_lifetime(std::time::Duration::from_secs(300))
         // Enable ANSI_QUOTES on every connection so double-quoted identifiers
         // ("col") work the same as backtick identifiers (`col`). This makes
         // standard SQL and AI-generated queries work without rewriting syntax.

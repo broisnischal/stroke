@@ -3,7 +3,7 @@ import { setMode } from 'mode-watcher'
 import {
   DEFAULT_THEME_ID,
   isDarkTheme,
-  nextThemeId,
+  THEME_IDS,
   normalizeThemeId,
 } from '$lib/themes/registry.js'
 
@@ -25,6 +25,28 @@ export const DEFAULT_SETTINGS = {
 
 /** Reactive app theme id (synced by applySettings). */
 export const appThemeId = writable(/** @type {ThemeId} */ (DEFAULT_THEME_ID))
+
+const LAST_DARK_KEY  = 'db-studio:last-dark-theme'
+const LAST_LIGHT_KEY = 'db-studio:last-light-theme'
+
+/** @param {ThemeId} id */
+function saveLastForMode(id) {
+  try {
+    if (isDarkTheme(id)) localStorage.setItem(LAST_DARK_KEY, id)
+    else                  localStorage.setItem(LAST_LIGHT_KEY, id)
+  } catch {}
+}
+
+/** @returns {{ dark: ThemeId, light: ThemeId }} */
+function loadLastForMode() {
+  try {
+    const dark  = normalizeThemeId(localStorage.getItem(LAST_DARK_KEY)  ?? 'dark')
+    const light = normalizeThemeId(localStorage.getItem(LAST_LIGHT_KEY) ?? 'light')
+    return { dark, light }
+  } catch {
+    return { dark: 'dark', light: 'light' }
+  }
+}
 
 /** @type {ThemeId[]} */
 let themeHistoryStack = []
@@ -80,6 +102,7 @@ export function applySettings(settings) {
   root.classList.toggle('dark', dark)
   setMode(dark ? 'dark' : 'light')
   appThemeId.set(theme)
+  isCurrentThemeDark.set(dark)
   root.style.setProperty('--app-zoom', String(zoom))
   root.style.setProperty('--app-font-size', `${Math.round(14 * zoom)}px`)
 }
@@ -145,12 +168,9 @@ export function updateSettings(patch) {
   const current = loadSettings()
   const next = { ...current, ...patch }
 
-  if (
-    !restoringTheme &&
-    patch.theme != null &&
-    patch.theme !== current.theme
-  ) {
+  if (!restoringTheme && patch.theme != null && patch.theme !== current.theme) {
     recordThemeBeforeChange(current.theme)
+    saveLastForMode(patch.theme)
   }
 
   saveSettings(next)
@@ -180,10 +200,26 @@ export function resetZoom() {
   return updateSettings({ zoom: DEFAULT_ZOOM })
 }
 
+/** Cycle only through themes of the same darkness as the current theme. */
 export function cycleTheme() {
   const current = loadSettings()
-  return updateSettings({ theme: nextThemeId(current.theme) })
+  const dark = isDarkTheme(current.theme)
+  const sameMode = THEME_IDS.filter(id => isDarkTheme(id) === dark)
+  const idx = sameMode.indexOf(current.theme)
+  const next = sameMode[(idx + 1) % sameMode.length]
+  return updateSettings({ theme: next })
 }
+
+/** Toggle between the user's last-used dark theme and last-used light theme. */
+export function toggleLightDark() {
+  const current = loadSettings()
+  const { dark, light } = loadLastForMode()
+  const target = isDarkTheme(current.theme) ? light : dark
+  return updateSettings({ theme: target })
+}
+
+/** Whether the current active theme is dark (reactive). */
+export const isCurrentThemeDark = writable(isDarkTheme(DEFAULT_THEME_ID))
 
 /** Revert to the theme used before the most recent change (⌘/Ctrl+Shift+M). */
 export function restorePreviousTheme() {

@@ -163,6 +163,18 @@ export async function listIndexes(schema) {
   }
 }
 
+/**
+ * @param {string} schema
+ * @param {string} table
+ */
+export async function getTableColumnStructure(schema, table) {
+  try {
+    return await invoke('pg_get_table_column_structure', { schema, table })
+  } catch (err) {
+    throw new Error(formatInvokeError(err))
+  }
+}
+
 /** @param {string} schema */
 export async function listEnums(schema) {
   try {

@@ -91,9 +91,10 @@ use crate::db::{
     connect, connect_d1, connect_mysql, connect_sqlite, disconnect,
     delete_table_row, delete_table_rows, execute_sql, get_table_rows, insert_table_row,
     list_schemas, list_tables, list_indexes, list_enums, truncate_table, drop_table,
+    get_table_column_structure,
     test_connection, test_d1_connection, test_mysql_connection, test_sqlite_connection,
     update_table_cell, ConnectionConfig, D1Config, DbState, EnumInfo, IndexInfo, InsertRowResult,
-    MysqlConfig, SqlResult, SqliteConfig, TableInfo, TableRows,
+    MysqlConfig, SqlResult, SqliteConfig, TableInfo, TableRows, ColumnStructureRow,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -187,6 +188,15 @@ pub async fn pg_list_indexes(
     schema: String,
 ) -> Result<Vec<IndexInfo>, String> {
     list_indexes(state, schema).await
+}
+
+#[tauri::command]
+pub async fn pg_get_table_column_structure(
+    state: State<'_, DbState>,
+    schema: String,
+    table: String,
+) -> Result<Vec<ColumnStructureRow>, String> {
+    get_table_column_structure(state, schema, table).await
 }
 
 #[tauri::command]

@@ -1,11 +1,20 @@
 <script>
   import X from '@lucide/svelte/icons/x'
   import Copy from '@lucide/svelte/icons/copy'
+  import Search from '@lucide/svelte/icons/search'
+  import Loader from '@lucide/svelte/icons/loader'
+  import Ellipsis from '@lucide/svelte/icons/ellipsis'
+  import CircleSlash from '@lucide/svelte/icons/circle-slash'
+  import Eraser from '@lucide/svelte/icons/eraser'
+  import Braces from '@lucide/svelte/icons/braces'
+  import KeyRound from '@lucide/svelte/icons/key-round'
   import ShikiBlock from './ShikiBlock.svelte'
   import ResizeHandle from './ResizeHandle.svelte'
   import * as Tabs from '$lib/components/ui/tabs/index.js'
+  import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js'
   import { toast } from 'svelte-sonner'
   import {
+    normalizeCellValue,
     formatJsonValue,
     formatNormalValue,
     formatNormalRecord,
@@ -13,6 +22,14 @@
     rowToRecord,
     rowsToJsonPayload,
   } from '$lib/row-inspector.js'
+  import {
+    isEditableType,
+    isBooleanType,
+    getColumnEnumValues,
+    valueToEditString,
+    parseCellInput,
+    normalizeColumnType,
+  } from '$lib/cell-value.js'
   import {
     clampInspectorWidth,
     loadLayout,
@@ -29,15 +46,25 @@
   let {
     columns = [],
     rows = [],
+    primaryKey = [],
     target = null,
     onclose = () => {},
+    onsave = null,
   } = $props()
 
   const initialLayout = loadLayout()
   let width = $state(initialLayout.inspectorWidth)
   let resizeStartWidth = initialLayout.inspectorWidth
-  /** @type {'normal' | 'json' | 'preview'} */
+  /** @type {'details' | 'normal' | 'json' | 'preview'} */
   let viewMode = $state(initialLayout.inspectorView)
+  let fieldSearch = $state('')
+
+  /** @type {Record<number, boolean>} */
+  let savingFields = $state({})
+  /** @type {Record<number, string | undefined>} */
+  let fieldErrors = $state({})
+  /** @type {Map<number, ReturnType<typeof setTimeout>>} */
+  const debounceTimers = new Map()
 
   const meta = $derived.by(() => {
     if (!target || columns.length === 0) return null
@@ -82,7 +109,6 @@
   )
   const shikiLang = $derived(viewMode === 'json' ? 'json' : 'plaintext')
 
-  // Detect if the inspected cell value is a previewable URL
   const cellPreviewHref = $derived.by(() => {
     if (!target || target.kind !== 'cell') return null
     const value = rows[target.rowIdx]?.[target.colIdx]
@@ -92,13 +118,81 @@
   const cellPreviewType = $derived(cellUrlType(cellPreviewHref))
   const hasPreview = $derived(cellPreviewType === 'image' || cellPreviewType === 'pdf')
 
-  // Fall back from preview tab when navigating to a non-previewable cell
+  // Field list for row details view
+  const pkSet = $derived(new Set(primaryKey))
+
+  const fields = $derived.by(() => {
+    if (!target || target.kind !== 'row' || columns.length === 0) return []
+    const row = rows[target.rowIdx] ?? []
+    const canEdit = !!onsave && primaryKey.length > 0
+    return columns.map((col, i) => {
+      const raw = normalizeCellValue(row[i])
+      const dataType = col.dataType ?? col.data_type ?? ''
+      const normalType = normalizeColumnType(dataType)
+      const enumValues = getColumnEnumValues(col)
+      const isBoolean = isBooleanType(dataType)
+      const isPk = pkSet.has(col.name)
+      // PK columns and non-editable types are read-only
+      const editable = canEdit && !isPk && isEditableType(dataType)
+      const isNull = raw === null
+      const isEmpty = typeof raw === 'string' && raw === ''
+      const isJsonType = normalType.startsWith('json')
+      const isTextType = /^(text|varchar|char|character|string|citext|uuid|name)/.test(normalType)
+      const isMultiline = typeof raw === 'object' && raw !== null
+      const nullable = col.nullable !== false
+      const initialEditStr = valueToEditString(raw)
+      return {
+        colIdx: i,
+        name: col.name,
+        dataType,
+        raw,
+        isNull,
+        isEmpty,
+        displayValue: isNull ? 'NULL' : (isEmpty ? 'EMPTY' : formatNormalValue(raw)),
+        initialEditStr,
+        editable,
+        isPk,
+        isBoolean,
+        enumValues,
+        isMultiline,
+        isJsonType,
+        isTextType,
+        nullable,
+      }
+    })
+  })
+
+  const filteredFields = $derived(
+    fieldSearch
+      ? fields.filter(
+          (f) =>
+            f.name.toLowerCase().includes(fieldSearch.toLowerCase()) ||
+            f.displayValue.toLowerCase().includes(fieldSearch.toLowerCase()),
+        )
+      : fields,
+  )
+
+  $effect(() => {
+    if (target?.kind === 'row' && viewMode !== 'json') viewMode = 'details'
+    if (target?.kind !== 'row' && viewMode === 'details') viewMode = 'normal'
+  })
+
+  // Cancel all pending debounce timers when the inspected row changes.
+  $effect(() => {
+    void (target?.kind === 'row' ? target.rowIdx : null)
+    return () => {
+      for (const t of debounceTimers.values()) clearTimeout(t)
+      debounceTimers.clear()
+    }
+  })
+
   $effect(() => {
     if (viewMode === 'preview' && !hasPreview) viewMode = 'normal'
   })
 
   $effect(() => {
-    if (viewMode !== 'preview') saveLayout({ inspectorView: viewMode })
+    if (viewMode !== 'preview' && viewMode !== 'details')
+      saveLayout({ inspectorView: viewMode })
   })
 
   async function openPreviewExternal() {
@@ -119,6 +213,140 @@
       toast.success('Copied JSON')
     } catch {
       toast.error('Could not copy to clipboard')
+    }
+  }
+
+  /**
+   * Stable string representation used for change-detection.
+   * Objects/arrays are compared via JSON so key-order doesn't matter.
+   * @param {unknown} v
+   */
+  function stableStr(v) {
+    if (v === null || v === undefined) return '\x00NULL'
+    if (typeof v === 'object') {
+      try { return JSON.stringify(v) } catch { return String(v) }
+    }
+    return String(v)
+  }
+
+  /**
+   * @param {number} colIdx
+   * @param {string} rawStr
+   * @param {boolean} [force] skip change-detection (used for dropdown actions)
+   */
+  async function saveField(colIdx, rawStr, force = false) {
+    if (!onsave || target?.kind !== 'row') return
+    const col = columns[colIdx]
+    if (!col) return
+    const dataType = col.dataType ?? col.data_type ?? ''
+    const enumValues = getColumnEnumValues(col)
+    const result = parseCellInput(rawStr, dataType, enumValues)
+    if (!result.ok) {
+      fieldErrors = { ...fieldErrors, [colIdx]: result.message }
+      return
+    }
+    fieldErrors = { ...fieldErrors, [colIdx]: undefined }
+    // Skip if value didn't change
+    if (!force) {
+      const original = fields.find((f) => f.colIdx === colIdx)?.raw ?? null
+      if (stableStr(result.value) === stableStr(original)) return
+    }
+    await commitValue(colIdx, result.value)
+  }
+
+  /**
+   * Direct value save, bypassing string parsing (for dropdown actions).
+   * @param {number} colIdx
+   * @param {unknown} value
+   */
+  async function commitValue(colIdx, value) {
+    if (!onsave || target?.kind !== 'row') return
+    const col = columns[colIdx]
+    if (!col) return
+    // Cancel any pending debounce for this field
+    const t = debounceTimers.get(colIdx)
+    if (t) { clearTimeout(t); debounceTimers.delete(colIdx) }
+    savingFields = { ...savingFields, [colIdx]: true }
+    try {
+      await onsave({ rowIdx: target.rowIdx, colIdx, value })
+    } catch (e) {
+      toast.error(`Failed to save ${col.name}`, { description: String(e) })
+    } finally {
+      savingFields = { ...savingFields, [colIdx]: false }
+    }
+  }
+
+  /**
+   * Schedule a debounced save (600 ms). Resets on every keystroke.
+   * @param {number} colIdx
+   * @param {string} rawStr
+   */
+  function scheduleFieldSave(colIdx, rawStr) {
+    const existing = debounceTimers.get(colIdx)
+    if (existing) clearTimeout(existing)
+    const t = setTimeout(() => {
+      debounceTimers.delete(colIdx)
+      void saveField(colIdx, rawStr)
+    }, 600)
+    debounceTimers.set(colIdx, t)
+  }
+
+  /**
+   * @param {number} colIdx
+   * @param {KeyboardEvent} e
+   */
+  function handleFieldKeydown(colIdx, e) {
+    const el = /** @type {HTMLInputElement | HTMLTextAreaElement} */ (e.currentTarget)
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      const existing = debounceTimers.get(colIdx)
+      if (existing) { clearTimeout(existing); debounceTimers.delete(colIdx) }
+      void saveField(colIdx, el.value)
+      el.blur()
+    }
+    if (e.key === 'Escape') {
+      const existing = debounceTimers.get(colIdx)
+      if (existing) { clearTimeout(existing); debounceTimers.delete(colIdx) }
+      el.blur()
+    }
+  }
+
+  /**
+   * On blur: flush any pending debounce and save immediately.
+   * @param {number} colIdx
+   * @param {FocusEvent} e
+   */
+  function handleFieldBlur(colIdx, e) {
+    const existing = debounceTimers.get(colIdx)
+    if (existing) { clearTimeout(existing); debounceTimers.delete(colIdx) }
+    const el = /** @type {HTMLInputElement | HTMLTextAreaElement} */ (e.currentTarget)
+    void saveField(colIdx, el.value)
+  }
+
+  /**
+   * @param {{ raw: unknown, initialEditStr: string, isJsonType: boolean, colIdx: number, name: string }} field
+   */
+  async function copyFieldValue(field) {
+    const text = field.raw === null ? 'NULL' : String(field.raw)
+    try {
+      await navigator.clipboard.writeText(text)
+      toast.success(`Copied ${field.name}`)
+    } catch {
+      toast.error('Could not copy to clipboard')
+    }
+  }
+
+  /**
+   * @param {{ colIdx: number, initialEditStr: string, isJsonType: boolean }} field
+   */
+  async function prettyFormat(field) {
+    if (!field.isJsonType) return
+    try {
+      const parsed = JSON.parse(field.initialEditStr)
+      const pretty = JSON.stringify(parsed, null, 2)
+      await commitValue(field.colIdx, pretty)
+    } catch {
+      toast.error('Invalid JSON — cannot pretty-format')
     }
   }
 </script>
@@ -172,15 +400,219 @@
 
       <Tabs.Root bind:value={viewMode} class="flex min-h-0 flex-1 flex-col">
         <Tabs.List class="studio-chrome mx-2 mt-2 h-8 w-auto shrink-0" data-studio-chrome>
-          <Tabs.Trigger value="normal" class="px-3 text-ui-xs">Normal</Tabs.Trigger>
-          <Tabs.Trigger value="json" class="px-3 text-ui-xs">JSON</Tabs.Trigger>
-          {#if hasPreview}
-            <Tabs.Trigger value="preview" class="px-3 text-ui-xs">Preview</Tabs.Trigger>
+          {#if target?.kind === 'row'}
+            <Tabs.Trigger value="details" class="px-3 text-ui-xs">Details</Tabs.Trigger>
+            <Tabs.Trigger value="json" class="px-3 text-ui-xs">JSON</Tabs.Trigger>
+          {:else}
+            <Tabs.Trigger value="normal" class="px-3 text-ui-xs">Normal</Tabs.Trigger>
+            <Tabs.Trigger value="json" class="px-3 text-ui-xs">JSON</Tabs.Trigger>
+            {#if hasPreview}
+              <Tabs.Trigger value="preview" class="px-3 text-ui-xs">Preview</Tabs.Trigger>
+            {/if}
           {/if}
         </Tabs.List>
 
         <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-          {#if viewMode === 'preview' && cellPreviewHref}
+          {#if viewMode === 'details' && target?.kind === 'row'}
+            <div class="flex min-h-0 flex-1 flex-col">
+              <!-- Search -->
+              <div class="shrink-0 px-2.5 py-2">
+                <div class="relative">
+                  <Search class="absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    type="text"
+                    placeholder="Search for field..."
+                    bind:value={fieldSearch}
+                    class="w-full rounded border border-border bg-muted/20 py-1.5 pl-7 pr-2.5 font-mono text-ui-xs placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+              </div>
+
+              <!-- Field list -->
+              <div class="flex-1 overflow-y-auto px-2.5 pb-3">
+                {#key target.rowIdx}
+                  {#each filteredFields as field (field.colIdx)}
+                    <div class={`group/field mb-2.5${fields.length > 100 ? ' [content-visibility:auto] [contain-intrinsic-size:auto_56px]' : ''}`}>
+                      <!-- Label row: name + type + hover actions -->
+                      <div class="mb-0.5 flex h-5 items-center gap-1">
+                        <span class="min-w-0 flex-1 truncate font-mono text-ui-2xs text-muted-foreground">{field.name}</span>
+                        {#if field.isPk}
+                          <span title="Primary key — cannot be changed" class="inline-flex shrink-0 items-center gap-0.5 font-mono text-ui-3xs text-amber-500/70">
+                            <KeyRound class="size-2.5" />PK
+                          </span>
+                        {/if}
+                        <span class="shrink-0 font-mono text-ui-3xs text-muted-foreground/40">{field.dataType}</span>
+
+                        {#if field.editable}
+                          <DropdownMenu.Root>
+                            <DropdownMenu.Trigger
+                              class="invisible ml-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground group-hover/field:visible"
+                              aria-label="Field actions"
+                            >
+                              <Ellipsis class="size-3" />
+                            </DropdownMenu.Trigger>
+                            <DropdownMenu.Content class="w-40 text-ui-xs" align="end" sideOffset={4}>
+                              <DropdownMenu.Item
+                                class="gap-2 text-ui-xs"
+                                disabled={savingFields[field.colIdx]}
+                                onSelect={() => void copyFieldValue(field)}
+                              >
+                                <Copy class="size-3.5 text-muted-foreground" />
+                                Copy value
+                              </DropdownMenu.Item>
+
+                              {#if field.nullable}
+                                <DropdownMenu.Separator />
+                                <DropdownMenu.Item
+                                  class="gap-2 text-ui-xs"
+                                  disabled={field.isNull || savingFields[field.colIdx]}
+                                  onSelect={() => void commitValue(field.colIdx, null)}
+                                >
+                                  <CircleSlash class="size-3.5 text-muted-foreground" />
+                                  Set NULL
+                                </DropdownMenu.Item>
+                              {/if}
+
+                              {#if field.isTextType || field.isBoolean === false && !field.enumValues && !field.isJsonType}
+                                <DropdownMenu.Item
+                                  class="gap-2 text-ui-xs"
+                                  disabled={field.isEmpty || savingFields[field.colIdx]}
+                                  onSelect={() => void commitValue(field.colIdx, '')}
+                                >
+                                  <Eraser class="size-3.5 text-muted-foreground" />
+                                  Set empty
+                                </DropdownMenu.Item>
+                              {/if}
+
+                              {#if field.isJsonType}
+                                <DropdownMenu.Item
+                                  class="gap-2 text-ui-xs"
+                                  disabled={field.isNull || savingFields[field.colIdx]}
+                                  onSelect={() => void prettyFormat(field)}
+                                >
+                                  <Braces class="size-3.5 text-muted-foreground" />
+                                  Pretty format
+                                </DropdownMenu.Item>
+                              {/if}
+                            </DropdownMenu.Content>
+                          </DropdownMenu.Root>
+                        {:else}
+                          <!-- Non-editable: copy only -->
+                          <button
+                            type="button"
+                            class="invisible ml-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground group-hover/field:visible"
+                            title="Copy value"
+                            onclick={() => copyFieldValue(field)}
+                          >
+                            <Copy class="size-3" />
+                          </button>
+                        {/if}
+                      </div>
+
+                      <!-- Value control -->
+                      {#if !field.editable}
+                        <!-- Read-only -->
+                        <div
+                          class="w-full rounded border border-border/60 bg-muted/10 px-2.5 py-1.5 font-mono text-ui-xs {field.isNull || field.isEmpty ? 'italic text-muted-foreground/40' : 'text-foreground'} {field.isMultiline ? 'whitespace-pre-wrap break-all' : 'truncate'}"
+                          title={field.displayValue}
+                        >{field.displayValue}</div>
+
+                      {:else if field.isBoolean}
+                        <div class="relative">
+                          <select
+                            value={field.initialEditStr}
+                            disabled={savingFields[field.colIdx]}
+                            class="w-full appearance-none rounded border border-border bg-muted/20 px-2.5 py-1.5 pr-7 font-mono text-ui-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+                            onchange={async (e) => {
+                              await saveField(field.colIdx, /** @type {HTMLSelectElement} */ (e.target).value)
+                            }}
+                          >
+                            <option value="">NULL</option>
+                            <option value="true">true</option>
+                            <option value="false">false</option>
+                          </select>
+                          <span class="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground/50">
+                            {#if savingFields[field.colIdx]}
+                              <Loader class="size-3 animate-spin" />
+                            {:else}
+                              <svg class="size-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6l4 4 4-4"/></svg>
+                            {/if}
+                          </span>
+                        </div>
+
+                      {:else if field.enumValues}
+                        <div class="relative">
+                          <select
+                            value={field.initialEditStr}
+                            disabled={savingFields[field.colIdx]}
+                            class="w-full appearance-none rounded border border-border bg-muted/20 px-2.5 py-1.5 pr-7 font-mono text-ui-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+                            onchange={async (e) => {
+                              await saveField(field.colIdx, /** @type {HTMLSelectElement} */ (e.target).value)
+                            }}
+                          >
+                            <option value="">NULL</option>
+                            {#each field.enumValues as opt (opt)}
+                              <option value={opt}>{opt}</option>
+                            {/each}
+                          </select>
+                          <span class="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground/50">
+                            {#if savingFields[field.colIdx]}
+                              <Loader class="size-3 animate-spin" />
+                            {:else}
+                              <svg class="size-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6l4 4 4-4"/></svg>
+                            {/if}
+                          </span>
+                        </div>
+
+                      {:else if field.isMultiline}
+                        <div class="relative">
+                          <textarea
+                            value={field.initialEditStr}
+                            rows={Math.min(6, Math.max(2, (field.initialEditStr.match(/\n/g)?.length ?? 0) + 1))}
+                            disabled={savingFields[field.colIdx]}
+                            placeholder={field.isNull ? 'NULL' : ''}
+                            class="w-full resize-none rounded border bg-muted/20 px-2.5 py-1.5 font-mono text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 {fieldErrors[field.colIdx] ? 'border-destructive' : 'border-border'}"
+                            oninput={(e) => scheduleFieldSave(field.colIdx, /** @type {HTMLTextAreaElement} */ (e.currentTarget).value)}
+                            onblur={(e) => handleFieldBlur(field.colIdx, e)}
+                            onkeydown={(e) => handleFieldKeydown(field.colIdx, e)}
+                          ></textarea>
+                          {#if savingFields[field.colIdx]}
+                            <Loader class="absolute right-2 top-2 size-3 animate-spin text-muted-foreground" />
+                          {/if}
+                        </div>
+
+                      {:else}
+                        <div class="relative">
+                          <input
+                            type="text"
+                            value={field.initialEditStr}
+                            disabled={savingFields[field.colIdx]}
+                            placeholder={field.isNull ? 'NULL' : ''}
+                            class="w-full rounded border bg-muted/20 px-2.5 py-1.5 font-mono text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 {fieldErrors[field.colIdx] ? 'border-destructive' : 'border-border'}"
+                            oninput={(e) => scheduleFieldSave(field.colIdx, /** @type {HTMLInputElement} */ (e.currentTarget).value)}
+                            onblur={(e) => handleFieldBlur(field.colIdx, e)}
+                            onkeydown={(e) => handleFieldKeydown(field.colIdx, e)}
+                          />
+                          {#if savingFields[field.colIdx]}
+                            <Loader class="absolute right-2 top-1/2 size-3 -translate-y-1/2 animate-spin text-muted-foreground" />
+                          {/if}
+                        </div>
+                      {/if}
+
+                      {#if fieldErrors[field.colIdx]}
+                        <p class="mt-0.5 font-mono text-ui-3xs text-destructive">{fieldErrors[field.colIdx]}</p>
+                      {/if}
+                    </div>
+                  {/each}
+
+                  {#if filteredFields.length === 0 && fieldSearch}
+                    <p class="py-6 text-center font-mono text-ui-xs text-muted-foreground/60">No fields match</p>
+                  {/if}
+                {/key}
+              </div>
+            </div>
+
+          {:else if viewMode === 'preview' && cellPreviewHref}
             <div class="flex min-h-0 flex-1 flex-col items-center justify-start gap-3 overflow-auto p-3">
               {#if cellPreviewType === 'image'}
                 <img
@@ -211,6 +643,7 @@
                 Open in browser
               </button>
             </div>
+
           {:else}
             <ShikiBlock
               code={displayCode}

@@ -14,6 +14,7 @@
   import Sidebar from './Sidebar.svelte'
   import TabBar from './TabBar.svelte'
   import TableToolbar from './TableToolbar.svelte'
+  import StructureView from './StructureView.svelte'
   import DataTable from './DataTable.svelte'
   import RowDetailPanel from './RowDetailPanel.svelte'
   import SqlConsole from './SqlConsole.svelte'
@@ -47,6 +48,7 @@
     listSchemas,
     listTables,
     getTableRows,
+    getTableColumnStructure,
     executeSql,
     updateTableCell,
     deleteTableRows,
@@ -124,6 +126,7 @@
     createSavedQuery,
   } from '$lib/stores/query-history.js'
   import { recordActivity } from '$lib/stores/activity-log.js'
+  import { loadRecentTabs, pushRecentTab, removeRecentTab, clearRecentTabs } from '$lib/stores/recent-tabs.js'
   import { installInputShortcuts } from '$lib/input-shortcuts.js'
 
   /** @typedef {import('$lib/studio-tabs.js').StudioTab} StudioTab */
@@ -189,6 +192,8 @@
   /** @type {StudioTab[]} */
   let tabs = $state([])
   let activeTabId = $state(/** @type {string | null} */ (null))
+  /** @type {import('$lib/stores/recent-tabs.js').RecentTab[]} */
+  let recentTabs = $state([])
 
   let schemas = $state([])
   let activeSchema = $state('public')
@@ -196,6 +201,12 @@
   let indexes = $state([])
   /** @type {{ name: string, values: string[] }[]} */
   let enums = $state([])
+  /** @type {'data' | 'structure'} */
+  let tableViewMode = $state('data')
+  /** @type {import('$lib/api.js').ColumnStructureRow[] | null} — loaded on demand when switching to structure view */
+  let structureColumns = $state(/** @type {any[]} */ ([]))
+  let loadingStructure = $state(false)
+  let structureSearch = $state('')
   let activeTable = $state(/** @type {string | null} */ (null))
   let tableFilter = $state('')
   let loadingTables = $state(false)
@@ -313,6 +324,14 @@
   let ormError = $state('')
 
   const activeTab = $derived(tabs.find((t) => t.id === activeTabId) ?? null)
+  /** 'table' | 'view' | 'materialized_view' | 'foreign_table' — for the active table tab */
+  const activeTableKind = $derived(
+    activeTab?.kind === 'table'
+      ? (/** @type {any} */ (activeTab.state))?.tableKind ?? 'table'
+      : 'table'
+  )
+  /** Structure view only makes sense for real tables, not views/materialized views */
+  const canShowStructure = $derived(activeTableKind === 'table' || activeTableKind === 'foreign_table')
 
   let welcomeTip = $state(pickRandomTip())
   let _lastWelcomeTabId = ''
@@ -386,6 +405,10 @@
   let savedQueries = $state([])
   let queryHistoryVisible = $state(loadQueryHistoryPref())
 
+  function refreshRecentTabs() {
+    recentTabs = persistConnectionId ? loadRecentTabs(persistConnectionId) : []
+  }
+
   async function refreshQueryStores() {
     if (!persistConnectionId) {
       queryHistory = []
@@ -411,6 +434,12 @@
 
   $effect(() => {
     if (commandOpen && persistConnectionId) void refreshQueryStores()
+  })
+
+  $effect(() => {
+    // Reload recents whenever the active connection changes
+    void persistConnectionId
+    refreshRecentTabs()
   })
 
   $effect(() => {
@@ -1150,6 +1179,8 @@
     const { filters = null, resetQuery = false } = options
     const existing = findTableTab(tabs, schema, table)
     if (existing) {
+      tableViewMode = 'data'
+      structureColumns = []
       await activateTab(existing.id)
       if (filters) {
         if (resetQuery) {
@@ -1168,6 +1199,10 @@
     saveActiveTabState()
     dropWelcomeTabs()
     const tableKind = tables.find((t) => t.name === table)?.kind ?? 'table'
+    if (persistConnectionId) {
+      pushRecentTab(persistConnectionId, { schema, table, tableKind: /** @type {any} */ (tableKind) })
+      refreshRecentTabs()
+    }
     const tab = createTableTab(schema, table, /** @type {any} */ (tableKind))
     // Pre-bake any filters/search into the tab state before fetching
     if (tab.state && filters) {
@@ -1176,6 +1211,9 @@
     tabs = [...tabs, tab]
     activeTabId = tab.id
     activeTable = table
+    tableViewMode = 'data'
+    structureColumns = []
+    structureSearch = ''
     page = 1
     pageSize = DEFAULT_PAGE_SIZE
     rowSearch = ''
@@ -1245,12 +1283,157 @@
           indexType: i.indexType ?? i.index_type ?? 'btree',
           isUnique: i.isUnique ?? i.is_unique ?? false,
           isPrimary: i.isPrimary ?? i.is_primary ?? false,
+          condition: i.condition ?? null,
+          comment: i.comment ?? null,
         }))
         .filter((i) => i.name)
     } catch {
       indexes = []
     }
   }
+
+  async function loadStructure() {
+    if (!activeSchema || !activeTable) { structureColumns = []; return }
+    loadingStructure = true
+    const targetSchema = activeSchema
+    const targetTable  = activeTable
+    const driver       = dbType  // 'postgres' | 'mysql' | 'sqlite' | 'd1'
+    try {
+      const s = targetSchema.replace(/'/g, "''")
+      const t = targetTable.replace(/'/g, "''")
+      let rows = /** @type {unknown[][]} */ ([])
+
+      // ── PostgreSQL / Supabase ─────────────────────────────────────────
+      // pg_catalog is 10-100× faster than information_schema on hosted PG.
+      if (driver === 'postgres') {
+        const r = await executeSql(`
+          SELECT
+            a.attnum::int,
+            a.attname,
+            CASE
+              WHEN t.typtype = 'b' AND t.typelem <> 0 AND t.typname LIKE '\\_%'
+                THEN (SELECT bt.typname FROM pg_catalog.pg_type bt WHERE bt.oid = t.typelem) || '[]'
+              WHEN a.atttypmod > 0 AND t.typname IN ('varchar','bpchar')
+                THEN t.typname || '(' || (a.atttypmod - 4)::text || ')'
+              WHEN a.atttypmod > 0 AND t.typname = 'numeric' AND a.atttypmod <> -1
+                THEN 'numeric(' || (((a.atttypmod - 4) >> 16) & 65535)::text
+                  || ',' || ((a.atttypmod - 4) & 65535)::text || ')'
+              WHEN a.atttypmod > 0 AND t.typname IN ('bit','varbit')
+                THEN t.typname || '(' || a.atttypmod::text || ')'
+              ELSE t.typname
+            END,
+            NOT a.attnotnull,
+            pg_get_expr(ad.adbin, ad.adrelid),
+            (
+              SELECT rn.nspname || '.' || rc.relname || '.' || ra.attname
+              FROM pg_catalog.pg_constraint  pc
+              JOIN pg_catalog.pg_class        rc ON rc.oid  = pc.confrelid
+              JOIN pg_catalog.pg_namespace    rn ON rn.oid  = rc.relnamespace
+              JOIN pg_catalog.pg_attribute    ra ON ra.attrelid = rc.oid AND ra.attnum = pc.confkey[1]
+              WHERE pc.contype = 'f' AND pc.conrelid = a.attrelid AND pc.conkey[1] = a.attnum
+              LIMIT 1
+            ),
+            (
+              SELECT pc.conname FROM pg_catalog.pg_constraint pc
+              WHERE pc.contype = 'f' AND pc.conrelid = a.attrelid AND pc.conkey[1] = a.attnum
+              LIMIT 1
+            ),
+            col_description(a.attrelid, a.attnum)
+          FROM pg_catalog.pg_attribute  a
+          JOIN pg_catalog.pg_class      c  ON c.oid = a.attrelid
+          JOIN pg_catalog.pg_namespace  n  ON n.oid = c.relnamespace
+          JOIN pg_catalog.pg_type       t  ON t.oid = a.atttypid
+          LEFT JOIN pg_catalog.pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
+          WHERE n.nspname = '${s}' AND c.relname = '${t}'
+            AND a.attnum > 0 AND NOT a.attisdropped
+          ORDER BY a.attnum
+        \`)
+        rows = r?.rows ?? []
+
+      // ── MySQL ─────────────────────────────────────────────────────────
+      } else if (driver === 'mysql') {
+        const r = await executeSql(`
+          SELECT
+            c.ORDINAL_POSITION,
+            c.COLUMN_NAME,
+            c.COLUMN_TYPE,
+            c.IS_NULLABLE = 'YES',
+            c.COLUMN_DEFAULT,
+            CASE WHEN kcu.REFERENCED_TABLE_NAME IS NOT NULL
+              THEN CONCAT(kcu.REFERENCED_TABLE_SCHEMA,'.',kcu.REFERENCED_TABLE_NAME,'.',kcu.REFERENCED_COLUMN_NAME)
+              ELSE NULL END,
+            kcu.CONSTRAINT_NAME,
+            c.COLUMN_COMMENT
+          FROM information_schema.COLUMNS c
+          LEFT JOIN information_schema.KEY_COLUMN_USAGE kcu
+            ON kcu.TABLE_SCHEMA = c.TABLE_SCHEMA AND kcu.TABLE_NAME = c.TABLE_NAME
+           AND kcu.COLUMN_NAME = c.COLUMN_NAME AND kcu.REFERENCED_TABLE_NAME IS NOT NULL
+          WHERE c.TABLE_SCHEMA = '${s}' AND c.TABLE_NAME = '${t}'
+          ORDER BY c.ORDINAL_POSITION
+        \`)
+        rows = r?.rows ?? []
+
+      // ── SQLite / D1 ───────────────────────────────────────────────────
+      } else {
+        const [colR, fkR] = await Promise.all([
+          executeSql(`PRAGMA table_info('${t}')`),
+          executeSql(`PRAGMA foreign_key_list('${t}')`),
+        ])
+        /** @type {Map<string, string>} */
+        const fkMap = new Map()
+        for (const fkRow of fkR?.rows ?? []) {
+          const fromCol = String(fkRow[3] ?? '')
+          const toTable = String(fkRow[2] ?? '')
+          const toCol   = String(fkRow[4] ?? '')
+          if (fromCol && !fkMap.has(fromCol)) fkMap.set(fromCol, `${toTable}.${toCol}`)
+        }
+        rows = (colR?.rows ?? []).map((row) => [
+          Number(row[0]) + 1,  // cid → 1-based ordinal
+          row[1],              // name
+          row[2],              // type
+          !(row[3] === 1 || row[3] === '1' || row[3] === true),  // notnull→nullable
+          row[4],              // dflt_value
+          fkMap.get(String(row[1] ?? '')) ?? null,
+          null,
+          null,
+        ])
+      }
+
+      if (activeTable === targetTable && activeSchema === targetSchema) {
+        structureColumns = rows.map((row) => ({
+          ordinalPosition:  Number(row[0]) || 0,
+          name:             String(row[1] ?? ''),
+          dataType:         String(row[2] ?? ''),
+          isNullable:       row[3] === true || row[3] === 't' || String(row[3]).toLowerCase() === 'true',
+          columnDefault:    row[4] != null ? String(row[4]) : null,
+          foreignKey:       row[5] != null ? String(row[5]) : null,
+          fkConstraintName: row[6] != null ? String(row[6]) : null,
+          comment:          row[7] != null ? String(row[7]) : null,
+        }))
+      }
+    } catch (e) {
+      toast.error('Could not load table structure', { description: String(e) })
+      if (activeTable === targetTable) structureColumns = []
+    } finally {
+      loadingStructure = false
+    }
+  }
+
+  // Auto-reset structure mode when navigating to a view/materialized_view.
+  $effect(() => {
+    if (!canShowStructure && tableViewMode === 'structure') {
+      tableViewMode = 'data'
+      structureColumns = []
+    }
+  })
+
+  // Auto-load structure when the view is in structure mode, a table is active,
+  // and there is an active connection.
+  $effect(() => {
+    if (connection && tableViewMode === 'structure' && activeTable && canShowStructure) {
+      void loadStructure()
+    }
+  })
 
   async function loadEnums() {
     if (!activeSchema) { enums = []; return }
@@ -1648,22 +1831,30 @@
     showDisconnectDialog = true
   }
 
-  async function handleDisconnect() {
-    recordActivity({ type: 'disconnect', title: `Disconnected from ${connection?.name ?? 'database'}`, success: true })
-    try {
-      await disconnectPostgres()
-    } catch {
-      /* ignore */
-    }
-    try { await mcpStop() } catch { /* ignore */ }
-    mcpRunning = false
-    connection = null
+  /** Reset all connection-scoped UI state to blank. */
+  function clearConnectionState() {
     schemas = []
     tables = []
+    indexes = []
+    enums = []
     activeSchema = 'public'
     activeTable = null
     tableFilter = ''
+    tableViewMode = 'data'
+    structureColumns = []
+    structureSearch = ''
+    loadingStructure = false
+    recentTabs = []
     resetTabs()
+  }
+
+  async function handleDisconnect() {
+    recordActivity({ type: 'disconnect', title: `Disconnected from ${connection?.name ?? 'database'}`, success: true })
+    try { await disconnectPostgres() } catch { /* ignore */ }
+    try { await mcpStop() } catch { /* ignore */ }
+    mcpRunning = false
+    connection = null
+    clearConnectionState()
     showConnectionModal = true
   }
 
@@ -1683,8 +1874,7 @@
     upsertConnection(conn)
     disconnectPostgres().catch(() => {})
     connection = null
-    schemas = []; tables = []; indexes = []; enums = []; activeSchema = 'public'; activeTable = null; tableFilter = ''
-    resetTabs()
+    clearConnectionState()
     autoConnecting = true
     try {
       if (conn.type === 'mysql') await connectMysql(conn)
@@ -1703,8 +1893,7 @@
   async function handleSampleConnect() {
     disconnectPostgres().catch(() => {})
     connection = null
-    schemas = []; tables = []; indexes = []; enums = []; activeSchema = 'public'; activeTable = null; tableFilter = ''
-    resetTabs()
+    clearConnectionState()
     autoConnecting = true
     try {
       const filePath = await initSampleDb()
@@ -1729,8 +1918,7 @@
     // Disconnect current (best-effort, non-blocking)
     disconnectPostgres().catch(() => {})
     connection = null
-    schemas = []; tables = []; indexes = []; enums = []; activeSchema = 'public'; activeTable = null; tableFilter = ''
-    resetTabs()
+    clearConnectionState()
     // Connect to the chosen saved connection
     autoConnecting = true
     try {
@@ -2138,6 +2326,20 @@
         onnewtable={() => (showCreateTableDialog = true)}
         ontruncatetable={handleTruncateTable}
         ondroptable={(t, c) => void handleDropTable(t, c)}
+        {recentTabs}
+        onrecentselect={(schema, table) => { if (aiMode) exitAiMode(); void openTableTab(schema, table) }}
+        onrecentremove={(schema, table) => {
+          if (persistConnectionId) {
+            removeRecentTab(persistConnectionId, schema, table)
+            refreshRecentTabs()
+          }
+        }}
+        onrecentclear={() => {
+          if (persistConnectionId) {
+            clearRecentTabs(persistConnectionId)
+            refreshRecentTabs()
+          }
+        }}
       />
     </div>
   {/if}
@@ -2361,9 +2563,54 @@
             <p class="font-mono text-ui-sm text-muted-foreground/40">Dismiss the error above to continue.</p>
           </div>
         {:else}
+          {#if tableViewMode === 'structure' && canShowStructure}
+            <TableToolbar
+              bind:this={tableToolbar}
+              bind:filterBarOpen
+              bind:tableViewMode
+              structureAllowed={canShowStructure}
+              ontogglestructure={() => { tableViewMode = 'data'; structureColumns = [] }}
+              {sidebarOpen}
+              queryMs={0}
+              page={1}
+              pageSize={0}
+              offset={0}
+              total={0}
+              columns={[]}
+              rowSearch=""
+              rowSort={null}
+              rowFilters={[]}
+              loading={loadingStructure}
+              selectedCount={0}
+              hasPrimaryKey={false}
+              deleting={false}
+              ontogglesidebar={toggleSidebar}
+              onrefresh={() => void loadStructure()}
+              onprev={() => {}}
+              onnext={() => {}}
+              {structureSearch}
+              onstructuresearchchange={(v) => (structureSearch = v)}
+            />
+            <StructureView
+              schema={activeSchema}
+              table={activeTable ?? ''}
+              {primaryKey}
+              columns={structureColumns}
+              indexes={activeTable ? indexes.filter((i) => i.tableName === activeTable) : []}
+              {tables}
+              {enums}
+              columnSearch={structureSearch}
+              loading={loadingStructure}
+              onrefresh={() => void loadStructure()}
+            />
+          {:else}
           <TableToolbar
             bind:this={tableToolbar}
             bind:filterBarOpen
+            bind:tableViewMode
+            structureAllowed={canShowStructure}
+            ontogglestructure={() => { tableViewMode = 'structure'; if (!structureColumns.length) void loadStructure() }}
+
             {sidebarOpen}
             {queryMs}
             {page}
@@ -2411,6 +2658,8 @@
                 {rows}
                 {primaryKey}
                 {foreignKeys}
+                schema={activeSchema}
+                tableName={activeTable ?? ''}
                 indexes={activeTable ? indexes.filter((i) => i.tableName === activeTable) : []}
                 {hiddenColumns}
                 columnWidthsKey={activeTable ? `${activeSchema}.${activeTable}` : undefined}
@@ -2435,10 +2684,13 @@
             <RowDetailPanel
               {columns}
               {rows}
+              {primaryKey}
               target={inspectorTarget}
               onclose={closeInspector}
+              onsave={handleSaveCell}
             />
           </div>
+          {/if}
         {/if}
       {/if}
 

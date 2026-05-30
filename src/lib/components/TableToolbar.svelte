@@ -1,5 +1,6 @@
 <script>
   import PanelLeft from "@lucide/svelte/icons/panel-left";
+  import LayoutList from "@lucide/svelte/icons/layout-list";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
@@ -74,7 +75,33 @@
     /** @type {(next: Set<string>) => void} */
     onhiddencolumnschange = () => {},
     filterBarOpen = $bindable(false),
+    /** @type {'data' | 'structure'} */
+    tableViewMode = $bindable('data'),
+    ontogglestructure = () => {},
+    /** Whether the structure view is available for the current object (false for views) */
+    structureAllowed = true,
+    /** Search string for column name filtering (structure mode only) */
+    structureSearch = '',
+    onstructuresearchchange = /** @type {(v: string) => void} */ (() => {}),
   } = $props();
+
+  /** @type {HTMLInputElement | null} */
+  let structureSearchEl = $state(null)
+
+  // Ctrl/Cmd+F focuses the column search input when in structure mode
+  $effect(() => {
+    if (tableViewMode !== 'structure') return
+    /** @param {KeyboardEvent} e */
+    function handler(e) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault()
+        structureSearchEl?.focus()
+        structureSearchEl?.select()
+      }
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  })
 
   const deleteLabel = $derived(
     selectedCount === 1
@@ -276,6 +303,17 @@
     >
       <PanelLeft class="size-3.5" />
     </button>
+    {#if structureAllowed}
+      <button
+        type="button"
+        class={cn(iconBtn, tableViewMode === 'structure' && "bg-accent text-foreground")}
+        title={tableViewMode === 'structure' ? 'Switch to Data view' : 'Switch to Structure view'}
+        aria-pressed={tableViewMode === 'structure'}
+        onclick={ontogglestructure}
+      >
+        <LayoutList class="size-3.5" />
+      </button>
+    {/if}
   </div>
 
   <!-- Center: search + filter + sort (full-width row below pagination when narrow) -->
@@ -286,20 +324,32 @@
       <Search
         class="pointer-events-none absolute left-2 size-3.5 text-muted-foreground"
       />
-      <Input
-        bind:ref={searchInputRef}
-        type="text"
-        role="searchbox"
-        aria-label="Search all columns"
-        class={cn(
-          "h-7 w-full min-w-0 border-input bg-input/30 pl-7 pr-7 text-ui-sm shadow-none focus-visible:ring-2",
-          localSearch.trim() && "border-ring/40",
-        )}
-        placeholder="Search all columns…"
-        value={localSearch}
-        disabled={columns.length === 0}
-        oninput={(e) => handleSearchInput(e.currentTarget.value)}
-      />
+      {#if tableViewMode === 'structure'}
+        <input
+          bind:this={structureSearchEl}
+          type="text"
+          aria-label="Search column"
+          class="h-7 w-full min-w-0 rounded-md border border-input bg-input/30 pl-7 pr-7 font-mono text-ui-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          placeholder="Search column…"
+          value={structureSearch}
+          oninput={(e) => onstructuresearchchange(/** @type {HTMLInputElement} */ (e.currentTarget).value)}
+        />
+      {:else}
+        <Input
+          bind:ref={searchInputRef}
+          type="text"
+          role="searchbox"
+          aria-label="Search all columns"
+          class={cn(
+            "h-7 w-full min-w-0 border-input bg-input/30 pl-7 pr-7 text-ui-sm shadow-none focus-visible:ring-2",
+            localSearch.trim() && "border-ring/40",
+          )}
+          placeholder="Search all columns…"
+          value={localSearch}
+          disabled={columns.length === 0}
+          oninput={(e) => handleSearchInput(e.currentTarget.value)}
+        />
+      {/if}
       <button
         type="button"
         class={cn(
@@ -314,6 +364,7 @@
       </button>
     </div>
 
+      {#if tableViewMode !== 'structure'}
       <button
         type="button"
         class={cn(
@@ -459,12 +510,14 @@
       <Plus class="size-3.5 shrink-0" />
       <span class="hidden md:inline">Add</span>
     </button>
+      {/if}
   </div>
 
   <!-- Right: perf + pagination -->
   <div
     class="order-2 ms-auto flex shrink-0 items-center gap-1 md:order-3 max-lg:max-w-[calc(100%-5rem)] max-lg:overflow-x-auto max-lg:[scrollbar-width:none] max-lg:[&::-webkit-scrollbar]:hidden"
   >
+    {#if tableViewMode !== 'structure'}
     {#if queryMs > 0}
       <span
         class="font-mono text-ui-xs text-muted-foreground tabular-nums"
@@ -551,6 +604,7 @@
     >
       <ChevronRight class="size-3.5" />
     </button>
+    {/if}<!-- end structure hide -->
     <button
       type="button"
       class={iconBtn}
@@ -562,6 +616,7 @@
       <RefreshCw class={cn("size-3.5", loading && "animate-spin")} />
     </button>
 
+    {#if tableViewMode !== 'structure'}
     <DropdownMenu.Root
       bind:open={limitOffsetOpen}
       onOpenChange={(open) => {
@@ -701,11 +756,12 @@
         </DropdownMenu.Item>
       </DropdownMenu.Content>
     </DropdownMenu.Root>
+    {/if}<!-- end structure hide (limit/offset + more menu) -->
   </div>
 </header>
 
 <!-- Inline filter bar -->
-{#if filterBarOpen && columns.length > 0}
+{#if filterBarOpen && columns.length > 0 && tableViewMode !== 'structure'}
   <div class="border-b border-border/50 bg-panel">
     {#each rowFilters as filter, i (filter.id)}
       {@const colKind = getColKind(filter.column)}

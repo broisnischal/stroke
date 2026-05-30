@@ -18,6 +18,8 @@
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Plus from "@lucide/svelte/icons/plus";
+  import Clock from "@lucide/svelte/icons/clock";
+  import X from "@lucide/svelte/icons/x";
   import DangerousActionDialog from "./DangerousActionDialog.svelte";
   import * as Select from "$lib/components/ui/select/index.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
@@ -114,6 +116,11 @@
     connection = null,
     ontruncatetable = /** @type {(table: string) => void} */ (() => {}),
     ondroptable = /** @type {(table: string, cascade: boolean) => void} */ (() => {}),
+    /** @type {import('$lib/stores/recent-tabs.js').RecentTab[]} */
+    recentTabs = [],
+    onrecentselect = /** @type {(schema: string, table: string) => void} */ (() => {}),
+    onrecentremove = /** @type {(schema: string, table: string) => void} */ (() => {}),
+    onrecentclear = () => {},
   } = $props();
 
   let localFilter = $state(untrack(() => tableFilter));
@@ -138,9 +145,11 @@
   }
 
   const _initial = loadSidebarSections()
+  let recentOpen = $state(_initial.recent ?? true);
   let tablesOpen = $state(_initial.tables ?? true);
   let viewsOpen = $state(_initial.views ?? false);
   let matViewsOpen = $state(_initial.matViews ?? false);
+  $effect(() => { saveSidebarSection('recent', recentOpen) })
   $effect(() => { saveSidebarSection('tables', tablesOpen) })
   $effect(() => { saveSidebarSection('views', viewsOpen) })
   $effect(() => { saveSidebarSection('matViews', matViewsOpen) })
@@ -435,8 +444,9 @@
           </div>
           <DropdownMenu.Root>
             <DropdownMenu.Trigger
-              class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
+              class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground disabled:pointer-events-none disabled:opacity-40"
               title="Display options"
+              disabled={!connectionName}
             >
               <ListFilter class="size-3.5" />
             </DropdownMenu.Trigger>
@@ -466,7 +476,7 @@
             type="button"
             class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
             title="Refresh tables (⌘R)"
-            disabled={loadingTables}
+            disabled={loadingTables || !connectionName}
             onclick={onrefresh}
           >
             <RefreshCw
@@ -490,10 +500,11 @@
           />
           <input
             type="search"
-            placeholder="Filter tables…"
+            placeholder={connectionName ? "Filter tables…" : "Not connected"}
             value={localFilter}
+            disabled={!connectionName}
             oninput={(e) => handleFilterInput(e.currentTarget.value)}
-            class={cn(sidebarFieldClass, "w-full pl-8 pr-2.5 outline-none")}
+            class={cn(sidebarFieldClass, "w-full pl-8 pr-2.5 outline-none disabled:opacity-40 disabled:cursor-not-allowed")}
             aria-label="Filter tables"
             data-sidebar-filter
           />
@@ -524,6 +535,70 @@
               </span>
             </div>
           {:else}
+            <!-- ── Recent ─────────────────────────────────────────── -->
+            {#if recentTabs.length > 0 && connectionName}
+              <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
+                <button
+                  type="button"
+                  class="flex min-w-0 flex-1 items-center gap-1 text-left"
+                  onclick={() => (recentOpen = !recentOpen)}
+                >
+                  <ChevronDown
+                    class={cn(
+                      "size-3 shrink-0 text-muted-foreground/60 transition-transform duration-150",
+                      !recentOpen && "-rotate-90",
+                    )}
+                  />
+                  <Clock class="size-3 shrink-0 text-muted-foreground/60" />
+                  <span class="text-ui-2xs font-medium tracking-wide text-muted-foreground uppercase">Recent</span>
+                  <span class="ml-1 font-mono text-ui-2xs text-muted-foreground/60">{recentTabs.length}</span>
+                </button>
+                <button
+                  type="button"
+                  class="ml-auto font-mono text-ui-2xs text-muted-foreground/50 hover:text-destructive transition-colors"
+                  onclick={onrecentclear}
+                  title="Clear recent"
+                >Clear</button>
+              </div>
+              {#if recentOpen}
+                <ul class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
+                  {#each recentTabs as item (item.schema + '.' + item.table)}
+                    <li class="group/recent [content-visibility:auto] [contain-intrinsic-size:auto_28px]">
+                      <div
+                        class={cn(
+                          "grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 transition-colors cursor-pointer",
+                          activeTable === item.table
+                            ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                            : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
+                        )}
+                        role="button"
+                        tabindex="0"
+                        onclick={() => onrecentselect(item.schema, item.table)}
+                        onkeydown={(e) => e.key === 'Enter' && onrecentselect(item.schema, item.table)}
+                      >
+                        {#if item.tableKind === 'view'}
+                          <Eye class="size-3 shrink-0 opacity-50" />
+                        {:else if item.tableKind === 'materialized_view'}
+                          <Layers class="size-3 shrink-0 opacity-50" />
+                        {:else}
+                          <Table2 class="size-3 shrink-0 opacity-50" />
+                        {/if}
+                        <span class="min-w-0 truncate font-mono text-ui-sm leading-none">{item.table}</span>
+                        <button
+                          type="button"
+                          title="Remove from recent"
+                          class="invisible inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:text-foreground group-hover/recent:inline-flex"
+                          onclick={(e) => { e.stopPropagation(); onrecentremove(item.schema, item.table) }}
+                        >
+                          <X class="size-3" />
+                        </button>
+                      </div>
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
+            {/if}
+
             <!-- ── Pinned ─────────────────────────────────────────── -->
             {#if visiblePinnedTables.length > 0 && connectionName}
               <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">

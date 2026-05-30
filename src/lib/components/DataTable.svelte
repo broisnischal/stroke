@@ -89,6 +89,9 @@
     showRowExpand = true,
     /** Persist column widths per table, e.g. "public.users" */
     columnWidthsKey = undefined,
+    /** Schema + table name used for INSERT statement generation */
+    schema = '',
+    tableName = '',
     /** Set of column names to hide. Controlled externally (toolbar). */
     hiddenColumns = /** @type {Set<string>} */ (new Set()),
     /**
@@ -674,6 +677,89 @@
       toast.success("Copied row as JSON");
     } catch {
       toast.error("Could not copy to clipboard");
+    }
+  }
+
+  // ── Copy row as … ──────────────────────────────────────────────────────────
+
+  /** Indices to copy: all selected rows if contextRow is in selection, else just contextRow. */
+  function copyTargetIndices(rowIdx) {
+    return selected.size > 1 && selected.has(rowIdx)
+      ? [...selected].sort((a, b) => a - b)
+      : [rowIdx];
+  }
+
+  /** Escape a cell value for CSV (RFC 4180). */
+  function csvCell(value) {
+    if (value === null || value === undefined) return '';
+    const s = typeof value === 'object' ? JSON.stringify(value) : String(value);
+    if (s.includes(',') || s.includes('"') || s.includes('\n') || s.includes('\r')) {
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  }
+
+  /** Escape a cell value for SQL INSERT. */
+  function sqlLiteral(value) {
+    if (value === null || value === undefined) return 'NULL';
+    if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
+    if (typeof value === 'number') return String(value);
+    if (typeof value === 'object') {
+      const s = JSON.stringify(value).replace(/'/g, "''");
+      return `'${s}'`;
+    }
+    return "'" + String(value).replace(/'/g, "''") + "'";
+  }
+
+  /** Markdown-safe cell text. */
+  function mdCell(value) {
+    if (value === null || value === undefined) return 'NULL';
+    const s = typeof value === 'object' ? JSON.stringify(value) : String(value);
+    return s.replace(/\|/g, '\\|').replace(/\n/g, ' ');
+  }
+
+  async function copyAs(rowIdx, format) {
+    const indices = copyTargetIndices(rowIdx);
+    const colNames = columns.map((c) => c.name);
+    const dataRows = indices.map((i) => rows[i] ?? []);
+    let text = '';
+    const label = indices.length > 1 ? `${indices.length} rows` : '1 row';
+
+    if (format === 'csv') {
+      const header = colNames.map(csvCell).join(',');
+      const body = dataRows.map((r) => r.map(csvCell).join(',')).join('\n');
+      text = header + '\n' + body;
+    } else if (format === 'json') {
+      const records = dataRows.map((r) => rowToRecord(columns, r));
+      text = formatJsonValue(indices.length === 1 ? records[0] : records);
+    } else if (format === 'plain') {
+      text = dataRows
+        .map((r) =>
+          colNames.map((name, i) => {
+            const v = r[i];
+            const s = v === null || v === undefined ? 'NULL' : typeof v === 'object' ? JSON.stringify(v) : String(v);
+            return `${name}: ${s}`;
+          }).join('\n'),
+        )
+        .join('\n\n');
+    } else if (format === 'markdown') {
+      const sep = colNames.map(() => '---').join(' | ');
+      const header = colNames.map(mdCell).join(' | ');
+      const body = dataRows.map((r) => r.map(mdCell).join(' | ')).join('\n');
+      text = `| ${header} |\n| ${sep} |\n${dataRows.map((r) => `| ${r.map(mdCell).join(' | ')} |`).join('\n')}`;
+    } else if (format === 'insert') {
+      const tbl = schema ? `"${schema}"."${tableName || 'table'}"` : `"${tableName || 'table'}"`;
+      const cols = colNames.map((c) => `"${c}"`).join(', ');
+      text = dataRows
+        .map((r) => `INSERT INTO ${tbl} (${cols}) VALUES (${r.map(sqlLiteral).join(', ')});`)
+        .join('\n');
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`Copied ${label} as ${format.toUpperCase()}`);
+    } catch {
+      toast.error('Could not copy to clipboard');
     }
   }
 
@@ -1397,7 +1483,7 @@
   })
 </script>
 
-{#if loading}
+{#if loading && columns.length === 0}
   <TableLoading {embedded} />
 {:else}
   <ContextMenu.Root
@@ -1659,6 +1745,11 @@
                       }
                       if (editingCell) cancelEdit();
                       focusedRow = idx;
+                      if (e.shiftKey) {
+                        openInInspector(idx);
+                        return;
+                      }
+                      if (inspectorRow !== null) inspectorRow = idx;
                       const cellEl = target?.closest("td[data-col-idx]");
                       if (cellEl) {
                         const ci = Number(cellEl.getAttribute("data-col-idx"));
@@ -2123,12 +2214,35 @@
         </ContextMenu.Item>
       {/if}
       <ContextMenu.Separator />
-      <ContextMenu.Item
-        onSelect={() => runMenuAction(() => copyRowJson(contextRowIdx))}
-      >
-        <Braces />
-        Copy row JSON
-      </ContextMenu.Item>
+      <ContextMenu.Sub>
+        <ContextMenu.SubTrigger>
+          <Copy />
+          Copy row as
+        </ContextMenu.SubTrigger>
+        <ContextMenu.SubContent class="w-44 [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+          <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'json'))}>
+            <Braces />
+            JSON
+          </ContextMenu.Item>
+          <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'csv'))}>
+            <Copy />
+            CSV
+          </ContextMenu.Item>
+          <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'plain'))}>
+            <Copy />
+            Plain text
+          </ContextMenu.Item>
+          <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'markdown'))}>
+            <Copy />
+            Markdown table
+          </ContextMenu.Item>
+          <ContextMenu.Separator />
+          <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'insert'))}>
+            <Copy />
+            INSERT statement
+          </ContextMenu.Item>
+        </ContextMenu.SubContent>
+      </ContextMenu.Sub>
       <ContextMenu.Item
         onSelect={() => runMenuAction(() => toggleRow(contextRowIdx))}
       >
