@@ -1625,6 +1625,134 @@ async fn execute_sql_pg(pool: &sqlx::PgPool, sql: &str) -> Result<SqlResult, Str
     })
 }
 
+async fn execute_sql_multi_pg(pool: &sqlx::PgPool, sql: &str) -> Result<Vec<SqlResult>, String> {
+    let started = std::time::Instant::now();
+
+    let stmts: Vec<&str> = sql
+        .split(';')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if stmts.is_empty() {
+        return Err("Query is empty".into());
+    }
+
+    // Single statement — delegate to existing path (avoids code duplication)
+    if stmts.len() == 1 {
+        return execute_sql_pg(pool, stmts[0]).await.map(|r| vec![r]);
+    }
+
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| format!("Failed to begin transaction: {e}"))?;
+
+    let _ = sqlx::query(&format!("SET LOCAL statement_timeout = {EXECUTE_SQL_TIMEOUT_MS}"))
+        .execute(&mut *tx)
+        .await;
+
+    let _ = started; // suppress unused warning; per-stmt timers used below
+    let mut results: Vec<SqlResult> = Vec::new();
+
+    for stmt in &stmts {
+        let stmt_started = std::time::Instant::now();
+        let stmt_ms = || stmt_started.elapsed().as_millis() as u64;
+
+        if is_row_returning_sql(stmt) {
+            let mut stream = sqlx::query(stmt).fetch(&mut *tx);
+            let mut pg_rows: Vec<sqlx::postgres::PgRow> = Vec::new();
+            let mut capped = false;
+
+            loop {
+                match stream.try_next().await {
+                    Ok(Some(row)) => {
+                        pg_rows.push(row);
+                        if pg_rows.len() >= EXECUTE_SQL_MAX_ROWS {
+                            capped = true;
+                            break;
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(e) => {
+                        drop(stream);
+                        let _ = tx.rollback().await;
+                        return Err(format!("Query failed: {e}"));
+                    }
+                }
+            }
+            drop(stream);
+
+            let columns: Vec<ColumnInfo> = pg_rows
+                .first()
+                .map(|r| {
+                    r.columns()
+                        .iter()
+                        .map(|c| ColumnInfo::new(c.name(), pg_type_label(c.type_info().name())))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let data: Vec<Vec<Value>> = pg_rows
+                .iter()
+                .map(|row| (0..row.len()).map(|i| cell_to_json(row, i)).collect())
+                .collect();
+
+            let row_count = data.len() as i64;
+            results.push(SqlResult {
+                columns,
+                rows: data,
+                row_count: Some(row_count),
+                message: if capped {
+                    Some(format!("Showing first {EXECUTE_SQL_MAX_ROWS} rows"))
+                } else {
+                    None
+                },
+                query_ms: stmt_ms(),
+            });
+        } else {
+            match sqlx::query(stmt).execute(&mut *tx).await {
+                Ok(result) => {
+                    let affected = result.rows_affected() as i64;
+                    results.push(SqlResult {
+                        columns: vec![],
+                        rows: vec![],
+                        row_count: Some(affected),
+                        message: Some(format!("{affected} row(s) affected")),
+                        query_ms: stmt_ms(),
+                    });
+                }
+                Err(e) => {
+                    let _ = tx.rollback().await;
+                    return Err(format!("Statement failed: {e}"));
+                }
+            }
+        }
+    }
+
+    let _ = tx.commit().await;
+    Ok(results)
+}
+
+pub async fn execute_sql_multi(state: State<'_, DbState>, sql: String) -> Result<Vec<SqlResult>, String> {
+    let sql_str = sql.trim();
+    if sql_str.is_empty() {
+        return Err("Query is empty".into());
+    }
+    match require_conn(&state)? {
+        ActiveConnection::Postgres(pool) => execute_sql_multi_pg(&pool, sql_str).await,
+        ActiveConnection::Sqlite(pool) => {
+            super::sqlite::execute_sql(&pool, sql_str).await.map(|r| vec![r])
+        }
+        ActiveConnection::D1(cfg) => {
+            super::d1::query(&cfg, sql_str, vec![]).await.map(|r| vec![r])
+        }
+        ActiveConnection::Mysql(pool) => {
+            super::mysql::execute_sql(&pool, sql_str).await.map(|r| vec![r])
+        }
+    }
+}
+
 // ── D1 helpers (thin wrappers that build SQLite-compatible SQL) ───────────────
 
 async fn get_table_rows_d1(

@@ -29,10 +29,12 @@
     sql = '',
     /** @type {string} */
     connectionId = '',
+    initialChartType = 'bar',
+    oncharttypechange = undefined,
   } = $props()
 
   // ── Chart type ────────────────────────────────────────────────────────────
-  let chartType = $state('bar')
+  let chartType = $state(initialChartType ?? 'bar')
 
   const currentEntry = $derived(CHART_CATALOG.find(c => c.id === chartType) ?? CHART_CATALOG[0])
 
@@ -64,6 +66,7 @@
 
   function selectChartType(id) {
     chartType = id
+    oncharttypechange?.(id)
     pickerOpen = false
     pickerSearch = ''
   }
@@ -380,13 +383,13 @@
     {/if}
 
     <!-- ── Chart ──────────────────────────────────────────────────────── -->
-    <div class="chart-canvas-host min-h-0 flex-1 p-2">
+    <div class="chart-canvas-host relative min-h-0 flex-1">
       {#if rows.length === 0}
-        <div class="flex h-full items-center justify-center">
+        <div class="absolute inset-0 flex items-center justify-center">
           <p class="text-ui-sm text-muted-foreground/40">No data to display</p>
         </div>
       {:else}
-        <EChartPanel {option} height="100%" />
+        <EChartPanel {option} class="absolute inset-0" />
       {/if}
     </div>
 

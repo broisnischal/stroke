@@ -1075,7 +1075,7 @@
 </script>
 
 <div
-  class="relative flex h-full min-h-0 min-w-0 shrink-0 flex-col overflow-hidden border-l border-border bg-panel"
+  class="relative flex h-full min-h-0 min-w-0 shrink-0 flex-col overflow-hidden bg-panel"
   style="width: {width}px; min-width: {width}px; max-width: {width}px"
   data-studio-region="ai-sidebar"
 >

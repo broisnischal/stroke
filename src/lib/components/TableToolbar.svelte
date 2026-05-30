@@ -1,5 +1,4 @@
 <script>
-  import PanelLeft from "@lucide/svelte/icons/panel-left";
   import LayoutList from "@lucide/svelte/icons/layout-list";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
@@ -42,7 +41,6 @@
   /** @typedef {import('$lib/table-query.js').FilterOp} FilterOp */
 
   let {
-    sidebarOpen = true,
     queryMs = 0,
     page = 1,
     pageSize = 50,
@@ -55,7 +53,6 @@
     rowSearch = "",
     rowSort = null,
     rowFilters = [],
-    ontogglesidebar = () => {},
     onrefresh = () => {},
     onprev = () => {},
     onnext = () => {},
@@ -298,6 +295,7 @@
 
   function clearFilters() {
     onfilterschange([]);
+    filterBarOpen = false;
   }
 
   /** @param {TableFilter[]} next */
@@ -330,15 +328,6 @@
   >
     <!-- Left -->
     <div class="order-1 flex shrink-0 items-center gap-0.5">
-      <button
-        type="button"
-        class={cn(iconBtn, !sidebarOpen && "bg-accent text-foreground")}
-        title="Toggle sidebar (⌘B)"
-        aria-pressed={sidebarOpen}
-        onclick={ontogglesidebar}
-      >
-        <PanelLeft class="size-3.5" />
-      </button>
       {#if structureAllowed}
         <button
           type="button"

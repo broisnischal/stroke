@@ -10,6 +10,8 @@
 		"data-slot": dataSlot = "input",
 		...restProps
 	} = $props();
+
+	const noSuggest = { autocomplete: "off", autocorrect: "off", autocapitalize: "off", spellcheck: false };
 </script>
 
 {#if type === "file"}
@@ -34,6 +36,7 @@
 			className
 		)}
 		{type}
+		{...noSuggest}
 		bind:value
 		{...restProps}
 	/>

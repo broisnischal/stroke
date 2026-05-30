@@ -96,7 +96,7 @@ pub fn toggle_devtools(window: tauri::WebviewWindow) {
 
 use crate::db::{
     connect, connect_d1, connect_mysql, connect_sqlite, disconnect,
-    delete_table_row, delete_table_rows, execute_ddl, execute_sql, get_table_rows, insert_table_row,
+    delete_table_row, delete_table_rows, execute_ddl, execute_sql, execute_sql_multi, get_table_rows, insert_table_row,
     list_schemas, list_tables, list_indexes, list_enums, truncate_table, drop_table,
     get_table_column_structure,
     test_connection, test_d1_connection, test_mysql_connection, test_sqlite_connection,
@@ -262,6 +262,11 @@ pub async fn pg_get_table_rows(
 #[tauri::command]
 pub async fn pg_execute_sql(state: State<'_, DbState>, sql: String) -> Result<SqlResult, String> {
     execute_sql(state, sql).await
+}
+
+#[tauri::command]
+pub async fn pg_execute_sql_multi(state: State<'_, DbState>, sql: String) -> Result<Vec<SqlResult>, String> {
+    execute_sql_multi(state, sql).await
 }
 
 /// Run a DDL statement outside a transaction (required for CREATE/DROP DATABASE etc.).

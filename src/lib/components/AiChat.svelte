@@ -209,6 +209,51 @@
     inputRef?.focus()
   }
 
+  /** Parse a raw error string into a human-friendly message. */
+  function parseErrorMessage(/** @type {string} */ raw) {
+    try {
+      // Strip leading "Error: " prefix if present
+      const body = raw.replace(/^Error:\s*/i, '')
+      // Try JSON parse (API errors are often JSON)
+      const json = JSON.parse(body)
+      const msg = json?.error?.message ?? json?.message ?? json?.detail ?? null
+      if (msg) {
+        const code = json?.error?.code ?? json?.code ?? json?.type ?? null
+        if (code === 'rate_limit_exceeded' || json?.type === 'rate_limited') {
+          return `Rate limit reached — wait a moment and try again.`
+        }
+        return String(msg)
+      }
+    } catch { /* not JSON */ }
+    if (/rate.limit/i.test(raw)) return `Rate limit reached — wait a moment and try again.`
+    if (/429/.test(raw)) return `Too many requests (429) — wait a moment and try again.`
+    if (/401|unauthorized/i.test(raw)) return `Authentication failed — check your API key.`
+    if (/timeout/i.test(raw)) return `Request timed out — try again.`
+    return raw.replace(/^Error:\s*/i, '').slice(0, 200)
+  }
+
+  /** Start a new chat with a short summary of the current one as opening context. */
+  async function continueInNewChat() {
+    const turnCount = apiHistory.filter(m => m.role === 'user').length
+    if (turnCount === 0) { await newConversation(); return }
+
+    // Build a brief handoff message
+    const summary = items
+      .filter(i => i.kind === 'user' || i.kind === 'assistant')
+      .slice(-6)
+      .map(i => i.kind === 'user'
+        ? `User: ${/** @type {any} */ (i).text?.slice(0, 120) ?? ''}`
+        : `AI: ${/** @type {any} */ (i).parts?.find(p => p.type === 'text')?.content?.slice(0, 200) ?? '…'}`)
+      .join('\n')
+
+    await newConversation()
+    await tick()
+    inputText = `[Continuing from previous conversation]\n\n${summary}\n\nPlease continue from where we left off.`
+    await tick()
+    resizeInput()
+    inputRef?.focus()
+  }
+
   async function removeConversation(/** @type {string} */ id) {
     closeContextMenu()
     await deleteConversation(id)
@@ -1862,7 +1907,30 @@
 
         <!-- Error bar -->
         {#if error}
-          <div class="shrink-0 border-t border-destructive/30 bg-destructive/8 px-3 py-2 text-ui-xs text-destructive">{error}</div>
+          <div class="shrink-0 border-t border-destructive/20 bg-destructive/6 px-3 py-2">
+            <div class="flex items-start gap-2">
+              <AlertTriangle class="mt-0.5 size-3.5 shrink-0 text-destructive/70" />
+              <p class="min-w-0 flex-1 text-ui-xs text-destructive/90 leading-relaxed">{parseErrorMessage(error)}</p>
+              <div class="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  class="inline-flex h-6 items-center gap-1 rounded-md border border-destructive/20 px-2 text-ui-xs text-destructive/70 transition-colors hover:bg-destructive/8 hover:text-destructive"
+                  onclick={continueInNewChat}
+                  title="Open a new chat pre-seeded with a summary of this conversation"
+                >
+                  Continue in new chat →
+                </button>
+                <button
+                  type="button"
+                  class="inline-flex size-5 items-center justify-center rounded text-destructive/40 transition-colors hover:text-destructive/70"
+                  onclick={() => (error = '')}
+                  title="Dismiss"
+                >
+                  <X class="size-3" />
+                </button>
+              </div>
+            </div>
+          </div>
         {/if}
 
         <!-- Jump-to-bottom button: shown whenever user has scrolled away from bottom -->
@@ -1881,15 +1949,10 @@
         <!-- Input -->
         <div class="shrink-0 border-t border-border/50 {mode === 'full' ? 'px-6 pb-6 pt-4' : 'px-3 pb-4 pt-3'}">
           <div class="{mode === 'full' ? 'mx-auto w-full max-w-2xl' : ''}">
-            <div class={cn(
-              'overflow-hidden rounded-2xl border transition-all duration-150',
-              mode === 'full' ? 'shadow-md shadow-black/6' : 'shadow-sm',
-              hasPendingConfirm
-                ? 'border-border/40 opacity-60'
-                : error
-                  ? 'border-destructive/40 focus-within:border-destructive/50'
-                  : 'border-border/60 focus-within:border-ring/40 focus-within:ring-2 focus-within:ring-ring/8',
-            )}>
+            <div
+              class="overflow-hidden rounded-2xl border border-[#3a3a3a] transition-opacity duration-150 {hasPendingConfirm ? 'opacity-50' : ''}"
+              style="border-color: #3a3a3a"
+            >
               <!-- Textarea row -->
               <textarea
                 bind:this={inputRef}

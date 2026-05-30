@@ -47,6 +47,7 @@
     "monaco-editor": "^0.55.1",
     "shiki": "^4.1.0",
     "sql-formatter": "^15.8.0",
+    "swapy": "^1.0.5",
     "tailwind-merge": "^3.6.0",
     "tailwind-variants": "^3.2.2",
     "tailwindcss": "^4.3.0",

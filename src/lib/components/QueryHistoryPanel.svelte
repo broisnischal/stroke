@@ -6,12 +6,14 @@
   import Trash2 from '@lucide/svelte/icons/trash-2'
   import Search from '@lucide/svelte/icons/search'
   import X from '@lucide/svelte/icons/x'
+  import BarChart2 from '@lucide/svelte/icons/bar-chart-2'
   import { cn } from '$lib/utils.js'
   import {
     clearQueryHistory,
     deleteQueryHistoryEntry,
     deleteSavedQuery,
   } from '$lib/stores/query-history.js'
+  import { savedCharts } from '$lib/stores/saved-charts.js'
 
   /** @typedef {import('$lib/stores/query-history.js').QueryHistoryEntry} QueryHistoryEntry */
   /** @typedef {import('$lib/stores/query-history.js').SavedQuery} SavedQuery */
@@ -26,9 +28,10 @@
     onselect = (sql) => {},
     onrefresh = async () => {},
     onclose = () => {},
+    onopenchart = /** @type {(chartId: string) => void} */ ((_id) => {}),
   } = $props()
 
-  /** @type {'history' | 'saved'} */
+  /** @type {'history' | 'saved' | 'charts'} */
   let tab = $state('history')
   let filter = $state('')
 
@@ -91,114 +94,122 @@
 </script>
 
 {#if visible}
-  <aside class="flex w-60 shrink-0 flex-col border-r border-border bg-panel">
-    <div class="flex flex-col gap-2 border-b border-border px-2.5 py-2.5">
-      <div class="flex items-center justify-between gap-2 px-0.5">
-        <span class="text-ui-xs font-semibold text-foreground">Queries</span>
+  <aside class="flex w-56 shrink-0 flex-col border-r border-border bg-panel">
+
+    <!-- Header row: title + close -->
+    <div class="flex h-9 shrink-0 items-center justify-between border-b border-border px-3">
+      <div class="flex items-center gap-0.5">
         <button
           type="button"
-          class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
-          title="Hide query history"
-          onclick={onclose}
-        >
-          <PanelLeft class="size-3.5" />
-        </button>
-      </div>
-
-      <div class="relative">
-        <Search class="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-        <input
-          type="search"
-          bind:value={filter}
-          placeholder="Search queries…"
-          class="h-8 w-full rounded-md border border-border/80 bg-background py-1 pl-7 pr-7 font-mono text-ui-xs text-foreground shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        />
-        {#if filter}
-          <button
-            type="button"
-            class="absolute right-1.5 top-1/2 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:text-foreground"
-            aria-label="Clear search"
-            onclick={() => (filter = '')}
-          >
-            <X class="size-3" />
-          </button>
-        {/if}
-      </div>
-
-      <div class="flex gap-0.5 rounded-md border border-border/80 bg-muted/30 p-0.5">
-        <button
-          type="button"
-          class={cn(
-            'flex flex-1 items-center justify-center gap-1.5 rounded px-2 py-1 text-ui-xs transition-colors',
-            tab === 'history'
-              ? 'bg-background font-medium text-foreground shadow-sm'
-              : 'text-muted-foreground hover:text-foreground',
-          )}
           onclick={() => (tab = 'history')}
+          class={cn(
+            'relative px-1.5 py-1 text-ui-xs font-medium transition-colors',
+            tab === 'history' ? 'text-foreground' : 'text-muted-foreground/60 hover:text-muted-foreground',
+          )}
         >
-          <History class="size-3 shrink-0" />
+          {#if tab === 'history'}
+            <span class="absolute inset-x-1.5 bottom-0 h-px bg-primary rounded-full"></span>
+          {/if}
           History
         </button>
         <button
           type="button"
-          class={cn(
-            'flex flex-1 items-center justify-center gap-1.5 rounded px-2 py-1 text-ui-xs transition-colors',
-            tab === 'saved'
-              ? 'bg-background font-medium text-foreground shadow-sm'
-              : 'text-muted-foreground hover:text-foreground',
-          )}
           onclick={() => (tab = 'saved')}
+          class={cn(
+            'relative px-1.5 py-1 text-ui-xs font-medium transition-colors',
+            tab === 'saved' ? 'text-foreground' : 'text-muted-foreground/60 hover:text-muted-foreground',
+          )}
         >
-          <Bookmark class="size-3 shrink-0" />
+          {#if tab === 'saved'}
+            <span class="absolute inset-x-1.5 bottom-0 h-px bg-primary rounded-full"></span>
+          {/if}
           Saved
         </button>
+        <button
+          type="button"
+          onclick={() => (tab = 'charts')}
+          class={cn(
+            'relative px-1.5 py-1 text-ui-xs font-medium transition-colors',
+            tab === 'charts' ? 'text-foreground' : 'text-muted-foreground/60 hover:text-muted-foreground',
+          )}
+        >
+          {#if tab === 'charts'}
+            <span class="absolute inset-x-1.5 bottom-0 h-px bg-primary rounded-full"></span>
+          {/if}
+          Charts
+        </button>
       </div>
+      <button
+        type="button"
+        class="inline-flex size-5 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-muted/60 hover:text-foreground"
+        title="Hide panel ({modKey}⇧B)"
+        onclick={onclose}
+      >
+        <PanelLeft class="size-3.5" />
+      </button>
     </div>
 
-    <div class="app-scroll flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-1.5 [will-change:transform]">
+    <!-- Search -->
+    <div class="relative border-b border-border/60 px-2 py-1.5">
+      <Search class="pointer-events-none absolute left-3.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/50" />
+      <input
+        type="search"
+        bind:value={filter}
+        placeholder="Search…"
+        class="h-6 w-full rounded border border-transparent bg-muted/40 py-0 pl-6 pr-5 font-mono text-ui-2xs text-foreground placeholder:text-muted-foreground/50 focus-visible:border-border focus-visible:bg-background focus-visible:outline-none"
+      />
+      {#if filter}
+        <button
+          type="button"
+          class="absolute right-3 top-1/2 inline-flex size-4 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/50 hover:text-foreground"
+          aria-label="Clear"
+          onclick={() => (filter = '')}
+        >
+          <X class="size-2.5" />
+        </button>
+      {/if}
+    </div>
+
+    <!-- List -->
+    <div class="app-scroll flex min-h-0 flex-1 flex-col overflow-y-auto py-1 [will-change:transform]">
       {#if tab === 'history'}
         {#each filteredHistory as entry (entry.id)}
-          <div class="group relative flex items-stretch">
+          <div class="group relative">
             <button
               type="button"
-              class="relative flex min-w-0 flex-1 items-start gap-2 rounded-md px-2 py-2 pr-8 text-left transition-colors hover:bg-accent/35"
+              class="flex w-full min-w-0 items-start gap-1.5 px-2.5 py-1.5 pr-7 text-left transition-colors hover:bg-accent/30"
               onclick={() => onselect(entry.sql)}
             >
-              <History class="mt-0.5 size-3.5 shrink-0 text-muted-foreground/70" />
+              <History class="mt-px size-3 shrink-0 text-muted-foreground/40" />
               <div class="min-w-0 flex-1">
-                <span class="block truncate font-mono text-ui-xs font-medium leading-snug text-foreground">
+                <span class="block truncate font-mono text-ui-2xs leading-snug text-foreground/90">
                   {entry.title}
                 </span>
-                <span class="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                <span class="flex items-center gap-1 text-[10px] leading-tight text-muted-foreground/60">
                   <span>{relativeTime(entry.executedAt)}</span>
                   {#if entry.queryMs}
-                    <span class="tabular-nums">{entry.queryMs}ms</span>
+                    <span class="tabular-nums opacity-70">{entry.queryMs}ms</span>
                   {/if}
                 </span>
               </div>
             </button>
             <button
               type="button"
-              class="absolute top-1/2 right-1.5 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-[opacity,color] hover:text-destructive group-hover:opacity-100"
-              title="Remove from history"
-              onclick={(e) => {
-                e.stopPropagation()
-                void removeHistory(entry.id)
-              }}
+              class="absolute right-1.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/40 hover:!text-destructive"
+              title="Remove"
+              onclick={(e) => { e.stopPropagation(); void removeHistory(entry.id) }}
             >
               <Trash2 class="size-3" />
             </button>
           </div>
         {:else}
-          <div class="flex flex-col items-center gap-2 px-3 py-8 text-center">
-            <History class="size-7 text-muted-foreground/25" />
-            <p class="text-[11px] leading-relaxed text-muted-foreground/70">
-              {filter ? 'No matching queries' : 'No query history yet'}
+          <div class="flex flex-col items-center gap-1.5 px-4 py-8 text-center">
+            <History class="size-5 text-muted-foreground/20" />
+            <p class="text-[11px] text-muted-foreground/60">
+              {filter ? 'No matches' : 'No history yet'}
             </p>
             {#if !filter}
-              <p class="text-[10px] leading-relaxed text-muted-foreground/50">
-                Run SQL to record statements ({modKey}↵)
-              </p>
+              <p class="text-[10px] text-muted-foreground/40">{modKey}↵ to run</p>
             {/if}
           </div>
         {/each}
@@ -206,51 +217,74 @@
         {#if history.length > 0 && !filter}
           <button
             type="button"
-            class="mt-1 w-full rounded-md px-2 py-1.5 text-center text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            class="mx-2 mt-1 rounded px-2 py-1 text-center text-[10px] text-muted-foreground/50 transition-colors hover:bg-muted/60 hover:text-foreground"
             onclick={() => void clearAllHistory()}
           >
-            Clear history
+            Clear all
           </button>
         {/if}
-      {:else}
+
+      {:else if tab === 'saved'}
         {#each filteredSaved as entry (entry.id)}
-          <div class="group relative flex items-stretch">
+          <div class="group relative">
             <button
               type="button"
-              class="relative flex min-w-0 flex-1 items-start gap-2 rounded-md px-2 py-2 pr-8 text-left transition-colors hover:bg-accent/35"
+              class="flex w-full min-w-0 items-start gap-1.5 px-2.5 py-1.5 pr-7 text-left transition-colors hover:bg-accent/30"
               onclick={() => onselect(entry.sql)}
             >
-              <Bookmark class="mt-0.5 size-3.5 shrink-0 text-primary/70" />
+              <Bookmark class="mt-px size-3 shrink-0 text-primary/50" />
               <div class="min-w-0 flex-1">
-                <span class="block truncate text-ui-xs font-medium leading-snug text-foreground">
+                <span class="block truncate text-ui-2xs leading-snug text-foreground/90">
                   {entry.name}
                 </span>
-                <span class="text-[10px] text-muted-foreground">{relativeTime(entry.updatedAt)}</span>
+                <span class="text-[10px] leading-tight text-muted-foreground/60">
+                  {relativeTime(entry.updatedAt)}
+                </span>
               </div>
             </button>
             <button
               type="button"
-              class="absolute top-1/2 right-1.5 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-[opacity,color] hover:text-destructive group-hover:opacity-100"
-              title="Delete saved query"
-              onclick={(e) => {
-                e.stopPropagation()
-                void removeSaved(entry.id)
-              }}
+              class="absolute right-1.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/40 hover:!text-destructive"
+              title="Delete"
+              onclick={(e) => { e.stopPropagation(); void removeSaved(entry.id) }}
             >
               <Trash2 class="size-3" />
             </button>
           </div>
         {:else}
-          <div class="flex flex-col items-center gap-2 px-3 py-8 text-center">
-            <Bookmark class="size-7 text-muted-foreground/25" />
-            <p class="text-[11px] leading-relaxed text-muted-foreground/70">
-              {filter ? 'No matching saved queries' : 'No saved queries'}
+          <div class="flex flex-col items-center gap-1.5 px-4 py-8 text-center">
+            <Bookmark class="size-5 text-muted-foreground/20" />
+            <p class="text-[11px] text-muted-foreground/60">
+              {filter ? 'No matches' : 'No saved queries'}
             </p>
             {#if !filter}
-              <p class="text-[10px] leading-relaxed text-muted-foreground/50">
-                Use Save in the SQL toolbar
-              </p>
+              <p class="text-[10px] text-muted-foreground/40">{modKey}S to save</p>
             {/if}
+          </div>
+        {/each}
+      {:else}
+        {#each $savedCharts as chart (chart.id)}
+          <div class="group relative">
+            <button
+              type="button"
+              class="flex w-full min-w-0 items-start gap-1.5 px-2.5 py-1.5 text-left transition-colors hover:bg-accent/30"
+              onclick={() => onselect(chart.sql)}
+            >
+              <BarChart2 class="mt-px size-3 shrink-0 text-muted-foreground/40" />
+              <div class="min-w-0 flex-1">
+                <span class="block truncate text-ui-2xs leading-snug text-foreground/90">
+                  {chart.name}
+                </span>
+                <span class="text-[10px] leading-tight text-muted-foreground/60">
+                  {chart.group}
+                </span>
+              </div>
+            </button>
+          </div>
+        {:else}
+          <div class="flex flex-col items-center gap-1.5 px-4 py-8 text-center">
+            <BarChart2 class="size-5 text-muted-foreground/20" />
+            <p class="text-[11px] text-muted-foreground/60">No saved charts yet</p>
           </div>
         {/each}
       {/if}

@@ -10,6 +10,8 @@
   import Bookmark from "@lucide/svelte/icons/bookmark";
   import Code2 from "@lucide/svelte/icons/code-2";
   import Plus from "@lucide/svelte/icons/plus";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import { cn } from "$lib/utils.js";
   import SqlEditor from "./SqlEditor.svelte";
   import { sqlToDrizzle, sqlToPrisma } from "$lib/orm-builder.js";
   import QueryHistoryPanel from "./QueryHistoryPanel.svelte";
@@ -44,6 +46,8 @@
     message = "",
     loading = false,
     error = "",
+    /** @type {any[]} */
+    multiResults = [],
     schemaHints = /** @type {SqlSchemaHints} */ ({}),
     schemaContext = /** @type {Parameters<typeof buildSystemPrompt>[0] | null} */ (null),
     onrun = () => {},
@@ -59,6 +63,7 @@
     onmodshifte = undefined,
     onmodshiftd = undefined,
     onmodshifto = undefined,
+    onmodshiftb = undefined,
     queryHistoryVisible = $bindable(false),
     /** @type {import('$lib/stores/query-history.js').QueryHistoryEntry[]} */
     queryHistory = [],
@@ -123,17 +128,189 @@
     const next = sqlTabs[idx === 0 ? 1 : idx - 1]
     sqlTabs = sqlTabs.filter((t) => t.id !== id)
     if (activeTabId === id) activeTabId = next.id
+    // Clean up stored result for the closed tab
+    const cleaned = new Map(tabResults)
+    cleaned.delete(id)
+    tabResults = cleaned
   }
 
-  let selected = $state(new Set());
-  /** @type {'table' | 'json' | 'chart'} */
-  let outputView = $state('table')
+  /**
+   * @typedef {{
+   *   columns: any[],
+   *   rows: any[][],
+   *   error: string,
+   *   queryMs: number,
+   *   message: string,
+   *   loading: boolean,
+   *   outputView: 'table' | 'chart' | 'json',
+   *   chartType: string,
+   *   resultSets: ResultSet[],
+   *   activeResultIdx: number,
+   * }} TabResult
+   *
+   * @typedef {{
+   *   columns: any[],
+   *   rows: any[][],
+   *   message: string,
+   *   queryMs: number,
+   *   outputView: 'table' | 'chart' | 'json',
+   *   chartType: string,
+   * }} ResultSet
+   */
+
+  /** @returns {TabResult} */
+  function defaultResult() {
+    return { columns: [], rows: [], error: '', queryMs: 0, message: '', loading: false, outputView: 'table', chartType: 'bar', resultSets: [], activeResultIdx: 0 }
+  }
+
+  /** @type {Map<string, TabResult>} */
+  let tabResults = $state(new Map())
+  let runningTabId = $state(/** @type {string | null} */ (null))
+
+  const activeResult = $derived(tabResults.get(activeTabId) ?? defaultResult())
+
+  // When query state arrives from parent, route it to the tab that triggered the run
+  $effect(() => {
+    const col = columns, r = rows, err = error, qms = queryMs, msg = message, l = loading
+    const multi = multiResults
+    untrack(() => {
+      if (!runningTabId) return
+      const prev = tabResults.get(runningTabId) ?? defaultResult()
+      const next = new Map(tabResults)
+      if (multi && multi.length > 1) {
+        const resultSets = multi.map((res, i) => {
+          const existing = prev.resultSets?.[i]
+          return /** @type {ResultSet} */ ({
+            columns: res.columns ?? [],
+            rows: res.rows ?? [],
+            message: res.message ?? '',
+            queryMs: res.query_ms ?? res.queryMs ?? 0,
+            outputView: existing?.outputView ?? 'table',
+            chartType: existing?.chartType ?? 'bar',
+          })
+        })
+        next.set(runningTabId, {
+          ...prev,
+          columns: col, rows: r, error: err, queryMs: qms, message: msg, loading: l,
+          resultSets,
+          activeResultIdx: Math.min(prev.activeResultIdx ?? 0, resultSets.length - 1),
+        })
+      } else {
+        next.set(runningTabId, {
+          ...prev,
+          columns: col, rows: r, error: err, queryMs: qms, message: msg, loading: l,
+          resultSets: [],
+          activeResultIdx: 0,
+        })
+      }
+      tabResults = next
+    })
+  })
+
+  /** Record which SQL editor tab is running, then fire onrun */
+  function handleRun() {
+    runningTabId = activeTabId
+    onrun()
+  }
+
+  /** @param {'table'|'chart'|'json'} view */
+  function setOutputView(view) {
+    const prev = tabResults.get(activeTabId) ?? defaultResult()
+    const next = new Map(tabResults)
+    if (prev.resultSets?.length > 1) {
+      const idx = prev.activeResultIdx ?? 0
+      const newSets = prev.resultSets.map((s, i) => i === idx ? { ...s, outputView: view } : s)
+      next.set(activeTabId, { ...prev, resultSets: newSets })
+    } else {
+      next.set(activeTabId, { ...prev, outputView: view })
+    }
+    tabResults = next
+  }
+
+  /** @param {string} type */
+  function setChartType(type) {
+    const prev = tabResults.get(activeTabId) ?? defaultResult()
+    const next = new Map(tabResults)
+    if (prev.resultSets?.length > 1) {
+      const idx = prev.activeResultIdx ?? 0
+      const newSets = prev.resultSets.map((s, i) => i === idx ? { ...s, chartType: type } : s)
+      next.set(activeTabId, { ...prev, resultSets: newSets })
+    } else {
+      next.set(activeTabId, { ...prev, chartType: type })
+    }
+    tabResults = next
+  }
+
+  /** @param {number} idx */
+  function setActiveResultIdx(idx) {
+    const prev = tabResults.get(activeTabId) ?? defaultResult()
+    const next = new Map(tabResults)
+    next.set(activeTabId, { ...prev, activeResultIdx: idx })
+    tabResults = next
+  }
+
+  let selected = $state(new Set())
+  // Reset row selection when switching editor tabs
+  $effect(() => { activeTabId; untrack(() => { selected = new Set() }) })
+
+  let outputVisible = $state(
+    (() => { try { return localStorage.getItem('sql-output-visible') !== 'false' } catch { return true } })()
+  )
+
+  function toggleOutput() {
+    outputVisible = !outputVisible
+    try { localStorage.setItem('sql-output-visible', String(outputVisible)) } catch {}
+  }
+
+  $effect(() => {
+    /** @param {KeyboardEvent} e */
+    function onKey(e) {
+      const mod = e.metaKey || e.ctrlKey
+      if (!mod || e.altKey) return
+      if (e.key === 'j' && !e.shiftKey) {
+        e.preventDefault()
+        toggleOutput()
+      } else if ((e.key === 'b' || e.key === 'B') && e.shiftKey) {
+        e.preventDefault()
+        queryHistoryVisible = !queryHistoryVisible
+        onmodshiftb?.()
+      } else if (e.key === 's' && !e.shiftKey) {
+        e.preventDefault()
+        openSaveDialog()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
+  const currentDisplay = $derived.by(() => {
+    if (activeResult.resultSets?.length > 1) {
+      const idx = Math.min(activeResult.activeResultIdx ?? 0, activeResult.resultSets.length - 1)
+      const s = activeResult.resultSets[idx]
+      return {
+        columns: s.columns,
+        rows: s.rows,
+        queryMs: s.queryMs,
+        message: s.message,
+        outputView: s.outputView,
+        chartType: s.chartType,
+      }
+    }
+    return {
+      columns: activeResult.columns,
+      rows: activeResult.rows,
+      queryMs: activeResult.queryMs,
+      message: activeResult.message,
+      outputView: activeResult.outputView,
+      chartType: activeResult.chartType,
+    }
+  })
 
   const rowObjects = $derived(
-    columns.length > 0 && rows.length > 0
-      ? rows.map((row) =>
+    currentDisplay.columns.length > 0 && currentDisplay.rows.length > 0
+      ? currentDisplay.rows.map((row) =>
           Object.fromEntries(
-            /** @type {any[]} */ (columns).map((col, i) => [col.name ?? col, /** @type {any[]} */ (row)[i]])
+            /** @type {any[]} */ (currentDisplay.columns).map((col, i) => [col.name ?? col, /** @type {any[]} */ (row)[i]])
           )
         )
       : []
@@ -165,7 +342,7 @@
   // Reset fix state when the error message or sql changes
   $effect(() => {
     // Track these two deps; read/write fixStatus outside tracking to avoid cycles
-    error; sql
+    activeResult.error; activeTabId; sql
     untrack(() => {
       if (fixStatus !== 'idle') {
         fixAbort?.abort()
@@ -178,7 +355,7 @@
   })
 
   async function fixWithAi() {
-    if (!error || !sql.trim()) return
+    if (!activeResult.error || !sql.trim()) return
     fixAbort?.abort()
     const ctrl = new AbortController()
     fixAbort = ctrl
@@ -216,7 +393,7 @@
       }
 
       const userMsg =
-        `Fix this SQL error.${schemaSection}\n\nError:\n${error}\n\nSQL:\n\`\`\`sql\n${sql.trim()}\n\`\`\`\n\n` +
+        `Fix this SQL error.${schemaSection}\n\nError:\n${activeResult.error}\n\nSQL:\n\`\`\`sql\n${sql.trim()}\n\`\`\`\n\n` +
         `Return the corrected SQL in a \`\`\`sql code block and a brief one-sentence explanation. ` +
         `Use column names exactly as shown in the schema above — do NOT normalize casing or guess column names.`
 
@@ -342,8 +519,8 @@
       variant="default"
       size="sm"
       class="h-7 shrink-0 gap-2 pl-2.5 pr-2 font-medium shadow-sm"
-      disabled={loading || !sql.trim()}
-      onclick={() => onrun()}
+      disabled={activeResult.loading || !sql.trim()}
+      onclick={handleRun}
     >
       <Play class="size-3.5 shrink-0" data-icon="inline-start" />
       Run
@@ -357,9 +534,9 @@
         variant="ghost"
         size="sm"
         class="h-7 gap-1.5 px-2 text-muted-foreground hover:text-foreground"
-        disabled={loading || !sql.trim()}
+        disabled={activeResult.loading || !sql.trim()}
         title="Re-run query"
-        onclick={() => onrun()}
+        onclick={handleRun}
       >
         <RefreshCw class="size-3.5 shrink-0" />
         <span class="text-ui-xs">Refresh</span>
@@ -438,16 +615,6 @@
       </Button>
     </div>
 
-    <div class="ml-auto flex min-w-0 items-center gap-3">
-      {#if queryMs > 0}
-        <span class="shrink-0 font-mono text-ui-xs tabular-nums text-muted-foreground">
-          {queryMs}ms
-        </span>
-      {/if}
-      {#if message}
-        <span class="min-w-0 truncate text-ui-xs text-muted-foreground">{message}</span>
-      {/if}
-    </div>
   </div>
 
   <!-- SQL Tabs -->
@@ -488,17 +655,19 @@
   </div>
 
   <div
-    class="relative shrink-0 overflow-hidden border-b border-border bg-panel"
-    style="height: {editorHeight}px"
+    class={outputVisible
+      ? "relative shrink-0 overflow-hidden bg-panel"
+      : "relative min-h-0 flex-1 overflow-hidden bg-panel"}
+    style={outputVisible ? `height: ${editorHeight}px` : undefined}
   >
     <SqlEditor
       bind:value={activeTab.content}
       class="absolute inset-0"
       {schemaHints}
       {onmodk}
-      onmodenter={onmodenter ?? (() => onrun())}
-      onmodr={() => onrun()}
-      {onmods}
+      onmodenter={onmodenter ?? handleRun}
+      onmodr={handleRun}
+      onmods={openSaveDialog}
       {onmodi}
       {onmodb}
       {onmodw}
@@ -508,6 +677,8 @@
       {onmodshifte}
       {onmodshiftd}
       {onmodshifto}
+      onmodj={toggleOutput}
+      onmodshiftb={() => { queryHistoryVisible = !queryHistoryVisible; onmodshiftb?.() }}
       onchange={(content) => {
         if (content !== _lastSyncedSql) {
           _lastSyncedSql = content
@@ -520,6 +691,7 @@
     />
   </div>
 
+  {#if outputVisible}
   <ResizeHandle
     axis="y"
     edge="end"
@@ -534,13 +706,14 @@
       saveLayout({ sqlEditorHeight: editorHeight });
     }}
   />
+  {/if}
 
-  {#if error}
+  {#if activeResult.error}
     <!-- Console-style error strip between editor and results -->
     <div class="shrink-0 border-b border-destructive/20 bg-destructive/5">
       <div class="flex items-start gap-2 px-3 py-2">
         <span class="mt-px shrink-0 font-mono text-ui-2xs font-bold uppercase tracking-wide text-destructive/70">error</span>
-        <pre class="max-h-24 min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-all font-mono text-ui-xs leading-relaxed text-destructive">{error}</pre>
+        <pre class="max-h-24 min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-all font-mono text-ui-xs leading-relaxed text-destructive">{activeResult.error}</pre>
         <div class="flex shrink-0 items-center gap-1.5">
           {#if fixStatus === 'idle' || fixStatus === 'error'}
             <button
@@ -610,60 +783,103 @@
     </div>
   {/if}
 
-  <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-panel">
-    {#if columns.length > 0}
-      {#if outputView === 'json'}
-        <JsonViewer
-          json={jsonText}
-          rowCount={rows.length}
-          onshowtable={() => (outputView = 'table')}
-        />
-      {:else if outputView === 'chart'}
-        <ChartView {columns} {rows} {sql} />
-      {:else}
-        <DataTable {columns} {rows} {loading} bind:selected />
+  <!-- Output panel: header always visible, content toggles with Cmd+J -->
+  <div class={outputVisible ? "flex min-h-0 flex-1 flex-col overflow-hidden" : "flex shrink-0 flex-col"}>
+    <!-- Output tab bar -->
+    <div
+      class="studio-chrome flex h-8 shrink-0 items-stretch border-b border-border bg-panel"
+      data-studio-chrome
+    >
+      <!-- Result-set selector tabs (only when multi-result) -->
+      {#if activeResult.resultSets?.length > 1}
+        {#each activeResult.resultSets as _rs, i (i)}
+          {@const rsActive = (activeResult.activeResultIdx ?? 0) === i}
+          <button
+            type="button"
+            onclick={() => setActiveResultIdx(i)}
+            class={cn(
+              'relative flex items-center border-b-2 px-2.5 font-mono text-ui-xs transition-colors',
+              rsActive ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground/50 hover:text-muted-foreground',
+            )}
+          >
+            Result {i + 1}
+          </button>
+        {/each}
+        <div class="mx-1.5 h-3.5 w-px shrink-0 self-center bg-border/60"></div>
       {/if}
 
-      <!-- View switcher — top-right overlay -->
-      <div class="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-end gap-1 p-2">
-        <div class="pointer-events-auto flex items-center gap-1 rounded-md border border-border/50 bg-background/85 px-1 py-0.5 shadow-md backdrop-blur-sm">
-          <button
-            type="button"
-            onclick={() => (outputView = 'table')}
-            class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-ui-2xs transition-colors {outputView === 'table' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}"
-            title="Table view"
-          >
-            Table
-          </button>
-          <button
-            type="button"
-            onclick={() => (outputView = 'chart')}
-            class="inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 font-mono text-ui-2xs transition-colors {outputView === 'chart' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}"
-            title="Chart view"
-          >
-            <BarChart2 class="size-3 shrink-0" />
-            Chart
-          </button>
-          <button
-            type="button"
-            onclick={() => (outputView = 'json')}
-            class="inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 font-mono text-ui-2xs transition-colors {outputView === 'json' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}"
-            title="JSON view"
-          >
-            <Braces class="size-3 shrink-0" />
-            JSON
-          </button>
-        </div>
-      </div>
+      <!-- View tabs -->
+      {#each [
+        { id: 'table', label: 'Table', Icon: null },
+        { id: 'chart', label: 'Chart', Icon: BarChart2 },
+        { id: 'json',  label: 'JSON',  Icon: Braces },
+      ] as tab (tab.id)}
+        {@const active = outputVisible && currentDisplay.outputView === tab.id}
+        {@const Icon = tab.Icon}
+        <button
+          type="button"
+          onclick={() => { setOutputView(tab.id); if (!outputVisible) toggleOutput() }}
+          class={cn(
+            'relative flex items-center gap-1.5 border-b-2 px-3 font-mono text-ui-xs transition-colors',
+            active ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground/50 hover:text-muted-foreground',
+          )}
+          title="{tab.label} view"
+        >
+          {#if Icon}
+            <Icon class="size-3 shrink-0" />
+          {/if}
+          {tab.label}
+        </button>
+      {/each}
 
-    {:else if loading}
-      <TableLoading />
-    {:else}
-      <div class="flex h-full flex-col items-center justify-center gap-2 text-center">
-        <Play class="size-6 text-muted-foreground/20" />
-        <p class="font-mono text-ui-sm text-muted-foreground/50">
-          Run a query to see results
-        </p>
+      <!-- Right: metadata + toggle -->
+      <div class="ml-auto flex shrink-0 items-center gap-3 pr-1.5">
+        {#if outputVisible && currentDisplay.rows.length > 0}
+          <span class="font-mono text-ui-2xs tabular-nums text-muted-foreground">{currentDisplay.rows.length} rows</span>
+        {/if}
+        {#if outputVisible && currentDisplay.queryMs > 0}
+          <span class="font-mono text-ui-2xs tabular-nums text-muted-foreground">{currentDisplay.queryMs}ms</span>
+        {/if}
+        {#if outputVisible && currentDisplay.message}
+          <span class="max-w-[160px] truncate font-mono text-ui-2xs text-muted-foreground">{currentDisplay.message}</span>
+        {/if}
+        <button
+          type="button"
+          onclick={toggleOutput}
+          title="{outputVisible ? 'Hide output' : 'Show output'} (⌘J)"
+          class="inline-flex size-5 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-foreground"
+        >
+          <ChevronDown class={cn('size-3.5 transition-transform duration-150', outputVisible ? '' : 'rotate-180')} />
+        </button>
+      </div>
+    </div>
+
+    {#if outputVisible}
+      <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-panel">
+        {#key `${activeTabId}:${activeResult.activeResultIdx ?? 0}`}
+          {#if currentDisplay.columns.length > 0}
+            {#if currentDisplay.outputView === 'json'}
+              <JsonViewer json={jsonText} rowCount={currentDisplay.rows.length} onshowtable={() => setOutputView('table')} />
+            {:else if currentDisplay.outputView === 'chart'}
+              <ChartView
+                columns={currentDisplay.columns}
+                rows={currentDisplay.rows}
+                {sql}
+                initialChartType={currentDisplay.chartType}
+                oncharttypechange={(t) => setChartType(t)}
+              />
+            {:else}
+              <DataTable columns={currentDisplay.columns} rows={currentDisplay.rows} loading={activeResult.loading} bind:selected />
+            {/if}
+          {:else if activeResult.loading}
+            <TableLoading />
+          {:else}
+            <div class="flex h-full flex-col items-center justify-center gap-2 text-center">
+              <Play class="size-6 text-muted-foreground/20" />
+              <p class="font-mono text-ui-sm text-muted-foreground/50">Run a query to see results</p>
+            </div>
+          {/if}
+        {/key}
       </div>
     {/if}
   </div>

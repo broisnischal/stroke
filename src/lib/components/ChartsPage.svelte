@@ -9,6 +9,12 @@
     deleteGroup,
     renameGroup,
   } from '$lib/stores/saved-charts.js'
+  import {
+    addChartToDashboard,
+    dashboards,
+    activeDashboardId,
+    createDashboard,
+  } from '$lib/stores/dashboards.js'
   import { CHART_CATALOG } from '$lib/chart-utils.js'
   import { cn } from '$lib/utils.js'
   import { toast } from 'svelte-sonner'
@@ -22,6 +28,7 @@
   import Check from '@lucide/svelte/icons/check'
   import ChevronDown from '@lucide/svelte/icons/chevron-down'
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
+  import LayoutDashboard from '@lucide/svelte/icons/layout-dashboard'
 
   /**
    * @typedef {import('$lib/stores/connections.js').SavedConnection} SavedConnection
@@ -144,6 +151,17 @@
   }
 
   const btnIconSm = 'inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground'
+
+  /** @param {string} chartId */
+  function addToDashboard(chartId) {
+    let dashId = $activeDashboardId
+    if (!dashId || !$dashboards.find(d => d.id === dashId)) {
+      const dash = createDashboard('Dashboard')
+      dashId = dash.id
+    }
+    addChartToDashboard(dashId, chartId)
+    toast.success('Added to dashboard')
+  }
 </script>
 
 <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -244,115 +262,95 @@
               </div>
 
               <!-- Chart cards grid -->
-              <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              <div class="grid grid-cols-2 gap-2.5 lg:grid-cols-3 xl:grid-cols-4">
                 {#each grpData.charts as chart (chart.id)}
                   {@const entry = catalogEntry(chart.config.type)}
-                  <div class="group relative flex flex-col overflow-hidden rounded-xl border border-border/50 bg-card transition-shadow hover:shadow-md">
+                  <div class="group relative flex flex-col overflow-hidden rounded-lg border border-border/50 bg-card transition-all hover:border-border hover:shadow-lg">
 
-                    <!-- Preview area -->
-                    <div class="relative h-36 bg-muted/10">
+                    <!-- Preview: dominant, fills top of card. Absolute child for crisp canvas sizing -->
+                    <div class="relative h-44 shrink-0 bg-muted/10">
                       {#if chart.previewOption && Object.keys(chart.previewOption).length > 0}
-                        <EChartPanel option={chart.previewOption} height="100%" />
+                        <EChartPanel option={chart.previewOption} class="absolute inset-0" />
                       {:else}
-                        <div class="flex h-full items-center justify-center">
+                        <div class="absolute inset-0 flex items-center justify-center">
                           <BarChart2 class="size-8 text-muted-foreground/15" />
                         </div>
                       {/if}
+
+                      <!-- Hover overlay with action buttons -->
+                      <div class="absolute inset-0 flex items-end justify-between bg-gradient-to-t from-card/95 via-card/20 to-transparent p-2 opacity-0 transition-opacity group-hover:opacity-100">
+                        <div class="flex items-center gap-1">
+                          <button
+                            type="button"
+                            class="inline-flex h-6 items-center gap-1 rounded border border-border/60 bg-card/90 px-1.5 text-ui-2xs text-muted-foreground backdrop-blur-sm transition-colors hover:bg-accent hover:text-foreground"
+                            title="Open SQL in editor"
+                            onclick={() => handleRunSql(chart)}
+                          >
+                            <Play class="size-2.5" />
+                            Run
+                          </button>
+                          <button
+                            type="button"
+                            class="inline-flex h-6 items-center gap-1 rounded border border-border/60 bg-card/90 px-1.5 text-ui-2xs text-muted-foreground backdrop-blur-sm transition-colors hover:bg-accent hover:text-foreground"
+                            title="Add to dashboard"
+                            onclick={() => addToDashboard(chart.id)}
+                          >
+                            <LayoutDashboard class="size-2.5" />
+                            Dashboard
+                          </button>
+                        </div>
+                        <div class="flex items-center gap-0.5">
+                          <button type="button" class={cn(btnIconSm, 'size-6 bg-card/90 backdrop-blur-sm border border-border/40')} title="Rename" onclick={() => startRenameChart(chart.id)}>
+                            <Pencil class="size-2.5" />
+                          </button>
+                          <div class="relative">
+                            <button type="button" class={cn(btnIconSm, 'size-6 bg-card/90 backdrop-blur-sm border border-border/40')} title="Move to group" onclick={() => { moveChartId = moveChartId === chart.id ? null : chart.id }}>
+                              <FolderOpen class="size-2.5" />
+                            </button>
+                            {#if moveChartId === chart.id}
+                              <div class="absolute bottom-full right-0 z-20 mb-1 min-w-[130px] rounded-lg border border-border/60 bg-popover p-1 shadow-lg">
+                                {#each $chartGroups.filter(g => g !== chart.group) as g (g)}
+                                  <button type="button" class="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground" onclick={() => handleMoveChart(chart.id, g)}>
+                                    <FolderOpen class="size-3 shrink-0" />{g}
+                                  </button>
+                                {/each}
+                                {#if $chartGroups.filter(g => g !== chart.group).length === 0}
+                                  <p class="px-2 py-1 text-ui-2xs text-muted-foreground/40">No other groups</p>
+                                {/if}
+                              </div>
+                            {/if}
+                          </div>
+                          <button
+                            type="button"
+                            class={cn(btnIconSm, 'size-6 bg-card/90 backdrop-blur-sm border border-border/40', confirmDeleteId === chart.id ? 'text-destructive' : 'hover:text-destructive')}
+                            title={confirmDeleteId === chart.id ? 'Click again to confirm' : 'Delete'}
+                            onclick={() => handleDeleteChart(chart.id)}
+                          >
+                            <Trash2 class="size-2.5" />
+                          </button>
+                        </div>
+                      </div>
                     </div>
 
-                    <!-- Card body -->
-                    <div class="flex flex-1 flex-col gap-1.5 p-3">
-
-                      <!-- Name row -->
+                    <!-- Footer: name + type badge -->
+                    <div class="flex items-center gap-2 px-2.5 py-2">
                       {#if renamingChartId === chart.id}
-                        <div class="flex items-center gap-1">
+                        <div class="flex min-w-0 flex-1 items-center gap-1">
                           <input
                             type="text"
                             bind:value={renameChartInput}
                             class="h-5 min-w-0 flex-1 rounded border border-border/50 bg-background/80 px-1.5 font-mono text-ui-xs outline-none focus:border-ring focus:ring-1 focus:ring-ring/30"
                             onkeydown={(e) => { if (e.key === 'Enter') commitRenameChart(); if (e.key === 'Escape') { renamingChartId = null } }}
                           />
-                          <button type="button" class={cn(btnIconSm, 'size-5')} onclick={commitRenameChart}><Check class="size-3" /></button>
-                          <button type="button" class={cn(btnIconSm, 'size-5')} onclick={() => { renamingChartId = null }}><X class="size-3" /></button>
+                          <button type="button" class={cn(btnIconSm, 'size-4 shrink-0')} onclick={commitRenameChart}><Check class="size-2.5" /></button>
+                          <button type="button" class={cn(btnIconSm, 'size-4 shrink-0')} onclick={() => { renamingChartId = null }}><X class="size-2.5" /></button>
                         </div>
                       {:else}
-                        <p class="truncate font-medium text-ui-sm" title={chart.name}>{chart.name}</p>
+                        <span class="min-w-0 flex-1 truncate text-ui-xs font-medium text-foreground/90" title={chart.name}>{chart.name}</span>
                       {/if}
-
-                      <!-- Meta row -->
-                      <div class="flex items-center gap-1.5 text-ui-2xs text-muted-foreground/50">
-                        <span class="rounded-full border border-border/40 bg-muted/40 px-1.5 py-0">{entry?.label ?? chart.config.type}</span>
-                        <span>{fmtDate(chart.createdAt)}</span>
-                      </div>
-
-                      <!-- Action row -->
-                      <div class="mt-auto flex items-center gap-0.5 pt-1">
-
-                        <!-- Run SQL -->
-                        <button
-                          type="button"
-                          class={cn(btnIconSm, 'size-6 text-primary/70 hover:text-primary')}
-                          title="Open SQL in Query Editor"
-                          onclick={() => handleRunSql(chart)}
-                        >
-                          <Play class="size-3" />
-                        </button>
-
-                        <!-- Rename -->
-                        <button
-                          type="button"
-                          class={cn(btnIconSm, 'size-6')}
-                          title="Rename chart"
-                          onclick={() => startRenameChart(chart.id)}
-                        >
-                          <Pencil class="size-3" />
-                        </button>
-
-                        <!-- Move to group -->
-                        <div class="relative">
-                          <button
-                            type="button"
-                            class={cn(btnIconSm, 'size-6')}
-                            title="Move to group"
-                            onclick={() => { moveChartId = moveChartId === chart.id ? null : chart.id }}
-                          >
-                            <FolderOpen class="size-3" />
-                          </button>
-                          {#if moveChartId === chart.id}
-                            <div class="absolute bottom-full left-0 z-20 mb-1 min-w-[130px] rounded-lg border border-border/60 bg-popover p-1 shadow-lg">
-                              {#each $chartGroups.filter(g => g !== chart.group) as g (g)}
-                                <button
-                                  type="button"
-                                  class="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-                                  onclick={() => handleMoveChart(chart.id, g)}
-                                >
-                                  <FolderOpen class="size-3 shrink-0" />
-                                  {g}
-                                </button>
-                              {/each}
-                              {#if $chartGroups.filter(g => g !== chart.group).length === 0}
-                                <p class="px-2 py-1 text-ui-2xs text-muted-foreground/40">No other groups</p>
-                              {/if}
-                            </div>
-                          {/if}
-                        </div>
-
-                        <!-- Delete -->
-                        <button
-                          type="button"
-                          class={cn(
-                            btnIconSm,
-                            'size-6 ml-auto',
-                            confirmDeleteId === chart.id ? 'text-destructive hover:bg-destructive/10 hover:text-destructive' : 'hover:text-destructive',
-                          )}
-                          title={confirmDeleteId === chart.id ? 'Click again to confirm delete' : 'Delete chart'}
-                          onclick={() => handleDeleteChart(chart.id)}
-                        >
-                          <Trash2 class="size-3" />
-                        </button>
-
-                      </div>
+                      <span class="shrink-0 rounded bg-muted/50 px-1 py-px font-mono text-[10px] text-muted-foreground/60">{entry?.label ?? chart.config.type}</span>
                     </div>
+
                   </div>
                 {/each}
               </div>

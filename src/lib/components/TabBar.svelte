@@ -1,4 +1,5 @@
 <script>
+  import { onMount } from 'svelte'
   import Table2 from '@lucide/svelte/icons/table-2'
   import Terminal from '@lucide/svelte/icons/terminal'
   import FileText from '@lucide/svelte/icons/file-text'
@@ -11,6 +12,19 @@
   import { cn } from '$lib/utils.js'
   import { tabDisplayTitle } from '$lib/studio-tabs.js'
   import * as ContextMenu from '$lib/components/ui/context-menu/index.js'
+
+  let isTauri = $state(false)
+
+  onMount(() => {
+    isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+  })
+
+  /** @param {MouseEvent} e */
+  function handleDragAreaDblClick(e) {
+    if (!isTauri) return
+    if (/** @type {Element} */ (e.target).closest('button')) return
+    import('@tauri-apps/api/window').then(({ getCurrentWindow }) => getCurrentWindow().toggleMaximize()).catch(() => {})
+  }
 
   /** @typedef {import('$lib/studio-tabs.js').StudioTab} StudioTab */
 
@@ -54,8 +68,10 @@
 <header
   class="studio-chrome flex h-9 shrink-0 items-stretch border-b border-border bg-background"
   data-studio-chrome
+  data-tauri-drag-region
   role="tablist"
   aria-label="Open editors"
+  ondblclick={handleDragAreaDblClick}
 >
   <div
     bind:this={scrollEl}

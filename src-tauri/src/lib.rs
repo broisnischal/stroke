@@ -49,6 +49,7 @@ pub fn run() {
             .maximized(true)
             .decorations(false)
             .transparent(true)
+            .shadow(true)
             .visible(false)
             .devtools(cfg!(debug_assertions))
             .on_navigation(|url| {
@@ -60,6 +61,29 @@ pub fn run() {
                 host == "localhost" || host == "tauri.localhost" || host == "127.0.0.1"
             })
             .build()?;
+
+            // Set native macOS window corner radius on the contentView's CALayer.
+            // CSS border-radius alone doesn't work for transparent frameless windows
+            // because WKWebView's backing layer clips at 0 radius by default.
+            #[cfg(target_os = "macos")]
+            {
+                use objc2_app_kit::NSWindow;
+
+                if let Ok(raw) = window.ns_window() {
+                    unsafe {
+                        let ns_win = raw as *mut objc2::runtime::AnyObject;
+                        let ns_win_ref: &NSWindow = &*(ns_win as *const NSWindow);
+
+                        if let Some(content_view) = ns_win_ref.contentView() {
+                            content_view.setWantsLayer(true);
+                            if let Some(layer) = content_view.layer() {
+                                layer.setCornerRadius(10.0);
+                                layer.setMasksToBounds(true);
+                            }
+                        }
+                    }
+                }
+            }
 
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -96,6 +120,7 @@ pub fn run() {
             commands::pg_drop_table,
             commands::pg_get_table_rows,
             commands::pg_execute_sql,
+            commands::pg_execute_sql_multi,
             commands::pg_execute_ddl,
             commands::pg_update_table_cell,
             commands::pg_delete_table_row,

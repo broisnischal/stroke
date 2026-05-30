@@ -247,6 +247,11 @@ export async function executeSql(sql) {
   }
 }
 
+/** Execute one or more SQL statements and return each result as a separate entry. */
+export async function executeSqlMulti(sql) {
+  return await inv('pg_execute_sql_multi', { sql })
+}
+
 /** Execute a DDL statement outside a transaction (CREATE/DROP DATABASE, etc.). */
 export async function executeDdl(sql) {
   try {

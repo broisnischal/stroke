@@ -42,6 +42,7 @@
   import LogsPage from './LogsPage.svelte'
   import JsonViewerPage from './JsonViewerPage.svelte'
   import ChartsPage from './ChartsPage.svelte'
+  import DashboardPage from './DashboardPage.svelte'
   import { Button } from '$lib/components/ui/button/index.js'
   import AlertTriangle from '@lucide/svelte/icons/triangle-alert'
   import X from '@lucide/svelte/icons/x'
@@ -52,6 +53,7 @@
     getTableRows,
     getTableColumnStructure,
     executeSql,
+    executeSqlMulti,
     executeDdl,
     updateTableCell,
     deleteTableRows,
@@ -73,6 +75,7 @@
     createJsonTab,
     createBackupTab,
     createChartsTab,
+    createDashboardTab,
     findTableTab,
     findSqlTab,
     findAiTab,
@@ -83,6 +86,7 @@
     findBackupTab,
     findJsonTab,
     findChartsTab,
+    findDashboardTab,
     findLastTableTab,
     tableTabTitle,
     cycleTabIndex,
@@ -135,6 +139,7 @@
   import { recordActivity } from '$lib/stores/activity-log.js'
   import { loadRecentTabs, pushRecentTab, removeRecentTab, clearRecentTabs } from '$lib/stores/recent-tabs.js'
   import { installInputShortcuts } from '$lib/input-shortcuts.js'
+  import TitleBar from './TitleBar.svelte'
 
   /** @typedef {import('$lib/studio-tabs.js').StudioTab} StudioTab */
   /** @typedef {import('$lib/studio-tabs.js').TableTabState} TableTabState */
@@ -199,6 +204,15 @@
   /** @type {StudioTab[]} */
   let tabs = $state([])
   let activeTabId = $state(/** @type {string | null} */ (null))
+
+  // ── Tab navigation history (back/forward) ────────────────────────────────
+  /** @type {string[]} */
+  let navHistory = $state([])
+  let navIndex = $state(-1)
+  let _navigating = false  // prevent history push during back/forward jumps
+
+  const canGoBack    = $derived(navIndex > 0)
+  const canGoForward = $derived(navIndex < navHistory.length - 1)
   /** @type {import('$lib/stores/recent-tabs.js').RecentTab[]} */
   let recentTabs = $state([])
 
@@ -248,6 +262,7 @@
   let jsonEverOpened = $state(false)
   let backupEverOpened = $state(false)
   let chartsEverOpened = $state(false)
+  let dashboardEverOpened = $state(false)
   $effect(() => {
     if (activeTab?.kind === 'sql') sqlEverOpened = true
     if (activeTab?.kind === 'orm') ormEverOpened = true
@@ -256,6 +271,7 @@
     if (activeTab?.kind === 'json') jsonEverOpened = true
     if (activeTab?.kind === 'backup') backupEverOpened = true
     if (activeTab?.kind === 'charts') chartsEverOpened = true
+    if (activeTab?.kind === 'dashboard') dashboardEverOpened = true
   })
 
   let columns = $state([])
@@ -328,6 +344,8 @@
   let sqlMessage = $state('')
   let sqlLoading = $state(false)
   let sqlError = $state('')
+  /** @type {any[]} */
+  let sqlMultiResults = $state([])
 
   let ormCode = $state('')
   let ormMode = $state(/** @type {'drizzle' | 'prisma'} */ ('drizzle'))
@@ -1033,6 +1051,7 @@
     sqlMessage = ''
     sqlLoading = false
     sqlError = ''
+    sqlMultiResults = []
   }
 
   function openWelcomeTab() {
@@ -1171,6 +1190,20 @@
     clearTableEditor()
   }
 
+  function openDashboardTab() {
+    const existing = findDashboardTab(tabs)
+    if (existing) {
+      void activateTab(existing.id)
+      return
+    }
+    saveActiveTabState()
+    dropWelcomeTabs()
+    const tab = createDashboardTab()
+    tabs = [...tabs, tab]
+    activeTabId = tab.id
+    clearTableEditor()
+  }
+
   /** @param {{ sql: string, mode: string }} detail */
   async function runOrm(detail) {
     if (!connection || !detail.sql.trim()) return
@@ -1195,8 +1228,50 @@
     if (id === activeTabId) return
     saveActiveTabState()
     activeTabId = id
+
+    // Push to nav history unless we're mid back/forward jump
+    if (!_navigating) {
+      const trimmed = navHistory.slice(0, navIndex + 1)
+      // Don't duplicate consecutive same id
+      if (trimmed[trimmed.length - 1] !== id) {
+        navHistory = [...trimmed, id].slice(-50) // cap at 50
+        navIndex = navHistory.length - 1
+      }
+    }
+
     const tab = tabs.find((t) => t.id === id)
     if (tab) await applyTabToEditor(tab)
+  }
+
+  async function navBack() {
+    if (!canGoBack) return
+    _navigating = true
+    navIndex -= 1
+    const id = navHistory[navIndex]
+    // Skip ids for tabs that no longer exist
+    if (!tabs.find(t => t.id === id)) {
+      navHistory = navHistory.filter((_, i) => i !== navIndex)
+      navIndex = Math.max(0, navIndex - 1)
+      _navigating = false
+      return
+    }
+    await activateTab(id)
+    _navigating = false
+  }
+
+  async function navForward() {
+    if (!canGoForward) return
+    _navigating = true
+    navIndex += 1
+    const id = navHistory[navIndex]
+    if (!tabs.find(t => t.id === id)) {
+      navHistory = navHistory.filter((_, i) => i !== navIndex)
+      navIndex = Math.min(navHistory.length - 1, navIndex)
+      _navigating = false
+      return
+    }
+    await activateTab(id)
+    _navigating = false
   }
 
   /** @param {string} id */
@@ -1758,18 +1833,22 @@
     sqlMessage = ''
     sqlColumns = []
     sqlRows = []
+    sqlMultiResults = []
     const sqlRan = sqlText
     try {
-      const data = await executeSql(sqlRan)
+      const results = await executeSqlMulti(sqlRan)
+      sqlMultiResults = results.length > 1 ? results : []
+      const data = results.length > 0 ? results[results.length - 1] : {}
       sqlColumns = data.columns ?? []
       sqlRows = data.rows ?? []
-      sqlQueryMs = data.queryMs ?? data.query_ms ?? 0
+      sqlQueryMs = data.query_ms ?? data.queryMs ?? 0
       sqlMessage = data.message ?? ''
-      if (!sqlMessage && data.rowCount != null && sqlColumns.length === 0) {
-        sqlMessage = `${formatCompactCount(data.rowCount)} row(s) affected`
+      if (!sqlMessage && data.row_count != null && sqlColumns.length === 0) {
+        sqlMessage = `${formatCompactCount(data.row_count)} row(s) affected`
       }
     } catch (e) {
       sqlError = String(e)
+      sqlMultiResults = []
     } finally {
       sqlLoading = false
       recordActivity({ type: 'sql_exec', title: sqlRan.trim().slice(0, 80) + (sqlRan.trim().length > 80 ? '…' : ''), detail: sqlRan, durationMs: sqlQueryMs, rowCount: sqlRows.length || undefined, success: !sqlError, error: sqlError || undefined })
@@ -2339,6 +2418,19 @@
 
 
 <div class="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
+<TitleBar
+  title={connection?.database ?? connection?.filePath ?? connection?.name ?? 'studio'}
+  {sidebarOpen}
+  {aiMode}
+  {aiSidebarOpen}
+  {canGoBack}
+  {canGoForward}
+  ontogglesidebar={toggleSidebar}
+  ontoggleaimode={() => { if (aiMode) exitAiMode(); else openAiTab() }}
+  ontoggleaisidebar={() => { if (aiMode) exitAiMode(); toggleAiSidebar() }}
+  ongoback={() => void navBack()}
+  ongoforward={() => void navForward()}
+/>
 <div class="flex min-h-0 flex-1 overflow-hidden">
   {#if sidebarEverOpened}
     <div
@@ -2365,6 +2457,7 @@
         onopenSchema={openSchemaTab}
         onopenorm={openOrmTab}
         onopenbackup={openBackupTab}
+        onopendashboard={() => { if (aiMode) exitAiMode(); openDashboardTab() }}
         {aiMode}
         onopenaimode={() => (aiMode ? exitAiMode() : enterAiMode())}
         {queryHistory}
@@ -2544,6 +2637,18 @@
         </div>
       {/if}
 
+      <!-- Dashboard tab - mount once, keep alive -->
+      {#if dashboardEverOpened}
+        <div
+          class={activeTab?.kind === 'dashboard' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+          inert={activeTab?.kind !== 'dashboard' || undefined}
+        >
+          <svelte:boundary failed={tabError}>
+            <DashboardPage />
+          </svelte:boundary>
+        </div>
+      {/if}
+
       <!-- ORM tab: mount once, keep alive so Monaco is not destroyed on tab switch -->
       {#if ormEverOpened}
         <div
@@ -2592,6 +2697,7 @@
             message={sqlMessage}
             loading={sqlLoading}
             error={sqlError}
+            multiResults={sqlMultiResults}
             schemaHints={sqlSchemaHints}
             schemaContext={aiSchemaContext}
             onrun={runSql}
@@ -2664,8 +2770,7 @@
               selectedCount={0}
               hasPrimaryKey={false}
               deleting={false}
-              ontogglesidebar={toggleSidebar}
-              onrefresh={() => void loadStructure()}
+                            onrefresh={() => void loadStructure()}
               onprev={() => {}}
               onnext={() => {}}
               {structureSearch}
@@ -2705,8 +2810,7 @@
             selectedCount={selected.size}
             hasPrimaryKey={primaryKey.length > 0}
             deleting={deletingRows}
-            ontogglesidebar={toggleSidebar}
-            onrefresh={loadRows}
+                        onrefresh={loadRows}
             onsearchchange={handleRowSearchChange}
             onfilterschange={(f) => void handleRowFiltersChange(f)}
             onsortchange={(s) => void handleRowSortChange(s)}
@@ -2955,6 +3059,7 @@
   onopenorm={openOrmTab}
         onopenbackup={openBackupTab}
   onopenchartspage={() => { if (aiMode) exitAiMode(); openChartsTab() }}
+  onopendashboard={() => { if (aiMode) exitAiMode(); openDashboardTab() }}
   onopensettings={() => (showSettingsModal = true)}
   onopencommand={() => (commandOpen = true)}
   ondisconnect={requestDisconnect}

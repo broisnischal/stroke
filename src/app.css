@@ -63,10 +63,21 @@ html[data-os="linux"]   { --window-radius: 8px; }
     @apply border-border outline-ring/50;
   }
 
+  /* Disable OS word suggestions, autocorrect, and spellcheck on all inputs. */
+  input:not([type="file"]),
+  textarea {
+    autocorrect: off;
+    autocapitalize: off;
+    spellcheck: false;
+  }
+
   html {
     font-size: var(--app-font-size);
     font-family: var(--font-sans);
-    @apply h-full;
+    @apply h-full overflow-hidden;
+    /* Transparent so the rounded body corners reveal the desktop, not a square
+       html background. Body's bg-background would otherwise propagate here. */
+    background: transparent;
     /* antialiased (grayscale) blurs on WebKitGTK/Linux; auto uses the platform
        renderer which stays sharp at all zoom levels and during scroll. */
     -webkit-font-smoothing: auto;
@@ -81,12 +92,16 @@ html[data-os="linux"]   { --window-radius: 8px; }
   body {
     @apply m-0 h-full min-h-0 overflow-hidden bg-background text-foreground;
     font-family: var(--font-sans);
+    /* Round the opaque body background to match the system window radius.
+       html has background:transparent above, so the clipped corners are truly
+       transparent — the desktop shows through on macOS with transparent(true). */
     border-radius: var(--window-radius);
   }
 
   #app {
     @apply m-0 h-full min-h-0 overflow-hidden;
-    border-radius: var(--window-radius);
+    /* NO border-radius here — body already clips everything. Adding it twice
+       creates a double-clip that leaves a visible margin ring. */
     user-select: none;
     -webkit-user-select: none;
   }
@@ -141,6 +156,16 @@ html[data-os="linux"]   { --window-radius: 8px; }
     user-select: none !important;
     -webkit-user-select: none !important;
   }
+
+  /* Force correct resize cursors — !important beats WKWebView's cursor resets */
+  .studio-resize-handle[aria-orientation="vertical"]   { cursor: col-resize !important; }
+  .studio-resize-handle[aria-orientation="horizontal"] { cursor: row-resize !important; }
+
+  /* Lock cursor globally while drag is active so it never flickers mid-drag */
+  body.is-resizing-x,
+  body.is-resizing-x * { cursor: col-resize !important; }
+  body.is-resizing-y,
+  body.is-resizing-y * { cursor: row-resize !important; }
 
   /* App chrome: no focus ring for mouse clicks; keep keyboard focus-visible */
   [data-studio-chrome] :focus:not(:focus-visible) {

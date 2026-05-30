@@ -30,7 +30,10 @@
       try {
         const { init } = await import('echarts')
         if (disposed || !container) return
-        const instance = init(container, null, { renderer: 'canvas' })
+        const instance = init(container, null, {
+          renderer: 'canvas',
+          devicePixelRatio: window.devicePixelRatio ?? 2,
+        })
         chart = instance
       } finally {
         initializing = false
@@ -46,7 +49,7 @@
       if (!chart) {
         void tryInit()
       } else {
-        chart.resize()
+        chart.resize({ devicePixelRatio: window.devicePixelRatio ?? 2 })
       }
     })
     ro.observe(container)
@@ -73,4 +76,10 @@
   })
 </script>
 
-<div bind:this={el} style="height: {height}; width: 100%;" class={cls}></div>
+<!-- When cls has layout classes (e.g. absolute inset-0), skip the inline height/width
+     so the class positioning fully controls the box. Otherwise fall back to height/width props. -->
+<div
+  bind:this={el}
+  style={cls ? '' : `height: ${height}; width: 100%;`}
+  class={cls || ''}
+></div>

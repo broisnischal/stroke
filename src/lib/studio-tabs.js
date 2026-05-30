@@ -1,4 +1,4 @@
-/** @typedef {'table' | 'sql' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'json' | 'charts'} StudioTabKind */
+/** @typedef {'table' | 'sql' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'json' | 'charts' | 'dashboard'} StudioTabKind */
 
 /** @typedef {import('$lib/table-query.js').TableSort} TableSort */
 /** @typedef {import('$lib/table-query.js').TableFilter} TableFilter */
@@ -264,6 +264,20 @@ export function findChartsTab(tabs) {
   return tabs.find((t) => t.kind === 'charts') ?? null
 }
 
+export function createDashboardTab() {
+  return /** @type {StudioTab} */ ({
+    id: nextTabId(),
+    kind: 'dashboard',
+    title: 'Dashboard',
+    state: null,
+  })
+}
+
+/** @param {StudioTab[]} tabs */
+export function findDashboardTab(tabs) {
+  return tabs.find((t) => t.kind === 'dashboard') ?? null
+}
+
 /** @param {TableTabState} state */
 export function tableTabTitle(state) {
   if (!state.table) return 'Table'
@@ -281,6 +295,7 @@ export function tabDisplayTitle(tab) {
   if (tab.kind === 'logs') return 'Activity Log'
   if (tab.kind === 'json') return 'JSON Viewer'
   if (tab.kind === 'charts') return 'Charts'
+  if (tab.kind === 'dashboard') return 'Dashboard'
   return tab.title
 }
 

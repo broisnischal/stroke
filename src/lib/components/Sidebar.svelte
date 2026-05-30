@@ -307,92 +307,10 @@
   data-studio-region="sidebar"
 >
   <aside
-    class="studio-chrome flex h-full min-w-0 flex-1 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
+    class="studio-chrome flex h-full min-w-0 flex-1 flex-col bg-sidebar text-sidebar-foreground"
     data-studio-chrome
   >
-    {#if isTauri && !fullscreen}
-      <!--
-      Traffic light row: buttons sit outside the drag region so they always
-      receive click events; the flex-1 filler to the right is the drag target.
-    -->
-      <div
-        class="traffic-group flex h-9 shrink-0 items-center border-b border-sidebar-border"
-      >
-        <!-- buttons — NOT inside data-tauri-drag-region -->
-        <div class="flex shrink-0 items-center gap-[7px] px-[14px]">
-          <button
-            type="button"
-            class="traffic-dot traffic-close"
-            onclick={winClose}
-            aria-label="Close window"
-            title="Close"
-          >
-            <svg
-              class="traffic-icon"
-              viewBox="0 0 8 8"
-              width="7"
-              height="7"
-              fill="none"
-            >
-              <path
-                d="M1.5 1.5l5 5M6.5 1.5l-5 5"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-              />
-            </svg>
-          </button>
-          <button
-            type="button"
-            class="traffic-dot traffic-minimize"
-            onclick={winMinimize}
-            aria-label="Minimize window"
-            title="Minimize"
-          >
-            <svg
-              class="traffic-icon"
-              viewBox="0 0 8 8"
-              width="7"
-              height="7"
-              fill="none"
-            >
-              <path
-                d="M1 4h6"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-              />
-            </svg>
-          </button>
-          <button
-            type="button"
-            class="traffic-dot traffic-maximize"
-            onclick={winToggleFullscreen}
-            aria-label={fullscreen ? "Exit fullscreen" : "Enter fullscreen"}
-            title={fullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
-          >
-            {#if fullscreen}
-              <!-- contract arrows -->
-              <svg class="traffic-icon" viewBox="0 0 8 8" width="7" height="7" fill="none">
-                <path d="M1.5 3.5h2v-2M6.5 4.5h-2v2" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            {:else}
-              <!-- expand arrows -->
-              <svg class="traffic-icon" viewBox="0 0 8 8" width="7" height="7" fill="none">
-                <path d="M1.5 3.5v-2h2M6.5 4.5v2h-2" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            {/if}
-          </button>
-        </div>
-        <!-- drag region fills the rest of the strip -->
-        <div
-          class="min-w-0 flex-1 self-stretch"
-          data-tauri-drag-region
-          role="none"
-          ondblclick={winToggleMaximize}
-        ></div>
-      </div>
-    {/if}
+    <!-- Traffic lights moved to TitleBar (full-width) -->
     <div class="flex min-h-0 flex-1 flex-col">
 
       <div

@@ -16,6 +16,7 @@
   import History from '@lucide/svelte/icons/history'
   import Archive from '@lucide/svelte/icons/archive'
   import BarChart2 from '@lucide/svelte/icons/bar-chart-2'
+  import LayoutDashboard from '@lucide/svelte/icons/layout-dashboard'
   import ShieldCheck from '@lucide/svelte/icons/shield-check'
   import Code2 from '@lucide/svelte/icons/code-2'
   import Settings from '@lucide/svelte/icons/settings'
@@ -57,6 +58,7 @@
     onopenorm = /** @type {() => void} */ (() => {}),
     onopenbackup = /** @type {() => void} */ (() => {}),
     onopenchartspage = /** @type {() => void} */ (() => {}),
+    onopendashboard = /** @type {() => void} */ (() => {}),
     onopensettings = /** @type {() => void} */ (() => {}),
     onopencommand = /** @type {() => void} */ (() => {}),
     ondisconnect = /** @type {() => void} */ (() => {}),
@@ -364,23 +366,23 @@
   <div class="flex shrink-0 items-center gap-0.5">
     <!-- Staged cell edits: Apply / Reset -->
     {#if pendingEditCount > 0}
-      <div class="flex items-center gap-1">
+      <div class="flex items-center gap-0.5">
         <button
           type="button"
-          class="flex items-center gap-1.5 rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          class="inline-flex h-5 items-center gap-1 rounded bg-primary/85 px-2 text-[11px] font-medium text-primary-foreground transition-colors hover:bg-primary"
           onclick={onapplyedits}
           title="Apply {pendingEditCount} unsaved change{pendingEditCount === 1 ? '' : 's'}"
         >
-          <Check class="size-3 shrink-0" />
+          <Check class="size-2.5 shrink-0" />
           <span>Apply {pendingEditCount}</span>
         </button>
         <button
           type="button"
-          class="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          class="inline-flex h-5 items-center gap-1 rounded px-2 text-[11px] text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
           onclick={onresetedits}
           title="Discard unsaved changes"
         >
-          <Undo2 class="size-3 shrink-0" />
+          <Undo2 class="size-2.5 shrink-0" />
           <span>Reset</span>
         </button>
       </div>
@@ -410,6 +412,9 @@
       </button>
       <button type="button" class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground" onclick={onopenchartspage} title="Saved Charts">
         <BarChart2 class="size-3.5" />
+      </button>
+      <button type="button" class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground" onclick={onopendashboard} title="Dashboard">
+        <LayoutDashboard class="size-3.5" />
       </button>
       {@render sep()}
     {/if}
