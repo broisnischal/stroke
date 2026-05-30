@@ -222,6 +222,20 @@ export function findLogsTab(tabs) {
   return tabs.find((t) => t.kind === 'logs') ?? null
 }
 
+export function createBackupTab() {
+  return /** @type {StudioTab} */ ({
+    id: nextTabId(),
+    kind: 'backup',
+    title: 'Backup & Restore',
+    state: null,
+  })
+}
+
+/** @param {StudioTab[]} tabs */
+export function findBackupTab(tabs) {
+  return tabs.find((t) => t.kind === 'backup') ?? null
+}
+
 export function createJsonTab() {
   return /** @type {StudioTab} */ ({
     id: nextTabId(),

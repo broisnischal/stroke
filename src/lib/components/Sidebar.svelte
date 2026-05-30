@@ -145,7 +145,7 @@
   }
 
   const _initial = loadSidebarSections()
-  let recentOpen = $state(_initial.recent ?? true);
+  let recentOpen = $state(_initial.recent ?? false);
   let tablesOpen = $state(_initial.tables ?? true);
   let viewsOpen = $state(_initial.views ?? false);
   let matViewsOpen = $state(_initial.matViews ?? false);
@@ -197,7 +197,7 @@
       const raw = localStorage.getItem(DISPLAY_PREFS_KEY)
       if (raw) return JSON.parse(raw)
     } catch {}
-    return { showTables: true, showViews: true, showMatViews: true, sortBy: 'name' }
+    return { showTables: true, showViews: true, showMatViews: true, showRecent: true, sortBy: 'name' }
   }
   function saveDisplayPrefs(prefs) {
     try { localStorage.setItem(DISPLAY_PREFS_KEY, JSON.stringify(prefs)) } catch {}
@@ -207,10 +207,11 @@
   let showTables = $state(_dp.showTables ?? true)
   let showViews = $state(_dp.showViews ?? true)
   let showMatViews = $state(_dp.showMatViews ?? true)
+  let showRecent = $state(_dp.showRecent ?? true)
   /** @type {'name' | 'rowCount'} */
   let sortBy = $state(_dp.sortBy ?? 'name')
 
-  $effect(() => { saveDisplayPrefs({ showTables, showViews, showMatViews, sortBy }) })
+  $effect(() => { saveDisplayPrefs({ showTables, showViews, showMatViews, showRecent, sortBy }) })
 
   // ── Selection state ───────────────────────────────────────────────────────
   /** @type {Set<string>} */
@@ -453,6 +454,10 @@
             <DropdownMenu.Content align="start" class="w-48 p-1 text-ui-sm">
               <DropdownMenu.Label class="px-2 py-1 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Show</DropdownMenu.Label>
               <DropdownMenu.CheckboxItem
+                checked={showRecent}
+                onCheckedChange={(v) => (showRecent = v)}
+              >Recent</DropdownMenu.CheckboxItem>
+              <DropdownMenu.CheckboxItem
                 checked={showTables}
                 onCheckedChange={(v) => (showTables = v)}
               >Tables</DropdownMenu.CheckboxItem>
@@ -536,7 +541,7 @@
             </div>
           {:else}
             <!-- ── Recent ─────────────────────────────────────────── -->
-            {#if recentTabs.length > 0 && connectionName}
+            {#if showRecent && recentTabs.length > 0 && connectionName}
               <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
                 <button
                   type="button"
@@ -551,7 +556,7 @@
                   />
                   <Clock class="size-3 shrink-0 text-muted-foreground/60" />
                   <span class="text-ui-2xs font-medium tracking-wide text-muted-foreground uppercase">Recent</span>
-                  <span class="ml-1 font-mono text-ui-2xs text-muted-foreground/60">{recentTabs.length}</span>
+                  <span class="ml-1 font-mono text-ui-2xs text-muted-foreground/60">{Math.min(recentTabs.length, 5)}</span>
                 </button>
                 <button
                   type="button"
@@ -562,8 +567,8 @@
               </div>
               {#if recentOpen}
                 <ul class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
-                  {#each recentTabs as item (item.schema + '.' + item.table)}
-                    <li class="group/recent [content-visibility:auto] [contain-intrinsic-size:auto_28px]">
+                  {#each recentTabs.slice(0, 5) as item (item.schema + '.' + item.table)}
+                    <li class="group/recent">
                       <div
                         class={cn(
                           "grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 transition-colors cursor-pointer",

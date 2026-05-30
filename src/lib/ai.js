@@ -375,6 +375,16 @@ async function tauriFetch(url, init, signal) {
   const authHeader = headers['Authorization'] ?? headers['authorization'] ?? ''
   const apiKey = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
 
+  // Forward any non-standard headers (e.g. Copilot-Integration-Id) through Rust.
+  /** @type {Record<string, string> | undefined} */
+  const extraHeaders = Object.fromEntries(
+    Object.entries(headers).filter(([k]) => {
+      const kl = k.toLowerCase()
+      return kl !== 'authorization' && kl !== 'content-type'
+    })
+  )
+  const hasExtra = Object.keys(extraHeaders).length > 0
+
   if (body.stream) {
     const { listen } = await import('@tauri-apps/api/event')
     const requestId = crypto.randomUUID()
@@ -408,7 +418,7 @@ async function tauriFetch(url, init, signal) {
 
     signal?.addEventListener('abort', () => { cleanup(); controller.close() }, { once: true })
 
-    invoke('ai_fetch', { url, apiKey, body, stream: true, requestId })
+    invoke('ai_fetch', { url, apiKey, body, stream: true, requestId, ...(hasExtra ? { extraHeaders } : {}) })
       .then(cleanup)
       .catch((e) => {
         if (!cleanedUp) {
@@ -419,7 +429,7 @@ async function tauriFetch(url, init, signal) {
 
     return { ok: true, body: readable }
   } else {
-    const data = await invoke('ai_fetch', { url, apiKey, body, stream: false, requestId: '' })
+    const data = await invoke('ai_fetch', { url, apiKey, body, stream: false, requestId: '', ...(hasExtra ? { extraHeaders } : {}) })
     return { ok: true, json: async () => data }
   }
 }
@@ -511,14 +521,22 @@ export async function chatCompletionRaw(settings, messages, tools = null) {
     body.tool_choice = 'auto'
   }
 
+  // Copilot uses a dynamically-obtained JWT and requires additional headers.
+  let bearerKey = settings.apiKey
+  /** @type {Record<string, string>} */
+  const reqHeaders = { 'Content-Type': 'application/json' }
+  if (base.includes('githubcopilot.com')) {
+    const { getCopilotJwt, COPILOT_EXTRA_HEADERS } = await import('./copilot.js')
+    bearerKey = await getCopilotJwt()
+    Object.assign(reqHeaders, COPILOT_EXTRA_HEADERS)
+  }
+  if (bearerKey) reqHeaders['Authorization'] = `Bearer ${bearerKey}`
+
   const res = await fetchWithAiRetry(
     url,
     {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(settings.apiKey ? { Authorization: `Bearer ${settings.apiKey}` } : {}),
-      },
+      headers: reqHeaders,
       body: JSON.stringify(body),
     },
     undefined,
@@ -553,14 +571,22 @@ export async function* chatCompletionStream(settings, messages, tools = null, si
   const body = { model: settings.model, messages, stream: true, temperature: 0, max_tokens: 16384 }
   if (tools?.length) { body.tools = tools; body.tool_choice = 'auto' }
 
+  // Copilot uses a dynamically-obtained JWT and requires additional headers.
+  let bearerKey = settings.apiKey
+  /** @type {Record<string, string>} */
+  const reqHeaders = { 'Content-Type': 'application/json' }
+  if (base.includes('githubcopilot.com')) {
+    const { getCopilotJwt, COPILOT_EXTRA_HEADERS } = await import('./copilot.js')
+    bearerKey = await getCopilotJwt()
+    Object.assign(reqHeaders, COPILOT_EXTRA_HEADERS)
+  }
+  if (bearerKey) reqHeaders['Authorization'] = `Bearer ${bearerKey}`
+
   const res = await fetchWithAiRetry(
     url,
     {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(settings.apiKey ? { Authorization: `Bearer ${settings.apiKey}` } : {}),
-      },
+      headers: reqHeaders,
       body: JSON.stringify(body),
     },
     signal,

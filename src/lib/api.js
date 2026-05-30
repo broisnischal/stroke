@@ -247,6 +247,15 @@ export async function executeSql(sql) {
   }
 }
 
+/** Execute a DDL statement outside a transaction (CREATE/DROP DATABASE, etc.). */
+export async function executeDdl(sql) {
+  try {
+    return await invoke('pg_execute_ddl', { sql })
+  } catch (err) {
+    throw new Error(formatInvokeError(err))
+  }
+}
+
 /**
  * @param {string} schema
  * @param {string} table
@@ -371,4 +380,25 @@ export async function aiLoadKey(profileId) {
 /** @param {string} profileId */
 export async function aiDeleteKey(profileId) {
   return inv('ai_delete_key', { profileId })
+}
+
+
+// ── Backup / Restore ──────────────────────────────────────────────────────────
+
+/**
+ * Export the connected database as a SQL dump string.
+ * @param {string | null} schema - Filter to one schema (PostgreSQL/MySQL only)
+ * @returns {Promise<{ sql: string, tableCount: number, rowCount: number }>}
+ */
+export async function backupExport(schema = null, tables = null) {
+  return inv('backup_export', { schema, tables })
+}
+
+/**
+ * Execute a SQL restore script against the connected database.
+ * @param {string} sql
+ * @returns {Promise<{ statementsOk: number, statementsErr: number, errors: string[] }>}
+ */
+export async function backupImport(sql) {
+  return inv('backup_import', { sql })
 }

@@ -14,6 +14,7 @@
   import Terminal from '@lucide/svelte/icons/terminal'
   import LayoutTemplate from '@lucide/svelte/icons/layout-template'
   import History from '@lucide/svelte/icons/history'
+  import Archive from '@lucide/svelte/icons/archive'
   import ShieldCheck from '@lucide/svelte/icons/shield-check'
   import Code2 from '@lucide/svelte/icons/code-2'
   import Settings from '@lucide/svelte/icons/settings'
@@ -23,6 +24,7 @@
   import Undo2 from '@lucide/svelte/icons/undo-2'
   import ChevronsUp from '@lucide/svelte/icons/chevrons-up'
   import ChevronsDown from '@lucide/svelte/icons/chevrons-down'
+  import Plus from '@lucide/svelte/icons/plus'
   import { cn } from '$lib/utils.js'
   import { aiProfiles, activeProfileId, setActiveProfile } from '$lib/stores/ai-settings.js'
   import { toggleLightDark, isCurrentThemeDark } from '$lib/stores/settings.js'
@@ -30,6 +32,7 @@
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js'
   import Sun from '@lucide/svelte/icons/sun'
   import Moon from '@lucide/svelte/icons/moon'
+  import CreateDatabaseDialog from './CreateDatabaseDialog.svelte'
 
   let {
     /** @type {import('$lib/stores/connections.js').SavedConnection | null} */
@@ -51,6 +54,7 @@
     onopenlogs = /** @type {() => void} */ (() => {}),
     onopensecurity = /** @type {() => void} */ (() => {}),
     onopenorm = /** @type {() => void} */ (() => {}),
+    onopenbackup = /** @type {() => void} */ (() => {}),
     onopensettings = /** @type {() => void} */ (() => {}),
     onopencommand = /** @type {() => void} */ (() => {}),
     ondisconnect = /** @type {() => void} */ (() => {}),
@@ -62,6 +66,7 @@
     showTableNav = false,
     onscrolltabletop = /** @type {() => void} */ (() => {}),
     onscrolltablebottom = /** @type {() => void} */ (() => {}),
+    oncreatedatabase = /** @type {(opts: import('./CreateDatabaseDialog.svelte').CreateDbOptions) => Promise<void>} */ (async () => {}),
   } = $props()
 
   // ── Model picker ──────────────────────────────────────────────────────────────
@@ -70,6 +75,7 @@
 
   // ── Database switcher ─────────────────────────────────────────────────────────
   let dbOpen = $state(false)
+  let createDbOpen = $state(false)
   /** @type {string[]} */
   let databases = $state([])
   let dbLoading = $state(false)
@@ -187,80 +193,104 @@
 
       {@render sep()}
 
-      <!-- Database switcher -->
-      <DropdownMenu.Root
-        bind:open={dbOpen}
-        onOpenChange={(o) => { if (o && databases.length === 0) void fetchDatabases(); if (!o) dbSearch = '' }}
-      >
-        <DropdownMenu.Trigger
-          class="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none data-[state=open]:bg-accent data-[state=open]:text-foreground"
-          title="Switch database"
+      <!-- Database switcher + create button -->
+      <div class="flex items-center">
+        <DropdownMenu.Root
+          bind:open={dbOpen}
+          onOpenChange={(o) => { if (o && databases.length === 0) void fetchDatabases(); if (!o) dbSearch = '' }}
         >
-          {#if connection?.type === 'sqlite'}
-            <HardDrive class="size-3 shrink-0" />
-          {:else}
-            <Database class="size-3 shrink-0" />
-          {/if}
-          <span class="max-w-[9rem] truncate font-mono font-medium">{currentDb || 'No database'}</span>
-          {#if isPostgres}
-            <ChevronDown class={cn('size-3 shrink-0 opacity-50 transition-transform', dbOpen && 'rotate-180')} />
-          {/if}
-        </DropdownMenu.Trigger>
-
-        <DropdownMenu.Content side="top" align="start" class="w-56 p-0 overflow-hidden">
-          {#if databases.length > 5}
-            <div class="border-b border-border/50 px-2 py-1.5">
-              <input
-                type="text"
-                placeholder="Filter…"
-                class="h-7 w-full rounded-md border border-border/60 bg-muted/40 px-2.5 text-xs outline-none placeholder:text-muted-foreground/40 focus:border-ring focus:ring-2 focus:ring-ring/20"
-                bind:value={dbSearch}
-              />
-            </div>
-          {/if}
-
-          <div class="max-h-[200px] overflow-y-auto p-1">
-            {#if dbLoading}
-              <div class="flex items-center justify-center gap-2 py-4 text-muted-foreground/60">
-                <RefreshCw class="size-3 animate-spin" />
-                <span class="text-xs">Loading…</span>
-              </div>
-            {:else if dbFiltered.length === 0}
-              <div class="py-3 text-center text-xs text-muted-foreground/60">
-                {dbSearch ? 'No match' : 'No databases found'}
-              </div>
+          <DropdownMenu.Trigger
+            class="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none data-[state=open]:bg-accent data-[state=open]:text-foreground"
+            title="Switch database"
+          >
+            {#if connection?.type === 'sqlite'}
+              <HardDrive class="size-3 shrink-0" />
             {:else}
-              {#each dbFiltered as db (db)}
-                {@const isCurrent = db === currentDb}
-                <DropdownMenu.Item
-                  class={cn('flex cursor-pointer items-center gap-2 font-mono text-xs', isCurrent && 'font-semibold')}
-                  onclick={() => switchDb(db)}
-                >
-                  <Database class={cn('size-3.5 shrink-0', isCurrent ? 'text-foreground' : 'text-muted-foreground/40')} />
-                  <span class="min-w-0 flex-1 truncate">{db}</span>
-                  {#if isCurrent}<Check class="ml-auto size-3.5 shrink-0" />{/if}
-                </DropdownMenu.Item>
-              {/each}
+              <Database class="size-3 shrink-0" />
             {/if}
-          </div>
+            <span class="max-w-[9rem] truncate font-mono font-medium">{currentDb || 'No database'}</span>
+            {#if isPostgres}
+              <ChevronDown class={cn('size-3 shrink-0 opacity-50 transition-transform', dbOpen && 'rotate-180')} />
+            {/if}
+          </DropdownMenu.Trigger>
 
-          {#if isPostgres}
-            <div class="flex items-center justify-between border-t border-border/50 px-2.5 py-1">
-              <span class="text-[10px] text-muted-foreground/50">
-                {databases.length} database{databases.length === 1 ? '' : 's'}
-              </span>
-              <button
-                type="button"
-                class="inline-flex size-5 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-muted hover:text-foreground"
-                onclick={fetchDatabases}
-                title="Refresh"
-              >
-                <RefreshCw class={cn('size-3', dbLoading && 'animate-spin')} />
-              </button>
+          <DropdownMenu.Content side="top" align="start" class="w-56 overflow-hidden p-0">
+            {#if databases.length > 5}
+              <div class="border-b border-border/50 px-2 py-1.5">
+                <input
+                  type="text"
+                  placeholder="Filter…"
+                  class="h-7 w-full rounded-md border border-border/60 bg-muted/40 px-2.5 text-xs outline-none placeholder:text-muted-foreground/40 focus:border-ring focus:ring-2 focus:ring-ring/20"
+                  bind:value={dbSearch}
+                />
+              </div>
+            {/if}
+
+            <div class="max-h-[200px] overflow-y-auto p-1">
+              {#if dbLoading}
+                <div class="flex items-center justify-center gap-2 py-4 text-muted-foreground/60">
+                  <RefreshCw class="size-3 animate-spin" />
+                  <span class="text-xs">Loading…</span>
+                </div>
+              {:else if dbFiltered.length === 0}
+                <div class="py-3 text-center text-xs text-muted-foreground/60">
+                  {dbSearch ? 'No match' : 'No databases found'}
+                </div>
+              {:else}
+                {#each dbFiltered as db (db)}
+                  {@const isCurrent = db === currentDb}
+                  <DropdownMenu.Item
+                    class={cn('flex cursor-pointer items-center gap-2 font-mono text-xs', isCurrent && 'font-semibold')}
+                    onclick={() => switchDb(db)}
+                  >
+                    <Database class={cn('size-3.5 shrink-0', isCurrent ? 'text-foreground' : 'text-muted-foreground/40')} />
+                    <span class="min-w-0 flex-1 truncate">{db}</span>
+                    {#if isCurrent}<Check class="ml-auto size-3.5 shrink-0" />{/if}
+                  </DropdownMenu.Item>
+                {/each}
+              {/if}
             </div>
-          {/if}
-        </DropdownMenu.Content>
-      </DropdownMenu.Root>
+
+            {#if isPostgres}
+              <div class="flex items-center justify-between border-t border-border/50 px-2 py-1">
+                <span class="text-[10px] text-muted-foreground/50">
+                  {databases.length} database{databases.length === 1 ? '' : 's'}
+                </span>
+                <div class="flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    class="inline-flex size-5 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-muted hover:text-foreground"
+                    onclick={fetchDatabases}
+                    title="Refresh list"
+                  >
+                    <RefreshCw class={cn('size-3', dbLoading && 'animate-spin')} />
+                  </button>
+                  <button
+                    type="button"
+                    class="inline-flex size-5 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-muted hover:text-foreground"
+                    onclick={() => { dbOpen = false; createDbOpen = true }}
+                    title="Create new database"
+                  >
+                    <Plus class="size-3" />
+                  </button>
+                </div>
+              </div>
+            {/if}
+          </DropdownMenu.Content>
+        </DropdownMenu.Root>
+
+        {#if isPostgres}
+          <button
+            type="button"
+            class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/40 transition-colors hover:bg-accent hover:text-foreground"
+            onclick={() => (createDbOpen = true)}
+            title="Create new database"
+            aria-label="Create new database"
+          >
+            <Plus class="size-3" />
+          </button>
+        {/if}
+      </div>
       {@render sep()}
 
       <!-- Data / Query Editor view toggle -->
@@ -373,6 +403,9 @@
       <button type="button" class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground" onclick={onopenorm} title="ORM Runner">
         <Code2 class="size-3.5" />
       </button>
+      <button type="button" class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground" onclick={onopenbackup} title="Backup & Restore">
+        <Archive class="size-3.5" />
+      </button>
       {@render sep()}
     {/if}
 
@@ -477,3 +510,12 @@
     </DropdownMenu.Root>
   </div>
 </div>
+
+<CreateDatabaseDialog
+  bind:open={createDbOpen}
+  connType={connection?.type ?? 'postgres'}
+  oncreate={async (opts) => {
+    await oncreatedatabase(opts)
+    databases = []
+  }}
+/>

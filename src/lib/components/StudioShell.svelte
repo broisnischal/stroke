@@ -38,6 +38,7 @@
   import OrmRunner from './OrmRunner.svelte'
   import SchemaPage from './SchemaPage.svelte'
   import SecurityPage from './SecurityPage.svelte'
+  import BackupPage from './BackupPage.svelte'
   import LogsPage from './LogsPage.svelte'
   import JsonViewerPage from './JsonViewerPage.svelte'
   import { Button } from '$lib/components/ui/button/index.js'
@@ -50,6 +51,7 @@
     getTableRows,
     getTableColumnStructure,
     executeSql,
+    executeDdl,
     updateTableCell,
     deleteTableRows,
     insertTableRow,
@@ -68,6 +70,7 @@
     createSecurityTab,
     createLogsTab,
     createJsonTab,
+    createBackupTab,
     findTableTab,
     findSqlTab,
     findAiTab,
@@ -75,6 +78,7 @@
     findOrmTab,
     findSecurityTab,
     findLogsTab,
+    findBackupTab,
     findJsonTab,
     findLastTableTab,
     tableTabTitle,
@@ -239,12 +243,14 @@
   let securityEverOpened = $state(false)
   let logsEverOpened = $state(false)
   let jsonEverOpened = $state(false)
+  let backupEverOpened = $state(false)
   $effect(() => {
     if (activeTab?.kind === 'sql') sqlEverOpened = true
     if (activeTab?.kind === 'orm') ormEverOpened = true
     if (activeTab?.kind === 'security') securityEverOpened = true
     if (activeTab?.kind === 'logs') logsEverOpened = true
     if (activeTab?.kind === 'json') jsonEverOpened = true
+    if (activeTab?.kind === 'backup') backupEverOpened = true
   })
 
   let columns = $state([])
@@ -275,6 +281,8 @@
   let scrollTableTop = $state(() => {})
   /** @type {() => void} */
   let scrollTableBottom = $state(() => {})
+  /** @type {{ refresh: () => void } | null} */
+  let securityPageRef = $state(null)
   let total = $state(0)
   let queryMs = $state(0)
   let loadingRows = $state(false)
@@ -827,24 +835,38 @@
     void handleModRefresh()
   })
 
-  // Ctrl+Arrow (Windows/Linux) or Cmd+Arrow (Mac) for pagination.
+  // Ctrl+Arrow (Windows/Linux) or Cmd+Arrow (Mac) for pagination and scroll.
   // Uses a raw listener instead of createHotkey because:
   //   1. macOS intercepts Ctrl+Arrow at the OS level for Mission Control.
   //   2. Raw listeners read current reactive signal values at call time.
   $effect(() => {
     /** @param {KeyboardEvent} e */
-    function onPaginationKey(e) {
+    function onArrowKey(e) {
       const mod = e.ctrlKey || e.metaKey
       if (!mod || e.altKey) return
-      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+      if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return
       if (commandOpen || showConnectionModal || showSettingsModal) return
-      if (activeTab?.kind !== 'table' || !activeTable) return
       const el = document.activeElement
       if (
         el instanceof HTMLInputElement ||
         el instanceof HTMLTextAreaElement ||
         (el instanceof HTMLElement && el.isContentEditable)
       ) return
+
+      // Ctrl/Cmd+Up → scroll table to top; Ctrl/Cmd+Down → scroll table to bottom
+      if (e.key === 'ArrowUp' && !e.shiftKey) {
+        e.preventDefault()
+        scrollTableTop()
+        return
+      }
+      if (e.key === 'ArrowDown' && !e.shiftKey) {
+        e.preventDefault()
+        scrollTableBottom()
+        return
+      }
+
+      // Left/Right: pagination (table tabs only)
+      if (activeTab?.kind !== 'table' || !activeTable) return
       if (e.shiftKey) {
         // Ctrl/Cmd+Shift+Left → first page, Ctrl/Cmd+Shift+Right → last page
         if (e.key === 'ArrowLeft') {
@@ -869,8 +891,8 @@
         }
       }
     }
-    document.addEventListener('keydown', onPaginationKey)
-    return () => document.removeEventListener('keydown', onPaginationKey)
+    document.addEventListener('keydown', onArrowKey)
+    return () => document.removeEventListener('keydown', onArrowKey)
   })
 
   // F11 (all platforms) and Cmd+Ctrl+F (macOS standard) for fullscreen toggle.
@@ -939,6 +961,15 @@
     }
     if (activeTab?.kind === 'table' && activeTable) {
       await loadRows()
+      return
+    }
+    if (activeTab?.kind === 'schema') {
+      await loadSchemas()
+      await loadTables()
+      return
+    }
+    if (activeTab?.kind === 'security') {
+      securityPageRef?.refresh()
       return
     }
     await loadTables()
@@ -1077,6 +1108,17 @@
     saveActiveTabState()
     dropWelcomeTabs()
     const tab = createSecurityTab()
+    tabs = [...tabs, tab]
+    activeTabId = tab.id
+    clearTableEditor()
+  }
+
+  function openBackupTab() {
+    const existing = findBackupTab(tabs)
+    if (existing) { void activateTab(existing.id); return }
+    saveActiveTabState()
+    dropWelcomeTabs()
+    const tab = createBackupTab()
     tabs = [...tabs, tab]
     activeTabId = tab.id
     clearTableEditor()
@@ -2255,6 +2297,7 @@
   {aiMode}
   ontoggleaimode={() => aiMode ? exitAiMode() : enterAiMode()}
   onopenorm={() => { if (aiMode) exitAiMode(); openOrmTab() }}
+  onopenbackup={() => { if (aiMode) exitAiMode(); openBackupTab() }}
   onopenSchema={() => { if (aiMode) exitAiMode(); openSchemaTab() }}
   onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
   onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
@@ -2312,6 +2355,7 @@
         onopencommand={() => (commandOpen = true)}
         onopenSchema={openSchemaTab}
         onopenorm={openOrmTab}
+        onopenbackup={openBackupTab}
         {aiMode}
         onopenaimode={() => (aiMode ? exitAiMode() : enterAiMode())}
         {queryHistory}
@@ -2435,7 +2479,19 @@
           inert={activeTab?.kind !== 'security' || undefined}
         >
           <svelte:boundary failed={tabError}>
-            <SecurityPage active={activeTab?.kind === 'security'} />
+            <SecurityPage bind:this={securityPageRef} active={activeTab?.kind === 'security'} />
+          </svelte:boundary>
+        </div>
+      {/if}
+
+      <!-- Backup tab -->
+      {#if backupEverOpened}
+        <div
+          class={activeTab?.kind === 'backup' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+          inert={activeTab?.kind !== 'backup' || undefined}
+        >
+          <svelte:boundary failed={tabError}>
+            <BackupPage dbType={dbType} activeSchema={activeSchema} {schemas} />
           </svelte:boundary>
         </div>
       {/if}
@@ -2676,6 +2732,16 @@
                 bind:scrollToBottom={scrollTableBottom}
                 {rowSort}
                 onsortchange={(s) => void handleRowSortChange(s)}
+                onhidecolumn={(colName) => {
+                  const next = new Set(hiddenColumns)
+                  next.add(colName)
+                  hiddenColumns = next
+                  if (activeTable) saveHiddenCols(persistConnectionId, activeSchema, activeTable, next)
+                }}
+                onfiltercolumn={(colName) => {
+                  const newFilter = { id: crypto.randomUUID(), column: colName, op: /** @type {any} */ ('contains'), value: '', conjunct: /** @type {any} */ ('and') }
+                  void handleRowFiltersChange([...rowFilters, newFilter])
+                }}
                 onsave={handleSaveCell}
                 ondelete={handleDeleteRow}
                 onfollowforeignkey={(d) => void handleFollowForeignKey(d)}
@@ -2858,8 +2924,28 @@
   onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
   onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
   onopenorm={openOrmTab}
+        onopenbackup={openBackupTab}
   onopensettings={() => (showSettingsModal = true)}
   onopencommand={() => (commandOpen = true)}
   ondisconnect={requestDisconnect}
+  oncreatedatabase={async ({ name, owner, encoding, lcCollate, lcCtype, template, connectionLimit }) => {
+    const escaped = name.replace(/"/g, '""')
+    let sql
+    if (connection?.type === 'mysql') {
+      sql = `CREATE DATABASE \`${name.replace(/`/g, '``')}\``
+      if (encoding) sql += ` CHARACTER SET ${encoding}`
+      if (lcCollate) sql += ` COLLATE ${lcCollate}`
+    } else {
+      sql = `CREATE DATABASE "${escaped}"`
+      if (encoding) sql += `\n  ENCODING '${encoding}'`
+      if (template) sql += `\n  TEMPLATE ${template}`
+      if (lcCollate) sql += `\n  LC_COLLATE '${lcCollate}'`
+      if (lcCtype) sql += `\n  LC_CTYPE '${lcCtype}'`
+      if (owner) sql += `\n  OWNER "${owner.replace(/"/g, '""')}"`
+      if (connectionLimit != null && connectionLimit !== -1) sql += `\n  CONNECTION LIMIT ${connectionLimit}`
+    }
+    await executeDdl(sql)
+    toast.success(`Database "${name}" created`)
+  }}
 />
 </div>

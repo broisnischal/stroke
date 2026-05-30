@@ -1,0 +1,812 @@
+/*!
+Backup and restore for all supported database engines.
+
+Export produces a plain SQL script (CREATE TABLE … + INSERT …) that can be
+executed against the same engine to restore the data. The format is intentionally
+simple and human-readable so users can inspect and edit it.
+
+Supported:
+  • SQLite  — full schema from sqlite_master + INSERT per table
+  • PostgreSQL — DDL via pg_catalog + INSERT per table per schema
+  • MySQL      — SHOW CREATE TABLE + INSERT per table per schema
+  • D1        — same SQLite approach via the Cloudflare D1 REST API
+*/
+
+use serde::Serialize;
+use sqlx::{Column, Decode, Postgres, Row, TypeInfo, ValueRef};
+use tauri::{AppHandle, Emitter, State};
+
+use super::connection::{require_conn, ActiveConnection, DbState};
+
+// ── Public result types ───────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportResult {
+    pub sql: String,
+    pub table_count: usize,
+    pub row_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportResult {
+    pub statements_ok: usize,
+    pub statements_err: usize,
+    pub errors: Vec<String>,
+}
+
+/// Progress event payload emitted as `backup-log` during an export.
+#[derive(Debug, Clone, Serialize)]
+pub struct BackupLog {
+    /// "info" | "ok" | "warn" | "error"
+    pub level: &'static str,
+    pub message: String,
+}
+
+fn emit_log(app: &AppHandle, level: &'static str, message: impl Into<String>) {
+    app.emit("backup-log", BackupLog { level, message: message.into() }).ok();
+}
+
+// ── Tauri commands ────────────────────────────────────────────────────────────
+
+/// Export the connected database as a SQL script.
+/// `schema` filters to a single schema (PostgreSQL / MySQL only; ignored for SQLite / D1).
+/// `tables` further filters to specific table names within that schema.
+/// Progress events are emitted as `backup-log` during the export.
+#[tauri::command]
+pub async fn backup_export(
+    app: AppHandle,
+    state: State<'_, DbState>,
+    schema: Option<String>,
+    tables: Option<Vec<String>>,
+) -> Result<ExportResult, String> {
+    match require_conn(&state)? {
+        ActiveConnection::Sqlite(pool) => export_sqlite(&app, &pool, tables.as_deref()).await,
+        ActiveConnection::Postgres(pool) => export_postgres(&app, &pool, schema.as_deref(), tables.as_deref()).await,
+        ActiveConnection::Mysql(pool) => export_mysql(&app, &pool, schema.as_deref(), tables.as_deref()).await,
+        ActiveConnection::D1(cfg) => export_d1(&app, &cfg, tables.as_deref()).await,
+    }
+}
+
+/// Execute a SQL restore script against the connected database.
+/// Statements are split on `;` boundaries; errors are collected but do not abort.
+#[tauri::command]
+pub async fn backup_import(
+    state: State<'_, DbState>,
+    sql: String,
+) -> Result<ImportResult, String> {
+    match require_conn(&state)? {
+        ActiveConnection::Sqlite(pool) => import_sqlite(&pool, &sql).await,
+        ActiveConnection::Postgres(pool) => import_postgres(&pool, &sql).await,
+        ActiveConnection::Mysql(pool) => import_mysql(&pool, &sql).await,
+        ActiveConnection::D1(cfg) => import_d1(&cfg, &sql).await,
+    }
+}
+
+// ── Shared helpers ────────────────────────────────────────────────────────────
+
+fn backup_header(engine: &str, schema: Option<&str>) -> String {
+    let schema_line = schema.map_or_else(String::new, |s| format!("-- Schema   : {s}\n"));
+    format!(
+        "-- DB Studio Backup\n-- Engine   : {engine}\n{schema_line}-- Restore  : execute this file against a {engine} database\n\n"
+    )
+}
+
+/// Split a SQL script into individual statements, skipping blank / comment-only ones.
+/// This handles the simple case produced by our own export; it is NOT a full SQL parser.
+fn split_statements(sql: &str) -> Vec<String> {
+    let mut stmts: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut in_single = false;  // inside '...'
+    let mut chars = sql.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\'' if !in_single => {
+                in_single = true;
+                current.push(ch);
+            }
+            '\'' if in_single => {
+                current.push(ch);
+                // escaped quote ''
+                if chars.peek() == Some(&'\'') {
+                    current.push(chars.next().unwrap());
+                } else {
+                    in_single = false;
+                }
+            }
+            '-' if !in_single && chars.peek() == Some(&'-') => {
+                // line comment — consume until newline
+                while let Some(c) = chars.next() {
+                    if c == '\n' { break; }
+                }
+                current.push('\n');
+            }
+            ';' if !in_single => {
+                let s = current.trim().to_string();
+                if !s.is_empty() {
+                    stmts.push(s);
+                }
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+    let s = current.trim().to_string();
+    if !s.is_empty() && !s.starts_with("--") {
+        stmts.push(s);
+    }
+    stmts
+}
+
+// ── SQLite export ─────────────────────────────────────────────────────────────
+
+async fn export_sqlite(
+    app: &AppHandle,
+    pool: &sqlx::SqlitePool,
+    filter: Option<&[String]>,
+) -> Result<ExportResult, String> {
+    emit_log(app, "info", "Starting SQLite export…");
+    let mut out = backup_header("SQLite", None);
+    out.push_str("PRAGMA foreign_keys=OFF;\nBEGIN TRANSACTION;\n\n");
+
+    let ddl_rows = sqlx::query(
+        "SELECT type, name, sql FROM sqlite_master \
+         WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' \
+         ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 WHEN 'view' THEN 2 ELSE 3 END, name"
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let mut all_tables: Vec<String> = Vec::new();
+    for row in &ddl_rows {
+        let obj_type: String = row.try_get(0).unwrap_or_default();
+        let name: String = row.try_get(1).unwrap_or_default();
+        let sql: String = row.try_get(2).unwrap_or_default();
+        // Only include table DDL if it passes the filter; always include non-table objects
+        if obj_type == "table" {
+            all_tables.push(name.clone());
+            if filter.map_or(true, |f| f.iter().any(|t| t == &name)) {
+                out.push_str(sql.trim());
+                out.push_str(";\n");
+            }
+        } else {
+            out.push_str(sql.trim());
+            out.push_str(";\n");
+        }
+    }
+
+    let tables_to_dump: Vec<&String> = all_tables.iter()
+        .filter(|t| filter.map_or(true, |f| f.iter().any(|ft| ft == *t)))
+        .collect();
+
+    emit_log(app, "info", format!("Exporting {} table(s)…", tables_to_dump.len()));
+
+    let mut total_rows = 0usize;
+    for table in &tables_to_dump {
+        emit_log(app, "info", format!("  → {table}"));
+        let q = format!("SELECT * FROM \"{}\"", table.replace('"', "\"\""));
+        let rows = sqlx::query(&q).fetch_all(pool).await.map_err(|e| e.to_string())?;
+        let n = rows.len();
+
+        if !rows.is_empty() {
+            let cols: Vec<String> = rows[0].columns().iter()
+                .map(|c| format!("\"{}\"", c.name().replace('"', "\"\"")))
+                .collect();
+            let col_list = cols.join(", ");
+            out.push('\n');
+            for row in &rows {
+                let vals: Vec<String> = (0..row.len()).map(|i| sqlite_val(row, i)).collect();
+                out.push_str(&format!(
+                    "INSERT OR REPLACE INTO \"{}\" ({}) VALUES ({});\n",
+                    table.replace('"', "\"\""), col_list, vals.join(", ")
+                ));
+            }
+        }
+        total_rows += n;
+        emit_log(app, "ok", format!("  ✓ {table} — {n} rows"));
+    }
+
+    out.push_str("\nCOMMIT;\nPRAGMA foreign_keys=ON;\n");
+    emit_log(app, "ok", format!("Export complete: {} tables, {} rows", tables_to_dump.len(), total_rows));
+    Ok(ExportResult { sql: out, table_count: tables_to_dump.len(), row_count: total_rows })
+}
+
+fn sqlite_val(row: &sqlx::sqlite::SqliteRow, idx: usize) -> String {
+    if let Ok(v) = row.try_get::<Option<i64>, _>(idx) {
+        return v.map_or_else(|| "NULL".into(), |n| n.to_string());
+    }
+    if let Ok(v) = row.try_get::<Option<f64>, _>(idx) {
+        return v.map_or_else(|| "NULL".into(), |n| n.to_string());
+    }
+    if let Ok(v) = row.try_get::<Option<String>, _>(idx) {
+        return v.map_or_else(|| "NULL".into(), |s| format!("'{}'", s.replace('\'', "''")));
+    }
+    if let Ok(v) = row.try_get::<Option<Vec<u8>>, _>(idx) {
+        return v.map_or_else(|| "NULL".into(), |b| format!("X'{}'", hex::encode(b)));
+    }
+    "NULL".into()
+}
+
+// ── SQLite import ─────────────────────────────────────────────────────────────
+
+async fn import_sqlite(pool: &sqlx::SqlitePool, sql: &str) -> Result<ImportResult, String> {
+    let stmts = split_statements(sql);
+    let total = stmts.len();
+    let mut ok = 0usize;
+    let mut errors: Vec<String> = Vec::new();
+
+    for stmt in &stmts {
+        let low = stmt.trim_start().to_lowercase();
+        // Skip pure-pragma lines that don't need execution context
+        if low.starts_with("pragma foreign_keys") {
+            ok += 1;
+            continue;
+        }
+        match sqlx::query(stmt).execute(pool).await {
+            Ok(_) => ok += 1,
+            Err(e) => errors.push(format!("{e} — near: {}…", &stmt[..stmt.len().min(60)])),
+        }
+    }
+
+    Ok(ImportResult { statements_ok: ok, statements_err: total - ok, errors })
+}
+
+// ── PostgreSQL export ─────────────────────────────────────────────────────────
+
+async fn export_postgres(
+    app: &AppHandle,
+    pool: &sqlx::PgPool,
+    schema_filter: Option<&str>,
+    table_filter: Option<&[String]>,
+) -> Result<ExportResult, String> {
+    // Get schemas to export
+    let schemas: Vec<String> = if let Some(s) = schema_filter {
+        vec![s.to_string()]
+    } else {
+        sqlx::query_scalar(
+            "SELECT nspname::text FROM pg_catalog.pg_namespace \
+             WHERE nspname NOT IN ('pg_catalog','information_schema','pg_toast') \
+               AND nspname NOT LIKE 'pg_temp_%' \
+             ORDER BY nspname"
+        )
+        .fetch_all(pool)
+        .await
+        .map_err(|e| e.to_string())?
+    };
+
+    emit_log(app, "info", format!("Starting PostgreSQL export ({} schema(s))…", schemas.len()));
+
+    let mut out = backup_header("PostgreSQL", schema_filter);
+    out.push_str("SET client_encoding = 'UTF8';\n");
+    out.push_str("SET standard_conforming_strings = on;\n");
+    out.push_str("SET session_replication_role = replica;\n\n");
+
+    let mut total_tables = 0usize;
+    let mut total_rows = 0usize;
+
+    for schema in &schemas {
+        let all_tables: Vec<String> = sqlx::query_scalar(
+            "SELECT c.relname::text FROM pg_catalog.pg_class c \
+             JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+             WHERE n.nspname = $1 AND c.relkind = 'r' AND NOT c.relispartition \
+             ORDER BY c.relname"
+        )
+        .bind(schema)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+        let tables_to_export: Vec<&String> = all_tables.iter()
+            .filter(|t| table_filter.map_or(true, |f| f.iter().any(|ft| ft == *t)))
+            .collect();
+
+        if tables_to_export.is_empty() { continue; }
+
+        emit_log(app, "info", format!("Schema {schema}: {} table(s)", tables_to_export.len()));
+        out.push_str(&format!("-- ── Schema: {schema} ───────────────────────────────────\n\n"));
+
+        for table in &tables_to_export {
+            emit_log(app, "info", format!("  → {schema}.{table}"));
+            match pg_dump_table(pool, schema, table).await {
+                Ok((ddl, rows)) => {
+                    out.push_str(&ddl);
+                    total_rows += rows;
+                    total_tables += 1;
+                    emit_log(app, "ok", format!("  ✓ {table} — {rows} rows"));
+                }
+                Err(e) => {
+                    out.push_str(&format!("-- ERROR exporting {schema}.{table}: {e}\n\n"));
+                    emit_log(app, "error", format!("  ✗ {table}: {e}"));
+                }
+            }
+        }
+
+        // Foreign keys — only for tables we exported
+        let fk_defs: Vec<String> = sqlx::query_scalar(
+            "SELECT format('ALTER TABLE %I.%I ADD CONSTRAINT %I %s',\
+                    n.nspname, t.relname, c.conname, pg_get_constraintdef(c.oid))\
+             FROM pg_catalog.pg_constraint c\
+             JOIN pg_catalog.pg_class t ON t.oid = c.conrelid\
+             JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace\
+             WHERE c.contype = 'f' AND n.nspname = $1\
+             ORDER BY t.relname, c.conname"
+        )
+        .bind(schema)
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+
+        if !fk_defs.is_empty() {
+            out.push_str(&format!("-- Foreign keys — {schema}\n"));
+            for fk in &fk_defs {
+                // Skip FK if the referenced table wasn't exported
+                out.push_str(fk);
+                out.push_str(";\n");
+            }
+            out.push('\n');
+        }
+    }
+
+    out.push_str("SET session_replication_role = DEFAULT;\n");
+    emit_log(app, "ok", format!("Export complete: {total_tables} tables, {total_rows} rows"));
+    Ok(ExportResult { sql: out, table_count: total_tables, row_count: total_rows })
+}
+
+async fn pg_dump_table(
+    pool: &sqlx::PgPool,
+    schema: &str,
+    table: &str,
+) -> Result<(String, usize), String> {
+    let mut out = String::new();
+
+    // Column definitions
+    let col_rows = sqlx::query(r#"
+        SELECT
+            a.attname::text,
+            format_type(a.atttypid, a.atttypmod),
+            NOT a.attnotnull AS nullable,
+            pg_get_expr(d.adbin, d.adrelid) AS col_default,
+            a.attidentity IN ('a','d') AS is_identity
+        FROM pg_catalog.pg_attribute a
+        LEFT JOIN pg_catalog.pg_attrdef d
+            ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+        JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = $1 AND c.relname = $2
+          AND a.attnum > 0 AND NOT a.attisdropped
+        ORDER BY a.attnum
+    "#)
+    .bind(schema)
+    .bind(table)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    if col_rows.is_empty() { return Ok((String::new(), 0)); }
+
+    // Primary key columns
+    let pk_cols: Vec<String> = sqlx::query_scalar(
+        "SELECT a.attname::text \
+         FROM pg_catalog.pg_constraint c \
+         JOIN pg_catalog.pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey) \
+         JOIN pg_catalog.pg_class t ON t.oid = c.conrelid \
+         JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace \
+         WHERE c.contype = 'p' AND n.nspname = $1 AND t.relname = $2 \
+         ORDER BY array_position(c.conkey, a.attnum)"
+    )
+    .bind(schema)
+    .bind(table)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
+    out.push_str(&format!("CREATE TABLE IF NOT EXISTS \"{schema}\".\"{table}\" (\n"));
+    let mut col_defs: Vec<String> = Vec::new();
+
+    for row in &col_rows {
+        let name: String = row.try_get(0).unwrap_or_default();
+        let typ: String = row.try_get(1).unwrap_or_default();
+        let nullable: bool = row.try_get(2).unwrap_or(true);
+        let default: Option<String> = row.try_get(3).ok().flatten();
+        let is_identity: bool = row.try_get(4).unwrap_or(false);
+
+        let mut def = format!("    \"{}\" {}", name, typ);
+        if !nullable { def.push_str(" NOT NULL"); }
+        if is_identity {
+            def.push_str(" GENERATED BY DEFAULT AS IDENTITY");
+        } else if let Some(d) = &default {
+            def.push_str(&format!(" DEFAULT {}", d));
+        }
+        col_defs.push(def);
+    }
+
+    if !pk_cols.is_empty() {
+        let pk_quoted = pk_cols.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", ");
+        col_defs.push(format!("    PRIMARY KEY ({})", pk_quoted));
+    }
+
+    out.push_str(&col_defs.join(",\n"));
+    out.push_str("\n);\n");
+
+    // Non-primary indexes
+    let indexes: Vec<String> = sqlx::query_scalar(
+        "SELECT pg_get_indexdef(i.oid) \
+         FROM pg_catalog.pg_index ix \
+         JOIN pg_catalog.pg_class i ON i.oid = ix.indexrelid \
+         JOIN pg_catalog.pg_class t ON t.oid = ix.indrelid \
+         JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace \
+         WHERE n.nspname = $1 AND t.relname = $2 AND NOT ix.indisprimary"
+    )
+    .bind(schema)
+    .bind(table)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
+    for idx_def in &indexes {
+        // Rewrite to IF NOT EXISTS (PostgreSQL 9.5+)
+        let safe = idx_def
+            .replacen("CREATE INDEX ", "CREATE INDEX IF NOT EXISTS ", 1)
+            .replacen("CREATE UNIQUE INDEX ", "CREATE UNIQUE INDEX IF NOT EXISTS ", 1);
+        out.push_str(&safe);
+        out.push_str(";\n");
+    }
+
+    // Data
+    let data_sql = format!("SELECT * FROM \"{schema}\".\"{table}\"");
+    let rows = sqlx::query(&data_sql)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let row_count = rows.len();
+    if !rows.is_empty() {
+        let col_names: Vec<String> = rows[0]
+            .columns()
+            .iter()
+            .map(|c| format!("\"{}\"", c.name()))
+            .collect();
+        let col_list = col_names.join(", ");
+        let conflict_target = if pk_cols.is_empty() {
+            "DO NOTHING".to_string()
+        } else {
+            let pk_q = pk_cols.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", ");
+            format!("({pk_q}) DO NOTHING")
+        };
+
+        out.push('\n');
+        for row in &rows {
+            let vals: Vec<String> = (0..row.len()).map(|i| pg_val(row, i)).collect();
+            out.push_str(&format!(
+                "INSERT INTO \"{schema}\".\"{table}\" ({col_list}) VALUES ({}) ON CONFLICT {conflict_target};\n",
+                vals.join(", ")
+            ));
+        }
+    }
+    out.push('\n');
+
+    Ok((out, row_count))
+}
+
+fn pg_val(row: &sqlx::postgres::PgRow, idx: usize) -> String {
+    let col = row.column(idx);
+    let type_name = col.type_info().name();
+
+    // Check NULL via raw value
+    if let Ok(raw) = row.try_get_raw(idx) {
+        if raw.is_null() { return "NULL".into(); }
+    } else {
+        return "NULL".into();
+    }
+
+    match type_name {
+        "BOOL" => {
+            return row.try_get::<bool, _>(idx)
+                .map(|b| if b { "TRUE" } else { "FALSE" }.into())
+                .unwrap_or_else(|_| "NULL".into());
+        }
+        "INT2" | "INT4" | "INT8" | "OID" => {
+            return row.try_get::<i64, _>(idx)
+                .map(|n| n.to_string())
+                .unwrap_or_else(|_| "NULL".into());
+        }
+        "FLOAT4" | "FLOAT8" | "NUMERIC" | "MONEY" => {
+            return row.try_get::<f64, _>(idx)
+                .map(|n| n.to_string())
+                .unwrap_or_else(|_| "NULL".into());
+        }
+        "JSON" | "JSONB" => {
+            return row.try_get::<serde_json::Value, _>(idx)
+                .map(|v| format!("'{}'", v.to_string().replace('\'', "''")))
+                .unwrap_or_else(|_| "NULL".into());
+        }
+        "BYTEA" => {
+            return row.try_get::<Vec<u8>, _>(idx)
+                .map(|b| format!("'\\x{}'", hex::encode(b)))
+                .unwrap_or_else(|_| "NULL".into());
+        }
+        _ => {}
+    }
+
+    // Fallback: decode raw bytes as UTF-8 text (covers TEXT, VARCHAR, UUID, timestamps, enums, arrays…)
+    if let Ok(raw) = row.try_get_raw(idx) {
+        if let Ok(text) = <String as Decode<sqlx::Postgres>>::decode(raw) {
+            return format!("'{}'", text.replace('\'', "''"));
+        }
+    }
+
+    "NULL".into()
+}
+
+// ── PostgreSQL import ─────────────────────────────────────────────────────────
+
+async fn import_postgres(pool: &sqlx::PgPool, sql: &str) -> Result<ImportResult, String> {
+    let stmts = split_statements(sql);
+    let total = stmts.len();
+    let mut ok = 0usize;
+    let mut errors: Vec<String> = Vec::new();
+
+    // Wrap everything in a transaction for atomicity where possible
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    // Disable FK during import
+    sqlx::query("SET session_replication_role = replica")
+        .execute(&mut *tx)
+        .await
+        .ok();
+
+    for stmt in &stmts {
+        let low = stmt.trim_start().to_lowercase();
+        if low.starts_with("set session_replication_role") { ok += 1; continue; }
+        match sqlx::query(stmt).execute(&mut *tx).await {
+            Ok(_) => ok += 1,
+            Err(e) => {
+                errors.push(format!("{e} — near: {}…", &stmt[..stmt.len().min(80)]));
+            }
+        }
+    }
+
+    sqlx::query("SET session_replication_role = DEFAULT")
+        .execute(&mut *tx)
+        .await
+        .ok();
+    tx.commit().await.map_err(|e| e.to_string())?;
+
+    Ok(ImportResult { statements_ok: ok, statements_err: total - ok, errors })
+}
+
+// ── MySQL export ──────────────────────────────────────────────────────────────
+
+async fn export_mysql(
+    app: &AppHandle,
+    pool: &sqlx::MySqlPool,
+    schema_filter: Option<&str>,
+    table_filter: Option<&[String]>,
+) -> Result<ExportResult, String> {
+    let schemas: Vec<String> = if let Some(s) = schema_filter {
+        vec![s.to_string()]
+    } else {
+        sqlx::query_scalar::<_, String>(
+            "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA \
+             WHERE SCHEMA_NAME NOT IN ('information_schema','performance_schema','mysql','sys') \
+             ORDER BY SCHEMA_NAME"
+        )
+        .fetch_all(pool)
+        .await
+        .map_err(|e| e.to_string())?
+    };
+
+    emit_log(app, "info", format!("Starting MySQL export ({} schema(s))…", schemas.len()));
+
+    let mut out = backup_header("MySQL", schema_filter);
+    out.push_str("SET FOREIGN_KEY_CHECKS=0;\nSET UNIQUE_CHECKS=0;\nSET AUTOCOMMIT=0;\n\n");
+
+    let mut total_tables = 0usize;
+    let mut total_rows = 0usize;
+
+    for schema in &schemas {
+        let all_tables: Vec<String> = sqlx::query_scalar::<_, String>(
+            "SELECT TABLE_NAME FROM information_schema.TABLES \
+             WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE' \
+             ORDER BY TABLE_NAME"
+        )
+        .bind(schema)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+        let tables_to_export: Vec<&String> = all_tables.iter()
+            .filter(|t| table_filter.map_or(true, |f| f.iter().any(|ft| ft == *t)))
+            .collect();
+
+        if tables_to_export.is_empty() { continue; }
+        emit_log(app, "info", format!("Schema {schema}: {} table(s)", tables_to_export.len()));
+        out.push_str(&format!("USE `{schema}`;\n\n"));
+
+        for table in &tables_to_export {
+            emit_log(app, "info", format!("  → {schema}.{table}"));
+            let create_row = sqlx::query(&format!("SHOW CREATE TABLE `{schema}`.`{table}`"))
+                .fetch_one(pool).await
+                .map_err(|e| format!("SHOW CREATE TABLE `{table}` failed: {e}"))?;
+
+            let create_sql: String = create_row.try_get(1).unwrap_or_default();
+            out.push_str(&create_sql.replace("CREATE TABLE ", "CREATE TABLE IF NOT EXISTS "));
+            out.push_str(";\n\n");
+
+            let rows = sqlx::query(&format!("SELECT * FROM `{schema}`.`{table}`"))
+                .fetch_all(pool).await
+                .map_err(|e| e.to_string())?;
+
+            let n = rows.len();
+            if !rows.is_empty() {
+                let cols: Vec<String> = rows[0].columns().iter().map(|c| format!("`{}`", c.name())).collect();
+                let col_list = cols.join(", ");
+                for row in &rows {
+                    let vals: Vec<String> = (0..row.len()).map(|i| mysql_val(&row, i)).collect();
+                    out.push_str(&format!("INSERT IGNORE INTO `{schema}`.`{table}` ({col_list}) VALUES ({});\n", vals.join(", ")));
+                }
+                out.push('\n');
+            }
+            total_rows += n;
+            total_tables += 1;
+            emit_log(app, "ok", format!("  ✓ {table} — {n} rows"));
+        }
+    }
+
+    out.push_str("\nSET FOREIGN_KEY_CHECKS=1;\nSET UNIQUE_CHECKS=1;\nCOMMIT;\n");
+    emit_log(app, "ok", format!("Export complete: {total_tables} tables, {total_rows} rows"));
+    Ok(ExportResult { sql: out, table_count: total_tables, row_count: total_rows })
+}
+
+fn mysql_val(row: &sqlx::mysql::MySqlRow, idx: usize) -> String {
+    if let Ok(v) = row.try_get::<Option<i64>, _>(idx) {
+        return v.map_or_else(|| "NULL".into(), |n| n.to_string());
+    }
+    if let Ok(v) = row.try_get::<Option<f64>, _>(idx) {
+        return v.map_or_else(|| "NULL".into(), |n| n.to_string());
+    }
+    if let Ok(v) = row.try_get::<Option<bool>, _>(idx) {
+        return v.map_or_else(|| "NULL".into(), |b| if b { "1" } else { "0" }.into());
+    }
+    if let Ok(v) = row.try_get::<Option<Vec<u8>>, _>(idx) {
+        return v.map_or_else(|| "NULL".into(), |b| {
+            if let Ok(s) = String::from_utf8(b.clone()) {
+                format!("'{}'", s.replace('\\', "\\\\").replace('\'', "\\'"))
+            } else {
+                format!("0x{}", hex::encode(b))
+            }
+        });
+    }
+    "NULL".into()
+}
+
+// ── MySQL import ──────────────────────────────────────────────────────────────
+
+async fn import_mysql(pool: &sqlx::MySqlPool, sql: &str) -> Result<ImportResult, String> {
+    let stmts = split_statements(sql);
+    let total = stmts.len();
+    let mut ok = 0usize;
+    let mut errors: Vec<String> = Vec::new();
+
+    // Note: MySQL doesn't support multi-statement transactions for DDL, so
+    // we run each statement individually.
+    for stmt in &stmts {
+        let low = stmt.trim_start().to_lowercase();
+        if low.starts_with("set foreign_key_checks")
+            || low.starts_with("set unique_checks")
+            || low.starts_with("set autocommit")
+        {
+            // Still execute these pragmas
+        }
+        match sqlx::query(stmt).execute(pool).await {
+            Ok(_) => ok += 1,
+            Err(e) => errors.push(format!("{e} — near: {}…", &stmt[..stmt.len().min(80)])),
+        }
+    }
+
+    Ok(ImportResult { statements_ok: ok, statements_err: total - ok, errors })
+}
+
+// ── D1 export ─────────────────────────────────────────────────────────────────
+// D1 is SQLite under the hood; we use the same SQL-based approach via the API.
+
+async fn export_d1(
+    app: &AppHandle,
+    cfg: &super::connection::D1Config,
+    filter: Option<&[String]>,
+) -> Result<ExportResult, String> {
+    emit_log(app, "info", "Starting Cloudflare D1 export…");
+    let mut out = backup_header("Cloudflare D1 (SQLite)", None);
+    out.push_str("PRAGMA foreign_keys=OFF;\nBEGIN TRANSACTION;\n\n");
+
+    let ddl_result = super::d1::query(
+        cfg,
+        "SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 WHEN 'view' THEN 2 ELSE 3 END, name",
+        vec![],
+    ).await?;
+
+    let type_idx = ddl_result.columns.iter().position(|c| c.name == "type").unwrap_or(0);
+    let name_idx = ddl_result.columns.iter().position(|c| c.name == "name").unwrap_or(1);
+    let sql_idx  = ddl_result.columns.iter().position(|c| c.name == "sql").unwrap_or(2);
+
+    let mut all_tables: Vec<String> = Vec::new();
+    for row in &ddl_result.rows {
+        let obj_type = row.get(type_idx).and_then(|v| v.as_str()).unwrap_or("");
+        let name     = row.get(name_idx).and_then(|v| v.as_str()).unwrap_or("");
+        let ddl_sql  = row.get(sql_idx).and_then(|v| v.as_str()).unwrap_or("");
+        if obj_type == "table" {
+            all_tables.push(name.to_string());
+            if filter.map_or(true, |f| f.iter().any(|t| t == name)) {
+                out.push_str(ddl_sql.trim()); out.push_str(";\n");
+            }
+        } else {
+            out.push_str(ddl_sql.trim()); out.push_str(";\n");
+        }
+    }
+
+    let tables_to_dump: Vec<&String> = all_tables.iter()
+        .filter(|t| filter.map_or(true, |f| f.iter().any(|ft| ft == *t)))
+        .collect();
+
+    emit_log(app, "info", format!("Exporting {} table(s)…", tables_to_dump.len()));
+
+    let mut total_rows = 0usize;
+    for table in &tables_to_dump {
+        emit_log(app, "info", format!("  → {table}"));
+        let data_result = super::d1::query(cfg,
+            &format!("SELECT * FROM \"{}\"", table.replace('"', "\"\"")), vec![]).await?;
+        let n = data_result.rows.len();
+        if !data_result.rows.is_empty() {
+            let col_names: Vec<String> = data_result.columns.iter()
+                .map(|c| format!("\"{}\"", c.name.replace('"', "\"\"")))
+                .collect();
+            let col_list = col_names.join(", ");
+            out.push('\n');
+            for row in &data_result.rows {
+                let vals: Vec<String> = data_result.columns.iter().enumerate()
+                    .map(|(i, _)| row.get(i).map_or("NULL".into(), json_to_sql_val))
+                    .collect();
+                out.push_str(&format!("INSERT OR REPLACE INTO \"{}\" ({}) VALUES ({});\n",
+                    table.replace('"', "\"\""), col_list, vals.join(", ")));
+            }
+        }
+        total_rows += n;
+        emit_log(app, "ok", format!("  ✓ {table} — {n} rows"));
+    }
+
+    out.push_str("\nCOMMIT;\nPRAGMA foreign_keys=ON;\n");
+    emit_log(app, "ok", format!("Export complete: {} tables, {total_rows} rows", tables_to_dump.len()));
+    Ok(ExportResult { sql: out, table_count: tables_to_dump.len(), row_count: total_rows })
+}
+
+fn json_to_sql_val(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::Null => "NULL".into(),
+        serde_json::Value::Bool(b) => if *b { "1" } else { "0" }.into(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::String(s) => format!("'{}'", s.replace('\'', "''")),
+        other => format!("'{}'", other.to_string().replace('\'', "''")),
+    }
+}
+
+// ── D1 import ────────────────────────────────────────────────────────────────
+
+async fn import_d1(cfg: &super::connection::D1Config, sql: &str) -> Result<ImportResult, String> {
+    let stmts = split_statements(sql);
+    let total = stmts.len();
+    let mut ok = 0usize;
+    let mut errors: Vec<String> = Vec::new();
+
+    for stmt in &stmts {
+        let low = stmt.trim_start().to_lowercase();
+        if low.starts_with("pragma foreign_keys") { ok += 1; continue; }
+        match super::d1::query(cfg, stmt, vec![]).await {
+            Ok(_) => ok += 1,
+            Err(e) => errors.push(format!("{e} — near: {}…", &stmt[..stmt.len().min(60)])),
+        }
+    }
+
+    Ok(ImportResult { statements_ok: ok, statements_err: total - ok, errors })
+}

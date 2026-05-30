@@ -15,6 +15,7 @@ pub async fn ai_fetch(
     body: serde_json::Value,
     stream: bool,
     request_id: String,
+    extra_headers: Option<std::collections::HashMap<String, String>>,
 ) -> Result<Option<serde_json::Value>, String> {
     let client = reqwest::Client::new();
     let mut builder = client
@@ -24,6 +25,12 @@ pub async fn ai_fetch(
     if let Some(key) = &api_key {
         if !key.is_empty() {
             builder = builder.header("Authorization", format!("Bearer {}", key));
+        }
+    }
+
+    if let Some(headers) = extra_headers {
+        for (k, v) in headers {
+            builder = builder.header(k, v);
         }
     }
 
@@ -89,7 +96,7 @@ pub fn toggle_devtools(window: tauri::WebviewWindow) {
 
 use crate::db::{
     connect, connect_d1, connect_mysql, connect_sqlite, disconnect,
-    delete_table_row, delete_table_rows, execute_sql, get_table_rows, insert_table_row,
+    delete_table_row, delete_table_rows, execute_ddl, execute_sql, get_table_rows, insert_table_row,
     list_schemas, list_tables, list_indexes, list_enums, truncate_table, drop_table,
     get_table_column_structure,
     test_connection, test_d1_connection, test_mysql_connection, test_sqlite_connection,
@@ -255,6 +262,12 @@ pub async fn pg_get_table_rows(
 #[tauri::command]
 pub async fn pg_execute_sql(state: State<'_, DbState>, sql: String) -> Result<SqlResult, String> {
     execute_sql(state, sql).await
+}
+
+/// Run a DDL statement outside a transaction (required for CREATE/DROP DATABASE etc.).
+#[tauri::command]
+pub async fn pg_execute_ddl(state: State<'_, DbState>, sql: String) -> Result<(), String> {
+    execute_ddl(state, sql).await
 }
 
 #[tauri::command]

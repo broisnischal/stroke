@@ -24,6 +24,8 @@
     PROVIDER_MODELS,
   } from "$lib/stores/ai-settings.js";
   import { invoke } from "@tauri-apps/api/core";
+  import CopilotLogin from "$lib/components/CopilotLogin.svelte";
+  import { fetchCopilotModels } from "$lib/copilot.js";
 
   let { open = $bindable(false) } = $props();
 
@@ -63,7 +65,31 @@
   const modelPresets = $derived(PROVIDER_MODELS[formProvider] ?? []);
   const isOllama = $derived(formProvider === "ollama");
   const isCustom = $derived(formProvider === "custom");
-  const needsKey = $derived(!formApiKey && !isOllama && !isCustom);
+  const isCopilot = $derived(formProvider === "copilot");
+  const needsKey = $derived(!formApiKey && !isOllama && !isCustom && !isCopilot);
+
+  /** Dynamic models fetched from Copilot API after login */
+  let copilotModels = $state(/** @type {{id:string,name:string}[]} */ ([]));
+  let copilotModelsLoading = $state(false);
+
+  /** Called when CopilotLogin completes with a fresh model list */
+  function onCopilotConnect(models) {
+    copilotModels = models;
+    if (models.length > 0 && !formModel) formModel = models[0].id;
+    testState = "ok";
+    testMsg = "Connected to GitHub Copilot";
+  }
+
+  /** Load dynamic Copilot models when entering step 1 for the Copilot provider */
+  $effect(() => {
+    if (isCopilot && step === 1 && copilotModels.length === 0 && !copilotModelsLoading) {
+      copilotModelsLoading = true;
+      fetchCopilotModels()
+        .then((m) => { copilotModels = m; if (!formModel && m.length > 0) formModel = m[0].id; })
+        .catch(() => { /* fallback to static presets */ })
+        .finally(() => { copilotModelsLoading = false; });
+    }
+  });
 
   const stepCanProceed = $derived(
     step === 0 ? !!formProvider : !!formModel.trim()
@@ -273,7 +299,35 @@
 
         <!-- Step 1 · Model ────────────────────────────────────────────── -->
         {:else if step === 1}
-          {#if modelPresets.length > 0}
+          {#if isCopilot}
+            <!-- Copilot: show dynamic models fetched from the API -->
+            {#if copilotModelsLoading}
+              <div class="flex items-center justify-center gap-2 py-4 text-xs text-muted-foreground">
+                <Loader2 class="size-3.5 animate-spin" />Fetching available models…
+              </div>
+            {:else}
+              {@const list = copilotModels.length > 0 ? copilotModels.map(m => ({ label: m.name, model: m.id, tag: '' })) : modelPresets}
+              <div class="divide-y divide-border/60 rounded-lg border border-border/80">
+                {#each list as preset (preset.model)}
+                  {@const selected = formModel === preset.model}
+                  <button
+                    type="button"
+                    class={cn(
+                      "flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors first:rounded-t-lg last:rounded-b-lg",
+                      selected ? "bg-muted/60" : "hover:bg-muted/40",
+                    )}
+                    onclick={() => { formModel = preset.model; testState = "idle"; }}
+                  >
+                    <div class="min-w-0 flex-1">
+                      <p class="text-sm font-medium text-foreground">{preset.label}</p>
+                      {#if preset.tag}<p class="font-mono text-xs text-muted-foreground">{preset.tag}</p>{/if}
+                    </div>
+                    {#if selected}<Check class="size-3.5 shrink-0 text-foreground" />{/if}
+                  </button>
+                {/each}
+              </div>
+            {/if}
+          {:else if modelPresets.length > 0}
             <div class="divide-y divide-border/60 rounded-lg border border-border/80">
               {#each modelPresets as preset (preset.model)}
                 {@const selected = formModel === preset.model}
@@ -313,7 +367,10 @@
               <Input id="form-name" class="h-8 text-sm" placeholder={formModel ? modelShortName(formModel) : "My model"} bind:value={formName} />
             </div>
 
-            {#if !isOllama}
+            {#if isCopilot}
+              <!-- GitHub Copilot: OAuth device flow instead of API key -->
+              <CopilotLogin onconnect={onCopilotConnect} ondisconnect={() => { testState = "idle"; testMsg = "" }} />
+            {:else if !isOllama}
               <div class="flex flex-col gap-1.5">
                 <div class="flex items-baseline gap-1.5">
                   <label for="form-key" class="text-xs font-medium text-foreground">API key</label>

@@ -10,7 +10,7 @@
   import Bot from "@lucide/svelte/icons/bot";
   import Palette from "@lucide/svelte/icons/palette";
   import Settings from "@lucide/svelte/icons/settings";
-  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import X from "@lucide/svelte/icons/x";
 
   let { open = $bindable(false) } = $props();
 
@@ -85,6 +85,8 @@
         { keys: [mod, "A"], desc: "Select all rows" },
         { keys: [mod, "Z"], desc: "Undo cell edit" },
         { keys: [mod, "⇧", "Z"], desc: "Redo cell edit" },
+        { keys: [mod, "↑"], desc: "Scroll to top" },
+        { keys: [mod, "↓"], desc: "Scroll to bottom" },
         { keys: [mod, "←"], desc: "Previous page" },
         { keys: [mod, "→"], desc: "Next page" },
         { keys: [mod, "⇧", "←"], desc: "First page" },
@@ -142,38 +144,36 @@
   });
 </script>
 
-<Dialog.Root
-  bind:open
-  onOpenChange={(o) => {
-    if (!o) query = "";
-  }}
->
-  <Dialog.Content
-    class="flex max-h-[82vh] w-[80vw] max-w-5xl flex-col gap-0 overflow-hidden p-0"
+{#if open}
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+  <div
+    class="fixed inset-0 z-50 flex flex-col bg-background"
+    role="document"
+    tabindex="-1"
+    onkeydown={(e) => { if (e.key === 'Escape') { e.preventDefault(); open = false } }}
   >
     <!-- Header -->
-    <Dialog.Header class="shrink-0 border-b border-border/60 px-5 py-4">
-      <div class="flex items-center gap-3">
+    <div class="flex shrink-0 items-start gap-4 border-b border-border/60 px-6 py-4">
+      <div class="flex items-center gap-3 min-w-0 flex-1">
         <div
           class="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-muted"
         >
           <Keyboard class="size-3.5 text-muted-foreground" />
         </div>
         <div class="min-w-0 flex-1">
-          <Dialog.Title class="text-sm font-semibold"
-            >Keyboard Shortcuts</Dialog.Title
-          >
-          <Dialog.Description class="mt-0.5 text-xs text-muted-foreground">
+          <h1 class="text-sm font-semibold">Keyboard Shortcuts</h1>
+          <p class="mt-0.5 text-xs text-muted-foreground">
             All shortcuts use <kbd
               class="rounded border border-border bg-muted px-1 font-mono text-[10px]"
               >{mod}</kbd
             > on this platform.
-          </Dialog.Description>
+          </p>
         </div>
       </div>
 
       <!-- Search -->
-      <div class="relative mt-3">
+      <div class="relative w-64 shrink-0">
         <Search
           class="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground/50"
         />
@@ -184,7 +184,17 @@
           class="h-8 w-full rounded-md border border-border/60 bg-muted/40 pl-8 pr-3 text-sm outline-none placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring/30"
         />
       </div>
-    </Dialog.Header>
+
+      <button
+        type="button"
+        class="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        onclick={() => (open = false)}
+        aria-label="Close"
+        title="Close (Esc)"
+      >
+        <X class="size-4" />
+      </button>
+    </div>
 
     <!-- Body -->
     <div class="min-h-0 flex-1 overflow-y-auto">
@@ -195,11 +205,11 @@
           </p>
         </div>
       {:else}
-        <div class="grid grid-cols-2 divide-x divide-border/50">
+        <div class="grid grid-cols-2 divide-x divide-border/50 lg:grid-cols-3 xl:grid-cols-4">
           {#each filtered as group (group.label)}
             {@const Icon = group.icon}
             <div
-              class="flex flex-col border-b border-border/50 px-5 py-4 last:border-b-0"
+              class="flex flex-col border-b border-border/50 px-5 py-4"
             >
               <!-- Group heading -->
               <div class="mb-3 flex items-center gap-2">
@@ -240,13 +250,8 @@
               </ul>
             </div>
           {/each}
-
-          <!-- Fill last cell if odd number of groups -->
-          {#if filtered.length % 2 !== 0}
-            <div></div>
-          {/if}
         </div>
       {/if}
     </div>
-  </Dialog.Content>
-</Dialog.Root>
+  </div>
+{/if}

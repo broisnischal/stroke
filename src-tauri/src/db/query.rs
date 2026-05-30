@@ -1415,6 +1415,32 @@ fn is_row_returning_sql(sql: &str) -> bool {
     )
 }
 
+/// Execute a single DDL statement that must run outside a transaction (e.g. CREATE DATABASE).
+/// Only supported on PostgreSQL and MySQL; executes directly on the connection pool.
+pub async fn execute_ddl(state: State<'_, DbState>, sql: String) -> Result<(), String> {
+    let sql_str = sql.trim();
+    if sql_str.is_empty() {
+        return Err("Statement is empty".into());
+    }
+    match require_conn(&state)? {
+        ActiveConnection::Postgres(pool) => {
+            sqlx::query(sql_str)
+                .execute(pool)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(())
+        }
+        ActiveConnection::Mysql(pool) => {
+            sqlx::query(sql_str)
+                .execute(pool)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(())
+        }
+        _ => Err("DDL execution outside a transaction is only supported for PostgreSQL and MySQL".into()),
+    }
+}
+
 pub async fn execute_sql(state: State<'_, DbState>, sql: String) -> Result<SqlResult, String> {
     let sql_str = sql.trim();
     if sql_str.is_empty() {

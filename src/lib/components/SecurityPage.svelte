@@ -110,7 +110,7 @@
     }
   }
 
-  function refresh() {
+  export function refresh() {
     if (activeTab === "roles") {
       roles = null;
       void loadRoles();

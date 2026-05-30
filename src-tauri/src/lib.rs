@@ -1,4 +1,5 @@
 mod commands;
+mod copilot;
 mod db;
 mod docker;
 mod license;
@@ -48,6 +49,7 @@ pub fn run() {
             .maximized(true)
             .decorations(false)
             .visible(false)
+            .devtools(cfg!(debug_assertions))
             .on_navigation(|url| {
                 let scheme = url.scheme();
                 if matches!(scheme, "tauri" | "ipc") {
@@ -93,6 +95,7 @@ pub fn run() {
             commands::pg_drop_table,
             commands::pg_get_table_rows,
             commands::pg_execute_sql,
+            commands::pg_execute_ddl,
             commands::pg_update_table_cell,
             commands::pg_delete_table_row,
             commands::pg_delete_table_rows,
@@ -106,6 +109,12 @@ pub fn run() {
             secrets::ai_store_key,
             secrets::ai_load_key,
             secrets::ai_delete_key,
+            copilot::copilot_start_device_flow,
+            copilot::copilot_poll_oauth_token,
+            copilot::copilot_get_copilot_token,
+            copilot::copilot_fetch_models,
+            db::backup::backup_export,
+            db::backup::backup_import,
             commands::check_license_status,
             commands::activate_license,
             commands::deactivate_license,

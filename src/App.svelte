@@ -11,6 +11,13 @@
     applySettings(loadSettings())
     installZoomShortcuts()
 
+    // Block print — no Tauri-level API exists for this, so override at the JS boundary
+    window.print = () => {}
+    window.addEventListener('beforeprint', (e) => e.preventDefault(), { capture: true })
+    document.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'p') { e.preventDefault(); e.stopPropagation() }
+    }, { capture: true })
+
     // Show the window (started hidden to avoid flash of small→maximized snap)
     // and fade in the page now that theme + layout are fully ready.
     try {

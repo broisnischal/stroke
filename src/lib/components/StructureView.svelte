@@ -394,6 +394,10 @@
     if (e.key === 'Escape') /** @type {HTMLElement} */ (e.currentTarget).blur()
   }
 
+  // Svelte action: focus the element on mount without the a11y_autofocus warning
+  /** @param {HTMLElement} el */
+  function focusOnMount(el) { el.focus() }
+
   // shared classes
   const TH = 'relative select-none overflow-hidden border-b border-r border-border bg-panel px-3 py-2 text-left font-medium text-muted-foreground text-ui-2xs uppercase tracking-wide whitespace-nowrap'
   const TD = 'border-b border-r border-border/40 p-0 align-middle overflow-hidden'
@@ -530,7 +534,7 @@
                   >
                     {#each filteredTypesFor(col.name) as t (t)}
                       <DropdownMenu.Item
-                        class="{t === displayType ? 'bg-accent/60' : ''}"
+                        class={t === displayType ? 'bg-accent/60' : ''}
                         onSelect={() => { typeDraft = { ...typeDraft, [col.name]: t }; stageType(col.name, t) }}
                       >{t}</DropdownMenu.Item>
                     {:else}
@@ -668,7 +672,7 @@
             <tr style="height:34px" class="bg-green-900/15 ring-1 ring-inset ring-green-700/30">
               <td class={TD}></td>
               <td class="{TD} ring-0">
-                <input type="text" bind:value={newColumn.name} placeholder="column_name" autofocus class="{INP} placeholder:text-muted-foreground/30" />
+                <input type="text" bind:value={newColumn.name} placeholder="column_name" use:focusOnMount class="{INP} placeholder:text-muted-foreground/30" />
               </td>
               <td class="{TD_DROP}">
                 <div class="relative h-full">
@@ -804,7 +808,7 @@
                   </DropdownMenu.Trigger>
                   <DropdownMenu.Content class="w-44 [&_[data-slot=dropdown-menu-item]]:font-mono [&_[data-slot=dropdown-menu-item]]:text-ui-sm [&_[data-slot=dropdown-menu-item]]:px-3 [&_[data-slot=dropdown-menu-item]]:py-1.5" align="start" sideOffset={1}>
                     {#each INDEX_ALGORITHMS as alg (alg)}
-                      <DropdownMenu.Item class="{alg.toLowerCase() === idx.indexType.toLowerCase() ? 'bg-accent/60' : ''}"
+                      <DropdownMenu.Item class={alg.toLowerCase() === idx.indexType.toLowerCase() ? 'bg-accent/60' : ''}
                         onSelect={() => { if (alg.toLowerCase() !== idx.indexType.toLowerCase()) requestIndexRecreate(idx, alg, idx.isUnique, idx.columns) }}
                       >{alg}</DropdownMenu.Item>
                     {/each}
@@ -890,7 +894,7 @@
                   </DropdownMenu.Trigger>
                   <DropdownMenu.Content class="w-44 [&_[data-slot=dropdown-menu-item]]:font-mono [&_[data-slot=dropdown-menu-item]]:text-ui-sm [&_[data-slot=dropdown-menu-item]]:px-3 [&_[data-slot=dropdown-menu-item]]:py-1.5" align="start" sideOffset={1}>
                     {#each INDEX_ALGORITHMS as alg (alg)}
-                      <DropdownMenu.Item class="{newIndex.algorithm === alg ? 'bg-accent' : ''}" onSelect={() => { if (newIndex) newIndex.algorithm = alg }}>{alg}</DropdownMenu.Item>
+                      <DropdownMenu.Item class={newIndex.algorithm === alg ? 'bg-accent' : ''} onSelect={() => { if (newIndex) newIndex.algorithm = alg }}>{alg}</DropdownMenu.Item>
                     {/each}
                     <DropdownMenu.Separator />
                     <DropdownMenu.Item class="text-muted-foreground" onSelect={() => { if (newIndex) newIndex.algorithm = '' }}>Manual input…</DropdownMenu.Item>

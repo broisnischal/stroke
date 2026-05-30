@@ -4,6 +4,11 @@
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
   import ArrowUpDown from "@lucide/svelte/icons/arrow-up-down";
+  import ArrowUp from "@lucide/svelte/icons/arrow-up";
+  import ArrowDown from "@lucide/svelte/icons/arrow-down";
+  import EyeOff from "@lucide/svelte/icons/eye-off";
+  import ListFilter from "@lucide/svelte/icons/list-filter";
+  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import KeyRound from "@lucide/svelte/icons/key-round";
   import Link2 from "@lucide/svelte/icons/link-2";
   import Zap from "@lucide/svelte/icons/zap";
@@ -115,18 +120,11 @@
      *  table to the top / bottom. */
     scrollToTop = $bindable(/** @type {() => void} */ (() => {})),
     scrollToBottom = $bindable(/** @type {() => void} */ (() => {})),
+    /** Called when user picks "Filter by this column" from the column header context menu. */
+    onfiltercolumn = /** @type {(colName: string) => void} */ (() => {}),
+    /** Called when user picks "Hide column" from the column header context menu. */
+    onhidecolumn = /** @type {(colName: string) => void} */ (() => {}),
   } = $props();
-
-  /** Brief overscroll hint: 'top' / 'bottom' when the user wheels past an edge. */
-  let overscrollEdge = $state(/** @type {'top' | 'bottom' | null} */ (null));
-  /** @type {ReturnType<typeof setTimeout> | null} */
-  let _overscrollTimer = null;
-  /** @param {'top' | 'bottom'} edge */
-  function flashOverscroll(edge) {
-    if (overscrollEdge !== edge) overscrollEdge = edge;
-    if (_overscrollTimer) clearTimeout(_overscrollTimer);
-    _overscrollTimer = setTimeout(() => { overscrollEdge = null; _overscrollTimer = null; }, 450);
-  }
 
   /**
    * Staged cell edits not yet written to the database, keyed by "rowIdx:colIdx".
@@ -640,25 +638,6 @@
     scrollToBottom = () => { if (tableContainer) tableContainer.scrollTo({ top: tableContainer.scrollHeight }); };
   });
 
-  // Overscroll hint: a brief edge glow when the wheel pushes past the top/bottom.
-  // Passive wheel listener doing only a cheap scrollTop read (plus an edge metric
-  // read that's a no-op layout in the common non-virtualized case) — it never
-  // touches the scroll position, so it can't affect scroll smoothness.
-  $effect(() => {
-    const container = tableContainer;
-    if (!container) return;
-    const onWheel = (/** @type {WheelEvent} */ e) => {
-      // Only hint the scroll boundary on larger tables — pointless for short lists.
-      if (rows.length <= 50) return;
-      if (e.deltaY < 0) {
-        if (container.scrollTop <= 0) flashOverscroll('top');
-      } else if (e.deltaY > 0) {
-        if (container.scrollTop + container.clientHeight >= container.scrollHeight - 1) flashOverscroll('bottom');
-      }
-    };
-    container.addEventListener('wheel', onWheel, { passive: true });
-    return () => container.removeEventListener('wheel', onWheel);
-  });
 
   async function copyCellValue(rowIdx, colIdx) {
     const value = rows[rowIdx]?.[colIdx];
@@ -1249,6 +1228,28 @@
     pinnedColumns = next
   }
 
+  /** Sort by a column with an explicit direction, guarding against pending edits. */
+  function headerSortDirect(colName, /** @type {'asc' | 'desc'} */ dir) {
+    if (pendingEdits.size > 0) {
+      toast.error('Unsaved changes', { description: 'Apply or reset your edits before sorting.' })
+      return
+    }
+    onsortchange({ column: colName, direction: dir })
+  }
+
+  /** Reset a column's width to its default and un-collapse it if needed. */
+  function resetColumnWidth(colName) {
+    const col = columns.find((c) => c.name === colName)
+    const dt = col?.dataType ?? col?.data_type ?? ''
+    columnWidths = { ...columnWidths, [colName]: clampColumnWidth(defaultColumnWidth(dt)) }
+    if (collapsedColumns.has(colName)) {
+      const next = new Set(collapsedColumns)
+      next.delete(colName)
+      collapsedColumns = next
+    }
+    if (columnWidthsKey) saveColumnWidths(columnWidthsKey, columnWidths)
+  }
+
   // Reset focus and undo history when the displayed table changes.
   $effect(() => {
     void columnWidthsKey;
@@ -1473,7 +1474,7 @@
   onDestroy(() => {
     if (previewShowTimer) clearTimeout(previewShowTimer)
     if (previewHideTimer) clearTimeout(previewHideTimer)
-    if (_overscrollTimer) clearTimeout(_overscrollTimer)
+
     // Clear staged-edit state in the parent so the StatusBar buttons don't linger.
     pendingEditCount = 0
     applyEdits = () => {}
@@ -1544,10 +1545,6 @@
             }
           }}
         >
-          <!-- Overscroll hint: brief glow pinned to the top edge when wheeling past the top. -->
-          <div aria-hidden="true" class="pointer-events-none sticky top-0 z-30 h-0">
-            <div class="absolute inset-x-0 top-0 h-10 bg-gradient-to-b from-primary/25 to-transparent transition-opacity duration-200 {overscrollEdge === 'top' ? 'opacity-100' : 'opacity-0'}"></div>
-          </div>
           {#if visibleColumns.length === 0}{:else}
           <table
             class="studio-data-table w-full table-fixed text-ui-sm"
@@ -1627,95 +1624,148 @@
                     </th>
                   {:else}
                     {@const isSorted = rowSort?.column === col.name}
-                    <th
-                      class={cn(
-                        "group/th relative overflow-hidden px-0 py-0 text-left font-normal",
-                        resizingColName === col.name && "bg-accent/30",
-                        isPinned && "sticky z-[1] bg-panel shadow-[1px_0_0_hsl(var(--border)/0.6)]",
-                      )}
-                      style="width: {colW}px; min-width: {colW}px; max-width: {colW}px{isPinned ? `; left: ${pinLeft}px` : ''}"
-                    >
-                      <button
-                        type="button"
-                        class={cn(
-                          "flex h-full w-full min-w-0 cursor-pointer items-center gap-1.5 px-3 py-1 text-left transition-colors hover:bg-accent/40",
-                          isSorted && "bg-accent/20",
-                        )}
-                        onclick={() => handleHeaderSort(col.name)}
-                        title="Sort by {col.name}"
-                      >
-                        <div class="flex min-w-0 flex-1 flex-col gap-px leading-tight">
-                          <div class="flex min-w-0 items-center gap-1">
-                            <span
-                              class={cx(
-                                "min-w-0 overflow-hidden whitespace-nowrap font-mono text-ui-sm text-foreground",
-                                col.name.length > 100 && "text-ellipsis",
-                              )}
-                              data-font="mono"
-                              title={col.name}>{col.name}</span
-                            >
-                            {#if meta && (meta.pk || meta.fk || meta.unique || meta.indexed || !meta.nullable)}
-                              <div class="flex shrink-0 items-center gap-[2px]">
-                                {#if meta.pk}
-                                  <span
-                                    title="Primary key"
-                                    class="inline-flex size-[13px] items-center justify-center rounded-sm bg-primary/10 text-primary"
-                                  ><KeyRound class="size-[8px]" /></span>
-                                {/if}
-                                {#if meta.fk}
-                                  <span
-                                    title={fkTooltip(col.name)}
-                                    class="inline-flex size-[13px] items-center justify-center rounded-sm bg-muted text-muted-foreground"
-                                  ><Link2 class="size-[8px]" /></span>
-                                {/if}
-                                {#if meta.unique && !meta.pk}
-                                  <span
-                                    title="Unique"
-                                    class="inline-flex size-[13px] items-center justify-center rounded-sm bg-muted text-muted-foreground"
-                                  ><Fingerprint class="size-[8px]" /></span>
-                                {/if}
-                                {#if meta.indexed}
-                                  <span
-                                    title="Indexed"
-                                    class="inline-flex size-[13px] items-center justify-center rounded-sm bg-muted text-muted-foreground"
-                                  ><Zap class="size-[8px]" /></span>
-                                {/if}
-                                {#if !meta.nullable && !meta.pk}
-                                  <span
-                                    title="Not null"
-                                    class="inline-flex size-[13px] items-center justify-center rounded-sm bg-muted text-muted-foreground/60"
-                                  ><Circle class="size-[7px] fill-muted-foreground/40" /></span>
-                                {/if}
-                              </div>
-                            {/if}
-                          </div>
-                          <span
-                            class="block truncate font-mono text-ui-2xs text-muted-foreground"
-                            data-font="mono"
-                            title={col.dataType ?? col.data_type}
-                            >{col.dataType ?? col.data_type}</span
+                    {@const isAsc = isSorted && rowSort?.direction === 'asc'}
+                    {@const isDesc = isSorted && rowSort?.direction === 'desc'}
+                    <ContextMenu.Root>
+                      <ContextMenu.Trigger>
+                        {#snippet child({ props })}
+                          <th
+                            {...props}
+                            class={cn(
+                              "group/th relative overflow-hidden px-0 py-0 text-left font-normal",
+                              resizingColName === col.name && "bg-accent/30",
+                              isPinned && "sticky z-[1] bg-panel shadow-[1px_0_0_hsl(var(--border)/0.6)]",
+                            )}
+                            style="width: {colW}px; min-width: {colW}px; max-width: {colW}px{isPinned ? `; left: ${pinLeft}px` : ''}"
                           >
-                        </div>
-                        {#if isSorted}
-                          <span class="shrink-0 text-primary/70">
-                            {#if rowSort?.direction === 'asc'}
-                              <svg class="size-3" viewBox="0 0 12 12" fill="none"><path d="M6 9V3M3 6l3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                            {:else}
-                              <svg class="size-3" viewBox="0 0 12 12" fill="none"><path d="M6 3v6M3 6l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            <button
+                              type="button"
+                              class={cn(
+                                "flex h-full w-full min-w-0 cursor-pointer items-center gap-1.5 px-3 py-1 text-left transition-colors hover:bg-accent/40",
+                                isSorted && "bg-accent/20",
+                              )}
+                              onclick={() => handleHeaderSort(col.name)}
+                              title="Sort by {col.name}"
+                            >
+                              <div class="flex min-w-0 flex-1 flex-col gap-px leading-tight">
+                                <div class="flex min-w-0 items-center gap-1">
+                                  <span
+                                    class={cx(
+                                      "min-w-0 overflow-hidden whitespace-nowrap font-mono text-ui-sm text-foreground",
+                                      col.name.length > 100 && "text-ellipsis",
+                                    )}
+                                    data-font="mono"
+                                    title={col.name}>{col.name}</span
+                                  >
+                                  {#if meta && (meta.pk || meta.fk || meta.unique || meta.indexed || !meta.nullable)}
+                                    <div class="flex shrink-0 items-center gap-[2px]">
+                                      {#if meta.pk}
+                                        <span
+                                          title="Primary key"
+                                          class="inline-flex size-[13px] items-center justify-center rounded-sm bg-primary/10 text-primary"
+                                        ><KeyRound class="size-[8px]" /></span>
+                                      {/if}
+                                      {#if meta.fk}
+                                        <span
+                                          title={fkTooltip(col.name)}
+                                          class="inline-flex size-[13px] items-center justify-center rounded-sm bg-muted text-muted-foreground"
+                                        ><Link2 class="size-[8px]" /></span>
+                                      {/if}
+                                      {#if meta.unique && !meta.pk}
+                                        <span
+                                          title="Unique"
+                                          class="inline-flex size-[13px] items-center justify-center rounded-sm bg-muted text-muted-foreground"
+                                        ><Fingerprint class="size-[8px]" /></span>
+                                      {/if}
+                                      {#if meta.indexed}
+                                        <span
+                                          title="Indexed"
+                                          class="inline-flex size-[13px] items-center justify-center rounded-sm bg-muted text-muted-foreground"
+                                        ><Zap class="size-[8px]" /></span>
+                                      {/if}
+                                      {#if !meta.nullable && !meta.pk}
+                                        <span
+                                          title="Not null"
+                                          class="inline-flex size-[13px] items-center justify-center rounded-sm bg-muted text-muted-foreground/60"
+                                        ><Circle class="size-[7px] fill-muted-foreground/40" /></span>
+                                      {/if}
+                                    </div>
+                                  {/if}
+                                </div>
+                                <span
+                                  class="block truncate font-mono text-ui-2xs text-muted-foreground"
+                                  data-font="mono"
+                                  title={col.dataType ?? col.data_type}
+                                  >{col.dataType ?? col.data_type}</span
+                                >
+                              </div>
+                              {#if isSorted}
+                                <span class="shrink-0 text-primary/70">
+                                  {#if isAsc}
+                                    <svg class="size-3" viewBox="0 0 12 12" fill="none"><path d="M6 9V3M3 6l3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                  {:else}
+                                    <svg class="size-3" viewBox="0 0 12 12" fill="none"><path d="M6 3v6M3 6l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                  {/if}
+                                </span>
+                              {:else}
+                                <ArrowUpDown class="size-3 shrink-0 opacity-0 transition-opacity group-hover/th:opacity-30" />
+                              {/if}
+                            </button>
+                            {#if visibleColumns.length > 1}
+                              <ColumnResizeHandle
+                                onresizestart={() => startColumnResize(col.name)}
+                                onresize={applyColumnResize}
+                                onresizeend={endColumnResize}
+                              />
                             {/if}
-                          </span>
-                        {:else}
-                          <ArrowUpDown class="size-3 shrink-0 opacity-0 transition-opacity group-hover/th:opacity-30" />
+                          </th>
+                        {/snippet}
+                      </ContextMenu.Trigger>
+                      <ContextMenu.Content
+                        class="w-48 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5"
+                      >
+                        <ContextMenu.Item onSelect={() => headerSortDirect(col.name, 'asc')}>
+                          <ArrowUp />
+                          Sort ascending
+                          {#if isAsc}<span class="ml-auto text-[10px] text-primary">✓</span>{/if}
+                        </ContextMenu.Item>
+                        <ContextMenu.Item onSelect={() => headerSortDirect(col.name, 'desc')}>
+                          <ArrowDown />
+                          Sort descending
+                          {#if isDesc}<span class="ml-auto text-[10px] text-primary">✓</span>{/if}
+                        </ContextMenu.Item>
+                        {#if isSorted}
+                          <ContextMenu.Item onSelect={() => { if (pendingEdits.size > 0) { toast.error('Unsaved changes', { description: 'Apply or reset your edits before sorting.' }); return } onsortchange(null) }}>
+                            <ArrowUpDown />
+                            Clear sort
+                          </ContextMenu.Item>
                         {/if}
-                      </button>
-                      {#if visibleColumns.length > 1}
-                        <ColumnResizeHandle
-                          onresizestart={() => startColumnResize(col.name)}
-                          onresize={applyColumnResize}
-                          onresizeend={endColumnResize}
-                        />
-                      {/if}
-                    </th>
+                        <ContextMenu.Separator />
+                        <ContextMenu.Item onSelect={() => onfiltercolumn(col.name)}>
+                          <ListFilter />
+                          Filter by this column
+                        </ContextMenu.Item>
+                        <ContextMenu.Separator />
+                        <ContextMenu.Item onSelect={() => toggleColumnPin(col.name)}>
+                          {#if isPinned}
+                            <PinOff />
+                            Unpin column
+                          {:else}
+                            <Pin />
+                            Pin column
+                          {/if}
+                        </ContextMenu.Item>
+                        <ContextMenu.Item onSelect={() => onhidecolumn(col.name)}>
+                          <EyeOff />
+                          Hide column
+                        </ContextMenu.Item>
+                        <ContextMenu.Separator />
+                        <ContextMenu.Item onSelect={() => resetColumnWidth(col.name)}>
+                          <RotateCcw />
+                          Reset column width
+                        </ContextMenu.Item>
+                      </ContextMenu.Content>
+                    </ContextMenu.Root>
                   {/if}
                 {/each}
                 <th aria-hidden="true" class="studio-spacer-cell bg-panel"></th>
@@ -2121,10 +2171,6 @@
               </div>
             </div>
           {/if}
-          <!-- Overscroll hint: brief glow pinned to the bottom edge when wheeling past the bottom. -->
-          <div aria-hidden="true" class="pointer-events-none sticky bottom-0 z-30 h-0">
-            <div class="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-primary/25 to-transparent transition-opacity duration-200 {overscrollEdge === 'bottom' ? 'opacity-100' : 'opacity-0'}"></div>
-          </div>
         </div>
       {/snippet}
     </ContextMenu.Trigger>

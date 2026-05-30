@@ -1,3 +1,4 @@
+pub mod backup;
 pub mod connection;
 pub mod d1;
 pub mod mysql;
