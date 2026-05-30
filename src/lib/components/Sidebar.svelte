@@ -872,6 +872,27 @@
               {/if}
             {/if}
 
+            <!-- ── All sections hidden ───────────────────────────── -->
+            {#if !showTables && !showViews && !showMatViews && !showRecent}
+              <div class="flex flex-col items-center justify-center gap-2 px-4 py-16 text-center">
+                <p class="text-ui-xs text-muted-foreground/50">All sections are hidden</p>
+                <p class="text-ui-2xs text-muted-foreground/30">Use the filter menu to show them</p>
+              </div>
+            {/if}
+
+            <!-- ── Empty state ───────────────────────────────────── -->
+            {#if !loadingTables && connectionName && tables.length === 0}
+              <div class="flex flex-1 flex-col items-center justify-center gap-3 px-4 py-16 text-center">
+                <div class="flex size-10 items-center justify-center rounded-xl border border-border/50 bg-muted/30">
+                  <Table2 class="size-5 text-muted-foreground/30" />
+                </div>
+                <div>
+                  <p class="text-ui-xs font-medium text-muted-foreground">No tables found</p>
+                  <p class="mt-0.5 text-ui-2xs text-muted-foreground/50">{activeSchema ? `in "${activeSchema}"` : 'in this database'}</p>
+                </div>
+              </div>
+            {/if}
+
             <!-- ── Materialized Views ─────────────────────────────── -->
             {#if showMatViews && (matViews.length > 0 || filteredMatViews.length > 0)}
               <button

@@ -2402,7 +2402,7 @@
         </div>
         <Button type="button" onclick={() => (showConnectionModal = true)}>Add connection</Button>
         <p class="text-ui-xs text-muted-foreground">
-          <kbd class="rounded border border-border px-1 font-mono">⌘K</kbd> command menu
+          <kbd>⌘K</kbd> command menu
         </p>
       </div>
     {:else}
@@ -2491,7 +2491,7 @@
           inert={activeTab?.kind !== 'backup' || undefined}
         >
           <svelte:boundary failed={tabError}>
-            <BackupPage dbType={dbType} activeSchema={activeSchema} {schemas} />
+            <BackupPage dbType={dbType} activeSchema={activeSchema} {schemas} tables={tables.map((t) => ({ name: t.name, rowCount: t.rowCount }))} />
           </svelte:boundary>
         </div>
       {/if}
@@ -2611,7 +2611,7 @@
           <div class="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center">
             <p class="font-mono text-ui text-muted-foreground">
               Select a table from the sidebar or press
-              <kbd class="rounded border border-border px-1 font-mono text-ui-xs">⌘K</kbd>
+              <kbd>⌘K</kbd>
             </p>
           </div>
         {:else if error}
@@ -2741,6 +2741,8 @@
                 onfiltercolumn={(colName) => {
                   const newFilter = { id: crypto.randomUUID(), column: colName, op: /** @type {any} */ ('contains'), value: '', conjunct: /** @type {any} */ ('and') }
                   void handleRowFiltersChange([...rowFilters, newFilter])
+                  filterBarOpen = true
+                  tableToolbar?.focusLastFilter?.()
                 }}
                 onsave={handleSaveCell}
                 ondelete={handleDeleteRow}
@@ -2779,7 +2781,7 @@
                 <div class="flex size-8 items-center justify-center rounded-lg border border-border/60 bg-background text-muted-foreground transition-colors group-hover:text-foreground">
                   <Terminal size={14} />
                 </div>
-                <kbd class="rounded border border-border/40 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground/50">{mod}T</kbd>
+                <kbd>{mod}T</kbd>
               </div>
               <div>
                 <p class="text-ui-sm font-medium text-foreground">SQL Editor</p>
@@ -2798,7 +2800,7 @@
                 <div class="flex size-8 items-center justify-center rounded-lg border border-border/60 bg-background text-muted-foreground transition-colors group-hover:text-foreground">
                   <Table2 size={14} />
                 </div>
-                <kbd class="rounded border border-border/40 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground/50">{mod}⇧D</kbd>
+                <kbd>{mod}⇧D</kbd>
               </div>
               <div>
                 <p class="text-ui-sm font-medium text-foreground">Browse Data</p>
@@ -2814,7 +2816,7 @@
                 <div class="flex size-8 items-center justify-center rounded-lg border border-border/60 bg-background text-muted-foreground transition-colors group-hover:text-foreground">
                   <Bot size={14} />
                 </div>
-                <kbd class="rounded border border-border/40 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground/50">{mod}⇧E</kbd>
+                <kbd>{mod}⇧E</kbd>
               </div>
               <div>
                 <p class="text-ui-sm font-medium text-foreground">AI Assistant</p>
@@ -2831,7 +2833,7 @@
                   <div class="flex size-8 items-center justify-center rounded-lg border border-border/60 bg-background text-muted-foreground transition-colors group-hover:text-foreground">
                     <LayoutTemplate size={14} />
                   </div>
-                  <kbd class="rounded border border-border/40 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground/50">{mod}⇧E</kbd>
+                  <kbd>{mod}⇧E</kbd>
                 </div>
                 <div>
                   <p class="text-ui-sm font-medium text-foreground">Schema Explorer</p>

@@ -106,9 +106,31 @@ fn build_where(columns: &[String], search: Option<&str>, filters: &[RowFilter]) 
     }
 
     for f in filters {
-        let col = bt(&f.column);
         let conj = if cond_parts.is_empty() { None }
                    else { Some(f.conjunct.as_deref().unwrap_or("and").to_uppercase()) };
+
+        if f.column == "__any__" {
+            let v = f.value.as_deref().unwrap_or("").trim();
+            if !v.is_empty() && !columns.is_empty() {
+                let (pattern, like_op) = match f.op.as_str() {
+                    "contains"    => (format!("%{}%", escape_like(v)), "LIKE"),
+                    "starts_with" => (format!("{}%",  escape_like(v)), "LIKE"),
+                    "ends_with"   => (format!("%{}",  escape_like(v)), "LIKE"),
+                    "eq"          => (v.to_string(), "="),
+                    _             => { continue; }
+                };
+                let parts: Vec<String> = columns.iter().map(|c| {
+                    let qc = bt(c);
+                    if like_op == "=" { format!("CAST({qc} AS CHAR) = ?") }
+                    else              { format!("CAST({qc} AS CHAR) {like_op} ? ESCAPE '\\\\'") }
+                }).collect();
+                cond_parts.push((conj, format!("({})", parts.join(" OR "))));
+                for _ in columns { binds.push(pattern.clone()); }
+            }
+            continue;
+        }
+
+        let col = bt(&f.column);
         match f.op.as_str() {
             "is_null"     => cond_parts.push((conj, format!("{col} IS NULL"))),
             "is_not_null" => cond_parts.push((conj, format!("{col} IS NOT NULL"))),

@@ -24,6 +24,8 @@
   } = $props()
 
   let name = $state('')
+  /** @type {HTMLInputElement | null} */
+  let nameInputEl = $state(null)
   let owner = $state('')
   let encoding = $state('UTF8')
   let lcCollate = $state('')
@@ -72,6 +74,9 @@
       loading = false
       error = ''
       showAdvanced = false
+    } else {
+      // Focus the name input when the dialog opens (replaces autofocus attr)
+      setTimeout(() => nameInputEl?.focus(), 0)
     }
   })
 
@@ -131,6 +136,7 @@
         </label>
         <input
           id="cdb-name"
+          bind:this={nameInputEl}
           type="text"
           placeholder={isMySQL ? 'my_database' : 'my_database'}
           bind:value={name}
@@ -138,7 +144,6 @@
           class={cn(inputCls, 'font-mono text-sm')}
           autocomplete="off"
           spellcheck="false"
-          autofocus
           disabled={loading}
         />
         <p class="mt-1 text-[10px] text-muted-foreground/50">Letters, digits, underscores · max 63 chars</p>

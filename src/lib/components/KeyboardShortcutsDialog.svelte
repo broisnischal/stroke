@@ -77,7 +77,7 @@
       icon: Table2,
       shortcuts: [
         { keys: [mod, "F"], desc: "Search rows" },
-        { keys: ["↵", "/ F2"], desc: "Edit cell" },
+        { keys: ["↵", "F2"], desc: "Edit cell" },
         { keys: ["Esc"], desc: "Cancel edit" },
         { keys: [mod, "↵"], desc: "Navigate to FK row" },
         { keys: [mod, "C"], desc: "Copy cell value" },
@@ -127,8 +127,13 @@
   ];
 
   let query = $state("");
+  let selectedGroup = $state(groups[0].label);
+  /** @type {HTMLInputElement | null} */
+  let searchEl = $state(null);
 
-  const filtered = $derived.by(() => {
+  const isSearching = $derived(query.trim().length > 0);
+
+  const filteredGroups = $derived.by(() => {
     const q = query.toLowerCase().trim();
     if (!q) return groups;
     return groups
@@ -142,6 +147,25 @@
       }))
       .filter((g) => g.shortcuts.length > 0);
   });
+
+  const displayGroups = $derived(
+    isSearching
+      ? filteredGroups
+      : groups.filter((g) => g.label === selectedGroup),
+  );
+
+  /** @param {KeyboardEvent} e */
+  function handleGlobalKey(e) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      open = false;
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === "f") {
+      e.preventDefault();
+      searchEl?.focus();
+    }
+  }
 </script>
 
 {#if open}
@@ -151,107 +175,146 @@
     class="fixed inset-0 z-50 flex flex-col bg-background"
     role="document"
     tabindex="-1"
-    onkeydown={(e) => { if (e.key === 'Escape') { e.preventDefault(); open = false } }}
+    onkeydown={handleGlobalKey}
   >
     <!-- Header -->
-    <div class="flex shrink-0 items-start gap-4 border-b border-border/60 px-6 py-4">
+    <div class="flex shrink-0 items-center gap-4 border-b border-border/40 px-5 py-3">
       <div class="flex items-center gap-3 min-w-0 flex-1">
-        <div
-          class="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-muted"
-        >
-          <Keyboard class="size-3.5 text-muted-foreground" />
+        <div class="flex size-7 shrink-0 items-center justify-center rounded-md border border-border/50 bg-muted/60">
+          <Keyboard class="size-3.5 text-muted-foreground/70" />
         </div>
-        <div class="min-w-0 flex-1">
-          <h1 class="text-sm font-semibold">Keyboard Shortcuts</h1>
-          <p class="mt-0.5 text-xs text-muted-foreground">
-            All shortcuts use <kbd
-              class="rounded border border-border bg-muted px-1 font-mono text-[10px]"
-              >{mod}</kbd
-            > on this platform.
+        <div>
+          <h1 class="text-sm font-semibold tracking-tight">Keyboard Shortcuts</h1>
+          <p class="text-[11px] text-muted-foreground/50 leading-none mt-0.5">
+            {mod} on {isMac ? "macOS" : "Windows/Linux"} · {mod}F to search
           </p>
         </div>
       </div>
 
       <!-- Search -->
-      <div class="relative w-64 shrink-0">
-        <Search
-          class="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground/50"
-        />
+      <div class="relative w-52 shrink-0">
+        <Search class="pointer-events-none absolute top-1/2 left-2.5 size-3 -translate-y-1/2 text-muted-foreground/35" />
         <input
+          bind:this={searchEl}
           type="text"
           placeholder="Search shortcuts…"
           bind:value={query}
-          class="h-8 w-full rounded-md border border-border/60 bg-muted/40 pl-8 pr-3 text-sm outline-none placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring/30"
+          class="h-7 w-full rounded-md border border-border/40 bg-muted/25 pl-7 pr-3 text-xs text-foreground outline-none placeholder:text-muted-foreground/30 focus:border-border focus:bg-muted/50 transition-colors"
         />
+        {#if query}
+          <button
+            type="button"
+            class="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground/35 hover:text-muted-foreground transition-colors"
+            onclick={() => (query = "")}
+          >
+            <X class="size-3" />
+          </button>
+        {/if}
       </div>
 
       <button
         type="button"
-        class="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground"
         onclick={() => (open = false)}
         aria-label="Close"
         title="Close (Esc)"
       >
-        <X class="size-4" />
+        <X class="size-3.5" />
       </button>
     </div>
 
     <!-- Body -->
-    <div class="min-h-0 flex-1 overflow-y-auto">
-      {#if filtered.length === 0}
-        <div class="flex flex-col items-center gap-2 py-12 text-center">
-          <p class="text-sm text-muted-foreground">
-            No shortcuts match "{query}"
-          </p>
-        </div>
-      {:else}
-        <div class="grid grid-cols-2 divide-x divide-border/50 lg:grid-cols-3 xl:grid-cols-4">
-          {#each filtered as group (group.label)}
-            {@const Icon = group.icon}
-            <div
-              class="flex flex-col border-b border-border/50 px-5 py-4"
-            >
-              <!-- Group heading -->
-              <div class="mb-3 flex items-center gap-2">
-                <Icon class="size-3.5 shrink-0 text-muted-foreground/60" />
-                <span
-                  class="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase"
-                >
-                  {group.label}
-                </span>
-              </div>
+    <div class="flex min-h-0 flex-1 overflow-hidden">
 
-              <!-- Shortcuts list -->
-              <ul class="flex flex-col gap-1.5">
-                {#each group.shortcuts as shortcut (shortcut.desc)}
-                  <li class="flex items-center justify-between gap-4">
-                    <span class="min-w-0 truncate text-xs text-foreground/80"
-                      >{shortcut.desc}</span
-                    >
-                    <span class="flex shrink-0 items-center gap-0.5">
-                      {#each shortcut.keys as key, i (i)}
-                        <kbd
-                          class={cn(
-                            "inline-flex min-h-[18px] min-w-[18px] items-center justify-center rounded border px-1.5 font-mono text-[10px] leading-none",
-                            "border-border bg-muted text-muted-foreground",
-                            "shadow-[0_1px_0_hsl(var(--border))]",
-                          )}>{key}</kbd
-                        >
-                        {#if i < shortcut.keys.length - 1}
-                          <span
-                            class="mx-0.5 text-[10px] text-muted-foreground/30"
-                            >+</span
-                          >
-                        {/if}
-                      {/each}
-                    </span>
-                  </li>
-                {/each}
-              </ul>
-            </div>
+      <!-- Sidebar -->
+      {#if !isSearching}
+        <nav class="flex w-48 shrink-0 flex-col gap-px overflow-y-auto border-r border-border/40 px-2 py-3">
+          {#each groups as group (group.label)}
+            {@const Icon = group.icon}
+            {@const active = selectedGroup === group.label}
+            <button
+              type="button"
+              onclick={() => (selectedGroup = group.label)}
+              class={cn(
+                "group flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-xs transition-colors",
+                active
+                  ? "bg-accent text-foreground font-medium"
+                  : "text-muted-foreground hover:bg-accent/40 hover:text-foreground/80",
+              )}
+            >
+              <Icon
+                class={cn(
+                  "size-3.5 shrink-0 transition-colors",
+                  active ? "text-foreground/80" : "text-muted-foreground/50 group-hover:text-muted-foreground/70",
+                )}
+              />
+              {group.label}
+              <span class={cn(
+                "ml-auto text-[10px] tabular-nums transition-colors",
+                active ? "text-muted-foreground/70" : "text-muted-foreground/30 group-hover:text-muted-foreground/50",
+              )}>
+                {group.shortcuts.length}
+              </span>
+            </button>
           {/each}
-        </div>
+        </nav>
       {/if}
+
+      <!-- Content -->
+      <div class="min-h-0 flex-1 overflow-y-auto">
+        {#if displayGroups.length === 0}
+          <div class="flex flex-col items-center gap-3 py-20 text-center">
+            <div class="flex size-10 items-center justify-center rounded-full border border-border/30 bg-muted/30">
+              <Search class="size-4 text-muted-foreground/30" />
+            </div>
+            <p class="text-sm text-muted-foreground/50">No shortcuts match <span class="text-foreground/60">"{query}"</span></p>
+          </div>
+        {:else}
+          <div class={cn(isSearching ? "divide-y divide-border/30" : "")}>
+            {#each displayGroups as group (group.label)}
+              {@const Icon = group.icon}
+              <div class="px-6 py-5">
+
+                {#if isSearching}
+                  <div class="mb-4 flex items-center gap-2">
+                    <Icon class="size-3.5 text-muted-foreground/40" />
+                    <span class="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/40">
+                      {group.label}
+                    </span>
+                  </div>
+                {/if}
+
+                <ul class="flex flex-col">
+                  {#each group.shortcuts as shortcut, i (shortcut.desc)}
+                    <li
+                      class={cn(
+                        "group/row flex items-center justify-between gap-8 px-2 py-2 rounded-md transition-colors hover:bg-accent/30",
+                        i !== group.shortcuts.length - 1 && "border-b border-border/20",
+                      )}
+                    >
+                      <span class="text-xs text-foreground/65 group-hover/row:text-foreground/80 transition-colors">
+                        {shortcut.desc}
+                      </span>
+
+                      <span class="flex shrink-0 items-center gap-1">
+                        {#each shortcut.keys as key, ki (ki)}
+                          <kbd>{key}</kbd>
+                          {#if ki < shortcut.keys.length - 1}
+                            <span class="text-[10px] text-muted-foreground/20 select-none">+</span>
+                          {/if}
+                        {/each}
+                      </span>
+                    </li>
+                  {/each}
+                </ul>
+
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
+
     </div>
   </div>
 {/if}
+

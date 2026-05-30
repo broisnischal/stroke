@@ -416,7 +416,7 @@ async function tauriFetch(url, init, signal) {
       unlistens.forEach((fn) => fn())
     }
 
-    signal?.addEventListener('abort', () => { cleanup(); controller.close() }, { once: true })
+    signal?.addEventListener('abort', () => { if (!cleanedUp) { cleanup(); controller.close() } }, { once: true })
 
     invoke('ai_fetch', { url, apiKey, body, stream: true, requestId, ...(hasExtra ? { extraHeaders } : {}) })
       .then(cleanup)

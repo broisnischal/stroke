@@ -1433,9 +1433,7 @@
           >
             <Plus class="size-3.5 shrink-0 text-muted-foreground" />
             <span class="font-medium">New chat</span>
-            <kbd
-              class="ml-auto inline-flex h-5 items-center rounded border border-border bg-muted/60 px-1.5 font-mono text-[10px] text-muted-foreground"
-            >{newChatShortcut}</kbd>
+            <kbd class="ml-auto">{newChatShortcut}</kbd>
           </button>
         </div>
 

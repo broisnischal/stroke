@@ -717,6 +717,47 @@ fn build_filter_condition(
     Ok(())
 }
 
+/// Build an OR-across-all-columns condition for the `__any__` sentinel.
+/// Binds the pattern value once and references it in every column condition.
+fn build_any_column_condition(
+    builder: &mut QueryBuilder,
+    columns: &[String],
+    op: &str,
+    value: &str,
+    conjunct: Option<&str>,
+) -> Result<(), String> {
+    if columns.is_empty() || value.is_empty() {
+        return Ok(());
+    }
+    let parts: Vec<String> = match op {
+        "contains" => {
+            let p = builder.push_bind(format!("%{}%", escape_ilike_pattern(value)));
+            columns.iter().filter_map(|c| quoted_column(c).ok())
+                .map(|col| format!("{col}::text ILIKE {p} ESCAPE '\\'")).collect()
+        }
+        "starts_with" => {
+            let p = builder.push_bind(format!("{}%", escape_ilike_pattern(value)));
+            columns.iter().filter_map(|c| quoted_column(c).ok())
+                .map(|col| format!("{col}::text ILIKE {p} ESCAPE '\\'")).collect()
+        }
+        "ends_with" => {
+            let p = builder.push_bind(format!("%{}", escape_ilike_pattern(value)));
+            columns.iter().filter_map(|c| quoted_column(c).ok())
+                .map(|col| format!("{col}::text ILIKE {p} ESCAPE '\\'")).collect()
+        }
+        "eq" => {
+            let p = builder.push_bind(value.to_string());
+            columns.iter().filter_map(|c| quoted_column(c).ok())
+                .map(|col| format!("{col}::text = {p}")).collect()
+        }
+        _ => return Err(format!("Unsupported operator for any-column filter: {op}")),
+    };
+    if !parts.is_empty() {
+        builder.push_condition(format!("({})", parts.join(" OR ")), conjunct);
+    }
+    Ok(())
+}
+
 fn build_where(
     columns: &[String],
     search: Option<&str>,
@@ -736,10 +777,19 @@ fn build_where(
     }
 
     for filter in filters {
-        ensure_column(&filter.column, columns)?;
         let op = filter.op.as_str();
-        let conjunct   = filter.conjunct.as_deref();
-        let data_type  = filter.data_type.as_deref();
+        let conjunct = filter.conjunct.as_deref();
+
+        if filter.column == "__any__" {
+            let value = filter.value.as_deref().unwrap_or("").trim();
+            if !value.is_empty() {
+                build_any_column_condition(&mut builder, columns, op, value, conjunct)?;
+            }
+            continue;
+        }
+
+        ensure_column(&filter.column, columns)?;
+        let data_type = filter.data_type.as_deref();
         if op != "is_null" && op != "is_not_null" {
             let value = filter.value.as_deref().unwrap_or("").trim();
             if value.is_empty() {
@@ -1425,14 +1475,14 @@ pub async fn execute_ddl(state: State<'_, DbState>, sql: String) -> Result<(), S
     match require_conn(&state)? {
         ActiveConnection::Postgres(pool) => {
             sqlx::query(sql_str)
-                .execute(pool)
+                .execute(&pool)
                 .await
                 .map_err(|e| e.to_string())?;
             Ok(())
         }
         ActiveConnection::Mysql(pool) => {
             sqlx::query(sql_str)
-                .execute(pool)
+                .execute(&pool)
                 .await
                 .map_err(|e| e.to_string())?;
             Ok(())
@@ -1653,9 +1703,24 @@ async fn get_table_rows_d1(
     }
     if let Some(ref fs) = filters {
         for f in fs {
-            let qcol = format!("\"{}\"", f.column.replace('"', "\"\""));
             let conj = if cond_parts.is_empty() { None }
                        else { Some(f.conjunct.as_deref().unwrap_or("and").to_uppercase()) };
+
+            if f.column == "__any__" {
+                if let Some(ref v) = f.value {
+                    let v = v.trim();
+                    if !v.is_empty() && !col_names.is_empty() {
+                        let (parts, extra) = super::sqlite::build_any_column_d1(&col_names, &f.op, v);
+                        if !parts.is_empty() {
+                            cond_parts.push((conj, format!("({})", parts.join(" OR "))));
+                            params.extend(extra);
+                        }
+                    }
+                }
+                continue;
+            }
+
+            let qcol = format!("\"{}\"", f.column.replace('"', "\"\""));
             match f.op.as_str() {
                 "is_null"     => cond_parts.push((conj, format!("{qcol} IS NULL"))),
                 "is_not_null" => cond_parts.push((conj, format!("{qcol} IS NOT NULL"))),

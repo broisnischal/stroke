@@ -224,9 +224,31 @@ pub async fn get_table_rows(
 
     if let Some(ref fs) = filters {
         for f in fs {
-            let qcol = format!("\"{}\"", f.column.replace('"', "\"\""));
             let conj = if cond_parts.is_empty() { None }
                        else { Some(f.conjunct.as_deref().unwrap_or("and").to_uppercase()) };
+
+            if f.column == "__any__" {
+                if let Some(ref v) = f.value {
+                    let v = v.trim();
+                    if !v.is_empty() && !col_names.is_empty() {
+                        let mut parts = Vec::new();
+                        let mut extra = Vec::new();
+                        for col in &col_names {
+                            let qcol = format!("\"{}\"", col.replace('"', "\"\""));
+                            let (cond, eb) = build_filter_condition(&qcol, &f.op, v);
+                            parts.push(cond);
+                            extra.extend(eb);
+                        }
+                        if !parts.is_empty() {
+                            cond_parts.push((conj, format!("({})", parts.join(" OR "))));
+                            binds.extend(extra);
+                        }
+                    }
+                }
+                continue;
+            }
+
+            let qcol = format!("\"{}\"", f.column.replace('"', "\"\""));
             match f.op.as_str() {
                 "is_null"     => cond_parts.push((conj, format!("{qcol} IS NULL"))),
                 "is_not_null" => cond_parts.push((conj, format!("{qcol} IS NOT NULL"))),
@@ -332,6 +354,19 @@ pub fn escape_like(input: &str) -> String {
         .replace('\\', "\\\\")
         .replace('%',  "\\%")
         .replace('_',  "\\_")
+}
+
+/// Build OR-across-all-columns conditions for the `__any__` sentinel (D1 / JSON params).
+pub fn build_any_column_d1(col_names: &[String], op: &str, val: &str) -> (Vec<String>, Vec<serde_json::Value>) {
+    let mut parts = Vec::new();
+    let mut params = Vec::new();
+    for col in col_names {
+        let qcol = format!("\"{}\"", col.replace('"', "\"\""));
+        let (cond, binds) = build_filter_condition(&qcol, op, val);
+        parts.push(cond);
+        for b in binds { params.push(serde_json::Value::String(b)); }
+    }
+    (parts, params)
 }
 
 /// Same logic as build_filter_condition but returns JSON Values for D1 HTTP params.

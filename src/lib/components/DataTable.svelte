@@ -61,6 +61,8 @@
   import MediaLightbox from "./MediaLightbox.svelte";
   import RowExpandViewer from "./RowExpandViewer.svelte";
   import JsonCellLightbox from "./JsonCellLightbox.svelte";
+  import CellQuickLook from "./CellQuickLook.svelte";
+  import Maximize2 from "@lucide/svelte/icons/maximize-2";
 
   let {
     columns = [],
@@ -139,6 +141,13 @@
 
   /** @type {HTMLInputElement | HTMLSelectElement | HTMLButtonElement | null} */
   let editInput = $state(null);
+
+  /**
+   * @typedef {{ rowIdx: number, colIdx: number, draft: string, original: string, columnName: string, dataType: string, nullable: boolean }} QuickLookCell
+   * @type {QuickLookCell | null}
+   */
+  let quickLookCell = $state(null);
+
   let contextRowIdx = $state(0);
   let contextColIdx = $state(0);
   let contextMenuOpen = $state(false);
@@ -465,6 +474,55 @@
   function cancelEdit() {
     if (!editingCell) return;
     editingCell = null;
+    tick().then(() => tableContainer?.focus({ preventScroll: true }));
+  }
+
+  /** @param {number} rowIdx @param {number} colIdx */
+  function openQuickLook(rowIdx, colIdx) {
+    const col = columns[colIdx];
+    if (!col) return;
+    const dataType = col.dataType ?? col.data_type ?? "";
+    if (!isEditableType(dataType)) return;
+    // close any inline edit first
+    if (editingCell) cancelEdit();
+    const startValue = effectiveCellValue(rowIdx, colIdx);
+    const original = valueToEditString(startValue);
+    quickLookCell = {
+      rowIdx,
+      colIdx,
+      draft: original,
+      original,
+      columnName: col.name,
+      dataType,
+      nullable: col.nullable ?? true,
+    };
+  }
+
+  function cancelQuickLook() {
+    quickLookCell = null;
+    tick().then(() => tableContainer?.focus({ preventScroll: true }));
+  }
+
+  async function commitQuickLook() {
+    if (!quickLookCell || saving) return;
+    const { rowIdx, colIdx, draft } = quickLookCell;
+    const col = columns[colIdx];
+    if (!col) return;
+    if (draft === quickLookCell.original) {
+      quickLookCell = null;
+      tick().then(() => tableContainer?.focus({ preventScroll: true }));
+      return;
+    }
+    const parsed = parseCellInput(draft, col.dataType ?? col.data_type ?? "text", getColumnEnumValues(col));
+    if (!parsed.ok) {
+      toast.error("Invalid value", { description: parsed.message });
+      return;
+    }
+    const prevValue = effectiveCellValue(rowIdx, colIdx);
+    stageEdit(rowIdx, colIdx, parsed.value);
+    pastEdits = [...pastEdits.slice(-49), { rowIdx, colIdx, oldValue: prevValue, newValue: parsed.value }];
+    futureEdits = [];
+    quickLookCell = null;
     tick().then(() => tableContainer?.focus({ preventScroll: true }));
   }
 
@@ -1344,6 +1402,18 @@
       return;
     }
 
+    // Shift+Space: open Quick Look editor for the focused cell
+    if (e.key === " " && e.shiftKey && !e.ctrlKey && !e.metaKey && !editingCell) {
+      if (focusedRow !== null && focusedCol !== null) {
+        const ai = visToActualColIdx(focusedCol);
+        if (ai >= 0 && canEditColumn(ai)) {
+          e.preventDefault();
+          openQuickLook(focusedRow, ai);
+          return;
+        }
+      }
+    }
+
     if (editingCell) return;
 
     const visLen = navigableColumns.length;
@@ -1914,6 +1984,7 @@
                         <!-- Background / text / shadow resolved by priority so the hot
                              cell class avoids tailwind-merge (cx = clsx only). Order
                              matches the previous cn() last-wins behavior exactly. -->
+                        {@const canEditCell = canEditColumn(colIdx)}
                         {@const cellBg = isEditing ? "bg-background"
                           : cellPinned ? "bg-panel"
                           : isDirty ? "bg-amber-400/15"
@@ -2101,6 +2172,19 @@
                             {/if}
                           {/if}
                           {#if !isEditing}
+                            {@const canExpand = canEditCell && !enumValues && !isBooleanType(colType)}
+                            {#if canExpand}
+                              <button
+                                type="button"
+                                tabindex={-1}
+                                class="absolute right-6 top-1/2 z-10 hidden size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground group-hover/cell:inline-flex hover:bg-accent/60 hover:text-foreground"
+                                title="Quick Look (Shift+Space)"
+                                aria-label="Open quick look editor"
+                                onclick={(e) => { e.stopPropagation(); openQuickLook(idx, colIdx); }}
+                              >
+                                <Maximize2 class="size-3" />
+                              </button>
+                            {/if}
                             <button
                               type="button"
                               tabindex={-1}
@@ -2340,5 +2424,12 @@
 <JsonCellLightbox
   data={jsonLightbox}
   onclose={() => { jsonLightbox = null }}
+/>
+
+<CellQuickLook
+  bind:cell={quickLookCell}
+  {saving}
+  oncancel={cancelQuickLook}
+  onsave={commitQuickLook}
 />
 

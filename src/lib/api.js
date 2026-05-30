@@ -390,8 +390,13 @@ export async function aiDeleteKey(profileId) {
  * @param {string | null} schema - Filter to one schema (PostgreSQL/MySQL only)
  * @returns {Promise<{ sql: string, tableCount: number, rowCount: number }>}
  */
-export async function backupExport(schema = null, tables = null) {
-  return inv('backup_export', { schema, tables })
+/**
+ * @param {string | null} schema
+ * @param {string[] | null} tables
+ * @param {{ includeSchema?: boolean, includeData?: boolean, includeSequences?: boolean, includeEnums?: boolean, includeFunctions?: boolean, includeTriggers?: boolean, includeViews?: boolean } | null} options
+ */
+export async function backupExport(schema = null, tables = null, options = null) {
+  return inv('backup_export', { schema, tables, options })
 }
 
 /**

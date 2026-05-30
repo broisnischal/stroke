@@ -32,6 +32,7 @@
     PAGE_SIZE_OPTIONS,
     activeFilters,
     createFilter,
+    ANY_COLUMN,
   } from "$lib/table-query.js";
   import { untrack } from "svelte";
   import { formatCompactCount } from "$lib/table-list.js";
@@ -162,6 +163,18 @@
     searchInputRef?.select();
   }
 
+  /** Focus the value input of the last filter row (called after "Filter by this column"). */
+  export function focusLastFilter() {
+    // Defer so the filter bar DOM has rendered
+    setTimeout(() => {
+      const inputs = document.querySelectorAll(
+        '.studio-filter-bar input[data-filter-value], .studio-filter-bar input:not([type="date"])',
+      )
+      const last = /** @type {HTMLInputElement|null} */ (inputs[inputs.length - 1])
+      last?.focus()
+    }, 30)
+  }
+
   /** Page numbers shown in the page dropdown (windowed when many pages). */
   const pageMenuItems = $derived.by(() => {
     const n = pageCount;
@@ -185,6 +198,7 @@
 
   /** @param {string} colName @returns {ColKind} */
   function getColKind(colName) {
+    if (colName === ANY_COLUMN) return 'text'
     const col = columns.find((c) => c.name === colName)
     const dt = (col?.dataType ?? col?.data_type ?? '').toLowerCase().replace(/\(.+\)$/, '').trim()
     if (dt === 'boolean' || dt === 'bool') return 'boolean'
@@ -193,8 +207,13 @@
     return 'text'
   }
 
+  const ANY_COLUMN_OPS = FILTER_OPS.filter((o) =>
+    ['contains', 'starts_with', 'ends_with', 'eq'].includes(o.value),
+  )
+
   /** @param {string} colName */
   function opsForCol(colName) {
+    if (colName === ANY_COLUMN) return ANY_COLUMN_OPS
     const kind = getColKind(colName)
     if (kind === 'boolean') return BOOL_FILTER_OPS
     if (kind === 'date') return DATE_FILTER_OPS
@@ -205,6 +224,7 @@
   /** Default op when a column is first chosen */
   /** @param {string} colName @returns {import('$lib/table-query.js').FilterOp} */
   function defaultOpForCol(colName) {
+    if (colName === ANY_COLUMN) return 'contains'
     const kind = getColKind(colName)
     if (kind === 'boolean') return 'eq'
     if (kind === 'date') return 'gte'
@@ -762,7 +782,7 @@
 
 <!-- Inline filter bar -->
 {#if filterBarOpen && columns.length > 0 && tableViewMode !== 'structure'}
-  <div class="border-b border-border/50 bg-panel">
+  <div class="studio-filter-bar border-b border-border/50 bg-panel">
     {#each rowFilters as filter, i (filter.id)}
       {@const colKind = getColKind(filter.column)}
       {@const colOps = opsForCol(filter.column)}
@@ -798,9 +818,13 @@
           }}
         >
           <Select.Trigger size="sm" class="h-7 w-32 shrink-0 gap-1 px-2 text-ui-sm font-normal shadow-none" title="Column">
-            <span class="truncate">{filter.column || 'Column'}</span>
+            <span class="truncate">
+              {filter.column === ANY_COLUMN ? 'Any column' : (filter.column || 'Column')}
+            </span>
           </Select.Trigger>
           <Select.Content class="max-h-56">
+            <Select.Item value={ANY_COLUMN} label="Any column" />
+            <Select.Separator />
             {#each columns as col (col.name)}
               <Select.Item value={col.name} label={col.name} />
             {/each}
@@ -866,6 +890,7 @@
           {:else if colKind === 'number'}
             <Input
               type="number"
+              data-filter-value
               class="h-7 min-w-[6rem] flex-1 border-input bg-input/30 text-ui-sm shadow-none"
               value={filter.value}
               placeholder="Value…"
@@ -873,6 +898,7 @@
             />
           {:else}
             <Input
+              data-filter-value
               class="h-7 min-w-[6rem] flex-1 border-input bg-input/30 text-ui-sm shadow-none"
               value={filter.value}
               placeholder="Value…"

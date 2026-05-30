@@ -12,7 +12,7 @@ pub use connection::{
     ActiveConnection, ConnectionConfig, D1Config, DbState, MysqlConfig, SqliteConfig,
 };
 pub use query::{
-    delete_table_row, delete_table_rows, execute_sql, get_table_rows, insert_table_row,
+    delete_table_row, delete_table_rows, execute_ddl, execute_sql, get_table_rows, insert_table_row,
     update_table_cell, InsertRowResult, RowFilter, SqlResult, TableRows,
 };
 pub use schema::{list_schemas, list_tables, list_indexes, list_enums, truncate_table, drop_table, get_table_column_structure, TableInfo, IndexInfo, EnumInfo, ColumnStructureRow};

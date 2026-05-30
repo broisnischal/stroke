@@ -17,9 +17,11 @@
 }
 
 /* OS-native border-radius conventions */
-html[data-os="macos"]   { --radius: 0.5rem; }   /* 8 px — macOS rounded controls */
-html[data-os="windows"] { --radius: 0.4375rem; } /* 7 px — Windows 11 rounding */
-/* linux keeps the default 6 px */
+html[data-os="macos"]   { --radius: 0.5rem; --window-radius: 10px; }  /* macOS Big Sur+ system radius */
+html[data-os="windows"] { --radius: 0.4375rem; --window-radius: 8px; } /* Windows 11 */
+html[data-os="linux"]   { --window-radius: 8px; }
+:root { --window-radius: 10px; }
+
 
 @theme inline {
   --radius-sm: calc(var(--radius) - 2px);
@@ -79,10 +81,12 @@ html[data-os="windows"] { --radius: 0.4375rem; } /* 7 px — Windows 11 rounding
   body {
     @apply m-0 h-full min-h-0 overflow-hidden bg-background text-foreground;
     font-family: var(--font-sans);
+    border-radius: var(--window-radius);
   }
 
   #app {
     @apply m-0 h-full min-h-0 overflow-hidden;
+    border-radius: var(--window-radius);
     user-select: none;
     -webkit-user-select: none;
   }
@@ -219,6 +223,38 @@ html[data-os="windows"] { --radius: 0.4375rem; } /* 7 px — Windows 11 rounding
     text-decoration: underline;
     text-underline-offset: 2px;
     text-decoration-color: color-mix(in oklch, currentColor 40%, transparent);
+  }
+
+  /* ── Global kbd / keyboard key badge ───────────────────────────────────── */
+  kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    font-family: var(--font-mono);
+    font-size: calc(9 / 13 * 1rem);
+    line-height: 1;
+    color: var(--muted-foreground);
+    background: color-mix(in oklch, var(--muted) 70%, transparent);
+    border: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
+    border-bottom-color: var(--border);
+    border-radius: 3px;
+    box-shadow: 0 1px 0 color-mix(in oklch, var(--border) 60%, transparent),
+                inset 0 1px 0 color-mix(in oklch, var(--background) 12%, transparent);
+    white-space: nowrap;
+    user-select: none;
+    vertical-align: middle;
+  }
+
+  /* kbd inside a primary-coloured surface (e.g. Save button) */
+  kbd.kbd-on-primary {
+    color: color-mix(in oklch, var(--primary-foreground) 70%, transparent);
+    background: color-mix(in oklch, var(--primary-foreground) 12%, transparent);
+    border-color: color-mix(in oklch, var(--primary-foreground) 25%, transparent);
+    border-bottom-color: color-mix(in oklch, var(--primary-foreground) 35%, transparent);
+    box-shadow: 0 1px 0 color-mix(in oklch, var(--primary-foreground) 20%, transparent);
   }
 
   .studio-data-table {

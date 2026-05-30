@@ -292,10 +292,7 @@
       class="flex shrink-0 items-center gap-2 border-t border-border/80 bg-muted/15 px-5 py-3"
     >
       <p class="mr-auto hidden text-ui-2xs text-muted-foreground sm:block">
-        <kbd
-          class="rounded border border-border/80 bg-background/80 px-1 py-px font-mono text-[10px] text-foreground/80"
-          >⌘↵</kbd
-        >
+        <kbd>⌘↵</kbd>
         insert
       </p>
       <Button variant="ghost" size="sm" class="h-8" disabled={saving} onclick={() => (open = false)}>

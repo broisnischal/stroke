@@ -48,6 +48,7 @@ pub fn run() {
             .resizable(true)
             .maximized(true)
             .decorations(false)
+            .transparent(true)
             .visible(false)
             .devtools(cfg!(debug_assertions))
             .on_navigation(|url| {

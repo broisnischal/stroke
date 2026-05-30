@@ -27,9 +27,9 @@
     classes: {
       toast: base,
       title:
-        'text-[13px] font-medium leading-snug tracking-[-0.01em] text-foreground',
-      description: 'text-[11.5px] leading-snug text-muted-foreground/90',
-      content: 'flex min-w-0 flex-1 flex-col gap-0.5 pr-5',
+        'text-[13px] font-medium capitalize leading-snug tracking-[-0.01em] text-foreground',
+      description: 'mt-0.5 text-[11.5px] leading-snug text-muted-foreground/90',
+      content: 'flex min-w-0 flex-1 flex-col pr-5',
       icon: 'm-0 mt-0.5 flex shrink-0 items-center self-start [&_svg]:pointer-events-none',
       actionButton:
         'h-6 shrink-0 rounded-md bg-foreground/90 px-2.5 text-[11px] font-medium text-background transition-[background-color,transform] duration-200 hover:bg-foreground active:scale-[0.98] dark:bg-foreground/85 dark:hover:bg-foreground',
@@ -209,6 +209,11 @@
 
   :global(.studio-toaster[data-expanded='true'] [data-sonner-toast]) {
     opacity: 1;
+  }
+
+  /* Hide description element when empty so no ghost space below title-only toasts */
+  :global(.studio-toaster [data-description]:empty) {
+    display: none;
   }
 
   @media (prefers-reduced-motion: reduce) {

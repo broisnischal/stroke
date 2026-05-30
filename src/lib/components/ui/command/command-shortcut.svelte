@@ -19,7 +19,7 @@
 		{...restProps}
 	>
 		{#each keyChars as key}
-			<kbd class="flex h-[18px] min-w-[18px] items-center justify-center rounded-[3px] border border-border/70 bg-muted/60 px-[3px] font-sans text-[10px] leading-none text-muted-foreground shadow-[0_1px_0_hsl(var(--border)/0.6)] group-data-[selected]/command-item:border-accent-foreground/25 group-data-[selected]/command-item:bg-accent-foreground/10 group-data-[selected]/command-item:text-accent-foreground group-data-[selected]/command-item:shadow-none">
+			<kbd class="group-data-[selected]/command-item:border-accent-foreground/25 group-data-[selected]/command-item:bg-accent-foreground/10 group-data-[selected]/command-item:text-accent-foreground group-data-[selected]/command-item:shadow-none">
 				{key}
 			</kbd>
 		{/each}
