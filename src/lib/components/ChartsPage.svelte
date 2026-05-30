@@ -11,8 +11,7 @@
   } from '$lib/stores/saved-charts.js'
   import {
     addChartToDashboard,
-    dashboards,
-    activeDashboardId,
+    dashboards, activeDashboardId,
     createDashboard,
   } from '$lib/stores/dashboards.js'
   import { CHART_CATALOG } from '$lib/chart-utils.js'
@@ -29,6 +28,8 @@
   import ChevronDown from '@lucide/svelte/icons/chevron-down'
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
   import LayoutDashboard from '@lucide/svelte/icons/layout-dashboard'
+  import LayoutGrid from '@lucide/svelte/icons/layout-grid'
+  import Plus from '@lucide/svelte/icons/plus'
 
   /**
    * @typedef {import('$lib/stores/connections.js').SavedConnection} SavedConnection
@@ -58,6 +59,10 @@
 
   /** @type {string | null} */
   let confirmDeleteId = $state(null)
+
+  // Dashboard picker popover per chart
+  /** @type {string | null} */
+  let dashPickerChartId = $state(null)
 
   // Charts per group (derived)
   const chartsByGroup = $derived(
@@ -152,15 +157,24 @@
 
   const btnIconSm = 'inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground'
 
-  /** @param {string} chartId */
-  function addToDashboard(chartId) {
-    let dashId = $activeDashboardId
-    if (!dashId || !$dashboards.find(d => d.id === dashId)) {
-      const dash = createDashboard('Dashboard')
-      dashId = dash.id
-    }
+  /**
+   * Add chart directly to a specific dashboard (or create one if none exist).
+   * @param {string} chartId
+   * @param {string} dashId
+   */
+  function addToDashboardById(chartId, dashId) {
     addChartToDashboard(dashId, chartId)
+    activeDashboardId.set(dashId)
+    dashPickerChartId = null
     toast.success('Added to dashboard')
+  }
+
+  /** @param {string} chartId */
+  function addToNewDashboard(chartId) {
+    const dash = createDashboard('Dashboard')
+    addChartToDashboard(dash.id, chartId)
+    dashPickerChartId = null
+    toast.success('Created dashboard & added chart')
   }
 </script>
 
@@ -289,15 +303,44 @@
                             <Play class="size-2.5" />
                             Run
                           </button>
-                          <button
-                            type="button"
-                            class="inline-flex h-6 items-center gap-1 rounded border border-border/60 bg-card/90 px-1.5 text-ui-2xs text-muted-foreground backdrop-blur-sm transition-colors hover:bg-accent hover:text-foreground"
-                            title="Add to dashboard"
-                            onclick={() => addToDashboard(chart.id)}
-                          >
-                            <LayoutDashboard class="size-2.5" />
-                            Dashboard
-                          </button>
+                          <div class="relative">
+                            <button
+                              type="button"
+                              class="inline-flex h-6 items-center gap-1 rounded border border-border/60 bg-card/90 px-1.5 text-ui-2xs text-muted-foreground backdrop-blur-sm transition-colors hover:bg-accent hover:text-foreground"
+                              title="Add to dashboard"
+                              onclick={(e) => { e.stopPropagation(); dashPickerChartId = dashPickerChartId === chart.id ? null : chart.id }}
+                            >
+                              <LayoutDashboard class="size-2.5" />
+                              Dashboard
+                            </button>
+                            {#if dashPickerChartId === chart.id}
+                              <div class="absolute bottom-full left-0 z-30 mb-1 min-w-[160px] overflow-hidden rounded-lg border border-border bg-popover shadow-xl">
+                                {#each $dashboards as d (d.id)}
+                                  <button
+                                    type="button"
+                                    class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-ui-xs transition-colors hover:bg-accent"
+                                    onclick={(e) => { e.stopPropagation(); addToDashboardById(chart.id, d.id) }}
+                                  >
+                                    <LayoutGrid class="size-3 shrink-0 text-muted-foreground/50" />
+                                    <span class="truncate">{d.name}</span>
+                                    {#if d.id === $activeDashboardId}
+                                      <span class="ml-auto font-mono text-[9px] text-muted-foreground/40">active</span>
+                                    {/if}
+                                  </button>
+                                {/each}
+                                <div class="border-t border-border/50">
+                                  <button
+                                    type="button"
+                                    class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-ui-xs text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
+                                    onclick={(e) => { e.stopPropagation(); addToNewDashboard(chart.id) }}
+                                  >
+                                    <Plus class="size-3 shrink-0" />
+                                    New dashboard
+                                  </button>
+                                </div>
+                              </div>
+                            {/if}
+                          </div>
                         </div>
                         <div class="flex items-center gap-0.5">
                           <button type="button" class={cn(btnIconSm, 'size-6 bg-card/90 backdrop-blur-sm border border-border/40')} title="Rename" onclick={() => startRenameChart(chart.id)}>

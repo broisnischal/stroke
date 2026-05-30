@@ -14,6 +14,7 @@
   import X from '@lucide/svelte/icons/x'
   import Grip from '@lucide/svelte/icons/grip'
   import Pencil from '@lucide/svelte/icons/pencil'
+  import Trash2 from '@lucide/svelte/icons/trash-2'
   import Check from '@lucide/svelte/icons/check'
   import ChevronDown from '@lucide/svelte/icons/chevron-down'
   import LayoutGrid from '@lucide/svelte/icons/layout-grid'
@@ -85,13 +86,30 @@
     swapyInstance = null
     if (!gridEl || !activeDash?.items.length) return
     swapyInstance = createSwapy(gridEl, { animation: 'dynamic', swapMode: 'hover' })
-    swapyInstance.onSwapEnd(({ newSlotItemMap }) => {
-      if (!activeDash) return
-      // asArray is [{slot, item}] in DOM/slot order — extract item IDs as the new order
-      const newOrder = /** @type {string[]} */ (newSlotItemMap.asArray.map(e => e.item).filter(Boolean))
-      reorderItems(activeDash.id, newOrder)
+    // Read DOM order directly after swap — avoids Swapy callback API inconsistencies
+    swapyInstance.onSwapEnd(() => {
+      if (!gridEl || !activeDash) return
+      const newOrder = Array.from(gridEl.querySelectorAll('[data-swapy-item]'))
+        .map(el => el.getAttribute('data-swapy-item'))
+        .filter(/** @param {string|null} id */ (id) => id !== null)
+      reorderItems(activeDash.id, /** @type {string[]} */ (newOrder))
       void reinitSwapy()
     })
+  }
+
+  // ── Delete active dashboard ────────────────────────────────────────────────
+  let confirmDeleteDash = $state(false)
+
+  function handleDeleteDashboard() {
+    if (!activeDash) return
+    if (confirmDeleteDash) {
+      deleteDashboard(activeDash.id)
+      confirmDeleteDash = false
+    } else {
+      confirmDeleteDash = true
+      // Auto-reset after 3s if not confirmed
+      setTimeout(() => { confirmDeleteDash = false }, 3000)
+    }
   }
 
   onMount(() => { void reinitSwapy() })
@@ -239,6 +257,21 @@
       >
         {activeDash.columns} cols
       </button>
+
+      <!-- Delete dashboard -->
+      <button
+        type="button"
+        class={cn(
+          'inline-flex size-6 items-center justify-center rounded transition-colors',
+          confirmDeleteDash
+            ? 'bg-destructive/15 text-destructive hover:bg-destructive/25'
+            : 'text-muted-foreground/30 hover:bg-muted/60 hover:text-destructive',
+        )}
+        title={confirmDeleteDash ? 'Click again to confirm delete' : 'Delete dashboard'}
+        onclick={handleDeleteDashboard}
+      >
+        <Trash2 class="size-3" />
+      </button>
     {/if}
 
     <div class="ml-auto flex items-center gap-1.5">
@@ -331,7 +364,7 @@
                 <!-- Span controls -->
                 <div class="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                   {#each [1, 2, 3] as s}
-                    {#if s <= cols}
+                    {#if s <= activeDash.columns}
                       <button
                         type="button"
                         onclick={() => { setItemSpan(activeDash.id, item.id, /** @type {1|2|3} */ (s)); void reinitSwapy() }}

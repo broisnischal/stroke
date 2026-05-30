@@ -5,13 +5,18 @@
     /** @type {import('echarts').EChartsOption} */
     option = {},
     height = '100%',
+    /**
+     * 'svg' (default): resolution-independent, always crisp on any DPI.
+     * 'canvas': use only for interactive charts needing GPU acceleration.
+     */
+    renderer = /** @type {'svg' | 'canvas'} */ ('svg'),
     class: cls = '',
   } = $props()
 
   /** @type {HTMLDivElement | null} */
   let el = $state(null)
   /** @type {import('echarts').ECharts | null} */
-  let chart = $state(null)   // $state so the option effect re-triggers when set
+  let chart = $state(null)
   /** @type {ResizeObserver | null} */
   let ro = null
 
@@ -23,33 +28,29 @@
     let initializing = false
 
     async function tryInit() {
-      // Guard: skip if already initialized, in progress, or container has no size
       if (disposed || chart || initializing) return
       if (container.clientWidth === 0 && container.clientHeight === 0) return
       initializing = true
       try {
         const { init } = await import('echarts')
         if (disposed || !container) return
-        const instance = init(container, null, {
-          renderer: 'canvas',
-          devicePixelRatio: window.devicePixelRatio ?? 2,
-        })
+        const opts = renderer === 'canvas'
+          ? { renderer: /** @type {'canvas'} */ ('canvas'), devicePixelRatio: window.devicePixelRatio || 2 }
+          : { renderer: /** @type {'svg'} */ ('svg') }
+        const instance = init(container, null, opts)
         chart = instance
       } finally {
         initializing = false
       }
     }
 
-    // First attempt after layout settles
     requestAnimationFrame(() => { if (!disposed) void tryInit() })
 
-    // ResizeObserver: initialize when the element first gets dimensions
-    // (covers hidden→visible tab transitions), resize when already initialized
     ro = new ResizeObserver(() => {
       if (!chart) {
         void tryInit()
       } else {
-        chart.resize({ devicePixelRatio: window.devicePixelRatio ?? 2 })
+        chart.resize()
       }
     })
     ro.observe(container)
@@ -61,7 +62,6 @@
     }
   })
 
-  // Apply option whenever chart instance or option changes
   $effect(() => {
     const c = chart
     const o = option
@@ -76,8 +76,6 @@
   })
 </script>
 
-<!-- When cls has layout classes (e.g. absolute inset-0), skip the inline height/width
-     so the class positioning fully controls the box. Otherwise fall back to height/width props. -->
 <div
   bind:this={el}
   style={cls ? '' : `height: ${height}; width: 100%;`}
