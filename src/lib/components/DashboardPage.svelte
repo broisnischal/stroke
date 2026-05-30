@@ -1,147 +1,170 @@
 <script>
-  import { onMount, onDestroy, tick } from 'svelte'
-  import { createSwapy } from 'swapy'
-  import EChartPanel from './EChartPanel.svelte'
-  import { savedCharts } from '$lib/stores/saved-charts.js'
+  import { onMount, onDestroy, tick } from "svelte";
+  import { createSwapy } from "swapy";
+  import EChartPanel from "./EChartPanel.svelte";
+  import { savedCharts } from "$lib/stores/saved-charts.js";
   import {
-    dashboards, activeDashboardId,
-    createDashboard, deleteDashboard, updateDashboard,
-    addChartToDashboard, removeChartFromDashboard, setItemSpan, reorderItems,
-  } from '$lib/stores/dashboards.js'
-  import { cn } from '$lib/utils.js'
-  import BarChart2 from '@lucide/svelte/icons/bar-chart-2'
-  import Plus from '@lucide/svelte/icons/plus'
-  import X from '@lucide/svelte/icons/x'
-  import Grip from '@lucide/svelte/icons/grip'
-  import Pencil from '@lucide/svelte/icons/pencil'
-  import Trash2 from '@lucide/svelte/icons/trash-2'
-  import Check from '@lucide/svelte/icons/check'
-  import ChevronDown from '@lucide/svelte/icons/chevron-down'
-  import LayoutGrid from '@lucide/svelte/icons/layout-grid'
+    dashboards,
+    activeDashboardId,
+    createDashboard,
+    deleteDashboard,
+    updateDashboard,
+    addChartToDashboard,
+    removeChartFromDashboard,
+    setItemSpan,
+    reorderItems,
+  } from "$lib/stores/dashboards.js";
+  import { cn } from "$lib/utils.js";
+  import BarChart2 from "@lucide/svelte/icons/bar-chart-2";
+  import Plus from "@lucide/svelte/icons/plus";
+  import X from "@lucide/svelte/icons/x";
+  import Grip from "@lucide/svelte/icons/grip";
+  import Pencil from "@lucide/svelte/icons/pencil";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
+  import Check from "@lucide/svelte/icons/check";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import LayoutGrid from "@lucide/svelte/icons/layout-grid";
 
-  let { } = $props()
+  let {} = $props();
 
   // ── Active dashboard ───────────────────────────────────────────────────────
   const activeDash = $derived(
-    $dashboards.find(d => d.id === $activeDashboardId) ?? null
-  )
+    $dashboards.find((d) => d.id === $activeDashboardId) ?? null,
+  );
 
   // ── Chart picker modal ─────────────────────────────────────────────────────
-  let pickerOpen = $state(false)
+  let pickerOpen = $state(false);
 
-  function openPicker() { pickerOpen = true }
+  function openPicker() {
+    pickerOpen = true;
+  }
 
   /** @param {string} chartId */
   function pickChart(chartId) {
-    if (!activeDash) return
-    addChartToDashboard(activeDash.id, chartId)
-    pickerOpen = false
-    void reinitSwapy()
+    if (!activeDash) return;
+    addChartToDashboard(activeDash.id, chartId);
+    pickerOpen = false;
+    void reinitSwapy();
   }
 
   // ── Dashboard CRUD ─────────────────────────────────────────────────────────
-  let namingOpen = $state(false)
-  let nameInput = $state('')
-  let editingName = $state(false)
-  let editNameInput = $state('')
+  let namingOpen = $state(false);
+  let nameInput = $state("");
+  let editingName = $state(false);
+  let editNameInput = $state("");
 
   function handleCreateDashboard() {
-    const n = nameInput.trim() || 'Dashboard'
-    createDashboard(n)
-    nameInput = ''
-    namingOpen = false
+    const n = nameInput.trim() || "Dashboard";
+    createDashboard(n);
+    nameInput = "";
+    namingOpen = false;
   }
 
   function startEditName() {
-    if (!activeDash) return
-    editNameInput = activeDash.name
-    editingName = true
+    if (!activeDash) return;
+    editNameInput = activeDash.name;
+    editingName = true;
   }
 
   function commitEditName() {
     if (activeDash && editNameInput.trim()) {
-      updateDashboard(activeDash.id, { name: editNameInput.trim() })
+      updateDashboard(activeDash.id, { name: editNameInput.trim() });
     }
-    editingName = false
+    editingName = false;
   }
 
-  let dashDropdownOpen = $state(false)
+  let dashDropdownOpen = $state(false);
 
   // ── Column toggle ──────────────────────────────────────────────────────────
   function toggleColumns() {
-    if (!activeDash) return
-    updateDashboard(activeDash.id, { columns: activeDash.columns === 3 ? 2 : 3 })
-    void reinitSwapy()
+    if (!activeDash) return;
+    updateDashboard(activeDash.id, {
+      columns: activeDash.columns === 3 ? 2 : 3,
+    });
+    void reinitSwapy();
   }
 
   // ── Swapy ─────────────────────────────────────────────────────────────────
   /** @type {HTMLDivElement | null} */
-  let gridEl = $state(null)
+  let gridEl = $state(null);
   /** @type {ReturnType<typeof createSwapy> | null} */
-  let swapyInstance = null
+  let swapyInstance = null;
 
   async function reinitSwapy() {
-    await tick()
-    swapyInstance?.destroy()
-    swapyInstance = null
-    if (!gridEl || !activeDash?.items.length) return
-    swapyInstance = createSwapy(gridEl, { animation: 'dynamic', swapMode: 'hover' })
+    await tick();
+    swapyInstance?.destroy();
+    swapyInstance = null;
+    if (!gridEl || !activeDash?.items.length) return;
+    swapyInstance = createSwapy(gridEl, {
+      animation: "dynamic",
+      swapMode: "hover",
+    });
     // Read DOM order directly after swap — avoids Swapy callback API inconsistencies
     swapyInstance.onSwapEnd(() => {
-      if (!gridEl || !activeDash) return
-      const newOrder = Array.from(gridEl.querySelectorAll('[data-swapy-item]'))
-        .map(el => el.getAttribute('data-swapy-item'))
-        .filter(/** @param {string|null} id */ (id) => id !== null)
-      reorderItems(activeDash.id, /** @type {string[]} */ (newOrder))
-      void reinitSwapy()
-    })
+      if (!gridEl || !activeDash) return;
+      const newOrder = Array.from(gridEl.querySelectorAll("[data-swapy-item]"))
+        .map((el) => el.getAttribute("data-swapy-item"))
+        .filter(/** @param {string|null} id */ (id) => id !== null);
+      reorderItems(activeDash.id, /** @type {string[]} */ (newOrder));
+      void reinitSwapy();
+    });
   }
 
   // ── Delete active dashboard ────────────────────────────────────────────────
-  let confirmDeleteDash = $state(false)
+  let confirmDeleteDash = $state(false);
 
   function handleDeleteDashboard() {
-    if (!activeDash) return
+    if (!activeDash) return;
     if (confirmDeleteDash) {
-      deleteDashboard(activeDash.id)
-      confirmDeleteDash = false
+      deleteDashboard(activeDash.id);
+      confirmDeleteDash = false;
     } else {
-      confirmDeleteDash = true
+      confirmDeleteDash = true;
       // Auto-reset after 3s if not confirmed
-      setTimeout(() => { confirmDeleteDash = false }, 3000)
+      setTimeout(() => {
+        confirmDeleteDash = false;
+      }, 3000);
     }
   }
 
-  onMount(() => { void reinitSwapy() })
-  onDestroy(() => { swapyInstance?.destroy() })
+  onMount(() => {
+    void reinitSwapy();
+  });
+  onDestroy(() => {
+    swapyInstance?.destroy();
+  });
 
   // Re-init when active dashboard changes
   $effect(() => {
-    $activeDashboardId
-    void reinitSwapy()
-  })
+    $activeDashboardId;
+    void reinitSwapy();
+  });
 
   // ── Chart lookup ───────────────────────────────────────────────────────────
   /** @param {string | null} chartId */
   function getChart(chartId) {
-    return chartId ? $savedCharts.find(c => c.id === chartId) ?? null : null
+    return chartId
+      ? ($savedCharts.find((c) => c.id === chartId) ?? null)
+      : null;
   }
 
   // Auto-fill grid: columns adjust automatically as container width changes (sidebar open/closed)
   const gridStyle = $derived(
-    `grid-template-columns: repeat(auto-fill, minmax(${activeDash?.columns === 2 ? '420px' : '260px'}, 1fr))`
-  )
+    `grid-template-columns: repeat(auto-fill, minmax(${activeDash?.columns === 2 ? "420px" : "260px"}, 1fr))`,
+  );
 
   /** @param {1|2|3} span */
   function spanStyle(span) {
-    return `grid-column: span ${span}`
+    return `grid-column: span ${span}`;
   }
 </script>
 
 <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-
   <!-- Header -->
-  <div class="studio-chrome flex h-10 shrink-0 items-center gap-2 border-b border-border bg-panel px-3" data-studio-chrome>
+  <div
+    class="studio-chrome flex h-10 shrink-0 items-center gap-2 border-b border-border bg-panel px-3"
+    data-studio-chrome
+  >
     <LayoutGrid class="size-4 shrink-0 text-muted-foreground/50" />
 
     <!-- Dashboard selector -->
@@ -158,21 +181,29 @@
               bind:value={editNameInput}
               class="w-32 bg-transparent font-medium outline-none"
               onblur={commitEditName}
-              onkeydown={(e) => { if (e.key === 'Enter') commitEditName(); if (e.key === 'Escape') editingName = false }}
+              onkeydown={(e) => {
+                if (e.key === "Enter") commitEditName();
+                if (e.key === "Escape") editingName = false;
+              }}
               onclick={(e) => e.stopPropagation()}
             />
             <span
               role="button"
               tabindex="0"
               class="text-primary cursor-pointer"
-              onclick={(e) => { e.stopPropagation(); commitEditName() }}
-              onkeydown={(e) => { if (e.key === 'Enter') commitEditName() }}
+              onclick={(e) => {
+                e.stopPropagation();
+                commitEditName();
+              }}
+              onkeydown={(e) => {
+                if (e.key === "Enter") commitEditName();
+              }}
             >
               <Check class="size-3" />
             </span>
           </span>
         {:else}
-          <span>{activeDash?.name ?? 'Select dashboard'}</span>
+          <span>{activeDash?.name ?? "Select dashboard"}</span>
           <ChevronDown class="size-3 text-muted-foreground/60" />
         {/if}
       </button>
@@ -187,10 +218,15 @@
             <button
               type="button"
               class={cn(
-                'flex w-full items-center gap-2 px-3 py-1.5 text-left text-ui-xs transition-colors hover:bg-accent',
-                d.id === $activeDashboardId ? 'font-medium text-foreground' : 'text-muted-foreground',
+                "flex w-full items-center gap-2 px-3 py-1.5 text-left text-ui-xs transition-colors hover:bg-accent",
+                d.id === $activeDashboardId
+                  ? "font-medium text-foreground"
+                  : "text-muted-foreground",
               )}
-              onclick={() => { activeDashboardId.set(d.id); dashDropdownOpen = false }}
+              onclick={() => {
+                activeDashboardId.set(d.id);
+                dashDropdownOpen = false;
+              }}
             >
               <LayoutGrid class="size-3 shrink-0" />
               <span class="flex-1 truncate">{d.name}</span>
@@ -199,8 +235,16 @@
                   role="button"
                   tabindex="0"
                   class="text-muted-foreground/30 hover:text-destructive cursor-pointer"
-                  onclick={(e) => { e.stopPropagation(); deleteDashboard(d.id) }}
-                  onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); deleteDashboard(d.id) } }}
+                  onclick={(e) => {
+                    e.stopPropagation();
+                    deleteDashboard(d.id);
+                  }}
+                  onkeydown={(e) => {
+                    if (e.key === "Enter") {
+                      e.stopPropagation();
+                      deleteDashboard(d.id);
+                    }
+                  }}
                 >
                   <X class="size-3" />
                 </span>
@@ -216,9 +260,16 @@
                   bind:value={nameInput}
                   placeholder="Dashboard name…"
                   class="h-5 flex-1 rounded border border-border/60 bg-background px-1.5 font-mono text-ui-2xs outline-none focus:border-ring"
-                  onkeydown={(e) => { if (e.key === 'Enter') handleCreateDashboard(); if (e.key === 'Escape') namingOpen = false }}
+                  onkeydown={(e) => {
+                    if (e.key === "Enter") handleCreateDashboard();
+                    if (e.key === "Escape") namingOpen = false;
+                  }}
                 />
-                <button type="button" class="text-primary" onclick={handleCreateDashboard}>
+                <button
+                  type="button"
+                  class="text-primary"
+                  onclick={handleCreateDashboard}
+                >
                   <Check class="size-3" />
                 </button>
               </div>
@@ -226,10 +277,13 @@
               <button
                 type="button"
                 class="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-ui-xs text-muted-foreground/60 transition-colors hover:text-foreground"
-                onclick={() => { namingOpen = true; nameInput = '' }}
+                onclick={() => {
+                  namingOpen = true;
+                  nameInput = "";
+                }}
               >
                 <Plus class="size-3" />
-                New dashboard
+                New
               </button>
             {/if}
           </div>
@@ -262,12 +316,14 @@
       <button
         type="button"
         class={cn(
-          'inline-flex size-6 items-center justify-center rounded transition-colors',
+          "inline-flex size-6 items-center justify-center rounded transition-colors",
           confirmDeleteDash
-            ? 'bg-destructive/15 text-destructive hover:bg-destructive/25'
-            : 'text-muted-foreground/30 hover:bg-muted/60 hover:text-destructive',
+            ? "bg-destructive/15 text-destructive hover:bg-destructive/25"
+            : "text-muted-foreground/30 hover:bg-muted/60 hover:text-destructive",
         )}
-        title={confirmDeleteDash ? 'Click again to confirm delete' : 'Delete dashboard'}
+        title={confirmDeleteDash
+          ? "Click again to confirm delete"
+          : "Delete dashboard"}
         onclick={handleDeleteDashboard}
       >
         <Trash2 class="size-3" />
@@ -290,34 +346,46 @@
 
   <!-- Content -->
   <div class="min-h-0 flex-1 overflow-y-auto p-4">
-
     {#if !activeDash}
       <!-- No dashboard selected -->
-      <div class="flex h-full min-h-[300px] flex-col items-center justify-center gap-4">
-        <div class="flex size-16 items-center justify-center rounded-2xl bg-muted/30">
+      <div
+        class="flex h-full min-h-[300px] flex-col items-center justify-center gap-4"
+      >
+        <div
+          class="flex size-16 items-center justify-center rounded-2xl bg-muted/30"
+        >
           <LayoutGrid class="size-8 text-muted-foreground/20" />
         </div>
         <div class="text-center">
           <p class="font-medium text-foreground/60">No dashboard yet</p>
-          <p class="mt-1 text-ui-sm text-muted-foreground/50">Create a dashboard to arrange your saved charts</p>
+          <p class="mt-1 text-ui-sm text-muted-foreground/50">
+            Create a dashboard to arrange your saved charts
+          </p>
         </div>
         <button
           type="button"
           class="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
-          onclick={() => { createDashboard('My Dashboard') }}
+          onclick={() => {
+            createDashboard("My Dashboard");
+          }}
         >
           <Plus class="size-4" />
           Create Dashboard
         </button>
       </div>
-
     {:else if activeDash.items.length === 0}
       <!-- Empty dashboard -->
-      <div class="flex h-full min-h-[300px] flex-col items-center justify-center gap-4">
-        <div class="flex size-16 items-center justify-center rounded-2xl border-2 border-dashed border-border/40">
+      <div
+        class="flex h-full min-h-[300px] flex-col items-center justify-center gap-4"
+      >
+        <div
+          class="flex size-16 items-center justify-center rounded-2xl border-2 border-dashed border-border/40"
+        >
           <BarChart2 class="size-8 text-muted-foreground/20" />
         </div>
-        <p class="text-ui-sm text-muted-foreground/50">Add charts to build your dashboard</p>
+        <p class="text-ui-sm text-muted-foreground/50">
+          Add charts to build your dashboard
+        </p>
         <button
           type="button"
           class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-4 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -327,26 +395,20 @@
           Add Chart
         </button>
       </div>
-
     {:else}
       <!-- Dashboard grid -->
-      <div
-        bind:this={gridEl}
-        class="grid gap-3"
-        style={gridStyle}
-      >
+      <div bind:this={gridEl} class="grid gap-3" style={gridStyle}>
         {#each activeDash.items as item (item.id)}
           {@const chart = getChart(item.chartId)}
-          <div
-            data-swapy-slot={item.id}
-            style={spanStyle(item.span)}
-          >
+          <div data-swapy-slot={item.id} style={spanStyle(item.span)}>
             <div
               data-swapy-item={item.id}
               class="group flex h-[260px] flex-col overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm transition-shadow hover:shadow-md"
             >
               <!-- Card header -->
-              <div class="flex h-9 shrink-0 items-center gap-1 border-b border-border/40 bg-card px-2">
+              <div
+                class="flex h-9 shrink-0 items-center gap-1 border-b border-border/40 bg-card px-2"
+              >
                 <!-- Drag handle -->
                 <div
                   data-swapy-handle
@@ -357,23 +419,36 @@
                 </div>
 
                 <!-- Title -->
-                <span class="min-w-0 flex-1 truncate text-ui-xs font-medium text-foreground/80">
-                  {chart?.name ?? 'Unknown chart'}
+                <span
+                  class="min-w-0 flex-1 truncate text-ui-xs font-medium text-foreground/80"
+                >
+                  {chart?.name ?? "Unknown chart"}
                 </span>
 
                 <!-- Span controls -->
-                <div class="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                <div
+                  class="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100"
+                >
                   {#each [1, 2, 3] as s}
                     {#if s <= activeDash.columns}
                       <button
                         type="button"
-                        onclick={() => { setItemSpan(activeDash.id, item.id, /** @type {1|2|3} */ (s)); void reinitSwapy() }}
+                        onclick={() => {
+                          setItemSpan(
+                            activeDash.id,
+                            item.id,
+                            /** @type {1|2|3} */ (s),
+                          );
+                          void reinitSwapy();
+                        }}
                         class={cn(
-                          'flex size-5 items-center justify-center rounded text-ui-2xs font-mono transition-colors',
-                          item.span === s ? 'bg-primary/15 text-primary' : 'text-muted-foreground/40 hover:bg-muted/60 hover:text-foreground',
+                          "flex size-5 items-center justify-center rounded text-ui-2xs font-mono transition-colors",
+                          item.span === s
+                            ? "bg-primary/15 text-primary"
+                            : "text-muted-foreground/40 hover:bg-muted/60 hover:text-foreground",
                         )}
-                        title="{s} column{s > 1 ? 's' : ''}"
-                      >{s}</button>
+                        title="{s} column{s > 1 ? 's' : ''}">{s}</button
+                      >
                     {/if}
                   {/each}
                 </div>
@@ -381,7 +456,10 @@
                 <!-- Remove -->
                 <button
                   type="button"
-                  onclick={() => { removeChartFromDashboard(activeDash.id, item.id); void reinitSwapy() }}
+                  onclick={() => {
+                    removeChartFromDashboard(activeDash.id, item.id);
+                    void reinitSwapy();
+                  }}
                   class="ml-1 flex size-5 items-center justify-center rounded text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/40 hover:!text-destructive"
                   title="Remove from dashboard"
                 >
@@ -392,9 +470,14 @@
               <!-- Chart body: relative container + absolute EChartPanel for reliable canvas sizing -->
               <div class="relative min-h-0 flex-1">
                 {#if chart?.previewOption && Object.keys(chart.previewOption).length > 0}
-                  <EChartPanel option={chart.previewOption} class="absolute inset-0" />
+                  <EChartPanel
+                    option={chart.previewOption}
+                    class="absolute inset-0"
+                  />
                 {:else}
-                  <div class="absolute inset-0 flex items-center justify-center gap-2 text-muted-foreground/30">
+                  <div
+                    class="absolute inset-0 flex items-center justify-center gap-2 text-muted-foreground/30"
+                  >
                     <BarChart2 class="size-6" />
                     <span class="text-ui-xs">No preview</span>
                   </div>
@@ -413,13 +496,25 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="fixed inset-0 z-50 flex items-center justify-center bg-background/60 backdrop-blur-sm"
-    onclick={(e) => { if (e.target === e.currentTarget) pickerOpen = false }}
-    onkeydown={(e) => { if (e.key === 'Escape') pickerOpen = false }}
+    onclick={(e) => {
+      if (e.target === e.currentTarget) pickerOpen = false;
+    }}
+    onkeydown={(e) => {
+      if (e.key === "Escape") pickerOpen = false;
+    }}
   >
-    <div class="flex w-[480px] max-h-[70vh] flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-xl">
-      <div class="flex h-11 shrink-0 items-center justify-between border-b border-border px-4">
+    <div
+      class="flex w-[480px] max-h-[70vh] flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-xl"
+    >
+      <div
+        class="flex h-11 shrink-0 items-center justify-between border-b border-border px-4"
+      >
         <span class="text-sm font-semibold">Add chart to dashboard</span>
-        <button type="button" onclick={() => (pickerOpen = false)} class="text-muted-foreground/50 hover:text-foreground">
+        <button
+          type="button"
+          onclick={() => (pickerOpen = false)}
+          class="text-muted-foreground/50 hover:text-foreground"
+        >
           <X class="size-4" />
         </button>
       </div>
@@ -436,18 +531,29 @@
                 onclick={() => pickChart(chart.id)}
                 class="group flex flex-col overflow-hidden rounded-lg border border-border/50 bg-background transition-colors hover:border-primary/50 hover:bg-accent/30 text-left"
               >
-                <div class="relative h-[100px] border-b border-border/30 bg-muted/20">
+                <div
+                  class="relative h-[100px] border-b border-border/30 bg-muted/20"
+                >
                   {#if chart.previewOption && Object.keys(chart.previewOption).length > 0}
-                    <EChartPanel option={chart.previewOption} class="absolute inset-0" />
+                    <EChartPanel
+                      option={chart.previewOption}
+                      class="absolute inset-0"
+                    />
                   {:else}
-                    <div class="absolute inset-0 flex items-center justify-center text-muted-foreground/25">
+                    <div
+                      class="absolute inset-0 flex items-center justify-center text-muted-foreground/25"
+                    >
                       <BarChart2 class="size-8" />
                     </div>
                   {/if}
                 </div>
                 <div class="px-2.5 py-1.5">
-                  <p class="truncate text-ui-xs font-medium text-foreground/80">{chart.name}</p>
-                  <p class="text-[10px] text-muted-foreground/50">{chart.group}</p>
+                  <p class="truncate text-ui-xs font-medium text-foreground/80">
+                    {chart.name}
+                  </p>
+                  <p class="text-[10px] text-muted-foreground/50">
+                    {chart.group}
+                  </p>
                 </div>
               </button>
             {/each}
