@@ -727,18 +727,30 @@
   const canUndo = $derived(inputHistoryIdx > 0 || inputText !== inputHistory[inputHistoryIdx])
   const canRedo = $derived(inputHistoryIdx < inputHistory.length - 1)
 
-  // ── `/` global focus shortcut ─────────────────────────────────────────────
+  // ── Global keyboard shortcuts ─────────────────────────────────────────────
   onMount(() => {
-    function onSlash(/** @type {KeyboardEvent} */ e) {
-      if (!isActive || e.key !== '/') return
-      const tag = /** @type {HTMLElement | null} */ (document.activeElement)?.tagName ?? ''
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return
-      if (/** @type {HTMLElement | null} */ (document.activeElement)?.isContentEditable) return
-      e.preventDefault()
-      inputRef?.focus()
+    function onGlobal(/** @type {KeyboardEvent} */ e) {
+      if (!isActive) return
+
+      // `/` → focus input
+      if (e.key === '/') {
+        const tag = /** @type {HTMLElement | null} */ (document.activeElement)?.tagName ?? ''
+        if (tag === 'INPUT' || tag === 'TEXTAREA') return
+        if (/** @type {HTMLElement | null} */ (document.activeElement)?.isContentEditable) return
+        e.preventDefault()
+        inputRef?.focus()
+        return
+      }
+
+      // ⌘⇧, → toggle settings panel
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === ',') {
+        e.preventDefault()
+        settingsOpen = !settingsOpen
+        if (settingsOpen) settingsTab = 'model'
+      }
     }
-    document.addEventListener('keydown', onSlash)
-    onDestroy(() => document.removeEventListener('keydown', onSlash))
+    document.addEventListener('keydown', onGlobal)
+    onDestroy(() => document.removeEventListener('keydown', onGlobal))
   })
 
   let seq = 0
@@ -1418,84 +1430,63 @@
 
       <!-- ── Conversation sidebar ───────────────────────────────────────── -->
       {#if sidebarVisible}
-      <aside class="flex w-56 shrink-0 flex-col border-r border-border bg-panel">
-        <div class="flex flex-col gap-2 border-b border-border px-2.5 py-2.5">
-          <div class="flex items-center justify-between gap-2 px-0.5">
-            <span class="text-ui-xs font-semibold text-foreground">Chats</span>
-            <button
-              type="button"
-              class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
-              title="Hide conversation list ({modKey}⇧B)"
-              onclick={toggleAiSidebar}
-            >
-              <PanelLeft class="size-3.5" />
-            </button>
-          </div>
+      <aside class="flex w-52 shrink-0 flex-col border-r border-border bg-panel">
+
+        <!-- Sidebar header: collapse + new chat -->
+        <div class="flex shrink-0 items-center gap-1 border-b border-border/50 px-2 py-2">
           <button
             type="button"
-            class="flex w-full items-center gap-2 rounded-md border border-border/80 bg-background px-2.5 py-2 text-left text-ui-xs text-foreground shadow-sm transition-colors hover:border-border hover:text-foreground"
+            class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            title="Hide chats ({modKey}⇧B)"
+            onclick={toggleAiSidebar}
+          >
+            <PanelLeft class="size-3.5" />
+          </button>
+          <span class="flex-1 px-1 text-ui-xs font-medium text-muted-foreground/60">History</span>
+          <button
+            type="button"
+            class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             title="New chat ({newChatShortcut})"
             onclick={() => void newConversation()}
           >
-            <Plus class="size-3.5 shrink-0 text-muted-foreground" />
-            <span class="font-medium">New chat</span>
-            <kbd class="ml-auto">{newChatShortcut}</kbd>
+            <Plus class="size-3.5" />
           </button>
         </div>
 
-        <div class="app-scroll flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-1.5">
+        <!-- Conversation list -->
+        <div class="app-scroll flex min-h-0 flex-1 flex-col overflow-y-auto py-1">
           {#if isDraftChat}
-            <button
-              type="button"
-              class={cn(
-                'group/chat relative flex w-full items-start gap-2 rounded-md px-2 py-2 text-left transition-colors',
-                'bg-accent/45 ring-1 ring-border/60',
-              )}
-            >
-              <MessageSquare class="mt-0.5 size-3.5 shrink-0 text-primary" />
-              <div class="min-w-0 flex-1">
-                <span class="block truncate text-ui-xs font-medium text-foreground">New chat</span>
-                <span class="text-[10px] text-muted-foreground">Draft · unsaved</span>
-              </div>
+            <button type="button" class="relative flex w-full flex-col px-3 py-2 text-left">
+              <span class="absolute inset-y-2 left-0 w-0.5 rounded-full bg-primary"></span>
+              <span class="truncate text-ui-xs font-medium text-foreground">New chat</span>
+              <span class="text-[10px] text-muted-foreground/50">Draft</span>
             </button>
           {/if}
 
           {#each convList as conv (conv.id)}
-            <div class="group relative flex items-stretch">
+            {@const isActive = activeConvId === conv.id}
+            <div class="group/conv relative">
               <button
                 type="button"
                 class={cn(
-                  'relative flex min-w-0 flex-1 items-start gap-2 rounded-md px-2 py-2 pr-8 text-left transition-colors hover:bg-accent/35',
-                  activeConvId === conv.id
-                    ? 'bg-accent/45 ring-1 ring-border/60'
-                    : 'text-muted-foreground hover:text-foreground',
+                  'relative flex w-full flex-col px-3 py-2 text-left transition-colors',
+                  isActive
+                    ? 'bg-accent/30 text-foreground'
+                    : 'text-muted-foreground hover:bg-accent/20 hover:text-foreground',
                 )}
                 onclick={() => void selectConversation(conv.id)}
                 oncontextmenu={(e) => showContextMenu(conv.id, e)}
               >
-                {#if activeConvId === conv.id}
-                  <span
-                    class="absolute top-2 bottom-2 left-0 w-0.5 rounded-full bg-primary"
-                    aria-hidden="true"
-                  ></span>
+                {#if isActive}
+                  <span class="absolute inset-y-2 left-0 w-0.5 rounded-full bg-primary"></span>
                 {/if}
-                <MessageSquare
-                  class={cn(
-                    'mt-0.5 size-3.5 shrink-0',
-                    activeConvId === conv.id ? 'text-primary' : 'text-muted-foreground/70',
-                  )}
-                />
-                <div class="min-w-0 flex-1">
-                  <span class="block truncate text-ui-xs font-medium leading-snug text-foreground">
-                    {conv.title}
-                  </span>
-                  <span class="text-[10px] text-muted-foreground">{relativeTime(conv.updatedAt)}</span>
-                </div>
+                <span class="truncate text-ui-xs font-medium leading-snug">{conv.title}</span>
+                <span class="mt-0.5 text-[10px] text-muted-foreground/50">{relativeTime(conv.updatedAt)}</span>
               </button>
               <button
                 type="button"
-                class="absolute top-1/2 right-1.5 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-[opacity,color] hover:text-destructive group-hover:opacity-100"
-                title="Delete conversation"
+                class="absolute right-1.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/40 opacity-0 transition-[opacity,color] hover:text-destructive group-hover/conv:opacity-100"
+                title="Delete"
                 onclick={(e) => { e.stopPropagation(); void removeConversation(conv.id) }}
               >
                 <Trash2 class="size-3" />
@@ -1504,14 +1495,9 @@
           {/each}
 
           {#if convList.length === 0 && !isDraftChat}
-            <div class="flex flex-col items-center gap-2 px-3 py-8 text-center">
-              <MessageSquare class="size-7 text-muted-foreground/25" />
-              <p class="text-[11px] leading-relaxed text-muted-foreground/70">
-                No conversations yet
-              </p>
-              <p class="text-[10px] leading-relaxed text-muted-foreground/50">
-                Chats save automatically as you message
-              </p>
+            <div class="flex flex-col items-center gap-1.5 px-4 py-10 text-center">
+              <p class="text-[11px] text-muted-foreground/50">No conversations yet</p>
+              <p class="text-[10px] text-muted-foreground/30">Chats save automatically</p>
             </div>
           {/if}
         </div>
@@ -1521,42 +1507,45 @@
       <!-- ── Main chat area ─────────────────────────────────────────────── -->
       <div class="relative flex min-h-0 min-w-0 flex-1 flex-col">
 
-        <!-- Header -->
-        <div class="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
-          <button
-            type="button"
-            class={cn(
-              'inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground',
-              !sidebarVisible && 'bg-accent/50 text-foreground',
-            )}
-            title={sidebarVisible ? `Hide chats (${modKey}⇧B)` : `Show chats (${modKey}⇧B)`}
-            onclick={toggleAiSidebar}
-          >
-            <PanelLeft class="size-3.5" />
-          </button>
-          {#if !sidebarVisible}
+        <!-- Header: single clean row -->
+        <div class="studio-chrome flex shrink-0 items-center border-b border-border/50 px-2 py-2" data-studio-chrome>
+          <!-- Left: sidebar toggle + new chat (when sidebar hidden) -->
+          <div class="flex items-center gap-0.5">
             <button
               type="button"
-              class="inline-flex h-6 items-center gap-1.5 rounded-md border border-border/80 bg-background px-2 text-ui-xs text-muted-foreground transition-colors hover:text-foreground"
-              title="New chat ({newChatShortcut})"
-              onclick={() => void newConversation()}
+              class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              title={sidebarVisible ? `Hide chats (${modKey}⇧B)` : `Show chats (${modKey}⇧B)`}
+              onclick={toggleAiSidebar}
             >
-              <Plus class="size-3" />
-              New chat
+              <PanelLeft class="size-3.5" />
             </button>
-          {/if}
-          <div class="flex items-center gap-1.5">
-            <Sparkles class="size-3.5 shrink-0 text-primary" />
-            <span class="text-ui-xs font-semibold">AI</span>
+            {#if !sidebarVisible}
+              <button
+                type="button"
+                class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                title="New chat ({newChatShortcut})"
+                onclick={() => void newConversation()}
+              >
+                <Plus class="size-3.5" />
+              </button>
+            {/if}
           </div>
-          <div class="ml-auto flex items-center gap-0.5">
+
+          <!-- Center: AI label -->
+          <div class="flex flex-1 items-center justify-center gap-1.5">
+            <Sparkles class="size-3.5 shrink-0 text-primary" />
+            <span class="text-ui-xs font-semibold tracking-wide">AI</span>
+          </div>
+
+          <!-- Right: settings + close -->
+          <div class="flex items-center gap-0.5">
             <button
               type="button"
               class={cn(
                 'inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
                 settingsOpen && 'bg-accent text-foreground',
               )}
-              title="Model & settings"
+              title="Settings ({modKey}⇧,)"
               onclick={() => { settingsOpen = !settingsOpen; settingsTab = 'model' }}
             >
               <Settings2 class="size-3.5" />
@@ -1649,170 +1638,148 @@
               {/if}
             </div>
           {:else}
-            <div class="flex flex-col gap-5" data-studio-selectable="text">
+            <div class="flex flex-col gap-4" data-studio-selectable="text">
               {#each items as item (item.id)}
 
+                <!-- ── User message ───────────────────────── -->
                 {#if item.kind === 'user'}
-                  <div class="flex justify-end">
-                    <div class="max-w-[85%] rounded-2xl rounded-tr-md bg-primary px-3.5 py-2 text-ui leading-relaxed text-primary-foreground shadow-sm">
+                  <div class="flex justify-end px-1">
+                    <div class="max-w-[78%] rounded-2xl rounded-tr-sm bg-primary px-4 py-2.5 text-ui leading-relaxed text-primary-foreground shadow-sm">
                       {item.text}
                     </div>
                   </div>
 
+                <!-- ── Thinking ───────────────────────────── -->
                 {:else if item.kind === 'thinking'}
-                  <div class="flex items-center gap-2.5 text-ui-xs text-muted-foreground">
-                    <div class="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/10">
-                      <Sparkles class="size-3 animate-pulse text-primary" />
+                  <div class="flex items-start gap-2.5">
+                    <div class="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/15">
+                      <Sparkles class="size-3 text-primary" />
                     </div>
-                    {#if aiStatusHint}
-                      <span class="animate-pulse">{aiStatusHint}</span>
-                    {:else}
-                      <span class="animate-pulse">Thinking…</span>
-                    {/if}
-                  </div>
-
-                {:else if item.kind === 'streaming'}
-                  <AiMarkdown content={displayStreamingContent} debounceMs={180} streaming />
-
-                {:else if item.kind === 'assistant'}
-                  <div class="flex flex-col gap-2">
-                    {#each item.parts as part, pi}
-                      {#if part.type === 'text'}
-                        <AiMarkdown content={part.content} />
-                      {:else if part.type === 'mermaid'}
-                        <div class="mermaid-output overflow-hidden rounded-lg border border-border">
-                          <div class="flex items-center justify-between gap-2 border-b border-border/50 bg-muted/30 px-3 py-1.5">
-                            <span class="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Diagram</span>
-                            <div class="flex items-center gap-1">
-                              <span class="hidden text-[10px] text-muted-foreground/40 sm:block mr-1">drag · Ctrl+scroll zoom</span>
-                              <button type="button" class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground" onclick={() => copyText(part.content)} title="Copy source">
-                                <Copy class="size-2.5" />Source
-                              </button>
-                              <button type="button" class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground" onclick={() => exportDiagramSvg(part.content)} title="Export SVG">
-                                <Download class="size-2.5" />SVG
-                              </button>
-                              <button type="button" class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground" onclick={() => void exportDiagramPng(part.content)} title="Export PNG">
-                                <Download class="size-2.5" />PNG
-                              </button>
-                              <button type="button" class="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground" onclick={() => openDiagramFullscreen(part.content)} title="Fullscreen">
-                                <Maximize2 class="size-3" />
-                              </button>
-                            </div>
-                          </div>
-                          <div class="mermaid-canvas" use:mermaidInteractive>
-                            {@html processMermaidSvg(part.content)}
-                          </div>
-                        </div>
-                      {:else if part.type === 'sql'}
-                        {@const sqlKey = `${item.id}-${pi}`}
-                        {@const sqlOpen = sqlExpanded.has(sqlKey)}
-                        <div class="overflow-hidden rounded-lg border border-border">
-                          <div class="flex items-center justify-between gap-2 border-b border-border/50 bg-muted/40 px-3 py-1.5">
-                            <button
-                              type="button"
-                              class="flex items-center gap-1.5 text-ui-xs text-muted-foreground hover:text-foreground"
-                              onclick={() => toggleSqlExpand(sqlKey)}
-                            >
-                              {#if sqlOpen}<ChevronDown class="size-3" />{:else}<ChevronRight class="size-3" />{/if}
-                              <span class="font-mono">SQL</span>
-                            </button>
-                            <div class="flex items-center gap-1">
-                              <button type="button" class="inline-flex h-6 items-center gap-1 rounded px-2 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground" onclick={() => copyText(part.content)}>
-                                <Copy class="size-3" />Copy
-                              </button>
-                              <button type="button" class="inline-flex h-6 items-center gap-1 rounded px-2 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground" onclick={() => onwritesql(part.content)}>
-                                <PenLine class="size-3" />Write
-                              </button>
-                              <button type="button" class="inline-flex h-6 items-center gap-1 rounded bg-primary px-2 text-ui-xs text-primary-foreground hover:opacity-90 disabled:opacity-50" disabled={loading} onclick={() => void runSqlBlock(part.content)}>
-                                <Play class="size-3" />Run
-                              </button>
-                            </div>
-                          </div>
-                          <AiSqlBlock sql={part.content} open={sqlOpen} />
-                        </div>
-                      {:else if part.type === 'error'}
-                        <div class="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/8 px-3 py-2.5 text-ui-xs text-destructive">
-                          <AlertTriangle class="mt-0.5 size-3.5 shrink-0" />
-                          <span>{part.content}</span>
-                        </div>
-                      {:else if part.type === 'confirm_prompt'}
-                        <div class="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/8 px-3 py-2.5 text-ui-xs text-amber-600 dark:text-amber-400">
-                          <AlertTriangle class="mt-0.5 size-3.5 shrink-0" />
-                          <span>{part.content}</span>
-                        </div>
+                    <div class="flex items-center gap-1.5 py-1">
+                      {#if aiStatusHint}
+                        <span class="text-ui-xs text-muted-foreground animate-pulse">{aiStatusHint}</span>
                       {:else}
-                        {@const codeKey = `${item.id}-${pi}`}
-                        {@const codeOpen = !collapsed.has(codeKey)}
-                        <div class="overflow-hidden rounded-lg border border-border">
-                          <div class="flex items-center justify-between gap-2 border-b border-border/50 bg-muted/40 px-3 py-1.5">
-                            <button
-                              type="button"
-                              class="flex items-center gap-1.5 text-ui-xs text-muted-foreground hover:text-foreground"
-                              onclick={() => toggleCollapse(codeKey)}
-                            >
-                              {#if codeOpen}<ChevronDown class="size-3" />{:else}<ChevronRight class="size-3" />{/if}
-                              <span class="font-mono">{part.lang || 'code'}</span>
-                            </button>
-                            <button type="button" class="inline-flex h-6 items-center gap-1 rounded px-2 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground" onclick={() => copyText(part.content)}>
-                              <Copy class="size-3" />Copy
-                            </button>
-                          </div>
-                          {#if codeOpen}
-                            <div class="border-t border-border/50 bg-muted/15">
-                              <ShikiBlock code={part.content} lang={part.lang || 'plaintext'} embedded />
-                            </div>
-                          {/if}
-                        </div>
+                        <span class="size-1.5 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay:0ms"></span>
+                        <span class="size-1.5 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay:150ms"></span>
+                        <span class="size-1.5 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay:300ms"></span>
                       {/if}
-                    {/each}
-                  </div>
-
-                {:else if item.kind === 'executing'}
-                  <div class="flex items-center gap-2.5 rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-ui-xs text-muted-foreground">
-                    <Loader2 class="size-3.5 shrink-0 animate-spin text-primary/70" />
-                    <div class="flex min-w-0 flex-1 flex-col gap-0.5">
-                      <span class="font-medium text-foreground/60">Executing</span>
-                      <span class="truncate font-mono text-[10px] text-muted-foreground/60">{item.sql}</span>
                     </div>
                   </div>
 
+                <!-- ── Streaming ──────────────────────────── -->
+                {:else if item.kind === 'streaming'}
+                  <div class="flex items-start gap-2.5">
+                    <div class="mt-1 flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/15">
+                      <Sparkles class="size-3 text-primary" />
+                    </div>
+                    <div class="min-w-0 flex-1 pt-0.5">
+                      <AiMarkdown content={displayStreamingContent} debounceMs={180} streaming />
+                    </div>
+                  </div>
+
+                <!-- ── Executing (tool call in progress) ──── -->
+                {:else if item.kind === 'executing'}
+                  <div class="flex items-center gap-2.5">
+                    <div class="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted/60 ring-1 ring-border/40">
+                      <Loader2 class="size-3 animate-spin text-muted-foreground" />
+                    </div>
+                    <div class="flex min-w-0 items-center gap-1.5 text-ui-xs text-muted-foreground">
+                      <span class="font-medium text-foreground/50">Running</span>
+                      <span class="truncate font-mono text-[10px] text-muted-foreground/40">{item.sql}</span>
+                    </div>
+                  </div>
+
+                <!-- ── Assistant message ──────────────────── -->
+                {:else if item.kind === 'assistant'}
+                  <div class="flex items-start gap-2.5">
+                    <div class="mt-1 flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/15">
+                      <Sparkles class="size-3 text-primary" />
+                    </div>
+                    <div class="flex min-w-0 flex-1 flex-col gap-2 pt-0.5">
+                      {#each item.parts as part, pi}
+                        {#if part.type === 'text'}
+                          <AiMarkdown content={part.content} />
+                        {:else if part.type === 'mermaid'}
+                          <div class="mermaid-output overflow-hidden rounded-xl border border-border/60">
+                            <div class="flex items-center justify-between gap-2 border-b border-border/40 bg-muted/20 px-3 py-1.5">
+                              <span class="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wider">Diagram</span>
+                              <div class="flex items-center gap-0.5">
+                                <span class="hidden text-[10px] text-muted-foreground/30 sm:block mr-1">drag · Ctrl+scroll zoom</span>
+                                <button type="button" class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground" onclick={() => copyText(part.content)} title="Copy source"><Copy class="size-2.5" />Source</button>
+                                <button type="button" class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground" onclick={() => exportDiagramSvg(part.content)} title="Export SVG"><Download class="size-2.5" />SVG</button>
+                                <button type="button" class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground" onclick={() => void exportDiagramPng(part.content)} title="Export PNG"><Download class="size-2.5" />PNG</button>
+                                <button type="button" class="inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground" onclick={() => openDiagramFullscreen(part.content)} title="Fullscreen"><Maximize2 class="size-3" /></button>
+                              </div>
+                            </div>
+                            <div class="mermaid-canvas" use:mermaidInteractive>
+                              {@html processMermaidSvg(part.content)}
+                            </div>
+                          </div>
+                        {:else if part.type === 'sql'}
+                          {@const sqlKey = `${item.id}-${pi}`}
+                          {@const sqlOpen = sqlExpanded.has(sqlKey)}
+                          <div class="overflow-hidden rounded-xl border border-border/60">
+                            <div class="flex items-center gap-2 border-b border-border/40 bg-muted/20 px-3 py-1.5">
+                              <button type="button" class="flex min-w-0 flex-1 items-center gap-1.5 text-ui-xs text-muted-foreground hover:text-foreground" onclick={() => toggleSqlExpand(sqlKey)}>
+                                {#if sqlOpen}<ChevronDown class="size-3 shrink-0" />{:else}<ChevronRight class="size-3 shrink-0" />{/if}
+                                <span class="font-mono font-medium">SQL</span>
+                              </button>
+                              <div class="flex items-center gap-0.5">
+                                <button type="button" class="inline-flex h-6 items-center gap-1 rounded-md px-2 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground" onclick={() => copyText(part.content)}><Copy class="size-3" />Copy</button>
+                                <button type="button" class="inline-flex h-6 items-center gap-1 rounded-md px-2 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground" onclick={() => onwritesql(part.content)}><PenLine class="size-3" />Write</button>
+                                <button type="button" class="inline-flex h-6 items-center gap-1 rounded-md bg-primary px-2 text-ui-xs text-primary-foreground hover:opacity-90 disabled:opacity-50" disabled={loading} onclick={() => void runSqlBlock(part.content)}><Play class="size-3" />Run</button>
+                              </div>
+                            </div>
+                            <AiSqlBlock sql={part.content} open={sqlOpen} />
+                          </div>
+                        {:else if part.type === 'error'}
+                          <div class="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/6 px-3 py-2.5 text-ui-xs text-destructive">
+                            <AlertTriangle class="mt-0.5 size-3.5 shrink-0" />
+                            <span>{part.content}</span>
+                          </div>
+                        {:else if part.type === 'confirm_prompt'}
+                          <div class="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/6 px-3 py-2.5 text-ui-xs text-amber-600 dark:text-amber-400">
+                            <AlertTriangle class="mt-0.5 size-3.5 shrink-0" />
+                            <span>{part.content}</span>
+                          </div>
+                        {:else}
+                          {@const codeKey = `${item.id}-${pi}`}
+                          {@const codeOpen = !collapsed.has(codeKey)}
+                          <div class="overflow-hidden rounded-xl border border-border/60">
+                            <div class="flex items-center justify-between gap-2 border-b border-border/40 bg-muted/20 px-3 py-1.5">
+                              <button type="button" class="flex items-center gap-1.5 text-ui-xs text-muted-foreground hover:text-foreground" onclick={() => toggleCollapse(codeKey)}>
+                                {#if codeOpen}<ChevronDown class="size-3" />{:else}<ChevronRight class="size-3" />{/if}
+                                <span class="font-mono">{part.lang || 'code'}</span>
+                              </button>
+                              <button type="button" class="inline-flex h-6 items-center gap-1 rounded-md px-2 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground" onclick={() => copyText(part.content)}><Copy class="size-3" />Copy</button>
+                            </div>
+                            {#if codeOpen}
+                              <div class="bg-muted/10">
+                                <ShikiBlock code={part.content} lang={part.lang || 'plaintext'} embedded />
+                              </div>
+                            {/if}
+                          </div>
+                        {/if}
+                      {/each}
+                    </div>
+                  </div>
+
+                <!-- ── Query result card ──────────────────── -->
                 {:else if item.kind === 'result'}
                   {@const resOpen = openResultId === item.id}
-                  <div class={cn(
-                    'overflow-hidden rounded-xl border text-ui-xs',
-                    item.error ? 'border-destructive/40 bg-destructive/5' : 'border-border/70',
-                    item.isSchema && 'border-primary/25',
-                  )}>
-                    <div
-                      class={cn(
-                        'group/res flex w-full items-center gap-2 px-3 py-2 transition-colors hover:bg-muted/20',
-                        item.error ? 'bg-destructive/8'
-                          : item.isSchema ? 'bg-primary/6'
-                          : 'bg-muted/20',
-                        resOpen && 'border-b border-border/40',
-                      )}
-                    >
-                      <button
-                        type="button"
-                        class="flex min-w-0 flex-1 items-center gap-2 text-left"
-                        onclick={() => toggleResult(item.id)}
-                      >
-                        {#if resOpen}<ChevronDown class="size-3 shrink-0 text-muted-foreground/60" />{:else}<ChevronRight class="size-3 shrink-0 text-muted-foreground/60" />{/if}
-                        <Table2 class={cn('size-3 shrink-0', item.isSchema ? 'text-primary/60' : 'text-muted-foreground/60')} />
-                        <span class="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground/70">{item.sql || 'Query'}</span>
+                  <div class="ml-8 overflow-hidden rounded-xl border text-ui-xs {item.error ? 'border-destructive/30' : item.isSchema ? 'border-primary/20' : 'border-border/50'}">
+                    <div class="group/res flex w-full items-center gap-2 px-3 py-2 transition-colors hover:bg-muted/20 {item.error ? 'bg-destructive/5' : item.isSchema ? 'bg-primary/5' : 'bg-muted/15'} {resOpen ? 'border-b border-border/30' : ''}">
+                      <button type="button" class="flex min-w-0 flex-1 items-center gap-2 text-left" onclick={() => toggleResult(item.id)}>
+                        {#if resOpen}<ChevronDown class="size-3 shrink-0 text-muted-foreground/50" />{:else}<ChevronRight class="size-3 shrink-0 text-muted-foreground/50" />{/if}
+                        <Table2 class="size-3 shrink-0 {item.isSchema ? 'text-primary/50' : 'text-muted-foreground/50'}" />
+                        <span class="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground/60">{item.sql || 'Query'}</span>
                       </button>
                       {#if item.sql}
-                        <button type="button" class="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 transition-colors group-hover/res:inline-flex hover:bg-accent hover:text-foreground" title="Copy SQL" onclick={() => copyText(item.sql)}>
-                          <Copy class="size-3" />
-                        </button>
-                        <button type="button" class="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 transition-colors group-hover/res:inline-flex hover:bg-accent hover:text-foreground" title="Write to editor" onclick={() => onwritesql(item.sql)}>
-                          <PenLine class="size-3" />
-                        </button>
+                        <button type="button" class="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground/40 group-hover/res:inline-flex hover:bg-accent hover:text-foreground" title="Copy SQL" onclick={() => copyText(item.sql)}><Copy class="size-3" /></button>
+                        <button type="button" class="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground/40 group-hover/res:inline-flex hover:bg-accent hover:text-foreground" title="Write to editor" onclick={() => onwritesql(item.sql)}><PenLine class="size-3" /></button>
                       {/if}
                       {#if !item.error}
-                        <span class="shrink-0 rounded-full bg-muted/60 px-1.5 py-0.5 font-mono text-[9px] tabular-nums text-muted-foreground">
-                          {formatCompactCount(item.total)} {item.total === 1 ? 'row' : 'rows'}
-                        </span>
+                        <span class="shrink-0 rounded-full bg-muted/50 px-1.5 py-0.5 font-mono text-[9px] tabular-nums text-muted-foreground/60">{formatCompactCount(item.total)} {item.total === 1 ? 'row' : 'rows'}</span>
                       {/if}
                     </div>
                     {#if resOpen}
@@ -1822,18 +1789,13 @@
                           <p class="font-mono text-[11px] leading-relaxed text-destructive">{item.error}</p>
                         </div>
                       {:else if item.rows.length === 0}
-                        <p class="px-3 py-3 text-center text-ui-xs italic text-muted-foreground/60">No rows returned.</p>
+                        <p class="px-3 py-3 text-center text-ui-xs italic text-muted-foreground/50">No rows returned.</p>
                       {:else}
                         <div class="overflow-x-auto">
-                          <DataTable
-                            columns={item.columns}
-                            rows={item.rows.slice(0, 15)}
-                            embedded
-                            showSelection={false}
-                          />
+                          <DataTable columns={item.columns} rows={item.rows.slice(0, 15)} embedded showSelection={false} />
                         </div>
                         {#if item.total > 15}
-                          <p class="border-t border-border/20 px-3 py-1.5 text-[10px] text-muted-foreground/50">
+                          <p class="border-t border-border/20 px-3 py-1.5 text-[10px] text-muted-foreground/40">
                             Showing 15 of {formatCompactCount(item.total)} rows{item.capped ? ` (limited to ${AI_ROW_LIMIT})` : ''}
                           </p>
                         {/if}
@@ -1841,35 +1803,37 @@
                     {/if}
                   </div>
 
+                <!-- ── Confirm dialog ──────────────────────── -->
                 {:else if item.kind === 'confirm'}
-                  <div class="overflow-hidden rounded-lg border border-destructive/40 bg-destructive/5">
-                    <div class="flex items-center gap-2 border-b border-destructive/30 bg-destructive/10 px-3 py-2">
+                  <div class="ml-8 overflow-hidden rounded-xl border border-destructive/30 bg-destructive/4">
+                    <div class="flex items-center gap-2 border-b border-destructive/20 bg-destructive/8 px-3 py-2">
                       <AlertTriangle class="size-3.5 shrink-0 text-destructive" />
                       <span class="text-ui-xs font-medium text-destructive">Confirm destructive operation</span>
                     </div>
-                    <pre class="px-3 py-2 font-mono text-ui-xs text-foreground whitespace-pre-wrap">{item.sql}</pre>
-                    <div class="flex items-center justify-between gap-2 border-t border-destructive/20 px-3 py-2">
-                      <p class="text-ui-xs text-muted-foreground">This cannot be undone.</p>
-                      <div class="flex gap-2">
-                        <button type="button" class="inline-flex h-7 items-center rounded-md border border-border px-3 text-ui-xs text-muted-foreground hover:bg-accent" onclick={() => item.resolve(false)}>Cancel</button>
-                        <button type="button" class="inline-flex h-7 items-center rounded-md bg-destructive px-3 text-ui-xs font-medium text-destructive-foreground hover:opacity-90" onclick={() => item.resolve(true)}>Execute</button>
+                    <pre class="px-3 py-2.5 font-mono text-ui-xs text-foreground whitespace-pre-wrap">{item.sql}</pre>
+                    <div class="flex items-center justify-between gap-2 border-t border-destructive/15 px-3 py-2">
+                      <p class="text-ui-xs text-muted-foreground/60">This cannot be undone.</p>
+                      <div class="flex gap-1.5">
+                        <button type="button" class="inline-flex h-7 items-center rounded-lg border border-border px-3 text-ui-xs text-muted-foreground hover:bg-accent" onclick={() => item.resolve(false)}>Cancel</button>
+                        <button type="button" class="inline-flex h-7 items-center rounded-lg bg-destructive px-3 text-ui-xs font-medium text-destructive-foreground hover:opacity-90" onclick={() => item.resolve(true)}>Execute</button>
                       </div>
                     </div>
                   </div>
 
+                <!-- ── Chart card ─────────────────────────── -->
                 {:else if item.kind === 'chart'}
-                  <div class="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+                  <div class="ml-8 overflow-hidden rounded-xl border {item.error ? 'border-destructive/30 bg-destructive/4' : 'border-border/50 bg-card'}">
                     {#if item.error}
-                      <div class="flex items-center gap-2 px-4 py-3 text-ui-sm text-destructive">
-                        <AlertTriangle class="size-4 shrink-0" />
+                      <div class="flex items-center gap-2 px-4 py-3 text-ui-xs text-destructive">
+                        <AlertTriangle class="size-3.5 shrink-0" />
                         {item.error}
                       </div>
                     {:else}
-                      <div class="border-b border-border/50 bg-muted/30 px-4 py-2 flex items-center gap-2">
-                        <span class="text-ui-xs font-semibold text-muted-foreground uppercase tracking-wide">{item.spec.title || 'Chart'}</span>
-                        <span class="ml-auto text-ui-xs text-muted-foreground/50 capitalize">{item.spec.type} chart</span>
+                      <div class="flex items-center gap-2 border-b border-border/30 px-4 py-2">
+                        <span class="text-ui-xs font-semibold text-foreground/80">{item.spec.title || 'Chart'}</span>
+                        <span class="ml-auto rounded-full bg-muted/50 px-2 py-0.5 font-mono text-[10px] capitalize text-muted-foreground/60">{item.spec.type}</span>
                       </div>
-                      <div class="p-4">
+                      <div class="p-3">
                         <AiChartRenderer spec={item.spec} />
                       </div>
                     {/if}
@@ -1879,9 +1843,15 @@
               {/each}
 
               {#if showWorking}
-                <div class="flex items-center gap-2.5 text-ui-xs text-muted-foreground">
-                  <Loader2 class="size-3.5 shrink-0 animate-spin text-primary/70" />
-                  <span class="animate-pulse">{aiStatusHint || 'Working…'}</span>
+                <div class="flex items-center gap-2.5">
+                  <div class="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/15">
+                    <Sparkles class="size-3 text-primary animate-pulse" />
+                  </div>
+                  <div class="flex items-center gap-1.5">
+                    <span class="size-1.5 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay:0ms"></span>
+                    <span class="size-1.5 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay:150ms"></span>
+                    <span class="size-1.5 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay:300ms"></span>
+                  </div>
                 </div>
               {/if}
             </div>
@@ -1909,34 +1879,23 @@
         {/if}
 
         <!-- Input -->
-        <div class="shrink-0 {mode === 'full' ? 'px-6 pb-8 pt-2' : 'px-3 pb-4 pt-2'}">
+        <div class="shrink-0 border-t border-border/50 {mode === 'full' ? 'px-6 pb-6 pt-4' : 'px-3 pb-4 pt-3'}">
           <div class="{mode === 'full' ? 'mx-auto w-full max-w-2xl' : ''}">
-            <!-- Pill input -->
             <div class={cn(
-              'flex items-end gap-2 rounded-full border px-3 py-2 transition-all duration-150',
-              mode === 'full' ? 'shadow-lg shadow-black/8' : 'shadow-sm',
+              'overflow-hidden rounded-2xl border transition-all duration-150',
+              mode === 'full' ? 'shadow-md shadow-black/6' : 'shadow-sm',
               hasPendingConfirm
-                ? 'border-border/50 opacity-60'
+                ? 'border-border/40 opacity-60'
                 : error
-                  ? 'border-destructive/50 focus-within:border-destructive/70'
-                  : 'border-border/60 focus-within:border-ring/50 focus-within:ring-2 focus-within:ring-ring/10',
+                  ? 'border-destructive/40 focus-within:border-destructive/50'
+                  : 'border-border/60 focus-within:border-ring/40 focus-within:ring-2 focus-within:ring-ring/8',
             )}>
-              <!-- + / context button -->
-              <button
-                type="button"
-                class="mb-0.5 inline-flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground"
-                onclick={() => { settingsOpen = true; settingsTab = 'context' }}
-                title="Context & settings"
-              >
-                <Plus class="size-4" />
-              </button>
-
-              <!-- Textarea -->
+              <!-- Textarea row -->
               <textarea
                 bind:this={inputRef}
-                class="min-h-[32px] flex-1 resize-none bg-transparent py-1.5 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/40 disabled:cursor-not-allowed"
-                style="height:auto;max-height:180px;overflow-y:auto"
-                placeholder={hasPendingConfirm ? 'Confirm or cancel the operation above…' : 'What do you want to know?'}
+                class="block w-full resize-none bg-transparent px-4 pt-3 pb-2 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/40 disabled:cursor-not-allowed"
+                style="height:auto;min-height:52px;max-height:180px;overflow-y:auto"
+                placeholder={hasPendingConfirm ? 'Confirm or cancel the operation above…' : 'Message AI…'}
                 rows={1}
                 value={inputText}
                 oninput={(e) => { inputText = /** @type {HTMLTextAreaElement} */ (e.target).value; resizeInput(); pushHistory(inputText) }}
@@ -1944,61 +1903,61 @@
                 disabled={hasPendingConfirm}
               ></textarea>
 
-              <!-- Model picker -->
-              <AiModelPicker onopenSettings={onopenmodelsettings} />
-
-              <!-- Send / Stop button -->
-              {#if loading}
-                <button
-                  type="button"
-                  class="mb-0.5 flex size-8 shrink-0 items-center justify-center rounded-full border border-border bg-background text-foreground/70 shadow-sm transition-colors hover:border-ring/60 hover:text-foreground active:scale-95"
-                  onclick={stop}
-                  aria-label="Stop"
-                  title="Stop (Esc)"
-                >
-                  <Square class="size-3 fill-current" />
-                </button>
-              {:else}
-                <button
-                  type="button"
-                  class={cn(
-                    'mb-0.5 flex size-8 shrink-0 items-center justify-center rounded-full transition-all active:scale-95',
-                    inputText.trim() && !hasPendingConfirm
-                      ? 'bg-foreground text-background shadow-sm hover:opacity-85'
-                      : 'bg-muted/50 text-muted-foreground/25 cursor-not-allowed',
-                  )}
-                  disabled={hasPendingConfirm || !inputText.trim()}
-                  onclick={() => void send()}
-                  aria-label="Send"
-                >
-                  <Send class="size-3.5" />
-                </button>
-              {/if}
-            </div>
-
-            <!-- Hint + context info row -->
-            <div class="mt-1.5 flex items-center justify-between px-3">
-              <p class="text-[10px] text-muted-foreground/30">
-                {#if hasPendingConfirm}
-                  Confirm or cancel above
+              <!-- Bottom toolbar row -->
+              <div class="flex items-center gap-2 border-t border-border/30 bg-muted/15 px-3 py-2">
+                <!-- Context stats (left) -->
+                {#if contextStats.messages > 0}
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] text-muted-foreground/40 transition-colors hover:bg-accent hover:text-muted-foreground select-none"
+                    onclick={() => { settingsOpen = true; settingsTab = 'context' }}
+                    title="Context usage"
+                  >
+                    <BarChart2 class="size-2.5 shrink-0" />
+                    <span class="tabular-nums">{tokEst(contextStats.totalChars)}</span>
+                    {#if contextStats.pct >= 70}
+                      <span class={contextStats.pct >= 90 ? 'text-destructive/70' : 'text-amber-500/70'}>· {contextStats.pct}%</span>
+                    {/if}
+                  </button>
                 {:else}
-                  ↵ send · ⇧↵ newline
+                  <span class="text-[10px] text-muted-foreground/25">
+                    {hasPendingConfirm ? 'Confirm or cancel above' : '↵ send · ⇧↵ newline'}
+                  </span>
                 {/if}
-              </p>
-              {#if contextStats.messages > 0}
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-1 text-[10px] text-muted-foreground/30 transition-colors hover:text-muted-foreground/60 select-none"
-                  onclick={() => { settingsOpen = true; settingsTab = 'context' }}
-                  title="Context usage"
-                >
-                  <BarChart2 class="size-2.5" />
-                  {tokEst(contextStats.totalChars)}
-                  {#if contextStats.pct >= 70}
-                    <span class={contextStats.pct >= 90 ? 'text-destructive/60' : 'text-amber-500/60'}>· {contextStats.pct}%</span>
-                  {/if}
-                </button>
-              {/if}
+
+                <div class="flex-1"></div>
+
+                <!-- Model picker -->
+                <AiModelPicker onopenSettings={onopenmodelsettings} />
+
+                <!-- Send / Stop -->
+                {#if loading}
+                  <button
+                    type="button"
+                    class="flex size-7 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-foreground/60 shadow-sm transition-colors hover:border-ring/50 hover:text-foreground active:scale-95"
+                    onclick={stop}
+                    aria-label="Stop"
+                    title="Stop (Esc)"
+                  >
+                    <Square class="size-2.5 fill-current" />
+                  </button>
+                {:else}
+                  <button
+                    type="button"
+                    class={cn(
+                      'flex size-7 shrink-0 items-center justify-center rounded-lg transition-all active:scale-95',
+                      inputText.trim() && !hasPendingConfirm
+                        ? 'bg-foreground text-background shadow-sm hover:opacity-85'
+                        : 'bg-muted/40 text-muted-foreground/25 cursor-not-allowed',
+                    )}
+                    disabled={hasPendingConfirm || !inputText.trim()}
+                    onclick={() => void send()}
+                    aria-label="Send"
+                  >
+                    <Send class="size-3" />
+                  </button>
+                {/if}
+              </div>
             </div>
           </div>
         </div>
@@ -2007,157 +1966,171 @@
 
       <!-- ── Right settings panel ─────────────────────────────────────── -->
       {#if settingsOpen}
-        <aside class="flex w-72 shrink-0 flex-col border-l border-border bg-panel">
-          <!-- Panel header with tabs -->
-          <div class="flex shrink-0 items-center gap-0.5 border-b border-border px-2 py-2">
+        <aside class="flex w-64 shrink-0 flex-col border-l border-border/50 bg-panel">
+
+          <!-- Header row: identical height/structure to main header -->
+          <div class="studio-chrome flex shrink-0 items-center border-b border-border/50 px-2 py-2" data-studio-chrome>
+            <button
+              type="button"
+              class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              onclick={() => (settingsOpen = false)}
+              title="Close ({modKey}⇧,)"
+            >
+              <X class="size-3.5" />
+            </button>
+            <span class="flex-1 text-center text-ui-xs font-semibold tracking-wide">Settings</span>
+            <div class="size-7 shrink-0"></div>
+          </div>
+
+          <!-- Tab bar: separate row with underline indicator -->
+          <div class="studio-chrome flex shrink-0 items-stretch border-b border-border/50" data-studio-chrome>
             {#each [{ id: 'model', label: 'Model' }, { id: 'skills', label: 'Skills' }, { id: 'context', label: 'Context' }] as tab (tab.id)}
               <button
                 type="button"
                 class={cn(
-                  'flex-1 rounded-md py-1 text-center text-ui-xs font-medium transition-colors',
+                  'relative flex flex-1 items-center justify-center py-2 text-ui-xs font-medium transition-colors',
                   settingsTab === tab.id
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground',
+                    ? 'text-foreground'
+                    : 'text-muted-foreground/60 hover:text-muted-foreground',
                 )}
                 onclick={() => (settingsTab = /** @type {'model'|'skills'|'context'} */ (tab.id))}
               >
                 {tab.label}{tab.id === 'skills' && skills.length ? ` (${skills.length})` : ''}
+                {#if settingsTab === tab.id}
+                  <span class="absolute bottom-0 inset-x-3 h-0.5 rounded-full bg-primary"></span>
+                {/if}
               </button>
             {/each}
-            <button
-              type="button"
-              class="ml-1 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              onclick={() => (settingsOpen = false)}
-            >
-              <X class="size-3.5" />
-            </button>
           </div>
 
-          <!-- Panel content (scrollable) -->
+          <!-- Panel content -->
           <div class="app-scroll flex min-h-0 flex-1 flex-col overflow-y-auto">
 
             <!-- ── Model tab ── -->
             {#if settingsTab === 'model'}
-              <div class="flex flex-col gap-3 p-3">
+              <div class="flex flex-col gap-3 p-4">
 
-                <!-- Status badge: not configured -->
+                <!-- Not configured warning -->
                 {#if !settings.apiKey && !settings.baseUrl.includes('localhost')}
-                  <div class="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/8 px-3 py-2.5">
+                  <div class="flex items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/6 px-3 py-2.5">
                     <AlertTriangle class="mt-0.5 size-3.5 shrink-0 text-amber-500" />
-                    <p class="text-ui-xs text-amber-600 dark:text-amber-400">No model configured yet.</p>
+                    <p class="text-ui-xs leading-relaxed text-amber-600 dark:text-amber-400">No API key configured.</p>
                   </div>
                 {/if}
 
-                <!-- Current model summary -->
-                <div class="flex flex-col gap-2 rounded-lg border border-border/70 bg-background p-3">
-                  <div class="flex items-center justify-between gap-2">
-                    <span class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">Profile</span>
-                    <span class="min-w-0 truncate text-ui-xs font-medium text-foreground">{($aiProfiles.find((p) => p.id === $activeProfileId) ?? $aiProfiles[0])?.name ?? '—'}</span>
-                  </div>
-                  <div class="flex items-center justify-between gap-2">
-                    <span class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">Model</span>
-                    <span class="min-w-0 truncate font-mono text-ui-xs text-foreground">{settings.model}</span>
-                  </div>
-                  <div class="flex items-center justify-between gap-2">
-                    <span class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">Endpoint</span>
-                    <span class="min-w-0 truncate font-mono text-[10px] text-muted-foreground">{settings.baseUrl}</span>
-                  </div>
-                  <div class="flex items-center justify-between gap-2">
-                    <span class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">API key</span>
-                    <span class="font-mono text-[10px] text-muted-foreground">{settings.apiKey ? '•••• set' : 'none'}</span>
-                  </div>
+                <!-- Active profile card -->
+                {#if true}
+                  {@const activeProfile = $aiProfiles.find((p) => p.id === $activeProfileId) ?? $aiProfiles[0]}
+                <div class="flex flex-col divide-y divide-border/30 rounded-xl border border-border/50 bg-background/60 overflow-hidden">
+                  {#each [
+                    { label: 'Profile', value: activeProfile?.name ?? '—', mono: false },
+                    { label: 'Model', value: settings.model || '—', mono: true },
+                    { label: 'Endpoint', value: settings.baseUrl, mono: true, truncate: true },
+                    { label: 'API key', value: settings.apiKey ? '•••• set' : 'not set', mono: true },
+                  ] as row}
+                    <div class="flex items-center justify-between gap-3 px-3 py-2">
+                      <span class="shrink-0 text-[10px] text-muted-foreground/60">{row.label}</span>
+                      <span class="min-w-0 {row.truncate ? 'truncate' : ''} {row.mono ? 'font-mono text-[10px]' : 'text-ui-xs'} text-right text-foreground/80">{row.value}</span>
+                    </div>
+                  {/each}
                 </div>
+                {/if}
 
-                <Button class="h-8 w-full text-ui-xs" onclick={onopenmodelsettings}>Configure model…</Button>
-                <p class="px-0.5 text-[10px] leading-relaxed text-muted-foreground/70">
-                  Shared with the AI sidebar (⌘I).
+                <button
+                  type="button"
+                  class="flex h-8 w-full items-center justify-center gap-1.5 rounded-xl border border-border/60 bg-background/60 text-ui-xs text-foreground transition-colors hover:bg-accent"
+                  onclick={onopenmodelsettings}
+                >
+                  <Settings2 class="size-3.5 text-muted-foreground" />
+                  Configure model…
+                </button>
+
+                <p class="text-center text-[10px] text-muted-foreground/40">
+                  Shared with AI sidebar · <kbd class="font-mono">{modKey}I</kbd>
                 </p>
               </div>
 
             <!-- ── Skills tab ── -->
             {:else if settingsTab === 'skills'}
-              <div class="flex flex-col gap-3 p-3">
-                <div class="flex items-center justify-between gap-2">
-                  <p class="text-ui-xs text-muted-foreground">Skills inject domain knowledge into every AI request.</p>
-                  <div class="flex items-center gap-1">
-                    <label class="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md border border-border bg-background px-2 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
-                      <Upload class="size-3" />
-                      Upload
-                      <input type="file" accept=".md,text/markdown,text/plain" multiple class="sr-only" onchange={handleSkillFileUpload} />
-                    </label>
-                    <button
-                      type="button"
-                      class="inline-flex h-7 items-center gap-1 rounded-md border border-primary/30 bg-primary/8 px-2 text-ui-xs text-primary transition-colors hover:bg-primary/15"
-                      onclick={() => (newSkillOpen = !newSkillOpen)}
-                    >
-                      <Plus class="size-3" />
-                      Create
-                    </button>
-                  </div>
+              <div class="flex flex-col gap-3 p-4">
+
+                <!-- Action row -->
+                <div class="flex items-center gap-1.5">
+                  <p class="flex-1 text-[10px] text-muted-foreground/60">Inject domain knowledge into every request.</p>
+                  <label class="inline-flex h-7 cursor-pointer items-center gap-1 rounded-lg border border-border/60 bg-background/60 px-2 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+                    <Upload class="size-3 shrink-0" />
+                    Upload
+                    <input type="file" accept=".md,text/markdown,text/plain" multiple class="sr-only" onchange={handleSkillFileUpload} />
+                  </label>
+                  <button
+                    type="button"
+                    class="inline-flex h-7 items-center gap-1 rounded-lg border border-primary/30 bg-primary/8 px-2 text-ui-xs text-primary transition-colors hover:bg-primary/15"
+                    onclick={() => (newSkillOpen = !newSkillOpen)}
+                  >
+                    <Plus class="size-3 shrink-0" />
+                    New
+                  </button>
                 </div>
 
+                <!-- New skill form -->
                 {#if newSkillOpen}
-                  <div class="flex flex-col gap-2 rounded-lg border border-border bg-background p-3">
+                  <div class="flex flex-col gap-2 rounded-xl border border-border/50 bg-background/60 p-3">
                     <p class="text-ui-xs font-medium">New skill</p>
-                    <div class="flex flex-col gap-1.5">
-                      <label for="skill-name" class="text-[10px] text-muted-foreground">Name *</label>
-                      <Input id="skill-name" class="h-7 text-ui-xs" placeholder="e.g. postgres-best-practices" bind:value={newSkillName} />
+                    <div class="flex flex-col gap-1">
+                      <label for="skill-name" class="text-[10px] text-muted-foreground/60">Name *</label>
+                      <Input id="skill-name" class="h-7 text-ui-xs" placeholder="e.g. postgres-patterns" bind:value={newSkillName} />
                     </div>
-                    <div class="flex flex-col gap-1.5">
-                      <label for="skill-desc" class="text-[10px] text-muted-foreground">Description</label>
-                      <Input id="skill-desc" class="h-7 text-ui-xs" placeholder="When to apply this skill" bind:value={newSkillDesc} />
+                    <div class="flex flex-col gap-1">
+                      <label for="skill-desc" class="text-[10px] text-muted-foreground/60">Description</label>
+                      <Input id="skill-desc" class="h-7 text-ui-xs" placeholder="When to apply…" bind:value={newSkillDesc} />
                     </div>
-                    <div class="flex flex-col gap-1.5">
-                      <label for="skill-content" class="text-[10px] text-muted-foreground">Content (Markdown) *</label>
+                    <div class="flex flex-col gap-1">
+                      <label for="skill-content" class="text-[10px] text-muted-foreground/60">Content (Markdown) *</label>
                       <textarea
                         id="skill-content"
-                        class="min-h-[100px] w-full resize-y rounded-md border border-border bg-background px-2.5 py-2 font-mono text-ui-xs leading-relaxed text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring/20 placeholder:text-muted-foreground/50"
-                        placeholder="# My Skill&#10;&#10;Write rules, patterns, and guidelines in Markdown..."
+                        class="min-h-[90px] w-full resize-y rounded-lg border border-border/60 bg-background px-2.5 py-2 font-mono text-ui-xs leading-relaxed text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring/20 placeholder:text-muted-foreground/40"
+                        placeholder="# My Skill&#10;&#10;Guidelines in Markdown..."
                         bind:value={newSkillContent}
                       ></textarea>
                     </div>
-                    <div class="flex justify-end gap-2">
-                      <button type="button" class="inline-flex h-7 items-center rounded-md border border-border px-3 text-ui-xs text-muted-foreground hover:bg-accent" onclick={() => (newSkillOpen = false)}>Cancel</button>
+                    <div class="flex justify-end gap-1.5">
+                      <button type="button" class="inline-flex h-7 items-center rounded-lg border border-border px-3 text-ui-xs text-muted-foreground hover:bg-accent" onclick={() => (newSkillOpen = false)}>Cancel</button>
                       <Button size="sm" class="h-7 px-3 text-ui-xs" disabled={!newSkillName.trim() || !newSkillContent.trim()} onclick={createSkill}>Save</Button>
                     </div>
                   </div>
                 {/if}
 
-                <!-- Built-in skills pills -->
-                <div class="flex flex-col gap-1">
-                  <p class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">Built-in (always on)</p>
+                <!-- Built-in -->
+                <div class="flex flex-col gap-1.5">
+                  <p class="text-[10px] font-medium text-muted-foreground/50 uppercase tracking-wide">Built-in</p>
                   <div class="flex flex-wrap gap-1">
-                    {#each ['PostgreSQL', 'MySQL', 'SQLite', 'Mermaid'] as b}
-                      <span class="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/40 px-2 py-0.5 text-[10px] text-muted-foreground">
+                    {#each ['PostgreSQL', 'MySQL', 'SQLite', 'Mermaid', 'Charts'] as b}
+                      <span class="inline-flex items-center gap-1 rounded-full border border-border/40 bg-muted/30 px-2 py-0.5 text-[10px] text-muted-foreground/70">
                         <span class="size-1.5 rounded-full bg-primary/50"></span>{b}
                       </span>
                     {/each}
                   </div>
                 </div>
 
+                <!-- Custom skills -->
                 {#if skills.length === 0}
-                  <div class="flex flex-col items-center gap-1.5 rounded-lg border border-dashed border-border py-6 text-center">
-                    <BookOpen class="size-6 text-muted-foreground/30" />
-                    <p class="text-ui-xs text-muted-foreground/60">No custom skills yet</p>
+                  <div class="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border/40 py-7 text-center">
+                    <BookOpen class="size-5 text-muted-foreground/25" />
+                    <p class="text-[11px] text-muted-foreground/50">No custom skills yet</p>
                   </div>
                 {:else}
-                  <div class="flex flex-col gap-1.5">
-                    <p class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">Custom ({skills.length})</p>
+                  <div class="flex flex-col gap-1">
+                    <p class="text-[10px] font-medium text-muted-foreground/50 uppercase tracking-wide">Custom ({skills.length})</p>
                     {#each skills as skill (skill.id)}
-                      <div class="flex items-start gap-2 rounded-lg border border-border/60 bg-background p-2.5">
-                        <BookOpen class="mt-0.5 size-3.5 shrink-0 text-primary/60" />
+                      <div class="flex items-start gap-2 rounded-xl border border-border/40 bg-background/50 px-3 py-2.5">
+                        <BookOpen class="mt-0.5 size-3.5 shrink-0 text-primary/50" />
                         <div class="min-w-0 flex-1">
                           <p class="truncate text-ui-xs font-medium">{skill.name}</p>
                           {#if skill.description}
-                            <p class="mt-0.5 line-clamp-2 text-[10px] leading-relaxed text-muted-foreground">{skill.description}</p>
+                            <p class="mt-0.5 line-clamp-2 text-[10px] leading-relaxed text-muted-foreground/60">{skill.description}</p>
                           {/if}
                         </div>
-                        <button
-                          type="button"
-                          class="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/40 hover:bg-destructive/10 hover:text-destructive"
-                          onclick={() => removeSkill(skill.id)}
-                          title="Remove skill"
-                        >
+                        <button type="button" class="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/30 hover:bg-destructive/10 hover:text-destructive" onclick={() => removeSkill(skill.id)} title="Remove">
                           <X class="size-3" />
                         </button>
                       </div>
@@ -2168,57 +2141,62 @@
 
             <!-- ── Context tab ── -->
             {:else}
-              <div class="flex flex-col gap-4 p-3">
+              <div class="flex flex-col gap-4 p-4">
 
-                <!-- Token gauge -->
+                <!-- Context gauge -->
                 <div class="flex flex-col gap-2">
                   <div class="flex items-center justify-between">
                     <span class="text-ui-xs font-medium">Context window</span>
-                    <span class="font-mono text-[10px] text-muted-foreground">{tokEst(contextStats.totalChars)} / {tokEst(contextStats.maxChars)} tok</span>
+                    <span class="font-mono text-[10px] tabular-nums text-muted-foreground/70">{tokEst(contextStats.totalChars)} / {tokEst(contextStats.maxChars)}</span>
                   </div>
-                  <div class="relative h-2 w-full overflow-hidden rounded-full bg-muted">
+                  <div class="h-1.5 w-full overflow-hidden rounded-full bg-muted/60">
                     <div
                       class={cn('h-full rounded-full transition-all duration-500',
                         contextStats.pct >= 90 ? 'bg-destructive' : contextStats.pct >= 70 ? 'bg-amber-500' : 'bg-primary')}
-                      style="width: {contextStats.pct}%"
+                      style="width: {Math.min(contextStats.pct, 100)}%"
                     ></div>
                   </div>
-                  <p class="text-[10px] text-muted-foreground/60">{contextStats.pct}% used · auto-compresses at 30k tokens (keeps last 10 turns)</p>
+                  <p class="text-[10px] text-muted-foreground/50">{contextStats.pct}% used · auto-compresses at 30k tokens</p>
                 </div>
 
-                <!-- Stats grid -->
+                <!-- Stats 2×2 grid -->
                 <div class="grid grid-cols-2 gap-2">
                   {#each [
                     { label: 'Turns', value: String(contextStats.messages) },
-                    { label: 'History', value: tokEst(contextStats.historyChars) + ' tok' },
-                    { label: 'System', value: tokEst(contextStats.promptChars) + ' tok' },
-                    { label: 'Total', value: tokEst(contextStats.totalChars) + ' tok' },
+                    { label: 'History', value: tokEst(contextStats.historyChars) },
+                    { label: 'System', value: tokEst(contextStats.promptChars) },
+                    { label: 'Total', value: tokEst(contextStats.totalChars) },
                   ] as stat}
-                    <div class="flex flex-col gap-0.5 rounded-lg border border-border/50 bg-background px-2.5 py-2">
-                      <span class="font-mono text-sm font-semibold tabular-nums text-foreground">{stat.value}</span>
-                      <span class="text-[10px] text-muted-foreground">{stat.label}</span>
+                    <div class="flex flex-col gap-0.5 rounded-xl border border-border/40 bg-background/60 px-3 py-2.5">
+                      <span class="font-mono text-base font-semibold tabular-nums text-foreground">{stat.value}</span>
+                      <span class="text-[10px] text-muted-foreground/60">{stat.label}</span>
                     </div>
                   {/each}
                 </div>
 
-                <!-- How it works -->
-                <div class="rounded-lg border border-border/40 bg-muted/20 px-3 py-2.5">
-                  <p class="mb-2 text-ui-xs font-medium">How it works</p>
-                  <ul class="space-y-1.5 text-[11px] text-muted-foreground">
-                    <li class="flex items-start gap-1.5"><span class="mt-1 size-1.5 shrink-0 rounded-full bg-primary/60"></span>History re-sent to AI on each turn — keeps full conversation context.</li>
-                    <li class="flex items-start gap-1.5"><span class="mt-1 size-1.5 shrink-0 rounded-full bg-primary/60"></span>At 30k tokens, old messages are summarised into a memory block (keeps last 10 turns).</li>
-                    <li class="flex items-start gap-1.5"><span class="mt-1 size-1.5 shrink-0 rounded-full bg-primary/60"></span>Only schema for tables you mention is injected (selective).</li>
-                    <li class="flex items-start gap-1.5"><span class="mt-1 size-1.5 shrink-0 rounded-full bg-amber-500/70"></span>Failed tool calls blocked after 2 retries per turn.</li>
-                  </ul>
+                <!-- Info pills -->
+                <div class="flex flex-col gap-1.5 rounded-xl border border-border/30 bg-muted/15 p-3">
+                  {#each [
+                    { color: 'bg-primary/50', text: 'Full history re-sent each turn for context.' },
+                    { color: 'bg-primary/50', text: 'Compresses at 30k — keeps last 10 turns.' },
+                    { color: 'bg-primary/50', text: 'Only schema for mentioned tables is injected.' },
+                    { color: 'bg-amber-500/60', text: 'Failed tool calls blocked after 2 retries.' },
+                  ] as item}
+                    <div class="flex items-start gap-2 text-[10px] text-muted-foreground/70">
+                      <span class="mt-1.5 size-1.5 shrink-0 rounded-full {item.color}"></span>
+                      {item.text}
+                    </div>
+                  {/each}
                 </div>
 
+                <!-- Clear button -->
                 <button
                   type="button"
-                  class="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-destructive/30 text-ui-xs text-destructive transition-colors hover:bg-destructive/8 hover:border-destructive/50"
+                  class="flex h-8 w-full items-center justify-center gap-1.5 rounded-xl border border-destructive/25 text-ui-xs text-destructive/80 transition-colors hover:bg-destructive/6 hover:border-destructive/40 hover:text-destructive"
                   onclick={() => { apiHistory = []; rawApiHistory = []; fetchedSchemas = {}; error = '' }}
                 >
                   <Trash2 class="size-3.5" />
-                  Clear history & schema cache
+                  Clear history & cache
                 </button>
               </div>
             {/if}
