@@ -206,7 +206,7 @@ pub async fn get_table_rows(
 
     // Build WHERE clause (using ? placeholders)
     // Each entry: (conjunct — None for first, Some("AND"/"OR") for rest, condition SQL, binds)
-    let mut cond_parts: Vec<(Option<String>, String)> = vec![];
+    let mut cond_parts: Vec<(Option<&'static str>, String)> = vec![];
     let mut binds: Vec<String> = vec![];
 
     if let Some(ref s) = search {
@@ -224,8 +224,9 @@ pub async fn get_table_rows(
 
     if let Some(ref fs) = filters {
         for f in fs {
-            let conj = if cond_parts.is_empty() { None }
-                       else { Some(f.conjunct.as_deref().unwrap_or("and").to_uppercase()) };
+            let conj: Option<&'static str> = if cond_parts.is_empty() { None }
+                else if f.conjunct.as_deref().is_some_and(|s| s.eq_ignore_ascii_case("or")) { Some("OR") }
+                else { Some("AND") };
 
             if f.column == "__any__" {
                 if let Some(ref v) = f.value {
@@ -262,10 +263,12 @@ pub async fn get_table_rows(
     }
 
     let where_clause = if cond_parts.is_empty() { String::new() } else {
-        let parts: Vec<String> = cond_parts.into_iter().map(|(c, s)| {
-            match c { None => s, Some(conj) => format!("{conj} {s}") }
-        }).collect();
-        format!("WHERE {}", parts.join(" "))
+        let mut out = String::from("WHERE ");
+        for (i, (conj, cond)) in cond_parts.into_iter().enumerate() {
+            if i > 0 { out.push(' '); out.push_str(conj.unwrap_or("AND")); out.push(' '); }
+            out.push_str(&cond);
+        }
+        out
     };
 
     // ORDER BY — NULLS LAST ensures consistent ordering when column has NULLs

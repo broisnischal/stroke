@@ -33,7 +33,7 @@
   import UpdateDialog from './UpdateDialog.svelte'
   import StatusBar from './StatusBar.svelte'
   import DisconnectDialog from './DisconnectDialog.svelte'
-  import InsertRowDialog from './InsertRowDialog.svelte'
+  // InsertRowDialog removed — replaced by inline draft row in DataTable
   import McpPanel from './McpPanel.svelte'
   import OrmRunner from './OrmRunner.svelte'
   import SchemaPage from './SchemaPage.svelte'
@@ -264,8 +264,9 @@
   let rows = $state([])
   let savingCell = $state(false)
   let deletingRows = $state(false)
-  let insertRowOpen = $state(false)
   let insertingRow = $state(false)
+  /** Bound from DataTable — triggers the inline new-row draft. */
+  let dtBeginInsertRow = $state(/** @type {() => void} */ (() => {}))
   let showMcpPanel = $state(false)
   let mcpRunning = $state(false)
   /** @type {{ rowIdx: number, colIdx: number, draft: string } | null} */
@@ -799,7 +800,6 @@
     if (showInsiderModal)      { e.preventDefault(); showInsiderModal = false;      return }
     if (showDisconnectDialog)  { e.preventDefault(); showDisconnectDialog = false;  return }
     if (showCreateTableDialog) { e.preventDefault(); showCreateTableDialog = false; return }
-    if (insertRowOpen)         { e.preventDefault(); insertRowOpen = false;         return }
     if (showDockerModal)       { e.preventDefault(); showDockerModal = false;       return }
     if (showMcpPanel)          { e.preventDefault(); showMcpPanel = false;          return }
     if (showConnectionModal)   { e.preventDefault(); showConnectionModal = false;   return }
@@ -2096,7 +2096,6 @@
     const _insertStart = Date.now()
     try {
       const { row } = await insertTableRow(activeSchema, activeTable, values)
-      insertRowOpen = false
       recordActivity({ type: 'row_insert', title: `Inserted row into ${activeTable}`, schema: activeSchema, table: activeTable, durationMs: Date.now() - _insertStart, success: true })
 
       const hasActiveFilters =
@@ -2245,15 +2244,6 @@
   bind:open={showDockerModal}
   initialDbType={dockerInitialDb}
   onconnect={handleDockerConnect}
-/>
-
-<InsertRowDialog
-  bind:open={insertRowOpen}
-  tableLabel={activeTable ? `${activeSchema}.${activeTable}` : ''}
-  {columns}
-  {primaryKey}
-  saving={insertingRow}
-  oninsert={handleInsertRow}
 />
 
 <McpPanel bind:open={showMcpPanel} connected={!!connection} />
@@ -2691,7 +2681,7 @@
             onlimitoffsetchange={(l, o) => void handleLimitOffsetChange(l, o)}
             ondeleteselected={() => void deleteSelectedRows()}
             onexport={handleExport}
-            onaddrow={() => (insertRowOpen = true)}
+            onaddrow={() => dtBeginInsertRow?.()}
             {hiddenColumns}
             onhiddencolumnschange={(next) => {
               hiddenColumns = next
@@ -2747,6 +2737,9 @@
                 onsave={handleSaveCell}
                 ondelete={handleDeleteRow}
                 onfollowforeignkey={(d) => void handleFollowForeignKey(d)}
+                oninsertrow={handleInsertRow}
+                insertSaving={insertingRow}
+                bind:beginInsertRow={dtBeginInsertRow}
               />
             </svelte:boundary>
             <RowDetailPanel

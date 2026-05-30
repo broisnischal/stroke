@@ -55,7 +55,18 @@
     isEditableType,
     parseCellInput,
     valueToEditString,
+    isLikelyAutoColumn,
+    buildInsertPayload,
+    isDateOnlyType,
+    isTimeOnlyType,
   } from "$lib/cell-value.js";
+  import {
+    defaultInsertDraft,
+    shouldUseDateTimePicker,
+    nowDateTimeLocal,
+    nowDateOnly,
+    nowTimeOnly,
+  } from "$lib/insert-field.js";
   import { cellLinkHref, cellUrlType } from "$lib/cell-display.js";
   import UrlPreviewTooltip from "./UrlPreviewTooltip.svelte";
   import MediaLightbox from "./MediaLightbox.svelte";
@@ -63,6 +74,9 @@
   import JsonCellLightbox from "./JsonCellLightbox.svelte";
   import CellQuickLook from "./CellQuickLook.svelte";
   import Maximize2 from "@lucide/svelte/icons/maximize-2";
+  import Check from "@lucide/svelte/icons/check";
+  import Loader from "@lucide/svelte/icons/loader";
+  import X from "@lucide/svelte/icons/x";
 
   let {
     columns = [],
@@ -126,6 +140,12 @@
     onfiltercolumn = /** @type {(colName: string) => void} */ (() => {}),
     /** Called when user picks "Hide column" from the column header context menu. */
     onhidecolumn = /** @type {(colName: string) => void} */ (() => {}),
+    /** Called when the user confirms the new row draft. Receives the validated values. */
+    oninsertrow = /** @type {(values: Record<string, unknown>) => Promise<void>} */ (async () => {}),
+    /** True while the insert is in flight — disables the draft row inputs. */
+    insertSaving = false,
+    /** Assigned by this component so the parent can trigger beginInsertRow(). */
+    beginInsertRow = $bindable(/** @type {() => void} */ (() => {})),
   } = $props();
 
   /**
@@ -183,6 +203,11 @@
   let futureEdits = $state([]);
   /** True while focus is inside this table (container or any child). */
   let isTableFocused = $state(false);
+
+  /** Draft values for the pending new row, keyed by column name. null = no new row. */
+  let newRowDrafts = $state(/** @type {Record<string, string> | null} */ (null))
+  /** Name of the column whose input is focused in the new row. */
+  let newRowFocusCol = $state(/** @type {string | null} */ (null))
 
   // ── Column collapse (drag-to-hide) ───────────────────────────────────────
   const COLLAPSED_COL_WIDTH = 12  // px width of the collapsed indicator strip
@@ -563,7 +588,8 @@
   }
 
   /** @param {'down' | 'right' | 'left' | null} afterAction */
-  async function commitEditWithAction(afterAction) {
+  /** @param {'down'|'right'|'left'|null} afterAction @param {boolean} [autoEdit] */
+  async function commitEditWithAction(afterAction, autoEdit = false) {
     if (!editingCell || saving) return;
 
     const { rowIdx, colIdx, draft } = editingCell;
@@ -572,7 +598,7 @@
 
     if (draft === editingCell.original) {
       editingCell = null;
-      if (afterAction) navigateAfterEdit(rowIdx, colIdx, afterAction);
+      if (afterAction) navigateAfterEdit(rowIdx, colIdx, afterAction, autoEdit);
       else tick().then(() => tableContainer?.focus({ preventScroll: true }));
       return;
     }
@@ -594,7 +620,7 @@
     pastEdits = [...pastEdits.slice(-49), { rowIdx, colIdx, oldValue: prevValue, newValue: parsed.value }];
     futureEdits = [];
     editingCell = null;
-    if (afterAction) navigateAfterEdit(rowIdx, colIdx, afterAction);
+    if (afterAction) navigateAfterEdit(rowIdx, colIdx, afterAction, autoEdit);
     else tick().then(() => tableContainer?.focus({ preventScroll: true }));
   }
 
@@ -695,6 +721,68 @@
     scrollToTop = () => tableContainer?.scrollTo({ top: 0 });
     scrollToBottom = () => { if (tableContainer) tableContainer.scrollTo({ top: tableContainer.scrollHeight }); };
   });
+
+  // Surface beginInsertRow to the parent (→ toolbar Add Row button).
+  $effect(() => {
+    beginInsertRow = () => {
+      /** @type {Record<string, string>} */
+      const drafts = {}
+      for (const col of columns) {
+        drafts[col.name] = defaultInsertDraft(col, primaryKey)
+      }
+      newRowDrafts = drafts
+      // Focus first non-auto visible column
+      const first = visibleColumns.find(c => {
+        const dt = c.dataType ?? c.data_type ?? ''
+        return !isLikelyAutoColumn(dt, c.name, primaryKey)
+      })
+      newRowFocusCol = first?.name ?? visibleColumns[0]?.name ?? null
+      // Scroll to top so the draft row is visible
+      tableContainer?.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+  })
+
+  function cancelNewRow() {
+    newRowDrafts = null
+    newRowFocusCol = null
+  }
+
+  async function submitNewRow() {
+    if (!newRowDrafts || insertSaving) return
+    const editableCols = columns.filter(c => isEditableType(c.dataType ?? c.data_type ?? ''))
+    const built = buildInsertPayload(editableCols, primaryKey, newRowDrafts)
+    if (!built.ok) {
+      toast.error('Cannot insert row', { description: built.message })
+      return
+    }
+    await oninsertrow(/** @type {Record<string, unknown>} */ (built.values))
+    newRowDrafts = null
+    newRowFocusCol = null
+  }
+
+  /** @param {string} colName @param {string} value */
+  function setNewRowDraft(colName, value) {
+    if (!newRowDrafts) return
+    newRowDrafts = { ...newRowDrafts, [colName]: value }
+  }
+
+  /** @param {KeyboardEvent} e */
+  function onNewRowKeydown(e) {
+    if (e.key === 'Escape') { e.preventDefault(); cancelNewRow(); return }
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); void submitNewRow(); return }
+  }
+
+  // Auto-focus the new-row input when focus column changes.
+  $effect(() => {
+    const col = newRowFocusCol
+    if (!col || !newRowDrafts) return
+    tick().then(() => {
+      const el = /** @type {HTMLElement|null} */ (
+        document.querySelector(`[data-new-row-input="${col}"]`)
+      )
+      el?.focus()
+    })
+  })
 
 
   async function copyCellValue(rowIdx, colIdx) {
@@ -841,8 +929,8 @@
     }
   }
 
-  /** @param {number} rowIdx @param {number} colIdx @param {'down'|'right'|'left'} action */
-  function navigateAfterEdit(rowIdx, colIdx, action) {
+  /** @param {number} rowIdx @param {number} colIdx @param {'down'|'right'|'left'} action @param {boolean} [autoEdit] */
+  function navigateAfterEdit(rowIdx, colIdx, action, autoEdit = false) {
     const visColIdx = actualToVisColIdx(colIdx);
     const visLen = navigableColumns.length;
     const rowLen = rows.length;
@@ -858,7 +946,14 @@
       if (visColIdx > 0) { focusedRow = rowIdx; focusedCol = visColIdx - 1; }
       else if (rowIdx > 0) { focusedRow = rowIdx - 1; focusedCol = visLen - 1; scrollRowIntoView(rowIdx - 1); }
     }
-    tick().then(() => tableContainer?.focus({ preventScroll: true }));
+    tick().then(() => {
+      if (autoEdit && focusedRow !== null && focusedCol !== null) {
+        const ai = visToActualColIdx(focusedCol)
+        if (ai >= 0) startEdit(focusedRow, ai)
+      } else {
+        tableContainer?.focus({ preventScroll: true })
+      }
+    })
   }
 
   function undoEdit() {
@@ -948,7 +1043,7 @@
 
     if (e.key === "Tab") {
       e.preventDefault();
-      void commitEditWithAction(e.shiftKey ? "left" : "right");
+      void commitEditWithAction(e.shiftKey ? "left" : "right", true);
       return;
     }
     // Ctrl/Cmd+Shift+Enter saves this cell straight to the database, bypassing
@@ -1148,11 +1243,18 @@
     const map = new Map()
     for (const col of columns) {
       const colIndexes = _indexesByCol.get(col.name) ?? []
+      // Single pass instead of two .some() — early exits once both flags are found
+      let unique = false, indexed = false
+      for (const idx of colIndexes) {
+        if (!unique && idx.isUnique && !idx.isPrimary) unique = true
+        else if (!indexed && !idx.isPrimary && !idx.isUnique) indexed = true
+        if (unique && indexed) break
+      }
       map.set(col.name, {
         pk: _pkSet.has(col.name),
         fk: _fkCols.has(col.name),
-        unique: colIndexes.some((idx) => idx.isUnique && !idx.isPrimary),
-        indexed: colIndexes.some((idx) => !idx.isPrimary && !idx.isUnique),
+        unique,
+        indexed,
         nullable: col.nullable !== false,
       })
     }
@@ -1551,6 +1653,7 @@
     resetEdits = () => {}
     scrollToTop = () => {}
     scrollToBottom = () => {}
+    beginInsertRow = () => {}
   })
 </script>
 
@@ -1841,8 +1944,147 @@
                 <th aria-hidden="true" class="studio-spacer-cell bg-panel"></th>
               </tr>
             </thead>
-            {#if rows.length > 0}
+            {#if rows.length > 0 || newRowDrafts}
               <tbody>
+                {#if newRowDrafts}
+                  <tr
+                    class="group/newrow relative border-b border-border bg-primary/[0.03]"
+                    onkeydown={onNewRowKeydown}
+                  >
+                    {#if showRowExpand}
+                      <td
+                        class="studio-table-gutter border-r border-border/20 bg-primary/5"
+                        style="width: {ROW_EXPAND_COL_WIDTH}px; min-width: {ROW_EXPAND_COL_WIDTH}px; max-width: {ROW_EXPAND_COL_WIDTH}px"
+                      >
+                        <div class="studio-table-gutter-inner flex items-center justify-center">
+                          {#if insertSaving}
+                            <Loader class="size-3 animate-spin text-muted-foreground" />
+                          {:else}
+                            <Check
+                              class="size-3 cursor-pointer text-primary hover:text-primary/70"
+                              onclick={() => void submitNewRow()}
+                              title="Insert row (⌘↵)"
+                            />
+                          {/if}
+                        </div>
+                      </td>
+                    {/if}
+                    {#if showSelection}
+                      <td
+                        class="studio-table-gutter border-r border-border/20 bg-primary/5"
+                        style="width: {ROW_SELECT_COL_WIDTH}px; min-width: {ROW_SELECT_COL_WIDTH}px; max-width: {ROW_SELECT_COL_WIDTH}px"
+                      >
+                        <div class="studio-table-gutter-inner flex items-center justify-center">
+                          <button
+                            type="button"
+                            class="inline-flex size-4 items-center justify-center rounded text-muted-foreground/50 hover:text-destructive"
+                            onclick={cancelNewRow}
+                            title="Cancel"
+                          >
+                            <X class="size-3" />
+                          </button>
+                        </div>
+                      </td>
+                    {/if}
+                    {#each visibleColumns as col (col.name)}
+                      {@const dt = col.dataType ?? col.data_type ?? ''}
+                      {@const isAuto = isLikelyAutoColumn(dt, col.name, primaryKey)}
+                      {@const enumValues = getColumnEnumValues(col)}
+                      {@const isBoolean = isBooleanType(dt)}
+                      {@const isDateTime = shouldUseDateTimePicker(dt, col.name)}
+                      {@const isDateOnly = isDateOnlyType(dt)}
+                      {@const isTimeOnly = isTimeOnlyType(dt)}
+                      {@const isPinned = pinnedColumns.has(col.name)}
+                      {@const pinOffset = pinnedOffsets.get(col.name)}
+                      {@const colWidth = widthForColumn(col.name, dt)}
+                      <td
+                        class={cn(
+                          'border-r border-border/20 px-2 py-1',
+                          isPinned && 'sticky z-10 bg-background shadow-[1px_0_0_0_hsl(var(--border)/0.2)]',
+                        )}
+                        style={[
+                          `min-width: ${colWidth}px; max-width: ${colWidth}px; width: ${colWidth}px`,
+                          isPinned ? `left: ${(showRowExpand ? ROW_EXPAND_COL_WIDTH : 0) + (showSelection ? ROW_SELECT_COL_WIDTH : 0) + (pinOffset ?? 0)}px` : '',
+                        ].filter(Boolean).join('; ')}
+                      >
+                        {#if isAuto}
+                          <span class="select-none font-mono text-ui-sm text-muted-foreground/35 italic">auto</span>
+                        {:else if enumValues}
+                          <select
+                            data-new-row-input={col.name}
+                            disabled={insertSaving}
+                            class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none disabled:opacity-50"
+                            value={newRowDrafts[col.name] ?? ''}
+                            onchange={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
+                            onfocus={() => (newRowFocusCol = col.name)}
+                          >
+                            <option value="">{col.nullable ? 'NULL / default' : 'Select…'}</option>
+                            {#each enumValues as opt (opt)}<option value={opt}>{opt}</option>{/each}
+                          </select>
+                        {:else if isBoolean}
+                          <select
+                            data-new-row-input={col.name}
+                            disabled={insertSaving}
+                            class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none disabled:opacity-50"
+                            value={newRowDrafts[col.name] ?? ''}
+                            onchange={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
+                            onfocus={() => (newRowFocusCol = col.name)}
+                          >
+                            <option value="">{col.nullable ? 'NULL / default' : 'Default'}</option>
+                            <option value="true">true</option>
+                            <option value="false">false</option>
+                          </select>
+                        {:else if isDateTime}
+                          <input
+                            data-new-row-input={col.name}
+                            type="datetime-local"
+                            disabled={insertSaving}
+                            class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none placeholder:text-muted-foreground/40 disabled:opacity-50"
+                            value={newRowDrafts[col.name] ?? ''}
+                            oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
+                            onfocus={() => (newRowFocusCol = col.name)}
+                          />
+                        {:else if isDateOnly}
+                          <input
+                            data-new-row-input={col.name}
+                            type="date"
+                            disabled={insertSaving}
+                            class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none disabled:opacity-50"
+                            value={newRowDrafts[col.name] ?? ''}
+                            oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
+                            onfocus={() => (newRowFocusCol = col.name)}
+                          />
+                        {:else if isTimeOnly}
+                          <input
+                            data-new-row-input={col.name}
+                            type="time"
+                            disabled={insertSaving}
+                            class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none disabled:opacity-50"
+                            value={newRowDrafts[col.name] ?? ''}
+                            oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
+                            onfocus={() => (newRowFocusCol = col.name)}
+                          />
+                        {:else}
+                          <input
+                            data-new-row-input={col.name}
+                            type="text"
+                            disabled={insertSaving}
+                            placeholder={col.nullable ? 'NULL or value' : 'Required'}
+                            class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none placeholder:text-muted-foreground/40 disabled:opacity-50"
+                            value={newRowDrafts[col.name] ?? ''}
+                            oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
+                            onfocus={() => (newRowFocusCol = col.name)}
+                          />
+                        {/if}
+                      </td>
+                    {/each}
+                    <td class="studio-spacer-cell bg-primary/[0.03]">
+                      {#if !insertSaving}
+                        <span class="whitespace-nowrap px-2 font-mono text-ui-2xs text-muted-foreground/40">⌘↵ save · Esc cancel</span>
+                      {/if}
+                    </td>
+                  </tr>
+                {/if}
                 {#if useVirtual && virtualTopPad > 0}
                   <tr aria-hidden="true" style="height: {virtualTopPad}px">
                     <td colspan={totalColSpan} class="border-0 p-0"></td>

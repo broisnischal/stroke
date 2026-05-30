@@ -71,10 +71,12 @@
 
   // Table selection
   /** @type {Set<string>} */
-  /** @type {Set<string>} */
   let selectedTables = $state(new Set());
   $effect(() => {
-    selectedTables = new Set(tables.map((t) => t.name));
+    const names = tables.map((t) => t.name);
+    if (names.length !== selectedTables.size || names.some((n) => !selectedTables.has(n))) {
+      selectedTables = new Set(names);
+    }
   });
 
   function toggleTable(/** @type {string} */ name) {

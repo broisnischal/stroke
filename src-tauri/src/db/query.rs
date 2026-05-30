@@ -511,7 +511,8 @@ struct WhereClause {
 
 struct QueryBuilder {
     /// (conjunct, sql_fragment) — conjunct is None for the first condition.
-    conditions: Vec<(Option<String>, String)>,
+    /// Using &'static str avoids a String allocation per filter for "AND"/"OR".
+    conditions: Vec<(Option<&'static str>, String)>,
     binds: Vec<String>,
 }
 
@@ -531,7 +532,7 @@ impl QueryBuilder {
         let c = if self.conditions.is_empty() {
             None
         } else {
-            Some(conjunct.unwrap_or("AND").to_uppercase())
+            Some(if conjunct.is_some_and(|s| s.eq_ignore_ascii_case("or")) { "OR" } else { "AND" })
         };
         self.conditions.push((c, cond));
     }
@@ -540,13 +541,16 @@ impl QueryBuilder {
         let sql = if self.conditions.is_empty() {
             String::new()
         } else {
-            let parts: Vec<String> = self.conditions.into_iter().map(|(conj, cond)| {
-                match conj {
-                    None => cond,
-                    Some(c) => format!("{c} {cond}"),
+            let mut out = String::from(" WHERE ");
+            for (i, (conj, cond)) in self.conditions.into_iter().enumerate() {
+                if i > 0 {
+                    out.push(' ');
+                    out.push_str(conj.unwrap_or("AND"));
+                    out.push(' ');
                 }
-            }).collect();
-            format!(" WHERE {}", parts.join(" "))
+                out.push_str(&cond);
+            }
+            out
         };
         WhereClause { sql, binds: self.binds }
     }
@@ -1688,7 +1692,7 @@ async fn get_table_rows_d1(
 
     // ── WHERE / ORDER build ───────────────────────────────────────────────────
     // Each entry: (conjunct — None for first, Some("AND"/"OR") for rest, condition SQL)
-    let mut cond_parts: Vec<(Option<String>, String)> = vec![];
+    let mut cond_parts: Vec<(Option<&'static str>, String)> = vec![];
     let mut params: Vec<Value> = vec![];
 
     if let Some(ref s) = search {
@@ -1703,8 +1707,9 @@ async fn get_table_rows_d1(
     }
     if let Some(ref fs) = filters {
         for f in fs {
-            let conj = if cond_parts.is_empty() { None }
-                       else { Some(f.conjunct.as_deref().unwrap_or("and").to_uppercase()) };
+            let conj: Option<&'static str> = if cond_parts.is_empty() { None }
+                else if f.conjunct.as_deref().is_some_and(|s| s.eq_ignore_ascii_case("or")) { Some("OR") }
+                else { Some("AND") };
 
             if f.column == "__any__" {
                 if let Some(ref v) = f.value {
@@ -1733,10 +1738,12 @@ async fn get_table_rows_d1(
         }
     }
     let where_clause = if cond_parts.is_empty() { String::new() } else {
-        let parts: Vec<String> = cond_parts.into_iter().map(|(c, s)| {
-            match c { None => s, Some(conj) => format!("{conj} {s}") }
-        }).collect();
-        format!("WHERE {}", parts.join(" "))
+        let mut out = String::from("WHERE ");
+        for (i, (conj, cond)) in cond_parts.into_iter().enumerate() {
+            if i > 0 { out.push(' '); out.push_str(conj.unwrap_or("AND")); out.push(' '); }
+            out.push_str(&cond);
+        }
+        out
     };
 
     let order_clause = if let Some(col) = sort_column {
