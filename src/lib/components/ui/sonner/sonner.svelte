@@ -216,6 +216,11 @@
     display: none;
   }
 
+  /* Center icon + close button vertically when there is no description */
+  :global(.studio-toaster [data-sonner-toast]:not(:has([data-description]:not(:empty)))) {
+    align-items: center;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     :global(.studio-toaster [data-sonner-toast]) {
       transition-duration: 0.01ms !important;

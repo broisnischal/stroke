@@ -1119,9 +1119,9 @@
     expandedRows = new Set();
   }
 
-  const ROW_EXPAND_COL_WIDTH = 32;
+  const ROW_EXPAND_COL_WIDTH = 40;
   /** Fits 16px checkbox with equal inset; no extra horizontal padding in cells */
-  const ROW_SELECT_COL_WIDTH = 32;
+  const ROW_SELECT_COL_WIDTH = 40;
   const visibleColumns = $derived(
     columns.filter((c) => !hiddenColumns.has(c.name)),
   );
