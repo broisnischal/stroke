@@ -763,6 +763,18 @@
     }
   }
 
+  // ── Chart fullscreen / zoom mode ───────────────────────────────────────────
+  /** @type {{ spec: any, title: string } | null} */
+  let fullscreenChart = $state(null)
+
+  function openChartFullscreen(spec) {
+    fullscreenChart = { spec, title: spec.title || '' }
+  }
+
+  function closeChartFullscreen() {
+    fullscreenChart = null
+  }
+
   // ── Diagram fullscreen ─────────────────────────────────────────────────────
   /** @type {string | null} */
   let fullscreenDiagramCode = $state(null)
@@ -1533,7 +1545,12 @@
   /** @param {KeyboardEvent} e */
   function handleGlobalKey(e) {
     if (!isActive) return
-    // Escape closes fullscreen diagram
+    // Escape closes fullscreen chart or diagram
+    if (e.key === 'Escape' && fullscreenChart) {
+      e.preventDefault()
+      closeChartFullscreen()
+      return
+    }
     if (e.key === 'Escape' && fullscreenDiagramCode) {
       e.preventDefault()
       closeDiagramFullscreen()
@@ -2059,6 +2076,13 @@
                             title="Reset view (or double-click chart)"
                             onclick={() => void resetChartView(item.id)}
                           ><RotateCcw class="size-3" /></button>
+                          <!-- Fullscreen / zoom mode -->
+                          <button
+                            type="button"
+                            class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:text-foreground"
+                            title="Zoom / fullscreen"
+                            onclick={() => openChartFullscreen(item.spec)}
+                          ><Maximize2 class="size-3" /></button>
                           <button
                             type="button"
                             class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:text-foreground"
@@ -2703,6 +2727,52 @@
 {/if}
 
 <!-- ── Diagram fullscreen modal ──────────────────────────────────────────── -->
+{#if fullscreenChart}
+  <!-- Chart fullscreen overlay -->
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <div
+    role="dialog"
+    aria-modal="true"
+    aria-label="Chart fullscreen"
+    class="fixed inset-0 z-[500] flex flex-col bg-background/96 backdrop-blur-sm"
+    onkeydown={(e) => { if (e.key === 'Escape') closeChartFullscreen() }}
+  >
+    <!-- Header -->
+    <div class="flex shrink-0 items-center gap-3 border-b border-border/60 bg-background/80 px-4 py-2">
+      <span class="min-w-0 flex-1 truncate font-mono text-[13px] font-semibold text-foreground/80">{fullscreenChart.title}</span>
+      <span class="font-mono text-[10px] capitalize text-muted-foreground/40">{fullscreenChart.spec.type}</span>
+      <div class="flex items-center gap-1">
+        <button
+          type="button"
+          class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground"
+          title="Download PNG"
+          onclick={() => {
+            const canvas = document.querySelector('[data-chart-fs] canvas')
+            if (!canvas) return
+            const a = document.createElement('a')
+            a.href = /** @type {HTMLCanvasElement} */ (canvas).toDataURL('image/png')
+            a.download = `${fullscreenChart?.title || 'chart'}.png`
+            a.click()
+          }}
+        ><Download class="size-3.5" /></button>
+        <button
+          type="button"
+          class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground"
+          title="Close (Esc)"
+          onclick={closeChartFullscreen}
+        ><X class="size-4" /></button>
+      </div>
+    </div>
+    <!-- Chart body — fills remaining space; scrollZoom lets ECharts handle wheel natively -->
+    <div class="min-h-0 flex-1" data-chart-fs>
+      <AiChartRenderer spec={fullscreenChart.spec} noTitle={true} scrollZoom={true} />
+    </div>
+    <p class="shrink-0 border-t border-border/30 px-4 py-1.5 text-center font-mono text-[10px] text-muted-foreground/30">
+      Ctrl+scroll to zoom · drag to pan · double-click to reset
+    </p>
+  </div>
+{/if}
+
 {#if fullscreenDiagramCode}
   <!-- Backdrop -->
   <div

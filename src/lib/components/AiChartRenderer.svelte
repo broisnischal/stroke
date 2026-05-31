@@ -14,6 +14,8 @@
     spec = null,
     /** Suppress the in-chart title (caller shows it in the card header) */
     noTitle = false,
+    /** When true (fullscreen mode), all scroll zooms — no interception needed */
+    scrollZoom = false,
   } = $props()
 
   /** @type {HTMLDivElement | null} */
@@ -43,7 +45,7 @@
     if (!converted || !spec) return {}
     const { columns, rows } = converted
     try {
-      return buildOption({
+      const base = buildOption({
         type: spec.type ?? 'bar',
         columns,
         rows,
@@ -55,6 +57,11 @@
         title: noTitle ? undefined : (spec.title || undefined),
         noTitle,
       })
+      // In scroll-zoom (fullscreen) mode, add inside dataZoom for all axis-based charts
+      if (scrollZoom && base && Object.keys(base).length > 0) {
+        return { ...base, dataZoom: [{ type: 'inside', zoomOnMouseWheel: true, moveOnMouseWheel: false }] }
+      }
+      return base
     } catch {
       return {}
     }
@@ -84,22 +91,24 @@
           instance.resize()
         })
         ro.observe(container)
-        // Ctrl/Cmd+wheel → zoom chart; plain wheel → let browser scroll naturally
-        container.addEventListener('wheel', (e) => {
-          if (!e.isTrusted) return // synthetic events go straight to ECharts canvas
-          e.stopPropagation()     // block ECharts from intercepting the real event
-          if (e.ctrlKey || e.metaKey) {
-            // Synthesize a plain wheel event (no modifier) so ECharts zooms
-            const canvas = container.querySelector('canvas')
-            canvas?.dispatchEvent(new WheelEvent('wheel', {
-              deltaY: e.deltaY, deltaMode: e.deltaMode,
-              clientX: e.clientX, clientY: e.clientY,
-              bubbles: false, cancelable: true,
-            }))
-          }
-          // Plain scroll: stopPropagation blocks ECharts' preventDefault(),
-          // so the browser scrolls the nearest scrollable ancestor naturally & smoothly.
-        }, { capture: true, passive: false })
+        // Scroll zoom:
+        // • scrollZoom=true (fullscreen): let ECharts handle all wheel natively — no interception
+        // • inline: Ctrl/Cmd+scroll → synthesize plain wheel for ECharts zoom
+        //           plain scroll   → stopPropagation so browser scrolls the page naturally
+        if (!scrollZoom) {
+          container.addEventListener('wheel', (e) => {
+            if (!e.isTrusted) return
+            e.stopPropagation()
+            if (e.ctrlKey || e.metaKey) {
+              const canvas = container.querySelector('canvas')
+              canvas?.dispatchEvent(new WheelEvent('wheel', {
+                deltaY: e.deltaY, deltaMode: e.deltaMode,
+                clientX: e.clientX, clientY: e.clientY,
+                bubbles: false, cancelable: true,
+              }))
+            }
+          }, { capture: true, passive: false })
+        }
         // Double-click → restore to initial view
         container.addEventListener('dblclick', () => {
           instance.dispatchAction({ type: 'restore' })
@@ -155,7 +164,7 @@
 </script>
 
 {#if spec?.type === 'choropleth'}
-  <ChoroplethChart bind:this={choroplethRef} {spec} {noTitle} />
+  <ChoroplethChart bind:this={choroplethRef} {spec} {noTitle} {scrollZoom} />
 {:else if spec?.type === 'meter'}
   <CarbonMeterChart {spec} {noTitle} />
 {:else if hasData}

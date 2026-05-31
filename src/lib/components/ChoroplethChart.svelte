@@ -6,6 +6,7 @@
   let {
     spec = /** @type {any} */ (null),
     noTitle = false,
+    scrollZoom = false,
   } = $props()
 
   /** @type {HTMLDivElement|null} */
@@ -98,20 +99,22 @@
     })
     ro.observe(container)
 
-    // Ctrl/Cmd+wheel → zoom map; plain wheel → browser scrolls naturally
-    container.addEventListener('wheel', (e) => {
-      if (!e.isTrusted) return // synthetic events: reach ECharts canvas directly
-      e.stopPropagation()     // block ECharts from intercepting the real event
-      if (e.ctrlKey || e.metaKey) {
-        const canvas = container.querySelector('canvas')
-        canvas?.dispatchEvent(new WheelEvent('wheel', {
-          deltaY: e.deltaY, deltaMode: e.deltaMode,
-          clientX: e.clientX, clientY: e.clientY,
-          bubbles: false, cancelable: true,
-        }))
-      }
-      // Plain scroll: no preventDefault() called → browser scrolls ancestor naturally
-    }, { capture: true, passive: false })
+    // scrollZoom=true (fullscreen): ECharts handles all wheel natively
+    // inline: only Ctrl/Cmd+scroll zooms; plain scroll → page
+    if (!scrollZoom) {
+      container.addEventListener('wheel', (e) => {
+        if (!e.isTrusted) return
+        e.stopPropagation()
+        if (e.ctrlKey || e.metaKey) {
+          const canvas = container.querySelector('canvas')
+          canvas?.dispatchEvent(new WheelEvent('wheel', {
+            deltaY: e.deltaY, deltaMode: e.deltaMode,
+            clientX: e.clientX, clientY: e.clientY,
+            bubbles: false, cancelable: true,
+          }))
+        }
+      }, { capture: true, passive: false })
+    }
 
     // Double-click → reset pan/zoom to initial world view
     container.addEventListener('dblclick', () => {
