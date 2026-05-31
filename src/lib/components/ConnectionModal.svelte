@@ -278,12 +278,9 @@
     d1Databases = []; d1SelectedAccountId = ''; d1DbLoadPhase = 'idle'
   }
 
-  /** Shared label style */
-  const lbl = 'mb-1.5 block text-xs font-medium text-muted-foreground'
-  /** Shared input class — full width, consistent height */
-  const inp = 'h-9 w-full text-sm'
-  /** Group divider */
-  const divider = 'border-t border-border/50 my-1'
+  const lbl = 'mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-foreground/50'
+  const inp = 'h-8 w-full border-border/25 bg-muted/[0.4] text-sm placeholder:text-muted-foreground/30 focus-visible:border-border/50 focus-visible:ring-0'
+  const divider = 'border-t border-border/25 my-0.5'
 </script>
 
 <!-- Driver icon, monochrome -->
@@ -300,37 +297,37 @@
 <Dialog.Root bind:open>
   <Dialog.Content
     showCloseButton={false}
-    class="flex max-h-[min(90vh,820px)] w-[min(880px,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden rounded-xl border border-border bg-background p-0 shadow-2xl"
+    class="flex h-[min(90vh,800px)] w-[min(920px,calc(100vw-2rem))] max-w-none sm:max-w-none flex-col gap-0 overflow-hidden rounded-2xl border border-border/40 bg-background p-0 shadow-2xl shadow-black/50"
   >
-    <div class="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[220px_minmax(0,1fr)]">
+    <div class="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[200px_minmax(0,1fr)]">
 
       <!-- ══════════════ LEFT sidebar ══════════════════════════════ -->
-      <aside class="flex min-h-0 flex-col border-b border-border md:border-b-0 md:border-r">
+      <aside class="flex min-h-0 flex-col border-b border-border/30 md:border-b-0 md:border-r">
 
         <div class="shrink-0 px-4 py-4">
-          <p class="text-sm font-semibold text-foreground">Connect</p>
-          <p class="mt-0.5 text-[11px] text-muted-foreground">Select or add a connection</p>
+          <p class="text-[15px] font-semibold tracking-tight text-foreground">Connect</p>
+          <p class="mt-0.5 text-[11px] text-muted-foreground/50">Select or add a connection</p>
         </div>
 
-        <ScrollArea class="min-h-0 flex-1 px-2 pb-2">
+        <ScrollArea class="min-h-0 flex-1 px-1.5 pb-3">
 
           <!-- New connection -->
           <button
             type="button"
             class={cn(
-              "mb-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-[13px] font-medium transition-colors",
+              "mb-1 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium transition-colors",
               !editingId
-                ? "bg-accent text-foreground"
-                : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                ? "bg-muted/60 text-foreground"
+                : "text-muted-foreground/70 hover:bg-muted/30 hover:text-foreground"
             )}
             onclick={() => resetForm(null)}
           >
-            <Plus class="size-3.5 shrink-0" />
+            <Plus class="size-3.5 shrink-0 opacity-60" />
             New connection
           </button>
 
           {#if saved.length > 0}
-            <p class="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/40">
+            <p class="px-3 pb-1.5 pt-4 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/30">
               Recent
             </p>
             {#each saved as conn (conn.id)}
@@ -339,8 +336,8 @@
               {@const cid    = conn.type === 'sqlite' && conn.filePath === ':memory:' ? 'sqlite-memory' : conn.type}
               <div
                 class={cn(
-                  "group flex cursor-pointer items-center gap-2.5 rounded-md px-3 py-2 transition-colors",
-                  isSel ? "bg-accent" : "hover:bg-accent"
+                  "group flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 transition-colors",
+                  isSel ? "bg-muted/60" : "hover:bg-muted/30"
                 )}
                 role="button" tabindex="0"
                 onclick={() => resetForm(conn)}
@@ -352,22 +349,22 @@
                   <div class="flex items-center gap-1.5">
                     <p class="min-w-0 truncate text-[13px] font-medium leading-none text-foreground">{conn.name}</p>
                     {#if conn.id === lastId}
-                      <span class="shrink-0 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/40">last</span>
+                      <span class="shrink-0 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/30">last</span>
                     {/if}
                   </div>
-                  <p class="mt-0.5 truncate font-mono text-[10px] text-muted-foreground/50">{connDetail(conn)}</p>
+                  <p class="mt-0.5 truncate font-mono text-[10px] text-muted-foreground/40">{connDetail(conn)}</p>
                 </div>
 
                 <div class="hidden shrink-0 items-center gap-1 group-hover:flex">
                   <button type="button"
-                    class="rounded border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+                    class="rounded-md bg-muted/50 px-2 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
                     disabled={!!connecting}
                     onclick={(e) => { e.stopPropagation(); void connectWith(conn) }}
                   >
                     {#if busy2}<Loader2 class="size-2.5 animate-spin inline" />{:else}Connect{/if}
                   </button>
                   <button type="button"
-                    class="rounded p-0.5 text-muted-foreground/30 transition-colors hover:text-destructive"
+                    class="rounded-md p-0.5 text-muted-foreground/25 transition-colors hover:text-destructive"
                     onclick={(e) => { e.stopPropagation(); handleDelete(conn.id) }}
                   ><Trash2 class="size-3" /></button>
                 </div>
@@ -375,9 +372,9 @@
             {/each}
 
           {:else}
-            <div class="mx-1 mt-2 flex flex-col items-center gap-2 rounded-md border border-dashed border-border/40 px-3 py-8 text-center">
-              <Clock class="size-4 text-muted-foreground/25" />
-              <p class="text-[11px] text-muted-foreground/40">No saved connections</p>
+            <div class="mx-1 mt-2 flex flex-col items-center gap-2 rounded-xl border border-dashed border-border/20 px-3 py-8 text-center">
+              <Clock class="size-4 text-muted-foreground/20" />
+              <p class="text-[11px] text-muted-foreground/30">No saved connections</p>
             </div>
           {/if}
         </ScrollArea>
@@ -390,31 +387,31 @@
 
             <!-- Database type -->
             <div>
-              <label class={lbl}>Database</label>
+              <label class={lbl}>Database type</label>
               <Select.Root
                 type="single"
                 value={dbType}
                 onValueChange={(v) => v && switchDriver(v)}
               >
-                <Select.Trigger class="h-9 w-full text-sm">
+                <Select.Trigger class="h-9 w-full border-border/25 bg-muted/[0.4] text-sm hover:border-border/40 hover:bg-muted/50 focus:border-border/50 focus:ring-0">
                   <div class="flex items-center gap-2">
                     {@render dicon(dbType, 'size-[14px]')}
                     <span class="text-foreground">{activeDriver.label}</span>
                   </div>
                 </Select.Trigger>
-                <Select.Content class="w-[var(--bits-select-anchor-width)] min-w-[var(--bits-select-anchor-width)] p-1">
+                <Select.Content class="w-[var(--bits-select-anchor-width)] min-w-[var(--bits-select-anchor-width)] rounded-xl p-1.5">
                   {#each CATEGORIES as cat, i}
-                    {#if i > 0}<Select.Separator class="my-1" />{/if}
+                    {#if i > 0}<Select.Separator class="my-1 opacity-40" />{/if}
                     <Select.Group>
-                      <Select.GroupHeading class="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">
+                      <Select.GroupHeading class="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground/40">
                         {cat.label}
                       </Select.GroupHeading>
                       {#each cat.drivers as d (d.id)}
-                        <Select.Item value={d.id} label={d.label} disabled={!!d.soon} class="rounded-sm py-1.5">
+                        <Select.Item value={d.id} label={d.label} disabled={!!d.soon} class="rounded-lg py-1.5">
                           <div class="flex items-center gap-2.5 pl-0.5">
                             {@render dicon(d.id, 'size-[14px]')}
                             <div class="min-w-0 flex-1">
-                              <p class="text-sm leading-none">{d.label}</p>
+                              <p class="text-[13px] leading-none">{d.label}</p>
                               <p class="mt-0.5 text-[11px] text-muted-foreground/60">{d.desc}</p>
                             </div>
                             {#if d.soon}
@@ -432,7 +429,7 @@
             <!-- Connection name -->
             <div>
               <label for="cn-name" class={lbl}>Connection name</label>
-              <Input id="cn-name" bind:value={name} class={inp} />
+              <Input id="cn-name" bind:value={name} class="h-9 w-full border-border/20 bg-transparent text-[15px] font-medium placeholder:text-muted-foreground/20 focus-visible:border-border/40 focus-visible:ring-0" />
             </div>
 
             <!-- ════ PostgreSQL ════════════════════════════════════ -->
@@ -442,16 +439,16 @@
 
               <!-- Connection string -->
               <div>
-                <label for="cn-uri" class={lbl}>Connection string <span class="font-normal opacity-60">(optional)</span></label>
+                <label for="cn-uri" class={lbl}>Connection string <span class="font-normal normal-case opacity-60">(optional)</span></label>
                 <div class="flex gap-2">
                   <Input id="cn-uri" bind:value={connectionUri}
                     placeholder="postgresql://user:pass@host:5432/db"
-                    class="h-9 flex-1 font-mono text-xs"
+                    class="h-8 flex-1 border-border/25 bg-muted/[0.4] font-mono text-xs placeholder:text-muted-foreground/30 focus-visible:border-border/50 focus-visible:ring-0"
                     onpaste={() => requestAnimationFrame(applyConnectionUri)}
                     onkeydown={(e) => e.key === 'Enter' && (e.preventDefault(), applyConnectionUri())}
                   />
                   <button type="button"
-                    class="h-9 shrink-0 rounded-lg border border-border px-3.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+                    class="h-8 shrink-0 rounded-lg bg-muted/40 px-3.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground disabled:opacity-40"
                     onclick={applyConnectionUri} disabled={!connectionUri.trim()}>Parse</button>
                 </div>
                 {#if uriHint}
@@ -501,11 +498,11 @@
               <div class={divider}></div>
 
               <!-- SSL -->
-              <label class="flex cursor-pointer items-center gap-3 rounded-lg border border-border/60 px-4 py-3 transition-colors hover:bg-accent/40 select-none">
+              <label class="flex cursor-pointer select-none items-center gap-3 rounded-xl border border-border/20 bg-muted/[0.15] px-4 py-3 transition-colors hover:bg-muted/30">
                 <Checkbox id="cn-ssl" checked={ssl} onCheckedChange={(v) => (ssl = v === true)} />
                 <div>
                   <p class="text-sm font-medium text-foreground">Use SSL / TLS</p>
-                  <p class="text-[11px] text-muted-foreground">Require an encrypted connection</p>
+                  <p class="text-[11px] text-muted-foreground/60">Require an encrypted connection</p>
                 </div>
               </label>
 
@@ -543,11 +540,11 @@
 
               <div class={divider}></div>
 
-              <label class="flex cursor-pointer items-center gap-3 rounded-lg border border-border/60 px-4 py-3 transition-colors hover:bg-accent/40 select-none">
+              <label class="flex cursor-pointer select-none items-center gap-3 rounded-xl border border-border/20 bg-muted/[0.15] px-4 py-3 transition-colors hover:bg-muted/30">
                 <Checkbox id="cn-mysql-ssl" checked={ssl} onCheckedChange={(v) => (ssl = v === true)} />
                 <div>
                   <p class="text-sm font-medium text-foreground">Use SSL / TLS</p>
-                  <p class="text-[11px] text-muted-foreground">Require an encrypted connection</p>
+                  <p class="text-[11px] text-muted-foreground/60">Require an encrypted connection</p>
                 </div>
               </label>
 
@@ -560,8 +557,8 @@
                 <label for="cn-path" class={lbl}>File path</label>
                 <Input id="cn-path" bind:value={filePath}
                   placeholder="/path/to/database.db"
-                  class="h-9 w-full font-mono text-sm" />
-                <p class="mt-1.5 text-[11px] text-muted-foreground/60">
+                  class="h-8 w-full border-border/25 bg-muted/[0.4] font-mono text-sm placeholder:text-muted-foreground/30 focus-visible:border-border/50 focus-visible:ring-0" />
+                <p class="mt-1.5 text-[11px] text-muted-foreground/40">
                   Absolute path to a <code class="font-mono">.db</code> or <code class="font-mono">.sqlite</code> file
                 </p>
               </div>
@@ -571,9 +568,9 @@
 
               <div class={divider}></div>
 
-              <div class="rounded-lg border border-border/50 bg-muted/20 px-4 py-3.5">
+              <div class="rounded-xl border border-border/20 bg-muted/[0.15] px-4 py-3.5">
                 <p class="text-sm font-medium text-foreground">Ephemeral in-memory database</p>
-                <p class="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+                <p class="mt-1 text-[12px] leading-relaxed text-muted-foreground/60">
                   Data exists only while this session is open. Nothing is written to disk —
                   ideal for testing SQL queries or quick exploration.
                 </p>
@@ -588,19 +585,19 @@
                 <label for="cn-libsql-url" class={lbl}>Database URL</label>
                 <Input id="cn-libsql-url" bind:value={libsqlUrl}
                   placeholder="libsql://your-db.turso.io"
-                  class="h-9 w-full font-mono text-sm" />
-                <p class="mt-1.5 text-[11px] text-muted-foreground/60">
+                  class="h-8 w-full border-border/25 bg-muted/[0.4] font-mono text-sm placeholder:text-muted-foreground/30 focus-visible:border-border/50 focus-visible:ring-0" />
+                <p class="mt-1.5 text-[11px] text-muted-foreground/40">
                   Accepts <code class="font-mono">libsql://</code>, <code class="font-mono">https://</code>, or <code class="font-mono">http://localhost:PORT</code>
                 </p>
               </div>
 
               <div>
                 <label for="cn-libsql-token" class={lbl}>
-                  Auth token <span class="font-normal opacity-60">(optional for local servers)</span>
+                  Auth token <span class="font-normal normal-case opacity-60">(optional for local servers)</span>
                 </label>
                 <Input id="cn-libsql-token" bind:value={libsqlToken} type="password"
                   placeholder="eyJhbGciOiJFZERTQSJ9…"
-                  class="h-9 w-full font-mono text-sm" />
+                  class="h-8 w-full border-border/25 bg-muted/[0.4] font-mono text-sm placeholder:text-muted-foreground/30 focus-visible:border-border/50 focus-visible:ring-0" />
               </div>
 
             <!-- ════ Cloudflare D1 ═════════════════════════════════ -->
@@ -619,7 +616,7 @@
               />
 
               <details class="group">
-                <summary class="cursor-pointer list-none select-none text-xs text-muted-foreground/40 hover:text-muted-foreground transition-colors">
+                <summary class="cursor-pointer list-none select-none text-xs text-muted-foreground/30 transition-colors hover:text-muted-foreground">
                   <span class="group-open:hidden">↓ Use an API token manually</span>
                   <span class="hidden group-open:inline">↑ Use an API token manually</span>
                 </summary>
@@ -627,11 +624,11 @@
                   <div class="grid grid-cols-2 gap-3">
                     <div>
                       <label class={lbl}>Account ID</label>
-                      <Input bind:value={accountId} placeholder="abcdef1234…" class="h-9 w-full font-mono text-xs" />
+                      <Input bind:value={accountId} placeholder="abcdef1234…" class="h-8 w-full border-border/25 bg-muted/[0.4] font-mono text-xs placeholder:text-muted-foreground/30 focus-visible:border-border/50 focus-visible:ring-0" />
                     </div>
                     <div>
                       <label class={lbl}>Database ID</label>
-                      <Input bind:value={databaseId} placeholder="xxxxxxxx-xxxx-…" class="h-9 w-full font-mono text-xs" />
+                      <Input bind:value={databaseId} placeholder="xxxxxxxx-xxxx-…" class="h-8 w-full border-border/25 bg-muted/[0.4] font-mono text-xs placeholder:text-muted-foreground/30 focus-visible:border-border/50 focus-visible:ring-0" />
                     </div>
                   </div>
                   <div>
@@ -648,19 +645,19 @@
         </ScrollArea>
 
         <!-- ════ Footer ════════════════════════════════════════════ -->
-        <div class="shrink-0 border-t border-border bg-muted/[0.02]">
+        <div class="shrink-0 border-t border-border/25 bg-muted/[0.02]">
 
           {#if error}
-            <div class="flex items-start gap-2.5 border-b border-border/50 px-5 py-3">
+            <div class="flex items-start gap-2.5 border-b border-border/25 px-5 py-3">
               <AlertCircle class="mt-px size-3.5 shrink-0 text-destructive" />
               <p class="text-xs leading-relaxed text-destructive">{error}</p>
             </div>
           {/if}
 
           {#if testOk && !error}
-            <div class="flex items-center gap-2.5 border-b border-border/50 px-5 py-3">
-              <CheckCircle2 class="size-3.5 shrink-0 text-foreground" />
-              <p class="text-xs text-foreground">Connection successful</p>
+            <div class="flex items-center gap-2.5 border-b border-border/25 px-5 py-3">
+              <CheckCircle2 class="size-3.5 shrink-0 text-emerald-500" />
+              <p class="text-xs text-emerald-500">Connection successful</p>
             </div>
           {/if}
 
@@ -668,21 +665,21 @@
             <div>
               {#if editingId}
                 <button type="button"
-                  class="text-xs text-muted-foreground/40 transition-colors hover:text-muted-foreground"
+                  class="text-xs text-muted-foreground/30 transition-colors hover:text-muted-foreground"
                   onclick={() => resetForm(null)}>Clear form</button>
               {/if}
             </div>
             <div class="flex items-center gap-2">
               {#if canTest}
                 <button type="button"
-                  class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-4 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+                  class="inline-flex h-8 items-center gap-1.5 rounded-lg px-4 text-sm text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-40"
                   onclick={handleTest} disabled={isBusy}
                 >
                   {#if testing}<Loader2 class="size-3.5 animate-spin" />Testing…{:else}Test connection{/if}
                 </button>
               {/if}
               <button type="button"
-                class="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                class="inline-flex h-8 items-center gap-1.5 rounded-lg bg-foreground px-5 text-sm font-medium text-background transition-colors hover:bg-foreground/85 disabled:opacity-50"
                 onclick={handleConnect} disabled={isBusy || dbType === 'bigquery'}
               >
                 {#if connecting === (editingId ?? '__new__')}
@@ -697,8 +694,8 @@
       </div>
     </div>
 
-    <Dialog.Close class="absolute right-3.5 top-3.5 inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground/40 transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-      <X class="size-4" />
+    <Dialog.Close class="absolute right-4 top-4 inline-flex size-6 items-center justify-center rounded-lg text-muted-foreground/30 transition-colors hover:bg-muted/50 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
+      <X class="size-3.5" />
     </Dialog.Close>
   </Dialog.Content>
 </Dialog.Root>

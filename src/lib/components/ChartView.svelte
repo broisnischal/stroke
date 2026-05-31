@@ -93,8 +93,37 @@
   })
 
   // ── Axis selection ────────────────────────────────────────────────────────
-  const numericCols = $derived(columns.filter(c => colType(c) === 'number'))
-  const allCols     = $derived(columns.map(c => c.name))
+
+  // Sniff row data to detect numeric columns that the DB reported with no/wrong type
+  const effectiveColumns = $derived.by(() => {
+    if (!rows.length) return columns
+    return columns.map((col, i) => {
+      if (colType(col) === 'number') return col
+      const samples = rows.slice(0, 20).map(r => /** @type {any} */ (r)[i]).filter(v => v != null && v !== '')
+      if (samples.length === 0) return col
+      const allNumeric = samples.every(v =>
+        typeof v === 'number' || (typeof v === 'string' && !isNaN(Number(v)))
+      )
+      return allNumeric ? { ...col, dataType: 'number', data_type: 'number' } : col
+    })
+  })
+
+  // Coerce string-encoded numerics to actual numbers in rows
+  const effectiveRows = $derived.by(() => {
+    if (!rows.length) return rows
+    return rows.map(row =>
+      /** @type {any[]} */ (row).map((v, i) => {
+        if (effectiveColumns[i] && colType(effectiveColumns[i]) === 'number' && typeof v === 'string') {
+          const n = Number(v)
+          return isNaN(n) ? v : n
+        }
+        return v
+      })
+    )
+  })
+
+  const numericCols = $derived(effectiveColumns.filter(c => colType(c) === 'number'))
+  const allCols     = $derived(effectiveColumns.map(c => c.name))
   const requiredAxes = $derived(getRequiredAxes(chartType))
 
   let xCol     = $state('')
@@ -103,8 +132,8 @@
   let groupCol = $state('')
 
   $effect(() => {
-    const gx = guessXCol(columns)
-    const gy = guessYCol(columns, gx)
+    const gx = guessXCol(effectiveColumns)
+    const gy = guessYCol(effectiveColumns, gx)
     xCol = gx; yCol = gy; zCol = ''; groupCol = ''
   })
 
@@ -112,10 +141,10 @@
   const isDark = $derived($isCurrentThemeDark)
 
   const option = $derived.by(() => {
-    if (!xCol || rows.length === 0) return {}
+    if (!xCol || effectiveRows.length === 0) return {}
     const needsY = !['histogram', 'tree'].includes(chartType)
     if (needsY && !yCol) return {}
-    return buildOption({ type: chartType, columns, rows, xCol, yCol: yCol || xCol, zCol: zCol || undefined, groupCol: groupCol || undefined, isDark })
+    return buildOption({ type: chartType, columns: effectiveColumns, rows: effectiveRows, xCol, yCol: yCol || xCol, zCol: zCol || undefined, groupCol: groupCol || undefined, isDark })
   })
 
   // ── Actions ───────────────────────────────────────────────────────────────
@@ -163,7 +192,7 @@
     saveOpen = false
   }
 
-  const chartable = $derived(isChartable(columns))
+  const chartable = $derived(isChartable(effectiveColumns))
 
   const sel = 'h-7 appearance-none rounded-md border border-border/50 bg-background/60 pl-2.5 pr-7 font-mono text-ui-xs text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring/30'
   const iconBtn = 'inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'

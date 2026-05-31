@@ -199,6 +199,18 @@ pub async fn get_table_rows(
         })
         .collect();
 
+    // col_name -> declared type (used as fallback when the table is empty)
+    let pragma_types: std::collections::HashMap<String, String> = pragma_rows
+        .iter()
+        .filter_map(|r| {
+            let name = r.try_get::<Option<String>, _>(1).ok().flatten()?;
+            let col_type = r.try_get::<Option<String>, _>(2).ok().flatten()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "text".into());
+            Some((name, col_type.to_lowercase()))
+        })
+        .collect();
+
     let col_names: Vec<String> = pragma_rows
         .iter()
         .filter_map(|r| r.try_get::<Option<String>, _>(1).ok().flatten())
@@ -323,7 +335,8 @@ pub async fn get_table_rows(
             col_names
                 .iter()
                 .map(|n| {
-                    let mut col = ColumnInfo::new(n.clone(), "text");
+                    let dt = pragma_types.get(n).cloned().unwrap_or_else(|| "text".into());
+                    let mut col = ColumnInfo::new(n.clone(), dt);
                     if let Some(&nullable) = pragma_nullable.get(n.as_str()) {
                         col.nullable = nullable;
                     }
@@ -451,6 +464,7 @@ pub async fn insert_table_row(
 
     let mut column_order: Vec<String> = Vec::new();
     let mut optional: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+    let mut col_type_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
 
     for r in &pragma_rows {
         let name = r
@@ -468,6 +482,7 @@ pub async fn insert_table_row(
         let pk: i64 = r.try_get(5).ok().unwrap_or(0);
         let opt = sqlite_column_optional_when_omitted(notnull != 0, dflt.as_deref(), pk, &col_type);
         column_order.push(name.clone());
+        col_type_map.insert(name.clone(), col_type.to_lowercase());
         optional.insert(name, opt);
     }
 
@@ -502,7 +517,8 @@ pub async fn insert_table_row(
     let mut q = sqlx::query(&sql);
     for col in &col_names {
         let v = values.get(col).ok_or_else(|| format!("Missing value for {col}"))?;
-        q = bind_value(q, v);
+        let ct = col_type_map.get(col).map(|s| s.as_str()).unwrap_or("");
+        q = bind_value_typed(q, v, ct);
     }
 
     let inserted = q
@@ -605,6 +621,18 @@ fn bind_value<'a>(
     q: sqlx::query::Query<'a, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'a>>,
     value: &Value,
 ) -> sqlx::query::Query<'a, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'a>> {
+    bind_value_typed(q, value, "")
+}
+
+/// Type-aware binding: coerces string values to integers/floats when the
+/// declared column affinity requires it. Prevents SQLITE_MISMATCH (code 20)
+/// when the frontend sends numeric strings for INTEGER/REAL columns.
+fn bind_value_typed<'a>(
+    q: sqlx::query::Query<'a, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'a>>,
+    value: &Value,
+    col_type: &str,
+) -> sqlx::query::Query<'a, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'a>> {
+    let t = col_type.to_ascii_lowercase();
     match value {
         Value::Null => q.bind(None::<String>),
         Value::Bool(b) => q.bind(*b as i64),
@@ -617,7 +645,23 @@ fn bind_value<'a>(
                 q.bind(n.to_string())
             }
         }
-        Value::String(s) => q.bind(s.clone()),
+        Value::String(s) => {
+            let trimmed = s.trim();
+            // Coerce numeric strings based on declared column affinity so that
+            // INTEGER PRIMARY KEY never receives a TEXT or REAL binding.
+            if t.contains("int") || t.ends_with("serial") {
+                if let Ok(i) = trimmed.parse::<i64>() {
+                    return q.bind(i);
+                }
+            } else if t.contains("real") || t.contains("float") || t.contains("double")
+                || t.contains("numeric") || t.contains("decimal") || t.contains("number")
+            {
+                if let Ok(f) = trimmed.parse::<f64>() {
+                    return q.bind(f);
+                }
+            }
+            q.bind(s.clone())
+        }
         other => q.bind(other.to_string()),
     }
 }

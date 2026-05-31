@@ -30,14 +30,34 @@
   const converted = $derived.by(() => {
     if (!spec?.data?.length) return null
     const keys = Object.keys(spec.data[0] ?? {})
+
+    /** @param {unknown} v */
+    function detectType(v) {
+      if (typeof v === 'number') return 'numeric'
+      if (typeof v === 'string') {
+        if (/^\d{4}-\d{2}/.test(v)) return 'timestamp'
+        if (v.trim() !== '' && !isNaN(Number(v))) return 'numeric'
+      }
+      return 'text'
+    }
+
     const columns = keys.map(k => {
       const sample = spec.data.find(r => r[k] != null)?.[k]
-      const dt = typeof sample === 'number' ? 'numeric'
-        : typeof sample === 'string' && /^\d{4}-\d{2}/.test(sample) ? 'timestamp'
-        : 'text'
+      const dt = detectType(sample)
       return { name: k, dataType: dt, data_type: dt }
     })
-    const rows = spec.data.map(obj => keys.map(k => obj[k]))
+
+    const rows = spec.data.map(obj =>
+      keys.map(k => {
+        const v = obj[k]
+        const col = columns.find(c => c.name === k)
+        if (col?.dataType === 'numeric' && typeof v === 'string') {
+          const n = Number(v)
+          return isNaN(n) ? v : n
+        }
+        return v
+      })
+    )
     return { columns, rows }
   })
 
