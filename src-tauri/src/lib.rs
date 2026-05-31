@@ -1,3 +1,4 @@
+mod cloudflare;
 mod commands;
 mod copilot;
 mod db;
@@ -160,6 +161,12 @@ pub fn run() {
             copilot::copilot_poll_oauth_token,
             copilot::copilot_get_copilot_token,
             copilot::copilot_fetch_models,
+            cloudflare::cloudflare_start_oauth,
+            cloudflare::cloudflare_oauth_status,
+            cloudflare::cloudflare_get_valid_token,
+            cloudflare::cloudflare_logout,
+            cloudflare::cloudflare_list_accounts,
+            cloudflare::cloudflare_list_d1_databases,
             db::backup::backup_export,
             db::backup::backup_import,
             commands::check_license_status,

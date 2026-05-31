@@ -25,7 +25,10 @@
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import LayoutGrid from "@lucide/svelte/icons/layout-grid";
 
-  let {} = $props();
+  let {
+    /** @type {import('$lib/stores/connections.js').SavedConnection | null} */
+    connection = null,
+  } = $props();
 
   // ── Active dashboard ───────────────────────────────────────────────────────
   const activeDash = $derived(
@@ -180,6 +183,14 @@
   }
 </script>
 
+{#if !connection}
+  <div class="flex min-h-0 flex-1 items-center justify-center bg-panel">
+    <div class="flex flex-col items-center gap-2 text-center">
+      <LayoutGrid class="size-8 text-muted-foreground/25" />
+      <p class="text-ui-sm text-muted-foreground">Connect to a database to view dashboards</p>
+    </div>
+  </div>
+{:else}
 <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
   <!-- Header -->
   <div
@@ -462,6 +473,7 @@
     {/if}
   </div>
 </div>
+{/if}
 
 <!-- Chart picker modal -->
 {#if pickerOpen}

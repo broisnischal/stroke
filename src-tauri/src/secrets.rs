@@ -8,7 +8,7 @@ fn keys_path(app: &tauri::AppHandle) -> std::path::PathBuf {
         .join("ai-keys.json")
 }
 
-fn read_all(app: &tauri::AppHandle) -> HashMap<String, String> {
+pub(crate) fn read_all(app: &tauri::AppHandle) -> HashMap<String, String> {
     let path = keys_path(app);
     std::fs::read_to_string(&path)
         .ok()
@@ -16,7 +16,7 @@ fn read_all(app: &tauri::AppHandle) -> HashMap<String, String> {
         .unwrap_or_default()
 }
 
-fn write_all(app: &tauri::AppHandle, map: &HashMap<String, String>) -> Result<(), String> {
+pub(crate) fn write_all(app: &tauri::AppHandle, map: &HashMap<String, String>) -> Result<(), String> {
     let path = keys_path(app);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;

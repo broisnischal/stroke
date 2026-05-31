@@ -357,12 +357,26 @@ async fn list_tables_libsql(cfg: &super::connection::LibSqlConfig) -> Result<Vec
     ).await?;
     let name_idx = result.columns.iter().position(|c| c.name == "name").unwrap_or(0);
     let type_idx = result.columns.iter().position(|c| c.name == "type").unwrap_or(1);
-    Ok(result.rows.iter().filter_map(|r| {
+    let mut tables: Vec<TableInfo> = result.rows.iter().filter_map(|r| {
         let name = r.get(name_idx)?.as_str()?.to_string();
         let ty = r.get(type_idx).and_then(|v| v.as_str()).unwrap_or("table");
         let kind = if ty == "view" { "view".to_string() } else { "table".to_string() };
         Some(TableInfo { name, kind, row_count: -1, rls_enabled: None })
-    }).collect())
+    }).collect();
+
+    for t in tables.iter_mut() {
+        if t.kind == "view" {
+            t.row_count = 0;
+            continue;
+        }
+        let sql = format!("SELECT COUNT(*) FROM \"{}\"", t.name.replace('"', "\"\""));
+        if let Ok(res) = super::libsql::query(cfg, &sql, vec![]).await {
+            if let Some(row) = res.rows.first() {
+                t.row_count = row.first().and_then(|v| v.as_i64()).unwrap_or(0);
+            }
+        }
+    }
+    Ok(tables)
 }
 
 async fn list_indexes_libsql(cfg: &super::connection::LibSqlConfig) -> Result<Vec<IndexInfo>, String> {
@@ -757,8 +771,213 @@ pub async fn get_table_column_structure(
         ActiveConnection::Postgres(pool) => {
             get_column_structure_pg(&pool, &schema, &table).await
         }
-        _ => Err("Structure view is only supported for PostgreSQL".to_string()),
+        ActiveConnection::Mysql(pool) => {
+            get_column_structure_mysql(&pool, &schema, &table).await
+        }
+        ActiveConnection::Sqlite(pool) => {
+            get_column_structure_sqlite(&pool, &table).await
+        }
+        ActiveConnection::D1(cfg) => {
+            get_column_structure_d1(&cfg, &table).await
+        }
+        ActiveConnection::LibSql(cfg) => {
+            get_column_structure_libsql(&cfg, &table).await
+        }
     }
+}
+
+async fn get_column_structure_sqlite(
+    pool: &sqlx::SqlitePool,
+    table: &str,
+) -> Result<Vec<ColumnStructureRow>, String> {
+    use std::collections::HashMap;
+    let tq = format!("\"{}\"", table.replace('"', "\"\""));
+
+    // cid, name, type, notnull, dflt_value, pk
+    let info_rows = sqlx::query(&format!("PRAGMA table_info({tq})"))
+        .fetch_all(pool)
+        .await
+        .map_err(|e| format!("PRAGMA table_info failed: {e}"))?;
+
+    // id, seq, table, from, to, on_update, on_delete, match
+    let fk_rows = sqlx::query(&format!("PRAGMA foreign_key_list({tq})"))
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+
+    let mut fk_map: HashMap<String, String> = Default::default();
+    for r in &fk_rows {
+        let from_col: String = r.try_get::<Option<String>, _>(3).ok().flatten().unwrap_or_default();
+        let ref_table: String = r.try_get::<Option<String>, _>(2).ok().flatten().unwrap_or_default();
+        let to_col: String = r.try_get::<Option<String>, _>(4).ok().flatten().unwrap_or_default();
+        if !from_col.is_empty() {
+            fk_map.insert(from_col, format!("main.{ref_table}.{to_col}"));
+        }
+    }
+
+    Ok(info_rows.iter().filter_map(|r| {
+        let cid: i64 = r.try_get::<Option<i64>, _>(0).ok().flatten().unwrap_or(0);
+        let name: String = r.try_get::<Option<String>, _>(1).ok().flatten()?;
+        let data_type = r.try_get::<Option<String>, _>(2).ok().flatten().unwrap_or_default().to_lowercase();
+        let notnull: i64 = r.try_get::<Option<i64>, _>(3).ok().flatten().unwrap_or(0);
+        let column_default: Option<String> = r.try_get::<Option<String>, _>(4).ok().flatten();
+        let foreign_key = fk_map.get(&name).cloned();
+        Some(ColumnStructureRow {
+            ordinal_position: (cid + 1) as i32,
+            name: name.clone(),
+            data_type,
+            is_nullable: notnull == 0,
+            column_default,
+            foreign_key,
+            fk_constraint_name: None,
+            comment: None,
+        })
+    }).collect())
+}
+
+async fn get_column_structure_mysql(
+    pool: &MySqlPool,
+    schema: &str,
+    table: &str,
+) -> Result<Vec<ColumnStructureRow>, String> {
+    use std::collections::HashMap;
+
+    let col_rows = sqlx::query(
+        "SELECT ORDINAL_POSITION, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT \
+         FROM information_schema.COLUMNS \
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? \
+         ORDER BY ORDINAL_POSITION",
+    )
+    .bind(schema)
+    .bind(table)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("Failed to get column info: {e}"))?;
+
+    let fk_rows = sqlx::query(
+        "SELECT kcu.COLUMN_NAME, kcu.REFERENCED_TABLE_SCHEMA, \
+                kcu.REFERENCED_TABLE_NAME, kcu.REFERENCED_COLUMN_NAME, kcu.CONSTRAINT_NAME \
+         FROM information_schema.KEY_COLUMN_USAGE kcu \
+         JOIN information_schema.REFERENTIAL_CONSTRAINTS rc \
+           ON rc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME \
+          AND rc.CONSTRAINT_SCHEMA = kcu.TABLE_SCHEMA \
+         WHERE kcu.TABLE_SCHEMA = ? AND kcu.TABLE_NAME = ? \
+           AND kcu.REFERENCED_TABLE_NAME IS NOT NULL \
+         ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION",
+    )
+    .bind(schema)
+    .bind(table)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
+    let mut fk_map: HashMap<String, (String, String)> = Default::default();
+    for row in &fk_rows {
+        let col: String = row.try_get(0).unwrap_or_default();
+        let ref_schema: String = row.try_get(1).unwrap_or_default();
+        let ref_table: String = row.try_get(2).unwrap_or_default();
+        let ref_col: String = row.try_get(3).unwrap_or_default();
+        let constraint: String = row.try_get(4).unwrap_or_default();
+        fk_map.insert(col, (format!("{ref_schema}.{ref_table}.{ref_col}"), constraint));
+    }
+
+    Ok(col_rows.iter().filter_map(|r| {
+        let ordinal: i32 = r.try_get::<u32, _>(0).unwrap_or(0) as i32;
+        let name: String = r.try_get(1).ok()?;
+        let data_type: String = r.try_get::<String, _>(2).unwrap_or_default().to_lowercase();
+        let is_nullable_str: String = r.try_get(3).unwrap_or_else(|_| "YES".to_string());
+        let column_default: Option<String> = r.try_get::<Option<String>, _>(4).ok().flatten();
+        let (foreign_key, fk_constraint_name) = fk_map
+            .get(&name)
+            .map(|(fk, cn)| (Some(fk.clone()), Some(cn.clone())))
+            .unwrap_or((None, None));
+        Some(ColumnStructureRow {
+            ordinal_position: ordinal,
+            name: name.clone(),
+            data_type,
+            is_nullable: is_nullable_str.eq_ignore_ascii_case("YES"),
+            column_default,
+            foreign_key,
+            fk_constraint_name,
+            comment: None,
+        })
+    }).collect())
+}
+
+/// Shared SQLite-pragma-based column structure for D1 and LibSQL (both SQLite-compatible).
+/// `fk_prefix` is the schema name to use in the "schema.table.col" FK string (e.g. "main").
+fn parse_column_structure_from_pragma_results(
+    info_rows: Vec<Vec<serde_json::Value>>,
+    fk_rows: Vec<Vec<serde_json::Value>>,
+    fk_prefix: &str,
+) -> Vec<ColumnStructureRow> {
+    use std::collections::HashMap;
+    let mut fk_map: HashMap<String, String> = Default::default();
+    for r in &fk_rows {
+        // PRAGMA foreign_key_list: id(0), seq(1), table(2), from(3), to(4)
+        let from_col = r.get(3).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let ref_table = r.get(2).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let to_col = r.get(4).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        if !from_col.is_empty() {
+            fk_map.insert(from_col, format!("{fk_prefix}.{ref_table}.{to_col}"));
+        }
+    }
+
+    info_rows.iter().filter_map(|r| {
+        // PRAGMA table_info: cid(0), name(1), type(2), notnull(3), dflt_value(4), pk(5)
+        let cid = r.get(0).and_then(|v| v.as_i64()).unwrap_or(0);
+        let name = r.get(1)?.as_str()?.to_string();
+        let data_type = r.get(2).and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+        let notnull = r.get(3).and_then(|v| v.as_i64()).unwrap_or(0);
+        let column_default = r.get(4).and_then(|v| v.as_str()).map(|s| s.to_string());
+        let foreign_key = fk_map.get(&name).cloned();
+        Some(ColumnStructureRow {
+            ordinal_position: (cid + 1) as i32,
+            name: name.clone(),
+            data_type,
+            is_nullable: notnull == 0,
+            column_default,
+            foreign_key,
+            fk_constraint_name: None,
+            comment: None,
+        })
+    }).collect()
+}
+
+async fn get_column_structure_d1(
+    cfg: &super::connection::D1Config,
+    table: &str,
+) -> Result<Vec<ColumnStructureRow>, String> {
+    let tq = format!("\"{}\"", table.replace('"', "\"\""));
+
+    let info_rows = super::d1::query(cfg, &format!("PRAGMA table_info({tq})"), vec![])
+        .await
+        .map(|r| r.rows)
+        .map_err(|e| format!("PRAGMA table_info failed: {e}"))?;
+    let fk_rows = super::d1::query(cfg, &format!("PRAGMA foreign_key_list({tq})"), vec![])
+        .await
+        .map(|r| r.rows)
+        .unwrap_or_default();
+
+    Ok(parse_column_structure_from_pragma_results(info_rows, fk_rows, "main"))
+}
+
+async fn get_column_structure_libsql(
+    cfg: &super::connection::LibSqlConfig,
+    table: &str,
+) -> Result<Vec<ColumnStructureRow>, String> {
+    let tq = format!("\"{}\"", table.replace('"', "\"\""));
+
+    let info_rows = super::libsql::query(cfg, &format!("PRAGMA table_info({tq})"), vec![])
+        .await
+        .map(|r| r.rows)
+        .map_err(|e| format!("PRAGMA table_info failed: {e}"))?;
+    let fk_rows = super::libsql::query(cfg, &format!("PRAGMA foreign_key_list({tq})"), vec![])
+        .await
+        .map(|r| r.rows)
+        .unwrap_or_default();
+
+    Ok(parse_column_structure_from_pragma_results(info_rows, fk_rows, "main"))
 }
 
 async fn get_column_structure_pg(

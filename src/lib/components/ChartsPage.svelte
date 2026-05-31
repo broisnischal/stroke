@@ -205,6 +205,14 @@
   }
 </script>
 
+{#if !connection}
+  <div class="flex min-h-0 flex-1 items-center justify-center bg-panel">
+    <div class="flex flex-col items-center gap-2 text-center">
+      <BarChart2 class="size-8 text-muted-foreground/25" />
+      <p class="text-ui-sm text-muted-foreground">Connect to a database to view saved charts</p>
+    </div>
+  </div>
+{:else}
 <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
   <!-- ── Header bar ────────────────────────────────────────────────────── -->
   <div
@@ -611,3 +619,4 @@
     {/if}
   </div>
 </div>
+{/if}

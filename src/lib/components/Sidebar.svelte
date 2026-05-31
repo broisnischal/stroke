@@ -598,7 +598,7 @@
             </button>
             {#if tablesOpen}
               <ul bind:this={tableListEl} class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
-                {#if regularTables.length === 0}
+                {#if regularTables.length === 0 && tables.length > 0}
                   <li
                     class="flex w-full flex-col items-center gap-2 px-4 py-8 text-center"
                   >

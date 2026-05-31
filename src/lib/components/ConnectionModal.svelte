@@ -1,112 +1,118 @@
 <script>
   import { untrack } from 'svelte'
-  import X         from '@lucide/svelte/icons/x'
-  import Clock     from '@lucide/svelte/icons/clock'
-  import Loader    from '@lucide/svelte/icons/loader'
-  import Plus      from '@lucide/svelte/icons/plus'
+  import X            from '@lucide/svelte/icons/x'
+  import Clock        from '@lucide/svelte/icons/clock'
+  import Loader2      from '@lucide/svelte/icons/loader-2'
+  import Plus         from '@lucide/svelte/icons/plus'
   import CheckCircle2 from '@lucide/svelte/icons/check-circle-2'
   import AlertCircle  from '@lucide/svelte/icons/alert-circle'
-  import Link2        from '@lucide/svelte/icons/link-2'
   import Trash2       from '@lucide/svelte/icons/trash-2'
-  import ChevronRight from '@lucide/svelte/icons/chevron-right'
+  import Database     from '@lucide/svelte/icons/database'
+  import HardDrive    from '@lucide/svelte/icons/hard-drive'
+  import Zap          from '@lucide/svelte/icons/zap'
+  import Globe        from '@lucide/svelte/icons/globe'
+  import Cloud        from '@lucide/svelte/icons/cloud'
+  import BarChart2    from '@lucide/svelte/icons/bar-chart-2'
+  import CloudflareLogin from './CloudflareLogin.svelte'
   import {
     testPostgresConnection, connectPostgres,
     testSqliteConnection,   connectSqlite,
     testMysqlConnection,    connectMysql,
     testD1Connection,       connectD1,
     testLibSqlConnection,   connectLibSql,
+    cloudflareListAccounts, cloudflareListD1Databases,
   } from '$lib/api.js'
   import {
     loadSavedConnections, upsertConnection, removeConnection,
     newConnectionId, getLastConnectionId, setLastConnectionId,
   } from '$lib/stores/connections.js'
   import { Input }      from '$lib/components/ui/input/index.js'
-  import { Label }      from '$lib/components/ui/label/index.js'
   import { Checkbox }   from '$lib/components/ui/checkbox/index.js'
   import { ScrollArea } from '$lib/components/ui/scroll-area/index.js'
   import * as Dialog    from '$lib/components/ui/dialog/index.js'
+  import * as Select    from '$lib/components/ui/select/index.js'
   import { cn }         from '$lib/utils.js'
   import { parseConnectionUri } from '$lib/connection-uri.js'
 
   let {
     open = $bindable(false),
-    /** @param {import('$lib/stores/connections.js').SavedConnection} conn @param {string} id */
     onconnected = (conn, id) => {},
   } = $props()
 
-  // ── Driver catalogue ──────────────────────────────────────────────────────────
   const CATEGORIES = [
     {
       label: 'Relational',
       drivers: [
-        { id: 'postgres', label: 'PostgreSQL', desc: 'Open-source relational DB', color: '#3b82f6', emoji: '🐘' },
-        { id: 'mysql',    label: 'MySQL',      desc: 'Popular relational DB',     color: '#f97316', emoji: '🐬' },
+        { id: 'postgres', label: 'PostgreSQL',      desc: 'Open-source relational database' },
+        { id: 'mysql',    label: 'MySQL',            desc: 'Popular relational database' },
       ],
     },
     {
-      label: 'SQLite Family',
+      label: 'SQLite',
       drivers: [
-        { id: 'sqlite',        label: 'SQLite',         desc: 'Local file database',         color: '#22c55e', emoji: '📁' },
-        { id: 'sqlite-memory', label: 'In-Memory',      desc: 'Temporary in-memory DB',      color: '#10b981', emoji: '⚡' },
-        { id: 'libsql',        label: 'Turso / LibSQL', desc: 'Serverless SQLite edge DB',   color: '#a855f7', emoji: '🌐' },
+        { id: 'sqlite',        label: 'SQLite',           desc: 'Local file-based database' },
+        { id: 'sqlite-memory', label: 'In-Memory SQLite', desc: 'Ephemeral, nothing on disk' },
+        { id: 'libsql',        label: 'Turso / LibSQL',   desc: 'Serverless SQLite at the edge' },
       ],
     },
     {
-      label: 'Cloud & Edge',
+      label: 'Cloud',
       drivers: [
-        { id: 'd1',       label: 'Cloudflare D1',  desc: 'Edge SQLite via REST API', color: '#f59e0b', emoji: '☁️' },
-        { id: 'bigquery', label: 'BigQuery',        desc: 'Google analytics warehouse', color: '#4285f4', emoji: '🔵', soon: true },
+        { id: 'd1',       label: 'Cloudflare D1', desc: 'Edge SQLite via REST API' },
+        { id: 'bigquery', label: 'BigQuery',       desc: 'Google analytics warehouse', soon: true },
       ],
     },
   ]
 
   const ALL_DRIVERS = CATEGORIES.flatMap(c => c.drivers)
-
   function driverById(id) { return ALL_DRIVERS.find(d => d.id === id) ?? ALL_DRIVERS[0] }
 
-  // ── State ─────────────────────────────────────────────────────────────────────
-  /** @type {import('$lib/stores/connections.js').SavedConnection[]} */
   let saved      = $state(loadSavedConnections().sort((a, b) => (b.lastConnectedAt ?? 0) - (a.lastConnectedAt ?? 0)))
   let lastId     = $state(getLastConnectionId())
-  /** @type {string|null} */
-  let editingId  = $state(null)
+  let editingId  = $state(/** @type {string|null} */ (null))
   let connecting = $state(/** @type {string|null} */ (null))
   let testing    = $state(false)
   let error      = $state('')
   let testOk     = $state(false)
-  let showSaved  = $state(true)
 
-  let dbType     = $state('postgres')
-  let name       = $state('Local PostgreSQL')
-  let host       = $state('127.0.0.1')
-  let port       = $state('5432')
-  let database   = $state('postgres')
-  let user       = $state('postgres')
-  let password   = $state('')
-  let ssl        = $state(false)
-  let filePath   = $state('')
-  let accountId  = $state('')
-  let databaseId = $state('')
-  let apiToken   = $state('')
-  let libsqlUrl  = $state('')
+  let dbType      = $state('postgres')
+  let name        = $state('Local PostgreSQL')
+  let host        = $state('127.0.0.1')
+  let port        = $state('5432')
+  let database    = $state('postgres')
+  let user        = $state('postgres')
+  let password    = $state('')
+  let ssl         = $state(false)
+  let filePath    = $state('')
+  let accountId   = $state('')
+  let databaseId  = $state('')
+  let apiToken    = $state('')
+  let libsqlUrl   = $state('')
   let libsqlToken = $state('')
   let connectionUri = $state('')
-  let uriHint      = $state('')
+  let uriHint       = $state('')
+
+  let d1DiscoverPhase     = $state(/** @type {'idle'|'loading'|'done'|'error'} */ ('idle'))
+  let d1DiscoverError     = $state('')
+  let d1Accounts          = $state(/** @type {Array<{id:string,name:string}>} */ ([]))
+  let d1SelectedAccountId = $state('')
+  let d1Databases         = $state(/** @type {Array<{uuid:string,name:string,num_tables?:number}>} */ ([]))
+  let d1DbLoadPhase       = $state(/** @type {'idle'|'loading'} */ ('idle'))
 
   const DEFAULTS = {
-    postgres:       { name: 'Local PostgreSQL', host: '127.0.0.1', port: '5432', database: 'postgres', user: 'postgres' },
-    mysql:          { name: 'Local MySQL',       host: '127.0.0.1', port: '3306', database: 'mysql',    user: 'root' },
-    sqlite:         { name: 'Local SQLite',      filePath: '' },
-    'sqlite-memory':{ name: 'In-Memory SQLite',  filePath: ':memory:' },
-    libsql:         { name: 'My Turso DB',       libsqlUrl: '', libsqlToken: '' },
-    d1:             { name: 'Cloudflare D1',     accountId: '', databaseId: '', apiToken: '' },
+    postgres:        { name: 'Local PostgreSQL', host: '127.0.0.1', port: '5432', database: 'postgres', user: 'postgres' },
+    mysql:           { name: 'Local MySQL',       host: '127.0.0.1', port: '3306', database: 'mysql',    user: 'root' },
+    sqlite:          { name: 'Local SQLite',      filePath: '' },
+    'sqlite-memory': { name: 'In-Memory SQLite',  filePath: ':memory:' },
+    libsql:          { name: 'My Turso DB',       libsqlUrl: '', libsqlToken: '' },
+    d1:              { name: 'Cloudflare D1',     accountId: '', databaseId: '', apiToken: '' },
   }
 
+  const activeDriver = $derived(ALL_DRIVERS.find(d => d.id === dbType) ?? ALL_DRIVERS[0])
+
   function formPayload() {
-    if (dbType === 'sqlite' || dbType === 'sqlite-memory') {
-      const fp = dbType === 'sqlite-memory' ? ':memory:' : filePath
-      return { type: 'sqlite', name, filePath: fp }
-    }
+    if (dbType === 'sqlite' || dbType === 'sqlite-memory')
+      return { type: 'sqlite', name, filePath: dbType === 'sqlite-memory' ? ':memory:' : filePath }
     if (dbType === 'libsql') return { type: 'libsql', name, url: libsqlUrl, authToken: libsqlToken || undefined }
     if (dbType === 'd1')     return { type: 'd1', name, accountId, databaseId, apiToken }
     if (dbType === 'mysql')  return { type: 'mysql', name, host, port, database, user, password, ssl }
@@ -117,38 +123,31 @@
     editingId = conn?.id ?? null
     if (conn) {
       const t = conn.type === 'sqlite' && conn.filePath === ':memory:' ? 'sqlite-memory' : (conn.type ?? 'postgres')
-      dbType     = t
-      name       = conn.name ?? ''
-      host       = conn.host ?? '127.0.0.1'
-      port       = String(conn.port ?? 5432)
-      database   = conn.database ?? 'postgres'
-      user       = conn.user ?? 'postgres'
-      password   = conn.password ?? ''
-      ssl        = Boolean(conn.ssl)
-      filePath   = conn.filePath ?? ''
-      accountId  = conn.accountId ?? ''
-      databaseId = conn.databaseId ?? ''
-      apiToken   = conn.apiToken ?? ''
-      libsqlUrl  = conn.url ?? ''
-      libsqlToken = conn.authToken ?? ''
+      dbType = t; name = conn.name ?? ''; host = conn.host ?? '127.0.0.1'
+      port = String(conn.port ?? 5432); database = conn.database ?? 'postgres'
+      user = conn.user ?? 'postgres'; password = conn.password ?? ''; ssl = Boolean(conn.ssl)
+      filePath = conn.filePath ?? ''; accountId = conn.accountId ?? ''
+      databaseId = conn.databaseId ?? ''; apiToken = conn.apiToken ?? ''
+      libsqlUrl = conn.url ?? ''; libsqlToken = conn.authToken ?? ''
     } else {
-      const d = DEFAULTS.postgres
-      dbType = 'postgres'; name = d.name; host = d.host; port = d.port
-      database = d.database; user = d.user; password = ''; ssl = false
+      dbType = 'postgres'; name = 'Local PostgreSQL'; host = '127.0.0.1'; port = '5432'
+      database = 'postgres'; user = 'postgres'; password = ''; ssl = false
       filePath = ''; accountId = ''; databaseId = ''; apiToken = ''
       libsqlUrl = ''; libsqlToken = ''
     }
     error = ''; testOk = false; connectionUri = ''; uriHint = ''
+    d1Reset()
   }
 
   function switchDriver(id) {
     dbType = id
     const d = DEFAULTS[id] ?? DEFAULTS.postgres
-    if ([...Object.values(DEFAULTS).map(v => v.name)].includes(name)) name = d.name
+    if (Object.values(DEFAULTS).map(v => v.name).includes(name)) name = d.name
     if (id === 'postgres') port = '5432'
     if (id === 'mysql')    port = '3306'
     if (id === 'sqlite-memory') filePath = ':memory:'
     error = ''; testOk = false; connectionUri = ''; uriHint = ''
+    if (id !== 'd1') d1Reset()
   }
 
   function applyConnectionUri() {
@@ -169,7 +168,7 @@
   function connDetail(conn) {
     if (conn.type === 'sqlite') return conn.filePath === ':memory:' ? 'in-memory' : (conn.filePath || '—')
     if (conn.type === 'libsql') return conn.url || '—'
-    if (conn.type === 'd1')     return `${conn.accountId?.slice(0,8) ?? ''}…`
+    if (conn.type === 'd1')     return conn.accountId?.slice(0, 8) ? `${conn.accountId.slice(0,8)}…` : '—'
     return `${conn.host ?? ''}/${conn.database ?? ''}`
   }
 
@@ -188,7 +187,6 @@
       saved  = loadSavedConnections().sort((a, b) => (b.lastConnectedAt ?? 0) - (a.lastConnectedAt ?? 0))
       lastId = getLastConnectionId()
       resetForm(null)
-      showSaved = saved.length > 0
     })
   })
 
@@ -238,7 +236,6 @@
       else if (payload.type === 'libsql') await connectLibSql(payload)
       else if (payload.type === 'mysql') await connectMysql(payload)
       else await connectPostgres(payload)
-
       const existing = editingId ? saved.find(s => s.id === editingId) : null
       const id = existing?.id ?? newConnectionId()
       const saved_conn = {
@@ -257,323 +254,442 @@
 
   const canTest = $derived(dbType !== 'bigquery')
   const isBusy  = $derived(testing || !!connecting)
+
+  async function d1Discover() {
+    if (!apiToken.trim()) { d1DiscoverError = 'Enter your API token first.'; return }
+    d1DiscoverPhase = 'loading'; d1DiscoverError = ''
+    d1Accounts = []; d1Databases = []; d1SelectedAccountId = ''; accountId = ''; databaseId = ''
+    try {
+      d1Accounts = await cloudflareListAccounts(apiToken)
+      d1DiscoverPhase = 'done'
+      if (d1Accounts.length === 1) await d1SelectAccount(d1Accounts[0].id)
+    } catch (e) { d1DiscoverPhase = 'error'; d1DiscoverError = String(e) }
+  }
+
+  async function d1SelectAccount(id) {
+    d1SelectedAccountId = id; accountId = id; d1Databases = []; databaseId = ''; d1DbLoadPhase = 'loading'
+    try { d1Databases = await cloudflareListD1Databases(apiToken, id) }
+    catch (e) { d1DiscoverError = String(e) }
+    finally { d1DbLoadPhase = 'idle' }
+  }
+
+  function d1Reset() {
+    d1DiscoverPhase = 'idle'; d1DiscoverError = ''; d1Accounts = []
+    d1Databases = []; d1SelectedAccountId = ''; d1DbLoadPhase = 'idle'
+  }
+
+  /** Shared label style */
+  const lbl = 'mb-1.5 block text-xs font-medium text-muted-foreground'
+  /** Shared input class — full width, consistent height */
+  const inp = 'h-9 w-full text-sm'
+  /** Group divider */
+  const divider = 'border-t border-border/50 my-1'
 </script>
+
+<!-- Driver icon, monochrome -->
+{#snippet dicon(id, cls = 'size-4')}
+  {#if id === 'postgres'}           <Database  class="{cls} shrink-0 text-muted-foreground" />
+  {:else if id === 'mysql'}         <Database  class="{cls} shrink-0 text-muted-foreground" />
+  {:else if id === 'sqlite'}        <HardDrive class="{cls} shrink-0 text-muted-foreground" />
+  {:else if id === 'sqlite-memory'} <Zap       class="{cls} shrink-0 text-muted-foreground" />
+  {:else if id === 'libsql'}        <Globe     class="{cls} shrink-0 text-muted-foreground" />
+  {:else if id === 'd1'}            <Cloud     class="{cls} shrink-0 text-muted-foreground" />
+  {:else}                           <BarChart2 class="{cls} shrink-0 text-muted-foreground" />{/if}
+{/snippet}
 
 <Dialog.Root bind:open>
   <Dialog.Content
     showCloseButton={false}
-    class="flex max-h-[min(90vh,800px)] w-[min(900px,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden rounded-2xl border border-border/60 bg-background p-0 shadow-2xl sm:max-w-[900px]"
+    class="flex max-h-[min(90vh,820px)] w-[min(880px,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden rounded-xl border border-border bg-background p-0 shadow-2xl"
   >
-    <div class="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[260px_minmax(0,1fr)]">
+    <div class="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[220px_minmax(0,1fr)]">
 
-      <!-- ── Left sidebar ─────────────────────────────────────────────────── -->
-      <aside class="flex min-h-0 flex-col border-b border-border/50 bg-muted/[0.03] md:border-b-0 md:border-r md:border-border/50">
+      <!-- ══════════════ LEFT sidebar ══════════════════════════════ -->
+      <aside class="flex min-h-0 flex-col border-b border-border md:border-b-0 md:border-r">
 
-        <!-- Header -->
         <div class="shrink-0 px-4 py-4">
-          <h2 class="text-sm font-semibold tracking-tight text-foreground">Connect</h2>
-          <p class="mt-0.5 text-[11px] text-muted-foreground/60">Select or add a database connection</p>
+          <p class="text-sm font-semibold text-foreground">Connect</p>
+          <p class="mt-0.5 text-[11px] text-muted-foreground">Select or add a connection</p>
         </div>
 
         <ScrollArea class="min-h-0 flex-1 px-2 pb-2">
-          <!-- New connection button -->
+
+          <!-- New connection -->
           <button
             type="button"
             class={cn(
-              "mb-1 flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-xs font-medium transition-colors",
+              "mb-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-[13px] font-medium transition-colors",
               !editingId
-                ? "bg-accent ring-1 ring-border/40 text-foreground"
-                : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                ? "bg-accent text-foreground"
+                : "text-muted-foreground hover:bg-accent hover:text-foreground"
             )}
             onclick={() => resetForm(null)}
           >
-            <div class={cn(
-              "flex size-7 shrink-0 items-center justify-center rounded-lg border transition-colors",
-              !editingId ? "border-border/60 bg-background/60" : "border-dashed border-border/50"
-            )}>
-              <Plus class="size-3.5" />
-            </div>
+            <Plus class="size-3.5 shrink-0" />
             New connection
           </button>
 
-          <!-- Saved connections -->
           {#if saved.length > 0}
-            <div class="mb-1 flex items-center gap-1.5 px-2 pt-2 pb-1">
-              <span class="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/40">Recent</span>
-              <span class="rounded-full bg-muted px-1 font-mono text-[9px] text-muted-foreground/50">{saved.length}</span>
-            </div>
-            <div class="flex flex-col gap-0.5">
-              {#each saved as conn (conn.id)}
-                {@const d = driverById(conn.type === 'sqlite' && conn.filePath === ':memory:' ? 'sqlite-memory' : conn.type)}
-                {@const isSelected = conn.id === editingId}
-                {@const isBusy2 = connecting === conn.id}
-                <div
-                  class={cn(
-                    "group relative flex cursor-pointer items-center gap-2.5 rounded-xl px-3 py-2 transition-colors",
-                    isSelected ? "bg-accent ring-1 ring-border/40" : "hover:bg-accent/50"
-                  )}
-                  role="button" tabindex="0"
-                  onclick={() => resetForm(conn)}
-                  onkeydown={(e) => e.key === 'Enter' && resetForm(conn)}
-                >
-                  <div class="flex size-7 shrink-0 items-center justify-center rounded-lg text-[14px]"
-                    style="background:{d.color}15; box-shadow: inset 0 0 0 1px {d.color}30"
-                  >{d.emoji}</div>
+            <p class="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/40">
+              Recent
+            </p>
+            {#each saved as conn (conn.id)}
+              {@const isSel  = conn.id === editingId}
+              {@const busy2  = connecting === conn.id}
+              {@const cid    = conn.type === 'sqlite' && conn.filePath === ':memory:' ? 'sqlite-memory' : conn.type}
+              <div
+                class={cn(
+                  "group flex cursor-pointer items-center gap-2.5 rounded-md px-3 py-2 transition-colors",
+                  isSel ? "bg-accent" : "hover:bg-accent"
+                )}
+                role="button" tabindex="0"
+                onclick={() => resetForm(conn)}
+                onkeydown={(e) => e.key === 'Enter' && resetForm(conn)}
+              >
+                {@render dicon(cid, 'size-3.5')}
 
-                  <div class="min-w-0 flex-1">
-                    <div class="flex items-center gap-1.5">
-                      <span class="min-w-0 truncate text-[12px] font-medium leading-snug text-foreground">{conn.name}</span>
-                      {#if conn.id === lastId}
-                        <span class="shrink-0 rounded-full px-1.5 py-px text-[8px] font-bold uppercase tracking-wider" style="background:{d.color}25;color:{d.color}">last</span>
-                      {/if}
-                    </div>
-                    <p class="mt-px truncate font-mono text-[10px] text-muted-foreground/50">{connDetail(conn)}</p>
-                    <div class="mt-0.5 flex h-4 items-center">
-                      <span class="text-[10px] text-muted-foreground/35 group-hover:hidden">{relativeTime(conn.lastConnectedAt)}</span>
-                      <div class="hidden items-center gap-1 group-hover:flex">
-                        <button type="button"
-                          class="inline-flex h-5 items-center rounded-md px-2 text-[10px] font-semibold text-white transition-opacity hover:opacity-80 disabled:opacity-50"
-                          style="background:{d.color}"
-                          disabled={!!connecting}
-                          onclick={(e) => { e.stopPropagation(); void connectWith(conn) }}
-                        >
-                          {#if isBusy2}<Loader class="size-2.5 animate-spin" />{:else}Connect{/if}
-                        </button>
-                        <button type="button"
-                          class="inline-flex size-5 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:text-destructive"
-                          onclick={(e) => { e.stopPropagation(); handleDelete(conn.id) }}
-                        ><Trash2 class="size-3" /></button>
-                      </div>
-                    </div>
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-1.5">
+                    <p class="min-w-0 truncate text-[13px] font-medium leading-none text-foreground">{conn.name}</p>
+                    {#if conn.id === lastId}
+                      <span class="shrink-0 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/40">last</span>
+                    {/if}
                   </div>
+                  <p class="mt-0.5 truncate font-mono text-[10px] text-muted-foreground/50">{connDetail(conn)}</p>
                 </div>
-              {/each}
-            </div>
+
+                <div class="hidden shrink-0 items-center gap-1 group-hover:flex">
+                  <button type="button"
+                    class="rounded border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+                    disabled={!!connecting}
+                    onclick={(e) => { e.stopPropagation(); void connectWith(conn) }}
+                  >
+                    {#if busy2}<Loader2 class="size-2.5 animate-spin inline" />{:else}Connect{/if}
+                  </button>
+                  <button type="button"
+                    class="rounded p-0.5 text-muted-foreground/30 transition-colors hover:text-destructive"
+                    onclick={(e) => { e.stopPropagation(); handleDelete(conn.id) }}
+                  ><Trash2 class="size-3" /></button>
+                </div>
+              </div>
+            {/each}
+
           {:else}
-            <div class="mx-2 my-1 flex flex-col items-center gap-2 rounded-xl border border-dashed border-border/40 px-4 py-8 text-center">
-              <Clock class="size-5 text-muted-foreground/25" />
-              <p class="text-[11px] text-muted-foreground/50">No saved connections yet</p>
+            <div class="mx-1 mt-2 flex flex-col items-center gap-2 rounded-md border border-dashed border-border/40 px-3 py-8 text-center">
+              <Clock class="size-4 text-muted-foreground/25" />
+              <p class="text-[11px] text-muted-foreground/40">No saved connections</p>
             </div>
           {/if}
         </ScrollArea>
       </aside>
 
-      <!-- ── Right: form ─────────────────────────────────────────────────── -->
+      <!-- ══════════════ RIGHT form ════════════════════════════════ -->
       <div class="flex min-h-0 min-w-0 flex-col">
         <ScrollArea class="min-h-0 flex-1">
-          <div class="flex flex-col gap-5 px-6 py-5">
+          <div class="flex flex-col gap-5 px-7 py-6">
 
-            <!-- DB type picker — categories -->
-            <div class="flex flex-col gap-3">
-              {#each CATEGORIES as cat}
-                <div>
-                  <p class="mb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/40">{cat.label}</p>
-                  <div class="grid gap-2" style="grid-template-columns: repeat(auto-fill, minmax(110px, 1fr))">
-                    {#each cat.drivers as d (d.id)}
-                      {@const active = dbType === d.id}
-                      <button
-                        type="button"
-                        class={cn(
-                          "relative flex flex-col gap-1.5 rounded-xl border px-3 py-3 text-left transition-all",
-                          d.soon ? "cursor-not-allowed opacity-40" : "cursor-pointer",
-                          active
-                            ? "border-border/70 bg-card shadow-sm"
-                            : "border-transparent bg-muted/25 hover:bg-muted/50 hover:border-border/30"
-                        )}
-                        onclick={() => !d.soon && switchDriver(d.id)}
-                        disabled={d.soon}
-                      >
-                        {#if active}
-                          <span class="absolute inset-x-3 bottom-0 h-[2px] rounded-full" style="background:{d.color}"></span>
-                        {/if}
-                        <span class="text-lg leading-none">{d.emoji}</span>
-                        <div>
-                          <div class="flex items-center gap-1">
-                            <span class={cn("text-[11px] font-semibold leading-tight", active ? "text-foreground" : "text-foreground/70")}>{d.label}</span>
+            <!-- Database type -->
+            <div>
+              <label class={lbl}>Database</label>
+              <Select.Root
+                type="single"
+                value={dbType}
+                onValueChange={(v) => v && switchDriver(v)}
+              >
+                <Select.Trigger class="h-9 w-full text-sm">
+                  <div class="flex items-center gap-2">
+                    {@render dicon(dbType, 'size-[14px]')}
+                    <span class="text-foreground">{activeDriver.label}</span>
+                  </div>
+                </Select.Trigger>
+                <Select.Content class="w-[var(--bits-select-anchor-width)] min-w-[var(--bits-select-anchor-width)] p-1">
+                  {#each CATEGORIES as cat, i}
+                    {#if i > 0}<Select.Separator class="my-1" />{/if}
+                    <Select.Group>
+                      <Select.GroupHeading class="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">
+                        {cat.label}
+                      </Select.GroupHeading>
+                      {#each cat.drivers as d (d.id)}
+                        <Select.Item value={d.id} label={d.label} disabled={!!d.soon} class="rounded-sm py-1.5">
+                          <div class="flex items-center gap-2.5 pl-0.5">
+                            {@render dicon(d.id, 'size-[14px]')}
+                            <div class="min-w-0 flex-1">
+                              <p class="text-sm leading-none">{d.label}</p>
+                              <p class="mt-0.5 text-[11px] text-muted-foreground/60">{d.desc}</p>
+                            </div>
                             {#if d.soon}
-                              <span class="rounded bg-muted px-1 text-[8px] font-bold uppercase tracking-wide text-muted-foreground/60">soon</span>
+                              <span class="mr-5 rounded border border-border px-1.5 py-px text-[9px] uppercase tracking-wide text-muted-foreground/40">Soon</span>
                             {/if}
                           </div>
-                          <p class="mt-0.5 text-[9px] leading-tight text-muted-foreground/50">{d.desc}</p>
-                        </div>
-                      </button>
-                    {/each}
-                  </div>
-                </div>
-              {/each}
+                        </Select.Item>
+                      {/each}
+                    </Select.Group>
+                  {/each}
+                </Select.Content>
+              </Select.Root>
             </div>
 
             <!-- Connection name -->
-            <div class="flex flex-col gap-1.5">
-              <Label for="cn-name" class="text-xs font-medium text-foreground/80">Connection name</Label>
-              <Input id="cn-name" bind:value={name} class="h-9 bg-muted/30 text-sm focus-visible:bg-background" />
+            <div>
+              <label for="cn-name" class={lbl}>Connection name</label>
+              <Input id="cn-name" bind:value={name} class={inp} />
             </div>
 
-            <!-- ── PostgreSQL ── -->
+            <!-- ════ PostgreSQL ════════════════════════════════════ -->
             {#if dbType === 'postgres'}
-              <div class="flex flex-col gap-1.5">
-                <div class="flex items-center gap-1.5">
-                  <Link2 class="size-3 text-muted-foreground/50" />
-                  <Label for="cn-uri" class="text-xs font-medium text-muted-foreground/70">
-                    Connection string <span class="font-normal opacity-60">(optional)</span>
-                  </Label>
-                </div>
+
+              <div class={divider}></div>
+
+              <!-- Connection string -->
+              <div>
+                <label for="cn-uri" class={lbl}>Connection string <span class="font-normal opacity-60">(optional)</span></label>
                 <div class="flex gap-2">
                   <Input id="cn-uri" bind:value={connectionUri}
                     placeholder="postgresql://user:pass@host:5432/db"
-                    class="h-9 flex-1 bg-muted/30 font-mono text-xs focus-visible:bg-background"
+                    class="h-9 flex-1 font-mono text-xs"
                     onpaste={() => requestAnimationFrame(applyConnectionUri)}
                     onkeydown={(e) => e.key === 'Enter' && (e.preventDefault(), applyConnectionUri())}
                   />
-                  <button type="button" class="h-9 shrink-0 rounded-md border border-border/50 bg-muted/30 px-3 text-xs text-muted-foreground transition-colors hover:bg-muted/60 disabled:opacity-40" onclick={applyConnectionUri} disabled={!connectionUri.trim()}>Parse</button>
+                  <button type="button"
+                    class="h-9 shrink-0 rounded-lg border border-border px-3.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+                    onclick={applyConnectionUri} disabled={!connectionUri.trim()}>Parse</button>
                 </div>
                 {#if uriHint}
-                  <p class={cn("flex items-center gap-1 text-[11px]", uriHint.includes('Could') || uriHint.includes('Expected') ? 'text-destructive' : 'text-emerald-500')}>
-                    {#if uriHint.includes('Could') || uriHint.includes('Expected')}<AlertCircle class="size-3 shrink-0" />{:else}<CheckCircle2 class="size-3 shrink-0" />{/if}
+                  <p class={cn("mt-1.5 flex items-center gap-1.5 text-xs",
+                    uriHint.includes('Could') || uriHint.includes('Expected') ? 'text-destructive' : 'text-emerald-500')}>
+                    {#if uriHint.includes('Could') || uriHint.includes('Expected')}
+                      <AlertCircle class="size-3 shrink-0" />
+                    {:else}
+                      <CheckCircle2 class="size-3 shrink-0" />
+                    {/if}
                     {uriHint}
                   </p>
                 {/if}
               </div>
-              <div class="flex items-center gap-2">
-                <div class="h-px flex-1 bg-border/30"></div>
-                <span class="text-[10px] font-medium uppercase tracking-widest text-muted-foreground/35">or fill manually</span>
-                <div class="h-px flex-1 bg-border/30"></div>
+
+              <div class={divider}></div>
+
+              <!-- Host + Port -->
+              <div class="grid grid-cols-[1fr_80px] gap-3">
+                <div>
+                  <label for="cn-host" class={lbl}>Host</label>
+                  <Input id="cn-host" bind:value={host} class={inp} />
+                </div>
+                <div>
+                  <label for="cn-port" class={lbl}>Port</label>
+                  <Input id="cn-port" bind:value={port} type="number" class={inp} />
+                </div>
               </div>
-              <div class="grid grid-cols-[1fr_90px] gap-2">
-                <div class="flex flex-col gap-1.5"><Label for="cn-host" class="text-xs font-medium text-foreground/75">Host</Label><Input id="cn-host" bind:value={host} class="h-9 bg-muted/30 text-sm focus-visible:bg-background" /></div>
-                <div class="flex flex-col gap-1.5"><Label for="cn-port" class="text-xs font-medium text-foreground/75">Port</Label><Input id="cn-port" type="number" bind:value={port} class="h-9 bg-muted/30 text-sm focus-visible:bg-background" /></div>
+
+              <!-- Database / User / Password -->
+              <div>
+                <label for="cn-db" class={lbl}>Database</label>
+                <Input id="cn-db" bind:value={database} class={inp} />
               </div>
-              <div class="grid grid-cols-3 gap-2">
-                <div class="flex flex-col gap-1.5"><Label for="cn-db" class="text-xs font-medium text-foreground/75">Database</Label><Input id="cn-db" bind:value={database} class="h-9 bg-muted/30 text-sm focus-visible:bg-background" /></div>
-                <div class="flex flex-col gap-1.5"><Label for="cn-user" class="text-xs font-medium text-foreground/75">User</Label><Input id="cn-user" bind:value={user} autocomplete="username" class="h-9 bg-muted/30 text-sm focus-visible:bg-background" /></div>
-                <div class="flex flex-col gap-1.5"><Label for="cn-pass" class="text-xs font-medium text-foreground/75">Password</Label><Input id="cn-pass" type="password" bind:value={password} autocomplete="current-password" class="h-9 bg-muted/30 text-sm focus-visible:bg-background" /></div>
+
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label for="cn-user" class={lbl}>Username</label>
+                  <Input id="cn-user" bind:value={user} autocomplete="username" class={inp} />
+                </div>
+                <div>
+                  <label for="cn-pass" class={lbl}>Password</label>
+                  <Input id="cn-pass" bind:value={password} type="password" autocomplete="current-password" class={inp} />
+                </div>
               </div>
-              <label class="flex cursor-pointer items-center gap-2.5 rounded-lg border border-border/40 bg-muted/15 px-3 py-2.5 transition-colors hover:bg-muted/30">
+
+              <div class={divider}></div>
+
+              <!-- SSL -->
+              <label class="flex cursor-pointer items-center gap-3 rounded-lg border border-border/60 px-4 py-3 transition-colors hover:bg-accent/40 select-none">
                 <Checkbox id="cn-ssl" checked={ssl} onCheckedChange={(v) => (ssl = v === true)} />
                 <div>
-                  <p class="text-xs font-medium text-foreground/75">Use SSL / TLS</p>
-                  <p class="text-[11px] text-muted-foreground/55">Enables sslmode=require for encrypted connections</p>
+                  <p class="text-sm font-medium text-foreground">Use SSL / TLS</p>
+                  <p class="text-[11px] text-muted-foreground">Require an encrypted connection</p>
                 </div>
               </label>
 
-            <!-- ── MySQL ── -->
+            <!-- ════ MySQL ══════════════════════════════════════════ -->
             {:else if dbType === 'mysql'}
-              <div class="grid grid-cols-[1fr_90px] gap-2">
-                <div class="flex flex-col gap-1.5"><Label for="cn-mysql-host" class="text-xs font-medium text-foreground/75">Host</Label><Input id="cn-mysql-host" bind:value={host} class="h-9 bg-muted/30 text-sm focus-visible:bg-background" /></div>
-                <div class="flex flex-col gap-1.5"><Label for="cn-mysql-port" class="text-xs font-medium text-foreground/75">Port</Label><Input id="cn-mysql-port" type="number" bind:value={port} class="h-9 bg-muted/30 text-sm focus-visible:bg-background" /></div>
+
+              <div class={divider}></div>
+
+              <div class="grid grid-cols-[1fr_80px] gap-3">
+                <div>
+                  <label for="cn-mysql-host" class={lbl}>Host</label>
+                  <Input id="cn-mysql-host" bind:value={host} class={inp} />
+                </div>
+                <div>
+                  <label for="cn-mysql-port" class={lbl}>Port</label>
+                  <Input id="cn-mysql-port" bind:value={port} type="number" class={inp} />
+                </div>
               </div>
-              <div class="grid grid-cols-3 gap-2">
-                <div class="flex flex-col gap-1.5"><Label for="cn-mysql-db" class="text-xs font-medium text-foreground/75">Database</Label><Input id="cn-mysql-db" bind:value={database} class="h-9 bg-muted/30 text-sm focus-visible:bg-background" /></div>
-                <div class="flex flex-col gap-1.5"><Label for="cn-mysql-user" class="text-xs font-medium text-foreground/75">User</Label><Input id="cn-mysql-user" bind:value={user} autocomplete="username" class="h-9 bg-muted/30 text-sm focus-visible:bg-background" /></div>
-                <div class="flex flex-col gap-1.5"><Label for="cn-mysql-pass" class="text-xs font-medium text-foreground/75">Password</Label><Input id="cn-mysql-pass" type="password" bind:value={password} autocomplete="current-password" class="h-9 bg-muted/30 text-sm focus-visible:bg-background" /></div>
+
+              <div>
+                <label for="cn-mysql-db" class={lbl}>Database</label>
+                <Input id="cn-mysql-db" bind:value={database} class={inp} />
               </div>
-              <label class="flex cursor-pointer items-center gap-2.5 rounded-lg border border-border/40 bg-muted/15 px-3 py-2.5 transition-colors hover:bg-muted/30">
+
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label for="cn-mysql-user" class={lbl}>Username</label>
+                  <Input id="cn-mysql-user" bind:value={user} autocomplete="username" class={inp} />
+                </div>
+                <div>
+                  <label for="cn-mysql-pass" class={lbl}>Password</label>
+                  <Input id="cn-mysql-pass" bind:value={password} type="password" autocomplete="current-password" class={inp} />
+                </div>
+              </div>
+
+              <div class={divider}></div>
+
+              <label class="flex cursor-pointer items-center gap-3 rounded-lg border border-border/60 px-4 py-3 transition-colors hover:bg-accent/40 select-none">
                 <Checkbox id="cn-mysql-ssl" checked={ssl} onCheckedChange={(v) => (ssl = v === true)} />
-                <div><p class="text-xs font-medium text-foreground/75">Use SSL / TLS</p><p class="text-[11px] text-muted-foreground/55">Enables ssl-mode=required for encrypted connections</p></div>
+                <div>
+                  <p class="text-sm font-medium text-foreground">Use SSL / TLS</p>
+                  <p class="text-[11px] text-muted-foreground">Require an encrypted connection</p>
+                </div>
               </label>
 
-            <!-- ── SQLite file ── -->
+            <!-- ════ SQLite ══════════════════════════════════════════ -->
             {:else if dbType === 'sqlite'}
-              <div class="flex flex-col gap-1.5">
-                <Label for="cn-path" class="text-xs font-medium text-foreground/75">File path</Label>
-                <Input id="cn-path" bind:value={filePath} placeholder="/path/to/database.db" class="h-9 bg-muted/30 font-mono text-sm focus-visible:bg-background" />
-                <p class="text-[11px] text-muted-foreground/50">Absolute path to the <code class="rounded bg-muted px-1 font-mono text-[10px]">.db</code> or <code class="rounded bg-muted px-1 font-mono text-[10px]">.sqlite</code> file.</p>
+
+              <div class={divider}></div>
+
+              <div>
+                <label for="cn-path" class={lbl}>File path</label>
+                <Input id="cn-path" bind:value={filePath}
+                  placeholder="/path/to/database.db"
+                  class="h-9 w-full font-mono text-sm" />
+                <p class="mt-1.5 text-[11px] text-muted-foreground/60">
+                  Absolute path to a <code class="font-mono">.db</code> or <code class="font-mono">.sqlite</code> file
+                </p>
               </div>
 
-            <!-- ── SQLite in-memory ── -->
+            <!-- ════ In-Memory ══════════════════════════════════════ -->
             {:else if dbType === 'sqlite-memory'}
-              <div class="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.04] px-4 py-3">
-                <p class="text-[11px] leading-relaxed text-emerald-600/80 dark:text-emerald-400/80">
-                  An in-memory SQLite database — data exists only for this session. Perfect for testing SQL or quick exploration.
-                  No file is created on disk.
+
+              <div class={divider}></div>
+
+              <div class="rounded-lg border border-border/50 bg-muted/20 px-4 py-3.5">
+                <p class="text-sm font-medium text-foreground">Ephemeral in-memory database</p>
+                <p class="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+                  Data exists only while this session is open. Nothing is written to disk —
+                  ideal for testing SQL queries or quick exploration.
                 </p>
               </div>
 
-            <!-- ── LibSQL / Turso ── -->
+            <!-- ════ LibSQL / Turso ════════════════════════════════ -->
             {:else if dbType === 'libsql'}
-              <div class="rounded-xl border border-purple-500/20 bg-purple-500/[0.04] px-4 py-3">
-                <p class="text-[11px] leading-relaxed text-purple-600/80 dark:text-purple-400/80">
-                  Connect to a <strong>Turso</strong> cloud database or any self-hosted <strong>libsql-server</strong>.
-                  Find your database URL and auth token in the Turso dashboard.
-                </p>
-              </div>
-              <div class="flex flex-col gap-1.5">
-                <Label for="cn-libsql-url" class="text-xs font-medium text-foreground/75">Database URL</Label>
+
+              <div class={divider}></div>
+
+              <div>
+                <label for="cn-libsql-url" class={lbl}>Database URL</label>
                 <Input id="cn-libsql-url" bind:value={libsqlUrl}
-                  placeholder="libsql://your-db-name.turso.io"
-                  class="h-9 bg-muted/30 font-mono text-xs focus-visible:bg-background"
-                />
-                <p class="text-[11px] text-muted-foreground/50">Format: <code class="font-mono text-[10px]">libsql://…</code> · <code class="font-mono text-[10px]">https://…</code> · <code class="font-mono text-[10px]">http://localhost:PORT</code></p>
-              </div>
-              <div class="flex flex-col gap-1.5">
-                <Label for="cn-libsql-token" class="text-xs font-medium text-foreground/75">
-                  Auth Token <span class="font-normal opacity-60">(optional for local servers)</span>
-                </Label>
-                <Input id="cn-libsql-token" type="password" bind:value={libsqlToken}
-                  placeholder="eyJhbGciOiJFZERTQSJ9…"
-                  class="h-9 bg-muted/30 font-mono text-xs focus-visible:bg-background"
-                />
+                  placeholder="libsql://your-db.turso.io"
+                  class="h-9 w-full font-mono text-sm" />
+                <p class="mt-1.5 text-[11px] text-muted-foreground/60">
+                  Accepts <code class="font-mono">libsql://</code>, <code class="font-mono">https://</code>, or <code class="font-mono">http://localhost:PORT</code>
+                </p>
               </div>
 
-            <!-- ── Cloudflare D1 ── -->
+              <div>
+                <label for="cn-libsql-token" class={lbl}>
+                  Auth token <span class="font-normal opacity-60">(optional for local servers)</span>
+                </label>
+                <Input id="cn-libsql-token" bind:value={libsqlToken} type="password"
+                  placeholder="eyJhbGciOiJFZERTQSJ9…"
+                  class="h-9 w-full font-mono text-sm" />
+              </div>
+
+            <!-- ════ Cloudflare D1 ═════════════════════════════════ -->
             {:else if dbType === 'd1'}
-              <div class="rounded-xl border border-amber-500/20 bg-amber-500/[0.04] px-4 py-3">
-                <p class="text-[11px] leading-relaxed text-amber-600/80 dark:text-amber-400/80">
-                  Connect to a Cloudflare D1 database via REST API. Find your credentials in the
-                  <strong>Cloudflare Dashboard → Workers & Pages → D1</strong>.
-                </p>
-              </div>
-              <div class="grid grid-cols-2 gap-3">
-                <div class="flex flex-col gap-1.5"><Label for="cn-acct" class="text-xs font-medium text-foreground/75">Account ID</Label><Input id="cn-acct" bind:value={accountId} placeholder="abcdef1234…" class="h-9 bg-muted/30 font-mono text-xs focus-visible:bg-background" /></div>
-                <div class="flex flex-col gap-1.5"><Label for="cn-dbid" class="text-xs font-medium text-foreground/75">Database ID</Label><Input id="cn-dbid" bind:value={databaseId} placeholder="xxxxxxxx-xxxx-…" class="h-9 bg-muted/30 font-mono text-xs focus-visible:bg-background" /></div>
-              </div>
-              <div class="flex flex-col gap-1.5">
-                <Label for="cn-tok" class="text-xs font-medium text-foreground/75">API Token</Label>
-                <Input id="cn-tok" type="password" bind:value={apiToken} placeholder="Cloudflare API token (D1:Edit)" class="h-9 bg-muted/30 text-sm focus-visible:bg-background" />
-              </div>
+
+              <div class={divider}></div>
+
+              <CloudflareLogin
+                onselect={(info) => {
+                  accountId  = info.accountId
+                  databaseId = info.databaseId
+                  apiToken   = info.token
+                  if (!name || name === 'Cloudflare D1') name = info.databaseName
+                }}
+                ondisconnect={() => { accountId = ''; databaseId = ''; apiToken = '' }}
+              />
+
+              <details class="group">
+                <summary class="cursor-pointer list-none select-none text-xs text-muted-foreground/40 hover:text-muted-foreground transition-colors">
+                  <span class="group-open:hidden">↓ Use an API token manually</span>
+                  <span class="hidden group-open:inline">↑ Use an API token manually</span>
+                </summary>
+                <div class="mt-3 flex flex-col gap-3">
+                  <div class="grid grid-cols-2 gap-3">
+                    <div>
+                      <label class={lbl}>Account ID</label>
+                      <Input bind:value={accountId} placeholder="abcdef1234…" class="h-9 w-full font-mono text-xs" />
+                    </div>
+                    <div>
+                      <label class={lbl}>Database ID</label>
+                      <Input bind:value={databaseId} placeholder="xxxxxxxx-xxxx-…" class="h-9 w-full font-mono text-xs" />
+                    </div>
+                  </div>
+                  <div>
+                    <label class={lbl}>API token</label>
+                    <Input bind:value={apiToken} type="password"
+                      placeholder="Cloudflare API token with D1:Edit" class={inp} />
+                  </div>
+                </div>
+              </details>
+
             {/if}
 
           </div>
         </ScrollArea>
 
-        <!-- ── Footer ──────────────────────────────────────────────────── -->
-        <div class="shrink-0 border-t border-border/50 bg-muted/[0.02] px-6 py-4">
+        <!-- ════ Footer ════════════════════════════════════════════ -->
+        <div class="shrink-0 border-t border-border bg-muted/[0.02]">
 
           {#if error}
-            <div class="mb-3 flex items-start gap-2.5 rounded-xl border border-destructive/20 bg-destructive/[0.06] px-3.5 py-2.5">
-              <AlertCircle class="mt-px size-3.5 shrink-0 text-destructive/70" />
-              <p class="text-[11px] leading-relaxed text-destructive/90">{error}</p>
-            </div>
-          {/if}
-          {#if testOk && !error}
-            <div class="mb-3 flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] px-3.5 py-2.5">
-              <CheckCircle2 class="size-3.5 shrink-0 text-emerald-500" />
-              <p class="text-[11px] text-emerald-600 dark:text-emerald-400">Connection successful</p>
+            <div class="flex items-start gap-2.5 border-b border-border/50 px-5 py-3">
+              <AlertCircle class="mt-px size-3.5 shrink-0 text-destructive" />
+              <p class="text-xs leading-relaxed text-destructive">{error}</p>
             </div>
           {/if}
 
-          <div class="flex items-center justify-between gap-3">
+          {#if testOk && !error}
+            <div class="flex items-center gap-2.5 border-b border-border/50 px-5 py-3">
+              <CheckCircle2 class="size-3.5 shrink-0 text-foreground" />
+              <p class="text-xs text-foreground">Connection successful</p>
+            </div>
+          {/if}
+
+          <div class="flex items-center justify-between px-5 py-3">
             <div>
               {#if editingId}
-                <button type="button" class="text-[11px] text-muted-foreground/50 transition-colors hover:text-muted-foreground" onclick={() => resetForm(null)}>
-                  Clear form
-                </button>
+                <button type="button"
+                  class="text-xs text-muted-foreground/40 transition-colors hover:text-muted-foreground"
+                  onclick={() => resetForm(null)}>Clear form</button>
               {/if}
             </div>
             <div class="flex items-center gap-2">
               {#if canTest}
                 <button type="button"
-                  class="inline-flex h-8 items-center gap-1.5 rounded-md border border-border/50 bg-muted/30 px-3.5 text-xs text-muted-foreground transition-colors hover:bg-muted/60 disabled:opacity-40"
+                  class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-4 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
                   onclick={handleTest} disabled={isBusy}
                 >
-                  {#if testing}<Loader class="size-3 animate-spin" />Testing…{:else}Test connection{/if}
+                  {#if testing}<Loader2 class="size-3.5 animate-spin" />Testing…{:else}Test connection{/if}
                 </button>
               {/if}
               <button type="button"
-                class="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-4 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                class="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
                 onclick={handleConnect} disabled={isBusy || dbType === 'bigquery'}
               >
-                {#if connecting === (editingId ?? '__new__')}<Loader class="size-3 animate-spin" />Connecting…{:else}{editingId ? 'Save & connect' : 'Connect'}{/if}
+                {#if connecting === (editingId ?? '__new__')}
+                  <Loader2 class="size-3.5 animate-spin" />Connecting…
+                {:else}
+                  {editingId ? 'Save & connect' : 'Connect'}
+                {/if}
               </button>
             </div>
           </div>
@@ -581,8 +697,7 @@
       </div>
     </div>
 
-    <!-- Close button -->
-    <Dialog.Close class="absolute right-3.5 top-3.5 inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
+    <Dialog.Close class="absolute right-3.5 top-3.5 inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground/40 transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
       <X class="size-4" />
     </Dialog.Close>
   </Dialog.Content>

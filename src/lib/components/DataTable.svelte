@@ -1680,7 +1680,7 @@
           {...props}
           tabindex={-1}
           class={cn(
-            "app-scroll relative overflow-auto bg-panel select-none outline-none [scrollbar-gutter:stable] [contain:layout] [overflow-anchor:none]",
+            "app-scroll relative overflow-auto bg-panel select-none outline-none [scrollbar-gutter:stable] [contain:layout] [overflow-anchor:none] flex flex-col",
             embedded ? "max-h-80" : "min-h-0 flex-1",
             resizingColName && "cursor-col-resize",
           )}
@@ -2473,6 +2473,7 @@
             {/if}
           </table>
           {/if}
+          <div class="pointer-events-none flex-1" aria-hidden="true"></div>
           {#if visibleColumns.length === 0}
             <div
               class="pointer-events-none absolute inset-0 flex items-center justify-center"

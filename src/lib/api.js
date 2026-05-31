@@ -115,6 +115,25 @@ export async function connectD1(config) {
   return inv('connect_d1_db', { config })
 }
 
+/**
+ * List all Cloudflare accounts accessible with the given API token.
+ * @param {string} apiToken
+ * @returns {Promise<Array<{id: string, name: string}>>}
+ */
+export async function cloudflareListAccounts(apiToken) {
+  return inv('cloudflare_list_accounts', { apiToken })
+}
+
+/**
+ * List all D1 databases for a given Cloudflare account.
+ * @param {string} apiToken
+ * @param {string} accountId
+ * @returns {Promise<Array<{uuid: string, name: string, created_at?: string, num_tables?: number}>>}
+ */
+export async function cloudflareListD1Databases(apiToken, accountId) {
+  return inv('cloudflare_list_d1_databases', { apiToken, accountId })
+}
+
 /** @param {{ name: string, url: string, authToken?: string }} config */
 export async function testLibSqlConnection(config) {
   return inv('test_libsql', { config })

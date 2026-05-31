@@ -132,7 +132,7 @@ html[data-os="linux"]   { --window-radius: 8px; }
     -webkit-user-select: text;
   }
 
-  #app :is(.studio-data-table tbody td, .studio-data-table tbody td *) {
+  #app :is(.studio-data-table tbody td input, .studio-data-table tbody td textarea) {
     user-select: text;
     -webkit-user-select: text;
   }

@@ -16,24 +16,58 @@ import { writable } from 'svelte/store'
  * }} Dashboard
  */
 
-const KEY = 'db-studio:dashboards'
-const ACTIVE_KEY = 'db-studio:active-dashboard'
+const KEY = (id) => id ? `db-studio:dashboards:${id}` : 'db-studio:dashboards'
+const ACTIVE_KEY = (id) => id ? `db-studio:active-dashboard:${id}` : 'db-studio:active-dashboard'
 
-/** @returns {Dashboard[]} */
-function load() {
-  try { return JSON.parse(localStorage.getItem(KEY) ?? '[]') } catch { return [] }
+// Tracks the currently active connection scope
+let _connId = ''
+
+/** @param {string} connectionId @returns {Dashboard[]} */
+function loadDashboards(connectionId) {
+  if (!connectionId) return []
+  try {
+    const specific = JSON.parse(localStorage.getItem(KEY(connectionId)) ?? 'null')
+    if (Array.isArray(specific)) return specific
+    // One-time migration: load from legacy global key
+    const global_ = JSON.parse(localStorage.getItem('db-studio:dashboards') ?? '[]')
+    return Array.isArray(global_) ? global_ : []
+  } catch { return [] }
 }
 
-/** @returns {string | null} */
-function loadActiveId() {
-  try { return localStorage.getItem(ACTIVE_KEY) } catch { return null }
+/** @param {string} connectionId @returns {string | null} */
+function loadActiveId(connectionId) {
+  if (!connectionId) return null
+  try {
+    return localStorage.getItem(ACTIVE_KEY(connectionId))
+      ?? localStorage.getItem('db-studio:active-dashboard')
+  } catch { return null }
 }
 
-export const dashboards = writable(load())
-export const activeDashboardId = writable(loadActiveId())
+export const dashboards = writable(/** @type {Dashboard[]} */ ([]))
+export const activeDashboardId = writable(/** @type {string | null} */ (null))
 
-dashboards.subscribe(v => { try { localStorage.setItem(KEY, JSON.stringify(v)) } catch {} })
-activeDashboardId.subscribe(v => { try { if (v) localStorage.setItem(ACTIVE_KEY, v); else localStorage.removeItem(ACTIVE_KEY) } catch {} })
+dashboards.subscribe(v => {
+  if (!_connId) return
+  try { localStorage.setItem(KEY(_connId), JSON.stringify(v)) } catch {}
+})
+activeDashboardId.subscribe(v => {
+  if (!_connId) return
+  try {
+    if (v) localStorage.setItem(ACTIVE_KEY(_connId), v)
+    else localStorage.removeItem(ACTIVE_KEY(_connId))
+  } catch {}
+})
+
+/**
+ * Switch the active connection. Reloads dashboards from the
+ * connection-specific localStorage key. Call whenever the active DB changes.
+ * @param {string} connectionId
+ */
+export function switchDashboardsConnection(connectionId) {
+  _connId = connectionId
+  dashboards.set(loadDashboards(_connId))
+  activeDashboardId.set(loadActiveId(_connId))
+}
 
 /** @param {string} name @returns {Dashboard} */
 export function createDashboard(name) {

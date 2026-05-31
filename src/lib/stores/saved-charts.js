@@ -1,6 +1,7 @@
 /**
  * Persistent store for saved charts, backed by localStorage.
- * Uses Svelte writable stores — subscribe with $ prefix in .svelte files.
+ * Charts are scoped per database connection — switching connections loads
+ * that connection's charts. An empty connectionId shows nothing.
  */
 import { writable } from 'svelte/store'
 
@@ -24,19 +25,39 @@ import { writable } from 'svelte/store'
  * }} SavedChart
  */
 
-const CHARTS_KEY = 'db-studio:saved-charts'
-const GROUPS_KEY = 'db-studio:chart-groups'
+const CHARTS_KEY = (id) => id ? `db-studio:saved-charts:${id}` : 'db-studio:saved-charts'
+const GROUPS_KEY = (id) => id ? `db-studio:chart-groups:${id}` : 'db-studio:chart-groups'
 
-/** @returns {SavedChart[]} */
-function loadCharts() {
-  try { return JSON.parse(localStorage.getItem(CHARTS_KEY) ?? '[]') } catch { return [] }
+// Tracks the currently active connection scope
+let _connId = ''
+
+/**
+ * Load charts for a connection. If the connection-specific key is empty,
+ * migrates charts from the legacy global key that match this connectionId.
+ * @param {string} connectionId
+ * @returns {SavedChart[]}
+ */
+function loadCharts(connectionId) {
+  if (!connectionId) return []
+  try {
+    const specific = JSON.parse(localStorage.getItem(CHARTS_KEY(connectionId)) ?? 'null')
+    if (Array.isArray(specific)) return specific
+    // One-time migration: filter matching charts from the legacy global key
+    const global_ = JSON.parse(localStorage.getItem('db-studio:saved-charts') ?? '[]')
+    return Array.isArray(global_) ? global_.filter(c => c.connectionId === connectionId) : []
+  } catch { return [] }
 }
 
-/** @returns {string[]} */
-function loadGroups() {
+/** @param {string} connectionId @returns {string[]} */
+function loadGroups(connectionId) {
+  if (!connectionId) return ['Default']
   try {
-    const v = JSON.parse(localStorage.getItem(GROUPS_KEY) ?? '[]')
-    return Array.isArray(v) && v.length > 0 ? v : ['Default']
+    const specific = JSON.parse(localStorage.getItem(GROUPS_KEY(connectionId)) ?? 'null')
+    if (Array.isArray(specific) && specific.length > 0) return specific
+    // One-time migration: build groups from migrated charts
+    const charts = loadCharts(connectionId)
+    const groups = [...new Set(charts.map(c => c.group).filter(Boolean))]
+    return groups.length > 0 ? groups : ['Default']
   } catch { return ['Default'] }
 }
 
@@ -45,11 +66,22 @@ function persist(v, key) {
   try { localStorage.setItem(key, JSON.stringify(v)) } catch {}
 }
 
-export const savedCharts = writable(loadCharts())
-export const chartGroups = writable(loadGroups())
+export const savedCharts = writable(/** @type {SavedChart[]} */ ([]))
+export const chartGroups = writable(/** @type {string[]} */ (['Default']))
 
-savedCharts.subscribe(v => persist(v, CHARTS_KEY))
-chartGroups.subscribe(v => persist(v, GROUPS_KEY))
+savedCharts.subscribe(v => { if (_connId) persist(v, CHARTS_KEY(_connId)) })
+chartGroups.subscribe(v => { if (_connId) persist(v, GROUPS_KEY(_connId)) })
+
+/**
+ * Switch the active connection. Reloads charts and groups from the
+ * connection-specific localStorage key. Call whenever the active DB changes.
+ * @param {string} connectionId
+ */
+export function switchChartsConnection(connectionId) {
+  _connId = connectionId
+  savedCharts.set(loadCharts(_connId))
+  chartGroups.set(loadGroups(_connId))
+}
 
 // ── Mutations ─────────────────────────────────────────────────────────────────
 

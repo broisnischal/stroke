@@ -151,8 +151,8 @@
   import { loadRecentTabs, pushRecentTab, removeRecentTab, clearRecentTabs } from '$lib/stores/recent-tabs.js'
   import { installInputShortcuts } from '$lib/input-shortcuts.js'
   import TitleBar from './TitleBar.svelte'
-  import { savedCharts, updateChart } from '$lib/stores/saved-charts.js'
-  import { dashboards, activeDashboardId } from '$lib/stores/dashboards.js'
+  import { savedCharts, updateChart, switchChartsConnection } from '$lib/stores/saved-charts.js'
+  import { dashboards, activeDashboardId, switchDashboardsConnection } from '$lib/stores/dashboards.js'
   import { buildOption } from '$lib/chart-utils.js'
   import { get } from 'svelte/store'
 
@@ -492,9 +492,11 @@
   })
 
   $effect(() => {
-    // Reload recents whenever the active connection changes
+    // Reload recents, charts, and dashboards whenever the active connection changes
     void persistConnectionId
     refreshRecentTabs()
+    switchChartsConnection(persistConnectionId)
+    switchDashboardsConnection(persistConnectionId)
   })
 
   $effect(() => {
@@ -2784,7 +2786,7 @@
           inert={activeTab?.kind !== 'dashboard' || undefined}
         >
           <svelte:boundary failed={tabError}>
-            <DashboardPage />
+            <DashboardPage {connection} />
           </svelte:boundary>
         </div>
       {/if}
