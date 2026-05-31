@@ -189,9 +189,10 @@
     <!-- Account selector -->
     {#if accounts.length > 1}
       <div class="flex flex-col gap-1.5">
-        <label class="text-[11px] font-medium text-foreground/75">Account</label>
+        <label for="cf-account-select" class="text-[11px] font-medium text-foreground/75">Account</label>
         <div class="relative">
           <select
+            id="cf-account-select"
             class="h-9 w-full appearance-none rounded-lg border border-border bg-muted/30 pl-3 pr-8 text-[12px] focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring/30"
             value={selectedAccountId}
             onchange={(e) => selectAccount(e.currentTarget.value)}

@@ -19,7 +19,7 @@
   const PANEL_MIN = 100
   const stored = loadLayout()
   let inputHeight = $state(untrack(() => Math.max(PANEL_MIN, Math.min(stored.sqlEditorHeight ?? 320, 520))))
-  let resizeStart = inputHeight
+  let resizeStart = $state(0)
   /** @type {HTMLElement | null} */
   let pageEl = $state(null)
 
