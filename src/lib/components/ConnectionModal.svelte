@@ -402,7 +402,7 @@
 
             <!-- Database type -->
             <div>
-              <label class={lbl}>Database type</label>
+              <p class={lbl}>Database type</p>
               <Select.Root
                 type="single"
                 value={dbType}
@@ -649,17 +649,17 @@
                 <div class="mt-3 flex flex-col gap-3">
                   <div class="grid grid-cols-2 gap-3">
                     <div>
-                      <label class={lbl}>Account ID</label>
-                      <Input bind:value={accountId} placeholder="abcdef1234…" class="h-8 w-full border-border/25 bg-muted/[0.4] font-mono text-xs placeholder:text-muted-foreground/30 focus-visible:border-border/50 focus-visible:ring-0" />
+                      <label for="cn-d1-account" class={lbl}>Account ID</label>
+                      <Input id="cn-d1-account" bind:value={accountId} placeholder="abcdef1234…" class="h-8 w-full border-border/25 bg-muted/[0.4] font-mono text-xs placeholder:text-muted-foreground/30 focus-visible:border-border/50 focus-visible:ring-0" />
                     </div>
                     <div>
-                      <label class={lbl}>Database ID</label>
-                      <Input bind:value={databaseId} placeholder="xxxxxxxx-xxxx-…" class="h-8 w-full border-border/25 bg-muted/[0.4] font-mono text-xs placeholder:text-muted-foreground/30 focus-visible:border-border/50 focus-visible:ring-0" />
+                      <label for="cn-d1-dbid" class={lbl}>Database ID</label>
+                      <Input id="cn-d1-dbid" bind:value={databaseId} placeholder="xxxxxxxx-xxxx-…" class="h-8 w-full border-border/25 bg-muted/[0.4] font-mono text-xs placeholder:text-muted-foreground/30 focus-visible:border-border/50 focus-visible:ring-0" />
                     </div>
                   </div>
                   <div>
-                    <label class={lbl}>API token</label>
-                    <Input bind:value={apiToken} type="password"
+                    <label for="cn-d1-token" class={lbl}>API token</label>
+                    <Input id="cn-d1-token" bind:value={apiToken} type="password"
                       placeholder="Cloudflare API token with D1:Edit" class={inp} />
                   </div>
                 </div>

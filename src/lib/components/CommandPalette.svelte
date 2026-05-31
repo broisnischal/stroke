@@ -156,7 +156,7 @@
   bind:open
   title="Command menu"
   description="Search tables, schemas, and commands"
-  class="sm:max-w-lg"
+  class="w-[min(540px,calc(100vw-2rem))] sm:max-w-none"
 >
   {#snippet children()}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -173,22 +173,22 @@
       />
 
       {#if page !== 'root'}
-        <div class="order-first flex items-center gap-1.5 border-b border-border px-3 py-2">
+        <div class="order-first flex items-center gap-1.5 border-b border-border/25 px-4 py-2">
           <button
             type="button"
-            class="flex items-center gap-1 rounded text-ui-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none"
+            class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground focus-visible:outline-none"
             onclick={goBack}
           >
-            <ChevronLeft class="size-3.5" />
+            <ChevronLeft class="size-3" />
             Back
           </button>
-          <span class="text-ui-xs text-muted-foreground/40">/</span>
-          <span class="text-ui-xs font-medium text-foreground">{pageLabel[page]}</span>
+          <span class="text-muted-foreground/25 text-[11px]">/</span>
+          <span class="text-[11px] font-medium text-foreground/80">{pageLabel[page]}</span>
         </div>
       {/if}
 
-      <Command.List class="max-h-[min(400px,55vh)]">
-        <Command.Empty>No results.</Command.Empty>
+      <Command.List class="max-h-[min(440px,58vh)]">
+        <Command.Empty class="py-8 text-center text-[12px] text-muted-foreground/40">No results.</Command.Empty>
 
         <!-- ── ROOT PAGE ─────────────────────────────────────────────── -->
         {#if page === 'root'}

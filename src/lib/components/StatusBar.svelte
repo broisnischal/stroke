@@ -28,6 +28,7 @@
   import ChevronsDown from '@lucide/svelte/icons/chevrons-down'
   import Plus         from '@lucide/svelte/icons/plus'
   import MoreHorizontal from '@lucide/svelte/icons/more-horizontal'
+  import GitBranch     from '@lucide/svelte/icons/git-branch'
   import Sun          from '@lucide/svelte/icons/sun'
   import Moon         from '@lucide/svelte/icons/moon'
   import { cn }       from '$lib/utils.js'
@@ -60,6 +61,7 @@
     onopenbackup = /** @type {() => void} */ (() => {}),
     onopenchartspage = /** @type {() => void} */ (() => {}),
     onopendashboard = /** @type {() => void} */ (() => {}),
+    onopendiagrams = /** @type {() => void} */ (() => {}),
     onopensettings = /** @type {() => void} */ (() => {}),
     onopencommand = /** @type {() => void} */ (() => {}),
     ondisconnect = /** @type {() => void} */ (() => {}),
@@ -426,6 +428,9 @@
           </DropdownMenu.Item>
           <DropdownMenu.Item class="cursor-pointer" onclick={onopendashboard}>
             <LayoutDashboard class="size-3.5 shrink-0 text-muted-foreground/50" /> Dashboard
+          </DropdownMenu.Item>
+          <DropdownMenu.Item class="cursor-pointer" onclick={onopendiagrams}>
+            <GitBranch class="size-3.5 shrink-0 text-muted-foreground/50" /> Diagrams
           </DropdownMenu.Item>
         </DropdownMenu.Content>
       </DropdownMenu.Root>

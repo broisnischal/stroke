@@ -3282,6 +3282,7 @@
         onopenbackup={openBackupTab}
   onopenchartspage={() => { if (aiMode) exitAiMode(); openChartsTab() }}
   onopendashboard={() => { if (aiMode) exitAiMode(); openDashboardTab() }}
+  onopendiagrams={() => { if (aiMode) exitAiMode(); openDiagramsTab() }}
   onopenerd={() => { if (aiMode) exitAiMode(); openErdTab() }}
   onopensettings={() => (showSettingsModal = true)}
   onopencommand={() => (commandOpen = true)}

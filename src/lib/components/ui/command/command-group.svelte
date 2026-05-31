@@ -17,8 +17,7 @@
 	data-slot="command-group"
 	class={cn(
 		"text-foreground py-1",
-		"[&_[data-command-group-items]]:flex [&_[data-command-group-items]]:w-full [&_[data-command-group-items]]:min-w-0 [&_[data-command-group-items]]:flex-col [&_[data-command-group-items]]:gap-0.5",
-		"**:[[cmdk-group-heading]]:text-muted-foreground **:[[cmdk-group-heading]]:py-1.5 **:[[cmdk-group-heading]]:text-xs **:[[cmdk-group-heading]]:font-medium",
+		"[&_[data-command-group-items]]:flex [&_[data-command-group-items]]:w-full [&_[data-command-group-items]]:min-w-0 [&_[data-command-group-items]]:flex-col [&_[data-command-group-items]]:gap-px",
 		className,
 	)}
 	value={value ?? heading ?? `----${useId()}`}
@@ -26,7 +25,7 @@
 >
 	{#if heading}
 		<CommandPrimitive.GroupHeading
-			class="text-muted-foreground px-2.5 py-1.5 text-xs font-medium"
+			class="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-foreground/40"
 		>
 			{heading}
 		</CommandPrimitive.GroupHeading>
