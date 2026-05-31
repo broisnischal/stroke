@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "tauri": "tauri dev",
     "tauri:build": "tauri build",
-    "tauri:build:arch": "NO_STRIP=1 tauri build"
+    "tauri:build:arch": "cross-env NO_STRIP=1 tauri build"
   },
   "devDependencies": {
     "@emnapi/core": "^1.10.0",
@@ -19,6 +19,7 @@
     "@sveltejs/vite-plugin-svelte": "^7.1.2",
     "@tauri-apps/api": "^2.11.0",
     "@tauri-apps/cli": "^2.11.2",
+    "cross-env": "^10.1.0",
     "mode-watcher": "^1.1.0",
     "svelte": "^5.55.5",
     "svelte-sonner": "^1.1.1",
@@ -39,7 +40,7 @@
     "bits-ui": "^2.18.1",
     "chart.js": "^4.5.1",
     "clsx": "^2.1.1",
-    "echarts": "^6.1.0",
+    "echarts": "^5.6.0",
     "echarts-wordcloud": "^2.1.0",
     "idb": "^8.0.3",
     "marked": "^18.0.4",

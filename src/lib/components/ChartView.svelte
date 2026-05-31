@@ -1,4 +1,5 @@
 <script>
+  import { untrack } from 'svelte'
   import EChartPanel from './EChartPanel.svelte'
   import {
     buildOption, guessXCol, guessYCol, isChartable,
@@ -34,7 +35,7 @@
   } = $props()
 
   // ── Chart type ────────────────────────────────────────────────────────────
-  let chartType = $state(initialChartType ?? 'bar')
+  let chartType = $state(untrack(() => initialChartType ?? 'bar'))
 
   const currentEntry = $derived(CHART_CATALOG.find(c => c.id === chartType) ?? CHART_CATALOG[0])
 
@@ -204,6 +205,8 @@
         <!-- Searchable chart picker popover -->
         {#if pickerOpen}
           <div
+            role="listbox"
+            tabindex="-1"
             bind:this={pickerRef}
             onkeydown={onPickerKeydown}
             class="absolute left-0 top-full z-50 mt-1 w-[480px] overflow-hidden rounded-xl border border-border/60 bg-popover/95 shadow-xl backdrop-blur-xl"

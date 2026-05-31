@@ -6,6 +6,7 @@ Options control which object types are included (schema DDL, data, sequences,
 enums, functions, triggers, views).
 */
 
+use futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use sqlx::{Column, Decode, Row, TypeInfo, ValueRef};
 use tauri::{AppHandle, Emitter, State};
@@ -119,7 +120,8 @@ fn backup_header(engine: &str, schema: Option<&str>) -> String {
 
 fn split_statements(sql: &str) -> Vec<String> {
     let mut stmts: Vec<String> = Vec::new();
-    let mut current = String::new();
+    // Pre-size to a reasonable statement buffer; avoids repeated reallocs for long INSERTs.
+    let mut current = String::with_capacity(512);
     let mut in_single = false;
     let mut chars = sql.chars().peekable();
 
@@ -141,6 +143,7 @@ fn split_statements(sql: &str) -> Vec<String> {
             ';' if !in_single => {
                 let s = current.trim().to_string();
                 if !s.is_empty() { stmts.push(s); }
+                // Keep capacity to avoid realloc for the next statement.
                 current.clear();
             }
             _ => current.push(ch),
@@ -204,21 +207,25 @@ async fn export_sqlite(
         for table in &tables_to_dump {
             emit_log(app, "backup-log", "info", format!("  → {table}"));
             let q = format!("SELECT * FROM \"{}\"", table.replace('"', "\"\""));
-            let rows = sqlx::query(&q).fetch_all(pool).await.map_err(|e| e.to_string())?;
-            let n = rows.len();
-            if !rows.is_empty() {
-                let cols: Vec<String> = rows[0].columns().iter()
-                    .map(|c| format!("\"{}\"", c.name().replace('"', "\"\"")))
-                    .collect();
-                let col_list = cols.join(", ");
-                out.push('\n');
-                for row in &rows {
-                    let vals: Vec<String> = (0..row.len()).map(|i| sqlite_val(row, i)).collect();
-                    out.push_str(&format!(
-                        "INSERT OR REPLACE INTO \"{}\" ({}) VALUES ({});\n",
-                        table.replace('"', "\"\""), col_list, vals.join(", ")
-                    ));
+            // Stream rows one at a time — avoids loading the entire table into memory.
+            let mut stream = sqlx::query(&q).fetch(pool);
+            let mut n = 0usize;
+            let mut col_list = String::new();
+            let table_esc = table.replace('"', "\"\"");
+            while let Some(row) = stream.try_next().await.map_err(|e| e.to_string())? {
+                if n == 0 {
+                    let cols: Vec<String> = row.columns().iter()
+                        .map(|c| format!("\"{}\"", c.name().replace('"', "\"\"")))
+                        .collect();
+                    col_list = cols.join(", ");
+                    out.push('\n');
                 }
+                n += 1;
+                let vals: Vec<String> = (0..row.len()).map(|i| sqlite_val(&row, i)).collect();
+                out.push_str(&format!(
+                    "INSERT OR REPLACE INTO \"{table_esc}\" ({col_list}) VALUES ({});\n",
+                    vals.join(", ")
+                ));
             }
             total_rows += n;
             emit_log(app, "backup-log", "ok", format!("  ✓ {table} — {n} rows"));
@@ -584,28 +591,31 @@ async fn pg_dump_table(
     }
 
     let data_sql = format!("SELECT * FROM \"{schema}\".\"{table}\"");
-    let rows = sqlx::query(&data_sql).fetch_all(pool).await.map_err(|e| e.to_string())?;
-    let row_count = rows.len();
+    // Stream rows one at a time to avoid loading an entire table into memory.
+    let mut stream = sqlx::query(&data_sql).fetch(pool);
+    let mut row_count = 0usize;
+    let mut col_list = String::new();
+    let conflict_target = if pk_cols.is_empty() {
+        "DO NOTHING".to_string()
+    } else {
+        let pk_q = pk_cols.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", ");
+        format!("({pk_q}) DO NOTHING")
+    };
 
-    if !rows.is_empty() {
-        let col_names: Vec<String> = rows[0].columns().iter()
-            .map(|c| format!("\"{}\"", c.name())).collect();
-        let col_list = col_names.join(", ");
-        let conflict_target = if pk_cols.is_empty() {
-            "DO NOTHING".to_string()
-        } else {
-            let pk_q = pk_cols.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", ");
-            format!("({pk_q}) DO NOTHING")
-        };
-
-        out.push('\n');
-        for row in &rows {
-            let vals: Vec<String> = (0..row.len()).map(|i| pg_val(row, i)).collect();
-            out.push_str(&format!(
-                "INSERT INTO \"{schema}\".\"{table}\" ({col_list}) VALUES ({}) ON CONFLICT {conflict_target};\n",
-                vals.join(", ")
-            ));
+    while let Some(row) = stream.try_next().await.map_err(|e| e.to_string())? {
+        if row_count == 0 {
+            col_list = row.columns().iter()
+                .map(|c| format!("\"{}\"", c.name()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            out.push('\n');
         }
+        row_count += 1;
+        let vals: Vec<String> = (0..row.len()).map(|i| pg_val(&row, i)).collect();
+        out.push_str(&format!(
+            "INSERT INTO \"{schema}\".\"{table}\" ({col_list}) VALUES ({}) ON CONFLICT {conflict_target};\n",
+            vals.join(", ")
+        ));
     }
     out.push('\n');
 
@@ -747,18 +757,20 @@ async fn export_mysql(
                     out.push_str(";\n\n");
 
                     if opts.include_data {
-                        let rows = sqlx::query(&format!("SELECT * FROM `{schema}`.`{table}`"))
-                            .fetch_all(pool).await.map_err(|e| e.to_string())?;
-                        let n = rows.len();
-                        if !rows.is_empty() {
-                            let cols: Vec<String> = rows[0].columns().iter().map(|c| format!("`{}`", c.name())).collect();
-                            let col_list = cols.join(", ");
-                            for row in &rows {
-                                let vals: Vec<String> = (0..row.len()).map(|i| mysql_val(&row, i)).collect();
-                                out.push_str(&format!("INSERT IGNORE INTO `{schema}`.`{table}` ({col_list}) VALUES ({});\n", vals.join(", ")));
+                        // Stream rows to avoid loading an entire table into memory.
+                        let data_q = format!("SELECT * FROM `{schema}`.`{table}`");
+                        let mut stream = sqlx::query(&data_q).fetch(pool);
+                        let mut n = 0usize;
+                        let mut col_list = String::new();
+                        while let Some(row) = stream.try_next().await.map_err(|e| e.to_string())? {
+                            if n == 0 {
+                                col_list = row.columns().iter().map(|c| format!("`{}`", c.name())).collect::<Vec<_>>().join(", ");
                             }
-                            out.push('\n');
+                            n += 1;
+                            let vals: Vec<String> = (0..row.len()).map(|i| mysql_val(&row, i)).collect();
+                            out.push_str(&format!("INSERT IGNORE INTO `{schema}`.`{table}` ({col_list}) VALUES ({});\n", vals.join(", ")));
                         }
+                        if n > 0 { out.push('\n'); }
                         total_rows += n;
                         emit_log(app, "backup-log", "ok", format!("  ✓ {table} — {n} rows"));
                     } else {

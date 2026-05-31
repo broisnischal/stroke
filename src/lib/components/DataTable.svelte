@@ -2230,7 +2230,6 @@
                         {@const cellBg = isEditing ? "bg-background"
                           : cellPinned ? "bg-panel"
                           : isDirty ? "bg-amber-400/15"
-                          : isFocusedCell ? "bg-primary/10"
                           : activeFk ? "bg-accent/15" : ""}
                         {@const cellTextColor = isEditing ? ""
                           : (isFocusedCell || isDirty) ? "text-foreground" : "text-muted-foreground"}

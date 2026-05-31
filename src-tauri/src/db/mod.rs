@@ -15,4 +15,8 @@ pub use query::{
     delete_table_row, delete_table_rows, execute_ddl, execute_sql, execute_sql_multi, get_table_rows, insert_table_row,
     update_table_cell, InsertRowResult, RowFilter, SqlResult, TableRows,
 };
-pub use schema::{list_schemas, list_tables, list_indexes, list_enums, truncate_table, drop_table, get_table_column_structure, TableInfo, IndexInfo, EnumInfo, ColumnStructureRow};
+pub use schema::{
+    list_schemas, list_tables, list_indexes, list_enums, list_triggers, list_sequences,
+    truncate_table, drop_table, get_table_column_structure,
+    TableInfo, IndexInfo, EnumInfo, TriggerInfo, SequenceInfo, ColumnStructureRow,
+};

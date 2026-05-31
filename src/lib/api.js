@@ -184,6 +184,24 @@ export async function listEnums(schema) {
   }
 }
 
+/** @param {string} schema */
+export async function listTriggers(schema) {
+  try {
+    return await invoke('pg_list_triggers', { schema })
+  } catch (err) {
+    throw new Error(formatInvokeError(err))
+  }
+}
+
+/** @param {string} schema */
+export async function listSequences(schema) {
+  try {
+    return await invoke('pg_list_sequences', { schema })
+  } catch (err) {
+    throw new Error(formatInvokeError(err))
+  }
+}
+
 /**
  * @param {string} schema
  * @param {string} table
@@ -411,4 +429,18 @@ export async function backupExport(schema = null, tables = null, options = null)
  */
 export async function backupImport(sql) {
   return inv('backup_import', { sql })
+}
+
+/**
+ * @typedef {{ pid: number, rssBytes: number, virtualBytes: number, cpuPercent: number, processName: string }} AppMetrics
+ */
+
+/** Sample this process's PID, memory (RSS + virtual), and CPU usage. */
+export async function getAppMetrics() {
+  return /** @type {Promise<AppMetrics>} */ (invoke('get_app_metrics'))
+}
+
+/** Rename the OS process so it appears as `name` in htop / ps / Activity Monitor. */
+export async function setProcessTitle(name) {
+  return invoke('set_process_title', { name })
 }

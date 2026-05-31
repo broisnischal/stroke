@@ -171,15 +171,20 @@ async fn close_existing(state: &State<'_, DbState>) {
 
 async fn open_pg(config: &PgConfig) -> Result<PgPool, String> {
     PgPoolOptions::new()
-        // A single get_table_rows fires 6 queries; multiple open tabs multiply that.
-        // 10 connections comfortably handles 3–4 concurrent tab loads in parallel.
-        .max_connections(10)
+        // Desktop app: at most 2-3 tabs open simultaneously, each running 1-2
+        // queries. 4 connections is the real-world ceiling; monitored logs showed
+        // only 4 connections actually opened even under active use. Keeping 10
+        // was wasting ~25-40 MB of Rust-side recv/send buffers + 8 OS FDs for
+        // sockets that stayed idle 95% of the time.
+        .max_connections(4)
         // No min_connections: keeping idle connections alive causes ping failures
         // after network changes or laptop sleep/wake (os error 60), then a 27 s
         // stall while the pool replaces the dead connection.
         .acquire_timeout(std::time::Duration::from_secs(10))
-        // Stay well under typical firewall/managed-DB idle connection timeouts (~5 min).
-        .idle_timeout(std::time::Duration::from_secs(60))
+        // Release idle connections after 30 s (was 60 s). Logs showed the app
+        // goes fully idle within 30 s of the user stopping interaction, so
+        // halving this cuts FD and memory hold-time without affecting responsiveness.
+        .idle_timeout(std::time::Duration::from_secs(30))
         .max_lifetime(std::time::Duration::from_secs(300))
         // Kill runaway queries automatically so they don't pin connections forever.
         .after_connect(|conn, _meta| {
@@ -249,9 +254,10 @@ pub async fn connect_sqlite(state: State<'_, DbState>, config: SqliteConfig) -> 
 
 async fn open_mysql(config: &MysqlConfig) -> Result<MySqlPool, String> {
     MySqlPoolOptions::new()
-        .max_connections(10)
+        // Same rationale as PG: 4 is the real-world ceiling for a desktop app.
+        .max_connections(4)
         .acquire_timeout(std::time::Duration::from_secs(10))
-        .idle_timeout(std::time::Duration::from_secs(60))
+        .idle_timeout(std::time::Duration::from_secs(30))
         .max_lifetime(std::time::Duration::from_secs(300))
         // Enable ANSI_QUOTES on every connection so double-quoted identifiers
         // ("col") work the same as backtick identifiers (`col`). This makes

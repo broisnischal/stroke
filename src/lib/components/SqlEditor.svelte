@@ -58,9 +58,17 @@
     /** @param {() => void | undefined} fn */
     const run = (fn) => fn?.()
 
+    // Ctrl+Enter: override Monaco's built-in insertLineAfter which steals this binding.
+    // addAction has higher priority than the built-in keybinding registry.
+    ed.addAction({
+      id: 'db-studio.run-query',
+      label: 'Run Query',
+      keybindings: [CtrlCmd | Enter],
+      run: () => run(onmodenter),
+    })
+
     // Editor-local shortcuts
     ed.addCommand(CtrlCmd | KeyK,     () => run(onmodk))
-    ed.addCommand(CtrlCmd | Enter,    () => run(onmodenter))
     ed.addCommand(CtrlCmd | KeyR,     () => run(onmodr))
     ed.addCommand(CtrlCmd | KeyS,     () => run(onmods))
 

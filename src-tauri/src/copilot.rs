@@ -1,8 +1,25 @@
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
 
 // The OAuth app client ID used by GitHub Copilot CLI / VS Code extension.
 // This is a public client_id; it does not grant access without user authorization.
 const GITHUB_CLIENT_ID: &str = "Iv1.b507a08c87ecfe98";
+
+// ── Shared HTTP client ─────────────────────────────────────────────────────────
+// One client for the whole process lifetime. Avoids reconstructing a TLS
+// connection pool on every OAuth poll (called every 5 s during device flow).
+static COPILOT_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+fn http_client() -> &'static reqwest::Client {
+    COPILOT_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .user_agent("db-studio/1.0")
+            .tcp_keepalive(std::time::Duration::from_secs(60))
+            .pool_max_idle_per_host(4)
+            .build()
+            .expect("failed to build Copilot HTTP client")
+    })
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DeviceFlowStart {
@@ -33,17 +50,10 @@ pub struct CopilotModel {
     pub name: String,
 }
 
-fn http_client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
-        .user_agent("db-studio/1.0")
-        .build()
-        .map_err(|e| e.to_string())
-}
-
 /// Step 1 of the GitHub Device OAuth flow: obtain a user_code and verification URL.
 #[tauri::command]
 pub async fn copilot_start_device_flow() -> Result<DeviceFlowStart, String> {
-    let client = http_client()?;
+    let client = http_client();
     // Use raw body so we don't need the reqwest `form` feature.
     let body = format!("client_id={}&scope=read%3Auser", GITHUB_CLIENT_ID);
 
@@ -85,7 +95,7 @@ pub async fn copilot_start_device_flow() -> Result<DeviceFlowStart, String> {
 /// Call this every `interval` seconds (from the DeviceFlowStart response).
 #[tauri::command]
 pub async fn copilot_poll_oauth_token(device_code: String) -> Result<PollResult, String> {
-    let client = http_client()?;
+    let client = http_client();
     let body = format!(
         "client_id={}&device_code={}&grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code",
         GITHUB_CLIENT_ID, device_code
@@ -131,7 +141,7 @@ pub async fn copilot_poll_oauth_token(device_code: String) -> Result<PollResult,
 /// The JWT is required for all Copilot API calls. Refresh it before it expires.
 #[tauri::command]
 pub async fn copilot_get_copilot_token(oauth_token: String) -> Result<CopilotToken, String> {
-    let client = http_client()?;
+    let client = http_client();
 
     let resp = client
         .get("https://api.github.com/copilot_internal/v2/token")
@@ -169,7 +179,7 @@ pub async fn copilot_get_copilot_token(oauth_token: String) -> Result<CopilotTok
 /// Falls back to a static list if the endpoint is unreachable.
 #[tauri::command]
 pub async fn copilot_fetch_models(copilot_token: String) -> Result<Vec<CopilotModel>, String> {
-    let client = http_client()?;
+    let client = http_client();
 
     let resp = client
         .get("https://api.githubcopilot.com/models")

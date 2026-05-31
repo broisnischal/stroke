@@ -33,8 +33,7 @@
     saveLayout,
   } from "$lib/stores/layout.js";
   import { untrack, onDestroy } from "svelte";
-  import { chatCompletionStream, parseAssistantMessage, buildSystemPrompt } from "$lib/ai.js";
-  import { loadAiSettings } from "$lib/stores/ai-settings.js";
+  import { buildSystemPrompt } from "$lib/ai.js";
 
   /** @typedef {import('$lib/monaco-sql-complete.js').SqlSchemaHints} SqlSchemaHints */
 
@@ -74,6 +73,9 @@
     onhistoryselect = (sql) => {},
     /** @param {string} name @param {string} sql */
     onsavequery = async (name, sql) => {},
+    /** Called when user clicks "Fix with AI" — parent opens sidebar and sends the message */
+    /** @param {{ error: string, sql: string }} detail */
+    onfixwithai = /** @type {((detail: { error: string, sql: string }) => void) | undefined} */ (undefined),
   } = $props();
 
   /**
@@ -330,117 +332,9 @@
   let saveQueryName = $state('');
   let savingQuery = $state(false);
 
-  // AI fix state
-  /** @type {'idle' | 'fixing' | 'done' | 'error'} */
-  let fixStatus = $state('idle')
-  let fixedSql = $state('')
-  let fixExplanation = $state('')
-  let fixErrMsg = $state('')
-  /** @type {AbortController | null} */
-  let fixAbort = $state(null)
-
-  // Reset fix state when the error message or sql changes
-  $effect(() => {
-    // Track these two deps; read/write fixStatus outside tracking to avoid cycles
-    activeResult.error; activeTabId; sql
-    untrack(() => {
-      if (fixStatus !== 'idle') {
-        fixAbort?.abort()
-        fixStatus = 'idle'
-        fixedSql = ''
-        fixExplanation = ''
-        fixErrMsg = ''
-      }
-    })
-  })
-
-  async function fixWithAi() {
+  function fixWithAi() {
     if (!activeResult.error || !sql.trim()) return
-    fixAbort?.abort()
-    const ctrl = new AbortController()
-    fixAbort = ctrl
-    fixStatus = 'fixing'
-    fixedSql = ''
-    fixExplanation = ''
-    fixErrMsg = ''
-
-    try {
-      const settings = loadAiSettings()
-      const systemPrompt = schemaContext
-        ? buildSystemPrompt(schemaContext)
-        : 'You are an expert SQL assistant. Fix the SQL error provided. Return the corrected SQL in a ```sql code block.'
-
-      // Build an explicit schema section so the AI sees exact column names/casing
-      // even if the table hasn't been browsed yet.
-      let schemaSection = ''
-      if (schemaContext) {
-        /** @param {{ name: string, dataType: string, nullable?: boolean }} c */
-        const colLine = (c) => `  ${c.name}  ${c.dataType}${c.nullable === false ? '  NOT NULL' : ''}`
-        const blocks = []
-        const activeKey = schemaContext.activeTable
-          ? `${schemaContext.activeSchema}.${schemaContext.activeTable}`
-          : null
-        if (schemaContext.activeTable && schemaContext.columns.length) {
-          blocks.push(`${activeKey}:\n${schemaContext.columns.map(colLine).join('\n')}`)
-        }
-        for (const [key, cols] of Object.entries(schemaContext.allTableColumns ?? {})) {
-          if (key === activeKey) continue
-          blocks.push(`${key}:\n${cols.map(colLine).join('\n')}`)
-        }
-        if (blocks.length) {
-          schemaSection = `\n\nDatabase schema (use column names EXACTLY as shown — casing matters in quoted identifiers):\n${blocks.join('\n\n')}`
-        }
-      }
-
-      const userMsg =
-        `Fix this SQL error.${schemaSection}\n\nError:\n${activeResult.error}\n\nSQL:\n\`\`\`sql\n${sql.trim()}\n\`\`\`\n\n` +
-        `Return the corrected SQL in a \`\`\`sql code block and a brief one-sentence explanation. ` +
-        `Use column names exactly as shown in the schema above — do NOT normalize casing or guess column names.`
-
-      let fullContent = ''
-
-      for await (const chunk of chatCompletionStream(
-        settings,
-        [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userMsg },
-        ],
-        null,
-        ctrl.signal,
-      )) {
-        if (chunk.textDelta) {
-          fullContent += chunk.textDelta
-          // Live-extract SQL as it streams in
-          const parts = parseAssistantMessage(fullContent)
-          const sqlPart = parts.find((p) => p.type === 'sql')
-          if (sqlPart) fixedSql = sqlPart.content
-        }
-      }
-
-      const parts = parseAssistantMessage(fullContent)
-      const sqlPart = parts.find((p) => p.type === 'sql')
-      const textPart = parts.find((p) => p.type === 'text')
-
-      if (!sqlPart) throw new Error('AI did not return a SQL fix')
-
-      fixedSql = sqlPart.content
-      fixExplanation = textPart?.content ?? ''
-      fixStatus = 'done'
-    } catch (/** @type {any} */ e) {
-      if (e?.name === 'AbortError') return
-      fixErrMsg = String(e)
-      fixStatus = 'error'
-    }
-  }
-
-  function applyFix() {
-    sql = fixedSql
-    fixStatus = 'idle'
-  }
-
-  function dismissFix() {
-    fixAbort?.abort()
-    fixStatus = 'idle'
+    onfixwithai?.({ error: activeResult.error, sql: sql.trim() })
   }
 
   const isMac =
@@ -626,11 +520,11 @@
       >
         <button
           type="button"
-          class="flex min-w-0 items-center gap-1.5 rounded-t py-1 pl-3 font-mono text-ui-xs transition-colors {sqlTabs.length > 1 ? 'pr-5' : 'pr-3'} {isActive ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground'}"
+          class="flex min-w-0 items-center gap-1.5 rounded-t py-1 pl-3 transition-colors {sqlTabs.length > 1 ? 'pr-5' : 'pr-3'} {isActive ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground'}"
           onclick={() => (activeTabId = tab.id)}
           title={tab.name}
         >
-          <span class="max-w-[100px] truncate">{tab.name}</span>
+          <span class="max-w-[100px] truncate text-ui-xs">{tab.name}</span>
         </button>
         {#if sqlTabs.length > 1}
           <button
@@ -709,77 +603,22 @@
   {/if}
 
   {#if activeResult.error}
-    <!-- Console-style error strip between editor and results -->
+    <!-- Console-style error strip -->
     <div class="shrink-0 border-b border-destructive/20 bg-destructive/5">
       <div class="flex items-start gap-2 px-3 py-2">
         <span class="mt-px shrink-0 font-mono text-ui-2xs font-bold uppercase tracking-wide text-destructive/70">error</span>
         <pre class="max-h-24 min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-all font-mono text-ui-xs leading-relaxed text-destructive">{activeResult.error}</pre>
-        <div class="flex shrink-0 items-center gap-1.5">
-          {#if fixStatus === 'idle' || fixStatus === 'error'}
-            <button
-              type="button"
-              onclick={() => void fixWithAi()}
-              class="inline-flex items-center gap-1 rounded border border-destructive/25 bg-destructive/8 px-2 py-0.5 font-mono text-ui-2xs text-destructive transition-colors hover:bg-destructive/15"
-            >
-              <Wand2 class="size-2.5 shrink-0" />
-              fix with ai
-            </button>
-          {:else if fixStatus === 'fixing'}
-            <button
-              type="button"
-              onclick={dismissFix}
-              class="inline-flex items-center gap-1 rounded border border-destructive/25 bg-destructive/8 px-2 py-0.5 font-mono text-ui-2xs text-destructive/60"
-            >
-              <Loader2 class="size-2.5 shrink-0 animate-spin" />
-              fixing…
-            </button>
-          {:else if fixStatus === 'done'}
-            <button
-              type="button"
-              onclick={dismissFix}
-              class="inline-flex items-center justify-center rounded border border-border/60 px-2 py-0.5 font-mono text-ui-2xs text-muted-foreground transition-colors hover:bg-muted"
-            >
-              <X class="size-2.5" />
-            </button>
-          {/if}
-        </div>
+        {#if onfixwithai}
+          <button
+            type="button"
+            onclick={fixWithAi}
+            class="inline-flex shrink-0 items-center gap-1 rounded border border-destructive/25 bg-destructive/8 px-2 py-0.5 font-mono text-ui-2xs text-destructive transition-colors hover:bg-destructive/15"
+          >
+            <Wand2 class="size-2.5 shrink-0" />
+            Fix with AI
+          </button>
+        {/if}
       </div>
-
-      {#if fixStatus === 'fixing' && fixedSql}
-        <div class="border-t border-destructive/10 px-3 py-2">
-          <p class="mb-1 font-mono text-ui-2xs text-muted-foreground">generating fix…</p>
-          <pre class="overflow-x-auto rounded bg-muted/60 px-2.5 py-2 font-mono text-ui-xs leading-relaxed text-foreground">{fixedSql}</pre>
-        </div>
-      {/if}
-
-      {#if fixStatus === 'done'}
-        <div class="border-t border-destructive/10 px-3 py-2">
-          <div class="flex items-center gap-2 pb-1.5">
-            <Wand2 class="size-3 shrink-0 text-primary/60" />
-            <span class="flex-1 font-mono text-ui-2xs text-muted-foreground">{fixExplanation || 'suggested fix'}</span>
-          </div>
-          <pre class="overflow-x-auto rounded bg-muted/60 px-2.5 py-2 font-mono text-ui-xs leading-relaxed text-foreground">{fixedSql}</pre>
-          <div class="flex items-center justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onclick={dismissFix}
-              class="font-mono text-ui-2xs text-muted-foreground transition-colors hover:text-foreground"
-            >dismiss</button>
-            <button
-              type="button"
-              onclick={applyFix}
-              class="inline-flex items-center gap-1 rounded bg-primary px-2.5 py-1 font-mono text-ui-2xs font-medium text-primary-foreground transition-opacity hover:opacity-90"
-            >
-              <CheckCheck class="size-2.5 shrink-0" />
-              apply fix
-            </button>
-          </div>
-        </div>
-      {/if}
-
-      {#if fixStatus === 'error'}
-        <p class="border-t border-destructive/10 px-3 pb-2 font-mono text-ui-2xs text-destructive/70">{fixErrMsg}</p>
-      {/if}
     </div>
   {/if}
 

@@ -70,6 +70,7 @@
   data-studio-chrome
   data-tauri-drag-region
   role="tablist"
+  tabindex="0"
   aria-label="Open editors"
   ondblclick={handleDragAreaDblClick}
 >

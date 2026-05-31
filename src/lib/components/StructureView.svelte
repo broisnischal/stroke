@@ -11,6 +11,8 @@
   import Undo2 from '@lucide/svelte/icons/undo-2'
   import ForeignKeyDialog from './ForeignKeyDialog.svelte'
   import DdlConfirmDialog from './DdlConfirmDialog.svelte'
+  import CreateTriggerDialog from './CreateTriggerDialog.svelte'
+  import GitBranch from '@lucide/svelte/icons/git-branch'
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js'
 
   /**
@@ -26,6 +28,8 @@
     columns = [],
     /** @type {IdxInfo[]} */
     indexes = [],
+    /** @type {{ name: string, tableName: string, timing: string, events: string, functionName: string, enabled: boolean }[]} */
+    triggers = [],
     tables = /** @type {{ name: string }[]} */ ([]),
     enums = /** @type {{ name: string }[]} */ ([]),
     columnSearch = '',
@@ -110,6 +114,9 @@
     try { await confirmAction() }
     finally { confirmLoading = false; confirmOpen = false; confirmAction = null }
   }
+
+  // ── Trigger create dialog ─────────────────────────────────────────────────
+  let createTriggerOpen = $state(false)
 
   // ── DDL helpers ───────────────────────────────────────────────────────────
   const tbl = () => `"${schema}"."${table}"`
@@ -353,6 +360,14 @@
           i.columns.toLowerCase().includes(columnSearch.toLowerCase()))
       : tableIndexes
   )
+  const tableTriggers = $derived(triggers.filter(t => t.tableName === table))
+  const visibleTriggers = $derived(
+    columnSearch.trim()
+      ? tableTriggers.filter(t =>
+          t.name.toLowerCase().includes(columnSearch.toLowerCase()) ||
+          t.functionName.toLowerCase().includes(columnSearch.toLowerCase()))
+      : tableTriggers
+  )
 
   // ── Add column ────────────────────────────────────────────────────────────
   /** @type {{ name: string, dataType: string, isNullable: boolean, columnDefault: string, comment: string } | null} */
@@ -405,6 +420,8 @@
   const INP = 'box-border block h-full w-full min-w-0 overflow-x-auto border-0 bg-transparent px-3 py-0 font-mono text-ui-sm text-foreground outline-none selection:bg-primary/20'
   const DROP_PANEL = 'absolute left-0 top-full z-50 mt-0.5 max-h-64 w-48 overflow-y-auto rounded-md border border-border/60 bg-popover p-1 text-popover-foreground shadow-md'
   const DROP_ITEM = 'relative flex w-full cursor-default select-none items-center rounded-sm px-2 py-1.5 font-mono text-ui-xs text-foreground outline-none hover:bg-accent hover:text-accent-foreground'
+  const SECTION_HDR = 'flex items-center gap-2 border-t border-border bg-panel/60 px-3 py-1.5'
+  const SECTION_LABEL = 'text-ui-2xs font-semibold uppercase tracking-widest text-muted-foreground/70'
 </script>
 
 <ForeignKeyDialog bind:open={fkOpen} {schema} {table} column={fkCol} constraintName={fkConstraint} existingFk={fkExisting} {tables} onrefresh={() => { fkOpen = false; onrefresh() }} />
@@ -481,71 +498,64 @@
                 {/if}
               </td>
 
-              <!-- data_type -->
-              <td class="{TD} {typeDropOpen[col.name] ? 'ring-2 ring-inset ring-primary' : stagedValues['type:' + col.name] ? 'ring-1 ring-inset ring-amber-500/50' : ''}">
-                <DropdownMenu.Root
-                  open={typeDropOpen[col.name] ?? false}
-                  onOpenChange={(v) => typeDropOpen = { ...typeDropOpen, [col.name]: v }}
-                >
-                  <DropdownMenu.Trigger class="flex h-full w-full items-center" tabindex={-1} aria-hidden>
-                    <span class="sr-only">Type</span>
-                  </DropdownMenu.Trigger>
-                  <div class="relative h-full">
-                    <input
-                      type="text"
-                      value={typeDraft[col.name] ?? displayType}
-                      class="{INP} pr-6 {stagedValues['type:' + col.name] ? 'text-amber-300/90' : ''}"
-                      onfocus={(e) => {
-                        typeDraft = { ...typeDraft, [col.name]: /** @type {HTMLInputElement} */ (e.target).value }
-                        typeDropOpen = { ...typeDropOpen, [col.name]: true }
-                      }}
-                      oninput={(e) => {
-                        typeDraft = { ...typeDraft, [col.name]: /** @type {HTMLInputElement} */ (e.target).value }
-                        typeDropOpen = { ...typeDropOpen, [col.name]: true }
-                      }}
-                      onblur={(e) => {
-                        setTimeout(() => {
-                          typeDropOpen = { ...typeDropOpen, [col.name]: false }
-                          const v = typeDraft[col.name]?.trim()
-                          if (v && v !== displayType) stageType(col.name, v)
-                        }, 160)
-                      }}
-                      onkeydown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault()
-                          const v = typeDraft[col.name]?.trim()
-                          typeDropOpen = { ...typeDropOpen, [col.name]: false }
-                          if (v && v !== displayType) stageType(col.name, v)
-                          /** @type {HTMLElement} */ (e.currentTarget).blur()
-                        }
-                        if (e.key === 'Escape') {
-                          typeDraft = { ...typeDraft, [col.name]: displayType }
-                          typeDropOpen = { ...typeDropOpen, [col.name]: false }
-                          /** @type {HTMLElement} */ (e.currentTarget).blur()
-                        }
-                      }}
-                    />
-                    <svg class="pointer-events-none absolute right-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/30" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6l4 4 4-4"/></svg>
-                  </div>
-                  <DropdownMenu.Content
-                    align="start"
-                    sideOffset={1}
-                    class="max-h-64 w-48 overflow-y-auto p-1 [&_[data-slot=dropdown-menu-item]]:font-mono [&_[data-slot=dropdown-menu-item]]:text-ui-xs"
-                  >
-                    {#each filteredTypesFor(col.name) as t (t)}
-                      <DropdownMenu.Item
-                        class={t === displayType ? 'bg-accent/60' : ''}
-                        onSelect={() => { typeDraft = { ...typeDraft, [col.name]: t }; stageType(col.name, t) }}
-                      >{t}</DropdownMenu.Item>
-                    {:else}
-                      <p class="px-2 py-1.5 font-mono text-ui-xs text-muted-foreground">No match</p>
-                    {/each}
-                    <DropdownMenu.Separator />
-                    <DropdownMenu.Item class="text-muted-foreground" onSelect={() => typeDropOpen = { ...typeDropOpen, [col.name]: false }}>
-                      Manual input…
-                    </DropdownMenu.Item>
-                  </DropdownMenu.Content>
-                </DropdownMenu.Root>
+              <!-- data_type: plain drop panel — avoids DropdownMenu.Root/Trigger hybrid
+                   that causes TypeError in Svelte 5 when the object literal is followed
+                   by a cast `(expr)` on the next line (ASI footgun). -->
+              <td class="{TD_DROP} {typeDropOpen[col.name] ? 'ring-2 ring-inset ring-primary' : stagedValues['type:' + col.name] ? 'ring-1 ring-inset ring-amber-500/50' : ''}">
+                <div class="relative h-full">
+                  <input
+                    type="text"
+                    value={typeDraft[col.name] ?? displayType}
+                    class="{INP} pr-6 {stagedValues['type:' + col.name] ? 'text-amber-300/90' : ''}"
+                    onfocus={() => {
+                      typeDropOpen = { ...typeDropOpen, [col.name]: true }
+                    }}
+                    oninput={(e) => {
+                      typeDraft = { ...typeDraft, [col.name]: e.currentTarget.value }
+                      typeDropOpen = { ...typeDropOpen, [col.name]: true }
+                    }}
+                    onblur={() => {
+                      setTimeout(() => {
+                        typeDropOpen = { ...typeDropOpen, [col.name]: false }
+                        const v = typeDraft[col.name]?.trim()
+                        if (v && v !== displayType) stageType(col.name, v)
+                        typeDraft = Object.fromEntries(Object.entries(typeDraft).filter(([k]) => k !== col.name))
+                      }, 160)
+                    }}
+                    onkeydown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        const v = typeDraft[col.name]?.trim()
+                        typeDropOpen = { ...typeDropOpen, [col.name]: false }
+                        if (v && v !== displayType) stageType(col.name, v)
+                        typeDraft = Object.fromEntries(Object.entries(typeDraft).filter(([k]) => k !== col.name))
+                        e.currentTarget.blur()
+                      } else if (e.key === 'Escape') {
+                        typeDraft = Object.fromEntries(Object.entries(typeDraft).filter(([k]) => k !== col.name))
+                        typeDropOpen = { ...typeDropOpen, [col.name]: false }
+                        e.currentTarget.blur()
+                      }
+                    }}
+                  />
+                  <svg class="pointer-events-none absolute right-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/30" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6l4 4 4-4"/></svg>
+                  {#if typeDropOpen[col.name]}
+                    <div class="{DROP_PANEL} w-52">
+                      {#each filteredTypesFor(col.name) as t (t)}
+                        <button type="button"
+                          class="{DROP_ITEM} {t === displayType ? 'bg-accent/60' : ''}"
+                          onmousedown={(e) => {
+                            e.preventDefault()
+                            typeDraft = { ...typeDraft, [col.name]: t }
+                            typeDropOpen = { ...typeDropOpen, [col.name]: false }
+                            stageType(col.name, t)
+                          }}
+                        >{t}</button>
+                      {:else}
+                        <p class="px-2 py-1.5 font-mono text-ui-xs text-muted-foreground/60">No match</p>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
               </td>
 
               <!-- is_nullable -->
@@ -762,33 +772,33 @@
     </div>
 
     <!-- ── Index section ── -->
-    <div class="border-t border-border font-mono">
-      <div class="flex items-center gap-2 px-3 py-2">
-        <span class="text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground">
+    <div class="font-mono">
+      <div class={SECTION_HDR}>
+        <span class={SECTION_LABEL}>
           Indexes
           {#if columnSearch && visibleIndexes.length !== tableIndexes.length}
-            <span class="ml-1 text-muted-foreground/50">({visibleIndexes.length}/{tableIndexes.length})</span>
+            <span class="ml-1 font-normal text-muted-foreground/40">({visibleIndexes.length}/{tableIndexes.length})</span>
           {/if}
         </span>
-        <button type="button" class="ml-auto flex items-center gap-1 rounded px-2 py-0.5 text-ui-xs text-muted-foreground hover:bg-accent/20 hover:text-foreground" onclick={startNewIndex}>
+        <button type="button" class="ml-auto flex items-center gap-1 rounded px-2 py-0.5 text-ui-xs text-muted-foreground hover:bg-accent/30 hover:text-foreground" onclick={startNewIndex}>
           <Plus class="size-3" />Add index
         </button>
       </div>
 
       <table class="border-collapse" style="table-layout: fixed; width: max-content; min-width: 100%">
         <colgroup>
-          <col style="min-width:180px;width:200px" />
+          <col style="min-width:180px;width:220px" />
           <col style="min-width:110px;width:130px" />
-          <col style="min-width:70px;width:80px" />
-          <col style="min-width:150px;width:180px" />
+          <col style="min-width:72px;width:80px" />
+          <col style="min-width:150px;width:200px" />
           <col style="min-width:130px;width:160px" />
           <col style="min-width:150px;width:180px" />
           <col style="min-width:36px;width:36px;max-width:36px" />
         </colgroup>
         <thead>
           <tr>
-            {#each ['index_name','index_algorithm','is_unique','column_name','condition','comment',''] as h}
-              <th class="border-b border-r border-border bg-panel px-3 py-2 text-left font-medium text-muted-foreground text-ui-2xs uppercase tracking-wide whitespace-nowrap">{h}</th>
+            {#each ['index_name','algorithm','is_unique','column_name','condition','comment',''] as h}
+              <th class={TH}>{h}</th>
             {/each}
           </tr>
         </thead>
@@ -820,21 +830,15 @@
 
               <!-- is_unique -->
               <td class="border-b border-r border-border/40 p-0 align-middle overflow-hidden">
-                <div class="relative flex h-full items-center px-3">
-                  <select
-                    value={idx.isUnique ? 'TRUE' : 'FALSE'}
-                    class="w-full appearance-none border-0 bg-transparent py-0 font-mono text-ui-sm focus:outline-none {idx.isUnique ? 'text-green-400' : 'text-muted-foreground'}"
-                    onchange={(e) => {
-                      const v = /** @type {HTMLSelectElement} */ (e.target).value === 'TRUE'
-                      if (v !== idx.isUnique) requestIndexRecreate(idx, idx.indexType, v, idx.columns)
-                    }}
+                <div class="flex h-full items-center px-3">
+                  <button
+                    type="button"
+                    class="rounded px-1.5 py-0.5 font-mono text-ui-xs font-medium transition-colors {idx.isUnique ? 'bg-green-500/12 text-green-400 hover:bg-green-500/20' : 'bg-muted/40 text-muted-foreground hover:bg-muted/70 hover:text-foreground'}"
+                    onclick={() => requestIndexRecreate(idx, idx.indexType, !idx.isUnique, idx.columns)}
+                    title="Click to toggle uniqueness"
                   >
-                    <option value="FALSE">FALSE</option>
-                    <option value="TRUE">TRUE</option>
-                  </select>
-                  <span class="pointer-events-none absolute right-1.5 text-muted-foreground/40">
-                    <svg class="size-3.5" viewBox="0 0 10 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4.5l3-3 3 3M2 7.5l3 3 3-3"/></svg>
-                  </span>
+                    {idx.isUnique ? 'TRUE' : 'FALSE'}
+                  </button>
                 </div>
               </td>
 
@@ -902,12 +906,14 @@
                 </DropdownMenu.Root>
               </td>
               <td class="border-b border-r border-green-700/20 p-0">
-                <div class="relative flex h-full items-center px-3">
-                  <select bind:value={newIndex.isUnique} class="w-full appearance-none border-0 bg-transparent py-0 font-mono text-ui-sm focus:outline-none {newIndex.isUnique ? 'text-green-400' : 'text-muted-foreground'}">
-                    <option value={false}>FALSE</option>
-                    <option value={true}>TRUE</option>
-                  </select>
-                  <span class="pointer-events-none absolute right-1.5 text-muted-foreground/40"><svg class="size-3.5" viewBox="0 0 10 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4.5l3-3 3 3M2 7.5l3 3 3-3"/></svg></span>
+                <div class="flex h-full items-center px-3">
+                  <button
+                    type="button"
+                    class="rounded px-1.5 py-0.5 font-mono text-ui-xs font-medium transition-colors {newIndex.isUnique ? 'bg-green-500/12 text-green-400 hover:bg-green-500/20' : 'bg-muted/40 text-muted-foreground hover:bg-muted/70 hover:text-foreground'}"
+                    onclick={() => { if (newIndex) newIndex.isUnique = !newIndex.isUnique }}
+                  >
+                    {newIndex.isUnique ? 'TRUE' : 'FALSE'}
+                  </button>
                 </div>
               </td>
               <td class="border-b border-r border-green-700/20 p-0">
@@ -934,6 +940,100 @@
         </tbody>
       </table>
     </div><!-- end index section -->
+
+    <!-- ── Triggers section ── -->
+    <div class="font-mono">
+      <div class={SECTION_HDR}>
+        <GitBranch class="size-3 shrink-0 text-muted-foreground/50" />
+        <span class={SECTION_LABEL}>
+          Triggers
+          {#if columnSearch && visibleTriggers.length !== tableTriggers.length}
+            <span class="ml-1 font-normal text-muted-foreground/40">({visibleTriggers.length}/{tableTriggers.length})</span>
+          {/if}
+        </span>
+        <button type="button" class="ml-auto flex items-center gap-1 rounded px-2 py-0.5 text-ui-xs text-muted-foreground hover:bg-accent/30 hover:text-foreground" onclick={() => (createTriggerOpen = true)}>
+          <Plus class="size-3" />Add trigger
+        </button>
+      </div>
+
+      <table class="border-collapse" style="table-layout: fixed; width: max-content; min-width: 100%">
+        <colgroup>
+          <col style="min-width:180px;width:220px" />
+          <col style="min-width:90px;width:100px" />
+          <col style="min-width:180px;width:220px" />
+          <col style="min-width:180px;width:220px" />
+          <col style="min-width:64px;width:72px" />
+          <col style="min-width:36px;width:36px;max-width:36px" />
+        </colgroup>
+        <thead>
+          <tr>
+            {#each ['trigger_name','timing','events','function','status',''] as h}
+              <th class="{TH} last:border-r-0">{h}</th>
+            {/each}
+          </tr>
+        </thead>
+        <tbody>
+          {#each visibleTriggers as trig (trig.name)}
+            <tr class="group/trig" style="height:32px">
+              <td class="border-b border-r border-border/40 px-3 font-mono text-ui-sm text-foreground overflow-hidden">
+                <span class="block truncate">{trig.name}</span>
+              </td>
+              <td class="border-b border-r border-border/40 px-3">
+                <span class="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground">{trig.timing}</span>
+              </td>
+              <td class="border-b border-r border-border/40 px-3 overflow-hidden">
+                <div class="flex gap-1 overflow-hidden">
+                  {#each trig.events.split(', ').filter(Boolean) as ev (ev)}
+                    <span class="shrink-0 rounded bg-primary/8 px-1.5 py-0.5 font-mono text-ui-3xs text-primary/80">{ev}</span>
+                  {/each}
+                </div>
+              </td>
+              <td class="border-b border-r border-border/40 px-3 font-mono text-ui-xs text-muted-foreground/70 overflow-hidden">
+                <span class="block truncate">{trig.functionName}()</span>
+              </td>
+              <td class="border-b border-r border-border/40 px-3">
+                {#if trig.enabled}
+                  <span class="flex items-center gap-1 font-mono text-ui-3xs text-green-400">
+                    <span class="size-1.5 rounded-full bg-green-400"></span>on
+                  </span>
+                {:else}
+                  <span class="flex items-center gap-1 font-mono text-ui-3xs text-muted-foreground/40">
+                    <span class="size-1.5 rounded-full bg-muted-foreground/30"></span>off
+                  </span>
+                {/if}
+              </td>
+              <td class="border-b border-border/40 p-0 align-middle">
+                <button type="button" disabled={confirmLoading}
+                  class="flex h-full w-full items-center justify-center text-muted-foreground/20 transition-colors hover:text-destructive disabled:opacity-40 group-hover/trig:text-muted-foreground/50"
+                  title="Drop trigger"
+                  onclick={() => askConfirm(
+                    { title: `Drop trigger "${trig.name}"`, description: `Permanently removes this trigger from "${table}".`, sql: `DROP TRIGGER "${trig.name}" ON ${tbl()};`, confirmLabel: 'Drop', variant: 'destructive' },
+                    async () => { await executeSql(`DROP TRIGGER "${trig.name}" ON ${tbl()}`); toast.success(`Trigger "${trig.name}" dropped`); onrefresh() }
+                  )}
+                >
+                  <Trash2 class="size-3.5" />
+                </button>
+              </td>
+            </tr>
+          {/each}
+
+          {#if visibleTriggers.length === 0 && columnSearch && tableTriggers.length > 0}
+            <tr><td colspan="6" class="px-3 py-4 font-mono text-ui-xs text-muted-foreground/50">No triggers match "{columnSearch}"</td></tr>
+          {:else if tableTriggers.length === 0}
+            <tr><td colspan="6" class="px-3 py-4 font-mono text-ui-xs text-muted-foreground/40">No triggers on this table</td></tr>
+          {/if}
+        </tbody>
+      </table>
+    </div><!-- end triggers section -->
+
   </div><!-- end inline-block wrapper -->
   </div><!-- end scroll container -->
 </div><!-- end outer flex -->
+
+<CreateTriggerDialog
+  bind:open={createTriggerOpen}
+  {schema}
+  defaultTable={table}
+  {tables}
+  onrefresh={onrefresh}
+/>

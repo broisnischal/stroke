@@ -1,6 +1,5 @@
 <script>
-  import { onMount, untrack } from "svelte";
-  import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { untrack } from "svelte";
   import { createHotkey } from "@tanstack/svelte-hotkeys";
   import Search from "@lucide/svelte/icons/search";
   import Pin from "@lucide/svelte/icons/pin";
@@ -35,65 +34,6 @@
   const initialLayout = loadLayout();
   let width = $state(initialLayout.navSidebarWidth);
   let resizeStartWidth = initialLayout.navSidebarWidth;
-
-  // Detect Tauri at mount time (inside onMount) to handle any injection delay
-  let isTauri = $state(false);
-  let maximized = $state(false);
-  let fullscreen = $state(false);
-
-  onMount(() => {
-    isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-    if (!isTauri) return;
-
-    const win = getCurrentWindow();
-    Promise.all([win.isMaximized(), win.isFullscreen()])
-      .then(([m, f]) => { maximized = m; fullscreen = f; })
-      .catch(() => {});
-
-    const unlistenP = win.listen("tauri://resize", async () => {
-      [maximized, fullscreen] = await Promise.all([win.isMaximized(), win.isFullscreen()]);
-    });
-
-    return () => {
-      unlistenP.then((fn) => fn()).catch(() => {});
-    };
-  });
-
-  async function winClose() {
-    if (!isTauri) return;
-    try {
-      await getCurrentWindow().close();
-    } catch (e) {
-      console.error("winClose:", e);
-    }
-  }
-
-  async function winMinimize() {
-    if (!isTauri) return;
-    try {
-      await getCurrentWindow().minimize();
-    } catch (e) {
-      console.error("winMinimize:", e);
-    }
-  }
-
-  async function winToggleMaximize() {
-    if (!isTauri) return;
-    try {
-      await getCurrentWindow().toggleMaximize();
-    } catch (e) {
-      console.error("winToggleMaximize:", e);
-    }
-  }
-
-  async function winToggleFullscreen() {
-    if (!isTauri) return;
-    try {
-      await getCurrentWindow().setFullscreen(!fullscreen);
-    } catch (e) {
-      console.error("winToggleFullscreen:", e);
-    }
-  }
 
   let {
     connectionName = "",
@@ -296,6 +236,50 @@
   const filteredMatViews = $derived(
     applySortBy(matViews.filter((t) => t.name.toLowerCase().includes(lf))),
   );
+  // ── Virtual list (tables only, kicks in at > 150 rows) ───────────────────
+  const VIRT_THRESHOLD = 150
+  const ROW_H = 28          // px — matches contain-intrinsic-size on each <li>
+  const VIRT_BUFFER = 10    // extra rows rendered above and below the viewport
+
+  /** @type {HTMLElement | null} */
+  let scrollContainerEl = $state(null)
+  /** @type {HTMLElement | null} */
+  let tableListEl = $state(null)
+  let sidebarScrollTop = $state(0)
+  let sidebarHeight = $state(0)
+  /** Offset of the tables <ul> from the top of the scroll container. Re-measured
+   *  whenever sections above it open/close (recent, pinned) or refs change. */
+  let tableListOffsetTop = $state(0)
+
+  $effect(() => {
+    // Dependencies that change the table-list's position in the scroll container
+    const _recentOpen = recentOpen
+    const _pins = visiblePinnedTables.length
+    const _showRecent = showRecent
+    const _el = tableListEl
+    const _container = scrollContainerEl
+    if (!_el || !_container) return
+    let node = /** @type {HTMLElement | null} */ (_el)
+    let off = 0
+    while (node && node !== _container) { off += node.offsetTop; node = /** @type {HTMLElement | null} */ (node.offsetParent) }
+    tableListOffsetTop = off
+  })
+
+  const shouldVirtualize = $derived(filteredRegularTables.length > VIRT_THRESHOLD)
+
+  const virtStart = $derived(
+    shouldVirtualize
+      ? Math.max(0, Math.floor((sidebarScrollTop - tableListOffsetTop) / ROW_H) - VIRT_BUFFER)
+      : 0
+  )
+  const virtEnd = $derived(
+    shouldVirtualize
+      ? Math.min(filteredRegularTables.length, Math.ceil((sidebarScrollTop + sidebarHeight - tableListOffsetTop) / ROW_H) + VIRT_BUFFER)
+      : filteredRegularTables.length
+  )
+  const virtTopPad  = $derived(shouldVirtualize ? virtStart * ROW_H : 0)
+  const virtBotPad  = $derived(shouldVirtualize ? Math.max(0, (filteredRegularTables.length - virtEnd) * ROW_H) : 0)
+
   /** Shared field chrome for schema select + table filter (aligned in sidebar grid) */
   const sidebarFieldClass =
     "h-7 w-full min-w-0 rounded-md border border-border bg-background/40 text-ui-sm text-foreground shadow-none transition-colors hover:bg-background/55 focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/30";
@@ -435,7 +419,12 @@
       </div>
 
       <div class="flex min-h-0 flex-1 flex-col">
-        <div class="app-scroll min-h-0 w-full flex-1 overflow-y-auto">
+        <div
+          bind:this={scrollContainerEl}
+          bind:clientHeight={sidebarHeight}
+          class="app-scroll min-h-0 w-full flex-1 overflow-y-auto"
+          onscroll={() => { if (scrollContainerEl) sidebarScrollTop = scrollContainerEl.scrollTop }}
+        >
           {#if loadingTables}
             <div
               class="flex items-center justify-center py-8"
@@ -598,7 +587,7 @@
               {/if}
             </button>
             {#if tablesOpen}
-              <ul class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
+              <ul bind:this={tableListEl} class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
                 {#if regularTables.length === 0}
                   <li
                     class="flex w-full flex-col items-center gap-2 px-4 py-8 text-center"
@@ -615,7 +604,8 @@
                     No tables match
                   </li>
                 {:else}
-                  {#each filteredRegularTables as table (table.name)}
+                  {#if virtTopPad > 0}<li style="height:{virtTopPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
+                  {#each filteredRegularTables.slice(virtStart, virtEnd) as table (table.name)}
                     {@const isSelected = selectedItems.has(table.name)}
                     <li class="[content-visibility:auto] [contain-intrinsic-size:auto_28px]">
                       <ContextMenu.Root>
@@ -691,6 +681,7 @@
                       </ContextMenu.Root>
                     </li>
                   {/each}
+                  {#if virtBotPad > 0}<li style="height:{virtBotPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
                 {/if}
               </ul>
             {/if}
@@ -940,54 +931,3 @@
   onconfirm={(c) => confirmDanger(c)}
 />
 
-<style>
-  .traffic-dot {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 13px;
-    height: 13px;
-    border-radius: 50%;
-    border: none;
-    cursor: default;
-    flex-shrink: 0;
-    transition: opacity 0.1s;
-    -webkit-app-region: no-drag;
-    app-region: no-drag;
-  }
-  .traffic-dot:active {
-    opacity: 0.55;
-  }
-
-  /* Standard macOS traffic light colours */
-  .traffic-close {
-    background-color: #ff5f57;
-    color: #7c0902;
-  }
-  .traffic-minimize {
-    background-color: #ffbd2e;
-    color: #7c4d00;
-  }
-  .traffic-maximize {
-    background-color: #27c93f;
-    color: #0a5c1d;
-  }
-
-  /* Icons hidden by default, revealed when any dot in the group is hovered */
-  .traffic-icon {
-    opacity: 0;
-    transition: opacity 0.08s;
-    pointer-events: none;
-    flex-shrink: 0;
-  }
-
-  /* Hover on the button group shows all icons simultaneously */
-  .traffic-group:hover .traffic-icon {
-    opacity: 1;
-  }
-
-  /* Dim when window doesn't have focus / group not hovered */
-  .traffic-group:not(:hover) .traffic-dot {
-    opacity: 0.45;
-  }
-</style>

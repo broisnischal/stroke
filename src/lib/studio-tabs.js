@@ -1,4 +1,4 @@
-/** @typedef {'table' | 'sql' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'json' | 'charts' | 'dashboard'} StudioTabKind */
+/** @typedef {'table' | 'sql' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree'} StudioTabKind */
 
 /** @typedef {import('$lib/table-query.js').TableSort} TableSort */
 /** @typedef {import('$lib/table-query.js').TableFilter} TableFilter */
@@ -278,6 +278,34 @@ export function findDashboardTab(tabs) {
   return tabs.find((t) => t.kind === 'dashboard') ?? null
 }
 
+export function createRelTreeTab() {
+  return /** @type {StudioTab} */ ({
+    id: nextTabId(),
+    kind: 'reltree',
+    title: 'Relation Tree',
+    state: null,
+  })
+}
+
+/** @param {StudioTab[]} tabs */
+export function findRelTreeTab(tabs) {
+  return tabs.find(t => t.kind === 'reltree') ?? null
+}
+
+export function createErdTab() {
+  return /** @type {StudioTab} */ ({
+    id: nextTabId(),
+    kind: 'erd',
+    title: 'ER Diagram',
+    state: null,
+  })
+}
+
+/** @param {StudioTab[]} tabs */
+export function findErdTab(tabs) {
+  return tabs.find((t) => t.kind === 'erd') ?? null
+}
+
 /** @param {TableTabState} state */
 export function tableTabTitle(state) {
   if (!state.table) return 'Table'
@@ -296,6 +324,8 @@ export function tabDisplayTitle(tab) {
   if (tab.kind === 'json') return 'JSON Viewer'
   if (tab.kind === 'charts') return 'Charts'
   if (tab.kind === 'dashboard') return 'Dashboard'
+  if (tab.kind === 'erd') return 'ER Diagram'
+  if (tab.kind === 'reltree') return 'Relation Tree'
   return tab.title
 }
 

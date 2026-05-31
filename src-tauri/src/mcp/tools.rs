@@ -1,5 +1,6 @@
 use crate::db::connection::ActiveConnection;
 use crate::mcp::ConnMeta;
+use futures::TryStreamExt;
 use serde_json::{json, Value};
 use sqlx::{Column, Row, TypeInfo};
 
@@ -221,28 +222,27 @@ async fn execute_sql_mysql(
     sql: &str,
     max_rows: usize,
 ) -> Result<String, String> {
-    use sqlx::{Column, Row};
-    let rows = sqlx::query(sql)
-        .fetch_all(pool)
-        .await
-        .map_err(|e| format!("SQL error: {e}"))?;
+    // Stream rows instead of fetch_all — caps memory at max_rows regardless of result size.
+    let mut stream = sqlx::query(sql).fetch(pool);
+    let mut columns: Vec<String> = Vec::new();
+    let mut data: Vec<Vec<serde_json::Value>> = Vec::with_capacity(max_rows.min(256));
+    let mut total = 0usize;
 
-    if rows.is_empty() {
-        return Ok(json!({ "columns": [], "rows": [], "row_count": 0 }).to_string());
+    while let Some(row) = stream.try_next().await.map_err(|e| format!("SQL error: {e}"))? {
+        if total == 0 {
+            columns = row.columns().iter().map(|c| c.name().to_string()).collect();
+        }
+        total += 1;
+        if data.len() < max_rows {
+            data.push((0..columns.len()).map(|i| crate::db::mysql::cell_to_json(&row, i)).collect());
+        }
     }
-
-    let columns: Vec<String> = rows[0].columns().iter().map(|c| c.name().to_string()).collect();
-    let data: Vec<Vec<serde_json::Value>> = rows
-        .iter()
-        .take(max_rows)
-        .map(|row| (0..columns.len()).map(|i| crate::db::mysql::cell_to_json(row, i)).collect())
-        .collect();
 
     Ok(json!({
         "columns": columns,
         "rows": data,
-        "row_count": rows.len(),
-        "truncated": rows.len() > max_rows
+        "row_count": total,
+        "truncated": total > max_rows
     }).to_string())
 }
 
@@ -251,32 +251,27 @@ async fn execute_sql_pg(
     sql: &str,
     max_rows: usize,
 ) -> Result<String, String> {
-    let rows = sqlx::query(sql)
-        .fetch_all(pool)
-        .await
-        .map_err(|e| format!("SQL error: {e}"))?;
+    // Stream rows — never materialises more than max_rows rows in memory.
+    let mut stream = sqlx::query(sql).fetch(pool);
+    let mut columns: Vec<String> = Vec::new();
+    let mut data: Vec<Vec<Value>> = Vec::with_capacity(max_rows.min(256));
+    let mut total = 0usize;
 
-    if rows.is_empty() {
-        return Ok(json!({ "columns": [], "rows": [], "row_count": 0 }).to_string());
+    while let Some(row) = stream.try_next().await.map_err(|e| format!("SQL error: {e}"))? {
+        if total == 0 {
+            columns = row.columns().iter().map(|c| c.name().to_string()).collect();
+        }
+        total += 1;
+        if data.len() < max_rows {
+            data.push((0..columns.len()).map(|i| pg_cell(&row, i)).collect());
+        }
     }
-
-    let columns: Vec<String> = rows[0]
-        .columns()
-        .iter()
-        .map(|c| c.name().to_string())
-        .collect();
-    let data: Vec<Vec<Value>> = rows
-        .iter()
-        .take(max_rows)
-        .map(|row| (0..columns.len()).map(|i| pg_cell(row, i)).collect())
-        .collect();
-    let truncated = rows.len() > max_rows;
 
     Ok(json!({
         "columns": columns,
         "rows": data,
-        "row_count": rows.len(),
-        "truncated": truncated
+        "row_count": total,
+        "truncated": total > max_rows
     })
     .to_string())
 }
@@ -286,35 +281,27 @@ async fn execute_sql_sqlite(
     sql: &str,
     max_rows: usize,
 ) -> Result<String, String> {
-    let rows = sqlx::query(sql)
-        .fetch_all(pool)
-        .await
-        .map_err(|e| format!("SQL error: {e}"))?;
+    // Stream rows — never materialises more than max_rows rows in memory.
+    let mut stream = sqlx::query(sql).fetch(pool);
+    let mut columns: Vec<String> = Vec::new();
+    let mut data: Vec<Vec<Value>> = Vec::with_capacity(max_rows.min(256));
+    let mut total = 0usize;
 
-    if rows.is_empty() {
-        return Ok(json!({ "columns": [], "rows": [], "row_count": 0 }).to_string());
+    while let Some(row) = stream.try_next().await.map_err(|e| format!("SQL error: {e}"))? {
+        if total == 0 {
+            columns = row.columns().iter().map(|c| c.name().to_string()).collect();
+        }
+        total += 1;
+        if data.len() < max_rows {
+            data.push((0..columns.len()).map(|i| crate::db::sqlite::cell_to_json(&row, i)).collect());
+        }
     }
-
-    let columns: Vec<String> = rows[0]
-        .columns()
-        .iter()
-        .map(|c| c.name().to_string())
-        .collect();
-    let data: Vec<Vec<Value>> = rows
-        .iter()
-        .take(max_rows)
-        .map(|row| {
-            (0..columns.len())
-                .map(|i| crate::db::sqlite::cell_to_json(row, i))
-                .collect()
-        })
-        .collect();
 
     Ok(json!({
         "columns": columns,
         "rows": data,
-        "row_count": rows.len(),
-        "truncated": rows.len() > max_rows
+        "row_count": total,
+        "truncated": total > max_rows
     })
     .to_string())
 }

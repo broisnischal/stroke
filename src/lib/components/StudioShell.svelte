@@ -8,7 +8,7 @@
   import Command from '@lucide/svelte/icons/command'
   import Lightbulb from '@lucide/svelte/icons/lightbulb'
   import { createHotkey, createHotkeySequence } from '@tanstack/svelte-hotkeys'
-  import { cycleTheme, restorePreviousTheme } from '$lib/stores/settings.js'
+  import { cycleTheme, restorePreviousTheme, isCurrentThemeDark } from '$lib/stores/settings.js'
   import { pickRandomTip } from '$lib/insider-tips.js'
   import { toast } from 'svelte-sonner'
   import Sidebar from './Sidebar.svelte'
@@ -43,6 +43,8 @@
   import JsonViewerPage from './JsonViewerPage.svelte'
   import ChartsPage from './ChartsPage.svelte'
   import DashboardPage from './DashboardPage.svelte'
+  import EntityRelationPage from './EntityRelationPage.svelte'
+  import RelationTreePage from './RelationTreePage.svelte'
   import { Button } from '$lib/components/ui/button/index.js'
   import AlertTriangle from '@lucide/svelte/icons/triangle-alert'
   import X from '@lucide/svelte/icons/x'
@@ -76,6 +78,10 @@
     createBackupTab,
     createChartsTab,
     createDashboardTab,
+    createErdTab,
+    findErdTab,
+    createRelTreeTab,
+    findRelTreeTab,
     findTableTab,
     findSqlTab,
     findAiTab,
@@ -121,6 +127,8 @@
     connectMysql,
     listIndexes,
     listEnums,
+    listTriggers,
+    listSequences,
     truncateTable,
     dropTable,
     initSampleDb,
@@ -140,6 +148,10 @@
   import { loadRecentTabs, pushRecentTab, removeRecentTab, clearRecentTabs } from '$lib/stores/recent-tabs.js'
   import { installInputShortcuts } from '$lib/input-shortcuts.js'
   import TitleBar from './TitleBar.svelte'
+  import { savedCharts, updateChart } from '$lib/stores/saved-charts.js'
+  import { dashboards, activeDashboardId } from '$lib/stores/dashboards.js'
+  import { buildOption } from '$lib/chart-utils.js'
+  import { get } from 'svelte/store'
 
   /** @typedef {import('$lib/studio-tabs.js').StudioTab} StudioTab */
   /** @typedef {import('$lib/studio-tabs.js').TableTabState} TableTabState */
@@ -222,6 +234,10 @@
   let indexes = $state([])
   /** @type {{ name: string, values: string[] }[]} */
   let enums = $state([])
+  /** @type {{ name: string, tableName: string, timing: string, events: string, functionName: string, enabled: boolean }[]} */
+  let triggers = $state([])
+  /** @type {{ name: string, dataType: string, startValue: number, minValue: number, maxValue: number, increment: number, cycle: boolean, ownedBy: string|null }[]} */
+  let sequences = $state([])
   /** @type {'data' | 'structure'} */
   let tableViewMode = $state('data')
   /** @type {import('$lib/api.js').ColumnStructureRow[] | null} — loaded on demand when switching to structure view */
@@ -263,6 +279,8 @@
   let backupEverOpened = $state(false)
   let chartsEverOpened = $state(false)
   let dashboardEverOpened = $state(false)
+  let erdEverOpened     = $state(false)
+  let relTreeEverOpened = $state(false)
   $effect(() => {
     if (activeTab?.kind === 'sql') sqlEverOpened = true
     if (activeTab?.kind === 'orm') ormEverOpened = true
@@ -272,6 +290,8 @@
     if (activeTab?.kind === 'backup') backupEverOpened = true
     if (activeTab?.kind === 'charts') chartsEverOpened = true
     if (activeTab?.kind === 'dashboard') dashboardEverOpened = true
+    if (activeTab?.kind === 'erd') erdEverOpened = true
+    if (activeTab?.kind === 'reltree') relTreeEverOpened = true
   })
 
   let columns = $state([])
@@ -305,6 +325,8 @@
   let scrollTableBottom = $state(() => {})
   /** @type {{ refresh: () => void } | null} */
   let securityPageRef = $state(null)
+  /** @type {{ sendMessage: (text: string) => void } | null} */
+  let aiSidebarRef = $state(null)
   let total = $state(0)
   let queryMs = $state(0)
   let loadingRows = $state(false)
@@ -753,17 +775,9 @@
     cycleTab(-1)
   })
 
-  createHotkey('Alt+Tab', (e) => {
-    if (!connection || tabs.length < 2) return
-    e.preventDefault()
-    cycleTab(1)
-  })
-
-  createHotkey('Alt+Shift+Tab', (e) => {
-    if (!connection || tabs.length < 2) return
-    e.preventDefault()
-    cycleTab(-1)
-  })
+  // Note: Mod+Tab / Mod+Shift+Tab above already map to Ctrl+Tab on Windows/Linux
+  // and Cmd+Tab on macOS. No additional Ctrl+Tab registration needed — duplicates
+  // cause the "[already registered]" warning from @tanstack/svelte-hotkeys.
 
   createHotkey('Mod+B', (e) => {
     e.preventDefault()
@@ -995,7 +1009,43 @@
       securityPageRef?.refresh()
       return
     }
+    if (activeTab?.kind === 'dashboard') {
+      await refreshDashboardCharts()
+      return
+    }
     await loadTables()
+  }
+
+  async function refreshDashboardCharts() {
+    const dash = get(dashboards).find((d) => d.id === get(activeDashboardId))
+    if (!dash) return
+    const charts = get(savedCharts)
+    const isDark = get(isCurrentThemeDark)
+    await Promise.all(
+      dash.items.map(async (item) => {
+        const chart = charts.find((c) => c.id === item.chartId)
+        if (!chart?.sql) return
+        try {
+          const result = await executeSql(chart.sql)
+          const cols = result.columns ?? []
+          const rows = result.rows ?? []
+          const option = buildOption({
+            type: chart.config.type,
+            columns: cols,
+            rows,
+            xCol: chart.config.xCol,
+            yCol: chart.config.yCol,
+            zCol: chart.config.zCol,
+            groupCol: chart.config.groupCol,
+            isDark,
+            title: chart.config.title,
+          })
+          updateChart(chart.id, { previewOption: option })
+        } catch {
+          // silently skip failed charts
+        }
+      })
+    )
   }
 
   function closeInspector() {
@@ -1015,6 +1065,26 @@
     if (!connection) return
     aiSidebarOpen = !aiSidebarOpen
     saveLayout({ aiSidebarOpen })
+  }
+
+  /**
+   * Route "Fix with AI" from SqlConsole into the AI sidebar.
+   * Opens the sidebar if hidden, then sends the composed message.
+   * @param {{ error: string, sql: string }} detail
+   */
+  function handleFixWithAi({ error, sql }) {
+    if (!connection) return
+    // Ensure sidebar is visible
+    if (!aiSidebarOpen) {
+      aiSidebarOpen = true
+      aiSidebarEverOpened = true
+      saveLayout({ aiSidebarOpen: true })
+    }
+    const msg =
+      `Fix this SQL error.\n\nError:\n${error}\n\nSQL:\n\`\`\`sql\n${sql}\n\`\`\`\n\n` +
+      `Return the corrected SQL in a \`\`\`sql block and a brief explanation.`
+    // Defer slightly so the sidebar has time to mount/unhide if it was closed
+    void Promise.resolve().then(() => aiSidebarRef?.sendMessage(msg))
   }
 
   /** Context-aware Accept from the AI sidebar — routes into the right editor. */
@@ -1199,6 +1269,28 @@
     saveActiveTabState()
     dropWelcomeTabs()
     const tab = createDashboardTab()
+    tabs = [...tabs, tab]
+    activeTabId = tab.id
+    clearTableEditor()
+  }
+
+  function openErdTab() {
+    const existing = findErdTab(tabs)
+    if (existing) { void activateTab(existing.id); return }
+    saveActiveTabState()
+    dropWelcomeTabs()
+    const tab = createErdTab()
+    tabs = [...tabs, tab]
+    activeTabId = tab.id
+    clearTableEditor()
+  }
+
+  function openRelTreeTab() {
+    const existing = findRelTreeTab(tabs)
+    if (existing) { void activateTab(existing.id); return }
+    saveActiveTabState()
+    dropWelcomeTabs()
+    const tab = createRelTreeTab()
     tabs = [...tabs, tab]
     activeTabId = tab.id
     clearTableEditor()
@@ -1581,6 +1673,42 @@
     }
   }
 
+  async function loadTriggers() {
+    if (!activeSchema) { triggers = []; return }
+    try {
+      const list = await listTriggers(activeSchema)
+      triggers = list.map((t) => ({
+        name: t.name ?? '',
+        tableName: t.tableName ?? t.table_name ?? '',
+        timing: t.timing ?? 'AFTER',
+        events: t.events ?? '',
+        functionName: t.functionName ?? t.function_name ?? '',
+        enabled: t.enabled ?? true,
+      })).filter((t) => t.name)
+    } catch {
+      triggers = []
+    }
+  }
+
+  async function loadSequences() {
+    if (!activeSchema) { sequences = []; return }
+    try {
+      const list = await listSequences(activeSchema)
+      sequences = list.map((s) => ({
+        name: s.name ?? '',
+        dataType: s.dataType ?? s.data_type ?? 'bigint',
+        startValue: s.startValue ?? s.start_value ?? 1,
+        minValue: s.minValue ?? s.min_value ?? 1,
+        maxValue: s.maxValue ?? s.max_value ?? 9007199254740991,
+        increment: s.increment ?? 1,
+        cycle: s.cycle ?? false,
+        ownedBy: s.ownedBy ?? s.owned_by ?? null,
+      })).filter((s) => s.name)
+    } catch {
+      sequences = []
+    }
+  }
+
   async function loadTables() {
     if (!activeSchema) {
       tables = []
@@ -1609,6 +1737,8 @@
     }
     void loadIndexes()
     void loadEnums()
+    void loadTriggers()
+    void loadSequences()
   }
 
   async function reloadTableFromQuery(resetPage = true) {
@@ -1977,6 +2107,8 @@
     tables = []
     indexes = []
     enums = []
+    triggers = []
+    sequences = []
     activeSchema = 'public'
     activeTable = null
     tableFilter = ''
@@ -2363,6 +2495,7 @@
 
 <UpdateDialog bind:this={updateDialog} onupdatefound={() => (statusBarHasUpdate = true)} />
 
+
 <CommandPalette
   bind:open={commandOpen}
   bind:page={commandPage}
@@ -2385,6 +2518,8 @@
   {aiMode}
   ontoggleaimode={() => aiMode ? exitAiMode() : enterAiMode()}
   onopenorm={() => { if (aiMode) exitAiMode(); openOrmTab() }}
+  onopenerd={() => { if (aiMode) exitAiMode(); openErdTab() }}
+  onopenreltree={() => { if (aiMode) exitAiMode(); openRelTreeTab() }}
   onopenbackup={() => { if (aiMode) exitAiMode(); openBackupTab() }}
   onopenSchema={() => { if (aiMode) exitAiMode(); openSchemaTab() }}
   onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
@@ -2458,6 +2593,8 @@
         onopenorm={openOrmTab}
         onopenbackup={openBackupTab}
         onopendashboard={() => { if (aiMode) exitAiMode(); openDashboardTab() }}
+        onopenerd={() => { if (aiMode) exitAiMode(); openErdTab() }}
+        onopenreltree={() => { if (aiMode) exitAiMode(); openRelTreeTab() }}
         {aiMode}
         onopenaimode={() => (aiMode ? exitAiMode() : enterAiMode())}
         {queryHistory}
@@ -2564,8 +2701,11 @@
       {:else if activeTab?.kind === 'schema'}
         <svelte:boundary failed={tabError}>
           <SchemaPage
+            schema={activeSchema}
             {indexes}
             {enums}
+            {triggers}
+            {sequences}
             {tables}
             loading={loadingTables}
             active={activeTab?.kind === 'schema'}
@@ -2649,6 +2789,38 @@
         </div>
       {/if}
 
+      <!-- Relation Tree tab -->
+      {#if relTreeEverOpened}
+        <div
+          class={activeTab?.kind === 'reltree' ? 'flex min-h-0 flex-1' : 'hidden'}
+          inert={activeTab?.kind !== 'reltree' || undefined}
+        >
+          <svelte:boundary failed={tabError}>
+            <RelationTreePage
+              schema={activeSchema}
+              {schemas}
+              onopentable={(s, t) => void openTableTab(s, t)}
+            />
+          </svelte:boundary>
+        </div>
+      {/if}
+
+      <!-- ER Diagram tab -->
+      {#if erdEverOpened}
+        <div
+          class={activeTab?.kind === 'erd' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+          inert={activeTab?.kind !== 'erd' || undefined}
+        >
+          <svelte:boundary failed={tabError}>
+            <EntityRelationPage
+              schema={activeSchema}
+              {schemas}
+              onopentable={(s, t) => void openTableTab(s, t)}
+            />
+          </svelte:boundary>
+        </div>
+      {/if}
+
       <!-- ORM tab: mount once, keep alive so Monaco is not destroyed on tab switch -->
       {#if ormEverOpened}
         <div
@@ -2716,6 +2888,7 @@
             onqueryrefresh={refreshQueryStores}
             onhistoryselect={(sql) => void openQueryInEditor(sql)}
             onsavequery={handleSaveQuery}
+            onfixwithai={handleFixWithAi}
           />
           </svelte:boundary>
         </div>
@@ -2782,11 +2955,12 @@
               {primaryKey}
               columns={structureColumns}
               indexes={activeTable ? indexes.filter((i) => i.tableName === activeTable) : []}
+              triggers={activeTable ? triggers.filter((t) => t.tableName === activeTable) : []}
               {tables}
               {enums}
               columnSearch={structureSearch}
               loading={loadingStructure}
-              onrefresh={() => void loadStructure()}
+              onrefresh={() => { void loadStructure(); void loadTriggers() }}
             />
           {:else}
           <TableToolbar
@@ -3013,6 +3187,7 @@
       inert={!aiSidebarOpen || aiMode || undefined}
     >
       <AiSidebar
+        bind:this={aiSidebarRef}
         schemaContext={aiSchemaContext}
         {connectionId}
         isActive={aiSidebarOpen && !aiMode}
@@ -3060,6 +3235,8 @@
         onopenbackup={openBackupTab}
   onopenchartspage={() => { if (aiMode) exitAiMode(); openChartsTab() }}
   onopendashboard={() => { if (aiMode) exitAiMode(); openDashboardTab() }}
+  onopenerd={() => { if (aiMode) exitAiMode(); openErdTab() }}
+  onopenreltree={() => { if (aiMode) exitAiMode(); openRelTreeTab() }}
   onopensettings={() => (showSettingsModal = true)}
   onopencommand={() => (commandOpen = true)}
   ondisconnect={requestDisconnect}

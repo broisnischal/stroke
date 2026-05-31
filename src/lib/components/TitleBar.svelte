@@ -7,6 +7,10 @@
   import Sparkles      from '@lucide/svelte/icons/sparkles'
   import MessageSquare from '@lucide/svelte/icons/message-square'
   import { cn } from '$lib/utils.js'
+  import { detectOs } from '$lib/platform.js'
+
+  const isMac = typeof navigator !== 'undefined' && detectOs() === 'macos'
+  const mod   = isMac ? '⌘' : 'Ctrl'
 
   let {
     title = 'studio',
@@ -98,7 +102,7 @@
         type="button"
         class={cn('pointer-events-auto ml-2 shrink-0', iconBtn, !sidebarOpen && 'bg-white/[0.05] text-foreground/60')}
         onclick={ontogglesidebar}
-        title={sidebarOpen ? 'Hide sidebar (⌘B)' : 'Show sidebar (⌘B)'}
+        title={sidebarOpen ? `Hide sidebar (${mod}B)` : `Show sidebar (${mod}B)`}
       >
         <PanelLeft class="size-3" />
       </button>
@@ -144,7 +148,7 @@
               : 'text-muted-foreground/50 hover:bg-white/[0.07] hover:text-muted-foreground',
           )}
           onclick={ontoggleaimode}
-          title={aiMode ? 'Exit agent mode (⌘⇧E)' : 'Enter agent mode (⌘⇧E)'}
+          title={aiMode ? `Exit agent mode (${mod}⇧E)` : `Enter agent mode (${mod}⇧E)`}
         >
           <Sparkles class="size-[10px]" />
           <span>Agent</span>
@@ -154,7 +158,7 @@
           type="button"
           class={cn(iconBtn, aiSidebarOpen && 'bg-white/[0.05] text-foreground/60')}
           onclick={ontoggleaisidebar}
-          title={aiSidebarOpen ? 'Close chat (⌘I)' : 'Open chat (⌘I)'}
+          title={aiSidebarOpen ? `Close chat (${mod}I)` : `Open chat (${mod}I)`}
         >
           <MessageSquare class="size-3" />
         </button>

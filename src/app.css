@@ -78,15 +78,20 @@ html[data-os="linux"]   { --window-radius: 8px; }
     /* Transparent so the rounded body corners reveal the desktop, not a square
        html background. Body's bg-background would otherwise propagate here. */
     background: transparent;
-    /* antialiased (grayscale) blurs on WebKitGTK/Linux; auto uses the platform
-       renderer which stays sharp at all zoom levels and during scroll. */
+    /* Linux/WebKitGTK: 'auto' lets FreeType apply the system's native hinting
+       (bytecode or autohint) so strokes snap to pixel boundaries — this is what
+       makes text look crisp on a non-HiDPI Linux screen. 'antialiased' forces
+       grayscale AA which bypasses FreeType hinting and makes text look light/soft.
+       macOS: 'auto' delegates to Core Text which also produces good results. */
     -webkit-font-smoothing: auto;
     -moz-osx-font-smoothing: auto;
-    /* optimizeLegibility causes blurry text during GPU-composited scroll in
-       WebKit / WebView2 — the software rasterizer it enables doesn't align
-       cleanly with compositor layer boundaries when rows scroll past the
-       sticky header. 'geometricPrecision' keeps crisp rendering without it. */
-    text-rendering: geometricPrecision;
+    /* 'auto' on WebKitGTK = FreeType normal mode (hinting on). We previously used
+       'geometricPrecision' to avoid scroll blur from GPU compositing, but
+       WEBKIT_DISABLE_DMABUF_RENDERER=1 in lib.rs already handles that — keeping
+       geometricPrecision unnecessarily disables FreeType hinting on Linux. */
+    text-rendering: auto;
+    /* font-synthesis and text-size-adjust omitted: font-synthesis:none can trigger
+       a WebKit font assertion on Linux startup; text-size-adjust is a no-op on desktop. */
   }
 
   body {
@@ -198,7 +203,7 @@ html[data-os="linux"]   { --window-radius: 8px; }
   [data-sonner-toaster] [data-sonner-toast] {
     font-family: inherit;
     font-size: inherit;
-    -webkit-font-smoothing: antialiased;
+    /* Inherit 'auto' from html — don't force antialiased which blurs on Linux */
   }
 
   [data-sonner-toaster] [data-sonner-toast][data-styled='false'] [data-description] {

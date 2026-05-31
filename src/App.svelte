@@ -11,6 +11,15 @@
     applySettings(loadSettings())
     installZoomShortcuts()
 
+    // Suppress Tauri's internal "Couldn't find callback id" warning.
+    // This is harmless noise that fires when Rust resolves a promise after a
+    // hot-reload or fast navigation has already torn down the JS callback.
+    const _warn = console.warn
+    console.warn = (/** @type {unknown} */ ...args) => {
+      if (typeof args[0] === 'string' && args[0].includes("Couldn't find callback id")) return
+      _warn.apply(console, args)
+    }
+
     // Block print — no Tauri-level API exists for this, so override at the JS boundary
     window.print = () => {}
     window.addEventListener('beforeprint', (e) => e.preventDefault(), { capture: true })

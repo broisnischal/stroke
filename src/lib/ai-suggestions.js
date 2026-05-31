@@ -104,18 +104,55 @@ export function generateSuggestions(ctx) {
 
   // --- Schema-level suggestions ---
   if (tables.length > 0) {
-    const biggest = [...tables].sort((a, b) => (b.rowCount ?? 0) - (a.rowCount ?? 0))[0]
+    const sorted = [...tables].sort((a, b) => (b.rowCount ?? 0) - (a.rowCount ?? 0))
+    const biggest = sorted[0]
     if (biggest && biggest.name !== activeTable) {
       suggestions.push({
-        label: `Largest table`,
-        prompt: `Show the first 10 rows of ${activeSchema}.${biggest.name}`,
+        label: `Browse ${biggest.name}`,
+        prompt: `Show me the first 20 rows of ${activeSchema}.${biggest.name}`,
       })
     }
 
     suggestions.push({
       label: `Schema overview`,
-      prompt: `List all tables in the "${activeSchema}" schema with their row counts and sizes`,
+      prompt: `List all tables in the "${activeSchema}" schema with their row counts`,
     })
+
+    suggestions.push({
+      label: `Row counts for all tables`,
+      prompt: `Show a ranked list of all tables in "${activeSchema}" ordered by number of rows descending`,
+    })
+
+    if (tables.length >= 3) {
+      suggestions.push({
+        label: `Foreign key relationships`,
+        prompt: `Show all foreign key relationships between tables in the "${activeSchema}" schema`,
+      })
+    }
+
+    if (tables.length >= 2) {
+      suggestions.push({
+        label: `Find recent activity`,
+        prompt: `Which tables in "${activeSchema}" have a created_at or updated_at column? Show the 10 most recent rows from the busiest one.`,
+      })
+    }
+
+    suggestions.push({
+      label: `Spot duplicate records`,
+      prompt: `Check the tables in "${activeSchema}" for any obvious duplicate rows or duplicate values in likely unique columns`,
+    })
+
+    suggestions.push({
+      label: `Database size breakdown`,
+      prompt: `Show the disk size of each table in the "${activeSchema}" schema, ordered largest first`,
+    })
+
+    if (sorted[1] && sorted[1].name !== activeTable) {
+      suggestions.push({
+        label: `Explore ${sorted[1].name}`,
+        prompt: `Show me a sample of ${activeSchema}.${sorted[1].name} with column descriptions`,
+      })
+    }
   }
 
   // Deduplicate and limit

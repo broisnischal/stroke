@@ -119,16 +119,34 @@ async fn exact_row_count(pool: &PgPool, schema: &str, table: &str) -> Result<i64
 }
 
 async fn resolve_unknown_row_counts(pool: &PgPool, schema: &str, tables: &mut [TableInfo]) {
-    for table in tables.iter_mut() {
-        if table.row_count >= 0 {
-            continue;
+    // Zero out view/foreign-table entries immediately (no COUNT needed).
+    for t in tables.iter_mut() {
+        if t.row_count < 0 && (t.kind == "view" || t.kind == "foreign_table") {
+            t.row_count = 0;
         }
-        // Views and foreign tables don't have reliable stats; skip exact count
-        if table.kind == "view" || table.kind == "foreign_table" {
-            table.row_count = 0;
-            continue;
-        }
-        table.row_count = exact_row_count(pool, schema, &table.name).await.unwrap_or(0);
+    }
+
+    // Collect indices of materialized views / tables that still need an exact count.
+    let needs_count: Vec<usize> = tables
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| t.row_count < 0)
+        .map(|(i, _)| i)
+        .collect();
+
+    if needs_count.is_empty() {
+        return;
+    }
+
+    // Fire all COUNT(*) queries in parallel — one round-trip instead of N.
+    let futs: Vec<_> = needs_count
+        .iter()
+        .map(|&i| exact_row_count(pool, schema, &tables[i].name))
+        .collect();
+    let counts = futures::future::join_all(futs).await;
+
+    for (&idx, result) in needs_count.iter().zip(counts.iter()) {
+        tables[idx].row_count = result.as_ref().copied().unwrap_or(0);
     }
 }
 
@@ -415,6 +433,37 @@ pub struct EnumInfo {
     pub values: Vec<String>,
 }
 
+// ── Triggers (PostgreSQL only) ────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TriggerInfo {
+    pub name: String,
+    pub table_name: String,
+    /// "BEFORE" | "AFTER" | "INSTEAD OF"
+    pub timing: String,
+    /// e.g. "INSERT, UPDATE"
+    pub events: String,
+    pub function_name: String,
+    pub enabled: bool,
+}
+
+// ── Sequences (PostgreSQL only) ───────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SequenceInfo {
+    pub name: String,
+    pub data_type: String,
+    pub start_value: i64,
+    pub min_value: i64,
+    pub max_value: i64,
+    pub increment: i64,
+    pub cycle: bool,
+    /// "table.column" when owned by a serial/identity column, None otherwise
+    pub owned_by: Option<String>,
+}
+
 async fn list_enums_pg(pool: &PgPool, schema: &str) -> Result<Vec<EnumInfo>, String> {
     let rows = sqlx::query(
         r#"
@@ -440,6 +489,107 @@ async fn list_enums_pg(pool: &PgPool, schema: &str) -> Result<Vec<EnumInfo>, Str
             Ok(EnumInfo { name, values })
         })
         .collect()
+}
+
+async fn list_triggers_pg(pool: &PgPool, schema: &str) -> Result<Vec<TriggerInfo>, String> {
+    let rows = sqlx::query(r#"
+        SELECT
+            t.tgname::text,
+            c.relname::text,
+            CASE
+                WHEN (t.tgtype::integer & 64) = 64 THEN 'INSTEAD OF'
+                WHEN (t.tgtype::integer & 2)  = 2  THEN 'BEFORE'
+                ELSE 'AFTER'
+            END,
+            array_to_string(
+                array_remove(ARRAY[
+                    CASE WHEN (t.tgtype::integer & 4)  = 4  THEN 'INSERT'   ELSE NULL END,
+                    CASE WHEN (t.tgtype::integer & 8)  = 8  THEN 'DELETE'   ELSE NULL END,
+                    CASE WHEN (t.tgtype::integer & 16) = 16 THEN 'UPDATE'   ELSE NULL END,
+                    CASE WHEN (t.tgtype::integer & 32) = 32 THEN 'TRUNCATE' ELSE NULL END
+                ], NULL),
+                ', '
+            ),
+            p.proname::text,
+            (t.tgenabled::text != 'D')
+        FROM pg_catalog.pg_trigger t
+        JOIN pg_catalog.pg_class c     ON c.oid = t.tgrelid
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_catalog.pg_proc p      ON p.oid = t.tgfoid
+        WHERE n.nspname = $1
+          AND NOT t.tgisinternal
+        ORDER BY c.relname, t.tgname
+    "#)
+    .bind(schema)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("Failed to list triggers: {e}"))?;
+
+    Ok(rows
+        .iter()
+        .filter_map(|r| {
+            Some(TriggerInfo {
+                name:          r.try_get::<String, _>(0).ok()?,
+                table_name:    r.try_get::<String, _>(1).ok()?,
+                timing:        r.try_get::<String, _>(2).unwrap_or_else(|_| "AFTER".to_string()),
+                events:        r.try_get::<String, _>(3).unwrap_or_default(),
+                function_name: r.try_get::<String, _>(4).unwrap_or_default(),
+                enabled:       r.try_get::<bool, _>(5).unwrap_or(true),
+            })
+        })
+        .collect())
+}
+
+async fn list_sequences_pg(pool: &PgPool, schema: &str) -> Result<Vec<SequenceInfo>, String> {
+    let rows = sqlx::query(r#"
+        SELECT
+            s.sequence_name::text,
+            s.data_type::text,
+            s.start_value::bigint,
+            s.minimum_value::bigint,
+            s.maximum_value::bigint,
+            s.increment::bigint,
+            (s.cycle_option = 'YES')::boolean,
+            (
+                SELECT dep_rel.relname::text || '.' || dep_att.attname::text
+                FROM pg_catalog.pg_class seq_cls
+                JOIN pg_catalog.pg_depend d
+                    ON d.objid = seq_cls.oid AND d.deptype = 'a'
+                JOIN pg_catalog.pg_class dep_rel
+                    ON dep_rel.oid = d.refobjid
+                JOIN pg_catalog.pg_attribute dep_att
+                    ON dep_att.attrelid = d.refobjid AND dep_att.attnum = d.refobjsubid
+                WHERE seq_cls.relname = s.sequence_name
+                  AND seq_cls.relkind = 'S'
+                  AND seq_cls.relnamespace = (
+                      SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = $1
+                  )
+                LIMIT 1
+            )
+        FROM information_schema.sequences s
+        WHERE s.sequence_schema = $1
+        ORDER BY s.sequence_name
+    "#)
+    .bind(schema)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("Failed to list sequences: {e}"))?;
+
+    Ok(rows
+        .iter()
+        .filter_map(|r| {
+            Some(SequenceInfo {
+                name:        r.try_get::<String, _>(0).ok()?,
+                data_type:   r.try_get::<String, _>(1).unwrap_or_else(|_| "bigint".to_string()),
+                start_value: r.try_get::<i64, _>(2).unwrap_or(1),
+                min_value:   r.try_get::<i64, _>(3).unwrap_or(1),
+                max_value:   r.try_get::<i64, _>(4).unwrap_or(i64::MAX),
+                increment:   r.try_get::<i64, _>(5).unwrap_or(1),
+                cycle:       r.try_get::<bool, _>(6).unwrap_or(false),
+                owned_by:    r.try_get::<Option<String>, _>(7).ok().flatten(),
+            })
+        })
+        .collect())
 }
 
 // ── Public dispatch ───────────────────────────────────────────────────────────
@@ -482,7 +632,26 @@ pub async fn list_enums(state: State<'_, DbState>, schema: String) -> Result<Vec
             validate_ident(&schema)?;
             list_enums_pg(&pool, &schema).await
         }
-        // MySQL / SQLite / D1 have no enum types accessible this way
+        _ => Ok(vec![]),
+    }
+}
+
+pub async fn list_triggers(state: State<'_, DbState>, schema: String) -> Result<Vec<TriggerInfo>, String> {
+    match require_conn(&state)? {
+        ActiveConnection::Postgres(pool) => {
+            validate_ident(&schema)?;
+            list_triggers_pg(&pool, &schema).await
+        }
+        _ => Ok(vec![]),
+    }
+}
+
+pub async fn list_sequences(state: State<'_, DbState>, schema: String) -> Result<Vec<SequenceInfo>, String> {
+    match require_conn(&state)? {
+        ActiveConnection::Postgres(pool) => {
+            validate_ident(&schema)?;
+            list_sequences_pg(&pool, &schema).await
+        }
         _ => Ok(vec![]),
     }
 }

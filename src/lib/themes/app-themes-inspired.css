@@ -626,3 +626,267 @@ html[data-theme="broisnees-light"] {
   --editor-surface: #ffffff;
   --editor-line-highlight: #f5f5f5;
 }
+
+/* ── Parchment — warm cream editorial light ── */
+html[data-theme="parchment"] {
+  --background: oklch(0.970 0.014 85);
+  --foreground: oklch(0.17 0.024 62);
+  --card: oklch(0.993 0.009 82);
+  --card-foreground: oklch(0.17 0.024 62);
+  --popover: oklch(0.993 0.009 82);
+  --popover-foreground: oklch(0.17 0.024 62);
+  --primary: oklch(0.33 0.10 262);
+  --primary-foreground: oklch(0.970 0.006 82);
+  --secondary: oklch(0.920 0.016 80);
+  --secondary-foreground: oklch(0.22 0.020 62);
+  --muted: oklch(0.920 0.015 80);
+  --muted-foreground: oklch(0.50 0.018 72);
+  --accent: oklch(0.888 0.019 80);
+  --accent-foreground: oklch(0.17 0.024 62);
+  --destructive: oklch(0.55 0.22 25);
+  --border: oklch(0.808 0.022 78);
+  --input: oklch(0.808 0.022 78);
+  --ring: oklch(0.42 0.10 262);
+  --sidebar: oklch(0.940 0.016 80);
+  --sidebar-foreground: oklch(0.20 0.022 62);
+  --sidebar-accent: oklch(0.878 0.020 78);
+  --sidebar-accent-foreground: oklch(0.17 0.024 62);
+  --sidebar-border: oklch(0.790 0.022 78);
+  --panel: oklch(0.960 0.014 82);
+  --table-grid: oklch(0.768 0.026 78);
+  --link: oklch(0.40 0.15 252);
+  --link-hover: oklch(0.30 0.18 252);
+  --editor-surface: #faf7f0;
+  --editor-line-highlight: #ede9de;
+}
+
+/* ── Ice — crisp pale steel-blue light ── */
+html[data-theme="ice"] {
+  --background: oklch(0.980 0.008 242);
+  --foreground: oklch(0.14 0.026 252);
+  --card: oklch(1 0.004 238);
+  --card-foreground: oklch(0.14 0.026 252);
+  --popover: oklch(1 0.004 238);
+  --popover-foreground: oklch(0.14 0.026 252);
+  --primary: oklch(0.46 0.20 252);
+  --primary-foreground: oklch(0.98 0.004 238);
+  --secondary: oklch(0.924 0.015 242);
+  --secondary-foreground: oklch(0.18 0.024 252);
+  --muted: oklch(0.924 0.014 242);
+  --muted-foreground: oklch(0.47 0.026 252);
+  --accent: oklch(0.892 0.018 240);
+  --accent-foreground: oklch(0.14 0.026 252);
+  --destructive: oklch(0.55 0.22 25);
+  --border: oklch(0.820 0.024 240);
+  --input: oklch(0.820 0.024 240);
+  --ring: oklch(0.46 0.20 252);
+  --sidebar: oklch(0.954 0.013 240);
+  --sidebar-foreground: oklch(0.18 0.024 252);
+  --sidebar-accent: oklch(0.886 0.020 240);
+  --sidebar-accent-foreground: oklch(0.14 0.026 252);
+  --sidebar-border: oklch(0.800 0.026 240);
+  --panel: oklch(0.970 0.010 240);
+  --table-grid: oklch(0.774 0.028 240);
+  --link: oklch(0.42 0.22 252);
+  --link-hover: oklch(0.32 0.24 252);
+  --editor-surface: #f2f5fc;
+  --editor-line-highlight: #e4eaf6;
+}
+
+/* ── Rosé — soft blush pink light ── */
+html[data-theme="rose"] {
+  --background: oklch(0.985 0.006 12);
+  --foreground: oklch(0.17 0.022 6);
+  --card: oklch(1 0.003 12);
+  --card-foreground: oklch(0.17 0.022 6);
+  --popover: oklch(1 0.003 12);
+  --popover-foreground: oklch(0.17 0.022 6);
+  --primary: oklch(0.52 0.22 350);
+  --primary-foreground: oklch(0.985 0.004 12);
+  --secondary: oklch(0.930 0.012 8);
+  --secondary-foreground: oklch(0.22 0.020 6);
+  --muted: oklch(0.930 0.011 8);
+  --muted-foreground: oklch(0.50 0.018 6);
+  --accent: oklch(0.900 0.014 8);
+  --accent-foreground: oklch(0.17 0.022 6);
+  --destructive: oklch(0.55 0.22 25);
+  --border: oklch(0.840 0.018 8);
+  --input: oklch(0.840 0.018 8);
+  --ring: oklch(0.52 0.22 350);
+  --sidebar: oklch(0.958 0.010 8);
+  --sidebar-foreground: oklch(0.20 0.020 6);
+  --sidebar-accent: oklch(0.900 0.016 8);
+  --sidebar-accent-foreground: oklch(0.17 0.022 6);
+  --sidebar-border: oklch(0.822 0.018 8);
+  --panel: oklch(0.972 0.008 10);
+  --table-grid: oklch(0.790 0.022 8);
+  --link: oklch(0.48 0.20 342);
+  --link-hover: oklch(0.38 0.22 342);
+  --editor-surface: #fff4f4;
+  --editor-line-highlight: #ffe6e8;
+}
+
+/* ── Catppuccin Latte — official pastel light ── */
+html[data-theme="catppuccin-latte"] {
+  --background: #eff1f5;
+  --foreground: #4c4f69;
+  --card: #e6e9ef;
+  --card-foreground: #4c4f69;
+  --popover: #dce0e8;
+  --popover-foreground: #4c4f69;
+  --primary: #8839ef;
+  --primary-foreground: #eff1f5;
+  --secondary: #e6e9ef;
+  --secondary-foreground: #4c4f69;
+  --muted: #e6e9ef;
+  --muted-foreground: #9ca0b0;
+  --accent: #dce0e8;
+  --accent-foreground: #4c4f69;
+  --destructive: #d20f39;
+  --border: oklch(0.55 0.03 280 / 20%);
+  --input: oklch(0.55 0.03 280 / 26%);
+  --ring: #8839ef;
+  --sidebar: #e6e9ef;
+  --sidebar-foreground: #4c4f69;
+  --sidebar-accent: #dce0e8;
+  --sidebar-accent-foreground: #4c4f69;
+  --sidebar-border: oklch(0.55 0.03 280 / 16%);
+  --panel: #eff1f5;
+  --table-grid: oklch(0.55 0.03 280 / 22%);
+  --link: #1e66f5;
+  --link-hover: #7287fd;
+  --editor-surface: #eff1f5;
+  --editor-line-highlight: #e6e9ef;
+}
+
+/* ── Rose Pine Dawn — warm rose light ── */
+html[data-theme="rosepine-dawn"] {
+  --background: #faf4ed;
+  --foreground: #575279;
+  --card: #fffaf3;
+  --card-foreground: #575279;
+  --popover: #fffaf3;
+  --popover-foreground: #575279;
+  --primary: #907aa9;
+  --primary-foreground: #faf4ed;
+  --secondary: #f2e9e1;
+  --secondary-foreground: #575279;
+  --muted: #f2e9e1;
+  --muted-foreground: #9893a5;
+  --accent: #eaddca;
+  --accent-foreground: #575279;
+  --destructive: #b4637a;
+  --border: oklch(0.65 0.04 340 / 22%);
+  --input: oklch(0.65 0.04 340 / 28%);
+  --ring: #907aa9;
+  --sidebar: #f2e9e1;
+  --sidebar-foreground: #575279;
+  --sidebar-accent: #eaddca;
+  --sidebar-accent-foreground: #575279;
+  --sidebar-border: oklch(0.65 0.04 340 / 18%);
+  --panel: #faf4ed;
+  --table-grid: oklch(0.65 0.04 340 / 24%);
+  --link: #286983;
+  --link-hover: #56949f;
+  --editor-surface: #faf4ed;
+  --editor-line-highlight: #f2e9e1;
+}
+
+/* ── Obsidian — near-black with emerald accent ── */
+html[data-theme="obsidian"] {
+  --background: oklch(0.100 0 0);
+  --foreground: oklch(0.910 0 0);
+  --card: oklch(0.145 0 0);
+  --card-foreground: oklch(0.910 0 0);
+  --popover: oklch(0.145 0 0);
+  --popover-foreground: oklch(0.910 0 0);
+  --primary: oklch(0.72 0.17 160);
+  --primary-foreground: oklch(0.090 0.02 160);
+  --secondary: oklch(0.185 0 0);
+  --secondary-foreground: oklch(0.850 0 0);
+  --muted: oklch(0.185 0 0);
+  --muted-foreground: oklch(0.540 0 0);
+  --accent: oklch(0.215 0 0);
+  --accent-foreground: oklch(0.940 0 0);
+  --destructive: oklch(0.65 0.2 25);
+  --border: oklch(1 0 0 / 8%);
+  --input: oklch(1 0 0 / 10%);
+  --ring: oklch(0.72 0.17 160);
+  --sidebar: oklch(0.078 0 0);
+  --sidebar-foreground: oklch(0.860 0 0);
+  --sidebar-accent: oklch(0.195 0 0);
+  --sidebar-accent-foreground: oklch(0.960 0 0);
+  --sidebar-border: oklch(1 0 0 / 6%);
+  --panel: oklch(0.115 0 0);
+  --table-grid: oklch(1 0 0 / 9%);
+  --link: oklch(0.75 0.15 160);
+  --link-hover: oklch(0.83 0.13 160);
+  --editor-surface: #181818;
+  --editor-line-highlight: #1f1f1f;
+}
+
+/* ── Espresso — warm dark brown ── */
+html[data-theme="espresso"] {
+  --background: oklch(0.152 0.016 62);
+  --foreground: oklch(0.912 0.016 70);
+  --card: oklch(0.198 0.018 60);
+  --card-foreground: oklch(0.912 0.016 70);
+  --popover: oklch(0.198 0.018 60);
+  --popover-foreground: oklch(0.912 0.016 70);
+  --primary: oklch(0.720 0.15 54);
+  --primary-foreground: oklch(0.130 0.022 60);
+  --secondary: oklch(0.232 0.018 60);
+  --secondary-foreground: oklch(0.858 0.014 70);
+  --muted: oklch(0.232 0.018 60);
+  --muted-foreground: oklch(0.580 0.016 65);
+  --accent: oklch(0.262 0.020 60);
+  --accent-foreground: oklch(0.940 0.014 70);
+  --destructive: oklch(0.65 0.18 25);
+  --border: oklch(0.42 0.022 60 / 38%);
+  --input: oklch(0.42 0.022 60 / 48%);
+  --ring: oklch(0.720 0.15 54);
+  --sidebar: oklch(0.118 0.014 60);
+  --sidebar-foreground: oklch(0.862 0.014 70);
+  --sidebar-accent: oklch(0.222 0.018 60);
+  --sidebar-accent-foreground: oklch(0.952 0.014 70);
+  --sidebar-border: oklch(0.40 0.022 60 / 30%);
+  --panel: oklch(0.172 0.016 60);
+  --table-grid: oklch(0.44 0.022 60 / 38%);
+  --link: oklch(0.78 0.14 54);
+  --link-hover: oklch(0.88 0.11 54);
+  --editor-surface: #1d1710;
+  --editor-line-highlight: #251e14;
+}
+
+/* ── Kanagawa — Neovim Wave palette ── */
+html[data-theme="kanagawa"] {
+  --background: #1f1f28;
+  --foreground: #dcd7ba;
+  --card: #2a2a37;
+  --card-foreground: #dcd7ba;
+  --popover: #2a2a37;
+  --popover-foreground: #dcd7ba;
+  --primary: #7e9cd8;
+  --primary-foreground: #1f1f28;
+  --secondary: #2d2d3b;
+  --secondary-foreground: #c8c093;
+  --muted: #2d2d3b;
+  --muted-foreground: #727169;
+  --accent: #363646;
+  --accent-foreground: #dcd7ba;
+  --destructive: #c34043;
+  --border: oklch(0.65 0.03 252 / 22%);
+  --input: oklch(0.65 0.03 252 / 28%);
+  --ring: #7e9cd8;
+  --sidebar: #16161d;
+  --sidebar-foreground: #c8c093;
+  --sidebar-accent: #363646;
+  --sidebar-accent-foreground: #dcd7ba;
+  --sidebar-border: oklch(0.65 0.03 252 / 18%);
+  --panel: #1f1f28;
+  --table-grid: oklch(0.65 0.03 252 / 24%);
+  --link: #7fb4ca;
+  --link-hover: #7e9cd8;
+  --editor-surface: #1f1f28;
+  --editor-line-highlight: #2a2a37;
+}

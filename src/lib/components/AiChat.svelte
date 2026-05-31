@@ -58,6 +58,15 @@
   import mermaid from 'mermaid'
   import { toast } from 'svelte-sonner'
   import { aiSettings, aiProfiles, activeProfileId } from '$lib/stores/ai-settings.js'
+  import { saveChart } from '$lib/stores/saved-charts.js'
+  import { buildOption } from '$lib/chart-utils.js'
+  import { isCurrentThemeDark } from '$lib/stores/settings.js'
+  import Bookmark from '@lucide/svelte/icons/bookmark'
+  import BookmarkCheck from '@lucide/svelte/icons/bookmark-check'
+  import ArrowRight from '@lucide/svelte/icons/arrow-right'
+  import Search from '@lucide/svelte/icons/search'
+  import TrendingUp from '@lucide/svelte/icons/trending-up'
+  import Layers from '@lucide/svelte/icons/layers'
   import AiModelPicker from './AiModelPicker.svelte'
   import {
     listConversations,
@@ -327,6 +336,41 @@
   let error = $state('')
   /** Shown on the thinking row while waiting on rate-limit retries */
   let aiStatusHint = $state('')
+
+  // ── Thinking phrase cycling ───────────────────────────────────────────────
+  const THINKING_PHRASES = [
+    'Thinking…',
+    'Analyzing schema…',
+    'Writing the query…',
+    'Reading the data…',
+    'Checking relationships…',
+    'Running the numbers…',
+    'Exploring tables…',
+    'Crafting response…',
+    'Connecting the dots…',
+    'Almost there…',
+  ]
+  let thinkingPhrase = $state(THINKING_PHRASES[0])
+  let thinkingVisible = $state(true)
+
+  $effect(() => {
+    if (!loading) {
+      thinkingPhrase = THINKING_PHRASES[0]
+      thinkingVisible = true
+      return
+    }
+    let i = 0
+    const tick = () => {
+      thinkingVisible = false
+      setTimeout(() => {
+        i = (i + 1) % THINKING_PHRASES.length
+        thinkingPhrase = THINKING_PHRASES[i]
+        thinkingVisible = true
+      }, 220)
+    }
+    const id = setInterval(tick, 2600)
+    return () => clearInterval(id)
+  })
   let inputText = $state('')
   const isDraftChat = $derived(!activeConvId && items.length > 0)
   /** Tracks all (name:args) combos executed this turn — prevents exact duplicate calls */
@@ -880,10 +924,11 @@
     if (!userPrefersCollapsed && !isSchema) openResultId = id
   }
 
-  /** Code blocks collapsed by user (in set = collapsed; default open) */
+  /** IDs of chart items the user has already saved this session */
+  let savedChartIds = $state(/** @type {Set<string>} */ (new Set()))
+
+  /** Blocks collapsed by user (in set = collapsed; default open for both code and SQL) */
   let collapsed = $state(/** @type {Set<string>} */ (new Set()))
-  /** SQL blocks expanded by user (in set = expanded; default collapsed) */
-  let sqlExpanded = $state(/** @type {Set<string>} */ (new Set()))
 
   /** @param {string} key */
   function toggleCollapse(key) {
@@ -891,14 +936,6 @@
     if (next.has(key)) next.delete(key)
     else next.add(key)
     collapsed = next
-  }
-
-  /** @param {string} key */
-  function toggleSqlExpand(key) {
-    const next = new Set(sqlExpanded)
-    if (next.has(key)) next.delete(key)
-    else next.add(key)
-    sqlExpanded = next
   }
 
   // ── Input auto-resize ──────────────────────────────────────────────────────
@@ -1576,11 +1613,8 @@
             {/if}
           </div>
 
-          <!-- Center: AI label -->
-          <div class="flex flex-1 items-center justify-center gap-1.5">
-            <Sparkles class="size-3.5 shrink-0 text-primary" />
-            <span class="text-ui-xs font-semibold tracking-wide">AI</span>
-          </div>
+          <!-- Center: spacer -->
+          <div class="flex-1"></div>
 
           <!-- Right: settings + close -->
           <div class="flex items-center gap-0.5">
@@ -1621,69 +1655,82 @@
           role="region"
           aria-label="Chat messages"
         >
-          <div class={mode === 'full' ? 'mx-auto w-full max-w-6xl px-4 py-6 min-h-full flex flex-col' : 'px-3 py-3'}>
+          <div class={mode === 'full' ? (items.length === 0 ? 'mx-auto w-full max-w-2xl px-8 h-full' : 'mx-auto w-full max-w-6xl px-8') : 'px-3 py-3'}>
           {#if items.length === 0}
-            <!-- Empty state with suggestions -->
-            <div class="flex h-full flex-col items-center justify-center {mode === 'full' ? 'gap-8 py-16' : 'gap-4 py-6'}">
-              <div class="flex flex-col items-center {mode === 'full' ? 'gap-5' : 'gap-2'} text-center">
-                {#if mode === 'full'}
-                  <div class="relative flex size-16 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/20 shadow-sm">
-                    <Sparkles class="size-8 text-primary" />
-                  </div>
-                {:else}
-                  <Sparkles class="size-7 text-muted-foreground/25" />
-                {/if}
-                <div>
-                  <p class="{mode === 'full' ? 'text-xl font-semibold' : 'text-ui-sm font-medium text-muted-foreground'}">{mode === 'full' ? 'How can I help?' : 'Ask anything about your database'}</p>
-                  {#if mode === 'full'}
-                    <p class="mt-1.5 max-w-sm text-ui-sm text-muted-foreground">Query data, explore schema, generate reports, and visualize insights.</p>
-                  {/if}
-                  {#if schemaContext.activeTable}
-                  <p class="{mode === 'full' ? 'mt-2 font-mono text-ui-xs text-muted-foreground/50' : 'text-ui-xs text-muted-foreground/60'}">
-                    {schemaContext.activeSchema}/{schemaContext.activeTable}
-                  </p>
-                  {/if}
-                </div>
-              </div>
+            {#if mode === 'full'}
+              <!-- ── Full-mode landing ── -->
+              <div class="flex h-full flex-col items-center justify-center gap-8">
 
-              {#if suggestions.length > 0}
-                <div class="{mode === 'full' ? 'w-full max-w-lg' : 'w-full'}">
-                  {#if mode !== 'full'}
-                    <div class="mb-2 flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <Zap class="size-3" />
-                      <span>Suggestions</span>
+                <!-- Hero text -->
+                <div class="flex flex-col items-center gap-4 text-center">
+                  {#if schemaContext.activeTable || schemaContext.tables?.length}
+                    <div class="inline-flex items-center gap-1.5 rounded-full border border-border/40 bg-muted/30 px-3.5 py-1.5 font-mono text-ui-xs text-muted-foreground/55 transition-colors hover:border-border/60 hover:text-muted-foreground/75">
+                      <Database class="size-3 shrink-0 text-muted-foreground/40" />
+                      {#if schemaContext.activeTable}
+                        {schemaContext.activeSchema}.{schemaContext.activeTable}
+                      {:else}
+                        {schemaContext.activeSchema} · {schemaContext.tables.length} tables
+                      {/if}
                     </div>
                   {/if}
-                  <div class="{mode === 'full' ? 'grid grid-cols-2 gap-2' : 'flex flex-wrap gap-1.5'}">
-                    {#each (mode === 'full' ? suggestions.slice(0, 4) : suggestions) as s (s.label)}
-                      {#if mode === 'full'}
-                        <button
-                          type="button"
-                          class="flex items-start gap-3 rounded-xl border border-border/70 bg-card p-3.5 text-left text-ui-sm text-foreground shadow-sm transition-all hover:border-border hover:shadow-md disabled:opacity-40"
-                          disabled={loading}
-                          onclick={() => void send([s.prompt])}
-                        >
-                          <MessageSquare class="mt-0.5 size-3.5 shrink-0 text-muted-foreground/60" />
-                          <span class="leading-snug">{s.label}</span>
-                        </button>
-                      {:else}
-                        <button
-                          type="button"
-                          class="inline-flex h-7 items-center gap-1 rounded-full border border-border bg-muted/30 px-3 text-xs text-foreground transition-colors hover:bg-accent hover:border-ring/40 disabled:opacity-40"
-                          disabled={loading}
-                          onclick={() => void send([s.prompt])}
-                        >
-                          <MessageSquare class="size-3 shrink-0 text-muted-foreground" />
-                          {s.label}
-                        </button>
-                      {/if}
-                    {/each}
+
+                  <div class="space-y-2.5">
+                    <h1 class="text-[1.9rem] font-semibold leading-[1.2] tracking-[-0.025em] text-foreground">
+                      What would you like<br>to explore?
+                    </h1>
+                    <p class="mx-auto max-w-sm text-ui-sm leading-relaxed text-muted-foreground/55">
+                      Write queries, build charts, explore your schema — just describe what you need.
+                    </p>
                   </div>
                 </div>
-              {/if}
-            </div>
+
+                <!-- Suggestions -->
+                {#if suggestions.length > 0}
+                  <div class="w-full overflow-hidden rounded-xl border border-border/40">
+                    <div class="grid grid-cols-2 gap-px bg-border/30">
+                      {#each suggestions.slice(0, 8) as s, i (s.label)}
+                        {@const icons = [Database, BarChart2, Search, TrendingUp, Zap, BookOpen, Layers, Table2]}
+                        {@const SugIcon = icons[i % icons.length]}
+                        <button
+                          type="button"
+                          class="group flex items-center gap-3 bg-background px-4 py-3 text-left transition-colors duration-100 hover:bg-muted/25 disabled:opacity-40"
+                          disabled={loading}
+                          onclick={() => void send([s.prompt])}
+                        >
+                          <SugIcon class="size-3.5 shrink-0 text-muted-foreground/35 transition-colors group-hover:text-muted-foreground/65" />
+                          <span class="min-w-0 flex-1 text-ui-xs text-muted-foreground/65 transition-colors group-hover:text-foreground/80">{s.label}</span>
+                        </button>
+                      {/each}
+                    </div>
+                  </div>
+                {/if}
+
+              </div>
+
+            {:else}
+              <!-- ── Tab-mode empty state: compact ── -->
+              <div class="flex flex-col items-center gap-4 py-6 text-center">
+                <Sparkles class="size-7 text-muted-foreground/20" />
+                <p class="text-ui-sm font-medium text-muted-foreground">Ask anything about your database</p>
+                {#if suggestions.length > 0}
+                  <div class="flex flex-wrap justify-center gap-1.5 w-full">
+                    {#each suggestions as s (s.label)}
+                      <button
+                        type="button"
+                        class="inline-flex h-7 items-center gap-1 rounded-full border border-border bg-muted/30 px-3 text-xs text-foreground transition-colors hover:bg-accent hover:border-ring/40 disabled:opacity-40"
+                        disabled={loading}
+                        onclick={() => void send([s.prompt])}
+                      >
+                        <MessageSquare class="size-3 shrink-0 text-muted-foreground" />
+                        {s.label}
+                      </button>
+                    {/each}
+                  </div>
+                {/if}
+              </div>
+            {/if}
           {:else}
-            <div class="flex flex-col gap-4" data-studio-selectable="text">
+            <div class="flex flex-col gap-5 py-6" data-studio-selectable="text">
               {#each items as item (item.id)}
 
                 <!-- ── User message ───────────────────────── -->
@@ -1696,19 +1743,18 @@
 
                 <!-- ── Thinking ───────────────────────────── -->
                 {:else if item.kind === 'thinking'}
-                  <div class="flex items-start gap-2.5">
-                    <div class="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/15">
-                      <Sparkles class="size-3 text-primary" />
+                  <div class="flex items-center gap-3">
+                    <div class="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/15">
+                      <Sparkles class="size-3 animate-pulse text-primary" />
                     </div>
-                    <div class="flex items-center gap-1.5 py-1">
-                      {#if aiStatusHint}
-                        <span class="text-ui-xs text-muted-foreground animate-pulse">{aiStatusHint}</span>
-                      {:else}
-                        <span class="size-1.5 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay:0ms"></span>
-                        <span class="size-1.5 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay:150ms"></span>
-                        <span class="size-1.5 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay:300ms"></span>
-                      {/if}
-                    </div>
+                    <span
+                      class="text-ui-xs text-muted-foreground/70 transition-opacity duration-200 {thinkingVisible ? 'opacity-100' : 'opacity-0'}"
+                    >{aiStatusHint || thinkingPhrase}</span>
+                    <span class="flex gap-1">
+                      <span class="size-1 animate-bounce rounded-full bg-muted-foreground/30" style="animation-delay:0ms"></span>
+                      <span class="size-1 animate-bounce rounded-full bg-muted-foreground/30" style="animation-delay:120ms"></span>
+                      <span class="size-1 animate-bounce rounded-full bg-muted-foreground/30" style="animation-delay:240ms"></span>
+                    </span>
                   </div>
 
                 <!-- ── Streaming ──────────────────────────── -->
@@ -1724,13 +1770,13 @@
 
                 <!-- ── Executing (tool call in progress) ──── -->
                 {:else if item.kind === 'executing'}
-                  <div class="flex items-center gap-2.5">
-                    <div class="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted/60 ring-1 ring-border/40">
-                      <Loader2 class="size-3 animate-spin text-muted-foreground" />
+                  <div class="flex items-center gap-3">
+                    <div class="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted/50 ring-1 ring-border/30">
+                      <Loader2 class="size-3 animate-spin text-muted-foreground/60" />
                     </div>
-                    <div class="flex min-w-0 items-center gap-1.5 text-ui-xs text-muted-foreground">
-                      <span class="font-medium text-foreground/50">Running</span>
-                      <span class="truncate font-mono text-[10px] text-muted-foreground/40">{item.sql}</span>
+                    <div class="flex min-w-0 items-center gap-2 text-ui-xs">
+                      <span class="shrink-0 rounded-md bg-amber-500/10 px-1.5 py-0.5 font-mono text-[10px] font-medium text-amber-500/70">SQL</span>
+                      <span class="min-w-0 truncate text-muted-foreground/50">{item.sql}</span>
                     </div>
                   </div>
 
@@ -1762,17 +1808,42 @@
                           </div>
                         {:else if part.type === 'sql'}
                           {@const sqlKey = `${item.id}-${pi}`}
-                          {@const sqlOpen = sqlExpanded.has(sqlKey)}
-                          <div class="overflow-hidden rounded-xl border border-border/60">
-                            <div class="flex items-center gap-2 border-b border-border/40 bg-muted/20 px-3 py-1.5">
-                              <button type="button" class="flex min-w-0 flex-1 items-center gap-1.5 text-ui-xs text-muted-foreground hover:text-foreground" onclick={() => toggleSqlExpand(sqlKey)}>
-                                {#if sqlOpen}<ChevronDown class="size-3 shrink-0" />{:else}<ChevronRight class="size-3 shrink-0" />{/if}
-                                <span class="font-mono font-medium">SQL</span>
+                          {@const sqlOpen = !collapsed.has(sqlKey)}
+                          <div class="overflow-hidden rounded-xl border border-border/50 bg-card/30">
+                            <!-- SQL block header -->
+                            <div class="group/sqlbar flex items-center gap-2 border-b border-border/30 bg-muted/8 px-3 py-2">
+                              <!-- Left: toggle + badge + preview -->
+                              <button
+                                type="button"
+                                class="flex min-w-0 flex-1 items-center gap-2 text-left"
+                                onclick={() => toggleCollapse(sqlKey)}
+                              >
+                                <span class="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:text-foreground">
+                                  {#if sqlOpen}<ChevronDown class="size-3.5" />{:else}<ChevronRight class="size-3.5" />{/if}
+                                </span>
+                                <span class="shrink-0 rounded-md border border-border/40 bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">SQL</span>
+                                <span class="min-w-0 truncate font-mono text-ui-xs text-muted-foreground/50">{part.content.trim().replace(/\s+/g, ' ').slice(0, 80)}</span>
                               </button>
-                              <div class="flex items-center gap-0.5">
-                                <button type="button" class="inline-flex h-6 items-center gap-1 rounded-md px-2 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground" onclick={() => copyText(part.content)}><Copy class="size-3" />Copy</button>
-                                <button type="button" class="inline-flex h-6 items-center gap-1 rounded-md px-2 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground" onclick={() => onwritesql(part.content)}><PenLine class="size-3" />Write</button>
-                                <button type="button" class="inline-flex h-6 items-center gap-1 rounded-md bg-primary px-2 text-ui-xs text-primary-foreground hover:opacity-90 disabled:opacity-50" disabled={loading} onclick={() => void runSqlBlock(part.content)}><Play class="size-3" />Run</button>
+                              <!-- Right: actions — visible on hover -->
+                              <div class="flex shrink-0 items-center gap-1 opacity-0 transition-opacity duration-150 group-hover/sqlbar:opacity-100">
+                                <button
+                                  type="button"
+                                  class="inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground/50 transition-colors hover:bg-muted/60 hover:text-foreground"
+                                  title="Copy SQL"
+                                  onclick={() => copyText(part.content)}
+                                ><Copy class="size-3.5" /></button>
+                                <button
+                                  type="button"
+                                  class="inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground/50 transition-colors hover:bg-muted/60 hover:text-foreground"
+                                  title="Write to editor"
+                                  onclick={() => onwritesql(part.content)}
+                                ><PenLine class="size-3.5" /></button>
+                                <button
+                                  type="button"
+                                  class="inline-flex h-7 items-center gap-1.5 rounded-lg bg-primary px-3 text-ui-xs font-medium text-primary-foreground transition-opacity hover:opacity-85 disabled:opacity-40"
+                                  disabled={loading}
+                                  onclick={() => void runSqlBlock(part.content)}
+                                ><Play class="size-3" />Run</button>
                               </div>
                             </div>
                             <AiSqlBlock sql={part.content} open={sqlOpen} />
@@ -1813,18 +1884,18 @@
                 {:else if item.kind === 'result'}
                   {@const resOpen = openResultId === item.id}
                   <div class="ml-8 overflow-hidden rounded-xl border text-ui-xs {item.error ? 'border-destructive/30' : item.isSchema ? 'border-primary/20' : 'border-border/50'}">
-                    <div class="group/res flex w-full items-center gap-2 px-3 py-2 transition-colors hover:bg-muted/20 {item.error ? 'bg-destructive/5' : item.isSchema ? 'bg-primary/5' : 'bg-muted/15'} {resOpen ? 'border-b border-border/30' : ''}">
+                    <div class="group/res flex w-full items-center gap-1.5 px-3 py-2 transition-colors hover:bg-muted/20 {item.error ? 'bg-destructive/5' : item.isSchema ? 'bg-primary/5' : 'bg-muted/10'} {resOpen ? 'border-b border-border/30' : ''}">
                       <button type="button" class="flex min-w-0 flex-1 items-center gap-2 text-left" onclick={() => toggleResult(item.id)}>
-                        {#if resOpen}<ChevronDown class="size-3 shrink-0 text-muted-foreground/50" />{:else}<ChevronRight class="size-3 shrink-0 text-muted-foreground/50" />{/if}
-                        <Table2 class="size-3 shrink-0 {item.isSchema ? 'text-primary/50' : 'text-muted-foreground/50'}" />
-                        <span class="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground/60">{item.sql || 'Query'}</span>
+                        {#if resOpen}<ChevronDown class="size-3 shrink-0 text-muted-foreground/40" />{:else}<ChevronRight class="size-3 shrink-0 text-muted-foreground/40" />{/if}
+                        <Table2 class="size-3 shrink-0 {item.isSchema ? 'text-primary/50' : 'text-muted-foreground/35'}" />
+                        <span class="min-w-0 flex-1 truncate text-ui-xs text-muted-foreground/60">{item.sql || 'Query'}</span>
                       </button>
                       {#if item.sql}
-                        <button type="button" class="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground/40 group-hover/res:inline-flex hover:bg-accent hover:text-foreground" title="Copy SQL" onclick={() => copyText(item.sql)}><Copy class="size-3" /></button>
-                        <button type="button" class="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground/40 group-hover/res:inline-flex hover:bg-accent hover:text-foreground" title="Write to editor" onclick={() => onwritesql(item.sql)}><PenLine class="size-3" /></button>
+                        <button type="button" class="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/30 opacity-0 transition-opacity group-hover/res:opacity-100 hover:bg-accent hover:text-foreground" title="Copy SQL" onclick={() => copyText(item.sql)}><Copy class="size-3" /></button>
+                        <button type="button" class="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/30 opacity-0 transition-opacity group-hover/res:opacity-100 hover:bg-accent hover:text-foreground" title="Write to editor" onclick={() => onwritesql(item.sql)}><PenLine class="size-3" /></button>
                       {/if}
                       {#if !item.error}
-                        <span class="shrink-0 rounded-full bg-muted/50 px-1.5 py-0.5 font-mono text-[9px] tabular-nums text-muted-foreground/60">{formatCompactCount(item.total)} {item.total === 1 ? 'row' : 'rows'}</span>
+                        <span class="shrink-0 rounded bg-muted/40 px-1.5 py-0.5 text-ui-3xs tabular-nums text-muted-foreground/50">{formatCompactCount(item.total)} {item.total === 1 ? 'row' : 'rows'}</span>
                       {/if}
                     </div>
                     {#if resOpen}
@@ -1867,19 +1938,97 @@
 
                 <!-- ── Chart card ─────────────────────────── -->
                 {:else if item.kind === 'chart'}
-                  <div class="ml-8 overflow-hidden rounded-xl border {item.error ? 'border-destructive/30 bg-destructive/4' : 'border-border/50 bg-card'}">
+                  <div class="ml-8 overflow-hidden rounded-xl border {item.error ? 'border-destructive/30 bg-destructive/5' : 'border-border/40 bg-card/50'}">
                     {#if item.error}
                       <div class="flex items-center gap-2 px-4 py-3 text-ui-xs text-destructive">
                         <AlertTriangle class="size-3.5 shrink-0" />
                         {item.error}
                       </div>
                     {:else}
-                      <div class="flex items-center gap-2 border-b border-border/30 px-4 py-2">
-                        <span class="text-ui-xs font-semibold text-foreground/80">{item.spec.title || 'Chart'}</span>
-                        <span class="ml-auto rounded-full bg-muted/50 px-2 py-0.5 font-mono text-[10px] capitalize text-muted-foreground/60">{item.spec.type}</span>
+                      <!-- Chart header -->
+                      <div class="flex items-center gap-2.5 px-4 py-3">
+                        <BarChart2 class="size-3.5 shrink-0 text-primary/50" />
+                        <span class="min-w-0 flex-1 truncate text-ui-sm font-semibold tracking-tight text-foreground">{item.spec.title || 'Chart'}</span>
+                        <div class="flex shrink-0 items-center gap-1">
+                          <span class="rounded-md border border-border/50 bg-muted/40 px-2 py-0.5 font-mono text-[10px] capitalize text-muted-foreground/60">{item.spec.type}</span>
+                          <button
+                            type="button"
+                            class="inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground"
+                            title="Download PNG"
+                            onclick={() => {
+                              const canvas = document.querySelector(`[data-chart-id="${item.id}"] canvas`)
+                              if (!canvas) return
+                              const a = document.createElement('a')
+                              a.href = /** @type {HTMLCanvasElement} */ (canvas).toDataURL('image/png')
+                              a.download = `${item.spec.title || 'chart'}.png`
+                              a.click()
+                            }}
+                          ><Download class="size-3.5" /></button>
+                          <button
+                            type="button"
+                            class="inline-flex size-7 items-center justify-center rounded-lg transition-colors {savedChartIds.has(item.id) ? 'text-primary' : 'text-muted-foreground/50 hover:bg-accent hover:text-foreground'}"
+                            title={savedChartIds.has(item.id) ? 'Saved to Charts' : 'Save to Charts'}
+                            onclick={() => {
+                              if (savedChartIds.has(item.id)) return
+                              const chartIdx = items.findIndex((i) => i.id === item.id)
+                              const prevResult = items.slice(0, chartIdx).reverse().find((i) => i.kind === 'result' && !/** @type {any} */ (i).error)
+
+                              // Build the full ECharts option so previews render immediately
+                              const spec = item.spec
+                              const keys = spec.data?.length ? Object.keys(spec.data[0] ?? {}) : []
+                              const cols = keys.map(k => {
+                                const sample = spec.data.find(r => r[k] != null)?.[k]
+                                const dt = typeof sample === 'number' ? 'numeric'
+                                  : typeof sample === 'string' && /^\d{4}-\d{2}/.test(sample) ? 'timestamp'
+                                  : 'text'
+                                return { name: k, dataType: dt, data_type: dt }
+                              })
+                              const rows = spec.data?.map(obj => keys.map(k => obj[k])) ?? []
+                              let previewOption = {}
+                              try {
+                                previewOption = buildOption({
+                                  type: spec.type ?? 'bar',
+                                  columns: cols,
+                                  rows,
+                                  xCol: spec.x_col ?? cols[0]?.name ?? '',
+                                  yCol: spec.y_col ?? cols[1]?.name ?? '',
+                                  zCol: spec.z_col || undefined,
+                                  groupCol: spec.group_col || undefined,
+                                  isDark: $isCurrentThemeDark,
+                                  noTitle: true,
+                                })
+                              } catch {}
+
+                              saveChart({
+                                name: spec.title || 'AI Chart',
+                                group: 'Chat Saved',
+                                connectionId,
+                                sql: prevResult?.kind === 'result' ? /** @type {any} */ (prevResult).sql : '',
+                                config: {
+                                  type: spec.type,
+                                  xCol: spec.x_col ?? '',
+                                  yCol: spec.y_col ?? '',
+                                  zCol: spec.z_col,
+                                  groupCol: spec.group_col,
+                                  title: spec.title,
+                                },
+                                previewOption,
+                              })
+                              savedChartIds = new Set([...savedChartIds, item.id])
+                              toast.success('Chart saved', { description: spec.title || 'Chart' })
+                            }}
+                          >
+                            {#if savedChartIds.has(item.id)}
+                              <BookmarkCheck class="size-3.5" />
+                            {:else}
+                              <Bookmark class="size-3.5" />
+                            {/if}
+                          </button>
+                        </div>
                       </div>
-                      <div class="p-3">
-                        <AiChartRenderer spec={item.spec} />
+                      <!-- Chart body -->
+                      <div class="border-t border-border/20 px-2 pb-2 pt-0" data-chart-id={item.id} style="height:320px">
+                        <AiChartRenderer spec={item.spec} noTitle={true} />
                       </div>
                     {/if}
                   </div>
@@ -1888,15 +2037,16 @@
               {/each}
 
               {#if showWorking}
-                <div class="flex items-center gap-2.5">
+                <div class="flex items-center gap-3">
                   <div class="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/15">
-                    <Sparkles class="size-3 text-primary animate-pulse" />
+                    <Sparkles class="size-3 animate-pulse text-primary" />
                   </div>
-                  <div class="flex items-center gap-1.5">
-                    <span class="size-1.5 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay:0ms"></span>
-                    <span class="size-1.5 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay:150ms"></span>
-                    <span class="size-1.5 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay:300ms"></span>
-                  </div>
+                  <span class="text-ui-xs text-muted-foreground/70 transition-opacity duration-200 {thinkingVisible ? 'opacity-100' : 'opacity-0'}">{aiStatusHint || thinkingPhrase}</span>
+                  <span class="flex gap-1">
+                    <span class="size-1 animate-bounce rounded-full bg-muted-foreground/30" style="animation-delay:0ms"></span>
+                    <span class="size-1 animate-bounce rounded-full bg-muted-foreground/30" style="animation-delay:120ms"></span>
+                    <span class="size-1 animate-bounce rounded-full bg-muted-foreground/30" style="animation-delay:240ms"></span>
+                  </span>
                 </div>
               {/if}
             </div>
@@ -1948,7 +2098,7 @@
 
         <!-- Input -->
         <div class="shrink-0 border-t border-border/50 {mode === 'full' ? 'px-6 pb-6 pt-4' : 'px-3 pb-4 pt-3'}">
-          <div class="{mode === 'full' ? 'mx-auto w-full max-w-2xl' : ''}">
+          <div class="{mode === 'full' ? 'mx-auto w-full max-w-3xl' : ''}">
             <div
               class="overflow-hidden rounded-2xl border border-[#3a3a3a] transition-opacity duration-150 {hasPendingConfirm ? 'opacity-50' : ''}"
               style="border-color: #3a3a3a"
@@ -2429,10 +2579,13 @@
     line-height: 1.6;
     color: var(--foreground);
     word-break: break-word;
-    font-optical-sizing: auto;
-    letter-spacing: -0.014em;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
+    /* letter-spacing: slightly tighter for Inter at body size */
+    letter-spacing: -0.01em;
+    /* Inherit font-smoothing from html (auto) — do NOT set antialiased here.
+       On Linux/WebKitGTK, 'antialiased' bypasses FreeType hinting and makes
+       text look thinner and blurrier than 'auto'. On macOS 'auto' is also fine.
+       font-optical-sizing: omitted — setting it to 'auto' explicitly can cause
+       WebKitGTK to pick different glyph outlines at small sizes. */
   }
   :global(.prose-ai > *:first-child) { margin-top: 0; }
   :global(.prose-ai > *:last-child) { margin-bottom: 0; }
@@ -2557,6 +2710,27 @@
   :global(.prose-ai img:hover) {
     opacity: 0.9;
     box-shadow: 0 4px 16px hsl(var(--foreground) / 0.12);
+  }
+  /* Images inside table cells: fixed thumbnail — prevents row height explosion */
+  :global(.prose-ai :is(td, th) img) {
+    display: block !important;
+    width: 44px !important;
+    height: 44px !important;
+    min-width: 44px !important;
+    max-width: 44px !important;
+    max-height: 44px !important;
+    object-fit: cover !important;
+    border-radius: 6px !important;
+    margin: 0 !important;
+    vertical-align: middle !important;
+  }
+  :global(.prose-ai :is(td, th) img:hover) {
+    box-shadow: 0 2px 8px hsl(var(--foreground) / 0.18) !important;
+  }
+  /* Center-align table cells that contain only an image */
+  :global(.prose-ai :is(td, th):has(img)) {
+    vertical-align: middle;
+    padding: 0.4rem 0.75rem;
   }
 
   :global(.mermaid-canvas svg) {

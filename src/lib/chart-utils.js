@@ -90,22 +90,59 @@ const PALETTE = [
   '#a855f7', '#14b8a6', '#f97316', '#ec4899', '#64748b',
 ]
 
-/** @param {boolean} isDark */
-function baseOption(isDark) {
-  const textColor = isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.45)'
-  const lineColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)'
-  const bg = isDark ? 'rgba(24,24,27,0.95)' : 'rgba(255,255,255,0.97)'
+/**
+ * Format a raw value for tooltip display.
+ * Timestamps from PostgreSQL arrive as strings like "2025-12-01 00:00:00 UTC"
+ * or ISO "2026-01-01T00:00:00.000Z" — convert to "Dec 2025" / "Jan 2026".
+ */
+function fmtTooltipValue(val) {
+  if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}/.test(val)) {
+    try {
+      const d = new Date(val.replace(' UTC', 'Z').replace(' ', 'T'))
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+      }
+    } catch {}
+  }
+  if (typeof val === 'number' && !isNaN(val)) {
+    if (Math.abs(val) >= 1e6) return val.toLocaleString()
+    if (!Number.isInteger(val)) return val.toFixed(2)
+    return val.toLocaleString()
+  }
+  return String(val ?? '')
+}
+
+/** @param {boolean} isDark @param {boolean} [noTitle] */
+function baseOption(isDark, noTitle = false) {
+  const textColor = isDark ? 'rgba(255,255,255,0.50)' : 'rgba(0,0,0,0.42)'
+  const lineColor = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)'
+  const bg = isDark ? 'rgba(20,20,23,0.97)' : 'rgba(255,255,255,0.97)'
   return {
     backgroundColor: 'transparent',
-    textStyle: { color: textColor, fontFamily: 'Geist Variable, ui-sans-serif, system-ui, sans-serif', fontSize: 11 },
+    textStyle: { color: textColor, fontFamily: 'Inter Variable, Inter, ui-sans-serif, system-ui, sans-serif', fontSize: 11 },
     tooltip: {
       backgroundColor: bg,
-      borderColor: lineColor,
+      borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
       borderWidth: 1,
-      textStyle: { color: isDark ? 'rgba(255,255,255,0.88)' : 'rgba(0,0,0,0.8)', fontSize: 11 },
-      extraCssText: 'border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.18);',
+      padding: [8, 12],
+      textStyle: { color: isDark ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.78)', fontSize: 12, fontFamily: 'Inter Variable, Inter, ui-sans-serif, system-ui, sans-serif' },
+      extraCssText: 'border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.20);',
+      formatter(params) {
+        const items = Array.isArray(params) ? params : [params]
+        const header = fmtTooltipValue(items[0]?.axisValue ?? items[0]?.name ?? '')
+        const rows = items.map(p => {
+          const color = p.color ?? '#6366f1'
+          const val = fmtTooltipValue(p.value ?? p.data)
+          return `<div style="display:flex;align-items:center;gap:6px;margin-top:3px">
+            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></span>
+            <span style="opacity:0.65;font-size:11px">${p.seriesName ?? ''}</span>
+            <span style="margin-left:auto;padding-left:12px;font-weight:600">${val}</span>
+          </div>`
+        }).join('')
+        return `<div style="font-size:11px;opacity:0.65;margin-bottom:2px">${header}</div>${rows}`
+      },
     },
-    grid: { top: 32, right: 16, bottom: 40, left: 12, containLabel: true },
+    grid: { top: noTitle ? 12 : 12, right: 16, bottom: 36, left: 12, containLabel: true },
     axisPointer: { lineStyle: { color: lineColor } },
     splitLine: { lineStyle: { color: lineColor } },
   }
@@ -122,13 +159,41 @@ function axisStyle(isDark) {
   }
 }
 
+/** Detect if an array of strings looks like timestamps */
+/** Exported so chart previews in ChartsPage can re-apply the formatter after JSON round-trip */
+export function isTimestampAxis(xData) {
+  const sample = xData.find(v => v && v !== 'null')
+  return typeof sample === 'string' && /^\d{4}-\d{2}-\d{2}/.test(sample)
+}
+
+/** Format a timestamp x-axis label to a short readable form */
+export function fmtAxisLabel(val) {
+  if (typeof val !== 'string' || !/^\d{4}-\d{2}-\d{2}/.test(val)) return val
+  try {
+    const d = new Date(val.replace(' UTC', 'Z').replace(' ', 'T'))
+    if (isNaN(d.getTime())) return val
+    // Day-level: show "Jan 15", Month-level: show "Jan 2026"
+    const hasTime = /\d{2}:\d{2}/.test(val)
+    const isMonthStart = d.getDate() === 1 && (!hasTime || val.includes('00:00:00'))
+    if (isMonthStart) return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  } catch { return val }
+}
+
 /** @param {boolean} isDark @param {string[]} xData */
 function categoryXAxis(isDark, xData) {
+  const isTs = isTimestampAxis(xData)
   return {
     type: 'category',
     data: xData,
     ...axisStyle(isDark),
-    axisLabel: { ...axisStyle(isDark).axisLabel, rotate: xData.length > 12 ? 30 : 0, overflow: 'truncate', width: 80 },
+    axisLabel: {
+      ...axisStyle(isDark).axisLabel,
+      rotate: !isTs && xData.length > 12 ? 30 : 0,
+      overflow: isTs ? 'none' : 'truncate',
+      width: isTs ? undefined : 80,
+      ...(isTs ? { formatter: fmtAxisLabel } : {}),
+    },
   }
 }
 
@@ -149,11 +214,12 @@ function valueYAxis(isDark) {
  *   groupCol?: string
  *   isDark?: boolean
  *   title?: string
+ *   noTitle?: boolean
  * }} cfg
  * @returns {import('echarts').EChartsOption}
  */
-export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, isDark = false, title }) {
-  const base = baseOption(isDark)
+export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, isDark = false, title, noTitle = false }) {
+  const base = baseOption(isDark, noTitle)
   const xi = columns.findIndex((c) => c.name === xCol)
   const yi = columns.findIndex((c) => c.name === yCol)
   const zi = zCol ? columns.findIndex((c) => c.name === zCol) : -1
@@ -161,7 +227,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
 
   /** @param {string} text */
   const titleOpt = (text) =>
-    text ? { title: { text, textStyle: { ...base.textStyle, fontSize: 13, fontWeight: 600 }, top: 4, left: 'center' } } : {}
+    (!noTitle && text) ? { title: { text, textStyle: { ...base.textStyle, fontSize: 13, fontWeight: 600 }, top: 4, left: 'center' } } : {}
 
   // ── Pie ────────────────────────────────────────────────────────────────────
   if (type === 'pie') {

@@ -191,11 +191,15 @@ async fn find_free_port(preferred: u16) -> Result<u16, String> {
 }
 
 fn generate_token() -> String {
+    // Use OS-provided randomness (getrandom syscall on Linux/macOS, BCryptGenRandom
+    // on Windows) for a 128-bit token — far stronger than PID+nanos (~32 bits).
+    let mut bytes = [0u8; 16];
+    if getrandom::getrandom(&mut bytes).is_ok() {
+        return bytes.iter().map(|b| format!("{b:02x}")).collect();
+    }
+    // getrandom failure is extremely rare; fall back to time+pid as last resort.
     use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .subsec_nanos();
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().subsec_nanos();
     let pid = std::process::id();
     format!("{pid:08x}{nanos:08x}")
 }

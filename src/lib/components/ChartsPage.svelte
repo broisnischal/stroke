@@ -15,7 +15,7 @@
     activeDashboardId,
     createDashboard,
   } from "$lib/stores/dashboards.js";
-  import { CHART_CATALOG } from "$lib/chart-utils.js";
+  import { CHART_CATALOG, isTimestampAxis, fmtAxisLabel } from "$lib/chart-utils.js";
   import { cn } from "$lib/utils.js";
   import { toast } from "svelte-sonner";
   import BarChart2 from "@lucide/svelte/icons/bar-chart-2";
@@ -79,6 +79,27 @@
   /** @param {string} typeId */
   function catalogEntry(typeId) {
     return CHART_CATALOG.find((c) => c.id === typeId);
+  }
+
+  /**
+   * Clean a saved previewOption for display:
+   * - Strips the in-chart title (shown in the card footer already)
+   * - Re-attaches timestamp formatters lost during JSON serialisation
+   * @param {any} option
+   */
+  function cleanPreviewOption(option) {
+    if (!option || !Object.keys(option).length) return option
+    const o = { ...option, title: undefined }
+    // x-axis formatter is a function — stripped by JSON.stringify when saved.
+    // Re-attach it if the axis data looks like timestamps.
+    const xData = Array.isArray(o.xAxis?.data) ? o.xAxis.data : null
+    if (xData && isTimestampAxis(xData)) {
+      o.xAxis = {
+        ...o.xAxis,
+        axisLabel: { ...o.xAxis?.axisLabel, formatter: fmtAxisLabel },
+      }
+    }
+    return o
   }
 
   /** @param {number} ts */
@@ -339,9 +360,10 @@
                 {/if}
               </div>
 
-              <!-- Chart cards grid -->
+              <!-- Chart cards grid — @container so columns adapt to sidebar state -->
+              <div class="@container">
               <div
-                class="grid grid-cols-2 gap-2.5 lg:grid-cols-3 xl:grid-cols-4"
+                class="grid grid-cols-1 gap-2.5 @[380px]:grid-cols-2 @[580px]:grid-cols-3 @[820px]:grid-cols-4"
               >
                 {#each grpData.charts as chart (chart.id)}
                   {@const entry = catalogEntry(chart.config.type)}
@@ -349,10 +371,10 @@
                     class="group relative flex flex-col overflow-hidden rounded-lg border border-border/50 bg-card transition-all hover:border-border hover:shadow-lg"
                   >
                     <!-- Preview: dominant, fills top of card. Absolute child for crisp canvas sizing -->
-                    <div class="relative h-44 shrink-0 bg-muted/10">
+                    <div class="relative h-36 shrink-0 bg-muted/10">
                       {#if chart.previewOption && Object.keys(chart.previewOption).length > 0}
                         <EChartPanel
-                          option={chart.previewOption}
+                          option={cleanPreviewOption(chart.previewOption)}
                           class="absolute inset-0"
                         />
                       {:else}
@@ -548,6 +570,7 @@
                   </div>
                 {/each}
               </div>
+              </div><!-- end @container -->
             </section>
           {/if}
         {/each}

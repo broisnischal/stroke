@@ -1,5 +1,5 @@
 <script>
-  import { onMount, onDestroy, tick } from "svelte";
+  import { onDestroy, tick } from "svelte";
   import { createSwapy } from "swapy";
   import EChartPanel from "./EChartPanel.svelte";
   import { savedCharts } from "$lib/stores/saved-charts.js";
@@ -35,16 +35,11 @@
   // ── Chart picker modal ─────────────────────────────────────────────────────
   let pickerOpen = $state(false);
 
-  function openPicker() {
-    pickerOpen = true;
-  }
-
   /** @param {string} chartId */
   function pickChart(chartId) {
     if (!activeDash) return;
     addChartToDashboard(activeDash.id, chartId);
     pickerOpen = false;
-    void reinitSwapy();
   }
 
   // ── Dashboard CRUD ─────────────────────────────────────────────────────────
@@ -76,12 +71,14 @@
   let dashDropdownOpen = $state(false);
 
   // ── Column toggle ──────────────────────────────────────────────────────────
-  function toggleColumns() {
+  /** @type {(2|3)[]} */
+  const COL_OPTIONS = [2, 3];
+
+  function cycleColumns() {
     if (!activeDash) return;
-    updateDashboard(activeDash.id, {
-      columns: activeDash.columns === 3 ? 2 : 3,
-    });
-    void reinitSwapy();
+    const idx = COL_OPTIONS.indexOf(activeDash.columns);
+    const next = COL_OPTIONS[(idx + 1) % COL_OPTIONS.length];
+    updateDashboard(activeDash.id, { columns: next });
   }
 
   // ── Swapy ─────────────────────────────────────────────────────────────────
@@ -90,24 +87,82 @@
   /** @type {ReturnType<typeof createSwapy> | null} */
   let swapyInstance = null;
 
-  async function reinitSwapy() {
-    await tick();
+  /**
+   * A stable string that captures every layout-affecting piece of state.
+   * Changing any of: active dashboard, column count, item order, item spans
+   * produces a different key and triggers Swapy re-init.
+   */
+  const layoutKey = $derived(
+    activeDash
+      ? `${activeDash.id}|${activeDash.columns}|${activeDash.items
+          .map((i) => `${i.id}:${Math.min(i.span, activeDash.columns)}`)
+          .join(",")}`
+      : "none",
+  );
+
+  $effect(() => {
+    // Subscribe to layoutKey so Svelte tracks it.
+    const _key = layoutKey;
+    let cancelled = false;
+
+    // Destroy synchronously first so Swapy releases the DOM before the
+    // next tick re-render.
     swapyInstance?.destroy();
     swapyInstance = null;
-    if (!gridEl || !activeDash?.items.length) return;
-    swapyInstance = createSwapy(gridEl, {
-      animation: "dynamic",
-      swapMode: "hover",
-    });
-    // Read DOM order directly after swap — avoids Swapy callback API inconsistencies
-    swapyInstance.onSwapEnd(() => {
-      if (!gridEl || !activeDash) return;
-      const newOrder = Array.from(gridEl.querySelectorAll("[data-swapy-item]"))
-        .map((el) => el.getAttribute("data-swapy-item"))
-        .filter(/** @param {string|null} id */ (id) => id !== null);
-      reorderItems(activeDash.id, /** @type {string[]} */ (newOrder));
-      void reinitSwapy();
-    });
+
+    void (async () => {
+      await tick(); // wait for Svelte to reconcile the DOM
+      if (cancelled || !gridEl || !activeDash?.items.length) return;
+
+      const grid = gridEl;
+      const dash = activeDash;
+
+      swapyInstance = createSwapy(grid, {
+        animation: "dynamic",
+        swapMode: "hover",
+      });
+
+      swapyInstance.onSwapEnd(() => {
+        // Read DOM order after swap and persist to store.
+        // The store update changes layoutKey → this effect re-runs → Swapy re-inits.
+        const newOrder = Array.from(
+          grid.querySelectorAll("[data-swapy-item]"),
+        )
+          .map((el) => el.getAttribute("data-swapy-item"))
+          .filter(/** @param {string|null} id */ (id) => id !== null);
+        reorderItems(dash.id, /** @type {string[]} */ (newOrder));
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+      swapyInstance?.destroy();
+      swapyInstance = null;
+    };
+  });
+
+  onDestroy(() => {
+    swapyInstance?.destroy();
+  });
+
+  // ── Grid layout ────────────────────────────────────────────────────────────
+  // Fixed column count so Swapy can predict slot positions reliably.
+  const gridStyle = $derived(
+    `grid-template-columns: repeat(${activeDash?.columns ?? 3}, 1fr)`,
+  );
+
+  /**
+   * Clamp span to the current column count so items never overflow the grid.
+   * @param {import('$lib/stores/dashboards.js').DashItem} item
+   */
+  function effectiveSpan(item) {
+    return Math.min(item.span, activeDash?.columns ?? 3);
+  }
+
+  // ── Chart lookup ───────────────────────────────────────────────────────────
+  /** @param {string | null} chartId */
+  function getChart(chartId) {
+    return chartId ? ($savedCharts.find((c) => c.id === chartId) ?? null) : null;
   }
 
   // ── Delete active dashboard ────────────────────────────────────────────────
@@ -120,42 +175,8 @@
       confirmDeleteDash = false;
     } else {
       confirmDeleteDash = true;
-      // Auto-reset after 3s if not confirmed
-      setTimeout(() => {
-        confirmDeleteDash = false;
-      }, 3000);
+      setTimeout(() => { confirmDeleteDash = false; }, 3000);
     }
-  }
-
-  onMount(() => {
-    void reinitSwapy();
-  });
-  onDestroy(() => {
-    swapyInstance?.destroy();
-  });
-
-  // Re-init when active dashboard changes
-  $effect(() => {
-    $activeDashboardId;
-    void reinitSwapy();
-  });
-
-  // ── Chart lookup ───────────────────────────────────────────────────────────
-  /** @param {string | null} chartId */
-  function getChart(chartId) {
-    return chartId
-      ? ($savedCharts.find((c) => c.id === chartId) ?? null)
-      : null;
-  }
-
-  // Auto-fill grid: columns adjust automatically as container width changes (sidebar open/closed)
-  const gridStyle = $derived(
-    `grid-template-columns: repeat(auto-fill, minmax(${activeDash?.columns === 2 ? "420px" : "260px"}, 1fr))`,
-  );
-
-  /** @param {1|2|3} span */
-  function spanStyle(span) {
-    return `grid-column: span ${span}`;
   }
 </script>
 
@@ -190,14 +211,9 @@
             <span
               role="button"
               tabindex="0"
-              class="text-primary cursor-pointer"
-              onclick={(e) => {
-                e.stopPropagation();
-                commitEditName();
-              }}
-              onkeydown={(e) => {
-                if (e.key === "Enter") commitEditName();
-              }}
+              class="cursor-pointer text-primary"
+              onclick={(e) => { e.stopPropagation(); commitEditName(); }}
+              onkeydown={(e) => { if (e.key === "Enter") commitEditName(); }}
             >
               <Check class="size-3" />
             </span>
@@ -223,10 +239,7 @@
                   ? "font-medium text-foreground"
                   : "text-muted-foreground",
               )}
-              onclick={() => {
-                activeDashboardId.set(d.id);
-                dashDropdownOpen = false;
-              }}
+              onclick={() => { activeDashboardId.set(d.id); dashDropdownOpen = false; }}
             >
               <LayoutGrid class="size-3 shrink-0" />
               <span class="flex-1 truncate">{d.name}</span>
@@ -234,17 +247,9 @@
                 <span
                   role="button"
                   tabindex="0"
-                  class="text-muted-foreground/30 hover:text-destructive cursor-pointer"
-                  onclick={(e) => {
-                    e.stopPropagation();
-                    deleteDashboard(d.id);
-                  }}
-                  onkeydown={(e) => {
-                    if (e.key === "Enter") {
-                      e.stopPropagation();
-                      deleteDashboard(d.id);
-                    }
-                  }}
+                  class="cursor-pointer text-muted-foreground/30 hover:text-destructive"
+                  onclick={(e) => { e.stopPropagation(); deleteDashboard(d.id); }}
+                  onkeydown={(e) => { if (e.key === "Enter") { e.stopPropagation(); deleteDashboard(d.id); } }}
                 >
                   <X class="size-3" />
                 </span>
@@ -265,11 +270,7 @@
                     if (e.key === "Escape") namingOpen = false;
                   }}
                 />
-                <button
-                  type="button"
-                  class="text-primary"
-                  onclick={handleCreateDashboard}
-                >
+                <button type="button" class="text-primary" onclick={handleCreateDashboard}>
                   <Check class="size-3" />
                 </button>
               </div>
@@ -277,10 +278,7 @@
               <button
                 type="button"
                 class="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-ui-xs text-muted-foreground/60 transition-colors hover:text-foreground"
-                onclick={() => {
-                  namingOpen = true;
-                  nameInput = "";
-                }}
+                onclick={() => { namingOpen = true; nameInput = ""; }}
               >
                 <Plus class="size-3" />
                 New
@@ -292,7 +290,7 @@
     </div>
 
     {#if activeDash}
-      <!-- Rename button -->
+      <!-- Rename -->
       <button
         type="button"
         class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-foreground"
@@ -302,17 +300,24 @@
         <Pencil class="size-3" />
       </button>
 
-      <!-- Column toggle -->
-      <button
-        type="button"
-        class="inline-flex h-6 items-center gap-1 rounded border border-border/50 px-2 text-ui-2xs text-muted-foreground/60 transition-colors hover:bg-muted/60 hover:text-foreground"
-        title="Toggle column count"
-        onclick={toggleColumns}
-      >
-        {activeDash.columns} cols
-      </button>
+      <!-- Column count cycle -->
+      <div class="flex items-center gap-px rounded border border-border/50">
+        {#each COL_OPTIONS as cols (cols)}
+          <button
+            type="button"
+            class={cn(
+              "flex h-6 w-7 items-center justify-center text-ui-2xs transition-colors first:rounded-l last:rounded-r",
+              activeDash.columns === cols
+                ? "bg-primary/15 text-primary font-medium"
+                : "text-muted-foreground/50 hover:bg-muted/60 hover:text-foreground",
+            )}
+            title="{cols} columns"
+            onclick={() => updateDashboard(activeDash.id, { columns: cols })}
+          >{cols}</button>
+        {/each}
+      </div>
 
-      <!-- Delete dashboard -->
+      <!-- Delete -->
       <button
         type="button"
         class={cn(
@@ -321,9 +326,7 @@
             ? "bg-destructive/15 text-destructive hover:bg-destructive/25"
             : "text-muted-foreground/30 hover:bg-muted/60 hover:text-destructive",
         )}
-        title={confirmDeleteDash
-          ? "Click again to confirm delete"
-          : "Delete dashboard"}
+        title={confirmDeleteDash ? "Click again to confirm delete" : "Delete dashboard"}
         onclick={handleDeleteDashboard}
       >
         <Trash2 class="size-3" />
@@ -335,7 +338,7 @@
         <button
           type="button"
           class="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-3 text-ui-xs font-medium text-primary-foreground transition-opacity hover:opacity-90"
-          onclick={openPicker}
+          onclick={() => (pickerOpen = true)}
         >
           <Plus class="size-3.5" />
           Add Chart
@@ -347,13 +350,8 @@
   <!-- Content -->
   <div class="min-h-0 flex-1 overflow-y-auto p-4">
     {#if !activeDash}
-      <!-- No dashboard selected -->
-      <div
-        class="flex h-full min-h-[300px] flex-col items-center justify-center gap-4"
-      >
-        <div
-          class="flex size-16 items-center justify-center rounded-2xl bg-muted/30"
-        >
+      <div class="flex h-full min-h-[300px] flex-col items-center justify-center gap-4">
+        <div class="flex size-16 items-center justify-center rounded-2xl bg-muted/30">
           <LayoutGrid class="size-8 text-muted-foreground/20" />
         </div>
         <div class="text-center">
@@ -365,50 +363,45 @@
         <button
           type="button"
           class="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
-          onclick={() => {
-            createDashboard("My Dashboard");
-          }}
+          onclick={() => createDashboard("My Dashboard")}
         >
           <Plus class="size-4" />
           Create Dashboard
         </button>
       </div>
+
     {:else if activeDash.items.length === 0}
-      <!-- Empty dashboard -->
-      <div
-        class="flex h-full min-h-[300px] flex-col items-center justify-center gap-4"
-      >
-        <div
-          class="flex size-16 items-center justify-center rounded-2xl border-2 border-dashed border-border/40"
-        >
+      <div class="flex h-full min-h-[300px] flex-col items-center justify-center gap-4">
+        <div class="flex size-16 items-center justify-center rounded-2xl border-2 border-dashed border-border/40">
           <BarChart2 class="size-8 text-muted-foreground/20" />
         </div>
-        <p class="text-ui-sm text-muted-foreground/50">
-          Add charts to build your dashboard
-        </p>
+        <p class="text-ui-sm text-muted-foreground/50">Add charts to build your dashboard</p>
         <button
           type="button"
           class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-4 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          onclick={openPicker}
+          onclick={() => (pickerOpen = true)}
         >
           <Plus class="size-4" />
           Add Chart
         </button>
       </div>
+
     {:else}
-      <!-- Dashboard grid -->
+      <!-- Dashboard grid — fixed columns so Swapy can compute slot positions reliably -->
       <div bind:this={gridEl} class="grid gap-3" style={gridStyle}>
         {#each activeDash.items as item (item.id)}
           {@const chart = getChart(item.chartId)}
-          <div data-swapy-slot={item.id} style={spanStyle(item.span)}>
+          {@const span = effectiveSpan(item)}
+          <div
+            data-swapy-slot={item.id}
+            style="grid-column: span {span}"
+          >
             <div
               data-swapy-item={item.id}
               class="group flex h-[260px] flex-col overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm transition-shadow hover:shadow-md"
             >
               <!-- Card header -->
-              <div
-                class="flex h-9 shrink-0 items-center gap-1 border-b border-border/40 bg-card px-2"
-              >
+              <div class="flex h-9 shrink-0 items-center gap-1 border-b border-border/40 bg-card px-2">
                 <!-- Drag handle -->
                 <div
                   data-swapy-handle
@@ -419,47 +412,31 @@
                 </div>
 
                 <!-- Title -->
-                <span
-                  class="min-w-0 flex-1 truncate text-ui-xs font-medium text-foreground/80"
-                >
+                <span class="min-w-0 flex-1 truncate text-ui-xs font-medium text-foreground/80">
                   {chart?.name ?? "Unknown chart"}
                 </span>
 
-                <!-- Span controls -->
-                <div
-                  class="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100"
-                >
-                  {#each [1, 2, 3] as s}
-                    {#if s <= activeDash.columns}
-                      <button
-                        type="button"
-                        onclick={() => {
-                          setItemSpan(
-                            activeDash.id,
-                            item.id,
-                            /** @type {1|2|3} */ (s),
-                          );
-                          void reinitSwapy();
-                        }}
-                        class={cn(
-                          "flex size-5 items-center justify-center rounded text-ui-2xs font-mono transition-colors",
-                          item.span === s
-                            ? "bg-primary/15 text-primary"
-                            : "text-muted-foreground/40 hover:bg-muted/60 hover:text-foreground",
-                        )}
-                        title="{s} column{s > 1 ? 's' : ''}">{s}</button
-                      >
-                    {/if}
+                <!-- Span selector (1 … columns) -->
+                <div class="flex items-center gap-px opacity-0 transition-opacity group-hover:opacity-100">
+                  {#each Array.from({ length: activeDash.columns }, (_, i) => i + 1) as s (s)}
+                    <button
+                      type="button"
+                      onclick={() => setItemSpan(activeDash.id, item.id, /** @type {1|2|3} */ (s))}
+                      class={cn(
+                        "flex size-5 items-center justify-center rounded text-ui-2xs font-mono transition-colors",
+                        span === s
+                          ? "bg-primary/15 text-primary"
+                          : "text-muted-foreground/40 hover:bg-muted/60 hover:text-foreground",
+                      )}
+                      title="{s} column{s > 1 ? 's' : ''}"
+                    >{s}</button>
                   {/each}
                 </div>
 
                 <!-- Remove -->
                 <button
                   type="button"
-                  onclick={() => {
-                    removeChartFromDashboard(activeDash.id, item.id);
-                    void reinitSwapy();
-                  }}
+                  onclick={() => removeChartFromDashboard(activeDash.id, item.id)}
                   class="ml-1 flex size-5 items-center justify-center rounded text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/40 hover:!text-destructive"
                   title="Remove from dashboard"
                 >
@@ -467,17 +444,12 @@
                 </button>
               </div>
 
-              <!-- Chart body: relative container + absolute EChartPanel for reliable canvas sizing -->
+              <!-- Chart body -->
               <div class="relative min-h-0 flex-1">
                 {#if chart?.previewOption && Object.keys(chart.previewOption).length > 0}
-                  <EChartPanel
-                    option={chart.previewOption}
-                    class="absolute inset-0"
-                  />
+                  <EChartPanel option={chart.previewOption} class="absolute inset-0" />
                 {:else}
-                  <div
-                    class="absolute inset-0 flex items-center justify-center gap-2 text-muted-foreground/30"
-                  >
+                  <div class="absolute inset-0 flex items-center justify-center gap-2 text-muted-foreground/30">
                     <BarChart2 class="size-6" />
                     <span class="text-ui-xs">No preview</span>
                   </div>
@@ -496,25 +468,13 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="fixed inset-0 z-50 flex items-center justify-center bg-background/60 backdrop-blur-sm"
-    onclick={(e) => {
-      if (e.target === e.currentTarget) pickerOpen = false;
-    }}
-    onkeydown={(e) => {
-      if (e.key === "Escape") pickerOpen = false;
-    }}
+    onclick={(e) => { if (e.target === e.currentTarget) pickerOpen = false; }}
+    onkeydown={(e) => { if (e.key === "Escape") pickerOpen = false; }}
   >
-    <div
-      class="flex w-[480px] max-h-[70vh] flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-xl"
-    >
-      <div
-        class="flex h-11 shrink-0 items-center justify-between border-b border-border px-4"
-      >
+    <div class="flex w-[480px] max-h-[70vh] flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-xl">
+      <div class="flex h-11 shrink-0 items-center justify-between border-b border-border px-4">
         <span class="text-sm font-semibold">Add chart to dashboard</span>
-        <button
-          type="button"
-          onclick={() => (pickerOpen = false)}
-          class="text-muted-foreground/50 hover:text-foreground"
-        >
+        <button type="button" onclick={() => (pickerOpen = false)} class="text-muted-foreground/50 hover:text-foreground">
           <X class="size-4" />
         </button>
       </div>
@@ -529,31 +489,20 @@
               <button
                 type="button"
                 onclick={() => pickChart(chart.id)}
-                class="group flex flex-col overflow-hidden rounded-lg border border-border/50 bg-background transition-colors hover:border-primary/50 hover:bg-accent/30 text-left"
+                class="group flex flex-col overflow-hidden rounded-lg border border-border/50 bg-background text-left transition-colors hover:border-primary/50 hover:bg-accent/30"
               >
-                <div
-                  class="relative h-[100px] border-b border-border/30 bg-muted/20"
-                >
+                <div class="relative h-[100px] border-b border-border/30 bg-muted/20">
                   {#if chart.previewOption && Object.keys(chart.previewOption).length > 0}
-                    <EChartPanel
-                      option={chart.previewOption}
-                      class="absolute inset-0"
-                    />
+                    <EChartPanel option={chart.previewOption} class="absolute inset-0" />
                   {:else}
-                    <div
-                      class="absolute inset-0 flex items-center justify-center text-muted-foreground/25"
-                    >
+                    <div class="absolute inset-0 flex items-center justify-center text-muted-foreground/25">
                       <BarChart2 class="size-8" />
                     </div>
                   {/if}
                 </div>
                 <div class="px-2.5 py-1.5">
-                  <p class="truncate text-ui-xs font-medium text-foreground/80">
-                    {chart.name}
-                  </p>
-                  <p class="text-[10px] text-muted-foreground/50">
-                    {chart.group}
-                  </p>
+                  <p class="truncate text-ui-xs font-medium text-foreground/80">{chart.name}</p>
+                  <p class="text-[10px] text-muted-foreground/50">{chart.group}</p>
                 </div>
               </button>
             {/each}
