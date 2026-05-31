@@ -200,45 +200,34 @@
 />
 
 <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-  <!-- Header -->
-  <div
-    class="studio-chrome flex h-9 shrink-0 items-center gap-2 border-b border-border bg-panel px-3"
-  >
-    <ShieldCheck class="size-3.5 shrink-0 text-muted-foreground" />
-    <span class="font-mono text-ui-sm font-medium">Security</span>
+  <!-- Tab row -->
+  <div class="flex shrink-0 items-center border-b border-border bg-panel">
+    {#each TABS as tab (tab.id)}
+      <button
+        type="button"
+        class={cn(
+          "relative flex h-8 items-center px-3 font-mono text-ui-xs transition-colors",
+          activeTab === tab.id
+            ? "text-foreground"
+            : "text-muted-foreground/50 hover:text-muted-foreground",
+        )}
+        onclick={() => { activeTab = /** @type {any} */ (tab.id) }}
+      >
+        {#if activeTab === tab.id}
+          <span class="absolute inset-x-0 bottom-0 h-px bg-primary" aria-hidden="true"></span>
+        {/if}
+        {tab.label}
+      </button>
+    {/each}
     <div class="flex-1"></div>
     <button
       type="button"
-      class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
+      class="mr-1 inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:text-foreground"
       title="Refresh (⌘R)"
       onclick={refresh}
     >
       <RefreshCw class={cn("size-3.5", isLoading && "animate-spin")} />
     </button>
-  </div>
-
-  <!-- Segmented tab control -->
-  <div
-    class="flex shrink-0 items-center border-b border-border bg-panel px-3 py-2"
-  >
-    <div
-      class="inline-flex h-7 items-center rounded-md border border-border/60 bg-muted/40 p-0.5 ring-1 ring-inset ring-border/40"
-    >
-      {#each TABS as tab (tab.id)}
-        <button
-          type="button"
-          class={cn(
-            "inline-flex h-6 items-center rounded-[5px] px-2.5 font-mono text-ui-2xs transition-all",
-            activeTab === tab.id
-              ? "bg-card text-foreground shadow-sm ring-1 ring-border/50"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-          onclick={() => {
-            activeTab = /** @type {any} */ (tab.id);
-          }}>{tab.label}</button
-        >
-      {/each}
-    </div>
   </div>
 
   <!-- Content -->

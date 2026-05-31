@@ -141,6 +141,11 @@
 
     registerAppShortcuts(editor)
 
+    // Monaco measures char widths at init time. If Geist Mono Variable isn't
+    // loaded yet (slow on Linux/Windows), it caches fallback-font widths and
+    // never self-corrects even after the font visually arrives.
+    document.fonts.ready.then(() => editor?.remeasureFonts())
+
     editor.onDidChangeModelContent(() => {
       const next = editor?.getValue() ?? ''
       if (next !== value) {

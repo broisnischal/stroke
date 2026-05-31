@@ -7,6 +7,7 @@
   import Square from '@lucide/svelte/icons/square'
   import Settings2 from '@lucide/svelte/icons/settings-2'
   import Trash2 from '@lucide/svelte/icons/trash-2'
+  import Pencil from '@lucide/svelte/icons/pencil'
   import Plus from '@lucide/svelte/icons/plus'
   import Play from '@lucide/svelte/icons/play'
   import PenLine from '@lucide/svelte/icons/pen-line'
@@ -42,6 +43,7 @@
   import AiChartRenderer from '$lib/components/AiChartRenderer.svelte'
   import {
     chatCompletionStream,
+    chatCompletionRaw,
     manageHistory,
     MAX_AI_RETRIES,
     AI_TOOLS,
@@ -58,6 +60,7 @@
   import mermaid from 'mermaid'
   import { toast } from 'svelte-sonner'
   import { aiSettings, aiProfiles, activeProfileId } from '$lib/stores/ai-settings.js'
+  import { aiChatParams, updateChatParams, resetChatParams } from '$lib/stores/ai-chat-params.js'
   import { saveChart } from '$lib/stores/saved-charts.js'
   import { buildOption } from '$lib/chart-utils.js'
   import { isCurrentThemeDark } from '$lib/stores/settings.js'
@@ -120,12 +123,12 @@
   })
 
   // ── Settings ──────────────────────────────────────────────────────────────
-  /** Model config is the shared reactive store, edited in the dedicated dialog. */
-  const settings = $derived($aiSettings)
+  /** Model config merged with chat params (temperature, topK, maxTokens). */
+  const settings = $derived({ ...$aiSettings, ...$aiChatParams })
   let settingsOpen = $state(false)
   /** @type {string | null} */
   let imageViewerSrc = $state(null)
-  /** @type {'model'|'skills'|'context'} */
+  /** @type {'model'|'skills'|'context'|'chat'} */
   let settingsTab = $state('model')
 
   // ── Skills ────────────────────────────────────────────────────────────────
@@ -319,6 +322,48 @@
       convList = [conv, ...convList]
     }
   }
+
+  // ── AI-generated title ────────────────────────────────────────────────────
+  /** Generate a short title from the conversation and update the stored title. */
+  async function generateAiTitle() {
+    if (!activeConvId) return
+    const userMsg = rawApiHistory.find((m) => m.role === 'user')
+    const assistantMsg = rawApiHistory.find((m) => m.role === 'assistant')
+    if (!userMsg || !assistantMsg) return
+    try {
+      const { content } = await chatCompletionRaw(settings, [
+        {
+          role: 'user',
+          content: `Given this conversation, write a short 3-6 word title that captures the topic. Reply with ONLY the title, no quotes, no punctuation at the end.\n\nUser: ${String(userMsg.content).slice(0, 300)}\nAssistant: ${String(assistantMsg.content).slice(0, 300)}`,
+        },
+      ])
+      const title = content?.trim().slice(0, 60)
+      if (!title || title.length < 3) return
+      await updateConversation(activeConvId, { title })
+      convList = convList.map((c) => c.id === activeConvId ? { ...c, title } : c)
+    } catch { /* non-critical — leave existing title */ }
+  }
+
+  // ── Rename conversation ───────────────────────────────────────────────────
+  /** @type {string|null} */
+  let renamingConvId = $state(null)
+  let renamingTitle = $state('')
+
+  function startRename(/** @type {string} */ id, /** @type {string} */ currentTitle) {
+    renamingConvId = id
+    renamingTitle = currentTitle
+  }
+
+  async function commitRename() {
+    const id = renamingConvId
+    const title = renamingTitle.trim()
+    renamingConvId = null
+    if (!id || !title) return
+    await updateConversation(id, { title })
+    convList = convList.map((c) => c.id === id ? { ...c, title } : c)
+  }
+
+  function cancelRename() { renamingConvId = null }
 
   // ── Platform ───────────────────────────────────────────────────────────────
   const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/i.test(navigator.platform)
@@ -1056,7 +1101,9 @@
 
     // Build query-filtered system prompt for this turn (merge session cache)
     const filteredCtx = filterSchemaForQuery({ ...schemaContext, allTableColumns: { ...schemaContext.allTableColumns, ...fetchedSchemas }, userSkills: skills }, text)
-    turnSystemPrompt = buildSystemPrompt(filteredCtx)
+    const basePrompt = buildSystemPrompt(filteredCtx)
+    const ci = $aiChatParams.customInstructions.trim()
+    turnSystemPrompt = ci ? `${ci}\n\n---\n\n${basePrompt}` : basePrompt
 
     // Smart context management: sliding window + optional summarization.
     // managedLen marks where new messages start after the turn — used to append to rawApiHistory.
@@ -1074,11 +1121,14 @@
       apiHistory = managedHistory
     }
 
+    const isFirstTurn = rawApiHistory.filter((m) => m.role === 'user').length === 1
     try {
       await runAiTurn(0)
       // Append all messages added during this turn to the full uncompressed history
       rawApiHistory.push(...apiHistory.slice(managedLen))
       await persistCurrent()
+      // Generate AI title after the first turn, in the background
+      if (isFirstTurn) void generateAiTitle()
     } catch (e) {
       if (/** @type {any} */ (e)?.name !== 'AbortError') error = String(e)
     } finally {
@@ -1547,32 +1597,61 @@
 
           {#each convList as conv (conv.id)}
             {@const isActive = activeConvId === conv.id}
+            {@const isRenaming = renamingConvId === conv.id}
             <div class="group/conv relative">
-              <button
-                type="button"
-                class={cn(
-                  'relative flex w-full flex-col px-3 py-2 text-left transition-colors',
-                  isActive
-                    ? 'bg-accent/30 text-foreground'
-                    : 'text-muted-foreground hover:bg-accent/20 hover:text-foreground',
-                )}
-                onclick={() => void selectConversation(conv.id)}
-                oncontextmenu={(e) => showContextMenu(conv.id, e)}
-              >
-                {#if isActive}
-                  <span class="absolute inset-y-2 left-0 w-0.5 rounded-full bg-primary"></span>
-                {/if}
-                <span class="truncate text-ui-xs font-medium leading-snug">{conv.title}</span>
-                <span class="mt-0.5 text-[10px] text-muted-foreground/50">{relativeTime(conv.updatedAt)}</span>
-              </button>
-              <button
-                type="button"
-                class="absolute right-1.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/40 opacity-0 transition-[opacity,color] hover:text-destructive group-hover/conv:opacity-100"
-                title="Delete"
-                onclick={(e) => { e.stopPropagation(); void removeConversation(conv.id) }}
-              >
-                <Trash2 class="size-3" />
-              </button>
+              {#if isRenaming}
+                <div class="flex items-center gap-1 px-3 py-2">
+                  {#if isActive}
+                    <span class="absolute inset-y-2 left-0 w-0.5 rounded-full bg-primary"></span>
+                  {/if}
+                  <!-- svelte-ignore a11y_autofocus -->
+                  <input
+                    autofocus
+                    type="text"
+                    bind:value={renamingTitle}
+                    class="min-w-0 flex-1 rounded border border-border/60 bg-background px-1.5 py-0.5 font-mono text-[11px] text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring/30"
+                    onkeydown={(e) => { if (e.key === 'Enter') void commitRename(); if (e.key === 'Escape') cancelRename() }}
+                    onblur={() => void commitRename()}
+                  />
+                </div>
+              {:else}
+                <button
+                  type="button"
+                  class={cn(
+                    'relative flex w-full flex-col px-3 py-2 text-left transition-colors',
+                    isActive
+                      ? 'bg-accent/30 text-foreground'
+                      : 'text-muted-foreground hover:bg-accent/20 hover:text-foreground',
+                  )}
+                  onclick={() => void selectConversation(conv.id)}
+                  ondblclick={() => startRename(conv.id, conv.title)}
+                  oncontextmenu={(e) => showContextMenu(conv.id, e)}
+                >
+                  {#if isActive}
+                    <span class="absolute inset-y-2 left-0 w-0.5 rounded-full bg-primary"></span>
+                  {/if}
+                  <span class="truncate text-ui-xs font-medium leading-snug">{conv.title}</span>
+                  <span class="mt-0.5 text-[10px] text-muted-foreground/50">{relativeTime(conv.updatedAt)}</span>
+                </button>
+                <div class="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover/conv:opacity-100">
+                  <button
+                    type="button"
+                    class="flex size-5 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:bg-accent hover:text-foreground"
+                    title="Rename"
+                    onclick={(e) => { e.stopPropagation(); startRename(conv.id, conv.title) }}
+                  >
+                    <Pencil class="size-3" />
+                  </button>
+                  <button
+                    type="button"
+                    class="flex size-5 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:text-destructive"
+                    title="Delete"
+                    onclick={(e) => { e.stopPropagation(); void removeConversation(conv.id) }}
+                  >
+                    <Trash2 class="size-3" />
+                  </button>
+                </div>
+              {/if}
             </div>
           {/each}
 
@@ -2197,7 +2276,7 @@
 
           <!-- Tab bar: separate row with underline indicator -->
           <div class="studio-chrome flex shrink-0 items-stretch border-b border-border/50" data-studio-chrome>
-            {#each [{ id: 'model', label: 'Model' }, { id: 'skills', label: 'Skills' }, { id: 'context', label: 'Context' }] as tab (tab.id)}
+            {#each [{ id: 'model', label: 'Model' }, { id: 'chat', label: 'Chat' }, { id: 'skills', label: 'Skills' }, { id: 'context', label: 'Context' }] as tab (tab.id)}
               <button
                 type="button"
                 class={cn(
@@ -2206,7 +2285,7 @@
                     ? 'text-foreground'
                     : 'text-muted-foreground/60 hover:text-muted-foreground',
                 )}
-                onclick={() => (settingsTab = /** @type {'model'|'skills'|'context'} */ (tab.id))}
+                onclick={() => (settingsTab = /** @type {'model'|'chat'|'skills'|'context'} */ (tab.id))}
               >
                 {tab.label}{tab.id === 'skills' && skills.length ? ` (${skills.length})` : ''}
                 {#if settingsTab === tab.id}
@@ -2261,6 +2340,107 @@
                 <p class="text-center text-[10px] text-muted-foreground/40">
                   Shared with AI sidebar · <kbd class="font-mono">{modKey}I</kbd>
                 </p>
+              </div>
+
+            <!-- ── Chat tab ── -->
+            {:else if settingsTab === 'chat'}
+              <div class="flex flex-col gap-4 p-4">
+
+                <!-- Temperature -->
+                <div class="flex flex-col gap-2">
+                  <div class="flex items-center justify-between">
+                    <label class="text-ui-xs font-medium text-foreground">Temperature</label>
+                    <span class="font-mono text-[11px] text-muted-foreground">{$aiChatParams.temperature.toFixed(2)}</span>
+                  </div>
+                  <input
+                    type="range" min="0" max="2" step="0.05"
+                    value={$aiChatParams.temperature}
+                    oninput={(e) => updateChatParams({ temperature: parseFloat(e.currentTarget.value) })}
+                    class="w-full accent-primary"
+                  />
+                  <p class="text-[10px] text-muted-foreground/50">0 = deterministic · 1 = balanced · 2 = creative</p>
+                </div>
+
+                <!-- Top-K -->
+                <div class="flex flex-col gap-2">
+                  <div class="flex items-center justify-between">
+                    <label class="text-ui-xs font-medium text-foreground">Top-K</label>
+                    <div class="flex items-center gap-1.5">
+                      <span class="font-mono text-[11px] text-muted-foreground">{$aiChatParams.topK ?? 'off'}</span>
+                      <button
+                        type="button"
+                        class="font-mono text-[10px] text-muted-foreground/50 hover:text-foreground"
+                        onclick={() => updateChatParams({ topK: $aiChatParams.topK === null ? 40 : null })}
+                      >{$aiChatParams.topK === null ? 'enable' : 'disable'}</button>
+                    </div>
+                  </div>
+                  {#if $aiChatParams.topK !== null}
+                    <input
+                      type="range" min="1" max="100" step="1"
+                      value={$aiChatParams.topK}
+                      oninput={(e) => updateChatParams({ topK: parseInt(e.currentTarget.value) })}
+                      class="w-full accent-primary"
+                    />
+                  {/if}
+                  <p class="text-[10px] text-muted-foreground/50">Limits token sampling pool. Not supported by all providers.</p>
+                </div>
+
+                <!-- Max tokens -->
+                <div class="flex flex-col gap-2">
+                  <div class="flex items-center justify-between">
+                    <label class="text-ui-xs font-medium text-foreground">Max tokens</label>
+                    <span class="font-mono text-[11px] text-muted-foreground">{$aiChatParams.maxTokens.toLocaleString()}</span>
+                  </div>
+                  <input
+                    type="range" min="512" max="32768" step="512"
+                    value={$aiChatParams.maxTokens}
+                    oninput={(e) => updateChatParams({ maxTokens: parseInt(e.currentTarget.value) })}
+                    class="w-full accent-primary"
+                  />
+                </div>
+
+                <!-- Custom instructions -->
+                <div class="flex flex-col gap-1.5">
+                  <label class="text-ui-xs font-medium text-foreground">Custom instructions</label>
+                  <textarea
+                    rows="5"
+                    placeholder="Always respond in Spanish. Focus on performance. Prefer CTEs over subqueries…"
+                    value={$aiChatParams.customInstructions}
+                    oninput={(e) => updateChatParams({ customInstructions: e.currentTarget.value })}
+                    class="w-full resize-none rounded-lg border border-border/50 bg-background/60 px-2.5 py-2 font-mono text-[11px] text-foreground outline-none placeholder:text-muted-foreground/30 focus:border-ring focus:ring-1 focus:ring-ring/30"
+                  ></textarea>
+                  <p class="text-[10px] text-muted-foreground/50">Prepended to the system prompt on every turn.</p>
+                </div>
+
+                <!-- Reset params -->
+                <button
+                  type="button"
+                  class="self-start font-mono text-[10px] text-muted-foreground/50 hover:text-foreground"
+                  onclick={resetChatParams}
+                >Reset to defaults</button>
+
+                <!-- Divider -->
+                <div class="border-t border-border/30"></div>
+
+                <!-- Clear all history -->
+                <div class="flex flex-col gap-1.5">
+                  <p class="text-ui-xs font-medium text-foreground">Chat history</p>
+                  <p class="text-[10px] text-muted-foreground/50">Permanently delete all saved conversations for this connection.</p>
+                  <button
+                    type="button"
+                    class="mt-1 flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-destructive/40 bg-destructive/8 text-ui-xs text-destructive transition-colors hover:bg-destructive/15"
+                    onclick={async () => {
+                      if (!confirm('Delete all conversations? This cannot be undone.')) return
+                      const { clearConversations } = await import('$lib/stores/conversations.js')
+                      await clearConversations(connectionId || undefined)
+                      convList = []
+                      await newConversation()
+                    }}
+                  >
+                    <Trash2 class="size-3.5" />
+                    Clear all history
+                  </button>
+                </div>
               </div>
 
             <!-- ── Skills tab ── -->

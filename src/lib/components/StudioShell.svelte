@@ -7,6 +7,11 @@
   import LayoutTemplate from '@lucide/svelte/icons/layout-template'
   import Command from '@lucide/svelte/icons/command'
   import Lightbulb from '@lucide/svelte/icons/lightbulb'
+  import Code2 from '@lucide/svelte/icons/code-2'
+  import ShieldCheck from '@lucide/svelte/icons/shield-check'
+  import ScrollText from '@lucide/svelte/icons/scroll-text'
+  import BarChart2 from '@lucide/svelte/icons/bar-chart-2'
+  import History from '@lucide/svelte/icons/history'
   import { createHotkey, createHotkeySequence } from '@tanstack/svelte-hotkeys'
   import { cycleTheme, restorePreviousTheme, isCurrentThemeDark } from '$lib/stores/settings.js'
   import { pickRandomTip } from '$lib/insider-tips.js'
@@ -44,7 +49,6 @@
   import ChartsPage from './ChartsPage.svelte'
   import DashboardPage from './DashboardPage.svelte'
   import EntityRelationPage from './EntityRelationPage.svelte'
-  import RelationTreePage from './RelationTreePage.svelte'
   import { Button } from '$lib/components/ui/button/index.js'
   import AlertTriangle from '@lucide/svelte/icons/triangle-alert'
   import X from '@lucide/svelte/icons/x'
@@ -80,8 +84,6 @@
     createDashboardTab,
     createErdTab,
     findErdTab,
-    createRelTreeTab,
-    findRelTreeTab,
     findTableTab,
     findSqlTab,
     findAiTab,
@@ -280,7 +282,6 @@
   let chartsEverOpened = $state(false)
   let dashboardEverOpened = $state(false)
   let erdEverOpened     = $state(false)
-  let relTreeEverOpened = $state(false)
   $effect(() => {
     if (activeTab?.kind === 'sql') sqlEverOpened = true
     if (activeTab?.kind === 'orm') ormEverOpened = true
@@ -291,7 +292,6 @@
     if (activeTab?.kind === 'charts') chartsEverOpened = true
     if (activeTab?.kind === 'dashboard') dashboardEverOpened = true
     if (activeTab?.kind === 'erd') erdEverOpened = true
-    if (activeTab?.kind === 'reltree') relTreeEverOpened = true
   })
 
   let columns = $state([])
@@ -1280,17 +1280,6 @@
     saveActiveTabState()
     dropWelcomeTabs()
     const tab = createErdTab()
-    tabs = [...tabs, tab]
-    activeTabId = tab.id
-    clearTableEditor()
-  }
-
-  function openRelTreeTab() {
-    const existing = findRelTreeTab(tabs)
-    if (existing) { void activateTab(existing.id); return }
-    saveActiveTabState()
-    dropWelcomeTabs()
-    const tab = createRelTreeTab()
     tabs = [...tabs, tab]
     activeTabId = tab.id
     clearTableEditor()
@@ -2519,7 +2508,6 @@
   ontoggleaimode={() => aiMode ? exitAiMode() : enterAiMode()}
   onopenorm={() => { if (aiMode) exitAiMode(); openOrmTab() }}
   onopenerd={() => { if (aiMode) exitAiMode(); openErdTab() }}
-  onopenreltree={() => { if (aiMode) exitAiMode(); openRelTreeTab() }}
   onopenbackup={() => { if (aiMode) exitAiMode(); openBackupTab() }}
   onopenSchema={() => { if (aiMode) exitAiMode(); openSchemaTab() }}
   onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
@@ -2594,8 +2582,7 @@
         onopenbackup={openBackupTab}
         onopendashboard={() => { if (aiMode) exitAiMode(); openDashboardTab() }}
         onopenerd={() => { if (aiMode) exitAiMode(); openErdTab() }}
-        onopenreltree={() => { if (aiMode) exitAiMode(); openRelTreeTab() }}
-        {aiMode}
+              {aiMode}
         onopenaimode={() => (aiMode ? exitAiMode() : enterAiMode())}
         {queryHistory}
         onqueryselect={(sql) => { if (aiMode) exitAiMode(); void openQueryInEditor(sql) }}
@@ -2785,22 +2772,6 @@
         >
           <svelte:boundary failed={tabError}>
             <DashboardPage />
-          </svelte:boundary>
-        </div>
-      {/if}
-
-      <!-- Relation Tree tab -->
-      {#if relTreeEverOpened}
-        <div
-          class={activeTab?.kind === 'reltree' ? 'flex min-h-0 flex-1' : 'hidden'}
-          inert={activeTab?.kind !== 'reltree' || undefined}
-        >
-          <svelte:boundary failed={tabError}>
-            <RelationTreePage
-              schema={activeSchema}
-              {schemas}
-              onopentable={(s, t) => void openTableTab(s, t)}
-            />
           </svelte:boundary>
         </div>
       {/if}
@@ -3070,108 +3041,140 @@
       {#if !activeTab || activeTab.kind === 'welcome'}
         {@const isMac = navigator.platform.toUpperCase().includes('MAC')}
         {@const mod = isMac ? '⌘' : 'Ctrl'}
-        <div class="flex flex-1 flex-col items-center justify-center gap-8 overflow-auto p-10">
+        {@const recentTables = tables.slice(0, 12)}
+        {@const recentQueries = queryHistory.slice(0, 5)}
+        {@const _now = Date.now()}
+        {@const relTime = (/** @type {number} */ ts) => {
+          const diff = _now - ts, sec = Math.floor(diff / 1000)
+          if (sec < 60) return 'just now'
+          const min = Math.floor(sec / 60)
+          if (min < 60) return `${min}m`
+          const hr = Math.floor(min / 60)
+          if (hr < 24) return `${hr}h`
+          const day = Math.floor(hr / 24)
+          return day < 7 ? `${day}d` : new Date(ts).toLocaleDateString()
+        }}
+        {@const cell = 'group flex flex-col gap-3 rounded-xl border border-border/25 bg-card/50 p-3 text-left transition-all hover:border-border/50 hover:bg-accent/10'}
+        {@const iconCls = 'size-3.5 text-muted-foreground/50 transition-colors group-hover:text-foreground/80'}
+        {@const labelCls = 'text-[11px] font-medium leading-none text-foreground/50 transition-colors group-hover:text-foreground/80'}
+        {@const hotkeyCls = 'text-[9px] tabular-nums text-muted-foreground/20 group-hover:text-muted-foreground/40 transition-colors self-end'}
 
-          <div class="flex flex-col items-center gap-1.5 text-center">
-            <h1 class="text-ui font-medium text-foreground">Where do you want to start?</h1>
-            <p class="text-ui-xs text-muted-foreground">Open a view or pick a table below</p>
+        <div class="flex flex-1 flex-col items-center justify-center gap-9 overflow-auto p-12">
+
+          <!-- Header -->
+          <div class="flex flex-col items-center gap-1.5">
+            <p class="text-xs font-medium text-muted-foreground/40 uppercase tracking-widest">Where do you want to start?</p>
+            {#if connection}
+              <div class="flex items-center gap-2 text-sm font-medium text-foreground/80">
+                <span class="size-1.5 rounded-full bg-primary/60 shrink-0"></span>
+                <span class="font-mono">{connection.database ?? connection.filePath?.split('/').at(-1) ?? connection.databaseId ?? 'connected'}</span>
+                <span class="text-muted-foreground/30 text-xs">·</span>
+                <span class="capitalize text-muted-foreground/50 text-xs font-normal">{dbType}</span>
+              </div>
+            {/if}
           </div>
 
-          <div class="grid w-full max-w-md grid-cols-2 gap-2">
-            <button
-              onclick={openSqlTab}
-              class="group flex flex-col gap-3 rounded-xl border border-border/50 bg-card p-4 text-left transition-all hover:border-border hover:bg-accent/20 hover:shadow-sm"
-            >
-              <div class="flex items-center justify-between">
-                <div class="flex size-8 items-center justify-center rounded-lg border border-border/60 bg-background text-muted-foreground transition-colors group-hover:text-foreground">
-                  <Terminal size={14} />
-                </div>
-                <kbd>{mod}T</kbd>
-              </div>
-              <div>
-                <p class="text-ui-sm font-medium text-foreground">SQL Editor</p>
-                <p class="mt-0.5 text-ui-xs text-muted-foreground">Write and run queries</p>
+          <!-- Unified action grid — all same size -->
+          <div class="grid w-full max-w-sm grid-cols-4 gap-1.5">
+
+            <button onclick={openSqlTab} class={cell}>
+              <Terminal class={iconCls} />
+              <div class="flex items-end justify-between gap-1">
+                <span class={labelCls}>SQL</span>
+                <span class={hotkeyCls}>{mod}T</span>
               </div>
             </button>
 
-            <button
-              onclick={() => {
-                const first = tables[0]
-                if (first) openTableTab(activeSchema, first.name)
-              }}
-              class="group flex flex-col gap-3 rounded-xl border border-border/50 bg-card p-4 text-left transition-all hover:border-border hover:bg-accent/20 hover:shadow-sm"
-            >
-              <div class="flex items-center justify-between">
-                <div class="flex size-8 items-center justify-center rounded-lg border border-border/60 bg-background text-muted-foreground transition-colors group-hover:text-foreground">
-                  <Table2 size={14} />
-                </div>
-                <kbd>{mod}⇧D</kbd>
-              </div>
-              <div>
-                <p class="text-ui-sm font-medium text-foreground">Browse Data</p>
-                <p class="mt-0.5 text-ui-xs text-muted-foreground">Explore tables and views</p>
+            <button onclick={() => { const first = tables[0]; if (first) openTableTab(activeSchema, first.name) }} class={cell}>
+              <Table2 class={iconCls} />
+              <div class="flex items-end justify-between gap-1">
+                <span class={labelCls}>Data</span>
+                <span class={hotkeyCls}>{mod}⇧D</span>
               </div>
             </button>
 
-            <button
-              onclick={openAiTab}
-              class="group flex flex-col gap-3 rounded-xl border border-border/50 bg-card p-4 text-left transition-all hover:border-border hover:bg-accent/20 hover:shadow-sm"
-            >
-              <div class="flex items-center justify-between">
-                <div class="flex size-8 items-center justify-center rounded-lg border border-border/60 bg-background text-muted-foreground transition-colors group-hover:text-foreground">
-                  <Bot size={14} />
-                </div>
-                <kbd>{mod}⇧E</kbd>
+            <button onclick={openAiTab} class={cell}>
+              <Bot class={iconCls} />
+              <div class="flex items-end justify-between gap-1">
+                <span class={labelCls}>AI</span>
+                <span class={hotkeyCls}>{mod}⇧E</span>
               </div>
-              <div>
-                <p class="text-ui-sm font-medium text-foreground">AI Assistant</p>
-                <p class="mt-0.5 text-ui-xs text-muted-foreground">Ask questions in plain text</p>
+            </button>
+
+            <button onclick={openOrmTab} class={cell}>
+              <Code2 class={iconCls} />
+              <div class="flex items-end justify-between gap-1">
+                <span class={labelCls}>ORM</span>
+                <span class={hotkeyCls}>{mod}⇧O</span>
               </div>
             </button>
 
             {#if hasSchemaExplorer}
-              <button
-                onclick={openSchemaTab}
-                class="group flex flex-col gap-3 rounded-xl border border-border/50 bg-card p-4 text-left transition-all hover:border-border hover:bg-accent/20 hover:shadow-sm"
-              >
-                <div class="flex items-center justify-between">
-                  <div class="flex size-8 items-center justify-center rounded-lg border border-border/60 bg-background text-muted-foreground transition-colors group-hover:text-foreground">
-                    <LayoutTemplate size={14} />
-                  </div>
-                  <kbd>{mod}⇧E</kbd>
-                </div>
-                <div>
-                  <p class="text-ui-sm font-medium text-foreground">Schema Explorer</p>
-                  <p class="mt-0.5 text-ui-xs text-muted-foreground">Visualize your database</p>
-                </div>
+              <button onclick={openSchemaTab} class={cell}>
+                <LayoutTemplate class={iconCls} />
+                <span class={labelCls}>Schema</span>
               </button>
             {/if}
+
+            {#if hasSecurity}
+              <button onclick={openSecurityTab} class={cell}>
+                <ShieldCheck class={iconCls} />
+                <span class={labelCls}>Security</span>
+              </button>
+            {/if}
+
+            <button onclick={openLogsTab} class={cell}>
+              <ScrollText class={iconCls} />
+              <span class={labelCls}>Logs</span>
+            </button>
+
+            <button onclick={openChartsTab} class={cell}>
+              <BarChart2 class={iconCls} />
+              <span class={labelCls}>Charts</span>
+            </button>
           </div>
 
-          <div class="w-full max-w-md rounded-xl border border-border/40 bg-muted/15 p-4">
-            <div class="flex items-start gap-3">
-              <Lightbulb class="mt-0.5 size-3.5 shrink-0 text-muted-foreground/40" />
-              <div class="flex min-w-0 flex-col gap-1">
-                <div class="flex items-center gap-2">
-                  <span class="text-ui-2xs font-medium uppercase tracking-wider text-muted-foreground/40">{welcomeTip.category}</span>
-                  <span class="font-mono text-ui-xs font-medium text-foreground/70">{welcomeTip.label}</span>
-                </div>
-                <p class="text-ui-xs leading-relaxed text-muted-foreground">{welcomeTip.text}</p>
-              </div>
+          <!-- Tables — borderless chips -->
+          {#if recentTables.length > 0}
+            <div class="flex w-full max-w-sm flex-wrap gap-x-0.5 gap-y-0">
+              {#each recentTables as t (t.name)}
+                <button
+                  onclick={() => openTableTab(activeSchema, t.name)}
+                  class="rounded px-1.5 py-1 font-mono text-[11px] text-muted-foreground/35 transition-colors hover:bg-accent/15 hover:text-foreground/70"
+                >
+                  {t.name}
+                </button>
+              {/each}
             </div>
-          </div>
+          {/if}
 
-          <div class="flex items-center gap-3 text-ui-2xs text-muted-foreground/40">
+          <!-- Recent queries — bare rows -->
+          {#if recentQueries.length > 0}
+            <div class="w-full max-w-sm">
+              {#each recentQueries as q, i (q.id)}
+                <button
+                  onclick={() => void openQueryInEditor(q.sql)}
+                  class="group flex w-full min-w-0 items-center gap-3 py-2 text-left transition-colors {i > 0 ? 'border-t border-border/10' : ''}"
+                >
+                  <span class="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground/35 transition-colors group-hover:text-foreground/65">{q.title}</span>
+                  <span class="shrink-0 text-[10px] tabular-nums text-muted-foreground/20">{relTime(q.executedAt)}</span>
+                </button>
+              {/each}
+            </div>
+          {/if}
+
+          <!-- Footer -->
+          <div class="flex items-center gap-3 text-[10px] text-muted-foreground/25">
             <button
               onclick={() => showShortcutsModal = true}
-              class="flex items-center gap-1.5 transition-colors hover:text-muted-foreground"
+              class="flex items-center gap-1 transition-colors hover:text-muted-foreground/50"
             >
-              <Command size={10} />
-              <span>keyboard shortcuts</span>
+              <Command size={9} />
+              <span>shortcuts</span>
             </button>
-            <span class="text-muted-foreground/20">·</span>
+            <span>·</span>
             <span class="font-mono">{mod}B sidebar</span>
-            <span class="text-muted-foreground/20">·</span>
+            <span>·</span>
             <span class="font-mono">{mod}W close tab</span>
           </div>
         </div>
@@ -3236,7 +3239,6 @@
   onopenchartspage={() => { if (aiMode) exitAiMode(); openChartsTab() }}
   onopendashboard={() => { if (aiMode) exitAiMode(); openDashboardTab() }}
   onopenerd={() => { if (aiMode) exitAiMode(); openErdTab() }}
-  onopenreltree={() => { if (aiMode) exitAiMode(); openRelTreeTab() }}
   onopensettings={() => (showSettingsModal = true)}
   onopencommand={() => (commandOpen = true)}
   ondisconnect={requestDisconnect}

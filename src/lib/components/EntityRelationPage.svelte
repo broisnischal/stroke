@@ -5,6 +5,7 @@
   import dagre from '@dagrejs/dagre'
   import { listTables, getTableColumnStructure, listIndexes } from '$lib/api.js'
   import ErdTableNode from './ErdTableNode.svelte'
+  import ErdFocusController from './ErdFocusController.svelte'
   import Loader from '@lucide/svelte/icons/loader'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
   import Search from '@lucide/svelte/icons/search'
@@ -109,13 +110,9 @@
           target:       refTable,
           sourceHandle: `src-${col.name}`,
           targetHandle: 'tgt',
-          type:         'smoothstep',
-          label:        col.name,
-          labelStyle:   'font-size:9px; font-family:monospace; fill:hsl(var(--muted-foreground)/0.6)',
-          labelBgStyle: 'fill:hsl(var(--background)/0.85)',
-          style:        'stroke:hsl(var(--primary)/0.4); stroke-width:1.5',
-          markerEnd:    { type: 'arrowclosed', color: 'hsl(var(--primary)/0.5)', width: 12, height: 12 },
-          animated:     false,
+          type:         'default',
+          style:        'stroke:hsl(var(--primary)/0.55); stroke-width:1.5',
+          animated:     true,
         })
         connected.add(t.name)
         connected.add(refTable)
@@ -237,6 +234,17 @@
 
   function reLayout() { buildGraph() }
 
+  // ── Focus on exact or single search match ─────────────────────────────────
+  const focusNodeId = $derived.by(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return null
+    const names = [...tableMeta.keys()]
+    const exact = names.find(n => n.toLowerCase() === q)
+    if (exact) return exact
+    const hits = names.filter(n => n.toLowerCase().includes(q))
+    return hits.length === 1 ? hits[0] : null
+  })
+
   // ── Detail panel data ─────────────────────────────────────────────────────
   const selMeta = $derived(selectedTable ? (tableMeta.get(selectedTable) ?? null) : null)
   const selFks  = $derived(selMeta?.columns.filter(c => c.foreignKey) ?? [])
@@ -257,11 +265,11 @@
   <!-- ── Toolbar ──────────────────────────────────────────────────────────── -->
   <div class="studio-chrome flex h-10 shrink-0 items-center gap-2 border-b border-border bg-panel px-3" data-studio-chrome>
     <Network class="size-4 shrink-0 text-muted-foreground/50" />
-    <span class="font-mono text-ui-xs font-semibold text-foreground/80">Entity Relationship</span>
+    <span class="shrink-0 whitespace-nowrap font-mono text-ui-xs font-semibold text-foreground/80">ER Diagram</span>
 
     <!-- Schema selector (only when multiple schemas) -->
     {#if schemas.length > 1}
-      <div class="relative ml-1">
+      <div class="relative ml-1 shrink-0">
         <button
           type="button"
           class="flex h-7 items-center gap-1.5 rounded-md border border-border/50 bg-background/60 px-2.5 font-mono text-ui-xs font-medium transition-colors hover:bg-accent"
@@ -289,13 +297,13 @@
     {/if}
 
     <!-- Search -->
-    <div class="relative flex items-center">
+    <div class="relative flex min-w-0 shrink items-center">
       <Search class="pointer-events-none absolute left-2.5 size-3 text-muted-foreground/40" />
       <input
         type="text"
         bind:value={search}
-        placeholder="Search tables / columns…"
-        class="h-7 w-48 rounded-md border border-border/50 bg-background/60 pl-7 pr-7 font-mono text-ui-xs outline-none placeholder:text-muted-foreground/35 focus:border-ring focus:ring-1 focus:ring-ring/30"
+        placeholder="Search tables…"
+        class="h-7 w-36 min-w-0 rounded-md border border-border/50 bg-background/60 pl-7 pr-6 font-mono text-ui-xs outline-none placeholder:text-muted-foreground/35 focus:border-ring focus:ring-1 focus:ring-ring/30"
       />
       {#if search}
         <button type="button" onclick={() => (search = '')} class="absolute right-2 text-muted-foreground/50 hover:text-foreground">
@@ -304,18 +312,18 @@
       {/if}
     </div>
 
-    <div class="ml-auto flex items-center gap-2">
-      <!-- Loading progress -->
+    <div class="ml-auto flex shrink-0 items-center gap-2">
+      <!-- Loading progress / stats -->
       {#if loading && totalCount > 0}
         <div class="flex items-center gap-2">
-          <div class="h-1 w-24 overflow-hidden rounded-full bg-muted/40">
+          <div class="h-1 w-20 overflow-hidden rounded-full bg-muted/40">
             <div class="h-full rounded-full bg-primary/60 transition-all duration-300" style="width:{Math.round(loadedCount/totalCount*100)}%"></div>
           </div>
           <span class="font-mono text-ui-2xs text-muted-foreground/50">{loadedCount}/{totalCount}</span>
         </div>
       {:else if tableMeta.size > 0}
-        <span class="font-mono text-ui-2xs text-muted-foreground/45">
-          {nodes.length}/{tableMeta.size} tables · {edges.length} relations
+        <span class="whitespace-nowrap font-mono text-ui-2xs text-muted-foreground/45">
+          {nodes.length}/{tableMeta.size} · {edges.length} fk
         </span>
       {/if}
 
@@ -323,29 +331,28 @@
       {#if tableMeta.size > 0}
         <button
           type="button"
-          class="inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-ui-xs transition-colors {connectedOnly ? 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/15' : 'border-border/50 text-muted-foreground hover:bg-accent hover:text-foreground'}"
+          class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 font-mono text-ui-xs whitespace-nowrap transition-colors {connectedOnly ? 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/15' : 'border-border/50 text-muted-foreground hover:bg-accent hover:text-foreground'}"
           onclick={() => (connectedOnly = !connectedOnly)}
           title="Only show tables that have FK relationships"
         >
-          <Link class="size-3.5" />
-          Connected only
+          <Link class="size-3.5 shrink-0" />
+          Connected
         </button>
       {/if}
 
       <button
         type="button"
-        class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/50 px-2.5 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        class="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border/50 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         onclick={reLayout}
         title="Re-run automatic layout"
       >
         <LayoutDashboard class="size-3.5" />
-        Re-layout
       </button>
 
       <button
         type="button"
         disabled={loading}
-        class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+        class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
         onclick={() => void load()}
         title="Reload schema"
       >
@@ -394,6 +401,8 @@
           maskColor="hsl(var(--background)/0.75)"
           style="background:hsl(var(--panel)); border:1px solid hsl(var(--border)/0.5); border-radius:8px; right:16px; bottom:16px;"
         />
+
+        <ErdFocusController {focusNodeId} />
 
         {#if tableMeta.size === 0 && !loading}
           <Panel position="top-center">
@@ -520,5 +529,8 @@
   }
   :global(.erd-canvas .svelte-flow__handle) {
     pointer-events: none;
+  }
+  :global(.erd-canvas .svelte-flow__attribution) {
+    display: none;
   }
 </style>

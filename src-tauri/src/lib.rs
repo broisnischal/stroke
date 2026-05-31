@@ -65,9 +65,10 @@ pub fn run() {
             // WebKitGTK 2.48+, having the protocol active without a connected
             // DevTools client causes JavaScriptCore to emit SIGTRAP
             // ("NeedDebuggerBreak trap") on any JS exception or font-load race,
-            // crashing the process. Keep devtools disabled by default; the
-            // toggle_devtools command exposes them on demand via the UI button.
-            .devtools(false)
+            // crashing the process. Auto-enable only in debug builds (dev mode);
+            // keep disabled in release. The toggle_devtools command also exposes
+            // them on demand via F12.
+            .devtools(cfg!(debug_assertions))
             .on_navigation(|url| {
                 let scheme = url.scheme();
                 if matches!(scheme, "tauri" | "ipc") {

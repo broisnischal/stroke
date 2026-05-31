@@ -431,6 +431,8 @@ async fn list_indexes_mysql(pool: &MySqlPool, schema: &str) -> Result<Vec<IndexI
 pub struct EnumInfo {
     pub name: String,
     pub values: Vec<String>,
+    /// Tables in the same schema that have a column using this enum type.
+    pub used_in_tables: Vec<String>,
 }
 
 // ── Triggers (PostgreSQL only) ────────────────────────────────────────────────

@@ -10,63 +10,64 @@
 
 <!-- svelte-ignore a11y_interactive_supports_focus -->
 <div
-  class="flex flex-col overflow-hidden rounded-[10px] border bg-card shadow-sm transition-all
+  class="flex flex-col overflow-hidden rounded-xl border bg-card shadow-sm transition-colors duration-150
     {data.selected
-      ? 'border-primary shadow-md shadow-primary/20 ring-1 ring-primary/30'
+      ? 'border-primary/60 ring-1 ring-primary/20'
       : !data.highlighted
-        ? 'border-border/25 opacity-40'
-        : 'border-border/50 hover:border-primary/50 hover:shadow-md'}"
+        ? 'border-border/20 opacity-35'
+        : 'border-border/40 hover:border-primary/40'}"
   style="width:{NODE_W}px; cursor: pointer"
   role="button"
   onclick={() => data.onSelect?.(data.name)}
   ondblclick={() => data.onOpen?.(data.name)}
   onkeydown={(e) => { if (e.key === 'Enter') data.onOpen?.(data.name) }}
 >
-  <!-- Target handle — receives incoming FK arrows (on left edge) -->
+  <!-- Target handle — receives incoming FK arrows -->
   <Handle
     type="target"
     position={Position.Left}
     id="tgt"
-    style="left:-5px; width:10px; height:10px; background:hsl(var(--primary)/0.5); border:2px solid hsl(var(--primary)/0.7); border-radius:50%; top:18px"
+    style="left:-5px; width:10px; height:10px; background:hsl(var(--primary)/0.7); border:2px solid hsl(var(--background)); border-radius:50%; top:18px; box-shadow:0 0 0 1.5px hsl(var(--primary)/0.4)"
   />
 
   <!-- Table header -->
-  <div class="flex items-center gap-2 border-b border-border/40 bg-muted/30 px-3 py-2">
-    <span class="min-w-0 flex-1 truncate font-mono text-[11px] font-bold text-foreground/90">{data.name}</span>
-    <span class="shrink-0 rounded bg-muted/60 px-1 font-mono text-[9px] text-muted-foreground/50">{data.columns?.length ?? 0}</span>
+  <div class="flex items-center gap-2 border-b border-border/30 bg-muted/20 px-3 py-2.5">
+    <span class="min-w-0 flex-1 truncate font-mono text-[11px] font-bold tracking-tight text-foreground">{data.name}</span>
+    <span class="shrink-0 rounded-md bg-muted/50 px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground/60">{data.columns?.length ?? 0}</span>
   </div>
 
   <!-- Column rows -->
-  <div class="flex flex-col divide-y divide-border/10">
+  <div class="flex flex-col">
     {#each (data.columns ?? []) as col (col.name)}
       {@const isPk = data.pkCols?.has(col.name)}
       {@const isFk = !!col.foreignKey}
-      <div class="relative flex items-center gap-1.5 px-2.5 py-[3px] {isPk ? 'bg-amber-500/6' : isFk ? 'bg-blue-500/4' : ''}">
-        <!-- Source handle for FK columns (right edge) -->
+      <div class="relative flex items-center gap-2 px-3 py-[4px]
+        {isPk ? 'bg-amber-500/8 border-b border-amber-500/10' : isFk ? 'bg-blue-500/5 border-b border-blue-500/8' : 'border-b border-border/8'}">
+        <!-- Source handle for FK columns -->
         {#if isFk}
           <Handle
             type="source"
             position={Position.Right}
             id="src-{col.name}"
-            style="right:-5px; width:8px; height:8px; background:hsl(var(--primary)/0.6); border:1.5px solid hsl(var(--primary)); border-radius:50%; top:50%"
+            style="right:-5px; width:9px; height:9px; background:hsl(var(--primary)/0.65); border:2px solid hsl(var(--background)); border-radius:50%; top:50%; box-shadow:0 0 0 1.5px hsl(var(--primary)/0.35)"
           />
         {/if}
 
-        <div class="flex size-3 shrink-0 items-center justify-center">
+        <div class="flex size-3.5 shrink-0 items-center justify-center">
           {#if isPk}
-            <KeyRound class="size-2.5 text-amber-400/90" />
+            <KeyRound class="size-3 text-amber-400" />
           {:else if isFk}
-            <Link class="size-2.5 text-blue-400/70" />
+            <Link class="size-3 text-blue-400/80" />
           {:else}
-            <div class="size-[3px] rounded-full bg-muted-foreground/25"></div>
+            <div class="size-1 rounded-full bg-muted-foreground/20"></div>
           {/if}
         </div>
 
         <span class="min-w-0 flex-1 truncate font-mono text-[10px] leading-snug
-          {isPk ? 'font-semibold text-amber-300/90' : isFk ? 'text-blue-300/75' : 'text-foreground/60'}"
+          {isPk ? 'font-semibold text-amber-300' : isFk ? 'text-blue-300/90' : 'text-foreground/65'}"
         >{col.name}</span>
 
-        <span class="shrink-0 font-mono text-[9px] leading-snug text-muted-foreground/35">{col.dataType}</span>
+        <span class="shrink-0 font-mono text-[9px] leading-snug text-muted-foreground/30">{col.dataType}</span>
       </div>
     {/each}
   </div>

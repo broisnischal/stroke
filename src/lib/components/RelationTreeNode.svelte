@@ -128,8 +128,8 @@
 
   <!-- Expanded children (recursive) -->
   {#if isOpen && hasMore}
+    {@const shared = { tableMeta, outbound, inbound, expanded, showCols, toggleExpand, toggleCols, onfocustable, onopentable, activeSchema }}
     <div class="border-t border-border/20 bg-background/30 p-2">
-      {@const shared = { tableMeta, outbound, inbound, expanded, showCols, toggleExpand, toggleCols, onfocustable, onopentable, activeSchema }}
 
       {#if nodeOut.length > 0}
         <div class="mb-1 px-1 font-mono text-[9px] uppercase tracking-widest text-muted-foreground/40">References</div>

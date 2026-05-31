@@ -517,7 +517,8 @@ export async function chatCompletionRaw(settings, messages, tools = null) {
   const url = base.endsWith('/chat/completions') ? base : `${base}/chat/completions`
 
   /** @type {Record<string, unknown>} */
-  const body = { model: settings.model, messages, temperature: 0, max_tokens: 16384 }
+  const body = { model: settings.model, messages, temperature: settings.temperature ?? 0, max_tokens: settings.maxTokens ?? 16384 }
+  if (settings.topK != null) body.top_k = settings.topK
   if (tools?.length) {
     body.tools = tools
     body.tool_choice = 'auto'
@@ -570,7 +571,8 @@ export async function* chatCompletionStream(settings, messages, tools = null, si
   const url = base.endsWith('/chat/completions') ? base : `${base}/chat/completions`
 
   /** @type {Record<string, unknown>} */
-  const body = { model: settings.model, messages, stream: true, temperature: 0, max_tokens: 16384 }
+  const body = { model: settings.model, messages, stream: true, temperature: settings.temperature ?? 0, max_tokens: settings.maxTokens ?? 16384 }
+  if (settings.topK != null) body.top_k = settings.topK
   if (tools?.length) { body.tools = tools; body.tool_choice = 'auto' }
 
   // Copilot uses a dynamically-obtained JWT and requires additional headers.

@@ -6,6 +6,7 @@
   import Bot from '@lucide/svelte/icons/bot'
   import LayoutTemplate from '@lucide/svelte/icons/layout-template'
   import Code2 from '@lucide/svelte/icons/code-2'
+  import ShieldCheck from '@lucide/svelte/icons/shield-check'
   import Eye from '@lucide/svelte/icons/eye'
   import X from '@lucide/svelte/icons/x'
   import Plus from '@lucide/svelte/icons/plus'
@@ -61,6 +62,7 @@
     if (tab.kind === 'ai') return Bot
     if (tab.kind === 'schema') return LayoutTemplate
     if (tab.kind === 'orm') return Code2
+    if (tab.kind === 'security') return ShieldCheck
     return FileText
   }
 </script>

@@ -50,12 +50,12 @@ pub struct AppMetrics {
 /// Monitor. Only works on Linux (via `prctl PR_SET_NAME`) and macOS (argv[0]).
 /// On other platforms this is a no-op and still returns Ok.
 #[tauri::command]
-pub fn set_process_title(name: String) -> Result<(), String> {
+pub fn set_process_title(_name: String) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
         use std::ffi::CString;
         // Truncate to 15 bytes — Linux kernel limit for PR_SET_NAME.
-        let truncated: String = name.chars().take(15).collect();
+        let truncated: String = _name.chars().take(15).collect();
         let cname = CString::new(truncated).map_err(|e| e.to_string())?;
         // SAFETY: prctl is thread-safe for PR_SET_NAME; no memory aliasing.
         unsafe {

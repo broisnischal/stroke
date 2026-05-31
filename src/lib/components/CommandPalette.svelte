@@ -24,7 +24,6 @@
   import ChevronLeft    from '@lucide/svelte/icons/chevron-left'
   import Eye            from '@lucide/svelte/icons/eye'
   import Network        from '@lucide/svelte/icons/network'
-  import GitBranch      from '@lucide/svelte/icons/git-branch'
   import * as Command from '$lib/components/ui/command/index.js'
   import { formatTableRowCount } from '$lib/table-list.js'
 
@@ -56,7 +55,6 @@
     ontoggleaimode = () => {},
     onopenorm = () => {},
     onopenerd = () => {},
-    onopenreltree = () => {},
     onopenSchema = () => {},
     onopensecurity = () => {},
     hasSchemaExplorer = true,
@@ -215,10 +213,6 @@
               <Command.Item value="open er diagram entity relationship foreign key pk fk graph" onSelect={() => run(onopenerd)}>
                 <Network class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">ER Diagram</span>
-              </Command.Item>
-              <Command.Item value="open relation tree hierarchy foreign key fk tree view" onSelect={() => run(onopenreltree)}>
-                <GitBranch class="size-4 shrink-0 opacity-60" />
-                <span data-slot="command-label" class="truncate">Relation Tree</span>
               </Command.Item>
               {#if hasSchemaExplorer}
                 <Command.Item value="open schema explorer indexes enums views materialized" onSelect={() => run(onopenSchema)}>
