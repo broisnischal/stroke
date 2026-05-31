@@ -21,7 +21,7 @@
     schema = '',
     /** @type {{ name: string, tableName: string, columns?: string, isUnique?: boolean, isPrimary?: boolean, indexType?: string }[]} */
     indexes = [],
-    /** @type {{ name: string, values: string[] }[]} */
+    /** @type {{ name: string, values: string[], usedInTables: string[] }[]} */
     enums = [],
     /** @type {{ name: string, tableName: string, timing: string, events: string, functionName: string, enabled: boolean }[]} */
     triggers = [],
@@ -37,6 +37,7 @@
   /** @type {'indexes' | 'triggers' | 'sequences' | 'enums' | 'views' | 'matviews'} */
   let activeType = $state('indexes')
   let filter = $state('')
+  let filterEl = $state(/** @type {HTMLInputElement | null} */ (null))
 
   const views    = $derived(tables.filter((t) => t.kind === 'view'))
   const matViews = $derived(tables.filter((t) => t.kind === 'materialized_view'))
@@ -138,6 +139,9 @@
   if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key === 'r') {
     e.preventDefault(); onrefresh()
   }
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key === 'f') {
+    e.preventDefault(); filterEl?.focus(); filterEl?.select()
+  }
 }} />
 
 <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -192,6 +196,7 @@
       <input
         type="search"
         placeholder="Filter…"
+        bind:this={filterEl}
         bind:value={filter}
         class="h-7 w-full rounded-md border border-border bg-background/40 pl-7 pr-2.5 text-ui-xs text-foreground outline-none transition-colors hover:bg-background/60 focus:border-ring focus:ring-1 focus:ring-ring/30"
       />
@@ -385,26 +390,47 @@
       {:else if filteredEnums.length === 0}
         {@render noMatch('enums', filter)}
       {:else}
-        <div class="grid gap-3 p-4" style="grid-template-columns: repeat(auto-fill, minmax(280px, 1fr))">
-          {#each filteredEnums as e (e.name)}
-            <div class="flex flex-col gap-2 rounded-lg border border-border bg-card p-4">
-              <div class="flex items-center gap-2">
-                <Tags class="size-4 shrink-0 text-muted-foreground/60" />
-                <span class="min-w-0 truncate font-mono text-ui-sm font-medium">{e.name}</span>
-                <span class="ml-auto shrink-0 rounded-full bg-muted px-2 py-0.5 font-mono text-ui-2xs text-muted-foreground">{e.values.length}</span>
-              </div>
-              {#if e.values.length > 0}
-                <div class="flex flex-wrap gap-1.5 border-t border-border pt-2">
-                  {#each e.values as val (val)}
-                    <span class="rounded-md border border-border bg-muted/50 px-2 py-0.5 font-mono text-ui-xs">{val}</span>
-                  {/each}
-                </div>
-              {:else}
-                <p class="border-t border-border pt-2 text-ui-xs text-muted-foreground/50">No values</p>
-              {/if}
-            </div>
-          {/each}
-        </div>
+        <table class="w-full text-ui-xs">
+          <thead class="studio-chrome sticky top-0 z-10 bg-panel text-left">
+            <tr class="border-b border-border/50">
+              <th class="w-56 px-3 py-2 font-mono font-normal text-muted-foreground">Name</th>
+              <th class="px-3 py-2 font-mono font-normal text-muted-foreground">Values</th>
+              <th class="w-52 px-3 py-2 font-mono font-normal text-muted-foreground">Used by</th>
+              <th class="w-10 px-3 py-2 text-right font-mono font-normal text-muted-foreground">n</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each filteredEnums as e (e.name)}
+              <tr class="group border-b border-border/25 align-top hover:bg-accent/10">
+                <td class="px-3 py-2.5">
+                  <span class="font-mono text-ui-xs font-medium text-foreground/90">{e.name}</span>
+                </td>
+                <td class="px-3 py-2.5">
+                  <div class="flex flex-wrap gap-x-2 gap-y-1">
+                    {#each e.values as val (val)}
+                      <span class="font-mono text-ui-xs text-muted-foreground/60">{val}</span>
+                    {/each}
+                    {#if e.values.length === 0}
+                      <span class="font-mono text-ui-xs text-muted-foreground/30">—</span>
+                    {/if}
+                  </div>
+                </td>
+                <td class="px-3 py-2.5">
+                  {#if (e.usedInTables ?? []).length > 0}
+                    <div class="flex flex-wrap gap-1">
+                      {#each e.usedInTables as tbl (tbl)}
+                        <span class="rounded bg-muted/40 px-1.5 py-px font-mono text-[10px] text-foreground/60">{tbl}</span>
+                      {/each}
+                    </div>
+                  {:else}
+                    <span class="font-mono text-ui-xs text-muted-foreground/25">unused</span>
+                  {/if}
+                </td>
+                <td class="px-3 py-2.5 text-right font-mono text-ui-xs tabular-nums text-muted-foreground/40">{e.values.length}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
       {/if}
 
     <!-- ── Views ─────────────────────────────────────────────────────────── -->

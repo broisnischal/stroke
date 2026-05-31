@@ -34,6 +34,7 @@
   /** @type {'history' | 'saved' | 'charts'} */
   let tab = $state('history')
   let filter = $state('')
+  let filterEl = $state(/** @type {HTMLInputElement | null} */ (null))
 
   const isMac =
     typeof navigator !== 'undefined' && /Mac|iPhone|iPad/i.test(navigator.platform)
@@ -102,6 +103,13 @@
 
 </script>
 
+<svelte:window onkeydown={(e) => {
+  if (!visible) return
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key === 'f') {
+    e.preventDefault(); filterEl?.focus(); filterEl?.select()
+  }
+}} />
+
 {#if visible}
   <aside class="flex w-56 shrink-0 flex-col border-r border-border bg-panel">
 
@@ -144,6 +152,7 @@
       <Search class="pointer-events-none absolute left-3.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/50" />
       <input
         type="search"
+        bind:this={filterEl}
         bind:value={filter}
         placeholder="Search…"
         class="h-6 w-full rounded border border-transparent bg-muted/40 py-0 pl-6 pr-5 font-mono text-ui-2xs text-foreground placeholder:text-muted-foreground/50 focus-visible:border-border focus-visible:bg-background focus-visible:outline-none"

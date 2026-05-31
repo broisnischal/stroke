@@ -61,7 +61,12 @@ export function getRequiredAxes(chartType) {
     case 'word-cloud':
       return { x: 'Word', y: 'Size/Count' }
     case 'tree':
+    case 'dendrogram':
       return { x: 'Name', y: '', group: 'Parent' }
+    case 'choropleth':
+      return { x: 'Country / Region', y: 'Value' }
+    case 'meter':
+      return { x: 'Segment label', y: 'Value', z: 'Total (optional)' }
     case 'sankey':
       return { x: 'Source', y: 'Value', group: 'Target' }
     case 'treemap':
@@ -547,13 +552,68 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
         symbolSize: 7,
         label: { position: 'left', verticalAlign: 'middle', align: 'right', fontSize: 10, color: base.textStyle.color },
         leaves: { label: { position: 'right', verticalAlign: 'middle', align: 'left' } },
+        roam: true,
         expandAndCollapse: true,
-        animationDuration: 550,
+        animationDuration: 400,
         lineStyle: { color: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)' },
       }],
       ...titleOpt(title ?? ''),
     }
   }
+
+  // ── Dendrogram ─────────────────────────────────────────────────────────────
+  if (type === 'dendrogram') {
+    // Same adjacency-list data as 'tree', rendered as a radial dendrogram
+    /** @type {Map<string, { name: string, children: any[] }>} */
+    const nodeMap = new Map()
+    rows.forEach((r) => {
+      const name = String(r[xi] ?? '')
+      if (!nodeMap.has(name)) nodeMap.set(name, { name, children: [] })
+    })
+    /** @type {any[]} */
+    const roots = []
+    rows.forEach((r) => {
+      const name = String(r[xi] ?? '')
+      const parent = gi >= 0 ? String(r[gi] ?? '') : ''
+      const node = nodeMap.get(name)
+      if (!node) return
+      if (parent && nodeMap.has(parent)) {
+        nodeMap.get(parent)?.children.push(node)
+      } else {
+        roots.push(node)
+      }
+    })
+    const treeData = roots.length > 0 ? roots : [{ name: 'Root', children: [...nodeMap.values()] }]
+    return {
+      ...base,
+      grid: undefined,
+      tooltip: { ...base.tooltip, trigger: 'item', formatter: '{b}' },
+      series: [{
+        type: 'tree',
+        data: treeData,
+        layout: 'radial',
+        top: '5%', left: '5%', bottom: '5%', right: '5%',
+        symbolSize: 6,
+        symbol: 'circle',
+        itemStyle: { color: PALETTE[0], borderWidth: 0 },
+        label: { fontSize: 10, color: base.textStyle.color, distance: 8 },
+        lineStyle: {
+          color: isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.15)',
+          width: 1.5,
+          curveness: 0.5,
+        },
+        roam: true,
+        expandAndCollapse: true,
+        initialTreeDepth: 3,
+        animationDuration: 400,
+      }],
+      ...titleOpt(title ?? ''),
+    }
+  }
+
+  // ── Choropleth / Meter — handled by dedicated Svelte components ────────────
+  // buildOption is not called for these types; return empty so callers get {}
+  if (type === 'choropleth' || type === 'meter') return {}
 
   // ── Sankey ─────────────────────────────────────────────────────────────────
   if (type === 'sankey') {
@@ -1178,5 +1238,35 @@ export const CHART_CATALOG = [
     axes: { x: 'word/term', y: 'count/weight' },
     requires: { x: 'any', y: 'number' },
     aiHint: 'Query term and COUNT(*) or weight columns',
+  },
+  {
+    id: 'dendrogram',
+    label: 'Dendrogram',
+    group: 'Hierarchical',
+    icon: 'git-fork',
+    description: 'Radial tree dendrogram from parent-child data',
+    axes: { x: 'name', group: 'parent' },
+    requires: { x: 'any', group: 'category' },
+    aiHint: 'Query id/name and parent_id/parent_name for adjacency list',
+  },
+  {
+    id: 'choropleth',
+    label: 'Choropleth',
+    group: 'Geographic',
+    icon: 'map',
+    description: 'World map colored by numeric value per country',
+    axes: { x: 'country name', y: 'value' },
+    requires: { x: 'any', y: 'number' },
+    aiHint: 'Query country name (English) and a numeric metric column',
+  },
+  {
+    id: 'meter',
+    label: 'Meter',
+    group: 'Part-to-Whole',
+    icon: 'gauge',
+    description: 'Proportional meter showing segments of a total',
+    axes: { x: 'segment label', y: 'value', z: 'total (optional)' },
+    requires: { x: 'any', y: 'number' },
+    aiHint: 'Query segment name and numeric value columns; optionally a total column',
   },
 ]

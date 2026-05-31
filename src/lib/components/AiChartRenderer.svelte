@@ -7,6 +7,8 @@
   import { buildOption } from '$lib/chart-utils.js'
   import { isCurrentThemeDark } from '$lib/stores/settings.js'
   import { toast } from 'svelte-sonner'
+  import ChoroplethChart from './ChoroplethChart.svelte'
+  import CarbonMeterChart from './CarbonMeterChart.svelte'
 
   let {
     spec = null,
@@ -82,6 +84,26 @@
           instance.resize()
         })
         ro.observe(container)
+        // Ctrl/Cmd+wheel → zoom chart; plain wheel → let browser scroll naturally
+        container.addEventListener('wheel', (e) => {
+          if (!e.isTrusted) return // synthetic events go straight to ECharts canvas
+          e.stopPropagation()     // block ECharts from intercepting the real event
+          if (e.ctrlKey || e.metaKey) {
+            // Synthesize a plain wheel event (no modifier) so ECharts zooms
+            const canvas = container.querySelector('canvas')
+            canvas?.dispatchEvent(new WheelEvent('wheel', {
+              deltaY: e.deltaY, deltaMode: e.deltaMode,
+              clientX: e.clientX, clientY: e.clientY,
+              bubbles: false, cancelable: true,
+            }))
+          }
+          // Plain scroll: stopPropagation blocks ECharts' preventDefault(),
+          // so the browser scrolls the nearest scrollable ancestor naturally & smoothly.
+        }, { capture: true, passive: false })
+        // Double-click → restore to initial view
+        container.addEventListener('dblclick', () => {
+          instance.dispatchAction({ type: 'restore' })
+        })
       } finally {
         initializing = false
       }
@@ -121,10 +143,22 @@
     toast.success('Chart saved as PNG')
   }
 
+  /** @type {ChoroplethChart|null} */
+  let choroplethRef = $state(null)
+
+  export function resetView() {
+    if (choroplethRef) { choroplethRef.resetView(); return }
+    chart?.dispatchAction({ type: 'restore' })
+  }
+
   const hasData = $derived((spec?.data?.length ?? 0) > 0)
 </script>
 
-{#if hasData}
+{#if spec?.type === 'choropleth'}
+  <ChoroplethChart bind:this={choroplethRef} {spec} {noTitle} />
+{:else if spec?.type === 'meter'}
+  <CarbonMeterChart {spec} {noTitle} />
+{:else if hasData}
   <div bind:this={el} class="h-full w-full"></div>
 {:else}
   <div class="flex items-center justify-center h-full text-ui-xs text-muted-foreground/50">

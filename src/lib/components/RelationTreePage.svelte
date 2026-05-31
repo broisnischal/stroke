@@ -37,6 +37,7 @@
   let activeSchema = $state(untrack(() => schema))
   let schemaOpen   = $state(false)
   let listSearch   = $state('')
+  let listSearchEl = $state(/** @type {HTMLInputElement | null} */ (null))
   /** @type {string|null} */
   let focusedTable = $state(null)
 
@@ -157,6 +158,13 @@
   $effect(() => { activeSchema; void load() })
 </script>
 
+<svelte:window onkeydown={(e) => {
+  if (!listSearchEl || !listSearchEl.offsetParent) return
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key === 'f') {
+    e.preventDefault(); listSearchEl.focus(); listSearchEl.select()
+  }
+}} />
+
 <div class="flex min-h-0 flex-1 overflow-hidden">
 
   <!-- ── Left: table list ──────────────────────────────────────────────────── -->
@@ -179,6 +187,7 @@
       <Search class="pointer-events-none absolute left-4 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/40" />
       <input
         type="text"
+        bind:this={listSearchEl}
         bind:value={listSearch}
         placeholder="Filter tables…"
         class="h-7 w-full rounded-md border border-border/40 bg-background/60 pl-7 pr-2 font-mono text-ui-xs outline-none placeholder:text-muted-foreground/30 focus:border-ring focus:ring-1 focus:ring-ring/30"

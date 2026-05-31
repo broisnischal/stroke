@@ -470,10 +470,19 @@ async fn list_enums_pg(pool: &PgPool, schema: &str) -> Result<Vec<EnumInfo>, Str
     let rows = sqlx::query(
         r#"
         SELECT t.typname::text AS name,
-               array_agg(e.enumlabel::text ORDER BY e.enumsortorder) AS values
+               array_agg(e.enumlabel::text ORDER BY e.enumsortorder) AS values,
+               COALESCE(
+                 array_agg(DISTINCT c.table_name::text)
+                 FILTER (WHERE c.table_name IS NOT NULL),
+                 ARRAY[]::text[]
+               ) AS used_in_tables
         FROM pg_catalog.pg_type t
         JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
         JOIN pg_catalog.pg_enum e ON e.enumtypid = t.oid
+        LEFT JOIN information_schema.columns c
+               ON c.udt_schema = n.nspname
+              AND c.udt_name   = t.typname
+              AND c.table_schema = n.nspname
         WHERE n.nspname = $1
         GROUP BY t.typname
         ORDER BY t.typname
@@ -488,7 +497,8 @@ async fn list_enums_pg(pool: &PgPool, schema: &str) -> Result<Vec<EnumInfo>, Str
         .map(|row| {
             let name: String = row.try_get("name").map_err(|e| e.to_string())?;
             let values: Vec<String> = row.try_get("values").map_err(|e| e.to_string())?;
-            Ok(EnumInfo { name, values })
+            let used_in_tables: Vec<String> = row.try_get("used_in_tables").map_err(|e| e.to_string())?;
+            Ok(EnumInfo { name, values, used_in_tables })
         })
         .collect()
 }

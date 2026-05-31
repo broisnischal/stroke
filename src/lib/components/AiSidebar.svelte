@@ -864,11 +864,19 @@
             </div>
 
           {:else if item.kind === 'chart'}
-            <div class="overflow-hidden rounded-lg border border-border/40 bg-card/30">
+            <div class="group/chart">
               {#if item.error}
-                <div class="flex items-center gap-2 px-3 py-2 text-ui-xs text-destructive"><AlertTriangle class="size-3.5 shrink-0" />{item.error}</div>
+                <p class="flex items-center gap-1.5 text-ui-xs text-destructive">
+                  <AlertTriangle class="size-3 shrink-0" />{item.error}
+                </p>
               {:else}
-                <AiChartRenderer spec={item.spec} noTitle={true} />
+                <div class="mb-0.5 flex items-center gap-1.5">
+                  <span class="min-w-0 flex-1 truncate font-mono text-[10px] font-medium text-foreground/55">{item.spec.title || ''}</span>
+                  <span class="font-mono text-[9px] capitalize text-muted-foreground/25 opacity-0 transition-opacity group-hover/chart:opacity-100">{item.spec.type}</span>
+                </div>
+                <div style="height:{['choropleth','dendrogram','tree','sankey'].includes(item.spec.type) ? 340 : 240}px; width:100%">
+                  <AiChartRenderer spec={item.spec} noTitle={true} />
+                </div>
               {/if}
             </div>
           {/if}

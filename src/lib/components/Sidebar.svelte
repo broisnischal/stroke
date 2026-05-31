@@ -64,6 +64,7 @@
   } = $props();
 
   let localFilter = $state(untrack(() => tableFilter));
+  let filterEl = $state(/** @type {HTMLInputElement | null} */ (null));
   let filterDebounce = /** @type {ReturnType<typeof setTimeout> | null} */ (
     null
   );
@@ -285,6 +286,14 @@
     "h-7 w-full min-w-0 rounded-md border border-border bg-background/40 text-ui-sm text-foreground shadow-none transition-colors hover:bg-background/55 focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/30";
 </script>
 
+<svelte:window onkeydown={(e) => {
+  // Guard: filterEl.offsetParent is null when sidebar is hidden via display:none
+  if (!filterEl || !filterEl.offsetParent) return
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key === 'f') {
+    e.preventDefault(); filterEl.focus(); filterEl.select()
+  }
+}} />
+
 <div
   class="flex h-full shrink-0"
   style:width="{width}px"
@@ -407,6 +416,7 @@
           />
           <input
             type="search"
+            bind:this={filterEl}
             placeholder={connectionName ? "Filter tables…" : "Not connected"}
             value={localFilter}
             disabled={!connectionName}
@@ -799,6 +809,14 @@
                   <p class="text-ui-xs font-medium text-muted-foreground">No tables found</p>
                   <p class="mt-0.5 text-ui-2xs text-muted-foreground/50">{activeSchema ? `in "${activeSchema}"` : 'in this database'}</p>
                 </div>
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1.5 rounded-md border border-border/50 bg-background/60 px-3 py-1.5 font-mono text-ui-2xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  onclick={onrefresh}
+                >
+                  <RefreshCw class="size-3" />
+                  Retry
+                </button>
               </div>
             {/if}
 

@@ -46,6 +46,7 @@
   let totalCount    = $state(0)
   let error         = $state('')
   let search        = $state('')
+  let searchEl      = $state(/** @type {HTMLInputElement | null} */ (null))
   let activeSchema  = $state(untrack(() => schema))
   let schemaOpen    = $state(false)
   let connectedOnly = $state(false)   // hide tables with no FK in/out
@@ -261,6 +262,13 @@
   )
 </script>
 
+<svelte:window onkeydown={(e) => {
+  if (!searchEl || !searchEl.offsetParent) return
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key === 'f') {
+    e.preventDefault(); searchEl.focus(); searchEl.select()
+  }
+}} />
+
 <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
   <!-- ── Toolbar ──────────────────────────────────────────────────────────── -->
   <div class="studio-chrome flex h-10 shrink-0 items-center gap-2 border-b border-border bg-panel px-3" data-studio-chrome>
@@ -301,6 +309,7 @@
       <Search class="pointer-events-none absolute left-2.5 size-3 text-muted-foreground/40" />
       <input
         type="text"
+        bind:this={searchEl}
         bind:value={search}
         placeholder="Search tables…"
         class="h-7 w-36 min-w-0 rounded-md border border-border/50 bg-background/60 pl-7 pr-6 font-mono text-ui-xs outline-none placeholder:text-muted-foreground/35 focus:border-ring focus:ring-1 focus:ring-ring/30"

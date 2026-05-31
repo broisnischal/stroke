@@ -4,7 +4,7 @@
   import { Button } from '$lib/components/ui/button/index.js'
 
   let {
-    /** @type {{ name: string, values: string[] }[]} */
+    /** @type {{ name: string, values: string[], usedInTables: string[] }[]} */
     enums = [],
     loading = false,
     onrefresh = () => {},
@@ -53,16 +53,17 @@
           <tr class="border-b border-border/50">
             <th class="w-[200px] px-3 py-2 font-mono font-normal text-muted-foreground">Name</th>
             <th class="px-3 py-2 font-mono font-normal text-muted-foreground">Values</th>
-            <th class="w-12 px-3 py-2 text-right font-mono font-normal text-muted-foreground">n</th>
+            <th class="w-52 px-3 py-2 font-mono font-normal text-muted-foreground">Used by</th>
+            <th class="w-10 px-3 py-2 text-right font-mono font-normal text-muted-foreground">n</th>
           </tr>
         </thead>
         <tbody>
           {#each enums as e (e.name)}
-            <tr class="border-b border-border/25 hover:bg-accent/15">
-              <td class="px-3 py-2.5 font-mono text-ui-xs font-medium text-foreground/90 align-top">
+            <tr class="border-b border-border/25 align-top hover:bg-accent/15">
+              <td class="px-3 py-2.5 font-mono text-ui-xs font-medium text-foreground/90">
                 {e.name}
               </td>
-              <td class="px-3 py-2.5 align-top">
+              <td class="px-3 py-2.5">
                 {#if e.values.length > 0}
                   <div class="flex flex-wrap gap-x-2 gap-y-1">
                     {#each e.values as val (val)}
@@ -73,7 +74,18 @@
                   <span class="font-mono text-ui-xs text-muted-foreground/30">—</span>
                 {/if}
               </td>
-              <td class="px-3 py-2.5 text-right font-mono text-ui-xs tabular-nums text-muted-foreground/40 align-top">
+              <td class="px-3 py-2.5">
+                {#if (e.usedInTables ?? []).length > 0}
+                  <div class="flex flex-wrap gap-1">
+                    {#each e.usedInTables as tbl (tbl)}
+                      <span class="rounded bg-muted/40 px-1.5 py-px font-mono text-[10px] text-foreground/60">{tbl}</span>
+                    {/each}
+                  </div>
+                {:else}
+                  <span class="font-mono text-ui-xs text-muted-foreground/25">unused</span>
+                {/if}
+              </td>
+              <td class="px-3 py-2.5 text-right font-mono text-ui-xs tabular-nums text-muted-foreground/40">
                 {e.values.length}
               </td>
             </tr>

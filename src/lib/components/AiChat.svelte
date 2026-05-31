@@ -130,6 +130,12 @@
   let imageViewerSrc = $state(null)
   /** @type {'model'|'skills'|'context'|'chat'} */
   let settingsTab = $state('model')
+  const SETTINGS_TABS = /** @type {const} */ ([
+    { id: 'model',   label: 'Model',   icon: Cpu },
+    { id: 'chat',    label: 'Chat',    icon: MessageSquare },
+    { id: 'skills',  label: 'Skills',  icon: Zap },
+    { id: 'context', label: 'Context', icon: Database },
+  ])
 
   // ── Skills ────────────────────────────────────────────────────────────────
   /** @type {import('$lib/stores/ai-skills.js').AiSkill[]} */
@@ -205,6 +211,7 @@
     )
     apiHistory = /** @type {import('$lib/ai.js').ApiMessage[]} */ (conv.apiHistory ?? [])
     rawApiHistory = /** @type {import('$lib/ai.js').ApiMessage[]} */ (conv.apiHistory ?? [])
+    syncSeq(items)
     error = ''
     await scrollBottom()
   }
@@ -369,6 +376,16 @@
   const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/i.test(navigator.platform)
   const modKey = isMac ? '⌘' : 'Ctrl'
   const newChatShortcut = $derived(`${modKey}⇧T`)
+
+  /** Reset an ECharts instance by its data-chart-id container */
+  async function resetChartView(chartId) {
+    const container = document.querySelector(`[data-chart-id="${chartId}"]`)
+    if (!container) return
+    const { getInstanceByDom } = await import('echarts')
+    const canvas = container.querySelector('canvas')
+    const chartEl = canvas?.parentElement
+    if (chartEl) { getInstanceByDom(chartEl)?.dispatchAction({ type: 'restore' }) }
+  }
 
   // ── Chat state ─────────────────────────────────────────────────────────────
   /** @type {ChatItem[]} */
@@ -889,6 +906,13 @@
 
   let seq = 0
   const uid = () => `c${++seq}`
+  /** After loading stored items, advance seq past their highest ID so new uid()s never collide. */
+  function syncSeq(loadedItems) {
+    for (const item of loadedItems) {
+      const m = /^c(\d+)$/.exec(String(item?.id ?? ''))
+      if (m) seq = Math.max(seq, parseInt(m[1]))
+    }
+  }
 
   const hasPendingConfirm = $derived(items.some((i) => i.kind === 'confirm'))
   const suggestions = $derived(generateSuggestions(schemaContext))
@@ -2017,22 +2041,27 @@
 
                 <!-- ── Chart card ─────────────────────────── -->
                 {:else if item.kind === 'chart'}
-                  <div class="ml-8 overflow-hidden rounded-xl border {item.error ? 'border-destructive/30 bg-destructive/5' : 'border-border/40 bg-card/50'}">
+                  <div class="group/chart ml-8">
                     {#if item.error}
-                      <div class="flex items-center gap-2 px-4 py-3 text-ui-xs text-destructive">
-                        <AlertTriangle class="size-3.5 shrink-0" />
-                        {item.error}
-                      </div>
+                      <p class="flex items-center gap-1.5 text-ui-xs text-destructive">
+                        <AlertTriangle class="size-3 shrink-0" />{item.error}
+                      </p>
                     {:else}
-                      <!-- Chart header -->
-                      <div class="flex items-center gap-2.5 px-4 py-3">
-                        <BarChart2 class="size-3.5 shrink-0 text-primary/50" />
-                        <span class="min-w-0 flex-1 truncate text-ui-sm font-semibold tracking-tight text-foreground">{item.spec.title || 'Chart'}</span>
-                        <div class="flex shrink-0 items-center gap-1">
-                          <span class="rounded-md border border-border/50 bg-muted/40 px-2 py-0.5 font-mono text-[10px] capitalize text-muted-foreground/60">{item.spec.type}</span>
+                      <!-- Floating header — no background, no border, appears on hover -->
+                      <div class="mb-0.5 flex items-center gap-1.5">
+                        <span class="min-w-0 flex-1 truncate font-mono text-[11px] font-medium text-foreground/60">{item.spec.title || ''}</span>
+                        <span class="font-mono text-[9px] capitalize text-muted-foreground/25">{item.spec.type}</span>
+                        <div class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/chart:opacity-100">
+                          <!-- Reset / re-centre -->
                           <button
                             type="button"
-                            class="inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground"
+                            class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:text-foreground"
+                            title="Reset view (or double-click chart)"
+                            onclick={() => void resetChartView(item.id)}
+                          ><RotateCcw class="size-3" /></button>
+                          <button
+                            type="button"
+                            class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:text-foreground"
                             title="Download PNG"
                             onclick={() => {
                               const canvas = document.querySelector(`[data-chart-id="${item.id}"] canvas`)
@@ -2042,10 +2071,10 @@
                               a.download = `${item.spec.title || 'chart'}.png`
                               a.click()
                             }}
-                          ><Download class="size-3.5" /></button>
+                          ><Download class="size-3" /></button>
                           <button
                             type="button"
-                            class="inline-flex size-7 items-center justify-center rounded-lg transition-colors {savedChartIds.has(item.id) ? 'text-primary' : 'text-muted-foreground/50 hover:bg-accent hover:text-foreground'}"
+                            class="inline-flex size-6 items-center justify-center rounded transition-colors {savedChartIds.has(item.id) ? 'text-primary' : 'text-muted-foreground/40 hover:text-foreground'}"
                             title={savedChartIds.has(item.id) ? 'Saved to Charts' : 'Save to Charts'}
                             onclick={() => {
                               if (savedChartIds.has(item.id)) return
@@ -2098,15 +2127,15 @@
                             }}
                           >
                             {#if savedChartIds.has(item.id)}
-                              <BookmarkCheck class="size-3.5" />
+                              <BookmarkCheck class="size-3" />
                             {:else}
-                              <Bookmark class="size-3.5" />
+                              <Bookmark class="size-3" />
                             {/if}
                           </button>
                         </div>
                       </div>
-                      <!-- Chart body -->
-                      <div class="border-t border-border/20 px-2 pb-2 pt-0" data-chart-id={item.id} style="height:320px">
+                      <!-- Chart body — fills full width, height by type -->
+                      <div data-chart-id={item.id} style="height:{['choropleth','dendrogram','tree','sankey'].includes(item.spec.type) ? 480 : 360}px; width:100%">
                         <AiChartRenderer spec={item.spec} noTitle={true} />
                       </div>
                     {/if}
@@ -2258,9 +2287,9 @@
 
       <!-- ── Right settings panel ─────────────────────────────────────── -->
       {#if settingsOpen}
-        <aside class="flex w-64 shrink-0 flex-col border-l border-border/50 bg-panel">
+        <aside class="flex w-80 shrink-0 flex-col border-l border-border/50 bg-panel">
 
-          <!-- Header row: identical height/structure to main header -->
+          <!-- Header — py-2 matches main chat header height so border-b aligns -->
           <div class="studio-chrome flex shrink-0 items-center border-b border-border/50 px-2 py-2" data-studio-chrome>
             <button
               type="button"
@@ -2274,22 +2303,23 @@
             <div class="size-7 shrink-0"></div>
           </div>
 
-          <!-- Tab bar: separate row with underline indicator -->
-          <div class="studio-chrome flex shrink-0 items-stretch border-b border-border/50" data-studio-chrome>
-            {#each [{ id: 'model', label: 'Model' }, { id: 'chat', label: 'Chat' }, { id: 'skills', label: 'Skills' }, { id: 'context', label: 'Context' }] as tab (tab.id)}
+          <!-- Tab bar -->
+          <div class="studio-chrome flex h-9 shrink-0 items-stretch border-b border-border/50" data-studio-chrome>
+            {#each SETTINGS_TABS as tab (tab.id)}
+              {@const Icon = tab.icon}
+              {@const active = settingsTab === tab.id}
               <button
                 type="button"
                 class={cn(
-                  'relative flex flex-1 items-center justify-center py-2 text-ui-xs font-medium transition-colors',
-                  settingsTab === tab.id
-                    ? 'text-foreground'
-                    : 'text-muted-foreground/60 hover:text-muted-foreground',
+                  'relative flex flex-1 items-center justify-center gap-1.5 text-ui-xs transition-colors',
+                  active ? 'text-foreground font-medium' : 'text-muted-foreground/45 hover:text-muted-foreground',
                 )}
                 onclick={() => (settingsTab = /** @type {'model'|'chat'|'skills'|'context'} */ (tab.id))}
               >
-                {tab.label}{tab.id === 'skills' && skills.length ? ` (${skills.length})` : ''}
-                {#if settingsTab === tab.id}
-                  <span class="absolute bottom-0 inset-x-3 h-0.5 rounded-full bg-primary"></span>
+                <Icon class="size-3 shrink-0" />
+                <span>{tab.label}{tab.id === 'skills' && skills.length ? ` ${skills.length}` : ''}</span>
+                {#if active}
+                  <span class="absolute bottom-0 left-0 right-0 h-px bg-primary"></span>
                 {/if}
               </button>
             {/each}
@@ -2349,10 +2379,11 @@
                 <!-- Temperature -->
                 <div class="flex flex-col gap-2">
                   <div class="flex items-center justify-between">
-                    <label class="text-ui-xs font-medium text-foreground">Temperature</label>
+                    <label for="cp-temperature" class="text-ui-xs font-medium text-foreground">Temperature</label>
                     <span class="font-mono text-[11px] text-muted-foreground">{$aiChatParams.temperature.toFixed(2)}</span>
                   </div>
                   <input
+                    id="cp-temperature"
                     type="range" min="0" max="2" step="0.05"
                     value={$aiChatParams.temperature}
                     oninput={(e) => updateChatParams({ temperature: parseFloat(e.currentTarget.value) })}
@@ -2364,7 +2395,7 @@
                 <!-- Top-K -->
                 <div class="flex flex-col gap-2">
                   <div class="flex items-center justify-between">
-                    <label class="text-ui-xs font-medium text-foreground">Top-K</label>
+                    <label for="cp-topk" class="text-ui-xs font-medium text-foreground">Top-K</label>
                     <div class="flex items-center gap-1.5">
                       <span class="font-mono text-[11px] text-muted-foreground">{$aiChatParams.topK ?? 'off'}</span>
                       <button
@@ -2376,6 +2407,7 @@
                   </div>
                   {#if $aiChatParams.topK !== null}
                     <input
+                      id="cp-topk"
                       type="range" min="1" max="100" step="1"
                       value={$aiChatParams.topK}
                       oninput={(e) => updateChatParams({ topK: parseInt(e.currentTarget.value) })}
@@ -2388,10 +2420,11 @@
                 <!-- Max tokens -->
                 <div class="flex flex-col gap-2">
                   <div class="flex items-center justify-between">
-                    <label class="text-ui-xs font-medium text-foreground">Max tokens</label>
+                    <label for="cp-maxtokens" class="text-ui-xs font-medium text-foreground">Max tokens</label>
                     <span class="font-mono text-[11px] text-muted-foreground">{$aiChatParams.maxTokens.toLocaleString()}</span>
                   </div>
                   <input
+                    id="cp-maxtokens"
                     type="range" min="512" max="32768" step="512"
                     value={$aiChatParams.maxTokens}
                     oninput={(e) => updateChatParams({ maxTokens: parseInt(e.currentTarget.value) })}
@@ -2401,8 +2434,9 @@
 
                 <!-- Custom instructions -->
                 <div class="flex flex-col gap-1.5">
-                  <label class="text-ui-xs font-medium text-foreground">Custom instructions</label>
+                  <label for="cp-instructions" class="text-ui-xs font-medium text-foreground">Custom instructions</label>
                   <textarea
+                    id="cp-instructions"
                     rows="5"
                     placeholder="Always respond in Spanish. Focus on performance. Prefer CTEs over subqueries…"
                     value={$aiChatParams.customInstructions}

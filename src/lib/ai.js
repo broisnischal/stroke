@@ -258,16 +258,16 @@ export const AI_TOOLS = [
     function: {
       name: 'render_chart',
       description:
-        'Render an interactive ECharts visualisation from query results. ' +
+        'Render an interactive visualisation from query results. ' +
         'ALWAYS call execute_sql first. Then pass the `rows` array from that result DIRECTLY as the `data` parameter here — do NOT omit it or pass an empty array. ' +
         'The rows are already objects (e.g. [{month:"Jan",revenue:1000},...]) — use them as-is. ' +
         'Pick the chart type that best matches the data shape (see CHART TYPES section in the system prompt). ' +
         'Supported types: bar, bar-horizontal, bar-grouped, bar-stacked, bar-stacked-100, bar-floating, ' +
         'lollipop, lollipop-h, line, area, area-stacked, combo, ' +
         'scatter, bubble, heatmap, radar, ' +
-        'pie, donut, funnel, gauge, bullet, ' +
-        'treemap, tree, circle-pack, sankey, ' +
-        'histogram, box-plot, word-cloud.',
+        'pie, donut, funnel, gauge, bullet, meter, ' +
+        'treemap, tree, circle-pack, sankey, dendrogram, ' +
+        'histogram, box-plot, word-cloud, choropleth.',
       parameters: {
         type: 'object',
         properties: {
@@ -277,9 +277,9 @@ export const AI_TOOLS = [
               'bar','bar-horizontal','bar-grouped','bar-stacked','bar-stacked-100','bar-floating',
               'lollipop','lollipop-h','line','area','area-stacked','combo',
               'scatter','bubble','heatmap','radar',
-              'pie','donut','funnel','gauge','bullet',
-              'treemap','tree','circle-pack','sankey',
-              'histogram','box-plot','word-cloud',
+              'pie','donut','funnel','gauge','bullet','meter',
+              'treemap','tree','circle-pack','sankey','dendrogram',
+              'histogram','box-plot','word-cloud','choropleth',
             ],
             description: 'ECharts chart type. Match to data shape described in system prompt.',
           },
@@ -951,7 +951,7 @@ stateDiagram-v2
 const SKILL_CHARTS = `
 ## Chart Rules
 
-- ALL 27 chart types including word-cloud, treemap, sankey, radar, bubble, circle-pack, tree, box-plot, and histogram are fully supported. NEVER say a chart type is unsupported or suggest falling back to another type.
+- ALL 30 chart types including word-cloud, treemap, sankey, radar, bubble, circle-pack, tree, dendrogram, choropleth, meter, box-plot, and histogram are fully supported. NEVER say a chart type is unsupported or suggest falling back to another type.
 - NEVER explain library internals, package names, or implementation details to the user. Just render the chart silently.
 - If data doesn't fit a requested chart type, reshape the SQL — do NOT fall back to a different chart type without asking.
 
@@ -997,9 +997,17 @@ Use \`render_chart\` after \`execute_sql\`. Match chart type to data shape:
 **Hierarchical**
 - \`treemap\` / \`circle-pack\`: { name, value } — SQL: SELECT category, SUM(amount) as value FROM … GROUP BY category
 - \`tree\`: { name, parent } — group_col=parent column — SQL: SELECT name, parent_name FROM hierarchy_table
+- \`dendrogram\`: same data as tree, rendered as radial dendrogram — ideal for org charts, taxonomies, recursive category trees
 
 **Flow**
 - \`sankey\`: { source, target, value } — x_col=source, group_col=target, y_col=value — SQL: SELECT from_step, to_step, COUNT(*) FROM funnel GROUP BY 1,2
+
+**Geographic**
+- \`choropleth\`: { country, value } — x_col=country name (English, e.g. "United States"), y_col=numeric metric — SQL: SELECT country, COUNT(*) as cnt FROM users GROUP BY country
+- Map abbreviations/codes to full English country names in SQL if possible (e.g. CASE WHEN country_code='US' THEN 'United States' …)
+
+**Part-to-whole (segmented)**
+- \`meter\`: { segment, value } — x_col=segment label, y_col=value; optionally z_col=total override — SQL: SELECT storage_type, used_gb FROM storage_breakdown
 
 **Text**
 - \`word-cloud\`: { word, count } — SQL: SELECT word, COUNT(*) as count FROM … GROUP BY word ORDER BY count DESC LIMIT 60

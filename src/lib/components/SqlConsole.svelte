@@ -355,6 +355,8 @@
   let ormCopied = $state(/** @type {'drizzle' | 'prisma' | null} */ (null))
   /** @type {ReturnType<typeof setTimeout> | null} */
   let ormCopiedTimer = null
+  /** @type {AbortController | null} */
+  let fixAbort = null
 
   function copyAsDrizzle() {
     const drizzle = sqlToDrizzle(sql)

@@ -1996,8 +1996,18 @@
     tables = []
     schemas = []
     activeSchema = 'public'
-    await loadSchemas()
+    // Retry loop — backend may not be fully ready immediately after connect
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await new Promise(r => setTimeout(r, attempt * 700))
+      await loadSchemas()
+      if (schemas.length > 0) break
+    }
     await loadTables()
+    // If tables came back empty despite a valid schema, give the backend one more chance
+    if (tables.length === 0 && schemas.length > 0) {
+      await new Promise(r => setTimeout(r, 1000))
+      await loadTables()
+    }
     tabs = []
     openWelcomeTab()
     await refreshQueryStores()

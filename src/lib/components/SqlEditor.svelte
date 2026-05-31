@@ -144,7 +144,9 @@
     // Monaco measures char widths at init time. If Geist Mono Variable isn't
     // loaded yet (slow on Linux/Windows), it caches fallback-font widths and
     // never self-corrects even after the font visually arrives.
-    document.fonts.ready.then(() => editor?.remeasureFonts())
+    document.fonts.ready.then(() => {
+      try { editor?.remeasureFonts?.() } catch { /* API not available in this Monaco build */ }
+    })
 
     editor.onDidChangeModelContent(() => {
       const next = editor?.getValue() ?? ''
