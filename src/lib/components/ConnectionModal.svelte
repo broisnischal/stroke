@@ -13,6 +13,7 @@
   import Globe        from '@lucide/svelte/icons/globe'
   import Cloud        from '@lucide/svelte/icons/cloud'
   import BarChart2    from '@lucide/svelte/icons/bar-chart-2'
+  import FolderOpen   from '@lucide/svelte/icons/folder-open'
   import CloudflareLogin from './CloudflareLogin.svelte'
   import {
     testPostgresConnection, connectPostgres,
@@ -281,6 +282,20 @@
   const lbl = 'mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-foreground/50'
   const inp = 'h-8 w-full border-border/25 bg-muted/[0.4] text-sm placeholder:text-muted-foreground/30 focus-visible:border-border/50 focus-visible:ring-0'
   const divider = 'border-t border-border/25 my-0.5'
+
+  async function pickSqliteFile() {
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog')
+      const path = await open({
+        title: 'Select SQLite database',
+        filters: [
+          { name: 'SQLite', extensions: ['db', 'sqlite', 'sqlite3'] },
+          { name: 'All files', extensions: ['*'] },
+        ],
+      })
+      if (typeof path === 'string' && path) filePath = path
+    } catch { /* browser/non-Tauri env */ }
+  }
 </script>
 
 <!-- Driver icon, monochrome -->
@@ -555,9 +570,20 @@
 
               <div>
                 <label for="cn-path" class={lbl}>File path</label>
-                <Input id="cn-path" bind:value={filePath}
-                  placeholder="/path/to/database.db"
-                  class="h-8 w-full border-border/25 bg-muted/[0.4] font-mono text-sm placeholder:text-muted-foreground/30 focus-visible:border-border/50 focus-visible:ring-0" />
+                <div class="flex gap-2">
+                  <Input id="cn-path" bind:value={filePath}
+                    placeholder="/path/to/database.db"
+                    class="h-8 flex-1 border-border/25 bg-muted/[0.4] font-mono text-sm placeholder:text-muted-foreground/30 focus-visible:border-border/50 focus-visible:ring-0" />
+                  <button
+                    type="button"
+                    class="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-muted/40 px-3 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/70 hover:text-foreground"
+                    onclick={pickSqliteFile}
+                    title="Browse for file"
+                  >
+                    <FolderOpen class="size-3.5" />
+                    Browse
+                  </button>
+                </div>
                 <p class="mt-1.5 text-[11px] text-muted-foreground/40">
                   Absolute path to a <code class="font-mono">.db</code> or <code class="font-mono">.sqlite</code> file
                 </p>

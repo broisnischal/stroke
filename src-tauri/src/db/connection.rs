@@ -335,6 +335,10 @@ pub async fn connect_libsql(state: State<'_, DbState>, config: LibSqlConfig) -> 
 // ── Disconnect ────────────────────────────────────────────────────────────────
 
 pub async fn disconnect(state: State<'_, DbState>) -> Result<(), String> {
+    // close_existing already sets state to None atomically via take() before
+    // starting the (potentially slow) pool close. Calling set_conn(None) again
+    // after the async close would race with any concurrent connect_* call that
+    // set a new connection while the pool was draining, wiping it out.
     close_existing(&state).await;
-    set_conn(&state, None)
+    Ok(())
 }

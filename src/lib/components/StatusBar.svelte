@@ -84,7 +84,11 @@
   let dbLoading = $state(false)
   let dbSearch = $state('')
 
-  const currentDb = $derived(connection?.database ?? connection?.filePath ?? '')
+  const currentDb = $derived(
+    connection?.type === 'libsql'
+      ? (connection?.url ?? '').replace(/^(libsql|https?):\/\//, '').split('/')[0]
+      : (connection?.database ?? connection?.filePath ?? '')
+  )
   const isPostgres = $derived(connection?.type === 'postgres' || connection?.type === 'mysql')
   const dbFiltered = $derived(
     dbSearch.trim()
@@ -120,6 +124,7 @@
 
   const connType = $derived(
     connection?.type === 'sqlite' ? 'SQLite'
+      : connection?.type === 'libsql' ? 'Turso'
       : connection?.type === 'mysql' ? 'MySQL'
       : connection?.type === 'd1' ? 'D1'
       : 'PostgreSQL',
@@ -131,6 +136,7 @@
   function connIcon(c) {
     if (c.type === 'sqlite') return HardDrive
     if (c.type === 'd1') return Cloud
+    if (c.type === 'libsql') return Wifi
     return Database
   }
 

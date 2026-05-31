@@ -19,6 +19,10 @@
   import Plus from "@lucide/svelte/icons/plus";
   import Clock from "@lucide/svelte/icons/clock";
   import X from "@lucide/svelte/icons/x";
+  import ArrowDownAZ from "@lucide/svelte/icons/arrow-down-a-z";
+  import ArrowUpAZ from "@lucide/svelte/icons/arrow-up-a-z";
+  import ArrowDown01 from "@lucide/svelte/icons/arrow-down-0-1";
+  import ArrowUp01 from "@lucide/svelte/icons/arrow-up-0-1";
   import DangerousActionDialog from "./DangerousActionDialog.svelte";
   import * as Select from "$lib/components/ui/select/index.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
@@ -138,7 +142,7 @@
       const raw = localStorage.getItem(DISPLAY_PREFS_KEY)
       if (raw) return JSON.parse(raw)
     } catch {}
-    return { showTables: true, showViews: true, showMatViews: true, showRecent: true, sortBy: 'name' }
+    return { showTables: true, showViews: true, showMatViews: true, showRecent: true, sortBy: 'name', showPins: true, showRowCount: true, sortDir: 'asc', hideEmpty: false }
   }
   function saveDisplayPrefs(prefs) {
     try { localStorage.setItem(DISPLAY_PREFS_KEY, JSON.stringify(prefs)) } catch {}
@@ -149,10 +153,15 @@
   let showViews = $state(_dp.showViews ?? true)
   let showMatViews = $state(_dp.showMatViews ?? true)
   let showRecent = $state(_dp.showRecent ?? true)
+  let showPins = $state(_dp.showPins ?? true)
+  let showRowCount = $state(_dp.showRowCount ?? true)
+  let hideEmpty = $state(_dp.hideEmpty ?? false)
   /** @type {'name' | 'rowCount'} */
   let sortBy = $state(_dp.sortBy ?? 'name')
+  /** @type {'asc' | 'desc'} */
+  let sortDir = $state(_dp.sortDir ?? 'asc')
 
-  $effect(() => { saveDisplayPrefs({ showTables, showViews, showMatViews, showRecent, sortBy }) })
+  $effect(() => { saveDisplayPrefs({ showTables, showViews, showMatViews, showRecent, sortBy, showPins, showRowCount, sortDir, hideEmpty }) })
 
   // ── Selection state ───────────────────────────────────────────────────────
   /** @type {Set<string>} */
@@ -222,10 +231,17 @@
 
   /** @param {any[]} list */
   function applySortBy(list) {
+    let result = list
+    if (hideEmpty) result = result.filter((t) => (t.rowCount ?? 0) > 0)
     if (sortBy === 'rowCount') {
-      return [...list].sort((a, b) => (b.rowCount ?? 0) - (a.rowCount ?? 0))
+      result = [...result].sort((a, b) => (b.rowCount ?? 0) - (a.rowCount ?? 0))
     }
-    return list
+    if (sortDir === 'desc' && sortBy === 'name') {
+      result = [...result].reverse()
+    } else if (sortDir === 'asc' && sortBy === 'rowCount') {
+      result = [...result].reverse()
+    }
+    return result
   }
 
   const filteredRegularTables = $derived(
@@ -362,7 +378,7 @@
             >
               <ListFilter class="size-3.5" />
             </DropdownMenu.Trigger>
-            <DropdownMenu.Content align="start" class="w-48 p-1 text-ui-sm">
+            <DropdownMenu.Content align="start" class="w-52 p-1 text-ui-sm">
               <DropdownMenu.Label class="px-2 py-1 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Show</DropdownMenu.Label>
               <DropdownMenu.CheckboxItem
                 checked={showRecent}
@@ -380,12 +396,50 @@
                 checked={showMatViews}
                 onCheckedChange={(v) => (showMatViews = v)}
               >Materialized Views</DropdownMenu.CheckboxItem>
+              <DropdownMenu.CheckboxItem
+                checked={showPins}
+                onCheckedChange={(v) => (showPins = v)}
+              >Pins</DropdownMenu.CheckboxItem>
+              <DropdownMenu.Separator />
+              <DropdownMenu.CheckboxItem
+                checked={showRowCount}
+                onCheckedChange={(v) => (showRowCount = v)}
+              >Row counts</DropdownMenu.CheckboxItem>
+              <DropdownMenu.CheckboxItem
+                checked={hideEmpty}
+                onCheckedChange={(v) => (hideEmpty = v)}
+              >Hide empty tables</DropdownMenu.CheckboxItem>
               <DropdownMenu.Separator />
               <DropdownMenu.Label class="px-2 py-1 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Sort by</DropdownMenu.Label>
               <DropdownMenu.RadioGroup value={sortBy} onValueChange={(v) => { if (v === 'name' || v === 'rowCount') sortBy = v }}>
                 <DropdownMenu.RadioItem value="name">Name</DropdownMenu.RadioItem>
                 <DropdownMenu.RadioItem value="rowCount">Row count</DropdownMenu.RadioItem>
               </DropdownMenu.RadioGroup>
+              <DropdownMenu.Separator />
+              <DropdownMenu.Label class="px-2 py-1 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Direction</DropdownMenu.Label>
+              <DropdownMenu.Item
+                onSelect={() => (sortDir = sortDir === 'asc' ? 'desc' : 'asc')}
+                class="gap-2"
+              >
+                {#if sortBy === 'name'}
+                  {#if sortDir === 'asc'}
+                    <ArrowDownAZ class="size-3.5 shrink-0 text-muted-foreground" />
+                    A → Z
+                  {:else}
+                    <ArrowUpAZ class="size-3.5 shrink-0 text-muted-foreground" />
+                    Z → A
+                  {/if}
+                {:else}
+                  {#if sortDir === 'desc'}
+                    <ArrowDown01 class="size-3.5 shrink-0 text-muted-foreground" />
+                    High → Low
+                  {:else}
+                    <ArrowUp01 class="size-3.5 shrink-0 text-muted-foreground" />
+                    Low → High
+                  {/if}
+                {/if}
+                <span class="ml-auto text-muted-foreground/50 text-ui-2xs">click to flip</span>
+              </DropdownMenu.Item>
             </DropdownMenu.Content>
           </DropdownMenu.Root>
           <button
@@ -522,7 +576,7 @@
             {/if}
 
             <!-- ── Pinned ─────────────────────────────────────────── -->
-            {#if visiblePinnedTables.length > 0 && connectionName}
+            {#if showPins && visiblePinnedTables.length > 0 && connectionName}
               <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
                 <Pin class="size-3 shrink-0 text-primary/60" />
                 <span class="text-ui-2xs font-medium tracking-wide text-muted-foreground uppercase">Pinned</span>
@@ -553,9 +607,11 @@
                         >
                           <Pin class="size-3 shrink-0 text-primary/50" />
                           <span class="min-w-0 truncate font-mono text-ui-sm leading-none">{tableName}</span>
+                          {#if showRowCount}
                           <span class="shrink-0 text-right font-mono text-ui-xs leading-none tabular-nums text-muted-foreground/60">
                             {formatTableRowCount(tables.find((t) => t.name === tableName)?.rowCount)}
                           </span>
+                          {/if}
                         </button>
                       </ContextMenu.Trigger>
                       <ContextMenu.Content class="w-44 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
@@ -653,10 +709,12 @@
                                 <Lock class="size-2.5 shrink-0 text-muted-foreground/50" title="Row-level security enabled" />
                               {/if}
                             </span>
+                            {#if showRowCount}
                             <span
                               class="shrink-0 text-right font-mono text-ui-xs leading-none tabular-nums text-muted-foreground"
                               title={table.rowCount != null ? Number(table.rowCount).toLocaleString("en-US") : undefined}
                             >{formatTableRowCount(table.rowCount)}</span>
+                            {/if}
                           </button>
                         </ContextMenu.Trigger>
                         <ContextMenu.Content class="w-44 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
@@ -888,9 +946,11 @@
                                 {/if}
                               </span>
                               <span class="min-w-0 truncate font-mono text-ui-sm leading-none">{mv.name}</span>
+                              {#if showRowCount}
                               <span class="shrink-0 text-right font-mono text-ui-xs leading-none tabular-nums text-muted-foreground">
                                 {formatTableRowCount(mv.rowCount)}
                               </span>
+                              {/if}
                             </button>
                           </ContextMenu.Trigger>
                           <ContextMenu.Content class="w-44 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">

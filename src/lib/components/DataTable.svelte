@@ -1276,11 +1276,11 @@
     const isExpanded = isRowExpanded(idx);
     // cx (no tailwind-merge): these classes never conflict and this runs per row.
     return cx(
-      "group/row outline-none hover:bg-accent/25",
+      "group/row outline-none hover:bg-muted/[0.18]",
       isExpanded && "[&>td]:border-b-0",
-      isSelected && "bg-accent/20",
-      isFocused && !isSelected && "bg-accent/15",
-      isFocused && isSelected && "ring-1 ring-ring/60 ring-inset",
+      isSelected && "bg-muted/30",
+      isFocused && !isSelected && "bg-muted/20",
+      isFocused && isSelected && "ring-1 ring-ring/40 ring-inset",
     );
   }
 
@@ -1814,8 +1814,8 @@
                             <button
                               type="button"
                               class={cn(
-                                "flex h-full w-full min-w-0 cursor-pointer items-center gap-1.5 px-3 py-1 text-left transition-colors hover:bg-accent/40",
-                                isSorted && "bg-accent/20",
+                                "flex h-full w-full min-w-0 cursor-pointer items-center gap-1.5 px-3 py-1 text-left transition-colors hover:bg-muted/40",
+                                isSorted && "bg-muted/30",
                               )}
                               onclick={() => handleHeaderSort(col.name)}
                               title="Sort by {col.name}"
@@ -1835,32 +1835,32 @@
                                       {#if meta.pk}
                                         <span
                                           title="Primary key"
-                                          class="inline-flex size-[13px] items-center justify-center rounded-sm bg-primary/10 text-primary"
+                                          class="inline-flex size-[13px] items-center justify-center rounded-sm bg-amber-500/15 text-amber-400/80"
                                         ><KeyRound class="size-[8px]" /></span>
                                       {/if}
                                       {#if meta.fk}
                                         <span
                                           title={fkTooltip(col.name)}
-                                          class="inline-flex size-[13px] items-center justify-center rounded-sm bg-muted text-muted-foreground"
+                                          class="inline-flex size-[13px] items-center justify-center rounded-sm bg-blue-500/10 text-blue-400/70"
                                         ><Link2 class="size-[8px]" /></span>
                                       {/if}
                                       {#if meta.unique && !meta.pk}
                                         <span
                                           title="Unique"
-                                          class="inline-flex size-[13px] items-center justify-center rounded-sm bg-muted text-muted-foreground"
+                                          class="inline-flex size-[13px] items-center justify-center rounded-sm bg-muted/60 text-muted-foreground/60"
                                         ><Fingerprint class="size-[8px]" /></span>
                                       {/if}
                                       {#if meta.indexed}
                                         <span
                                           title="Indexed"
-                                          class="inline-flex size-[13px] items-center justify-center rounded-sm bg-muted text-muted-foreground"
+                                          class="inline-flex size-[13px] items-center justify-center rounded-sm bg-muted/60 text-muted-foreground/50"
                                         ><Zap class="size-[8px]" /></span>
                                       {/if}
                                       {#if !meta.nullable && !meta.pk}
                                         <span
                                           title="Not null"
-                                          class="inline-flex size-[13px] items-center justify-center rounded-sm bg-muted text-muted-foreground/60"
-                                        ><Circle class="size-[7px] fill-muted-foreground/40" /></span>
+                                          class="inline-flex size-[13px] items-center justify-center rounded-sm bg-muted/40 text-muted-foreground/40"
+                                        ><Circle class="size-[7px] fill-muted-foreground/30" /></span>
                                       {/if}
                                     </div>
                                   {/if}
@@ -1948,7 +1948,7 @@
               <tbody>
                 {#if newRowDrafts}
                   <tr
-                    class="group/newrow relative border-b border-border bg-primary/[0.03]"
+                    class="group/newrow relative border-b border-border/30 bg-emerald-500/[0.04] ring-1 ring-inset ring-emerald-500/20"
                     onkeydown={onNewRowKeydown}
                   >
                     {#if showRowExpand}

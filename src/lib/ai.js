@@ -301,6 +301,36 @@ export const AI_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'render_diagram',
+      description:
+        'Render and auto-save a Mermaid diagram. ' +
+        'Use this whenever the user asks to visualise schema, create a flowchart, draw relationships, or generate ANY diagram. ' +
+        'Never write a bare mermaid code block as the main output — always call this tool instead. ' +
+        'The diagram is rendered interactively with pan/zoom and saved to the user\'s Diagrams library.',
+      parameters: {
+        type: 'object',
+        properties: {
+          type: {
+            type: 'string',
+            enum: ['flowchart', 'classDiagram', 'sequenceDiagram', 'erDiagram', 'mindmap', 'stateDiagram-v2', 'gitGraph', 'timeline', 'journey'],
+            description: 'Mermaid diagram type. Choose based on what is being visualised.',
+          },
+          title: {
+            type: 'string',
+            description: 'Concise title, 2–5 words, title-case. Describes the subject, not the type. E.g. "User Order Flow", "E-Commerce ERD", "Auth Sequence".',
+          },
+          code: {
+            type: 'string',
+            description: 'Complete, valid Mermaid code starting with the diagram type directive. Must be syntactically correct.',
+          },
+        },
+        required: ['type', 'title', 'code'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'list_tables',
       description:
         'List all tables and views in the current schema. ' +
@@ -854,6 +884,32 @@ const SKILL_SQLITE = `
 const SKILL_MERMAID = `
 ## Skill: Diagram Generation with Mermaid
 
+### RULE: Always use \`render_diagram\` tool — never write a bare mermaid code block as the main output
+
+When the user asks you to create, draw, visualise, or generate ANY diagram, flowchart, ERD, class diagram, sequence diagram, mindmap, or state diagram:
+→ Call the **\`render_diagram\`** tool. Do NOT write a mermaid code block.
+
+The tool renders the diagram interactively (pan/zoom), auto-saves it to the Diagrams library, and gives it a proper title.
+
+Only use mermaid code blocks inside explanatory prose (e.g. "here's the syntax: \`\`\`mermaid…\`\`\`").
+
+### Diagram types and when to use each
+| Type | When | Directive |
+|------|------|-----------|
+| \`erDiagram\` | Table relationships, schema structure | \`erDiagram\` |
+| \`flowchart\` | Process flows, query logic, migration steps | \`flowchart TD\` / \`flowchart LR\` |
+| \`classDiagram\` | ORM models, class hierarchies, object relationships | \`classDiagram\` |
+| \`sequenceDiagram\` | API call sequences, transaction flows, auth flows | \`sequenceDiagram\` |
+| \`stateDiagram-v2\` | State machines, order/workflow status transitions | \`stateDiagram-v2\` |
+| \`mindmap\` | Topic breakdowns, schema overviews, feature maps | \`mindmap\` |
+| \`gitGraph\` | Branch strategies, migration timelines | \`gitGraph\` |
+| \`timeline\` | Project phases, chronological events | \`timeline\` |
+| \`journey\` | User journeys, multi-step processes scored by happiness | \`journey\` |
+
+### Title rules
+- 2–5 words, title-case, descriptive. Examples: "User Order Flow", "E-Commerce ERD", "Auth Sequence", "Order State Machine", "Product Hierarchy"
+- Reflect the subject, not the diagram type ("Users & Orders" not "ER Diagram")
+
 Always output diagrams in a \`\`\`mermaid code block — they render interactively in DB Studio.
 
 ### Entity-Relationship Diagrams (ERD)
@@ -1317,10 +1373,11 @@ ${otherTablesSection}
 - \`list_tables()\` — List all tables and views in the active schema.
 - \`get_schema(table?)\` — Get full column info (type, nullable, default) for one or all tables.
 - \`render_chart(type, title, data, x_col, y_col, z_col?, group_col?)\` — Render an interactive ECharts chart. Call \`execute_sql\` first, then pass its \`rows\` array DIRECTLY as \`data\`. Never call render_chart with an empty or missing data array.
+- \`render_diagram(type, title, code)\` — Render and save an interactive Mermaid diagram. Use for ALL diagram/flowchart/ERD/sequence/class/mindmap/state requests. Types: flowchart, classDiagram, sequenceDiagram, erDiagram, mindmap, stateDiagram-v2, gitGraph, timeline, journey. Title: 2–5 words, title-case, describes the subject. NEVER write a bare mermaid code block as the primary output — always use this tool.
 
 === OUTPUT RULES ===
 1. Output directly — never open with "Sure!", "Great!", "Here is your chart", "Certainly!" or any filler phrase.
-2. Never mix formats: if outputting a chart call \`render_chart\`, if outputting a diagram use a mermaid block, if explaining use prose.
+2. Never mix formats: if outputting a chart call \`render_chart\`, if outputting a diagram call \`render_diagram\`, if explaining use prose.
 3. Always use fenced code blocks with language names: \`\`\`sql, \`\`\`json, \`\`\`mermaid, etc.
 4. Prose responses: max 4 short paragraphs. Use **bold** for key terms.
 5. Errors from tool calls: wrap in <error>message here</error> tags.

@@ -182,28 +182,31 @@
 </script>
 
 <Dialog.Root bind:open onOpenChange={handleOpenChange}>
-  <Dialog.Content class="gap-0 overflow-hidden p-0 sm:max-w-[22rem]">
+  <Dialog.Content showCloseButton={false} class="w-[min(380px,calc(100vw-2rem))] sm:max-w-none gap-0 overflow-hidden p-0">
 
     <!-- ══ LIST VIEW ═════════════════════════════════════════════════════ -->
     {#if view === "list"}
-      <Dialog.Header class="space-y-0.5 border-b border-border/60 px-5 py-4">
-        <Dialog.Title class="text-sm font-semibold tracking-tight">AI Models</Dialog.Title>
-        <Dialog.Description class="text-xs text-muted-foreground">
-          Select an active model or add a new one.
-        </Dialog.Description>
-      </Dialog.Header>
+      <div class="flex items-center gap-2 border-b border-border/25 px-5 py-4">
+        <div class="flex-1">
+          <Dialog.Title class="text-[13px] font-semibold text-foreground">AI Models</Dialog.Title>
+          <Dialog.Description class="mt-0.5 text-[11px] text-muted-foreground/60">
+            Select an active model or add a new one.
+          </Dialog.Description>
+        </div>
+        <Dialog.Close class="inline-flex size-6 items-center justify-center rounded-lg text-muted-foreground/30 transition-colors hover:bg-muted/50 hover:text-muted-foreground focus-visible:outline-none" />
+      </div>
 
-      <div class="app-scroll max-h-[min(60vh,30rem)] overflow-y-auto px-4 py-3">
+      <div class="app-scroll max-h-[min(60vh,30rem)] overflow-y-auto px-3 py-2">
         {#if $aiProfiles.length === 0}
-          <p class="py-6 text-center text-sm text-muted-foreground">No models configured.</p>
+          <p class="py-6 text-center text-[12px] text-muted-foreground/50">No models configured.</p>
         {:else}
-          <div class="divide-y divide-border/60 rounded-lg border border-border/80">
+          <div class="flex flex-col gap-px">
             {#each $aiProfiles as profile (profile.id)}
               {@const isActive = profile.id === $activeProfileId}
               <div
                 class={cn(
-                  "group flex items-center gap-3 px-3 py-2.5 transition-colors cursor-pointer first:rounded-t-lg last:rounded-b-lg",
-                  isActive ? "bg-muted/60" : "hover:bg-muted/40",
+                  "group flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 transition-colors",
+                  isActive ? "bg-muted/50" : "hover:bg-muted/30",
                 )}
                 role="button"
                 tabindex="0"
@@ -211,19 +214,17 @@
                 onkeydown={(e) => e.key === "Enter" && void setActiveProfile(profile.id)}
               >
                 <div class="min-w-0 flex-1">
-                  <p class="truncate text-sm font-medium text-foreground">{profile.name}</p>
-                  <p class="truncate font-mono text-xs text-muted-foreground">{profile.model}</p>
+                  <p class="truncate text-[13px] font-medium text-foreground">{profile.name}</p>
+                  <p class="mt-0.5 truncate font-mono text-[10px] text-muted-foreground/50">{profile.model}</p>
                 </div>
                 <div class="flex shrink-0 items-center gap-1.5">
                   {#if isActive}
-                    <Badge variant="secondary" class="text-[10px]">Active</Badge>
+                    <span class="rounded-md bg-muted/60 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/50">active</span>
                   {/if}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    class="h-6 px-2 text-xs opacity-0 group-hover:opacity-100"
+                  <button
+                    class="rounded-md px-2 py-0.5 text-[11px] text-muted-foreground/40 opacity-0 transition-colors hover:bg-muted/60 hover:text-foreground group-hover:opacity-100"
                     onclick={(e) => { e.stopPropagation(); void startEdit(profile) }}
-                  >Edit</Button>
+                  >Edit</button>
                 </div>
               </div>
             {/each}
@@ -231,68 +232,74 @@
         {/if}
       </div>
 
-      <div class="border-t border-border/60 px-4 py-3">
-        <Button variant="outline" class="w-full gap-2 text-sm" onclick={startAdd}>
+      <div class="border-t border-border/25 px-4 py-3">
+        <button type="button"
+          class="flex w-full items-center justify-center gap-1.5 rounded-lg border border-border/25 bg-muted/[0.2] py-2 text-[12px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
+          onclick={startAdd}>
           <Plus class="size-3.5" />
           Add model
-        </Button>
+        </button>
       </div>
 
     <!-- ══ FORM VIEW ═════════════════════════════════════════════════════ -->
     {:else}
       <!-- Header -->
-      <Dialog.Header class="border-b border-border/60 px-4 py-3">
+      <div class="border-b border-border/25 px-4 py-3.5">
         <div class="flex items-center gap-2">
-          <Button variant="ghost" size="icon-sm" onclick={prevStep} title={step === 0 ? "Cancel" : "Back"}>
-            <ChevronLeft class="size-4" />
-          </Button>
-          <Dialog.Title class="flex-1 text-center text-sm font-semibold tracking-tight">
+          <button type="button"
+            class="inline-flex size-6 items-center justify-center rounded-lg text-muted-foreground/40 transition-colors hover:bg-muted/50 hover:text-foreground"
+            onclick={prevStep}
+            title={step === 0 ? "Cancel" : "Back"}
+          >
+            <ChevronLeft class="size-3.5" />
+          </button>
+          <Dialog.Title class="flex-1 text-center text-[13px] font-semibold text-foreground">
             {editingId ? "Edit model" : "Add model"}
           </Dialog.Title>
-          <span class="size-7 shrink-0"></span>
+          <Dialog.Close class="inline-flex size-6 items-center justify-center rounded-lg text-muted-foreground/30 transition-colors hover:bg-muted/50 hover:text-muted-foreground focus-visible:outline-none" />
         </div>
 
-        <!-- Step indicator -->
-        <div class="mt-3 flex items-center justify-center gap-1">
+        <!-- Stepper -->
+        <div class="mt-3.5 flex items-center justify-center gap-1.5">
           {#each STEPS as label, i}
-            <div class="flex items-center gap-1">
+            <div class="flex items-center gap-1.5">
               <span class={cn(
-                "flex size-5 items-center justify-center rounded-full text-[10px] font-semibold ring-1 transition-all",
-                i < step  ? "bg-foreground text-background ring-foreground"
-                : i === step ? "bg-background text-foreground ring-foreground"
-                : "bg-transparent text-muted-foreground/50 ring-border/50",
+                "flex size-[18px] items-center justify-center rounded-full text-[9px] font-semibold transition-all",
+                i < step  ? "bg-foreground text-background"
+                : i === step ? "bg-transparent text-foreground ring-1 ring-foreground/60"
+                : "bg-transparent text-muted-foreground/35 ring-1 ring-border/40",
               )}>
-                {#if i < step}<Check class="size-2.5" />{:else}{i + 1}{/if}
+                {#if i < step}<Check class="size-2" />{:else}{i + 1}{/if}
               </span>
-              <span class={cn("text-[11px] font-medium", i === step ? "text-foreground" : "text-muted-foreground/40")}>
+              <span class={cn("text-[10px] font-medium", i === step ? "text-foreground" : "text-muted-foreground/35")}>
                 {label}
               </span>
             </div>
             {#if i < STEPS.length - 1}
-              <div class={cn("h-px w-5 shrink-0 transition-colors", i < step ? "bg-foreground/30" : "bg-border/50")}></div>
+              <div class={cn("h-px w-4 shrink-0 rounded-full transition-colors", i < step ? "bg-foreground/25" : "bg-border/30")}></div>
             {/if}
           {/each}
         </div>
-      </Dialog.Header>
+      </div>
 
       <!-- Step body -->
       <div class="app-scroll max-h-[min(60vh,34rem)] overflow-y-auto px-4 py-3">
 
         <!-- Step 0 · Provider ─────────────────────────────────────────── -->
         {#if step === 0}
-          <div class="divide-y divide-border/60 rounded-lg border border-border/80">
+          <div class="flex flex-col gap-px">
             {#each PROVIDERS as p (p.id)}
               {@const selected = formProvider === p.id}
               <button
                 type="button"
                 class={cn(
-                  "flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left transition-colors first:rounded-t-lg last:rounded-b-lg",
-                  selected ? "bg-muted/60" : "hover:bg-muted/40",
+                  "flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left transition-colors",
+                  selected ? "bg-muted/50" : "hover:bg-muted/30",
                 )}
                 onclick={() => selectProvider(p.id)}
               >
-                <span class="text-sm font-medium text-foreground">{p.label}</span>
-                {#if selected}<Check class="size-3.5 shrink-0 text-foreground" />{/if}
+                <span class="text-[13px] font-medium text-foreground">{p.label}</span>
+                {#if selected}<Check class="size-3 shrink-0 text-foreground/70" />{/if}
               </button>
             {/each}
           </div>
@@ -307,43 +314,43 @@
               </div>
             {:else}
               {@const list = copilotModels.length > 0 ? copilotModels.map(m => ({ label: m.name, model: m.id, tag: '' })) : modelPresets}
-              <div class="divide-y divide-border/60 rounded-lg border border-border/80">
+              <div class="flex flex-col gap-px">
                 {#each list as preset (preset.model)}
                   {@const selected = formModel === preset.model}
                   <button
                     type="button"
                     class={cn(
-                      "flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors first:rounded-t-lg last:rounded-b-lg",
-                      selected ? "bg-muted/60" : "hover:bg-muted/40",
+                      "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors",
+                      selected ? "bg-muted/50" : "hover:bg-muted/30",
                     )}
                     onclick={() => { formModel = preset.model; testState = "idle"; }}
                   >
                     <div class="min-w-0 flex-1">
-                      <p class="text-sm font-medium text-foreground">{preset.label}</p>
-                      {#if preset.tag}<p class="font-mono text-xs text-muted-foreground">{preset.tag}</p>{/if}
+                      <p class="text-[13px] font-medium text-foreground">{preset.label}</p>
+                      {#if preset.tag}<p class="mt-0.5 font-mono text-[10px] text-muted-foreground/50">{preset.tag}</p>{/if}
                     </div>
-                    {#if selected}<Check class="size-3.5 shrink-0 text-foreground" />{/if}
+                    {#if selected}<Check class="size-3 shrink-0 text-foreground/70" />{/if}
                   </button>
                 {/each}
               </div>
             {/if}
           {:else if modelPresets.length > 0}
-            <div class="divide-y divide-border/60 rounded-lg border border-border/80">
+            <div class="flex flex-col gap-px">
               {#each modelPresets as preset (preset.model)}
                 {@const selected = formModel === preset.model}
                 <button
                   type="button"
                   class={cn(
-                    "flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors first:rounded-t-lg last:rounded-b-lg",
-                    selected ? "bg-muted/60" : "hover:bg-muted/40",
+                    "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors",
+                    selected ? "bg-muted/50" : "hover:bg-muted/30",
                   )}
                   onclick={() => { formModel = preset.model; testState = "idle"; }}
                 >
                   <div class="min-w-0 flex-1">
-                    <p class="text-sm font-medium text-foreground">{preset.label}</p>
-                    <p class="font-mono text-xs text-muted-foreground">{preset.tag}</p>
+                    <p class="text-[13px] font-medium text-foreground">{preset.label}</p>
+                    {#if preset.tag}<p class="mt-0.5 font-mono text-[10px] text-muted-foreground/50">{preset.tag}</p>{/if}
                   </div>
-                  {#if selected}<Check class="size-3.5 shrink-0 text-foreground" />{/if}
+                  {#if selected}<Check class="size-3 shrink-0 text-foreground/70" />{/if}
                 </button>
               {/each}
             </div>
@@ -427,11 +434,11 @@
             {/if}
 
             {#if testState === "ok"}
-              <div class="flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2.5 text-xs text-foreground">
+              <div class="flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.08] px-3 py-2.5 text-[12px] text-emerald-500">
                 <Check class="size-3.5 shrink-0" />{testMsg}
               </div>
             {:else if testState === "error"}
-              <div class="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/8 px-3 py-2.5 text-xs text-destructive">
+              <div class="flex items-start gap-2 rounded-xl border border-destructive/20 bg-destructive/[0.08] px-3 py-2.5 text-[12px] text-destructive">
                 <AlertTriangle class="mt-0.5 size-3.5 shrink-0" /><span class="break-words">{testMsg}</span>
               </div>
             {/if}
@@ -440,29 +447,40 @@
       </div>
 
       <!-- Footer -->
-      <div class="flex items-center justify-between gap-2 border-t border-border/60 px-4 py-3">
+      <div class="flex items-center justify-between gap-2 border-t border-border/25 px-4 py-3">
         <div class="flex items-center gap-1.5">
           {#if step === 2}
-            <Button variant="outline" size="sm" disabled={testState === "testing" || !formModel.trim()} onclick={testConnection}>
-              {#if testState === "testing"}<Loader2 class="size-3.5 animate-spin" />Testing…{:else}Test{/if}
-            </Button>
+            <button type="button"
+              class="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/25 px-3 text-[12px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-40"
+              disabled={testState === "testing" || !formModel.trim()}
+              onclick={testConnection}>
+              {#if testState === "testing"}<Loader2 class="size-3 animate-spin" />Testing…{:else}Test{/if}
+            </button>
           {/if}
           {#if editingId}
-            <Button variant="ghost" size="icon-sm" class="text-muted-foreground hover:text-destructive" onclick={() => void handleDelete(editingId)}>
+            <button type="button"
+              class="inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground/30 transition-colors hover:bg-muted/40 hover:text-destructive"
+              onclick={() => void handleDelete(editingId)}>
               <Trash2 class="size-3.5" />
-            </Button>
+            </button>
           {/if}
         </div>
 
         {#if step < STEPS.length - 1}
-          <Button size="sm" disabled={!stepCanProceed} onclick={nextStep}>
-            Continue <ChevronRight class="size-3.5" />
-          </Button>
+          <button type="button"
+            class="inline-flex h-7 items-center gap-1 rounded-lg bg-foreground px-3 text-[12px] font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-40"
+            disabled={!stepCanProceed}
+            onclick={nextStep}>
+            Continue <ChevronRight class="size-3" />
+          </button>
         {:else}
-          <Button size="sm" disabled={saving || !formModel.trim()} onclick={() => void save()}>
-            {#if saving}<Loader2 class="size-3.5 animate-spin" />{/if}
+          <button type="button"
+            class="inline-flex h-7 items-center gap-1.5 rounded-lg bg-foreground px-3 text-[12px] font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-40"
+            disabled={saving || !formModel.trim()}
+            onclick={() => void save()}>
+            {#if saving}<Loader2 class="size-3 animate-spin" />{/if}
             {editingId ? "Save" : "Add model"}
-          </Button>
+          </button>
         {/if}
       </div>
     {/if}

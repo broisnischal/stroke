@@ -87,8 +87,9 @@
     }
   }
 
-  const SEL = 'h-8 w-full appearance-none rounded-md border border-border/60 bg-muted/20 px-3 pr-7 font-mono text-ui-xs text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring/30'
-  const INP = 'h-8 w-full rounded-md border border-border/60 bg-muted/20 px-3 font-mono text-ui-xs text-foreground placeholder:text-muted-foreground/35 outline-none focus:border-ring focus:ring-1 focus:ring-ring/30'
+  const lbl = 'mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-foreground/50'
+  const inp = 'h-8 w-full rounded-lg border border-border/25 bg-muted/[0.4] px-3 font-mono text-[12px] text-foreground placeholder:text-muted-foreground/30 outline-none focus:border-border/50 focus:ring-0'
+  const sel = 'h-8 w-full appearance-none rounded-lg border border-border/25 bg-muted/[0.4] px-3 pr-7 font-mono text-[12px] text-foreground outline-none focus:border-border/50'
 </script>
 
 <DdlConfirmDialog
@@ -105,85 +106,85 @@
 <Dialog.Root bind:open>
   <Dialog.Portal>
     <Dialog.Overlay />
-    <Dialog.Content class="max-w-[420px] gap-0 overflow-hidden p-0 sm:rounded-xl">
+    <Dialog.Content showCloseButton={false} class="w-[min(440px,calc(100vw-2rem))] sm:max-w-none gap-0 overflow-hidden p-0">
 
       <!-- Header -->
-      <div class="flex items-center gap-3 border-b border-border/60 px-5 py-4">
-        <div class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-          <Link class="size-4 text-primary" />
+      <div class="flex items-start gap-3.5 border-b border-border/25 px-5 pt-5 pb-4">
+        <div class="mt-px flex size-8 shrink-0 items-center justify-center rounded-xl bg-muted/50">
+          <Link class="size-3.5 text-muted-foreground/70" />
         </div>
         <div class="min-w-0 flex-1">
-          <Dialog.Title class="text-ui-sm font-semibold">
+          <Dialog.Title class="text-[13px] font-semibold text-foreground">
             {constraintName ? 'Edit foreign key' : 'Add foreign key'}
           </Dialog.Title>
-          <p class="font-mono text-ui-xs text-muted-foreground">
-            <span class="text-foreground/70">{table}</span>.<span class="text-primary/80">{column}</span>
+          <p class="mt-0.5 font-mono text-[11px] text-muted-foreground/60">
+            {table}.<span class="text-foreground/70">{column}</span>
           </p>
         </div>
-        <Dialog.Close class="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground" />
+        <Dialog.Close class="inline-flex size-6 items-center justify-center rounded-lg text-muted-foreground/30 transition-colors hover:bg-muted/50 hover:text-muted-foreground focus-visible:outline-none" />
       </div>
 
       <!-- Body -->
-      <div class="flex flex-col gap-4 px-5 py-5">
+      <div class="flex flex-col gap-4 px-5 py-4">
 
-        <!-- FK path visualisation -->
-        <div class="flex items-center gap-2 rounded-lg border border-border/40 bg-muted/15 px-4 py-3">
-          <span class="font-mono text-ui-xs">
-            <span class="text-muted-foreground/60">{schema}.</span><span class="text-foreground/80">{table}</span>.<span class="font-semibold text-primary">{column}</span>
+        <!-- FK path -->
+        <div class="flex items-center gap-2 rounded-xl border border-border/20 bg-muted/[0.2] px-3.5 py-2.5">
+          <span class="font-mono text-[12px]">
+            <span class="text-muted-foreground/40">{schema}.</span><span class="text-foreground/70">{table}</span>.<span class="font-semibold text-foreground">{column}</span>
           </span>
-          <ArrowRight class="size-3.5 shrink-0 text-muted-foreground/40" />
+          <ArrowRight class="size-3 shrink-0 text-muted-foreground/30" />
           {#if refTable && refColumn}
-            <span class="font-mono text-ui-xs">
-              <span class="text-muted-foreground/60">{schema}.</span><span class="text-foreground/80">{refTable}</span>.<span class="font-semibold text-blue-400">{refColumn}</span>
+            <span class="font-mono text-[12px]">
+              <span class="text-muted-foreground/40">{schema}.</span><span class="text-foreground/70">{refTable}</span>.<span class="font-semibold text-blue-400">{refColumn}</span>
             </span>
           {:else}
-            <span class="font-mono text-ui-xs text-muted-foreground/35">select table and column →</span>
+            <span class="font-mono text-[11px] text-muted-foreground/30">select table and column</span>
           {/if}
         </div>
 
         <!-- Referenced table + column -->
         <div class="grid grid-cols-2 gap-3">
-          <div class="flex flex-col gap-1.5">
-            <label for="fk-ref-table" class="text-ui-xs font-medium text-muted-foreground">Referenced table</label>
+          <div>
+            <label for="fk-ref-table" class={lbl}>Referenced table</label>
             <div class="relative">
-              <select id="fk-ref-table" bind:value={refTable} class={SEL}>
+              <select id="fk-ref-table" bind:value={refTable} class={sel}>
                 <option value="">Select table…</option>
-                {#each tables as t (t.name)}
-                  <option value={t.name}>{t.name}</option>
-                {/each}
+                {#each tables as t (t.name)}<option value={t.name}>{t.name}</option>{/each}
               </select>
-              <span class="pointer-events-none absolute inset-y-0 right-2 flex items-center text-muted-foreground/40">
-                <svg class="size-3.5" viewBox="0 0 10 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4.5l3-3 3 3M2 7.5l3 3 3-3"/></svg>
+              <span class="pointer-events-none absolute inset-y-0 right-2 flex items-center text-muted-foreground/35">
+                <svg class="size-3" viewBox="0 0 10 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4.5l3-3 3 3M2 7.5l3 3 3-3"/></svg>
               </span>
             </div>
           </div>
-          <div class="flex flex-col gap-1.5">
-            <label for="fk-ref-col" class="text-ui-xs font-medium text-muted-foreground">Referenced column</label>
-            <input id="fk-ref-col" type="text" bind:value={refColumn} placeholder="id" class={INP} />
+          <div>
+            <label for="fk-ref-col" class={lbl}>Referenced column</label>
+            <input id="fk-ref-col" type="text" bind:value={refColumn} placeholder="id" class={inp} />
           </div>
         </div>
 
         <!-- ON UPDATE + ON DELETE -->
         <div class="grid grid-cols-2 gap-3">
-          <div class="flex flex-col gap-1.5">
-            <p class="text-ui-xs font-medium text-muted-foreground">On update</p>
+          <div>
+            <p class={lbl}>On update</p>
             <div class="flex flex-wrap gap-1">
               {#each FK_ACTIONS as a (a)}
-                <button
-                  type="button"
-                  class="rounded px-2 py-0.5 font-mono text-[10px] font-medium transition-colors {onUpdate === a ? 'bg-primary/15 text-primary ring-1 ring-primary/30' : 'bg-muted/30 text-muted-foreground/60 hover:bg-muted/60 hover:text-foreground'}"
+                <button type="button"
+                  class="rounded-md px-2 py-0.5 font-mono text-[10px] font-medium transition-colors {onUpdate === a
+                    ? 'bg-muted/70 text-foreground ring-1 ring-border/50'
+                    : 'text-muted-foreground/45 hover:bg-muted/40 hover:text-foreground'}"
                   onclick={() => (onUpdate = a)}
                 >{a}</button>
               {/each}
             </div>
           </div>
-          <div class="flex flex-col gap-1.5">
-            <p class="text-ui-xs font-medium text-muted-foreground">On delete</p>
+          <div>
+            <p class={lbl}>On delete</p>
             <div class="flex flex-wrap gap-1">
               {#each FK_ACTIONS as a (a)}
-                <button
-                  type="button"
-                  class="rounded px-2 py-0.5 font-mono text-[10px] font-medium transition-colors {onDelete === a ? 'bg-destructive/15 text-destructive ring-1 ring-destructive/30' : 'bg-muted/30 text-muted-foreground/60 hover:bg-muted/60 hover:text-foreground'}"
+                <button type="button"
+                  class="rounded-md px-2 py-0.5 font-mono text-[10px] font-medium transition-colors {onDelete === a
+                    ? 'bg-destructive/10 text-destructive ring-1 ring-destructive/20'
+                    : 'text-muted-foreground/45 hover:bg-muted/40 hover:text-foreground'}"
                   onclick={() => (onDelete = a)}
                 >{a}</button>
               {/each}
@@ -194,31 +195,23 @@
       </div>
 
       <!-- Footer -->
-      <div class="flex items-center justify-end gap-2 border-t border-border/50 px-5 py-3">
+      <div class="flex items-center justify-end gap-2 border-t border-border/25 px-5 py-3">
         {#if constraintName}
-          <button
-            type="button"
-            disabled={deleting || saving}
-            class="mr-auto inline-flex h-8 items-center gap-1.5 rounded-lg border border-destructive/30 px-3 text-ui-xs text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-40"
-            onclick={() => (dropConfirmOpen = true)}
-          >
+          <button type="button" disabled={deleting || saving}
+            class="mr-auto inline-flex h-8 items-center gap-1.5 rounded-lg px-3.5 text-[13px] text-destructive/70 transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
+            onclick={() => (dropConfirmOpen = true)}>
             {#if deleting}<Loader class="size-3 animate-spin" />{/if}
             Remove FK
           </button>
         {/if}
-        <button
-          type="button"
-          class="inline-flex h-8 items-center rounded-lg border border-border/60 px-4 text-ui-xs text-muted-foreground transition-colors hover:bg-accent"
-          onclick={() => (open = false)}
-        >Cancel</button>
-        <button
-          type="button"
-          disabled={!isValid || saving || deleting}
-          class="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-4 text-ui-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
-          onclick={handleSave}
-        >
+        <button type="button"
+          class="inline-flex h-8 items-center rounded-lg px-3.5 text-[13px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
+          onclick={() => (open = false)}>Cancel</button>
+        <button type="button" disabled={!isValid || saving || deleting}
+          class="inline-flex h-8 items-center gap-1.5 rounded-lg bg-foreground px-4 text-[13px] font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-40"
+          onclick={handleSave}>
           {#if saving}<Loader class="size-3 animate-spin" />{/if}
-          {constraintName ? 'Update' : 'Add FK'}
+          {constraintName ? 'Update FK' : 'Add FK'}
         </button>
       </div>
 

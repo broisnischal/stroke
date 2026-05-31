@@ -11,6 +11,8 @@
   import ShieldCheck from '@lucide/svelte/icons/shield-check'
   import ScrollText from '@lucide/svelte/icons/scroll-text'
   import BarChart2 from '@lucide/svelte/icons/bar-chart-2'
+  import LayoutDashboard from '@lucide/svelte/icons/layout-dashboard'
+  import GitBranch from '@lucide/svelte/icons/git-branch'
   import History from '@lucide/svelte/icons/history'
   import { createHotkey, createHotkeySequence } from '@tanstack/svelte-hotkeys'
   import { cycleTheme, restorePreviousTheme, isCurrentThemeDark } from '$lib/stores/settings.js'
@@ -47,6 +49,7 @@
   import LogsPage from './LogsPage.svelte'
   import JsonViewerPage from './JsonViewerPage.svelte'
   import ChartsPage from './ChartsPage.svelte'
+  import DiagramsPage from './DiagramsPage.svelte'
   import DashboardPage from './DashboardPage.svelte'
   import EntityRelationPage from './EntityRelationPage.svelte'
   import { Button } from '$lib/components/ui/button/index.js'
@@ -84,6 +87,8 @@
     createDashboardTab,
     createErdTab,
     findErdTab,
+    createDiagramsTab,
+    findDiagramsTab,
     findTableTab,
     findSqlTab,
     findAiTab,
@@ -152,6 +157,7 @@
   import { installInputShortcuts } from '$lib/input-shortcuts.js'
   import TitleBar from './TitleBar.svelte'
   import { savedCharts, updateChart, switchChartsConnection } from '$lib/stores/saved-charts.js'
+  import { switchDiagramsConnection } from '$lib/stores/saved-diagrams.js'
   import { dashboards, activeDashboardId, switchDashboardsConnection } from '$lib/stores/dashboards.js'
   import { buildOption } from '$lib/chart-utils.js'
   import { get } from 'svelte/store'
@@ -283,6 +289,7 @@
   let chartsEverOpened = $state(false)
   let dashboardEverOpened = $state(false)
   let erdEverOpened     = $state(false)
+  let diagramsEverOpened = $state(false)
   $effect(() => {
     if (activeTab?.kind === 'sql') sqlEverOpened = true
     if (activeTab?.kind === 'orm') ormEverOpened = true
@@ -293,6 +300,7 @@
     if (activeTab?.kind === 'charts') chartsEverOpened = true
     if (activeTab?.kind === 'dashboard') dashboardEverOpened = true
     if (activeTab?.kind === 'erd') erdEverOpened = true
+    if (activeTab?.kind === 'diagrams') diagramsEverOpened = true
   })
 
   let columns = $state([])
@@ -497,6 +505,7 @@
     refreshRecentTabs()
     switchChartsConnection(persistConnectionId)
     switchDashboardsConnection(persistConnectionId)
+    switchDiagramsConnection(persistConnectionId)
   })
 
   $effect(() => {
@@ -1286,6 +1295,14 @@
     tabs = [...tabs, tab]
     activeTabId = tab.id
     clearTableEditor()
+  }
+
+  function openDiagramsTab() {
+    const existing = findDiagramsTab(tabs)
+    if (existing) { activateTab(existing.id); return }
+    const tab = createDiagramsTab()
+    tabs = [...tabs, tab]
+    activeTabId = tab.id
   }
 
   /** @param {{ sql: string, mode: string }} detail */
@@ -2147,7 +2164,7 @@
       ssl: false,
     })
     upsertConnection(conn)
-    disconnectPostgres().catch(() => {})
+    await disconnectPostgres().catch(() => {})
     connection = null
     clearConnectionState()
     autoConnecting = true
@@ -2166,7 +2183,7 @@
   }
 
   async function handleSampleConnect() {
-    disconnectPostgres().catch(() => {})
+    await disconnectPostgres().catch(() => {})
     connection = null
     clearConnectionState()
     autoConnecting = true
@@ -2190,8 +2207,9 @@
 
   /** @param {import('$lib/stores/connections.js').SavedConnection} conn */
   async function handleSwitchDatabase(conn) {
-    // Disconnect current (best-effort, non-blocking)
-    disconnectPostgres().catch(() => {})
+    // Disconnect current before connecting to the new one to avoid the race
+    // where set_conn(None) could fire after connect_* sets the new connection.
+    await disconnectPostgres().catch(() => {})
     connection = null
     clearConnectionState()
     // Connect to the chosen saved connection
@@ -2661,6 +2679,7 @@
             onexit={exitAiMode}
             onwritesql={(sql) => void handleAiWriteSql(sql)}
             onopenmodelsettings={() => (showAiModelSettings = true)}
+            onopendiagramspage={() => { exitAiMode(); openDiagramsTab() }}
           />
         </div>
       {/if}
@@ -2775,6 +2794,18 @@
               {connection}
               onrunsql={(sql) => { if (aiMode) exitAiMode(); void openQueryInEditor(sql) }}
             />
+          </svelte:boundary>
+        </div>
+      {/if}
+
+      <!-- Diagrams tab - mount once, keep alive -->
+      {#if diagramsEverOpened}
+        <div
+          class={activeTab?.kind === 'diagrams' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+          inert={activeTab?.kind !== 'diagrams' || undefined}
+        >
+          <svelte:boundary failed={tabError}>
+            <DiagramsPage {connection} />
           </svelte:boundary>
         </div>
       {/if}
@@ -3056,7 +3087,6 @@
       {#if !activeTab || activeTab.kind === 'welcome'}
         {@const isMac = navigator.platform.toUpperCase().includes('MAC')}
         {@const mod = isMac ? '⌘' : 'Ctrl'}
-        {@const recentTables = tables.slice(0, 12)}
         {@const recentQueries = queryHistory.slice(0, 5)}
         {@const _now = Date.now()}
         {@const relTime = (/** @type {number} */ ts) => {
@@ -3078,18 +3108,22 @@
 
           <!-- Header -->
           <div class="flex flex-col items-center gap-1.5">
-            <p class="text-xs font-medium text-muted-foreground/40 uppercase tracking-widest">Where do you want to start?</p>
+            <p class="text-[9px] font-medium uppercase tracking-[0.25em] text-muted-foreground/25">Quick access</p>
             {#if connection}
               <div class="flex items-center gap-2 text-sm font-medium text-foreground/80">
-                <span class="size-1.5 rounded-full bg-primary/60 shrink-0"></span>
+                <span class="size-1.5 rounded-full bg-emerald-500 shrink-0"></span>
                 <span class="font-mono">{connection.database ?? connection.filePath?.split('/').at(-1) ?? connection.databaseId ?? 'connected'}</span>
                 <span class="text-muted-foreground/30 text-xs">·</span>
                 <span class="capitalize text-muted-foreground/50 text-xs font-normal">{dbType}</span>
+                {#if tables.length > 0}
+                  <span class="text-muted-foreground/30 text-xs">·</span>
+                  <span class="text-xs text-muted-foreground/40 font-normal">{tables.length} tables</span>
+                {/if}
               </div>
             {/if}
           </div>
 
-          <!-- Unified action grid — all same size -->
+          <!-- Action grid — max-w-sm keeps all sections aligned -->
           <div class="grid w-full max-w-sm grid-cols-4 gap-1.5">
 
             <button onclick={openSqlTab} class={cell}>
@@ -3100,12 +3134,9 @@
               </div>
             </button>
 
-            <button onclick={() => { const first = tables[0]; if (first) openTableTab(activeSchema, first.name) }} class={cell}>
-              <Table2 class={iconCls} />
-              <div class="flex items-end justify-between gap-1">
-                <span class={labelCls}>Data</span>
-                <span class={hotkeyCls}>{mod}⇧D</span>
-              </div>
+            <button onclick={openDashboardTab} class={cell}>
+              <LayoutDashboard class={iconCls} />
+              <span class={labelCls}>Dashboard</span>
             </button>
 
             <button onclick={openAiTab} class={cell}>
@@ -3147,42 +3178,40 @@
               <BarChart2 class={iconCls} />
               <span class={labelCls}>Charts</span>
             </button>
+
+            <button onclick={openDiagramsTab} class={cell}>
+              <GitBranch class={iconCls} />
+              <span class={labelCls}>Diagrams</span>
+            </button>
+
+            <button onclick={() => (showConnectionModal = true)} class={cell}>
+              <Database class={iconCls} />
+              <span class={labelCls}>Connect</span>
+            </button>
           </div>
 
-          <!-- Tables — borderless chips -->
-          {#if recentTables.length > 0}
-            <div class="flex w-full max-w-sm flex-wrap gap-x-0.5 gap-y-0">
-              {#each recentTables as t (t.name)}
-                <button
-                  onclick={() => openTableTab(activeSchema, t.name)}
-                  class="rounded px-1.5 py-1 font-mono text-[11px] text-muted-foreground/35 transition-colors hover:bg-accent/15 hover:text-foreground/70"
-                >
-                  {t.name}
-                </button>
-              {/each}
-            </div>
-          {/if}
-
-          <!-- Recent queries — bare rows -->
+          <!-- Recent queries — same max-w-sm as the grid -->
           {#if recentQueries.length > 0}
-            <div class="w-full max-w-sm">
-              {#each recentQueries as q, i (q.id)}
+            <div class="w-full max-w-sm flex flex-col gap-0.5">
+              <p class="mb-1 px-2 text-[9px] font-semibold uppercase tracking-[0.15em] text-muted-foreground/25">Recent</p>
+              {#each recentQueries as q (q.id)}
                 <button
                   onclick={() => void openQueryInEditor(q.sql)}
-                  class="group flex w-full min-w-0 items-center gap-3 py-2 text-left transition-colors {i > 0 ? 'border-t border-border/10' : ''}"
+                  class="group flex w-full min-w-0 items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-muted/25"
                 >
-                  <span class="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground/35 transition-colors group-hover:text-foreground/65">{q.title}</span>
-                  <span class="shrink-0 text-[10px] tabular-nums text-muted-foreground/20">{relTime(q.executedAt)}</span>
+                  <History class="size-3 shrink-0 text-muted-foreground/20 transition-colors group-hover:text-muted-foreground/40" />
+                  <span class="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground/35 transition-colors group-hover:text-foreground/60">{q.title}</span>
+                  <span class="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/20">{relTime(q.executedAt)}</span>
                 </button>
               {/each}
             </div>
           {/if}
 
           <!-- Footer -->
-          <div class="flex items-center gap-3 text-[10px] text-muted-foreground/25">
+          <div class="flex items-center gap-3 text-[10px] text-muted-foreground/20">
             <button
               onclick={() => showShortcutsModal = true}
-              class="flex items-center gap-1 transition-colors hover:text-muted-foreground/50"
+              class="flex items-center gap-1 transition-colors hover:text-muted-foreground/40"
             >
               <Command size={9} />
               <span>shortcuts</span>

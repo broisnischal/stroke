@@ -414,14 +414,14 @@
   function focusOnMount(el) { el.focus() }
 
   // shared classes
-  const TH = 'relative select-none overflow-hidden border-b border-r border-border bg-panel px-3 py-2 text-left font-medium text-muted-foreground text-ui-2xs uppercase tracking-wide whitespace-nowrap'
-  const TD = 'border-b border-r border-border/40 p-0 align-middle overflow-hidden'
-  const TD_DROP = 'border-b border-r border-border/40 p-0 align-middle overflow-visible'
-  const INP = 'box-border block h-full w-full min-w-0 overflow-x-auto border-0 bg-transparent px-3 py-0 font-mono text-ui-sm text-foreground outline-none selection:bg-primary/20'
-  const DROP_PANEL = 'absolute left-0 top-full z-50 mt-0.5 max-h-64 w-48 overflow-y-auto rounded-md border border-border/60 bg-popover p-1 text-popover-foreground shadow-md'
-  const DROP_ITEM = 'relative flex w-full cursor-default select-none items-center rounded-sm px-2 py-1.5 font-mono text-ui-xs text-foreground outline-none hover:bg-accent hover:text-accent-foreground'
-  const SECTION_HDR = 'flex items-center gap-2 border-t border-border bg-panel/60 px-3 py-1.5'
-  const SECTION_LABEL = 'text-ui-2xs font-semibold uppercase tracking-widest text-muted-foreground/70'
+  const TH = 'relative select-none overflow-hidden border-b border-r border-border/30 bg-muted/[0.15] px-3 py-2 text-left font-semibold text-muted-foreground/45 text-[10px] uppercase tracking-[0.07em] whitespace-nowrap'
+  const TD = 'border-b border-r border-border/25 p-0 align-middle overflow-hidden'
+  const TD_DROP = 'border-b border-r border-border/25 p-0 align-middle overflow-visible'
+  const INP = 'box-border block h-full w-full min-w-0 overflow-x-auto border-0 bg-transparent px-3 py-0 font-mono text-[12px] text-foreground outline-none selection:bg-primary/20'
+  const DROP_PANEL = 'absolute left-0 top-full z-50 mt-0.5 max-h-64 w-48 overflow-y-auto rounded-xl border border-border/35 bg-background p-1.5 shadow-xl shadow-black/30'
+  const DROP_ITEM = 'relative flex w-full cursor-default select-none items-center rounded-lg px-2.5 py-1.5 font-mono text-[12px] text-foreground outline-none hover:bg-muted/60'
+  const SECTION_HDR = 'flex items-center gap-2 border-t border-border/30 bg-muted/[0.08] px-3 py-2'
+  const SECTION_LABEL = 'text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-foreground/40'
 </script>
 
 <ForeignKeyDialog bind:open={fkOpen} {schema} {table} column={fkCol} constraintName={fkConstraint} existingFk={fkExisting} {tables} onrefresh={() => { fkOpen = false; onrefresh() }} />
@@ -439,12 +439,12 @@
 
 <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
   <!-- Title strip -->
-  <div class="studio-chrome flex shrink-0 items-center gap-3 border-b border-border px-4 py-2 font-mono text-ui-xs" data-studio-chrome>
-    <span class="font-medium text-foreground">{table}</span>
+  <div class="studio-chrome flex shrink-0 items-center gap-3 border-b border-border/30 px-4 py-2.5 font-mono text-[11px]" data-studio-chrome>
+    <span class="font-semibold text-foreground">{table}</span>
     {#if primaryKey.length > 0}
-      <span class="flex items-center gap-1 text-amber-500/80"><KeyRound class="size-3" />{primaryKey.join(', ')}</span>
+      <span class="flex items-center gap-1 rounded-md bg-amber-500/10 px-1.5 py-0.5 text-amber-400/80"><KeyRound class="size-2.5" />{primaryKey.join(', ')}</span>
     {/if}
-    {#if loading}<Loader class="ml-auto size-3.5 animate-spin text-muted-foreground" />{/if}
+    {#if loading}<Loader class="ml-auto size-3.5 animate-spin text-muted-foreground/50" />{/if}
   </div>
 
   <!-- Single scroll container — content takes natural height, no forced stretch -->
@@ -636,7 +636,7 @@
               <!-- foreign_key -->
               <td class={TD}>
                 {#if col.foreignKey}
-                  <button type="button" class="flex h-full w-full items-center gap-1.5 px-3 font-mono text-ui-sm text-blue-400/80 hover:bg-accent/20" onclick={() => openFkDialog(col)}>
+                  <button type="button" class="flex h-full w-full items-center gap-1.5 px-3 font-mono text-[12px] text-blue-400/70 transition-colors hover:bg-muted/40 hover:text-blue-400" onclick={() => openFkDialog(col)}>
                     <ArrowRight class="size-3 shrink-0" /><span class="truncate">{col.foreignKey}</span>
                   </button>
                 {:else if !isPk}
@@ -679,7 +679,7 @@
 
           <!-- Add column row -->
           {#if newColumn}
-            <tr style="height:34px" class="bg-green-900/15 ring-1 ring-inset ring-green-700/30">
+            <tr style="height:34px" class="bg-emerald-500/[0.04] ring-1 ring-inset ring-emerald-500/20">
               <td class={TD}></td>
               <td class="{TD} ring-0">
                 <input type="text" bind:value={newColumn.name} placeholder="column_name" use:focusOnMount class="{INP} placeholder:text-muted-foreground/30" />
@@ -736,37 +736,37 @@
       </table>
 
     <!-- ── Action bar: Apply/Reset pending changes + Add column ── -->
-    <div class="flex items-center gap-2 border-t border-border/40 px-3 py-1.5 font-mono">
+    <div class="flex items-center gap-2 border-t border-border/25 px-3 py-1.5 font-mono">
     {#if newColumn}
-      <span class="text-ui-2xs text-green-400/80">New column — fill in details then save</span>
+      <span class="text-[10px] text-emerald-500/70">New column — fill in details then save</span>
       <button type="button" disabled={confirmLoading}
-        class="ml-auto flex items-center gap-1 rounded bg-green-900/20 px-2.5 py-1 text-ui-xs text-green-400 hover:bg-green-900/30 disabled:opacity-50"
+        class="ml-auto inline-flex h-6 items-center gap-1 rounded-lg bg-foreground px-2.5 text-[11px] font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-40"
         onclick={saveNewColumn}>
-        {#if confirmLoading}<Loader class="mr-1 size-3 animate-spin" />{/if}
+        {#if confirmLoading}<Loader class="mr-0.5 size-2.5 animate-spin" />{/if}
         Save column
       </button>
       <button type="button"
-        class="flex items-center gap-1 rounded px-2.5 py-1 text-ui-xs text-muted-foreground hover:bg-accent/20"
+        class="inline-flex h-6 items-center gap-1 rounded-lg px-2.5 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
         onclick={() => (newColumn = null)}>Cancel</button>
     {:else}
       {#if hasPending}
-        <span class="text-ui-2xs text-amber-400/80">{pendingCount} pending {pendingCount === 1 ? 'change' : 'changes'}</span>
+        <span class="text-[10px] text-amber-400/70">{pendingCount} pending {pendingCount === 1 ? 'change' : 'changes'}</span>
         <button type="button" disabled={confirmLoading}
-          class="flex items-center gap-1.5 rounded bg-primary/15 px-2.5 py-1 text-ui-xs font-medium text-primary hover:bg-primary/25 disabled:opacity-50"
+          class="inline-flex h-6 items-center gap-1 rounded-lg bg-foreground px-2.5 text-[11px] font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-40"
           onclick={applyPendingDdl}>
-          {#if confirmLoading}<Loader class="size-3 animate-spin" />{:else}<Check class="size-3" />{/if}
+          {#if confirmLoading}<Loader class="size-2.5 animate-spin" />{:else}<Check class="size-2.5" />{/if}
           Apply {pendingCount}
         </button>
         <button type="button"
-          class="flex items-center gap-1.5 rounded px-2.5 py-1 text-ui-xs text-muted-foreground hover:bg-accent/20 hover:text-foreground"
+          class="inline-flex h-6 items-center gap-1 rounded-lg px-2.5 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
           onclick={resetPendingDdl}>
-          <Undo2 class="size-3" />Reset
+          <Undo2 class="size-2.5" />Reset
         </button>
       {/if}
       <button type="button"
-        class="ml-auto flex items-center gap-1 rounded px-2 py-0.5 text-ui-xs text-muted-foreground hover:bg-accent/20 hover:text-foreground"
+        class="ml-auto inline-flex h-6 items-center gap-1 rounded-lg px-2.5 text-[11px] text-muted-foreground/50 transition-colors hover:bg-muted/40 hover:text-foreground"
         onclick={startNewColumn}>
-        <Plus class="size-3" />Add column
+        <Plus class="size-2.5" />Add column
       </button>
     {/if}
     </div>
@@ -780,8 +780,8 @@
             <span class="ml-1 font-normal text-muted-foreground/40">({visibleIndexes.length}/{tableIndexes.length})</span>
           {/if}
         </span>
-        <button type="button" class="ml-auto flex items-center gap-1 rounded px-2 py-0.5 text-ui-xs text-muted-foreground hover:bg-accent/30 hover:text-foreground" onclick={startNewIndex}>
-          <Plus class="size-3" />Add index
+        <button type="button" class="ml-auto inline-flex h-6 items-center gap-1 rounded-lg px-2.5 text-[10px] text-muted-foreground/50 transition-colors hover:bg-muted/40 hover:text-foreground" onclick={startNewIndex}>
+          <Plus class="size-2.5" />Add index
         </button>
       </div>
 
@@ -833,7 +833,7 @@
                 <div class="flex h-full items-center px-3">
                   <button
                     type="button"
-                    class="rounded px-1.5 py-0.5 font-mono text-ui-xs font-medium transition-colors {idx.isUnique ? 'bg-green-500/12 text-green-400 hover:bg-green-500/20' : 'bg-muted/40 text-muted-foreground hover:bg-muted/70 hover:text-foreground'}"
+                    class="rounded-md px-1.5 py-0.5 font-mono text-[10px] font-semibold transition-colors {idx.isUnique ? 'bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20' : 'bg-muted/30 text-muted-foreground/50 hover:bg-muted/60 hover:text-foreground'}"
                     onclick={() => requestIndexRecreate(idx, idx.indexType, !idx.isUnique, idx.columns)}
                     title="Click to toggle uniqueness"
                   >
@@ -886,7 +886,7 @@
 
           <!-- New index row -->
           {#if newIndex}
-            <tr style="height:34px" class="bg-green-900/15 ring-1 ring-inset ring-green-700/30">
+            <tr style="height:34px" class="bg-emerald-500/[0.04] ring-1 ring-inset ring-emerald-500/20">
               <td class="border-b border-r border-green-700/20 p-0">
                 <input type="text" bind:value={newIndex.name} placeholder="auto-generated" class="{INP} placeholder:text-muted-foreground/30" />
               </td>
@@ -951,8 +951,8 @@
             <span class="ml-1 font-normal text-muted-foreground/40">({visibleTriggers.length}/{tableTriggers.length})</span>
           {/if}
         </span>
-        <button type="button" class="ml-auto flex items-center gap-1 rounded px-2 py-0.5 text-ui-xs text-muted-foreground hover:bg-accent/30 hover:text-foreground" onclick={() => (createTriggerOpen = true)}>
-          <Plus class="size-3" />Add trigger
+        <button type="button" class="ml-auto inline-flex h-6 items-center gap-1 rounded-lg px-2.5 text-[10px] text-muted-foreground/50 transition-colors hover:bg-muted/40 hover:text-foreground" onclick={() => (createTriggerOpen = true)}>
+          <Plus class="size-2.5" />Add trigger
         </button>
       </div>
 

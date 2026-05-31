@@ -62,6 +62,7 @@
   import { aiSettings, aiProfiles, activeProfileId } from '$lib/stores/ai-settings.js'
   import { aiChatParams, updateChatParams, resetChatParams } from '$lib/stores/ai-chat-params.js'
   import { saveChart } from '$lib/stores/saved-charts.js'
+  import { saveDiagram } from '$lib/stores/saved-diagrams.js'
   import { buildOption } from '$lib/chart-utils.js'
   import { isCurrentThemeDark } from '$lib/stores/settings.js'
   import Bookmark from '@lucide/svelte/icons/bookmark'
@@ -70,6 +71,7 @@
   import Search from '@lucide/svelte/icons/search'
   import TrendingUp from '@lucide/svelte/icons/trending-up'
   import Layers from '@lucide/svelte/icons/layers'
+  import GitBranch from '@lucide/svelte/icons/git-branch'
   import AiModelPicker from './AiModelPicker.svelte'
   import {
     listConversations,
@@ -89,9 +91,34 @@
    *   | { id: string, kind: 'chart', spec: { type: string, title: string, data: object[], x_col: string, y_col: string, z_col?: string, group_col?: string }, error: string|null }
    *   | { id: string, kind: 'confirm', sql: string, resolve: (ok: boolean) => void }
    *   | { id: string, kind: 'thinking' }
-   *   | { id: string, kind: 'executing', sql: string }
+   *   | { id: string, kind: 'executing', sql: string, op: 'query' | 'schema' | 'describe' | 'run' | 'diagram' }
+   *   | { id: string, kind: 'diagram', code: string, title: string }
    * } ChatItem
    */
+
+  /**
+   * Returns human-readable label + detail for an executing item.
+   * @param {'query'|'schema'|'describe'|'run'} op
+   * @param {string} sql
+   */
+  function execMeta(op, sql) {
+    if (op === 'schema') {
+      return { label: 'Reading schema', detail: sql === 'all tables' ? 'all tables' : sql, verb: null }
+    }
+    if (op === 'describe') {
+      return { label: 'Describing table', detail: sql, verb: null }
+    }
+    if (op === 'diagram') {
+      return { label: 'Creating diagram', detail: sql, verb: null }
+    }
+    const trimmed = sql.trim()
+    const verb = trimmed.split(/\s+/)[0]?.toUpperCase() ?? 'SQL'
+    const tableMatch = trimmed.match(/\b(?:FROM|INTO|UPDATE|TABLE|JOIN)\s+(?:["'`]?)(\w+)/i)
+    const table = tableMatch?.[1] ?? ''
+    const labelMap = { SELECT: 'Querying', INSERT: 'Inserting', UPDATE: 'Updating', DELETE: 'Deleting', CREATE: 'Creating', DROP: 'Dropping', ALTER: 'Altering', WITH: 'Querying' }
+    const label = labelMap[verb] ?? 'Executing'
+    return { label, detail: table || verb, verb }
+  }
 
   let {
     schemaContext = {
@@ -113,6 +140,8 @@
     onwritesql = (sql) => {},
     /** Open the dedicated AI model settings dialog. */
     onopenmodelsettings = () => {},
+    /** Called when user saves a diagram — opens Diagrams page */
+    onopendiagramspage = /** @type {(() => void) | undefined} */ (undefined),
   } = $props()
 
   $effect(() => {
@@ -1358,7 +1387,7 @@
         }
         const { sql: guardedSql, capped: frontendCapped } = guardSelectLimit(sql)
         const execId = uid()
-        items.push(/** @type {ChatItem} */ ({ id: execId, kind: 'executing', sql }))
+        items.push(/** @type {ChatItem} */ ({ id: execId, kind: 'executing', sql, op: 'query' }))
         await scrollBottom()
         try {
           const data = await executeSql(guardedSql)
@@ -1402,7 +1431,7 @@
         const schema = String(args.schema ?? schemaContext.activeSchema).replace(/'/g, "''")
         const table = String(args.table ?? '').replace(/'/g, "''")
         const execId = uid()
-        items.push(/** @type {ChatItem} */ ({ id: execId, kind: 'executing', sql: `${schema}.${table} schema` }))
+        items.push(/** @type {ChatItem} */ ({ id: execId, kind: 'executing', sql: `${schema}.${table}`, op: 'describe' }))
         await scrollBottom()
         const dbType = schemaContext.dbType ?? 'postgres'
         const isSqliteFamily = dbType === 'sqlite' || dbType === 'd1' || dbType === 'libsql'
@@ -1452,6 +1481,28 @@
           toolResult = JSON.stringify({ success: true, message: 'Chart rendered successfully.' })
         }
 
+      } else if (call.function.name === 'render_diagram') {
+        const diagramType = String(args.type ?? 'flowchart')
+        const title = String(args.title ?? 'Diagram').trim() || 'Diagram'
+        const code = String(args.code ?? '').trim()
+        const execId = uid()
+        items.push(/** @type {ChatItem} */ ({ id: execId, kind: 'executing', sql: title, op: 'diagram' }))
+        await scrollBottom()
+        if (!code) {
+          const execIdx = items.findIndex((i) => i.id === execId)
+          if (execIdx >= 0) items.splice(execIdx, 1)
+          toolResult = JSON.stringify({ error: 'No diagram code provided.' })
+        } else {
+          saveDiagram(title, code)
+          const diagId = uid()
+          const execIdx = items.findIndex((i) => i.id === execId)
+          const diagItem = /** @type {ChatItem} */ ({ id: diagId, kind: 'diagram', code, title })
+          if (execIdx >= 0) items.splice(execIdx, 1, diagItem)
+          else items.push(diagItem)
+          await scrollBottom()
+          toolResult = JSON.stringify({ success: true, title, diagramType, message: 'Diagram rendered and saved to Diagrams library.' })
+        }
+
       } else if (call.function.name === 'list_tables') {
         const tableNames = schemaContext.tables.map((t) => ({ name: t.name, rowCount: t.rowCount }))
         toolResult = JSON.stringify({ schema: schemaContext.activeSchema, tables: tableNames, total: tableNames.length })
@@ -1459,7 +1510,7 @@
       } else if (call.function.name === 'get_schema') {
         const targetTable = String(args.table ?? '').trim()
         const execId = uid()
-        items.push(/** @type {ChatItem} */ ({ id: execId, kind: 'executing', sql: targetTable ? `schema: ${targetTable}` : `schema: all tables` }))
+        items.push(/** @type {ChatItem} */ ({ id: execId, kind: 'executing', sql: targetTable || 'all tables', op: 'schema' }))
         await scrollBottom()
         try {
           const dbType2 = schemaContext.dbType ?? 'postgres'
@@ -1553,7 +1604,7 @@
     }
     loading = true
     const execId = uid()
-    items.push(/** @type {ChatItem} */ ({ id: execId, kind: 'executing', sql }))
+    items.push(/** @type {ChatItem} */ ({ id: execId, kind: 'executing', sql, op: 'run' }))
     await scrollBottom()
     try {
       const data = await executeSql(sql)
@@ -1959,13 +2010,30 @@
 
                 <!-- ── Executing (tool call in progress) ──── -->
                 {:else if item.kind === 'executing'}
+                  {@const meta = execMeta(item.op, item.sql)}
                   <div class="flex items-center gap-3">
-                    <div class="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted/50 ring-1 ring-border/30">
-                      <Loader2 class="size-3 animate-spin text-muted-foreground/60" />
+                    <div class="relative flex size-6 shrink-0 items-center justify-center">
+                      <span class="absolute inset-0 animate-ping rounded-full bg-primary/15 [animation-duration:1.4s]"></span>
+                      <div class="relative flex size-6 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/20">
+                        {#if item.op === 'schema' || item.op === 'describe'}
+                          <Layers class="size-3 text-primary/70" />
+                        {:else if item.op === 'diagram'}
+                          <GitBranch class="size-3 text-primary/70" />
+                        {:else}
+                          <Database class="size-3 text-primary/70" />
+                        {/if}
+                      </div>
                     </div>
-                    <div class="flex min-w-0 items-center gap-2 text-ui-xs">
-                      <span class="shrink-0 rounded-md bg-amber-500/10 px-1.5 py-0.5 font-mono text-[10px] font-medium text-amber-500/70">SQL</span>
-                      <span class="min-w-0 truncate text-muted-foreground/50">{item.sql}</span>
+                    <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <div class="flex items-center gap-1.5">
+                        <span class="text-ui-xs font-medium text-foreground/70">{meta.label}</span>
+                        <span class="flex gap-0.5">
+                          <span class="size-1 animate-bounce rounded-full bg-muted-foreground/30" style="animation-delay:0ms"></span>
+                          <span class="size-1 animate-bounce rounded-full bg-muted-foreground/30" style="animation-delay:100ms"></span>
+                          <span class="size-1 animate-bounce rounded-full bg-muted-foreground/30" style="animation-delay:200ms"></span>
+                        </span>
+                      </div>
+                      <span class="min-w-0 truncate font-mono text-[10px] text-muted-foreground/45">{#if item.op === 'query' || item.op === 'run'}{item.sql.trim().slice(0, 120)}{:else}{meta.detail}{/if}</span>
                     </div>
                   </div>
 
@@ -1988,6 +2056,16 @@
                                 <button type="button" class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground" onclick={() => copyText(part.content)} title="Copy source"><Copy class="size-2.5" />Source</button>
                                 <button type="button" class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground" onclick={() => exportDiagramSvg(part.content)} title="Export SVG"><Download class="size-2.5" />SVG</button>
                                 <button type="button" class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground" onclick={() => void exportDiagramPng(part.content)} title="Export PNG"><Download class="size-2.5" />PNG</button>
+                                <button
+                                  type="button"
+                                  class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                                  onclick={() => {
+                                    const name = part.content.trim().split('\n')[0].replace(/[^a-zA-Z0-9 _-]/g, '').trim() || 'Diagram'
+                                    saveDiagram(name, part.content)
+                                    toast.success('Diagram saved', { description: 'View it in the Diagrams page', action: onopendiagramspage ? { label: 'Open', onClick: onopendiagramspage } : undefined })
+                                  }}
+                                  title="Save diagram"
+                                ><Bookmark class="size-2.5" />Save</button>
                                 <button type="button" class="inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground" onclick={() => openDiagramFullscreen(part.content)} title="Fullscreen"><Maximize2 class="size-3" /></button>
                               </div>
                             </div>
@@ -2232,6 +2310,32 @@
                         <AiChartRenderer spec={item.spec} noTitle={true} />
                       </div>
                     {/if}
+                  </div>
+
+                <!-- ── Diagram (render_diagram tool result) ── -->
+                {:else if item.kind === 'diagram'}
+                  <div class="group/diag ml-8 mermaid-output overflow-hidden rounded-xl border border-border/60">
+                    <div class="flex items-center justify-between gap-2 border-b border-border/40 bg-muted/20 px-3 py-1.5">
+                      <div class="flex items-center gap-2 min-w-0">
+                        <GitBranch class="size-3 shrink-0 text-muted-foreground/50" />
+                        <span class="truncate text-[10px] font-medium text-foreground/70">{item.title}</span>
+                      </div>
+                      <div class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/diag:opacity-100">
+                        <span class="hidden text-[10px] text-muted-foreground/30 sm:block mr-1">drag · Ctrl+scroll zoom</span>
+                        <button type="button" class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground" onclick={() => copyText(item.code)} title="Copy source"><Copy class="size-2.5" />Source</button>
+                        <button type="button" class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground" onclick={() => exportDiagramSvg(item.code)} title="Export SVG"><Download class="size-2.5" />SVG</button>
+                        <button type="button" class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground" onclick={() => void exportDiagramPng(item.code)} title="Export PNG"><Download class="size-2.5" />PNG</button>
+                        <button type="button" class="inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground" onclick={() => openDiagramFullscreen(item.code)} title="Fullscreen"><Maximize2 class="size-3" /></button>
+                        <button
+                          type="button"
+                          class="inline-flex size-5 items-center justify-center rounded transition-colors text-primary/60 hover:text-primary"
+                          title="Saved to Diagrams library"
+                        ><BookmarkCheck class="size-3" /></button>
+                      </div>
+                    </div>
+                    <div class="mermaid-canvas" use:mermaidInteractive>
+                      {@html processMermaidSvg(item.code)}
+                    </div>
                   </div>
                 {/if}
 
