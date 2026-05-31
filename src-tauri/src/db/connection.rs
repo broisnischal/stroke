@@ -88,6 +88,18 @@ pub struct D1Config {
     pub api_token: String,
 }
 
+// ── LibSQL / Turso ────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibSqlConfig {
+    pub name: String,
+    /// Database URL: libsql://*.turso.io, https://*.turso.io, or http://localhost:PORT
+    pub url: String,
+    /// Auth token (Turso). Leave None/empty for local unauthenticated libsql-server.
+    pub auth_token: Option<String>,
+}
+
 // ── Active connection ─────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -96,6 +108,7 @@ pub enum ActiveConnection {
     Sqlite(SqlitePool),
     Mysql(MySqlPool),
     D1(D1Config),
+    LibSql(LibSqlConfig),
 }
 
 impl ActiveConnection {
@@ -105,6 +118,7 @@ impl ActiveConnection {
             Self::Sqlite(_) => "sqlite",
             Self::Mysql(_) => "mysql",
             Self::D1(_) => "d1",
+            Self::LibSql(_) => "libsql",
         }
     }
 }
@@ -303,6 +317,19 @@ pub async fn connect_d1(state: State<'_, DbState>, config: D1Config) -> Result<(
     test_d1_connection(config.clone()).await?;
     close_existing(&state).await;
     set_conn(&state, Some(ActiveConnection::D1(config)))
+}
+
+// ── LibSQL / Turso connect / test ─────────────────────────────────────────────
+
+pub async fn test_libsql_connection(config: LibSqlConfig) -> Result<(), String> {
+    crate::db::libsql::query(&config, "SELECT 1", vec![]).await?;
+    Ok(())
+}
+
+pub async fn connect_libsql(state: State<'_, DbState>, config: LibSqlConfig) -> Result<(), String> {
+    test_libsql_connection(config.clone()).await?;
+    close_existing(&state).await;
+    set_conn(&state, Some(ActiveConnection::LibSql(config)))
 }
 
 // ── Disconnect ────────────────────────────────────────────────────────────────

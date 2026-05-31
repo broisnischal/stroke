@@ -347,6 +347,43 @@ async fn list_indexes_d1(cfg: &super::connection::D1Config) -> Result<Vec<IndexI
         .collect())
 }
 
+// ── LibSQL / Turso ────────────────────────────────────────────────────────────
+
+async fn list_tables_libsql(cfg: &super::connection::LibSqlConfig) -> Result<Vec<TableInfo>, String> {
+    let result = super::libsql::query(
+        cfg,
+        "SELECT name, type FROM sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' ORDER BY name",
+        vec![],
+    ).await?;
+    let name_idx = result.columns.iter().position(|c| c.name == "name").unwrap_or(0);
+    let type_idx = result.columns.iter().position(|c| c.name == "type").unwrap_or(1);
+    Ok(result.rows.iter().filter_map(|r| {
+        let name = r.get(name_idx)?.as_str()?.to_string();
+        let ty = r.get(type_idx).and_then(|v| v.as_str()).unwrap_or("table");
+        let kind = if ty == "view" { "view".to_string() } else { "table".to_string() };
+        Some(TableInfo { name, kind, row_count: -1, rls_enabled: None })
+    }).collect())
+}
+
+async fn list_indexes_libsql(cfg: &super::connection::LibSqlConfig) -> Result<Vec<IndexInfo>, String> {
+    let result = super::libsql::query(
+        cfg,
+        "SELECT name, tbl_name, COALESCE(sql,'') FROM sqlite_master WHERE type='index' ORDER BY tbl_name, name",
+        vec![],
+    ).await?;
+    let name_idx = result.columns.iter().position(|c| c.name == "name").unwrap_or(0);
+    let tbl_idx  = result.columns.iter().position(|c| c.name == "tbl_name").unwrap_or(1);
+    let sql_idx  = result.columns.iter().position(|c| c.name == "sql").unwrap_or(2);
+    Ok(result.rows.iter().filter_map(|r| {
+        let name = r.get(name_idx)?.as_str()?.to_string();
+        let table_name = r.get(tbl_idx)?.as_str()?.to_string();
+        let sql = r.get(sql_idx).and_then(|v| v.as_str()).unwrap_or("").to_uppercase();
+        let is_unique = sql.contains("UNIQUE");
+        let is_primary = name.starts_with("sqlite_autoindex_");
+        Some(IndexInfo { name, table_name, columns: String::new(), index_type: "btree".to_string(), is_unique, is_primary, condition: None, comment: None })
+    }).collect())
+}
+
 // ── MySQL ─────────────────────────────────────────────────────────────────────
 
 async fn list_schemas_mysql(pool: &MySqlPool) -> Result<Vec<String>, String> {
@@ -610,7 +647,7 @@ pub async fn list_schemas(state: State<'_, DbState>) -> Result<Vec<String>, Stri
     match require_conn(&state)? {
         ActiveConnection::Postgres(pool) => list_schemas_pg(&pool).await,
         ActiveConnection::Mysql(pool) => list_schemas_mysql(&pool).await,
-        ActiveConnection::Sqlite(_) | ActiveConnection::D1(_) => Ok(vec!["main".to_string()]),
+        ActiveConnection::Sqlite(_) | ActiveConnection::D1(_) | ActiveConnection::LibSql(_) => Ok(vec!["main".to_string()]),
     }
 }
 
@@ -623,6 +660,7 @@ pub async fn list_tables(state: State<'_, DbState>, schema: String) -> Result<Ve
         ActiveConnection::Mysql(pool) => list_tables_mysql(&pool, &schema).await,
         ActiveConnection::Sqlite(pool) => list_tables_sqlite(&pool).await,
         ActiveConnection::D1(cfg) => list_tables_d1(&cfg).await,
+        ActiveConnection::LibSql(cfg) => list_tables_libsql(&cfg).await,
     }
 }
 
@@ -635,6 +673,7 @@ pub async fn list_indexes(state: State<'_, DbState>, schema: String) -> Result<V
         ActiveConnection::Mysql(pool) => list_indexes_mysql(&pool, &schema).await,
         ActiveConnection::Sqlite(pool) => list_indexes_sqlite(&pool).await,
         ActiveConnection::D1(cfg) => list_indexes_d1(&cfg).await,
+        ActiveConnection::LibSql(cfg) => list_indexes_libsql(&cfg).await,
     }
 }
 

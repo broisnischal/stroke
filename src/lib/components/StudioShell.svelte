@@ -126,6 +126,7 @@
     connectPostgres,
     connectSqlite,
     connectD1,
+    connectLibSql,
     connectMysql,
     listIndexes,
     listEnums,
@@ -2050,6 +2051,7 @@
     try {
       if (last.type === 'sqlite') await connectSqlite(last)
       else if (last.type === 'd1') await connectD1(last)
+      else if (last.type === 'libsql') await connectLibSql(last)
       else if (last.type === 'mysql') await connectMysql(last)
       else await connectPostgres(last)
       await onConnected(last, last.id)
@@ -2193,9 +2195,10 @@
     // Connect to the chosen saved connection
     autoConnecting = true
     try {
-      const { connectPostgres, connectSqlite, connectD1, connectMysql } = await import('$lib/api.js')
+      const { connectPostgres, connectSqlite, connectD1, connectLibSql, connectMysql } = await import('$lib/api.js')
       if (conn.type === 'sqlite') await connectSqlite(conn)
       else if (conn.type === 'd1') await connectD1(conn)
+      else if (conn.type === 'libsql') await connectLibSql(conn)
       else if (conn.type === 'mysql') await connectMysql(conn)
       else await connectPostgres(conn)
       await onConnected(conn, conn.id)

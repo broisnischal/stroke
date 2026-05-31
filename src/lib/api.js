@@ -115,6 +115,16 @@ export async function connectD1(config) {
   return inv('connect_d1_db', { config })
 }
 
+/** @param {{ name: string, url: string, authToken?: string }} config */
+export async function testLibSqlConnection(config) {
+  return inv('test_libsql', { config })
+}
+
+/** @param {{ name: string, url: string, authToken?: string }} config */
+export async function connectLibSql(config) {
+  return inv('connect_libsql_db', { config })
+}
+
 // ── Docker ────────────────────────────────────────────────────────────────────
 
 /** Returns Docker server version string, or throws a user-facing error. */

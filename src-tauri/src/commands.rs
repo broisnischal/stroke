@@ -114,12 +114,12 @@ pub fn toggle_devtools(window: tauri::WebviewWindow) {
 }
 
 use crate::db::{
-    connect, connect_d1, connect_mysql, connect_sqlite, disconnect,
+    connect, connect_d1, connect_libsql, connect_mysql, connect_sqlite, disconnect,
     delete_table_row, delete_table_rows, execute_ddl, execute_sql, execute_sql_multi, get_table_rows, insert_table_row,
     list_schemas, list_tables, list_indexes, list_enums, list_triggers, list_sequences,
     truncate_table, drop_table, get_table_column_structure,
-    test_connection, test_d1_connection, test_mysql_connection, test_sqlite_connection,
-    update_table_cell, ConnectionConfig, D1Config, DbState, EnumInfo, IndexInfo, TriggerInfo, SequenceInfo,
+    test_connection, test_d1_connection, test_libsql_connection, test_mysql_connection, test_sqlite_connection,
+    update_table_cell, ConnectionConfig, D1Config, DbState, EnumInfo, IndexInfo, LibSqlConfig, TriggerInfo, SequenceInfo,
     InsertRowResult, MysqlConfig, SqlResult, SqliteConfig, TableInfo, TableRows, ColumnStructureRow,
 };
 use serde_json::Value;
@@ -184,6 +184,18 @@ pub async fn connect_d1_db(
     config: D1Config,
 ) -> Result<(), String> {
     connect_d1(state, config).await
+}
+
+// ── LibSQL / Turso ────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn test_libsql(config: LibSqlConfig) -> Result<(), String> {
+    test_libsql_connection(config).await
+}
+
+#[tauri::command]
+pub async fn connect_libsql_db(state: State<'_, DbState>, config: LibSqlConfig) -> Result<(), String> {
+    connect_libsql(state, config).await
 }
 
 // ── Shared disconnect ────────────────────────────────────────────────────────

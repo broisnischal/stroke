@@ -92,6 +92,7 @@ pub async fn backup_export(
         ActiveConnection::Postgres(pool) => export_postgres(&app, &pool, schema.as_deref(), tables.as_deref(), &opts).await,
         ActiveConnection::Mysql(pool) => export_mysql(&app, &pool, schema.as_deref(), tables.as_deref(), &opts).await,
         ActiveConnection::D1(cfg) => export_d1(&app, &cfg, tables.as_deref(), &opts).await,
+        ActiveConnection::LibSql(_) => Err("Backup export is not supported for LibSQL/Turso connections".to_string()),
     }
 }
 
@@ -106,6 +107,7 @@ pub async fn backup_import(
         ActiveConnection::Postgres(pool) => import_postgres(&app, &pool, &sql).await,
         ActiveConnection::Mysql(pool) => import_mysql(&app, &pool, &sql).await,
         ActiveConnection::D1(cfg) => import_d1(&app, &cfg, &sql).await,
+        ActiveConnection::LibSql(_) => Err("Backup import is not supported for LibSQL/Turso connections".to_string()),
     }
 }
 

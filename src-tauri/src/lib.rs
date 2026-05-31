@@ -128,6 +128,8 @@ pub fn run() {
             commands::connect_mysql_db,
             commands::test_d1,
             commands::connect_d1_db,
+            commands::test_libsql,
+            commands::connect_libsql_db,
             commands::pg_list_schemas,
             commands::pg_list_tables,
             commands::pg_list_indexes,

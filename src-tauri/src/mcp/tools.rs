@@ -213,6 +213,10 @@ async fn execute_sql(
         ActiveConnection::Postgres(pool) => execute_sql_pg(pool, sql, max_rows).await,
         ActiveConnection::Sqlite(pool) => execute_sql_sqlite(pool, sql, max_rows).await,
         ActiveConnection::D1(cfg) => execute_sql_d1(cfg, sql, max_rows).await,
+        ActiveConnection::LibSql(cfg) => {
+            let result = crate::db::libsql::query(cfg, sql, vec![]).await?;
+            Ok(json!({"columns":result.columns.iter().map(|c|&c.name).collect::<Vec<_>>(),"rows":&result.rows,"row_count":result.rows.len(),"truncated":result.rows.len()>=max_rows}).to_string())
+        }
         ActiveConnection::Mysql(pool) => execute_sql_mysql(pool, sql, max_rows).await,
     }
 }
@@ -328,6 +332,10 @@ async fn list_tables(conn: &ActiveConnection, schema: &str) -> Result<String, St
         ActiveConnection::Postgres(pool) => list_tables_pg(pool, schema).await,
         ActiveConnection::Sqlite(pool) => list_tables_sqlite(pool).await,
         ActiveConnection::D1(cfg) => list_tables_d1(cfg).await,
+        ActiveConnection::LibSql(cfg) => {
+            let r = crate::db::libsql::query(cfg, "SELECT name,type FROM sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' ORDER BY name", vec![]).await?;
+            Ok(json!({"tables":r.rows.iter().filter_map(|row|row.first()?.as_str().map(|n|n.to_string())).collect::<Vec<_>>()}).to_string())
+        }
         ActiveConnection::Mysql(pool) => list_tables_mysql(pool, schema).await,
     }
 }
@@ -425,6 +433,11 @@ async fn describe_table(
         ActiveConnection::Postgres(pool) => describe_table_pg(pool, schema, table).await,
         ActiveConnection::Sqlite(pool) => describe_table_sqlite(pool, table).await,
         ActiveConnection::D1(cfg) => describe_table_sqlite_compat(cfg, table).await,
+        ActiveConnection::LibSql(cfg) => {
+            let tq = format!("\"{}\"", table.replace('"', "\"\""));
+            let r = crate::db::libsql::query(cfg, &format!("PRAGMA table_info({tq})"), vec![]).await?;
+            Ok(json!({"table":table,"pragma_info":r.rows}).to_string())
+        }
         ActiveConnection::Mysql(pool) => describe_table_mysql(pool, schema, table).await,
     }
 }
@@ -677,6 +690,7 @@ async fn check_migrations(conn: &ActiveConnection, schema: &str) -> Result<Strin
         ActiveConnection::Postgres(pool) => check_migrations_pg(pool, schema).await,
         ActiveConnection::Sqlite(pool) => check_migrations_sqlite(pool).await,
         ActiveConnection::D1(cfg) => check_migrations_d1(cfg).await,
+        ActiveConnection::LibSql(_) => Ok(json!({"migrations":[],"note":"Migration detection not yet supported for LibSQL"}).to_string()),
         ActiveConnection::Mysql(pool) => check_migrations_mysql(pool, schema).await,
     }
 }
@@ -874,6 +888,10 @@ async fn explain_query(conn: &ActiveConnection, sql: &str) -> Result<String, Str
         ActiveConnection::Postgres(pool) => explain_query_pg(pool, sql).await,
         ActiveConnection::Sqlite(pool) => explain_query_sqlite(pool, sql).await,
         ActiveConnection::D1(cfg) => explain_query_d1(cfg, sql).await,
+        ActiveConnection::LibSql(cfg) => {
+            let r = crate::db::libsql::query(cfg, &format!("EXPLAIN QUERY PLAN {sql}"), vec![]).await?;
+            Ok(json!({"plan":r.rows,"database":"libsql"}).to_string())
+        }
         ActiveConnection::Mysql(pool) => explain_query_mysql(pool, sql).await,
     }
 }
@@ -940,6 +958,11 @@ async fn get_database_stats(conn: &ActiveConnection, schema: &str) -> Result<Str
         ActiveConnection::Postgres(pool) => get_database_stats_pg(pool, schema).await,
         ActiveConnection::Sqlite(pool) => get_database_stats_sqlite(pool).await,
         ActiveConnection::D1(cfg) => get_database_stats_d1(cfg).await,
+        ActiveConnection::LibSql(cfg) => {
+            let r = crate::db::libsql::query(cfg, "SELECT COUNT(*) as table_count FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'", vec![]).await?;
+            let count = r.rows.first().and_then(|row| row.first()).and_then(|v| v.as_i64()).unwrap_or(0);
+            Ok(json!({"database":"libsql","table_count":count}).to_string())
+        }
         ActiveConnection::Mysql(pool) => get_database_stats_mysql(pool, schema).await,
     }
 }

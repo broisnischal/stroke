@@ -1074,31 +1074,49 @@
    */
   async function ensureFullSchemaCache() {
     if (!schemaContext.tables?.length) return
-    const isMysql = schemaContext.dbType === 'mysql'
+    const dbTypeSC = schemaContext.dbType ?? 'postgres'
+    const isMysql = dbTypeSC === 'mysql'
+    const isSqliteFamilySC = dbTypeSC === 'sqlite' || dbTypeSC === 'd1' || dbTypeSC === 'libsql'
     const sc = schemaContext.activeSchema
 
-    // Determine which tables we still need column data for
     const combined = { ...schemaContext.allTableColumns, ...fetchedSchemas }
     const missing = schemaContext.tables.filter((t) => !combined[`${sc}.${t.name}`])
     if (!missing.length) return
 
     try {
-      const scSafe = sc.replace(/'/g, "''")
-      // One query fetches all missing tables at once
-      // For PostgreSQL, resolve USER-DEFINED to the actual enum/type name so the AI
-      // sees 'account_status' instead of 'USER-DEFINED' and can query enum values.
-      const sql = isMysql
-        ? `SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '${scSafe}' ORDER BY TABLE_NAME, ORDINAL_POSITION`
-        : `SELECT c.table_name, c.column_name, CASE WHEN c.data_type = 'USER-DEFINED' THEN c.udt_name ELSE c.data_type END AS data_type, c.is_nullable FROM information_schema.columns c WHERE c.table_schema = '${scSafe}' ORDER BY c.table_name, c.ordinal_position`
-      const data = await executeSql(sql)
       /** @type {Record<string, {name:string, dataType:string, nullable:boolean}[]>} */
       const byTable = {}
-      for (const row of (data.rows ?? [])) {
-        const key = `${sc}.${String(row[0])}`
-        if (!byTable[key]) byTable[key] = []
-        byTable[key].push({ name: String(row[1]), dataType: String(row[2]), nullable: String(row[3]).toUpperCase() === 'YES' })
+
+      if (isSqliteFamilySC) {
+        // SQLite/D1/LibSQL: PRAGMA per table (no information_schema)
+        for (const t of missing) {
+          try {
+            const tq = `"${t.name.replace(/"/g, '""')}"`
+            const data = await executeSql(`PRAGMA table_info(${tq})`)
+            const c = data.columns ?? [], r = data.rows ?? []
+            const nameI = c.findIndex(x => x.name === 'name'), typeI = c.findIndex(x => x.name === 'type')
+            const nnI = c.findIndex(x => x.name === 'notnull')
+            const key = `${sc}.${t.name}`
+            byTable[key] = r.map(row => ({
+              name: String(row[nameI] ?? row[1] ?? ''),
+              dataType: String(row[typeI] ?? row[2] ?? 'text'),
+              nullable: !(row[nnI] ?? row[3]),
+            }))
+          } catch { /* skip this table */ }
+        }
+      } else {
+        const scSafe = sc.replace(/'/g, "''")
+        const sql = isMysql
+          ? `SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '${scSafe}' ORDER BY TABLE_NAME, ORDINAL_POSITION`
+          : `SELECT c.table_name, c.column_name, CASE WHEN c.data_type = 'USER-DEFINED' THEN c.udt_name ELSE c.data_type END AS data_type, c.is_nullable FROM information_schema.columns c WHERE c.table_schema = '${scSafe}' ORDER BY c.table_name, c.ordinal_position`
+        const data = await executeSql(sql)
+        for (const row of (data.rows ?? [])) {
+          const key = `${sc}.${String(row[0])}`
+          if (!byTable[key]) byTable[key] = []
+          byTable[key].push({ name: String(row[1]), dataType: String(row[2]), nullable: String(row[3]).toUpperCase() === 'YES' })
+        }
       }
-      // Merge into session cache (preserves any existing entries)
+
       fetchedSchemas = { ...fetchedSchemas, ...byTable }
     } catch {
       // Non-fatal — AI will call describe_table if schema fetch fails
@@ -1386,12 +1404,33 @@
         const execId = uid()
         items.push(/** @type {ChatItem} */ ({ id: execId, kind: 'executing', sql: `${schema}.${table} schema` }))
         await scrollBottom()
-        const descSql = schemaContext.dbType === 'mysql'
-          ? `SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '${schema}' AND TABLE_NAME = '${table}' ORDER BY ORDINAL_POSITION`
-          : `SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema = '${schema}' AND table_name = '${table}' ORDER BY ordinal_position`
-        const data = await executeSql(descSql)
-        const cols = data.columns ?? []
-        const rows = data.rows ?? []
+        const dbType = schemaContext.dbType ?? 'postgres'
+        const isSqliteFamily = dbType === 'sqlite' || dbType === 'd1' || dbType === 'libsql'
+        let cols, rows, colObjs
+        if (isSqliteFamily) {
+          const data = await executeSql(`PRAGMA table_info("${table.replace(/"/g, '""')}")`)
+          cols = data.columns ?? []
+          rows = data.rows ?? []
+          // PRAGMA columns: cid, name, type, notnull, dflt_value, pk
+          const nameIdx = cols.findIndex(c => c.name === 'name'), typeIdx = cols.findIndex(c => c.name === 'type')
+          const nnIdx = cols.findIndex(c => c.name === 'notnull'), dfltIdx = cols.findIndex(c => c.name === 'dflt_value')
+          const pkIdx = cols.findIndex(c => c.name === 'pk')
+          colObjs = rows.map(r => ({
+            name: r[nameIdx] ?? r[1],
+            type: r[typeIdx] ?? r[2] ?? 'text',
+            nullable: (r[nnIdx] ?? r[3]) ? 'NO' : 'YES',
+            default: r[dfltIdx] ?? r[4] ?? null,
+            pk: !!(r[pkIdx] ?? r[5]),
+          }))
+        } else {
+          const descSql = dbType === 'mysql'
+            ? `SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '${schema}' AND TABLE_NAME = '${table}' ORDER BY ORDINAL_POSITION`
+            : `SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema = '${schema}' AND table_name = '${table}' ORDER BY ordinal_position`
+          const data = await executeSql(descSql)
+          cols = data.columns ?? []
+          rows = data.rows ?? []
+          colObjs = rows.map(r => ({ name: r[0], type: r[1], nullable: r[2], default: r[3] ?? null }))
+        }
         const schemaResultId = uid()
         const schemaResultItem = /** @type {ChatItem} */ ({ id: schemaResultId, kind: 'result', sql: `${schema}.${table} schema`, columns: cols, rows, total: rows.length, error: null, isSchema: true })
         const execIdx = items.findIndex((i) => i.id === execId)
@@ -1399,10 +1438,7 @@
         else items.push(schemaResultItem)
         autoOpenResult(schemaResultId, true)
         await scrollBottom()
-        toolResult = JSON.stringify({
-          table: `${schema}.${table}`,
-          columns: rows.map((r) => ({ name: r[0], type: r[1], nullable: r[2] === 'YES', default: r[3] ?? null })),
-        })
+        toolResult = JSON.stringify({ table: `${schema}.${table}`, columns: colObjs })
 
       } else if (call.function.name === 'render_chart') {
         const chartSpec = args
@@ -1426,16 +1462,49 @@
         items.push(/** @type {ChatItem} */ ({ id: execId, kind: 'executing', sql: targetTable ? `schema: ${targetTable}` : `schema: all tables` }))
         await scrollBottom()
         try {
-          const isMysql = schemaContext.dbType === 'mysql'
+          const dbType2 = schemaContext.dbType ?? 'postgres'
+          const isMysql = dbType2 === 'mysql'
+          const isSqliteFamily2 = dbType2 === 'sqlite' || dbType2 === 'd1' || dbType2 === 'libsql'
           const sc = schemaContext.activeSchema.replace(/'/g, "''")
-          if (targetTable) {
+
+          if (isSqliteFamily2) {
+            if (targetTable) {
+              const tq = `"${targetTable.replace(/"/g, '""')}"`
+              const data = await executeSql(`PRAGMA table_info(${tq})`)
+              const r = data.rows ?? []
+              const c = data.columns ?? []
+              const nameI = c.findIndex(x => x.name === 'name'), typeI = c.findIndex(x => x.name === 'type')
+              const nnI = c.findIndex(x => x.name === 'notnull'), dfltI = c.findIndex(x => x.name === 'dflt_value')
+              const cols = r.map(row => ({ name: row[nameI] ?? row[1], type: row[typeI] ?? row[2] ?? 'text', nullable: (row[nnI] ?? row[3]) ? 'NO' : 'YES', default: row[dfltI] ?? row[4] ?? null }))
+              const execIdx = items.findIndex(i => i.id === execId)
+              if (execIdx >= 0) items.splice(execIdx, 1)
+              toolResult = JSON.stringify({ table: `${schemaContext.activeSchema}.${targetTable}`, columns: cols })
+            } else {
+              // All tables — use already-loaded context, fall back to sqlite_master
+              const tableNames = schemaContext.tables.map(t => t.name)
+              const byTable = /** @type {Record<string, unknown[]>} */ ({})
+              for (const tbl of tableNames) {
+                const tq = `"${tbl.replace(/"/g, '""')}"`
+                try {
+                  const data = await executeSql(`PRAGMA table_info(${tq})`)
+                  const c = data.columns ?? [], r = data.rows ?? []
+                  const nameI = c.findIndex(x => x.name === 'name'), typeI = c.findIndex(x => x.name === 'type')
+                  const nnI = c.findIndex(x => x.name === 'notnull')
+                  byTable[tbl] = r.map(row => ({ name: row[nameI] ?? row[1], type: row[typeI] ?? row[2] ?? 'text', nullable: (row[nnI] ?? row[3]) ? 'NO' : 'YES' }))
+                } catch { byTable[tbl] = [] }
+              }
+              const execIdx = items.findIndex(i => i.id === execId)
+              if (execIdx >= 0) items.splice(execIdx, 1)
+              toolResult = JSON.stringify({ schema: schemaContext.activeSchema, tables: byTable })
+            }
+          } else if (targetTable) {
             const tt = targetTable.replace(/'/g, "''")
             const sql = isMysql
               ? `SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '${sc}' AND TABLE_NAME = '${tt}' ORDER BY ORDINAL_POSITION`
               : `SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema = '${sc}' AND table_name = '${tt}' ORDER BY ordinal_position`
             const data = await executeSql(sql)
-            const cols = (data.rows ?? []).map((r) => ({ name: r[0], type: r[1], nullable: r[2] === 'YES', default: r[3] ?? null }))
-            const execIdx = items.findIndex((i) => i.id === execId)
+            const cols = (data.rows ?? []).map(r => ({ name: r[0], type: r[1], nullable: r[2] === 'YES', default: r[3] ?? null }))
+            const execIdx = items.findIndex(i => i.id === execId)
             if (execIdx >= 0) items.splice(execIdx, 1)
             toolResult = JSON.stringify({ table: `${schemaContext.activeSchema}.${targetTable}`, columns: cols })
           } else {
@@ -1449,12 +1518,12 @@
               if (!byTable[tName]) byTable[tName] = []
               byTable[tName].push({ name: row[1], type: row[2], nullable: row[3] === 'YES' })
             }
-            const execIdx = items.findIndex((i) => i.id === execId)
+            const execIdx = items.findIndex(i => i.id === execId)
             if (execIdx >= 0) items.splice(execIdx, 1)
             toolResult = JSON.stringify({ schema: schemaContext.activeSchema, tables: byTable })
           }
         } catch (e) {
-          const execIdx = items.findIndex((i) => i.id === execId)
+          const execIdx = items.findIndex(i => i.id === execId)
           if (execIdx >= 0) items.splice(execIdx, 1)
           toolResult = JSON.stringify({ error: String(e) })
         }

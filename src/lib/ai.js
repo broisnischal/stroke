@@ -1077,19 +1077,21 @@ export function buildSystemPrompt(ctx) {
     )
   })()
 
-  const dbType = /** @type {'postgres'|'sqlite'|'d1'|'mysql'} */ (ctx.dbType ?? 'postgres')
+  const dbType = /** @type {'postgres'|'sqlite'|'d1'|'libsql'|'mysql'} */ (ctx.dbType ?? 'postgres')
 
   const DB_LABEL = {
     postgres: 'PostgreSQL',
     sqlite: 'SQLite',
     d1: 'Cloudflare D1 (SQLite-compatible)',
+    libsql: 'Turso / LibSQL (SQLite-compatible)',
     mysql: 'MySQL',
   }
 
   const DB_NOTES = {
     postgres: `Use standard PostgreSQL syntax. All PG features are available: CTEs, window functions, JSON/JSONB operators, pg_catalog, ILIKE, RETURNING, ON CONFLICT, etc.`,
-    sqlite: `Use SQLite syntax only. Important limitations: no RIGHT/FULL OUTER JOIN, no stored procedures, no ILIKE (use LIKE with LOWER()), limited ALTER TABLE (can only add columns), use strftime() for dates, INTEGER PRIMARY KEY is auto-increment (not SERIAL), ON CONFLICT is supported, no RETURNING in older SQLite builds. Do NOT use PostgreSQL-specific functions or operators.`,
-    d1: `Use SQLite-compatible SQL for Cloudflare D1. D1 is built on SQLite — do NOT use PostgreSQL syntax. Avoid ILIKE, SERIAL, pg_catalog, JSON operators (->>/->), window functions may be limited. Use strftime() for dates. D1 does not support triggers or stored procedures.`,
+    sqlite: `Use SQLite syntax only. Important limitations: no RIGHT/FULL OUTER JOIN, no stored procedures, no ILIKE (use LIKE with LOWER()), limited ALTER TABLE (can only add columns), use strftime() for dates, INTEGER PRIMARY KEY is auto-increment (not SERIAL), ON CONFLICT is supported, no RETURNING in older SQLite builds. Do NOT use PostgreSQL-specific functions or operators. Schema queries use PRAGMA and sqlite_master — NOT information_schema.`,
+    d1: `Use SQLite-compatible SQL for Cloudflare D1. D1 is built on SQLite — do NOT use PostgreSQL syntax. Avoid ILIKE, SERIAL, pg_catalog, JSON operators (->>/->), window functions may be limited. Use strftime() for dates. D1 does not support triggers or stored procedures. Schema queries use PRAGMA and sqlite_master — NOT information_schema.`,
+    libsql: `Use SQLite-compatible SQL for Turso / LibSQL. This is a cloud-hosted SQLite database — do NOT use PostgreSQL or MySQL syntax. No ILIKE (use LOWER() LIKE), no SERIAL, no pg_catalog, no information_schema. Use PRAGMA table_info('table') and sqlite_master for schema introspection. Use strftime() for dates. Always use the describe_table tool to inspect columns — do NOT query information_schema.`,
     mysql: `Use MySQL syntax. Important rules:
 - Backtick identifiers (\`table\`, \`column\`), NOT double-quotes
 - LIMIT not FETCH FIRST; GROUP_CONCAT not string_agg; IFNULL/IF not COALESCE/CASE for simple null checks
@@ -1120,13 +1122,23 @@ WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.constraint_schema = '${ctx.activ
     sqlite: `\`\`\`sql
 -- All tables
 SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;
+-- Columns for a specific table
+PRAGMA table_info('tablename');
+-- Foreign keys
+PRAGMA foreign_key_list('tablename');
 \`\`\`
-Then for each table use \`describe_table\` or \`PRAGMA table_info('tablename')\` and \`PRAGMA foreign_key_list('tablename')\`.`,
+Use \`describe_table\` tool for column details. Never query information_schema — it does not exist in SQLite.`,
     d1: `\`\`\`sql
--- All tables
 SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;
+PRAGMA table_info('tablename');
 \`\`\`
-Then for each table use \`describe_table\` or \`PRAGMA table_info('tablename')\` and \`PRAGMA foreign_key_list('tablename')\`.`,
+Use \`describe_table\` tool for column details. Never query information_schema — it does not exist in D1/SQLite.`,
+    libsql: `\`\`\`sql
+SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;
+PRAGMA table_info('tablename');
+PRAGMA foreign_key_list('tablename');
+\`\`\`
+Use \`describe_table\` tool for column details. Never query information_schema — Turso/LibSQL uses SQLite and does not have information_schema.`,
     mysql: `\`\`\`sql
 -- All columns
 SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE
@@ -1273,7 +1285,7 @@ SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() ORDER B
   const builtInSkills = [
     dbType === 'postgres' ? SKILL_POSTGRES : null,
     dbType === 'mysql' ? SKILL_MYSQL : null,
-    (dbType === 'sqlite' || dbType === 'd1') ? SKILL_SQLITE : null,
+    (dbType === 'sqlite' || dbType === 'd1' || dbType === 'libsql') ? SKILL_SQLITE : null,
     SKILL_MERMAID,
     SKILL_CHARTS,
   ].filter(Boolean).join('\n')
