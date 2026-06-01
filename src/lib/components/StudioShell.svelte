@@ -2696,6 +2696,8 @@
         oncloseothers={closeOtherTabs}
         oncloseall={closeAllTabs}
         onnew={openWelcomeTab}
+        {recentTabs}
+        onrecentselect={(schema, table) => { if (aiMode) exitAiMode(); void openTableTab(schema, table) }}
       />
 
       {#snippet tabError(/** @type {unknown} */ error, /** @type {() => void} */ reset)}

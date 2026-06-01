@@ -266,6 +266,22 @@
   /** @type {'image' | 'pdf'} */
   let lightboxType = $state("image");
 
+  /**
+   * Safely encode a URL so special characters (spaces, non-ASCII) in path
+   * segments don't break image/PDF previews. Decodes first to avoid
+   * double-encoding already-encoded URLs.
+   * @param {string} href
+   */
+  function encodeHref(href) {
+    try {
+      const u = new URL(href)
+      u.pathname = u.pathname.split('/').map(seg => encodeURIComponent(decodeURIComponent(seg))).join('/')
+      return u.toString()
+    } catch {
+      try { return encodeURI(decodeURI(href)) } catch { return href }
+    }
+  }
+
   /** @param {string} href @param {'image'|'pdf'|'link'} type @param {DOMRect} rect */
   function showUrlPreview(href, type, rect) {
     if (previewHideTimer) {
@@ -2364,8 +2380,9 @@
                                 : undefined}
                             >
                               {#if cellHref}
+                                {@const safeHref = (urlType === 'image' || urlType === 'pdf') ? encodeHref(cellHref) : cellHref}
                                 <a
-                                  href={cellHref}
+                                  href={safeHref}
                                   data-cell-url
                                   tabindex={-1}
                                   class={cx(
@@ -2376,22 +2393,22 @@
                                     e.preventDefault();
                                     e.stopPropagation();
                                     if (e.ctrlKey || e.metaKey || e.shiftKey) {
-                                      void openExternal(cellHref);
+                                      void openExternal(safeHref);
                                     } else if (
                                       urlType === "image" ||
                                       urlType === "pdf"
                                     ) {
-                                      lightboxUrl = cellHref;
+                                      lightboxUrl = safeHref;
                                       lightboxType =
                                         /** @type {'image'|'pdf'} */ (urlType);
                                     } else {
-                                      void openExternal(cellHref);
+                                      void openExternal(safeHref);
                                     }
                                   }}
                                   onmouseenter={(e) => {
                                     if (urlType)
                                       showUrlPreview(
-                                        cellHref,
+                                        safeHref,
                                         urlType,
                                         e.currentTarget.getBoundingClientRect(),
                                       );
