@@ -199,6 +199,18 @@ pub async fn get_table_rows(
         })
         .collect();
 
+    // col_name -> declared type (used as fallback when the table is empty)
+    let pragma_types: std::collections::HashMap<String, String> = pragma_rows
+        .iter()
+        .filter_map(|r| {
+            let name = r.try_get::<Option<String>, _>(1).ok().flatten()?;
+            let col_type = r.try_get::<Option<String>, _>(2).ok().flatten()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "text".into());
+            Some((name, col_type.to_lowercase()))
+        })
+        .collect();
+
     let col_names: Vec<String> = pragma_rows
         .iter()
         .filter_map(|r| r.try_get::<Option<String>, _>(1).ok().flatten())
@@ -206,7 +218,7 @@ pub async fn get_table_rows(
 
     // Build WHERE clause (using ? placeholders)
     // Each entry: (conjunct — None for first, Some("AND"/"OR") for rest, condition SQL, binds)
-    let mut cond_parts: Vec<(Option<String>, String)> = vec![];
+    let mut cond_parts: Vec<(Option<&'static str>, String)> = vec![];
     let mut binds: Vec<String> = vec![];
 
     if let Some(ref s) = search {
@@ -224,9 +236,32 @@ pub async fn get_table_rows(
 
     if let Some(ref fs) = filters {
         for f in fs {
+            let conj: Option<&'static str> = if cond_parts.is_empty() { None }
+                else if f.conjunct.as_deref().is_some_and(|s| s.eq_ignore_ascii_case("or")) { Some("OR") }
+                else { Some("AND") };
+
+            if f.column == "__any__" {
+                if let Some(ref v) = f.value {
+                    let v = v.trim();
+                    if !v.is_empty() && !col_names.is_empty() {
+                        let mut parts = Vec::new();
+                        let mut extra = Vec::new();
+                        for col in &col_names {
+                            let qcol = format!("\"{}\"", col.replace('"', "\"\""));
+                            let (cond, eb) = build_filter_condition(&qcol, &f.op, v);
+                            parts.push(cond);
+                            extra.extend(eb);
+                        }
+                        if !parts.is_empty() {
+                            cond_parts.push((conj, format!("({})", parts.join(" OR "))));
+                            binds.extend(extra);
+                        }
+                    }
+                }
+                continue;
+            }
+
             let qcol = format!("\"{}\"", f.column.replace('"', "\"\""));
-            let conj = if cond_parts.is_empty() { None }
-                       else { Some(f.conjunct.as_deref().unwrap_or("and").to_uppercase()) };
             match f.op.as_str() {
                 "is_null"     => cond_parts.push((conj, format!("{qcol} IS NULL"))),
                 "is_not_null" => cond_parts.push((conj, format!("{qcol} IS NOT NULL"))),
@@ -240,10 +275,12 @@ pub async fn get_table_rows(
     }
 
     let where_clause = if cond_parts.is_empty() { String::new() } else {
-        let parts: Vec<String> = cond_parts.into_iter().map(|(c, s)| {
-            match c { None => s, Some(conj) => format!("{conj} {s}") }
-        }).collect();
-        format!("WHERE {}", parts.join(" "))
+        let mut out = String::from("WHERE ");
+        for (i, (conj, cond)) in cond_parts.into_iter().enumerate() {
+            if i > 0 { out.push(' '); out.push_str(conj.unwrap_or("AND")); out.push(' '); }
+            out.push_str(&cond);
+        }
+        out
     };
 
     // ORDER BY — NULLS LAST ensures consistent ordering when column has NULLs
@@ -298,7 +335,8 @@ pub async fn get_table_rows(
             col_names
                 .iter()
                 .map(|n| {
-                    let mut col = ColumnInfo::new(n.clone(), "text");
+                    let dt = pragma_types.get(n).cloned().unwrap_or_else(|| "text".into());
+                    let mut col = ColumnInfo::new(n.clone(), dt);
                     if let Some(&nullable) = pragma_nullable.get(n.as_str()) {
                         col.nullable = nullable;
                     }
@@ -332,6 +370,19 @@ pub fn escape_like(input: &str) -> String {
         .replace('\\', "\\\\")
         .replace('%',  "\\%")
         .replace('_',  "\\_")
+}
+
+/// Build OR-across-all-columns conditions for the `__any__` sentinel (D1 / JSON params).
+pub fn build_any_column_d1(col_names: &[String], op: &str, val: &str) -> (Vec<String>, Vec<serde_json::Value>) {
+    let mut parts = Vec::new();
+    let mut params = Vec::new();
+    for col in col_names {
+        let qcol = format!("\"{}\"", col.replace('"', "\"\""));
+        let (cond, binds) = build_filter_condition(&qcol, op, val);
+        parts.push(cond);
+        for b in binds { params.push(serde_json::Value::String(b)); }
+    }
+    (parts, params)
 }
 
 /// Same logic as build_filter_condition but returns JSON Values for D1 HTTP params.
@@ -413,6 +464,7 @@ pub async fn insert_table_row(
 
     let mut column_order: Vec<String> = Vec::new();
     let mut optional: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+    let mut col_type_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
 
     for r in &pragma_rows {
         let name = r
@@ -430,6 +482,7 @@ pub async fn insert_table_row(
         let pk: i64 = r.try_get(5).ok().unwrap_or(0);
         let opt = sqlite_column_optional_when_omitted(notnull != 0, dflt.as_deref(), pk, &col_type);
         column_order.push(name.clone());
+        col_type_map.insert(name.clone(), col_type.to_lowercase());
         optional.insert(name, opt);
     }
 
@@ -464,7 +517,8 @@ pub async fn insert_table_row(
     let mut q = sqlx::query(&sql);
     for col in &col_names {
         let v = values.get(col).ok_or_else(|| format!("Missing value for {col}"))?;
-        q = bind_value(q, v);
+        let ct = col_type_map.get(col).map(|s| s.as_str()).unwrap_or("");
+        q = bind_value_typed(q, v, ct);
     }
 
     let inserted = q
@@ -567,6 +621,18 @@ fn bind_value<'a>(
     q: sqlx::query::Query<'a, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'a>>,
     value: &Value,
 ) -> sqlx::query::Query<'a, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'a>> {
+    bind_value_typed(q, value, "")
+}
+
+/// Type-aware binding: coerces string values to integers/floats when the
+/// declared column affinity requires it. Prevents SQLITE_MISMATCH (code 20)
+/// when the frontend sends numeric strings for INTEGER/REAL columns.
+fn bind_value_typed<'a>(
+    q: sqlx::query::Query<'a, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'a>>,
+    value: &Value,
+    col_type: &str,
+) -> sqlx::query::Query<'a, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'a>> {
+    let t = col_type.to_ascii_lowercase();
     match value {
         Value::Null => q.bind(None::<String>),
         Value::Bool(b) => q.bind(*b as i64),
@@ -579,7 +645,23 @@ fn bind_value<'a>(
                 q.bind(n.to_string())
             }
         }
-        Value::String(s) => q.bind(s.clone()),
+        Value::String(s) => {
+            let trimmed = s.trim();
+            // Coerce numeric strings based on declared column affinity so that
+            // INTEGER PRIMARY KEY never receives a TEXT or REAL binding.
+            if t.contains("int") || t.ends_with("serial") {
+                if let Ok(i) = trimmed.parse::<i64>() {
+                    return q.bind(i);
+                }
+            } else if t.contains("real") || t.contains("float") || t.contains("double")
+                || t.contains("numeric") || t.contains("decimal") || t.contains("number")
+            {
+                if let Ok(f) = trimmed.parse::<f64>() {
+                    return q.bind(f);
+                }
+            }
+            q.bind(s.clone())
+        }
         other => q.bind(other.to_string()),
     }
 }

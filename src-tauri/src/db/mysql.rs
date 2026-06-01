@@ -89,7 +89,7 @@ struct WhereClause {
 
 fn build_where(columns: &[String], search: Option<&str>, filters: &[RowFilter]) -> Result<WhereClause, String> {
     // (conjunct — None for first condition, Some("AND"/"OR") for subsequent)
-    let mut cond_parts: Vec<(Option<String>, String)> = Vec::new();
+    let mut cond_parts: Vec<(Option<&'static str>, String)> = Vec::new();
     let mut binds: Vec<String> = Vec::new();
 
     if let Some(term) = search.map(str::trim).filter(|s| !s.is_empty()) {
@@ -106,9 +106,32 @@ fn build_where(columns: &[String], search: Option<&str>, filters: &[RowFilter]) 
     }
 
     for f in filters {
+        let conj: Option<&'static str> = if cond_parts.is_empty() { None }
+            else if f.conjunct.as_deref().is_some_and(|s| s.eq_ignore_ascii_case("or")) { Some("OR") }
+            else { Some("AND") };
+
+        if f.column == "__any__" {
+            let v = f.value.as_deref().unwrap_or("").trim();
+            if !v.is_empty() && !columns.is_empty() {
+                let (pattern, like_op) = match f.op.as_str() {
+                    "contains"    => (format!("%{}%", escape_like(v)), "LIKE"),
+                    "starts_with" => (format!("{}%",  escape_like(v)), "LIKE"),
+                    "ends_with"   => (format!("%{}",  escape_like(v)), "LIKE"),
+                    "eq"          => (v.to_string(), "="),
+                    _             => { continue; }
+                };
+                let parts: Vec<String> = columns.iter().map(|c| {
+                    let qc = bt(c);
+                    if like_op == "=" { format!("CAST({qc} AS CHAR) = ?") }
+                    else              { format!("CAST({qc} AS CHAR) {like_op} ? ESCAPE '\\\\'") }
+                }).collect();
+                cond_parts.push((conj, format!("({})", parts.join(" OR "))));
+                for _ in columns { binds.push(pattern.clone()); }
+            }
+            continue;
+        }
+
         let col = bt(&f.column);
-        let conj = if cond_parts.is_empty() { None }
-                   else { Some(f.conjunct.as_deref().unwrap_or("and").to_uppercase()) };
         match f.op.as_str() {
             "is_null"     => cond_parts.push((conj, format!("{col} IS NULL"))),
             "is_not_null" => cond_parts.push((conj, format!("{col} IS NOT NULL"))),
@@ -157,10 +180,12 @@ fn build_where(columns: &[String], search: Option<&str>, filters: &[RowFilter]) 
     }
 
     let sql = if cond_parts.is_empty() { String::new() } else {
-        let parts: Vec<String> = cond_parts.into_iter().map(|(c, s)| {
-            match c { None => s, Some(conj) => format!("{conj} {s}") }
-        }).collect();
-        format!(" WHERE {}", parts.join(" "))
+        let mut out = String::from(" WHERE ");
+        for (i, (conj, cond)) in cond_parts.into_iter().enumerate() {
+            if i > 0 { out.push(' '); out.push_str(conj.unwrap_or("AND")); out.push(' '); }
+            out.push_str(&cond);
+        }
+        out
     };
     Ok(WhereClause { sql, binds })
 }

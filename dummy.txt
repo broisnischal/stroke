@@ -1,48 +1,13 @@
-
-build-linux
-Node.js 20 actions are deprecated. The following actions are running on Node.js 20 and may not work as expected: actions/checkout@v4, actions/setup-node@v4. Actions will be forced to run with Node.js 24 by default starting June 2nd, 2026. Node.js 20 will be removed from the runner on September 16th, 2026. Please check if updated versions of these actions are available that support Node.js 24. To opt into Node.js 24 now, set the FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true environment variable on the runner or in your workflow file. Once Node.js 24 becomes the default, you can temporarily opt out by setting ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
-
-
-
-Cause (Arch-specific)
-Tauri runs linuxdeploy, which bundles an old strip tool. Arch’s system libraries use newer ELF sections (.relr.dyn) that that strip does not understand, so you get errors like:
-
-strip: unknown type [0x13] section `.relr.dyn'
-linuxdeploy treats that as fatal → failed to run linuxdeploy.
-
-CI on Ubuntu 22.04 usually works because those libs are built with an older toolchain.
-
-Fixes
-1. Build AppImage on Arch (recommended if you want AppImage)
-NO_STRIP=1 npm run tauri build
-Or use the script added in the repo:
-
-npm run tauri:build:arch
-NO_STRIP=1 skips the broken strip step. The AppImage is a bit larger but works.
-
-2. Skip AppImage on Arch (simplest)
-You already have a working package:
-
-npm run tauri build -- --bundles deb
-Artifacts:
-
-src-tauri/target/release/bundle/deb/db-studio_0.1.2_amd64.deb
-Or run directly: ./src-tauri/target/release/app
-On Arch, .deb is for Debian/Ubuntu (dpkg -i). For daily use on Arch, the binary or AppImage is more natural.
-
-3. Optional: FUSE for running AppImages
-If the AppImage builds but won’t run:
-
-sudo pacman -S fuse2
-Or:
-
-./db-studio_0.1.2_amd64.AppImage --appimage-extract-and-run
-Summary
-Step	Status on your machine
-Compile app
-OK
-.deb / .rpm
-OK
-AppImage
-Fails without NO_STRIP=1
-Use NO_STRIP=1 npm run tauri build for a full local build, or --bundles deb if you only need the Debian package / binary. Details are in README.md under “Building on Arch Linux”.
+┌─────────────────┬─────────────────┬─────────────┬──────────────────────────────────────────────────────────────────────────┐
+│     Setting     │     Before      │    After    │                                   Why                                    │
+├─────────────────┼─────────────────┼─────────────┼──────────────────────────────────────────────────────────────────────────┤
+│ min_connections │ 2               │ removed (0) │ Don't keep idle connections alive to be pinged                           │
+├─────────────────┼─────────────────┼─────────────┼──────────────────────────────────────────────────────────────────────────┤
+│ idle_timeout    │ 600 s (10 min)  │ 60 s        │ Connections are recycled before firewalls/managed DBs kill them silently │
+├─────────────────┼─────────────────┼─────────────┼──────────────────────────────────────────────────────────────────────────┤
+│ max_lifetime    │ 1800 s (30 min) │ 300 s       │ Same reason — force fresh connections proactively                        │
+├─────────────────┼─────────────────┼─────────────┼──────────────────────────────────────────────────────────────────────────┤
+│ acquire_timeout │ 30 s            │ 10 s        │ Fail fast instead of blocking the UI for 30 s                            │
+├─────────────────┼─────────────────┼─────────────┼──────────────────────────────────────────────────────────────────────────┤
+│ max_connections │ 20              │ 10          │ Desktop app; reduces resource use                                        │
+└─────────────────┴─────────────────┴─────────────┴──────────────────────────────────────────────────────────────────────────

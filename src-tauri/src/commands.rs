@@ -1,4 +1,22 @@
+use std::sync::OnceLock;
 use tauri::Emitter;
+
+// ── Shared HTTP client for AI requests ────────────────────────────────────────
+// One client for the whole process lifetime. reqwest maintains an internal
+// connection pool, so subsequent requests to the same host reuse the TLS
+// session and avoid the ~300–700 ms handshake on every call.
+static AI_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+fn ai_http_client() -> &'static reqwest::Client {
+    AI_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .tcp_keepalive(std::time::Duration::from_secs(60))
+            .pool_max_idle_per_host(4)
+            .pool_idle_timeout(std::time::Duration::from_secs(90))
+            .build()
+            .expect("failed to build AI HTTP client")
+    })
+}
 
 /// Proxy an OpenAI-compatible chat completions request through the Rust backend,
 /// bypassing WebView CORS restrictions for local AI models (Ollama, LM Studio, etc.).
@@ -15,8 +33,9 @@ pub async fn ai_fetch(
     body: serde_json::Value,
     stream: bool,
     request_id: String,
+    extra_headers: Option<std::collections::HashMap<String, String>>,
 ) -> Result<Option<serde_json::Value>, String> {
-    let client = reqwest::Client::new();
+    let client = ai_http_client();
     let mut builder = client
         .post(&url)
         .header("Content-Type", "application/json");
@@ -24,6 +43,12 @@ pub async fn ai_fetch(
     if let Some(key) = &api_key {
         if !key.is_empty() {
             builder = builder.header("Authorization", format!("Bearer {}", key));
+        }
+    }
+
+    if let Some(headers) = extra_headers {
+        for (k, v) in headers {
+            builder = builder.header(k, v);
         }
     }
 
@@ -60,9 +85,10 @@ pub async fn ai_fetch(
 }
 
 /// Write text content to a path chosen by the user via a native save dialog.
+/// Uses async I/O so large export files don't block the Tokio executor thread.
 #[tauri::command]
 pub async fn save_file(path: String, content: String) -> Result<(), String> {
-    std::fs::write(&path, content).map_err(|e| e.to_string())
+    tokio::fs::write(&path, content).await.map_err(|e| e.to_string())
 }
 
 /// Restart the application — called after an update is installed.
@@ -88,12 +114,13 @@ pub fn toggle_devtools(window: tauri::WebviewWindow) {
 }
 
 use crate::db::{
-    connect, connect_d1, connect_mysql, connect_sqlite, disconnect,
-    delete_table_row, delete_table_rows, execute_sql, get_table_rows, insert_table_row,
-    list_schemas, list_tables, list_indexes, list_enums, truncate_table, drop_table,
-    test_connection, test_d1_connection, test_mysql_connection, test_sqlite_connection,
-    update_table_cell, ConnectionConfig, D1Config, DbState, EnumInfo, IndexInfo, InsertRowResult,
-    MysqlConfig, SqlResult, SqliteConfig, TableInfo, TableRows,
+    connect, connect_d1, connect_libsql, connect_mysql, connect_sqlite, disconnect,
+    delete_table_row, delete_table_rows, execute_ddl, execute_sql, execute_sql_multi, get_table_rows, insert_table_row,
+    list_schemas, list_tables, list_indexes, list_enums, list_triggers, list_sequences,
+    truncate_table, drop_table, get_table_column_structure,
+    test_connection, test_d1_connection, test_libsql_connection, test_mysql_connection, test_sqlite_connection,
+    update_table_cell, ConnectionConfig, D1Config, DbState, EnumInfo, IndexInfo, LibSqlConfig, TriggerInfo, SequenceInfo,
+    InsertRowResult, MysqlConfig, SqlResult, SqliteConfig, TableInfo, TableRows, ColumnStructureRow,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -159,6 +186,18 @@ pub async fn connect_d1_db(
     connect_d1(state, config).await
 }
 
+// ── LibSQL / Turso ────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn test_libsql(config: LibSqlConfig) -> Result<(), String> {
+    test_libsql_connection(config).await
+}
+
+#[tauri::command]
+pub async fn connect_libsql_db(state: State<'_, DbState>, config: LibSqlConfig) -> Result<(), String> {
+    connect_libsql(state, config).await
+}
+
 // ── Shared disconnect ────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -190,11 +229,36 @@ pub async fn pg_list_indexes(
 }
 
 #[tauri::command]
+pub async fn pg_get_table_column_structure(
+    state: State<'_, DbState>,
+    schema: String,
+    table: String,
+) -> Result<Vec<ColumnStructureRow>, String> {
+    get_table_column_structure(state, schema, table).await
+}
+
+#[tauri::command]
 pub async fn pg_list_enums(
     state: State<'_, DbState>,
     schema: String,
 ) -> Result<Vec<EnumInfo>, String> {
     list_enums(state, schema).await
+}
+
+#[tauri::command]
+pub async fn pg_list_triggers(
+    state: State<'_, DbState>,
+    schema: String,
+) -> Result<Vec<TriggerInfo>, String> {
+    list_triggers(state, schema).await
+}
+
+#[tauri::command]
+pub async fn pg_list_sequences(
+    state: State<'_, DbState>,
+    schema: String,
+) -> Result<Vec<SequenceInfo>, String> {
+    list_sequences(state, schema).await
 }
 
 #[tauri::command]
@@ -245,6 +309,17 @@ pub async fn pg_get_table_rows(
 #[tauri::command]
 pub async fn pg_execute_sql(state: State<'_, DbState>, sql: String) -> Result<SqlResult, String> {
     execute_sql(state, sql).await
+}
+
+#[tauri::command]
+pub async fn pg_execute_sql_multi(state: State<'_, DbState>, sql: String) -> Result<Vec<SqlResult>, String> {
+    execute_sql_multi(state, sql).await
+}
+
+/// Run a DDL statement outside a transaction (required for CREATE/DROP DATABASE etc.).
+#[tauri::command]
+pub async fn pg_execute_ddl(state: State<'_, DbState>, sql: String) -> Result<(), String> {
+    execute_ddl(state, sql).await
 }
 
 #[tauri::command]
@@ -492,7 +567,7 @@ async fn seed_sample_database(pool: &sqlx::SqlitePool) -> Result<(), String> {
             ( 2,  2, 1,  34.99),
             ( 3,  3, 1, 109.00),
             ( 3,  4, 1,  49.99),
-            ( 3,  5, 1,  79.99),  -- note: above 188.99 total (intentional rounding)
+            ( 3,  5, 1,  79.99),
             ( 4,  6, 1,  19.99),
             ( 5, 10, 1,  35.00),
             ( 5, 16, 1,  28.00),

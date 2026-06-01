@@ -1,160 +1,196 @@
 <script>
-  import { onMount, onDestroy } from 'svelte'
-  import { Chart, registerables } from 'chart.js'
+  /**
+   * Renders AI-generated charts using ECharts + the shared buildOption() utility.
+   * Spec format: { type, title, data, x_col, y_col, z_col?, group_col? }
+   */
+  import { onDestroy } from 'svelte'
+  import { buildOption } from '$lib/chart-utils.js'
+  import { isCurrentThemeDark } from '$lib/stores/settings.js'
+  import { toast } from 'svelte-sonner'
+  import ChoroplethChart from './ChoroplethChart.svelte'
+  import CarbonMeterChart from './CarbonMeterChart.svelte'
 
-  Chart.register(...registerables)
+  let {
+    spec = null,
+    /** Suppress the in-chart title (caller shows it in the card header) */
+    noTitle = false,
+    /** When true (fullscreen mode), all scroll zooms — no interception needed */
+    scrollZoom = false,
+  } = $props()
 
-  let { spec = null } = $props()
+  /** @type {HTMLDivElement | null} */
+  let el = $state(null)
+  /** @type {import('echarts').ECharts | null} */
+  let chart = $state(null)
+  /** @type {ResizeObserver | null} */
+  let ro = null
 
-  /** @type {HTMLCanvasElement | null} */
-  let canvasEl = $state(null)
-  /** @type {Chart | null} */
-  let chartInstance = null
+  const isDark = $derived($isCurrentThemeDark)
 
-  function getThemeColors() {
-    const style = getComputedStyle(document.documentElement)
-    const get = (v) => style.getPropertyValue(v).trim()
-    return {
-      gridColor: 'rgba(128,128,128,0.12)',
-      tickColor: 'rgba(128,128,128,0.7)',
-      tooltipBg: get('--popover') || (document.documentElement.classList.contains('dark') ? '#1c1c1e' : '#ffffff'),
-      tooltipText: get('--foreground') || (document.documentElement.classList.contains('dark') ? '#f5f5f5' : '#111111'),
+  const converted = $derived.by(() => {
+    if (!spec?.data?.length) return null
+    const keys = Object.keys(spec.data[0] ?? {})
+
+    /** @param {unknown} v */
+    function detectType(v) {
+      if (typeof v === 'number') return 'numeric'
+      if (typeof v === 'string') {
+        if (/^\d{4}-\d{2}/.test(v)) return 'timestamp'
+        if (v.trim() !== '' && !isNaN(Number(v))) return 'numeric'
+      }
+      return 'text'
     }
-  }
 
-  const PALETTE = [
-    '#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6',
-    '#06b6d4', '#f97316', '#84cc16', '#ec4899', '#14b8a6',
-  ]
+    const columns = keys.map(k => {
+      const sample = spec.data.find(r => r[k] != null)?.[k]
+      const dt = detectType(sample)
+      return { name: k, dataType: dt, data_type: dt }
+    })
 
-  function buildChartConfig(spec, colors) {
-    const { type, title, data = [], x_key, y_keys = [] } = spec
-    const labels = data.map((d) => String(d[x_key] ?? ''))
-    const isPie = type === 'pie' || type === 'doughnut'
-
-    let datasets
-    if (isPie) {
-      const key = y_keys[0]?.key ?? (Object.keys(data[0] ?? {}).find((k) => k !== x_key) || 'value')
-      datasets = [{
-        data: data.map((d) => Number(d[key] ?? 0)),
-        backgroundColor: PALETTE.slice(0, data.length),
-        borderWidth: 1,
-        borderColor: 'transparent',
-        hoverBorderColor: 'transparent',
-      }]
-    } else {
-      datasets = y_keys.map((s, i) => {
-        const color = PALETTE[i % PALETTE.length]
-        const isArea = type === 'area'
-        return {
-          label: s.label || s.key,
-          data: data.map((d) => {
-            const v = d[s.key]
-            return v != null ? Number(v) : null
-          }),
-          borderColor: color,
-          backgroundColor: isArea ? `${color}26` : type === 'bar' ? `${color}cc` : color,
-          fill: isArea,
-          tension: type === 'line' || type === 'area' ? 0.35 : 0,
-          borderWidth: type === 'bar' ? 0 : 2,
-          borderRadius: type === 'bar' ? 4 : 0,
-          pointRadius: type === 'scatter' ? 5 : type === 'line' || type === 'area' ? 3 : 0,
-          pointHoverRadius: 5,
+    const rows = spec.data.map(obj =>
+      keys.map(k => {
+        const v = obj[k]
+        const col = columns.find(c => c.name === k)
+        if (col?.dataType === 'numeric' && typeof v === 'string') {
+          const n = Number(v)
+          return isNaN(n) ? v : n
         }
+        return v
       })
-    }
+    )
+    return { columns, rows }
+  })
 
-    const chartType = type === 'area' ? 'line' : type
-    const scales = isPie ? {} : {
-      x: {
-        grid: { color: colors.gridColor, drawBorder: false },
-        ticks: { color: colors.tickColor, maxRotation: 45, font: { size: 11 } },
-      },
-      y: {
-        grid: { color: colors.gridColor, drawBorder: false },
-        ticks: { color: colors.tickColor, font: { size: 11 } },
-        beginAtZero: true,
-      },
+  const option = $derived.by(() => {
+    if (!converted || !spec) return {}
+    const { columns, rows } = converted
+    try {
+      const base = buildOption({
+        type: spec.type ?? 'bar',
+        columns,
+        rows,
+        xCol: spec.x_col ?? columns[0]?.name ?? '',
+        yCol: spec.y_col ?? columns[1]?.name ?? '',
+        zCol: spec.z_col || undefined,
+        groupCol: spec.group_col || undefined,
+        isDark,
+        title: noTitle ? undefined : (spec.title || undefined),
+        noTitle,
+      })
+      // In scroll-zoom (fullscreen) mode, add inside dataZoom for all axis-based charts
+      if (scrollZoom && base && Object.keys(base).length > 0) {
+        return { ...base, dataZoom: [{ type: 'inside', zoomOnMouseWheel: true, moveOnMouseWheel: false }] }
+      }
+      return base
+    } catch {
+      return {}
     }
-
-    return {
-      type: chartType,
-      data: { labels, datasets },
-      options: {
-        responsive: true,
-        // Fill the fixed-height container instead of deriving height from the
-        // aspect ratio. With maintainAspectRatio:true in a non-fixed-height
-        // box, the canvas resize feeds back into the container size and Chart.js
-        // ResizeObserver loops forever, pegging the CPU. resizeDelay debounces
-        // any legitimate resizes.
-        maintainAspectRatio: false,
-        resizeDelay: 100,
-        animation: { duration: 350 },
-        plugins: {
-          legend: {
-            display: isPie || y_keys.length > 1,
-            position: isPie ? 'bottom' : 'top',
-            labels: { color: colors.tickColor, font: { size: 11 }, boxWidth: 12, padding: 12 },
-          },
-          title: {
-            display: !!title,
-            text: title,
-            color: colors.tooltipText,
-            font: { size: 13, weight: '600' },
-            padding: { bottom: 12 },
-          },
-          tooltip: {
-            backgroundColor: colors.tooltipBg,
-            titleColor: colors.tooltipText,
-            bodyColor: colors.tickColor,
-            borderColor: 'rgba(128,128,128,0.2)',
-            borderWidth: 1,
-            padding: 10,
-            cornerRadius: 8,
-          },
-        },
-        scales,
-      },
-    }
-  }
-
-  function buildChart() {
-    if (!canvasEl || !spec?.data?.length) return
-    const colors = getThemeColors()
-    const config = buildChartConfig(spec, colors)
-    chartInstance?.destroy()
-    chartInstance = new Chart(canvasEl, config)
-  }
+  })
 
   $effect(() => {
-    if (spec && canvasEl) {
-      buildChart()
+    const container = el
+    if (!container) return
+    let disposed = false
+    let initializing = false
+
+    async function tryInit() {
+      if (disposed || chart || initializing) return
+      if (container.clientWidth === 0 || container.clientHeight === 0) return
+      initializing = true
+      try {
+        const { init } = await import('echarts')
+        if (disposed) return
+        const instance = init(container, null, {
+          renderer: 'canvas',
+          devicePixelRatio: window.devicePixelRatio || 2,
+        })
+        chart = instance
+        ro = new ResizeObserver((entries) => {
+          const { width, height } = entries[0].contentRect
+          if (width === 0 || height === 0) return
+          instance.resize()
+        })
+        ro.observe(container)
+        // Scroll zoom:
+        // • scrollZoom=true (fullscreen): let ECharts handle all wheel natively — no interception
+        // • inline: Ctrl/Cmd+scroll → synthesize plain wheel for ECharts zoom
+        //           plain scroll   → stopPropagation so browser scrolls the page naturally
+        if (!scrollZoom) {
+          container.addEventListener('wheel', (e) => {
+            if (!e.isTrusted) return
+            e.stopPropagation()
+            if (e.ctrlKey || e.metaKey) {
+              const canvas = container.querySelector('canvas')
+              canvas?.dispatchEvent(new WheelEvent('wheel', {
+                deltaY: e.deltaY, deltaMode: e.deltaMode,
+                clientX: e.clientX, clientY: e.clientY,
+                bubbles: false, cancelable: true,
+              }))
+            }
+          }, { capture: true, passive: false })
+        }
+        // Double-click → restore to initial view
+        container.addEventListener('dblclick', () => {
+          instance.dispatchAction({ type: 'restore' })
+        })
+      } finally {
+        initializing = false
+      }
+    }
+
+    // Defer init until the container is on-screen
+    const io = new IntersectionObserver(
+      (entries) => { if (entries[0].isIntersecting) void tryInit() },
+      { threshold: 0 },
+    )
+    io.observe(container)
+
+    return () => {
+      disposed = true
+      io.disconnect()
+      ro?.disconnect(); ro = null
+      chart?.dispose(); chart = null
     }
   })
 
-  // Rebuild on theme change
-  onMount(() => {
-    const obs = new MutationObserver(() => {
-      if (chartInstance) buildChart()
-    })
-    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-theme'] })
-    return () => obs.disconnect()
+  $effect(() => {
+    const c = chart
+    const o = option
+    if (c && o && Object.keys(o).length > 0) {
+      c.setOption(o, { notMerge: true, lazyUpdate: true })
+    }
   })
 
-  onDestroy(() => {
-    chartInstance?.destroy()
-    chartInstance = null
-  })
+  onDestroy(() => { ro?.disconnect(); chart?.dispose() })
+
+  export function downloadPng(filename = 'chart.png') {
+    const canvas = el?.querySelector('canvas')
+    const img = canvas?.toDataURL?.('image/png')
+    if (!img) { toast.error('Could not export chart'); return }
+    const a = document.createElement('a')
+    a.href = img; a.download = filename; a.click()
+    toast.success('Chart saved as PNG')
+  }
+
+  /** @type {ChoroplethChart|null} */
+  let choroplethRef = $state(null)
+
+  export function resetView() {
+    if (choroplethRef) { choroplethRef.resetView(); return }
+    chart?.dispatchAction({ type: 'restore' })
+  }
+
+  const hasData = $derived((spec?.data?.length ?? 0) > 0)
 </script>
 
-{#if spec?.data?.length}
-  <!-- Fixed height (not max-height) so maintainAspectRatio:false has a definite
-       box to fill and the canvas never feeds its size back into the layout. -->
-  <div class="relative w-full" style="height: 320px;">
-    <canvas bind:this={canvasEl}></canvas>
-  </div>
+{#if spec?.type === 'choropleth'}
+  <ChoroplethChart bind:this={choroplethRef} {spec} {noTitle} {scrollZoom} />
+{:else if spec?.type === 'meter'}
+  <CarbonMeterChart {spec} {noTitle} />
+{:else if hasData}
+  <div bind:this={el} class="h-full w-full"></div>
 {:else}
-  <div class="flex items-center justify-center rounded-lg border border-border bg-muted/20 px-4 py-8 text-sm text-muted-foreground">
-    No data to display
+  <div class="flex items-center justify-center h-full text-ui-xs text-muted-foreground/50">
+    No data
   </div>
 {/if}

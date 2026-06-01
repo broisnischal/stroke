@@ -28,4 +28,4 @@ scripts/.keys.json
 packaging/aur/discerns/src/
 packaging/aur/discerns/pkg/
 packaging/aur/discerns/*.pkg.tar.zst
-packaging/aur/discerns/*.tar.zst
+packaging/aur/discerns/*.tar.zstlogs/

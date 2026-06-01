@@ -3,8 +3,7 @@
 	import DialogPortal from "./dialog-portal.svelte";
 	import * as Dialog from "./index.js";
 	import { cn } from "$lib/utils.js";
-	import { Button } from "$lib/components/ui/button/index.js";
-	import XIcon from '@lucide/svelte/icons/x';
+	import X from '@lucide/svelte/icons/x';
 
 	let {
 		ref = $bindable(null),
@@ -22,7 +21,7 @@
 		bind:ref
 		data-slot="dialog-content"
 		class={cn(
-			"bg-popover text-popover-foreground data-open:animate-in data-closed:animate-out data-closed:fade-out-0 data-open:fade-in-0 data-closed:zoom-out-95 data-open:zoom-in-95 ring-foreground/10 flex max-w-[calc(100%-2rem)] flex-col gap-4 rounded-xl p-4 text-sm ring-1 duration-100 sm:max-w-sm fixed top-1/2 left-1/2 z-50 w-full -translate-x-1/2 -translate-y-1/2 outline-none",
+			"bg-background text-foreground data-open:animate-in data-closed:animate-out data-closed:fade-out-0 data-open:fade-in-0 data-closed:zoom-out-[0.97] data-open:zoom-in-[0.97] flex flex-col gap-4 rounded-2xl border border-border/35 p-5 text-sm shadow-2xl shadow-black/50 duration-150 w-full max-w-[calc(100%-2rem)] fixed top-1/2 left-1/2 z-50 -translate-x-1/2 -translate-y-1/2 outline-none",
 			className
 		)}
 		{...restProps}
@@ -31,10 +30,13 @@
 		{#if showCloseButton}
 			<DialogPrimitive.Close data-slot="dialog-close">
 				{#snippet child({ props })}
-					<Button variant="ghost" class="absolute top-2 right-2" size="icon-sm" {...props}>
-						<XIcon  />
+					<button
+						class="absolute right-3.5 top-3.5 inline-flex size-6 items-center justify-center rounded-lg text-muted-foreground/30 transition-colors hover:bg-muted/50 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+						{...props}
+					>
+						<X class="size-3.5" />
 						<span class="sr-only">Close</span>
-					</Button>
+					</button>
 				{/snippet}
 			</DialogPrimitive.Close>
 		{/if}

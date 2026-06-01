@@ -151,9 +151,9 @@
     <!-- Footer -->
     <div class="flex shrink-0 items-center justify-between border-t border-border/50 px-4 py-2.5">
       <p class="font-mono text-ui-2xs text-muted-foreground/50">
-        <kbd class="rounded border border-border/40 px-1 font-mono text-ui-3xs">⌘↵</kbd> to run
+        <kbd>⌘↵</kbd> to run
         &nbsp;·&nbsp;
-        <kbd class="rounded border border-border/40 px-1 font-mono text-ui-3xs">Esc</kbd> to close
+        <kbd>Esc</kbd> to close
       </p>
       <div class="flex items-center gap-2">
         <button

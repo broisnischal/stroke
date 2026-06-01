@@ -9,11 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
-    svelte({
-      compilerOptions: {
-        runes: true,
-      },
-    }),
+    svelte({ compilerOptions: { runes: true } }),
     tailwindcss(),
   ],
   resolve: {

@@ -4,13 +4,14 @@ import { invoke } from '@tauri-apps/api/core'
 // ── Provider catalogue ───────────────────────────────────────────────────────
 
 export const PROVIDERS = [
-  { id: 'openrouter', label: 'OpenRouter', url: 'https://openrouter.ai/api/v1', keysUrl: 'https://openrouter.ai/keys' },
-  { id: 'openai',     label: 'OpenAI',     url: 'https://api.openai.com/v1', keysUrl: 'https://platform.openai.com/api-keys' },
-  { id: 'anthropic',  label: 'Anthropic',  url: 'https://api.anthropic.com/v1', keysUrl: 'https://console.anthropic.com/settings/keys' },
-  { id: 'mistral',    label: 'Mistral',    url: 'https://api.mistral.ai/v1', keysUrl: 'https://console.mistral.ai/api-keys' },
-  { id: 'google',     label: 'Google',     url: 'https://generativelanguage.googleapis.com/v1beta/openai', keysUrl: 'https://aistudio.google.com/apikey' },
-  { id: 'ollama',     label: 'Ollama',     url: 'http://localhost:11434/v1', keysUrl: null },
-  { id: 'custom',     label: 'Custom',     url: '', keysUrl: null },
+  { id: 'openrouter', label: 'OpenRouter',      url: 'https://openrouter.ai/api/v1', keysUrl: 'https://openrouter.ai/keys' },
+  { id: 'openai',     label: 'OpenAI',           url: 'https://api.openai.com/v1', keysUrl: 'https://platform.openai.com/api-keys' },
+  { id: 'anthropic',  label: 'Anthropic',        url: 'https://api.anthropic.com/v1', keysUrl: 'https://console.anthropic.com/settings/keys' },
+  { id: 'copilot',    label: 'GitHub Copilot',   url: 'https://api.githubcopilot.com', keysUrl: null, deviceFlow: true },
+  { id: 'mistral',    label: 'Mistral',          url: 'https://api.mistral.ai/v1', keysUrl: 'https://console.mistral.ai/api-keys' },
+  { id: 'google',     label: 'Google',           url: 'https://generativelanguage.googleapis.com/v1beta/openai', keysUrl: 'https://aistudio.google.com/apikey' },
+  { id: 'ollama',     label: 'Ollama',           url: 'http://localhost:11434/v1', keysUrl: null },
+  { id: 'custom',     label: 'Custom',           url: '', keysUrl: null },
 ]
 
 /** @type {Record<string, { label: string, model: string, tag: string }[]>} */
@@ -50,6 +51,15 @@ export const PROVIDER_MODELS = {
     { label: 'qwen2.5-coder', model: 'qwen2.5-coder', tag: 'local' },
     { label: 'codellama', model: 'codellama', tag: 'local' },
     { label: 'mistral', model: 'mistral', tag: 'local' },
+  ],
+  // Copilot models are fetched dynamically; these are the static fallback
+  copilot: [
+    { label: 'GPT-4o',             model: 'gpt-4o',               tag: 'smart' },
+    { label: 'GPT-4o mini',        model: 'gpt-4o-mini',          tag: 'fast'  },
+    { label: 'o3-mini',            model: 'o3-mini',              tag: 'smart' },
+    { label: 'Claude 3.5 Sonnet',  model: 'claude-3.5-sonnet',    tag: 'smart' },
+    { label: 'Claude 3.7 Sonnet',  model: 'claude-3.7-sonnet',    tag: 'smart' },
+    { label: 'Gemini 2.0 Flash',   model: 'gemini-2.0-flash-001', tag: 'fast'  },
   ],
   custom: [],
 }
@@ -235,7 +245,11 @@ export const DEFAULT_AI_SETTINGS = { baseUrl: OPENROUTER_BASE_URL, apiKey: '', m
 export function loadAiSettings() { return get(aiSettings) }
 export function saveAiSettings(s) { return setAiSettings(s) }
 export function setAiSettings(s) { aiSettings.set(s); return s }
-export function isAiConfigured(s) { return Boolean(s.apiKey) || /localhost|127\.0\.0\.1/.test(s.baseUrl) }
+export function isAiConfigured(s) {
+  return Boolean(s.apiKey) ||
+    /localhost|127\.0\.0\.1/.test(s.baseUrl) ||
+    (s.baseUrl ?? '').includes('githubcopilot.com')
+}
 
 // Legacy presets (kept for external references, now empty)
 export const AI_PROVIDER_PRESETS = []

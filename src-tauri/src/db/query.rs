@@ -391,6 +391,12 @@ impl PgColumnMeta {
             let type_ref = pg_cast_type_ref(udt_schema, udt_name)?;
             return Ok(format!(r#""{column}" = $1::{type_ref}"#));
         }
+        // json/jsonb bindings arrive as text strings; an explicit cast tells
+        // PostgreSQL to interpret the parameter as json/jsonb instead of text.
+        let norm = normalize_pg_type(&self.data_type);
+        if norm == "json" || norm == "jsonb" {
+            return Ok(format!(r#""{column}" = $1::{norm}"#));
+        }
         if let Some(cast) = pg_datetime_cast(&self.data_type) {
             return Ok(format!(r#""{column}" = $1::{cast}"#));
         }
@@ -406,6 +412,10 @@ impl PgColumnMeta {
             let udt_schema = self.udt_schema.as_deref().unwrap_or("public");
             let type_ref = pg_cast_type_ref(udt_schema, udt_name)?;
             return Ok(format!("${bind_idx}::{type_ref}"));
+        }
+        let norm = normalize_pg_type(&self.data_type);
+        if norm == "json" || norm == "jsonb" {
+            return Ok(format!("${bind_idx}::{norm}"));
         }
         if let Some(cast) = pg_datetime_cast(&self.data_type) {
             return Ok(format!("${bind_idx}::{cast}"));
@@ -501,7 +511,8 @@ struct WhereClause {
 
 struct QueryBuilder {
     /// (conjunct, sql_fragment) — conjunct is None for the first condition.
-    conditions: Vec<(Option<String>, String)>,
+    /// Using &'static str avoids a String allocation per filter for "AND"/"OR".
+    conditions: Vec<(Option<&'static str>, String)>,
     binds: Vec<String>,
 }
 
@@ -521,7 +532,7 @@ impl QueryBuilder {
         let c = if self.conditions.is_empty() {
             None
         } else {
-            Some(conjunct.unwrap_or("AND").to_uppercase())
+            Some(if conjunct.is_some_and(|s| s.eq_ignore_ascii_case("or")) { "OR" } else { "AND" })
         };
         self.conditions.push((c, cond));
     }
@@ -530,13 +541,16 @@ impl QueryBuilder {
         let sql = if self.conditions.is_empty() {
             String::new()
         } else {
-            let parts: Vec<String> = self.conditions.into_iter().map(|(conj, cond)| {
-                match conj {
-                    None => cond,
-                    Some(c) => format!("{c} {cond}"),
+            let mut out = String::from(" WHERE ");
+            for (i, (conj, cond)) in self.conditions.into_iter().enumerate() {
+                if i > 0 {
+                    out.push(' ');
+                    out.push_str(conj.unwrap_or("AND"));
+                    out.push(' ');
                 }
-            }).collect();
-            format!(" WHERE {}", parts.join(" "))
+                out.push_str(&cond);
+            }
+            out
         };
         WhereClause { sql, binds: self.binds }
     }
@@ -707,6 +721,47 @@ fn build_filter_condition(
     Ok(())
 }
 
+/// Build an OR-across-all-columns condition for the `__any__` sentinel.
+/// Binds the pattern value once and references it in every column condition.
+fn build_any_column_condition(
+    builder: &mut QueryBuilder,
+    columns: &[String],
+    op: &str,
+    value: &str,
+    conjunct: Option<&str>,
+) -> Result<(), String> {
+    if columns.is_empty() || value.is_empty() {
+        return Ok(());
+    }
+    let parts: Vec<String> = match op {
+        "contains" => {
+            let p = builder.push_bind(format!("%{}%", escape_ilike_pattern(value)));
+            columns.iter().filter_map(|c| quoted_column(c).ok())
+                .map(|col| format!("{col}::text ILIKE {p} ESCAPE '\\'")).collect()
+        }
+        "starts_with" => {
+            let p = builder.push_bind(format!("{}%", escape_ilike_pattern(value)));
+            columns.iter().filter_map(|c| quoted_column(c).ok())
+                .map(|col| format!("{col}::text ILIKE {p} ESCAPE '\\'")).collect()
+        }
+        "ends_with" => {
+            let p = builder.push_bind(format!("%{}", escape_ilike_pattern(value)));
+            columns.iter().filter_map(|c| quoted_column(c).ok())
+                .map(|col| format!("{col}::text ILIKE {p} ESCAPE '\\'")).collect()
+        }
+        "eq" => {
+            let p = builder.push_bind(value.to_string());
+            columns.iter().filter_map(|c| quoted_column(c).ok())
+                .map(|col| format!("{col}::text = {p}")).collect()
+        }
+        _ => return Err(format!("Unsupported operator for any-column filter: {op}")),
+    };
+    if !parts.is_empty() {
+        builder.push_condition(format!("({})", parts.join(" OR ")), conjunct);
+    }
+    Ok(())
+}
+
 fn build_where(
     columns: &[String],
     search: Option<&str>,
@@ -726,10 +781,19 @@ fn build_where(
     }
 
     for filter in filters {
-        ensure_column(&filter.column, columns)?;
         let op = filter.op.as_str();
-        let conjunct   = filter.conjunct.as_deref();
-        let data_type  = filter.data_type.as_deref();
+        let conjunct = filter.conjunct.as_deref();
+
+        if filter.column == "__any__" {
+            let value = filter.value.as_deref().unwrap_or("").trim();
+            if !value.is_empty() {
+                build_any_column_condition(&mut builder, columns, op, value, conjunct)?;
+            }
+            continue;
+        }
+
+        ensure_column(&filter.column, columns)?;
+        let data_type = filter.data_type.as_deref();
         if op != "is_null" && op != "is_not_null" {
             let value = filter.value.as_deref().unwrap_or("").trim();
             if value.is_empty() {
@@ -793,6 +857,9 @@ pub async fn get_table_rows(
         }
         ActiveConnection::D1(cfg) => {
             return get_table_rows_d1(&cfg, &table, limit, offset, search, sort_column, sort_direction, filters).await;
+        }
+        ActiveConnection::LibSql(cfg) => {
+            return get_table_rows_libsql(&cfg, &table, limit, offset, search, sort_column, sort_direction, filters).await;
         }
         ActiveConnection::Mysql(pool) => {
             return super::mysql::get_table_rows(
@@ -860,14 +927,18 @@ pub async fn get_table_rows(
             .map(|c| ColumnInfo::new(c.name(), pg_type_label(c.type_info().name())))
             .collect()
     } else {
-        let meta = sqlx::query(&format!(
+        let meta = sqlx::query(
             r#"
-            SELECT column_name, data_type
-            FROM information_schema.columns
-            WHERE table_schema = $1 AND table_name = $2
-            ORDER BY ordinal_position
+            SELECT a.attname::text, t.typname::text
+            FROM pg_catalog.pg_attribute a
+            JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+            JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+            JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
+            WHERE n.nspname = $1 AND c.relname = $2
+              AND a.attnum > 0 AND NOT a.attisdropped
+            ORDER BY a.attnum
             "#
-        ))
+        )
         .bind(&schema)
         .bind(&table)
         .fetch_all(&pool)
@@ -878,7 +949,7 @@ pub async fn get_table_rows(
             .filter_map(|r| {
                 Some(ColumnInfo::new(
                     r.try_get::<String, _>(0).ok()?,
-                    r.try_get::<String, _>(1).ok()?.to_lowercase(),
+                    r.try_get::<String, _>(1).ok()?,
                 ))
             })
             .collect()
@@ -928,6 +999,9 @@ pub async fn update_table_cell(
         ActiveConnection::D1(cfg) => {
             return update_table_cell_d1(&cfg, &table, primary_key, &column, &value).await;
         }
+        ActiveConnection::LibSql(cfg) => {
+            return update_table_cell_libsql(&cfg, &table, primary_key, &column, &value).await;
+        }
         ActiveConnection::Mysql(pool) => {
             return super::mysql::update_table_cell(&pool, &schema, &table, primary_key, &column, &value).await;
         }
@@ -952,9 +1026,18 @@ pub async fn update_table_cell(
 
     let meta_rows = sqlx::query(
         r#"
-        SELECT column_name::text, data_type::text, udt_schema::text, udt_name::text
-        FROM information_schema.columns
-        WHERE table_schema = $1 AND table_name = $2
+        SELECT
+            a.attname::text,
+            CASE WHEN t.typtype IN ('e','c','d') THEN 'USER-DEFINED' ELSE t.typname::text END,
+            tn.nspname::text,
+            t.typname::text
+        FROM pg_catalog.pg_attribute a
+        JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
+        JOIN pg_catalog.pg_namespace tn ON tn.oid = t.typnamespace
+        WHERE n.nspname = $1 AND c.relname = $2
+          AND a.attnum > 0 AND NOT a.attisdropped
         "#,
     )
     .bind(&schema)
@@ -1042,6 +1125,10 @@ pub async fn insert_table_row(
             let row = insert_table_row_d1(&cfg, &table, values).await?;
             return Ok(InsertRowResult { row });
         }
+        ActiveConnection::LibSql(cfg) => {
+            let row = insert_table_row_libsql(&cfg, &table, values).await?;
+            return Ok(InsertRowResult { row });
+        }
         ActiveConnection::Mysql(pool) => {
             let row = super::mysql::insert_table_row(&pool, &schema, &table, values).await?;
             return Ok(InsertRowResult { row });
@@ -1056,16 +1143,22 @@ pub async fn insert_table_row(
     let meta_rows = sqlx::query(
         r#"
         SELECT
-            column_name::text,
-            data_type::text,
-            is_nullable::text,
-            column_default::text,
-            is_identity::text,
-            udt_schema::text,
-            udt_name::text
-        FROM information_schema.columns
-        WHERE table_schema = $1 AND table_name = $2
-        ORDER BY ordinal_position
+            a.attname::text,
+            CASE WHEN t.typtype IN ('e','c','d') THEN 'USER-DEFINED' ELSE t.typname::text END,
+            NOT a.attnotnull,
+            pg_get_expr(ad.adbin, ad.adrelid),
+            a.attidentity IN ('a', 'd'),
+            tn.nspname::text,
+            t.typname::text
+        FROM pg_catalog.pg_attribute a
+        JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
+        JOIN pg_catalog.pg_namespace tn ON tn.oid = t.typnamespace
+        LEFT JOIN pg_catalog.pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
+        WHERE n.nspname = $1 AND c.relname = $2
+          AND a.attnum > 0 AND NOT a.attisdropped
+        ORDER BY a.attnum
         "#,
     )
     .bind(&schema)
@@ -1086,15 +1179,9 @@ pub async fn insert_table_row(
             .try_get(0)
             .map_err(|e| format!("Invalid column name: {e}"))?;
         let data_type: String = row.try_get(1).unwrap_or_else(|_| "text".into());
-        let is_nullable = row
-            .try_get::<String, _>(2)
-            .map(|s| s.eq_ignore_ascii_case("YES"))
-            .unwrap_or(true);
+        let is_nullable = row.try_get::<bool, _>(2).unwrap_or(true);
         let column_default: Option<String> = row.try_get(3).ok();
-        let is_identity = row
-            .try_get::<String, _>(4)
-            .map(|s| s.eq_ignore_ascii_case("YES"))
-            .unwrap_or(false);
+        let is_identity = row.try_get::<bool, _>(4).unwrap_or(false);
         let optional =
             pg_column_optional_when_omitted(is_nullable, column_default.as_deref(), is_identity, &data_type);
 
@@ -1208,6 +1295,9 @@ pub async fn delete_table_rows(
         ActiveConnection::D1(cfg) => {
             return delete_table_rows_d1(&cfg, &table, primary_keys).await;
         }
+        ActiveConnection::LibSql(cfg) => {
+            return delete_table_rows_libsql(&cfg, &table, primary_keys).await;
+        }
         ActiveConnection::Mysql(pool) => {
             return super::mysql::delete_table_rows(&pool, &schema, &table, primary_keys).await;
         }
@@ -1237,9 +1327,13 @@ pub async fn delete_table_rows(
 
     let meta_rows = sqlx::query(
         r#"
-        SELECT column_name::text, data_type::text
-        FROM information_schema.columns
-        WHERE table_schema = $1 AND table_name = $2
+        SELECT a.attname::text, t.typname::text
+        FROM pg_catalog.pg_attribute a
+        JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
+        WHERE n.nspname = $1 AND c.relname = $2
+          AND a.attnum > 0 AND NOT a.attisdropped
         "#,
     )
     .bind(&schema)
@@ -1388,6 +1482,32 @@ fn is_row_returning_sql(sql: &str) -> bool {
     )
 }
 
+/// Execute a single DDL statement that must run outside a transaction (e.g. CREATE DATABASE).
+/// Only supported on PostgreSQL and MySQL; executes directly on the connection pool.
+pub async fn execute_ddl(state: State<'_, DbState>, sql: String) -> Result<(), String> {
+    let sql_str = sql.trim();
+    if sql_str.is_empty() {
+        return Err("Statement is empty".into());
+    }
+    match require_conn(&state)? {
+        ActiveConnection::Postgres(pool) => {
+            sqlx::query(sql_str)
+                .execute(&pool)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(())
+        }
+        ActiveConnection::Mysql(pool) => {
+            sqlx::query(sql_str)
+                .execute(&pool)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(())
+        }
+        _ => Err("DDL execution outside a transaction is only supported for PostgreSQL and MySQL".into()),
+    }
+}
+
 pub async fn execute_sql(state: State<'_, DbState>, sql: String) -> Result<SqlResult, String> {
     let sql_str = sql.trim();
     if sql_str.is_empty() {
@@ -1397,6 +1517,7 @@ pub async fn execute_sql(state: State<'_, DbState>, sql: String) -> Result<SqlRe
         ActiveConnection::Postgres(pool) => execute_sql_pg(&pool, sql_str).await,
         ActiveConnection::Sqlite(pool) => super::sqlite::execute_sql(&pool, sql_str).await,
         ActiveConnection::D1(cfg) => super::d1::query(&cfg, sql_str, vec![]).await,
+        ActiveConnection::LibSql(cfg) => super::libsql::query(&cfg, sql_str, vec![]).await,
         ActiveConnection::Mysql(pool) => super::mysql::execute_sql(&pool, sql_str).await,
     }
 }
@@ -1518,6 +1639,137 @@ async fn execute_sql_pg(pool: &sqlx::PgPool, sql: &str) -> Result<SqlResult, Str
     })
 }
 
+async fn execute_sql_multi_pg(pool: &sqlx::PgPool, sql: &str) -> Result<Vec<SqlResult>, String> {
+    let started = std::time::Instant::now();
+
+    let stmts: Vec<&str> = sql
+        .split(';')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if stmts.is_empty() {
+        return Err("Query is empty".into());
+    }
+
+    // Single statement — delegate to existing path (avoids code duplication)
+    if stmts.len() == 1 {
+        return execute_sql_pg(pool, stmts[0]).await.map(|r| vec![r]);
+    }
+
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| format!("Failed to begin transaction: {e}"))?;
+
+    let _ = sqlx::query(&format!("SET LOCAL statement_timeout = {EXECUTE_SQL_TIMEOUT_MS}"))
+        .execute(&mut *tx)
+        .await;
+
+    let _ = started; // suppress unused warning; per-stmt timers used below
+    let mut results: Vec<SqlResult> = Vec::new();
+
+    for stmt in &stmts {
+        let stmt_started = std::time::Instant::now();
+        let stmt_ms = || stmt_started.elapsed().as_millis() as u64;
+
+        if is_row_returning_sql(stmt) {
+            let mut stream = sqlx::query(stmt).fetch(&mut *tx);
+            let mut pg_rows: Vec<sqlx::postgres::PgRow> = Vec::new();
+            let mut capped = false;
+
+            loop {
+                match stream.try_next().await {
+                    Ok(Some(row)) => {
+                        pg_rows.push(row);
+                        if pg_rows.len() >= EXECUTE_SQL_MAX_ROWS {
+                            capped = true;
+                            break;
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(e) => {
+                        drop(stream);
+                        let _ = tx.rollback().await;
+                        return Err(format!("Query failed: {e}"));
+                    }
+                }
+            }
+            drop(stream);
+
+            let columns: Vec<ColumnInfo> = pg_rows
+                .first()
+                .map(|r| {
+                    r.columns()
+                        .iter()
+                        .map(|c| ColumnInfo::new(c.name(), pg_type_label(c.type_info().name())))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let data: Vec<Vec<Value>> = pg_rows
+                .iter()
+                .map(|row| (0..row.len()).map(|i| cell_to_json(row, i)).collect())
+                .collect();
+
+            let row_count = data.len() as i64;
+            results.push(SqlResult {
+                columns,
+                rows: data,
+                row_count: Some(row_count),
+                message: if capped {
+                    Some(format!("Showing first {EXECUTE_SQL_MAX_ROWS} rows"))
+                } else {
+                    None
+                },
+                query_ms: stmt_ms(),
+            });
+        } else {
+            match sqlx::query(stmt).execute(&mut *tx).await {
+                Ok(result) => {
+                    let affected = result.rows_affected() as i64;
+                    results.push(SqlResult {
+                        columns: vec![],
+                        rows: vec![],
+                        row_count: Some(affected),
+                        message: Some(format!("{affected} row(s) affected")),
+                        query_ms: stmt_ms(),
+                    });
+                }
+                Err(e) => {
+                    let _ = tx.rollback().await;
+                    return Err(format!("Statement failed: {e}"));
+                }
+            }
+        }
+    }
+
+    let _ = tx.commit().await;
+    Ok(results)
+}
+
+pub async fn execute_sql_multi(state: State<'_, DbState>, sql: String) -> Result<Vec<SqlResult>, String> {
+    let sql_str = sql.trim();
+    if sql_str.is_empty() {
+        return Err("Query is empty".into());
+    }
+    match require_conn(&state)? {
+        ActiveConnection::Postgres(pool) => execute_sql_multi_pg(&pool, sql_str).await,
+        ActiveConnection::Sqlite(pool) => {
+            super::sqlite::execute_sql(&pool, sql_str).await.map(|r| vec![r])
+        }
+        ActiveConnection::D1(cfg) => {
+            super::d1::query(&cfg, sql_str, vec![]).await.map(|r| vec![r])
+        }
+        ActiveConnection::LibSql(cfg) => {
+            super::libsql::query(&cfg, sql_str, vec![]).await.map(|r| vec![r])
+        }
+        ActiveConnection::Mysql(pool) => {
+            super::mysql::execute_sql(&pool, sql_str).await.map(|r| vec![r])
+        }
+    }
+}
+
 // ── D1 helpers (thin wrappers that build SQLite-compatible SQL) ───────────────
 
 async fn get_table_rows_d1(
@@ -1585,7 +1837,7 @@ async fn get_table_rows_d1(
 
     // ── WHERE / ORDER build ───────────────────────────────────────────────────
     // Each entry: (conjunct — None for first, Some("AND"/"OR") for rest, condition SQL)
-    let mut cond_parts: Vec<(Option<String>, String)> = vec![];
+    let mut cond_parts: Vec<(Option<&'static str>, String)> = vec![];
     let mut params: Vec<Value> = vec![];
 
     if let Some(ref s) = search {
@@ -1600,9 +1852,25 @@ async fn get_table_rows_d1(
     }
     if let Some(ref fs) = filters {
         for f in fs {
+            let conj: Option<&'static str> = if cond_parts.is_empty() { None }
+                else if f.conjunct.as_deref().is_some_and(|s| s.eq_ignore_ascii_case("or")) { Some("OR") }
+                else { Some("AND") };
+
+            if f.column == "__any__" {
+                if let Some(ref v) = f.value {
+                    let v = v.trim();
+                    if !v.is_empty() && !col_names.is_empty() {
+                        let (parts, extra) = super::sqlite::build_any_column_d1(&col_names, &f.op, v);
+                        if !parts.is_empty() {
+                            cond_parts.push((conj, format!("({})", parts.join(" OR "))));
+                            params.extend(extra);
+                        }
+                    }
+                }
+                continue;
+            }
+
             let qcol = format!("\"{}\"", f.column.replace('"', "\"\""));
-            let conj = if cond_parts.is_empty() { None }
-                       else { Some(f.conjunct.as_deref().unwrap_or("and").to_uppercase()) };
             match f.op.as_str() {
                 "is_null"     => cond_parts.push((conj, format!("{qcol} IS NULL"))),
                 "is_not_null" => cond_parts.push((conj, format!("{qcol} IS NOT NULL"))),
@@ -1615,10 +1883,12 @@ async fn get_table_rows_d1(
         }
     }
     let where_clause = if cond_parts.is_empty() { String::new() } else {
-        let parts: Vec<String> = cond_parts.into_iter().map(|(c, s)| {
-            match c { None => s, Some(conj) => format!("{conj} {s}") }
-        }).collect();
-        format!("WHERE {}", parts.join(" "))
+        let mut out = String::from("WHERE ");
+        for (i, (conj, cond)) in cond_parts.into_iter().enumerate() {
+            if i > 0 { out.push(' '); out.push_str(conj.unwrap_or("AND")); out.push(' '); }
+            out.push_str(&cond);
+        }
+        out
     };
 
     let order_clause = if let Some(col) = sort_column {
@@ -1799,6 +2069,250 @@ async fn delete_table_rows_d1(
     for pk_map in primary_keys {
         let params: Vec<Value> = pk.iter().map(|(_, c)| pk_map.get(c).cloned().unwrap_or(Value::Null)).collect();
         let res = d1q(cfg, &sql, params).await?;
+        total += res.row_count.unwrap_or(0).max(0) as u64;
+    }
+    Ok(total)
+}
+
+// ── LibSQL helpers (mirrors D1 helpers; calls libsql::query instead of d1::query) ──
+
+async fn get_table_rows_libsql(
+    cfg: &super::connection::LibSqlConfig,
+    table: &str,
+    limit: i64,
+    offset: i64,
+    search: Option<String>,
+    sort_column: Option<String>,
+    sort_direction: Option<String>,
+    filters: Option<Vec<RowFilter>>,
+) -> Result<TableRows, String> {
+    use super::libsql::query as lq;
+    let t0 = std::time::Instant::now();
+    let tq = format!("\"{}\"", table.replace('"', "\"\""));
+
+    let pragma_sql = format!("PRAGMA table_info({tq})");
+    let fk_sql     = format!("PRAGMA foreign_key_list({tq})");
+    let (pragma_res, fk_res) = tokio::join!(lq(cfg, &pragma_sql, vec![]), lq(cfg, &fk_sql, vec![]));
+    let pragma = pragma_res?;
+    let fk_res = fk_res?;
+
+    let name_idx = pragma.columns.iter().position(|c| c.name == "name").unwrap_or(1);
+    let pk_idx   = pragma.columns.iter().position(|c| c.name == "pk").unwrap_or(5);
+
+    let col_names: Vec<String> = pragma.rows.iter()
+        .filter_map(|r| r.get(name_idx)?.as_str().map(|s| s.to_string()))
+        .collect();
+
+    let mut pk: Vec<(i64, String)> = pragma.rows.iter().filter_map(|r| {
+        let pos = r.get(pk_idx)?.as_i64().unwrap_or(0);
+        if pos == 0 { return None; }
+        let n = r.get(name_idx)?.as_str()?.to_string();
+        Some((pos, n))
+    }).collect();
+    pk.sort_by_key(|(p, _)| *p);
+    let primary_key: Vec<String> = pk.into_iter().map(|(_, n)| n).collect();
+
+    let mut fk_map: std::collections::BTreeMap<i64, ForeignKeyInfo> = Default::default();
+    if let (Some(id_col), Some(tbl_col), Some(from_col), Some(to_col)) = (
+        fk_res.columns.iter().position(|c| c.name == "id"),
+        fk_res.columns.iter().position(|c| c.name == "table"),
+        fk_res.columns.iter().position(|c| c.name == "from"),
+        fk_res.columns.iter().position(|c| c.name == "to"),
+    ) {
+        for r in &fk_res.rows {
+            let id = r.get(id_col).and_then(|v| v.as_i64()).unwrap_or(0);
+            let ref_tbl = r.get(tbl_col).and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let from = r.get(from_col).and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let to = r.get(to_col).and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let e = fk_map.entry(id).or_insert(ForeignKeyInfo {
+                columns: vec![], referenced_schema: "main".to_string(),
+                referenced_table: ref_tbl, referenced_columns: vec![],
+            });
+            e.columns.push(from);
+            e.referenced_columns.push(to);
+        }
+    }
+    let foreign_keys: Vec<ForeignKeyInfo> = fk_map.into_values().collect();
+
+    let mut cond_parts: Vec<(Option<&'static str>, String)> = vec![];
+    let mut params: Vec<Value> = vec![];
+
+    if let Some(ref s) = search {
+        if !s.is_empty() && !col_names.is_empty() {
+            let escaped = super::sqlite::escape_like(s);
+            let parts: Vec<String> = col_names.iter()
+                .map(|c| format!("LOWER(CAST(\"{}\" AS TEXT)) LIKE LOWER(?) ESCAPE '\\'", c.replace('"', "\"\"")))
+                .collect();
+            cond_parts.push((None, format!("({})", parts.join(" OR "))));
+            for _ in &col_names { params.push(Value::String(format!("%{escaped}%"))); }
+        }
+    }
+    if let Some(ref fs) = filters {
+        for f in fs {
+            let conj: Option<&'static str> = if cond_parts.is_empty() { None }
+                else if f.conjunct.as_deref().is_some_and(|s| s.eq_ignore_ascii_case("or")) { Some("OR") }
+                else { Some("AND") };
+            if f.column == "__any__" {
+                if let Some(ref v) = f.value {
+                    let v = v.trim();
+                    if !v.is_empty() && !col_names.is_empty() {
+                        let (parts, extra) = super::sqlite::build_any_column_d1(&col_names, &f.op, v);
+                        if !parts.is_empty() {
+                            cond_parts.push((conj, format!("({})", parts.join(" OR "))));
+                            params.extend(extra);
+                        }
+                    }
+                }
+                continue;
+            }
+            let qcol = format!("\"{}\"", f.column.replace('"', "\"\""));
+            match f.op.as_str() {
+                "is_null"     => cond_parts.push((conj, format!("{qcol} IS NULL"))),
+                "is_not_null" => cond_parts.push((conj, format!("{qcol} IS NOT NULL"))),
+                _ => if let Some(ref v) = f.value {
+                    let (cond, bp) = super::sqlite::build_d1_filter(&qcol, &f.op, v);
+                    cond_parts.push((conj, cond));
+                    params.extend(bp);
+                },
+            }
+        }
+    }
+    let where_clause = if cond_parts.is_empty() { String::new() } else {
+        let mut out = String::from("WHERE ");
+        for (i, (conj, cond)) in cond_parts.into_iter().enumerate() {
+            if i > 0 { out.push(' '); out.push_str(conj.unwrap_or("AND")); out.push(' '); }
+            out.push_str(&cond);
+        }
+        out
+    };
+    let order_clause = if let Some(col) = sort_column {
+        let dir = match sort_direction.as_deref() { Some("desc") => "DESC", _ => "ASC" };
+        format!("ORDER BY \"{}\" {dir}", col.replace('"', "\"\""))
+    } else { String::new() };
+
+    let count_sql = format!("SELECT COUNT(*) FROM {tq} {where_clause}");
+    let rows_sql  = format!("SELECT * FROM {tq} {where_clause} {order_clause} LIMIT ? OFFSET ?");
+    let mut row_params = params.clone();
+    row_params.push(Value::Number(limit.into()));
+    row_params.push(Value::Number(offset.into()));
+
+    let (count_res, rows_res) = tokio::join!(lq(cfg, &count_sql, params), lq(cfg, &rows_sql, row_params));
+    let count_res = count_res?;
+    let rows_res  = rows_res?;
+    let total = count_res.rows.first().and_then(|r| r.first()).and_then(|v| v.as_i64()).unwrap_or(0);
+
+    Ok(TableRows {
+        columns: rows_res.columns,
+        rows: rows_res.rows,
+        total,
+        query_ms: t0.elapsed().as_millis() as u64,
+        primary_key,
+        foreign_keys,
+    })
+}
+
+async fn update_table_cell_libsql(
+    cfg: &super::connection::LibSqlConfig,
+    table: &str,
+    primary_key: HashMap<String, Value>,
+    column: &str,
+    value: &Value,
+) -> Result<(), String> {
+    use super::libsql::query as lq;
+    let pragma = lq(cfg, &format!("PRAGMA table_info(\"{}\")", table.replace('"', "\"\"")), vec![]).await?;
+    let name_idx = pragma.columns.iter().position(|c| c.name == "name").unwrap_or(1);
+    let pk_idx   = pragma.columns.iter().position(|c| c.name == "pk").unwrap_or(5);
+    let mut pk: Vec<(i64, String)> = pragma.rows.iter().filter_map(|r| {
+        let pos = r.get(pk_idx)?.as_i64().unwrap_or(0);
+        if pos == 0 { return None; }
+        Some((pos, r.get(name_idx)?.as_str()?.to_string()))
+    }).collect();
+    pk.sort_by_key(|(p, _)| *p);
+    if pk.is_empty() { return Err("Cannot update row: table has no primary key".into()); }
+
+    let tq = format!("\"{}\"", table.replace('"', "\"\""));
+    let set_col = format!("\"{}\"", column.replace('"', "\"\""));
+    let where_parts: Vec<String> = pk.iter().map(|(_, c)| format!("\"{}\" = ?", c.replace('"', "\"\""))).collect();
+    let sql = format!("UPDATE {tq} SET {set_col} = ? WHERE {}", where_parts.join(" AND "));
+
+    let mut params = vec![value.clone()];
+    for (_, col) in &pk { params.push(primary_key.get(col).cloned().unwrap_or(Value::Null)); }
+    lq(cfg, &sql, params).await?;
+    Ok(())
+}
+
+async fn insert_table_row_libsql(
+    cfg: &super::connection::LibSqlConfig,
+    table: &str,
+    values: HashMap<String, Value>,
+) -> Result<Vec<Value>, String> {
+    use super::libsql::query as lq;
+    let tq = format!("\"{}\"", table.replace('"', "\"\""));
+    let pragma = lq(cfg, &format!("PRAGMA table_info({tq})"), vec![]).await?;
+    let name_idx = pragma.columns.iter().position(|c| c.name == "name").unwrap_or(1);
+    let type_idx = pragma.columns.iter().position(|c| c.name == "type").unwrap_or(2);
+    let notnull_idx = pragma.columns.iter().position(|c| c.name == "notnull").unwrap_or(3);
+    let dflt_idx = pragma.columns.iter().position(|c| c.name == "dflt_value").unwrap_or(4);
+    let pk_idx = pragma.columns.iter().position(|c| c.name == "pk").unwrap_or(5);
+
+    let mut column_order: Vec<String> = Vec::new();
+    let mut optional: HashMap<String, bool> = HashMap::new();
+    for r in &pragma.rows {
+        let name = r.get(name_idx).and_then(|v| v.as_str()).ok_or("Invalid PRAGMA row")?.to_string();
+        let col_type = r.get(type_idx).and_then(|v| v.as_str()).unwrap_or("text");
+        let notnull = r.get(notnull_idx).and_then(|v| v.as_i64()).unwrap_or(0) != 0;
+        let dflt = r.get(dflt_idx).and_then(|v| v.as_str());
+        let pk = r.get(pk_idx).and_then(|v| v.as_i64()).unwrap_or(0);
+        let opt = super::sqlite::sqlite_column_optional_when_omitted(notnull, dflt, pk, col_type);
+        column_order.push(name.clone());
+        optional.insert(name, opt);
+    }
+    for col in values.keys() {
+        if !optional.contains_key(col) { return Err(format!("Unknown column: {col}")); }
+    }
+    for (name, &opt) in &optional {
+        if !opt && !values.contains_key(name) { return Err(format!("Column \"{name}\" is required")); }
+    }
+
+    let mut col_names: Vec<String> = values.keys().cloned().collect();
+    col_names.sort();
+    let cols: Vec<String> = col_names.iter().map(|c| format!("\"{}\"", c.replace('"', "\"\""))).collect();
+    let placeholders: Vec<String> = (0..col_names.len()).map(|_| "?".to_string()).collect();
+    let sql = format!("INSERT INTO {tq} ({}) VALUES ({}) RETURNING *", cols.join(", "), placeholders.join(", "));
+    let params: Vec<Value> = col_names.iter().map(|c| values.get(c).cloned().unwrap_or(Value::Null)).collect();
+    let res = lq(cfg, &sql, params).await?;
+    let row = res.rows.first().ok_or("Insert succeeded but RETURNING returned no row")?;
+    Ok(column_order.iter().map(|name| {
+        let idx = res.columns.iter().position(|c| c.name == *name).unwrap_or(0);
+        row.get(idx).cloned().unwrap_or(Value::Null)
+    }).collect())
+}
+
+async fn delete_table_rows_libsql(
+    cfg: &super::connection::LibSqlConfig,
+    table: &str,
+    primary_keys: Vec<HashMap<String, Value>>,
+) -> Result<u64, String> {
+    use super::libsql::query as lq;
+    if primary_keys.is_empty() { return Ok(0); }
+    let pragma = lq(cfg, &format!("PRAGMA table_info(\"{}\")", table.replace('"', "\"\"")), vec![]).await?;
+    let name_idx = pragma.columns.iter().position(|c| c.name == "name").unwrap_or(1);
+    let pk_idx   = pragma.columns.iter().position(|c| c.name == "pk").unwrap_or(5);
+    let mut pk: Vec<(i64, String)> = pragma.rows.iter().filter_map(|r| {
+        let pos = r.get(pk_idx)?.as_i64().unwrap_or(0);
+        if pos == 0 { return None; }
+        Some((pos, r.get(name_idx)?.as_str()?.to_string()))
+    }).collect();
+    pk.sort_by_key(|(p, _)| *p);
+    if pk.is_empty() { return Err("Cannot delete rows: table has no primary key".into()); }
+
+    let tq = format!("\"{}\"", table.replace('"', "\"\""));
+    let where_parts: Vec<String> = pk.iter().map(|(_, c)| format!("\"{}\" = ?", c.replace('"', "\"\""))).collect();
+    let sql = format!("DELETE FROM {tq} WHERE {}", where_parts.join(" AND "));
+    let mut total = 0u64;
+    for pk_map in primary_keys {
+        let params: Vec<Value> = pk.iter().map(|(_, c)| pk_map.get(c).cloned().unwrap_or(Value::Null)).collect();
+        let res = lq(cfg, &sql, params).await?;
         total += res.row_count.unwrap_or(0).max(0) as u64;
     }
     Ok(total)

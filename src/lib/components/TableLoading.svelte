@@ -1,5 +1,6 @@
 <script>
   import { cn } from '$lib/utils.js'
+  import Loader from '@lucide/svelte/icons/loader'
 
   let { embedded = false } = $props()
 
@@ -29,21 +30,8 @@
   role="status"
   aria-label="Loading"
 >
-  <div class="flex flex-col items-center gap-3">
-    <span class="inline-flex gap-1.5" aria-hidden="true">
-      <span
-        class="size-1.5 animate-bounce rounded-full bg-muted-foreground/60"
-        style="animation-delay: 0ms"
-      ></span>
-      <span
-        class="size-1.5 animate-bounce rounded-full bg-muted-foreground/60"
-        style="animation-delay: 150ms"
-      ></span>
-      <span
-        class="size-1.5 animate-bounce rounded-full bg-muted-foreground/60"
-        style="animation-delay: 300ms"
-      ></span>
-    </span>
-    <p class="font-mono text-ui-sm text-muted-foreground">{message}</p>
+  <div class="flex flex-col items-center gap-2.5">
+    <Loader class="size-5 animate-spin text-muted-foreground/50" aria-hidden="true" />
+    <p class="font-mono text-ui-sm text-muted-foreground/70">{message}</p>
   </div>
 </div>

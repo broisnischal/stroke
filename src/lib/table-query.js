@@ -1,3 +1,6 @@
+/** Sentinel used when the filter should match across every column. */
+export const ANY_COLUMN = '__any__'
+
 /** @typedef {'asc' | 'desc'} SortDirection */
 
 /** @typedef {{ column: string, direction: SortDirection }} TableSort */
@@ -61,6 +64,8 @@ export function activeFilters(filters) {
     if (!f.column) return false
     const op = FILTER_OPS.find((o) => o.value === f.op)
     if (!op) return false
+    // any-column only makes sense with a value; null-checks don't apply
+    if (f.column === ANY_COLUMN) return op.needsValue && f.value.trim().length > 0
     if (!op.needsValue) return true
     return f.value.trim().length > 0
   })
@@ -81,7 +86,7 @@ export function filtersForApi(filters, columns) {
     op,
     value: value.trim() || undefined,
     conjunct: i === 0 ? undefined : (conjunct ?? 'and'),
-    dataType: typeMap[column] || undefined,
+    dataType: column !== ANY_COLUMN ? (typeMap[column] || undefined) : undefined,
   }))
 }
 

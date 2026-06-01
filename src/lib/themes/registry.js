@@ -1,6 +1,6 @@
 /** @typedef {'light' | 'studio' | 'product' | 'editor' | 'classic' | 'mono'} ThemeGroup */
 
-/** @typedef {'light' | 'notion' | 'github-light' | 'vscode-light' | 'linear-light' | 'broisnees-light' | 'linear' | 'cursor' | 'raycast' | 'vercel' | 'vscode' | 'github' | 'onedark' | 'catppuccin' | 'rosepine' | 'tokyonight' | 'gruvbox' | 'monokai' | 'ayu' | 'dark' | 'vitesse' | 'midnight' | 'slate' | 'nord' | 'dracula' | 'forest' | 'solarized' | 'broisnees'} ThemeId */
+/** @typedef {'light' | 'parchment' | 'ice' | 'rose' | 'catppuccin-latte' | 'rosepine-dawn' | 'notion' | 'github-light' | 'vscode-light' | 'linear-light' | 'broisnees-light' | 'linear' | 'cursor' | 'raycast' | 'vercel' | 'vscode' | 'github' | 'onedark' | 'catppuccin' | 'rosepine' | 'tokyonight' | 'gruvbox' | 'monokai' | 'ayu' | 'kanagawa' | 'dark' | 'vitesse' | 'midnight' | 'slate' | 'obsidian' | 'espresso' | 'nord' | 'dracula' | 'forest' | 'solarized' | 'broisnees'} ThemeId */
 
 /** @typedef {{ id: ThemeId, name: string, description: string, isDark: boolean, group: ThemeGroup, preview: { bg: string, fg: string, accent: string } }} ThemeDefinition */
 
@@ -76,6 +76,46 @@ export const APP_THEMES = [
     isDark: false,
     group: 'light',
     preview: { bg: '#ffffff', fg: '#3f3f46', accent: '#5e6ad2' },
+  },
+  {
+    id: 'parchment',
+    name: 'Parchment',
+    description: 'Warm cream paper',
+    isDark: false,
+    group: 'light',
+    preview: { bg: '#faf7f0', fg: '#2d2416', accent: '#4a3d8f' },
+  },
+  {
+    id: 'ice',
+    name: 'Ice',
+    description: 'Cool pale blue',
+    isDark: false,
+    group: 'light',
+    preview: { bg: '#f2f5fc', fg: '#0f1a2e', accent: '#3b6fd4' },
+  },
+  {
+    id: 'rose',
+    name: 'Rosé',
+    description: 'Soft blush pink',
+    isDark: false,
+    group: 'light',
+    preview: { bg: '#fff4f4', fg: '#2a1518', accent: '#c0375c' },
+  },
+  {
+    id: 'catppuccin-latte',
+    name: 'Catppuccin Latte',
+    description: 'Pastel light',
+    isDark: false,
+    group: 'light',
+    preview: { bg: '#eff1f5', fg: '#4c4f69', accent: '#8839ef' },
+  },
+  {
+    id: 'rosepine-dawn',
+    name: 'Rose Pine Dawn',
+    description: 'Warm rose light',
+    isDark: false,
+    group: 'light',
+    preview: { bg: '#faf4ed', fg: '#575279', accent: '#907aa9' },
   },
   {
     id: 'linear',
@@ -212,6 +252,30 @@ export const APP_THEMES = [
     isDark: true,
     group: 'studio',
     preview: { bg: '#1a1a1f', fg: '#e4e4e7', accent: '#a78bfa' },
+  },
+  {
+    id: 'obsidian',
+    name: 'Obsidian',
+    description: 'Black + emerald',
+    isDark: true,
+    group: 'studio',
+    preview: { bg: '#181818', fg: '#e8e8e8', accent: '#4ade80' },
+  },
+  {
+    id: 'espresso',
+    name: 'Espresso',
+    description: 'Warm dark brown',
+    isDark: true,
+    group: 'studio',
+    preview: { bg: '#1d1710', fg: '#e8dcc8', accent: '#d4973a' },
+  },
+  {
+    id: 'kanagawa',
+    name: 'Kanagawa',
+    description: 'Neovim Wave',
+    isDark: true,
+    group: 'editor',
+    preview: { bg: '#1f1f28', fg: '#dcd7ba', accent: '#7e9cd8' },
   },
   {
     id: 'nord',
@@ -511,6 +575,70 @@ export function mermaidThemeFor(id) {
       line: '#e5e5e5',
       accent: '#0a0a0a',
       border: '#e5e5e5',
+    },
+    parchment: {
+      bg: '#faf7f0',
+      fg: '#2d2416',
+      muted: '#7a6e5a',
+      line: '#d6cec0',
+      accent: '#4a3d8f',
+      border: '#c8bfae',
+    },
+    ice: {
+      bg: '#f2f5fc',
+      fg: '#0f1a2e',
+      muted: '#6a7a9a',
+      line: '#ccd5ea',
+      accent: '#3b6fd4',
+      border: '#bcc8e0',
+    },
+    rose: {
+      bg: '#fff4f4',
+      fg: '#2a1518',
+      muted: '#8a6070',
+      line: '#f0ccd0',
+      accent: '#c0375c',
+      border: '#e8b8c0',
+    },
+    'catppuccin-latte': {
+      bg: '#eff1f5',
+      fg: '#4c4f69',
+      muted: '#9ca0b0',
+      line: '#ccd0da',
+      accent: '#8839ef',
+      border: '#bcc0cc',
+    },
+    'rosepine-dawn': {
+      bg: '#faf4ed',
+      fg: '#575279',
+      muted: '#9893a5',
+      line: '#dfdad9',
+      accent: '#907aa9',
+      border: '#d4d0cc',
+    },
+    obsidian: {
+      bg: '#181818',
+      fg: '#e8e8e8',
+      muted: '#666666',
+      line: '#282828',
+      accent: '#4ade80',
+      border: '#2a2a2a',
+    },
+    espresso: {
+      bg: '#1d1710',
+      fg: '#e8dcc8',
+      muted: '#8a7a60',
+      line: '#3a2e20',
+      accent: '#d4973a',
+      border: '#302518',
+    },
+    kanagawa: {
+      bg: '#1f1f28',
+      fg: '#dcd7ba',
+      muted: '#727169',
+      line: '#363646',
+      accent: '#7e9cd8',
+      border: '#2a2a37',
     },
   }
   return map[id]

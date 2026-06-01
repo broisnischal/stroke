@@ -33,6 +33,8 @@
     onmodshifte = undefined,
     onmodshiftd = undefined,
     onmodshifto = undefined,
+    onmodj = undefined,
+    onmodshiftb = undefined,
     /** @param {string} content */
     onchange = undefined,
     /** @type {(actions: { format: () => Promise<void> }) => void} */
@@ -51,16 +53,24 @@
   /** @param {monaco.editor.IStandaloneCodeEditor} ed */
   function registerAppShortcuts(ed) {
     const { CtrlCmd, Shift } = monaco.KeyMod
-    const { KeyK, KeyR, KeyS, KeyI, KeyB, KeyW, KeyN, KeyM, KeyT, KeyD, KeyO, KeyE, Enter } = monaco.KeyCode
+    const { KeyK, KeyR, KeyS, KeyI, KeyB, KeyW, KeyN, KeyM, KeyT, KeyD, KeyO, KeyE, KeyJ, Enter } = monaco.KeyCode
 
     /** @param {() => void | undefined} fn */
     const run = (fn) => fn?.()
 
+    // Ctrl+Enter: override Monaco's built-in insertLineAfter which steals this binding.
+    // addAction has higher priority than the built-in keybinding registry.
+    ed.addAction({
+      id: 'db-studio.run-query',
+      label: 'Run Query',
+      keybindings: [CtrlCmd | Enter],
+      run: () => run(onmodenter),
+    })
+
     // Editor-local shortcuts
     ed.addCommand(CtrlCmd | KeyK,     () => run(onmodk))
-    ed.addCommand(CtrlCmd | Enter,    () => run(onmodenter))
     ed.addCommand(CtrlCmd | KeyR,     () => run(onmodr))
-    ed.addCommand(CtrlCmd | KeyS,     async () => { await formatDocument() })
+    ed.addCommand(CtrlCmd | KeyS,     () => run(onmods))
 
     // Global app shortcuts — work even when Monaco has focus
     ed.addCommand(CtrlCmd | KeyI,           () => run(onmodi))
@@ -72,10 +82,11 @@
     ed.addCommand(CtrlCmd | Shift | KeyD,   () => run(onmodshiftd))
     ed.addCommand(CtrlCmd | Shift | KeyE,   () => run(onmodshifte))
     ed.addCommand(CtrlCmd | Shift | KeyO,   () => run(onmodshifto))
+    ed.addCommand(CtrlCmd | KeyJ,           () => run(onmodj))
+    ed.addCommand(CtrlCmd | Shift | KeyB,   () => run(onmodshiftb))
 
     async function formatDocument() {
       await ed.getAction('editor.action.formatDocument')?.run()
-      run(onmods)
     }
 
     onactionsready?.({ format: formatDocument })
@@ -129,6 +140,13 @@
     })
 
     registerAppShortcuts(editor)
+
+    // Monaco measures char widths at init time. If Geist Mono Variable isn't
+    // loaded yet (slow on Linux/Windows), it caches fallback-font widths and
+    // never self-corrects even after the font visually arrives.
+    document.fonts.ready.then(() => {
+      try { editor?.remeasureFonts?.() } catch { /* API not available in this Monaco build */ }
+    })
 
     editor.onDidChangeModelContent(() => {
       const next = editor?.getValue() ?? ''

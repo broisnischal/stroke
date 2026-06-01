@@ -1,4 +1,4 @@
-/** @typedef {'table' | 'sql' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'json'} StudioTabKind */
+/** @typedef {'table' | 'sql' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams'} StudioTabKind */
 
 /** @typedef {import('$lib/table-query.js').TableSort} TableSort */
 /** @typedef {import('$lib/table-query.js').TableFilter} TableFilter */
@@ -222,6 +222,20 @@ export function findLogsTab(tabs) {
   return tabs.find((t) => t.kind === 'logs') ?? null
 }
 
+export function createBackupTab() {
+  return /** @type {StudioTab} */ ({
+    id: nextTabId(),
+    kind: 'backup',
+    title: 'Backup & Restore',
+    state: null,
+  })
+}
+
+/** @param {StudioTab[]} tabs */
+export function findBackupTab(tabs) {
+  return tabs.find((t) => t.kind === 'backup') ?? null
+}
+
 export function createJsonTab() {
   return /** @type {StudioTab} */ ({
     id: nextTabId(),
@@ -234,6 +248,76 @@ export function createJsonTab() {
 /** @param {StudioTab[]} tabs */
 export function findJsonTab(tabs) {
   return tabs.find((t) => t.kind === 'json') ?? null
+}
+
+export function createChartsTab() {
+  return /** @type {StudioTab} */ ({
+    id: nextTabId(),
+    kind: 'charts',
+    title: 'Charts',
+    state: null,
+  })
+}
+
+/** @param {StudioTab[]} tabs */
+export function findChartsTab(tabs) {
+  return tabs.find((t) => t.kind === 'charts') ?? null
+}
+
+export function createDashboardTab() {
+  return /** @type {StudioTab} */ ({
+    id: nextTabId(),
+    kind: 'dashboard',
+    title: 'Dashboard',
+    state: null,
+  })
+}
+
+/** @param {StudioTab[]} tabs */
+export function findDashboardTab(tabs) {
+  return tabs.find((t) => t.kind === 'dashboard') ?? null
+}
+
+export function createRelTreeTab() {
+  return /** @type {StudioTab} */ ({
+    id: nextTabId(),
+    kind: 'reltree',
+    title: 'Relation Tree',
+    state: null,
+  })
+}
+
+/** @param {StudioTab[]} tabs */
+export function findRelTreeTab(tabs) {
+  return tabs.find(t => t.kind === 'reltree') ?? null
+}
+
+export function createDiagramsTab() {
+  return /** @type {StudioTab} */ ({
+    id: nextTabId(),
+    kind: 'diagrams',
+    title: 'Diagrams',
+    state: null,
+  })
+}
+
+/** @param {StudioTab[]} tabs */
+export function findDiagramsTab(tabs) {
+  return tabs.find((t) => t.kind === 'diagrams') ?? null
+}
+
+export function createErdTab() {
+  return /** @type {StudioTab} */ ({
+    id: nextTabId(),
+    kind: 'erd',
+    title: 'ER Diagram',
+    state: null,
+  })
+}
+
+/** @param {StudioTab[]} tabs */
+export function findErdTab(tabs) {
+  return tabs.find((t) => t.kind === 'erd') ?? null
 }
 
 /** @param {TableTabState} state */
@@ -252,6 +336,11 @@ export function tabDisplayTitle(tab) {
   if (tab.kind === 'security') return 'Security'
   if (tab.kind === 'logs') return 'Activity Log'
   if (tab.kind === 'json') return 'JSON Viewer'
+  if (tab.kind === 'charts') return 'Charts'
+  if (tab.kind === 'dashboard') return 'Dashboard'
+  if (tab.kind === 'erd') return 'ER Diagram'
+  if (tab.kind === 'reltree') return 'Relation Tree'
+  if (tab.kind === 'diagrams') return 'Diagrams'
   return tab.title
 }
 
