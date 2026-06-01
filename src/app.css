@@ -74,6 +74,10 @@ html[data-os="linux"]   { --window-radius: 8px; }
   html {
     font-size: var(--app-font-size);
     font-family: var(--font-sans);
+    font-weight: 400;
+    /* Enable optical sizing axis on variable fonts — improves stroke contrast at
+       small sizes without requiring manual weight tweaks per component. */
+    font-optical-sizing: auto;
     @apply h-full overflow-hidden;
     /* Transparent so the rounded body corners reveal the desktop, not a square
        html background. Body's bg-background would otherwise propagate here. */
@@ -85,13 +89,26 @@ html[data-os="linux"]   { --window-radius: 8px; }
        macOS: 'auto' delegates to Core Text which also produces good results. */
     -webkit-font-smoothing: auto;
     -moz-osx-font-smoothing: auto;
-    /* 'auto' on WebKitGTK = FreeType normal mode (hinting on). We previously used
-       'geometricPrecision' to avoid scroll blur from GPU compositing, but
-       WEBKIT_DISABLE_DMABUF_RENDERER=1 in lib.rs already handles that — keeping
-       geometricPrecision unnecessarily disables FreeType hinting on Linux. */
-    text-rendering: auto;
+    /* optimizeSpeed (not optimizeLegibility): a data-grid renders tens of
+       thousands of text nodes, and optimizeLegibility forces kerning + ligature
+       shaping on every one of them — the single biggest cause of scroll/paint
+       jank on WebKitGTK here. Speed mode skips that shaping; the visual
+       difference on UI/mono text is negligible. */
+    text-rendering: optimizeSpeed;
     /* font-synthesis and text-size-adjust omitted: font-synthesis:none can trigger
        a WebKit font assertion on Linux startup; text-size-adjust is a no-op on desktop. */
+  }
+
+  /* Windows renders variable fonts noticeably lighter than macOS/Linux due to
+     DirectWrite's grayscale AA. Bump weight slightly so strokes look consistent. */
+  html[data-os="windows"] {
+    font-weight: 430;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Linux at non-HiDPI benefits from a touch more weight too. */
+  html[data-os="linux"] {
+    font-weight: 410;
   }
 
   body {
@@ -184,11 +201,45 @@ html[data-os="linux"]   { --window-radius: 8px; }
     outline: none !important;
   }
 
-  /* Portaled overlays use rem (html font-size); keep explicit size for non-rem children */
+  /* Portaled overlays — these render outside #app so must explicitly inherit
+     the correct family, optical-sizing, and OS font-weight. */
   [data-slot='context-menu-content'],
   [data-slot='dropdown-menu-content'],
-  [data-slot='select-content'] {
+  [data-slot='select-content'],
+  [data-slot='dialog-content'],
+  [data-slot='popover-content'],
+  [role='dialog'],
+  [role='menu'],
+  [role='listbox'] {
+    font-family: var(--font-sans);
     font-size: var(--app-font-size);
+    font-optical-sizing: auto;
+  }
+
+  html[data-os='windows'] :is(
+    [data-slot='context-menu-content'],
+    [data-slot='dropdown-menu-content'],
+    [data-slot='select-content'],
+    [data-slot='dialog-content'],
+    [data-slot='popover-content'],
+    [role='dialog'],
+    [role='menu'],
+    [role='listbox']
+  ) {
+    font-weight: 430;
+  }
+
+  html[data-os='linux'] :is(
+    [data-slot='context-menu-content'],
+    [data-slot='dropdown-menu-content'],
+    [data-slot='select-content'],
+    [data-slot='dialog-content'],
+    [data-slot='popover-content'],
+    [role='dialog'],
+    [role='menu'],
+    [role='listbox']
+  ) {
+    font-weight: 410;
   }
 
   /* Sonner — frosted notifications */
@@ -227,6 +278,7 @@ html[data-os="linux"]   { --window-radius: 8px; }
   .font-mono,
   [data-font="mono"] {
     font-family: var(--font-mono);
+    font-optical-sizing: auto;
   }
 
   .shiki-block .shiki,
@@ -264,7 +316,7 @@ html[data-os="linux"]   { --window-radius: 8px; }
     height: 18px;
     padding: 0 4px;
     font-family: var(--font-mono);
-    font-size: calc(9 / 13 * 1rem);
+    font-size: calc(10 / 14 * 1rem);  /* 10px — same as text-ui-3xs */
     line-height: 1;
     color: var(--muted-foreground);
     background: color-mix(in oklch, var(--muted) 70%, transparent);
@@ -292,6 +344,14 @@ html[data-os="linux"]   { --window-radius: 8px; }
     border-spacing: 0;
     line-height: 1.25;
     user-select: none;
+  }
+
+  /* Focused cell — set imperatively via $effect (not reactive template class)
+     so focus changes only update 2 DOM nodes instead of re-rendering all cells. */
+  .studio-data-table tbody td[data-focused-cell] {
+    color: var(--color-foreground) !important;
+    outline: 1px solid hsl(var(--ring) / 0.4);
+    outline-offset: -1px;
   }
 
 
@@ -357,26 +417,44 @@ html[data-os="linux"]   { --window-radius: 8px; }
     -webkit-user-select: none;
   }
 
-  /* UI type scale (1rem = --app-font-size). Replaces text-[Npx] so zoom stays crisp. */
+  /* UI type scale (1rem = --app-font-size = 14px).
+     Denominators match the base so each step lands on a whole pixel at 100% zoom,
+     eliminating the sub-pixel rounding differences that made text look
+     inconsistent across macOS / Windows / Linux. */
   .text-ui {
-    font-size: 1rem;
+    font-size: 1rem;           /* 14px */
   }
 
   .text-ui-sm {
-    font-size: calc(12 / 13 * 1rem);
+    font-size: calc(13 / 14 * 1rem);  /* 13px */
   }
 
   .text-ui-xs {
-    font-size: calc(11 / 13 * 1rem);
+    font-size: calc(12 / 14 * 1rem);  /* 12px */
   }
 
   .text-ui-2xs {
-    font-size: calc(10 / 13 * 1rem);
+    font-size: calc(11 / 14 * 1rem);  /* 11px */
   }
 
   .text-ui-3xs {
-    font-size: calc(9 / 13 * 1rem);
+    font-size: calc(10 / 14 * 1rem);  /* 10px — minimum for legibility */
   }
+
+  /* ── Hardcoded text-[Npx] → rem equivalents ────────────────────────────────
+     371 uses of text-[8px]…text-[15px] across the codebase use fixed px sizes
+     that bypass --app-font-size and render differently per OS.
+     These overrides convert them to rem so they scale consistently and can be
+     zoomed. 8px/9px are bumped to 10px minimum for legibility on all screens. */
+  .text-\[8px\]  { font-size: calc(10 / 14 * 1rem); } /* ↑ bumped to 10px min */
+  .text-\[9px\]  { font-size: calc(10 / 14 * 1rem); } /* ↑ bumped to 10px min */
+  .text-\[10px\] { font-size: calc(10 / 14 * 1rem); }
+  .text-\[11px\] { font-size: calc(11 / 14 * 1rem); }
+  .text-\[12px\] { font-size: calc(12 / 14 * 1rem); }
+  .text-\[13px\] { font-size: calc(13 / 14 * 1rem); }
+  .text-\[14px\] { font-size: 1rem; }
+  .text-\[15px\] { font-size: calc(15 / 14 * 1rem); }
+  .text-\[16px\] { font-size: calc(16 / 14 * 1rem); }
 
   /* Skeleton placeholders (shadcn-style pulse) */
   .skeleton {
@@ -428,6 +506,11 @@ html[data-os="linux"]   { --window-radius: 8px; }
     scrollbar-color: color-mix(in oklch, var(--muted-foreground) 35%, transparent) transparent;
     /* Prevent scroll from chaining to the parent when this container hits its boundary */
     overscroll-behavior: contain;
+  }
+
+  /* Reserve scrollbar gutter only on the actual scrollable list inside dropdowns/popovers */
+  .db-list-scroll {
+    scrollbar-gutter: stable;
   }
 
   /* bits-ui ScrollArea viewport */

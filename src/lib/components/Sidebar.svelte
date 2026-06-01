@@ -253,10 +253,15 @@
   const filteredMatViews = $derived(
     applySortBy(matViews.filter((t) => t.name.toLowerCase().includes(lf))),
   );
-  // ── Virtual list (tables only, kicks in at > 150 rows) ───────────────────
-  const VIRT_THRESHOLD = 150
-  const ROW_H = 28          // px — matches contain-intrinsic-size on each <li>
-  const VIRT_BUFFER = 10    // extra rows rendered above and below the viewport
+  // ── Virtual list (tables only) ───────────────────────────────────────────
+  const VIRT_THRESHOLD = 40   // kick in early — 40+ tables already benefits from virtualization
+  const ROW_H = 28            // px — matches contain-intrinsic-size on each <li>
+  const VIRT_BUFFER = 16      // extra rows rendered above and below the viewport
+  // Snap the window to a row grid so it only shifts once per chunk of scrolling
+  // (the derived short-circuits on every scroll event in between → no re-render,
+  // no padding-row resize). Must be ≤ VIRT_BUFFER so the buffer covers the
+  // in-chunk scroll distance before the next snap.
+  const VIRT_CHUNK = 8
 
   /** @type {HTMLElement | null} */
   let scrollContainerEl = $state(null)
@@ -284,16 +289,17 @@
 
   const shouldVirtualize = $derived(filteredRegularTables.length > VIRT_THRESHOLD)
 
-  const virtStart = $derived(
-    shouldVirtualize
-      ? Math.max(0, Math.floor((sidebarScrollTop - tableListOffsetTop) / ROW_H) - VIRT_BUFFER)
-      : 0
-  )
-  const virtEnd = $derived(
-    shouldVirtualize
-      ? Math.min(filteredRegularTables.length, Math.ceil((sidebarScrollTop + sidebarHeight - tableListOffsetTop) / ROW_H) + VIRT_BUFFER)
-      : filteredRegularTables.length
-  )
+  const virtStart = $derived.by(() => {
+    if (!shouldVirtualize) return 0
+    let start = Math.max(0, Math.floor((sidebarScrollTop - tableListOffsetTop) / ROW_H) - VIRT_BUFFER)
+    return start - (start % VIRT_CHUNK) // snap down to the chunk grid
+  })
+  const virtEnd = $derived.by(() => {
+    if (!shouldVirtualize) return filteredRegularTables.length
+    let end = Math.ceil((sidebarScrollTop + sidebarHeight - tableListOffsetTop) / ROW_H) + VIRT_BUFFER
+    end += (VIRT_CHUNK - 1) - ((end % VIRT_CHUNK + VIRT_CHUNK) % VIRT_CHUNK) // snap up
+    return Math.min(filteredRegularTables.length, end)
+  })
   const virtTopPad  = $derived(shouldVirtualize ? virtStart * ROW_H : 0)
   const virtBotPad  = $derived(shouldVirtualize ? Math.max(0, (filteredRegularTables.length - virtEnd) * ROW_H) : 0)
 
@@ -487,7 +493,9 @@
           bind:this={scrollContainerEl}
           bind:clientHeight={sidebarHeight}
           class="app-scroll min-h-0 w-full flex-1 overflow-y-auto"
-          onscroll={() => { if (scrollContainerEl) sidebarScrollTop = scrollContainerEl.scrollTop }}
+          onscroll={() => {
+            if (scrollContainerEl) sidebarScrollTop = scrollContainerEl.scrollTop
+          }}
         >
           {#if loadingTables}
             <div
