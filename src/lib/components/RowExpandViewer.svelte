@@ -12,6 +12,12 @@
   } from '$lib/json-inspector.js'
 
   const TRUNCATE_LIMIT = 200
+  // Above this many characters of (already per-string-truncated) JSON, skip
+  // Shiki tokenization + URL linkification — both walk the entire document and
+  // cause a visible hang on large rows. The plain <pre> below is instant and
+  // still fully readable/scrollable, so the expand feature is unchanged for big
+  // payloads, just without colors.
+  const HIGHLIGHT_LIMIT = 12000
 
   let {
     record,
@@ -35,9 +41,13 @@
     scrollable = rootEl.scrollHeight > rootEl.clientHeight + 1
   }
 
-  const jsonText = $derived(formatJsonValue(record))
   const displayText = $derived(formatJsonValue(truncateDeep(record, TRUNCATE_LIMIT)))
   const appTheme = $derived($appThemeId)
+  // Full (untruncated) JSON is only needed for "Copy JSON" — compute it lazily
+  // on click instead of stringifying the whole record on every render.
+  function fullJsonText() {
+    return formatJsonValue(record)
+  }
 
   /**
    * @param {unknown} value
@@ -65,6 +75,12 @@
   $effect(() => {
     const source = displayText
     const theme = appTheme
+    // Large payloads: render a plain (unhighlighted) <pre> synchronously and
+    // skip Shiki entirely — tokenizing the whole document is the expand lag.
+    if (source.length > HIGHLIGHT_LIMIT) {
+      html = `<pre class="m-0 p-0 font-mono text-ui-2xs leading-relaxed whitespace-pre text-foreground">${escapeHtml(source)}</pre>`
+      return
+    }
     let cancelled = false
     highlightCode(source, 'json', theme)
       .then((result) => { if (!cancelled) html = result })
@@ -78,6 +94,9 @@
   $effect(() => {
     if (!html || !rootEl) return
     const source = displayText
+    // Skip the DOM-walking URL linkify on large payloads (it's the other half of
+    // the expand lag); just measure for the scrollbar.
+    if (source.length > HIGHLIGHT_LIMIT) { void tick().then(remeasure); return }
     void tick().then(() => {
       const pre = rootEl?.querySelector('pre')
       if (pre instanceof HTMLElement) linkifyJsonInElement(pre, source)
@@ -99,7 +118,7 @@
 
   async function copyJson() {
     try {
-      await navigator.clipboard.writeText(jsonText)
+      await navigator.clipboard.writeText(fullJsonText())
       copied = true
       if (copiedTimer) clearTimeout(copiedTimer)
       copiedTimer = setTimeout(() => { copied = false }, 2000)
