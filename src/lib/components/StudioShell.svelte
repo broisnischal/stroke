@@ -538,6 +538,26 @@
 
   const _aiActive = $derived(aiMode || aiSidebarOpen)
 
+  // The all-tables column map only changes when the table-column cache changes
+  // (a new table is fetched), NOT when the user switches to an already-cached
+  // table. Splitting it into its own derived means a table click no longer
+  // rebuilds this whole object — that rebuild (Object.fromEntries over every
+  // cached table) was a main-thread stall on each table switch while AI was open.
+  const _allTableColumns = $derived.by(() => {
+    if (!_aiActive) return /** @type {Record<string, { name: string, dataType: string, nullable: boolean, enumValues?: string[] }[]>} */ ({})
+    return Object.fromEntries(
+      [...tableColumnsCache.entries()].map(([key, cols]) => [
+        key,
+        cols.map((c) => ({
+          name: c.name,
+          dataType: c.dataType ?? c.data_type ?? '',
+          nullable: c.nullable ?? true,
+          enumValues: c.enumValues ?? c.enum_values ?? undefined,
+        })),
+      ]),
+    )
+  })
+
   const aiSchemaContext = $derived.by(() => {
     // Only rebuild the expensive schema context when AI is actually visible.
     // When AI is hidden, return a cheap stable object — components using it
@@ -562,18 +582,7 @@
       })),
       primaryKey,
       foreignKeys,
-      /** @type {Record<string, { name: string, dataType: string, nullable: boolean, enumValues?: string[] }[]>} */
-      allTableColumns: Object.fromEntries(
-        untrack(() => [...tableColumnsCache.entries()]).map(([key, cols]) => [
-          key,
-          cols.map((c) => ({
-            name: c.name,
-            dataType: c.dataType ?? c.data_type ?? '',
-            nullable: c.nullable ?? true,
-            enumValues: c.enumValues ?? c.enum_values ?? undefined,
-          })),
-        ]),
-      ),
+      allTableColumns: _allTableColumns,
       /** @type {'postgres' | 'sqlite' | 'd1'} */
       dbType: /** @type {any} */ (connection)?.type ?? 'postgres',
     }

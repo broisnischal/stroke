@@ -513,7 +513,7 @@
             {@const displayType = stagedValues['type:' + col.name] ?? col.dataType}
             {@const displayNullable = stagedValues['nullable:' + col.name] !== undefined ? stagedValues['nullable:' + col.name] : col.isNullable}
             {@const displayDefault = stagedValues['default:' + col.name] !== undefined ? stagedValues['default:' + col.name] : (col.columnDefault ?? '')}
-            <tr class="group/row {staged ? 'bg-amber-500/[0.04]' : ''}" style="height:32px">
+            <tr class="group/row {staged ? 'bg-amber-500/[0.04]' : ''}" style="height:32px;content-visibility:auto;contain-intrinsic-size:auto 32px">
 
               <!-- # -->
               <td class="{TD} {staged ? 'border-l-2 border-l-amber-500/50' : ''}">
