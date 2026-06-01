@@ -8,11 +8,15 @@
   import Code2 from '@lucide/svelte/icons/code-2'
   import ShieldCheck from '@lucide/svelte/icons/shield-check'
   import Eye from '@lucide/svelte/icons/eye'
+  import Layers from '@lucide/svelte/icons/layers'
   import X from '@lucide/svelte/icons/x'
   import Plus from '@lucide/svelte/icons/plus'
+  import Clock from '@lucide/svelte/icons/clock'
+  import ChevronDown from '@lucide/svelte/icons/chevron-down'
   import { cn } from '$lib/utils.js'
   import { tabDisplayTitle } from '$lib/studio-tabs.js'
   import * as ContextMenu from '$lib/components/ui/context-menu/index.js'
+  import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js'
 
   let isTauri = $state(false)
 
@@ -37,6 +41,9 @@
     oncloseothers = /** @param {string} _id */ (_id) => {},
     oncloseall = () => {},
     onnew = () => {},
+    /** @type {import('$lib/stores/recent-tabs.js').RecentTab[]} */
+    recentTabs = [],
+    onrecentselect = /** @type {(schema: string, table: string) => void} */ (() => {}),
   } = $props()
 
   /** @type {HTMLElement | null} */
@@ -150,6 +157,44 @@
       </ContextMenu.Root>
     {/each}
   </div>
+
+  <!-- Recent tables dropdown -->
+  {#if recentTabs.length > 0}
+    <div class="flex shrink-0 items-center border-l border-border/40 px-0.5">
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger
+          class="inline-flex h-6 items-center gap-0.5 rounded-md px-1.5 text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-foreground"
+          title="Recent tables"
+        >
+          <Clock class="size-3" />
+          <ChevronDown class="size-2.5" />
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Content align="end" class="w-52 p-1 text-ui-xs">
+          <DropdownMenu.Label class="px-2 py-1 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/50">
+            Recent tables
+          </DropdownMenu.Label>
+          {#each recentTabs.slice(0, 8) as item (item.schema + '.' + item.table)}
+            <DropdownMenu.Item
+              class="gap-2 font-mono text-ui-xs"
+              onSelect={() => onrecentselect(item.schema, item.table)}
+            >
+              {#if item.tableKind === 'view'}
+                <Eye class="size-3 shrink-0 text-muted-foreground/60" />
+              {:else if item.tableKind === 'materialized_view'}
+                <Layers class="size-3 shrink-0 text-muted-foreground/60" />
+              {:else}
+                <Table2 class="size-3 shrink-0 text-muted-foreground/60" />
+              {/if}
+              <span class="truncate">{item.table}</span>
+              {#if item.schema && item.schema !== 'public'}
+                <span class="ml-auto shrink-0 text-muted-foreground/40">{item.schema}</span>
+              {/if}
+            </DropdownMenu.Item>
+          {/each}
+        </DropdownMenu.Content>
+      </DropdownMenu.Root>
+    </div>
+  {/if}
 
   <!-- New tab -->
   <div class="flex shrink-0 items-center border-l border-border/40 px-1">
