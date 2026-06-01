@@ -68,7 +68,6 @@
     nowTimeOnly,
   } from "$lib/insert-field.js";
   import { cellLinkHref, cellUrlType } from "$lib/cell-display.js";
-  import UrlPreviewTooltip from "./UrlPreviewTooltip.svelte";
   import MediaLightbox from "./MediaLightbox.svelte";
   import RowExpandViewer from "./RowExpandViewer.svelte";
   import JsonCellLightbox from "./JsonCellLightbox.svelte";
@@ -146,6 +145,12 @@
     insertSaving = false,
     /** Assigned by this component so the parent can trigger beginInsertRow(). */
     beginInsertRow = $bindable(/** @type {() => void} */ (() => {})),
+    /** When true all write operations (edit, delete, insert) are disabled. */
+    readonly = false,
+    /** Incremented by the parent when a fresh page of rows is applied
+     *  (page/filter/sort/search change). On change the table jumps its scroll
+     *  and virtual window back to the top. */
+    reloadToken = 0,
   } = $props();
 
   /**
@@ -224,33 +229,28 @@
   // The expansion runs off the switch's critical path, so switching feels instant
   // and scrolling is smooth once the page settles. Very large pages stay
   // windowed forever to keep the DOM/memory bounded.
-  const VIRTUAL_THRESHOLD = 100   // above this, mount windowed for a fast switch
-  const FULL_RENDER_MAX = 2000    // expand to a full render up to this many rows
+  const VIRTUAL_THRESHOLD = 30    // above this, mount windowed for a fast switch
+  const FULL_RENDER_MAX = 250     // expand to a full render up to this many rows
   // Defer the full render until just after the tab switch settles.
   let _deferFullRender = $state(true)
   // Row height: gutter-inner has min-height 1.75rem; at --app-font-size:14px that is
   // 1.75 × 14 = 24.5px → 25px rendered. Add 1px for subpixel headroom → 26.
   const ROW_HEIGHT = 26
-  // 15 rows = ~390px overscan buffer on each side — enough for fast touchpad/wheel
-  // scrolling without creating too many extra DOM nodes per replenishment cycle.
-  const OVERSCAN = 15
+  // 20 rows overscan = ~520px buffer each side — eliminates blank flash on fast scroll.
+  const OVERSCAN = 20
+  // Snap the virtual window to a grid of this many rows. The window then only
+  // shifts once per chunk of scrolling instead of once per row, so scrolling
+  // *within* a chunk re-renders nothing and — crucially — never resizes the
+  // spacer rows, which would otherwise force a full <table> relayout on every
+  // scroll event (very costly on WebKitGTK). Must be ≤ OVERSCAN so the buffer
+  // covers the in-chunk scroll distance before the next snap (no blank rows).
+  const VIRTUAL_CHUNK = 10
   let _scrollTop = $state(0)
   // Start high so the first virtual render covers any reasonable screen height
   // before the ResizeObserver fires with the real value.
   let _viewportHeight = $state(1200)
 
-  // ── URL preview / lightbox ────────────────────────────────────────────────
-  /** @type {string | null} */
-  let previewUrl = $state(null);
-  /** @type {'image' | 'pdf' | 'link' | null} */
-  let previewType = $state(null);
-  /** @type {DOMRect | null} */
-  let previewAnchorRect = $state(null);
-  /** @type {ReturnType<typeof setTimeout> | null} */
-  let previewShowTimer = null;
-  /** @type {ReturnType<typeof setTimeout> | null} */
-  let previewHideTimer = null;
-
+  // ── Lightbox (click-to-open image / PDF) ──────────────────────────────────
   /** @type {string | null} */
   let lightboxUrl = $state(null);
 
@@ -265,57 +265,6 @@
 
   /** @type {'image' | 'pdf'} */
   let lightboxType = $state("image");
-
-  /**
-   * Safely encode a URL so special characters (spaces, non-ASCII) in path
-   * segments don't break image/PDF previews. Decodes first to avoid
-   * double-encoding already-encoded URLs.
-   * @param {string} href
-   */
-  function encodeHref(href) {
-    try {
-      const u = new URL(href)
-      u.pathname = u.pathname.split('/').map(seg => encodeURIComponent(decodeURIComponent(seg))).join('/')
-      return u.toString()
-    } catch {
-      try { return encodeURI(decodeURI(href)) } catch { return href }
-    }
-  }
-
-  /** @param {string} href @param {'image'|'pdf'|'link'} type @param {DOMRect} rect */
-  function showUrlPreview(href, type, rect) {
-    if (previewHideTimer) {
-      clearTimeout(previewHideTimer);
-      previewHideTimer = null;
-    }
-    if (previewShowTimer) clearTimeout(previewShowTimer);
-    if (type === "link") return;
-    previewShowTimer = setTimeout(() => {
-      previewUrl = href;
-      previewType = type;
-      previewAnchorRect = rect;
-      previewShowTimer = null;
-    }, 350);
-  }
-
-  function scheduleHidePreview() {
-    if (previewShowTimer) {
-      clearTimeout(previewShowTimer);
-      previewShowTimer = null;
-    }
-    if (previewHideTimer) return;
-    previewHideTimer = setTimeout(() => {
-      previewUrl = null;
-      previewHideTimer = null;
-    }, 250);
-  }
-
-  function cancelHidePreview() {
-    if (previewHideTimer) {
-      clearTimeout(previewHideTimer);
-      previewHideTimer = null;
-    }
-  }
 
   async function openExternal(/** @type {string} */ url) {
     try {
@@ -334,6 +283,7 @@
   }
 
   function canEditColumn(colIdx) {
+    if (readonly) return false;
     const col = columns[colIdx];
     if (!col || !primaryKey.length) return false;
     return isEditableType(col.dataType ?? col.data_type ?? "");
@@ -481,6 +431,7 @@
    *   instead of the existing value (type-to-edit behavior).
    */
   function startEdit(rowIdx, colIdx, initialChar) {
+    if (readonly) return;
     const col = columns[colIdx];
     if (!col) return;
 
@@ -741,6 +692,7 @@
   // Surface beginInsertRow to the parent (→ toolbar Add Row button).
   $effect(() => {
     beginInsertRow = () => {
+      if (readonly) return;
       /** @type {Record<string, string>} */
       const drafts = {}
       for (const col of columns) {
@@ -927,6 +879,7 @@
 
   /** @param {number} rowIdx */
   async function deleteRow(rowIdx) {
+    if (readonly) return;
     if (!primaryKey.length) {
       toast.error("Cannot delete", {
         description: "This table has no primary key.",
@@ -1173,24 +1126,36 @@
   // full render shortly after, so scrolling is smooth. Keyed on table identity +
   // row count so it does NOT re-trigger on in-place cell edits (which keep both).
   $effect(() => {
+    // Only re-defer on table/column identity change, NOT on row count change
+    // (pagination, filter). Row count changes should not re-trigger the
+    // virtual→full expansion cycle — that caused a 200ms jank on every page turn.
     void columnWidthsKey
-    void rows.length
     _deferFullRender = true
-    const id = setTimeout(() => { _deferFullRender = false }, 200)
+    const id = setTimeout(() => { _deferFullRender = false }, 120)
     return () => clearTimeout(id)
   })
   // Stable key that changes only when column names change — prevents the
   // column-widths $effect from re-running on every row fetch (same columns, new array ref).
   const _columnNamesKey = $derived(columns.map((c) => c.name).join('\x00'))
 
-  // O(1) min/max of expandedRows — recomputed only when the set changes,
-  // not on every scroll tick (which was the O(n) per-scroll culprit).
-  const _expandedMin = $derived(expandedRows.size ? Math.min(...expandedRows) : Infinity)
-  const _expandedMax = $derived(expandedRows.size ? Math.max(...expandedRows) : -Infinity)
+  // Cached min/max of expandedRows. Using a single-pass loop + $effect avoids
+  // Math.min/max spread (which allocates a temp array each time the set changes).
+  let _expandedMin = $state(Infinity)
+  let _expandedMax = $state(-Infinity)
+  $effect(() => {
+    if (expandedRows.size === 0) { _expandedMin = Infinity; _expandedMax = -Infinity; return }
+    let mn = Infinity, mx = -Infinity
+    for (const i of expandedRows) { if (i < mn) mn = i; if (i > mx) mx = i }
+    _expandedMin = mn; _expandedMax = mx
+  })
 
   const virtualStart = $derived.by(() => {
     if (!useVirtual) return 0
     let start = Math.max(0, Math.floor(_scrollTop / ROW_HEIGHT) - OVERSCAN)
+    // Snap down to the chunk grid so this value only changes once per chunk of
+    // scrolling — the derived then short-circuits on every in-between scroll
+    // event (no re-render, no spacer-row resize, no table relayout).
+    start -= start % VIRTUAL_CHUNK
     // Only the active edit input and expanded (tall) rows must stay mounted when
     // off-screen. A focused (non-editing) row is NOT extended into the window —
     // that would render everything between focus and viewport and lock up large
@@ -1202,7 +1167,11 @@
   })
   const virtualEnd = $derived.by(() => {
     if (!useVirtual) return rows.length - 1
-    let end = Math.min(rows.length - 1, Math.ceil((_scrollTop + _viewportHeight) / ROW_HEIGHT) + OVERSCAN)
+    let end = Math.ceil((_scrollTop + _viewportHeight) / ROW_HEIGHT) + OVERSCAN
+    // Snap up to the chunk grid (mirror of virtualStart) so the bottom edge is
+    // likewise stable within a chunk.
+    end += (VIRTUAL_CHUNK - 1) - ((end % VIRTUAL_CHUNK + VIRTUAL_CHUNK) % VIRTUAL_CHUNK)
+    end = Math.min(rows.length - 1, end)
     if (_expandedMax > end) end = Math.min(rows.length - 1, _expandedMax)
     if (editingCell && editingCell.rowIdx > end) end = Math.min(rows.length - 1, editingCell.rowIdx)
     return end
@@ -1221,6 +1190,21 @@
     const out = []
     for (let i = virtualStart; i <= virtualEnd; i++) out.push(i)
     return out
+  })
+
+  // When the parent applies a fresh page of rows (page/filter/sort/search), jump
+  // back to the top. Resetting _scrollTop in the same pre-paint flush keeps the
+  // virtual window matched to the new scroll position, so the swap renders the
+  // small top slice directly instead of a stale mid-table window that then
+  // snaps — that snap is both the "scroll jumps" glitch and an extra re-render.
+  let _firstReload = true
+  $effect(() => {
+    void reloadToken
+    if (_firstReload) { _firstReload = false; return }
+    untrack(() => {
+      _scrollTop = 0
+      if (tableContainer && tableContainer.scrollTop !== 0) tableContainer.scrollTop = 0
+    })
   })
 
   const allSelected = $derived(
@@ -1253,6 +1237,16 @@
 
   const _pkSet = $derived(new Set(primaryKey))
   const _fkCols = $derived(new Set(foreignKeys.flatMap((fk) => fk.columns)))
+
+  // Per-column stable cache — computed once per column/schema change instead of
+  // once per cell per render. getColumnEnumValues, canEditColumn, and fkByColumn
+  // were previously called rows×cols times on every reactive update.
+  const _colCache = $derived.by(() => columns.map((col, colIdx) => ({
+    colType: col?.dataType ?? col?.data_type ?? '',
+    enumValues: getColumnEnumValues(col),
+    canEdit: !readonly && primaryKey.length > 0 && isEditableType(col?.dataType ?? col?.data_type ?? ''),
+    fk: fkByColumn[col?.name ?? ''] ?? null,
+  })))
 
   const colMeta = $derived.by(() => {
     /** @type {Map<string, { pk: boolean, fk: boolean, indexed: boolean, unique: boolean, nullable: boolean }>} */
@@ -1491,6 +1485,28 @@
     }
   })
 
+  // ── Imperative focused-cell highlight ────────────────────────────────────
+  // isFocusedCell was previously computed inline for every cell in the render
+  // loop, making ALL rows×cols cells re-render whenever focusedRow/focusedCol
+  // changed (every keypress, every click). Now we update exactly 2 DOM nodes
+  // (remove from old cell, add to new cell) via $effect, bypassing Svelte's
+  // reactive template system entirely for the focus highlight.
+  let _prevFocusedCellEl = /** @type {Element | null} */ (null)
+  $effect(() => {
+    const row = focusedRow
+    const col = focusedCol
+    const editing = editingCell
+    _prevFocusedCellEl?.removeAttribute('data-focused-cell')
+    _prevFocusedCellEl = null
+    if (row === null || col === null || editing || !tableContainer) return
+    const colName = navigableColumns[col]?.name
+    if (!colName) return
+    const rowEl = tableContainer.querySelector(`tr[data-row-idx="${row}"]`)
+    if (!rowEl) return
+    const tdEl = rowEl.querySelector(`td[data-col-name="${colName}"]`)
+    if (tdEl) { tdEl.setAttribute('data-focused-cell', ''); _prevFocusedCellEl = tdEl }
+  })
+
   /** @param {KeyboardEvent} e */
   function handleTableKeydown(e) {
     // Ctrl+A: select all rows
@@ -1660,9 +1676,6 @@
   }
 
   onDestroy(() => {
-    if (previewShowTimer) clearTimeout(previewShowTimer)
-    if (previewHideTimer) clearTimeout(previewHideTimer)
-
     // Clear staged-edit state in the parent so the StatusBar buttons don't linger.
     pendingEditCount = 0
     applyEdits = () => {}
@@ -2111,6 +2124,7 @@
                   <tr
                     data-row-idx={idx}
                     class={rowClass(idx)}
+                    style="contain: layout paint style"
                     onclick={(e) => {
                       if (e.button !== 0) return;
                       const target = e.target instanceof Element ? e.target : null;
@@ -2228,32 +2242,33 @@
                           editingCell?.rowIdx === idx &&
                           editingCell?.colIdx === colIdx}
                         {@const col = columns[colIdx]}
-                        {@const colType = col?.dataType ?? col?.data_type ?? ""}
-                        {@const enumValues = getColumnEnumValues(col)}
+                        {@const cached = _colCache[colIdx]}
+                        {@const colType = cached?.colType ?? ""}
+                        {@const enumValues = cached?.enumValues ?? null}
+                        {@const canEditCell = cached?.canEdit ?? false}
+                        {@const cellFk = cached?.fk ?? null}
                         {@const stagedEdit = hasPendingEdits ? pendingEdits.get(idx + ":" + colIdx) : undefined}
                         {@const isDirty = !!stagedEdit}
                         {@const cellValue = stagedEdit ? stagedEdit.value : cell}
-                        {@const cellFk = foreignKeyForCell(idx, colIdx)}
                         {@const cellIsNull = cellValue === null || cellValue === undefined}
                         {@const activeFk = cellFk && !cellIsNull}
-                        {@const isFocusedCell = !isEditing && focusedRow === idx && focusedCol !== null && columns[colIdx]?.name === navigableColumns[focusedCol]?.name}
                         {@const cellPinned = pinnedColumns.has(col?.name ?? '')}
                         {@const cellPinLeft = cellPinned ? (pinnedOffsets.get(col?.name ?? '') ?? 0) : 0}
-                        <!-- Background / text / shadow resolved by priority so the hot
-                             cell class avoids tailwind-merge (cx = clsx only). Order
-                             matches the previous cn() last-wins behavior exactly. -->
-                        {@const canEditCell = canEditColumn(colIdx)}
+                        <!-- isFocusedCell removed from template — handled imperatively
+                             by $effect + CSS (data-focused-cell attr) to avoid
+                             making all rows×cols cells reactive to focusedRow changes. -->
                         {@const cellBg = isEditing ? "bg-background"
                           : cellPinned ? "bg-panel"
                           : isDirty ? "bg-amber-400/15"
                           : activeFk ? "bg-accent/15" : ""}
                         {@const cellTextColor = isEditing ? ""
-                          : (isFocusedCell || isDirty) ? "text-foreground" : "text-muted-foreground"}
+                          : isDirty ? "text-foreground" : "text-muted-foreground"}
                         {@const cellShadow = isEditing ? ""
                           : cellPinned ? "shadow-[1px_0_0_hsl(var(--border)/0.6)]"
                           : isDirty ? "shadow-[inset_2px_0_0_#f59e0b]" : ""}
                         <td
                           data-col-idx={colIdx}
+                          data-col-name={col?.name}
                           class={cx(
                             "overflow-hidden font-mono",
                             isEditing
@@ -2380,7 +2395,7 @@
                                 : undefined}
                             >
                               {#if cellHref}
-                                {@const safeHref = (urlType === 'image' || urlType === 'pdf') ? encodeHref(cellHref) : cellHref}
+                                {@const safeHref = cellHref}
                                 <a
                                   href={safeHref}
                                   data-cell-url
@@ -2405,15 +2420,6 @@
                                       void openExternal(safeHref);
                                     }
                                   }}
-                                  onmouseenter={(e) => {
-                                    if (urlType)
-                                      showUrlPreview(
-                                        safeHref,
-                                        urlType,
-                                        e.currentTarget.getBoundingClientRect(),
-                                      );
-                                  }}
-                                  onmouseleave={scheduleHidePreview}
                                 >
                                   {cellDisplay}
                                 </a>
@@ -2568,7 +2574,7 @@
       {/if}
       <ContextMenu.Separator />
       <ContextMenu.Item
-        disabled={!menuEditable}
+        disabled={!menuEditable || readonly}
         onSelect={() =>
           runMenuAction(() => startEdit(contextRowIdx, contextColIdx))}
       >
@@ -2585,7 +2591,7 @@
         <ContextMenu.Shortcut>⌘C</ContextMenu.Shortcut>
       </ContextMenu.Item>
       <ContextMenu.Item
-        disabled={!menuEditable || menuCellNull}
+        disabled={!menuEditable || menuCellNull || readonly}
         onSelect={() =>
           runMenuAction(() => setCellNull(contextRowIdx, contextColIdx))}
       >
@@ -2641,7 +2647,7 @@
       <ContextMenu.Separator />
       <ContextMenu.Item
         variant="destructive"
-        disabled={!hasPrimaryKey || saving}
+        disabled={!hasPrimaryKey || saving || readonly}
         onSelect={() => runMenuAction(() => deleteRow(contextRowIdx))}
       >
         <Trash2 />
@@ -2652,24 +2658,6 @@
       </ContextMenu.Item>
     </ContextMenu.Content>
   </ContextMenu.Root>
-{/if}
-
-{#if previewUrl && previewType && previewAnchorRect}
-  <UrlPreviewTooltip
-    url={previewUrl}
-    type={previewType}
-    anchorRect={previewAnchorRect}
-    onmouseenter={cancelHidePreview}
-    onmouseleave={scheduleHidePreview}
-    onopen={() => void openExternal(previewUrl)}
-    onexpand={() => {
-      if (previewType === "image" || previewType === "pdf") {
-        lightboxUrl = previewUrl;
-        lightboxType = /** @type {'image'|'pdf'} */ (previewType);
-        previewUrl = null;
-      }
-    }}
-  />
 {/if}
 
 <MediaLightbox

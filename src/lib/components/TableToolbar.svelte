@@ -3,7 +3,6 @@
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
-
   import ListFilter from "@lucide/svelte/icons/list-filter";
   import ArrowUpDown from "@lucide/svelte/icons/arrow-up-down";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
@@ -81,6 +80,8 @@
     /** Search string for column name filtering (structure mode only) */
     structureSearch = "",
     onstructuresearchchange = /** @type {(v: string) => void} */ (() => {}),
+    /** When true, all write operations are disabled in the table */
+    readonly = false,
   } = $props();
 
   /** @type {HTMLInputElement | null} */
@@ -551,8 +552,8 @@
         <button
           type="button"
           class="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-border/60 px-2 text-ui-sm text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30 md:px-2.5"
-          disabled={loading || columns.length === 0}
-          title="Insert row (Add)"
+          disabled={loading || columns.length === 0 || readonly}
+          title={readonly ? "Read-only mode" : "Insert row (Add)"}
           onclick={onaddrow}
         >
           <Plus class="size-3.5 shrink-0" />
@@ -801,7 +802,7 @@
             <DropdownMenu.Separator />
             <DropdownMenu.Item
               variant="destructive"
-              disabled={selectedCount === 0 || !hasPrimaryKey || deleting}
+              disabled={selectedCount === 0 || !hasPrimaryKey || deleting || readonly}
               onSelect={ondeleteselected}
             >
               <Trash2 />
