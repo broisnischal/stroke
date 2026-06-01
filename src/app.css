@@ -17,9 +17,11 @@
 }
 
 /* OS-native border-radius conventions */
-html[data-os="macos"]   { --radius: 0.5rem; }   /* 8 px — macOS rounded controls */
-html[data-os="windows"] { --radius: 0.4375rem; } /* 7 px — Windows 11 rounding */
-/* linux keeps the default 6 px */
+html[data-os="macos"]   { --radius: 0.5rem; --window-radius: 10px; }  /* macOS Big Sur+ system radius */
+html[data-os="windows"] { --radius: 0.4375rem; --window-radius: 8px; } /* Windows 11 */
+html[data-os="linux"]   { --window-radius: 8px; }
+:root { --window-radius: 10px; }
+
 
 @theme inline {
   --radius-sm: calc(var(--radius) - 2px);
@@ -61,28 +63,50 @@ html[data-os="windows"] { --radius: 0.4375rem; } /* 7 px — Windows 11 rounding
     @apply border-border outline-ring/50;
   }
 
+  /* Disable OS word suggestions, autocorrect, and spellcheck on all inputs. */
+  input:not([type="file"]),
+  textarea {
+    autocorrect: off;
+    autocapitalize: off;
+    spellcheck: false;
+  }
+
   html {
     font-size: var(--app-font-size);
     font-family: var(--font-sans);
-    @apply h-full;
-    /* antialiased (grayscale) blurs on WebKitGTK/Linux; auto uses the platform
-       renderer which stays sharp at all zoom levels and during scroll. */
+    @apply h-full overflow-hidden;
+    /* Transparent so the rounded body corners reveal the desktop, not a square
+       html background. Body's bg-background would otherwise propagate here. */
+    background: transparent;
+    /* Linux/WebKitGTK: 'auto' lets FreeType apply the system's native hinting
+       (bytecode or autohint) so strokes snap to pixel boundaries — this is what
+       makes text look crisp on a non-HiDPI Linux screen. 'antialiased' forces
+       grayscale AA which bypasses FreeType hinting and makes text look light/soft.
+       macOS: 'auto' delegates to Core Text which also produces good results. */
     -webkit-font-smoothing: auto;
     -moz-osx-font-smoothing: auto;
-    /* optimizeLegibility causes blurry text during GPU-composited scroll in
-       WebKit / WebView2 — the software rasterizer it enables doesn't align
-       cleanly with compositor layer boundaries when rows scroll past the
-       sticky header. 'geometricPrecision' keeps crisp rendering without it. */
-    text-rendering: geometricPrecision;
+    /* 'auto' on WebKitGTK = FreeType normal mode (hinting on). We previously used
+       'geometricPrecision' to avoid scroll blur from GPU compositing, but
+       WEBKIT_DISABLE_DMABUF_RENDERER=1 in lib.rs already handles that — keeping
+       geometricPrecision unnecessarily disables FreeType hinting on Linux. */
+    text-rendering: auto;
+    /* font-synthesis and text-size-adjust omitted: font-synthesis:none can trigger
+       a WebKit font assertion on Linux startup; text-size-adjust is a no-op on desktop. */
   }
 
   body {
     @apply m-0 h-full min-h-0 overflow-hidden bg-background text-foreground;
     font-family: var(--font-sans);
+    /* Round the opaque body background to match the system window radius.
+       html has background:transparent above, so the clipped corners are truly
+       transparent — the desktop shows through on macOS with transparent(true). */
+    border-radius: var(--window-radius);
   }
 
   #app {
     @apply m-0 h-full min-h-0 overflow-hidden;
+    /* NO border-radius here — body already clips everything. Adding it twice
+       creates a double-clip that leaves a visible margin ring. */
     user-select: none;
     -webkit-user-select: none;
   }
@@ -108,7 +132,7 @@ html[data-os="windows"] { --radius: 0.4375rem; } /* 7 px — Windows 11 rounding
     -webkit-user-select: text;
   }
 
-  #app :is(.studio-data-table tbody td, .studio-data-table tbody td *) {
+  #app :is(.studio-data-table tbody td input, .studio-data-table tbody td textarea) {
     user-select: text;
     -webkit-user-select: text;
   }
@@ -137,6 +161,16 @@ html[data-os="windows"] { --radius: 0.4375rem; } /* 7 px — Windows 11 rounding
     user-select: none !important;
     -webkit-user-select: none !important;
   }
+
+  /* Force correct resize cursors — !important beats WKWebView's cursor resets */
+  .studio-resize-handle[aria-orientation="vertical"]   { cursor: col-resize !important; }
+  .studio-resize-handle[aria-orientation="horizontal"] { cursor: row-resize !important; }
+
+  /* Lock cursor globally while drag is active so it never flickers mid-drag */
+  body.is-resizing-x,
+  body.is-resizing-x * { cursor: col-resize !important; }
+  body.is-resizing-y,
+  body.is-resizing-y * { cursor: row-resize !important; }
 
   /* App chrome: no focus ring for mouse clicks; keep keyboard focus-visible */
   [data-studio-chrome] :focus:not(:focus-visible) {
@@ -169,7 +203,7 @@ html[data-os="windows"] { --radius: 0.4375rem; } /* 7 px — Windows 11 rounding
   [data-sonner-toaster] [data-sonner-toast] {
     font-family: inherit;
     font-size: inherit;
-    -webkit-font-smoothing: antialiased;
+    /* Inherit 'auto' from html — don't force antialiased which blurs on Linux */
   }
 
   [data-sonner-toaster] [data-sonner-toast][data-styled='false'] [data-description] {
@@ -219,6 +253,38 @@ html[data-os="windows"] { --radius: 0.4375rem; } /* 7 px — Windows 11 rounding
     text-decoration: underline;
     text-underline-offset: 2px;
     text-decoration-color: color-mix(in oklch, currentColor 40%, transparent);
+  }
+
+  /* ── Global kbd / keyboard key badge ───────────────────────────────────── */
+  kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    font-family: var(--font-mono);
+    font-size: calc(9 / 13 * 1rem);
+    line-height: 1;
+    color: var(--muted-foreground);
+    background: color-mix(in oklch, var(--muted) 70%, transparent);
+    border: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
+    border-bottom-color: var(--border);
+    border-radius: 3px;
+    box-shadow: 0 1px 0 color-mix(in oklch, var(--border) 60%, transparent),
+                inset 0 1px 0 color-mix(in oklch, var(--background) 12%, transparent);
+    white-space: nowrap;
+    user-select: none;
+    vertical-align: middle;
+  }
+
+  /* kbd inside a primary-coloured surface (e.g. Save button) */
+  kbd.kbd-on-primary {
+    color: color-mix(in oklch, var(--primary-foreground) 70%, transparent);
+    background: color-mix(in oklch, var(--primary-foreground) 12%, transparent);
+    border-color: color-mix(in oklch, var(--primary-foreground) 25%, transparent);
+    border-bottom-color: color-mix(in oklch, var(--primary-foreground) 35%, transparent);
+    box-shadow: 0 1px 0 color-mix(in oklch, var(--primary-foreground) 20%, transparent);
   }
 
   .studio-data-table {

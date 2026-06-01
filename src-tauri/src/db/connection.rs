@@ -88,6 +88,18 @@ pub struct D1Config {
     pub api_token: String,
 }
 
+// ── LibSQL / Turso ────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibSqlConfig {
+    pub name: String,
+    /// Database URL: libsql://*.turso.io, https://*.turso.io, or http://localhost:PORT
+    pub url: String,
+    /// Auth token (Turso). Leave None/empty for local unauthenticated libsql-server.
+    pub auth_token: Option<String>,
+}
+
 // ── Active connection ─────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -96,6 +108,7 @@ pub enum ActiveConnection {
     Sqlite(SqlitePool),
     Mysql(MySqlPool),
     D1(D1Config),
+    LibSql(LibSqlConfig),
 }
 
 impl ActiveConnection {
@@ -105,6 +118,7 @@ impl ActiveConnection {
             Self::Sqlite(_) => "sqlite",
             Self::Mysql(_) => "mysql",
             Self::D1(_) => "d1",
+            Self::LibSql(_) => "libsql",
         }
     }
 }
@@ -171,13 +185,21 @@ async fn close_existing(state: &State<'_, DbState>) {
 
 async fn open_pg(config: &PgConfig) -> Result<PgPool, String> {
     PgPoolOptions::new()
-        // A single get_table_rows fires 6 queries; multiple open tabs multiply that.
-        // 20 connections comfortably handles 3–4 concurrent tab loads in parallel.
-        .max_connections(20)
-        .min_connections(2)
-        .acquire_timeout(std::time::Duration::from_secs(30))
-        .idle_timeout(std::time::Duration::from_secs(600))
-        .max_lifetime(std::time::Duration::from_secs(1800))
+        // Desktop app: at most 2-3 tabs open simultaneously, each running 1-2
+        // queries. 4 connections is the real-world ceiling; monitored logs showed
+        // only 4 connections actually opened even under active use. Keeping 10
+        // was wasting ~25-40 MB of Rust-side recv/send buffers + 8 OS FDs for
+        // sockets that stayed idle 95% of the time.
+        .max_connections(4)
+        // No min_connections: keeping idle connections alive causes ping failures
+        // after network changes or laptop sleep/wake (os error 60), then a 27 s
+        // stall while the pool replaces the dead connection.
+        .acquire_timeout(std::time::Duration::from_secs(10))
+        // Release idle connections after 30 s (was 60 s). Logs showed the app
+        // goes fully idle within 30 s of the user stopping interaction, so
+        // halving this cuts FD and memory hold-time without affecting responsiveness.
+        .idle_timeout(std::time::Duration::from_secs(30))
+        .max_lifetime(std::time::Duration::from_secs(300))
         // Kill runaway queries automatically so they don't pin connections forever.
         .after_connect(|conn, _meta| {
             Box::pin(async move {
@@ -246,11 +268,11 @@ pub async fn connect_sqlite(state: State<'_, DbState>, config: SqliteConfig) -> 
 
 async fn open_mysql(config: &MysqlConfig) -> Result<MySqlPool, String> {
     MySqlPoolOptions::new()
-        .max_connections(20)
-        .min_connections(2)
-        .acquire_timeout(std::time::Duration::from_secs(30))
-        .idle_timeout(std::time::Duration::from_secs(600))
-        .max_lifetime(std::time::Duration::from_secs(1800))
+        // Same rationale as PG: 4 is the real-world ceiling for a desktop app.
+        .max_connections(4)
+        .acquire_timeout(std::time::Duration::from_secs(10))
+        .idle_timeout(std::time::Duration::from_secs(30))
+        .max_lifetime(std::time::Duration::from_secs(300))
         // Enable ANSI_QUOTES on every connection so double-quoted identifiers
         // ("col") work the same as backtick identifiers (`col`). This makes
         // standard SQL and AI-generated queries work without rewriting syntax.
@@ -297,9 +319,26 @@ pub async fn connect_d1(state: State<'_, DbState>, config: D1Config) -> Result<(
     set_conn(&state, Some(ActiveConnection::D1(config)))
 }
 
+// ── LibSQL / Turso connect / test ─────────────────────────────────────────────
+
+pub async fn test_libsql_connection(config: LibSqlConfig) -> Result<(), String> {
+    crate::db::libsql::query(&config, "SELECT 1", vec![]).await?;
+    Ok(())
+}
+
+pub async fn connect_libsql(state: State<'_, DbState>, config: LibSqlConfig) -> Result<(), String> {
+    test_libsql_connection(config.clone()).await?;
+    close_existing(&state).await;
+    set_conn(&state, Some(ActiveConnection::LibSql(config)))
+}
+
 // ── Disconnect ────────────────────────────────────────────────────────────────
 
 pub async fn disconnect(state: State<'_, DbState>) -> Result<(), String> {
+    // close_existing already sets state to None atomically via take() before
+    // starting the (potentially slow) pool close. Calling set_conn(None) again
+    // after the async close would race with any concurrent connect_* call that
+    // set a new connection while the pool was draining, wiping it out.
     close_existing(&state).await;
-    set_conn(&state, None)
+    Ok(())
 }

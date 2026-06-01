@@ -7,13 +7,21 @@
   import LayoutTemplate from '@lucide/svelte/icons/layout-template'
   import Command from '@lucide/svelte/icons/command'
   import Lightbulb from '@lucide/svelte/icons/lightbulb'
+  import Code2 from '@lucide/svelte/icons/code-2'
+  import ShieldCheck from '@lucide/svelte/icons/shield-check'
+  import ScrollText from '@lucide/svelte/icons/scroll-text'
+  import BarChart2 from '@lucide/svelte/icons/bar-chart-2'
+  import LayoutDashboard from '@lucide/svelte/icons/layout-dashboard'
+  import GitBranch from '@lucide/svelte/icons/git-branch'
+  import History from '@lucide/svelte/icons/history'
   import { createHotkey, createHotkeySequence } from '@tanstack/svelte-hotkeys'
-  import { cycleTheme, restorePreviousTheme } from '$lib/stores/settings.js'
+  import { cycleTheme, restorePreviousTheme, isCurrentThemeDark } from '$lib/stores/settings.js'
   import { pickRandomTip } from '$lib/insider-tips.js'
   import { toast } from 'svelte-sonner'
   import Sidebar from './Sidebar.svelte'
   import TabBar from './TabBar.svelte'
   import TableToolbar from './TableToolbar.svelte'
+  import StructureView from './StructureView.svelte'
   import DataTable from './DataTable.svelte'
   import RowDetailPanel from './RowDetailPanel.svelte'
   import SqlConsole from './SqlConsole.svelte'
@@ -32,13 +40,18 @@
   import UpdateDialog from './UpdateDialog.svelte'
   import StatusBar from './StatusBar.svelte'
   import DisconnectDialog from './DisconnectDialog.svelte'
-  import InsertRowDialog from './InsertRowDialog.svelte'
+  // InsertRowDialog removed — replaced by inline draft row in DataTable
   import McpPanel from './McpPanel.svelte'
   import OrmRunner from './OrmRunner.svelte'
   import SchemaPage from './SchemaPage.svelte'
   import SecurityPage from './SecurityPage.svelte'
+  import BackupPage from './BackupPage.svelte'
   import LogsPage from './LogsPage.svelte'
   import JsonViewerPage from './JsonViewerPage.svelte'
+  import ChartsPage from './ChartsPage.svelte'
+  import DiagramsPage from './DiagramsPage.svelte'
+  import DashboardPage from './DashboardPage.svelte'
+  import EntityRelationPage from './EntityRelationPage.svelte'
   import { Button } from '$lib/components/ui/button/index.js'
   import AlertTriangle from '@lucide/svelte/icons/triangle-alert'
   import X from '@lucide/svelte/icons/x'
@@ -47,7 +60,10 @@
     listSchemas,
     listTables,
     getTableRows,
+    getTableColumnStructure,
     executeSql,
+    executeSqlMulti,
+    executeDdl,
     updateTableCell,
     deleteTableRows,
     insertTableRow,
@@ -66,6 +82,13 @@
     createSecurityTab,
     createLogsTab,
     createJsonTab,
+    createBackupTab,
+    createChartsTab,
+    createDashboardTab,
+    createErdTab,
+    findErdTab,
+    createDiagramsTab,
+    findDiagramsTab,
     findTableTab,
     findSqlTab,
     findAiTab,
@@ -73,7 +96,10 @@
     findOrmTab,
     findSecurityTab,
     findLogsTab,
+    findBackupTab,
     findJsonTab,
+    findChartsTab,
+    findDashboardTab,
     findLastTableTab,
     tableTabTitle,
     cycleTabIndex,
@@ -105,9 +131,12 @@
     connectPostgres,
     connectSqlite,
     connectD1,
+    connectLibSql,
     connectMysql,
     listIndexes,
     listEnums,
+    listTriggers,
+    listSequences,
     truncateTable,
     dropTable,
     initSampleDb,
@@ -124,7 +153,14 @@
     createSavedQuery,
   } from '$lib/stores/query-history.js'
   import { recordActivity } from '$lib/stores/activity-log.js'
+  import { loadRecentTabs, pushRecentTab, removeRecentTab, clearRecentTabs } from '$lib/stores/recent-tabs.js'
   import { installInputShortcuts } from '$lib/input-shortcuts.js'
+  import TitleBar from './TitleBar.svelte'
+  import { savedCharts, updateChart, switchChartsConnection } from '$lib/stores/saved-charts.js'
+  import { switchDiagramsConnection } from '$lib/stores/saved-diagrams.js'
+  import { dashboards, activeDashboardId, switchDashboardsConnection } from '$lib/stores/dashboards.js'
+  import { buildOption } from '$lib/chart-utils.js'
+  import { get } from 'svelte/store'
 
   /** @typedef {import('$lib/studio-tabs.js').StudioTab} StudioTab */
   /** @typedef {import('$lib/studio-tabs.js').TableTabState} TableTabState */
@@ -190,12 +226,33 @@
   let tabs = $state([])
   let activeTabId = $state(/** @type {string | null} */ (null))
 
+  // ── Tab navigation history (back/forward) ────────────────────────────────
+  /** @type {string[]} */
+  let navHistory = $state([])
+  let navIndex = $state(-1)
+  let _navigating = false  // prevent history push during back/forward jumps
+
+  const canGoBack    = $derived(navIndex > 0)
+  const canGoForward = $derived(navIndex < navHistory.length - 1)
+  /** @type {import('$lib/stores/recent-tabs.js').RecentTab[]} */
+  let recentTabs = $state([])
+
   let schemas = $state([])
   let activeSchema = $state('public')
   let tables = $state([])
   let indexes = $state([])
   /** @type {{ name: string, values: string[] }[]} */
   let enums = $state([])
+  /** @type {{ name: string, tableName: string, timing: string, events: string, functionName: string, enabled: boolean }[]} */
+  let triggers = $state([])
+  /** @type {{ name: string, dataType: string, startValue: number, minValue: number, maxValue: number, increment: number, cycle: boolean, ownedBy: string|null }[]} */
+  let sequences = $state([])
+  /** @type {'data' | 'structure'} */
+  let tableViewMode = $state('data')
+  /** @type {import('$lib/api.js').ColumnStructureRow[] | null} — loaded on demand when switching to structure view */
+  let structureColumns = $state(/** @type {any[]} */ ([]))
+  let loadingStructure = $state(false)
+  let structureSearch = $state('')
   let activeTable = $state(/** @type {string | null} */ (null))
   let tableFilter = $state('')
   let loadingTables = $state(false)
@@ -228,12 +285,22 @@
   let securityEverOpened = $state(false)
   let logsEverOpened = $state(false)
   let jsonEverOpened = $state(false)
+  let backupEverOpened = $state(false)
+  let chartsEverOpened = $state(false)
+  let dashboardEverOpened = $state(false)
+  let erdEverOpened     = $state(false)
+  let diagramsEverOpened = $state(false)
   $effect(() => {
     if (activeTab?.kind === 'sql') sqlEverOpened = true
     if (activeTab?.kind === 'orm') ormEverOpened = true
     if (activeTab?.kind === 'security') securityEverOpened = true
     if (activeTab?.kind === 'logs') logsEverOpened = true
     if (activeTab?.kind === 'json') jsonEverOpened = true
+    if (activeTab?.kind === 'backup') backupEverOpened = true
+    if (activeTab?.kind === 'charts') chartsEverOpened = true
+    if (activeTab?.kind === 'dashboard') dashboardEverOpened = true
+    if (activeTab?.kind === 'erd') erdEverOpened = true
+    if (activeTab?.kind === 'diagrams') diagramsEverOpened = true
   })
 
   let columns = $state([])
@@ -247,8 +314,9 @@
   let rows = $state([])
   let savingCell = $state(false)
   let deletingRows = $state(false)
-  let insertRowOpen = $state(false)
   let insertingRow = $state(false)
+  /** Bound from DataTable — triggers the inline new-row draft. */
+  let dtBeginInsertRow = $state(/** @type {() => void} */ (() => {}))
   let showMcpPanel = $state(false)
   let mcpRunning = $state(false)
   /** @type {{ rowIdx: number, colIdx: number, draft: string } | null} */
@@ -264,6 +332,10 @@
   let scrollTableTop = $state(() => {})
   /** @type {() => void} */
   let scrollTableBottom = $state(() => {})
+  /** @type {{ refresh: () => void } | null} */
+  let securityPageRef = $state(null)
+  /** @type {{ sendMessage: (text: string) => void } | null} */
+  let aiSidebarRef = $state(null)
   let total = $state(0)
   let queryMs = $state(0)
   let loadingRows = $state(false)
@@ -303,6 +375,8 @@
   let sqlMessage = $state('')
   let sqlLoading = $state(false)
   let sqlError = $state('')
+  /** @type {any[]} */
+  let sqlMultiResults = $state([])
 
   let ormCode = $state('')
   let ormMode = $state(/** @type {'drizzle' | 'prisma'} */ ('drizzle'))
@@ -313,6 +387,14 @@
   let ormError = $state('')
 
   const activeTab = $derived(tabs.find((t) => t.id === activeTabId) ?? null)
+  /** 'table' | 'view' | 'materialized_view' | 'foreign_table' — for the active table tab */
+  const activeTableKind = $derived(
+    activeTab?.kind === 'table'
+      ? (/** @type {any} */ (activeTab.state))?.tableKind ?? 'table'
+      : 'table'
+  )
+  /** Structure view only makes sense for real tables, not views/materialized views */
+  const canShowStructure = $derived(activeTableKind === 'table' || activeTableKind === 'foreign_table')
 
   let welcomeTip = $state(pickRandomTip())
   let _lastWelcomeTabId = ''
@@ -386,6 +468,10 @@
   let savedQueries = $state([])
   let queryHistoryVisible = $state(loadQueryHistoryPref())
 
+  function refreshRecentTabs() {
+    recentTabs = persistConnectionId ? loadRecentTabs(persistConnectionId) : []
+  }
+
   async function refreshQueryStores() {
     if (!persistConnectionId) {
       queryHistory = []
@@ -411,6 +497,15 @@
 
   $effect(() => {
     if (commandOpen && persistConnectionId) void refreshQueryStores()
+  })
+
+  $effect(() => {
+    // Reload recents, charts, and dashboards whenever the active connection changes
+    void persistConnectionId
+    refreshRecentTabs()
+    switchChartsConnection(persistConnectionId)
+    switchDashboardsConnection(persistConnectionId)
+    switchDiagramsConnection(persistConnectionId)
   })
 
   $effect(() => {
@@ -692,17 +787,9 @@
     cycleTab(-1)
   })
 
-  createHotkey('Alt+Tab', (e) => {
-    if (!connection || tabs.length < 2) return
-    e.preventDefault()
-    cycleTab(1)
-  })
-
-  createHotkey('Alt+Shift+Tab', (e) => {
-    if (!connection || tabs.length < 2) return
-    e.preventDefault()
-    cycleTab(-1)
-  })
+  // Note: Mod+Tab / Mod+Shift+Tab above already map to Ctrl+Tab on Windows/Linux
+  // and Cmd+Tab on macOS. No additional Ctrl+Tab registration needed — duplicates
+  // cause the "[already registered]" warning from @tanstack/svelte-hotkeys.
 
   createHotkey('Mod+B', (e) => {
     e.preventDefault()
@@ -762,7 +849,6 @@
     if (showInsiderModal)      { e.preventDefault(); showInsiderModal = false;      return }
     if (showDisconnectDialog)  { e.preventDefault(); showDisconnectDialog = false;  return }
     if (showCreateTableDialog) { e.preventDefault(); showCreateTableDialog = false; return }
-    if (insertRowOpen)         { e.preventDefault(); insertRowOpen = false;         return }
     if (showDockerModal)       { e.preventDefault(); showDockerModal = false;       return }
     if (showMcpPanel)          { e.preventDefault(); showMcpPanel = false;          return }
     if (showConnectionModal)   { e.preventDefault(); showConnectionModal = false;   return }
@@ -798,24 +884,38 @@
     void handleModRefresh()
   })
 
-  // Ctrl+Arrow (Windows/Linux) or Cmd+Arrow (Mac) for pagination.
+  // Ctrl+Arrow (Windows/Linux) or Cmd+Arrow (Mac) for pagination and scroll.
   // Uses a raw listener instead of createHotkey because:
   //   1. macOS intercepts Ctrl+Arrow at the OS level for Mission Control.
   //   2. Raw listeners read current reactive signal values at call time.
   $effect(() => {
     /** @param {KeyboardEvent} e */
-    function onPaginationKey(e) {
+    function onArrowKey(e) {
       const mod = e.ctrlKey || e.metaKey
       if (!mod || e.altKey) return
-      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+      if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return
       if (commandOpen || showConnectionModal || showSettingsModal) return
-      if (activeTab?.kind !== 'table' || !activeTable) return
       const el = document.activeElement
       if (
         el instanceof HTMLInputElement ||
         el instanceof HTMLTextAreaElement ||
         (el instanceof HTMLElement && el.isContentEditable)
       ) return
+
+      // Ctrl/Cmd+Up → scroll table to top; Ctrl/Cmd+Down → scroll table to bottom
+      if (e.key === 'ArrowUp' && !e.shiftKey) {
+        e.preventDefault()
+        scrollTableTop()
+        return
+      }
+      if (e.key === 'ArrowDown' && !e.shiftKey) {
+        e.preventDefault()
+        scrollTableBottom()
+        return
+      }
+
+      // Left/Right: pagination (table tabs only)
+      if (activeTab?.kind !== 'table' || !activeTable) return
       if (e.shiftKey) {
         // Ctrl/Cmd+Shift+Left → first page, Ctrl/Cmd+Shift+Right → last page
         if (e.key === 'ArrowLeft') {
@@ -840,8 +940,8 @@
         }
       }
     }
-    document.addEventListener('keydown', onPaginationKey)
-    return () => document.removeEventListener('keydown', onPaginationKey)
+    document.addEventListener('keydown', onArrowKey)
+    return () => document.removeEventListener('keydown', onArrowKey)
   })
 
   // F11 (all platforms) and Cmd+Ctrl+F (macOS standard) for fullscreen toggle.
@@ -912,7 +1012,52 @@
       await loadRows()
       return
     }
+    if (activeTab?.kind === 'schema') {
+      await loadSchemas()
+      await loadTables()
+      return
+    }
+    if (activeTab?.kind === 'security') {
+      securityPageRef?.refresh()
+      return
+    }
+    if (activeTab?.kind === 'dashboard') {
+      await refreshDashboardCharts()
+      return
+    }
     await loadTables()
+  }
+
+  async function refreshDashboardCharts() {
+    const dash = get(dashboards).find((d) => d.id === get(activeDashboardId))
+    if (!dash) return
+    const charts = get(savedCharts)
+    const isDark = get(isCurrentThemeDark)
+    await Promise.all(
+      dash.items.map(async (item) => {
+        const chart = charts.find((c) => c.id === item.chartId)
+        if (!chart?.sql) return
+        try {
+          const result = await executeSql(chart.sql)
+          const cols = result.columns ?? []
+          const rows = result.rows ?? []
+          const option = buildOption({
+            type: chart.config.type,
+            columns: cols,
+            rows,
+            xCol: chart.config.xCol,
+            yCol: chart.config.yCol,
+            zCol: chart.config.zCol,
+            groupCol: chart.config.groupCol,
+            isDark,
+            title: chart.config.title,
+          })
+          updateChart(chart.id, { previewOption: option })
+        } catch {
+          // silently skip failed charts
+        }
+      })
+    )
   }
 
   function closeInspector() {
@@ -932,6 +1077,26 @@
     if (!connection) return
     aiSidebarOpen = !aiSidebarOpen
     saveLayout({ aiSidebarOpen })
+  }
+
+  /**
+   * Route "Fix with AI" from SqlConsole into the AI sidebar.
+   * Opens the sidebar if hidden, then sends the composed message.
+   * @param {{ error: string, sql: string }} detail
+   */
+  function handleFixWithAi({ error, sql }) {
+    if (!connection) return
+    // Ensure sidebar is visible
+    if (!aiSidebarOpen) {
+      aiSidebarOpen = true
+      aiSidebarEverOpened = true
+      saveLayout({ aiSidebarOpen: true })
+    }
+    const msg =
+      `Fix this SQL error.\n\nError:\n${error}\n\nSQL:\n\`\`\`sql\n${sql}\n\`\`\`\n\n` +
+      `Return the corrected SQL in a \`\`\`sql block and a brief explanation.`
+    // Defer slightly so the sidebar has time to mount/unhide if it was closed
+    void Promise.resolve().then(() => aiSidebarRef?.sendMessage(msg))
   }
 
   /** Context-aware Accept from the AI sidebar — routes into the right editor. */
@@ -968,6 +1133,7 @@
     sqlMessage = ''
     sqlLoading = false
     sqlError = ''
+    sqlMultiResults = []
   }
 
   function openWelcomeTab() {
@@ -1053,6 +1219,17 @@
     clearTableEditor()
   }
 
+  function openBackupTab() {
+    const existing = findBackupTab(tabs)
+    if (existing) { void activateTab(existing.id); return }
+    saveActiveTabState()
+    dropWelcomeTabs()
+    const tab = createBackupTab()
+    tabs = [...tabs, tab]
+    activeTabId = tab.id
+    clearTableEditor()
+  }
+
   function openLogsTab() {
     const existing = findLogsTab(tabs)
     if (existing) {
@@ -1081,6 +1258,53 @@
     clearTableEditor()
   }
 
+  function openChartsTab() {
+    const existing = findChartsTab(tabs)
+    if (existing) {
+      void activateTab(existing.id)
+      return
+    }
+    saveActiveTabState()
+    dropWelcomeTabs()
+    const tab = createChartsTab()
+    tabs = [...tabs, tab]
+    activeTabId = tab.id
+    clearTableEditor()
+  }
+
+  function openDashboardTab() {
+    const existing = findDashboardTab(tabs)
+    if (existing) {
+      void activateTab(existing.id)
+      return
+    }
+    saveActiveTabState()
+    dropWelcomeTabs()
+    const tab = createDashboardTab()
+    tabs = [...tabs, tab]
+    activeTabId = tab.id
+    clearTableEditor()
+  }
+
+  function openErdTab() {
+    const existing = findErdTab(tabs)
+    if (existing) { void activateTab(existing.id); return }
+    saveActiveTabState()
+    dropWelcomeTabs()
+    const tab = createErdTab()
+    tabs = [...tabs, tab]
+    activeTabId = tab.id
+    clearTableEditor()
+  }
+
+  function openDiagramsTab() {
+    const existing = findDiagramsTab(tabs)
+    if (existing) { activateTab(existing.id); return }
+    const tab = createDiagramsTab()
+    tabs = [...tabs, tab]
+    activeTabId = tab.id
+  }
+
   /** @param {{ sql: string, mode: string }} detail */
   async function runOrm(detail) {
     if (!connection || !detail.sql.trim()) return
@@ -1105,8 +1329,50 @@
     if (id === activeTabId) return
     saveActiveTabState()
     activeTabId = id
+
+    // Push to nav history unless we're mid back/forward jump
+    if (!_navigating) {
+      const trimmed = navHistory.slice(0, navIndex + 1)
+      // Don't duplicate consecutive same id
+      if (trimmed[trimmed.length - 1] !== id) {
+        navHistory = [...trimmed, id].slice(-50) // cap at 50
+        navIndex = navHistory.length - 1
+      }
+    }
+
     const tab = tabs.find((t) => t.id === id)
     if (tab) await applyTabToEditor(tab)
+  }
+
+  async function navBack() {
+    if (!canGoBack) return
+    _navigating = true
+    navIndex -= 1
+    const id = navHistory[navIndex]
+    // Skip ids for tabs that no longer exist
+    if (!tabs.find(t => t.id === id)) {
+      navHistory = navHistory.filter((_, i) => i !== navIndex)
+      navIndex = Math.max(0, navIndex - 1)
+      _navigating = false
+      return
+    }
+    await activateTab(id)
+    _navigating = false
+  }
+
+  async function navForward() {
+    if (!canGoForward) return
+    _navigating = true
+    navIndex += 1
+    const id = navHistory[navIndex]
+    if (!tabs.find(t => t.id === id)) {
+      navHistory = navHistory.filter((_, i) => i !== navIndex)
+      navIndex = Math.min(navHistory.length - 1, navIndex)
+      _navigating = false
+      return
+    }
+    await activateTab(id)
+    _navigating = false
   }
 
   /** @param {string} id */
@@ -1150,6 +1416,8 @@
     const { filters = null, resetQuery = false } = options
     const existing = findTableTab(tabs, schema, table)
     if (existing) {
+      tableViewMode = 'data'
+      structureColumns = []
       await activateTab(existing.id)
       if (filters) {
         if (resetQuery) {
@@ -1168,6 +1436,10 @@
     saveActiveTabState()
     dropWelcomeTabs()
     const tableKind = tables.find((t) => t.name === table)?.kind ?? 'table'
+    if (persistConnectionId) {
+      pushRecentTab(persistConnectionId, { schema, table, tableKind: /** @type {any} */ (tableKind) })
+      refreshRecentTabs()
+    }
     const tab = createTableTab(schema, table, /** @type {any} */ (tableKind))
     // Pre-bake any filters/search into the tab state before fetching
     if (tab.state && filters) {
@@ -1176,6 +1448,9 @@
     tabs = [...tabs, tab]
     activeTabId = tab.id
     activeTable = table
+    tableViewMode = 'data'
+    structureColumns = []
+    structureSearch = ''
     page = 1
     pageSize = DEFAULT_PAGE_SIZE
     rowSearch = ''
@@ -1245,12 +1520,157 @@
           indexType: i.indexType ?? i.index_type ?? 'btree',
           isUnique: i.isUnique ?? i.is_unique ?? false,
           isPrimary: i.isPrimary ?? i.is_primary ?? false,
+          condition: i.condition ?? null,
+          comment: i.comment ?? null,
         }))
         .filter((i) => i.name)
     } catch {
       indexes = []
     }
   }
+
+  async function loadStructure() {
+    if (!activeSchema || !activeTable) { structureColumns = []; return }
+    loadingStructure = true
+    const targetSchema = activeSchema
+    const targetTable  = activeTable
+    const driver       = dbType  // 'postgres' | 'mysql' | 'sqlite' | 'd1'
+    try {
+      const s = targetSchema.replace(/'/g, "''")
+      const t = targetTable.replace(/'/g, "''")
+      let rows = /** @type {unknown[][]} */ ([])
+
+      // ── PostgreSQL / Supabase ─────────────────────────────────────────
+      // pg_catalog is 10-100× faster than information_schema on hosted PG.
+      if (driver === 'postgres') {
+        const r = await executeSql(`
+          SELECT
+            a.attnum::int,
+            a.attname,
+            CASE
+              WHEN t.typtype = 'b' AND t.typelem <> 0 AND t.typname LIKE '\\_%'
+                THEN (SELECT bt.typname FROM pg_catalog.pg_type bt WHERE bt.oid = t.typelem) || '[]'
+              WHEN a.atttypmod > 0 AND t.typname IN ('varchar','bpchar')
+                THEN t.typname || '(' || (a.atttypmod - 4)::text || ')'
+              WHEN a.atttypmod > 0 AND t.typname = 'numeric' AND a.atttypmod <> -1
+                THEN 'numeric(' || (((a.atttypmod - 4) >> 16) & 65535)::text
+                  || ',' || ((a.atttypmod - 4) & 65535)::text || ')'
+              WHEN a.atttypmod > 0 AND t.typname IN ('bit','varbit')
+                THEN t.typname || '(' || a.atttypmod::text || ')'
+              ELSE t.typname
+            END,
+            NOT a.attnotnull,
+            pg_get_expr(ad.adbin, ad.adrelid),
+            (
+              SELECT rn.nspname || '.' || rc.relname || '.' || ra.attname
+              FROM pg_catalog.pg_constraint  pc
+              JOIN pg_catalog.pg_class        rc ON rc.oid  = pc.confrelid
+              JOIN pg_catalog.pg_namespace    rn ON rn.oid  = rc.relnamespace
+              JOIN pg_catalog.pg_attribute    ra ON ra.attrelid = rc.oid AND ra.attnum = pc.confkey[1]
+              WHERE pc.contype = 'f' AND pc.conrelid = a.attrelid AND pc.conkey[1] = a.attnum
+              LIMIT 1
+            ),
+            (
+              SELECT pc.conname FROM pg_catalog.pg_constraint pc
+              WHERE pc.contype = 'f' AND pc.conrelid = a.attrelid AND pc.conkey[1] = a.attnum
+              LIMIT 1
+            ),
+            col_description(a.attrelid, a.attnum)
+          FROM pg_catalog.pg_attribute  a
+          JOIN pg_catalog.pg_class      c  ON c.oid = a.attrelid
+          JOIN pg_catalog.pg_namespace  n  ON n.oid = c.relnamespace
+          JOIN pg_catalog.pg_type       t  ON t.oid = a.atttypid
+          LEFT JOIN pg_catalog.pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
+          WHERE n.nspname = '${s}' AND c.relname = '${t}'
+            AND a.attnum > 0 AND NOT a.attisdropped
+          ORDER BY a.attnum
+        `)
+        rows = r?.rows ?? []
+
+      // ── MySQL ─────────────────────────────────────────────────────────
+      } else if (driver === 'mysql') {
+        const r = await executeSql(`
+          SELECT
+            c.ORDINAL_POSITION,
+            c.COLUMN_NAME,
+            c.COLUMN_TYPE,
+            c.IS_NULLABLE = 'YES',
+            c.COLUMN_DEFAULT,
+            CASE WHEN kcu.REFERENCED_TABLE_NAME IS NOT NULL
+              THEN CONCAT(kcu.REFERENCED_TABLE_SCHEMA,'.',kcu.REFERENCED_TABLE_NAME,'.',kcu.REFERENCED_COLUMN_NAME)
+              ELSE NULL END,
+            kcu.CONSTRAINT_NAME,
+            c.COLUMN_COMMENT
+          FROM information_schema.COLUMNS c
+          LEFT JOIN information_schema.KEY_COLUMN_USAGE kcu
+            ON kcu.TABLE_SCHEMA = c.TABLE_SCHEMA AND kcu.TABLE_NAME = c.TABLE_NAME
+           AND kcu.COLUMN_NAME = c.COLUMN_NAME AND kcu.REFERENCED_TABLE_NAME IS NOT NULL
+          WHERE c.TABLE_SCHEMA = '${s}' AND c.TABLE_NAME = '${t}'
+          ORDER BY c.ORDINAL_POSITION
+        `)
+        rows = r?.rows ?? []
+
+      // ── SQLite / D1 ───────────────────────────────────────────────────
+      } else {
+        const [colR, fkR] = await Promise.all([
+          executeSql(`PRAGMA table_info('${t}')`),
+          executeSql(`PRAGMA foreign_key_list('${t}')`),
+        ])
+        /** @type {Map<string, string>} */
+        const fkMap = new Map()
+        for (const fkRow of fkR?.rows ?? []) {
+          const fromCol = String(fkRow[3] ?? '')
+          const toTable = String(fkRow[2] ?? '')
+          const toCol   = String(fkRow[4] ?? '')
+          if (fromCol && !fkMap.has(fromCol)) fkMap.set(fromCol, `${toTable}.${toCol}`)
+        }
+        rows = (colR?.rows ?? []).map((row) => [
+          Number(row[0]) + 1,  // cid → 1-based ordinal
+          row[1],              // name
+          row[2],              // type
+          !(row[3] === 1 || row[3] === '1' || row[3] === true),  // notnull→nullable
+          row[4],              // dflt_value
+          fkMap.get(String(row[1] ?? '')) ?? null,
+          null,
+          null,
+        ])
+      }
+
+      if (activeTable === targetTable && activeSchema === targetSchema) {
+        structureColumns = rows.map((row) => ({
+          ordinalPosition:  Number(row[0]) || 0,
+          name:             String(row[1] ?? ''),
+          dataType:         String(row[2] ?? ''),
+          isNullable:       row[3] === true || row[3] === 't' || String(row[3]).toLowerCase() === 'true',
+          columnDefault:    row[4] != null ? String(row[4]) : null,
+          foreignKey:       row[5] != null ? String(row[5]) : null,
+          fkConstraintName: row[6] != null ? String(row[6]) : null,
+          comment:          row[7] != null ? String(row[7]) : null,
+        }))
+      }
+    } catch (e) {
+      toast.error('Could not load table structure', { description: String(e) })
+      if (activeTable === targetTable) structureColumns = []
+    } finally {
+      loadingStructure = false
+    }
+  }
+
+  // Auto-reset structure mode when navigating to a view/materialized_view.
+  $effect(() => {
+    if (!canShowStructure && tableViewMode === 'structure') {
+      tableViewMode = 'data'
+      structureColumns = []
+    }
+  })
+
+  // Auto-load structure when the view is in structure mode, a table is active,
+  // and there is an active connection.
+  $effect(() => {
+    if (connection && tableViewMode === 'structure' && activeTable && canShowStructure) {
+      void loadStructure()
+    }
+  })
 
   async function loadEnums() {
     if (!activeSchema) { enums = []; return }
@@ -1259,6 +1679,42 @@
       enums = list.map((e) => ({ name: e.name ?? '', values: e.values ?? [] }))
     } catch {
       enums = []
+    }
+  }
+
+  async function loadTriggers() {
+    if (!activeSchema) { triggers = []; return }
+    try {
+      const list = await listTriggers(activeSchema)
+      triggers = list.map((t) => ({
+        name: t.name ?? '',
+        tableName: t.tableName ?? t.table_name ?? '',
+        timing: t.timing ?? 'AFTER',
+        events: t.events ?? '',
+        functionName: t.functionName ?? t.function_name ?? '',
+        enabled: t.enabled ?? true,
+      })).filter((t) => t.name)
+    } catch {
+      triggers = []
+    }
+  }
+
+  async function loadSequences() {
+    if (!activeSchema) { sequences = []; return }
+    try {
+      const list = await listSequences(activeSchema)
+      sequences = list.map((s) => ({
+        name: s.name ?? '',
+        dataType: s.dataType ?? s.data_type ?? 'bigint',
+        startValue: s.startValue ?? s.start_value ?? 1,
+        minValue: s.minValue ?? s.min_value ?? 1,
+        maxValue: s.maxValue ?? s.max_value ?? 9007199254740991,
+        increment: s.increment ?? 1,
+        cycle: s.cycle ?? false,
+        ownedBy: s.ownedBy ?? s.owned_by ?? null,
+      })).filter((s) => s.name)
+    } catch {
+      sequences = []
     }
   }
 
@@ -1290,6 +1746,8 @@
     }
     void loadIndexes()
     void loadEnums()
+    void loadTriggers()
+    void loadSequences()
   }
 
   async function reloadTableFromQuery(resetPage = true) {
@@ -1514,18 +1972,22 @@
     sqlMessage = ''
     sqlColumns = []
     sqlRows = []
+    sqlMultiResults = []
     const sqlRan = sqlText
     try {
-      const data = await executeSql(sqlRan)
+      const results = await executeSqlMulti(sqlRan)
+      sqlMultiResults = results.length > 1 ? results : []
+      const data = results.length > 0 ? results[results.length - 1] : {}
       sqlColumns = data.columns ?? []
       sqlRows = data.rows ?? []
-      sqlQueryMs = data.queryMs ?? data.query_ms ?? 0
+      sqlQueryMs = data.query_ms ?? data.queryMs ?? 0
       sqlMessage = data.message ?? ''
-      if (!sqlMessage && data.rowCount != null && sqlColumns.length === 0) {
-        sqlMessage = `${formatCompactCount(data.rowCount)} row(s) affected`
+      if (!sqlMessage && data.row_count != null && sqlColumns.length === 0) {
+        sqlMessage = `${formatCompactCount(data.row_count)} row(s) affected`
       }
     } catch (e) {
       sqlError = String(e)
+      sqlMultiResults = []
     } finally {
       sqlLoading = false
       recordActivity({ type: 'sql_exec', title: sqlRan.trim().slice(0, 80) + (sqlRan.trim().length > 80 ? '…' : ''), detail: sqlRan, durationMs: sqlQueryMs, rowCount: sqlRows.length || undefined, success: !sqlError, error: sqlError || undefined })
@@ -1554,8 +2016,18 @@
     tables = []
     schemas = []
     activeSchema = 'public'
-    await loadSchemas()
+    // Retry loop — backend may not be fully ready immediately after connect
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await new Promise(r => setTimeout(r, attempt * 700))
+      await loadSchemas()
+      if (schemas.length > 0) break
+    }
     await loadTables()
+    // If tables came back empty despite a valid schema, give the backend one more chance
+    if (tables.length === 0 && schemas.length > 0) {
+      await new Promise(r => setTimeout(r, 1000))
+      await loadTables()
+    }
     tabs = []
     openWelcomeTab()
     await refreshQueryStores()
@@ -1598,6 +2070,7 @@
     try {
       if (last.type === 'sqlite') await connectSqlite(last)
       else if (last.type === 'd1') await connectD1(last)
+      else if (last.type === 'libsql') await connectLibSql(last)
       else if (last.type === 'mysql') await connectMysql(last)
       else await connectPostgres(last)
       await onConnected(last, last.id)
@@ -1648,22 +2121,32 @@
     showDisconnectDialog = true
   }
 
-  async function handleDisconnect() {
-    recordActivity({ type: 'disconnect', title: `Disconnected from ${connection?.name ?? 'database'}`, success: true })
-    try {
-      await disconnectPostgres()
-    } catch {
-      /* ignore */
-    }
-    try { await mcpStop() } catch { /* ignore */ }
-    mcpRunning = false
-    connection = null
+  /** Reset all connection-scoped UI state to blank. */
+  function clearConnectionState() {
     schemas = []
     tables = []
+    indexes = []
+    enums = []
+    triggers = []
+    sequences = []
     activeSchema = 'public'
     activeTable = null
     tableFilter = ''
+    tableViewMode = 'data'
+    structureColumns = []
+    structureSearch = ''
+    loadingStructure = false
+    recentTabs = []
     resetTabs()
+  }
+
+  async function handleDisconnect() {
+    recordActivity({ type: 'disconnect', title: `Disconnected from ${connection?.name ?? 'database'}`, success: true })
+    try { await disconnectPostgres() } catch { /* ignore */ }
+    try { await mcpStop() } catch { /* ignore */ }
+    mcpRunning = false
+    connection = null
+    clearConnectionState()
     showConnectionModal = true
   }
 
@@ -1681,10 +2164,9 @@
       ssl: false,
     })
     upsertConnection(conn)
-    disconnectPostgres().catch(() => {})
+    await disconnectPostgres().catch(() => {})
     connection = null
-    schemas = []; tables = []; indexes = []; enums = []; activeSchema = 'public'; activeTable = null; tableFilter = ''
-    resetTabs()
+    clearConnectionState()
     autoConnecting = true
     try {
       if (conn.type === 'mysql') await connectMysql(conn)
@@ -1701,10 +2183,9 @@
   }
 
   async function handleSampleConnect() {
-    disconnectPostgres().catch(() => {})
+    await disconnectPostgres().catch(() => {})
     connection = null
-    schemas = []; tables = []; indexes = []; enums = []; activeSchema = 'public'; activeTable = null; tableFilter = ''
-    resetTabs()
+    clearConnectionState()
     autoConnecting = true
     try {
       const filePath = await initSampleDb()
@@ -1726,17 +2207,18 @@
 
   /** @param {import('$lib/stores/connections.js').SavedConnection} conn */
   async function handleSwitchDatabase(conn) {
-    // Disconnect current (best-effort, non-blocking)
-    disconnectPostgres().catch(() => {})
+    // Disconnect current before connecting to the new one to avoid the race
+    // where set_conn(None) could fire after connect_* sets the new connection.
+    await disconnectPostgres().catch(() => {})
     connection = null
-    schemas = []; tables = []; indexes = []; enums = []; activeSchema = 'public'; activeTable = null; tableFilter = ''
-    resetTabs()
+    clearConnectionState()
     // Connect to the chosen saved connection
     autoConnecting = true
     try {
-      const { connectPostgres, connectSqlite, connectD1, connectMysql } = await import('$lib/api.js')
+      const { connectPostgres, connectSqlite, connectD1, connectLibSql, connectMysql } = await import('$lib/api.js')
       if (conn.type === 'sqlite') await connectSqlite(conn)
       else if (conn.type === 'd1') await connectD1(conn)
+      else if (conn.type === 'libsql') await connectLibSql(conn)
       else if (conn.type === 'mysql') await connectMysql(conn)
       else await connectPostgres(conn)
       await onConnected(conn, conn.id)
@@ -1866,7 +2348,6 @@
     const _insertStart = Date.now()
     try {
       const { row } = await insertTableRow(activeSchema, activeTable, values)
-      insertRowOpen = false
       recordActivity({ type: 'row_insert', title: `Inserted row into ${activeTable}`, schema: activeSchema, table: activeTable, durationMs: Date.now() - _insertStart, success: true })
 
       const hasActiveFilters =
@@ -2017,15 +2498,6 @@
   onconnect={handleDockerConnect}
 />
 
-<InsertRowDialog
-  bind:open={insertRowOpen}
-  tableLabel={activeTable ? `${activeSchema}.${activeTable}` : ''}
-  {columns}
-  {primaryKey}
-  saving={insertingRow}
-  oninsert={handleInsertRow}
-/>
-
 <McpPanel bind:open={showMcpPanel} connected={!!connection} />
 
 <SettingsDialog
@@ -2044,6 +2516,7 @@
 <AboutDialog bind:open={showAboutModal} />
 
 <UpdateDialog bind:this={updateDialog} onupdatefound={() => (statusBarHasUpdate = true)} />
+
 
 <CommandPalette
   bind:open={commandOpen}
@@ -2067,6 +2540,8 @@
   {aiMode}
   ontoggleaimode={() => aiMode ? exitAiMode() : enterAiMode()}
   onopenorm={() => { if (aiMode) exitAiMode(); openOrmTab() }}
+  onopenerd={() => { if (aiMode) exitAiMode(); openErdTab() }}
+  onopenbackup={() => { if (aiMode) exitAiMode(); openBackupTab() }}
   onopenSchema={() => { if (aiMode) exitAiMode(); openSchemaTab() }}
   onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
   onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
@@ -2099,6 +2574,19 @@
 
 
 <div class="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
+<TitleBar
+  title={connection?.database ?? connection?.filePath ?? connection?.name ?? 'studio'}
+  {sidebarOpen}
+  {aiMode}
+  {aiSidebarOpen}
+  {canGoBack}
+  {canGoForward}
+  ontogglesidebar={toggleSidebar}
+  ontoggleaimode={() => { if (aiMode) exitAiMode(); else openAiTab() }}
+  ontoggleaisidebar={() => { if (aiMode) exitAiMode(); toggleAiSidebar() }}
+  ongoback={() => void navBack()}
+  ongoforward={() => void navForward()}
+/>
 <div class="flex min-h-0 flex-1 overflow-hidden">
   {#if sidebarEverOpened}
     <div
@@ -2124,7 +2612,10 @@
         onopencommand={() => (commandOpen = true)}
         onopenSchema={openSchemaTab}
         onopenorm={openOrmTab}
-        {aiMode}
+        onopenbackup={openBackupTab}
+        onopendashboard={() => { if (aiMode) exitAiMode(); openDashboardTab() }}
+        onopenerd={() => { if (aiMode) exitAiMode(); openErdTab() }}
+              {aiMode}
         onopenaimode={() => (aiMode ? exitAiMode() : enterAiMode())}
         {queryHistory}
         onqueryselect={(sql) => { if (aiMode) exitAiMode(); void openQueryInEditor(sql) }}
@@ -2138,6 +2629,20 @@
         onnewtable={() => (showCreateTableDialog = true)}
         ontruncatetable={handleTruncateTable}
         ondroptable={(t, c) => void handleDropTable(t, c)}
+        {recentTabs}
+        onrecentselect={(schema, table) => { if (aiMode) exitAiMode(); void openTableTab(schema, table) }}
+        onrecentremove={(schema, table) => {
+          if (persistConnectionId) {
+            removeRecentTab(persistConnectionId, schema, table)
+            refreshRecentTabs()
+          }
+        }}
+        onrecentclear={() => {
+          if (persistConnectionId) {
+            clearRecentTabs(persistConnectionId)
+            refreshRecentTabs()
+          }
+        }}
       />
     </div>
   {/if}
@@ -2156,7 +2661,7 @@
         </div>
         <Button type="button" onclick={() => (showConnectionModal = true)}>Add connection</Button>
         <p class="text-ui-xs text-muted-foreground">
-          <kbd class="rounded border border-border px-1 font-mono">⌘K</kbd> command menu
+          <kbd>⌘K</kbd> command menu
         </p>
       </div>
     {:else}
@@ -2174,6 +2679,7 @@
             onexit={exitAiMode}
             onwritesql={(sql) => void handleAiWriteSql(sql)}
             onopenmodelsettings={() => (showAiModelSettings = true)}
+            onopendiagramspage={() => { exitAiMode(); openDiagramsTab() }}
           />
         </div>
       {/if}
@@ -2216,8 +2722,11 @@
       {:else if activeTab?.kind === 'schema'}
         <svelte:boundary failed={tabError}>
           <SchemaPage
+            schema={activeSchema}
             {indexes}
             {enums}
+            {triggers}
+            {sequences}
             {tables}
             loading={loadingTables}
             active={activeTab?.kind === 'schema'}
@@ -2233,7 +2742,19 @@
           inert={activeTab?.kind !== 'security' || undefined}
         >
           <svelte:boundary failed={tabError}>
-            <SecurityPage active={activeTab?.kind === 'security'} />
+            <SecurityPage bind:this={securityPageRef} active={activeTab?.kind === 'security'} />
+          </svelte:boundary>
+        </div>
+      {/if}
+
+      <!-- Backup tab -->
+      {#if backupEverOpened}
+        <div
+          class={activeTab?.kind === 'backup' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+          inert={activeTab?.kind !== 'backup' || undefined}
+        >
+          <svelte:boundary failed={tabError}>
+            <BackupPage dbType={dbType} activeSchema={activeSchema} {schemas} tables={tables.map((t) => ({ name: t.name, rowCount: t.rowCount }))} />
           </svelte:boundary>
         </div>
       {/if}
@@ -2258,6 +2779,61 @@
         >
           <svelte:boundary failed={tabError}>
             <JsonViewerPage active={activeTab?.kind === 'json'} />
+          </svelte:boundary>
+        </div>
+      {/if}
+
+      <!-- Charts tab - mount once, keep alive -->
+      {#if chartsEverOpened}
+        <div
+          class={activeTab?.kind === 'charts' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+          inert={activeTab?.kind !== 'charts' || undefined}
+        >
+          <svelte:boundary failed={tabError}>
+            <ChartsPage
+              {connection}
+              onrunsql={(sql) => { if (aiMode) exitAiMode(); void openQueryInEditor(sql) }}
+            />
+          </svelte:boundary>
+        </div>
+      {/if}
+
+      <!-- Diagrams tab - mount once, keep alive -->
+      {#if diagramsEverOpened}
+        <div
+          class={activeTab?.kind === 'diagrams' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+          inert={activeTab?.kind !== 'diagrams' || undefined}
+        >
+          <svelte:boundary failed={tabError}>
+            <DiagramsPage {connection} />
+          </svelte:boundary>
+        </div>
+      {/if}
+
+      <!-- Dashboard tab - mount once, keep alive -->
+      {#if dashboardEverOpened}
+        <div
+          class={activeTab?.kind === 'dashboard' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+          inert={activeTab?.kind !== 'dashboard' || undefined}
+        >
+          <svelte:boundary failed={tabError}>
+            <DashboardPage {connection} />
+          </svelte:boundary>
+        </div>
+      {/if}
+
+      <!-- ER Diagram tab -->
+      {#if erdEverOpened}
+        <div
+          class={activeTab?.kind === 'erd' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+          inert={activeTab?.kind !== 'erd' || undefined}
+        >
+          <svelte:boundary failed={tabError}>
+            <EntityRelationPage
+              schema={activeSchema}
+              {schemas}
+              onopentable={(s, t) => void openTableTab(s, t)}
+            />
           </svelte:boundary>
         </div>
       {/if}
@@ -2310,6 +2886,7 @@
             message={sqlMessage}
             loading={sqlLoading}
             error={sqlError}
+            multiResults={sqlMultiResults}
             schemaHints={sqlSchemaHints}
             schemaContext={aiSchemaContext}
             onrun={runSql}
@@ -2328,6 +2905,7 @@
             onqueryrefresh={refreshQueryStores}
             onhistoryselect={(sql) => void openQueryInEditor(sql)}
             onsavequery={handleSaveQuery}
+            onfixwithai={handleFixWithAi}
           />
           </svelte:boundary>
         </div>
@@ -2353,7 +2931,7 @@
           <div class="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center">
             <p class="font-mono text-ui text-muted-foreground">
               Select a table from the sidebar or press
-              <kbd class="rounded border border-border px-1 font-mono text-ui-xs">⌘K</kbd>
+              <kbd>⌘K</kbd>
             </p>
           </div>
         {:else if error}
@@ -2361,9 +2939,54 @@
             <p class="font-mono text-ui-sm text-muted-foreground/40">Dismiss the error above to continue.</p>
           </div>
         {:else}
+          {#if tableViewMode === 'structure' && canShowStructure}
+            <TableToolbar
+              bind:this={tableToolbar}
+              bind:filterBarOpen
+              bind:tableViewMode
+              structureAllowed={canShowStructure}
+              ontogglestructure={() => { tableViewMode = 'data'; structureColumns = [] }}
+              {sidebarOpen}
+              queryMs={0}
+              page={1}
+              pageSize={0}
+              offset={0}
+              total={0}
+              columns={[]}
+              rowSearch=""
+              rowSort={null}
+              rowFilters={[]}
+              loading={loadingStructure}
+              selectedCount={0}
+              hasPrimaryKey={false}
+              deleting={false}
+                            onrefresh={() => void loadStructure()}
+              onprev={() => {}}
+              onnext={() => {}}
+              {structureSearch}
+              onstructuresearchchange={(v) => (structureSearch = v)}
+            />
+            <StructureView
+              schema={activeSchema}
+              table={activeTable ?? ''}
+              {primaryKey}
+              columns={structureColumns}
+              indexes={activeTable ? indexes.filter((i) => i.tableName === activeTable) : []}
+              triggers={activeTable ? triggers.filter((t) => t.tableName === activeTable) : []}
+              {tables}
+              {enums}
+              columnSearch={structureSearch}
+              loading={loadingStructure}
+              onrefresh={() => { void loadStructure(); void loadTriggers() }}
+            />
+          {:else}
           <TableToolbar
             bind:this={tableToolbar}
             bind:filterBarOpen
+            bind:tableViewMode
+            structureAllowed={canShowStructure}
+            ontogglestructure={() => { tableViewMode = 'structure'; if (!structureColumns.length) void loadStructure() }}
+
             {sidebarOpen}
             {queryMs}
             {page}
@@ -2378,8 +3001,7 @@
             selectedCount={selected.size}
             hasPrimaryKey={primaryKey.length > 0}
             deleting={deletingRows}
-            ontogglesidebar={toggleSidebar}
-            onrefresh={loadRows}
+                        onrefresh={loadRows}
             onsearchchange={handleRowSearchChange}
             onfilterschange={(f) => void handleRowFiltersChange(f)}
             onsortchange={(s) => void handleRowSortChange(s)}
@@ -2388,7 +3010,7 @@
             onlimitoffsetchange={(l, o) => void handleLimitOffsetChange(l, o)}
             ondeleteselected={() => void deleteSelectedRows()}
             onexport={handleExport}
-            onaddrow={() => (insertRowOpen = true)}
+            onaddrow={() => dtBeginInsertRow?.()}
             {hiddenColumns}
             onhiddencolumnschange={(next) => {
               hiddenColumns = next
@@ -2411,6 +3033,8 @@
                 {rows}
                 {primaryKey}
                 {foreignKeys}
+                schema={activeSchema}
+                tableName={activeTable ?? ''}
                 indexes={activeTable ? indexes.filter((i) => i.tableName === activeTable) : []}
                 {hiddenColumns}
                 columnWidthsKey={activeTable ? `${activeSchema}.${activeTable}` : undefined}
@@ -2427,126 +3051,174 @@
                 bind:scrollToBottom={scrollTableBottom}
                 {rowSort}
                 onsortchange={(s) => void handleRowSortChange(s)}
+                onhidecolumn={(colName) => {
+                  const next = new Set(hiddenColumns)
+                  next.add(colName)
+                  hiddenColumns = next
+                  if (activeTable) saveHiddenCols(persistConnectionId, activeSchema, activeTable, next)
+                }}
+                onfiltercolumn={(colName) => {
+                  const newFilter = { id: crypto.randomUUID(), column: colName, op: /** @type {any} */ ('contains'), value: '', conjunct: /** @type {any} */ ('and') }
+                  void handleRowFiltersChange([...rowFilters, newFilter])
+                  filterBarOpen = true
+                  tableToolbar?.focusLastFilter?.()
+                }}
                 onsave={handleSaveCell}
                 ondelete={handleDeleteRow}
                 onfollowforeignkey={(d) => void handleFollowForeignKey(d)}
+                oninsertrow={handleInsertRow}
+                insertSaving={insertingRow}
+                bind:beginInsertRow={dtBeginInsertRow}
               />
             </svelte:boundary>
             <RowDetailPanel
               {columns}
               {rows}
+              {primaryKey}
               target={inspectorTarget}
               onclose={closeInspector}
+              onsave={handleSaveCell}
             />
           </div>
+          {/if}
         {/if}
       {/if}
 
       {#if !activeTab || activeTab.kind === 'welcome'}
         {@const isMac = navigator.platform.toUpperCase().includes('MAC')}
         {@const mod = isMac ? '⌘' : 'Ctrl'}
-        <div class="flex flex-1 flex-col items-center justify-center gap-8 overflow-auto p-10">
+        {@const recentQueries = queryHistory.slice(0, 5)}
+        {@const _now = Date.now()}
+        {@const relTime = (/** @type {number} */ ts) => {
+          const diff = _now - ts, sec = Math.floor(diff / 1000)
+          if (sec < 60) return 'just now'
+          const min = Math.floor(sec / 60)
+          if (min < 60) return `${min}m`
+          const hr = Math.floor(min / 60)
+          if (hr < 24) return `${hr}h`
+          const day = Math.floor(hr / 24)
+          return day < 7 ? `${day}d` : new Date(ts).toLocaleDateString()
+        }}
+        {@const cell = 'group flex flex-col gap-3 rounded-xl border border-border/25 bg-card/50 p-3 text-left transition-all hover:border-border/50 hover:bg-accent/10'}
+        {@const iconCls = 'size-3.5 text-muted-foreground/50 transition-colors group-hover:text-foreground/80'}
+        {@const labelCls = 'text-[11px] font-medium leading-none text-foreground/50 transition-colors group-hover:text-foreground/80'}
+        {@const hotkeyCls = 'text-[9px] tabular-nums text-muted-foreground/20 group-hover:text-muted-foreground/40 transition-colors self-end'}
 
-          <div class="flex flex-col items-center gap-1.5 text-center">
-            <h1 class="text-ui font-medium text-foreground">Where do you want to start?</h1>
-            <p class="text-ui-xs text-muted-foreground">Open a view or pick a table below</p>
+        <div class="flex flex-1 flex-col items-center justify-center gap-9 overflow-auto p-12">
+
+          <!-- Header -->
+          <div class="flex flex-col items-center gap-1.5">
+            <p class="text-[9px] font-medium uppercase tracking-[0.25em] text-muted-foreground/25">Quick access</p>
+            {#if connection}
+              <div class="flex items-center gap-2 text-sm font-medium text-foreground/80">
+                <span class="size-1.5 rounded-full bg-emerald-500 shrink-0"></span>
+                <span class="font-mono">{connection.database ?? connection.filePath?.split('/').at(-1) ?? connection.databaseId ?? 'connected'}</span>
+                <span class="text-muted-foreground/30 text-xs">·</span>
+                <span class="capitalize text-muted-foreground/50 text-xs font-normal">{dbType}</span>
+                {#if tables.length > 0}
+                  <span class="text-muted-foreground/30 text-xs">·</span>
+                  <span class="text-xs text-muted-foreground/40 font-normal">{tables.length} tables</span>
+                {/if}
+              </div>
+            {/if}
           </div>
 
-          <div class="grid w-full max-w-md grid-cols-2 gap-2">
-            <button
-              onclick={openSqlTab}
-              class="group flex flex-col gap-3 rounded-xl border border-border/50 bg-card p-4 text-left transition-all hover:border-border hover:bg-accent/20 hover:shadow-sm"
-            >
-              <div class="flex items-center justify-between">
-                <div class="flex size-8 items-center justify-center rounded-lg border border-border/60 bg-background text-muted-foreground transition-colors group-hover:text-foreground">
-                  <Terminal size={14} />
-                </div>
-                <kbd class="rounded border border-border/40 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground/50">{mod}T</kbd>
-              </div>
-              <div>
-                <p class="text-ui-sm font-medium text-foreground">SQL Editor</p>
-                <p class="mt-0.5 text-ui-xs text-muted-foreground">Write and run queries</p>
+          <!-- Action grid — max-w-sm keeps all sections aligned -->
+          <div class="grid w-full max-w-sm grid-cols-4 gap-1.5">
+
+            <button onclick={openSqlTab} class={cell}>
+              <Terminal class={iconCls} />
+              <div class="flex items-end justify-between gap-1">
+                <span class={labelCls}>SQL</span>
+                <span class={hotkeyCls}>{mod}T</span>
               </div>
             </button>
 
-            <button
-              onclick={() => {
-                const first = tables[0]
-                if (first) openTableTab(activeSchema, first.name)
-              }}
-              class="group flex flex-col gap-3 rounded-xl border border-border/50 bg-card p-4 text-left transition-all hover:border-border hover:bg-accent/20 hover:shadow-sm"
-            >
-              <div class="flex items-center justify-between">
-                <div class="flex size-8 items-center justify-center rounded-lg border border-border/60 bg-background text-muted-foreground transition-colors group-hover:text-foreground">
-                  <Table2 size={14} />
-                </div>
-                <kbd class="rounded border border-border/40 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground/50">{mod}⇧D</kbd>
-              </div>
-              <div>
-                <p class="text-ui-sm font-medium text-foreground">Browse Data</p>
-                <p class="mt-0.5 text-ui-xs text-muted-foreground">Explore tables and views</p>
+            <button onclick={openDashboardTab} class={cell}>
+              <LayoutDashboard class={iconCls} />
+              <span class={labelCls}>Dashboard</span>
+            </button>
+
+            <button onclick={openAiTab} class={cell}>
+              <Bot class={iconCls} />
+              <div class="flex items-end justify-between gap-1">
+                <span class={labelCls}>AI</span>
+                <span class={hotkeyCls}>{mod}⇧E</span>
               </div>
             </button>
 
-            <button
-              onclick={openAiTab}
-              class="group flex flex-col gap-3 rounded-xl border border-border/50 bg-card p-4 text-left transition-all hover:border-border hover:bg-accent/20 hover:shadow-sm"
-            >
-              <div class="flex items-center justify-between">
-                <div class="flex size-8 items-center justify-center rounded-lg border border-border/60 bg-background text-muted-foreground transition-colors group-hover:text-foreground">
-                  <Bot size={14} />
-                </div>
-                <kbd class="rounded border border-border/40 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground/50">{mod}⇧E</kbd>
-              </div>
-              <div>
-                <p class="text-ui-sm font-medium text-foreground">AI Assistant</p>
-                <p class="mt-0.5 text-ui-xs text-muted-foreground">Ask questions in plain text</p>
+            <button onclick={openOrmTab} class={cell}>
+              <Code2 class={iconCls} />
+              <div class="flex items-end justify-between gap-1">
+                <span class={labelCls}>ORM</span>
+                <span class={hotkeyCls}>{mod}⇧O</span>
               </div>
             </button>
 
             {#if hasSchemaExplorer}
-              <button
-                onclick={openSchemaTab}
-                class="group flex flex-col gap-3 rounded-xl border border-border/50 bg-card p-4 text-left transition-all hover:border-border hover:bg-accent/20 hover:shadow-sm"
-              >
-                <div class="flex items-center justify-between">
-                  <div class="flex size-8 items-center justify-center rounded-lg border border-border/60 bg-background text-muted-foreground transition-colors group-hover:text-foreground">
-                    <LayoutTemplate size={14} />
-                  </div>
-                  <kbd class="rounded border border-border/40 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground/50">{mod}⇧E</kbd>
-                </div>
-                <div>
-                  <p class="text-ui-sm font-medium text-foreground">Schema Explorer</p>
-                  <p class="mt-0.5 text-ui-xs text-muted-foreground">Visualize your database</p>
-                </div>
+              <button onclick={openSchemaTab} class={cell}>
+                <LayoutTemplate class={iconCls} />
+                <span class={labelCls}>Schema</span>
               </button>
             {/if}
+
+            {#if hasSecurity}
+              <button onclick={openSecurityTab} class={cell}>
+                <ShieldCheck class={iconCls} />
+                <span class={labelCls}>Security</span>
+              </button>
+            {/if}
+
+            <button onclick={openLogsTab} class={cell}>
+              <ScrollText class={iconCls} />
+              <span class={labelCls}>Logs</span>
+            </button>
+
+            <button onclick={openChartsTab} class={cell}>
+              <BarChart2 class={iconCls} />
+              <span class={labelCls}>Charts</span>
+            </button>
+
+            <button onclick={openDiagramsTab} class={cell}>
+              <GitBranch class={iconCls} />
+              <span class={labelCls}>Diagrams</span>
+            </button>
+
+            <button onclick={() => (showConnectionModal = true)} class={cell}>
+              <Database class={iconCls} />
+              <span class={labelCls}>Connect</span>
+            </button>
           </div>
 
-          <div class="w-full max-w-md rounded-xl border border-border/40 bg-muted/15 p-4">
-            <div class="flex items-start gap-3">
-              <Lightbulb class="mt-0.5 size-3.5 shrink-0 text-muted-foreground/40" />
-              <div class="flex min-w-0 flex-col gap-1">
-                <div class="flex items-center gap-2">
-                  <span class="text-ui-2xs font-medium uppercase tracking-wider text-muted-foreground/40">{welcomeTip.category}</span>
-                  <span class="font-mono text-ui-xs font-medium text-foreground/70">{welcomeTip.label}</span>
-                </div>
-                <p class="text-ui-xs leading-relaxed text-muted-foreground">{welcomeTip.text}</p>
-              </div>
+          <!-- Recent queries — same max-w-sm as the grid -->
+          {#if recentQueries.length > 0}
+            <div class="w-full max-w-sm flex flex-col gap-0.5">
+              <p class="mb-1 px-2 text-[9px] font-semibold uppercase tracking-[0.15em] text-muted-foreground/25">Recent</p>
+              {#each recentQueries as q (q.id)}
+                <button
+                  onclick={() => void openQueryInEditor(q.sql)}
+                  class="group flex w-full min-w-0 items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-muted/25"
+                >
+                  <History class="size-3 shrink-0 text-muted-foreground/20 transition-colors group-hover:text-muted-foreground/40" />
+                  <span class="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground/35 transition-colors group-hover:text-foreground/60">{q.title}</span>
+                  <span class="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/20">{relTime(q.executedAt)}</span>
+                </button>
+              {/each}
             </div>
-          </div>
+          {/if}
 
-          <div class="flex items-center gap-3 text-ui-2xs text-muted-foreground/40">
+          <!-- Footer -->
+          <div class="flex items-center gap-3 text-[10px] text-muted-foreground/20">
             <button
               onclick={() => showShortcutsModal = true}
-              class="flex items-center gap-1.5 transition-colors hover:text-muted-foreground"
+              class="flex items-center gap-1 transition-colors hover:text-muted-foreground/40"
             >
-              <Command size={10} />
-              <span>keyboard shortcuts</span>
+              <Command size={9} />
+              <span>shortcuts</span>
             </button>
-            <span class="text-muted-foreground/20">·</span>
+            <span>·</span>
             <span class="font-mono">{mod}B sidebar</span>
-            <span class="text-muted-foreground/20">·</span>
+            <span>·</span>
             <span class="font-mono">{mod}W close tab</span>
           </div>
         </div>
@@ -2562,6 +3234,7 @@
       inert={!aiSidebarOpen || aiMode || undefined}
     >
       <AiSidebar
+        bind:this={aiSidebarRef}
         schemaContext={aiSchemaContext}
         {connectionId}
         isActive={aiSidebarOpen && !aiMode}
@@ -2606,8 +3279,32 @@
   onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
   onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
   onopenorm={openOrmTab}
+        onopenbackup={openBackupTab}
+  onopenchartspage={() => { if (aiMode) exitAiMode(); openChartsTab() }}
+  onopendashboard={() => { if (aiMode) exitAiMode(); openDashboardTab() }}
+  onopendiagrams={() => { if (aiMode) exitAiMode(); openDiagramsTab() }}
+  onopenerd={() => { if (aiMode) exitAiMode(); openErdTab() }}
   onopensettings={() => (showSettingsModal = true)}
   onopencommand={() => (commandOpen = true)}
   ondisconnect={requestDisconnect}
+  oncreatedatabase={async ({ name, owner, encoding, lcCollate, lcCtype, template, connectionLimit }) => {
+    const escaped = name.replace(/"/g, '""')
+    let sql
+    if (connection?.type === 'mysql') {
+      sql = `CREATE DATABASE \`${name.replace(/`/g, '``')}\``
+      if (encoding) sql += ` CHARACTER SET ${encoding}`
+      if (lcCollate) sql += ` COLLATE ${lcCollate}`
+    } else {
+      sql = `CREATE DATABASE "${escaped}"`
+      if (encoding) sql += `\n  ENCODING '${encoding}'`
+      if (template) sql += `\n  TEMPLATE ${template}`
+      if (lcCollate) sql += `\n  LC_COLLATE '${lcCollate}'`
+      if (lcCtype) sql += `\n  LC_CTYPE '${lcCtype}'`
+      if (owner) sql += `\n  OWNER "${owner.replace(/"/g, '""')}"`
+      if (connectionLimit != null && connectionLimit !== -1) sql += `\n  CONNECTION LIMIT ${connectionLimit}`
+    }
+    await executeDdl(sql)
+    toast.success(`Database "${name}" created`)
+  }}
 />
 </div>

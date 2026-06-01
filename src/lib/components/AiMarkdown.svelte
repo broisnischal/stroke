@@ -12,20 +12,47 @@
       const img = /** @type {HTMLImageElement} */ (el)
       img.setAttribute('data-img-enhanced', '1')
       img.loading = 'lazy'
-      img.style.maxWidth = '100%'
-      img.style.height = 'auto'
-      img.style.borderRadius = '8px'
-      img.style.cursor = 'zoom-in'
+
+      const inTable = !!img.closest('td, th')
+
+      if (inTable) {
+        // Compact fixed thumbnail — prevents table rows from ballooning in height
+        img.style.width = '44px'
+        img.style.height = '44px'
+        img.style.minWidth = '44px'
+        img.style.objectFit = 'cover'
+        img.style.borderRadius = '6px'
+        img.style.cursor = 'zoom-in'
+        img.style.display = 'block'
+        img.style.verticalAlign = 'middle'
+      } else {
+        img.style.maxWidth = '100%'
+        img.style.height = 'auto'
+        img.style.borderRadius = '8px'
+        img.style.cursor = 'zoom-in'
+      }
+
       img.addEventListener('error', () => {
         const url = img.getAttribute('src') ?? ''
-        const link = document.createElement('a')
-        link.href = url
-        link.target = '_blank'
-        link.rel = 'noopener noreferrer'
-        link.textContent = img.getAttribute('alt') ? `Image: ${img.getAttribute('alt')}` : 'Open image'
-        link.className =
-          'inline-flex max-w-full items-center gap-1 truncate rounded-md border border-[var(--border)] bg-[var(--muted)]/30 px-2 py-1 text-[var(--muted-foreground)] no-underline hover:text-[var(--foreground)]'
-        img.replaceWith(link)
+        const alt = img.getAttribute('alt') ?? ''
+        if (inTable) {
+          // In tables: replace broken image with a small icon pill
+          const span = document.createElement('span')
+          span.className =
+            'inline-flex size-11 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--muted)]/30 text-[var(--muted-foreground)]/40'
+          span.innerHTML =
+            '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 13 3-3 3 3"/><circle cx="8.5" cy="8.5" r="1.5"/></svg>'
+          img.replaceWith(span)
+        } else {
+          const link = document.createElement('a')
+          link.href = url
+          link.target = '_blank'
+          link.rel = 'noopener noreferrer'
+          link.textContent = alt ? `Image: ${alt}` : 'Open image'
+          link.className =
+            'inline-flex max-w-full items-center gap-1 truncate rounded-md border border-[var(--border)] bg-[var(--muted)]/30 px-2 py-1 text-[var(--muted-foreground)] no-underline hover:text-[var(--foreground)]'
+          img.replaceWith(link)
+        }
       }, { once: true })
     })
   }

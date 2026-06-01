@@ -152,8 +152,10 @@ fn machine_id_raw() -> String {
             }
         }
     }
-    // Fallback: hostname
-    std::env::var("HOSTNAME")
+    // Fallback: try platform-appropriate env vars then /etc/hostname.
+    // COMPUTERNAME is the correct Windows variable; HOSTNAME is POSIX-standard.
+    std::env::var("COMPUTERNAME")                          // Windows
+        .or_else(|_| std::env::var("HOSTNAME"))           // Linux/macOS shell env
         .or_else(|_| std::fs::read_to_string("/etc/hostname").map(|s| s.trim().to_string()))
         .unwrap_or_else(|_| "unknown-host".to_string())
 }

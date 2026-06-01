@@ -1,16 +1,31 @@
 <script>
+  import { onMount } from 'svelte'
   import Table2 from '@lucide/svelte/icons/table-2'
   import Terminal from '@lucide/svelte/icons/terminal'
   import FileText from '@lucide/svelte/icons/file-text'
   import Bot from '@lucide/svelte/icons/bot'
   import LayoutTemplate from '@lucide/svelte/icons/layout-template'
   import Code2 from '@lucide/svelte/icons/code-2'
+  import ShieldCheck from '@lucide/svelte/icons/shield-check'
   import Eye from '@lucide/svelte/icons/eye'
   import X from '@lucide/svelte/icons/x'
   import Plus from '@lucide/svelte/icons/plus'
   import { cn } from '$lib/utils.js'
   import { tabDisplayTitle } from '$lib/studio-tabs.js'
   import * as ContextMenu from '$lib/components/ui/context-menu/index.js'
+
+  let isTauri = $state(false)
+
+  onMount(() => {
+    isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+  })
+
+  /** @param {MouseEvent} e */
+  function handleDragAreaDblClick(e) {
+    if (!isTauri) return
+    if (/** @type {Element} */ (e.target).closest('button')) return
+    import('@tauri-apps/api/window').then(({ getCurrentWindow }) => getCurrentWindow().toggleMaximize()).catch(() => {})
+  }
 
   /** @typedef {import('$lib/studio-tabs.js').StudioTab} StudioTab */
 
@@ -47,6 +62,7 @@
     if (tab.kind === 'ai') return Bot
     if (tab.kind === 'schema') return LayoutTemplate
     if (tab.kind === 'orm') return Code2
+    if (tab.kind === 'security') return ShieldCheck
     return FileText
   }
 </script>
@@ -54,8 +70,11 @@
 <header
   class="studio-chrome flex h-9 shrink-0 items-stretch border-b border-border bg-background"
   data-studio-chrome
+  data-tauri-drag-region
   role="tablist"
+  tabindex="0"
   aria-label="Open editors"
+  ondblclick={handleDragAreaDblClick}
 >
   <div
     bind:this={scrollEl}

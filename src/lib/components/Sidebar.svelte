@@ -1,6 +1,5 @@
 <script>
-  import { onMount, untrack } from "svelte";
-  import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { untrack } from "svelte";
   import { createHotkey } from "@tanstack/svelte-hotkeys";
   import Search from "@lucide/svelte/icons/search";
   import Pin from "@lucide/svelte/icons/pin";
@@ -18,6 +17,12 @@
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Plus from "@lucide/svelte/icons/plus";
+  import Clock from "@lucide/svelte/icons/clock";
+  import X from "@lucide/svelte/icons/x";
+  import ArrowDownAZ from "@lucide/svelte/icons/arrow-down-a-z";
+  import ArrowUpAZ from "@lucide/svelte/icons/arrow-up-a-z";
+  import ArrowDown01 from "@lucide/svelte/icons/arrow-down-0-1";
+  import ArrowUp01 from "@lucide/svelte/icons/arrow-up-0-1";
   import DangerousActionDialog from "./DangerousActionDialog.svelte";
   import * as Select from "$lib/components/ui/select/index.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
@@ -33,65 +38,6 @@
   const initialLayout = loadLayout();
   let width = $state(initialLayout.navSidebarWidth);
   let resizeStartWidth = initialLayout.navSidebarWidth;
-
-  // Detect Tauri at mount time (inside onMount) to handle any injection delay
-  let isTauri = $state(false);
-  let maximized = $state(false);
-  let fullscreen = $state(false);
-
-  onMount(() => {
-    isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-    if (!isTauri) return;
-
-    const win = getCurrentWindow();
-    Promise.all([win.isMaximized(), win.isFullscreen()])
-      .then(([m, f]) => { maximized = m; fullscreen = f; })
-      .catch(() => {});
-
-    const unlistenP = win.listen("tauri://resize", async () => {
-      [maximized, fullscreen] = await Promise.all([win.isMaximized(), win.isFullscreen()]);
-    });
-
-    return () => {
-      unlistenP.then((fn) => fn()).catch(() => {});
-    };
-  });
-
-  async function winClose() {
-    if (!isTauri) return;
-    try {
-      await getCurrentWindow().close();
-    } catch (e) {
-      console.error("winClose:", e);
-    }
-  }
-
-  async function winMinimize() {
-    if (!isTauri) return;
-    try {
-      await getCurrentWindow().minimize();
-    } catch (e) {
-      console.error("winMinimize:", e);
-    }
-  }
-
-  async function winToggleMaximize() {
-    if (!isTauri) return;
-    try {
-      await getCurrentWindow().toggleMaximize();
-    } catch (e) {
-      console.error("winToggleMaximize:", e);
-    }
-  }
-
-  async function winToggleFullscreen() {
-    if (!isTauri) return;
-    try {
-      await getCurrentWindow().setFullscreen(!fullscreen);
-    } catch (e) {
-      console.error("winToggleFullscreen:", e);
-    }
-  }
 
   let {
     connectionName = "",
@@ -114,9 +60,15 @@
     connection = null,
     ontruncatetable = /** @type {(table: string) => void} */ (() => {}),
     ondroptable = /** @type {(table: string, cascade: boolean) => void} */ (() => {}),
+    /** @type {import('$lib/stores/recent-tabs.js').RecentTab[]} */
+    recentTabs = [],
+    onrecentselect = /** @type {(schema: string, table: string) => void} */ (() => {}),
+    onrecentremove = /** @type {(schema: string, table: string) => void} */ (() => {}),
+    onrecentclear = () => {},
   } = $props();
 
   let localFilter = $state(untrack(() => tableFilter));
+  let filterEl = $state(/** @type {HTMLInputElement | null} */ (null));
   let filterDebounce = /** @type {ReturnType<typeof setTimeout> | null} */ (
     null
   );
@@ -138,9 +90,11 @@
   }
 
   const _initial = loadSidebarSections()
+  let recentOpen = $state(_initial.recent ?? false);
   let tablesOpen = $state(_initial.tables ?? true);
   let viewsOpen = $state(_initial.views ?? false);
   let matViewsOpen = $state(_initial.matViews ?? false);
+  $effect(() => { saveSidebarSection('recent', recentOpen) })
   $effect(() => { saveSidebarSection('tables', tablesOpen) })
   $effect(() => { saveSidebarSection('views', viewsOpen) })
   $effect(() => { saveSidebarSection('matViews', matViewsOpen) })
@@ -188,7 +142,7 @@
       const raw = localStorage.getItem(DISPLAY_PREFS_KEY)
       if (raw) return JSON.parse(raw)
     } catch {}
-    return { showTables: true, showViews: true, showMatViews: true, sortBy: 'name' }
+    return { showTables: true, showViews: true, showMatViews: true, showRecent: true, sortBy: 'name', showPins: true, showRowCount: true, sortDir: 'asc', hideEmpty: false }
   }
   function saveDisplayPrefs(prefs) {
     try { localStorage.setItem(DISPLAY_PREFS_KEY, JSON.stringify(prefs)) } catch {}
@@ -198,10 +152,16 @@
   let showTables = $state(_dp.showTables ?? true)
   let showViews = $state(_dp.showViews ?? true)
   let showMatViews = $state(_dp.showMatViews ?? true)
+  let showRecent = $state(_dp.showRecent ?? true)
+  let showPins = $state(_dp.showPins ?? true)
+  let showRowCount = $state(_dp.showRowCount ?? true)
+  let hideEmpty = $state(_dp.hideEmpty ?? false)
   /** @type {'name' | 'rowCount'} */
   let sortBy = $state(_dp.sortBy ?? 'name')
+  /** @type {'asc' | 'desc'} */
+  let sortDir = $state(_dp.sortDir ?? 'asc')
 
-  $effect(() => { saveDisplayPrefs({ showTables, showViews, showMatViews, sortBy }) })
+  $effect(() => { saveDisplayPrefs({ showTables, showViews, showMatViews, showRecent, sortBy, showPins, showRowCount, sortDir, hideEmpty }) })
 
   // ── Selection state ───────────────────────────────────────────────────────
   /** @type {Set<string>} */
@@ -271,10 +231,17 @@
 
   /** @param {any[]} list */
   function applySortBy(list) {
+    let result = list
+    if (hideEmpty) result = result.filter((t) => (t.rowCount ?? 0) > 0)
     if (sortBy === 'rowCount') {
-      return [...list].sort((a, b) => (b.rowCount ?? 0) - (a.rowCount ?? 0))
+      result = [...result].sort((a, b) => (b.rowCount ?? 0) - (a.rowCount ?? 0))
     }
-    return list
+    if (sortDir === 'desc' && sortBy === 'name') {
+      result = [...result].reverse()
+    } else if (sortDir === 'asc' && sortBy === 'rowCount') {
+      result = [...result].reverse()
+    }
+    return result
   }
 
   const filteredRegularTables = $derived(
@@ -286,10 +253,62 @@
   const filteredMatViews = $derived(
     applySortBy(matViews.filter((t) => t.name.toLowerCase().includes(lf))),
   );
+  // ── Virtual list (tables only, kicks in at > 150 rows) ───────────────────
+  const VIRT_THRESHOLD = 150
+  const ROW_H = 28          // px — matches contain-intrinsic-size on each <li>
+  const VIRT_BUFFER = 10    // extra rows rendered above and below the viewport
+
+  /** @type {HTMLElement | null} */
+  let scrollContainerEl = $state(null)
+  /** @type {HTMLElement | null} */
+  let tableListEl = $state(null)
+  let sidebarScrollTop = $state(0)
+  let sidebarHeight = $state(0)
+  /** Offset of the tables <ul> from the top of the scroll container. Re-measured
+   *  whenever sections above it open/close (recent, pinned) or refs change. */
+  let tableListOffsetTop = $state(0)
+
+  $effect(() => {
+    // Dependencies that change the table-list's position in the scroll container
+    const _recentOpen = recentOpen
+    const _pins = visiblePinnedTables.length
+    const _showRecent = showRecent
+    const _el = tableListEl
+    const _container = scrollContainerEl
+    if (!_el || !_container) return
+    let node = /** @type {HTMLElement | null} */ (_el)
+    let off = 0
+    while (node && node !== _container) { off += node.offsetTop; node = /** @type {HTMLElement | null} */ (node.offsetParent) }
+    tableListOffsetTop = off
+  })
+
+  const shouldVirtualize = $derived(filteredRegularTables.length > VIRT_THRESHOLD)
+
+  const virtStart = $derived(
+    shouldVirtualize
+      ? Math.max(0, Math.floor((sidebarScrollTop - tableListOffsetTop) / ROW_H) - VIRT_BUFFER)
+      : 0
+  )
+  const virtEnd = $derived(
+    shouldVirtualize
+      ? Math.min(filteredRegularTables.length, Math.ceil((sidebarScrollTop + sidebarHeight - tableListOffsetTop) / ROW_H) + VIRT_BUFFER)
+      : filteredRegularTables.length
+  )
+  const virtTopPad  = $derived(shouldVirtualize ? virtStart * ROW_H : 0)
+  const virtBotPad  = $derived(shouldVirtualize ? Math.max(0, (filteredRegularTables.length - virtEnd) * ROW_H) : 0)
+
   /** Shared field chrome for schema select + table filter (aligned in sidebar grid) */
   const sidebarFieldClass =
     "h-7 w-full min-w-0 rounded-md border border-border bg-background/40 text-ui-sm text-foreground shadow-none transition-colors hover:bg-background/55 focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/30";
 </script>
+
+<svelte:window onkeydown={(e) => {
+  // Guard: filterEl.offsetParent is null when sidebar is hidden via display:none
+  if (!filterEl || !filterEl.offsetParent) return
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key === 'f') {
+    e.preventDefault(); filterEl.focus(); filterEl.select()
+  }
+}} />
 
 <div
   class="flex h-full shrink-0"
@@ -297,92 +316,10 @@
   data-studio-region="sidebar"
 >
   <aside
-    class="studio-chrome flex h-full min-w-0 flex-1 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
+    class="studio-chrome flex h-full min-w-0 flex-1 flex-col bg-sidebar text-sidebar-foreground"
     data-studio-chrome
   >
-    {#if isTauri && !fullscreen}
-      <!--
-      Traffic light row: buttons sit outside the drag region so they always
-      receive click events; the flex-1 filler to the right is the drag target.
-    -->
-      <div
-        class="traffic-group flex h-9 shrink-0 items-center border-b border-sidebar-border"
-      >
-        <!-- buttons — NOT inside data-tauri-drag-region -->
-        <div class="flex shrink-0 items-center gap-[7px] px-[14px]">
-          <button
-            type="button"
-            class="traffic-dot traffic-close"
-            onclick={winClose}
-            aria-label="Close window"
-            title="Close"
-          >
-            <svg
-              class="traffic-icon"
-              viewBox="0 0 8 8"
-              width="7"
-              height="7"
-              fill="none"
-            >
-              <path
-                d="M1.5 1.5l5 5M6.5 1.5l-5 5"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-              />
-            </svg>
-          </button>
-          <button
-            type="button"
-            class="traffic-dot traffic-minimize"
-            onclick={winMinimize}
-            aria-label="Minimize window"
-            title="Minimize"
-          >
-            <svg
-              class="traffic-icon"
-              viewBox="0 0 8 8"
-              width="7"
-              height="7"
-              fill="none"
-            >
-              <path
-                d="M1 4h6"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-              />
-            </svg>
-          </button>
-          <button
-            type="button"
-            class="traffic-dot traffic-maximize"
-            onclick={winToggleFullscreen}
-            aria-label={fullscreen ? "Exit fullscreen" : "Enter fullscreen"}
-            title={fullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
-          >
-            {#if fullscreen}
-              <!-- contract arrows -->
-              <svg class="traffic-icon" viewBox="0 0 8 8" width="7" height="7" fill="none">
-                <path d="M1.5 3.5h2v-2M6.5 4.5h-2v2" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            {:else}
-              <!-- expand arrows -->
-              <svg class="traffic-icon" viewBox="0 0 8 8" width="7" height="7" fill="none">
-                <path d="M1.5 3.5v-2h2M6.5 4.5v2h-2" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            {/if}
-          </button>
-        </div>
-        <!-- drag region fills the rest of the strip -->
-        <div
-          class="min-w-0 flex-1 self-stretch"
-          data-tauri-drag-region
-          role="none"
-          ondblclick={winToggleMaximize}
-        ></div>
-      </div>
-    {/if}
+    <!-- Traffic lights moved to TitleBar (full-width) -->
     <div class="flex min-h-0 flex-1 flex-col">
 
       <div
@@ -435,13 +372,18 @@
           </div>
           <DropdownMenu.Root>
             <DropdownMenu.Trigger
-              class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
+              class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground disabled:pointer-events-none disabled:opacity-40"
               title="Display options"
+              disabled={!connectionName}
             >
               <ListFilter class="size-3.5" />
             </DropdownMenu.Trigger>
-            <DropdownMenu.Content align="start" class="w-48 p-1 text-ui-sm">
+            <DropdownMenu.Content align="start" class="w-52 p-1 text-ui-sm">
               <DropdownMenu.Label class="px-2 py-1 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Show</DropdownMenu.Label>
+              <DropdownMenu.CheckboxItem
+                checked={showRecent}
+                onCheckedChange={(v) => (showRecent = v)}
+              >Recent</DropdownMenu.CheckboxItem>
               <DropdownMenu.CheckboxItem
                 checked={showTables}
                 onCheckedChange={(v) => (showTables = v)}
@@ -454,19 +396,57 @@
                 checked={showMatViews}
                 onCheckedChange={(v) => (showMatViews = v)}
               >Materialized Views</DropdownMenu.CheckboxItem>
+              <DropdownMenu.CheckboxItem
+                checked={showPins}
+                onCheckedChange={(v) => (showPins = v)}
+              >Pins</DropdownMenu.CheckboxItem>
+              <DropdownMenu.Separator />
+              <DropdownMenu.CheckboxItem
+                checked={showRowCount}
+                onCheckedChange={(v) => (showRowCount = v)}
+              >Row counts</DropdownMenu.CheckboxItem>
+              <DropdownMenu.CheckboxItem
+                checked={hideEmpty}
+                onCheckedChange={(v) => (hideEmpty = v)}
+              >Hide empty tables</DropdownMenu.CheckboxItem>
               <DropdownMenu.Separator />
               <DropdownMenu.Label class="px-2 py-1 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Sort by</DropdownMenu.Label>
               <DropdownMenu.RadioGroup value={sortBy} onValueChange={(v) => { if (v === 'name' || v === 'rowCount') sortBy = v }}>
                 <DropdownMenu.RadioItem value="name">Name</DropdownMenu.RadioItem>
                 <DropdownMenu.RadioItem value="rowCount">Row count</DropdownMenu.RadioItem>
               </DropdownMenu.RadioGroup>
+              <DropdownMenu.Separator />
+              <DropdownMenu.Label class="px-2 py-1 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Direction</DropdownMenu.Label>
+              <DropdownMenu.Item
+                onSelect={() => (sortDir = sortDir === 'asc' ? 'desc' : 'asc')}
+                class="gap-2"
+              >
+                {#if sortBy === 'name'}
+                  {#if sortDir === 'asc'}
+                    <ArrowDownAZ class="size-3.5 shrink-0 text-muted-foreground" />
+                    A → Z
+                  {:else}
+                    <ArrowUpAZ class="size-3.5 shrink-0 text-muted-foreground" />
+                    Z → A
+                  {/if}
+                {:else}
+                  {#if sortDir === 'desc'}
+                    <ArrowDown01 class="size-3.5 shrink-0 text-muted-foreground" />
+                    High → Low
+                  {:else}
+                    <ArrowUp01 class="size-3.5 shrink-0 text-muted-foreground" />
+                    Low → High
+                  {/if}
+                {/if}
+                <span class="ml-auto text-muted-foreground/50 text-ui-2xs">click to flip</span>
+              </DropdownMenu.Item>
             </DropdownMenu.Content>
           </DropdownMenu.Root>
           <button
             type="button"
             class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
             title="Refresh tables (⌘R)"
-            disabled={loadingTables}
+            disabled={loadingTables || !connectionName}
             onclick={onrefresh}
           >
             <RefreshCw
@@ -490,10 +470,12 @@
           />
           <input
             type="search"
-            placeholder="Filter tables…"
+            bind:this={filterEl}
+            placeholder={connectionName ? "Filter tables…" : "Not connected"}
             value={localFilter}
+            disabled={!connectionName}
             oninput={(e) => handleFilterInput(e.currentTarget.value)}
-            class={cn(sidebarFieldClass, "w-full pl-8 pr-2.5 outline-none")}
+            class={cn(sidebarFieldClass, "w-full pl-8 pr-2.5 outline-none disabled:opacity-40 disabled:cursor-not-allowed")}
             aria-label="Filter tables"
             data-sidebar-filter
           />
@@ -501,7 +483,12 @@
       </div>
 
       <div class="flex min-h-0 flex-1 flex-col">
-        <div class="app-scroll min-h-0 w-full flex-1 overflow-y-auto">
+        <div
+          bind:this={scrollContainerEl}
+          bind:clientHeight={sidebarHeight}
+          class="app-scroll min-h-0 w-full flex-1 overflow-y-auto"
+          onscroll={() => { if (scrollContainerEl) sidebarScrollTop = scrollContainerEl.scrollTop }}
+        >
           {#if loadingTables}
             <div
               class="flex items-center justify-center py-8"
@@ -524,8 +511,72 @@
               </span>
             </div>
           {:else}
+            <!-- ── Recent ─────────────────────────────────────────── -->
+            {#if showRecent && recentTabs.length > 0 && connectionName}
+              <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
+                <button
+                  type="button"
+                  class="flex min-w-0 flex-1 items-center gap-1 text-left"
+                  onclick={() => (recentOpen = !recentOpen)}
+                >
+                  <ChevronDown
+                    class={cn(
+                      "size-3 shrink-0 text-muted-foreground/60 transition-transform duration-150",
+                      !recentOpen && "-rotate-90",
+                    )}
+                  />
+                  <Clock class="size-3 shrink-0 text-muted-foreground/60" />
+                  <span class="text-ui-2xs font-medium tracking-wide text-muted-foreground uppercase">Recent</span>
+                  <span class="ml-1 font-mono text-ui-2xs text-muted-foreground/60">{Math.min(recentTabs.length, 5)}</span>
+                </button>
+                <button
+                  type="button"
+                  class="ml-auto font-mono text-ui-2xs text-muted-foreground/50 hover:text-destructive transition-colors"
+                  onclick={onrecentclear}
+                  title="Clear recent"
+                >Clear</button>
+              </div>
+              {#if recentOpen}
+                <ul class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
+                  {#each recentTabs.slice(0, 5) as item (item.schema + '.' + item.table)}
+                    <li class="group/recent">
+                      <div
+                        class={cn(
+                          "grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 transition-colors cursor-pointer",
+                          activeTable === item.table
+                            ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                            : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
+                        )}
+                        role="button"
+                        tabindex="0"
+                        onclick={() => onrecentselect(item.schema, item.table)}
+                        onkeydown={(e) => e.key === 'Enter' && onrecentselect(item.schema, item.table)}
+                      >
+                        {#if item.tableKind === 'view'}
+                          <Eye class="size-3 shrink-0 opacity-50" />
+                        {:else if item.tableKind === 'materialized_view'}
+                          <Layers class="size-3 shrink-0 opacity-50" />
+                        {:else}
+                          <Table2 class="size-3 shrink-0 opacity-50" />
+                        {/if}
+                        <span class="min-w-0 truncate font-mono text-ui-sm leading-none">{item.table}</span>
+                        <button
+                          type="button"
+                          title="Remove from recent"
+                          class="invisible inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:text-foreground group-hover/recent:inline-flex"
+                          onclick={(e) => { e.stopPropagation(); onrecentremove(item.schema, item.table) }}
+                        >
+                          <X class="size-3" />
+                        </button>
+                      </div>
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
+            {/if}
+
             <!-- ── Pinned ─────────────────────────────────────────── -->
-            {#if visiblePinnedTables.length > 0 && connectionName}
+            {#if showPins && visiblePinnedTables.length > 0 && connectionName}
               <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
                 <Pin class="size-3 shrink-0 text-primary/60" />
                 <span class="text-ui-2xs font-medium tracking-wide text-muted-foreground uppercase">Pinned</span>
@@ -556,9 +607,11 @@
                         >
                           <Pin class="size-3 shrink-0 text-primary/50" />
                           <span class="min-w-0 truncate font-mono text-ui-sm leading-none">{tableName}</span>
+                          {#if showRowCount}
                           <span class="shrink-0 text-right font-mono text-ui-xs leading-none tabular-nums text-muted-foreground/60">
                             {formatTableRowCount(tables.find((t) => t.name === tableName)?.rowCount)}
                           </span>
+                          {/if}
                         </button>
                       </ContextMenu.Trigger>
                       <ContextMenu.Content class="w-44 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
@@ -600,8 +653,8 @@
               {/if}
             </button>
             {#if tablesOpen}
-              <ul class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
-                {#if regularTables.length === 0}
+              <ul bind:this={tableListEl} class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
+                {#if regularTables.length === 0 && tables.length > 0}
                   <li
                     class="flex w-full flex-col items-center gap-2 px-4 py-8 text-center"
                   >
@@ -617,7 +670,8 @@
                     No tables match
                   </li>
                 {:else}
-                  {#each filteredRegularTables as table (table.name)}
+                  {#if virtTopPad > 0}<li style="height:{virtTopPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
+                  {#each filteredRegularTables.slice(virtStart, virtEnd) as table (table.name)}
                     {@const isSelected = selectedItems.has(table.name)}
                     <li class="[content-visibility:auto] [contain-intrinsic-size:auto_28px]">
                       <ContextMenu.Root>
@@ -655,10 +709,12 @@
                                 <Lock class="size-2.5 shrink-0 text-muted-foreground/50" title="Row-level security enabled" />
                               {/if}
                             </span>
+                            {#if showRowCount}
                             <span
                               class="shrink-0 text-right font-mono text-ui-xs leading-none tabular-nums text-muted-foreground"
                               title={table.rowCount != null ? Number(table.rowCount).toLocaleString("en-US") : undefined}
                             >{formatTableRowCount(table.rowCount)}</span>
+                            {/if}
                           </button>
                         </ContextMenu.Trigger>
                         <ContextMenu.Content class="w-44 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
@@ -693,6 +749,7 @@
                       </ContextMenu.Root>
                     </li>
                   {/each}
+                  {#if virtBotPad > 0}<li style="height:{virtBotPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
                 {/if}
               </ul>
             {/if}
@@ -792,6 +849,35 @@
               {/if}
             {/if}
 
+            <!-- ── All sections hidden ───────────────────────────── -->
+            {#if !showTables && !showViews && !showMatViews && !showRecent}
+              <div class="flex flex-col items-center justify-center gap-2 px-4 py-16 text-center">
+                <p class="text-ui-xs text-muted-foreground/50">All sections are hidden</p>
+                <p class="text-ui-2xs text-muted-foreground/30">Use the filter menu to show them</p>
+              </div>
+            {/if}
+
+            <!-- ── Empty state ───────────────────────────────────── -->
+            {#if !loadingTables && connectionName && tables.length === 0}
+              <div class="flex flex-1 flex-col items-center justify-center gap-3 px-4 py-16 text-center">
+                <div class="flex size-10 items-center justify-center rounded-xl border border-border/50 bg-muted/30">
+                  <Table2 class="size-5 text-muted-foreground/30" />
+                </div>
+                <div>
+                  <p class="text-ui-xs font-medium text-muted-foreground">No tables found</p>
+                  <p class="mt-0.5 text-ui-2xs text-muted-foreground/50">{activeSchema ? `in "${activeSchema}"` : 'in this database'}</p>
+                </div>
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1.5 rounded-md border border-border/50 bg-background/60 px-3 py-1.5 font-mono text-ui-2xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  onclick={onrefresh}
+                >
+                  <RefreshCw class="size-3" />
+                  Retry
+                </button>
+              </div>
+            {/if}
+
             <!-- ── Materialized Views ─────────────────────────────── -->
             {#if showMatViews && (matViews.length > 0 || filteredMatViews.length > 0)}
               <button
@@ -860,9 +946,11 @@
                                 {/if}
                               </span>
                               <span class="min-w-0 truncate font-mono text-ui-sm leading-none">{mv.name}</span>
+                              {#if showRowCount}
                               <span class="shrink-0 text-right font-mono text-ui-xs leading-none tabular-nums text-muted-foreground">
                                 {formatTableRowCount(mv.rowCount)}
                               </span>
+                              {/if}
                             </button>
                           </ContextMenu.Trigger>
                           <ContextMenu.Content class="w-44 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
@@ -921,54 +1009,3 @@
   onconfirm={(c) => confirmDanger(c)}
 />
 
-<style>
-  .traffic-dot {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 13px;
-    height: 13px;
-    border-radius: 50%;
-    border: none;
-    cursor: default;
-    flex-shrink: 0;
-    transition: opacity 0.1s;
-    -webkit-app-region: no-drag;
-    app-region: no-drag;
-  }
-  .traffic-dot:active {
-    opacity: 0.55;
-  }
-
-  /* Standard macOS traffic light colours */
-  .traffic-close {
-    background-color: #ff5f57;
-    color: #7c0902;
-  }
-  .traffic-minimize {
-    background-color: #ffbd2e;
-    color: #7c4d00;
-  }
-  .traffic-maximize {
-    background-color: #27c93f;
-    color: #0a5c1d;
-  }
-
-  /* Icons hidden by default, revealed when any dot in the group is hovered */
-  .traffic-icon {
-    opacity: 0;
-    transition: opacity 0.08s;
-    pointer-events: none;
-    flex-shrink: 0;
-  }
-
-  /* Hover on the button group shows all icons simultaneously */
-  .traffic-group:hover .traffic-icon {
-    opacity: 1;
-  }
-
-  /* Dim when window doesn't have focus / group not hovered */
-  .traffic-group:not(:hover) .traffic-dot {
-    opacity: 0.45;
-  }
-</style>

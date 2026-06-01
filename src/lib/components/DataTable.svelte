@@ -4,6 +4,11 @@
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
   import ArrowUpDown from "@lucide/svelte/icons/arrow-up-down";
+  import ArrowUp from "@lucide/svelte/icons/arrow-up";
+  import ArrowDown from "@lucide/svelte/icons/arrow-down";
+  import EyeOff from "@lucide/svelte/icons/eye-off";
+  import ListFilter from "@lucide/svelte/icons/list-filter";
+  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import KeyRound from "@lucide/svelte/icons/key-round";
   import Link2 from "@lucide/svelte/icons/link-2";
   import Zap from "@lucide/svelte/icons/zap";
@@ -50,12 +55,28 @@
     isEditableType,
     parseCellInput,
     valueToEditString,
+    isLikelyAutoColumn,
+    buildInsertPayload,
+    isDateOnlyType,
+    isTimeOnlyType,
   } from "$lib/cell-value.js";
+  import {
+    defaultInsertDraft,
+    shouldUseDateTimePicker,
+    nowDateTimeLocal,
+    nowDateOnly,
+    nowTimeOnly,
+  } from "$lib/insert-field.js";
   import { cellLinkHref, cellUrlType } from "$lib/cell-display.js";
   import UrlPreviewTooltip from "./UrlPreviewTooltip.svelte";
   import MediaLightbox from "./MediaLightbox.svelte";
   import RowExpandViewer from "./RowExpandViewer.svelte";
   import JsonCellLightbox from "./JsonCellLightbox.svelte";
+  import CellQuickLook from "./CellQuickLook.svelte";
+  import Maximize2 from "@lucide/svelte/icons/maximize-2";
+  import Check from "@lucide/svelte/icons/check";
+  import Loader from "@lucide/svelte/icons/loader";
+  import X from "@lucide/svelte/icons/x";
 
   let {
     columns = [],
@@ -89,6 +110,9 @@
     showRowExpand = true,
     /** Persist column widths per table, e.g. "public.users" */
     columnWidthsKey = undefined,
+    /** Schema + table name used for INSERT statement generation */
+    schema = '',
+    tableName = '',
     /** Set of column names to hide. Controlled externally (toolbar). */
     hiddenColumns = /** @type {Set<string>} */ (new Set()),
     /**
@@ -112,18 +136,17 @@
      *  table to the top / bottom. */
     scrollToTop = $bindable(/** @type {() => void} */ (() => {})),
     scrollToBottom = $bindable(/** @type {() => void} */ (() => {})),
+    /** Called when user picks "Filter by this column" from the column header context menu. */
+    onfiltercolumn = /** @type {(colName: string) => void} */ (() => {}),
+    /** Called when user picks "Hide column" from the column header context menu. */
+    onhidecolumn = /** @type {(colName: string) => void} */ (() => {}),
+    /** Called when the user confirms the new row draft. Receives the validated values. */
+    oninsertrow = /** @type {(values: Record<string, unknown>) => Promise<void>} */ (async () => {}),
+    /** True while the insert is in flight — disables the draft row inputs. */
+    insertSaving = false,
+    /** Assigned by this component so the parent can trigger beginInsertRow(). */
+    beginInsertRow = $bindable(/** @type {() => void} */ (() => {})),
   } = $props();
-
-  /** Brief overscroll hint: 'top' / 'bottom' when the user wheels past an edge. */
-  let overscrollEdge = $state(/** @type {'top' | 'bottom' | null} */ (null));
-  /** @type {ReturnType<typeof setTimeout> | null} */
-  let _overscrollTimer = null;
-  /** @param {'top' | 'bottom'} edge */
-  function flashOverscroll(edge) {
-    if (overscrollEdge !== edge) overscrollEdge = edge;
-    if (_overscrollTimer) clearTimeout(_overscrollTimer);
-    _overscrollTimer = setTimeout(() => { overscrollEdge = null; _overscrollTimer = null; }, 450);
-  }
 
   /**
    * Staged cell edits not yet written to the database, keyed by "rowIdx:colIdx".
@@ -138,6 +161,13 @@
 
   /** @type {HTMLInputElement | HTMLSelectElement | HTMLButtonElement | null} */
   let editInput = $state(null);
+
+  /**
+   * @typedef {{ rowIdx: number, colIdx: number, draft: string, original: string, columnName: string, dataType: string, nullable: boolean }} QuickLookCell
+   * @type {QuickLookCell | null}
+   */
+  let quickLookCell = $state(null);
+
   let contextRowIdx = $state(0);
   let contextColIdx = $state(0);
   let contextMenuOpen = $state(false);
@@ -173,6 +203,11 @@
   let futureEdits = $state([]);
   /** True while focus is inside this table (container or any child). */
   let isTableFocused = $state(false);
+
+  /** Draft values for the pending new row, keyed by column name. null = no new row. */
+  let newRowDrafts = $state(/** @type {Record<string, string> | null} */ (null))
+  /** Name of the column whose input is focused in the new row. */
+  let newRowFocusCol = $state(/** @type {string | null} */ (null))
 
   // ── Column collapse (drag-to-hide) ───────────────────────────────────────
   const COLLAPSED_COL_WIDTH = 12  // px width of the collapsed indicator strip
@@ -467,6 +502,55 @@
     tick().then(() => tableContainer?.focus({ preventScroll: true }));
   }
 
+  /** @param {number} rowIdx @param {number} colIdx */
+  function openQuickLook(rowIdx, colIdx) {
+    const col = columns[colIdx];
+    if (!col) return;
+    const dataType = col.dataType ?? col.data_type ?? "";
+    if (!isEditableType(dataType)) return;
+    // close any inline edit first
+    if (editingCell) cancelEdit();
+    const startValue = effectiveCellValue(rowIdx, colIdx);
+    const original = valueToEditString(startValue);
+    quickLookCell = {
+      rowIdx,
+      colIdx,
+      draft: original,
+      original,
+      columnName: col.name,
+      dataType,
+      nullable: col.nullable ?? true,
+    };
+  }
+
+  function cancelQuickLook() {
+    quickLookCell = null;
+    tick().then(() => tableContainer?.focus({ preventScroll: true }));
+  }
+
+  async function commitQuickLook() {
+    if (!quickLookCell || saving) return;
+    const { rowIdx, colIdx, draft } = quickLookCell;
+    const col = columns[colIdx];
+    if (!col) return;
+    if (draft === quickLookCell.original) {
+      quickLookCell = null;
+      tick().then(() => tableContainer?.focus({ preventScroll: true }));
+      return;
+    }
+    const parsed = parseCellInput(draft, col.dataType ?? col.data_type ?? "text", getColumnEnumValues(col));
+    if (!parsed.ok) {
+      toast.error("Invalid value", { description: parsed.message });
+      return;
+    }
+    const prevValue = effectiveCellValue(rowIdx, colIdx);
+    stageEdit(rowIdx, colIdx, parsed.value);
+    pastEdits = [...pastEdits.slice(-49), { rowIdx, colIdx, oldValue: prevValue, newValue: parsed.value }];
+    futureEdits = [];
+    quickLookCell = null;
+    tick().then(() => tableContainer?.focus({ preventScroll: true }));
+  }
+
   /** Stable map key for a staged edit. */
   const editKey = (/** @type {number} */ rowIdx, /** @type {number} */ colIdx) => `${rowIdx}:${colIdx}`;
 
@@ -504,7 +588,8 @@
   }
 
   /** @param {'down' | 'right' | 'left' | null} afterAction */
-  async function commitEditWithAction(afterAction) {
+  /** @param {'down'|'right'|'left'|null} afterAction @param {boolean} [autoEdit] */
+  async function commitEditWithAction(afterAction, autoEdit = false) {
     if (!editingCell || saving) return;
 
     const { rowIdx, colIdx, draft } = editingCell;
@@ -513,7 +598,7 @@
 
     if (draft === editingCell.original) {
       editingCell = null;
-      if (afterAction) navigateAfterEdit(rowIdx, colIdx, afterAction);
+      if (afterAction) navigateAfterEdit(rowIdx, colIdx, afterAction, autoEdit);
       else tick().then(() => tableContainer?.focus({ preventScroll: true }));
       return;
     }
@@ -535,7 +620,7 @@
     pastEdits = [...pastEdits.slice(-49), { rowIdx, colIdx, oldValue: prevValue, newValue: parsed.value }];
     futureEdits = [];
     editingCell = null;
-    if (afterAction) navigateAfterEdit(rowIdx, colIdx, afterAction);
+    if (afterAction) navigateAfterEdit(rowIdx, colIdx, afterAction, autoEdit);
     else tick().then(() => tableContainer?.focus({ preventScroll: true }));
   }
 
@@ -637,25 +722,68 @@
     scrollToBottom = () => { if (tableContainer) tableContainer.scrollTo({ top: tableContainer.scrollHeight }); };
   });
 
-  // Overscroll hint: a brief edge glow when the wheel pushes past the top/bottom.
-  // Passive wheel listener doing only a cheap scrollTop read (plus an edge metric
-  // read that's a no-op layout in the common non-virtualized case) — it never
-  // touches the scroll position, so it can't affect scroll smoothness.
+  // Surface beginInsertRow to the parent (→ toolbar Add Row button).
   $effect(() => {
-    const container = tableContainer;
-    if (!container) return;
-    const onWheel = (/** @type {WheelEvent} */ e) => {
-      // Only hint the scroll boundary on larger tables — pointless for short lists.
-      if (rows.length <= 50) return;
-      if (e.deltaY < 0) {
-        if (container.scrollTop <= 0) flashOverscroll('top');
-      } else if (e.deltaY > 0) {
-        if (container.scrollTop + container.clientHeight >= container.scrollHeight - 1) flashOverscroll('bottom');
+    beginInsertRow = () => {
+      /** @type {Record<string, string>} */
+      const drafts = {}
+      for (const col of columns) {
+        drafts[col.name] = defaultInsertDraft(col, primaryKey)
       }
-    };
-    container.addEventListener('wheel', onWheel, { passive: true });
-    return () => container.removeEventListener('wheel', onWheel);
-  });
+      newRowDrafts = drafts
+      // Focus first non-auto visible column
+      const first = visibleColumns.find(c => {
+        const dt = c.dataType ?? c.data_type ?? ''
+        return !isLikelyAutoColumn(dt, c.name, primaryKey)
+      })
+      newRowFocusCol = first?.name ?? visibleColumns[0]?.name ?? null
+      // Scroll to top so the draft row is visible
+      tableContainer?.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+  })
+
+  function cancelNewRow() {
+    newRowDrafts = null
+    newRowFocusCol = null
+  }
+
+  async function submitNewRow() {
+    if (!newRowDrafts || insertSaving) return
+    const editableCols = columns.filter(c => isEditableType(c.dataType ?? c.data_type ?? ''))
+    const built = buildInsertPayload(editableCols, primaryKey, newRowDrafts)
+    if (!built.ok) {
+      toast.error('Cannot insert row', { description: built.message })
+      return
+    }
+    await oninsertrow(/** @type {Record<string, unknown>} */ (built.values))
+    newRowDrafts = null
+    newRowFocusCol = null
+  }
+
+  /** @param {string} colName @param {string} value */
+  function setNewRowDraft(colName, value) {
+    if (!newRowDrafts) return
+    newRowDrafts = { ...newRowDrafts, [colName]: value }
+  }
+
+  /** @param {KeyboardEvent} e */
+  function onNewRowKeydown(e) {
+    if (e.key === 'Escape') { e.preventDefault(); cancelNewRow(); return }
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); void submitNewRow(); return }
+  }
+
+  // Auto-focus the new-row input when focus column changes.
+  $effect(() => {
+    const col = newRowFocusCol
+    if (!col || !newRowDrafts) return
+    tick().then(() => {
+      const el = /** @type {HTMLElement|null} */ (
+        document.querySelector(`[data-new-row-input="${col}"]`)
+      )
+      el?.focus()
+    })
+  })
+
 
   async function copyCellValue(rowIdx, colIdx) {
     const value = rows[rowIdx]?.[colIdx];
@@ -674,6 +802,89 @@
       toast.success("Copied row as JSON");
     } catch {
       toast.error("Could not copy to clipboard");
+    }
+  }
+
+  // ── Copy row as … ──────────────────────────────────────────────────────────
+
+  /** Indices to copy: all selected rows if contextRow is in selection, else just contextRow. */
+  function copyTargetIndices(rowIdx) {
+    return selected.size > 1 && selected.has(rowIdx)
+      ? [...selected].sort((a, b) => a - b)
+      : [rowIdx];
+  }
+
+  /** Escape a cell value for CSV (RFC 4180). */
+  function csvCell(value) {
+    if (value === null || value === undefined) return '';
+    const s = typeof value === 'object' ? JSON.stringify(value) : String(value);
+    if (s.includes(',') || s.includes('"') || s.includes('\n') || s.includes('\r')) {
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  }
+
+  /** Escape a cell value for SQL INSERT. */
+  function sqlLiteral(value) {
+    if (value === null || value === undefined) return 'NULL';
+    if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
+    if (typeof value === 'number') return String(value);
+    if (typeof value === 'object') {
+      const s = JSON.stringify(value).replace(/'/g, "''");
+      return `'${s}'`;
+    }
+    return "'" + String(value).replace(/'/g, "''") + "'";
+  }
+
+  /** Markdown-safe cell text. */
+  function mdCell(value) {
+    if (value === null || value === undefined) return 'NULL';
+    const s = typeof value === 'object' ? JSON.stringify(value) : String(value);
+    return s.replace(/\|/g, '\\|').replace(/\n/g, ' ');
+  }
+
+  async function copyAs(rowIdx, format) {
+    const indices = copyTargetIndices(rowIdx);
+    const colNames = columns.map((c) => c.name);
+    const dataRows = indices.map((i) => rows[i] ?? []);
+    let text = '';
+    const label = indices.length > 1 ? `${indices.length} rows` : '1 row';
+
+    if (format === 'csv') {
+      const header = colNames.map(csvCell).join(',');
+      const body = dataRows.map((r) => r.map(csvCell).join(',')).join('\n');
+      text = header + '\n' + body;
+    } else if (format === 'json') {
+      const records = dataRows.map((r) => rowToRecord(columns, r));
+      text = formatJsonValue(indices.length === 1 ? records[0] : records);
+    } else if (format === 'plain') {
+      text = dataRows
+        .map((r) =>
+          colNames.map((name, i) => {
+            const v = r[i];
+            const s = v === null || v === undefined ? 'NULL' : typeof v === 'object' ? JSON.stringify(v) : String(v);
+            return `${name}: ${s}`;
+          }).join('\n'),
+        )
+        .join('\n\n');
+    } else if (format === 'markdown') {
+      const sep = colNames.map(() => '---').join(' | ');
+      const header = colNames.map(mdCell).join(' | ');
+      const body = dataRows.map((r) => r.map(mdCell).join(' | ')).join('\n');
+      text = `| ${header} |\n| ${sep} |\n${dataRows.map((r) => `| ${r.map(mdCell).join(' | ')} |`).join('\n')}`;
+    } else if (format === 'insert') {
+      const tbl = schema ? `"${schema}"."${tableName || 'table'}"` : `"${tableName || 'table'}"`;
+      const cols = colNames.map((c) => `"${c}"`).join(', ');
+      text = dataRows
+        .map((r) => `INSERT INTO ${tbl} (${cols}) VALUES (${r.map(sqlLiteral).join(', ')});`)
+        .join('\n');
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`Copied ${label} as ${format.toUpperCase()}`);
+    } catch {
+      toast.error('Could not copy to clipboard');
     }
   }
 
@@ -718,8 +929,8 @@
     }
   }
 
-  /** @param {number} rowIdx @param {number} colIdx @param {'down'|'right'|'left'} action */
-  function navigateAfterEdit(rowIdx, colIdx, action) {
+  /** @param {number} rowIdx @param {number} colIdx @param {'down'|'right'|'left'} action @param {boolean} [autoEdit] */
+  function navigateAfterEdit(rowIdx, colIdx, action, autoEdit = false) {
     const visColIdx = actualToVisColIdx(colIdx);
     const visLen = navigableColumns.length;
     const rowLen = rows.length;
@@ -735,7 +946,14 @@
       if (visColIdx > 0) { focusedRow = rowIdx; focusedCol = visColIdx - 1; }
       else if (rowIdx > 0) { focusedRow = rowIdx - 1; focusedCol = visLen - 1; scrollRowIntoView(rowIdx - 1); }
     }
-    tick().then(() => tableContainer?.focus({ preventScroll: true }));
+    tick().then(() => {
+      if (autoEdit && focusedRow !== null && focusedCol !== null) {
+        const ai = visToActualColIdx(focusedCol)
+        if (ai >= 0) startEdit(focusedRow, ai)
+      } else {
+        tableContainer?.focus({ preventScroll: true })
+      }
+    })
   }
 
   function undoEdit() {
@@ -825,7 +1043,7 @@
 
     if (e.key === "Tab") {
       e.preventDefault();
-      void commitEditWithAction(e.shiftKey ? "left" : "right");
+      void commitEditWithAction(e.shiftKey ? "left" : "right", true);
       return;
     }
     // Ctrl/Cmd+Shift+Enter saves this cell straight to the database, bypassing
@@ -901,9 +1119,9 @@
     expandedRows = new Set();
   }
 
-  const ROW_EXPAND_COL_WIDTH = 32;
+  const ROW_EXPAND_COL_WIDTH = 40;
   /** Fits 16px checkbox with equal inset; no extra horizontal padding in cells */
-  const ROW_SELECT_COL_WIDTH = 32;
+  const ROW_SELECT_COL_WIDTH = 40;
   const visibleColumns = $derived(
     columns.filter((c) => !hiddenColumns.has(c.name)),
   );
@@ -1025,11 +1243,18 @@
     const map = new Map()
     for (const col of columns) {
       const colIndexes = _indexesByCol.get(col.name) ?? []
+      // Single pass instead of two .some() — early exits once both flags are found
+      let unique = false, indexed = false
+      for (const idx of colIndexes) {
+        if (!unique && idx.isUnique && !idx.isPrimary) unique = true
+        else if (!indexed && !idx.isPrimary && !idx.isUnique) indexed = true
+        if (unique && indexed) break
+      }
       map.set(col.name, {
         pk: _pkSet.has(col.name),
         fk: _fkCols.has(col.name),
-        unique: colIndexes.some((idx) => idx.isUnique && !idx.isPrimary),
-        indexed: colIndexes.some((idx) => !idx.isPrimary && !idx.isUnique),
+        unique,
+        indexed,
         nullable: col.nullable !== false,
       })
     }
@@ -1051,11 +1276,11 @@
     const isExpanded = isRowExpanded(idx);
     // cx (no tailwind-merge): these classes never conflict and this runs per row.
     return cx(
-      "group/row outline-none hover:bg-accent/25",
+      "group/row outline-none hover:bg-muted/[0.18]",
       isExpanded && "[&>td]:border-b-0",
-      isSelected && "bg-accent/20",
-      isFocused && !isSelected && "bg-accent/15",
-      isFocused && isSelected && "ring-1 ring-ring/60 ring-inset",
+      isSelected && "bg-muted/30",
+      isFocused && !isSelected && "bg-muted/20",
+      isFocused && isSelected && "ring-1 ring-ring/40 ring-inset",
     );
   }
 
@@ -1163,6 +1388,28 @@
     pinnedColumns = next
   }
 
+  /** Sort by a column with an explicit direction, guarding against pending edits. */
+  function headerSortDirect(colName, /** @type {'asc' | 'desc'} */ dir) {
+    if (pendingEdits.size > 0) {
+      toast.error('Unsaved changes', { description: 'Apply or reset your edits before sorting.' })
+      return
+    }
+    onsortchange({ column: colName, direction: dir })
+  }
+
+  /** Reset a column's width to its default and un-collapse it if needed. */
+  function resetColumnWidth(colName) {
+    const col = columns.find((c) => c.name === colName)
+    const dt = col?.dataType ?? col?.data_type ?? ''
+    columnWidths = { ...columnWidths, [colName]: clampColumnWidth(defaultColumnWidth(dt)) }
+    if (collapsedColumns.has(colName)) {
+      const next = new Set(collapsedColumns)
+      next.delete(colName)
+      collapsedColumns = next
+    }
+    if (columnWidthsKey) saveColumnWidths(columnWidthsKey, columnWidths)
+  }
+
   // Reset focus and undo history when the displayed table changes.
   $effect(() => {
     void columnWidthsKey;
@@ -1255,6 +1502,18 @@
         if (ai >= 0) startEdit(focusedRow, ai);
       } else { focusedRow = 0; focusedCol = 0; }
       return;
+    }
+
+    // Shift+Space: open Quick Look editor for the focused cell
+    if (e.key === " " && e.shiftKey && !e.ctrlKey && !e.metaKey && !editingCell) {
+      if (focusedRow !== null && focusedCol !== null) {
+        const ai = visToActualColIdx(focusedCol);
+        if (ai >= 0 && canEditColumn(ai)) {
+          e.preventDefault();
+          openQuickLook(focusedRow, ai);
+          return;
+        }
+      }
     }
 
     if (editingCell) return;
@@ -1387,17 +1646,18 @@
   onDestroy(() => {
     if (previewShowTimer) clearTimeout(previewShowTimer)
     if (previewHideTimer) clearTimeout(previewHideTimer)
-    if (_overscrollTimer) clearTimeout(_overscrollTimer)
+
     // Clear staged-edit state in the parent so the StatusBar buttons don't linger.
     pendingEditCount = 0
     applyEdits = () => {}
     resetEdits = () => {}
     scrollToTop = () => {}
     scrollToBottom = () => {}
+    beginInsertRow = () => {}
   })
 </script>
 
-{#if loading}
+{#if loading && columns.length === 0}
   <TableLoading {embedded} />
 {:else}
   <ContextMenu.Root
@@ -1420,7 +1680,7 @@
           {...props}
           tabindex={-1}
           class={cn(
-            "app-scroll relative overflow-auto bg-panel select-none outline-none [scrollbar-gutter:stable] [contain:layout] [overflow-anchor:none]",
+            "app-scroll relative overflow-auto bg-panel select-none outline-none [scrollbar-gutter:stable] [contain:layout] [overflow-anchor:none] flex flex-col",
             embedded ? "max-h-80" : "min-h-0 flex-1",
             resizingColName && "cursor-col-resize",
           )}
@@ -1458,10 +1718,6 @@
             }
           }}
         >
-          <!-- Overscroll hint: brief glow pinned to the top edge when wheeling past the top. -->
-          <div aria-hidden="true" class="pointer-events-none sticky top-0 z-30 h-0">
-            <div class="absolute inset-x-0 top-0 h-10 bg-gradient-to-b from-primary/25 to-transparent transition-opacity duration-200 {overscrollEdge === 'top' ? 'opacity-100' : 'opacity-0'}"></div>
-          </div>
           {#if visibleColumns.length === 0}{:else}
           <table
             class="studio-data-table w-full table-fixed text-ui-sm"
@@ -1541,102 +1797,294 @@
                     </th>
                   {:else}
                     {@const isSorted = rowSort?.column === col.name}
-                    <th
-                      class={cn(
-                        "group/th relative overflow-hidden px-0 py-0 text-left font-normal",
-                        resizingColName === col.name && "bg-accent/30",
-                        isPinned && "sticky z-[1] bg-panel shadow-[1px_0_0_hsl(var(--border)/0.6)]",
-                      )}
-                      style="width: {colW}px; min-width: {colW}px; max-width: {colW}px{isPinned ? `; left: ${pinLeft}px` : ''}"
-                    >
-                      <button
-                        type="button"
-                        class={cn(
-                          "flex h-full w-full min-w-0 cursor-pointer items-center gap-1.5 px-3 py-1 text-left transition-colors hover:bg-accent/40",
-                          isSorted && "bg-accent/20",
-                        )}
-                        onclick={() => handleHeaderSort(col.name)}
-                        title="Sort by {col.name}"
-                      >
-                        <div class="flex min-w-0 flex-1 flex-col gap-px leading-tight">
-                          <div class="flex min-w-0 items-center gap-1">
-                            <span
-                              class={cx(
-                                "min-w-0 overflow-hidden whitespace-nowrap font-mono text-ui-sm text-foreground",
-                                col.name.length > 100 && "text-ellipsis",
-                              )}
-                              data-font="mono"
-                              title={col.name}>{col.name}</span
-                            >
-                            {#if meta && (meta.pk || meta.fk || meta.unique || meta.indexed || !meta.nullable)}
-                              <div class="flex shrink-0 items-center gap-[2px]">
-                                {#if meta.pk}
-                                  <span
-                                    title="Primary key"
-                                    class="inline-flex size-[13px] items-center justify-center rounded-sm bg-primary/10 text-primary"
-                                  ><KeyRound class="size-[8px]" /></span>
-                                {/if}
-                                {#if meta.fk}
-                                  <span
-                                    title={fkTooltip(col.name)}
-                                    class="inline-flex size-[13px] items-center justify-center rounded-sm bg-muted text-muted-foreground"
-                                  ><Link2 class="size-[8px]" /></span>
-                                {/if}
-                                {#if meta.unique && !meta.pk}
-                                  <span
-                                    title="Unique"
-                                    class="inline-flex size-[13px] items-center justify-center rounded-sm bg-muted text-muted-foreground"
-                                  ><Fingerprint class="size-[8px]" /></span>
-                                {/if}
-                                {#if meta.indexed}
-                                  <span
-                                    title="Indexed"
-                                    class="inline-flex size-[13px] items-center justify-center rounded-sm bg-muted text-muted-foreground"
-                                  ><Zap class="size-[8px]" /></span>
-                                {/if}
-                                {#if !meta.nullable && !meta.pk}
-                                  <span
-                                    title="Not null"
-                                    class="inline-flex size-[13px] items-center justify-center rounded-sm bg-muted text-muted-foreground/60"
-                                  ><Circle class="size-[7px] fill-muted-foreground/40" /></span>
-                                {/if}
-                              </div>
-                            {/if}
-                          </div>
-                          <span
-                            class="block truncate font-mono text-ui-2xs text-muted-foreground"
-                            data-font="mono"
-                            title={col.dataType ?? col.data_type}
-                            >{col.dataType ?? col.data_type}</span
+                    {@const isAsc = isSorted && rowSort?.direction === 'asc'}
+                    {@const isDesc = isSorted && rowSort?.direction === 'desc'}
+                    <ContextMenu.Root>
+                      <ContextMenu.Trigger>
+                        {#snippet child({ props })}
+                          <th
+                            {...props}
+                            class={cn(
+                              "group/th relative overflow-hidden px-0 py-0 text-left font-normal",
+                              resizingColName === col.name && "bg-accent/30",
+                              isPinned && "sticky z-[1] bg-panel shadow-[1px_0_0_hsl(var(--border)/0.6)]",
+                            )}
+                            style="width: {colW}px; min-width: {colW}px; max-width: {colW}px{isPinned ? `; left: ${pinLeft}px` : ''}"
                           >
-                        </div>
-                        {#if isSorted}
-                          <span class="shrink-0 text-primary/70">
-                            {#if rowSort?.direction === 'asc'}
-                              <svg class="size-3" viewBox="0 0 12 12" fill="none"><path d="M6 9V3M3 6l3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                            {:else}
-                              <svg class="size-3" viewBox="0 0 12 12" fill="none"><path d="M6 3v6M3 6l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            <button
+                              type="button"
+                              class={cn(
+                                "flex h-full w-full min-w-0 cursor-pointer items-center gap-1.5 px-3 py-1 text-left transition-colors hover:bg-muted/40",
+                                isSorted && "bg-muted/30",
+                              )}
+                              onclick={() => handleHeaderSort(col.name)}
+                              title="Sort by {col.name}"
+                            >
+                              <div class="flex min-w-0 flex-1 flex-col gap-px leading-tight">
+                                <div class="flex min-w-0 items-center gap-1">
+                                  <span
+                                    class={cx(
+                                      "min-w-0 overflow-hidden whitespace-nowrap font-mono text-ui-sm text-foreground",
+                                      col.name.length > 100 && "text-ellipsis",
+                                    )}
+                                    data-font="mono"
+                                    title={col.name}>{col.name}</span
+                                  >
+                                  {#if meta && (meta.pk || meta.fk || meta.unique || meta.indexed || !meta.nullable)}
+                                    <div class="flex shrink-0 items-center gap-[2px]">
+                                      {#if meta.pk}
+                                        <span
+                                          title="Primary key"
+                                          class="inline-flex size-[13px] items-center justify-center rounded-sm bg-amber-500/15 text-amber-400/80"
+                                        ><KeyRound class="size-[8px]" /></span>
+                                      {/if}
+                                      {#if meta.fk}
+                                        <span
+                                          title={fkTooltip(col.name)}
+                                          class="inline-flex size-[13px] items-center justify-center rounded-sm bg-blue-500/10 text-blue-400/70"
+                                        ><Link2 class="size-[8px]" /></span>
+                                      {/if}
+                                      {#if meta.unique && !meta.pk}
+                                        <span
+                                          title="Unique"
+                                          class="inline-flex size-[13px] items-center justify-center rounded-sm bg-muted/60 text-muted-foreground/60"
+                                        ><Fingerprint class="size-[8px]" /></span>
+                                      {/if}
+                                      {#if meta.indexed}
+                                        <span
+                                          title="Indexed"
+                                          class="inline-flex size-[13px] items-center justify-center rounded-sm bg-muted/60 text-muted-foreground/50"
+                                        ><Zap class="size-[8px]" /></span>
+                                      {/if}
+                                      {#if !meta.nullable && !meta.pk}
+                                        <span
+                                          title="Not null"
+                                          class="inline-flex size-[13px] items-center justify-center rounded-sm bg-muted/40 text-muted-foreground/40"
+                                        ><Circle class="size-[7px] fill-muted-foreground/30" /></span>
+                                      {/if}
+                                    </div>
+                                  {/if}
+                                </div>
+                                <span
+                                  class="block truncate font-mono text-ui-2xs text-muted-foreground"
+                                  data-font="mono"
+                                  title={col.dataType ?? col.data_type}
+                                  >{col.dataType ?? col.data_type}</span
+                                >
+                              </div>
+                              {#if isSorted}
+                                <span class="shrink-0 text-primary/70">
+                                  {#if isAsc}
+                                    <svg class="size-3" viewBox="0 0 12 12" fill="none"><path d="M6 9V3M3 6l3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                  {:else}
+                                    <svg class="size-3" viewBox="0 0 12 12" fill="none"><path d="M6 3v6M3 6l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                  {/if}
+                                </span>
+                              {:else}
+                                <ArrowUpDown class="size-3 shrink-0 opacity-0 transition-opacity group-hover/th:opacity-30" />
+                              {/if}
+                            </button>
+                            {#if visibleColumns.length > 1}
+                              <ColumnResizeHandle
+                                onresizestart={() => startColumnResize(col.name)}
+                                onresize={applyColumnResize}
+                                onresizeend={endColumnResize}
+                              />
                             {/if}
-                          </span>
-                        {:else}
-                          <ArrowUpDown class="size-3 shrink-0 opacity-0 transition-opacity group-hover/th:opacity-30" />
+                          </th>
+                        {/snippet}
+                      </ContextMenu.Trigger>
+                      <ContextMenu.Content
+                        class="w-48 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5"
+                      >
+                        <ContextMenu.Item onSelect={() => headerSortDirect(col.name, 'asc')}>
+                          <ArrowUp />
+                          Sort ascending
+                          {#if isAsc}<span class="ml-auto text-[10px] text-primary">✓</span>{/if}
+                        </ContextMenu.Item>
+                        <ContextMenu.Item onSelect={() => headerSortDirect(col.name, 'desc')}>
+                          <ArrowDown />
+                          Sort descending
+                          {#if isDesc}<span class="ml-auto text-[10px] text-primary">✓</span>{/if}
+                        </ContextMenu.Item>
+                        {#if isSorted}
+                          <ContextMenu.Item onSelect={() => { if (pendingEdits.size > 0) { toast.error('Unsaved changes', { description: 'Apply or reset your edits before sorting.' }); return } onsortchange(null) }}>
+                            <ArrowUpDown />
+                            Clear sort
+                          </ContextMenu.Item>
                         {/if}
-                      </button>
-                      {#if visibleColumns.length > 1}
-                        <ColumnResizeHandle
-                          onresizestart={() => startColumnResize(col.name)}
-                          onresize={applyColumnResize}
-                          onresizeend={endColumnResize}
-                        />
-                      {/if}
-                    </th>
+                        <ContextMenu.Separator />
+                        <ContextMenu.Item onSelect={() => onfiltercolumn(col.name)}>
+                          <ListFilter />
+                          Filter by this column
+                        </ContextMenu.Item>
+                        <ContextMenu.Separator />
+                        <ContextMenu.Item onSelect={() => toggleColumnPin(col.name)}>
+                          {#if isPinned}
+                            <PinOff />
+                            Unpin column
+                          {:else}
+                            <Pin />
+                            Pin column
+                          {/if}
+                        </ContextMenu.Item>
+                        <ContextMenu.Item onSelect={() => onhidecolumn(col.name)}>
+                          <EyeOff />
+                          Hide column
+                        </ContextMenu.Item>
+                        <ContextMenu.Separator />
+                        <ContextMenu.Item onSelect={() => resetColumnWidth(col.name)}>
+                          <RotateCcw />
+                          Reset column width
+                        </ContextMenu.Item>
+                      </ContextMenu.Content>
+                    </ContextMenu.Root>
                   {/if}
                 {/each}
                 <th aria-hidden="true" class="studio-spacer-cell bg-panel"></th>
               </tr>
             </thead>
-            {#if rows.length > 0}
+            {#if rows.length > 0 || newRowDrafts}
               <tbody>
+                {#if newRowDrafts}
+                  <tr
+                    class="group/newrow relative border-b border-border/30 bg-emerald-500/[0.04] ring-1 ring-inset ring-emerald-500/20"
+                    onkeydown={onNewRowKeydown}
+                  >
+                    {#if showRowExpand}
+                      <td
+                        class="studio-table-gutter border-r border-border/20 bg-primary/5"
+                        style="width: {ROW_EXPAND_COL_WIDTH}px; min-width: {ROW_EXPAND_COL_WIDTH}px; max-width: {ROW_EXPAND_COL_WIDTH}px"
+                      >
+                        <div class="studio-table-gutter-inner flex items-center justify-center">
+                          {#if insertSaving}
+                            <Loader class="size-3 animate-spin text-muted-foreground" />
+                          {:else}
+                            <Check
+                              class="size-3 cursor-pointer text-primary hover:text-primary/70"
+                              onclick={() => void submitNewRow()}
+                              title="Insert row (⌘↵)"
+                            />
+                          {/if}
+                        </div>
+                      </td>
+                    {/if}
+                    {#if showSelection}
+                      <td
+                        class="studio-table-gutter border-r border-border/20 bg-primary/5"
+                        style="width: {ROW_SELECT_COL_WIDTH}px; min-width: {ROW_SELECT_COL_WIDTH}px; max-width: {ROW_SELECT_COL_WIDTH}px"
+                      >
+                        <div class="studio-table-gutter-inner flex items-center justify-center">
+                          <button
+                            type="button"
+                            class="inline-flex size-4 items-center justify-center rounded text-muted-foreground/50 hover:text-destructive"
+                            onclick={cancelNewRow}
+                            title="Cancel"
+                          >
+                            <X class="size-3" />
+                          </button>
+                        </div>
+                      </td>
+                    {/if}
+                    {#each visibleColumns as col (col.name)}
+                      {@const dt = col.dataType ?? col.data_type ?? ''}
+                      {@const isAuto = isLikelyAutoColumn(dt, col.name, primaryKey)}
+                      {@const enumValues = getColumnEnumValues(col)}
+                      {@const isBoolean = isBooleanType(dt)}
+                      {@const isDateTime = shouldUseDateTimePicker(dt, col.name)}
+                      {@const isDateOnly = isDateOnlyType(dt)}
+                      {@const isTimeOnly = isTimeOnlyType(dt)}
+                      {@const isPinned = pinnedColumns.has(col.name)}
+                      {@const pinOffset = pinnedOffsets.get(col.name)}
+                      {@const colWidth = widthForColumn(col.name, dt)}
+                      <td
+                        class={cn(
+                          'border-r border-border/20 px-2 py-1',
+                          isPinned && 'sticky z-10 bg-background shadow-[1px_0_0_0_hsl(var(--border)/0.2)]',
+                        )}
+                        style={[
+                          `min-width: ${colWidth}px; max-width: ${colWidth}px; width: ${colWidth}px`,
+                          isPinned ? `left: ${(showRowExpand ? ROW_EXPAND_COL_WIDTH : 0) + (showSelection ? ROW_SELECT_COL_WIDTH : 0) + (pinOffset ?? 0)}px` : '',
+                        ].filter(Boolean).join('; ')}
+                      >
+                        {#if isAuto}
+                          <span class="select-none font-mono text-ui-sm text-muted-foreground/35 italic">auto</span>
+                        {:else if enumValues}
+                          <select
+                            data-new-row-input={col.name}
+                            disabled={insertSaving}
+                            class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none disabled:opacity-50"
+                            value={newRowDrafts[col.name] ?? ''}
+                            onchange={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
+                            onfocus={() => (newRowFocusCol = col.name)}
+                          >
+                            <option value="">{col.nullable ? 'NULL / default' : 'Select…'}</option>
+                            {#each enumValues as opt (opt)}<option value={opt}>{opt}</option>{/each}
+                          </select>
+                        {:else if isBoolean}
+                          <select
+                            data-new-row-input={col.name}
+                            disabled={insertSaving}
+                            class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none disabled:opacity-50"
+                            value={newRowDrafts[col.name] ?? ''}
+                            onchange={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
+                            onfocus={() => (newRowFocusCol = col.name)}
+                          >
+                            <option value="">{col.nullable ? 'NULL / default' : 'Default'}</option>
+                            <option value="true">true</option>
+                            <option value="false">false</option>
+                          </select>
+                        {:else if isDateTime}
+                          <input
+                            data-new-row-input={col.name}
+                            type="datetime-local"
+                            disabled={insertSaving}
+                            class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none placeholder:text-muted-foreground/40 disabled:opacity-50"
+                            value={newRowDrafts[col.name] ?? ''}
+                            oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
+                            onfocus={() => (newRowFocusCol = col.name)}
+                          />
+                        {:else if isDateOnly}
+                          <input
+                            data-new-row-input={col.name}
+                            type="date"
+                            disabled={insertSaving}
+                            class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none disabled:opacity-50"
+                            value={newRowDrafts[col.name] ?? ''}
+                            oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
+                            onfocus={() => (newRowFocusCol = col.name)}
+                          />
+                        {:else if isTimeOnly}
+                          <input
+                            data-new-row-input={col.name}
+                            type="time"
+                            disabled={insertSaving}
+                            class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none disabled:opacity-50"
+                            value={newRowDrafts[col.name] ?? ''}
+                            oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
+                            onfocus={() => (newRowFocusCol = col.name)}
+                          />
+                        {:else}
+                          <input
+                            data-new-row-input={col.name}
+                            type="text"
+                            disabled={insertSaving}
+                            placeholder={col.nullable ? 'NULL or value' : 'Required'}
+                            class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none placeholder:text-muted-foreground/40 disabled:opacity-50"
+                            value={newRowDrafts[col.name] ?? ''}
+                            oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
+                            onfocus={() => (newRowFocusCol = col.name)}
+                          />
+                        {/if}
+                      </td>
+                    {/each}
+                    <td class="studio-spacer-cell bg-primary/[0.03]">
+                      {#if !insertSaving}
+                        <span class="whitespace-nowrap px-2 font-mono text-ui-2xs text-muted-foreground/40">⌘↵ save · Esc cancel</span>
+                      {/if}
+                    </td>
+                  </tr>
+                {/if}
                 {#if useVirtual && virtualTopPad > 0}
                   <tr aria-hidden="true" style="height: {virtualTopPad}px">
                     <td colspan={totalColSpan} class="border-0 p-0"></td>
@@ -1659,6 +2107,11 @@
                       }
                       if (editingCell) cancelEdit();
                       focusedRow = idx;
+                      if (e.shiftKey) {
+                        openInInspector(idx);
+                        return;
+                      }
+                      if (inspectorRow !== null) inspectorRow = idx;
                       const cellEl = target?.closest("td[data-col-idx]");
                       if (cellEl) {
                         const ci = Number(cellEl.getAttribute("data-col-idx"));
@@ -1773,10 +2226,10 @@
                         <!-- Background / text / shadow resolved by priority so the hot
                              cell class avoids tailwind-merge (cx = clsx only). Order
                              matches the previous cn() last-wins behavior exactly. -->
+                        {@const canEditCell = canEditColumn(colIdx)}
                         {@const cellBg = isEditing ? "bg-background"
                           : cellPinned ? "bg-panel"
                           : isDirty ? "bg-amber-400/15"
-                          : isFocusedCell ? "bg-primary/10"
                           : activeFk ? "bg-accent/15" : ""}
                         {@const cellTextColor = isEditing ? ""
                           : (isFocusedCell || isDirty) ? "text-foreground" : "text-muted-foreground"}
@@ -1960,6 +2413,19 @@
                             {/if}
                           {/if}
                           {#if !isEditing}
+                            {@const canExpand = canEditCell && !enumValues && !isBooleanType(colType)}
+                            {#if canExpand}
+                              <button
+                                type="button"
+                                tabindex={-1}
+                                class="absolute right-6 top-1/2 z-10 hidden size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground group-hover/cell:inline-flex hover:bg-accent/60 hover:text-foreground"
+                                title="Quick Look (Shift+Space)"
+                                aria-label="Open quick look editor"
+                                onclick={(e) => { e.stopPropagation(); openQuickLook(idx, colIdx); }}
+                              >
+                                <Maximize2 class="size-3" />
+                              </button>
+                            {/if}
                             <button
                               type="button"
                               tabindex={-1}
@@ -2007,6 +2473,7 @@
             {/if}
           </table>
           {/if}
+          <div class="pointer-events-none flex-1" aria-hidden="true"></div>
           {#if visibleColumns.length === 0}
             <div
               class="pointer-events-none absolute inset-0 flex items-center justify-center"
@@ -2030,10 +2497,6 @@
               </div>
             </div>
           {/if}
-          <!-- Overscroll hint: brief glow pinned to the bottom edge when wheeling past the bottom. -->
-          <div aria-hidden="true" class="pointer-events-none sticky bottom-0 z-30 h-0">
-            <div class="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-primary/25 to-transparent transition-opacity duration-200 {overscrollEdge === 'bottom' ? 'opacity-100' : 'opacity-0'}"></div>
-          </div>
         </div>
       {/snippet}
     </ContextMenu.Trigger>
@@ -2123,12 +2586,35 @@
         </ContextMenu.Item>
       {/if}
       <ContextMenu.Separator />
-      <ContextMenu.Item
-        onSelect={() => runMenuAction(() => copyRowJson(contextRowIdx))}
-      >
-        <Braces />
-        Copy row JSON
-      </ContextMenu.Item>
+      <ContextMenu.Sub>
+        <ContextMenu.SubTrigger>
+          <Copy />
+          Copy row as
+        </ContextMenu.SubTrigger>
+        <ContextMenu.SubContent class="w-44 [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+          <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'json'))}>
+            <Braces />
+            JSON
+          </ContextMenu.Item>
+          <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'csv'))}>
+            <Copy />
+            CSV
+          </ContextMenu.Item>
+          <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'plain'))}>
+            <Copy />
+            Plain text
+          </ContextMenu.Item>
+          <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'markdown'))}>
+            <Copy />
+            Markdown table
+          </ContextMenu.Item>
+          <ContextMenu.Separator />
+          <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'insert'))}>
+            <Copy />
+            INSERT statement
+          </ContextMenu.Item>
+        </ContextMenu.SubContent>
+      </ContextMenu.Sub>
       <ContextMenu.Item
         onSelect={() => runMenuAction(() => toggleRow(contextRowIdx))}
       >
@@ -2180,5 +2666,12 @@
 <JsonCellLightbox
   data={jsonLightbox}
   onclose={() => { jsonLightbox = null }}
+/>
+
+<CellQuickLook
+  bind:cell={quickLookCell}
+  {saving}
+  oncancel={cancelQuickLook}
+  onsave={commitQuickLook}
 />
 

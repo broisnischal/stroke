@@ -14,9 +14,9 @@
 	bind:ref
 	data-slot="command-item"
 	class={cn(
-		"group/command-item relative flex w-full min-w-0 cursor-default items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm outline-hidden select-none",
-		"text-foreground data-selected:bg-accent data-selected:text-accent-foreground",
-		"data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50",
+		"group/command-item relative flex w-full min-w-0 cursor-default items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] outline-hidden select-none transition-colors",
+		"text-foreground/80 data-selected:bg-muted/50 data-selected:text-foreground",
+		"data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-40",
 		"[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
 		"[&>[data-slot=command-label]]:min-w-0 [&>[data-slot=command-label]]:flex-1 [&>[data-slot=command-label]]:truncate",
 		"[&>[data-slot=command-trailing]]:ml-auto [&>[data-slot=command-trailing]]:shrink-0",

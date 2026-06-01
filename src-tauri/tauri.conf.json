@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "db-studio",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "identifier": "com.broisnischal.studio",
   "build": {
     "frontendDist": "../dist",
@@ -10,6 +10,7 @@
     "beforeBuildCommand": "npm run build"
   },
   "app": {
+    "macOSPrivateApi": true,
     "security": {
       "csp": null
     }

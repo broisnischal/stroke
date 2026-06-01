@@ -115,6 +115,35 @@ export async function connectD1(config) {
   return inv('connect_d1_db', { config })
 }
 
+/**
+ * List all Cloudflare accounts accessible with the given API token.
+ * @param {string} apiToken
+ * @returns {Promise<Array<{id: string, name: string}>>}
+ */
+export async function cloudflareListAccounts(apiToken) {
+  return inv('cloudflare_list_accounts', { apiToken })
+}
+
+/**
+ * List all D1 databases for a given Cloudflare account.
+ * @param {string} apiToken
+ * @param {string} accountId
+ * @returns {Promise<Array<{uuid: string, name: string, created_at?: string, num_tables?: number}>>}
+ */
+export async function cloudflareListD1Databases(apiToken, accountId) {
+  return inv('cloudflare_list_d1_databases', { apiToken, accountId })
+}
+
+/** @param {{ name: string, url: string, authToken?: string }} config */
+export async function testLibSqlConnection(config) {
+  return inv('test_libsql', { config })
+}
+
+/** @param {{ name: string, url: string, authToken?: string }} config */
+export async function connectLibSql(config) {
+  return inv('connect_libsql_db', { config })
+}
+
 // ── Docker ────────────────────────────────────────────────────────────────────
 
 /** Returns Docker server version string, or throws a user-facing error. */
@@ -163,10 +192,40 @@ export async function listIndexes(schema) {
   }
 }
 
+/**
+ * @param {string} schema
+ * @param {string} table
+ */
+export async function getTableColumnStructure(schema, table) {
+  try {
+    return await invoke('pg_get_table_column_structure', { schema, table })
+  } catch (err) {
+    throw new Error(formatInvokeError(err))
+  }
+}
+
 /** @param {string} schema */
 export async function listEnums(schema) {
   try {
     return await invoke('pg_list_enums', { schema })
+  } catch (err) {
+    throw new Error(formatInvokeError(err))
+  }
+}
+
+/** @param {string} schema */
+export async function listTriggers(schema) {
+  try {
+    return await invoke('pg_list_triggers', { schema })
+  } catch (err) {
+    throw new Error(formatInvokeError(err))
+  }
+}
+
+/** @param {string} schema */
+export async function listSequences(schema) {
+  try {
+    return await invoke('pg_list_sequences', { schema })
   } catch (err) {
     throw new Error(formatInvokeError(err))
   }
@@ -230,6 +289,20 @@ export async function getTableRows(schema, table, limit, offset, query = {}) {
 export async function executeSql(sql) {
   try {
     return await invoke('pg_execute_sql', { sql })
+  } catch (err) {
+    throw new Error(formatInvokeError(err))
+  }
+}
+
+/** Execute one or more SQL statements and return each result as a separate entry. */
+export async function executeSqlMulti(sql) {
+  return await inv('pg_execute_sql_multi', { sql })
+}
+
+/** Execute a DDL statement outside a transaction (CREATE/DROP DATABASE, etc.). */
+export async function executeDdl(sql) {
+  try {
+    return await invoke('pg_execute_ddl', { sql })
   } catch (err) {
     throw new Error(formatInvokeError(err))
   }
@@ -359,4 +432,44 @@ export async function aiLoadKey(profileId) {
 /** @param {string} profileId */
 export async function aiDeleteKey(profileId) {
   return inv('ai_delete_key', { profileId })
+}
+
+
+// ── Backup / Restore ──────────────────────────────────────────────────────────
+
+/**
+ * Export the connected database as a SQL dump string.
+ * @param {string | null} schema - Filter to one schema (PostgreSQL/MySQL only)
+ * @returns {Promise<{ sql: string, tableCount: number, rowCount: number }>}
+ */
+/**
+ * @param {string | null} schema
+ * @param {string[] | null} tables
+ * @param {{ includeSchema?: boolean, includeData?: boolean, includeSequences?: boolean, includeEnums?: boolean, includeFunctions?: boolean, includeTriggers?: boolean, includeViews?: boolean } | null} options
+ */
+export async function backupExport(schema = null, tables = null, options = null) {
+  return inv('backup_export', { schema, tables, options })
+}
+
+/**
+ * Execute a SQL restore script against the connected database.
+ * @param {string} sql
+ * @returns {Promise<{ statementsOk: number, statementsErr: number, errors: string[] }>}
+ */
+export async function backupImport(sql) {
+  return inv('backup_import', { sql })
+}
+
+/**
+ * @typedef {{ pid: number, rssBytes: number, virtualBytes: number, cpuPercent: number, processName: string }} AppMetrics
+ */
+
+/** Sample this process's PID, memory (RSS + virtual), and CPU usage. */
+export async function getAppMetrics() {
+  return /** @type {Promise<AppMetrics>} */ (invoke('get_app_metrics'))
+}
+
+/** Rename the OS process so it appears as `name` in htop / ps / Activity Monitor. */
+export async function setProcessTitle(name) {
+  return invoke('set_process_title', { name })
 }

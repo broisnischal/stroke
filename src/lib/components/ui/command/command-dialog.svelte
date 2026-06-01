@@ -23,7 +23,10 @@
 		<Dialog.Description>{description}</Dialog.Description>
 	</Dialog.Header>
 	<Dialog.Content
-		class={cn("rounded-xl! top-1/3 translate-y-0 overflow-hidden p-0", className)}
+		class={cn(
+			"rounded-2xl! top-[18vh] translate-y-0 overflow-hidden p-0 shadow-2xl shadow-black/50",
+			className
+		)}
 		{showCloseButton}
 		{portalProps}
 	>

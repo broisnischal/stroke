@@ -1,37 +1,37 @@
 /* App color tokens per theme — use html[data-theme] so we beat :root in the cascade */
 @import './app-themes-inspired.css';
 
-/* ── Light ── clean neutral, modern, high contrast */
+/* ── Light ── warm paper, genuinely inviting */
 html[data-theme="light"] {
-  --background: oklch(0.97 0 0);
-  --foreground: oklch(0.13 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.13 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.13 0 0);
-  --primary: oklch(0.13 0 0);
-  --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.93 0 0);
-  --secondary-foreground: oklch(0.2 0 0);
-  --muted: oklch(0.93 0 0);
-  --muted-foreground: oklch(0.46 0 0);
-  --accent: oklch(0.9 0 0);
-  --accent-foreground: oklch(0.13 0 0);
+  --background: oklch(0.977 0.010 85);
+  --foreground: oklch(0.15 0.018 65);
+  --card: oklch(1 0.005 80);
+  --card-foreground: oklch(0.15 0.018 65);
+  --popover: oklch(1 0.005 80);
+  --popover-foreground: oklch(0.15 0.018 65);
+  --primary: oklch(0.16 0.018 65);
+  --primary-foreground: oklch(0.977 0.010 85);
+  --secondary: oklch(0.930 0.013 82);
+  --secondary-foreground: oklch(0.22 0.018 65);
+  --muted: oklch(0.930 0.012 82);
+  --muted-foreground: oklch(0.48 0.016 75);
+  --accent: oklch(0.900 0.016 82);
+  --accent-foreground: oklch(0.15 0.018 65);
   --destructive: oklch(0.55 0.22 25);
-  --border: oklch(0.87 0 0);
-  --input: oklch(0.87 0 0);
-  --ring: oklch(0.45 0 0);
-  --sidebar: oklch(0.95 0 0);
-  --sidebar-foreground: oklch(0.18 0 0);
-  --sidebar-accent: oklch(0.9 0 0);
-  --sidebar-accent-foreground: oklch(0.13 0 0);
-  --sidebar-border: oklch(0.87 0 0);
-  --panel: oklch(0.96 0 0);
-  --table-grid: oklch(0.83 0 0);
-  --link: oklch(0.44 0.15 250);
-  --link-hover: oklch(0.36 0.17 250);
-  --editor-surface: oklch(1 0 0);
-  --editor-line-highlight: oklch(0.955 0 0);
+  --border: oklch(0.825 0.018 80);
+  --input: oklch(0.825 0.018 80);
+  --ring: oklch(0.42 0.02 65);
+  --sidebar: oklch(0.952 0.014 82);
+  --sidebar-foreground: oklch(0.18 0.018 65);
+  --sidebar-accent: oklch(0.888 0.018 80);
+  --sidebar-accent-foreground: oklch(0.15 0.018 65);
+  --sidebar-border: oklch(0.808 0.018 80);
+  --panel: oklch(0.963 0.012 83);
+  --table-grid: oklch(0.770 0.022 80);
+  --link: oklch(0.42 0.15 250);
+  --link-hover: oklch(0.32 0.17 250);
+  --editor-surface: #faf8f3;
+  --editor-line-highlight: #f0ece3;
 }
 
 /* ── Dark ── neutral graphite, fixed primary visibility */

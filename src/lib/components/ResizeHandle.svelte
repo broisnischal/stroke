@@ -16,6 +16,10 @@
     if (e.button !== 0) return
     e.preventDefault()
     onresizestart()
+
+    const bodyClass = axis === 'x' ? 'is-resizing-x' : 'is-resizing-y'
+    document.body.classList.add(bodyClass)
+
     const el = /** @type {HTMLElement} */ (e.currentTarget)
     el.setPointerCapture(e.pointerId)
     const startX = e.clientX
@@ -29,6 +33,7 @@
 
     /** @param {PointerEvent} ev */
     function onUp(ev) {
+      document.body.classList.remove(bodyClass)
       el.releasePointerCapture(ev.pointerId)
       el.removeEventListener('pointermove', onMove)
       el.removeEventListener('pointerup', onUp)
@@ -41,7 +46,7 @@
     el.addEventListener('pointercancel', onUp)
   }
 
-  const STEP = 20 // px per arrow key press
+  const STEP = 20
 
   /** @param {KeyboardEvent} e */
   function handleKeydown(e) {
@@ -61,8 +66,6 @@
   }
 </script>
 
-<!-- A resize splitter is a focusable, keyboard/pointer-operable control; the
-     separator role is correct here even though Svelte flags it as non-interactive. -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div
@@ -71,17 +74,18 @@
   aria-label="Resize panel"
   tabindex="0"
   class={cn(
-    'group relative z-10 shrink-0 touch-none select-none focus-visible:outline-none',
+    'studio-resize-handle group relative z-20 shrink-0 touch-none select-none focus-visible:outline-none',
     axis === 'x' ? 'h-full w-1 cursor-col-resize' : 'h-1 w-full cursor-row-resize',
   )}
   onpointerdown={handlePointerDown}
   onkeydown={handleKeydown}
 >
+  <!-- Visual-only line, pointer-events-none so it never shadows the cursor -->
   <div
     class={cn(
-      'absolute rounded-full bg-border/40 transition-colors group-hover:bg-primary/60 group-active:bg-primary group-focus-visible:bg-primary/70',
-      axis === 'x' && 'inset-y-2 w-0.5 left-1/2 -translate-x-1/2',
-      axis === 'y' && 'inset-x-2 h-0.5 top-1/2 -translate-y-1/2',
+      'pointer-events-none absolute rounded-full bg-border/50 transition-colors group-hover:bg-primary/70 group-active:bg-primary group-focus-visible:bg-primary/70',
+      axis === 'x' && 'inset-y-2 w-px left-1/2 -translate-x-1/2',
+      axis === 'y' && 'inset-x-2 h-px top-1/2 -translate-y-1/2',
     )}
   ></div>
 </div>
