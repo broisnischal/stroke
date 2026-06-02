@@ -87,9 +87,9 @@
     }
   }
 
-  const lbl = 'mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-foreground/50'
-  const inp = 'h-8 w-full rounded-lg border border-border/25 bg-muted/[0.4] px-3 font-mono text-[12px] text-foreground placeholder:text-muted-foreground/30 outline-none focus:border-border/50 focus:ring-0'
-  const sel = 'h-8 w-full appearance-none rounded-lg border border-border/25 bg-muted/[0.4] px-3 pr-7 font-mono text-[12px] text-foreground outline-none focus:border-border/50'
+  const lbl = 'mb-2 block text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/50'
+  const inp = 'h-9 w-full rounded-lg border border-border/30 bg-muted/[0.35] px-3 font-mono text-[13px] text-foreground placeholder:text-muted-foreground/30 outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-colors'
+  const sel = 'h-9 w-full appearance-none rounded-lg border border-border/30 bg-muted/[0.35] px-3 pr-7 font-mono text-[13px] text-foreground outline-none focus:border-primary/50 transition-colors'
 </script>
 
 <DdlConfirmDialog

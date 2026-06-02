@@ -420,8 +420,15 @@
   const INP = 'box-border block h-full w-full min-w-0 overflow-x-auto border-0 bg-transparent px-3 py-0 font-mono text-[12px] text-foreground outline-none selection:bg-primary/20'
   const DROP_PANEL = 'absolute left-0 top-full z-50 mt-0.5 max-h-64 w-48 overflow-y-auto rounded-xl border border-border/35 bg-background p-1.5 shadow-xl shadow-black/30'
   const DROP_ITEM = 'relative flex w-full cursor-default select-none items-center rounded-lg px-2.5 py-1.5 font-mono text-[12px] text-foreground outline-none hover:bg-muted/60'
-  const SECTION_HDR = 'flex items-center gap-2 border-t border-border/30 bg-muted/[0.08] px-3 py-2'
-  const SECTION_LABEL = 'text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-foreground/40'
+
+  // ── Tab state ─────────────────────────────────────────────────────────────
+  /** @type {'columns' | 'indexes' | 'relations' | 'triggers'} */
+  let activeTab = $state('columns')
+
+  // Reset tab on table change
+  $effect(() => { schema; table; activeTab = 'columns' })
+
+  const relationsColumns = $derived(columns.filter(c => c.foreignKey))
 </script>
 
 <ForeignKeyDialog bind:open={fkOpen} {schema} {table} column={fkCol} constraintName={fkConstraint} existingFk={fkExisting} {tables} onrefresh={() => { fkOpen = false; onrefresh() }} />
@@ -447,9 +454,39 @@
     {#if loading}<Loader class="ml-auto size-3.5 animate-spin text-muted-foreground/50" />{/if}
   </div>
 
-  <!-- Single scroll container — content takes natural height, no forced stretch -->
+  <!-- Tab bar -->
+  <div class="studio-chrome flex shrink-0 items-center gap-0 border-b border-border/30 bg-panel px-2" data-studio-chrome>
+    {#each [
+      { id: 'columns',   label: 'Columns',   count: columns.length },
+      { id: 'indexes',   label: 'Indexes',   count: tableIndexes.length },
+      { id: 'relations', label: 'Relations', count: relationsColumns.length },
+      { id: 'triggers',  label: 'Triggers',  count: tableTriggers.length },
+    ] as tab (tab.id)}
+      <button
+        type="button"
+        class="relative flex h-9 items-center gap-1.5 px-3.5 text-ui-xs font-medium transition-colors
+          {activeTab === tab.id
+            ? 'text-foreground after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:rounded-t-full after:bg-primary'
+            : 'text-muted-foreground/60 hover:text-foreground'}"
+        onclick={() => activeTab = /** @type {any} */ (tab.id)}
+      >
+        {tab.label}
+        {#if tab.count > 0}
+          <span class="rounded-full px-1.5 py-px text-[10px] font-normal
+            {activeTab === tab.id ? 'bg-primary/15 text-primary/80' : 'bg-muted/50 text-muted-foreground/50'}">
+            {tab.count}
+          </span>
+        {/if}
+      </button>
+    {/each}
+  </div>
+
+  <!-- Tab content -->
   <div class="min-h-0 flex-1" style="overflow: auto">
     <div style="display: inline-block; min-width: 100%; vertical-align: top">
+
+    <!-- ── Columns tab ── -->
+    {#if activeTab === 'columns'}
       <table class="border-collapse" style="table-layout: fixed; width: max-content; min-width: 100%">
         <colgroup>
           {#each colWidths as w}<col style="width:{w}px;min-width:{w}px;max-width:{w}px" />{/each}
@@ -476,7 +513,7 @@
             {@const displayType = stagedValues['type:' + col.name] ?? col.dataType}
             {@const displayNullable = stagedValues['nullable:' + col.name] !== undefined ? stagedValues['nullable:' + col.name] : col.isNullable}
             {@const displayDefault = stagedValues['default:' + col.name] !== undefined ? stagedValues['default:' + col.name] : (col.columnDefault ?? '')}
-            <tr class="group/row {staged ? 'bg-amber-500/[0.04]' : ''}" style="height:32px">
+            <tr class="group/row {staged ? 'bg-amber-500/[0.04]' : ''}" style="height:32px;content-visibility:auto;contain-intrinsic-size:auto 32px">
 
               <!-- # -->
               <td class="{TD} {staged ? 'border-l-2 border-l-amber-500/50' : ''}">
@@ -770,11 +807,13 @@
       </button>
     {/if}
     </div>
+    {/if}<!-- end columns tab -->
 
-    <!-- ── Index section ── -->
+    <!-- ── Indexes tab ── -->
+    {#if activeTab === 'indexes'}
     <div class="font-mono">
-      <div class={SECTION_HDR}>
-        <span class={SECTION_LABEL}>
+      <div class="flex items-center gap-2 border-b border-border/30 bg-muted/[0.08] px-3 py-2">
+        <span class="text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-foreground/40">
           Indexes
           {#if columnSearch && visibleIndexes.length !== tableIndexes.length}
             <span class="ml-1 font-normal text-muted-foreground/40">({visibleIndexes.length}/{tableIndexes.length})</span>
@@ -939,13 +978,67 @@
           {/if}
         </tbody>
       </table>
-    </div><!-- end index section -->
+    </div>
+    {/if}<!-- end indexes tab -->
 
-    <!-- ── Triggers section ── -->
+    <!-- ── Relations tab ── -->
+    {#if activeTab === 'relations'}
     <div class="font-mono">
-      <div class={SECTION_HDR}>
+      <div class="flex items-center gap-2 border-b border-border/30 bg-muted/[0.08] px-3 py-2">
+        <span class="text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-foreground/40">Foreign Key Relations</span>
+      </div>
+      <table class="border-collapse" style="table-layout: fixed; width: max-content; min-width: 100%">
+        <colgroup>
+          <col style="min-width:160px;width:200px" />
+          <col style="min-width:220px;width:280px" />
+          <col style="min-width:36px;width:36px;max-width:36px" />
+        </colgroup>
+        <thead>
+          <tr>
+            {#each ['column', 'references', ''] as h}
+              <th class={TH}>{h}</th>
+            {/each}
+          </tr>
+        </thead>
+        <tbody>
+          {#each relationsColumns as col (col.name)}
+            <tr class="group/rel" style="height:32px">
+              <td class="border-b border-r border-border/40 px-3 font-mono text-ui-sm text-foreground overflow-hidden">
+                <div class="flex items-center gap-1.5 truncate">
+                  {#if pkSet.has(col.name)}<KeyRound class="size-3 shrink-0 text-amber-400/60" />{/if}
+                  <span class="truncate">{col.name}</span>
+                </div>
+              </td>
+              <td class="border-b border-r border-border/40 p-0 overflow-hidden">
+                <button type="button" class="flex h-full w-full items-center gap-1.5 px-3 font-mono text-[12px] text-blue-400/70 transition-colors hover:bg-muted/40 hover:text-blue-400" onclick={() => openFkDialog(col)}>
+                  <ArrowRight class="size-3 shrink-0" /><span class="truncate">{col.foreignKey}</span>
+                </button>
+              </td>
+              <td class="border-b border-border/40 p-0 align-middle">
+                <button type="button" disabled={confirmLoading}
+                  class="flex h-full w-full items-center justify-center text-muted-foreground/20 transition-colors hover:text-destructive disabled:opacity-40 group-hover/rel:text-muted-foreground/50"
+                  title="Remove foreign key"
+                  onclick={() => openFkDialog(col)}
+                >
+                  <Trash2 class="size-3.5" />
+                </button>
+              </td>
+            </tr>
+          {/each}
+          {#if relationsColumns.length === 0}
+            <tr><td colspan="3" class="px-3 py-6 font-mono text-ui-xs text-muted-foreground/40">No foreign key relations on this table</td></tr>
+          {/if}
+        </tbody>
+      </table>
+    </div>
+    {/if}<!-- end relations tab -->
+
+    <!-- ── Triggers tab ── -->
+    {#if activeTab === 'triggers'}
+    <div class="font-mono">
+      <div class="flex items-center gap-2 border-b border-border/30 bg-muted/[0.08] px-3 py-2">
         <GitBranch class="size-3 shrink-0 text-muted-foreground/50" />
-        <span class={SECTION_LABEL}>
+        <span class="text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-foreground/40">
           Triggers
           {#if columnSearch && visibleTriggers.length !== tableTriggers.length}
             <span class="ml-1 font-normal text-muted-foreground/40">({visibleTriggers.length}/{tableTriggers.length})</span>
@@ -1024,9 +1117,10 @@
           {/if}
         </tbody>
       </table>
-    </div><!-- end triggers section -->
+    </div>
+    {/if}<!-- end triggers tab -->
 
-  </div><!-- end inline-block wrapper -->
+    </div><!-- end inline-block wrapper -->
   </div><!-- end scroll container -->
 </div><!-- end outer flex -->
 

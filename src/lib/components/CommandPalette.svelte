@@ -125,6 +125,22 @@
   const viewTables    = $derived(tables.filter((t) => t.tableKind === 'view'))
   const matViewTables = $derived(tables.filter((t) => t.tableKind === 'materialized_view'))
 
+  // Search text bound from Command.Input. We filter + cap the Tables page
+  // ourselves (instead of mounting every table and letting bits-ui score them
+  // all on each keystroke), which keeps the rendered list small and scrolling
+  // smooth even with thousands of tables.
+  let paletteSearch = $state('')
+  const TABLES_PAGE_CAP = 100
+  /** @param {{ name: string }[]} list */
+  function filterAndCap(list) {
+    const q = paletteSearch.trim().toLowerCase()
+    const matched = q ? list.filter((t) => t.name.toLowerCase().includes(q)) : list
+    return { items: matched.slice(0, TABLES_PAGE_CAP), total: matched.length }
+  }
+  const tablesPageRegular = $derived(filterAndCap(regularTables))
+  const tablesPageViews   = $derived(filterAndCap(viewTables))
+  const tablesPageMatViews = $derived(filterAndCap(matViewTables))
+
   /** @param {() => void} action */
   function run(action) {
     open = false
@@ -165,6 +181,7 @@
          keeping it above the input without disrupting the focus-trap scan order. -->
     <div class="flex flex-col" onkeydown={handleKeydown}>
       <Command.Input
+        bind:value={paletteSearch}
         placeholder={
           page === 'root' ? 'Search tables, schemas, commands…'
           : page === 'tables' ? 'Search tables and views…'
@@ -380,9 +397,9 @@
 
         <!-- ── TABLES PAGE ───────────────────────────────────────────── -->
         {:else if page === 'tables'}
-          {#if regularTables.length > 0}
+          {#if tablesPageRegular.total > 0}
             <Command.Group heading="Tables">
-              {#each regularTables as table (table.name)}
+              {#each tablesPageRegular.items as table (table.name)}
                 <Command.Item value="table {activeSchema} {table.name} {table.name}" onSelect={() => run(() => ontableselect(table.name))}>
                   <Table2 class="size-4 shrink-0 opacity-60" />
                   <span data-slot="command-label" class="truncate font-mono">{table.name}</span>
@@ -393,21 +410,31 @@
                   >{formatTableRowCount(table.rowCount)}</span>
                 </Command.Item>
               {/each}
+              {#if tablesPageRegular.total > tablesPageRegular.items.length}
+                <div class="px-2.5 py-1.5 text-[11px] text-muted-foreground/40">
+                  Showing {tablesPageRegular.items.length} of {tablesPageRegular.total} — keep typing to narrow.
+                </div>
+              {/if}
             </Command.Group>
           {/if}
-          {#if viewTables.length > 0}
+          {#if tablesPageViews.total > 0}
             <Command.Group heading="Views">
-              {#each viewTables as table (table.name)}
+              {#each tablesPageViews.items as table (table.name)}
                 <Command.Item value="view {activeSchema} {table.name} {table.name}" onSelect={() => run(() => ontableselect(table.name))}>
                   <Eye class="size-4 shrink-0 opacity-60" />
                   <span data-slot="command-label" class="truncate font-mono">{table.name}</span>
                 </Command.Item>
               {/each}
+              {#if tablesPageViews.total > tablesPageViews.items.length}
+                <div class="px-2.5 py-1.5 text-[11px] text-muted-foreground/40">
+                  Showing {tablesPageViews.items.length} of {tablesPageViews.total} — keep typing to narrow.
+                </div>
+              {/if}
             </Command.Group>
           {/if}
-          {#if matViewTables.length > 0}
+          {#if tablesPageMatViews.total > 0}
             <Command.Group heading="Materialized views">
-              {#each matViewTables as table (table.name)}
+              {#each tablesPageMatViews.items as table (table.name)}
                 <Command.Item value="materialized view {activeSchema} {table.name} {table.name}" onSelect={() => run(() => ontableselect(table.name))}>
                   <Eye class="size-4 shrink-0 opacity-60" />
                   <span data-slot="command-label" class="truncate font-mono">{table.name}</span>
@@ -417,6 +444,11 @@
                   >{formatTableRowCount(table.rowCount)}</span>
                 </Command.Item>
               {/each}
+              {#if tablesPageMatViews.total > tablesPageMatViews.items.length}
+                <div class="px-2.5 py-1.5 text-[11px] text-muted-foreground/40">
+                  Showing {tablesPageMatViews.items.length} of {tablesPageMatViews.total} — keep typing to narrow.
+                </div>
+              {/if}
             </Command.Group>
           {/if}
 
