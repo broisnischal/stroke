@@ -33,7 +33,6 @@
     foreignKeyTargetLabel,
   } from "$lib/foreign-key-nav.js";
   import TableLoading from "./TableLoading.svelte";
-  import ColumnResizeHandle from "./ColumnResizeHandle.svelte";
   import {
     loadColumnWidths,
     saveColumnWidths,
@@ -43,7 +42,7 @@
     defaultColumnWidth,
   } from "$lib/table-column-widths.js";
   import { formatCompactCount } from "$lib/table-list.js";
-  import { cn, cx } from "$lib/utils.js";
+  import { cn } from "$lib/utils.js";
   import {
     formatJsonValue,
     formatNormalValue,
@@ -76,6 +75,22 @@
   import Check from "@lucide/svelte/icons/check";
   import Loader from "@lucide/svelte/icons/loader";
   import X from "@lucide/svelte/icons/x";
+  import {
+    createColorReader,
+    withAlpha,
+    drawIcon,
+    roundRect,
+    drawCheckbox,
+    drawBadge,
+    drawTriangle,
+    computeColumnGeometry,
+    colDrawnX,
+    colAtX,
+    resizeColAtX,
+    computeRowTops,
+    rowAtContentY,
+    rowIndexAtY,
+  } from "$lib/canvas-table.js";
 
   let {
     columns = [],
@@ -220,35 +235,61 @@
   /** Columns collapsed by dragging the resize handle fully left. */
   let collapsedColumns = $state(/** @type {Set<string>} */ (new Set()))
 
-  // ── Virtual scroll ────────────────────────────────────────────────────────
-  // Two competing goals:
-  //   • Fast tab switch — mounting all rows up front is slow, so on a fresh
-  //     table we mount VIRTUALIZED (only the visible window ≈ a few dozen rows).
-  //   • Smooth scroll — native scroll of a fully-rendered table beats windowing,
-  //     so a moment after mount we EXPAND to render every row (up to a cap).
-  // The expansion runs off the switch's critical path, so switching feels instant
-  // and scrolling is smooth once the page settles. Very large pages stay
-  // windowed forever to keep the DOM/memory bounded.
-  const VIRTUAL_THRESHOLD = 30    // above this, mount windowed for a fast switch
-  const FULL_RENDER_MAX = 250     // expand to a full render up to this many rows
-  // Defer the full render until just after the tab switch settles.
-  let _deferFullRender = $state(true)
-  // Row height: gutter-inner has min-height 1.75rem; at --app-font-size:14px that is
-  // 1.75 × 14 = 24.5px → 25px rendered. Add 1px for subpixel headroom → 26.
-  const ROW_HEIGHT = 26
-  // 20 rows overscan = ~520px buffer each side — eliminates blank flash on fast scroll.
-  const OVERSCAN = 20
-  // Snap the virtual window to a grid of this many rows. The window then only
-  // shifts once per chunk of scrolling instead of once per row, so scrolling
-  // *within* a chunk re-renders nothing and — crucially — never resizes the
-  // spacer rows, which would otherwise force a full <table> relayout on every
-  // scroll event (very costly on WebKitGTK). Must be ≤ OVERSCAN so the buffer
-  // covers the in-chunk scroll distance before the next snap (no blank rows).
-  const VIRTUAL_CHUNK = 10
+  // Row height: the canvas paints every body row at this fixed height. Roomier
+  // than the old 26px for a calmer, Linear/Drizzle-style rhythm.
+  const ROW_HEIGHT = 33
   let _scrollTop = $state(0)
-  // Start high so the first virtual render covers any reasonable screen height
-  // before the ResizeObserver fires with the real value.
+  // Start high so the first paint covers any reasonable screen height before the
+  // ResizeObserver fires with the real value.
   let _viewportHeight = $state(1200)
+
+  // ── Canvas rendering ──────────────────────────────────────────────────────
+  // The grid is painted to a single <canvas> pinned to the viewport; the bulk
+  // cells/header/checkboxes/badges are drawn, and only inherently-interactive
+  // bits (active edit input, insert form, expanded JSON, menus, lightboxes) are
+  // DOM overlays positioned in content coordinates over the canvas.
+  const HEADER_H = 40 // single-line header (name + inline datatype)
+  const GUTTER_EXPAND_W = 38
+  const GUTTER_SELECT_W = 42
+  /** @type {HTMLCanvasElement | null} */
+  let canvasEl = $state(null)
+  /** @type {HTMLSpanElement | null} */
+  let colorProbe = $state(null)
+  let _scrollLeft = $state(0)
+  let _viewportWidth = $state(800)
+  /** Bumped to force a repaint when a non-reactive input (theme) changes. */
+  let _redrawToken = $state(0)
+  /** Hover target (drawn affordances + tooltip + cursor). */
+  let hoveredRow = $state(/** @type {number | null} */ (null))
+  let hoveredColName = $state(/** @type {string | null} */ (null))
+  /** Column whose right edge the pointer is over in the header (resize cursor). */
+  let _resizeHoverCol = $state(/** @type {string | null} */ (null))
+  /** Swallow the click that fires right after a resize-drag pointerup. */
+  let _suppressNextClick = false
+  /** Lightweight canvas tooltip (replaces lost title= attributes). */
+  let _tooltip = $state(/** @type {{ x: number, y: number, text: string } | null} */ (null))
+  let _tooltipTimer = 0
+  /** Right-click target kind, so one ContextMenu can show header vs body items. */
+  let contextIsHeader = $state(false)
+  let contextHeaderCol = $state("")
+
+  // Map a visible/any column name → its index in the full `columns` array
+  // (rows[] are indexed by the full column order, including hidden columns).
+  const _nameToActualIdx = $derived.by(() => {
+    /** @type {Map<string, number>} */
+    const m = new Map()
+    columns.forEach((c, i) => m.set(c.name, i))
+    return m
+  })
+
+  /** Extra body offset for the inline insert-row slot (a DOM overlay). */
+  const insertRowOffset = $derived(newRowDrafts ? ROW_HEIGHT : 0)
+  /** Fixed height of an expanded JSON detail slot. */
+  const expandHeight = $derived(
+    embedded
+      ? Math.min(0.4 * _viewportHeight, 256)
+      : Math.min(0.6 * _viewportHeight, 512),
+  )
 
   // ── Lightbox (click-to-open image / PDF) ──────────────────────────────────
   /** @type {string | null} */
@@ -349,21 +390,17 @@
 
   /** @param {number} rowIdx */
   function scrollRowIntoView(rowIdx) {
-    tick().then(() => {
-      const el = tableContainer?.querySelector(`[data-row-idx="${rowIdx}"]`)
-      if (el) {
-        el.scrollIntoView({ block: 'nearest' })
-      } else if (useVirtual && tableContainer) {
-        const estimatedTop = rowIdx * ROW_HEIGHT
-        const ch = tableContainer.clientHeight
-        const st = tableContainer.scrollTop
-        if (estimatedTop < st) {
-          tableContainer.scrollTop = Math.max(0, estimatedTop - OVERSCAN * ROW_HEIGHT)
-        } else if (estimatedTop + ROW_HEIGHT > st + ch) {
-          tableContainer.scrollTop = estimatedTop - ch + ROW_HEIGHT + OVERSCAN * ROW_HEIGHT
-        }
-      }
-    })
+    if (!tableContainer) return
+    const top = rowDocTop(rowIdx)
+    const bottom = top + ROW_HEIGHT
+    const ch = tableContainer.clientHeight
+    const st = tableContainer.scrollTop
+    // Keep the row clear of the pinned header band at the top of the viewport.
+    if (top - HEADER_H < st) {
+      tableContainer.scrollTop = Math.max(0, top - HEADER_H)
+    } else if (bottom > st + ch) {
+      tableContainer.scrollTop = bottom - ch
+    }
   }
 
   const fkByColumn = $derived(
@@ -1113,84 +1150,34 @@
     }
     return map
   })
-  // Windowed when: not embedded, big enough to matter, AND either we're still
-  // deferring the full render (just switched in) or the page is too big to ever
-  // fully render. Otherwise render every row for native-smooth scroll.
-  const useVirtual = $derived(
-    !embedded &&
-    rows.length > VIRTUAL_THRESHOLD &&
-    (_deferFullRender || rows.length > FULL_RENDER_MAX)
-  )
 
-  // On a fresh table / new page, mount windowed (fast switch) then expand to a
-  // full render shortly after, so scrolling is smooth. Keyed on table identity +
-  // row count so it does NOT re-trigger on in-place cell edits (which keep both).
-  $effect(() => {
-    // Only re-defer on table/column identity change, NOT on row count change
-    // (pagination, filter). Row count changes should not re-trigger the
-    // virtual→full expansion cycle — that caused a 200ms jank on every page turn.
-    void columnWidthsKey
-    _deferFullRender = true
-    const id = setTimeout(() => { _deferFullRender = false }, 120)
-    return () => clearTimeout(id)
-  })
+  // ── Canvas geometry (single source of truth for draw + hit-test) ───────────
+  const gutterWidth = $derived(
+    (showRowExpand ? GUTTER_EXPAND_W : 0) + (showSelection ? GUTTER_SELECT_W : 0),
+  )
+  const geom = $derived(
+    computeColumnGeometry({
+      columns: visibleColumns.map((c) => ({ name: c.name, dataType: c.dataType ?? c.data_type ?? '' })),
+      widthOf: (name) => widthForColumn(name, ''),
+      isPinned: (name) => pinnedColumns.has(name),
+      gutterWidth,
+    }),
+  )
+  const rowTops = $derived(computeRowTops(rows.length, expandedRows, expandHeight, ROW_HEIGHT))
+  /** Total scrollable content height incl. header + insert slot + body. */
+  const contentHeight = $derived(HEADER_H + insertRowOffset + (rowTops[rows.length] ?? 0))
+
+  /** Document-space y of a body row's top (0 = top of the sizer). */
+  function rowDocTop(/** @type {number} */ idx) {
+    return HEADER_H + insertRowOffset + (rowTops[idx] ?? idx * ROW_HEIGHT)
+  }
+  /** Viewport y of a body row's top. */
+  function rowViewportY(/** @type {number} */ idx) {
+    return rowDocTop(idx) - _scrollTop
+  }
   // Stable key that changes only when column names change — prevents the
   // column-widths $effect from re-running on every row fetch (same columns, new array ref).
   const _columnNamesKey = $derived(columns.map((c) => c.name).join('\x00'))
-
-  // Cached min/max of expandedRows. Using a single-pass loop + $effect avoids
-  // Math.min/max spread (which allocates a temp array each time the set changes).
-  let _expandedMin = $state(Infinity)
-  let _expandedMax = $state(-Infinity)
-  $effect(() => {
-    if (expandedRows.size === 0) { _expandedMin = Infinity; _expandedMax = -Infinity; return }
-    let mn = Infinity, mx = -Infinity
-    for (const i of expandedRows) { if (i < mn) mn = i; if (i > mx) mx = i }
-    _expandedMin = mn; _expandedMax = mx
-  })
-
-  const virtualStart = $derived.by(() => {
-    if (!useVirtual) return 0
-    let start = Math.max(0, Math.floor(_scrollTop / ROW_HEIGHT) - OVERSCAN)
-    // Snap down to the chunk grid so this value only changes once per chunk of
-    // scrolling — the derived then short-circuits on every in-between scroll
-    // event (no re-render, no spacer-row resize, no table relayout).
-    start -= start % VIRTUAL_CHUNK
-    // Only the active edit input and expanded (tall) rows must stay mounted when
-    // off-screen. A focused (non-editing) row is NOT extended into the window —
-    // that would render everything between focus and viewport and lock up large
-    // tables; the highlight only matters on-screen and scrollRowIntoView() covers
-    // keyboard nav to off-screen rows.
-    if (_expandedMin < start) start = Math.max(0, _expandedMin)
-    if (editingCell && editingCell.rowIdx < start) start = Math.max(0, editingCell.rowIdx)
-    return start
-  })
-  const virtualEnd = $derived.by(() => {
-    if (!useVirtual) return rows.length - 1
-    let end = Math.ceil((_scrollTop + _viewportHeight) / ROW_HEIGHT) + OVERSCAN
-    // Snap up to the chunk grid (mirror of virtualStart) so the bottom edge is
-    // likewise stable within a chunk.
-    end += (VIRTUAL_CHUNK - 1) - ((end % VIRTUAL_CHUNK + VIRTUAL_CHUNK) % VIRTUAL_CHUNK)
-    end = Math.min(rows.length - 1, end)
-    if (_expandedMax > end) end = Math.min(rows.length - 1, _expandedMax)
-    if (editingCell && editingCell.rowIdx > end) end = Math.min(rows.length - 1, editingCell.rowIdx)
-    return end
-  })
-  const virtualTopPad = $derived(virtualStart * ROW_HEIGHT)
-  const virtualBottomPad = $derived((rows.length - 1 - virtualEnd) * ROW_HEIGHT)
-
-  // Iterate ABSOLUTE row indices (not a sliced array + loop index). Keyed by the
-  // index itself, a reused row keeps a constant `idx` across scroll shifts, so
-  // its block does NOT re-run — only the row entering/leaving the window mounts
-  // or unmounts. (With a sliced array the loop index shifts for every row each
-  // step, forcing all visible rows — and all their cells — to re-render.)
-  const visibleRowIndexes = $derived.by(() => {
-    if (!useVirtual) return rows.map((_, i) => i)
-    /** @type {number[]} */
-    const out = []
-    for (let i = virtualStart; i <= virtualEnd; i++) out.push(i)
-    return out
-  })
 
   // When the parent applies a fresh page of rows (page/filter/sort/search), jump
   // back to the top. Resetting _scrollTop in the same pre-paint flush keeps the
@@ -1203,7 +1190,11 @@
     if (_firstReload) { _firstReload = false; return }
     untrack(() => {
       _scrollTop = 0
-      if (tableContainer && tableContainer.scrollTop !== 0) tableContainer.scrollTop = 0
+      _scrollLeft = 0
+      if (tableContainer) {
+        if (tableContainer.scrollTop !== 0) tableContainer.scrollTop = 0
+        if (tableContainer.scrollLeft !== 0) tableContainer.scrollLeft = 0
+      }
     })
   })
 
@@ -1277,21 +1268,6 @@
     if (!fk) return 'Foreign key'
     const label = foreignKeyTargetLabel(fk)
     return label ? `Foreign key → ${label}` : 'Foreign key'
-  }
-
-  /** @param {number} idx */
-  function rowClass(idx) {
-    const isFocused = focusedRow === idx;
-    const isSelected = selected.has(idx);
-    const isExpanded = isRowExpanded(idx);
-    // cx (no tailwind-merge): these classes never conflict and this runs per row.
-    return cx(
-      "group/row outline-none hover:bg-muted/[0.18]",
-      isExpanded && "[&>td]:border-b-0",
-      isSelected && "bg-muted/30",
-      isFocused && !isSelected && "bg-muted/20",
-      isFocused && isSelected && "ring-1 ring-ring/40 ring-inset",
-    );
   }
 
   /** @param {string} name @param {string} dataType */
@@ -1455,57 +1431,104 @@
     return () => window.removeEventListener("keydown", onCapture, true);
   });
 
+  // Scroll is wired via the template `onscroll` handler (reactive) → onContainerScroll.
+  // This effect only tracks the viewport size.
   $effect(() => {
     const container = tableContainer
-    if (!container || !useVirtual) return
+    if (!container) return
+    _viewportWidth = container.clientWidth
     _viewportHeight = container.clientHeight
     _scrollTop = container.scrollTop
+    _scrollLeft = container.scrollLeft
 
-    // Update synchronously — no RAF delay so the virtual window always matches
-    // the scroll position before the browser paints the next frame.
-    // Synchronous update — keeps the virtual window exactly matched to the
-    // scroll position before paint (rAF coalescing was measurably worse here).
-    const onScroll = () => {
-      const st = container.scrollTop
-      if (st !== _scrollTop) _scrollTop = st
-    }
-
-    // Resize is rare; one RAF is fine here to avoid hammering during window drag.
+    // Resize is rare; one RAF is fine to avoid hammering during window drag.
     let roRafId = 0
     const ro = new ResizeObserver(() => {
       if (roRafId) return
-      roRafId = requestAnimationFrame(() => { roRafId = 0; _viewportHeight = container.clientHeight })
+      roRafId = requestAnimationFrame(() => {
+        roRafId = 0
+        _viewportWidth = container.clientWidth
+        _viewportHeight = container.clientHeight
+      })
     })
-    container.addEventListener('scroll', onScroll, { passive: true })
     ro.observe(container)
     return () => {
       if (roRafId) cancelAnimationFrame(roRafId)
-      container.removeEventListener('scroll', onScroll)
       ro.disconnect()
     }
   })
 
-  // ── Imperative focused-cell highlight ────────────────────────────────────
-  // isFocusedCell was previously computed inline for every cell in the render
-  // loop, making ALL rows×cols cells re-render whenever focusedRow/focusedCol
-  // changed (every keypress, every click). Now we update exactly 2 DOM nodes
-  // (remove from old cell, add to new cell) via $effect, bypassing Svelte's
-  // reactive template system entirely for the focus highlight.
-  let _prevFocusedCellEl = /** @type {Element | null} */ (null)
+  /** @param {Event & { currentTarget: HTMLElement }} e */
+  function onContainerScroll(e) {
+    const el = e.currentTarget
+    if (el.scrollTop !== _scrollTop) _scrollTop = el.scrollTop
+    if (el.scrollLeft !== _scrollLeft) _scrollLeft = el.scrollLeft
+  }
+
+  // ── Canvas backing context + colour reader ────────────────────────────────
+  // Plain (non-reactive) holders. Canvas sizing + drawing happen together in the
+  // single master effect below — keeping them in ONE effect avoids any read+write
+  // ping-pong between separate effects.
+  /** @type {CanvasRenderingContext2D | null} */
+  let _ctx = null
+  /** @type {ReturnType<typeof createColorReader> | null} */
+  let _readColor = null
+  /** Canvas font strings measured from the DOM so they exactly match the app's
+   *  computed type scale + the real loaded mono font (avoids fallback tofu). */
+  let _fonts = /** @type {{ cell: string, type: string, header: string, family: string, cellPx: number, typePx: number } | null} */ (null)
+
+  /** Read the real computed mono fonts for cells / datatypes off the probe. */
+  function readFonts(/** @type {HTMLElement} */ probe) {
+    const prevClass = probe.className
+    const measure = (/** @type {string} */ cls) => {
+      probe.className = cls
+      const cs = getComputedStyle(probe)
+      return { px: parseFloat(cs.fontSize) || 13, family: cs.fontFamily }
+    }
+    const cell = measure('font-mono text-ui-sm')
+    const type = measure('font-mono text-ui-2xs')
+    probe.className = prevClass
+    return {
+      family: cell.family,
+      cellPx: cell.px,
+      typePx: type.px,
+      cell: `${cell.px}px ${cell.family}`,
+      type: `${type.px}px ${type.family}`,
+      // Medium-weight header name (Linear/Drizzle style).
+      header: `530 ${cell.px}px ${cell.family}`,
+    }
+  }
+
+  // Repaint once webfonts finish loading — the canvas may first paint with a
+  // fallback font that lacks glyphs (e.g. ʻ, macrons) and renders them as tofu.
   $effect(() => {
-    const row = focusedRow
-    const col = focusedCol
-    const editing = editingCell
-    _prevFocusedCellEl?.removeAttribute('data-focused-cell')
-    _prevFocusedCellEl = null
-    if (row === null || col === null || editing || !tableContainer) return
-    const colName = navigableColumns[col]?.name
-    if (!colName) return
-    const rowEl = tableContainer.querySelector(`tr[data-row-idx="${row}"]`)
-    if (!rowEl) return
-    const tdEl = rowEl.querySelector(`td[data-col-name="${colName}"]`)
-    if (tdEl) { tdEl.setAttribute('data-focused-cell', ''); _prevFocusedCellEl = tdEl }
+    if (typeof document === 'undefined' || !document.fonts) return
+    let cancelled = false
+    document.fonts.ready.then(() => {
+      if (cancelled) return
+      _fonts = null
+      _readColor = null
+      _redrawToken++
+    })
+    return () => { cancelled = true }
   })
+
+  // Recreate the colour cache when the theme flips (the probe resolves the new
+  // computed colours). The bump runs in a MutationObserver callback (not an
+  // effect body), so reading _redrawToken here is not a tracked dependency.
+  $effect(() => {
+    const probe = colorProbe
+    if (!probe || typeof MutationObserver === 'undefined') return
+    const mo = new MutationObserver(() => {
+      _readColor = createColorReader(probe)
+      _redrawToken++
+    })
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] })
+    return () => mo.disconnect()
+  })
+
+  // The focused-cell highlight is painted directly on the canvas by draw(),
+  // which depends on focusedRow/focusedCol and so repaints on focus changes.
 
   /** @param {KeyboardEvent} e */
   function handleTableKeydown(e) {
@@ -1675,7 +1698,681 @@
     }
   }
 
+  // ── Canvas drawing ─────────────────────────────────────────────────────────
+  const CELL_PAD_X = 16
+  const ICON_HIT = 24 // hover-button hit width
+
+  /** Truncate `text` to fit `maxW` px under the current ctx.font, adding `…`. */
+  function truncText(ctx, text, maxW) {
+    if (maxW <= 0) return ''
+    if (ctx.measureText(text).width <= maxW) return text
+    let lo = 0, hi = text.length
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1
+      if (ctx.measureText(text.slice(0, mid) + '…').width <= maxW) lo = mid
+      else hi = mid - 1
+    }
+    return text.slice(0, lo) + '…'
+  }
+
+  /** Right-aligned hover-button rects for a cell (viewport coords). */
+  function cellButtonRects(cellX, w, ry, rh, { canExpand }) {
+    const right = cellX + w
+    const cy = ry + rh / 2
+    const copy = { x: right - 4 - ICON_HIT, y: ry, w: ICON_HIT, h: rh, cx: right - 4 - ICON_HIT / 2, cy }
+    const quick = canExpand
+      ? { x: copy.x - ICON_HIT, y: ry, w: ICON_HIT, h: rh, cx: copy.x - ICON_HIT / 2, cy }
+      : null
+    return { copy, quick }
+  }
+
+  function draw() {
+    const ctx = _ctx
+    const read = _readColor
+    if (!ctx || !read || !canvasEl || !colorProbe) return
+    if (!_fonts) _fonts = readFonts(colorProbe)
+
+    const W = _viewportWidth
+    const H = _viewportHeight
+    const n = rows.length
+
+    // Resolve theme colours (cached for the frame by the reader).
+    const cPanel = read('var(--panel)')
+    const cFg = read('var(--foreground)')
+    const cMuted = read('var(--muted-foreground)')
+    const cGrid = read('var(--table-grid)')
+    const cBorder = read('var(--border)')
+    const cRing = read('var(--ring)')
+    const cMutedBg = read('var(--muted)')
+    const cAccent = read('var(--accent)')
+    const cPrimary = read('var(--primary)')
+    // Primary cell value text — crisper than muted (Drizzle/Linear feel), but a
+    // hair softer than full foreground so focused/dirty cells still stand out.
+    const cText = withAlpha(cFg, 0.86)
+    const AMBER = 'rgb(245, 158, 11)'
+    const AMBER_FG = 'rgba(251, 191, 36, 0.85)'
+    const BLUE_FG = 'rgba(96, 165, 250, 0.8)'
+
+    ctx.clearRect(0, 0, W, H)
+    ctx.fillStyle = cPanel
+    ctx.fillRect(0, 0, W, H)
+
+    const usedW = Math.max(0, Math.min(W, geom.totalWidth - _scrollLeft))
+    const navName = focusedCol !== null ? navigableColumns[focusedCol]?.name : null
+
+    // ── Body ─────────────────────────────────────────────────────────────
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(0, HEADER_H, W, Math.max(0, H - HEADER_H))
+    ctx.clip()
+    ctx.textBaseline = 'middle'
+
+    const bodyTopY = Math.max(0, _scrollTop - HEADER_H - insertRowOffset)
+    let i = rowIndexAtY(rowTops, n, bodyTopY)
+    for (; i < n; i++) {
+      const ry = rowViewportY(i)
+      if (ry >= H) break
+      if (ry + ROW_HEIGHT <= HEADER_H) continue
+      drawBodyRow(ctx, i, ry, {
+        cFg, cText, cMuted, cGrid, cMutedBg, cRing, cAccent, cPanel, usedW, navName,
+        AMBER, BLUE_FG, cPrimary,
+      })
+    }
+    ctx.restore()
+
+    // ── Header (pinned) ────────────────────────────────────────────────────
+    drawHeaderRow(ctx, {
+      W, cPanel, cFg, cMuted, cGrid, cBorder, cMutedBg, cAccent, cPrimary, cRing,
+      AMBER, AMBER_FG, BLUE_FG, usedW,
+    })
+  }
+
+  /** @param {CanvasRenderingContext2D} ctx */
+  function drawBodyRow(ctx, idx, ry, c) {
+    const rh = ROW_HEIGHT
+    // Row background (selected > focused > hover).
+    let bgA = 0
+    const isSel = selected.has(idx)
+    if (isSel) bgA = 0.3
+    else if (focusedRow === idx) bgA = 0.2
+    else if (hoveredRow === idx) bgA = 0.18
+    if (bgA) {
+      ctx.fillStyle = withAlpha(c.cMutedBg, bgA)
+      ctx.fillRect(0, ry, c.usedW, rh)
+    }
+
+    // Non-pinned cells, clipped to the right of the frozen gutters. Pinned
+    // columns are painted afterwards on top, so non-pinned slide under them.
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(gutterWidth, ry, Math.max(0, _viewportWidth - gutterWidth), rh)
+    ctx.clip()
+    for (const col of geom.cols) {
+      if (col.pinned) continue
+      const dx = col.contentX - _scrollLeft
+      if (dx + col.w <= gutterWidth || dx >= _viewportWidth) continue
+      drawCell(ctx, idx, col, dx, ry, rh, c)
+    }
+    ctx.restore()
+
+    // Pinned cells on top (frozen left, after gutters).
+    for (const col of geom.cols) {
+      if (!col.pinned) continue
+      const dx = colDrawnX(col, geom, _scrollLeft)
+      drawCell(ctx, idx, col, dx, ry, rh, c, true)
+    }
+
+    // Gutters (frozen left, on top of everything).
+    drawRowGutters(ctx, idx, ry, rh, c)
+
+    // Row ring when focused + selected.
+    if (focusedRow === idx && isSel) {
+      ctx.strokeStyle = withAlpha(c.cRing, 0.4)
+      ctx.lineWidth = 1
+      ctx.strokeRect(0.5, ry + 0.5, c.usedW - 1, rh - 1)
+    }
+
+    // Bottom grid line.
+    ctx.strokeStyle = c.cGrid
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(0, ry + rh - 0.5)
+    ctx.lineTo(c.usedW, ry + rh - 0.5)
+    ctx.stroke()
+  }
+
+  /** @param {CanvasRenderingContext2D} ctx */
+  function drawCell(ctx, idx, col, cellX, ry, rh, c, pinned = false) {
+    const w = col.w
+    const actualIdx = _nameToActualIdx.get(col.name) ?? -1
+    const cached = _colCache[actualIdx]
+    const isCollapsed = collapsedColumns.has(col.name)
+
+    if (pinned) {
+      ctx.fillStyle = c.cPanel
+      ctx.fillRect(cellX, ry, w, rh)
+    }
+
+    if (isCollapsed) {
+      ctx.fillStyle = withAlpha(c.cPanel, 0.8)
+      ctx.fillRect(cellX, ry, w, rh)
+      ctx.strokeStyle = c.cGrid
+      ctx.lineWidth = 1
+      ctx.beginPath(); ctx.moveTo(cellX + w - 0.5, ry); ctx.lineTo(cellX + w - 0.5, ry + rh); ctx.stroke()
+      return
+    }
+
+    const editing = editingCell && editingCell.rowIdx === idx && editingCell.colIdx === actualIdx
+    const staged = hasPendingEdits ? pendingEdits.get(idx + ':' + actualIdx) : undefined
+    const isDirty = !!staged
+    const value = staged ? staged.value : rows[idx]?.[actualIdx]
+    const isNull = value === null || value === undefined
+    const isJson = !isNull && typeof value === 'object'
+    const fk = cached?.fk ?? null
+    const activeFk = fk && !isNull
+    const isFocusedCell = focusedRow === idx && c.navName === col.name && !editing
+
+    // Cell background tints.
+    if (!editing) {
+      if (isDirty) { ctx.fillStyle = withAlpha(c.AMBER, 0.15); ctx.fillRect(cellX, ry, w, rh) }
+      else if (activeFk) { ctx.fillStyle = withAlpha(c.cAccent, 0.15); ctx.fillRect(cellX, ry, w, rh) }
+    } else {
+      // Active edit cell — overlay input covers it; leave panel + ring.
+      ctx.strokeStyle = c.cPrimary
+      ctx.lineWidth = 2
+      ctx.strokeRect(cellX + 1, ry + 1, w - 2, rh - 2)
+    }
+
+    // Vertical grid separator at right edge.
+    ctx.strokeStyle = c.cGrid
+    ctx.lineWidth = 1
+    ctx.beginPath(); ctx.moveTo(cellX + w - 0.5, ry); ctx.lineTo(cellX + w - 0.5, ry + rh); ctx.stroke()
+
+    // Dirty inset marker.
+    if (isDirty && !editing) {
+      ctx.fillStyle = c.AMBER
+      ctx.fillRect(cellX, ry, 2, rh)
+    }
+
+    if (editing) return // text drawn by the DOM overlay
+
+    // Text.
+    const textColor = isFocusedCell || isDirty || activeFk ? c.cFg
+      : isNull ? c.cMuted
+      : c.cText
+    const text = displayCell(value)
+    ctx.font = _fonts.cell
+    ctx.fillStyle = textColor
+    const rowHover = hoveredRow === idx
+    const isHover = rowHover && hoveredColName === col.name
+    const canExpand = (cached?.canEdit ?? false) && !cached?.enumValues && !isBooleanType(cached?.colType ?? '')
+    // Reserve room on the right for hover buttons / fk icon / json pill.
+    let rightReserve = 0
+    if (isHover) rightReserve += ICON_HIT + (canExpand ? ICON_HIT : 0)
+    if (activeFk && rowHover) rightReserve += 18
+    const textMaxW = w - CELL_PAD_X * 2 - rightReserve
+    const shown = truncText(ctx, text, textMaxW)
+    ctx.textAlign = 'left'
+    ctx.fillText(shown, cellX + CELL_PAD_X, ry + rh / 2 + 0.5)
+
+    // JSON pill indicator.
+    if (isJson) {
+      const pillW = 30, pillH = 13
+      const px = cellX + w - CELL_PAD_X - pillW - (isHover ? ICON_HIT : 0)
+      const py = ry + (rh - pillH) / 2
+      ctx.fillStyle = withAlpha(c.cMutedBg, 0.5)
+      roundRect(ctx, px, py, pillW, pillH, 2.5); ctx.fill()
+      ctx.fillStyle = c.cMuted
+      ctx.font = `600 9px ${_fonts.family}`
+      ctx.textAlign = 'left'
+      ctx.fillText('JSON', px + 8, py + pillH / 2 + 0.5)
+      drawIcon(ctx, 'braces', px + 1.5, py + 2.5, 8, c.cMuted, 2.2)
+    }
+
+    // FK external-link icon — only on row hover (keeps the grid uncluttered).
+    if (activeFk && rowHover) {
+      drawIcon(ctx, 'external-link', cellX + w - CELL_PAD_X - 13 - (isHover ? ICON_HIT : 0), ry + rh / 2 - 6, 12, withAlpha(c.cRing, 0.9), 2)
+    }
+
+    // Focused-cell outline.
+    if (isFocusedCell) {
+      ctx.strokeStyle = withAlpha(c.cRing, 0.4)
+      ctx.lineWidth = 1
+      ctx.strokeRect(cellX + 0.5, ry + 0.5, w - 1, rh - 1)
+    }
+
+    // Hover buttons (copy + quick look).
+    if (isHover) {
+      const { copy, quick } = cellButtonRects(cellX, w, ry, rh, { canExpand })
+      drawIcon(ctx, 'copy', copy.cx - 7, copy.cy - 7, 14, c.cMuted, 1.8)
+      if (quick) drawIcon(ctx, 'maximize-2', quick.cx - 7, quick.cy - 7, 14, c.cMuted, 1.8)
+    }
+  }
+
+  /** @param {CanvasRenderingContext2D} ctx */
+  function drawRowGutters(ctx, idx, ry, rh, c) {
+    if (gutterWidth <= 0) return
+    ctx.fillStyle = c.cPanel
+    ctx.fillRect(0, ry, gutterWidth, rh)
+    let gx = 0
+    if (showRowExpand) {
+      const expanded = expandedRows.has(idx)
+      const hov = hoveredRow === idx
+      if (expanded || hov) {
+        drawIcon(ctx, expanded ? 'chevron-down' : 'chevron-right',
+          gx + (GUTTER_EXPAND_W - 14) / 2, ry + (rh - 14) / 2, 14,
+          expanded ? c.cFg : c.cMuted, 2)
+      }
+      gx += GUTTER_EXPAND_W
+    }
+    if (showSelection) {
+      drawCheckbox(ctx, gx + (GUTTER_SELECT_W - 16) / 2, ry + (rh - 16) / 2, 16,
+        { checked: selected.has(idx) },
+        { border: c.cMuted, fill: c.cPrimary, mark: c.cPanel })
+      gx += GUTTER_SELECT_W
+    }
+    // Gutter right separator.
+    ctx.strokeStyle = c.cGrid
+    ctx.lineWidth = 1
+    ctx.beginPath(); ctx.moveTo(gutterWidth - 0.5, ry); ctx.lineTo(gutterWidth - 0.5, ry + rh); ctx.stroke()
+  }
+
+  /** @param {CanvasRenderingContext2D} ctx */
+  function drawHeaderRow(ctx, c) {
+    ctx.fillStyle = c.cPanel
+    ctx.fillRect(0, 0, c.W, HEADER_H)
+
+    // Non-pinned headers, clipped to the right of the frozen gutters.
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(gutterWidth, 0, Math.max(0, c.W - gutterWidth), HEADER_H)
+    ctx.clip()
+    for (const col of geom.cols) {
+      if (col.pinned) continue
+      const dx = col.contentX - _scrollLeft
+      if (dx + col.w <= gutterWidth || dx >= c.W) continue
+      drawHeaderCell(ctx, col, dx, c)
+    }
+    ctx.restore()
+
+    // Pinned headers.
+    for (const col of geom.cols) {
+      if (!col.pinned) continue
+      drawHeaderCell(ctx, col, colDrawnX(col, geom, _scrollLeft), c)
+    }
+
+    // Gutter headers.
+    if (gutterWidth > 0) {
+      ctx.fillStyle = c.cPanel
+      ctx.fillRect(0, 0, gutterWidth, HEADER_H)
+      let gx = 0
+      if (showRowExpand) {
+        if (expandedRows.size > 0) {
+          drawIcon(ctx, 'chevrons-down-up', gx + (GUTTER_EXPAND_W - 14) / 2, (HEADER_H - 14) / 2, 14, c.cMuted, 2)
+        }
+        gx += GUTTER_EXPAND_W
+      }
+      if (showSelection) {
+        drawCheckbox(ctx, gx + (GUTTER_SELECT_W - 16) / 2, (HEADER_H - 16) / 2, 16,
+          { checked: allSelected, indeterminate: someSelected },
+          { border: c.cMuted, fill: c.cPrimary, mark: c.cPanel })
+        gx += GUTTER_SELECT_W
+      }
+      ctx.strokeStyle = c.cGrid
+      ctx.lineWidth = 1
+      ctx.beginPath(); ctx.moveTo(gutterWidth - 0.5, 0); ctx.lineTo(gutterWidth - 0.5, HEADER_H); ctx.stroke()
+    }
+
+    // Header bottom border (stronger).
+    ctx.strokeStyle = c.cBorder
+    ctx.lineWidth = 1
+    ctx.beginPath(); ctx.moveTo(0, HEADER_H - 0.5); ctx.lineTo(c.W, HEADER_H - 0.5); ctx.stroke()
+  }
+
+  /** @param {CanvasRenderingContext2D} ctx */
+  function drawHeaderCell(ctx, col, x, c) {
+    const w = col.w
+    const sorted = rowSort?.column === col.name
+    const collapsed = collapsedColumns.has(col.name)
+
+    // Pinned headers are painted on top of scrolled columns — give them an opaque
+    // backing so the columns sliding underneath don't bleed through.
+    if (col.pinned) { ctx.fillStyle = c.cPanel; ctx.fillRect(x, 0, w, HEADER_H) }
+
+    // Background tint.
+    if (resizingColName === col.name) { ctx.fillStyle = withAlpha(c.cAccent, 0.3); ctx.fillRect(x, 0, w, HEADER_H) }
+    else if (sorted) { ctx.fillStyle = withAlpha(c.cMutedBg, 0.3); ctx.fillRect(x, 0, w, HEADER_H) }
+
+    // Right grid separator.
+    ctx.strokeStyle = c.cGrid
+    ctx.lineWidth = 1
+    ctx.beginPath(); ctx.moveTo(x + w - 0.5, 0); ctx.lineTo(x + w - 0.5, HEADER_H); ctx.stroke()
+
+    if (collapsed) {
+      ctx.fillStyle = withAlpha(c.cMuted, 0.5)
+      ctx.font = `8px ${_fonts.family}`
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      ctx.fillText('···', x + w / 2, HEADER_H / 2)
+      return
+    }
+
+    const meta = colMeta.get(col.name)
+    const cy = HEADER_H / 2
+    const sortReserve = 18
+    // Single line, vertically centered (Drizzle/Linear style): bold name, then
+    // metadata badges, then the inline muted datatype, with a sort chevron at the
+    // right edge.
+    ctx.textBaseline = 'middle'
+    ctx.textAlign = 'left'
+
+    const badges = []
+    if (meta) {
+      if (meta.pk) badges.push({ letter: 'K', bg: withAlpha(c.AMBER, 0.15), fg: c.AMBER_FG })
+      if (meta.fk) badges.push({ letter: 'F', bg: 'rgba(59,130,246,0.12)', fg: c.BLUE_FG })
+      if (meta.unique && !meta.pk) badges.push({ letter: 'U', bg: withAlpha(c.cMutedBg, 0.6), fg: withAlpha(c.cMuted, 0.7) })
+      if (meta.indexed) badges.push({ letter: 'I', bg: withAlpha(c.cMutedBg, 0.6), fg: withAlpha(c.cMuted, 0.6) })
+      if (!meta.nullable && !meta.pk) badges.push({ dot: true, bg: withAlpha(c.cMutedBg, 0.4), fg: withAlpha(c.cMuted, 0.5) })
+    }
+    const badgeW = badges.length * 16
+
+    // Name (medium weight).
+    ctx.font = _fonts.header
+    ctx.fillStyle = c.cFg
+    const nameMaxW = w - CELL_PAD_X - sortReserve - badgeW - 8
+    const name = truncText(ctx, col.name, Math.max(0, nameMaxW))
+    ctx.fillText(name, x + CELL_PAD_X, cy + 0.5)
+    let tx = x + CELL_PAD_X + ctx.measureText(name).width + 7
+
+    // Badges.
+    for (const b of badges) {
+      drawBadge(ctx, tx, cy - 6.5, 13, { bg: b.bg, fg: b.fg, letter: b.letter ?? '', dot: b.dot })
+      tx += 16
+    }
+
+    // Inline datatype (muted), only if there's comfortable room.
+    const typeRoom = x + w - sortReserve - 4 - tx
+    if (typeRoom > 22 && col.dataType) {
+      ctx.font = _fonts.type
+      ctx.fillStyle = withAlpha(c.cMuted, 0.75)
+      ctx.fillText(truncText(ctx, col.dataType, typeRoom), tx + (badges.length ? 4 : 2), cy + 0.5)
+    }
+
+    // Sort indicator (active = solid; hovered header = faint affordance).
+    if (sorted) {
+      const dir = rowSort?.direction === 'asc' ? 'up' : 'down'
+      drawTriangle(ctx, x + w - 10, cy, 4, dir, withAlpha(c.cPrimary, 0.85))
+    } else if (_resizeHoverCol !== col.name && hoveredColName === col.name && hoveredRow === null) {
+      drawTriangle(ctx, x + w - 10, cy - 3.5, 3, 'up', withAlpha(c.cMuted, 0.35))
+      drawTriangle(ctx, x + w - 10, cy + 3.5, 3, 'down', withAlpha(c.cMuted, 0.35))
+    }
+
+    // Resize-edge affordance.
+    if (_resizeHoverCol === col.name || resizingColName === col.name) {
+      ctx.strokeStyle = withAlpha(c.cPrimary, 0.7)
+      ctx.lineWidth = 2
+      ctx.beginPath(); ctx.moveTo(x + w - 1, 5); ctx.lineTo(x + w - 1, HEADER_H - 5); ctx.stroke()
+    }
+  }
+
+  // Master effect — sizes the canvas backing store (DPR-aware) and repaints.
+  // Doing both here, and never reading+writing the same signal, keeps it a pure
+  // sink: it tracks every input that affects the grid and writes no reactive
+  // state, so it can't loop.
+  $effect(() => {
+    void rows; void columns; void columnWidths; void collapsedColumns
+    void pinnedColumns; void hiddenColumns; void selected; void focusedRow
+    void focusedCol; void editingCell; void pendingEdits; void expandedRows
+    void rowSort; void _scrollTop; void _scrollLeft; void _viewportWidth
+    void _viewportHeight; void hoveredRow; void hoveredColName; void _resizeHoverCol
+    void resizingColName; void newRowDrafts; void insertSaving; void colMeta
+    void geom; void rowTops; void _redrawToken; void foreignKeys; void indexes
+    void _colCache
+
+    const canvas = canvasEl
+    const probe = colorProbe
+    if (!canvas || !probe) return
+    if (!_readColor) _readColor = createColorReader(probe)
+    const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    const bw = Math.max(1, Math.round(_viewportWidth * dpr))
+    const bh = Math.max(1, Math.round(_viewportHeight * dpr))
+    // Only touch canvas.width/height when it actually changes — assigning clears
+    // the canvas, and we want to avoid a redundant clear on every repaint.
+    if (canvas.width !== bw || canvas.height !== bh) {
+      canvas.width = bw
+      canvas.height = bh
+      canvas.style.width = _viewportWidth + 'px'
+      canvas.style.height = _viewportHeight + 'px'
+    }
+    _ctx = canvas.getContext('2d')
+    if (_ctx) _ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    draw()
+  })
+
+  // ── Canvas pointer interaction ──────────────────────────────────────────
+  function canvasXY(/** @type {{ clientX: number, clientY: number }} */ e) {
+    const r = canvasEl?.getBoundingClientRect()
+    if (!r) return { x: 0, y: 0 }
+    return { x: e.clientX - r.left, y: e.clientY - r.top }
+  }
+
+  /**
+   * Hit-test a viewport point.
+   * @returns {{ kind: string, idx?: number, col?: any, actualIdx?: number, drawnX?: number, x?: number, y?: number }}
+   */
+  function hitTest(x, y) {
+    if (y < HEADER_H) {
+      if (x < gutterWidth) {
+        if (showRowExpand && x < GUTTER_EXPAND_W) return { kind: 'header-expand-all' }
+        return { kind: 'header-select-all' }
+      }
+      const hit = colAtX(x, geom, _scrollLeft)
+      if (!hit) return { kind: 'none' }
+      return { kind: 'header', col: hit.col, drawnX: hit.drawnX, x, y }
+    }
+    const bodyY = y + _scrollTop - HEADER_H - insertRowOffset
+    const r = rowAtContentY(rowTops, rows.length, ROW_HEIGHT, bodyY)
+    if (!r || !r.inRowBody) return { kind: 'none' }
+    const idx = r.idx
+    if (x < gutterWidth) {
+      if (showRowExpand && x < GUTTER_EXPAND_W) return { kind: 'row-expand', idx }
+      return { kind: 'row-select', idx }
+    }
+    const hit = colAtX(x, geom, _scrollLeft)
+    if (!hit) return { kind: 'none', idx }
+    const actualIdx = _nameToActualIdx.get(hit.col.name) ?? -1
+    return { kind: 'cell', idx, col: hit.col, actualIdx, drawnX: hit.drawnX, x, y }
+  }
+
+  function onCanvasClick(/** @type {MouseEvent} */ e) {
+    if (e.button !== 0) return
+    if (_suppressNextClick) { _suppressNextClick = false; return }
+    const { x, y } = canvasXY(e)
+    const t = hitTest(x, y)
+    switch (t.kind) {
+      case 'header-expand-all': collapseAllRows(); return
+      case 'header-select-all': toggleAll(!allSelected); return
+      case 'header': {
+        const name = t.col.name
+        if (collapsedColumns.has(name)) { restoreColumn(name); return }
+        if (resizeColAtX(x, geom, _scrollLeft)) return // resize edge — handled on pointerdown
+        handleHeaderSort(name)
+        return
+      }
+      case 'row-expand': toggleRowExpand(/** @type {number} */ (t.idx)); return
+      case 'row-select': handleRowSelect(/** @type {number} */ (t.idx), e.shiftKey); return
+      case 'cell': {
+        const idx = /** @type {number} */ (t.idx)
+        const actualIdx = /** @type {number} */ (t.actualIdx)
+        if (editingCell) cancelEdit()
+        focusedRow = idx
+        const vi = actualToVisColIdx(actualIdx)
+        if (vi >= 0) focusedCol = vi
+        if (e.shiftKey) { openInInspector(idx); return }
+        if (inspectorRow !== null) inspectorRow = idx
+
+        const cached = _colCache[actualIdx]
+        const value = effectiveCellValue(idx, actualIdx)
+        const isNull = value === null || value === undefined
+        const isJson = !isNull && typeof value === 'object'
+        const canExpand = (cached?.canEdit ?? false) && !cached?.enumValues && !isBooleanType(cached?.colType ?? '')
+        const { copy, quick } = cellButtonRects(/** @type {number} */ (t.drawnX), t.col.w, 0, ROW_HEIGHT, { canExpand })
+        const relX = x - /** @type {number} */ (t.drawnX)
+        if (relX >= copy.x - /** @type {number} */ (t.drawnX) && relX <= copy.x - /** @type {number} */ (t.drawnX) + copy.w) {
+          void copyCellValue(idx, actualIdx); return
+        }
+        if (quick && relX >= quick.x - /** @type {number} */ (t.drawnX) && relX <= quick.x - /** @type {number} */ (t.drawnX) + quick.w) {
+          openQuickLook(idx, actualIdx); return
+        }
+        if (isJson) { openJsonLightbox(value, t.col.name, e); return }
+        if (tryFollowForeignKey(idx, actualIdx, e, { requireModifier: true })) return
+        // URL cell → open like the old anchor.
+        const fk = cached?.fk ?? null
+        if (!fk) {
+          const href = cellLinkHref(formatCell(value))
+          if (href) {
+            const ut = cellUrlType(href, t.col.name)
+            if (e.ctrlKey || e.metaKey || e.shiftKey) void openExternal(href)
+            else if (ut === 'image' || ut === 'pdf') { lightboxUrl = href; lightboxType = /** @type {'image'|'pdf'} */ (ut) }
+            else void openExternal(href)
+            return
+          }
+        }
+        tableContainer?.focus({ preventScroll: true })
+        return
+      }
+    }
+  }
+
+  function onCanvasDblClick(/** @type {MouseEvent} */ e) {
+    const { x, y } = canvasXY(e)
+    const t = hitTest(x, y)
+    if (t.kind !== 'cell') return
+    const idx = /** @type {number} */ (t.idx)
+    const actualIdx = /** @type {number} */ (t.actualIdx)
+    if (tryFollowForeignKey(idx, actualIdx, e)) return
+    startEdit(idx, actualIdx)
+  }
+
+  function onCanvasAuxClick(/** @type {MouseEvent} */ e) {
+    if (e.button !== 1) return
+    const { x, y } = canvasXY(e)
+    const t = hitTest(x, y)
+    if (t.kind === 'cell') tryFollowForeignKey(/** @type {number} */ (t.idx), /** @type {number} */ (t.actualIdx), e)
+  }
+
+  function onCanvasPointerDown(/** @type {PointerEvent} */ e) {
+    if (e.button !== 0) return
+    const { x, y } = canvasXY(e)
+    if (y >= HEADER_H) return
+    const colName = resizeColAtX(x, geom, _scrollLeft)
+    if (!colName) return
+    e.preventDefault()
+    startColumnResize(colName)
+    const startX = e.clientX
+    const move = (/** @type {PointerEvent} */ ev) => applyColumnResize(ev.clientX - startX)
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      endColumnResize()
+      // The pointerup is followed by a synthetic click on the canvas; swallow it
+      // so a drag that collapsed/resized a column doesn't also sort/restore it.
+      _suppressNextClick = true
+      setTimeout(() => { _suppressNextClick = false }, 0)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+
+  function onCanvasPointerMove(/** @type {PointerEvent} */ e) {
+    const { x, y } = canvasXY(e)
+    if (resizingColName) return
+    if (y < HEADER_H) {
+      // Header: resize cursor + hover col for sort affordance.
+      const rc = resizeColAtX(x, geom, _scrollLeft)
+      _resizeHoverCol = rc
+      const hit = x >= gutterWidth ? colAtX(x, geom, _scrollLeft) : null
+      hoveredRow = null
+      hoveredColName = hit ? hit.col.name : null
+      scheduleTooltip(e, hit ? `${hit.col.name}  ·  ${hit.col.dataType}` : null)
+      return
+    }
+    _resizeHoverCol = null
+    const t = hitTest(x, y)
+    if (t.kind === 'cell') {
+      hoveredRow = /** @type {number} */ (t.idx)
+      hoveredColName = t.col.name
+      const value = effectiveCellValue(/** @type {number} */ (t.idx), /** @type {number} */ (t.actualIdx))
+      const cached = _colCache[/** @type {number} */ (t.actualIdx)]
+      const fk = cached?.fk ?? null
+      let tip = null
+      if (fk && value !== null && value !== undefined) {
+        tip = `${formatCell(value)} — Ctrl/⌘-click or double-click to open ${foreignKeyTargetLabel(fk)}`
+      } else if (!(value !== null && typeof value === 'object')) {
+        const full = formatCell(value)
+        if (displayCell(value) !== full) tip = full
+      }
+      scheduleTooltip(e, tip)
+    } else {
+      hoveredRow = t.kind === 'row-expand' || t.kind === 'row-select' ? /** @type {number} */ (t.idx ?? null) : null
+      hoveredColName = null
+      scheduleTooltip(e, null)
+    }
+  }
+
+  function onCanvasPointerLeave() {
+    hoveredRow = null
+    hoveredColName = null
+    _resizeHoverCol = null
+    clearTimeout(_tooltipTimer)
+    _tooltip = null
+  }
+
+  function scheduleTooltip(/** @type {{ clientX: number, clientY: number }} */ e, /** @type {string | null} */ text) {
+    clearTimeout(_tooltipTimer)
+    if (!text) { _tooltip = null; return }
+    const cx = e.clientX, cy = e.clientY
+    _tooltipTimer = window.setTimeout(() => {
+      const r = tableContainer?.getBoundingClientRect()
+      _tooltip = { x: cx - (r?.left ?? 0), y: cy - (r?.top ?? 0), text }
+    }, 450)
+  }
+
+  /** Right-click: record the target so the single ContextMenu shows the right items. */
+  function onCanvasContextMenu(/** @type {MouseEvent} */ e, /** @type {((e: MouseEvent) => void) | undefined} */ bitsOpen) {
+    const { x, y } = canvasXY(e)
+    const t = hitTest(x, y)
+    if (t.kind === 'header') {
+      contextIsHeader = true
+      contextHeaderCol = t.col.name
+      bitsOpen?.(e)
+      return
+    }
+    if (t.kind === 'cell' || t.kind === 'row-select' || t.kind === 'row-expand') {
+      contextIsHeader = false
+      contextRowIdx = /** @type {number} */ (t.idx)
+      contextColIdx = t.kind === 'cell' ? /** @type {number} */ (t.actualIdx) : 0
+      pendingContextMenu = true
+      bitsOpen?.(e)
+      return
+    }
+    e.preventDefault()
+  }
+
+  // Editing-overlay geometry (viewport-relative position of the active cell).
+  const editOverlay = $derived.by(() => {
+    if (!editingCell) return null
+    const col = geom.cols.find((c) => _nameToActualIdx.get(c.name) === editingCell.colIdx)
+    if (!col) return null
+    const top = HEADER_H + insertRowOffset + (rowTops[editingCell.rowIdx] ?? 0)
+    // Pinned columns rest at their frozen x (content-space = scrollLeft + fixed).
+    const left = col.pinned
+      ? _scrollLeft + (geom.pinnedFixedX.get(col.name) ?? geom.gutterWidth)
+      : col.contentX
+    return { top, left, width: col.w, height: ROW_HEIGHT }
+  })
+
   onDestroy(() => {
+    clearTimeout(_tooltipTimer)
     // Clear staged-edit state in the parent so the StatusBar buttons don't linger.
     pendingEditCount = 0
     applyEdits = () => {}
@@ -1700,7 +2397,7 @@
       }
     }}
   >
-    <ContextMenu.Trigger disabled={rows.length === 0}>
+    <ContextMenu.Trigger>
       {#snippet child({ props })}
         {@const bitsContextMenu = props.oncontextmenu}
         <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -1709,36 +2406,12 @@
           {...props}
           tabindex={-1}
           class={cn(
-            "app-scroll relative overflow-auto bg-panel select-none outline-none [scrollbar-gutter:stable] [contain:layout] [overflow-anchor:none] flex flex-col",
+            "app-scroll relative overflow-auto bg-panel select-none outline-none [scrollbar-gutter:stable] [contain:layout] [overflow-anchor:none]",
             embedded ? "max-h-80" : "min-h-0 flex-1",
-            resizingColName && "cursor-col-resize",
+            (resizingColName || _resizeHoverCol) && "cursor-col-resize",
           )}
-          oncontextmenu={(e) => {
-            const target = e.target;
-            if (!(target instanceof Element)) {
-              e.preventDefault();
-              return;
-            }
-            const rowEl = target.closest("[data-row-idx]");
-            if (!rowEl) {
-              e.preventDefault();
-              return;
-            }
-            const rowIdx = Number(rowEl.getAttribute("data-row-idx"));
-            if (!Number.isFinite(rowIdx)) {
-              e.preventDefault();
-              return;
-            }
-            // Capture which row/col was right-clicked
-            pendingContextMenu = true;
-            contextRowIdx = rowIdx;
-            const cellEl = target.closest("td[data-col-idx]");
-            contextColIdx = cellEl
-              ? Number(cellEl.getAttribute("data-col-idx")) || 0
-              : 0;
-            // Hand off to bits-ui to open the menu
-            bitsContextMenu?.(e);
-          }}
+          oncontextmenu={(e) => onCanvasContextMenu(e, bitsContextMenu)}
+          onscroll={onContainerScroll}
           onkeydown={handleTableKeydown}
           onfocusin={() => { isTableFocused = true; }}
           onfocusout={(e) => {
@@ -1747,778 +2420,260 @@
             }
           }}
         >
-          {#if visibleColumns.length === 0}{:else}
-          <table
-            class="studio-data-table w-full table-fixed text-ui-sm"
-          >
-            <colgroup>
-              {#if showRowExpand}
-                <col style="width: {ROW_EXPAND_COL_WIDTH}px; min-width: {ROW_EXPAND_COL_WIDTH}px; max-width: {ROW_EXPAND_COL_WIDTH}px" />
-              {/if}
-              {#if showSelection}
-                <col style="width: {ROW_SELECT_COL_WIDTH}px; min-width: {ROW_SELECT_COL_WIDTH}px; max-width: {ROW_SELECT_COL_WIDTH}px" />
-              {/if}
-              {#each visibleColumns as col (col.name)}
-                {@const isCollapsed = collapsedColumns.has(col.name)}
-                {@const colW = isCollapsed ? COLLAPSED_COL_WIDTH : widthForColumn(col.name, col.dataType ?? col.data_type ?? "")}
-                <col style="width: {colW}px" />
-              {/each}
-              <!-- Auto-width spacer: absorbs any leftover panel width so the
-                   real columns keep their exact, stable widths (no reflow on
-                   data / column-count / sidebar changes). Collapses to 0 when
-                   columns overflow, letting the horizontal scrollbar take over. -->
-              <col class="studio-spacer-col" />
-            </colgroup>
-            <thead class="studio-chrome sticky top-0 z-20 bg-panel">
-              <tr>
-                {#if showRowExpand}
-                  <th
-                    class="studio-table-gutter bg-panel"
-                    style="width: {ROW_EXPAND_COL_WIDTH}px; min-width: {ROW_EXPAND_COL_WIDTH}px; max-width: {ROW_EXPAND_COL_WIDTH}px"
-                    aria-label="Expand row"
-                  >
-                    {#if expandedRows.size > 0}
-                      <div class="studio-table-gutter-inner">
-                        <button
-                          type="button"
-                          class="flex size-full items-center justify-center text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-                          title="Collapse all expanded rows ({expandedRows.size})"
-                          aria-label="Collapse all expanded rows"
-                          onclick={(e) => { e.stopPropagation(); collapseAllRows(); }}
-                        >
-                          <ChevronsDownUp class="size-3.5" />
-                        </button>
-                      </div>
-                    {/if}
-                  </th>
-                {/if}
-                {#if showSelection}
-                  <th
-                    class="studio-table-gutter bg-panel font-normal"
-                    style="width: {ROW_SELECT_COL_WIDTH}px; min-width: {ROW_SELECT_COL_WIDTH}px; max-width: {ROW_SELECT_COL_WIDTH}px"
-                  >
-                    <div class="studio-table-gutter-inner">
-                      <Checkbox
-                        checked={allSelected}
-                        indeterminate={someSelected}
-                        onCheckedChange={(v) => toggleAll(v === true)}
-                      />
-                    </div>
-                  </th>
-                {/if}
-                {#each visibleColumns as col (col.name)}
-                  {@const isCollapsed = collapsedColumns.has(col.name)}
-                  {@const isPinned = pinnedColumns.has(col.name)}
-                  {@const colW = widthForColumn(col.name, col.dataType ?? col.data_type ?? "")}
-                  {@const pinLeft = pinnedOffsets.get(col.name) ?? 0}
-                  {@const meta = colMeta.get(col.name)}
-                  {#if isCollapsed}
-                    <!-- Collapsed column — thin clickable restore strip -->
-                    <th
-                      title="Click to restore '{col.name}'"
-                      class="group/collapsed relative cursor-pointer overflow-hidden bg-panel transition-colors hover:bg-accent/40"
-                      style="width: {COLLAPSED_COL_WIDTH}px; min-width: {COLLAPSED_COL_WIDTH}px; max-width: {COLLAPSED_COL_WIDTH}px"
-                      onclick={() => restoreColumn(col.name)}
-                    >
-                      <div class="flex h-full items-center justify-center">
-                        <span class="select-none font-mono text-[8px] leading-none text-muted-foreground/50 group-hover/collapsed:text-muted-foreground">···</span>
-                      </div>
-                    </th>
-                  {:else}
-                    {@const isSorted = rowSort?.column === col.name}
-                    {@const isAsc = isSorted && rowSort?.direction === 'asc'}
-                    {@const isDesc = isSorted && rowSort?.direction === 'desc'}
-                    <ContextMenu.Root>
-                      <ContextMenu.Trigger>
-                        {#snippet child({ props })}
-                          <th
-                            {...props}
-                            class={cn(
-                              "group/th relative overflow-hidden px-0 py-0 text-left font-normal",
-                              resizingColName === col.name && "bg-accent/30",
-                              isPinned && "sticky z-[1] bg-panel shadow-[1px_0_0_hsl(var(--border)/0.6)]",
-                            )}
-                            style="width: {colW}px; min-width: {colW}px; max-width: {colW}px{isPinned ? `; left: ${pinLeft}px` : ''}"
-                          >
-                            <button
-                              type="button"
-                              class={cn(
-                                "flex h-full w-full min-w-0 cursor-pointer items-center gap-1.5 px-3 py-1 text-left transition-colors hover:bg-muted/40",
-                                isSorted && "bg-muted/30",
-                              )}
-                              onclick={() => handleHeaderSort(col.name)}
-                              title="Sort by {col.name}"
-                            >
-                              <div class="flex min-w-0 flex-1 flex-col gap-px leading-tight">
-                                <div class="flex min-w-0 items-center gap-1">
-                                  <span
-                                    class={cx(
-                                      "min-w-0 overflow-hidden whitespace-nowrap font-mono text-ui-sm text-foreground",
-                                      col.name.length > 100 && "text-ellipsis",
-                                    )}
-                                    data-font="mono"
-                                    title={col.name}>{col.name}</span
-                                  >
-                                  {#if meta && (meta.pk || meta.fk || meta.unique || meta.indexed || !meta.nullable)}
-                                    <div class="flex shrink-0 items-center gap-[2px]">
-                                      {#if meta.pk}
-                                        <span
-                                          title="Primary key"
-                                          class="inline-flex size-[13px] items-center justify-center rounded-sm bg-amber-500/15 text-amber-400/80"
-                                        ><KeyRound class="size-[8px]" /></span>
-                                      {/if}
-                                      {#if meta.fk}
-                                        <span
-                                          title={fkTooltip(col.name)}
-                                          class="inline-flex size-[13px] items-center justify-center rounded-sm bg-blue-500/10 text-blue-400/70"
-                                        ><Link2 class="size-[8px]" /></span>
-                                      {/if}
-                                      {#if meta.unique && !meta.pk}
-                                        <span
-                                          title="Unique"
-                                          class="inline-flex size-[13px] items-center justify-center rounded-sm bg-muted/60 text-muted-foreground/60"
-                                        ><Fingerprint class="size-[8px]" /></span>
-                                      {/if}
-                                      {#if meta.indexed}
-                                        <span
-                                          title="Indexed"
-                                          class="inline-flex size-[13px] items-center justify-center rounded-sm bg-muted/60 text-muted-foreground/50"
-                                        ><Zap class="size-[8px]" /></span>
-                                      {/if}
-                                      {#if !meta.nullable && !meta.pk}
-                                        <span
-                                          title="Not null"
-                                          class="inline-flex size-[13px] items-center justify-center rounded-sm bg-muted/40 text-muted-foreground/40"
-                                        ><Circle class="size-[7px] fill-muted-foreground/30" /></span>
-                                      {/if}
-                                    </div>
-                                  {/if}
-                                </div>
-                                <span
-                                  class="block truncate font-mono text-ui-2xs text-muted-foreground"
-                                  data-font="mono"
-                                  title={col.dataType ?? col.data_type}
-                                  >{col.dataType ?? col.data_type}</span
-                                >
-                              </div>
-                              {#if isSorted}
-                                <span class="shrink-0 text-primary/70">
-                                  {#if isAsc}
-                                    <svg class="size-3" viewBox="0 0 12 12" fill="none"><path d="M6 9V3M3 6l3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                                  {:else}
-                                    <svg class="size-3" viewBox="0 0 12 12" fill="none"><path d="M6 3v6M3 6l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                                  {/if}
-                                </span>
-                              {:else}
-                                <ArrowUpDown class="size-3 shrink-0 opacity-0 transition-opacity group-hover/th:opacity-30" />
-                              {/if}
-                            </button>
-                            {#if visibleColumns.length > 1}
-                              <ColumnResizeHandle
-                                onresizestart={() => startColumnResize(col.name)}
-                                onresize={applyColumnResize}
-                                onresizeend={endColumnResize}
-                              />
-                            {/if}
-                          </th>
-                        {/snippet}
-                      </ContextMenu.Trigger>
-                      <ContextMenu.Content
-                        class="w-48 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5"
-                      >
-                        <ContextMenu.Item onSelect={() => headerSortDirect(col.name, 'asc')}>
-                          <ArrowUp />
-                          Sort ascending
-                          {#if isAsc}<span class="ml-auto text-[10px] text-primary">✓</span>{/if}
-                        </ContextMenu.Item>
-                        <ContextMenu.Item onSelect={() => headerSortDirect(col.name, 'desc')}>
-                          <ArrowDown />
-                          Sort descending
-                          {#if isDesc}<span class="ml-auto text-[10px] text-primary">✓</span>{/if}
-                        </ContextMenu.Item>
-                        {#if isSorted}
-                          <ContextMenu.Item onSelect={() => { if (pendingEdits.size > 0) { toast.error('Unsaved changes', { description: 'Apply or reset your edits before sorting.' }); return } onsortchange(null) }}>
-                            <ArrowUpDown />
-                            Clear sort
-                          </ContextMenu.Item>
-                        {/if}
-                        <ContextMenu.Separator />
-                        <ContextMenu.Item onSelect={() => onfiltercolumn(col.name)}>
-                          <ListFilter />
-                          Filter by this column
-                        </ContextMenu.Item>
-                        <ContextMenu.Separator />
-                        <ContextMenu.Item onSelect={() => toggleColumnPin(col.name)}>
-                          {#if isPinned}
-                            <PinOff />
-                            Unpin column
-                          {:else}
-                            <Pin />
-                            Pin column
-                          {/if}
-                        </ContextMenu.Item>
-                        <ContextMenu.Item onSelect={() => onhidecolumn(col.name)}>
-                          <EyeOff />
-                          Hide column
-                        </ContextMenu.Item>
-                        <ContextMenu.Separator />
-                        <ContextMenu.Item onSelect={() => resetColumnWidth(col.name)}>
-                          <RotateCcw />
-                          Reset column width
-                        </ContextMenu.Item>
-                      </ContextMenu.Content>
-                    </ContextMenu.Root>
-                  {/if}
-                {/each}
-                <th aria-hidden="true" class="studio-spacer-cell bg-panel"></th>
-              </tr>
-            </thead>
-            {#if rows.length > 0 || newRowDrafts}
-              <tbody>
-                {#if newRowDrafts}
-                  <tr
-                    class="group/newrow relative border-b border-border/30 bg-emerald-500/[0.04] ring-1 ring-inset ring-emerald-500/20"
-                    onkeydown={onNewRowKeydown}
-                  >
-                    {#if showRowExpand}
-                      <td
-                        class="studio-table-gutter border-r border-border/20 bg-primary/5"
-                        style="width: {ROW_EXPAND_COL_WIDTH}px; min-width: {ROW_EXPAND_COL_WIDTH}px; max-width: {ROW_EXPAND_COL_WIDTH}px"
-                      >
-                        <div class="studio-table-gutter-inner flex items-center justify-center">
-                          {#if insertSaving}
-                            <Loader class="size-3 animate-spin text-muted-foreground" />
-                          {:else}
-                            <Check
-                              class="size-3 cursor-pointer text-primary hover:text-primary/70"
-                              onclick={() => void submitNewRow()}
-                              title="Insert row (⌘↵)"
-                            />
-                          {/if}
-                        </div>
-                      </td>
-                    {/if}
-                    {#if showSelection}
-                      <td
-                        class="studio-table-gutter border-r border-border/20 bg-primary/5"
-                        style="width: {ROW_SELECT_COL_WIDTH}px; min-width: {ROW_SELECT_COL_WIDTH}px; max-width: {ROW_SELECT_COL_WIDTH}px"
-                      >
-                        <div class="studio-table-gutter-inner flex items-center justify-center">
-                          <button
-                            type="button"
-                            class="inline-flex size-4 items-center justify-center rounded text-muted-foreground/50 hover:text-destructive"
-                            onclick={cancelNewRow}
-                            title="Cancel"
-                          >
-                            <X class="size-3" />
-                          </button>
-                        </div>
-                      </td>
-                    {/if}
-                    {#each visibleColumns as col (col.name)}
-                      {@const dt = col.dataType ?? col.data_type ?? ''}
-                      {@const isAuto = isLikelyAutoColumn(dt, col.name, primaryKey)}
-                      {@const enumValues = getColumnEnumValues(col)}
-                      {@const isBoolean = isBooleanType(dt)}
-                      {@const isDateTime = shouldUseDateTimePicker(dt, col.name)}
-                      {@const isDateOnly = isDateOnlyType(dt)}
-                      {@const isTimeOnly = isTimeOnlyType(dt)}
-                      {@const isPinned = pinnedColumns.has(col.name)}
-                      {@const pinOffset = pinnedOffsets.get(col.name)}
-                      {@const colWidth = widthForColumn(col.name, dt)}
-                      <td
-                        class={cn(
-                          'border-r border-border/20 px-2 py-1',
-                          isPinned && 'sticky z-10 bg-background shadow-[1px_0_0_0_hsl(var(--border)/0.2)]',
-                        )}
-                        style={[
-                          `min-width: ${colWidth}px; max-width: ${colWidth}px; width: ${colWidth}px`,
-                          isPinned ? `left: ${(showRowExpand ? ROW_EXPAND_COL_WIDTH : 0) + (showSelection ? ROW_SELECT_COL_WIDTH : 0) + (pinOffset ?? 0)}px` : '',
-                        ].filter(Boolean).join('; ')}
-                      >
-                        {#if isAuto}
-                          <span class="select-none font-mono text-ui-sm text-muted-foreground/35 italic">auto</span>
-                        {:else if enumValues}
-                          <select
-                            data-new-row-input={col.name}
-                            disabled={insertSaving}
-                            class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none disabled:opacity-50"
-                            value={newRowDrafts[col.name] ?? ''}
-                            onchange={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
-                            onfocus={() => (newRowFocusCol = col.name)}
-                          >
-                            <option value="">{col.nullable ? 'NULL / default' : 'Select…'}</option>
-                            {#each enumValues as opt (opt)}<option value={opt}>{opt}</option>{/each}
-                          </select>
-                        {:else if isBoolean}
-                          <select
-                            data-new-row-input={col.name}
-                            disabled={insertSaving}
-                            class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none disabled:opacity-50"
-                            value={newRowDrafts[col.name] ?? ''}
-                            onchange={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
-                            onfocus={() => (newRowFocusCol = col.name)}
-                          >
-                            <option value="">{col.nullable ? 'NULL / default' : 'Default'}</option>
-                            <option value="true">true</option>
-                            <option value="false">false</option>
-                          </select>
-                        {:else if isDateTime}
-                          <input
-                            data-new-row-input={col.name}
-                            type="datetime-local"
-                            disabled={insertSaving}
-                            class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none placeholder:text-muted-foreground/40 disabled:opacity-50"
-                            value={newRowDrafts[col.name] ?? ''}
-                            oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
-                            onfocus={() => (newRowFocusCol = col.name)}
-                          />
-                        {:else if isDateOnly}
-                          <input
-                            data-new-row-input={col.name}
-                            type="date"
-                            disabled={insertSaving}
-                            class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none disabled:opacity-50"
-                            value={newRowDrafts[col.name] ?? ''}
-                            oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
-                            onfocus={() => (newRowFocusCol = col.name)}
-                          />
-                        {:else if isTimeOnly}
-                          <input
-                            data-new-row-input={col.name}
-                            type="time"
-                            disabled={insertSaving}
-                            class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none disabled:opacity-50"
-                            value={newRowDrafts[col.name] ?? ''}
-                            oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
-                            onfocus={() => (newRowFocusCol = col.name)}
-                          />
-                        {:else}
-                          <input
-                            data-new-row-input={col.name}
-                            type="text"
-                            disabled={insertSaving}
-                            placeholder={col.nullable ? 'NULL or value' : 'Required'}
-                            class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none placeholder:text-muted-foreground/40 disabled:opacity-50"
-                            value={newRowDrafts[col.name] ?? ''}
-                            oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
-                            onfocus={() => (newRowFocusCol = col.name)}
-                          />
-                        {/if}
-                      </td>
-                    {/each}
-                    <td class="studio-spacer-cell bg-primary/[0.03]">
-                      {#if !insertSaving}
-                        <span class="whitespace-nowrap px-2 font-mono text-ui-2xs text-muted-foreground/40">⌘↵ save · Esc cancel</span>
-                      {/if}
-                    </td>
-                  </tr>
-                {/if}
-                {#if useVirtual && virtualTopPad > 0}
-                  <tr aria-hidden="true" style="height: {virtualTopPad}px">
-                    <td colspan={totalColSpan} class="border-0 p-0"></td>
-                  </tr>
-                {/if}
-                {#each visibleRowIndexes as idx (idx)}
-                  {@const row = rows[idx]}
-                  <tr
-                    data-row-idx={idx}
-                    class={rowClass(idx)}
-                    style="contain: layout paint style"
-                    onclick={(e) => {
-                      if (e.button !== 0) return;
-                      const target = e.target instanceof Element ? e.target : null;
-                      // Copy button — delegated so the button itself needs no listener.
-                      const copyBtn = target?.closest("[data-copy-cell]");
-                      if (copyBtn) {
-                        e.stopPropagation();
-                        void copyCellValue(idx, Number(copyBtn.getAttribute("data-copy-cell")));
-                        return;
-                      }
-                      if (editingCell) cancelEdit();
-                      focusedRow = idx;
-                      if (e.shiftKey) {
-                        openInInspector(idx);
-                        return;
-                      }
-                      if (inspectorRow !== null) inspectorRow = idx;
-                      const cellEl = target?.closest("td[data-col-idx]");
-                      if (cellEl) {
-                        const ci = Number(cellEl.getAttribute("data-col-idx"));
-                        const vi = actualToVisColIdx(ci);
-                        if (vi >= 0) focusedCol = vi;
-                        // Ctrl/Cmd-click follows a foreign key (formerly on the cell).
-                        if (tryFollowForeignKey(idx, ci, e, { requireModifier: true })) return;
-                      } else if (focusedCol === null) {
-                        focusedCol = 0;
-                      }
-                      tableContainer?.focus({ preventScroll: true });
-                    }}
-                    ondblclick={(e) => {
-                      const cellEl = e.target instanceof Element ? e.target.closest("td[data-col-idx]") : null;
-                      if (!cellEl) return;
-                      e.preventDefault();
-                      const ci = Number(cellEl.getAttribute("data-col-idx"));
-                      // FK cell with a value → follow; otherwise start editing.
-                      if (tryFollowForeignKey(idx, ci, e)) return;
-                      startEdit(idx, ci);
-                    }}
-                    onauxclick={(e) => {
-                      if (e.button !== 1) return;
-                      const cellEl =
-                        e.target instanceof Element
-                          ? e.target.closest("td[data-col-idx]")
-                          : null;
-                      if (!cellEl) return;
-                      const colIdx =
-                        Number(cellEl.getAttribute("data-col-idx")) || 0;
-                      if (tryFollowForeignKey(idx, colIdx, e)) return;
-                    }}
-                  >
-                    {#if showRowExpand}
-                      <td
-                        class="studio-table-gutter studio-table-expand-gutter bg-panel"
-                        style="width: {ROW_EXPAND_COL_WIDTH}px; min-width: {ROW_EXPAND_COL_WIDTH}px; max-width: {ROW_EXPAND_COL_WIDTH}px"
-                        aria-expanded={isRowExpanded(idx)}
-                        aria-label={isRowExpanded(idx)
-                          ? "Collapse row JSON"
-                          : "Expand row JSON"}
-                        title={isRowExpanded(idx)
-                          ? "Collapse row"
-                          : "Expand row as JSON"}
-                        onclick={(e) => {
-                          e.stopPropagation()
-                          toggleRowExpand(idx)
-                        }}
-                      >
-                        <div class="studio-table-gutter-inner">
-                          <span
-                            class={cn(
-                              "studio-row-expand-icon flex w-full self-stretch items-center justify-center text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-                              isRowExpanded(idx)
-                                ? "opacity-100"
-                                : "opacity-0 group-hover/row:opacity-100",
-                            )}
-                            aria-hidden="true"
-                          >
-                            {#if isRowExpanded(idx)}
-                              <ChevronDown class="size-3.5" />
-                            {:else}
-                              <ChevronRight class="size-3.5" />
-                            {/if}
-                          </span>
-                        </div>
-                      </td>
-                    {/if}
-                    {#if showSelection}
-                      <td
-                        class="studio-table-gutter bg-panel"
-                        style="width: {ROW_SELECT_COL_WIDTH}px; min-width: {ROW_SELECT_COL_WIDTH}px; max-width: {ROW_SELECT_COL_WIDTH}px"
-                        onclick={(e) => {
-                          e.stopPropagation()
-                          handleRowSelect(idx, e.shiftKey)
-                        }}
-                      >
-                        <div class="studio-table-gutter-inner">
-                          <Checkbox
-                            tabindex={-1}
-                            checked={selected.has(idx)}
-                            onCheckedChange={() => {}}
-                          />
-                        </div>
-                      </td>
-                    {/if}
-                    {#each row as cell, colIdx}
-                      {#if hiddenColumns.has(columns[colIdx]?.name)}<!-- skip hidden -->
-                      {:else if collapsedColumns.has(columns[colIdx]?.name)}
-                        <!-- Collapsed column — render a matching empty strip cell -->
-                        <td
-                          class="overflow-hidden border-r border-border/20 bg-panel/80 p-0"
-                          style="width: {COLLAPSED_COL_WIDTH}px; min-width: {COLLAPSED_COL_WIDTH}px; max-width: {COLLAPSED_COL_WIDTH}px"
-                          aria-hidden="true"
-                        ></td>
-                      {:else}
-                        {@const isEditing =
-                          editingCell?.rowIdx === idx &&
-                          editingCell?.colIdx === colIdx}
-                        {@const col = columns[colIdx]}
-                        {@const cached = _colCache[colIdx]}
-                        {@const colType = cached?.colType ?? ""}
-                        {@const enumValues = cached?.enumValues ?? null}
-                        {@const canEditCell = cached?.canEdit ?? false}
-                        {@const cellFk = cached?.fk ?? null}
-                        {@const stagedEdit = hasPendingEdits ? pendingEdits.get(idx + ":" + colIdx) : undefined}
-                        {@const isDirty = !!stagedEdit}
-                        {@const cellValue = stagedEdit ? stagedEdit.value : cell}
-                        {@const cellIsNull = cellValue === null || cellValue === undefined}
-                        {@const activeFk = cellFk && !cellIsNull}
-                        {@const cellPinned = pinnedColumns.has(col?.name ?? '')}
-                        {@const cellPinLeft = cellPinned ? (pinnedOffsets.get(col?.name ?? '') ?? 0) : 0}
-                        <!-- isFocusedCell removed from template — handled imperatively
-                             by $effect + CSS (data-focused-cell attr) to avoid
-                             making all rows×cols cells reactive to focusedRow changes. -->
-                        {@const cellBg = isEditing ? "bg-background"
-                          : cellPinned ? "bg-panel"
-                          : isDirty ? "bg-amber-400/15"
-                          : activeFk ? "bg-accent/15" : ""}
-                        {@const cellTextColor = isEditing ? ""
-                          : isDirty ? "text-foreground" : "text-muted-foreground"}
-                        {@const cellShadow = isEditing ? ""
-                          : cellPinned ? "shadow-[1px_0_0_hsl(var(--border)/0.6)]"
-                          : isDirty ? "shadow-[inset_2px_0_0_#f59e0b]" : ""}
-                        <td
-                          data-col-idx={colIdx}
-                          data-col-name={col?.name}
-                          class={cx(
-                            "overflow-hidden font-mono",
-                            isEditing
-                              ? "relative p-0 align-middle ring-2 ring-inset ring-primary"
-                              : "group/cell relative whitespace-nowrap px-3 py-0.5",
-                            !isEditing && activeFk && "group/fk cursor-pointer transition-colors hover:bg-accent/30",
-                            !isEditing && cellPinned && "sticky z-[1]",
-                            cellBg, cellTextColor, cellShadow,
-                          )}
-                          style={isEditing ? "border: 0" : cellPinned ? `left: ${cellPinLeft}px` : undefined}
-                          data-font="mono"
-                        >
-                          {#if isEditing && editingCell}
-                            {@const isNullable = col?.nullable ?? true}
-                            {#if enumValues}
-                              <select
-                                bind:this={editInput}
-                                bind:value={editingCell.draft}
-                                disabled={saving}
-                                aria-label="Edit {col?.name ?? 'cell'}"
-                                class="box-border block h-7 w-full min-w-0 max-w-full cursor-pointer appearance-none border-0 bg-transparent px-3 py-1 font-mono text-ui-sm text-foreground outline-none"
-                                onclick={(e) => e.stopPropagation()}
-                                onkeydown={handleEditKeydown}
-                                onchange={() => void commitEdit()}
-                              >
-                                {#if isNullable}
-                                  <option value="">NULL</option>
-                                {/if}
-                                {#if editingCell.original && !enumValues.includes(editingCell.original)}
-                                  <option value={editingCell.original}
-                                    >{editingCell.original}</option
-                                  >
-                                {/if}
-                                {#each enumValues as option (option)}
-                                  <option value={option}>{option}</option>
-                                {/each}
-                              </select>
-                            {:else if isBooleanType(colType)}
-                              {@const isOn = editingCell.draft === "true"}
-                              {@const isNull =
-                                isNullable &&
-                                editingCell.draft !== "true" &&
-                                editingCell.draft !== "false"}
-                              <button
-                                type="button"
-                                bind:this={editInput}
-                                disabled={saving}
-                                aria-label="Toggle {col?.name ?? 'cell'}"
-                                class="flex h-7 w-full items-center gap-2.5 px-3 font-mono text-ui-sm text-foreground outline-none"
-                                onclick={async (e) => {
-                                  e.stopPropagation();
-                                  editingCell.draft =
-                                    editingCell.draft === "true"
-                                      ? "false"
-                                      : "true";
-                                  await commitEdit();
-                                }}
-                                onkeydown={handleEditKeydown}
-                              >
-                                <span
-                                  class={cn(
-                                    "relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors duration-150",
-                                    isOn
-                                      ? "bg-primary/80"
-                                      : "bg-muted-foreground/30",
-                                  )}
-                                >
-                                  <span
-                                    class="absolute size-3 rounded-full bg-white shadow-sm transition-transform duration-150"
-                                    style={isOn
-                                      ? "transform: translateX(14px)"
-                                      : "transform: translateX(2px)"}
-                                  ></span>
-                                </span>
-                                <span
-                                  class={isNull ? "text-muted-foreground" : ""}
-                                  >{isNull
-                                    ? "NULL"
-                                    : editingCell.draft === "true"
-                                      ? "true"
-                                      : "false"}</span
-                                >
-                              </button>
-                            {:else}
-                              <input
-                                bind:this={editInput}
-                                bind:value={editingCell.draft}
-                                disabled={saving}
-                                aria-label="Edit {col?.name ?? 'cell'}"
-                                class="box-border block h-7 w-full min-w-0 max-w-full overflow-x-auto border-0 bg-transparent px-3 py-1 font-mono text-ui-sm text-foreground outline-none [field-sizing:fixed] selection:bg-primary/20"
-                                onclick={(e) => e.stopPropagation()}
-                                onkeydown={handleEditKeydown}
-                              />
-                            {/if}
-                          {:else}
-                            {@const cellText = formatCell(cellValue)}
-                            {@const cellDisplay = displayCell(cellValue)}
-                            {@const isJsonCell = cellValue !== null && typeof cellValue === 'object'}
-                            {@const cellHref = !activeFk && !isJsonCell
-                              ? cellLinkHref(cellText)
-                              : null}
-                            {@const urlType = cellUrlType(cellHref, col?.name ?? "")}
-                            {#if isJsonCell}
-                              <span class="flex min-w-0 items-center gap-1.5">
-                                <span class="truncate font-mono text-muted-foreground">{cellDisplay}</span>
-                                <button
-                                  type="button"
-                                  class="inline-flex shrink-0 items-center gap-0.5 rounded border border-border/60 bg-muted/40 px-1 py-px font-mono text-[10px] leading-none text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                                  title="View JSON"
-                                  aria-label="View JSON"
-                                  onclick={(e) => openJsonLightbox(cellValue, col?.name ?? 'json', e)}
-                                >
-                                  <Braces class="size-2.5" /> JSON
-                                </button>
-                              </span>
-                            {:else}
-                            <span
-                              class={cx(
-                                "flex items-center gap-1.5 truncate",
-                                activeFk && "text-foreground",
-                              )}
-                              title={activeFk
-                                ? `${cellText} — Ctrl/⌘-click or double-click to open ${foreignKeyTargetLabel(cellFk)}`
-                                : undefined}
-                            >
-                              {#if cellHref}
-                                {@const safeHref = cellHref}
-                                <a
-                                  href={safeHref}
-                                  data-cell-url
-                                  tabindex={-1}
-                                  class={cx(
-                                    "truncate",
-                                    urlType === "image" && "cursor-zoom-in",
-                                  )}
-                                  onclick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    if (e.ctrlKey || e.metaKey || e.shiftKey) {
-                                      void openExternal(safeHref);
-                                    } else if (
-                                      urlType === "image" ||
-                                      urlType === "pdf"
-                                    ) {
-                                      lightboxUrl = safeHref;
-                                      lightboxType =
-                                        /** @type {'image'|'pdf'} */ (urlType);
-                                    } else {
-                                      void openExternal(safeHref);
-                                    }
-                                  }}
-                                >
-                                  {cellDisplay}
-                                </a>
-                              {:else}
-                                <span class="truncate">{cellDisplay}</span>
-                              {/if}
-                              {#if activeFk}
-                                <ExternalLink
-                                  class="size-3 shrink-0 text-ring/80 transition-colors group-hover/fk:text-foreground"
-                                  aria-hidden="true"
-                                />
-                              {/if}
-                            </span>
-                            {/if}
-                          {/if}
-                          {#if !isEditing}
-                            {@const canExpand = canEditCell && !enumValues && !isBooleanType(colType)}
-                            {#if canExpand}
-                              <button
-                                type="button"
-                                tabindex={-1}
-                                class="absolute right-6 top-1/2 z-10 hidden size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground group-hover/cell:inline-flex hover:bg-accent/60 hover:text-foreground"
-                                title="Quick Look (Shift+Space)"
-                                aria-label="Open quick look editor"
-                                onclick={(e) => { e.stopPropagation(); openQuickLook(idx, colIdx); }}
-                              >
-                                <Maximize2 class="size-3" />
-                              </button>
-                            {/if}
-                            <button
-                              type="button"
-                              tabindex={-1}
-                              data-copy-cell={colIdx}
-                              class="absolute right-0.5 top-1/2 z-10 hidden size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground group-hover/cell:inline-flex hover:bg-accent/60 hover:text-foreground"
-                            >
-                              <Copy class="size-3" />
-                            </button>
-                          {/if}
-                        </td>
-                      {/if}
-                    {/each}
-                    <td aria-hidden="true" class="studio-spacer-cell"></td>
-                  </tr>
-                  {#if showRowExpand && isRowExpanded(idx)}
-                    <tr>
-                      <td
-                        class="studio-table-gutter bg-panel"
-                        style="width: {ROW_EXPAND_COL_WIDTH}px; min-width: {ROW_EXPAND_COL_WIDTH}px; max-width: {ROW_EXPAND_COL_WIDTH}px"
-                        aria-hidden="true"
-                      ></td>
-                      {#if showSelection}
-                        <td
-                          class="studio-table-gutter bg-panel"
-                          style="width: {ROW_SELECT_COL_WIDTH}px; min-width: {ROW_SELECT_COL_WIDTH}px; max-width: {ROW_SELECT_COL_WIDTH}px"
-                          aria-hidden="true"
-                        ></td>
-                      {/if}
-                      <td colspan={dataColSpan} class="p-0 align-top">
-                        <RowExpandViewer
-                          record={rowToRecord(columns, row)}
-                          rowLabel="row {idx + 1}"
-                          maxHeight={embedded ? "min(40vh, 16rem)" : "min(60vh, 32rem)"}
-                        />
-                      </td>
-                    </tr>
-                  {/if}
-                {/each}
-                {#if useVirtual && virtualBottomPad > 0}
-                  <tr aria-hidden="true" style="height: {virtualBottomPad}px">
-                    <td colspan={totalColSpan} class="border-0 p-0"></td>
-                  </tr>
-                {/if}
-              </tbody>
-            {/if}
-          </table>
-          {/if}
-          <div class="pointer-events-none flex-1" aria-hidden="true"></div>
-          {#if visibleColumns.length === 0}
+          <!-- Hidden probe: resolves theme CSS custom properties to concrete
+               rgb() colours the canvas 2D context can use. -->
+          <span
+            bind:this={colorProbe}
+            aria-hidden="true"
+            class="font-mono"
+            style="position:absolute;top:0;left:0;width:0;height:0;overflow:hidden;pointer-events:none"
+          ></span>
+
+          {#if visibleColumns.length > 0}
+            <!-- Canvas layer: a 0-height sticky wrapper placed BEFORE the sizer
+                 so its natural flow position is the top-left; sticky then pins
+                 the viewport-sized canvas there while the sizer below provides
+                 the scroll range. The canvas overflows the 0-height box. -->
+            <div style="position:sticky;top:0;left:0;width:0;height:0;z-index:1;overflow:visible">
+              <canvas
+                bind:this={canvasEl}
+                class="block"
+                style="cursor:{resizingColName || _resizeHoverCol ? 'col-resize' : 'default'}"
+                onclick={onCanvasClick}
+                ondblclick={onCanvasDblClick}
+                onauxclick={onCanvasAuxClick}
+                onpointerdown={onCanvasPointerDown}
+                onpointermove={onCanvasPointerMove}
+                onpointerleave={onCanvasPointerLeave}
+              ></canvas>
+            </div>
+
+            <!-- Sizer: establishes the scroll range; DOM overlays are positioned
+                 within it in content coordinates. -->
             <div
-              class="pointer-events-none absolute inset-0 flex items-center justify-center"
-              role="status"
-              aria-live="polite"
+              class="relative"
+              style="width:{geom.totalWidth}px; height:{contentHeight}px"
             >
+              <!-- Inline insert-row form -->
+              {#if newRowDrafts}
+                <div
+                  class="absolute left-0 z-20 flex border-b border-border/30 bg-emerald-500/[0.04] ring-1 ring-inset ring-emerald-500/20"
+                  style="top:{HEADER_H}px; height:{ROW_HEIGHT}px; width:{geom.totalWidth}px"
+                  onkeydown={onNewRowKeydown}
+                >
+                  {#if showRowExpand}
+                    <div class="flex shrink-0 items-center justify-center border-r border-border/20 bg-primary/5" style="width:{GUTTER_EXPAND_W}px">
+                      {#if insertSaving}
+                        <Loader class="size-3 animate-spin text-muted-foreground" />
+                      {:else}
+                        <Check
+                          class="size-3 cursor-pointer text-primary hover:text-primary/70"
+                          onclick={() => void submitNewRow()}
+                          title="Insert row (⌘↵)"
+                        />
+                      {/if}
+                    </div>
+                  {/if}
+                  {#if showSelection}
+                    <div class="flex shrink-0 items-center justify-center border-r border-border/20 bg-primary/5" style="width:{GUTTER_SELECT_W}px">
+                      <button
+                        type="button"
+                        class="inline-flex size-4 items-center justify-center rounded text-muted-foreground/50 hover:text-destructive"
+                        onclick={cancelNewRow}
+                        title="Cancel"
+                      >
+                        <X class="size-3" />
+                      </button>
+                    </div>
+                  {/if}
+                  {#each visibleColumns as col (col.name)}
+                    {@const dt = col.dataType ?? col.data_type ?? ''}
+                    {@const isAuto = isLikelyAutoColumn(dt, col.name, primaryKey)}
+                    {@const enumValues = getColumnEnumValues(col)}
+                    {@const isBoolean = isBooleanType(dt)}
+                    {@const isDateTime = shouldUseDateTimePicker(dt, col.name)}
+                    {@const isDateOnly = isDateOnlyType(dt)}
+                    {@const isTimeOnly = isTimeOnlyType(dt)}
+                    {@const colWidth = widthForColumn(col.name, dt)}
+                    <div class="flex shrink-0 items-center overflow-hidden border-r border-border/20 px-2" style="width:{colWidth}px">
+                      {#if isAuto}
+                        <span class="select-none font-mono text-ui-sm text-muted-foreground/35 italic">auto</span>
+                      {:else if enumValues}
+                        <select
+                          data-new-row-input={col.name}
+                          disabled={insertSaving}
+                          class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none disabled:opacity-50"
+                          value={newRowDrafts[col.name] ?? ''}
+                          onchange={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
+                          onfocus={() => (newRowFocusCol = col.name)}
+                        >
+                          <option value="">{col.nullable ? 'NULL / default' : 'Select…'}</option>
+                          {#each enumValues as opt (opt)}<option value={opt}>{opt}</option>{/each}
+                        </select>
+                      {:else if isBoolean}
+                        <select
+                          data-new-row-input={col.name}
+                          disabled={insertSaving}
+                          class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none disabled:opacity-50"
+                          value={newRowDrafts[col.name] ?? ''}
+                          onchange={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
+                          onfocus={() => (newRowFocusCol = col.name)}
+                        >
+                          <option value="">{col.nullable ? 'NULL / default' : 'Default'}</option>
+                          <option value="true">true</option>
+                          <option value="false">false</option>
+                        </select>
+                      {:else if isDateTime}
+                        <input
+                          data-new-row-input={col.name}
+                          type="datetime-local"
+                          disabled={insertSaving}
+                          class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none placeholder:text-muted-foreground/40 disabled:opacity-50"
+                          value={newRowDrafts[col.name] ?? ''}
+                          oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
+                          onfocus={() => (newRowFocusCol = col.name)}
+                        />
+                      {:else if isDateOnly}
+                        <input
+                          data-new-row-input={col.name}
+                          type="date"
+                          disabled={insertSaving}
+                          class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none disabled:opacity-50"
+                          value={newRowDrafts[col.name] ?? ''}
+                          oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
+                          onfocus={() => (newRowFocusCol = col.name)}
+                        />
+                      {:else if isTimeOnly}
+                        <input
+                          data-new-row-input={col.name}
+                          type="time"
+                          disabled={insertSaving}
+                          class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none disabled:opacity-50"
+                          value={newRowDrafts[col.name] ?? ''}
+                          oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
+                          onfocus={() => (newRowFocusCol = col.name)}
+                        />
+                      {:else}
+                        <input
+                          data-new-row-input={col.name}
+                          type="text"
+                          disabled={insertSaving}
+                          placeholder={col.nullable ? 'NULL or value' : 'Required'}
+                          class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none placeholder:text-muted-foreground/40 disabled:opacity-50"
+                          value={newRowDrafts[col.name] ?? ''}
+                          oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
+                          onfocus={() => (newRowFocusCol = col.name)}
+                        />
+                      {/if}
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+
+              <!-- Expanded JSON detail panels -->
+              {#each [...expandedRows] as exIdx (exIdx)}
+                {#if rows[exIdx]}
+                  <div
+                    class="absolute z-10 overflow-hidden"
+                    style="top:{rowDocTop(exIdx) + ROW_HEIGHT}px; left:{gutterWidth}px; width:{Math.max(geom.totalWidth - gutterWidth, _viewportWidth - gutterWidth)}px; height:{expandHeight}px"
+                  >
+                    <RowExpandViewer
+                      record={rowToRecord(columns, rows[exIdx])}
+                      rowLabel={"row " + (exIdx + 1)}
+                      maxHeight={expandHeight + "px"}
+                    />
+                  </div>
+                {/if}
+              {/each}
+
+              <!-- Active inline cell editor -->
+              {#if editingCell && editOverlay}
+                {@const ecol = columns[editingCell.colIdx]}
+                {@const ecached = _colCache[editingCell.colIdx]}
+                {@const eEnum = ecached?.enumValues ?? null}
+                {@const eType = ecached?.colType ?? ''}
+                {@const eNullable = ecol?.nullable ?? true}
+                <div
+                  class="absolute z-30 box-border bg-background ring-2 ring-inset ring-primary"
+                  style="top:{editOverlay.top}px; left:{editOverlay.left}px; width:{editOverlay.width}px; height:{editOverlay.height}px"
+                >
+                  {#if eEnum}
+                    <select
+                      bind:this={editInput}
+                      bind:value={editingCell.draft}
+                      disabled={saving}
+                      aria-label="Edit {ecol?.name ?? 'cell'}"
+                      class="box-border block h-full w-full min-w-0 max-w-full cursor-pointer appearance-none border-0 bg-transparent px-3 font-mono text-ui-sm text-foreground outline-none"
+                      onclick={(e) => e.stopPropagation()}
+                      onkeydown={handleEditKeydown}
+                      onchange={() => void commitEdit()}
+                    >
+                      {#if eNullable}<option value="">NULL</option>{/if}
+                      {#if editingCell.original && !eEnum.includes(editingCell.original)}
+                        <option value={editingCell.original}>{editingCell.original}</option>
+                      {/if}
+                      {#each eEnum as option (option)}<option value={option}>{option}</option>{/each}
+                    </select>
+                  {:else if isBooleanType(eType)}
+                    {@const isOn = editingCell.draft === "true"}
+                    {@const isNull = eNullable && editingCell.draft !== "true" && editingCell.draft !== "false"}
+                    <button
+                      type="button"
+                      bind:this={editInput}
+                      disabled={saving}
+                      aria-label="Toggle {ecol?.name ?? 'cell'}"
+                      class="flex h-full w-full items-center gap-2.5 px-3 font-mono text-ui-sm text-foreground outline-none"
+                      onclick={async (e) => {
+                        e.stopPropagation();
+                        editingCell.draft = editingCell.draft === "true" ? "false" : "true";
+                        await commitEdit();
+                      }}
+                      onkeydown={handleEditKeydown}
+                    >
+                      <span class={cn("relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors duration-150", isOn ? "bg-primary/80" : "bg-muted-foreground/30")}>
+                        <span class="absolute size-3 rounded-full bg-white shadow-sm transition-transform duration-150" style={isOn ? "transform: translateX(14px)" : "transform: translateX(2px)"}></span>
+                      </span>
+                      <span class={isNull ? "text-muted-foreground" : ""}>{isNull ? "NULL" : editingCell.draft === "true" ? "true" : "false"}</span>
+                    </button>
+                  {:else}
+                    <input
+                      bind:this={editInput}
+                      bind:value={editingCell.draft}
+                      disabled={saving}
+                      aria-label="Edit {ecol?.name ?? 'cell'}"
+                      class="box-border block h-full w-full min-w-0 max-w-full overflow-x-auto border-0 bg-transparent px-3 font-mono text-ui-sm text-foreground outline-none [field-sizing:fixed] selection:bg-primary/20"
+                      onclick={(e) => e.stopPropagation()}
+                      onkeydown={handleEditKeydown}
+                    />
+                  {/if}
+                </div>
+              {/if}
+            </div>
+          {/if}
+
+          <!-- Empty states -->
+          {#if visibleColumns.length === 0}
+            <div class="pointer-events-none absolute inset-0 z-[3] flex items-center justify-center" role="status" aria-live="polite">
               <div class="flex flex-col items-center gap-2 px-4 text-center">
                 <Table2 class="size-8 text-muted-foreground/25" />
                 <p class="text-ui-sm text-muted-foreground">No columns visible</p>
               </div>
             </div>
-          {:else if rows.length === 0}
-            <div
-              class="pointer-events-none absolute inset-0 flex items-center justify-center"
-              role="status"
-              aria-live="polite"
-            >
+          {:else if rows.length === 0 && !newRowDrafts}
+            <div class="pointer-events-none absolute inset-0 z-[3] flex items-center justify-center" role="status" aria-live="polite">
               <div class="flex flex-col items-center gap-2 px-4 text-center">
                 <Table2 class="size-8 text-muted-foreground/25" />
                 <p class="text-ui-sm text-muted-foreground">No rows in this table</p>
               </div>
             </div>
+          {/if}
+
+          <!-- Hover tooltip (restores title= affordances lost to canvas) -->
+          {#if _tooltip}
+            <div
+              class="pointer-events-none absolute z-40 max-w-md truncate rounded border border-border bg-popover px-2 py-1 font-mono text-ui-2xs text-popover-foreground shadow-md"
+              style="left:{Math.min(_tooltip.x + 12, (_viewportWidth - 12))}px; top:{_tooltip.y + 18}px"
+            >{_tooltip.text}</div>
           {/if}
         </div>
       {/snippet}
@@ -2533,129 +2688,157 @@
         "[&_[data-slot=context-menu-item]_svg]:size-3.5",
       )}
     >
-      <ContextMenu.Item
-        onSelect={() => runMenuAction(() => openInInspector(contextRowIdx))}
-      >
-        <PanelRight />
-        Open
-      </ContextMenu.Item>
-      {#if menuForeignKey && !menuCellNull}
-        <ContextMenu.Item
-          onSelect={() =>
-            runMenuAction(() =>
-              onfollowforeignkey({
-                rowIdx: contextRowIdx,
-                colIdx: contextColIdx,
-              }),
-            )}
-        >
-          <ExternalLink />
-          Open {menuForeignKeyLabel}
-          <ContextMenu.Shortcut>⌘↵</ContextMenu.Shortcut>
+      {#if contextIsHeader}
+        {@const hcol = contextHeaderCol}
+        {@const hSorted = rowSort?.column === hcol}
+        {@const hAsc = hSorted && rowSort?.direction === 'asc'}
+        {@const hDesc = hSorted && rowSort?.direction === 'desc'}
+        {@const hPinned = pinnedColumns.has(hcol)}
+        {@const hCollapsed = collapsedColumns.has(hcol)}
+        <ContextMenu.Item onSelect={() => runMenuAction(() => headerSortDirect(hcol, 'asc'))}>
+          <ArrowUp />
+          Sort ascending
+          {#if hAsc}<span class="ml-auto text-[10px] text-primary">✓</span>{/if}
         </ContextMenu.Item>
-      {/if}
-      <ContextMenu.Separator />
-      <ContextMenu.Item
-        onSelect={() => runMenuAction(() => toggleColumnPin(menuColName))}
-      >
-        {#if menuColPinned}
-          <PinOff />
-          Unpin column
-        {:else}
-          <Pin />
-          Pin column
+        <ContextMenu.Item onSelect={() => runMenuAction(() => headerSortDirect(hcol, 'desc'))}>
+          <ArrowDown />
+          Sort descending
+          {#if hDesc}<span class="ml-auto text-[10px] text-primary">✓</span>{/if}
+        </ContextMenu.Item>
+        {#if hSorted}
+          <ContextMenu.Item onSelect={() => runMenuAction(() => { if (pendingEdits.size > 0) { toast.error('Unsaved changes', { description: 'Apply or reset your edits before sorting.' }); return } onsortchange(null) })}>
+            <ArrowUpDown />
+            Clear sort
+          </ContextMenu.Item>
         {/if}
-      </ContextMenu.Item>
-      {#if menuColCollapsed}
-        <ContextMenu.Item onSelect={() => runMenuAction(() => restoreColumn(menuColName))}>
-          <ArrowUpDown />
-          Restore column
+        <ContextMenu.Separator />
+        <ContextMenu.Item onSelect={() => runMenuAction(() => onfiltercolumn(hcol))}>
+          <ListFilter />
+          Filter by this column
         </ContextMenu.Item>
-      {/if}
-      <ContextMenu.Separator />
-      <ContextMenu.Item
-        disabled={!menuEditable || readonly}
-        onSelect={() =>
-          runMenuAction(() => startEdit(contextRowIdx, contextColIdx))}
-      >
-        <Pencil />
-        Edit
-        <ContextMenu.Shortcut>Enter</ContextMenu.Shortcut>
-      </ContextMenu.Item>
-      <ContextMenu.Item
-        onSelect={() =>
-          runMenuAction(() => copyCellValue(contextRowIdx, contextColIdx))}
-      >
-        <Copy />
-        Copy
-        <ContextMenu.Shortcut>⌘C</ContextMenu.Shortcut>
-      </ContextMenu.Item>
-      <ContextMenu.Item
-        disabled={!menuEditable || menuCellNull || readonly}
-        onSelect={() =>
-          runMenuAction(() => setCellNull(contextRowIdx, contextColIdx))}
-      >
-        <CircleSlash />
-        Set NULL
-      </ContextMenu.Item>
-      {#if showRowExpand}
+        <ContextMenu.Separator />
+        <ContextMenu.Item onSelect={() => runMenuAction(() => toggleColumnPin(hcol))}>
+          {#if hPinned}<PinOff />Unpin column{:else}<Pin />Pin column{/if}
+        </ContextMenu.Item>
+        <ContextMenu.Item onSelect={() => runMenuAction(() => onhidecolumn(hcol))}>
+          <EyeOff />
+          Hide column
+        </ContextMenu.Item>
+        {#if hCollapsed}
+          <ContextMenu.Item onSelect={() => runMenuAction(() => restoreColumn(hcol))}>
+            <ArrowUpDown />
+            Restore column
+          </ContextMenu.Item>
+        {/if}
+        <ContextMenu.Separator />
+        <ContextMenu.Item onSelect={() => runMenuAction(() => resetColumnWidth(hcol))}>
+          <RotateCcw />
+          Reset column width
+        </ContextMenu.Item>
+      {:else}
+        <ContextMenu.Item onSelect={() => runMenuAction(() => openInInspector(contextRowIdx))}>
+          <PanelRight />
+          Open
+        </ContextMenu.Item>
+        {#if menuForeignKey && !menuCellNull}
+          <ContextMenu.Item
+            onSelect={() =>
+              runMenuAction(() =>
+                onfollowforeignkey({
+                  rowIdx: contextRowIdx,
+                  colIdx: contextColIdx,
+                }),
+              )}
+          >
+            <ExternalLink />
+            Open {menuForeignKeyLabel}
+            <ContextMenu.Shortcut>⌘↵</ContextMenu.Shortcut>
+          </ContextMenu.Item>
+        {/if}
+        <ContextMenu.Separator />
+        <ContextMenu.Item onSelect={() => runMenuAction(() => toggleColumnPin(menuColName))}>
+          {#if menuColPinned}<PinOff />Unpin column{:else}<Pin />Pin column{/if}
+        </ContextMenu.Item>
+        {#if menuColCollapsed}
+          <ContextMenu.Item onSelect={() => runMenuAction(() => restoreColumn(menuColName))}>
+            <ArrowUpDown />
+            Restore column
+          </ContextMenu.Item>
+        {/if}
+        <ContextMenu.Separator />
         <ContextMenu.Item
-          onSelect={() => runMenuAction(() => toggleRowExpand(contextRowIdx))}
+          disabled={!menuEditable || readonly}
+          onSelect={() => runMenuAction(() => startEdit(contextRowIdx, contextColIdx))}
         >
-          <Braces />
-          {isRowExpanded(contextRowIdx)
-            ? "Collapse row JSON"
-            : "Expand"}
+          <Pencil />
+          Edit
+          <ContextMenu.Shortcut>Enter</ContextMenu.Shortcut>
+        </ContextMenu.Item>
+        <ContextMenu.Item onSelect={() => runMenuAction(() => copyCellValue(contextRowIdx, contextColIdx))}>
+          <Copy />
+          Copy
+          <ContextMenu.Shortcut>⌘C</ContextMenu.Shortcut>
+        </ContextMenu.Item>
+        <ContextMenu.Item
+          disabled={!menuEditable || menuCellNull || readonly}
+          onSelect={() => runMenuAction(() => setCellNull(contextRowIdx, contextColIdx))}
+        >
+          <CircleSlash />
+          Set NULL
+        </ContextMenu.Item>
+        {#if showRowExpand}
+          <ContextMenu.Item onSelect={() => runMenuAction(() => toggleRowExpand(contextRowIdx))}>
+            <Braces />
+            {isRowExpanded(contextRowIdx) ? "Collapse row JSON" : "Expand"}
+          </ContextMenu.Item>
+        {/if}
+        <ContextMenu.Separator />
+        <ContextMenu.Sub>
+          <ContextMenu.SubTrigger>
+            <Copy />
+            Copy row as
+          </ContextMenu.SubTrigger>
+          <ContextMenu.SubContent class="w-44 [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+            <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'json'))}>
+              <Braces />
+              JSON
+            </ContextMenu.Item>
+            <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'csv'))}>
+              <Copy />
+              CSV
+            </ContextMenu.Item>
+            <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'plain'))}>
+              <Copy />
+              Plain text
+            </ContextMenu.Item>
+            <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'markdown'))}>
+              <Copy />
+              Markdown table
+            </ContextMenu.Item>
+            <ContextMenu.Separator />
+            <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'insert'))}>
+              <Copy />
+              INSERT statement
+            </ContextMenu.Item>
+          </ContextMenu.SubContent>
+        </ContextMenu.Sub>
+        <ContextMenu.Item onSelect={() => runMenuAction(() => toggleRow(contextRowIdx))}>
+          <CheckSquare />
+          {selected.has(contextRowIdx) ? "Deselect row" : "Select row"}
+        </ContextMenu.Item>
+        <ContextMenu.Separator />
+        <ContextMenu.Item
+          variant="destructive"
+          disabled={!hasPrimaryKey || saving || readonly}
+          onSelect={() => runMenuAction(() => deleteRow(contextRowIdx))}
+        >
+          <Trash2 />
+          {selected.size > 1 && selected.has(contextRowIdx)
+            ? `Delete ${formatCompactCount(selected.size)} rows`
+            : "Delete row"}
+          <ContextMenu.Shortcut>⌘⌫</ContextMenu.Shortcut>
         </ContextMenu.Item>
       {/if}
-      <ContextMenu.Separator />
-      <ContextMenu.Sub>
-        <ContextMenu.SubTrigger>
-          <Copy />
-          Copy row as
-        </ContextMenu.SubTrigger>
-        <ContextMenu.SubContent class="w-44 [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
-          <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'json'))}>
-            <Braces />
-            JSON
-          </ContextMenu.Item>
-          <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'csv'))}>
-            <Copy />
-            CSV
-          </ContextMenu.Item>
-          <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'plain'))}>
-            <Copy />
-            Plain text
-          </ContextMenu.Item>
-          <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'markdown'))}>
-            <Copy />
-            Markdown table
-          </ContextMenu.Item>
-          <ContextMenu.Separator />
-          <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'insert'))}>
-            <Copy />
-            INSERT statement
-          </ContextMenu.Item>
-        </ContextMenu.SubContent>
-      </ContextMenu.Sub>
-      <ContextMenu.Item
-        onSelect={() => runMenuAction(() => toggleRow(contextRowIdx))}
-      >
-        <CheckSquare />
-        {selected.has(contextRowIdx) ? "Deselect row" : "Select row"}
-      </ContextMenu.Item>
-      <ContextMenu.Separator />
-      <ContextMenu.Item
-        variant="destructive"
-        disabled={!hasPrimaryKey || saving || readonly}
-        onSelect={() => runMenuAction(() => deleteRow(contextRowIdx))}
-      >
-        <Trash2 />
-        {selected.size > 1 && selected.has(contextRowIdx)
-          ? `Delete ${formatCompactCount(selected.size)} rows`
-          : "Delete row"}
-        <ContextMenu.Shortcut>⌘⌫</ContextMenu.Shortcut>
-      </ContextMenu.Item>
     </ContextMenu.Content>
   </ContextMenu.Root>
 {/if}
