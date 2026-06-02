@@ -254,6 +254,11 @@
   let loadingStructure = $state(false)
   let structureSearch = $state('')
   let activeTable = $state(/** @type {string | null} */ (null))
+  // Pre-filtered to the active table so the DataTable/StructureView props don't
+  // recreate a filtered array on every StudioShell re-render (was a per-render
+  // cost on each tab switch and keystroke).
+  const activeTableIndexes = $derived(activeTable ? indexes.filter((i) => i.tableName === activeTable) : [])
+  const activeTableTriggers = $derived(activeTable ? triggers.filter((t) => t.tableName === activeTable) : [])
   let tableFilter = $state('')
   let loadingTables = $state(false)
 
@@ -315,6 +320,7 @@
   let savingCell = $state(false)
   let deletingRows = $state(false)
   let insertingRow = $state(false)
+  let tableReadonly = $state(false)
   /** Bound from DataTable — triggers the inline new-row draft. */
   let dtBeginInsertRow = $state(/** @type {() => void} */ (() => {}))
   let showMcpPanel = $state(false)
@@ -343,6 +349,13 @@
   let pageSize = $state(DEFAULT_PAGE_SIZE)
   let rawOffset = $state(/** @type {number | null} */ (null))
   const currentOffset = $derived(rawOffset ?? (page - 1) * pageSize)
+  // Bumped whenever a fresh page of rows is applied (page/filter/sort/search).
+  // The DataTable watches it to jump its scroll + virtual window back to the
+  // top, so a reload never leaves the view stranded mid-table.
+  let reloadToken = $state(0)
+  // Monotonic id so an out-of-order / superseded row fetch can't clobber a
+  // newer one when the user pages rapidly.
+  let _loadSeq = 0
   let rowSearch = $state('')
   let rowSort = $state(/** @type {TableSort | null} */ (null))
   let rowFilters = $state(/** @type {TableFilter[]} */ ([]))
@@ -414,6 +427,14 @@
   const _tableNames = $derived(tables.map((t) => t.name))
 
   const sqlSchemaHints = $derived.by(() => {
+    // Only the SQL editor consumes this, and building columnsByTable iterates the
+    // whole table-column cache (dozens of tables). Skip that work entirely unless
+    // the SQL view is active — otherwise every table-tab switch paid for hints
+    // nothing was showing. When the user opens SQL, activeView flips and this
+    // rebuilds fresh from the current caches.
+    if (activeView !== 'sql') {
+      return { schemas, activeSchema, tables: _tableNames, columnsByTable: /** @type {Record<string, string[]>} */ ({}) }
+    }
     /** @type {Record<string, string[]>} */
     const columnsByTable = {}
     for (const [key, cols] of tableColumnsCache) {
@@ -517,6 +538,26 @@
 
   const _aiActive = $derived(aiMode || aiSidebarOpen)
 
+  // The all-tables column map only changes when the table-column cache changes
+  // (a new table is fetched), NOT when the user switches to an already-cached
+  // table. Splitting it into its own derived means a table click no longer
+  // rebuilds this whole object — that rebuild (Object.fromEntries over every
+  // cached table) was a main-thread stall on each table switch while AI was open.
+  const _allTableColumns = $derived.by(() => {
+    if (!_aiActive) return /** @type {Record<string, { name: string, dataType: string, nullable: boolean, enumValues?: string[] }[]>} */ ({})
+    return Object.fromEntries(
+      [...tableColumnsCache.entries()].map(([key, cols]) => [
+        key,
+        cols.map((c) => ({
+          name: c.name,
+          dataType: c.dataType ?? c.data_type ?? '',
+          nullable: c.nullable ?? true,
+          enumValues: c.enumValues ?? c.enum_values ?? undefined,
+        })),
+      ]),
+    )
+  })
+
   const aiSchemaContext = $derived.by(() => {
     // Only rebuild the expensive schema context when AI is actually visible.
     // When AI is hidden, return a cheap stable object — components using it
@@ -541,18 +582,7 @@
       })),
       primaryKey,
       foreignKeys,
-      /** @type {Record<string, { name: string, dataType: string, nullable: boolean, enumValues?: string[] }[]>} */
-      allTableColumns: Object.fromEntries(
-        untrack(() => [...tableColumnsCache.entries()]).map(([key, cols]) => [
-          key,
-          cols.map((c) => ({
-            name: c.name,
-            dataType: c.dataType ?? c.data_type ?? '',
-            nullable: c.nullable ?? true,
-            enumValues: c.enumValues ?? c.enum_values ?? undefined,
-          })),
-        ]),
-      ),
+      allTableColumns: _allTableColumns,
       /** @type {'postgres' | 'sqlite' | 'd1'} */
       dbType: /** @type {any} */ (connection)?.type ?? 'postgres',
     }
@@ -1913,6 +1943,7 @@
       total = 0
       return
     }
+    const seq = ++_loadSeq
     loadingRows = true
     selected = new Set()
     focusedRow = null
@@ -1928,7 +1959,16 @@
         sortDirection,
         filters: filtersForApi(rowFilters, columns),
       })
-      columns = data.columns ?? []
+      // A newer load started while this one was in flight — discard this stale
+      // result so it can't overwrite the newer page (avoids flicker + races
+      // when paging rapidly).
+      if (seq !== _loadSeq) return
+      // Keep the existing columns array reference when the schema is unchanged
+      // (the common case when paging/filtering the same table). Reassigning a
+      // fresh array would needlessly invalidate every column-derived value
+      // (colMeta, pinned offsets, per-column caches) and re-render all headers.
+      const nextColumns = data.columns ?? []
+      if (!sameColumnShape(columns, nextColumns)) columns = nextColumns
       if (activeTable) {
         lruSet(tableColumnsCache, `${activeSchema}.${activeTable}`, columns)
       }
@@ -1937,11 +1977,14 @@
       rows = data.rows ?? []
       total = Number(data.total ?? 0)
       queryMs = Number(data.queryMs ?? data.query_ms ?? 0)
+      // Fresh dataset → tell the DataTable to reset scroll to the top.
+      reloadToken++
       const maxPage = Math.max(1, Math.ceil(total / pageSize) || 1)
       if (page > maxPage) {
         page = maxPage
       }
     } catch (e) {
+      if (seq !== _loadSeq) return
       error = String(e)
       columns = []
       primaryKey = []
@@ -1950,8 +1993,23 @@
       total = 0
       recordActivity({ type: 'row_fetch', title: `Failed to load ${activeTable}`, schema: activeSchema, table: activeTable ?? undefined, success: false, error: String(e) })
     } finally {
-      loadingRows = false
+      if (seq === _loadSeq) loadingRows = false
     }
+  }
+
+  /**
+   * Whether two column lists describe the same shape (name + type, in order).
+   * Used to preserve the array reference across page fetches of the same table.
+   * @param {any[]} a @param {any[]} b
+   */
+  function sameColumnShape(a, b) {
+    if (a === b) return true
+    if (!a || !b || a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) {
+      if (a[i]?.name !== b[i]?.name) return false
+      if ((a[i]?.dataType ?? a[i]?.data_type) !== (b[i]?.dataType ?? b[i]?.data_type)) return false
+    }
+    return true
   }
 
   /** @param {'csv' | 'json'} format */
@@ -2560,7 +2618,7 @@
 />
 
 {#if autoConnecting}
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+  <div class="fixed inset-0 z-50 flex items-center justify-center bg-background/90">
     <div class="flex flex-col items-center gap-3 text-muted-foreground">
       <span class="inline-flex gap-1">
         <span class="size-2 animate-bounce rounded-full bg-muted-foreground" style="animation-delay:0ms"></span>
@@ -2696,6 +2754,8 @@
         oncloseothers={closeOtherTabs}
         oncloseall={closeAllTabs}
         onnew={openWelcomeTab}
+        {recentTabs}
+        onrecentselect={(schema, table) => { if (aiMode) exitAiMode(); void openTableTab(schema, table) }}
       />
 
       {#snippet tabError(/** @type {unknown} */ error, /** @type {() => void} */ reset)}
@@ -2971,8 +3031,8 @@
               table={activeTable ?? ''}
               {primaryKey}
               columns={structureColumns}
-              indexes={activeTable ? indexes.filter((i) => i.tableName === activeTable) : []}
-              triggers={activeTable ? triggers.filter((t) => t.tableName === activeTable) : []}
+              indexes={activeTableIndexes}
+              triggers={activeTableTriggers}
               {tables}
               {enums}
               columnSearch={structureSearch}
@@ -3011,6 +3071,7 @@
             ondeleteselected={() => void deleteSelectedRows()}
             onexport={handleExport}
             onaddrow={() => dtBeginInsertRow?.()}
+            readonly={tableReadonly}
             {hiddenColumns}
             onhiddencolumnschange={(next) => {
               hiddenColumns = next
@@ -3035,8 +3096,9 @@
                 {foreignKeys}
                 schema={activeSchema}
                 tableName={activeTable ?? ''}
-                indexes={activeTable ? indexes.filter((i) => i.tableName === activeTable) : []}
+                indexes={activeTableIndexes}
                 {hiddenColumns}
+                {reloadToken}
                 columnWidthsKey={activeTable ? `${activeSchema}.${activeTable}` : undefined}
                 loading={loadingRows}
                 saving={savingCell || deletingRows || insertingRow}
@@ -3069,6 +3131,7 @@
                 oninsertrow={handleInsertRow}
                 insertSaving={insertingRow}
                 bind:beginInsertRow={dtBeginInsertRow}
+                readonly={tableReadonly}
               />
             </svelte:boundary>
             <RowDetailPanel
@@ -3286,6 +3349,7 @@
   onopenerd={() => { if (aiMode) exitAiMode(); openErdTab() }}
   onopensettings={() => (showSettingsModal = true)}
   onopencommand={() => (commandOpen = true)}
+  bind:readonly={tableReadonly}
   ondisconnect={requestDisconnect}
   oncreatedatabase={async ({ name, owner, encoding, lcCollate, lcCtype, template, connectionLimit }) => {
     const escaped = name.replace(/"/g, '""')

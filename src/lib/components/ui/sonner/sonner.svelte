@@ -20,7 +20,7 @@
   const showClearAll = $derived(activeCount > 1)
 
   const base =
-    'group/toast pointer-events-auto relative flex w-full items-start gap-2.5 overflow-hidden rounded-xl border border-border/40 bg-popover/90 px-3 py-2.5 text-popover-foreground shadow-[0_0_0_0.5px_rgba(0,0,0,0.03),0_10px_38px_-8px_rgba(0,0,0,0.14),0_2px_10px_-3px_rgba(0,0,0,0.06)] backdrop-blur-2xl backdrop-saturate-150 dark:border-white/[0.07] dark:bg-popover/75 dark:shadow-[0_0_0_0.5px_rgba(255,255,255,0.05),0_16px_48px_-10px_rgba(0,0,0,0.55),0_4px_14px_-4px_rgba(0,0,0,0.35)]'
+    'group/toast pointer-events-auto relative flex w-full items-start gap-2.5 overflow-hidden rounded-xl border border-border/40 bg-popover px-3 py-2.5 text-popover-foreground shadow-[0_0_0_0.5px_rgba(0,0,0,0.03),0_10px_38px_-8px_rgba(0,0,0,0.14),0_2px_10px_-3px_rgba(0,0,0,0.06)] dark:border-white/[0.07] dark:shadow-[0_0_0_0.5px_rgba(255,255,255,0.05),0_16px_48px_-10px_rgba(0,0,0,0.55),0_4px_14px_-4px_rgba(0,0,0,0.35)]'
 
   const toastOptions = {
     unstyled: true,
@@ -90,7 +90,7 @@
   {#if showClearAll}
     <button
       type="button"
-      class="studio-toast-clear-all pointer-events-auto ml-auto shrink-0 rounded-lg border border-border/50 bg-popover/90 px-2.5 py-1 text-[11px] font-medium text-muted-foreground shadow-sm backdrop-blur-xl transition-colors hover:bg-muted/60 hover:text-foreground dark:border-white/[0.08] dark:bg-popover/80"
+      class="studio-toast-clear-all pointer-events-auto ml-auto shrink-0 rounded-lg border border-border/50 bg-popover px-2.5 py-1 text-[11px] font-medium text-muted-foreground shadow-sm transition-colors hover:bg-muted/60 hover:text-foreground dark:border-white/[0.08]"
       onclick={() => toast.dismiss()}
     >
       Clear all

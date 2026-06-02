@@ -130,7 +130,7 @@
     role="dialog"
     aria-modal="true"
     aria-label="JSON viewer"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 outline-none backdrop-blur-sm"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 outline-none"
     onclick={onclose}
     onkeydown={handleKey}
   >

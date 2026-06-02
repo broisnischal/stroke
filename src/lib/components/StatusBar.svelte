@@ -31,6 +31,8 @@
   import GitBranch     from '@lucide/svelte/icons/git-branch'
   import Sun          from '@lucide/svelte/icons/sun'
   import Moon         from '@lucide/svelte/icons/moon'
+  import Lock         from '@lucide/svelte/icons/lock'
+  import LockOpen     from '@lucide/svelte/icons/lock-open'
   import { cn }       from '$lib/utils.js'
   import { aiProfiles, activeProfileId, setActiveProfile } from '$lib/stores/ai-settings.js'
   import { toggleLightDark, isCurrentThemeDark } from '$lib/stores/settings.js'
@@ -74,6 +76,8 @@
     onscrolltabletop = /** @type {() => void} */ (() => {}),
     onscrolltablebottom = /** @type {() => void} */ (() => {}),
     oncreatedatabase = /** @type {(opts: import('./CreateDatabaseDialog.svelte').CreateDbOptions) => Promise<void>} */ (async () => {}),
+    /** Global read-only toggle — prevents all writes across the whole session */
+    readonly = $bindable(false),
   } = $props()
 
   const activeProfile = $derived($aiProfiles.find((p) => p.id === $activeProfileId) ?? $aiProfiles[0])
@@ -242,7 +246,7 @@
               </div>
             {/if}
 
-            <div class="max-h-[200px] overflow-y-auto p-1">
+            <div class="db-list-scroll max-h-[200px] overflow-y-auto p-1 [contain:layout_paint]">
               {#if dbLoading}
                 <div class="flex items-center justify-center gap-2 py-4 text-muted-foreground/50">
                   <RefreshCw class="size-3 animate-spin" />
@@ -253,7 +257,7 @@
                   {dbSearch ? 'No match' : 'No databases found'}
                 </div>
               {:else}
-                {#each dbFiltered as db (db)}
+                {#each dbFiltered.slice(0, 200) as db (db)}
                   {@const isCurrent = db === currentDb}
                   <DropdownMenu.Item
                     class={cn('cursor-pointer font-mono', isCurrent && 'font-semibold')}
@@ -450,6 +454,21 @@
     <!-- Command palette -->
     <button type="button" class={iconBtn} onclick={onopencommand} title="Command menu (⌘K)">
       <Command class="size-3.5" />
+    </button>
+
+    <!-- Read-only toggle -->
+    <button
+      type="button"
+      class={cn(iconBtn, readonly && 'text-amber-500! hover:text-amber-400!')}
+      title={readonly ? 'Read-only mode — click to enable editing' : 'Read-write mode — click to lock'}
+      aria-pressed={readonly}
+      onclick={() => (readonly = !readonly)}
+    >
+      {#if readonly}
+        <Lock class="size-3.5" />
+      {:else}
+        <LockOpen class="size-3.5" />
+      {/if}
     </button>
 
     <!-- Theme toggle -->

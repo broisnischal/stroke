@@ -912,13 +912,45 @@ pub async fn get_table_rows(
     }
     data_query = data_query.bind(limit).bind(offset);
 
-    // COUNT and data SELECT are independent — run both in parallel.
-    let (total_result, rows_result) = tokio::join!(
-        count_query.fetch_one(&pool),
-        data_query.fetch_all(&pool),
-    );
-    let total: i64 = total_result.map_err(|e| format!("Failed to count rows: {e}"))?;
-    let rows = rows_result.map_err(|e| format!("Failed to fetch rows: {e}"))?;
+    // For an unfiltered listing, COUNT(*) on a large table is a full sequential
+    // scan that can take seconds — that's the "pause" when opening a big table.
+    // Use the planner's row estimate (pg_class.reltuples) instead, which is
+    // instant, and only fall back to an exact COUNT when the table is small
+    // (estimate < threshold, where an exact count is sub-millisecond) or has
+    // never been analyzed (reltuples = -1). Filtered/searched queries always use
+    // an exact count since the WHERE clause bounds the scan and accuracy matters.
+    const ESTIMATE_THRESHOLD: i64 = 100_000;
+    let rows;
+    let total: i64;
+    if where_clause.sql.is_empty() {
+        let estimate: Option<i64> = sqlx::query_scalar::<_, i64>(
+            "SELECT reltuples::bigint FROM pg_class WHERE oid = $1::regclass",
+        )
+        .bind(&table_ref)
+        .fetch_optional(&pool)
+        .await
+        .ok()
+        .flatten();
+        rows = data_query
+            .fetch_all(&pool)
+            .await
+            .map_err(|e| format!("Failed to fetch rows: {e}"))?;
+        total = match estimate {
+            Some(est) if est >= ESTIMATE_THRESHOLD => est,
+            _ => count_query
+                .fetch_one(&pool)
+                .await
+                .map_err(|e| format!("Failed to count rows: {e}"))?,
+        };
+    } else {
+        // COUNT and data SELECT are independent — run both in parallel.
+        let (total_result, rows_result) = tokio::join!(
+            count_query.fetch_one(&pool),
+            data_query.fetch_all(&pool),
+        );
+        total = total_result.map_err(|e| format!("Failed to count rows: {e}"))?;
+        rows = rows_result.map_err(|e| format!("Failed to fetch rows: {e}"))?;
+    }
 
     let mut columns: Vec<ColumnInfo> = if let Some(first) = rows.first() {
         first
