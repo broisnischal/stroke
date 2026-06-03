@@ -13,7 +13,7 @@ export const PAGE_SIZE_OPTIONS = [25, 50, 100, 250]
 
 export const DEFAULT_PAGE_SIZE = 50
 
-export const MAX_PAGE_SIZE = 2000
+export const MAX_PAGE_SIZE = 1_000_000
 
 export const FILTER_OPS = /** @type {{ value: FilterOp, label: string, needsValue: boolean }[]} */ ([
   { value: 'eq', label: 'equals', needsValue: true },
