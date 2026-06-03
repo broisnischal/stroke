@@ -826,7 +826,7 @@ fn build_order_by(
     Ok(format!(" ORDER BY {col} {dir} NULLS LAST"))
 }
 
-const MAX_PAGE_LIMIT: i64 = 2000;
+const MAX_PAGE_LIMIT: i64 = 1_000_000;
 
 pub async fn get_table_rows(
     state: State<'_, DbState>,
