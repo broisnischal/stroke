@@ -83,6 +83,14 @@
    * @typedef {{ id: string, name: string, content: string }} SqlTab
    */
 
+  /** @type {{ focus: () => void } | null} */
+  let sqlEditorRef = $state(null)
+
+  /** Focus the SQL editor — called by the parent when this tab becomes active. */
+  export function focusEditor() {
+    sqlEditorRef?.focus()
+  }
+
   const initialTabId = crypto.randomUUID();
   /** @type {SqlTab[]} */
   let sqlTabs = $state([{ id: initialTabId, name: 'Query 1', content: sql }])
@@ -590,6 +598,7 @@
     style={outputVisible ? `height: ${editorHeight}px` : undefined}
   >
     <SqlEditor
+      bind:this={sqlEditorRef}
       bind:value={activeTab.content}
       class="absolute inset-0"
       {schemaHints}

@@ -297,6 +297,15 @@
   let dashboardEverOpened = $state(false)
   let erdEverOpened     = $state(false)
   let diagramsEverOpened = $state(false)
+  /** @type {{ focusEditor: () => void } | null} */
+  let sqlConsoleRef = $state(null)
+
+  // Auto-focus the SQL editor whenever the SQL tab becomes active
+  $effect(() => {
+    if (activeTab?.kind !== 'sql') return
+    tick().then(() => sqlConsoleRef?.focusEditor())
+  })
+
   $effect(() => {
     if (activeTab?.kind === 'sql') sqlEverOpened = true
     if (activeTab?.kind === 'orm') ormEverOpened = true
@@ -368,7 +377,7 @@
   let rowSort = $state(/** @type {TableSort | null} */ (null))
   let rowFilters = $state(/** @type {TableFilter[]} */ ([]))
   let filterBarOpen = $state(false)
-  /** @type {{ focusRowSearch?: () => void } | null} */
+  /** @type {{ focusRowSearch?: () => void, clearRowSearch?: () => void } | null} */
   let tableToolbar = $state(null)
   /** @type {ReturnType<typeof setTimeout> | null} */
   let filterDebounceTimer = null
@@ -776,6 +785,15 @@
     if (activeTab?.kind !== 'table' || !activeTable) return
     e.preventDefault()
     tableToolbar?.focusRowSearch?.()
+  })
+
+  // Ctrl/Cmd+T when viewing a table: clear the row search (and focus it).
+  // This lets the user quickly reset filters without reaching for the mouse.
+  createHotkey('Mod+T', (e) => {
+    if (commandOpen || showConnectionModal || showSettingsModal) return
+    if (activeTab?.kind !== 'table' || !activeTable) return
+    e.preventDefault()
+    tableToolbar?.clearRowSearch?.()
   })
 
   createHotkey('Mod+Enter', (e) => {
@@ -2999,6 +3017,7 @@
         >
           <svelte:boundary failed={tabError}>
           <SqlConsole
+            bind:this={sqlConsoleRef}
             bind:sql={sqlText}
             bind:queryHistoryVisible
             {queryHistory}

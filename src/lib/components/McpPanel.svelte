@@ -1,301 +1,163 @@
 <script>
-  import Server from "@lucide/svelte/icons/server";
-  import Copy from "@lucide/svelte/icons/copy";
-  import Check from "@lucide/svelte/icons/check";
-  import Power from "@lucide/svelte/icons/power";
-  import PowerOff from "@lucide/svelte/icons/power-off";
-  import Zap from "@lucide/svelte/icons/zap";
-  import Bot from "@lucide/svelte/icons/bot";
-  import Code2 from "@lucide/svelte/icons/code-2";
-  import Wand2 from "@lucide/svelte/icons/wand-2";
+  import Server    from "@lucide/svelte/icons/server";
+  import Copy      from "@lucide/svelte/icons/copy";
+  import Check     from "@lucide/svelte/icons/check";
+  import Power     from "@lucide/svelte/icons/power";
+  import PowerOff  from "@lucide/svelte/icons/power-off";
   import ExternalLink from "@lucide/svelte/icons/external-link";
+  import ShieldCheck  from "@lucide/svelte/icons/shield-check";
+  import X         from "@lucide/svelte/icons/x";
+  import Bot       from "@lucide/svelte/icons/bot";
+  import Code2     from "@lucide/svelte/icons/code-2";
+  import Wand2     from "@lucide/svelte/icons/wand-2";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
-  import { Button } from "$lib/components/ui/button/index.js";
-  import { Label } from "$lib/components/ui/label/index.js";
   import { cn } from "$lib/utils.js";
-  import { mcpStart, mcpStop, mcpStatus } from "$lib/api.js";
+  import { mcpStart, mcpStop, mcpStatus, mcpSetReadonly } from "$lib/api.js";
 
   let { open = $bindable(false), connected = false } = $props();
 
   /** @type {{ running: boolean, port: number, url: string, token: string } | null} */
-  let status = $state(null);
+  let status   = $state(null);
   let toggling = $state(false);
   /** @type {string | null} */
-  let copied = $state(null);
+  let copied   = $state(null);
+
+  // Read-only mode — persisted to localStorage
+  let readOnly = $state(
+    typeof localStorage !== 'undefined'
+      ? localStorage.getItem('db-studio:mcp-readonly') === 'true'
+      : false
+  );
 
   $effect(() => {
     if (open) void refresh();
   });
 
   async function refresh() {
-    try {
-      status = await mcpStatus();
-    } catch {
-      status = null;
-    }
+    try { status = await mcpStatus() } catch { status = null }
   }
 
   async function toggle() {
     toggling = true;
     try {
-      if (status?.running) {
-        await mcpStop();
-      } else {
-        await mcpStart();
-      }
+      if (status?.running) await mcpStop(); else await mcpStart();
       status = await mcpStatus();
-    } catch (e) {
-      console.error(e);
-    } finally {
-      toggling = false;
-    }
+    } catch (e) { console.error(e) }
+    finally { toggling = false }
   }
 
-  const claudeConfig = $derived(
-    status
-      ? JSON.stringify(
-          {
-            mcpServers: {
-              "db-studio": {
-                url: status.url,
-                headers: { Authorization: `Bearer ${status.token}` },
-              },
-            },
-          },
-          null,
-          2,
-        )
-      : "",
-  );
+  async function toggleReadOnly() {
+    readOnly = !readOnly;
+    if (typeof localStorage !== 'undefined')
+      localStorage.setItem('db-studio:mcp-readonly', String(readOnly));
+    try { await mcpSetReadonly(readOnly) } catch {}
+  }
 
-  const cursorConfig = $derived(
-    status
-      ? JSON.stringify(
-          {
-            mcpServers: {
-              "db-studio": {
-                url: status.url,
-                headers: { Authorization: `Bearer ${status.token}` },
-              },
-            },
-          },
-          null,
-          2,
-        )
-      : "",
-  );
+  // Sync read-only setting to backend when the dialog opens
+  $effect(() => {
+    if (open) mcpSetReadonly(readOnly).catch(() => {})
+  })
 
-  const vscodeConfig = $derived(
-    status
-      ? JSON.stringify(
-          {
-            servers: {
-              "db-studio": {
-                type: "http",
-                url: status.url,
-                headers: { Authorization: `Bearer ${status.token}` },
-              },
-            },
-          },
-          null,
-          2,
-        )
-      : "",
-  );
+  const claudeConfig  = $derived(status ? JSON.stringify({ mcpServers: { "db-studio": { url: status.url, headers: { Authorization: `Bearer ${status.token}` } } } }, null, 2) : '')
+  const cursorConfig  = $derived(claudeConfig)
+  const vscodeConfig  = $derived(status ? JSON.stringify({ servers: { "db-studio": { type: "http", url: status.url, headers: { Authorization: `Bearer ${status.token}` } } } }, null, 2) : '')
 
   const cursorInstallUrl = $derived.by(() => {
-    if (!status) return "";
-    const cfg = JSON.stringify({
-      url: status.url,
-      headers: { Authorization: `Bearer ${status.token}` },
-    });
-    return `cursor://anysphere.cursor-deeplink/mcp/install?name=db-studio&config=${btoa(cfg)}`;
-  });
-
+    if (!status) return ''
+    return `cursor://anysphere.cursor-deeplink/mcp/install?name=db-studio&config=${btoa(JSON.stringify({ url: status.url, headers: { Authorization: `Bearer ${status.token}` } }))}`
+  })
   const vscodeInstallUrl = $derived.by(() => {
-    if (!status) return "";
-    const cfg = JSON.stringify({
-      name: "db-studio",
-      type: "http",
-      url: status.url,
-      headers: { Authorization: `Bearer ${status.token}` },
-    });
-    return `vscode:mcp/install?${encodeURIComponent(cfg)}`;
-  });
-
-  const vscodeInsidersInstallUrl = $derived.by(() => {
-    if (!status) return "";
-    const cfg = JSON.stringify({
-      name: "db-studio",
-      type: "http",
-      url: status.url,
-      headers: { Authorization: `Bearer ${status.token}` },
-    });
-    return `vscode-insiders:mcp/install?${encodeURIComponent(cfg)}`;
-  });
+    if (!status) return ''
+    return `vscode:mcp/install?${encodeURIComponent(JSON.stringify({ name: 'db-studio', type: 'http', url: status.url, headers: { Authorization: `Bearer ${status.token}` } }))}`
+  })
+  const vscodeInsidersUrl = $derived.by(() => {
+    if (!status) return ''
+    return vscodeInstallUrl.replace('vscode:', 'vscode-insiders:')
+  })
 
   async function installVia(url) {
-    try {
-      const { openUrl } = await import("@tauri-apps/plugin-opener");
-      await openUrl(url);
-    } catch (e) {
-      console.error("Failed to open install URL:", e);
-    }
+    try { const { openUrl } = await import('@tauri-apps/plugin-opener'); await openUrl(url) }
+    catch {}
   }
 
-  /** @param {string} text @param {string} key */
   async function copy(text, key) {
-    if (!text) return;
-    await navigator.clipboard.writeText(text);
-    copied = key;
-    setTimeout(() => {
-      copied = null;
-    }, 2000);
+    if (!text) return
+    await navigator.clipboard.writeText(text)
+    copied = key
+    setTimeout(() => { copied = null }, 2000)
   }
-
-  const clients = $derived(
-    status
-      ? [
-          {
-            id: "claude",
-            name: "Claude Desktop",
-            icon: Bot,
-            iconClass: "bg-orange-500/10 text-orange-500",
-            description: "Paste JSON into your Claude Desktop config file.",
-            primaryLabel: "Copy config",
-            primaryIcon: Copy,
-            primaryAction: () => void copy(claudeConfig, "claude"),
-            primaryCopied: () => copied === "claude",
-            primaryCopiedLabel: "Copied",
-            secondary: null,
-            footnote: "", //~/Library/Application Support/Claude/claude_desktop_config.json
-          },
-          {
-            id: "cursor",
-            name: "Cursor",
-            icon: Wand2,
-            iconClass: "bg-blue-500/15 text-blue-500",
-            description: "Install db-studio via Cursor’s MCP deep link.",
-            primaryLabel: "Add to Cursor",
-            primaryIcon: ExternalLink,
-            primaryAction: () => void installVia(cursorInstallUrl),
-            primaryDisabled: !cursorInstallUrl,
-            secondaryLabel: "Copy JSON",
-            secondaryIcon: Copy,
-            secondaryAction: () => void copy(cursorConfig, "cursor"),
-            secondaryCopied: () => copied === "cursor",
-          },
-          {
-            id: "vscode",
-            name: "VS Code",
-            icon: Code2,
-            iconClass: "bg-sky-500/15 text-sky-500",
-            description: "Install via VS Code’s built-in MCP handler.",
-            primaryLabel: "Add to VS Code",
-            primaryIcon: ExternalLink,
-            primaryAction: () => void installVia(vscodeInstallUrl),
-            primaryDisabled: !vscodeInstallUrl,
-            secondaryLabel: "VS Code Insiders",
-            secondaryIcon: ExternalLink,
-            secondaryAction: () => void installVia(vscodeInsidersInstallUrl),
-          },
-        ]
-      : [],
-  );
 </script>
 
 <Dialog.Root bind:open>
-  <Dialog.Content
-    class="flex max-h-[90vh] w-full max-w-2xl flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl"
-  >
-    <Dialog.Header class="shrink-0 space-y-0 border-b border-border px-6 py-5">
-      <div class="flex items-start gap-3 pr-8">
-        <div
-          class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted"
-        >
-          <Server class="size-4 text-muted-foreground" />
+  <Dialog.Content class="w-full max-w-xl gap-0 overflow-hidden rounded-2xl border-border/60 p-0 shadow-2xl sm:max-w-xl">
+
+    <!-- ── Header ── -->
+    <div class="flex items-start justify-between border-b border-border/40 px-6 py-5">
+      <div class="flex items-center gap-3.5">
+        <div class="flex size-9 shrink-0 items-center justify-center rounded-xl bg-muted/50 ring-1 ring-border/30">
+          <Server class="size-4 text-foreground/70" />
         </div>
-        <div class="min-w-0 flex-1 space-y-1">
-          <Dialog.Title class="text-base font-semibold leading-none"
-            >MCP Server</Dialog.Title
-          >
-          <Dialog.Description
-            class="text-sm leading-snug text-muted-foreground"
-          >
-            Connect Claude Desktop, Cursor, or VS Code. Port and token stay
-            stable, configure once.
-          </Dialog.Description>
+        <div>
+          <Dialog.Title class="text-[15px] font-semibold leading-none tracking-tight text-foreground">
+            MCP Server
+          </Dialog.Title>
+          <p class="mt-1 text-[13px] leading-snug text-muted-foreground/70">
+            Connect Claude, Cursor, or VS Code to your database.
+          </p>
         </div>
       </div>
-    </Dialog.Header>
+      <Dialog.Close
+        class="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground/40 transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none"
+      >
+        <X class="size-4" />
+      </Dialog.Close>
+    </div>
 
-    <div class="app-scroll min-h-0 flex-1 overflow-y-auto [will-change:transform]">
-      <div class="flex flex-col gap-3 border-b border-border px-6 py-4">
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <Label class="text-muted-foreground">Server</Label>
-          {#if status?.running}
-            <span
-              class="inline-flex items-center gap-1.5 rounded-full bg-green-500/10 px-2.5 py-0 text-xs font-medium text-green-600 dark:text-green-400"
-            >
-              <span class="size-1.5 animate-pulse rounded-full bg-green-500"
-              ></span>
-              Running on port {status.port}
-            </span>
-          {:else if status}
-            <span
-              class="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground"
-            >
-              <span class="size-1.5 rounded-full bg-muted-foreground/40"></span>
-              Stopped
-            </span>
-          {/if}
-        </div>
+    <!-- ── Scrollable body ── -->
+    <div class="flex flex-col gap-0 overflow-y-auto" style="max-height: 70vh">
 
-        <div class="flex items-center gap-2">
+      <!-- Server status + controls -->
+      <div class="border-b border-border/30 px-6 py-4">
+        <div class="flex items-center justify-between gap-3">
+          <!-- URL pill -->
           {#if status}
-            <div
-              class="flex min-w-0 flex-1 items-center gap-1 rounded-lg border border-border bg-muted/20 pl-3 pr-1 py-1.5"
-            >
-              <code
-                class="min-w-0 flex-1 truncate font-mono text-xs text-foreground"
-                >{status.url}</code
-              >
-              <Button
+            <div class="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-border/40 bg-muted/20 px-3 py-2">
+              <code class="min-w-0 flex-1 truncate font-mono text-[12px] text-foreground/80">{status.url}</code>
+              <button
                 type="button"
-                variant="ghost"
-                size="icon-sm"
-                class="shrink-0"
-                aria-label="Copy server URL"
-                onclick={() => void copy(status?.url ?? "", "url")}
+                class="shrink-0 rounded p-0.5 text-muted-foreground/40 transition-colors hover:text-foreground"
+                onclick={() => void copy(status?.url ?? '', 'url')}
+                aria-label="Copy URL"
               >
-                {#if copied === "url"}
+                {#if copied === 'url'}
                   <Check class="size-3.5 text-green-500" />
                 {:else}
                   <Copy class="size-3.5" />
                 {/if}
-              </Button>
+              </button>
             </div>
           {:else}
-            <div
-              class="flex-1 rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground"
-            >
-              Loading server status…
+            <div class="flex-1 rounded-lg border border-dashed border-border/40 px-3 py-2 text-[12px] text-muted-foreground/50">
+              {connected ? 'Loading…' : 'No database connected'}
             </div>
           {/if}
 
-          <Button
+          <!-- Start / Stop -->
+          <button
             type="button"
-            variant={status?.running ? "outline" : "default"}
-            size="sm"
-            class="shrink-0 py-4"
+            class={cn(
+              "inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-2 text-[13px] font-medium transition-colors",
+              status?.running
+                ? "border-border/50 bg-muted/30 text-foreground/70 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30"
+                : "border-primary/30 bg-primary/10 text-primary hover:bg-primary/20",
+              (toggling || !connected || !status) && "pointer-events-none opacity-40"
+            )}
             disabled={toggling || !connected || !status}
             onclick={() => void toggle()}
           >
             {#if toggling}
-              <span
-                class="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent"
-              ></span>
-              {status?.running ? "Stopping…" : "Starting…"}
+              <span class="size-3 animate-spin rounded-full border-2 border-current border-t-transparent"></span>
+              {status?.running ? 'Stopping' : 'Starting'}
             {:else if status?.running}
               <PowerOff class="size-3.5" />
               Stop
@@ -303,112 +165,176 @@
               <Power class="size-3.5" />
               Start
             {/if}
-          </Button>
+          </button>
         </div>
 
-        {#if status && !status.running}
-          <p class="text-xs text-amber-600 dark:text-amber-400">
-            Start the server before clients can connect. Install links still
-            work for setup.
-          </p>
-        {/if}
+        <!-- Status badge -->
+        <div class="mt-2.5 flex items-center gap-2">
+          {#if status?.running}
+            <span class="inline-flex items-center gap-1.5 text-[11px] font-medium text-green-500">
+              <span class="size-1.5 animate-pulse rounded-full bg-green-500"></span>
+              Running on port {status.port}
+            </span>
+          {:else if status}
+            <span class="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground/45">
+              <span class="size-1.5 rounded-full bg-muted-foreground/30"></span>
+              Stopped
+            </span>
+          {/if}
+        </div>
       </div>
 
-      {#if status}
-        <section class="border-b border-border px-6 py-5">
-          <Label class="mb-4 block">One click install</Label>
-
-          <div class="grid gap-3 sm:grid-cols-3">
-            {#each clients as client (client.id)}
-              {@const Icon = client.icon}
-              <div
-                class="flex min-h-[11.5rem] flex-col rounded-xl border border-border bg-card p-4"
-              >
-                <div class="mb-3 flex items-center gap-2.5">
-                  <div
-                    class={cn(
-                      "flex size-8 shrink-0 items-center justify-center rounded-lg",
-                      client.iconClass,
-                    )}
-                  >
-                    <Icon class="size-4" />
-                  </div>
-                  <span class="text-sm font-medium text-foreground"
-                    >{client.name}</span
-                  >
-                </div>
-
-                <p
-                  class="mb-4 flex-1 text-xs leading-relaxed text-muted-foreground"
-                >
-                  {client.description}
-                </p>
-
-                <div class="flex flex-col gap-2">
-                  <Button
-                    type="button"
-                    variant="default"
-                    size="sm"
-                    class="w-full"
-                    disabled={client.primaryDisabled}
-                    onclick={client.primaryAction}
-                  >
-                    {#if client.primaryCopied?.()}
-                      <Check class="size-3.5 text-primary-foreground" />
-                      {client.primaryCopiedLabel ?? "Copied"}
-                    {:else}
-                      {@const PrimaryIcon = client.primaryIcon}
-                      <PrimaryIcon class="size-3.5" />
-                      {client.primaryLabel}
-                    {/if}
-                  </Button>
-
-                  {#if client.secondaryLabel}
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      class="w-full"
-                      onclick={client.secondaryAction}
-                    >
-                      {#if client.secondaryCopied?.()}
-                        <Check class="size-3.5 text-green-500" />
-                        Copied
-                      {:else}
-                        {@const SecondaryIcon = client.secondaryIcon}
-                        <SecondaryIcon class="size-3.5" />
-                        {client.secondaryLabel}
-                      {/if}
-                    </Button>
-                  {:else if client.footnote}
-                    <p
-                      class="px-1 text-center font-mono text-[10px] leading-snug text-muted-foreground"
-                      title={client.footnote}
-                    >
-                      {client.footnote}
-                    </p>
-                  {/if}
-                </div>
-              </div>
-            {/each}
-          </div>
-        </section>
-      {:else}
-        <div
-          class="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center"
+      <!-- ── Read-only mode ── -->
+      <div class="border-b border-border/30 px-6 py-4">
+        <button
+          type="button"
+          class="flex w-full items-start gap-3 text-left"
+          onclick={toggleReadOnly}
         >
-          <div
-            class="flex size-14 items-center justify-center rounded-2xl border border-border bg-muted/30"
-          >
-            <Server class="size-6 text-muted-foreground/40" />
+          <div class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/40 ring-1 ring-border/25">
+            <ShieldCheck class={cn("size-4", readOnly ? "text-amber-500" : "text-muted-foreground/50")} />
           </div>
-          <p class="max-w-xs text-sm text-muted-foreground">
-            {connected
-              ? "Loading server status…"
-              : "Connect to a database first, then start the MCP server."}
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center justify-between gap-3">
+              <span class="text-[13px] font-medium text-foreground">Read-only mode</span>
+              <!-- Toggle pill -->
+              <div
+                class={cn(
+                  "flex h-5 w-9 shrink-0 items-center rounded-full border px-0.5 transition-colors duration-200",
+                  readOnly
+                    ? "border-amber-500/40 bg-amber-500/20"
+                    : "border-border/40 bg-muted/30"
+                )}
+              >
+                <span
+                  class={cn(
+                    "size-3.5 rounded-full transition-transform duration-200",
+                    readOnly ? "translate-x-4 bg-amber-500" : "translate-x-0 bg-muted-foreground/40"
+                  )}
+                ></span>
+              </div>
+            </div>
+            <p class="mt-0.5 text-[12px] leading-snug text-muted-foreground/55">
+              {readOnly
+                ? 'Only SELECT queries are permitted. Write operations are blocked.'
+                : 'All SQL operations are allowed. Enable to restrict the agent to reads only.'}
+            </p>
+          </div>
+        </button>
+      </div>
+
+      <!-- ── Client cards ── -->
+      {#if status}
+        <div class="px-6 py-5">
+          <p class="mb-4 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/40">
+            Connect a client
+          </p>
+
+          <div class="flex flex-col gap-2.5">
+            <!-- Claude Desktop -->
+            <div class="flex items-center gap-4 rounded-xl border border-border/40 bg-muted/[0.07] px-4 py-3.5 transition-colors hover:bg-muted/15">
+              <div class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-orange-500/10 ring-1 ring-orange-500/20">
+                <Bot class="size-4 text-orange-500" />
+              </div>
+              <div class="min-w-0 flex-1">
+                <p class="text-[13px] font-medium text-foreground">Claude Desktop</p>
+                <p class="mt-0.5 text-[11px] text-muted-foreground/55">Paste JSON into your config file</p>
+              </div>
+              <button
+                type="button"
+                class="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border/50 bg-background px-3 py-1.5 text-[12px] font-medium text-foreground/70 transition-colors hover:bg-muted/40 hover:text-foreground"
+                onclick={() => void copy(claudeConfig, 'claude')}
+              >
+                {#if copied === 'claude'}
+                  <Check class="size-3 text-green-500" />
+                  Copied
+                {:else}
+                  <Copy class="size-3" />
+                  Copy config
+                {/if}
+              </button>
+            </div>
+
+            <!-- Cursor -->
+            <div class="flex items-center gap-4 rounded-xl border border-border/40 bg-muted/[0.07] px-4 py-3.5 transition-colors hover:bg-muted/15">
+              <div class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 ring-1 ring-blue-500/20">
+                <Wand2 class="size-4 text-blue-500" />
+              </div>
+              <div class="min-w-0 flex-1">
+                <p class="text-[13px] font-medium text-foreground">Cursor</p>
+                <p class="mt-0.5 text-[11px] text-muted-foreground/55">Install via Cursor's MCP deep link</p>
+              </div>
+              <div class="flex shrink-0 items-center gap-1.5">
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1.5 rounded-lg border border-border/50 bg-background px-3 py-1.5 text-[12px] font-medium text-foreground/70 transition-colors hover:bg-muted/40 hover:text-foreground"
+                  onclick={() => void installVia(cursorInstallUrl)}
+                >
+                  <ExternalLink class="size-3" />
+                  Add
+                </button>
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1.5 rounded-lg border border-border/40 px-2.5 py-1.5 text-[12px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
+                  onclick={() => void copy(cursorConfig, 'cursor')}
+                >
+                  {#if copied === 'cursor'}
+                    <Check class="size-3 text-green-500" />
+                  {:else}
+                    <Copy class="size-3" />
+                  {/if}
+                </button>
+              </div>
+            </div>
+
+            <!-- VS Code -->
+            <div class="flex items-center gap-4 rounded-xl border border-border/40 bg-muted/[0.07] px-4 py-3.5 transition-colors hover:bg-muted/15">
+              <div class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 ring-1 ring-sky-500/20">
+                <Code2 class="size-4 text-sky-500" />
+              </div>
+              <div class="min-w-0 flex-1">
+                <p class="text-[13px] font-medium text-foreground">VS Code</p>
+                <p class="mt-0.5 text-[11px] text-muted-foreground/55">Install via built-in MCP handler</p>
+              </div>
+              <div class="flex shrink-0 items-center gap-1.5">
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1.5 rounded-lg border border-border/50 bg-background px-3 py-1.5 text-[12px] font-medium text-foreground/70 transition-colors hover:bg-muted/40 hover:text-foreground"
+                  onclick={() => void installVia(vscodeInstallUrl)}
+                >
+                  <ExternalLink class="size-3" />
+                  VS Code
+                </button>
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1.5 rounded-lg border border-border/40 px-2.5 py-1.5 text-[12px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
+                  onclick={() => void installVia(vscodeInsidersUrl)}
+                >
+                  <ExternalLink class="size-3" />
+                  <span class="text-[11px]">Insiders</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      {:else if connected}
+        <div class="flex flex-col items-center justify-center gap-3 px-6 py-14 text-center">
+          <div class="flex size-12 items-center justify-center rounded-2xl border border-border/30 bg-muted/20">
+            <Server class="size-5 text-muted-foreground/30" />
+          </div>
+          <p class="text-[13px] text-muted-foreground/60">Loading server status…</p>
+        </div>
+      {:else}
+        <div class="flex flex-col items-center justify-center gap-3 px-6 py-14 text-center">
+          <div class="flex size-12 items-center justify-center rounded-2xl border border-border/30 bg-muted/20">
+            <Server class="size-5 text-muted-foreground/30" />
+          </div>
+          <p class="max-w-[220px] text-[13px] text-muted-foreground/60">
+            Connect to a database first, then start the MCP server.
           </p>
         </div>
       {/if}
+
     </div>
   </Dialog.Content>
 </Dialog.Root>
