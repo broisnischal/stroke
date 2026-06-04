@@ -152,12 +152,27 @@ function handleZoomKeydown(e) {
 
 /** Block Tauri webview zoom (Ctrl/Cmd + wheel) when hotkeys are enabled in the shell. */
 function handleZoomWheel(e) {
-  if (e.ctrlKey || e.metaKey) {
-    // Let mermaid diagrams handle their own Ctrl+scroll zoom
-    if (/** @type {Element} */ (e.target)?.closest?.('.mermaid-canvas')) return
-    e.preventDefault()
-    e.stopPropagation()
-  }
+  if (!(e.ctrlKey || e.metaKey)) return
+  // Let mermaid diagrams handle their own Ctrl+scroll zoom
+  if (/** @type {Element} */ (e.target)?.closest?.('.mermaid-canvas')) return
+  // Always block native webview magnification (macOS pinch / Tauri polyfill).
+  e.preventDefault()
+  // Canvas DataTable owns Ctrl/Cmd+scroll inside the grid — let that listener run.
+  if (/** @type {Element} */ (e.target)?.closest?.('[data-canvas-table]')) return
+  e.stopPropagation()
+}
+
+/**
+ * Block macOS WebKit (WKWebView) native trackpad pinch-magnification.
+ * Unlike Chromium, WebKit does NOT surface pinch as ctrl+wheel — it fires
+ * non-standard `gesture*` events and magnifies the whole page. Stray finger
+ * movement (e.g. while dragging a column resize handle) then zooms the view.
+ * @param {Event} e
+ */
+function handleZoomGesture(e) {
+  // Let mermaid diagrams handle their own gesture zoom.
+  if (/** @type {Element} */ (e.target)?.closest?.('.mermaid-canvas')) return
+  e.preventDefault()
 }
 
 /** Register Ctrl/Cmd +/-/0 zoom shortcuts (capture phase, works in inputs). */
@@ -166,6 +181,10 @@ export function installZoomShortcuts() {
   zoomListenerInstalled = true
   window.addEventListener('keydown', handleZoomKeydown, true)
   window.addEventListener('wheel', handleZoomWheel, { capture: true, passive: false })
+  // WebKit-only pinch magnification (macOS). No-op on Chromium.
+  window.addEventListener('gesturestart', handleZoomGesture, { capture: true, passive: false })
+  window.addEventListener('gesturechange', handleZoomGesture, { capture: true, passive: false })
+  window.addEventListener('gestureend', handleZoomGesture, { capture: true, passive: false })
 }
 
 /** @param {Partial<AppSettings>} patch */

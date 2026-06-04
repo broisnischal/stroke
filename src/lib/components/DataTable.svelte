@@ -2301,40 +2301,48 @@
     }
   }
 
-  // Master effect — sizes the canvas backing store (DPR-aware) and repaints.
-  // Doing both here, and never reading+writing the same signal, keeps it a pure
-  // sink: it tracks every input that affects the grid and writes no reactive
-  // state, so it can't loop.
-  $effect(() => {
-    void rows; void columns; void columnWidths
-    void pinnedColumns; void hiddenColumns; void selected; void focusedRow
-    void focusedCol; void editingCell; void pendingEdits; void expandedRows
-    void rowSort; void _scrollTop; void _scrollLeft; void _viewportWidth
-    void _viewportHeight; void hoveredRow; void hoveredColName; void _resizeHoverCol
-    void resizingColName; void newRowDrafts; void insertSaving; void colMeta
-    void geom; void rowTops; void _redrawToken; void foreignKeys; void indexes
-    void _colCache; void expandedRowHeights; void fkSubview; void virtualRelCols; void VIRTUAL_COL_W
-    // Read the zoom store directly so this effect re-runs the moment any tab changes zoom.
-    void zoomState.value; void canvasZoom
-
+  /** Size the canvas backing store (DPR-aware). Always sync CSS px size so macOS
+   *  WebKit can't display a stale CSS box over a mismatched bitmap (blurry zoom). */
+  function syncCanvasSurface() {
     const canvas = canvasEl
     const probe = colorProbe
-    if (!canvas || !probe) return
+    if (!canvas || !probe) return false
     if (!_readColor) _readColor = createColorReader(probe)
+    const cssW = Math.max(1, Math.round(_viewportWidth))
+    const cssH = Math.max(1, Math.round(_viewportHeight))
     const dpr = Math.min(window.devicePixelRatio || 1, 2)
-    const bw = Math.max(1, Math.round(_viewportWidth * dpr))
-    const bh = Math.max(1, Math.round(_viewportHeight * dpr))
+    const bw = Math.max(1, Math.round(cssW * dpr))
+    const bh = Math.max(1, Math.round(cssH * dpr))
+    canvas.style.width = cssW + 'px'
+    canvas.style.height = cssH + 'px'
     // Only touch canvas.width/height when it actually changes — assigning clears
     // the canvas, and we want to avoid a redundant clear on every repaint.
     if (canvas.width !== bw || canvas.height !== bh) {
       canvas.width = bw
       canvas.height = bh
-      canvas.style.width = _viewportWidth + 'px'
-      canvas.style.height = _viewportHeight + 'px'
     }
     _ctx = canvas.getContext('2d')
     if (_ctx) _ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    draw()
+    return !!_ctx
+  }
+
+  // Layout / sizing effect — resize the backing store when geometry or viewport changes.
+  $effect(() => {
+    void rows; void columns; void columnWidths
+    void pinnedColumns; void hiddenColumns; void selected; void focusedRow
+    void focusedCol; void editingCell; void pendingEdits; void expandedRows
+    void rowSort; void _scrollTop; void _scrollLeft; void _viewportWidth
+    void _viewportHeight; void newRowDrafts; void insertSaving; void colMeta
+    void geom; void rowTops; void _redrawToken; void foreignKeys; void indexes
+    void _colCache; void expandedRowHeights; void fkSubview; void virtualRelCols; void VIRTUAL_COL_W
+    void zoomState.value; void canvasZoom
+    if (syncCanvasSurface()) draw()
+  })
+
+  // Hover / affordance repaint — pointer moves must not re-touch canvas dimensions.
+  $effect(() => {
+    void hoveredRow; void hoveredColName; void _resizeHoverCol; void resizingColName
+    if (_ctx) draw()
   })
 
   // ── Canvas pointer interaction ──────────────────────────────────────────
@@ -2575,17 +2583,21 @@
   // Ctrl/Cmd+Scroll → zoom the canvas. Must use { passive: false } so preventDefault
   // works — Svelte's onwheel directive registers a passive listener by default which
   // can't call preventDefault, causing the browser to intercept the event first.
+  // Capture phase so we run after the window-level webview guard (preventDefault only)
+  // but before the browser applies native magnification.
   $effect(() => {
     const el = tableContainer
     if (!el) return
     function onWheel(/** @type {WheelEvent} */ e) {
       if (!e.ctrlKey && !e.metaKey) return
+      // Trackpad pinch / scroll while grabbing a column edge is not zoom intent.
+      if (resizingColName || _resizeHoverCol) return
       e.preventDefault()
       e.stopPropagation()
       adjustZoom(e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP)
     }
-    el.addEventListener('wheel', onWheel, { passive: false })
-    return () => el.removeEventListener('wheel', onWheel)
+    el.addEventListener('wheel', onWheel, { capture: true, passive: false })
+    return () => el.removeEventListener('wheel', onWheel, { capture: true })
   })
 
   function onCanvasContextMenu(/** @type {MouseEvent} */ e, /** @type {((e: MouseEvent) => void) | undefined} */ bitsOpen) {
@@ -2652,6 +2664,7 @@
         <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
         <div
           bind:this={tableContainer}
+          data-canvas-table=""
           {...props}
           tabindex={-1}
           class={cn(
