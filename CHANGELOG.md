@@ -4,6 +4,63 @@ All notable changes to DB Studio are listed here, newest first.
 
 ---
 
+## [0.3.4] - 2026-06-04
+
+### New Features
+
+#### Canvas Table
+- **Canvas zoom** — `Ctrl/Cmd + Scroll` or `Ctrl/Cmd + =/-/0` zooms the entire table (rows, fonts, columns) proportionally; zoom level is shared across all open tabs and persisted to `localStorage`
+- **FK inline sub-view** — clicking a foreign-key cell opens a compact panel below the row showing the referenced record(s); `Ctrl/Cmd + click` navigates to the full table; `Esc` closes
+- **Reverse FK relationship columns** — tables that reference the current table appear as pill-badge columns on the right; clicking a badge shows related rows in the inline panel (max 5 columns, deduplicated by `fromTable`)
+- **Per-tab expand state** — JSON expand rows and FK sub-view state are saved per table tab and restored when switching back; different tables start with their own clean slate
+- **Shift + scroll for horizontal** — default mouse wheel scrolls vertically; Shift + scroll moves the table horizontally, preventing accidental horizontal hijack on wide tables
+- **`Ctrl/Cmd + T` clears table search** — when viewing a table tab, this shortcut clears and focuses the row search input
+- **Go-to-top / bottom buttons** always visible in the status bar when on a table tab
+
+#### SQL Editor
+- **Ctrl/Cmd + Enter runs query from first keystroke** — uses a document-level `capture` listener so it fires even before the editor is clicked into; also works from the very first open without clicking Run first
+- **Auto-focus on tab open** — the SQL editor receives focus automatically whenever the SQL tab becomes active
+
+#### SQL Console
+- **Export results** — `CSV` and `JSON` download buttons appear in the result toolbar when a query returns data
+- **0-row results hidden** — when a query returns 0 rows, no result card is added to the AI chat; the AI still knows the result was empty
+
+#### MCP Server
+- **Read-only mode** — toggle in the MCP dialog restricts the agent to `SELECT`-only queries; `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, and other write operations are rejected at the server level with a clear error; setting is persisted and synced to the Rust backend live
+- **MCP panel revamp** — redesigned in the Linear/Resend/Raycast style: compact list rows instead of large cards, inline Start/Stop button, amber-accented read-only toggle, theme-aware borders throughout
+
+#### AI Chat
+- **Image rendering removed** — database columns containing image URLs no longer trigger dozens of simultaneous network requests; images are replaced with compact link chips (`filename.ext`) that open on click; resolves major performance lag on tables with image URL columns
+- **Schema/describe results hidden** — internal AI tool calls (`describe_table`, `get_schema`) no longer show result cards in the chat; the AI still receives the data and answers correctly but the intermediate steps stay invisible
+- **Inline code chip styling** — column name chips (`created_at`, `user_id`) are more polished: 5px radius, proper padding, `Geist Mono` font, `white-space: nowrap`
+- **AI chat table styling** — uppercase small-caps headers, hover-highlight rows (replaces static zebra striping), 8px border-radius with `overflow: hidden` clipping
+- **Input textarea** — replaced hardcoded `#3a3a3a` border with `var(--border)` tokens; `focus-within` ring; `font-family: inherit` ensures Inter is used for typed text
+- **AI chart save preserves spec** — AI-generated charts (including `meter` and `choropleth` types that don't use ECharts) now save the full `aiSpec` so previews render correctly in Charts and Dashboard pages
+
+### Bug Fixes
+- Fixed `onCanvasPointerLeave` missing after tooltip removal — hover state now clears correctly on mouse leave
+- Fixed `cy` variable not defined in virtual column badge drawing — was causing a `ReferenceError` silently
+- Fixed `run` not in scope in `docRunHandler` — `Ctrl+Enter` in SQL editor would silently fail with `ReferenceError` instead of running the query
+- Fixed connection pool exhaustion — reverse FK relationships are now cached per `schema.table` and loaded only once, not on every page/sort/filter reload
+- Fixed `canvasZoom` not live-updating open tabs — replaced local `$state` with a module-level `$state` store so all DataTable instances react immediately; also fixed passive wheel listener that prevented `preventDefault`
+- Fixed `Cmd+K` command palette search persisting between opens — `paletteSearch` is now cleared when the dialog closes
+- Fixed FK sub-view "Open in sub view" not navigating for reverse FK — now correctly passes `reverseRel` info to `handleFollowForeignKey` and navigates to the referencing table with filters applied
+- Fixed virtual relationship column width too narrow — minimum raised to 300px with conservative `10px/char` estimate; eliminates `cart_it...` truncation
+- Fixed row lines not extending into virtual columns — bottom grid line now draws to full `_viewportWidth` and is painted after cell fills so it stays on top
+- Fixed FK sub-view panel position — panel now anchors to viewport left edge using `transform: translateX(_scrollLeft)` (GPU-composited, no layout thrashing) regardless of horizontal scroll
+- Fixed FK sub-view lag on open — replaced debounced `ResizeObserver` height chain with zero-cost overlay (panel doesn't push rows down, no `rowTops` recomputation)
+- Fixed horizontal scroll hijack in FK sub-view — only horizontal `wheel` events are stopped from propagating; vertical scroll always passes through to the main table
+
+### Changes
+- Removed column collapse (drag-to-hide) — columns now have a hard 48px minimum width instead of snapping to a 12px strip
+- Removed hover tooltips on canvas cells — eliminated the 450ms `setTimeout` loop that was firing on every mouse move at 120Hz
+- Not-null dot badge removed from column headers — was visually indistinguishable from the `·` type separator and caused confusion
+- FK sub-view and JSON expand are mutually exclusive per row — opening one closes the other
+- Ctrl+T in table view clears search instead of opening the command palette tables page (the command palette shortcut is unchanged from other views)
+- `prose-ai` table rows use hover highlight instead of static even/odd zebra striping for a cleaner look
+
+---
+
 ## [0.3.3] - 2026-06-04
 
 ### New Features
