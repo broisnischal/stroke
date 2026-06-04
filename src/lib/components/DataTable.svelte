@@ -69,6 +69,7 @@
   import { cellLinkHref, cellUrlType } from "$lib/cell-display.js";
   import MediaLightbox from "./MediaLightbox.svelte";
   import RowExpandViewer from "./RowExpandViewer.svelte";
+  import FkSubviewPanel from "./FkSubviewPanel.svelte";
   import JsonCellLightbox from "./JsonCellLightbox.svelte";
   import CellQuickLook from "./CellQuickLook.svelte";
   import Maximize2 from "@lucide/svelte/icons/maximize-2";
@@ -154,6 +155,14 @@
     onfiltercolumn = /** @type {(colName: string) => void} */ (() => {}),
     /** Called when user picks "Hide column" from the column header context menu. */
     onhidecolumn = /** @type {(colName: string) => void} */ (() => {}),
+    /**
+     * Reverse FK relationships (tables that reference this table).
+     * Rendered as virtual badge columns at the right.
+     * @type {Array<{ fromSchema:string, fromTable:string, fromColumns:string[], toColumns:string[], constraintName:string }>}
+     */
+    incomingForeignKeys = [],
+    /** Fetch related rows for an inline FK sub-view. Returns { columns, rows, error? }. */
+    onfetchrelatedrows = /** @type {(detail: any) => Promise<{ columns: any[], rows: any[], error?: string }>} */ (async () => ({ columns: [], rows: [] })),
     /** Called when the user confirms the new row draft. Receives the validated values. */
     oninsertrow = /** @type {(values: Record<string, unknown>) => Promise<void>} */ (async () => {}),
     /** True while the insert is in flight — disables the draft row inputs. */
@@ -187,6 +196,12 @@
    * @type {QuickLookCell | null}
    */
   let quickLookCell = $state(null);
+
+  /**
+   * Currently open FK sub-view (forward or reverse), or null.
+   * @type {{ rowIdx:number, kind:'forward'|'reverse', label:string, data:{ loading:boolean, columns:any[], rows:any[], error:string|null } } | null}
+   */
+  let fkSubview = $state(null)
 
   let contextRowIdx = $state(0);
   let contextColIdx = $state(0);
@@ -284,15 +299,22 @@
    * @param {number} rowIdx
    */
   function trackExpandHeight(node, rowIdx) {
-    const ro = new ResizeObserver(() => {
+    // Debounce height updates so rapid changes (toolbar → loaded content) collapse
+    // into a single reactive write, avoiding a double layout-shift.
+    let timer = 0
+    const commit = () => {
       const h = node.offsetHeight
-      if (h > 0 && expandedRowHeights.get(rowIdx) !== h) {
+      // Ignore tiny heights that just reflect the loading/toolbar-only state —
+      // keep the current allocation until real content settles.
+      if (h >= 48 && expandedRowHeights.get(rowIdx) !== h) {
         expandedRowHeights = new Map(expandedRowHeights).set(rowIdx, h)
       }
-    })
+    }
+    const ro = new ResizeObserver(() => { clearTimeout(timer); timer = setTimeout(commit, 40) })
     ro.observe(node)
     return {
       destroy() {
+        clearTimeout(timer)
         ro.disconnect()
         const next = new Map(expandedRowHeights)
         next.delete(rowIdx)
@@ -1123,12 +1145,17 @@
   /** @param {number} rowIdx */
   function toggleRowExpand(rowIdx) {
     const next = new Set(expandedRows);
-    if (next.has(rowIdx)) next.delete(rowIdx);
-    else next.add(rowIdx);
+    if (next.has(rowIdx)) {
+      next.delete(rowIdx);
+    } else {
+      next.add(rowIdx);
+      // Opening JSON expand: close FK sub-view for the same row (mutually exclusive)
+      if (fkSubview?.rowIdx === rowIdx) fkSubview = null
+    }
     expandedRows = next;
   }
 
-  /** Collapse every expanded JSON row at once. */
+  /** Collapse every expanded row at once. */
   function collapseAllRows() {
     if (expandedRows.size === 0) return;
     expandedRows = new Set();
@@ -1140,6 +1167,31 @@
   const visibleColumns = $derived(
     columns.filter((c) => !hiddenColumns.has(c.name)),
   );
+
+  // ── Virtual relationship columns (reverse FK / one-to-many) ─────────────────
+  // One per unique fromTable, max 8. Shown as badge columns to the right of real data.
+  const MAX_VIRTUAL_COLS = 5
+  // Width adapts to the longest label (7px/char estimate + padding), clamped 110–180px
+  const VIRTUAL_COL_W = $derived.by(() => {
+    if (!virtualRelCols.length) return 130
+    const maxChars = Math.max(...virtualRelCols.map(v => v.label.length))
+    return Math.min(180, Math.max(110, maxChars * 7 + 32))
+  })
+  const virtualRelCols = $derived.by(() => {
+    if (!incomingForeignKeys.length) return /** @type {typeof incomingForeignKeys} */ ([])
+    const seen = new Set()
+    const result = []
+    for (const fk of incomingForeignKeys) {
+      if (seen.has(fk.fromTable)) continue
+      seen.add(fk.fromTable)
+      result.push({ ...fk, label: (fk.fromSchema && fk.fromSchema !== schema) ? `${fk.fromSchema}.${fk.fromTable}` : fk.fromTable })
+      if (result.length >= MAX_VIRTUAL_COLS) break
+    }
+    return result
+  })
+  // Total scrollable width includes virtual rel columns
+  const totalContentWidth = $derived(geom.totalWidth + virtualRelCols.length * VIRTUAL_COL_W)
+
   // +1 for the trailing auto-width spacer column (keeps real columns stable).
   const dataColSpan = $derived(visibleColumns.length + 1);
   const totalColSpan = $derived(
@@ -1171,7 +1223,48 @@
       gutterWidth,
     }),
   )
-  const rowTops = $derived(computeRowTops(rows.length, expandedRows, 320, ROW_HEIGHT, expandedRowHeights))
+  // FK sub-view is independent of JSON expand — tracks its own height directly.
+  /** Measured height of the currently open FK sub-view panel in px. */
+  let fkSubviewHeight = $state(0)
+
+  /**
+   * Svelte action: measures the FK panel height into `fkSubviewHeight` directly.
+   * Uses rAF (no debounce) so height is accurate immediately after content loads.
+   */
+  function trackFkPanelHeight(node) {
+    let rafId = 0
+    const measure = () => {
+      const h = node.offsetHeight
+      if (h > 0 && h !== fkSubviewHeight) fkSubviewHeight = h
+    }
+    const ro = new ResizeObserver(() => {
+      cancelAnimationFrame(rafId)
+      rafId = requestAnimationFrame(measure)
+    })
+    ro.observe(node)
+    measure()
+    return {
+      destroy() {
+        cancelAnimationFrame(rafId)
+        ro.disconnect()
+        fkSubviewHeight = 0
+      },
+    }
+  }
+
+  const _allExpandedForLayout = $derived.by(() => {
+    const s = new Set(expandedRows)
+    if (fkSubview !== null) s.add(fkSubview.rowIdx)
+    return s
+  })
+  // Merged heights: JSON heights + live FK height
+  const _mergedHeights = $derived.by(() => {
+    if (fkSubview === null || fkSubviewHeight === 0) return expandedRowHeights
+    const merged = new Map(expandedRowHeights)
+    merged.set(fkSubview.rowIdx, fkSubviewHeight)
+    return merged
+  })
+  const rowTops = $derived(computeRowTops(rows.length, _allExpandedForLayout, 320, ROW_HEIGHT, _mergedHeights))
   /** Total scrollable content height incl. header + insert slot + body. */
   const contentHeight = $derived(HEADER_H + insertRowOffset + (rowTops[rows.length] ?? 0))
 
@@ -1201,6 +1294,7 @@
     untrack(() => {
       _scrollTop = 0
       if (tableContainer && tableContainer.scrollTop !== 0) tableContainer.scrollTop = 0
+      fkSubview = null
     })
   })
 
@@ -1377,13 +1471,36 @@
     if (columnWidthsKey) saveColumnWidths(columnWidthsKey, columnWidths)
   }
 
-  // Reset focus and undo history when the displayed table changes.
+  // ── Per-tab expand/sub-view state preservation ───────────────────────────────
+  // Expand rows and FK sub-view are saved per columnWidthsKey so switching tabs
+  // restores exactly what the user had open in each table.
+  /** @type {Map<string, { expandedRows: Set<number>, fkSubview: typeof fkSubview }>} */
+  const _tabExpandCache = new Map()
+  let _lastTabKey = columnWidthsKey ?? ''
+
   $effect(() => {
-    void columnWidthsKey;
-    focusedRow = null;
-    focusedCol = null;
-    pastEdits = [];
-    futureEdits = [];
+    const newKey = columnWidthsKey ?? ''
+    if (newKey === _lastTabKey) return
+    untrack(() => {
+      // Save state for the tab we're leaving
+      if (_lastTabKey !== undefined && _lastTabKey !== '') {
+        _tabExpandCache.set(_lastTabKey, {
+          expandedRows: new Set(expandedRows),
+          fkSubview: fkSubview,
+        })
+      }
+      // Restore state for the tab we're entering (fresh Set/null if first visit)
+      const saved = _tabExpandCache.get(newKey)
+      expandedRows = saved ? new Set(saved.expandedRows) : new Set()
+      fkSubview = saved?.fkSubview ?? null
+      fkSubviewHeight = 0
+      // Always reset non-content states
+      focusedRow = null
+      focusedCol = null
+      pastEdits = []
+      futureEdits = []
+      _lastTabKey = newKey
+    })
   });
 
   // Drop staged edits when the table changes or rows are reordered (sort),
@@ -1698,9 +1815,9 @@
 
   /** Right-aligned hover-button rects for a cell (viewport coords). */
   function cellButtonRects(cellX, w, ry, rh, { canExpand }) {
-    const right = cellX + w
+    const right = cellX + w - 4  // 4px right margin
     const cy = ry + rh / 2
-    const copy = { x: right - 4 - ICON_HIT, y: ry, w: ICON_HIT, h: rh, cx: right - 4 - ICON_HIT / 2, cy }
+    const copy = { x: right - ICON_HIT, y: ry, w: ICON_HIT, h: rh, cx: right - ICON_HIT / 2, cy }
     const quick = canExpand
       ? { x: copy.x - ICON_HIT, y: ry, w: ICON_HIT, h: rh, cx: copy.x - ICON_HIT / 2, cy }
       : null
@@ -1816,11 +1933,49 @@
     ctx.moveTo(0, ry + rh - 0.5)
     ctx.lineTo(c.usedW, ry + rh - 0.5)
     ctx.stroke()
+
+    // ── Virtual relationship column cells ─────────────────────────────────────
+    for (let vi = 0; vi < virtualRelCols.length; vi++) {
+      const vc = virtualRelCols[vi]
+      const cellX = geom.totalWidth + vi * VIRTUAL_COL_W - _scrollLeft
+      if (cellX + VIRTUAL_COL_W <= 0 || cellX >= _viewportWidth) continue
+      ctx.fillStyle = c.cPanel; ctx.fillRect(cellX, ry, VIRTUAL_COL_W, rh)
+      const isActive = fkSubview?.rowIdx === idx && fkSubview?.kind === 'reverse' && fkSubview?.label === vc.label
+      const isVHov = hoveredRow === idx && hoveredColName === `__vrel__${vi}`
+      if (isActive) { ctx.fillStyle = withAlpha(c.cPrimary, 0.07); ctx.fillRect(cellX, ry, VIRTUAL_COL_W, rh) }
+      // Pill badge — centered, pill radius, border ring (matches Image #14)
+      if (!_fonts) return
+      const bH = 20, bPadX = 10, bR = 10  // pill shape
+      ctx.font = `500 12px ${_fonts.family}`
+      const labelTxt = truncText(ctx, vc.label, VIRTUAL_COL_W - 24)
+      const bW = Math.min(ctx.measureText(labelTxt).width + bPadX * 2, VIRTUAL_COL_W - 14)
+      const bX = cellX + (VIRTUAL_COL_W - bW) / 2  // centered
+      const bY = ry + (rh - bH) / 2
+      // Fill
+      ctx.fillStyle = isActive
+        ? withAlpha(c.cPrimary, 0.18)
+        : isVHov
+          ? withAlpha(c.cMutedBg, 0.5)
+          : withAlpha(c.cMutedBg, 0.3)
+      roundRect(ctx, bX, bY, bW, bH, bR); ctx.fill()
+      // Border ring
+      ctx.strokeStyle = isActive ? withAlpha(c.cPrimary, 0.6) : withAlpha(c.cMuted, 0.3)
+      ctx.lineWidth = 1
+      roundRect(ctx, bX + 0.5, bY + 0.5, bW - 1, bH - 1, bR); ctx.stroke()
+      // Label — centered
+      ctx.fillStyle = isActive ? c.cPrimary : withAlpha(c.cFg, 0.7)
+      ctx.textBaseline = 'middle'; ctx.textAlign = 'center'
+      ctx.fillText(labelTxt, bX + bW / 2, ry + rh / 2 + 0.5)
+      // Right border
+      ctx.strokeStyle = c.cGrid; ctx.lineWidth = 1
+      ctx.beginPath(); ctx.moveTo(cellX + VIRTUAL_COL_W - 0.5, ry); ctx.lineTo(cellX + VIRTUAL_COL_W - 0.5, ry + rh); ctx.stroke()
+    }
   }
 
   /** @param {CanvasRenderingContext2D} ctx */
   function drawCell(ctx, idx, col, cellX, ry, rh, c, pinned = false) {
     const w = col.w
+
     const actualIdx = _nameToActualIdx.get(col.name) ?? -1
     const cached = _colCache[actualIdx]
 
@@ -1869,24 +2024,46 @@
       : isNull ? c.cMuted
       : c.cText
     const text = displayCell(value)
-    ctx.font = _fonts.cell
-    ctx.fillStyle = textColor
     const rowHover = hoveredRow === idx
     const isHover = rowHover && hoveredColName === col.name
     const canExpand = (cached?.canEdit ?? false) && !cached?.enumValues && !isBooleanType(cached?.colType ?? '')
-    // Reserve room on the right for hover buttons / fk icon / json pill.
-    let rightReserve = 0
-    if (isHover) rightReserve += ICON_HIT + (canExpand ? ICON_HIT : 0)
-    if (activeFk && rowHover) rightReserve += 18
-    const textMaxW = w - CELL_PAD_X * 2 - rightReserve
-    const shown = truncText(ctx, text, textMaxW)
-    ctx.textAlign = 'left'
-    ctx.fillText(shown, cellX + CELL_PAD_X, ry + rh / 2 + 0.5)
 
-    // JSON pill indicator.
+    // Right-side content widths (sequential, no overlap).
+    const hoverW = isHover ? ICON_HIT + (canExpand ? ICON_HIT : 0) : 0
+    const fkW = (activeFk && rowHover) ? 20 : 0
+    const jsonW = isJson ? 36 : 0
+    const rightReserve = 4 + hoverW + fkW + jsonW  // 4 = right margin
+    const textMaxW = w - CELL_PAD_X * 2 - rightReserve
+
+    ctx.font = _fonts.cell
+    ctx.fillStyle = textColor
+    ctx.textAlign = 'left'
+    ctx.fillText(truncText(ctx, text, Math.max(0, textMaxW)), cellX + CELL_PAD_X, ry + rh / 2 + 0.5)
+
+    // Draw right-side items right-to-left with a running cursor.
+    const cy = ry + rh / 2
+    let rx = cellX + w - 4  // 4px right margin
+
+    // 1. Hover buttons (rightmost when hovering the cell).
+    if (isHover) {
+      drawIcon(ctx, 'copy', rx - ICON_HIT + 5, cy - 7, 14, c.cMuted, 1.8)
+      rx -= ICON_HIT
+      if (canExpand) {
+        drawIcon(ctx, 'maximize-2', rx - ICON_HIT + 5, cy - 7, 14, c.cMuted, 1.8)
+        rx -= ICON_HIT
+      }
+    }
+
+    // 2. FK external-link icon (row hover only).
+    if (activeFk && rowHover) {
+      drawIcon(ctx, 'external-link', rx - 16, cy - 6, 12, withAlpha(c.cRing, 0.9), 2)
+      rx -= 20
+    }
+
+    // 3. JSON pill.
     if (isJson) {
       const pillW = 30, pillH = 13
-      const px = cellX + w - CELL_PAD_X - pillW - (isHover ? ICON_HIT : 0)
+      const px = rx - 2 - pillW
       const py = ry + (rh - pillH) / 2
       ctx.fillStyle = withAlpha(c.cMutedBg, 0.5)
       roundRect(ctx, px, py, pillW, pillH, 2.5); ctx.fill()
@@ -1897,23 +2074,11 @@
       drawIcon(ctx, 'braces', px + 1.5, py + 2.5, 8, c.cMuted, 2.2)
     }
 
-    // FK external-link icon — only on row hover (keeps the grid uncluttered).
-    if (activeFk && rowHover) {
-      drawIcon(ctx, 'external-link', cellX + w - CELL_PAD_X - 13 - (isHover ? ICON_HIT : 0), ry + rh / 2 - 6, 12, withAlpha(c.cRing, 0.9), 2)
-    }
-
     // Focused-cell outline — bright primary border.
     if (isFocusedCell) {
       ctx.strokeStyle = withAlpha(c.cPrimary, 0.85)
       ctx.lineWidth = 2
       ctx.strokeRect(cellX + 1, ry + 1, w - 2, rh - 2)
-    }
-
-    // Hover buttons (copy + quick look).
-    if (isHover) {
-      const { copy, quick } = cellButtonRects(cellX, w, ry, rh, { canExpand })
-      drawIcon(ctx, 'copy', copy.cx - 7, copy.cy - 7, 14, c.cMuted, 1.8)
-      if (quick) drawIcon(ctx, 'maximize-2', quick.cx - 7, quick.cy - 7, 14, c.cMuted, 1.8)
     }
   }
 
@@ -1924,7 +2089,7 @@
     ctx.fillRect(offsetX, ry, gutterWidth, rh)
     let gx = offsetX
     if (showRowExpand) {
-      const expanded = expandedRows.has(idx)
+      const expanded = expandedRows.has(idx) || fkSubview?.rowIdx === idx
       const hov = hoveredRow === idx
       if (expanded || hov) {
         drawIcon(ctx, expanded ? 'chevron-down' : 'chevron-right',
@@ -1986,6 +2151,24 @@
       ctx.beginPath(); ctx.moveTo(gx0 + gutterWidth - 0.5, 0); ctx.lineTo(gx0 + gutterWidth - 0.5, HEADER_H); ctx.stroke()
     }
 
+    // Virtual relationship column headers
+    for (let vi = 0; vi < virtualRelCols.length; vi++) {
+      const vc = virtualRelCols[vi]
+      const x = geom.totalWidth + vi * VIRTUAL_COL_W - _scrollLeft
+      if (x + VIRTUAL_COL_W <= 0 || x >= c.W) continue
+      if (vi === 0) {
+        ctx.fillStyle = withAlpha(c.cMutedBg, 0.1); ctx.fillRect(x, 0, VIRTUAL_COL_W, HEADER_H)
+        ctx.strokeStyle = withAlpha(c.cPrimary, 0.25); ctx.lineWidth = 2
+        ctx.beginPath(); ctx.moveTo(x + 1, 4); ctx.lineTo(x + 1, HEADER_H - 4); ctx.stroke()
+      }
+      ctx.strokeStyle = c.cGrid; ctx.lineWidth = 1
+      ctx.beginPath(); ctx.moveTo(x + VIRTUAL_COL_W - 0.5, 0); ctx.lineTo(x + VIRTUAL_COL_W - 0.5, HEADER_H); ctx.stroke()
+      if (!_fonts) continue
+      ctx.font = _fonts.header; ctx.fillStyle = withAlpha(c.cMuted, 0.6)
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
+      ctx.fillText(truncText(ctx, vc.label, VIRTUAL_COL_W - CELL_PAD_X * 2), x + CELL_PAD_X, HEADER_H / 2 + 0.5)
+    }
+
     // Header bottom border.
     ctx.strokeStyle = c.cBorder
     ctx.lineWidth = 1
@@ -1995,6 +2178,7 @@
   /** @param {CanvasRenderingContext2D} ctx */
   function drawHeaderCell(ctx, col, x, c) {
     const w = col.w
+
     const sorted = rowSort?.column === col.name
 
     // Pinned headers are painted on top of scrolled columns — give them an opaque
@@ -2083,7 +2267,7 @@
     void _viewportHeight; void hoveredRow; void hoveredColName; void _resizeHoverCol
     void resizingColName; void newRowDrafts; void insertSaving; void colMeta
     void geom; void rowTops; void _redrawToken; void foreignKeys; void indexes
-    void _colCache; void expandedRowHeights
+    void _colCache; void expandedRowHeights; void fkSubview; void fkSubviewHeight; void virtualRelCols; void _allExpandedForLayout
 
     const canvas = canvasEl
     const probe = colorProbe
@@ -2146,6 +2330,38 @@
     if (e.button !== 0) return
     if (_suppressNextClick) { _suppressNextClick = false; return }
     const { x, y } = canvasXY(e)
+
+    // Check virtual relationship column clicks (right of real columns)
+    if (y >= HEADER_H && virtualRelCols.length > 0) {
+      const cx = x + _scrollLeft
+      const vOffset = cx - geom.totalWidth
+      if (vOffset >= 0) {
+        const vi = Math.floor(vOffset / VIRTUAL_COL_W)
+        if (vi >= 0 && vi < virtualRelCols.length) {
+          const vc = virtualRelCols[vi]
+          const bodyY = y + _scrollTop - HEADER_H - insertRowOffset
+          const r = rowAtContentY(rowTops, rows.length, ROW_HEIGHT, bodyY)
+          if (!r?.inRowBody) return
+          const rowIdx = r.idx
+          const row = rows[rowIdx] ?? []
+          // Toggle: same cell closes
+          if (fkSubview?.rowIdx === rowIdx && fkSubview?.kind === 'reverse' && fkSubview?.label === vc.label) {
+            fkSubview = null
+            return
+          }
+          // Opening FK sub-view: close JSON expand for the same row (mutually exclusive)
+          if (expandedRows.has(rowIdx)) { const s = new Set(expandedRows); s.delete(rowIdx); expandedRows = s }
+          fkSubview = { rowIdx, kind: 'reverse', label: vc.label, data: { loading: true, columns: [], rows: [], error: null } }
+          scrollRowIntoView(rowIdx)
+          void onfetchrelatedrows({ kind: 'reverse', fromSchema: vc.fromSchema, fromTable: vc.fromTable, fromColumns: vc.fromColumns, toColumns: vc.toColumns, row }).then(res => {
+            if (fkSubview?.rowIdx !== rowIdx || fkSubview?.label !== vc.label) return
+            fkSubview = { ...fkSubview, data: { loading: false, columns: res.columns ?? [], rows: res.rows ?? [], error: res.error ?? null } }
+          })
+          return
+        }
+      }
+    }
+
     const t = hitTest(x, y)
     switch (t.kind) {
       case 'header-expand-all': collapseAllRows(); return
@@ -2160,6 +2376,7 @@
       case 'cell': {
         const idx = /** @type {number} */ (t.idx)
         const actualIdx = /** @type {number} */ (t.actualIdx)
+
         if (editingCell) cancelEdit()
         focusedRow = idx
         const vi = actualToVisColIdx(actualIdx)
@@ -2181,9 +2398,32 @@
           openQuickLook(idx, actualIdx); return
         }
         if (isJson) { openJsonLightbox(value, t.col.name, e); return }
-        if (tryFollowForeignKey(idx, actualIdx, e, { requireModifier: true })) return
-        // URL cell → open like the old anchor.
+
+        // Forward FK: Ctrl/Cmd = full navigation; plain click = inline sub-view
         const fk = cached?.fk ?? null
+        if (fk && !isNull) {
+          if (e.metaKey || e.ctrlKey) {
+            tryFollowForeignKey(idx, actualIdx, e)
+            return
+          }
+          const fkLbl = foreignKeyTargetLabel(fk)
+          if (fkSubview?.rowIdx === idx && fkSubview?.kind === 'forward' && fkSubview?.label === fkLbl) {
+            fkSubview = null
+            return
+          }
+          // Opening FK sub-view: close JSON expand for the same row (mutually exclusive)
+          if (expandedRows.has(idx)) { const s = new Set(expandedRows); s.delete(idx); expandedRows = s }
+          fkSubview = { rowIdx: idx, kind: 'forward', label: fkLbl, colIdx: actualIdx, data: { loading: true, columns: [], rows: [], error: null } }
+          scrollRowIntoView(idx)
+          void onfetchrelatedrows({ kind: 'forward', fk, row: rows[idx] ?? [] }).then(res => {
+            if (fkSubview?.rowIdx !== idx || fkSubview?.label !== fkLbl) return
+            fkSubview = { ...fkSubview, data: { loading: false, columns: res.columns ?? [], rows: res.rows ?? [], error: res.error ?? null } }
+          })
+          tableContainer?.focus({ preventScroll: true })
+          return
+        }
+
+        // URL cell → open like the old anchor.
         if (!fk) {
           const href = cellLinkHref(formatCell(value))
           if (href) {
@@ -2253,6 +2493,20 @@
       return
     }
     _resizeHoverCol = null
+    // Check virtual rel columns first (they are to the right of real columns)
+    if (y >= HEADER_H && virtualRelCols.length > 0) {
+      const cx = x + _scrollLeft
+      const vOffset = cx - geom.totalWidth
+      if (vOffset >= 0) {
+        const vi = Math.floor(vOffset / VIRTUAL_COL_W)
+        if (vi >= 0 && vi < virtualRelCols.length) {
+          const bodyY = y + _scrollTop - HEADER_H - insertRowOffset
+          const r = rowAtContentY(rowTops, rows.length, ROW_HEIGHT, bodyY)
+          if (r?.inRowBody) { hoveredRow = r.idx; hoveredColName = `__vrel__${vi}` }
+          return
+        }
+      }
+    }
     const t = hitTest(x, y)
     if (t.kind === 'cell') {
       hoveredRow = /** @type {number} */ (t.idx)
@@ -2264,6 +2518,12 @@
   }
 
   /** Right-click: record the target so the single ContextMenu shows the right items. */
+  function onCanvasPointerLeave() {
+    hoveredRow = null
+    hoveredColName = null
+    _resizeHoverCol = null
+  }
+
   function onCanvasContextMenu(/** @type {MouseEvent} */ e, /** @type {((e: MouseEvent) => void) | undefined} */ bitsOpen) {
     const { x, y } = canvasXY(e)
     const t = hitTest(x, y)
@@ -2377,7 +2637,7 @@
                  within it in content coordinates. -->
             <div
               class="relative"
-              style="width:{geom.totalWidth}px; height:{contentHeight}px"
+              style="width:{totalContentWidth}px; height:{contentHeight}px"
             >
               <!-- Inline insert-row form -->
               {#if newRowDrafts}
@@ -2495,21 +2755,38 @@
                 </div>
               {/if}
 
-              <!-- Expanded JSON detail panels — height is measured and fed back to rowTops -->
+              <!-- JSON expand panels (independent from FK sub-view) -->
               {#each [...expandedRows] as exIdx (exIdx)}
-                {#if rows[exIdx]}
+                {#if rows[exIdx] !== undefined}
                   <div
                     class="absolute z-10"
                     style="top:{rowDocTop(exIdx) + ROW_HEIGHT}px; left:{gutterWidth}px; width:{Math.max(geom.totalWidth - gutterWidth, _viewportWidth - gutterWidth)}px"
                     use:trackExpandHeight={exIdx}
                   >
-                    <RowExpandViewer
-                      record={rowToRecord(columns, rows[exIdx])}
-                      rowLabel={"row " + (exIdx + 1)}
-                    />
+                    <RowExpandViewer record={rowToRecord(columns, rows[exIdx])} rowLabel={"row " + (exIdx + 1)} />
                   </div>
                 {/if}
               {/each}
+
+              <!-- FK sub-view panel — spans full viewport width (including gutter area).
+                   Only horizontal wheel events are stopped so the main table can still
+                   scroll vertically when the pointer is over the sub-view. -->
+              {#if fkSubview !== null && rows[fkSubview.rowIdx] !== undefined}
+                {@const fkIdx = fkSubview.rowIdx}
+                <div
+                  class="absolute z-20"
+                  style="top:{rowDocTop(fkIdx) + ROW_HEIGHT}px; left:{_scrollLeft}px; width:{_viewportWidth}px"
+                  use:trackFkPanelHeight
+                  onwheel={(e) => { if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) e.stopPropagation() }}
+                >
+                  <FkSubviewPanel
+                    data={fkSubview.data}
+                    fkLabel={fkSubview.label}
+                    onclose={() => { fkSubview = null }}
+                    onfullview={() => onfollowforeignkey({ rowIdx: fkIdx, colIdx: fkSubview?.colIdx ?? 0 })}
+                  />
+                </div>
+              {/if}
 
               <!-- Active inline cell editor -->
               {#if editingCell && editOverlay}

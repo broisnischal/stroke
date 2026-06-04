@@ -135,6 +135,7 @@ pub fn run() {
             commands::pg_list_tables,
             commands::pg_list_indexes,
             commands::pg_get_table_column_structure,
+            commands::pg_get_incoming_foreign_keys,
             commands::pg_list_enums,
             commands::pg_list_triggers,
             commands::pg_list_sequences,

@@ -63,7 +63,7 @@
     const source = displayText
     const theme = appTheme
     if (source.length > HIGHLIGHT_LIMIT) {
-      html = `<pre class="m-0 p-0 font-mono text-[11px] leading-[1.55] whitespace-pre text-foreground">${escapeHtml(source)}</pre>`
+      html = `<pre class="m-0 p-0 font-mono text-sm leading-relaxed whitespace-pre text-foreground">${escapeHtml(source)}</pre>`
       return
     }
     let cancelled = false
@@ -71,7 +71,7 @@
       .then((result) => { if (!cancelled) html = result })
       .catch(() => {
         if (!cancelled)
-          html = `<pre class="m-0 p-0 font-mono text-[11px] leading-[1.55] whitespace-pre text-foreground">${escapeHtml(source)}</pre>`
+          html = `<pre class="m-0 p-0 font-mono text-sm leading-relaxed whitespace-pre text-foreground">${escapeHtml(source)}</pre>`
       })
     return () => { cancelled = true }
   })
@@ -180,40 +180,40 @@
 </script>
 
 <div class="border-t border-border/30 bg-background">
-  <!-- Compact toolbar -->
-  <div class="flex items-center gap-1.5 border-b border-border/20 bg-muted/20 px-2.5 py-0.5">
+  <!-- Toolbar -->
+  <div class="flex items-center gap-2 border-b border-border/20 bg-muted/20 px-3 py-1">
     {#if rowLabel}
-      <span class="font-mono text-[10px] text-muted-foreground/40 select-none">{rowLabel}</span>
-      <span class="text-border/40 select-none text-[10px]">·</span>
+      <span class="font-mono text-xs text-muted-foreground/40 select-none">{rowLabel}</span>
+      <span class="text-border/40 select-none text-xs">·</span>
     {/if}
     <button
       type="button"
-      class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/60 transition-colors hover:bg-accent/40 hover:text-foreground"
+      class="inline-flex items-center gap-1.5 rounded px-2 py-0.5 font-mono text-xs text-muted-foreground/60 transition-colors hover:bg-accent/40 hover:text-foreground"
       onclick={copyJson}
     >
       {#if copied}
-        <Check class="size-2.5 text-green-500" />
+        <Check class="size-3 text-green-500" />
         <span>Copied</span>
       {:else}
-        <Copy class="size-2.5" />
+        <Copy class="size-3" />
         <span>Copy JSON</span>
       {/if}
     </button>
   </div>
 
-  <!-- JSON content — grows to fit, no inner scroll -->
+  <!-- JSON content -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     bind:this={rootEl}
     data-studio-selectable="text"
-    class="px-3 py-2"
+    class="px-5 py-4"
     oncontextmenu={handleContextMenu}
   >
     {#if !html}
-      <p class="font-mono text-[10px] text-muted-foreground/40">Loading…</p>
+      <p class="font-mono text-sm text-muted-foreground/40">Loading…</p>
     {:else}
       <div
-        class="[&_pre]:m-0 [&_pre]:bg-transparent! [&_pre]:p-0 [&_pre]:font-mono [&_pre]:text-[11px] [&_pre]:leading-[1.55] [&_pre]:whitespace-pre [&_.json-inspector-url]:text-link [&_.json-inspector-url]:underline [&_.json-inspector-url]:underline-offset-2"
+        class="[&_pre]:m-0 [&_pre]:bg-transparent! [&_pre]:p-0 [&_pre]:font-mono [&_pre]:text-sm [&_pre]:leading-relaxed [&_pre]:whitespace-pre [&_.json-inspector-url]:text-link [&_.json-inspector-url]:underline [&_.json-inspector-url]:underline-offset-2"
       >
         {@html html}
       </div>
@@ -238,7 +238,7 @@
       {#if contextMenu.value !== null}
         <button
           type="button"
-          class="flex w-full items-center gap-2 px-2.5 py-1 text-left font-mono text-[11px] text-foreground hover:bg-accent hover:text-accent-foreground"
+          class="flex w-full items-center gap-2 px-2.5 py-1 text-left font-mono text-sm text-foreground hover:bg-accent hover:text-accent-foreground"
           onclick={() => { copyText(/** @type {string} */ (contextMenu?.value)); dismissMenu() }}
         >
           <Copy class="size-3 shrink-0 text-muted-foreground" />
@@ -247,7 +247,7 @@
       {/if}
       <button
         type="button"
-        class="flex w-full items-center gap-2 px-2.5 py-1 text-left font-mono text-[11px] text-foreground hover:bg-accent hover:text-accent-foreground"
+        class="flex w-full items-center gap-2 px-2.5 py-1 text-left font-mono text-sm text-foreground hover:bg-accent hover:text-accent-foreground"
         onclick={() => { copyJson(); dismissMenu() }}
       >
         <Copy class="size-3 shrink-0 text-muted-foreground" />
