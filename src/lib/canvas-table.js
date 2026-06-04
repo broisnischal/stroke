@@ -97,6 +97,9 @@ const ICON_PATHS = {
     "M9 9m0 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8a2 2 0 0 1-2-2Z",
     "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1",
   ],
+  "arrow-up": ["M12 19V5", "m5 12 7-7 7 7"],
+  "arrow-down": ["M12 5v14", "m19 12-7 7-7-7"],
+  "arrow-up-down": ["m21 16-4 4-4-4", "M17 20V4", "m3 8 4-4 4 4", "M7 4v16"],
 };
 
 /** @type {Map<string, Path2D[]>} */
@@ -276,10 +279,11 @@ export function colDrawnX(col, geom, scrollLeft) {
 /**
  * Hit-test a viewport x → the column under it (pinned columns win, matching
  * paint order). Returns null when x is over a gutter or empty space.
+ * Pass frozenLeft=0 when gutters are non-sticky (scroll with content).
  * @returns {{ col: any, drawnX: number } | null}
  */
-export function colAtX(x, geom, scrollLeft) {
-  if (x < geom.gutterWidth) return null;
+export function colAtX(x, geom, scrollLeft, frozenLeft = geom.gutterWidth) {
+  if (x < frozenLeft) return null;
   // Pinned columns are painted last (on top); test them first, rightmost first.
   for (let i = geom.cols.length - 1; i >= 0; i--) {
     const col = geom.cols[i];
@@ -287,13 +291,10 @@ export function colAtX(x, geom, scrollLeft) {
     const dx = colDrawnX(col, geom, scrollLeft);
     if (x >= dx && x < dx + col.w) return { col, drawnX: dx };
   }
-  // Non-pinned columns sit at their scrolled position; only the part right of the
-  // (frozen) gutters is hittable — anything a pinned column covers was already
-  // returned above.
   for (const col of geom.cols) {
     if (col.pinned) continue;
     const dx = col.contentX - scrollLeft;
-    if (x >= geom.gutterWidth && x >= dx && x < dx + col.w) return { col, drawnX: dx };
+    if (x >= frozenLeft && x >= dx && x < dx + col.w) return { col, drawnX: dx };
   }
   return null;
 }
@@ -301,13 +302,13 @@ export function colAtX(x, geom, scrollLeft) {
 /**
  * Detect a column-resize target near a column's right border in the header.
  * Returns the column name whose edge is within `slop` px of x, or null.
+ * Pass frozenLeft=0 when gutters are non-sticky.
  */
-export function resizeColAtX(x, geom, scrollLeft, slop = 5) {
-  // Pinned edges are painted on top, so test them first.
+export function resizeColAtX(x, geom, scrollLeft, slop = 5, frozenLeft = geom.gutterWidth) {
   const order = geom.cols.filter((c) => c.pinned).concat(geom.cols.filter((c) => !c.pinned));
   for (const col of order) {
     const edge = colDrawnX(col, geom, scrollLeft) + col.w;
-    if (edge < geom.gutterWidth - 0.5) continue; // hidden left of the gutters
+    if (edge < frozenLeft - 0.5) continue;
     if (Math.abs(x - edge) <= slop) return col.name;
   }
   return null;
@@ -316,18 +317,19 @@ export function resizeColAtX(x, geom, scrollLeft, slop = 5) {
 // ── Row geometry ──────────────────────────────────────────────────────────
 
 /**
- * Cumulative top offset of every row. Fixed `rowHeight` rows, plus `expandHeight`
- * extra for each expanded row. Page size is capped (≤ MAX_PAGE_SIZE) so a dense
- * array is cheap and keeps lookups O(1)/O(log n).
+ * Cumulative top offset of every row. Fixed `rowHeight` rows, plus expand height
+ * for each expanded row. Per-row measured heights are used when available;
+ * `defaultExpandHeight` is the fallback before measurement.
  * @param {Set<number>} expandedSet
+ * @param {Map<number,number> | null} expandHeights Per-row measured heights (optional).
  * @returns {Float64Array} length rowCount+1; [rowCount] is the total height.
  */
-export function computeRowTops(rowCount, expandedSet, expandHeight, rowHeight) {
+export function computeRowTops(rowCount, expandedSet, defaultExpandHeight, rowHeight, expandHeights = null) {
   const tops = new Float64Array(rowCount + 1);
   let y = 0;
   for (let i = 0; i < rowCount; i++) {
     tops[i] = y;
-    y += rowHeight + (expandedSet.has(i) ? expandHeight : 0);
+    y += rowHeight + (expandedSet.has(i) ? (expandHeights?.get(i) ?? defaultExpandHeight) : 0);
   }
   tops[rowCount] = y;
   return tops;

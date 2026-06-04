@@ -229,15 +229,8 @@
   /** Name of the column whose input is focused in the new row. */
   let newRowFocusCol = $state(/** @type {string | null} */ (null))
 
-  // ── Column collapse (drag-to-hide) ───────────────────────────────────────
-  const COLLAPSED_COL_WIDTH = 12  // px width of the collapsed indicator strip
-  const COLLAPSE_ZONE = 40        // drag below this → snap preview + collapse on release
-  /** Columns collapsed by dragging the resize handle fully left. */
-  let collapsedColumns = $state(/** @type {Set<string>} */ (new Set()))
 
-  // Row height: the canvas paints every body row at this fixed height. Roomier
-  // than the old 26px for a calmer, Linear/Drizzle-style rhythm.
-  const ROW_HEIGHT = 33
+  const ROW_HEIGHT = 36
   let _scrollTop = $state(0)
   // Start high so the first paint covers any reasonable screen height before the
   // ResizeObserver fires with the real value.
@@ -266,9 +259,6 @@
   let _resizeHoverCol = $state(/** @type {string | null} */ (null))
   /** Swallow the click that fires right after a resize-drag pointerup. */
   let _suppressNextClick = false
-  /** Lightweight canvas tooltip (replaces lost title= attributes). */
-  let _tooltip = $state(/** @type {{ x: number, y: number, text: string } | null} */ (null))
-  let _tooltipTimer = 0
   /** Right-click target kind, so one ContextMenu can show header vs body items. */
   let contextIsHeader = $state(false)
   let contextHeaderCol = $state("")
@@ -284,12 +274,32 @@
 
   /** Extra body offset for the inline insert-row slot (a DOM overlay). */
   const insertRowOffset = $derived(newRowDrafts ? ROW_HEIGHT : 0)
-  /** Fixed height of an expanded JSON detail slot. */
-  const expandHeight = $derived(
-    embedded
-      ? Math.min(0.4 * _viewportHeight, 256)
-      : Math.min(0.6 * _viewportHeight, 512),
-  )
+  /** Measured heights for each expanded row (rowIdx → px). Updated by ResizeObserver. */
+  let expandedRowHeights = $state(/** @type {Map<number, number>} */ (new Map()))
+
+  /**
+   * Svelte action: observes an expand panel's rendered height and updates the map.
+   * Cleans up when the panel unmounts (row collapsed).
+   * @param {HTMLElement} node
+   * @param {number} rowIdx
+   */
+  function trackExpandHeight(node, rowIdx) {
+    const ro = new ResizeObserver(() => {
+      const h = node.offsetHeight
+      if (h > 0 && expandedRowHeights.get(rowIdx) !== h) {
+        expandedRowHeights = new Map(expandedRowHeights).set(rowIdx, h)
+      }
+    })
+    ro.observe(node)
+    return {
+      destroy() {
+        ro.disconnect()
+        const next = new Map(expandedRowHeights)
+        next.delete(rowIdx)
+        expandedRowHeights = next
+      },
+    }
+  }
 
   // ── Lightbox (click-to-open image / PDF) ──────────────────────────────────
   /** @type {string | null} */
@@ -339,7 +349,6 @@
   );
   const menuEditable = $derived(canEditColumn(contextColIdx));
   const menuColPinned = $derived(pinnedColumns.has(menuColName));
-  const menuColCollapsed = $derived(collapsedColumns.has(menuColName));
   const menuCellNull = $derived(
     rows[contextRowIdx]?.[contextColIdx] === null ||
       rows[contextRowIdx]?.[contextColIdx] === undefined,
@@ -1136,8 +1145,7 @@
   const totalColSpan = $derived(
     (showRowExpand ? 1 : 0) + (showSelection ? 1 : 0) + visibleColumns.length + 1,
   )
-  /** Columns visible to the keyboard — excludes collapsed strips. */
-  const navigableColumns = $derived(visibleColumns.filter((c) => !collapsedColumns.has(c.name)))
+  const navigableColumns = $derived(visibleColumns)
   /** Map of pinned column name → sticky left offset in px. Gutters are not
    *  sticky, so pinned columns stick from the left edge (0). */
   const pinnedOffsets = $derived.by(() => {
@@ -1163,7 +1171,7 @@
       gutterWidth,
     }),
   )
-  const rowTops = $derived(computeRowTops(rows.length, expandedRows, expandHeight, ROW_HEIGHT))
+  const rowTops = $derived(computeRowTops(rows.length, expandedRows, 320, ROW_HEIGHT, expandedRowHeights))
   /** Total scrollable content height incl. header + insert slot + body. */
   const contentHeight = $derived(HEADER_H + insertRowOffset + (rowTops[rows.length] ?? 0))
 
@@ -1188,13 +1196,11 @@
   $effect(() => {
     void reloadToken
     if (_firstReload) { _firstReload = false; return }
+    // Only reset vertical scroll — preserve horizontal position so the user
+    // stays looking at the same columns after a sort or filter reload.
     untrack(() => {
       _scrollTop = 0
-      _scrollLeft = 0
-      if (tableContainer) {
-        if (tableContainer.scrollTop !== 0) tableContainer.scrollTop = 0
-        if (tableContainer.scrollLeft !== 0) tableContainer.scrollLeft = 0
-      }
+      if (tableContainer && tableContainer.scrollTop !== 0) tableContainer.scrollTop = 0
     })
   })
 
@@ -1272,7 +1278,6 @@
 
   /** @param {string} name @param {string} dataType */
   function widthForColumn(name, dataType) {
-    if (collapsedColumns.has(name)) return COLLAPSED_COL_WIDTH
     return columnWidths[name] ?? defaultColumnWidth(dataType);
   }
 
@@ -1304,9 +1309,7 @@
   /** @param {number} dx */
   function applyColumnResize(dx) {
     if (!resizingColName) return;
-    const raw = resizeStartWidth + dx
-    // Allow dragging into the collapse zone — shows snap-preview at strip width
-    _pendingResizeWidth = raw <= COLLAPSE_ZONE ? COLLAPSED_COL_WIDTH : clampColumnWidth(raw)
+    _pendingResizeWidth = clampColumnWidth(resizeStartWidth + dx)
     if (_resizeRafId) return;
     _resizeRafId = requestAnimationFrame(() => {
       _resizeRafId = 0;
@@ -1324,26 +1327,9 @@
       }
     }
     if (resizingColName) {
-      if ((columnWidths[resizingColName] ?? 0) <= COLLAPSE_ZONE) {
-        // Snap to collapsed — restore columnWidths to the pre-drag value so
-        // restoring the column brings it back at a sensible width.
-        const col = columns.find((c) => c.name === resizingColName)
-        const dt = col?.dataType ?? col?.data_type ?? ''
-        columnWidths = { ...columnWidths, [resizingColName]: clampColumnWidth(defaultColumnWidth(dt)) }
-        collapsedColumns = new Set([...collapsedColumns, resizingColName])
-        if (columnWidthsKey) saveColumnWidths(columnWidthsKey, columnWidths)
-      } else if (columnWidthsKey) {
-        saveColumnWidths(columnWidthsKey, columnWidths);
-      }
+      if (columnWidthsKey) saveColumnWidths(columnWidthsKey, columnWidths);
     }
     resizingColName = null;
-  }
-
-  /** Restore a column that was collapsed by dragging. */
-  function restoreColumn(colName) {
-    const next = new Set(collapsedColumns)
-    next.delete(colName)
-    collapsedColumns = next
   }
 
   /** Cycle sort: none → asc → desc → none */
@@ -1383,16 +1369,11 @@
     onsortchange({ column: colName, direction: dir })
   }
 
-  /** Reset a column's width to its default and un-collapse it if needed. */
+  /** Reset a column's width to its default. */
   function resetColumnWidth(colName) {
     const col = columns.find((c) => c.name === colName)
     const dt = col?.dataType ?? col?.data_type ?? ''
     columnWidths = { ...columnWidths, [colName]: clampColumnWidth(defaultColumnWidth(dt)) }
-    if (collapsedColumns.has(colName)) {
-      const next = new Set(collapsedColumns)
-      next.delete(colName)
-      collapsedColumns = next
-    }
     if (columnWidthsKey) saveColumnWidths(columnWidthsKey, columnWidths)
   }
 
@@ -1790,44 +1771,40 @@
   /** @param {CanvasRenderingContext2D} ctx */
   function drawBodyRow(ctx, idx, ry, c) {
     const rh = ROW_HEIGHT
-    // Row background (selected > focused > hover).
-    let bgA = 0
+    // Row background — selected uses primary tint, others use muted.
     const isSel = selected.has(idx)
-    if (isSel) bgA = 0.3
-    else if (focusedRow === idx) bgA = 0.2
-    else if (hoveredRow === idx) bgA = 0.18
-    if (bgA) {
-      ctx.fillStyle = withAlpha(c.cMutedBg, bgA)
+    if (isSel) {
+      ctx.fillStyle = withAlpha(c.cPrimary, hoveredRow === idx ? 0.18 : 0.13)
+      ctx.fillRect(0, ry, c.usedW, rh)
+    } else if (focusedRow === idx) {
+      ctx.fillStyle = withAlpha(c.cMutedBg, 0.22)
+      ctx.fillRect(0, ry, c.usedW, rh)
+    } else if (hoveredRow === idx) {
+      ctx.fillStyle = withAlpha(c.cMutedBg, 0.18)
       ctx.fillRect(0, ry, c.usedW, rh)
     }
 
-    // Non-pinned cells, clipped to the right of the frozen gutters. Pinned
-    // columns are painted afterwards on top, so non-pinned slide under them.
-    ctx.save()
-    ctx.beginPath()
-    ctx.rect(gutterWidth, ry, Math.max(0, _viewportWidth - gutterWidth), rh)
-    ctx.clip()
+    // Non-pinned cells.
     for (const col of geom.cols) {
       if (col.pinned) continue
       const dx = col.contentX - _scrollLeft
-      if (dx + col.w <= gutterWidth || dx >= _viewportWidth) continue
+      if (dx + col.w <= 0 || dx >= _viewportWidth) continue
       drawCell(ctx, idx, col, dx, ry, rh, c)
     }
-    ctx.restore()
 
-    // Pinned cells on top (frozen left, after gutters).
+    // Pinned cells on top (frozen left).
     for (const col of geom.cols) {
       if (!col.pinned) continue
       const dx = colDrawnX(col, geom, _scrollLeft)
       drawCell(ctx, idx, col, dx, ry, rh, c, true)
     }
 
-    // Gutters (frozen left, on top of everything).
-    drawRowGutters(ctx, idx, ry, rh, c)
+    // Gutters scroll with content — drawn on top to cover any cell bleed.
+    drawRowGutters(ctx, idx, -_scrollLeft, ry, rh, c)
 
     // Row ring when focused + selected.
     if (focusedRow === idx && isSel) {
-      ctx.strokeStyle = withAlpha(c.cRing, 0.4)
+      ctx.strokeStyle = withAlpha(c.cPrimary, 0.45)
       ctx.lineWidth = 1
       ctx.strokeRect(0.5, ry + 0.5, c.usedW - 1, rh - 1)
     }
@@ -1846,20 +1823,10 @@
     const w = col.w
     const actualIdx = _nameToActualIdx.get(col.name) ?? -1
     const cached = _colCache[actualIdx]
-    const isCollapsed = collapsedColumns.has(col.name)
 
     if (pinned) {
       ctx.fillStyle = c.cPanel
       ctx.fillRect(cellX, ry, w, rh)
-    }
-
-    if (isCollapsed) {
-      ctx.fillStyle = withAlpha(c.cPanel, 0.8)
-      ctx.fillRect(cellX, ry, w, rh)
-      ctx.strokeStyle = c.cGrid
-      ctx.lineWidth = 1
-      ctx.beginPath(); ctx.moveTo(cellX + w - 0.5, ry); ctx.lineTo(cellX + w - 0.5, ry + rh); ctx.stroke()
-      return
     }
 
     const editing = editingCell && editingCell.rowIdx === idx && editingCell.colIdx === actualIdx
@@ -1876,6 +1843,7 @@
     if (!editing) {
       if (isDirty) { ctx.fillStyle = withAlpha(c.AMBER, 0.15); ctx.fillRect(cellX, ry, w, rh) }
       else if (activeFk) { ctx.fillStyle = withAlpha(c.cAccent, 0.15); ctx.fillRect(cellX, ry, w, rh) }
+      else if (isFocusedCell) { ctx.fillStyle = withAlpha(c.cPrimary, 0.08); ctx.fillRect(cellX, ry, w, rh) }
     } else {
       // Active edit cell — overlay input covers it; leave panel + ring.
       ctx.strokeStyle = c.cPrimary
@@ -1934,11 +1902,11 @@
       drawIcon(ctx, 'external-link', cellX + w - CELL_PAD_X - 13 - (isHover ? ICON_HIT : 0), ry + rh / 2 - 6, 12, withAlpha(c.cRing, 0.9), 2)
     }
 
-    // Focused-cell outline.
+    // Focused-cell outline — bright primary border.
     if (isFocusedCell) {
-      ctx.strokeStyle = withAlpha(c.cRing, 0.4)
-      ctx.lineWidth = 1
-      ctx.strokeRect(cellX + 0.5, ry + 0.5, w - 1, rh - 1)
+      ctx.strokeStyle = withAlpha(c.cPrimary, 0.85)
+      ctx.lineWidth = 2
+      ctx.strokeRect(cellX + 1, ry + 1, w - 2, rh - 2)
     }
 
     // Hover buttons (copy + quick look).
@@ -1949,12 +1917,12 @@
     }
   }
 
-  /** @param {CanvasRenderingContext2D} ctx */
-  function drawRowGutters(ctx, idx, ry, rh, c) {
+  /** @param {CanvasRenderingContext2D} ctx @param {number} offsetX scroll-adjusted left offset */
+  function drawRowGutters(ctx, idx, offsetX, ry, rh, c) {
     if (gutterWidth <= 0) return
     ctx.fillStyle = c.cPanel
-    ctx.fillRect(0, ry, gutterWidth, rh)
-    let gx = 0
+    ctx.fillRect(offsetX, ry, gutterWidth, rh)
+    let gx = offsetX
     if (showRowExpand) {
       const expanded = expandedRows.has(idx)
       const hov = hoveredRow === idx
@@ -1971,10 +1939,9 @@
         { border: c.cMuted, fill: c.cPrimary, mark: c.cPanel })
       gx += GUTTER_SELECT_W
     }
-    // Gutter right separator.
     ctx.strokeStyle = c.cGrid
     ctx.lineWidth = 1
-    ctx.beginPath(); ctx.moveTo(gutterWidth - 0.5, ry); ctx.lineTo(gutterWidth - 0.5, ry + rh); ctx.stroke()
+    ctx.beginPath(); ctx.moveTo(offsetX + gutterWidth - 0.5, ry); ctx.lineTo(offsetX + gutterWidth - 0.5, ry + rh); ctx.stroke()
   }
 
   /** @param {CanvasRenderingContext2D} ctx */
@@ -1982,18 +1949,13 @@
     ctx.fillStyle = c.cPanel
     ctx.fillRect(0, 0, c.W, HEADER_H)
 
-    // Non-pinned headers, clipped to the right of the frozen gutters.
-    ctx.save()
-    ctx.beginPath()
-    ctx.rect(gutterWidth, 0, Math.max(0, c.W - gutterWidth), HEADER_H)
-    ctx.clip()
+    // Non-pinned headers.
     for (const col of geom.cols) {
       if (col.pinned) continue
       const dx = col.contentX - _scrollLeft
-      if (dx + col.w <= gutterWidth || dx >= c.W) continue
+      if (dx + col.w <= 0 || dx >= c.W) continue
       drawHeaderCell(ctx, col, dx, c)
     }
-    ctx.restore()
 
     // Pinned headers.
     for (const col of geom.cols) {
@@ -2001,11 +1963,12 @@
       drawHeaderCell(ctx, col, colDrawnX(col, geom, _scrollLeft), c)
     }
 
-    // Gutter headers.
+    // Gutter headers — scroll with content.
     if (gutterWidth > 0) {
+      const gx0 = -_scrollLeft
       ctx.fillStyle = c.cPanel
-      ctx.fillRect(0, 0, gutterWidth, HEADER_H)
-      let gx = 0
+      ctx.fillRect(gx0, 0, gutterWidth, HEADER_H)
+      let gx = gx0
       if (showRowExpand) {
         if (expandedRows.size > 0) {
           drawIcon(ctx, 'chevrons-down-up', gx + (GUTTER_EXPAND_W - 14) / 2, (HEADER_H - 14) / 2, 14, c.cMuted, 2)
@@ -2020,10 +1983,10 @@
       }
       ctx.strokeStyle = c.cGrid
       ctx.lineWidth = 1
-      ctx.beginPath(); ctx.moveTo(gutterWidth - 0.5, 0); ctx.lineTo(gutterWidth - 0.5, HEADER_H); ctx.stroke()
+      ctx.beginPath(); ctx.moveTo(gx0 + gutterWidth - 0.5, 0); ctx.lineTo(gx0 + gutterWidth - 0.5, HEADER_H); ctx.stroke()
     }
 
-    // Header bottom border (stronger).
+    // Header bottom border.
     ctx.strokeStyle = c.cBorder
     ctx.lineWidth = 1
     ctx.beginPath(); ctx.moveTo(0, HEADER_H - 0.5); ctx.lineTo(c.W, HEADER_H - 0.5); ctx.stroke()
@@ -2033,7 +1996,6 @@
   function drawHeaderCell(ctx, col, x, c) {
     const w = col.w
     const sorted = rowSort?.column === col.name
-    const collapsed = collapsedColumns.has(col.name)
 
     // Pinned headers are painted on top of scrolled columns — give them an opaque
     // backing so the columns sliding underneath don't bleed through.
@@ -2047,14 +2009,6 @@
     ctx.strokeStyle = c.cGrid
     ctx.lineWidth = 1
     ctx.beginPath(); ctx.moveTo(x + w - 0.5, 0); ctx.lineTo(x + w - 0.5, HEADER_H); ctx.stroke()
-
-    if (collapsed) {
-      ctx.fillStyle = withAlpha(c.cMuted, 0.5)
-      ctx.font = `8px ${_fonts.family}`
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-      ctx.fillText('···', x + w / 2, HEADER_H / 2)
-      return
-    }
 
     const meta = colMeta.get(col.name)
     const cy = HEADER_H / 2
@@ -2071,7 +2025,6 @@
       if (meta.fk) badges.push({ letter: 'F', bg: 'rgba(59,130,246,0.12)', fg: c.BLUE_FG })
       if (meta.unique && !meta.pk) badges.push({ letter: 'U', bg: withAlpha(c.cMutedBg, 0.6), fg: withAlpha(c.cMuted, 0.7) })
       if (meta.indexed) badges.push({ letter: 'I', bg: withAlpha(c.cMutedBg, 0.6), fg: withAlpha(c.cMuted, 0.6) })
-      if (!meta.nullable && !meta.pk) badges.push({ dot: true, bg: withAlpha(c.cMutedBg, 0.4), fg: withAlpha(c.cMuted, 0.5) })
     }
     const badgeW = badges.length * 16
 
@@ -2089,21 +2042,25 @@
       tx += 16
     }
 
-    // Inline datatype (muted), only if there's comfortable room.
-    const typeRoom = x + w - sortReserve - 4 - tx
-    if (typeRoom > 22 && col.dataType) {
+    // Inline datatype with separator dot — only if there's comfortable room.
+    const typeGap = badges.length ? 5 : 3
+    const typeStartX = tx + typeGap
+    const typeRoom = x + w - sortReserve - 4 - typeStartX
+    if (typeRoom > 28 && col.dataType) {
       ctx.font = _fonts.type
-      ctx.fillStyle = withAlpha(c.cMuted, 0.75)
-      ctx.fillText(truncText(ctx, col.dataType, typeRoom), tx + (badges.length ? 4 : 2), cy + 0.5)
+      ctx.fillStyle = withAlpha(c.cMuted, 0.3)
+      ctx.fillText('·', typeStartX, cy + 0.5)
+      const dotW = ctx.measureText('· ').width
+      ctx.fillStyle = withAlpha(c.cMuted, 0.7)
+      ctx.fillText(truncText(ctx, col.dataType, typeRoom - dotW), typeStartX + dotW, cy + 0.5)
     }
 
-    // Sort indicator (active = solid; hovered header = faint affordance).
+    // Sort indicator — Lucide icons.
     if (sorted) {
-      const dir = rowSort?.direction === 'asc' ? 'up' : 'down'
-      drawTriangle(ctx, x + w - 10, cy, 4, dir, withAlpha(c.cPrimary, 0.85))
+      const iconName = rowSort?.direction === 'asc' ? 'arrow-up' : 'arrow-down'
+      drawIcon(ctx, iconName, x + w - sortReserve + 2, cy - 7, 14, withAlpha(c.cPrimary, 0.9), 1.8)
     } else if (_resizeHoverCol !== col.name && hoveredColName === col.name && hoveredRow === null) {
-      drawTriangle(ctx, x + w - 10, cy - 3.5, 3, 'up', withAlpha(c.cMuted, 0.35))
-      drawTriangle(ctx, x + w - 10, cy + 3.5, 3, 'down', withAlpha(c.cMuted, 0.35))
+      drawIcon(ctx, 'arrow-up-down', x + w - sortReserve + 2, cy - 7, 14, withAlpha(c.cMuted, 0.4), 1.6)
     }
 
     // Resize-edge affordance.
@@ -2119,14 +2076,14 @@
   // sink: it tracks every input that affects the grid and writes no reactive
   // state, so it can't loop.
   $effect(() => {
-    void rows; void columns; void columnWidths; void collapsedColumns
+    void rows; void columns; void columnWidths
     void pinnedColumns; void hiddenColumns; void selected; void focusedRow
     void focusedCol; void editingCell; void pendingEdits; void expandedRows
     void rowSort; void _scrollTop; void _scrollLeft; void _viewportWidth
     void _viewportHeight; void hoveredRow; void hoveredColName; void _resizeHoverCol
     void resizingColName; void newRowDrafts; void insertSaving; void colMeta
     void geom; void rowTops; void _redrawToken; void foreignKeys; void indexes
-    void _colCache
+    void _colCache; void expandedRowHeights
 
     const canvas = canvasEl
     const probe = colorProbe
@@ -2160,12 +2117,14 @@
    * @returns {{ kind: string, idx?: number, col?: any, actualIdx?: number, drawnX?: number, x?: number, y?: number }}
    */
   function hitTest(x, y) {
+    // Content x accounts for scroll — gutters live in content space, not frozen.
+    const cx = x + _scrollLeft
     if (y < HEADER_H) {
-      if (x < gutterWidth) {
-        if (showRowExpand && x < GUTTER_EXPAND_W) return { kind: 'header-expand-all' }
+      if (cx < gutterWidth) {
+        if (showRowExpand && cx < GUTTER_EXPAND_W) return { kind: 'header-expand-all' }
         return { kind: 'header-select-all' }
       }
-      const hit = colAtX(x, geom, _scrollLeft)
+      const hit = colAtX(x, geom, _scrollLeft, 0)
       if (!hit) return { kind: 'none' }
       return { kind: 'header', col: hit.col, drawnX: hit.drawnX, x, y }
     }
@@ -2173,11 +2132,11 @@
     const r = rowAtContentY(rowTops, rows.length, ROW_HEIGHT, bodyY)
     if (!r || !r.inRowBody) return { kind: 'none' }
     const idx = r.idx
-    if (x < gutterWidth) {
-      if (showRowExpand && x < GUTTER_EXPAND_W) return { kind: 'row-expand', idx }
+    if (cx < gutterWidth) {
+      if (showRowExpand && cx < GUTTER_EXPAND_W) return { kind: 'row-expand', idx }
       return { kind: 'row-select', idx }
     }
-    const hit = colAtX(x, geom, _scrollLeft)
+    const hit = colAtX(x, geom, _scrollLeft, 0)
     if (!hit) return { kind: 'none', idx }
     const actualIdx = _nameToActualIdx.get(hit.col.name) ?? -1
     return { kind: 'cell', idx, col: hit.col, actualIdx, drawnX: hit.drawnX, x, y }
@@ -2192,10 +2151,8 @@
       case 'header-expand-all': collapseAllRows(); return
       case 'header-select-all': toggleAll(!allSelected); return
       case 'header': {
-        const name = t.col.name
-        if (collapsedColumns.has(name)) { restoreColumn(name); return }
-        if (resizeColAtX(x, geom, _scrollLeft)) return // resize edge — handled on pointerdown
-        handleHeaderSort(name)
+        if (resizeColAtX(x, geom, _scrollLeft, 5, 0)) return // resize edge — handled on pointerdown
+        handleHeaderSort(t.col.name)
         return
       }
       case 'row-expand': toggleRowExpand(/** @type {number} */ (t.idx)); return
@@ -2264,7 +2221,7 @@
     if (e.button !== 0) return
     const { x, y } = canvasXY(e)
     if (y >= HEADER_H) return
-    const colName = resizeColAtX(x, geom, _scrollLeft)
+    const colName = resizeColAtX(x, geom, _scrollLeft, 5, 0)
     if (!colName) return
     e.preventDefault()
     startColumnResize(colName)
@@ -2287,13 +2244,12 @@
     const { x, y } = canvasXY(e)
     if (resizingColName) return
     if (y < HEADER_H) {
-      // Header: resize cursor + hover col for sort affordance.
-      const rc = resizeColAtX(x, geom, _scrollLeft)
+      const rc = resizeColAtX(x, geom, _scrollLeft, 5, 0)
       _resizeHoverCol = rc
-      const hit = x >= gutterWidth ? colAtX(x, geom, _scrollLeft) : null
+      const cx = x + _scrollLeft
+      const hit = cx >= gutterWidth ? colAtX(x, geom, _scrollLeft, 0) : null
       hoveredRow = null
       hoveredColName = hit ? hit.col.name : null
-      scheduleTooltip(e, hit ? `${hit.col.name}  ·  ${hit.col.dataType}` : null)
       return
     }
     _resizeHoverCol = null
@@ -2301,40 +2257,10 @@
     if (t.kind === 'cell') {
       hoveredRow = /** @type {number} */ (t.idx)
       hoveredColName = t.col.name
-      const value = effectiveCellValue(/** @type {number} */ (t.idx), /** @type {number} */ (t.actualIdx))
-      const cached = _colCache[/** @type {number} */ (t.actualIdx)]
-      const fk = cached?.fk ?? null
-      let tip = null
-      if (fk && value !== null && value !== undefined) {
-        tip = `${formatCell(value)} — Ctrl/⌘-click or double-click to open ${foreignKeyTargetLabel(fk)}`
-      } else if (!(value !== null && typeof value === 'object')) {
-        const full = formatCell(value)
-        if (displayCell(value) !== full) tip = full
-      }
-      scheduleTooltip(e, tip)
     } else {
       hoveredRow = t.kind === 'row-expand' || t.kind === 'row-select' ? /** @type {number} */ (t.idx ?? null) : null
       hoveredColName = null
-      scheduleTooltip(e, null)
     }
-  }
-
-  function onCanvasPointerLeave() {
-    hoveredRow = null
-    hoveredColName = null
-    _resizeHoverCol = null
-    clearTimeout(_tooltipTimer)
-    _tooltip = null
-  }
-
-  function scheduleTooltip(/** @type {{ clientX: number, clientY: number }} */ e, /** @type {string | null} */ text) {
-    clearTimeout(_tooltipTimer)
-    if (!text) { _tooltip = null; return }
-    const cx = e.clientX, cy = e.clientY
-    _tooltipTimer = window.setTimeout(() => {
-      const r = tableContainer?.getBoundingClientRect()
-      _tooltip = { x: cx - (r?.left ?? 0), y: cy - (r?.top ?? 0), text }
-    }, 450)
   }
 
   /** Right-click: record the target so the single ContextMenu shows the right items. */
@@ -2372,7 +2298,6 @@
   })
 
   onDestroy(() => {
-    clearTimeout(_tooltipTimer)
     // Clear staged-edit state in the parent so the StatusBar buttons don't linger.
     pendingEditCount = 0
     applyEdits = () => {}
@@ -2570,17 +2495,17 @@
                 </div>
               {/if}
 
-              <!-- Expanded JSON detail panels -->
+              <!-- Expanded JSON detail panels — height is measured and fed back to rowTops -->
               {#each [...expandedRows] as exIdx (exIdx)}
                 {#if rows[exIdx]}
                   <div
-                    class="absolute z-10 overflow-hidden"
-                    style="top:{rowDocTop(exIdx) + ROW_HEIGHT}px; left:{gutterWidth}px; width:{Math.max(geom.totalWidth - gutterWidth, _viewportWidth - gutterWidth)}px; height:{expandHeight}px"
+                    class="absolute z-10"
+                    style="top:{rowDocTop(exIdx) + ROW_HEIGHT}px; left:{gutterWidth}px; width:{Math.max(geom.totalWidth - gutterWidth, _viewportWidth - gutterWidth)}px"
+                    use:trackExpandHeight={exIdx}
                   >
                     <RowExpandViewer
                       record={rowToRecord(columns, rows[exIdx])}
                       rowLabel={"row " + (exIdx + 1)}
-                      maxHeight={expandHeight + "px"}
                     />
                   </div>
                 {/if}
@@ -2668,13 +2593,6 @@
             </div>
           {/if}
 
-          <!-- Hover tooltip (restores title= affordances lost to canvas) -->
-          {#if _tooltip}
-            <div
-              class="pointer-events-none absolute z-40 max-w-md truncate rounded border border-border bg-popover px-2 py-1 font-mono text-ui-2xs text-popover-foreground shadow-md"
-              style="left:{Math.min(_tooltip.x + 12, (_viewportWidth - 12))}px; top:{_tooltip.y + 18}px"
-            >{_tooltip.text}</div>
-          {/if}
         </div>
       {/snippet}
     </ContextMenu.Trigger>
@@ -2694,7 +2612,6 @@
         {@const hAsc = hSorted && rowSort?.direction === 'asc'}
         {@const hDesc = hSorted && rowSort?.direction === 'desc'}
         {@const hPinned = pinnedColumns.has(hcol)}
-        {@const hCollapsed = collapsedColumns.has(hcol)}
         <ContextMenu.Item onSelect={() => runMenuAction(() => headerSortDirect(hcol, 'asc'))}>
           <ArrowUp />
           Sort ascending
@@ -2724,12 +2641,6 @@
           <EyeOff />
           Hide column
         </ContextMenu.Item>
-        {#if hCollapsed}
-          <ContextMenu.Item onSelect={() => runMenuAction(() => restoreColumn(hcol))}>
-            <ArrowUpDown />
-            Restore column
-          </ContextMenu.Item>
-        {/if}
         <ContextMenu.Separator />
         <ContextMenu.Item onSelect={() => runMenuAction(() => resetColumnWidth(hcol))}>
           <RotateCcw />
@@ -2759,12 +2670,6 @@
         <ContextMenu.Item onSelect={() => runMenuAction(() => toggleColumnPin(menuColName))}>
           {#if menuColPinned}<PinOff />Unpin column{:else}<Pin />Pin column{/if}
         </ContextMenu.Item>
-        {#if menuColCollapsed}
-          <ContextMenu.Item onSelect={() => runMenuAction(() => restoreColumn(menuColName))}>
-            <ArrowUpDown />
-            Restore column
-          </ContextMenu.Item>
-        {/if}
         <ContextMenu.Separator />
         <ContextMenu.Item
           disabled={!menuEditable || readonly}
