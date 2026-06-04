@@ -430,6 +430,11 @@ export async function mcpStatus() {
   return inv('mcp_status')
 }
 
+/** @param {boolean} readonly */
+export async function mcpSetReadonly(readonly) {
+  return inv('mcp_set_readonly', { readonly })
+}
+
 // ── AI Secrets (secure key storage in app data dir, not localStorage) ────────
 
 /** @param {string} profileId @param {string} apiKey */

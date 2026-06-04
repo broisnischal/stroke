@@ -153,6 +153,7 @@ pub fn run() {
             mcp::mcp_stop,
             mcp::mcp_status,
             mcp::mcp_update_connections,
+            mcp::mcp_set_readonly,
             docker::docker_check,
             docker::docker_run_db,
             secrets::ai_store_key,

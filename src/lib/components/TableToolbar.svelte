@@ -161,6 +161,12 @@
     searchInputRef?.select();
   }
 
+  /** Clear the row search and focus the input (Ctrl+T shortcut). */
+  export function clearRowSearch() {
+    clearSearch()
+    searchInputRef?.focus()
+  }
+
   /** Focus the value input of the last filter row (called after "Filter by this column"). */
   export function focusLastFilter() {
     // Defer so the filter bar DOM has rendered

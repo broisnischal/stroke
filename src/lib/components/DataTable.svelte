@@ -1,5 +1,11 @@
 <script>
   import { tick, onDestroy, untrack } from "svelte";
+  import {
+    zoomState, adjustZoom, resetZoom, ZOOM_STEP,
+  } from '$lib/stores/canvas-zoom.svelte.js'
+
+  // Local derived so all $derived layout constants track it reactively.
+  const canvasZoom = $derived(zoomState.value)
   import { toast } from "svelte-sonner";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
@@ -245,20 +251,22 @@
   let newRowFocusCol = $state(/** @type {string | null} */ (null))
 
 
-  const ROW_HEIGHT = 36
+  // ── Canvas zoom ────────────────────────────────────────────────────────────
+  // canvasZoom / adjustZoom / resetZoom come from the shared store so ALL open
+  // DataTable tabs zoom together and the level persists across sessions.
+
+  // All layout constants scale with canvasZoom so the entire canvas zooms together.
+  const ROW_HEIGHT = $derived(Math.round(36 * canvasZoom))
+
   let _scrollTop = $state(0)
   // Start high so the first paint covers any reasonable screen height before the
   // ResizeObserver fires with the real value.
   let _viewportHeight = $state(1200)
 
   // ── Canvas rendering ──────────────────────────────────────────────────────
-  // The grid is painted to a single <canvas> pinned to the viewport; the bulk
-  // cells/header/checkboxes/badges are drawn, and only inherently-interactive
-  // bits (active edit input, insert form, expanded JSON, menus, lightboxes) are
-  // DOM overlays positioned in content coordinates over the canvas.
-  const HEADER_H = 40 // single-line header (name + inline datatype)
-  const GUTTER_EXPAND_W = 38
-  const GUTTER_SELECT_W = 42
+  const HEADER_H = $derived(Math.round(40 * canvasZoom))
+  const GUTTER_EXPAND_W = $derived(Math.round(38 * canvasZoom))
+  const GUTTER_SELECT_W = $derived(Math.round(42 * canvasZoom))
   /** @type {HTMLCanvasElement | null} */
   let canvasEl = $state(null)
   /** @type {HTMLSpanElement | null} */
@@ -1197,11 +1205,10 @@
   const MAX_VIRTUAL_COLS = 5
   // Width adapts to the longest label (7px/char estimate + padding), clamped 110–180px
   const VIRTUAL_COL_W = $derived.by(() => {
-    if (!virtualRelCols.length) return 300
+    if (!virtualRelCols.length) return Math.round(300 * canvasZoom)
     const maxChars = Math.max(...virtualRelCols.map(v => v.label.length))
-    // 10px/char (conservative — actual monospace chars vary by font/weight/size)
-    // + 60px overhead for badge paddings, cell margins and pill border
-    return Math.min(380, Math.max(300, maxChars * 10 + 60))
+    const base = Math.min(380, Math.max(300, maxChars * 10 + 60))
+    return Math.round(base * canvasZoom)
   })
   const virtualRelCols = $derived.by(() => {
     if (!incomingForeignKeys.length) return /** @type {typeof incomingForeignKeys} */ ([])
@@ -1359,8 +1366,10 @@
   }
 
   /** @param {string} name @param {string} dataType */
+  /** Returns the display width of a column in canvas px (logical × canvasZoom). */
   function widthForColumn(name, dataType) {
-    return columnWidths[name] ?? defaultColumnWidth(dataType);
+    const logical = columnWidths[name] ?? defaultColumnWidth(dataType)
+    return Math.round(logical * canvasZoom)
   }
 
   $effect(() => {
@@ -1391,7 +1400,8 @@
   /** @param {number} dx */
   function applyColumnResize(dx) {
     if (!resizingColName) return;
-    _pendingResizeWidth = clampColumnWidth(resizeStartWidth + dx)
+    // dx is screen pixels; convert to logical (un-zoomed) before clamping
+    _pendingResizeWidth = clampColumnWidth(resizeStartWidth + Math.round(dx / canvasZoom))
     if (_resizeRafId) return;
     _resizeRafId = requestAnimationFrame(() => {
       _resizeRafId = 0;
@@ -1612,11 +1622,29 @@
     return () => mo.disconnect()
   })
 
+  // Dedicated zoom watcher — runs the moment zoomState.value changes in any tab,
+  // clears the font cache so they're re-measured at the new size, and bumps
+  // _redrawToken to guarantee a full canvas repaint immediately.
+  $effect(() => {
+    const z = zoomState.value  // subscribe to the store directly
+    untrack(() => {
+      _fonts = null            // discard cached font metrics — zoom may change them
+      _redrawToken++
+    })
+  })
+
   // The focused-cell highlight is painted directly on the canvas by draw(),
   // which depends on focusedRow/focusedCol and so repaints on focus changes.
 
   /** @param {KeyboardEvent} e */
   function handleTableKeydown(e) {
+    // Ctrl/Cmd + / - / 0: zoom the canvas table
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
+      if (e.key === '=' || e.key === '+') { e.preventDefault(); adjustZoom(ZOOM_STEP); return }
+      if (e.key === '-')                  { e.preventDefault(); adjustZoom(-ZOOM_STEP); return }
+      if (e.key === '0')                  { e.preventDefault(); resetZoom(); return }
+    }
+
     // Ctrl+A: select all rows
     if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "a" || e.key === "A")) {
       e.preventDefault();
@@ -1786,8 +1814,8 @@
   }
 
   // ── Canvas drawing ─────────────────────────────────────────────────────────
-  const CELL_PAD_X = 16
-  const ICON_HIT = 24 // hover-button hit width
+  const CELL_PAD_X = $derived(Math.round(16 * canvasZoom))
+  const ICON_HIT = $derived(Math.round(24 * canvasZoom))
 
   /** Truncate `text` to fit `maxW` px under the current ctx.font, adding `…`. */
   function truncText(ctx, text, maxW) {
@@ -1818,6 +1846,23 @@
     const read = _readColor
     if (!ctx || !read || !canvasEl || !colorProbe) return
     if (!_fonts) _fonts = readFonts(colorProbe)
+
+    // Scale fonts for the current zoom level.
+    // We temporarily swap _fonts so all drawing helpers pick up the right sizes
+    // without needing extra parameters.
+    const _baseFonts = _fonts
+    if (canvasZoom !== 1.0 && _baseFonts) {
+      const cpx = Math.max(8, Math.round(_baseFonts.cellPx * canvasZoom))
+      const tpx = Math.max(7, Math.round(_baseFonts.typePx * canvasZoom))
+      _fonts = {
+        family: _baseFonts.family,
+        cellPx: cpx,
+        typePx: tpx,
+        cell:   `${cpx}px ${_baseFonts.family}`,
+        type:   `${tpx}px ${_baseFonts.family}`,
+        header: `530 ${cpx}px ${_baseFonts.family}`,
+      }
+    }
 
     const W = _viewportWidth
     const H = _viewportHeight
@@ -1872,6 +1917,9 @@
       W, cPanel, cFg, cMuted, cGrid, cBorder, cMutedBg, cAccent, cPrimary, cRing,
       AMBER, AMBER_FG, BLUE_FG, usedW,
     })
+
+    // Restore base fonts (the zoom-scaled copy was only for this draw pass).
+    _fonts = _baseFonts
   }
 
   /** @param {CanvasRenderingContext2D} ctx */
@@ -2266,6 +2314,8 @@
     void resizingColName; void newRowDrafts; void insertSaving; void colMeta
     void geom; void rowTops; void _redrawToken; void foreignKeys; void indexes
     void _colCache; void expandedRowHeights; void fkSubview; void virtualRelCols; void VIRTUAL_COL_W
+    // Read the zoom store directly so this effect re-runs the moment any tab changes zoom.
+    void zoomState.value; void canvasZoom
 
     const canvas = canvasEl
     const probe = colorProbe
@@ -2522,6 +2572,22 @@
     _resizeHoverCol = null
   }
 
+  // Ctrl/Cmd+Scroll → zoom the canvas. Must use { passive: false } so preventDefault
+  // works — Svelte's onwheel directive registers a passive listener by default which
+  // can't call preventDefault, causing the browser to intercept the event first.
+  $effect(() => {
+    const el = tableContainer
+    if (!el) return
+    function onWheel(/** @type {WheelEvent} */ e) {
+      if (!e.ctrlKey && !e.metaKey) return
+      e.preventDefault()
+      e.stopPropagation()
+      adjustZoom(e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP)
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  })
+
   function onCanvasContextMenu(/** @type {MouseEvent} */ e, /** @type {((e: MouseEvent) => void) | undefined} */ bitsOpen) {
     const { x, y } = canvasXY(e)
     const t = hitTest(x, y)
@@ -2596,6 +2662,34 @@
           oncontextmenu={(e) => onCanvasContextMenu(e, bitsContextMenu)}
           onscroll={onContainerScroll}
           onkeydown={handleTableKeydown}
+          onwheel={(e) => {
+            // Without Shift: treat all wheel events as vertical.
+            // Horizontal table scroll only when Shift is explicitly held.
+            // This prevents trackpad horizontal-bias from hijacking page scroll.
+            if (!e.shiftKey && Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
+              // Vertical-dominant scroll without Shift — let it bubble up to
+              // the parent (AI chat / page scroll) and prevent the table from
+              // consuming it as horizontal scroll.
+              const tc = tableContainer
+              if (!tc) return
+              const atTop = tc.scrollTop === 0
+              const atBottom = tc.scrollTop + tc.clientHeight >= tc.scrollHeight - 1
+              if (e.deltaY < 0 && atTop || e.deltaY > 0 && atBottom) {
+                // Already at the vertical limit — let the outer container scroll
+                return
+              }
+              // Otherwise scroll this container vertically (the default behavior)
+              // and stop horizontal scrolling.
+              e.preventDefault()
+              tc.scrollTop += e.deltaY
+            } else if (e.shiftKey) {
+              // Shift+scroll: horizontal scrolling within the table
+              e.preventDefault()
+              const tc = tableContainer
+              if (tc) tc.scrollLeft += e.deltaY || e.deltaX
+            }
+            // Pure horizontal gesture (deltaX dominant, no shift) — allow native
+          }}
           onfocusin={() => { isTableFocused = true; }}
           onfocusout={(e) => {
             if (!tableContainer?.contains(e.relatedTarget instanceof Element ? e.relatedTarget : null)) {

@@ -41,28 +41,39 @@ jobs:
           PRERELEASE=""
           [[ "$TAG" == *-* ]] && PRERELEASE="--prerelease"
 
-          cat > /tmp/notes.md << EOF
-          ## DB Studio ${TAG}
+          # Extract changelog for this version from CHANGELOG.md.
+          # Grabs everything between the matching "## [X.Y.Z]" header and the next one.
+          VERSION="${TAG#v}"
+          CHANGELOG=$(node -e "
+            const fs = require('fs')
+            const lines = fs.readFileSync('CHANGELOG.md', 'utf8').split('\n')
+            const header = '## [' + process.env.VERSION + ']'
+            let inside = false
+            const out = []
+            for (const l of lines) {
+              if (l.startsWith(header)) { inside = true; continue }
+              if (inside && /^## \[/.test(l)) break
+              if (inside) out.push(l)
+            }
+            process.stdout.write(out.join('\n').trim())
+          " VERSION="$VERSION")
 
-          ### macOS
+          cat > /tmp/notes.md << EOF
+          ${CHANGELOG:-No changelog available for this release.}
+
+          ---
+
+          ### Install
+
+          **macOS**
           - Apple Silicon: \`db-studio_*_aarch64.dmg\`
           - Intel Mac: \`db-studio_*_x64.dmg\`
 
-          > **"damaged and can't be opened"?** macOS Gatekeeper blocks unsigned apps. Run once after installing:
-          > \`\`\`bash
-          > xattr -cr /Applications/db-studio.app
-          > \`\`\`
-          > Or: right-click the .dmg → Open → Open Anyway in System Settings → Privacy & Security.
+          > **"damaged and can't be opened"?** Run once: \`xattr -cr /Applications/db-studio.app\`
 
-          ### Linux
-          - \`.deb\` (Debian / Ubuntu)
-          - \`.rpm\` (Fedora / RHEL)
-          - \`.AppImage\` (universal)
-          - \`.pkg.tar.zst\` (Arch Linux)
+          **Linux:** \`.deb\` · \`.rpm\` · \`.AppImage\` · \`.pkg.tar.zst\` (Arch)
 
-          ### Windows
-          - \`.exe\` NSIS setup (recommended)
-          - \`.msi\` installer
+          **Windows:** \`.exe\` NSIS setup (recommended) · \`.msi\`
 
           Built from \`${SHA}\`.
           EOF
@@ -359,6 +370,22 @@ jobs:
 
           const read = (f) => { try { return fs.readFileSync(f, 'utf8').trim() } catch { return '' } }
 
+          // Extract this version's changelog section from CHANGELOG.md
+          function extractChangelog(version) {
+            try {
+              const lines = fs.readFileSync('CHANGELOG.md', 'utf8').split('\n')
+              const header = `## [${version}]`
+              let inside = false
+              const out = []
+              for (const l of lines) {
+                if (l.startsWith(header)) { inside = true; continue }
+                if (inside && /^## \[/.test(l)) break
+                if (inside) out.push(l)
+              }
+              return out.join('\n').trim()
+            } catch { return '' }
+          }
+
           const platforms = {}
           const add = (key, sigFile, url) => {
             const sig = read(sigFile)
@@ -371,9 +398,11 @@ jobs:
           add('linux-x86_64',   'sig-linux/updater.sig',         `${BASE}/db-studio_amd64.AppImage.tar.gz`)
           add('windows-x86_64', 'sig-windows/updater.sig',       `${BASE}/db-studio_x64-setup.nsis.zip`)
 
+          const notes = extractChangelog(VERSION) || `See https://github.com/broisnischal/studio/releases/tag/v${VERSION}`
+
           const out = {
             version: VERSION,
-            notes: `See https://github.com/broisnischal/studio/releases/tag/v${VERSION}`,
+            notes,
             pub_date: new Date().toISOString(),
             platforms,
           }

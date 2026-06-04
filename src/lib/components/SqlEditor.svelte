@@ -58,22 +58,22 @@
     /** @param {() => void | undefined} fn */
     const run = (fn) => fn?.()
 
-    // Ctrl+Enter: suppress Monaco's built-in insertLineAfter FIRST (addKeybindingRules
-    // is the only reliable way to remove built-in bindings), then register our action.
-    // addAction alone is not sufficient — the built-in wins the conflict resolution.
-    try {
-      ed.addKeybindingRules?.([
-        { keybinding: CtrlCmd | Enter, command: '-editor.action.insertLineAfter' },
-      ])
-    } catch { /* older Monaco versions may not have addKeybindingRules */ }
+    // Ctrl/Cmd+Enter: use a capture-phase listener on the container so it fires
+    // BEFORE Monaco's own key handlers (which call stopPropagation and block
+    // global hotkey listeners). This is the only reliable cross-platform approach.
+    container.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !e.shiftKey && !e.altKey) {
+        e.preventDefault()
+        e.stopPropagation()
+        run(onmodenter)
+      }
+    }, { capture: true, passive: false })
+    // Still register the action so it appears in Monaco's command palette (F1)
     ed.addAction({
       id: 'db-studio.run-query',
       label: 'Run Query',
-      keybindings: [CtrlCmd | Enter],
       run: () => run(onmodenter),
     })
-    // Belt-and-suspenders: addCommand as well so at least one path fires
-    ed.addCommand(CtrlCmd | Enter, () => run(onmodenter))
 
     // Editor-local shortcuts
     ed.addCommand(CtrlCmd | KeyK,     () => run(onmodk))
@@ -149,6 +149,27 @@
 
     registerAppShortcuts(editor)
 
+    // Document-level capture so Ctrl/Cmd+Enter fires even when the user hasn't
+    // yet clicked into the editor (no focus = no container-level events).
+    // Guards:
+    //   • container.clientWidth === 0 → editor is in a hidden/inactive tab
+    //   • activeElement is a real input/textarea outside Monaco → don't steal it
+    function docRunHandler(/** @type {KeyboardEvent} */ e) {
+      if (!container || container.clientWidth === 0) return
+      if (!e.ctrlKey && !e.metaKey) return
+      if (e.key !== 'Enter' || e.shiftKey || e.altKey) return
+      const ae = document.activeElement
+      const isOtherInput = ae && ae !== document.body &&
+        !container.contains(ae) &&
+        (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' ||
+         ae.getAttribute('contenteditable') === 'true')
+      if (isOtherInput) return
+      e.preventDefault()
+      e.stopPropagation()
+      onmodenter?.()  // call directly — `run` is scoped to registerAppShortcuts, not here
+    }
+    document.addEventListener('keydown', docRunHandler, { capture: true, passive: false })
+
     // Monaco measures char widths at init time. If Geist Mono Variable isn't
     // loaded yet (slow on Linux/Windows), it caches fallback-font widths and
     // never self-corrects even after the font visually arrives.
@@ -174,11 +195,17 @@
     })
 
     return () => {
+      document.removeEventListener('keydown', docRunHandler, { capture: true })
       editor?.dispose()
       editor = null
       themeObserver.disconnect()
     }
   })
+
+  /** Focus the Monaco editor (called when the SQL tab becomes active). */
+  export function focus() {
+    editor?.focus()
+  }
 
   $effect(() => {
     if (!editor) return
