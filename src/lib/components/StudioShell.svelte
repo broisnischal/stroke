@@ -1556,8 +1556,22 @@
     }
   }
 
-  /** @param {{ rowIdx: number, colIdx: number }} detail */
-  async function handleFollowForeignKey({ rowIdx, colIdx }) {
+  /** @param {{ rowIdx: number, colIdx: number, reverseRel?: any, row?: unknown[] }} detail */
+  async function handleFollowForeignKey({ rowIdx, colIdx, reverseRel, row: detailRow }) {
+    // Reverse FK: navigate to the referencing table with the correct filter
+    if (reverseRel?.fromTable) {
+      const row = detailRow ?? rows[rowIdx]
+      if (!row) return
+      const fromSchema = reverseRel.fromSchema || activeSchema
+      const revFilters = buildReverseForeignKeyFilters(reverseRel, columns, row)
+      if (!revFilters) {
+        toast.error('Cannot open reference', { description: 'Could not build filter.' })
+        return
+      }
+      await openTableTab(fromSchema, reverseRel.fromTable, { filters: filtersForApi(revFilters), resetQuery: true })
+      return
+    }
+    // Forward FK: standard navigation
     const col = columns[colIdx]
     if (!col) return
     const fk = findForeignKeyForColumn(foreignKeys, col.name)
@@ -3371,7 +3385,7 @@
   {pendingEditCount}
   onapplyedits={() => void applyEdits()}
   onresetedits={() => resetEdits()}
-  showTableNav={activeTab?.kind === 'table' && total > 0}
+  showTableNav={activeTab?.kind === 'table'}
   onscrolltabletop={() => scrollTableTop()}
   onscrolltablebottom={() => scrollTableBottom()}
   onswitchconnection={handleSwitchDatabase}

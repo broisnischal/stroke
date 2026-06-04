@@ -63,9 +63,15 @@
     <div class="px-3 py-3 font-mono text-[12px] italic text-muted-foreground/35">No rows found.</div>
 
   {:else}
-    <!-- Horizontally scrollable, vertically scrollable only when many rows.
-         No w-full on table — sizes to content so the last column doesn't stretch. -->
-    <div class="overflow-x-auto overflow-y-auto overscroll-contain" style="max-height: 280px">
+    <!-- ≤10 rows: show all (no inner scroll, main table scroll works normally).
+         >10 rows: cap height and add vertical scroll.
+         No overscroll-contain so scroll chains naturally to the main table at limits. -->
+    {@const needsScroll = rowCount > 10}
+    <div
+      class="overflow-x-auto"
+      class:overflow-y-auto={needsScroll}
+      style={needsScroll ? 'max-height: 280px' : ''}
+    >
       <table class="w-max min-w-full border-collapse">
         <thead class="sticky top-0 z-10 bg-background">
           <tr class="border-b border-border/40">

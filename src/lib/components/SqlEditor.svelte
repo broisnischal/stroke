@@ -58,14 +58,22 @@
     /** @param {() => void | undefined} fn */
     const run = (fn) => fn?.()
 
-    // Ctrl+Enter: override Monaco's built-in insertLineAfter which steals this binding.
-    // addAction has higher priority than the built-in keybinding registry.
+    // Ctrl+Enter: suppress Monaco's built-in insertLineAfter FIRST (addKeybindingRules
+    // is the only reliable way to remove built-in bindings), then register our action.
+    // addAction alone is not sufficient — the built-in wins the conflict resolution.
+    try {
+      ed.addKeybindingRules?.([
+        { keybinding: CtrlCmd | Enter, command: '-editor.action.insertLineAfter' },
+      ])
+    } catch { /* older Monaco versions may not have addKeybindingRules */ }
     ed.addAction({
       id: 'db-studio.run-query',
       label: 'Run Query',
       keybindings: [CtrlCmd | Enter],
       run: () => run(onmodenter),
     })
+    // Belt-and-suspenders: addCommand as well so at least one path fires
+    ed.addCommand(CtrlCmd | Enter, () => run(onmodenter))
 
     // Editor-local shortcuts
     ed.addCommand(CtrlCmd | KeyK,     () => run(onmodk))
