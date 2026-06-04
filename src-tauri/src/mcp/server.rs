@@ -19,6 +19,7 @@ struct AppState {
     connections: Arc<Mutex<Vec<ConnMeta>>>,
     active_conn_id: Arc<Mutex<Option<String>>>,
     token: String,
+    read_only: Arc<Mutex<bool>>,
 }
 
 #[derive(Deserialize)]
@@ -75,9 +76,10 @@ pub async fn run(
     conn: Arc<Mutex<Option<ActiveConnection>>>,
     connections: Arc<Mutex<Vec<ConnMeta>>>,
     active_conn_id: Arc<Mutex<Option<String>>>,
+    read_only: Arc<Mutex<bool>>,
     shutdown_rx: oneshot::Receiver<()>,
 ) {
-    let state = AppState { conn, connections, active_conn_id, token };
+    let state = AppState { conn, connections, active_conn_id, token, read_only };
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
@@ -169,6 +171,19 @@ async fn dispatch(
                 let active_id = state.active_conn_id.lock().map_err(|e| e.to_string())?.clone();
                 let text = tools::call_meta_tool(name, &connections, active_id.as_deref())?;
                 return Ok(json!({ "content": [{ "type": "text", "text": text }] }));
+            }
+
+            // Enforce read-only mode: only SELECT-family queries are allowed.
+            let is_readonly = *state.read_only.lock().map_err(|e| e.to_string())?;
+            if is_readonly && name == "execute_sql" {
+                let sql = args["sql"].as_str().unwrap_or("");
+                if !tools::is_read_only_sql(sql) {
+                    return Err(
+                        "Read-only mode is enabled. Only SELECT queries are permitted. \
+                         Disable read-only mode in DB Studio's MCP settings to run write operations."
+                            .to_string(),
+                    );
+                }
             }
 
             let conn = state

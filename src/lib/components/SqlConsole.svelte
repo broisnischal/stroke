@@ -11,6 +11,7 @@
   import Code2 from "@lucide/svelte/icons/code-2";
   import Plus from "@lucide/svelte/icons/plus";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import Download from "@lucide/svelte/icons/download";
   import { cn } from "$lib/utils.js";
   import SqlEditor from "./SqlEditor.svelte";
   import { sqlToDrizzle, sqlToPrisma } from "$lib/orm-builder.js";
@@ -81,6 +82,14 @@
   /**
    * @typedef {{ id: string, name: string, content: string }} SqlTab
    */
+
+  /** @type {{ focus: () => void } | null} */
+  let sqlEditorRef = $state(null)
+
+  /** Focus the SQL editor — called by the parent when this tab becomes active. */
+  export function focusEditor() {
+    sqlEditorRef?.focus()
+  }
 
   const initialTabId = crypto.randomUUID();
   /** @type {SqlTab[]} */
@@ -320,6 +329,38 @@
 
   const jsonText = $derived(rowObjects.length > 0 ? JSON.stringify(rowObjects, null, 2) : '[]')
 
+  // ── Export helpers ──────────────────────────────────────────────────────────
+  /** Escape a value for CSV (RFC 4180). */
+  function _csvCell(v) {
+    if (v === null || v === undefined) return ''
+    const s = typeof v === 'object' ? JSON.stringify(v) : String(v)
+    if (s.includes(',') || s.includes('"') || s.includes('\n') || s.includes('\r')) {
+      return '"' + s.replace(/"/g, '""') + '"'
+    }
+    return s
+  }
+
+  function downloadBlob(content, filename, type) {
+    const blob = new Blob([content], { type })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = filename; a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+
+  function exportCsv() {
+    const cols = currentDisplay.columns.map(c => c.name ?? String(c))
+    const header = cols.map(_csvCell).join(',')
+    const body = currentDisplay.rows.map(r =>
+      /** @type {any[]} */ (r).map(_csvCell).join(',')
+    ).join('\n')
+    downloadBlob(header + '\n' + body, 'query-result.csv', 'text/csv')
+  }
+
+  function exportJson() {
+    downloadBlob(jsonText, 'query-result.json', 'application/json')
+  }
+
   /** @type {HTMLElement | null} */
   let consoleEl = $state(null);
   const initialLayout = loadLayout();
@@ -557,6 +598,7 @@
     style={outputVisible ? `height: ${editorHeight}px` : undefined}
   >
     <SqlEditor
+      bind:this={sqlEditorRef}
       bind:value={activeTab.content}
       class="absolute inset-0"
       {schemaHints}
@@ -684,6 +726,29 @@
         {#if outputVisible && currentDisplay.message}
           <span class="max-w-[160px] truncate font-mono text-ui-2xs text-muted-foreground">{currentDisplay.message}</span>
         {/if}
+
+        <!-- Export buttons — only when there are results -->
+        {#if outputVisible && currentDisplay.rows.length > 0}
+          <button
+            type="button"
+            class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-foreground"
+            title="Export as CSV"
+            onclick={exportCsv}
+          >
+            <Download class="size-3" />
+            <span class="text-[10px]">CSV</span>
+          </button>
+          <button
+            type="button"
+            class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-foreground"
+            title="Export as JSON"
+            onclick={exportJson}
+          >
+            <Download class="size-3" />
+            <span class="text-[10px]">JSON</span>
+          </button>
+        {/if}
+
         <button
           type="button"
           onclick={toggleOutput}

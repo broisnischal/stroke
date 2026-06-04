@@ -1,0 +1,212 @@
+# Changelog
+
+All notable changes to DB Studio are listed here, newest first.
+
+---
+
+## [0.3.4] - 2026-06-04
+
+### New Features
+
+#### Canvas Table
+- **Canvas zoom** — `Ctrl/Cmd + Scroll` or `Ctrl/Cmd + =/-/0` zooms the entire table (rows, fonts, columns) proportionally; zoom level is shared across all open tabs and persisted to `localStorage`
+- **FK inline sub-view** — clicking a foreign-key cell opens a compact panel below the row showing the referenced record(s); `Ctrl/Cmd + click` navigates to the full table; `Esc` closes
+- **Reverse FK relationship columns** — tables that reference the current table appear as pill-badge columns on the right; clicking a badge shows related rows in the inline panel (max 5 columns, deduplicated by `fromTable`)
+- **Per-tab expand state** — JSON expand rows and FK sub-view state are saved per table tab and restored when switching back; different tables start with their own clean slate
+- **Shift + scroll for horizontal** — default mouse wheel scrolls vertically; Shift + scroll moves the table horizontally, preventing accidental horizontal hijack on wide tables
+- **`Ctrl/Cmd + T` clears table search** — when viewing a table tab, this shortcut clears and focuses the row search input
+- **Go-to-top / bottom buttons** always visible in the status bar when on a table tab
+
+#### SQL Editor
+- **Ctrl/Cmd + Enter runs query from first keystroke** — uses a document-level `capture` listener so it fires even before the editor is clicked into; also works from the very first open without clicking Run first
+- **Auto-focus on tab open** — the SQL editor receives focus automatically whenever the SQL tab becomes active
+
+#### SQL Console
+- **Export results** — `CSV` and `JSON` download buttons appear in the result toolbar when a query returns data
+- **0-row results hidden** — when a query returns 0 rows, no result card is added to the AI chat; the AI still knows the result was empty
+
+#### MCP Server
+- **Read-only mode** — toggle in the MCP dialog restricts the agent to `SELECT`-only queries; `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, and other write operations are rejected at the server level with a clear error; setting is persisted and synced to the Rust backend live
+- **MCP panel revamp** — redesigned in the Linear/Resend/Raycast style: compact list rows instead of large cards, inline Start/Stop button, amber-accented read-only toggle, theme-aware borders throughout
+
+#### AI Chat
+- **Image rendering removed** — database columns containing image URLs no longer trigger dozens of simultaneous network requests; images are replaced with compact link chips (`filename.ext`) that open on click; resolves major performance lag on tables with image URL columns
+- **Schema/describe results hidden** — internal AI tool calls (`describe_table`, `get_schema`) no longer show result cards in the chat; the AI still receives the data and answers correctly but the intermediate steps stay invisible
+- **Inline code chip styling** — column name chips (`created_at`, `user_id`) are more polished: 5px radius, proper padding, `Geist Mono` font, `white-space: nowrap`
+- **AI chat table styling** — uppercase small-caps headers, hover-highlight rows (replaces static zebra striping), 8px border-radius with `overflow: hidden` clipping
+- **Input textarea** — replaced hardcoded `#3a3a3a` border with `var(--border)` tokens; `focus-within` ring; `font-family: inherit` ensures Inter is used for typed text
+- **AI chart save preserves spec** — AI-generated charts (including `meter` and `choropleth` types that don't use ECharts) now save the full `aiSpec` so previews render correctly in Charts and Dashboard pages
+
+### Bug Fixes
+- Fixed `onCanvasPointerLeave` missing after tooltip removal — hover state now clears correctly on mouse leave
+- Fixed `cy` variable not defined in virtual column badge drawing — was causing a `ReferenceError` silently
+- Fixed `run` not in scope in `docRunHandler` — `Ctrl+Enter` in SQL editor would silently fail with `ReferenceError` instead of running the query
+- Fixed connection pool exhaustion — reverse FK relationships are now cached per `schema.table` and loaded only once, not on every page/sort/filter reload
+- Fixed `canvasZoom` not live-updating open tabs — replaced local `$state` with a module-level `$state` store so all DataTable instances react immediately; also fixed passive wheel listener that prevented `preventDefault`
+- Fixed `Cmd+K` command palette search persisting between opens — `paletteSearch` is now cleared when the dialog closes
+- Fixed FK sub-view "Open in sub view" not navigating for reverse FK — now correctly passes `reverseRel` info to `handleFollowForeignKey` and navigates to the referencing table with filters applied
+- Fixed virtual relationship column width too narrow — minimum raised to 300px with conservative `10px/char` estimate; eliminates `cart_it...` truncation
+- Fixed row lines not extending into virtual columns — bottom grid line now draws to full `_viewportWidth` and is painted after cell fills so it stays on top
+- Fixed FK sub-view panel position — panel now anchors to viewport left edge using `transform: translateX(_scrollLeft)` (GPU-composited, no layout thrashing) regardless of horizontal scroll
+- Fixed FK sub-view lag on open — replaced debounced `ResizeObserver` height chain with zero-cost overlay (panel doesn't push rows down, no `rowTops` recomputation)
+- Fixed horizontal scroll hijack in FK sub-view — only horizontal `wheel` events are stopped from propagating; vertical scroll always passes through to the main table
+
+### Changes
+- Removed column collapse (drag-to-hide) — columns now have a hard 48px minimum width instead of snapping to a 12px strip
+- Removed hover tooltips on canvas cells — eliminated the 450ms `setTimeout` loop that was firing on every mouse move at 120Hz
+- Not-null dot badge removed from column headers — was visually indistinguishable from the `·` type separator and caused confusion
+- FK sub-view and JSON expand are mutually exclusive per row — opening one closes the other
+- Ctrl+T in table view clears search instead of opening the command palette tables page (the command palette shortcut is unchanged from other views)
+- `prose-ai` table rows use hover highlight instead of static even/odd zebra striping for a cleaner look
+
+---
+
+## [0.3.3] - 2026-06-04
+
+### New Features
+- Canvas-based table renderer handles 1M+ rows without freezing
+- Foreign key sub-view panel — click any FK cell to see related rows inline
+- Reverse FK navigation — view all rows in a child table referencing the current row
+- Update dialog now shows a proper "What's New" changelog with sections per update
+
+### Bug Fixes
+- Fixed query filter not applying correctly on certain column types
+- Fixed table-query building incorrect WHERE clause for nullable columns
+- Fixed row expand viewer not reflecting cell edits immediately
+- Fixed FK dialog not refreshing after schema changes
+
+### Changes
+- DataTable split into canvas renderer + geometry helpers for maintainability
+- SQL console result panel now persists last query result across tab switches
+
+---
+
+## [0.3.2] - 2026-06-02
+
+### New Features
+- JSON cell lightbox — view large JSON values full-screen with syntax highlighting
+- Row expand viewer for inspecting all columns of a row in a side panel
+- Structure view shows indexes, constraints, and triggers per table
+
+### Bug Fixes
+- Fixed slow query performance on large schemas
+- Fixed status bar not updating after table switch
+- Fixed command palette search not matching table names with underscores
+
+### Changes
+- Database switcher redesigned for clarity
+- Foreign key dialog now shows column mappings inline
+- Sidebar table list performance improved for schemas with 500+ tables
+- Sonner toast positioning adjusted to avoid overlap with status bar
+
+---
+
+## [0.3.1] - 2026-06-01
+
+### New Features
+- Tab bar with per-tab state — switch between multiple tables without losing scroll/filter state
+
+### Bug Fixes
+- Fixed table loading spinner not dismissing on empty result sets
+- Fixed structure view crashing on tables with no primary key
+
+### Changes
+- StudioShell refactored for faster tab routing
+
+---
+
+## [0.3.0] - 2026-06-01
+
+### New Features
+- Charts & Dashboard page — visualize query results as bar, line, pie, and scatter charts
+- Diagrams page with Mermaid ER diagram viewer — auto-generated from schema
+- AI Chat redesigned with conversation history and query suggestion chips
+- Cloudflare D1 authentication flow added
+- Command palette overhauled — full-width rows, keyboard shortcut badges, grouped results
+
+### Bug Fixes
+- Fixed EGL rendering crash on Wayland (Linux)
+- Fixed chart re-renders causing CPU spikes
+
+### Changes
+- App shell layout refactored to support tabbed side panels
+- Status bar now shows active connection and row count at all times
+
+---
+
+## [0.2.2] - 2026-05-29
+
+### Bug Fixes
+- Fixed chart rendering causing CPU overload — disabled aspect ratio maintenance on resize
+- Fixed virtualized row rendering dropping rows at certain scroll speeds
+
+### Changes
+- Query execution pipeline optimized — large result sets stream in chunks
+
+---
+
+## [0.2.0] - 2026-05-28
+
+### New Features
+- Comprehensive rendering and memory optimizations for the data table
+- X11 fallback added for EGL stability on Linux
+
+### Bug Fixes
+- Fixed EGL_BAD_ALLOC crash on Wayland with WebKitGTK
+- Fixed AUR package build missing `patchelf` dependency
+
+---
+
+## [0.1.22] - 2026-05-28
+
+### New Features
+- UI styling pass — refined spacing, typography, and color tokens across all panels
+
+### Bug Fixes
+- Fixed multiple Svelte reactivity warnings causing unnecessary re-renders
+
+---
+
+## [0.1.12] - 2026-05-24
+
+### New Features
+- Built-in MCP server — expose your connected database to AI agents (Cursor, VS Code, Claude)
+- One-click deep links to install the MCP server into Cursor and VS Code
+- MCP server toggle moved to Settings (off by default)
+- Themes — light, dark, and system-follow support
+
+### Bug Fixes
+- Fixed `latest.json` generation in release workflow — updater now works on all platforms
+- Fixed URL opener blocking `cursor://` and `vscode:` protocol links
+
+---
+
+## [0.1.11] - 2026-05-24
+
+### New Features
+- AI can now fix SQL errors automatically when a query fails
+- Manual "Check for updates" action added to command palette
+
+---
+
+## [0.1.7] - 2026-05-24
+
+### New Features
+- URL preview and media lightbox for URL-type columns in the data table
+
+---
+
+## [0.1.5] - 2026-05-23
+
+### Bug Fixes
+- macOS ad-hoc signing added — Gatekeeper workaround instructions in release notes
+
+---
+
+## [0.1.2] - 2026-05-21
+
+### New Features
+- Table filters — filter by any column with eq/neq/contains/gt/lt operators
+- Foreign key navigation — click FK values to jump to the referenced row
+- SQL editor improvements — syntax highlighting, history, saved queries
+- GitHub Actions release workflow — automated builds for Linux, Windows, and macOS

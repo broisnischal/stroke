@@ -87,9 +87,22 @@
     }
   }
 
-  const lbl = 'mb-2 block text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/50'
-  const inp = 'h-9 w-full rounded-lg border border-border/30 bg-muted/[0.35] px-3 font-mono text-[13px] text-foreground placeholder:text-muted-foreground/30 outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-colors'
-  const sel = 'h-9 w-full appearance-none rounded-lg border border-border/30 bg-muted/[0.35] px-3 pr-7 font-mono text-[13px] text-foreground outline-none focus:border-primary/50 transition-colors'
+  const lbl = 'mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/40'
+  const inp = 'h-9 w-full rounded-lg border border-border/30 bg-muted/[0.3] px-3 font-mono text-[13px] text-foreground placeholder:text-muted-foreground/25 outline-none focus:border-primary/40 focus:ring-1 focus:ring-primary/15 transition-colors'
+  const sel = 'h-9 w-full appearance-none rounded-lg border border-border/30 bg-muted/[0.3] px-3 pr-7 font-mono text-[13px] text-foreground outline-none focus:border-primary/40 transition-colors'
+
+  /**
+   * Action pill class — active uses primary styling for both sections
+   * (destructive styling only for truly dangerous actions like CASCADE in On Delete).
+   */
+  function actionCls(a, active, section) {
+    if (!active) return 'rounded-md px-2.5 py-1 font-mono text-[11px] font-medium text-muted-foreground/40 transition-colors hover:bg-muted/40 hover:text-foreground'
+    const isDanger = section === 'delete' && (a === 'CASCADE')
+    const isWarn = section === 'delete' && (a === 'SET NULL' || a === 'SET DEFAULT')
+    if (isDanger) return 'rounded-md px-2.5 py-1 font-mono text-[11px] font-medium bg-destructive/10 text-destructive ring-1 ring-destructive/25'
+    if (isWarn)   return 'rounded-md px-2.5 py-1 font-mono text-[11px] font-medium bg-amber-500/10 text-amber-400 ring-1 ring-amber-500/25'
+    return 'rounded-md px-2.5 py-1 font-mono text-[11px] font-medium bg-primary/10 text-primary ring-1 ring-primary/25'
+  }
 </script>
 
 <DdlConfirmDialog
@@ -163,30 +176,20 @@
         </div>
 
         <!-- ON UPDATE + ON DELETE -->
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-2 gap-4">
           <div>
             <p class={lbl}>On update</p>
-            <div class="flex flex-wrap gap-1">
+            <div class="flex flex-wrap gap-1.5">
               {#each FK_ACTIONS as a (a)}
-                <button type="button"
-                  class="rounded-md px-2 py-0.5 font-mono text-[10px] font-medium transition-colors {onUpdate === a
-                    ? 'bg-muted/70 text-foreground ring-1 ring-border/50'
-                    : 'text-muted-foreground/45 hover:bg-muted/40 hover:text-foreground'}"
-                  onclick={() => (onUpdate = a)}
-                >{a}</button>
+                <button type="button" class={actionCls(a, onUpdate === a, 'update')} onclick={() => (onUpdate = a)}>{a}</button>
               {/each}
             </div>
           </div>
           <div>
             <p class={lbl}>On delete</p>
-            <div class="flex flex-wrap gap-1">
+            <div class="flex flex-wrap gap-1.5">
               {#each FK_ACTIONS as a (a)}
-                <button type="button"
-                  class="rounded-md px-2 py-0.5 font-mono text-[10px] font-medium transition-colors {onDelete === a
-                    ? 'bg-destructive/10 text-destructive ring-1 ring-destructive/20'
-                    : 'text-muted-foreground/45 hover:bg-muted/40 hover:text-foreground'}"
-                  onclick={() => (onDelete = a)}
-                >{a}</button>
+                <button type="button" class={actionCls(a, onDelete === a, 'delete')} onclick={() => (onDelete = a)}>{a}</button>
               {/each}
             </div>
           </div>
