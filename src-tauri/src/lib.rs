@@ -70,6 +70,10 @@ pub fn run() {
             // keep disabled in release. The toggle_devtools command also exposes
             // them on demand via F12.
             .devtools(cfg!(debug_assertions))
+            // The app implements its own canvas-table zoom; disable Tauri's injected
+            // Ctrl/Cmd+wheel webview polyfill (macOS/Linux) so pinch near column
+            // resize handles doesn't magnify the whole webview.
+            .zoom_hotkeys_enabled(false)
             .on_navigation(|url| {
                 let scheme = url.scheme();
                 if matches!(scheme, "tauri" | "ipc") {
@@ -101,6 +105,16 @@ pub fn run() {
                         }
                     }
                 }
+
+                // Disable WKWebView trackpad pinch magnification — the canvas table
+                // has its own zoom and pinch during column resize was blowing up the view.
+                let _ = window.with_webview(|webview| unsafe {
+                    use objc2_web_kit::WKWebView;
+                    let view: &WKWebView = &*webview.inner().cast();
+                    view.setAllowsMagnification(false);
+                    view.setMagnification(1.0);
+                    view.setPageZoom(1.0);
+                });
             }
 
             if cfg!(debug_assertions) {
