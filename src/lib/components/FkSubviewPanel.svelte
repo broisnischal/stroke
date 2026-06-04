@@ -1,0 +1,115 @@
+<script>
+  import Loader from '@lucide/svelte/icons/loader'
+  import ExternalLink from '@lucide/svelte/icons/external-link'
+  import X from '@lucide/svelte/icons/x'
+
+  let {
+    data,
+    fkLabel = '',
+    onclose = () => {},
+    /** Navigate to the related table WITH the FK filter applied */
+    onfullview = () => {},
+  } = $props()
+
+  /** @param {unknown} v */
+  function fmt(v) {
+    if (v === null || v === undefined) return 'NULL'
+    if (typeof v === 'object') return JSON.stringify(v)
+    return String(v)
+  }
+
+  const rowCount = $derived(data?.rows?.length ?? 0)
+</script>
+
+<!--
+  Width is set by the parent (= viewport width - gutter).
+  No max-width cap here — the parent already handles it.
+-->
+<div class="w-full border border-border/40 bg-background shadow-sm">
+
+  <!-- Compact header: close on left, table name, count -->
+  <div class="flex items-center gap-2 border-b border-border/30 bg-muted/10 px-2.5 py-1.5">
+    <button
+      type="button"
+      class="flex shrink-0 items-center rounded p-0.5 text-muted-foreground/40 transition-colors hover:bg-muted/40 hover:text-foreground"
+      onclick={onclose}
+      aria-label="Close"
+    >
+      <X class="size-3.5" />
+    </button>
+
+    <span class="rounded border border-border/50 bg-muted/30 px-2 py-0.5 font-mono text-[12px] font-medium text-foreground/75">
+      {fkLabel}
+    </span>
+
+    {#if !data?.loading && !data?.error}
+      <span class="font-mono text-[11px] text-muted-foreground/40">
+        {rowCount}{rowCount >= 50 ? '+' : ''} row{rowCount !== 1 ? 's' : ''}
+      </span>
+    {/if}
+  </div>
+
+  <!-- Content — no min-height so the panel shrinks to its data -->
+  {#if data?.loading}
+    <div class="flex items-center gap-2 px-3 py-4">
+      <Loader class="size-3.5 animate-spin text-muted-foreground/40" />
+      <span class="font-mono text-[12px] text-muted-foreground/50">Loading…</span>
+    </div>
+
+  {:else if data?.error}
+    <div class="px-3 py-3 font-mono text-[12px] text-destructive/60">{data.error}</div>
+
+  {:else if !rowCount}
+    <div class="px-3 py-3 font-mono text-[12px] italic text-muted-foreground/35">No rows found.</div>
+
+  {:else}
+    <!-- Horizontally scrollable, vertically scrollable only when many rows.
+         No w-full on table — sizes to content so the last column doesn't stretch. -->
+    <div class="overflow-x-auto overflow-y-auto overscroll-contain" style="max-height: 280px">
+      <table class="w-max min-w-full border-collapse">
+        <thead class="sticky top-0 z-10 bg-background">
+          <tr class="border-b border-border/40">
+            {#each data.columns as col (col.name ?? col)}
+              <th class="whitespace-nowrap px-3 py-1.5 text-left">
+                <span class="font-mono text-[12px] font-bold text-foreground/75">{col.name ?? col}</span>
+                {#if col.dataType ?? col.data_type}
+                  <span class="ml-1 font-mono text-[11px] font-normal text-muted-foreground/30">{col.dataType ?? col.data_type}</span>
+                {/if}
+              </th>
+            {/each}
+          </tr>
+        </thead>
+        <tbody>
+          {#each data.rows as row, i (i)}
+            <tr class="border-b border-border/15 last:border-0 hover:bg-muted/10">
+              {#each data.columns as col, j (col.name ?? j)}
+                {@const v = Array.isArray(row) ? row[j] : row[col.name ?? col]}
+                {@const isNullVal = v === null || v === undefined}
+                <td
+                  class="whitespace-nowrap px-3 py-1.5 font-mono text-[12px]"
+                  class:text-muted-foreground={isNullVal}
+                  class:italic={isNullVal}
+                >{fmt(v)}</td>
+              {/each}
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Footer: button on LEFT -->
+    <div class="flex items-center gap-3 border-t border-border/25 bg-muted/5 px-3 py-1.5">
+      <button
+        type="button"
+        class="inline-flex items-center gap-1.5 rounded border border-border/40 bg-muted/20 px-3 py-1 font-mono text-[12px] text-foreground/65 transition-colors hover:bg-muted/50 hover:text-foreground"
+        onclick={onfullview}
+      >
+        Open in sub view
+        <ExternalLink class="size-3" />
+      </button>
+      {#if rowCount >= 50}
+        <span class="font-mono text-[11px] text-muted-foreground/25">First 50 rows shown</span>
+      {/if}
+    </div>
+  {/if}
+</div>

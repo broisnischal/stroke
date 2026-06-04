@@ -1058,3 +1058,132 @@ async fn get_column_structure_pg(
 
     Ok(result)
 }
+
+// ── Incoming foreign keys (reverse / one-to-many relationships) ───────────────
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IncomingForeignKey {
+    pub from_schema: String,
+    pub from_table: String,
+    pub from_columns: Vec<String>,
+    pub to_columns: Vec<String>,
+    pub constraint_name: String,
+}
+
+async fn get_incoming_fks_pg(pool: &PgPool, schema: &str, table: &str) -> Result<Vec<IncomingForeignKey>, String> {
+    let rows = sqlx::query(r#"
+        SELECT
+            fn.nspname::text,
+            fc.relname::text,
+            ARRAY(SELECT a.attname::text FROM pg_catalog.pg_attribute a
+                  WHERE a.attrelid = pc.conrelid AND a.attnum = ANY(pc.conkey)
+                  ORDER BY array_position(pc.conkey, a.attnum))::text[],
+            ARRAY(SELECT a.attname::text FROM pg_catalog.pg_attribute a
+                  WHERE a.attrelid = pc.confrelid AND a.attnum = ANY(pc.confkey)
+                  ORDER BY array_position(pc.confkey, a.attnum))::text[],
+            pc.conname::text
+        FROM pg_catalog.pg_constraint pc
+        JOIN pg_catalog.pg_class       fc  ON fc.oid = pc.conrelid
+        JOIN pg_catalog.pg_namespace   fn  ON fn.oid = fc.relnamespace
+        JOIN pg_catalog.pg_class       tc  ON tc.oid = pc.confrelid
+        JOIN pg_catalog.pg_namespace   tn  ON tn.oid = tc.relnamespace
+        WHERE pc.contype = 'f'
+          AND tn.nspname = $1
+          AND tc.relname = $2
+        ORDER BY fn.nspname, fc.relname, pc.conname
+    "#)
+    .bind(schema)
+    .bind(table)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("Incoming FK query failed: {e}"))?;
+
+    Ok(rows.iter().filter_map(|r| Some(IncomingForeignKey {
+        from_schema:     r.try_get(0).ok()?,
+        from_table:      r.try_get(1).ok()?,
+        from_columns:    r.try_get(2).unwrap_or_default(),
+        to_columns:      r.try_get(3).unwrap_or_default(),
+        constraint_name: r.try_get(4).unwrap_or_default(),
+    })).collect())
+}
+
+async fn get_incoming_fks_mysql(pool: &MySqlPool, schema: &str, table: &str) -> Result<Vec<IncomingForeignKey>, String> {
+    let rows = sqlx::query(r#"
+        SELECT kcu.table_schema, kcu.table_name, kcu.column_name,
+               kcu.referenced_column_name, kcu.constraint_name
+        FROM information_schema.key_column_usage kcu
+        JOIN information_schema.table_constraints tc
+            ON tc.constraint_name = kcu.constraint_name
+           AND tc.table_schema    = kcu.table_schema
+           AND tc.table_name      = kcu.table_name
+        WHERE tc.constraint_type          = 'FOREIGN KEY'
+          AND kcu.referenced_table_schema = ?
+          AND kcu.referenced_table_name   = ?
+        ORDER BY kcu.table_name, kcu.constraint_name, kcu.ordinal_position
+    "#)
+    .bind(schema)
+    .bind(table)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("Incoming FK query failed: {e}"))?;
+
+    let mut map: std::collections::BTreeMap<(String, String, String), (Vec<String>, Vec<String>)> = Default::default();
+    for r in &rows {
+        let fs: String = r.try_get(0).unwrap_or_default();
+        let ft: String = r.try_get(1).unwrap_or_default();
+        let fc: String = r.try_get(2).unwrap_or_default();
+        let tc: String = r.try_get(3).unwrap_or_default();
+        let cn: String = r.try_get(4).unwrap_or_default();
+        let e = map.entry((fs, ft, cn)).or_default();
+        e.0.push(fc); e.1.push(tc);
+    }
+    Ok(map.into_iter().map(|((fs, ft, cn), (fc, tc))| IncomingForeignKey {
+        from_schema: fs, from_table: ft, from_columns: fc, to_columns: tc, constraint_name: cn,
+    }).collect())
+}
+
+async fn get_incoming_fks_sqlite(pool: &sqlx::SqlitePool, table: &str) -> Result<Vec<IncomingForeignKey>, String> {
+    let tables: Vec<String> = sqlx::query(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+    ).fetch_all(pool).await.unwrap_or_default()
+     .iter().filter_map(|r| r.try_get::<String, _>(0).ok()).collect();
+
+    let mut result = Vec::new();
+    for from_table in tables {
+        let tq = format!("\"{}\"", from_table.replace('"', "\"\""));
+        let fk_rows = sqlx::query(&format!("PRAGMA foreign_key_list({tq})"))
+            .fetch_all(pool).await.unwrap_or_default();
+        let mut fk_map: std::collections::BTreeMap<i64, (Vec<String>, Vec<String>)> = Default::default();
+        for r in &fk_rows {
+            let id: i64 = r.try_get(0).unwrap_or(0);
+            let ref_table: String = r.try_get::<Option<String>, _>(2).ok().flatten().unwrap_or_default();
+            if !ref_table.eq_ignore_ascii_case(table) { continue; }
+            let fc: String = r.try_get::<Option<String>, _>(3).ok().flatten().unwrap_or_default();
+            let tc: String = r.try_get::<Option<String>, _>(4).ok().flatten().unwrap_or_default();
+            let e = fk_map.entry(id).or_default(); e.0.push(fc); e.1.push(tc);
+        }
+        for (_, (from_columns, to_columns)) in fk_map {
+            result.push(IncomingForeignKey {
+                from_schema: "main".to_string(), from_table: from_table.clone(),
+                from_columns, to_columns, constraint_name: String::new(),
+            });
+        }
+    }
+    Ok(result)
+}
+
+pub async fn get_incoming_foreign_keys(
+    state: State<'_, DbState>,
+    schema: String,
+    table: String,
+) -> Result<Vec<IncomingForeignKey>, String> {
+    validate_ident(&schema)?;
+    validate_ident(&table)?;
+    match require_conn(&state)? {
+        ActiveConnection::Postgres(pool) => get_incoming_fks_pg(&pool, &schema, &table).await,
+        ActiveConnection::Mysql(pool)    => get_incoming_fks_mysql(&pool, &schema, &table).await,
+        ActiveConnection::Sqlite(pool)   => get_incoming_fks_sqlite(&pool, &table).await,
+        _                                => Ok(vec![]),
+    }
+}

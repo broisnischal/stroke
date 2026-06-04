@@ -61,6 +61,7 @@
     listTables,
     getTableRows,
     getTableColumnStructure,
+    getIncomingForeignKeys,
     executeSql,
     executeSqlMulti,
     executeDdl,
@@ -117,6 +118,7 @@
   } from '$lib/table-query.js'
   import {
     buildForeignKeyFilters,
+    buildReverseForeignKeyFilters,
     findForeignKeyForColumn,
     normalizeForeignKeys,
   } from '$lib/foreign-key-nav.js'
@@ -316,6 +318,12 @@
   let primaryKey = $state([])
   /** @type {ForeignKeyInfo[]} */
   let foreignKeys = $state([])
+  /** Cache of incoming (reverse) FKs, keyed by "schema.table". Loaded once per table open. */
+  let incomingFkCache = $state(/** @type {Map<string,any[]>} */ (new Map()))
+  /** Incoming FKs for the active table, read from cache. */
+  const incomingForeignKeys = $derived(
+    (activeSchema && activeTable) ? (incomingFkCache.get(`${activeSchema}.${activeTable}`) ?? []) : []
+  )
   let rows = $state([])
   let savingCell = $state(false)
   let deletingRows = $state(false)
@@ -1505,6 +1513,47 @@
     }
     // Fire the fetch in background — caller can open more tabs without waiting
     void fetchRowsForTab(tab.id)
+    // Load reverse FKs once per table (cached — not re-fetched on page/sort changes)
+    void loadIncomingForeignKeys(schema, table)
+  }
+
+  /** Load incoming FKs for a table into the cache (no-op if already cached). */
+  async function loadIncomingForeignKeys(schema, table) {
+    const key = `${schema}.${table}`
+    if (incomingFkCache.has(key)) return
+    try {
+      const result = await getIncomingForeignKeys(schema, table)
+      incomingFkCache = new Map(incomingFkCache).set(key, result ?? [])
+    } catch {
+      incomingFkCache = new Map(incomingFkCache).set(key, [])
+    }
+  }
+
+  /**
+   * Fetch related rows for an FK sub-view panel.
+   * kind='forward': follow this table's FK to the referenced table.
+   * kind='reverse': query a referencing table filtered to this row.
+   */
+  async function handleFetchRelatedRows(detail) {
+    try {
+      if (detail.kind === 'forward') {
+        const filters = buildForeignKeyFilters(detail.fk, columns, detail.row)
+        if (!filters) return { columns: [], rows: [], error: 'FK value is NULL' }
+        const refSchema = detail.fk.referencedSchema || detail.fk.referenced_schema || activeSchema
+        const refTable  = detail.fk.referencedTable  || detail.fk.referenced_table  || ''
+        if (!refTable) return { columns: [], rows: [], error: 'No referenced table' }
+        const data = await getTableRows(refSchema, refTable, 50, 0, { filters: filtersForApi(filters) })
+        return { columns: data.columns ?? [], rows: data.rows ?? [] }
+      } else {
+        const revFilters = buildReverseForeignKeyFilters(detail, columns, detail.row)
+        if (!revFilters) return { columns: [], rows: [], error: 'Cannot build filter — value may be NULL' }
+        const fromSchema = detail.fromSchema || activeSchema
+        const data = await getTableRows(fromSchema, detail.fromTable, 50, 0, { filters: filtersForApi(revFilters) })
+        return { columns: data.columns ?? [], rows: data.rows ?? [] }
+      }
+    } catch (e) {
+      return { columns: [], rows: [], error: String(e) }
+    }
   }
 
   /** @param {{ rowIdx: number, colIdx: number }} detail */
@@ -3094,6 +3143,8 @@
                 {rows}
                 {primaryKey}
                 {foreignKeys}
+                {incomingForeignKeys}
+                onfetchrelatedrows={handleFetchRelatedRows}
                 schema={activeSchema}
                 tableName={activeTable ?? ''}
                 indexes={activeTableIndexes}

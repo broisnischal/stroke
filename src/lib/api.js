@@ -204,6 +204,19 @@ export async function getTableColumnStructure(schema, table) {
   }
 }
 
+/**
+ * Returns tables that have a FK pointing TO the given table (reverse/incoming relationships).
+ * @param {string} schema @param {string} table
+ * @returns {Promise<Array<{ fromSchema:string, fromTable:string, fromColumns:string[], toColumns:string[], constraintName:string }>>}
+ */
+export async function getIncomingForeignKeys(schema, table) {
+  try {
+    return await invoke('pg_get_incoming_foreign_keys', { schema, table })
+  } catch (err) {
+    throw new Error(formatInvokeError(err))
+  }
+}
+
 /** @param {string} schema */
 export async function listEnums(schema) {
   try {

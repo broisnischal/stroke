@@ -49,6 +49,30 @@ export function buildForeignKeyFilters(fk, columns, row) {
   return filters
 }
 
+/**
+ * Build eq filters on a referencing table from the current row's referenced column values.
+ * Used for reverse FK (one-to-many) sub-view queries.
+ * @param {{ fromColumns: string[], toColumns: string[] }} reverseFk
+ * @param {Array<{ name: string }>} columns
+ * @param {unknown[]} row
+ * @returns {import('$lib/table-query.js').TableFilter[] | null}
+ */
+export function buildReverseForeignKeyFilters(reverseFk, columns, row) {
+  const { fromColumns, toColumns } = reverseFk
+  if (!fromColumns?.length || fromColumns.length !== toColumns?.length) return null
+  const filters = []
+  for (let i = 0; i < toColumns.length; i++) {
+    const colIdx = columns.findIndex(c => c.name === toColumns[i])
+    if (colIdx < 0) return null
+    const value = row[colIdx]
+    if (value === null || value === undefined) return null
+    const filter = createFilter(fromColumns[i], 'eq')
+    filter.value = cellValueToFilterString(value)
+    filters.push(filter)
+  }
+  return filters.length ? filters : null
+}
+
 /** @param {unknown} raw */
 export function normalizeForeignKeys(raw) {
   if (!Array.isArray(raw)) return []
