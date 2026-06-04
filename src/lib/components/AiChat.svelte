@@ -1698,22 +1698,29 @@
           const backendCapped =
             typeof data.message === "string" &&
             data.message.startsWith("Showing first");
-          const resultId = uid();
-          // Replace executing indicator with result card in one operation
           const execIdx = items.findIndex((i) => i.id === execId);
-          const resultItem = /** @type {ChatItem} */ ({
-            id: resultId,
-            kind: "result",
-            sql,
-            columns: cols,
-            rows: rows.slice(0, AI_DISPLAY_ROWS),
-            total,
-            error: null,
-            capped: frontendCapped,
-          });
-          if (execIdx >= 0) items.splice(execIdx, 1, resultItem);
-          else items.push(resultItem);
-          autoOpenResult(resultId);
+          // Only show a result card when there are actual rows to display.
+          // Zero-row results are silently removed from the chat — the AI still
+          // receives the empty result via toolResult and can explain it.
+          if (total > 0) {
+            const resultId = uid();
+            const resultItem = /** @type {ChatItem} */ ({
+              id: resultId,
+              kind: "result",
+              sql,
+              columns: cols,
+              rows: rows.slice(0, AI_DISPLAY_ROWS),
+              total,
+              error: null,
+              capped: frontendCapped,
+            });
+            if (execIdx >= 0) items.splice(execIdx, 1, resultItem);
+            else items.push(resultItem);
+            autoOpenResult(resultId);
+          } else {
+            // 0 rows — just remove the executing indicator, no result card
+            if (execIdx >= 0) items.splice(execIdx, 1);
+          }
           await scrollBottom();
           // Return rows as objects (not arrays) so the AI can pass `rows`
           // directly to render_chart without needing to transform the data.
@@ -1811,21 +1818,10 @@
             default: r[3] ?? null,
           }));
         }
-        const schemaResultId = uid();
-        const schemaResultItem = /** @type {ChatItem} */ ({
-          id: schemaResultId,
-          kind: "result",
-          sql: `${schema}.${table} schema`,
-          columns: cols,
-          rows,
-          total: rows.length,
-          error: null,
-          isSchema: true,
-        });
+        // Schema describe is an internal AI operation — remove the executing
+        // indicator without adding a result card. The AI gets the data via toolResult.
         const execIdx = items.findIndex((i) => i.id === execId);
-        if (execIdx >= 0) items.splice(execIdx, 1, schemaResultItem);
-        else items.push(schemaResultItem);
-        autoOpenResult(schemaResultId, true);
+        if (execIdx >= 0) items.splice(execIdx, 1);
         await scrollBottom();
         toolResult = JSON.stringify({
           table: `${schema}.${table}`,
@@ -2428,12 +2424,7 @@
       bind:this={scrollEl}
       onscroll={onScrollAreaScroll}
       class="app-scroll min-h-0 flex-1 overflow-y-auto relative [will-change:transform] [overflow-anchor:none]"
-      onclick={(e) => {
-        const img = /** @type {HTMLElement} */ (e.target)?.closest?.("img");
-        if (img instanceof HTMLImageElement && img.closest(".prose-ai")) {
-          imageViewerSrc = img.src;
-        }
-      }}
+      onclick={undefined}
       role="region"
       aria-label="Chat messages"
     >
@@ -3138,6 +3129,10 @@
                                 title: spec.title,
                               },
                               previewOption,
+                              // Keep the full AI spec so AiChartRenderer can
+                              // re-render types (meter, choropleth) that don't
+                              // produce an ECharts previewOption.
+                              aiSpec: spec,
                             });
                             savedChartIds = new Set([
                               ...savedChartIds,
@@ -3329,16 +3324,15 @@
     >
       <div class={mode === "full" ? "mx-auto w-full max-w-3xl" : ""}>
         <div
-          class="overflow-hidden rounded-2xl border border-[#3a3a3a] transition-opacity duration-150 {hasPendingConfirm
+          class="overflow-hidden rounded-xl border border-border/60 bg-muted/[0.08] shadow-sm ring-1 ring-transparent transition-all duration-150 focus-within:border-border focus-within:ring-border/20 {hasPendingConfirm
             ? 'opacity-50'
             : ''}"
-          style="border-color: #3a3a3a"
         >
           <!-- Textarea row -->
           <textarea
             bind:this={inputRef}
-            class="block w-full resize-none bg-transparent px-4 pt-3 pb-2 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/40 disabled:cursor-not-allowed"
-            style="height:auto;min-height:52px;max-height:180px;overflow-y:auto"
+            class="block w-full resize-none bg-transparent px-4 pt-3.5 pb-2 text-[0.9375rem] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/35 disabled:cursor-not-allowed"
+            style="height:auto;min-height:56px;max-height:200px;overflow-y:auto;font-family:inherit"
             placeholder={hasPendingConfirm
               ? "Confirm or cancel the operation above…"
               : "Message AI…"}
@@ -3355,13 +3349,13 @@
 
           <!-- Bottom toolbar row -->
           <div
-            class="flex items-center gap-2 border-t border-border/30 bg-muted/15 px-3 py-2"
+            class="flex items-center gap-2 border-t border-border/25 bg-transparent px-3 py-1.5"
           >
             <!-- Context stats (left) -->
             {#if contextStats.messages > 0}
               <button
                 type="button"
-                class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] text-muted-foreground/40 transition-colors hover:bg-accent hover:text-muted-foreground select-none"
+                class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/35 transition-colors hover:bg-muted/50 hover:text-muted-foreground select-none"
                 onclick={() => {
                   settingsOpen = true;
                   settingsTab = "context";
@@ -3375,13 +3369,13 @@
                 {#if contextStats.pct >= 70}
                   <span
                     class={contextStats.pct >= 90
-                      ? "text-destructive/70"
-                      : "text-amber-500/70"}>· {contextStats.pct}%</span
+                      ? "text-destructive/60"
+                      : "text-amber-500/60"}>· {contextStats.pct}%</span
                   >
                 {/if}
               </button>
             {:else}
-              <span class="text-[10px] text-muted-foreground/25">
+              <span class="text-[10px] text-muted-foreground/20">
                 {hasPendingConfirm
                   ? "Confirm or cancel above"
                   : "↵ send · ⇧↵ newline"}
@@ -4195,16 +4189,12 @@
       ui-sans-serif,
       sans-serif;
     font-size: 0.9375rem;
-    line-height: 1.6;
+    line-height: 1.65;
     color: var(--foreground);
     word-break: break-word;
-    /* letter-spacing: slightly tighter for Inter at body size */
-    letter-spacing: -0.01em;
-    /* Inherit font-smoothing from html (auto) — do NOT set antialiased here.
-       On Linux/WebKitGTK, 'antialiased' bypasses FreeType hinting and makes
-       text look thinner and blurrier than 'auto'. On macOS 'auto' is also fine.
-       font-optical-sizing: omitted — setting it to 'auto' explicitly can cause
-       WebKitGTK to pick different glyph outlines at small sizes. */
+    letter-spacing: -0.011em;
+    /* Inherit font-smoothing — do NOT override to 'antialiased' here
+       (breaks FreeType hinting on Linux/WebKitGTK). */
   }
   :global(.prose-ai > *:first-child) {
     margin-top: 0;
@@ -4213,7 +4203,7 @@
     margin-bottom: 0;
   }
   :global(.prose-ai p) {
-    margin: 0.4rem 0;
+    margin: 0.45rem 0;
   }
   :global(.prose-ai strong) {
     font-weight: 600;
@@ -4250,12 +4240,16 @@
     margin: 0.2rem 0;
   }
   :global(.prose-ai code) {
-    font-family: ui-monospace, "Geist Mono", monospace;
-    font-size: 0.85em;
-    background: var(--muted);
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    padding: 0.1em 0.35em;
+    font-family: "Geist Mono Variable", "Geist Mono", ui-monospace, monospace;
+    font-size: 0.8125em;
+    font-weight: 500;
+    background: color-mix(in oklch, var(--muted) 90%, var(--foreground) 5%);
+    border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+    border-radius: 5px;
+    padding: 0.18em 0.45em;
+    color: var(--foreground);
+    /* Prevent inline chips from line-breaking */
+    white-space: nowrap;
   }
   :global(.prose-ai pre:not(.shiki)) {
     background: var(--muted);
@@ -4288,40 +4282,41 @@
   }
   :global(.prose-ai table) {
     border-collapse: collapse;
-    /* display:block + overflow-x:auto lets wide tables scroll horizontally
-       instead of cramming every column into a tiny width */
     display: block;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     max-width: 100%;
     width: max-content;
-    font-size: 0.875rem;
-    margin: 0.5rem 0;
-    border-radius: 6px;
+    font-size: 0.8125rem;
+    margin: 0.6rem 0;
+    border-radius: 8px;
     border: 1px solid var(--border);
+    overflow: hidden;
   }
   :global(.prose-ai th) {
     border-bottom: 1px solid var(--border);
-    border-right: 1px solid var(--border);
-    padding: 0.4rem 0.875rem;
-    background: color-mix(in oklch, var(--muted) 60%, transparent);
+    border-right: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
+    padding: 0.45rem 1rem;
+    background: color-mix(in oklch, var(--muted) 50%, transparent);
     font-weight: 600;
     text-align: left;
     white-space: nowrap;
     color: var(--muted-foreground);
-    font-size: 0.8125rem;
-    letter-spacing: 0.02em;
+    font-size: 0.75rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
   }
   :global(.prose-ai th:last-child) {
     border-right: none;
   }
   :global(.prose-ai td) {
-    border-bottom: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
-    border-right: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
-    padding: 0.35rem 0.875rem;
-    font-family: ui-monospace, "Geist Mono", monospace;
+    border-bottom: 1px solid color-mix(in oklch, var(--border) 45%, transparent);
+    border-right: 1px solid color-mix(in oklch, var(--border) 40%, transparent);
+    padding: 0.4rem 1rem;
+    font-family: "Geist Mono Variable", "Geist Mono", ui-monospace, monospace;
     font-size: 0.8125rem;
     white-space: nowrap;
+    color: var(--foreground);
   }
   :global(.prose-ai td:last-child) {
     border-right: none;
@@ -4329,8 +4324,8 @@
   :global(.prose-ai tr:last-child td) {
     border-bottom: none;
   }
-  :global(.prose-ai tr:nth-child(even) td) {
-    background: color-mix(in oklch, var(--muted) 30%, transparent);
+  :global(.prose-ai tr:hover td) {
+    background: color-mix(in oklch, var(--muted) 35%, transparent);
   }
   :global(.prose-ai blockquote) {
     border-left: 2px solid var(--border);
@@ -4370,45 +4365,31 @@
     cursor: grabbing;
   }
 
-  /* ── Inline images in AI responses ─────────────────────────────────────── */
-  :global(.prose-ai img) {
-    display: inline-block;
-    max-width: min(100%, 320px);
-    max-height: 200px;
-    object-fit: cover;
-    border-radius: 10px;
+  /* Images are never rendered — the custom marked renderer outputs link chips instead.
+     This rule is a safety net for any stray <img> that might appear from other sources. */
+  :global(.prose-ai img) { display: none !important; }
+
+  /* ── Image-link chips (replaces inline images) ───────────────────────────── */
+  :global(.prose-ai-img-link) {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25em;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.75em;
+    padding: 0.1em 0.45em;
+    border-radius: 4px;
     border: 1px solid var(--border);
-    cursor: zoom-in;
-    margin: 0.25rem 0;
-    transition:
-      opacity 0.15s,
-      box-shadow 0.15s;
+    background: color-mix(in oklch, var(--muted) 60%, transparent);
+    color: var(--muted-foreground);
+    text-decoration: none;
     vertical-align: middle;
   }
-  :global(.prose-ai img:hover) {
-    opacity: 0.9;
-    box-shadow: 0 4px 16px hsl(var(--foreground) / 0.12);
-  }
-  /* Images inside table cells: fixed thumbnail — prevents row height explosion */
-  :global(.prose-ai :is(td, th) img) {
-    display: block !important;
-    width: 44px !important;
-    height: 44px !important;
-    min-width: 44px !important;
-    max-width: 44px !important;
-    max-height: 44px !important;
-    object-fit: cover !important;
-    border-radius: 6px !important;
-    margin: 0 !important;
-    vertical-align: middle !important;
-  }
-  :global(.prose-ai :is(td, th) img:hover) {
-    box-shadow: 0 2px 8px hsl(var(--foreground) / 0.18) !important;
-  }
-  /* Center-align table cells that contain only an image */
-  :global(.prose-ai :is(td, th):has(img)) {
-    vertical-align: middle;
-    padding: 0.4rem 0.75rem;
+  :global(.prose-ai-img-link:hover) {
+    color: var(--foreground);
+    background: var(--muted);
   }
 
   :global(.mermaid-canvas svg) {

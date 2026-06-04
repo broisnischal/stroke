@@ -102,7 +102,10 @@
   }
 
   $effect(() => {
-    if (!open) page = 'root'
+    if (!open) {
+      page = 'root'
+      paletteSearch = ''  // clear search so it never persists between opens
+    }
   })
 
   // Focus the search input when the dialog opens or navigates to a sub-page.

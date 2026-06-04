@@ -2,6 +2,7 @@
   import { onDestroy, tick } from "svelte";
   import { createSwapy } from "swapy";
   import EChartPanel from "./EChartPanel.svelte";
+  import AiChartRenderer from "./AiChartRenderer.svelte";
   import { savedCharts } from "$lib/stores/saved-charts.js";
   import {
     dashboards,
@@ -459,6 +460,10 @@
               <div class="relative min-h-0 flex-1">
                 {#if chart?.previewOption && Object.keys(chart.previewOption).length > 0}
                   <EChartPanel option={chart.previewOption} class="absolute inset-0" />
+                {:else if chart?.aiSpec}
+                  <div class="absolute inset-0">
+                    <AiChartRenderer spec={chart.aiSpec} noTitle={true} />
+                  </div>
                 {:else}
                   <div class="absolute inset-0 flex items-center justify-center gap-2 text-muted-foreground/30">
                     <BarChart2 class="size-6" />
@@ -506,6 +511,10 @@
                 <div class="relative h-[100px] border-b border-border/30 bg-muted/20">
                   {#if chart.previewOption && Object.keys(chart.previewOption).length > 0}
                     <EChartPanel option={chart.previewOption} class="absolute inset-0" />
+                  {:else if chart.aiSpec}
+                    <div class="absolute inset-0">
+                      <AiChartRenderer spec={chart.aiSpec} noTitle={true} />
+                    </div>
                   {:else}
                     <div class="absolute inset-0 flex items-center justify-center text-muted-foreground/25">
                       <BarChart2 class="size-8" />

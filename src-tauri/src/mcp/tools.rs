@@ -202,6 +202,39 @@ pub async fn call_tool(
     }
 }
 
+// ── Read-only guard ───────────────────────────────────────────────────────────
+
+/// Returns true if the SQL is read-only (SELECT, WITH, EXPLAIN, SHOW, DESCRIBE,
+/// VALUES, PRAGMA) — used to enforce MCP read-only mode.
+pub fn is_read_only_sql(sql: &str) -> bool {
+    // Strip leading whitespace and block/line comments, then check the first keyword.
+    let s = sql.trim();
+    // Skip leading block comments (/* ... */) and line comments (--)
+    let first_word = strip_sql_comments(s)
+        .trim()
+        .split(|c: char| c.is_whitespace() || c == '(')
+        .next()
+        .unwrap_or("")
+        .to_ascii_uppercase();
+    matches!(
+        first_word.as_str(),
+        "SELECT" | "WITH" | "EXPLAIN" | "SHOW" | "DESCRIBE" | "DESC"
+            | "VALUES" | "PRAGMA" | "TABLE" | "TABLES"
+    )
+}
+
+fn strip_sql_comments(s: &str) -> &str {
+    let s = s.trim_start();
+    if s.starts_with("--") {
+        // skip to end of line
+        s.find('\n').map_or("", |i| strip_sql_comments(&s[i + 1..]))
+    } else if s.starts_with("/*") {
+        s.find("*/").map_or("", |i| strip_sql_comments(&s[i + 2..]))
+    } else {
+        s
+    }
+}
+
 // ── execute_sql ───────────────────────────────────────────────────────────────
 
 async fn execute_sql(

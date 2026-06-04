@@ -1,5 +1,6 @@
 <script>
   import EChartPanel from "./EChartPanel.svelte";
+  import AiChartRenderer from "./AiChartRenderer.svelte";
   import {
     savedCharts,
     chartGroups,
@@ -385,6 +386,12 @@
                           option={cleanPreviewOption(chart.previewOption)}
                           class="absolute inset-0"
                         />
+                      {:else if chart.aiSpec}
+                        <!-- AI-generated chart types (meter, choropleth, etc.) that don't
+                             produce an ECharts option — render via AiChartRenderer -->
+                        <div class="absolute inset-0">
+                          <AiChartRenderer spec={chart.aiSpec} noTitle={true} />
+                        </div>
                       {:else}
                         <div
                           class="absolute inset-0 flex items-center justify-center"

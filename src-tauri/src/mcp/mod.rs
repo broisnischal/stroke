@@ -37,6 +37,8 @@ pub struct McpState {
     pub connections: Arc<Mutex<Vec<ConnMeta>>>,
     /// ID of the currently active connection (matches one entry in `connections`).
     pub active_conn_id: Arc<Mutex<Option<String>>>,
+    /// When true, only SELECT / read-only SQL is allowed through execute_sql.
+    pub read_only: Arc<Mutex<bool>>,
 }
 
 impl McpState {
@@ -48,6 +50,7 @@ impl McpState {
             token: Mutex::new(String::new()),
             connections: Arc::new(Mutex::new(Vec::new())),
             active_conn_id: Arc::new(Mutex::new(None)),
+            read_only: Arc::new(Mutex::new(false)),
         }
     }
 
@@ -124,10 +127,11 @@ pub async fn mcp_start(mcp: State<'_, McpState>) -> Result<McpStatus, String> {
     let conn = Arc::clone(&mcp.conn);
     let connections = Arc::clone(&mcp.connections);
     let active_conn_id = Arc::clone(&mcp.active_conn_id);
+    let read_only = Arc::clone(&mcp.read_only);
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
     let token_clone = token.clone();
     tokio::spawn(async move {
-        server::run(port, token_clone, conn, connections, active_conn_id, shutdown_rx).await;
+        server::run(port, token_clone, conn, connections, active_conn_id, read_only, shutdown_rx).await;
     });
 
     *mcp.port.lock().map_err(|e| e.to_string())? = port;
@@ -175,6 +179,14 @@ pub fn mcp_update_connections(
 ) -> Result<(), String> {
     *mcp.connections.lock().map_err(|e| e.to_string())? = connections;
     *mcp.active_conn_id.lock().map_err(|e| e.to_string())? = active_id;
+    Ok(())
+}
+
+/// Enable or disable read-only mode for the MCP server.
+/// When enabled, execute_sql only allows SELECT / read-only queries.
+#[tauri::command]
+pub fn mcp_set_readonly(readonly: bool, mcp: State<'_, McpState>) -> Result<(), String> {
+    *mcp.read_only.lock().map_err(|e| e.to_string())? = readonly;
     Ok(())
 }
 

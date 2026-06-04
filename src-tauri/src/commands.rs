@@ -117,10 +117,10 @@ use crate::db::{
     connect, connect_d1, connect_libsql, connect_mysql, connect_sqlite, disconnect,
     delete_table_row, delete_table_rows, execute_ddl, execute_sql, execute_sql_multi, get_table_rows, insert_table_row,
     list_schemas, list_tables, list_indexes, list_enums, list_triggers, list_sequences,
-    truncate_table, drop_table, get_table_column_structure,
+    truncate_table, drop_table, get_table_column_structure, get_incoming_foreign_keys,
     test_connection, test_d1_connection, test_libsql_connection, test_mysql_connection, test_sqlite_connection,
     update_table_cell, ConnectionConfig, D1Config, DbState, EnumInfo, IndexInfo, LibSqlConfig, TriggerInfo, SequenceInfo,
-    InsertRowResult, MysqlConfig, SqlResult, SqliteConfig, TableInfo, TableRows, ColumnStructureRow,
+    InsertRowResult, MysqlConfig, SqlResult, SqliteConfig, TableInfo, TableRows, ColumnStructureRow, IncomingForeignKey,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -235,6 +235,15 @@ pub async fn pg_get_table_column_structure(
     table: String,
 ) -> Result<Vec<ColumnStructureRow>, String> {
     get_table_column_structure(state, schema, table).await
+}
+
+#[tauri::command]
+pub async fn pg_get_incoming_foreign_keys(
+    state: State<'_, DbState>,
+    schema: String,
+    table: String,
+) -> Result<Vec<IncomingForeignKey>, String> {
+    get_incoming_foreign_keys(state, schema, table).await
 }
 
 #[tauri::command]

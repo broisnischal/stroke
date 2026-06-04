@@ -12,17 +12,11 @@
   } from '$lib/json-inspector.js'
 
   const TRUNCATE_LIMIT = 200
-  // Above this many characters of (already per-string-truncated) JSON, skip
-  // Shiki tokenization + URL linkification — both walk the entire document and
-  // cause a visible hang on large rows. The plain <pre> below is instant and
-  // still fully readable/scrollable, so the expand feature is unchanged for big
-  // payloads, just without colors.
   const HIGHLIGHT_LIMIT = 12000
 
   let {
     record,
     rowLabel = '',
-    maxHeight = 'min(50vh, 20rem)',
   } = $props()
 
   let html = $state('')
@@ -31,20 +25,13 @@
   let copiedTimer = null
   /** @type {HTMLDivElement | null} */
   let rootEl = $state(null)
-  let scrollable = $state(false)
 
   /** @type {{ x: number, y: number, value: string | null } | null} */
   let contextMenu = $state(null)
 
-  function remeasure() {
-    if (!rootEl) return
-    scrollable = rootEl.scrollHeight > rootEl.clientHeight + 1
-  }
-
   const displayText = $derived(formatJsonValue(truncateDeep(record, TRUNCATE_LIMIT)))
   const appTheme = $derived($appThemeId)
-  // Full (untruncated) JSON is only needed for "Copy JSON" — compute it lazily
-  // on click instead of stringifying the whole record on every render.
+
   function fullJsonText() {
     return formatJsonValue(record)
   }
@@ -75,10 +62,8 @@
   $effect(() => {
     const source = displayText
     const theme = appTheme
-    // Large payloads: render a plain (unhighlighted) <pre> synchronously and
-    // skip Shiki entirely — tokenizing the whole document is the expand lag.
     if (source.length > HIGHLIGHT_LIMIT) {
-      html = `<pre class="m-0 p-0 font-mono text-ui-2xs leading-relaxed whitespace-pre text-foreground">${escapeHtml(source)}</pre>`
+      html = `<pre class="m-0 p-0 font-mono text-sm leading-relaxed whitespace-pre text-foreground">${escapeHtml(source)}</pre>`
       return
     }
     let cancelled = false
@@ -86,7 +71,7 @@
       .then((result) => { if (!cancelled) html = result })
       .catch(() => {
         if (!cancelled)
-          html = `<pre class="m-0 p-0 font-mono text-ui-2xs leading-relaxed whitespace-pre text-foreground">${escapeHtml(source)}</pre>`
+          html = `<pre class="m-0 p-0 font-mono text-sm leading-relaxed whitespace-pre text-foreground">${escapeHtml(source)}</pre>`
       })
     return () => { cancelled = true }
   })
@@ -94,21 +79,11 @@
   $effect(() => {
     if (!html || !rootEl) return
     const source = displayText
-    // Skip the DOM-walking URL linkify on large payloads (it's the other half of
-    // the expand lag); just measure for the scrollbar.
-    if (source.length > HIGHLIGHT_LIMIT) { void tick().then(remeasure); return }
+    if (source.length > HIGHLIGHT_LIMIT) return
     void tick().then(() => {
       const pre = rootEl?.querySelector('pre')
       if (pre instanceof HTMLElement) linkifyJsonInElement(pre, source)
-      remeasure()
     })
-  })
-
-  $effect(() => {
-    if (!rootEl) return
-    const ro = new ResizeObserver(remeasure)
-    ro.observe(rootEl)
-    return () => ro.disconnect()
   })
 
   /** @param {string} s */
@@ -140,8 +115,6 @@
   }
 
   /**
-   * Find the JSON value text at a mouse click position.
-   * Returns the raw source slice, with surrounding quotes stripped for strings.
    * @param {number} clientX
    * @param {number} clientY
    * @returns {string | null}
@@ -170,7 +143,6 @@
 
     const raw = displayText.slice(range.start, range.end)
 
-    // Strip surrounding double-quotes for JSON strings
     if (raw.length >= 2 && raw[0] === '"' && raw[raw.length - 1] === '"') {
       try {
         const parsed = JSON.parse(raw)
@@ -195,9 +167,6 @@
   }
 
   /**
-   * Portal action — moves the element to document.body so it escapes any
-   * `will-change:transform` ancestor (DataTable uses it for scroll perf),
-   * which otherwise makes position:fixed relative to that ancestor.
    * @param {HTMLElement} node
    */
   function portal(node) {
@@ -210,39 +179,41 @@
   }
 </script>
 
-<div class="border-t border-border/50 bg-background">
-  <div class="studio-chrome flex items-center justify-between border-b border-border/50 bg-panel px-3 py-0.5">
+<div class="border-t border-border/30 bg-background">
+  <!-- Toolbar -->
+  <div class="flex items-center gap-2 border-b border-border/20 bg-muted/20 px-3 py-1">
     {#if rowLabel}
-      <span class="font-mono text-ui-2xs text-muted-foreground/40 select-none">{rowLabel}</span>
+      <span class="font-mono text-xs text-muted-foreground/40 select-none">{rowLabel}</span>
+      <span class="text-border/40 select-none text-xs">·</span>
     {/if}
     <button
       type="button"
-      class="mr-auto inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 text-ui-2xs text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
+      class="inline-flex items-center gap-1.5 rounded px-2 py-0.5 font-mono text-xs text-muted-foreground/60 transition-colors hover:bg-accent/40 hover:text-foreground"
       onclick={copyJson}
     >
       {#if copied}
         <Check class="size-3 text-green-500" />
-        Copied
+        <span>Copied</span>
       {:else}
         <Copy class="size-3" />
-        Copy JSON
+        <span>Copy JSON</span>
       {/if}
     </button>
   </div>
 
+  <!-- JSON content -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     bind:this={rootEl}
     data-studio-selectable="text"
-    class="px-3 py-2"
-    style="display:block;max-height:{maxHeight};overflow:{scrollable ? 'auto' : 'visible'}"
+    class="px-5 py-4"
     oncontextmenu={handleContextMenu}
   >
     {#if !html}
-      <p class="font-mono text-ui-2xs text-muted-foreground/50">Loading…</p>
+      <p class="font-mono text-sm text-muted-foreground/40">Loading…</p>
     {:else}
       <div
-        class="[&_pre]:m-0 [&_pre]:bg-transparent! [&_pre]:p-0 [&_pre]:font-mono [&_pre]:text-ui-2xs [&_pre]:leading-relaxed [&_pre]:whitespace-pre [&_.json-inspector-url]:text-link [&_.json-inspector-url]:underline [&_.json-inspector-url]:underline-offset-2"
+        class="[&_pre]:m-0 [&_pre]:bg-transparent! [&_pre]:p-0 [&_pre]:font-mono [&_pre]:text-sm [&_pre]:leading-relaxed [&_pre]:whitespace-pre [&_.json-inspector-url]:text-link [&_.json-inspector-url]:underline [&_.json-inspector-url]:underline-offset-2"
       >
         {@html html}
       </div>
@@ -260,26 +231,26 @@
     oncontextmenu={(e) => e.preventDefault()}
   >
     <div
-      class="min-w-40 overflow-hidden rounded-md border border-border bg-popover py-1 shadow-lg"
+      class="min-w-36 overflow-hidden rounded border border-border/60 bg-popover py-0.5 shadow-lg"
       style="position:fixed;left:{contextMenu.x}px;top:{contextMenu.y}px"
       onmousedown={(e) => e.stopPropagation()}
     >
       {#if contextMenu.value !== null}
         <button
           type="button"
-          class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-ui-sm text-foreground hover:bg-accent hover:text-accent-foreground"
+          class="flex w-full items-center gap-2 px-2.5 py-1 text-left font-mono text-sm text-foreground hover:bg-accent hover:text-accent-foreground"
           onclick={() => { copyText(/** @type {string} */ (contextMenu?.value)); dismissMenu() }}
         >
-          <Copy class="size-3.5 shrink-0 text-muted-foreground" />
+          <Copy class="size-3 shrink-0 text-muted-foreground" />
           Copy value
         </button>
       {/if}
       <button
         type="button"
-        class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-ui-sm text-foreground hover:bg-accent hover:text-accent-foreground"
+        class="flex w-full items-center gap-2 px-2.5 py-1 text-left font-mono text-sm text-foreground hover:bg-accent hover:text-accent-foreground"
         onclick={() => { copyJson(); dismissMenu() }}
       >
-        <Copy class="size-3.5 shrink-0 text-muted-foreground" />
+        <Copy class="size-3 shrink-0 text-muted-foreground" />
         Copy JSON
       </button>
     </div>
