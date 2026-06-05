@@ -257,7 +257,7 @@
   // and the level persists via app settings.
 
   // All layout constants scale with canvasZoom so the entire canvas zooms together.
-  const ROW_HEIGHT = $derived(Math.round(32 * canvasZoom))
+  const ROW_HEIGHT = $derived(Math.round(24 * canvasZoom))
 
   let _scrollTop = $state(0)
   // Start high so the first paint covers any reasonable screen height before the
@@ -265,9 +265,9 @@
   let _viewportHeight = $state(1200)
 
   // ── Canvas rendering ──────────────────────────────────────────────────────
-  const HEADER_H = $derived(Math.round(34 * canvasZoom))
-  const GUTTER_EXPAND_W = $derived(Math.round(38 * canvasZoom))
-  const GUTTER_SELECT_W = $derived(Math.round(42 * canvasZoom))
+  const HEADER_H = $derived(Math.round(30 * canvasZoom))
+  const GUTTER_EXPAND_W = $derived(Math.round(32 * canvasZoom))
+  const GUTTER_SELECT_W = $derived(Math.round(36 * canvasZoom))
   /** @type {HTMLCanvasElement | null} */
   let canvasEl = $state(null)
   /** @type {HTMLSpanElement | null} */
@@ -318,7 +318,7 @@
       const h = node.offsetHeight
       // Ignore tiny heights that just reflect the loading/toolbar-only state —
       // keep the current allocation until real content settles.
-      if (h >= 48 && expandedRowHeights.get(rowIdx) !== h) {
+      if (h >= 40 && expandedRowHeights.get(rowIdx) !== h) {
         expandedRowHeights = new Map(expandedRowHeights).set(rowIdx, h)
       }
     }
@@ -1263,9 +1263,9 @@
   // FK sub-view is a zero-cost overlay — it does NOT push rows down and is NOT
   // included in rowTops. This eliminates the fkSubviewHeight→_mergedHeights→rowTops
   // reactive chain that caused lag every time the panel opened or changed height.
-  const rowTops = $derived(computeRowTops(rows.length, expandedRows, 320, ROW_HEIGHT, expandedRowHeights))
-  /** Total scrollable content height incl. header + insert slot + body. */
-  const contentHeight = $derived(HEADER_H + insertRowOffset + (rowTops[rows.length] ?? 0))
+  const rowTops = $derived(computeRowTops(rows.length, expandedRows, 280, ROW_HEIGHT, expandedRowHeights))
+  /** Total scrollable content height incl. header + insert slot + body + 2-row bottom margin. */
+  const contentHeight = $derived(HEADER_H + insertRowOffset + (rowTops[rows.length] ?? 0) + ROW_HEIGHT * 2)
 
   /** Viewport-visible column resize handles (DOM overlay — not on the canvas). */
   const resizeHandles = $derived.by(() => {
@@ -1600,8 +1600,8 @@
       const cs = getComputedStyle(probe)
       return { px: parseFloat(cs.fontSize) || 13, family: cs.fontFamily }
     }
-    const cell = measure('font-mono text-ui-sm')
-    const type = measure('font-mono text-ui-2xs')
+    const cell = measure('font-mono text-ui-xs')
+    const type = measure('font-mono text-ui-3xs')
     probe.className = prevClass
     return {
       family: cell.family,
@@ -1834,7 +1834,7 @@
   }
 
   // ── Canvas drawing ─────────────────────────────────────────────────────────
-  const CELL_PAD_X = $derived(Math.round(12 * canvasZoom))
+  const CELL_PAD_X = $derived(Math.round(10 * canvasZoom))
   const ICON_HIT = $derived(Math.round(24 * canvasZoom))
 
   // Cached glyph advance for the active ctx.font. Every table font is monospace,
@@ -2827,10 +2827,12 @@
 
             <!-- Column resize handles: DOM overlay so header edge interaction never
                  hits the canvas (macOS trackpad pinch on canvas was page-zooming
-                 the webview and making the grid look huge/blurry). -->
+                 the webview and making the grid look huge/blurry).
+                 height:0 + overflow:visible keeps this out of flow so it does NOT
+                 push the sizer down (which would mis-align all DOM overlays). -->
             <div
               class="sticky top-0 z-[2] pointer-events-none"
-              style="height:{HEADER_H}px; width:{_viewportWidth}px"
+              style="height:0; overflow:visible; width:{_viewportWidth}px"
               aria-hidden="true"
             >
               {#each resizeHandles as h (h.name)}
@@ -2838,8 +2840,8 @@
                   role="separator"
                   aria-orientation="vertical"
                   aria-label="Resize column {h.name}"
-                  class="absolute top-0 h-full w-2.5 -translate-x-1/2 cursor-col-resize pointer-events-auto touch-none"
-                  style="left:{h.x}px"
+                  class="absolute top-0 w-2.5 -translate-x-1/2 cursor-col-resize pointer-events-auto touch-none"
+                  style="left:{h.x}px; height:{HEADER_H}px"
                   onpointerdown={(e) => onResizeHandleDown(e, h.name)}
                   onpointerenter={() => onResizeHandleEnter(h.name)}
                   onpointerleave={onResizeHandleLeave}
@@ -2980,7 +2982,7 @@
                 {#if rows[exIdx] !== undefined}
                   <div
                     class="absolute z-10"
-                    style="top:{rowDocTop(exIdx) + ROW_HEIGHT}px; left:{gutterWidth}px; width:{Math.max(geom.totalWidth - gutterWidth, _viewportWidth - gutterWidth)}px"
+                    style="top:{rowDocTop(exIdx) + ROW_HEIGHT}px; left:0; width:{_viewportWidth}px; transform:translateX({_scrollLeft}px); will-change:transform"
                     use:trackExpandHeight={exIdx}
                   >
                     <RowExpandViewer record={rowToRecord(columns, rows[exIdx])} rowLabel={"row " + (exIdx + 1)} />
