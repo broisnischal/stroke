@@ -1207,8 +1207,11 @@
   // ── Virtual relationship columns (reverse FK / one-to-many) ─────────────────
   // One per unique fromTable, max 8. Shown as badge columns to the right of real data.
   const MAX_VIRTUAL_COLS = 5
+  /** User-overridden logical width for all virtual rel columns (null = auto-computed). */
+  let virtualColWidthOverride = $state(/** @type {number | null} */ (null))
   // Width adapts to the longest label (7px/char estimate + padding), clamped 110–180px
   const VIRTUAL_COL_W = $derived.by(() => {
+    if (virtualColWidthOverride !== null) return Math.round(virtualColWidthOverride * canvasZoom)
     if (!virtualRelCols.length) return Math.round(300 * canvasZoom)
     const maxChars = Math.max(...virtualRelCols.map(v => v.label.length))
     const base = Math.min(380, Math.max(300, maxChars * 10 + 60))
@@ -1221,7 +1224,9 @@
     for (const fk of incomingForeignKeys) {
       if (seen.has(fk.fromTable)) continue
       seen.add(fk.fromTable)
-      result.push({ ...fk, label: (fk.fromSchema && fk.fromSchema !== schema) ? `${fk.fromSchema}.${fk.fromTable}` : fk.fromTable })
+      const label = (fk.fromSchema && fk.fromSchema !== schema) ? `${fk.fromSchema}.${fk.fromTable}` : fk.fromTable
+      if (hiddenColumns.has(`__vrel:${label}`)) continue
+      result.push({ ...fk, label })
       if (result.length >= MAX_VIRTUAL_COLS) break
     }
     return result
@@ -1275,6 +1280,12 @@
       const x = colDrawnX(col, geom, _scrollLeft) + col.w
       if (x < gutterWidth - 6 || x > _viewportWidth + 6) continue
       out.push({ name: col.name, x })
+    }
+    // Virtual rel column resize handles (right edge of each virtual col)
+    for (let vi = 0; vi < virtualRelCols.length; vi++) {
+      const x = geom.totalWidth + (vi + 1) * VIRTUAL_COL_W - _scrollLeft
+      if (x < gutterWidth - 6 || x > _viewportWidth + 6) continue
+      out.push({ name: `__vrel__${vi}`, x })
     }
     return out
   })
@@ -1407,7 +1418,11 @@
     resizingColName = colName;
     _zoomGuard.resizing = true
     _zoomGuard.block = true
-    resizeStartWidth = columnWidths[colName] ?? defaultColumnWidth("");
+    if (colName.startsWith('__vrel__')) {
+      resizeStartWidth = virtualColWidthOverride ?? Math.round(VIRTUAL_COL_W / canvasZoom)
+    } else {
+      resizeStartWidth = columnWidths[colName] ?? defaultColumnWidth("")
+    }
   }
 
   // Batch column resize updates to animation frames — pointermove can fire at
@@ -1424,7 +1439,11 @@
     _resizeRafId = requestAnimationFrame(() => {
       _resizeRafId = 0;
       if (!resizingColName) return;
-      columnWidths = { ...columnWidths, [resizingColName]: _pendingResizeWidth };
+      if (resizingColName.startsWith('__vrel__')) {
+        virtualColWidthOverride = _pendingResizeWidth;
+      } else {
+        columnWidths = { ...columnWidths, [resizingColName]: _pendingResizeWidth };
+      }
     });
   }
 
@@ -1433,10 +1452,14 @@
       cancelAnimationFrame(_resizeRafId);
       _resizeRafId = 0;
       if (resizingColName) {
-        columnWidths = { ...columnWidths, [resizingColName]: _pendingResizeWidth };
+        if (resizingColName.startsWith('__vrel__')) {
+          virtualColWidthOverride = _pendingResizeWidth;
+        } else {
+          columnWidths = { ...columnWidths, [resizingColName]: _pendingResizeWidth };
+        }
       }
     }
-    if (resizingColName) {
+    if (resizingColName && !resizingColName.startsWith('__vrel__')) {
       if (columnWidthsKey) saveColumnWidths(columnWidthsKey, columnWidths);
     }
     resizingColName = null;
@@ -2014,32 +2037,34 @@
       const isVHov = hoveredRow === idx && hoveredColName === `__vrel__${vi}`
       if (!_fonts) return
 
-      // Badge font: 1px smaller than cell text for a compact chip feel
+      // Badge: compact tag style — no border at rest, border on hover/active
       const badgeFontPx = Math.max(10, _fonts.cellPx - 1)
-      const bPadX = 9
-      const bH = Math.round(badgeFontPx * 1.65)
-      const bR = bH / 2
+      const bPadX = 8
+      const bH = Math.round(badgeFontPx * 1.55)
+      const bR = 3
       ctx.font = `500 ${badgeFontPx}px ${_fonts.family}`
 
-      const maxLabelW = VIRTUAL_COL_W - 28
+      const maxLabelW = VIRTUAL_COL_W - 24
       const labelTxt = truncText(ctx, vc.label, maxLabelW)
       const textW = textWidth(ctx, labelTxt)
-      const bW = textW + bPadX * 2
+      const bW = Math.min(textW + bPadX * 2, VIRTUAL_COL_W - 16)
       const bX = cellX + (VIRTUAL_COL_W - bW) / 2
       const bY = ry + (rh - bH) / 2
 
-      if (isActive) { ctx.fillStyle = withAlpha(c.cPrimary, 0.06); ctx.fillRect(cellX, ry, VIRTUAL_COL_W, rh) }
+      if (isActive) { ctx.fillStyle = withAlpha(c.cPrimary, 0.05); ctx.fillRect(cellX, ry, VIRTUAL_COL_W, rh) }
 
       ctx.fillStyle = isActive
-        ? withAlpha(c.cPrimary, 0.14)
-        : isVHov ? withAlpha(c.cMutedBg, 0.5) : withAlpha(c.cMutedBg, 0.28)
+        ? withAlpha(c.cPrimary, 0.15)
+        : isVHov ? withAlpha(c.cMutedBg, 0.55) : withAlpha(c.cMutedBg, 0.2)
       roundRect(ctx, bX, bY, bW, bH, bR); ctx.fill()
 
-      ctx.strokeStyle = isActive ? withAlpha(c.cPrimary, 0.5) : withAlpha(c.cMuted, 0.3)
-      ctx.lineWidth = 1
-      roundRect(ctx, bX + 0.5, bY + 0.5, bW - 1, bH - 1, bR); ctx.stroke()
+      if (isActive || isVHov) {
+        ctx.strokeStyle = isActive ? withAlpha(c.cPrimary, 0.45) : withAlpha(c.cMuted, 0.22)
+        ctx.lineWidth = 1
+        roundRect(ctx, bX + 0.5, bY + 0.5, bW - 1, bH - 1, bR); ctx.stroke()
+      }
 
-      ctx.fillStyle = isActive ? c.cPrimary : withAlpha(c.cFg, 0.7)
+      ctx.fillStyle = isActive ? c.cPrimary : withAlpha(c.cFg, 0.6)
       ctx.textBaseline = 'middle'; ctx.textAlign = 'center'
       ctx.fillText(labelTxt, bX + bW / 2, ry + rh / 2 + 0.5)
     }
@@ -2264,10 +2289,12 @@
     // Virtual relationship column headers
     for (let vi = 0; vi < virtualRelCols.length; vi++) {
       const vc = virtualRelCols[vi]
+      const vrelKey = `__vrel__${vi}`
       const x = geom.totalWidth + vi * VIRTUAL_COL_W - _scrollLeft
       if (x + VIRTUAL_COL_W <= 0 || x >= c.W) continue
+      ctx.fillStyle = withAlpha(c.cMutedBg, resizingColName === vrelKey ? 0.25 : 0.1)
+      ctx.fillRect(x, 0, VIRTUAL_COL_W, HEADER_H)
       if (vi === 0) {
-        ctx.fillStyle = withAlpha(c.cMutedBg, 0.1); ctx.fillRect(x, 0, VIRTUAL_COL_W, HEADER_H)
         ctx.strokeStyle = withAlpha(c.cPrimary, 0.25); ctx.lineWidth = 2
         ctx.beginPath(); ctx.moveTo(x + 1, 4); ctx.lineTo(x + 1, HEADER_H - 4); ctx.stroke()
       }
@@ -2276,8 +2303,13 @@
       if (!_fonts) continue
       ctx.font = _fonts.header; ctx.fillStyle = withAlpha(c.cMuted, 0.6)
       ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
-      // Use smaller side padding (8px) so long names fit more fully
       ctx.fillText(truncText(ctx, vc.label, VIRTUAL_COL_W - 16), x + 8, HEADER_H / 2 + 0.5)
+      // Resize edge affordance (matches regular column behaviour)
+      if (_resizeHoverCol === vrelKey || resizingColName === vrelKey) {
+        ctx.strokeStyle = withAlpha(c.cPrimary, 0.7)
+        ctx.lineWidth = 2
+        ctx.beginPath(); ctx.moveTo(x + VIRTUAL_COL_W - 1, 5); ctx.lineTo(x + VIRTUAL_COL_W - 1, HEADER_H - 5); ctx.stroke()
+      }
     }
 
     // Header bottom border.
@@ -2806,25 +2838,24 @@
             style="position:absolute;top:0;left:0;width:0;height:0;overflow:hidden;pointer-events:none"
           ></span>
 
-          {#if visibleColumns.length > 0}
-            <!-- Canvas layer: a 0-height sticky wrapper placed BEFORE the sizer
-                 so its natural flow position is the top-left; sticky then pins
-                 the viewport-sized canvas there while the sizer below provides
-                 the scroll range. The canvas overflows the 0-height box. -->
-            <div style="position:sticky;top:0;left:0;width:0;height:0;z-index:1;overflow:visible">
-              <canvas
-                bind:this={canvasEl}
-                class="block"
-                style="cursor:default"
-                onclick={onCanvasClick}
-                ondblclick={onCanvasDblClick}
-                onauxclick={onCanvasAuxClick}
-                onpointerdown={onCanvasPointerDown}
-                onpointermove={onCanvasPointerMove}
-                onpointerleave={onCanvasPointerLeave}
-              ></canvas>
-            </div>
+          <!-- Canvas: always mounted so the 2D context survives table navigation
+               (each mount creates a new GPU-tracked context; keeping it alive
+               across table switches eliminates the accumulation shown in DevTools). -->
+          <div style="position:sticky;top:0;left:0;width:0;height:0;z-index:1;overflow:visible">
+            <canvas
+              bind:this={canvasEl}
+              class="block"
+              style="cursor:default"
+              onclick={onCanvasClick}
+              ondblclick={onCanvasDblClick}
+              onauxclick={onCanvasAuxClick}
+              onpointerdown={onCanvasPointerDown}
+              onpointermove={onCanvasPointerMove}
+              onpointerleave={onCanvasPointerLeave}
+            ></canvas>
+          </div>
 
+          {#if visibleColumns.length > 0}
             <!-- Column resize handles: DOM overlay so header edge interaction never
                  hits the canvas (macOS trackpad pinch on canvas was page-zooming
                  the webview and making the grid look huge/blurry).
@@ -2839,7 +2870,7 @@
                 <div
                   role="separator"
                   aria-orientation="vertical"
-                  aria-label="Resize column {h.name}"
+                  aria-label="Resize {h.name.startsWith('__vrel__') ? 'relationship column' : `column ${h.name}`}"
                   class="absolute top-0 w-2.5 -translate-x-1/2 cursor-col-resize pointer-events-auto touch-none"
                   style="left:{h.x}px; height:{HEADER_H}px"
                   onpointerdown={(e) => onResizeHandleDown(e, h.name)}
@@ -2991,13 +3022,19 @@
               {/each}
 
               <!-- FK sub-view panel — spans full viewport width (including gutter area).
-                   Only horizontal wheel events are stopped so the main table can still
-                   scroll vertically when the pointer is over the sub-view. -->
+                   Outer div is absolute for vertical position; left:0/right:0 gives it
+                   the full scrollable width so the inner sticky child has room to stick.
+                   Inner div uses position:sticky;left:0 to stay at the viewport left
+                   edge on horizontal scroll — no transform or will-change needed,
+                   which avoids the forced compositing layer that caused scroll lag. -->
               {#if fkSubview !== null && rows[fkSubview.rowIdx] !== undefined}
                 {@const fkIdx = fkSubview.rowIdx}
                 <div
-                  class="absolute z-20"
-                  style="top:{rowDocTop(fkIdx) + ROW_HEIGHT}px; left:0; width:{_viewportWidth}px; transform:translateX({_scrollLeft}px); will-change:transform"
+                  class="absolute z-20 left-0 right-0"
+                  style="top:{rowDocTop(fkIdx) + ROW_HEIGHT}px"
+                >
+                <div
+                  style="position:sticky; left:0; width:{_viewportWidth}px"
                   onwheel={(e) => { if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) e.stopPropagation() }}
                 >
                   <FkSubviewPanel
@@ -3016,6 +3053,7 @@
                       }
                     }}
                   />
+                </div>
                 </div>
               {/if}
 
