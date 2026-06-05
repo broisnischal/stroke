@@ -70,9 +70,11 @@ pub fn run() {
             // keep disabled in release. The toggle_devtools command also exposes
             // them on demand via F12.
             .devtools(cfg!(debug_assertions))
-            // The app implements its own canvas-table zoom; disable Tauri's injected
-            // Ctrl/Cmd+wheel webview polyfill (macOS/Linux) so pinch near column
-            // resize handles doesn't magnify the whole webview.
+            // The app implements its own CSS-based zoom; disable Tauri's injected
+            // zoom polyfill. On macOS/Linux that polyfill attaches a `mousewheel`
+            // (legacy event) listener that calls set_webview_zoom on ctrl+scroll —
+            // a stray trackpad pinch near a column resize handle would then page-zoom
+            // the whole webview (devicePixelRatio jumps, canvas renders blurry).
             .zoom_hotkeys_enabled(false)
             .on_navigation(|url| {
                 let scheme = url.scheme();
@@ -106,8 +108,9 @@ pub fn run() {
                     }
                 }
 
-                // Disable WKWebView trackpad pinch magnification — the canvas table
-                // has its own zoom and pinch during column resize was blowing up the view.
+                // Defensive: disable every native WKWebView zoom path. App zoom is
+                // CSS-based (--app-zoom); stray pinch near column resize handles
+                // must never page-zoom the webview (devicePixelRatio drift → blur).
                 let _ = window.with_webview(|webview| unsafe {
                     use objc2_web_kit::WKWebView;
                     let view: &WKWebView = &*webview.inner().cast();

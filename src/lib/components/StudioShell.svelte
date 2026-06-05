@@ -1,5 +1,5 @@
 <script>
-  import { onMount, onDestroy, untrack } from 'svelte'
+  import { onMount, onDestroy, untrack, tick } from 'svelte'
   import Database from '@lucide/svelte/icons/database'
   import Terminal from '@lucide/svelte/icons/terminal'
   import Table2 from '@lucide/svelte/icons/table-2'
