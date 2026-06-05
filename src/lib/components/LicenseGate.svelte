@@ -92,12 +92,12 @@
       <p class="text-center text-xs text-muted-foreground/50">
         No license yet? &nbsp;
         <a
-          href="https://dbstudio.app"
+          href="https://stroke.app"
           target="_blank"
           rel="noopener noreferrer"
           class="font-medium text-primary/80 underline-offset-2 transition-opacity hover:opacity-70 hover:underline"
         >
-          Get one at dbstudio.app →
+          Get one at stroke.app →
         </a>
       </p>
     </div>
@@ -166,8 +166,8 @@
         <div class="border-t border-border/60 px-5 py-3">
           <p class="text-xs text-muted-foreground/50">
             No license?
-            <a href="https://dbstudio.app" target="_blank" rel="noopener noreferrer"
-               class="text-primary/70 underline-offset-2 hover:underline">dbstudio.app →</a>
+            <a href="https://stroke.app" target="_blank" rel="noopener noreferrer"
+               class="text-primary/70 underline-offset-2 hover:underline">stroke.app →</a>
           </p>
         </div>
       </Dialog.Content>

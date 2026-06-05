@@ -3,12 +3,12 @@ pkgver=0.1.22
 pkgrel=4
 pkgdesc="Cross-database desktop studio built with Tauri"
 arch=('x86_64')
-url="https://github.com/broisnischal/studio"
+url="https://github.com/broisnischal/stroke"
 license=('custom')
 depends=('fuse2')
 options=(!strip)
 
-source=("${pkgname}-${pkgver}.AppImage::https://github.com/broisnischal/studio/releases/download/v${pkgver}/db-studio_${pkgver}_amd64.AppImage")
+source=("${pkgname}-${pkgver}.AppImage::https://github.com/broisnischal/stroke/releases/download/v${pkgver}/stroke_${pkgver}_amd64.AppImage")
 sha256sums=('7214b7bd75519a191898b7f124c4667f358bef61b65f6b43b34baa06e51cf10d')
 
 package() {
