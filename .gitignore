@@ -29,3 +29,8 @@ packaging/aur/discerns/src/
 packaging/aur/discerns/pkg/
 packaging/aur/discerns/*.pkg.tar.zst
 packaging/aur/discerns/*.tar.zstlogs/
+
+# Local secrets — never commit
+.env
+.env.local
+.env.*.local

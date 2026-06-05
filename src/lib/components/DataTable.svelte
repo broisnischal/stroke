@@ -1,11 +1,9 @@
 <script>
   import { tick, onDestroy, untrack } from "svelte";
-  import {
-    zoomState, adjustZoom, resetZoom, ZOOM_STEP,
-  } from '$lib/stores/canvas-zoom.svelte.js'
-
-  // Local derived so all $derived layout constants track it reactively.
-  const canvasZoom = $derived(zoomState.value)
+  import { zoomState } from '$lib/stores/canvas-zoom.svelte.js'
+  // Zoom is driven through the app-level settings so the canvas scales together
+  // with the rest of the UI (applySettings mirrors the app zoom into zoomState).
+  import { increaseZoom, decreaseZoom, resetZoom } from '$lib/stores/settings.js'
   import { toast } from "svelte-sonner";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
@@ -93,11 +91,13 @@
     computeColumnGeometry,
     colDrawnX,
     colAtX,
-    resizeColAtX,
     computeRowTops,
     rowAtContentY,
     rowIndexAtY,
   } from "$lib/canvas-table.js";
+
+  // Local derived so all $derived layout constants track it reactively.
+  const canvasZoom = $derived(zoomState.value)
 
   let {
     columns = [],
@@ -252,11 +252,12 @@
 
 
   // ── Canvas zoom ────────────────────────────────────────────────────────────
-  // canvasZoom / adjustZoom / resetZoom come from the shared store so ALL open
-  // DataTable tabs zoom together and the level persists across sessions.
+  // canvasZoom mirrors the app zoom: applySettings() writes the app zoom into the
+  // shared zoomState store, so all open tabs zoom together with the rest of the UI
+  // and the level persists via app settings.
 
   // All layout constants scale with canvasZoom so the entire canvas zooms together.
-  const ROW_HEIGHT = $derived(Math.round(36 * canvasZoom))
+  const ROW_HEIGHT = $derived(Math.round(24 * canvasZoom))
 
   let _scrollTop = $state(0)
   // Start high so the first paint covers any reasonable screen height before the
@@ -264,9 +265,9 @@
   let _viewportHeight = $state(1200)
 
   // ── Canvas rendering ──────────────────────────────────────────────────────
-  const HEADER_H = $derived(Math.round(40 * canvasZoom))
-  const GUTTER_EXPAND_W = $derived(Math.round(38 * canvasZoom))
-  const GUTTER_SELECT_W = $derived(Math.round(42 * canvasZoom))
+  const HEADER_H = $derived(Math.round(30 * canvasZoom))
+  const GUTTER_EXPAND_W = $derived(Math.round(32 * canvasZoom))
+  const GUTTER_SELECT_W = $derived(Math.round(36 * canvasZoom))
   /** @type {HTMLCanvasElement | null} */
   let canvasEl = $state(null)
   /** @type {HTMLSpanElement | null} */
@@ -282,6 +283,9 @@
   let _resizeHoverCol = $state(/** @type {string | null} */ (null))
   /** Swallow the click that fires right after a resize-drag pointerup. */
   let _suppressNextClick = false
+  /** Synchronous wheel-zoom guard — updated in pointer handlers so the wheel
+   *  listener never reads stale $state through a closed-over $effect closure. */
+  const _zoomGuard = { block: false, resizing: false }
   /** Right-click target kind, so one ContextMenu can show header vs body items. */
   let contextIsHeader = $state(false)
   let contextHeaderCol = $state("")
@@ -314,7 +318,7 @@
       const h = node.offsetHeight
       // Ignore tiny heights that just reflect the loading/toolbar-only state —
       // keep the current allocation until real content settles.
-      if (h >= 48 && expandedRowHeights.get(rowIdx) !== h) {
+      if (h >= 40 && expandedRowHeights.get(rowIdx) !== h) {
         expandedRowHeights = new Map(expandedRowHeights).set(rowIdx, h)
       }
     }
@@ -1203,8 +1207,11 @@
   // ── Virtual relationship columns (reverse FK / one-to-many) ─────────────────
   // One per unique fromTable, max 8. Shown as badge columns to the right of real data.
   const MAX_VIRTUAL_COLS = 5
+  /** User-overridden logical width for all virtual rel columns (null = auto-computed). */
+  let virtualColWidthOverride = $state(/** @type {number | null} */ (null))
   // Width adapts to the longest label (7px/char estimate + padding), clamped 110–180px
   const VIRTUAL_COL_W = $derived.by(() => {
+    if (virtualColWidthOverride !== null) return Math.round(virtualColWidthOverride * canvasZoom)
     if (!virtualRelCols.length) return Math.round(300 * canvasZoom)
     const maxChars = Math.max(...virtualRelCols.map(v => v.label.length))
     const base = Math.min(380, Math.max(300, maxChars * 10 + 60))
@@ -1217,7 +1224,9 @@
     for (const fk of incomingForeignKeys) {
       if (seen.has(fk.fromTable)) continue
       seen.add(fk.fromTable)
-      result.push({ ...fk, label: (fk.fromSchema && fk.fromSchema !== schema) ? `${fk.fromSchema}.${fk.fromTable}` : fk.fromTable })
+      const label = (fk.fromSchema && fk.fromSchema !== schema) ? `${fk.fromSchema}.${fk.fromTable}` : fk.fromTable
+      if (hiddenColumns.has(`__vrel:${label}`)) continue
+      result.push({ ...fk, label })
       if (result.length >= MAX_VIRTUAL_COLS) break
     }
     return result
@@ -1259,9 +1268,27 @@
   // FK sub-view is a zero-cost overlay — it does NOT push rows down and is NOT
   // included in rowTops. This eliminates the fkSubviewHeight→_mergedHeights→rowTops
   // reactive chain that caused lag every time the panel opened or changed height.
-  const rowTops = $derived(computeRowTops(rows.length, expandedRows, 320, ROW_HEIGHT, expandedRowHeights))
-  /** Total scrollable content height incl. header + insert slot + body. */
-  const contentHeight = $derived(HEADER_H + insertRowOffset + (rowTops[rows.length] ?? 0))
+  const rowTops = $derived(computeRowTops(rows.length, expandedRows, 280, ROW_HEIGHT, expandedRowHeights))
+  /** Total scrollable content height incl. header + insert slot + body + 2-row bottom margin. */
+  const contentHeight = $derived(HEADER_H + insertRowOffset + (rowTops[rows.length] ?? 0) + ROW_HEIGHT * 2)
+
+  /** Viewport-visible column resize handles (DOM overlay — not on the canvas). */
+  const resizeHandles = $derived.by(() => {
+    /** @type {{ name: string, x: number }[]} */
+    const out = []
+    for (const col of geom.cols) {
+      const x = colDrawnX(col, geom, _scrollLeft) + col.w
+      if (x < gutterWidth - 6 || x > _viewportWidth + 6) continue
+      out.push({ name: col.name, x })
+    }
+    // Virtual rel column resize handles (right edge of each virtual col)
+    for (let vi = 0; vi < virtualRelCols.length; vi++) {
+      const x = geom.totalWidth + (vi + 1) * VIRTUAL_COL_W - _scrollLeft
+      if (x < gutterWidth - 6 || x > _viewportWidth + 6) continue
+      out.push({ name: `__vrel__${vi}`, x })
+    }
+    return out
+  })
 
   /** Document-space y of a body row's top (0 = top of the sizer). */
   function rowDocTop(/** @type {number} */ idx) {
@@ -1389,7 +1416,13 @@
   /** @param {string} colName */
   function startColumnResize(colName) {
     resizingColName = colName;
-    resizeStartWidth = columnWidths[colName] ?? defaultColumnWidth("");
+    _zoomGuard.resizing = true
+    _zoomGuard.block = true
+    if (colName.startsWith('__vrel__')) {
+      resizeStartWidth = virtualColWidthOverride ?? Math.round(VIRTUAL_COL_W / canvasZoom)
+    } else {
+      resizeStartWidth = columnWidths[colName] ?? defaultColumnWidth("")
+    }
   }
 
   // Batch column resize updates to animation frames — pointermove can fire at
@@ -1406,7 +1439,11 @@
     _resizeRafId = requestAnimationFrame(() => {
       _resizeRafId = 0;
       if (!resizingColName) return;
-      columnWidths = { ...columnWidths, [resizingColName]: _pendingResizeWidth };
+      if (resizingColName.startsWith('__vrel__')) {
+        virtualColWidthOverride = _pendingResizeWidth;
+      } else {
+        columnWidths = { ...columnWidths, [resizingColName]: _pendingResizeWidth };
+      }
     });
   }
 
@@ -1415,13 +1452,19 @@
       cancelAnimationFrame(_resizeRafId);
       _resizeRafId = 0;
       if (resizingColName) {
-        columnWidths = { ...columnWidths, [resizingColName]: _pendingResizeWidth };
+        if (resizingColName.startsWith('__vrel__')) {
+          virtualColWidthOverride = _pendingResizeWidth;
+        } else {
+          columnWidths = { ...columnWidths, [resizingColName]: _pendingResizeWidth };
+        }
       }
     }
-    if (resizingColName) {
+    if (resizingColName && !resizingColName.startsWith('__vrel__')) {
       if (columnWidthsKey) saveColumnWidths(columnWidthsKey, columnWidths);
     }
     resizingColName = null;
+    _zoomGuard.resizing = false
+    _zoomGuard.block = false
   }
 
   /** Cycle sort: none → asc → desc → none */
@@ -1474,7 +1517,7 @@
   // restores exactly what the user had open in each table.
   /** @type {Map<string, { expandedRows: Set<number>, fkSubview: typeof fkSubview }>} */
   const _tabExpandCache = new Map()
-  let _lastTabKey = columnWidthsKey ?? ''
+  let _lastTabKey = $state(untrack(() => columnWidthsKey ?? ''))
 
   $effect(() => {
     const newKey = columnWidthsKey ?? ''
@@ -1580,8 +1623,8 @@
       const cs = getComputedStyle(probe)
       return { px: parseFloat(cs.fontSize) || 13, family: cs.fontFamily }
     }
-    const cell = measure('font-mono text-ui-sm')
-    const type = measure('font-mono text-ui-2xs')
+    const cell = measure('font-mono text-ui-xs')
+    const type = measure('font-mono text-ui-3xs')
     probe.className = prevClass
     return {
       family: cell.family,
@@ -1638,10 +1681,10 @@
 
   /** @param {KeyboardEvent} e */
   function handleTableKeydown(e) {
-    // Ctrl/Cmd + / - / 0: zoom the canvas table
+    // Ctrl/Cmd + / - / 0: zoom the whole app (canvas scales in lockstep).
     if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
-      if (e.key === '=' || e.key === '+') { e.preventDefault(); adjustZoom(ZOOM_STEP); return }
-      if (e.key === '-')                  { e.preventDefault(); adjustZoom(-ZOOM_STEP); return }
+      if (e.key === '=' || e.key === '+') { e.preventDefault(); increaseZoom(); return }
+      if (e.key === '-')                  { e.preventDefault(); decreaseZoom(); return }
       if (e.key === '0')                  { e.preventDefault(); resetZoom(); return }
     }
 
@@ -1814,14 +1857,43 @@
   }
 
   // ── Canvas drawing ─────────────────────────────────────────────────────────
-  const CELL_PAD_X = $derived(Math.round(16 * canvasZoom))
+  const CELL_PAD_X = $derived(Math.round(10 * canvasZoom))
   const ICON_HIT = $derived(Math.round(24 * canvasZoom))
+
+  // Cached glyph advance for the active ctx.font. Every table font is monospace,
+  // so text width is O(1) (charCount × advance). This replaces the per-cell
+  // measureText() binary search that was the main scroll-framerate bottleneck.
+  // Re-measured automatically whenever ctx.font changes (zoom / cell vs header).
+  let _glyphW = 0
+  let _glyphFont = ''
+  function _syncGlyphW(/** @type {CanvasRenderingContext2D} */ ctx) {
+    if (ctx.font === _glyphFont) return
+    const a = ctx.measureText('i').width
+    const b = ctx.measureText('W').width
+    _glyphW = Math.abs(a - b) < 0.1 ? b : 0 // 0 ⇒ not monospace → fall back to measureText
+    _glyphFont = ctx.font
+  }
+
+  /** Width of `str` under the active font (O(1) for monospace). */
+  function textWidth(/** @type {CanvasRenderingContext2D} */ ctx, /** @type {string} */ str) {
+    _syncGlyphW(ctx)
+    return _glyphW > 0 ? str.length * _glyphW : ctx.measureText(str).width
+  }
 
   /** Truncate `text` to fit `maxW` px under the current ctx.font, adding `…`. */
   function truncText(ctx, text, maxW) {
     if (maxW <= 0) return ''
+    const len = text.length
+    if (len === 0) return text
+    _syncGlyphW(ctx)
+    if (_glyphW > 0) {
+      if (len * _glyphW <= maxW) return text
+      const maxChars = Math.floor(maxW / _glyphW)
+      return maxChars <= 1 ? (maxChars === 1 ? '…' : '') : text.slice(0, maxChars - 1) + '…'
+    }
+    // Proportional fallback (non-monospace fonts only).
     if (ctx.measureText(text).width <= maxW) return text
-    let lo = 0, hi = text.length
+    let lo = 0, hi = len
     while (lo < hi) {
       const mid = (lo + hi + 1) >> 1
       if (ctx.measureText(text.slice(0, mid) + '…').width <= maxW) lo = mid
@@ -1845,24 +1917,12 @@
     const ctx = _ctx
     const read = _readColor
     if (!ctx || !read || !canvasEl || !colorProbe) return
+    // Fonts are measured off the live DOM probe, so they already reflect the
+    // app zoom (.text-ui-* sizes resolve against --app-font-size). The layout
+    // constants (ROW_HEIGHT, HEADER_H, …) scale by the same canvasZoom factor,
+    // so text and geometry stay proportional with the rest of the UI. Do NOT
+    // multiply the probe fonts by canvasZoom again — that double-scales them.
     if (!_fonts) _fonts = readFonts(colorProbe)
-
-    // Scale fonts for the current zoom level.
-    // We temporarily swap _fonts so all drawing helpers pick up the right sizes
-    // without needing extra parameters.
-    const _baseFonts = _fonts
-    if (canvasZoom !== 1.0 && _baseFonts) {
-      const cpx = Math.max(8, Math.round(_baseFonts.cellPx * canvasZoom))
-      const tpx = Math.max(7, Math.round(_baseFonts.typePx * canvasZoom))
-      _fonts = {
-        family: _baseFonts.family,
-        cellPx: cpx,
-        typePx: tpx,
-        cell:   `${cpx}px ${_baseFonts.family}`,
-        type:   `${tpx}px ${_baseFonts.family}`,
-        header: `530 ${cpx}px ${_baseFonts.family}`,
-      }
-    }
 
     const W = _viewportWidth
     const H = _viewportHeight
@@ -1892,6 +1952,12 @@
     const usedW = Math.max(0, Math.min(W, geom.totalWidth - _scrollLeft))
     const navName = focusedCol !== null ? navigableColumns[focusedCol]?.name : null
 
+    // Frozen left region (gutter + pinned columns). Non-pinned grid separators
+    // behind it are skipped in the batched grid pass so they don't draw over the
+    // opaque pinned/gutter fills.
+    let frozenW = gutterWidth
+    for (const col of geom.cols) if (col.pinned) frozenW += col.w
+
     // ── Body ─────────────────────────────────────────────────────────────
     ctx.save()
     ctx.beginPath()
@@ -1907,7 +1973,7 @@
       if (ry + ROW_HEIGHT <= HEADER_H) continue
       drawBodyRow(ctx, i, ry, {
         cFg, cText, cMuted, cGrid, cMutedBg, cRing, cAccent, cPanel, usedW, navName,
-        AMBER, BLUE_FG, cPrimary,
+        AMBER, BLUE_FG, cPrimary, frozenW,
       })
     }
     ctx.restore()
@@ -1917,9 +1983,6 @@
       W, cPanel, cFg, cMuted, cGrid, cBorder, cMutedBg, cAccent, cPrimary, cRing,
       AMBER, AMBER_FG, BLUE_FG, usedW,
     })
-
-    // Restore base fonts (the zoom-scaled copy was only for this draw pass).
-    _fonts = _baseFonts
   }
 
   /** @param {CanvasRenderingContext2D} ctx */
@@ -1974,46 +2037,77 @@
       const isVHov = hoveredRow === idx && hoveredColName === `__vrel__${vi}`
       if (!_fonts) return
 
-      // Badge font: 1px smaller than cell text for a compact chip feel
+      // Badge: compact tag style — no border at rest, border on hover/active
       const badgeFontPx = Math.max(10, _fonts.cellPx - 1)
-      const bPadX = 9
-      const bH = Math.round(badgeFontPx * 1.65)
-      const bR = bH / 2
+      const bPadX = 8
+      const bH = Math.round(badgeFontPx * 1.55)
+      const bR = 3
       ctx.font = `500 ${badgeFontPx}px ${_fonts.family}`
 
-      const maxLabelW = VIRTUAL_COL_W - 28
+      const maxLabelW = VIRTUAL_COL_W - 24
       const labelTxt = truncText(ctx, vc.label, maxLabelW)
-      const textW = ctx.measureText(labelTxt).width
-      const bW = textW + bPadX * 2
+      const textW = textWidth(ctx, labelTxt)
+      const bW = Math.min(textW + bPadX * 2, VIRTUAL_COL_W - 16)
       const bX = cellX + (VIRTUAL_COL_W - bW) / 2
       const bY = ry + (rh - bH) / 2
 
-      if (isActive) { ctx.fillStyle = withAlpha(c.cPrimary, 0.06); ctx.fillRect(cellX, ry, VIRTUAL_COL_W, rh) }
+      if (isActive) { ctx.fillStyle = withAlpha(c.cPrimary, 0.05); ctx.fillRect(cellX, ry, VIRTUAL_COL_W, rh) }
 
       ctx.fillStyle = isActive
-        ? withAlpha(c.cPrimary, 0.14)
-        : isVHov ? withAlpha(c.cMutedBg, 0.5) : withAlpha(c.cMutedBg, 0.28)
+        ? withAlpha(c.cPrimary, 0.15)
+        : isVHov ? withAlpha(c.cMutedBg, 0.55) : withAlpha(c.cMutedBg, 0.2)
       roundRect(ctx, bX, bY, bW, bH, bR); ctx.fill()
 
-      ctx.strokeStyle = isActive ? withAlpha(c.cPrimary, 0.5) : withAlpha(c.cMuted, 0.3)
-      ctx.lineWidth = 1
-      roundRect(ctx, bX + 0.5, bY + 0.5, bW - 1, bH - 1, bR); ctx.stroke()
+      if (isActive || isVHov) {
+        ctx.strokeStyle = isActive ? withAlpha(c.cPrimary, 0.45) : withAlpha(c.cMuted, 0.22)
+        ctx.lineWidth = 1
+        roundRect(ctx, bX + 0.5, bY + 0.5, bW - 1, bH - 1, bR); ctx.stroke()
+      }
 
-      ctx.fillStyle = isActive ? c.cPrimary : withAlpha(c.cFg, 0.7)
+      ctx.fillStyle = isActive ? c.cPrimary : withAlpha(c.cFg, 0.6)
       ctx.textBaseline = 'middle'; ctx.textAlign = 'center'
       ctx.fillText(labelTxt, bX + bW / 2, ry + rh / 2 + 0.5)
-
-      // Right column border (vertical)
-      ctx.strokeStyle = c.cGrid; ctx.lineWidth = 1
-      ctx.beginPath(); ctx.moveTo(cellX + VIRTUAL_COL_W - 0.5, ry); ctx.lineTo(cellX + VIRTUAL_COL_W - 0.5, ry + rh); ctx.stroke()
     }
 
-    // Bottom grid line — drawn LAST so it sits on top of all cell fills (real + virtual).
+    // ── Batched grid pass ───────────────────────────────────────────────────
+    // All separators (column edges, virtual edges, gutter, bottom row line) are
+    // collected into ONE path and stroked once — instead of a beginPath/stroke
+    // per cell. This collapses ~(cols+3) draw-call flushes per row down to one,
+    // the single biggest scroll-perf win alongside O(1) text measurement.
+    const vw = _viewportWidth
+    const frozenW = c.frozenW ?? gutterWidth
     ctx.strokeStyle = c.cGrid
     ctx.lineWidth = 1
     ctx.beginPath()
-    ctx.moveTo(0, ry + rh - 0.5)
-    ctx.lineTo(_viewportWidth, ry + rh - 0.5)
+    // Non-pinned column separators (skip ones hidden behind the frozen region).
+    for (const col of geom.cols) {
+      if (col.pinned) continue
+      const dx = col.contentX - _scrollLeft
+      if (dx + col.w <= 0 || dx >= vw) continue
+      const ex = dx + col.w - 0.5
+      if (ex <= frozenW) continue
+      ctx.moveTo(ex, ry); ctx.lineTo(ex, ry + rh)
+    }
+    // Virtual relationship column separators.
+    for (let vi = 0; vi < virtualRelCols.length; vi++) {
+      const ex = geom.totalWidth + vi * VIRTUAL_COL_W - _scrollLeft + VIRTUAL_COL_W - 0.5
+      if (ex <= frozenW || ex >= vw) continue
+      ctx.moveTo(ex, ry); ctx.lineTo(ex, ry + rh)
+    }
+    // Pinned column separators (frozen, drawn on top of their fills).
+    for (const col of geom.cols) {
+      if (!col.pinned) continue
+      const ex = colDrawnX(col, geom, _scrollLeft) + col.w - 0.5
+      if (ex <= 0 || ex >= vw) continue
+      ctx.moveTo(ex, ry); ctx.lineTo(ex, ry + rh)
+    }
+    // Gutter separator (scrolls with content).
+    if (gutterWidth > 0) {
+      const gex = gutterWidth - _scrollLeft - 0.5
+      if (gex > 0 && gex < vw) { ctx.moveTo(gex, ry); ctx.lineTo(gex, ry + rh) }
+    }
+    // Bottom row line.
+    ctx.moveTo(0, ry + rh - 0.5); ctx.lineTo(vw, ry + rh - 0.5)
     ctx.stroke()
   }
 
@@ -2051,10 +2145,7 @@
       ctx.strokeRect(cellX + 1, ry + 1, w - 2, rh - 2)
     }
 
-    // Vertical grid separator at right edge.
-    ctx.strokeStyle = c.cGrid
-    ctx.lineWidth = 1
-    ctx.beginPath(); ctx.moveTo(cellX + w - 0.5, ry); ctx.lineTo(cellX + w - 0.5, ry + rh); ctx.stroke()
+    // (Vertical grid separators are batched once per row in drawBodyRow.)
 
     // Dirty inset marker.
     if (isDirty && !editing) {
@@ -2076,7 +2167,7 @@
     // Right-side content widths (sequential, no overlap).
     const hoverW = isHover ? ICON_HIT + (canExpand ? ICON_HIT : 0) : 0
     const fkW = (activeFk && rowHover) ? 20 : 0
-    const jsonW = isJson ? 36 : 0
+    const jsonW = isJson ? Math.round(36 * canvasZoom) : 0
     const rightReserve = 4 + hoverW + fkW + jsonW  // 4 = right margin
     const textMaxW = w - CELL_PAD_X * 2 - rightReserve
 
@@ -2105,18 +2196,19 @@
       rx -= 20
     }
 
-    // 3. JSON pill.
+    // 3. JSON pill — scale with canvasZoom so it stays proportional to the grid.
     if (isJson) {
-      const pillW = 30, pillH = 13
+      const pillW = Math.round(30 * canvasZoom), pillH = Math.round(13 * canvasZoom)
       const px = rx - 2 - pillW
       const py = ry + (rh - pillH) / 2
+      const pillFontPx = Math.max(8, Math.round(9 * canvasZoom))
       ctx.fillStyle = withAlpha(c.cMutedBg, 0.5)
-      roundRect(ctx, px, py, pillW, pillH, 2.5); ctx.fill()
+      roundRect(ctx, px, py, pillW, pillH, 2.5 * canvasZoom); ctx.fill()
       ctx.fillStyle = c.cMuted
-      ctx.font = `600 9px ${_fonts.family}`
+      ctx.font = `600 ${pillFontPx}px ${_fonts.family}`
       ctx.textAlign = 'left'
-      ctx.fillText('JSON', px + 8, py + pillH / 2 + 0.5)
-      drawIcon(ctx, 'braces', px + 1.5, py + 2.5, 8, c.cMuted, 2.2)
+      ctx.fillText('JSON', px + Math.round(8 * canvasZoom), py + pillH / 2 + 0.5)
+      drawIcon(ctx, 'braces', px + 1.5 * canvasZoom, py + 2.5 * canvasZoom, Math.round(8 * canvasZoom), c.cMuted, 2.2)
     }
 
     // Focused-cell outline — bright primary border.
@@ -2149,9 +2241,7 @@
         { border: c.cMuted, fill: c.cPrimary, mark: c.cPanel })
       gx += GUTTER_SELECT_W
     }
-    ctx.strokeStyle = c.cGrid
-    ctx.lineWidth = 1
-    ctx.beginPath(); ctx.moveTo(offsetX + gutterWidth - 0.5, ry); ctx.lineTo(offsetX + gutterWidth - 0.5, ry + rh); ctx.stroke()
+    // (Gutter separator is batched once per row in drawBodyRow.)
   }
 
   /** @param {CanvasRenderingContext2D} ctx */
@@ -2199,10 +2289,12 @@
     // Virtual relationship column headers
     for (let vi = 0; vi < virtualRelCols.length; vi++) {
       const vc = virtualRelCols[vi]
+      const vrelKey = `__vrel__${vi}`
       const x = geom.totalWidth + vi * VIRTUAL_COL_W - _scrollLeft
       if (x + VIRTUAL_COL_W <= 0 || x >= c.W) continue
+      ctx.fillStyle = withAlpha(c.cMutedBg, resizingColName === vrelKey ? 0.25 : 0.1)
+      ctx.fillRect(x, 0, VIRTUAL_COL_W, HEADER_H)
       if (vi === 0) {
-        ctx.fillStyle = withAlpha(c.cMutedBg, 0.1); ctx.fillRect(x, 0, VIRTUAL_COL_W, HEADER_H)
         ctx.strokeStyle = withAlpha(c.cPrimary, 0.25); ctx.lineWidth = 2
         ctx.beginPath(); ctx.moveTo(x + 1, 4); ctx.lineTo(x + 1, HEADER_H - 4); ctx.stroke()
       }
@@ -2211,8 +2303,13 @@
       if (!_fonts) continue
       ctx.font = _fonts.header; ctx.fillStyle = withAlpha(c.cMuted, 0.6)
       ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
-      // Use smaller side padding (8px) so long names fit more fully
       ctx.fillText(truncText(ctx, vc.label, VIRTUAL_COL_W - 16), x + 8, HEADER_H / 2 + 0.5)
+      // Resize edge affordance (matches regular column behaviour)
+      if (_resizeHoverCol === vrelKey || resizingColName === vrelKey) {
+        ctx.strokeStyle = withAlpha(c.cPrimary, 0.7)
+        ctx.lineWidth = 2
+        ctx.beginPath(); ctx.moveTo(x + VIRTUAL_COL_W - 1, 5); ctx.lineTo(x + VIRTUAL_COL_W - 1, HEADER_H - 5); ctx.stroke()
+      }
     }
 
     // Header bottom border.
@@ -2249,12 +2346,12 @@
     ctx.textBaseline = 'middle'
     ctx.textAlign = 'left'
 
+    // Relational indicators only (primary + foreign key). Uniqueness/index were
+    // dropped from the header to cut clutter — they still surface in the inspector.
     const badges = []
     if (meta) {
       if (meta.pk) badges.push({ letter: 'K', bg: withAlpha(c.AMBER, 0.15), fg: c.AMBER_FG })
       if (meta.fk) badges.push({ letter: 'F', bg: 'rgba(59,130,246,0.12)', fg: c.BLUE_FG })
-      if (meta.unique && !meta.pk) badges.push({ letter: 'U', bg: withAlpha(c.cMutedBg, 0.6), fg: withAlpha(c.cMuted, 0.7) })
-      if (meta.indexed) badges.push({ letter: 'I', bg: withAlpha(c.cMutedBg, 0.6), fg: withAlpha(c.cMuted, 0.6) })
     }
     const badgeW = badges.length * 16
 
@@ -2264,25 +2361,21 @@
     const nameMaxW = w - CELL_PAD_X - sortReserve - badgeW - 8
     const name = truncText(ctx, col.name, Math.max(0, nameMaxW))
     ctx.fillText(name, x + CELL_PAD_X, cy + 0.5)
-    let tx = x + CELL_PAD_X + ctx.measureText(name).width + 7
+    let tx = x + CELL_PAD_X + textWidth(ctx, name) + 7
 
-    // Badges.
+    // Key badges.
     for (const b of badges) {
       drawBadge(ctx, tx, cy - 6.5, 13, { bg: b.bg, fg: b.fg, letter: b.letter ?? '', dot: b.dot })
       tx += 16
     }
 
-    // Inline datatype with separator dot — only if there's comfortable room.
-    const typeGap = badges.length ? 5 : 3
-    const typeStartX = tx + typeGap
+    // Inline datatype — muted, no dot separator (cleaner), only when there's room.
+    const typeStartX = tx + (badges.length ? 4 : 2)
     const typeRoom = x + w - sortReserve - 4 - typeStartX
-    if (typeRoom > 28 && col.dataType) {
+    if (typeRoom > 24 && col.dataType) {
       ctx.font = _fonts.type
-      ctx.fillStyle = withAlpha(c.cMuted, 0.3)
-      ctx.fillText('·', typeStartX, cy + 0.5)
-      const dotW = ctx.measureText('· ').width
-      ctx.fillStyle = withAlpha(c.cMuted, 0.7)
-      ctx.fillText(truncText(ctx, col.dataType, typeRoom - dotW), typeStartX + dotW, cy + 0.5)
+      ctx.fillStyle = withAlpha(c.cMuted, 0.5)
+      ctx.fillText(truncText(ctx, col.dataType, typeRoom), typeStartX, cy + 0.5)
     }
 
     // Sort indicator — Lucide icons.
@@ -2301,40 +2394,61 @@
     }
   }
 
-  // Master effect — sizes the canvas backing store (DPR-aware) and repaints.
-  // Doing both here, and never reading+writing the same signal, keeps it a pure
-  // sink: it tracks every input that affects the grid and writes no reactive
-  // state, so it can't loop.
-  $effect(() => {
-    void rows; void columns; void columnWidths
-    void pinnedColumns; void hiddenColumns; void selected; void focusedRow
-    void focusedCol; void editingCell; void pendingEdits; void expandedRows
-    void rowSort; void _scrollTop; void _scrollLeft; void _viewportWidth
-    void _viewportHeight; void hoveredRow; void hoveredColName; void _resizeHoverCol
-    void resizingColName; void newRowDrafts; void insertSaving; void colMeta
-    void geom; void rowTops; void _redrawToken; void foreignKeys; void indexes
-    void _colCache; void expandedRowHeights; void fkSubview; void virtualRelCols; void VIRTUAL_COL_W
-    // Read the zoom store directly so this effect re-runs the moment any tab changes zoom.
-    void zoomState.value; void canvasZoom
-
+  /** Size the canvas backing store (DPR-aware). Always sync CSS px size so macOS
+   *  WebKit can't display a stale CSS box over a mismatched bitmap (blurry zoom). */
+  function syncCanvasSurface() {
     const canvas = canvasEl
     const probe = colorProbe
-    if (!canvas || !probe) return
+    if (!canvas || !probe) return false
     if (!_readColor) _readColor = createColorReader(probe)
+    const cssW = Math.max(1, Math.round(_viewportWidth))
+    const cssH = Math.max(1, Math.round(_viewportHeight))
     const dpr = Math.min(window.devicePixelRatio || 1, 2)
-    const bw = Math.max(1, Math.round(_viewportWidth * dpr))
-    const bh = Math.max(1, Math.round(_viewportHeight * dpr))
+    const bw = Math.max(1, Math.round(cssW * dpr))
+    const bh = Math.max(1, Math.round(cssH * dpr))
+    canvas.style.width = cssW + 'px'
+    canvas.style.height = cssH + 'px'
     // Only touch canvas.width/height when it actually changes — assigning clears
     // the canvas, and we want to avoid a redundant clear on every repaint.
     if (canvas.width !== bw || canvas.height !== bh) {
       canvas.width = bw
       canvas.height = bh
-      canvas.style.width = _viewportWidth + 'px'
-      canvas.style.height = _viewportHeight + 'px'
     }
     _ctx = canvas.getContext('2d')
     if (_ctx) _ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    draw()
+    return !!_ctx
+  }
+
+  // rAF-batched paint — coalesces bursts of scroll/state changes into a single
+  // draw per animation frame so high-frequency trackpad scroll (up to 120Hz on
+  // ProMotion) never queues multiple synchronous repaints and tears/janks.
+  let _drawRafId = 0
+  function scheduleDraw() {
+    if (_drawRafId) return
+    _drawRafId = requestAnimationFrame(() => {
+      _drawRafId = 0
+      if (_ctx) draw()
+    })
+  }
+  onDestroy(() => { if (_drawRafId) cancelAnimationFrame(_drawRafId) })
+
+  // Layout / sizing effect — resize the backing store when geometry or viewport changes.
+  $effect(() => {
+    void rows; void columns; void columnWidths
+    void pinnedColumns; void hiddenColumns; void selected; void focusedRow
+    void focusedCol; void editingCell; void pendingEdits; void expandedRows
+    void rowSort; void _scrollTop; void _scrollLeft; void _viewportWidth
+    void _viewportHeight; void newRowDrafts; void insertSaving; void colMeta
+    void geom; void rowTops; void _redrawToken; void foreignKeys; void indexes
+    void _colCache; void expandedRowHeights; void fkSubview; void virtualRelCols; void VIRTUAL_COL_W
+    void zoomState.value; void canvasZoom
+    if (syncCanvasSurface()) scheduleDraw()
+  })
+
+  // Hover / affordance repaint — pointer moves must not re-touch canvas dimensions.
+  $effect(() => {
+    void hoveredRow; void hoveredColName; void _resizeHoverCol; void resizingColName
+    if (_ctx) scheduleDraw()
   })
 
   // ── Canvas pointer interaction ──────────────────────────────────────────
@@ -2415,7 +2529,6 @@
       case 'header-expand-all': collapseAllRows(); return
       case 'header-select-all': toggleAll(!allSelected); return
       case 'header': {
-        if (resizeColAtX(x, geom, _scrollLeft, 5, 0)) return // resize edge — handled on pointerdown
         handleHeaderSort(t.col.name)
         return
       }
@@ -2505,13 +2618,20 @@
     if (t.kind === 'cell') tryFollowForeignKey(/** @type {number} */ (t.idx), /** @type {number} */ (t.actualIdx), e)
   }
 
-  function onCanvasPointerDown(/** @type {PointerEvent} */ e) {
-    if (e.button !== 0) return
-    const { x, y } = canvasXY(e)
-    if (y >= HEADER_H) return
-    const colName = resizeColAtX(x, geom, _scrollLeft, 5, 0)
-    if (!colName) return
+  /** Swallow pinch/scroll zoom on resize handles; reset stray webview page-zoom. */
+  function blockPointerZoom(/** @type {Event} */ e) {
     e.preventDefault()
+    e.stopPropagation()
+    void import('@tauri-apps/api/webview')
+      .then(({ getCurrentWebview }) => getCurrentWebview().setZoom(1))
+      .catch(() => {})
+  }
+
+  /** @param {PointerEvent} e @param {string} colName */
+  function onResizeHandleDown(e, colName) {
+    if (e.button !== 0) return
+    e.preventDefault()
+    e.stopPropagation()
     startColumnResize(colName)
     const startX = e.clientX
     const move = (/** @type {PointerEvent} */ ev) => applyColumnResize(ev.clientX - startX)
@@ -2519,8 +2639,6 @@
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
       endColumnResize()
-      // The pointerup is followed by a synthetic click on the canvas; swallow it
-      // so a drag that collapsed/resized a column doesn't also sort/restore it.
       _suppressNextClick = true
       setTimeout(() => { _suppressNextClick = false }, 0)
     }
@@ -2528,12 +2646,35 @@
     window.addEventListener('pointerup', up)
   }
 
+  /** @param {string} colName */
+  function onResizeHandleEnter(colName) {
+    _resizeHoverCol = colName
+    _zoomGuard.block = true
+    void import('@tauri-apps/api/webview')
+      .then(({ getCurrentWebview }) => getCurrentWebview().setZoom(1))
+      .catch(() => {})
+  }
+
+  function onResizeHandleLeave() {
+    if (!resizingColName) {
+      _resizeHoverCol = null
+      _zoomGuard.block = false
+    }
+  }
+
+  function onCanvasPointerDown(/** @type {PointerEvent} */ e) {
+    if (e.button !== 0) return
+    const { y } = canvasXY(e)
+    // Header resize is handled by the DOM overlay — canvas only handles body.
+    if (y < HEADER_H) return
+  }
+
   function onCanvasPointerMove(/** @type {PointerEvent} */ e) {
     const { x, y } = canvasXY(e)
     if (resizingColName) return
     if (y < HEADER_H) {
-      const rc = resizeColAtX(x, geom, _scrollLeft, 5, 0)
-      _resizeHoverCol = rc
+      _resizeHoverCol = null
+      _zoomGuard.block = false
       const cx = x + _scrollLeft
       const hit = cx >= gutterWidth ? colAtX(x, geom, _scrollLeft, 0) : null
       hoveredRow = null
@@ -2541,6 +2682,7 @@
       return
     }
     _resizeHoverCol = null
+    _zoomGuard.block = false
     // Check virtual rel columns first (they are to the right of real columns)
     if (y >= HEADER_H && virtualRelCols.length > 0) {
       const cx = x + _scrollLeft
@@ -2570,22 +2712,26 @@
     hoveredRow = null
     hoveredColName = null
     _resizeHoverCol = null
+    _zoomGuard.block = false
   }
 
-  // Ctrl/Cmd+Scroll → zoom the canvas. Must use { passive: false } so preventDefault
-  // works — Svelte's onwheel directive registers a passive listener by default which
-  // can't call preventDefault, causing the browser to intercept the event first.
+  // Re-sync canvas backing store when devicePixelRatio changes (stray webview
+  // page-zoom on macOS). Without this the CSS box and bitmap can drift → blur.
   $effect(() => {
-    const el = tableContainer
-    if (!el) return
-    function onWheel(/** @type {WheelEvent} */ e) {
-      if (!e.ctrlKey && !e.metaKey) return
-      e.preventDefault()
-      e.stopPropagation()
-      adjustZoom(e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP)
+    if (!tableContainer) return
+    let lastDpr = window.devicePixelRatio
+    const resync = () => {
+      const dpr = window.devicePixelRatio
+      if (dpr === lastDpr) return
+      lastDpr = dpr
+      if (syncCanvasSurface()) scheduleDraw()
     }
-    el.addEventListener('wheel', onWheel, { passive: false })
-    return () => el.removeEventListener('wheel', onWheel)
+    window.addEventListener('resize', resync)
+    window.visualViewport?.addEventListener('resize', resync)
+    return () => {
+      window.removeEventListener('resize', resync)
+      window.visualViewport?.removeEventListener('resize', resync)
+    }
   })
 
   function onCanvasContextMenu(/** @type {MouseEvent} */ e, /** @type {((e: MouseEvent) => void) | undefined} */ bitsOpen) {
@@ -2652,43 +2798,29 @@
         <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
         <div
           bind:this={tableContainer}
+          data-canvas-table=""
           {...props}
           tabindex={-1}
           class={cn(
             "app-scroll relative overflow-auto bg-panel select-none outline-none [scrollbar-gutter:stable] [contain:layout] [overflow-anchor:none]",
             embedded ? "max-h-80" : "min-h-0 flex-1",
-            (resizingColName || _resizeHoverCol) && "cursor-col-resize",
+            resizingColName && "cursor-col-resize",
           )}
           oncontextmenu={(e) => onCanvasContextMenu(e, bitsContextMenu)}
           onscroll={onContainerScroll}
           onkeydown={handleTableKeydown}
           onwheel={(e) => {
-            // Without Shift: treat all wheel events as vertical.
-            // Horizontal table scroll only when Shift is explicitly held.
-            // This prevents trackpad horizontal-bias from hijacking page scroll.
-            if (!e.shiftKey && Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
-              // Vertical-dominant scroll without Shift — let it bubble up to
-              // the parent (AI chat / page scroll) and prevent the table from
-              // consuming it as horizontal scroll.
+            // Shift+wheel → horizontal scroll (maps a mouse wheel's vertical
+            // delta onto the X axis). Everything else — vertical, trackpad,
+            // diagonal — is left to the browser so macOS momentum/inertia and
+            // edge overscroll-chaining to the parent stay buttery smooth.
+            if (e.shiftKey) {
               const tc = tableContainer
-              if (!tc) return
-              const atTop = tc.scrollTop === 0
-              const atBottom = tc.scrollTop + tc.clientHeight >= tc.scrollHeight - 1
-              if (e.deltaY < 0 && atTop || e.deltaY > 0 && atBottom) {
-                // Already at the vertical limit — let the outer container scroll
-                return
+              if (tc && (e.deltaY || e.deltaX)) {
+                e.preventDefault()
+                tc.scrollLeft += e.deltaY || e.deltaX
               }
-              // Otherwise scroll this container vertically (the default behavior)
-              // and stop horizontal scrolling.
-              e.preventDefault()
-              tc.scrollTop += e.deltaY
-            } else if (e.shiftKey) {
-              // Shift+scroll: horizontal scrolling within the table
-              e.preventDefault()
-              const tc = tableContainer
-              if (tc) tc.scrollLeft += e.deltaY || e.deltaX
             }
-            // Pure horizontal gesture (deltaX dominant, no shift) — allow native
           }}
           onfocusin={() => { isTableFocused = true; }}
           onfocusout={(e) => {
@@ -2706,23 +2838,51 @@
             style="position:absolute;top:0;left:0;width:0;height:0;overflow:hidden;pointer-events:none"
           ></span>
 
+          <!-- Canvas: always mounted so the 2D context survives table navigation
+               (each mount creates a new GPU-tracked context; keeping it alive
+               across table switches eliminates the accumulation shown in DevTools). -->
+          <div style="position:sticky;top:0;left:0;width:0;height:0;z-index:1;overflow:visible">
+            <canvas
+              bind:this={canvasEl}
+              class="block"
+              style="cursor:default"
+              onclick={onCanvasClick}
+              ondblclick={onCanvasDblClick}
+              onauxclick={onCanvasAuxClick}
+              onpointerdown={onCanvasPointerDown}
+              onpointermove={onCanvasPointerMove}
+              onpointerleave={onCanvasPointerLeave}
+            ></canvas>
+          </div>
+
           {#if visibleColumns.length > 0}
-            <!-- Canvas layer: a 0-height sticky wrapper placed BEFORE the sizer
-                 so its natural flow position is the top-left; sticky then pins
-                 the viewport-sized canvas there while the sizer below provides
-                 the scroll range. The canvas overflows the 0-height box. -->
-            <div style="position:sticky;top:0;left:0;width:0;height:0;z-index:1;overflow:visible">
-              <canvas
-                bind:this={canvasEl}
-                class="block"
-                style="cursor:{resizingColName || _resizeHoverCol ? 'col-resize' : 'default'}"
-                onclick={onCanvasClick}
-                ondblclick={onCanvasDblClick}
-                onauxclick={onCanvasAuxClick}
-                onpointerdown={onCanvasPointerDown}
-                onpointermove={onCanvasPointerMove}
-                onpointerleave={onCanvasPointerLeave}
-              ></canvas>
+            <!-- Column resize handles: DOM overlay so header edge interaction never
+                 hits the canvas (macOS trackpad pinch on canvas was page-zooming
+                 the webview and making the grid look huge/blurry).
+                 height:0 + overflow:visible keeps this out of flow so it does NOT
+                 push the sizer down (which would mis-align all DOM overlays). -->
+            <div
+              class="sticky top-0 z-[2] pointer-events-none"
+              style="height:0; overflow:visible; width:{_viewportWidth}px"
+              aria-hidden="true"
+            >
+              {#each resizeHandles as h (h.name)}
+                <div
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label="Resize {h.name.startsWith('__vrel__') ? 'relationship column' : `column ${h.name}`}"
+                  class="absolute top-0 w-2.5 -translate-x-1/2 cursor-col-resize pointer-events-auto touch-none"
+                  style="left:{h.x}px; height:{HEADER_H}px"
+                  onpointerdown={(e) => onResizeHandleDown(e, h.name)}
+                  onpointerenter={() => onResizeHandleEnter(h.name)}
+                  onpointerleave={onResizeHandleLeave}
+                  onwheel={blockPointerZoom}
+                  onmousewheel={blockPointerZoom}
+                  ongesturestart={blockPointerZoom}
+                  ongesturechange={blockPointerZoom}
+                  ongestureend={blockPointerZoom}
+                ></div>
+              {/each}
             </div>
 
             <!-- Sizer: establishes the scroll range; DOM overlays are positioned
@@ -2734,6 +2894,7 @@
               <!-- Inline insert-row form -->
               {#if newRowDrafts}
                 <div
+                  role="none"
                   class="absolute left-0 z-20 flex border-b border-border/30 bg-emerald-500/[0.04] ring-1 ring-inset ring-emerald-500/20"
                   style="top:{HEADER_H}px; height:{ROW_HEIGHT}px; width:{geom.totalWidth}px"
                   onkeydown={onNewRowKeydown}
@@ -2852,7 +3013,7 @@
                 {#if rows[exIdx] !== undefined}
                   <div
                     class="absolute z-10"
-                    style="top:{rowDocTop(exIdx) + ROW_HEIGHT}px; left:{gutterWidth}px; width:{Math.max(geom.totalWidth - gutterWidth, _viewportWidth - gutterWidth)}px"
+                    style="top:{rowDocTop(exIdx) + ROW_HEIGHT}px; left:0; width:{_viewportWidth}px; transform:translateX({_scrollLeft}px); will-change:transform"
                     use:trackExpandHeight={exIdx}
                   >
                     <RowExpandViewer record={rowToRecord(columns, rows[exIdx])} rowLabel={"row " + (exIdx + 1)} />
@@ -2861,13 +3022,19 @@
               {/each}
 
               <!-- FK sub-view panel — spans full viewport width (including gutter area).
-                   Only horizontal wheel events are stopped so the main table can still
-                   scroll vertically when the pointer is over the sub-view. -->
+                   Outer div is absolute for vertical position; left:0/right:0 gives it
+                   the full scrollable width so the inner sticky child has room to stick.
+                   Inner div uses position:sticky;left:0 to stay at the viewport left
+                   edge on horizontal scroll — no transform or will-change needed,
+                   which avoids the forced compositing layer that caused scroll lag. -->
               {#if fkSubview !== null && rows[fkSubview.rowIdx] !== undefined}
                 {@const fkIdx = fkSubview.rowIdx}
                 <div
-                  class="absolute z-20"
-                  style="top:{rowDocTop(fkIdx) + ROW_HEIGHT}px; left:0; width:{_viewportWidth}px; transform:translateX({_scrollLeft}px); will-change:transform"
+                  class="absolute z-20 left-0 right-0"
+                  style="top:{rowDocTop(fkIdx) + ROW_HEIGHT}px"
+                >
+                <div
+                  style="position:sticky; left:0; width:{_viewportWidth}px"
                   onwheel={(e) => { if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) e.stopPropagation() }}
                 >
                   <FkSubviewPanel
@@ -2886,6 +3053,7 @@
                       }
                     }}
                   />
+                </div>
                 </div>
               {/if}
 

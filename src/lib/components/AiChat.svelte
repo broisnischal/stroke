@@ -1199,7 +1199,7 @@
   });
 
   // ── AI sidebar visibility (persisted) ─────────────────────────────────────
-  const AI_SIDEBAR_KEY = "db-studio:ai-sidebar-open";
+  const AI_SIDEBAR_KEY = "stroke:ai-sidebar-open";
 
   function loadSidebarPref() {
     try {

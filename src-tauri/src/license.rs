@@ -39,7 +39,7 @@ const TRIAL_FILE: &str = ".trial";
 // Note: revocation only takes effect after the user installs the update.
 // For immediate remote revocation you'll need the server endpoint (coming later).
 const REVOKED_KEY_HASHES: &[&str] = &[
-    // "aabbcc..." — example: paste hash here, one per line
+    "ed13c9edc3bea01c6f82a415a10b21f85b85f829004f473cb78e8cd10056059f", // revoked 2026-06-05 (case: LIC-REV-2026-06-05-01)
 ];
 
 // ── Data types ────────────────────────────────────────────────────────────────

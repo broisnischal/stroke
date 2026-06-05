@@ -786,9 +786,7 @@
                   </div>
 
                 {:else if part.type === 'error'}
-                  <div class="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/6 px-3 py-2 text-ui-xs text-destructive">
-                    <AlertTriangle class="mt-0.5 size-3.5 shrink-0" /><span>{part.content}</span>
-                  </div>
+                  <p class="text-ui-xs text-muted-foreground/70">{part.content}</p>
 
                 {:else if part.type === 'confirm_prompt'}
                   <div class="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/6 px-3 py-2 text-ui-xs text-amber-600 dark:text-amber-400">

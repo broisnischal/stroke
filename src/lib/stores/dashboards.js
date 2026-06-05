@@ -16,8 +16,8 @@ import { writable } from 'svelte/store'
  * }} Dashboard
  */
 
-const KEY = (id) => id ? `db-studio:dashboards:${id}` : 'db-studio:dashboards'
-const ACTIVE_KEY = (id) => id ? `db-studio:active-dashboard:${id}` : 'db-studio:active-dashboard'
+const KEY = (id) => id ? `stroke:dashboards:${id}` : 'stroke:dashboards'
+const ACTIVE_KEY = (id) => id ? `stroke:active-dashboard:${id}` : 'stroke:active-dashboard'
 
 // Tracks the currently active connection scope
 let _connId = ''
@@ -29,7 +29,7 @@ function loadDashboards(connectionId) {
     const specific = JSON.parse(localStorage.getItem(KEY(connectionId)) ?? 'null')
     if (Array.isArray(specific)) return specific
     // One-time migration: load from legacy global key
-    const global_ = JSON.parse(localStorage.getItem('db-studio:dashboards') ?? '[]')
+    const global_ = JSON.parse(localStorage.getItem('stroke:dashboards') ?? '[]')
     return Array.isArray(global_) ? global_ : []
   } catch { return [] }
 }
@@ -39,7 +39,7 @@ function loadActiveId(connectionId) {
   if (!connectionId) return null
   try {
     return localStorage.getItem(ACTIVE_KEY(connectionId))
-      ?? localStorage.getItem('db-studio:active-dashboard')
+      ?? localStorage.getItem('stroke:active-dashboard')
   } catch { return null }
 }
 

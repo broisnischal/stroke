@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import * as monaco from 'monaco-editor'
-  import { defineDbStudioMonacoThemes, monacoThemeId, readEditorFontOptions } from '$lib/monaco-themes.js'
+  import { defineStrokeMonacoThemes, monacoThemeId, readEditorFontOptions } from '$lib/monaco-themes.js'
   import { normalizeThemeId } from '$lib/themes/registry.js'
   import Table2 from '@lucide/svelte/icons/table-2'
   import Copy from '@lucide/svelte/icons/copy'
@@ -95,7 +95,7 @@
   }
 
   onMount(() => {
-    defineDbStudioMonacoThemes()
+    defineStrokeMonacoThemes()
     if (!container) return
 
     const { fontSize, lineHeight } = readEditorFontOptions()

@@ -48,6 +48,7 @@ getrandom = "0.2"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSView", "objc2-quartz-core"] }
 objc2-quartz-core = { version = "0.3", features = ["CALayer"] }
+objc2-web-kit = { version = "0.3", features = ["WKWebView"] }
 
 [profile.release]
 strip = true

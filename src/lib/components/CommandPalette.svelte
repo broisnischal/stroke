@@ -134,15 +134,48 @@
   // smooth even with thousands of tables.
   let paletteSearch = $state('')
   const TABLES_PAGE_CAP = 100
+
+  /**
+   * Substring score: exact > starts-with > contains. No fuzzy scattered-char matching.
+   * @param {string} name
+   * @param {string} query
+   * @returns {number}
+   */
+  function filterScore(name, query) {
+    if (!query) return 1
+    const n = name.toLowerCase()
+    const q = query.toLowerCase()
+    if (n === q) return 1000
+    if (n.startsWith(q)) return 900
+    const sub = n.indexOf(q)
+    return sub !== -1 ? 800 - sub : 0
+  }
+
   /** @param {{ name: string }[]} list */
   function filterAndCap(list) {
     const q = paletteSearch.trim().toLowerCase()
-    const matched = q ? list.filter((t) => t.name.toLowerCase().includes(q)) : list
-    return { items: matched.slice(0, TABLES_PAGE_CAP), total: matched.length }
+    if (!q) return { items: list.slice(0, TABLES_PAGE_CAP), total: list.length }
+    const scored = list
+      .map((t) => ({ t, s: filterScore(t.name, q) }))
+      .filter((x) => x.s > 0)
+      .sort((a, b) => b.s - a.s)
+    return { items: scored.slice(0, TABLES_PAGE_CAP).map((x) => x.t), total: scored.length }
   }
-  const tablesPageRegular = $derived(filterAndCap(regularTables))
-  const tablesPageViews   = $derived(filterAndCap(viewTables))
+
+  const tablesPageRegular  = $derived(filterAndCap(regularTables))
+  const tablesPageViews    = $derived(filterAndCap(viewTables))
   const tablesPageMatViews = $derived(filterAndCap(matViewTables))
+
+  // On tables page: shouldFilter=false so bits-ui skips its sort/filter pass entirely
+  // (no CSS `order` reordering, no keyboard-nav interference). We pre-filter in JS.
+  // On root page: bits-ui filters with a plain substring check against item value strings.
+  const shouldFilter = $derived(page !== 'tables')
+
+  /** @type {(value: string, search: string) => number} */
+  const commandFilter = (value, search) => {
+    if (!search) return 1
+    return value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0
+  }
 
   /** @param {() => void} action */
   function run(action) {
@@ -173,6 +206,8 @@
 
 <Command.Dialog
   bind:open
+  filter={commandFilter}
+  shouldFilter={shouldFilter}
   title="Command menu"
   description="Search tables, schemas, and commands"
   class="w-[min(540px,calc(100vw-2rem))] sm:max-w-none"
@@ -185,6 +220,7 @@
     <div class="flex flex-col" onkeydown={handleKeydown}>
       <Command.Input
         bind:value={paletteSearch}
+        oninput={(/** @type {Event} */ e) => { paletteSearch = /** @type {HTMLInputElement} */ (e.currentTarget).value }}
         placeholder={
           page === 'root' ? 'Search tables, schemas, commands…'
           : page === 'tables' ? 'Search tables and views…'
@@ -361,7 +397,7 @@
               </Command.Item>
               <Command.Item value="about license version info app" onSelect={() => run(onopenabout)}>
                 <Info class="size-4 shrink-0 opacity-60" />
-                <span data-slot="command-label" class="truncate">About DB Studio</span>
+                <span data-slot="command-label" class="truncate">About Stroke</span>
               </Command.Item>
               <Command.Item value="check for updates upgrade version" onSelect={() => run(oncheckupdate)}>
                 <ArrowDownToLine class="size-4 shrink-0 opacity-60" />

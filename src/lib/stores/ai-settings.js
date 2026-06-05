@@ -80,9 +80,9 @@ export const PROVIDER_MODELS = {
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 
-const PROFILES_KEY = 'db-studio:ai-profiles'
-const ACTIVE_KEY   = 'db-studio:ai-active-profile'
-const LEGACY_KEY   = 'db-studio:ai-settings'
+const PROFILES_KEY = 'stroke:ai-profiles'
+const ACTIVE_KEY   = 'stroke:ai-active-profile'
+const LEGACY_KEY   = 'stroke:ai-settings'
 
 // ── Default profile ──────────────────────────────────────────────────────────
 

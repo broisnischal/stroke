@@ -1,5 +1,5 @@
 /*!
-Process naming and runtime metrics for DB Studio.
+Process naming and runtime metrics for Stroke.
 
 Exposes two Tauri commands:
   - `set_process_title`  — renames the process so it shows up as a recognisable
@@ -32,7 +32,7 @@ fn sys() -> &'static Mutex<System> {
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct AppMetrics {
-    /// OS process ID of this DB Studio process.
+    /// OS process ID of this Stroke process.
     pub pid: u32,
     /// Resident Set Size in bytes — actual physical RAM in use.
     pub rss_bytes: u64,

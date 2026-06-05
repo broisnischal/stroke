@@ -1,4 +1,4 @@
-const STORAGE_KEY = 'db-studio:column-widths'
+const STORAGE_KEY = 'stroke:column-widths'
 
 /** @type {Record<string, Record<string, number>> | null} */
 let _cache = null

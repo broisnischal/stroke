@@ -12,6 +12,8 @@
 		showCloseButton = false,
 		portalProps,
 		children,
+		filter = undefined,
+		shouldFilter = undefined,
 		class: className,
 		...restProps
 	} = $props();
@@ -30,6 +32,6 @@
 		{showCloseButton}
 		{portalProps}
 	>
-		<Command {...restProps} bind:value bind:ref {children} />
+		<Command filter={filter} shouldFilter={shouldFilter} {...restProps} bind:value bind:ref {children} />
 	</Dialog.Content>
 </Dialog.Root>
