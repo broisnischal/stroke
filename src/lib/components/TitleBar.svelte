@@ -42,7 +42,18 @@
     const p = win.listen('tauri://resize', async () => {
       [maximized, fullscreen] = await Promise.all([win.isMaximized(), win.isFullscreen()])
     })
-    return () => { p.then(fn => fn()).catch(() => {}) }
+
+    // After minimize/restore, WebKit's pointer hit-testing tree can become stale,
+    // making buttons unresponsive. Briefly toggling pointer-events forces a rebuild.
+    const pFocus = win.listen('tauri://focus', () => {
+      document.documentElement.style.pointerEvents = 'none'
+      requestAnimationFrame(() => { document.documentElement.style.pointerEvents = '' })
+    })
+
+    return () => {
+      p.then(fn => fn()).catch(() => {})
+      pFocus.then(fn => fn()).catch(() => {})
+    }
   })
 
   async function winClose()            { try { await getCurrentWindow().close()                    } catch {} }

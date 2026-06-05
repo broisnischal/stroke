@@ -47,12 +47,26 @@ export function createColorReader(probe) {
   };
 }
 
+// Memoize results — (colour, alpha) combos are few and stable, but this runs in
+// the per-frame draw loop, so caching avoids repeated regex parsing on scroll.
+/** @type {Map<string, string>} */
+const _alphaCache = new Map();
+
 /**
  * Apply an alpha to a CSS colour string regardless of notation (rgb/rgba/hsl,
  * functional space-separated, oklch/oklab/color(), or hex). Returns a string
  * the canvas understands.
  */
 export function withAlpha(/** @type {string} */ color, /** @type {number} */ a) {
+  const key = color + "@" + a;
+  const cached = _alphaCache.get(key);
+  if (cached !== undefined) return cached;
+  const out = _computeAlpha(color, a);
+  _alphaCache.set(key, out);
+  return out;
+}
+
+function _computeAlpha(/** @type {string} */ color, /** @type {number} */ a) {
   const c = color.trim();
   const fnMatch = c.match(/^([a-z]+)\((.*)\)$/i);
   if (fnMatch) {
