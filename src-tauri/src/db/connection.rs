@@ -200,10 +200,11 @@ async fn open_pg(config: &PgConfig) -> Result<PgPool, String> {
         // halving this cuts FD and memory hold-time without affecting responsiveness.
         .idle_timeout(std::time::Duration::from_secs(30))
         .max_lifetime(std::time::Duration::from_secs(300))
-        // Kill runaway queries automatically so they don't pin connections forever.
+        // Kill truly runaway queries. 10 min covers bulk inserts / migrations while
+        // still bounding accidental full-table scans that would pin a connection.
         .after_connect(|conn, _meta| {
             Box::pin(async move {
-                sqlx::query("SET statement_timeout = '30s'")
+                sqlx::query("SET statement_timeout = '10min'")
                     .execute(&mut *conn)
                     .await?;
                 Ok(())

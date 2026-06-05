@@ -25,8 +25,8 @@ import { writable } from 'svelte/store'
  * }} SavedChart
  */
 
-const CHARTS_KEY = (id) => id ? `db-studio:saved-charts:${id}` : 'db-studio:saved-charts'
-const GROUPS_KEY = (id) => id ? `db-studio:chart-groups:${id}` : 'db-studio:chart-groups'
+const CHARTS_KEY = (id) => id ? `stroke:saved-charts:${id}` : 'stroke:saved-charts'
+const GROUPS_KEY = (id) => id ? `stroke:chart-groups:${id}` : 'stroke:chart-groups'
 
 // Tracks the currently active connection scope
 let _connId = ''
@@ -43,7 +43,7 @@ function loadCharts(connectionId) {
     const specific = JSON.parse(localStorage.getItem(CHARTS_KEY(connectionId)) ?? 'null')
     if (Array.isArray(specific)) return specific
     // One-time migration: filter matching charts from the legacy global key
-    const global_ = JSON.parse(localStorage.getItem('db-studio:saved-charts') ?? '[]')
+    const global_ = JSON.parse(localStorage.getItem('stroke:saved-charts') ?? '[]')
     return Array.isArray(global_) ? global_.filter(c => c.connectionId === connectionId) : []
   } catch { return [] }
 }

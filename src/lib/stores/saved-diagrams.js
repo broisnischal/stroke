@@ -2,7 +2,7 @@ import { writable } from 'svelte/store'
 
 /** @typedef {{ id: string, name: string, code: string, group: string, createdAt: number, updatedAt: number }} SavedDiagram */
 
-const KEY = (id) => id ? `db-studio:saved-diagrams:${id}` : 'db-studio:saved-diagrams'
+const KEY = (id) => id ? `stroke:saved-diagrams:${id}` : 'stroke:saved-diagrams'
 
 function load(connId) {
   if (!connId) return []

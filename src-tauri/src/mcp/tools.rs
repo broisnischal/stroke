@@ -10,7 +10,7 @@ pub fn tool_list() -> Value {
     json!([
         {
             "name": "list_databases",
-            "description": "List all saved database connections and show which one is currently active. Call this at the start of a session when the user hasn't specified a database, or when you need to know what databases are available. If multiple databases exist, ask the user which one to use and instruct them to switch in DB Studio.",
+            "description": "List all saved database connections and show which one is currently active. Call this at the start of a session when the user hasn't specified a database, or when you need to know what databases are available. If multiple databases exist, ask the user which one to use and instruct them to switch in Stroke.",
             "inputSchema": {
                 "type": "object",
                 "properties": {}
@@ -131,9 +131,9 @@ pub fn call_meta_tool(
                 "active_id": active_id,
                 "active_name": active_name,
                 "note": if connections.len() > 1 {
-                    "Multiple databases available. To switch, open DB Studio and connect to the desired database. Then retry your request."
+                    "Multiple databases available. To switch, open Stroke and connect to the desired database. Then retry your request."
                 } else if connections.is_empty() {
-                    "No saved connections found. Open DB Studio and add a connection first."
+                    "No saved connections found. Open Stroke and add a connection first."
                 } else {
                     "One database configured."
                 }
@@ -157,7 +157,7 @@ pub fn call_meta_tool(
                 }
                 None => Ok(json!({
                     "connected": false,
-                    "note": "No database is currently connected. Open DB Studio and connect to a database, then retry."
+                    "note": "No database is currently connected. Open Stroke and connect to a database, then retry."
                 }).to_string()),
             }
         }

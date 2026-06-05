@@ -1517,7 +1517,7 @@
   // restores exactly what the user had open in each table.
   /** @type {Map<string, { expandedRows: Set<number>, fkSubview: typeof fkSubview }>} */
   const _tabExpandCache = new Map()
-  let _lastTabKey = $state(columnWidthsKey ?? '')
+  let _lastTabKey = $state(untrack(() => columnWidthsKey ?? ''))
 
   $effect(() => {
     const newKey = columnWidthsKey ?? ''

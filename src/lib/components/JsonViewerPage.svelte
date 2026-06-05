@@ -2,7 +2,7 @@
   import { onMount, tick, untrack } from 'svelte'
   import * as monaco from 'monaco-editor'
   import { configureMonacoWorkers } from '$lib/monaco-env.js'
-  import { defineDbStudioMonacoThemes, monacoThemeId, readEditorFontOptions } from '$lib/monaco-themes.js'
+  import { defineStrokeMonacoThemes, monacoThemeId, readEditorFontOptions } from '$lib/monaco-themes.js'
   import { normalizeThemeId } from '$lib/themes/registry.js'
   import ResizeHandle from './ResizeHandle.svelte'
   import { loadLayout, saveLayout } from '$lib/stores/layout.js'
@@ -250,7 +250,7 @@
 
   onMount(() => {
     configureMonacoWorkers()
-    defineDbStudioMonacoThemes()
+    defineStrokeMonacoThemes()
     if (!inputContainer || !resultContainer) return
 
     const { fontSize, lineHeight } = readEditorFontOptions()

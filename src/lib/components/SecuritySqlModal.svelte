@@ -4,7 +4,7 @@
   import { configureMonacoWorkers } from '$lib/monaco-env.js'
   import { registerMonacoSqlFormatter } from '$lib/format-sql.js'
   import {
-    defineDbStudioMonacoThemes,
+    defineStrokeMonacoThemes,
     monacoThemeId,
     readEditorFontOptions,
   } from '$lib/monaco-themes.js'
@@ -32,7 +32,7 @@
 
   onMount(() => {
     configureMonacoWorkers()
-    defineDbStudioMonacoThemes()
+    defineStrokeMonacoThemes()
     registerMonacoSqlFormatter(monaco)
     if (!container) return
 

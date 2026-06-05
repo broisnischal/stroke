@@ -153,7 +153,7 @@ async fn dispatch(
         "initialize" => Ok(json!({
             "protocolVersion": "2024-11-05",
             "capabilities": { "tools": {} },
-            "serverInfo": { "name": "DB Studio", "version": env!("CARGO_PKG_VERSION") }
+            "serverInfo": { "name": "Stroke", "version": env!("CARGO_PKG_VERSION") }
         })),
 
         "ping" => Ok(json!({})),
@@ -180,7 +180,7 @@ async fn dispatch(
                 if !tools::is_read_only_sql(sql) {
                     return Err(
                         "Read-only mode is enabled. Only SELECT queries are permitted. \
-                         Disable read-only mode in DB Studio's MCP settings to run write operations."
+                         Disable read-only mode in Stroke's MCP settings to run write operations."
                             .to_string(),
                     );
                 }
@@ -191,7 +191,7 @@ async fn dispatch(
                 .lock()
                 .map_err(|e| e.to_string())?
                 .clone()
-                .ok_or("Not connected to a database. Call list_databases to see available connections and ask the user to select one in DB Studio.")?;
+                .ok_or("Not connected to a database. Call list_databases to see available connections and ask the user to select one in Stroke.")?;
             let text = tools::call_tool(&conn, name, &args).await?;
             Ok(json!({ "content": [{ "type": "text", "text": text }] }))
         }

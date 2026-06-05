@@ -397,7 +397,7 @@
               </Command.Item>
               <Command.Item value="about license version info app" onSelect={() => run(onopenabout)}>
                 <Info class="size-4 shrink-0 opacity-60" />
-                <span data-slot="command-label" class="truncate">About DB Studio</span>
+                <span data-slot="command-label" class="truncate">About Stroke</span>
               </Command.Item>
               <Command.Item value="check for updates upgrade version" onSelect={() => run(oncheckupdate)}>
                 <ArrowDownToLine class="size-4 shrink-0 opacity-60" />

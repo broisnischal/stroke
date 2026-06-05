@@ -1,5 +1,5 @@
 /**
- * Cloudflare OAuth token management for DB Studio.
+ * Cloudflare OAuth token management for Stroke.
  *
  * Auth is backed by the Rust cloudflare module which:
  *  1. Runs a local HTTP callback server

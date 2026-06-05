@@ -8,7 +8,7 @@ import {
 } from '$lib/themes/registry.js'
 import { zoomState, ZOOM_MIN, ZOOM_MAX } from '$lib/stores/canvas-zoom.svelte.js'
 
-const STORAGE_KEY = 'db-studio:settings'
+const STORAGE_KEY = 'stroke:settings'
 
 /** @typedef {import('$lib/themes/registry.js').ThemeId} ThemeId */
 /** @typedef {{ theme: ThemeId, zoom: number, mcpAutoStart: boolean }} AppSettings */
@@ -27,8 +27,8 @@ export const DEFAULT_SETTINGS = {
 /** Reactive app theme id (synced by applySettings). */
 export const appThemeId = writable(/** @type {ThemeId} */ (DEFAULT_THEME_ID))
 
-const LAST_DARK_KEY  = 'db-studio:last-dark-theme'
-const LAST_LIGHT_KEY = 'db-studio:last-light-theme'
+const LAST_DARK_KEY  = 'stroke:last-dark-theme'
+const LAST_LIGHT_KEY = 'stroke:last-light-theme'
 
 /** @param {ThemeId} id */
 function saveLastForMode(id) {
@@ -117,7 +117,7 @@ export function applySettings(settings) {
   // renderer reads zoomState directly and repaints on change.
   // Drop the legacy per-table key — it drifted from settings.zoom and made only
   // the grid look huge/blurry while the sidebar stayed at normal scale.
-  try { localStorage.removeItem('db-studio:canvas-zoom') } catch {}
+  try { localStorage.removeItem('stroke:canvas-zoom') } catch {}
   const canvasZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom))
   if (zoomState.value !== canvasZoom) zoomState.value = canvasZoom
   resetWebviewZoom()

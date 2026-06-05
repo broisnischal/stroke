@@ -244,7 +244,7 @@
           class="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
           onclick={() => { open = false; onopenabout() }}
         >
-          <span>About DB Studio</span>
+          <span>About Stroke</span>
           <ChevronRight class="size-3.5 shrink-0 opacity-60" />
         </button>
       </div>

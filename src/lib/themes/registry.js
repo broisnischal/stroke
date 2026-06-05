@@ -345,7 +345,7 @@ export function shikiThemeId(id) {
 
 /** @param {ThemeId} id */
 export function monacoThemeName(id) {
-  return `db-studio-${id}`
+  return `stroke-${id}`
 }
 
 /** @param {ThemeId} id */

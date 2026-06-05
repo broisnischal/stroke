@@ -15,7 +15,7 @@
   let step = $state(1)
   let prev = $state(0)
   const TOTAL = 3
-  const KEY = 'db-studio:onboarded'
+  const KEY = 'stroke:onboarded'
 
   const forward = $derived(step >= prev)
 
@@ -56,7 +56,7 @@
       <div class="flex items-center gap-2.5">
         <!-- Logo placeholder: swap Database icon for <img src="/logo.svg" class="h-6" /> -->
         <Database class="size-5 text-primary" />
-        <span class="text-sm font-semibold text-foreground">DB Studio</span>
+        <span class="text-sm font-semibold text-foreground">Stroke</span>
       </div>
 
       <!-- Step dots -->
@@ -99,14 +99,14 @@
               <div class="logo-icon relative flex items-center justify-center">
                 <div class="absolute size-40 rounded-full" style="background: radial-gradient(circle, hsl(var(--primary)/0.15) 0%, transparent 70%); filter: blur(24px);"></div>
                 <div class="relative flex size-20 items-center justify-center rounded-2xl border border-primary/20 bg-primary/10">
-                  <!-- Swap for: <img src="/logo.svg" alt="DB Studio" class="size-12" /> -->
+                  <!-- Swap for: <img src="/logo.svg" alt="Stroke" class="size-12" /> -->
                   <Database class="size-9 text-primary" />
                 </div>
               </div>
 
               <div class="flex flex-col gap-4">
                 <h1 class="text-4xl font-bold tracking-tight text-foreground">
-                  Welcome to DB Studio
+                  Welcome to Stroke
                 </h1>
                 <p class="text-base leading-relaxed text-muted-foreground">
                   The developer's database client. Connect to any database,<br />

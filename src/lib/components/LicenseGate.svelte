@@ -60,7 +60,7 @@
           <Database class="size-7 text-primary" />
         </div>
         <div class="flex flex-col gap-1">
-          <h1 class="text-2xl font-bold tracking-tight text-foreground">DB Studio</h1>
+          <h1 class="text-2xl font-bold tracking-tight text-foreground">Stroke</h1>
           <p class="text-sm text-muted-foreground">Your trial has ended. Activate a license to continue.</p>
         </div>
       </div>

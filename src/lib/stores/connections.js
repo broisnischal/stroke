@@ -1,5 +1,5 @@
-const STORAGE_KEY = 'db-studio:connections'
-const LAST_ID_KEY  = 'db-studio:last-connection-id'
+const STORAGE_KEY = 'stroke:connections'
+const LAST_ID_KEY  = 'stroke:last-connection-id'
 
 /**
  * @typedef {'postgres' | 'sqlite' | 'd1'} DbType

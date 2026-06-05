@@ -1,11 +1,11 @@
-# CLAUDE.md - DB Studio Project Guide
+# CLAUDE.md - Stroke Project Guide
 
 This file is the source of truth for AI agents working in this repository.
 Use it to keep changes consistent with the current architecture and UI patterns.
 
 ## 1) Project snapshot
 
-DB Studio is a Tauri desktop app for database work:
+Stroke is a Tauri desktop app for database work:
 
 - connect to PostgreSQL, SQLite, Cloudflare D1, and MySQL flows in UI
 - browse schemas/tables and row counts
