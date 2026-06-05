@@ -15,6 +15,7 @@
   import Columns3 from "@lucide/svelte/icons/columns-3";
   import Eye from "@lucide/svelte/icons/eye";
   import EyeOff from "@lucide/svelte/icons/eye-off";
+  import Link2 from "@lucide/svelte/icons/link-2";
   import Search from "@lucide/svelte/icons/search";
   import X from "@lucide/svelte/icons/x";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
@@ -71,6 +72,8 @@
     hiddenColumns = new Set(),
     /** @type {(next: Set<string>) => void} */
     onhiddencolumnschange = () => {},
+    /** Virtual FK relationship columns (reverse FK badge cols) to show in the hide/show dropdown. */
+    virtualRelColumns = /** @type {Array<{ label: string }>} */ ([]),
     filterBarOpen = $bindable(false),
     /** @type {'data' | 'structure'} */
     tableViewMode = $bindable("data"),
@@ -551,6 +554,30 @@
                   >
                 </button>
               {/each}
+              {#if virtualRelColumns.length > 0}
+                <div class="my-0.5 h-px bg-border/30"></div>
+                {#each virtualRelColumns as vc (vc.label)}
+                  {@const vcKey = `__vrel:${vc.label}`}
+                  {@const hidden = hiddenColumns.has(vcKey)}
+                  <button
+                    type="button"
+                    class="flex w-full items-center gap-1.5 rounded-[2px] px-1.5 py-1 text-left text-ui-xs hover:bg-accent hover:text-foreground"
+                    onclick={() => {
+                      const next = new Set(hiddenColumns);
+                      if (next.has(vcKey)) next.delete(vcKey); else next.add(vcKey);
+                      onhiddencolumnschange(next);
+                    }}
+                  >
+                    {#if hidden}
+                      <EyeOff class="size-3 shrink-0 text-muted-foreground" />
+                    {:else}
+                      <Link2 class="size-3 shrink-0 text-primary/60" />
+                    {/if}
+                    <span class={cn("truncate", hidden && "text-muted-foreground")}>{vc.label}</span>
+                    <span class="ml-auto shrink-0 text-ui-2xs text-muted-foreground/35">rel</span>
+                  </button>
+                {/each}
+              {/if}
             </div>
           </DropdownMenu.Content>
         </DropdownMenu.Root>

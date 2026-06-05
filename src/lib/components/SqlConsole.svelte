@@ -603,7 +603,7 @@
       class="absolute inset-0"
       {schemaHints}
       {onmodk}
-      onmodenter={onmodenter ?? handleRun}
+      onmodenter={handleRun}
       onmodr={handleRun}
       onmods={openSaveDialog}
       {onmodi}

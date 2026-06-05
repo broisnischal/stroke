@@ -333,6 +333,18 @@
   const incomingForeignKeys = $derived(
     (activeSchema && activeTable) ? (incomingFkCache.get(`${activeSchema}.${activeTable}`) ?? []) : []
   )
+  /** Virtual rel column labels for the toolbar columns dropdown. Mirrors DataTable's virtualRelCols. */
+  const virtualRelColumnsForToolbar = $derived.by(() => {
+    const seen = new Set()
+    const result = []
+    for (const fk of incomingForeignKeys) {
+      if (seen.has(fk.fromTable)) continue
+      seen.add(fk.fromTable)
+      result.push({ label: (fk.fromSchema && fk.fromSchema !== activeSchema) ? `${fk.fromSchema}.${fk.fromTable}` : fk.fromTable })
+      if (result.length >= 5) break
+    }
+    return result
+  })
   let rows = $state([])
   let savingCell = $state(false)
   let deletingRows = $state(false)
@@ -3155,6 +3167,7 @@
             onaddrow={() => dtBeginInsertRow?.()}
             readonly={tableReadonly}
             {hiddenColumns}
+            virtualRelColumns={virtualRelColumnsForToolbar}
             onhiddencolumnschange={(next) => {
               hiddenColumns = next
               if (activeTable) saveHiddenCols(persistConnectionId, activeSchema, activeTable, next)
