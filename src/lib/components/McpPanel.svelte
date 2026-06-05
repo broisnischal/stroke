@@ -25,7 +25,7 @@
   // Read-only mode — persisted to localStorage
   let readOnly = $state(
     typeof localStorage !== 'undefined'
-      ? localStorage.getItem('db-studio:mcp-readonly') === 'true'
+      ? localStorage.getItem('stroke:mcp-readonly') === 'true'
       : false
   );
 
@@ -49,7 +49,7 @@
   async function toggleReadOnly() {
     readOnly = !readOnly;
     if (typeof localStorage !== 'undefined')
-      localStorage.setItem('db-studio:mcp-readonly', String(readOnly));
+      localStorage.setItem('stroke:mcp-readonly', String(readOnly));
     try { await mcpSetReadonly(readOnly) } catch {}
   }
 
@@ -58,17 +58,17 @@
     if (open) mcpSetReadonly(readOnly).catch(() => {})
   })
 
-  const claudeConfig  = $derived(status ? JSON.stringify({ mcpServers: { "db-studio": { url: status.url, headers: { Authorization: `Bearer ${status.token}` } } } }, null, 2) : '')
+  const claudeConfig  = $derived(status ? JSON.stringify({ mcpServers: { "stroke": { url: status.url, headers: { Authorization: `Bearer ${status.token}` } } } }, null, 2) : '')
   const cursorConfig  = $derived(claudeConfig)
-  const vscodeConfig  = $derived(status ? JSON.stringify({ servers: { "db-studio": { type: "http", url: status.url, headers: { Authorization: `Bearer ${status.token}` } } } }, null, 2) : '')
+  const vscodeConfig  = $derived(status ? JSON.stringify({ servers: { "stroke": { type: "http", url: status.url, headers: { Authorization: `Bearer ${status.token}` } } } }, null, 2) : '')
 
   const cursorInstallUrl = $derived.by(() => {
     if (!status) return ''
-    return `cursor://anysphere.cursor-deeplink/mcp/install?name=db-studio&config=${btoa(JSON.stringify({ url: status.url, headers: { Authorization: `Bearer ${status.token}` } }))}`
+    return `cursor://anysphere.cursor-deeplink/mcp/install?name=stroke&config=${btoa(JSON.stringify({ url: status.url, headers: { Authorization: `Bearer ${status.token}` } }))}`
   })
   const vscodeInstallUrl = $derived.by(() => {
     if (!status) return ''
-    return `vscode:mcp/install?${encodeURIComponent(JSON.stringify({ name: 'db-studio', type: 'http', url: status.url, headers: { Authorization: `Bearer ${status.token}` } }))}`
+    return `vscode:mcp/install?${encodeURIComponent(JSON.stringify({ name: 'stroke', type: 'http', url: status.url, headers: { Authorization: `Bearer ${status.token}` } }))}`
   })
   const vscodeInsidersUrl = $derived.by(() => {
     if (!status) return ''

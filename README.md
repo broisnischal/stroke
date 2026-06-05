@@ -1,198 +1,108 @@
-# DB Studio
+<div align="center">
 
-A desktop database client for PostgreSQL, SQLite, and Cloudflare D1. Browse tables, run SQL, edit rows inline, and connect AI tools directly to your database through a built-in MCP server.
+# Stroke
 
----
+**A fast, modern desktop database client.**
 
-## Download
+Connect to PostgreSQL, MySQL, SQLite, Turso/LibSQL, and Cloudflare D1 — browse schemas, edit data inline, write SQL, visualize, and let AI tools talk to your database through a built-in MCP server.
 
-Go to the [Releases](../../releases) page and grab the installer for your platform:
+[Download](#install) · [Features](#features) · [Build from source](#build-from-source) · [Website](https://stroke.app)
 
-| Platform | File |
-|----------|------|
-| macOS (Apple Silicon) | `db-studio_x.x.x_aarch64.dmg` |
-| macOS (Intel) | `db-studio_x.x.x_x64.dmg` |
-| Windows | `db-studio_x.x.x_x64-setup.exe` |
-| Linux (Debian/Ubuntu) | `db-studio_x.x.x_amd64.deb` |
-| Linux (AppImage) | `db-studio_x.x.x_amd64.AppImage` |
-
-### macOS
-
-1. Open the `.dmg` file.
-2. Drag **db-studio** into your Applications folder.
-3. On first launch, right-click → Open if macOS shows an unverified developer warning.
-
-### Windows
-
-Run the `.exe` installer and follow the prompts. No additional dependencies needed.
-
-### Linux (Debian/Ubuntu)
-
-```bash
-sudo dpkg -i db-studio_*_amd64.deb
-```
-
-Then launch from your application menu or run `db-studio` in a terminal.
-
-### Linux (Arch)
-
-```bash
-./db-studio_*_amd64.AppImage
-```
-
-Or build from source (see [Build from Source](#build-from-source) below).
+</div>
 
 ---
 
-## Connecting to a Database
+## Supported databases
 
-When you open DB Studio you'll see the connection screen. Choose your database type and fill in the details.
-
-### PostgreSQL
-
-| Field | Default |
-|-------|---------|
-| Host | `127.0.0.1` |
-| Port | `5432` |
-| Database | `postgres` |
-| User | `postgres` |
-| Password | _(your password)_ |
-| SSL | off |
-
-Click **Test Connection** to verify before saving.
-
-### SQLite
-
-Enter the file path to your `.db` or `.sqlite` file. Use `:memory:` for an in-memory database.
-
-### Cloudflare D1
-
-Enter your Cloudflare **Account ID**, **Database ID**, and **API Token** from the Cloudflare dashboard.
-
----
-
-Saved connections are stored locally on your machine. You can save as many connections as you like and switch between them at any time. DB Studio reopens your last-used connection automatically on the next launch.
+| Database | Notes |
+|----------|-------|
+| **PostgreSQL** | Full schema, enums, sequences, triggers, indexes |
+| **MySQL** | Standard host/port connections |
+| **SQLite** | Local file or `:memory:` |
+| **Turso / LibSQL** | Serverless SQLite at the edge |
+| **Cloudflare D1** | Connect via OAuth or API token |
 
 ---
 
 ## Features
 
-### Schema Explorer
+- **Schema explorer** — tables, views, materialized views, and foreign tables with live row counts, plus an index browser.
+- **Data grid** — paginated browsing, resizable columns (saved per table), column show/hide, multi-column sort, full-text search, and a visual filter builder.
+- **Inline editing** — type-aware editors for text, numbers, booleans, enums, dates, UUIDs, and JSON. Insert and delete rows with smart defaults.
+- **Row inspector** — view any row in formatted, JSON, or preview mode.
+- **Foreign keys** — click a value to jump to the referenced table with the filter applied.
+- **SQL console** — Monaco editor with syntax highlighting, schema-aware autocomplete, formatting, execution time, and CSV/JSON export.
+- **Query history & saved queries** — every query is saved automatically; bookmark the ones you keep.
+- **Schema diagrams** — auto-generated ERDs of your tables and relationships.
+- **Charts & dashboards** — turn query results into charts and pin them to a dashboard.
+- **ORM runner** — run and preview ORM-style queries.
+- **Docker launch** — spin up a local Postgres or MySQL container in one click.
+- **Backup & restore** — export and import your data.
+- **AI chat** — an assistant with direct access to your database that runs queries, explains schemas, generates SQL, and renders diagrams (works with any OpenAI-compatible API).
+- **MCP server** — expose your database to Claude, Cursor, and other MCP clients (see below).
+- **Command palette** — `Cmd/Ctrl+K` to jump anywhere instantly.
 
-The left sidebar lists every schema in your database. Expand a schema to see all its tables, views, materialized views, and foreign tables — each showing a live row count. Use the search box to filter by name, or press **Cmd/Ctrl+K** to open the command palette and jump to any table instantly.
+---
 
-### Table Data Grid
+## Install
 
-Click any table to open a paginated data grid. You can:
+Grab the installer for your platform from the [Releases](https://github.com/broisnischal/stroke/releases) page.
 
-- Page through rows in steps of 25, 50, 100, 250, or up to 1,000 rows per page
-- See total row count and current page position
-- Resize columns by dragging their headers — widths are saved per table
-- Hide or show individual columns from the toolbar
-- Sort by any column (ascending or descending) by clicking its header
+| Platform | File |
+|----------|------|
+| macOS (Apple Silicon) | `stroke_x.x.x_aarch64.dmg` |
+| macOS (Intel) | `stroke_x.x.x_x64.dmg` |
+| Windows | `stroke_x.x.x_x64-setup.exe` |
+| Linux (Debian/Ubuntu) | `stroke_x.x.x_amd64.deb` |
+| Linux (AppImage) | `stroke_x.x.x_amd64.AppImage` |
 
-### Filtering & Search
+**macOS** — open the `.dmg`, drag **Stroke** to Applications. On first launch, right-click → Open if you see an unverified developer warning.
 
-- **Search bar** — searches across all columns using a case-insensitive match
-- **Filter builder** — add one or more column filters with operators: `equals`, `not equal`, `contains`, `does not contain`, `starts with`, `ends with`, `greater than`, `greater or equal`, `less than`, `less or equal`, `is null`, `is not null`
+**Windows** — run the `.exe` installer and follow the prompts.
 
-Filters combine with AND logic. Sorting and filters work together.
+**Linux (Debian/Ubuntu)**
 
-### Inline Cell Editing
+```bash
+sudo dpkg -i stroke_*_amd64.deb
+```
 
-Double-click any cell to edit it in place. DB Studio knows the column type:
+**Linux (AppImage)**
 
-- Text, numbers, and booleans each get the right input
-- Enum columns show a dropdown of valid values
-- Timestamp and date columns use a date/time picker
-- UUID columns can be edited or regenerated
-- JSON/JSONB columns are editable as text
-- Binary (bytea) columns are display-only
+```bash
+chmod +x stroke_*_amd64.AppImage
+./stroke_*_amd64.AppImage
+```
 
-Changes are saved to the database immediately when you confirm.
+---
 
-### Insert Rows
+## Connecting
 
-Click **Insert row** to open the insert form. Every column is listed with its data type and whether it's required. DB Studio pre-fills sensible defaults:
+Pick a database type on the connection screen and fill in the details. Hit **Test connection** to verify, then **Connect**.
 
-- Auto-increment and identity columns are skipped automatically
-- `created_at` / `updated_at` style columns get the current timestamp
-- UUID and CUID ID columns get a generated value
-- Enum columns show a dropdown
-- All NOT NULL columns with no default are marked as required
+- **PostgreSQL / MySQL** — host, port, database, user, password (optional SSL). You can also paste a full connection string and click **Parse**.
+- **SQLite** — point to a `.db`/`.sqlite` file, or use an in-memory database.
+- **Turso / LibSQL** — enter the database URL and (optionally) an auth token.
+- **Cloudflare D1** — sign in with Cloudflare, or enter Account ID, Database ID, and an API token manually.
 
-### Delete Rows
+Connections are saved locally, and Stroke reopens your last one on launch.
 
-Select one or more rows using the checkboxes on the left, then click **Delete** in the toolbar. Single-row deletion is also available through the row context menu. Bulk deletes show a confirmation prompt.
+---
 
-### Row Inspector
+## AI & MCP server
 
-Click any row to open the inspector panel on the right. It shows every column value in a readable layout. Switch between three views:
+Configure any OpenAI-compatible provider (OpenAI, Mistral, Ollama, …) in **Settings** with a base URL, model, and API key to enable AI chat and SQL suggestions.
 
-- **Normal** — formatted values, one per line
-- **JSON** — the full row as a JSON object
-- **Preview** — large cell content or URL detection with external link opening
+To connect external AI tools, Stroke ships a built-in **Model Context Protocol** server:
 
-The inspector panel is resizable and its state persists between sessions.
+1. Open **Settings → MCP Server**.
+2. Click **Start**.
+3. Copy the one-click config for Claude or Cursor into your tool's config.
 
-### Foreign Key Navigation
+The server uses a stable bearer token, so you only configure it once.
 
-When a column is a foreign key, DB Studio detects the relationship and lets you click the cell value to jump to the referenced table with the matching filter already applied.
+---
 
-### Index Browser
-
-Open the **Indexes** tab in the schema explorer to see every index on your tables — including the type (B-tree, Hash, GIN, GIST, BRIN), the indexed columns, and whether it's unique or a primary key.
-
-### SQL Console
-
-Press **Cmd/Ctrl+Shift+S** or open the SQL tab to get a full SQL editor:
-
-- Syntax highlighting and schema-aware autocomplete
-- Format your query automatically
-- Run with **Cmd/Ctrl+Enter**
-- See execution time and row count after each query
-- Results appear in a table below — up to 5,000 rows, with a 30-second timeout to protect your connection
-- Export results as CSV or JSON
-
-### Query History & Saved Queries
-
-Every query you execute is automatically saved to history. You can re-run any past query, or bookmark it as a saved query to keep it permanently. Both are accessible from the sidebar and the command palette.
-
-### Data Export
-
-From either the table grid or the SQL results panel, export data as:
-
-- **CSV** — properly quoted and escaped
-- **JSON** — formatted array of objects
-
-On desktop a native save dialog opens. On web it falls back to a browser download.
-
-### AI Chat
-
-Open the AI tab (**Cmd/Ctrl+Shift+A**) to chat with an AI assistant that has direct access to your database. The AI can:
-
-- Run queries and return real data in its answers
-- Describe any table's schema
-- Generate and explain SQL
-- Render Mermaid diagrams and formatted Markdown
-
-Configure any OpenAI-compatible API (OpenAI, Mistral, Ollama, etc.) in Settings by entering your base URL, model name, and API key.
-
-### AI SQL Suggestions
-
-In the SQL editor, DB Studio can suggest relevant queries for the table you're viewing — common filters, joins to related tables, aggregations, and more. Click a suggestion to insert it into the editor.
-
-### MCP Server (Connect AI Tools)
-
-DB Studio includes a built-in **Model Context Protocol (MCP) server** that exposes your connected database to AI tools like Claude Desktop, Cursor, and any other MCP-compatible client.
-
-1. Open **Settings → MCP Server**
-2. Click **Start** — the server starts on port `39847` (or the next available port)
-3. Copy the one-click config snippet for Claude or Cursor and paste it into your AI tool's config file
-
-The server uses bearer token authentication. The token is stable across restarts so you only need to configure your AI tool once.
-
-### Keyboard Shortcuts
+## Keyboard shortcuts
 
 | Shortcut | Action |
 |----------|--------|
@@ -201,35 +111,30 @@ The server uses bearer token authentication. The token is stable across restarts
 | `Cmd/Ctrl+Shift+S` | SQL console |
 | `Cmd/Ctrl+Shift+A` | AI chat |
 | `Cmd/Ctrl+Enter` | Run SQL query |
-| `Cmd/Ctrl+?` | Show all shortcuts |
 | `Cmd/Ctrl+⌥+←/→` | Switch tabs |
+| `Cmd/Ctrl+?` | Show all shortcuts |
 
 ---
 
-## Build from Source
+## Build from source
 
-You'll need [Node.js](https://nodejs.org) (v18+) and the [Rust toolchain](https://rustup.rs).
+Requires [Node.js](https://nodejs.org) 18+ and the [Rust toolchain](https://rustup.rs).
 
 ```bash
-git clone https://github.com/broisnischal/studio
-cd studio
+git clone https://github.com/broisnischal/stroke
+cd stroke
 npm install
-npm run tauri dev
+npm run tauri        # run in dev
+npm run tauri:build  # build a release binary
 ```
 
-To build a release binary:
+**Arch Linux** — the AppImage step can fail due to a linker quirk. Build only the `.deb`:
 
 ```bash
-npm run tauri build
+npm run tauri:build -- --bundles deb
 ```
 
-**Arch Linux note:** The AppImage step can fail due to a linker incompatibility. Build only the `.deb` to avoid it:
-
-```bash
-npm run tauri build -- --bundles deb
-```
-
-Or use the included script that sets the right flag for AppImage on Arch:
+…or use the included helper for AppImage on Arch:
 
 ```bash
 npm run tauri:build:arch
@@ -237,6 +142,7 @@ npm run tauri:build:arch
 
 ---
 
-## Reporting Issues
+## Issues
 
-Found a bug or want to request a feature? Open an issue at [github.com/broisnischal/studio/issues](https://github.com/broisnischal/studio/issues).
+Found a bug or have a feature request? Open an issue at
+[github.com/broisnischal/stroke/issues](https://github.com/broisnischal/stroke/issues).

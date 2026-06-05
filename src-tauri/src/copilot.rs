@@ -13,7 +13,7 @@ static COPILOT_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 fn http_client() -> &'static reqwest::Client {
     COPILOT_CLIENT.get_or_init(|| {
         reqwest::Client::builder()
-            .user_agent("db-studio/1.0")
+            .user_agent("stroke/1.0")
             .tcp_keepalive(std::time::Duration::from_secs(60))
             .pool_max_idle_per_host(4)
             .build()
@@ -147,7 +147,7 @@ pub async fn copilot_get_copilot_token(oauth_token: String) -> Result<CopilotTok
         .get("https://api.github.com/copilot_internal/v2/token")
         .header("Authorization", format!("Bearer {}", oauth_token))
         .header("Accept", "application/json")
-        .header("User-Agent", "db-studio/1.0")
+        .header("User-Agent", "stroke/1.0")
         .send()
         .await
         .map_err(|e| format!("Network error: {e}"))?;

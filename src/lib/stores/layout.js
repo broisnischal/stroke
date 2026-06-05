@@ -1,4 +1,4 @@
-const STORAGE_KEY = 'db-studio:layout'
+const STORAGE_KEY = 'stroke:layout'
 
 /** @typedef {'normal' | 'json'} InspectorView */
 

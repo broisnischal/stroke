@@ -6,8 +6,9 @@ import {
   THEME_IDS,
   normalizeThemeId,
 } from '$lib/themes/registry.js'
+import { zoomState, ZOOM_MIN, ZOOM_MAX } from '$lib/stores/canvas-zoom.svelte.js'
 
-const STORAGE_KEY = 'db-studio:settings'
+const STORAGE_KEY = 'stroke:settings'
 
 /** @typedef {import('$lib/themes/registry.js').ThemeId} ThemeId */
 /** @typedef {{ theme: ThemeId, zoom: number, mcpAutoStart: boolean }} AppSettings */
@@ -26,8 +27,8 @@ export const DEFAULT_SETTINGS = {
 /** Reactive app theme id (synced by applySettings). */
 export const appThemeId = writable(/** @type {ThemeId} */ (DEFAULT_THEME_ID))
 
-const LAST_DARK_KEY  = 'db-studio:last-dark-theme'
-const LAST_LIGHT_KEY = 'db-studio:last-light-theme'
+const LAST_DARK_KEY  = 'stroke:last-dark-theme'
+const LAST_LIGHT_KEY = 'stroke:last-light-theme'
 
 /** @param {ThemeId} id */
 function saveLastForMode(id) {
@@ -110,6 +111,23 @@ export function applySettings(settings) {
   isCurrentThemeDark.set(dark)
   root.style.setProperty('--app-zoom', String(zoom))
   root.style.setProperty('--app-font-size', `${Math.round(14 * zoom)}px`)
+
+  // Keep the canvas-table zoom in lockstep with the app zoom so Cmd +/-/0 (and
+  // the zoom buttons) scale the grid alongside the rest of the UI. The canvas
+  // renderer reads zoomState directly and repaints on change.
+  // Drop the legacy per-table key — it drifted from settings.zoom and made only
+  // the grid look huge/blurry while the sidebar stayed at normal scale.
+  try { localStorage.removeItem('stroke:canvas-zoom') } catch {}
+  const canvasZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom))
+  if (zoomState.value !== canvasZoom) zoomState.value = canvasZoom
+  resetWebviewZoom()
+}
+
+/** Snap native webview page-zoom back to 1 (macOS pinch / Tauri polyfill leak). */
+export function resetWebviewZoom() {
+  void import('@tauri-apps/api/webview')
+    .then(({ getCurrentWebview }) => getCurrentWebview().setZoom(1))
+    .catch(() => {})
 }
 
 let zoomListenerInstalled = false
@@ -150,22 +168,45 @@ function handleZoomKeydown(e) {
 
 }
 
-/** Block Tauri webview zoom (Ctrl/Cmd + wheel) when hotkeys are enabled in the shell. */
-function handleZoomWheel(e) {
-  if (e.ctrlKey || e.metaKey) {
-    // Let mermaid diagrams handle their own Ctrl+scroll zoom
-    if (/** @type {Element} */ (e.target)?.closest?.('.mermaid-canvas')) return
-    e.preventDefault()
-    e.stopPropagation()
-  }
+/**
+ * Block every Ctrl/Cmd + scroll zoom path. Zoom is keyboard-only (Cmd +/-/0).
+ * macOS trackpad pinch arrives as ctrl+wheel near column resize handles and
+ * page-zooms the webview (devicePixelRatio drift → canvas looks huge/blurry
+ * while the sidebar, scaled via --app-font-size, stays normal).
+ * @param {Event} e
+ */
+function blockNativeScrollZoom(e) {
+  const we = /** @type {WheelEvent} */ (e)
+  if (!(we.ctrlKey || we.metaKey)) return
+  // Let mermaid diagrams handle their own Ctrl+scroll zoom.
+  if (/** @type {Element} */ (e.target)?.closest?.('.mermaid-canvas')) return
+  e.preventDefault()
+  e.stopImmediatePropagation()
+  resetWebviewZoom()
 }
 
-/** Register Ctrl/Cmd +/-/0 zoom shortcuts (capture phase, works in inputs). */
+/**
+ * Block macOS WebKit (WKWebView) native trackpad pinch-magnification.
+ * @param {Event} e
+ */
+function handleZoomGesture(e) {
+  if (/** @type {Element} */ (e.target)?.closest?.('.mermaid-canvas')) return
+  e.preventDefault()
+  e.stopImmediatePropagation()
+  resetWebviewZoom()
+}
+
 export function installZoomShortcuts() {
   if (zoomListenerInstalled || typeof window === 'undefined') return
   zoomListenerInstalled = true
   window.addEventListener('keydown', handleZoomKeydown, true)
-  window.addEventListener('wheel', handleZoomWheel, { capture: true, passive: false })
+  window.addEventListener('wheel', blockNativeScrollZoom, { capture: true, passive: false })
+  // Legacy event — Tauri's zoom polyfill listens on this, not `wheel`.
+  window.addEventListener('mousewheel', blockNativeScrollZoom, { capture: true, passive: false })
+  // WebKit-only pinch magnification (macOS). No-op on Chromium.
+  window.addEventListener('gesturestart', handleZoomGesture, { capture: true, passive: false })
+  window.addEventListener('gesturechange', handleZoomGesture, { capture: true, passive: false })
+  window.addEventListener('gestureend', handleZoomGesture, { capture: true, passive: false })
 }
 
 /** @param {Partial<AppSettings>} patch */

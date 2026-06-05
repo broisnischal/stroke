@@ -131,7 +131,7 @@
       </div>
       <div>
         <p class="text-sm font-medium text-foreground">Connect with Cloudflare</p>
-        <p class="mt-0.5 text-[11px] text-muted-foreground">Authorize DB Studio to access your D1 databases.</p>
+        <p class="mt-0.5 text-[11px] text-muted-foreground">Authorize Stroke to access your D1 databases.</p>
       </div>
       <button
         type="button"
@@ -152,7 +152,7 @@
       <Loader2 class="size-6 animate-spin text-amber-500" />
       <div>
         <p class="text-sm font-medium text-foreground">Browser opened</p>
-        <p class="mt-0.5 text-[11px] text-muted-foreground">Authorize DB Studio in the Cloudflare page, then return here.</p>
+        <p class="mt-0.5 text-[11px] text-muted-foreground">Authorize Stroke in the Cloudflare page, then return here.</p>
       </div>
       <p class="text-[10px] text-muted-foreground/40">Waiting… (5 min timeout)</p>
     </div>

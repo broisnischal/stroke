@@ -3,7 +3,7 @@
   import * as monaco from "monaco-editor";
   import { configureMonacoWorkers } from "$lib/monaco-env.js";
   import {
-    defineDbStudioMonacoThemes,
+    defineStrokeMonacoThemes,
     monacoThemeId,
     readEditorFontOptions,
   } from "$lib/monaco-themes.js";
@@ -433,7 +433,7 @@
 
   onMount(() => {
     configureMonacoWorkers();
-    defineDbStudioMonacoThemes();
+    defineStrokeMonacoThemes();
 
     if (!code.trim()) code = defaultCode();
 

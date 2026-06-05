@@ -1,6 +1,6 @@
 import { writable, get } from 'svelte/store'
 
-const KEY = 'db-studio:ai-chat-params'
+const KEY = 'stroke:ai-chat-params'
 
 /**
  * @typedef {{

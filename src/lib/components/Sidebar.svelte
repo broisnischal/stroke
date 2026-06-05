@@ -74,7 +74,7 @@
   );
 
   // Section open/collapsed state — persisted across sidebar toggles
-  const SIDEBAR_EXPAND_KEY = 'db-studio:sidebar-sections'
+  const SIDEBAR_EXPAND_KEY = 'stroke:sidebar-sections'
   function loadSidebarSections() {
     try {
       const raw = localStorage.getItem(SIDEBAR_EXPAND_KEY)
@@ -100,7 +100,7 @@
   $effect(() => { saveSidebarSection('matViews', matViewsOpen) })
 
   // ── Pinned tables ─────────────────────────────────────────────────────────
-  const PINNED_KEY = 'db-studio:pinned-tables'
+  const PINNED_KEY = 'stroke:pinned-tables'
 
   function loadPinnedAll() {
     try {
@@ -136,7 +136,7 @@
   }
 
   // ── Display preferences ───────────────────────────────────────────────────
-  const DISPLAY_PREFS_KEY = 'db-studio:sidebar-display'
+  const DISPLAY_PREFS_KEY = 'stroke:sidebar-display'
   function loadDisplayPrefs() {
     try {
       const raw = localStorage.getItem(DISPLAY_PREFS_KEY)

@@ -1,6 +1,6 @@
 import { openDB } from 'idb'
 
-export const DB_NAME = 'db-studio'
+export const DB_NAME = 'stroke'
 export const DB_VERSION = 2
 
 export const STORES = {

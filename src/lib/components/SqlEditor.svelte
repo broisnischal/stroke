@@ -5,7 +5,7 @@
   import { registerMonacoSqlFormatter } from '$lib/format-sql.js'
   import { registerMonacoSqlCompletion } from '$lib/monaco-sql-complete.js'
   import {
-    defineDbStudioMonacoThemes,
+    defineStrokeMonacoThemes,
     monacoThemeId,
     readEditorFontOptions,
   } from '$lib/monaco-themes.js'
@@ -70,7 +70,7 @@
     }, { capture: true, passive: false })
     // Still register the action so it appears in Monaco's command palette (F1)
     ed.addAction({
-      id: 'db-studio.run-query',
+      id: 'stroke.run-query',
       label: 'Run Query',
       run: () => run(onmodenter),
     })
@@ -102,7 +102,7 @@
 
   onMount(() => {
     configureMonacoWorkers()
-    defineDbStudioMonacoThemes()
+    defineStrokeMonacoThemes()
     registerMonacoSqlFormatter(monaco)
     registerMonacoSqlCompletion(monaco, () => schemaHints)
     if (!container) return

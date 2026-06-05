@@ -6,7 +6,7 @@ const MAX = 10
 
 /** @param {string} connectionId */
 function storageKey(connectionId) {
-  return `db-studio:recent-tabs:${connectionId}`
+  return `stroke:recent-tabs:${connectionId}`
 }
 
 /**

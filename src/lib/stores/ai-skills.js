@@ -1,4 +1,4 @@
-const SKILLS_KEY = 'db-studio:ai-skills'
+const SKILLS_KEY = 'stroke:ai-skills'
 
 /**
  * @typedef {{ id: string, name: string, description: string, content: string }} AiSkill

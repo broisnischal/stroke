@@ -1,4 +1,5 @@
 <script>
+  import './sonner.css'
   import CircleCheck from '@lucide/svelte/icons/circle-check'
   import Info from '@lucide/svelte/icons/info'
   import Loader2 from '@lucide/svelte/icons/loader-2'
@@ -155,75 +156,3 @@
     {/snippet}
   </Sonner>
 </section>
-
-<style>
-  .studio-toast-root {
-    position: fixed;
-    z-index: 999999999;
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
-    pointer-events: none;
-  }
-
-  /* Anchor toaster inside host so clear-all + stack share one column */
-  :global(.studio-toast-root .studio-toaster[data-sonner-toaster]) {
-    position: relative !important;
-    top: auto !important;
-    right: auto !important;
-    bottom: auto !important;
-    left: auto !important;
-    width: 100% !important;
-    transform: none !important;
-    margin: 0;
-  }
-
-  /* No slide/fade-in-up — appear in place; stack motion only */
-  :global(.studio-toaster [data-sonner-toast]) {
-    --y: translateY(0) !important;
-    transition:
-      transform 400ms cubic-bezier(0.22, 1, 0.36, 1),
-      opacity 200ms ease,
-      height 400ms cubic-bezier(0.22, 1, 0.36, 1),
-      box-shadow 200ms ease !important;
-  }
-
-  :global(.studio-toaster [data-sonner-toast]:not([data-mounted='true'])) {
-    opacity: 0;
-  }
-
-  :global(.studio-toaster [data-sonner-toast][data-mounted='true']) {
-    opacity: 1;
-  }
-
-  :global(.studio-toaster [data-sonner-toast][data-removed='true'][data-swipe-out='false']) {
-    --y: translateY(0) !important;
-    opacity: 0 !important;
-  }
-
-  /* Collapsed stack: cards peek behind the front toast */
-  :global(.studio-toaster[data-expanded='false'] [data-sonner-toast][data-front='false']) {
-    opacity: 0.9;
-  }
-
-  :global(.studio-toaster[data-expanded='true'] [data-sonner-toast]) {
-    opacity: 1;
-  }
-
-  /* Hide description element when empty so no ghost space below title-only toasts */
-  :global(.studio-toaster [data-description]:empty) {
-    display: none;
-  }
-
-  /* Center icon + close button vertically when there is no description */
-  :global(.studio-toaster [data-sonner-toast]:not(:has([data-description]:not(:empty)))) {
-    align-items: center;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    :global(.studio-toaster [data-sonner-toast]) {
-      transition-duration: 0.01ms !important;
-    }
-  }
-</style>

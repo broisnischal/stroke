@@ -206,7 +206,7 @@
   <div
     bind:this={rootEl}
     data-studio-selectable="text"
-    class="px-5 py-4"
+    class="px-5 py-2"
     oncontextmenu={handleContextMenu}
   >
     {#if !html}

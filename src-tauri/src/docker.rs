@@ -129,7 +129,7 @@ pub async fn docker_run_db(
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    let container_name = format!("db-studio-{db_type}-{ts}");
+    let container_name = format!("stroke-{db_type}-{ts}");
     let port_map = format!("{host_port}:{cont_port}");
 
     // ── Pull ──────────────────────────────────────────────────────────────────
