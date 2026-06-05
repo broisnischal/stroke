@@ -1,4 +1,4 @@
-# Build DB Studio for Linux, Windows, and macOS and publish to GitHub Releases.
+# Build Stroke for Linux, Windows, and macOS and publish to GitHub Releases.
 #
 # Create a release:
 #   git tag v0.1.0
@@ -66,10 +66,10 @@ jobs:
           ### Install
 
           **macOS**
-          - Apple Silicon: \`db-studio_*_aarch64.dmg\`
-          - Intel Mac: \`db-studio_*_x64.dmg\`
+          - Apple Silicon: \`stroke_*_aarch64.dmg\`
+          - Intel Mac: \`stroke_*_x64.dmg\`
 
-          > **"damaged and can't be opened"?** Run once: \`xattr -cr /Applications/db-studio.app\`
+          > **"damaged and can't be opened"?** Run once: \`xattr -cr /Applications/Stroke.app\`
 
           **Linux:** \`.deb\` · \`.rpm\` · \`.AppImage\` · \`.pkg.tar.zst\` (Arch)
 
@@ -79,7 +79,7 @@ jobs:
           EOF
 
           gh release create "$TAG" \
-            --title "DB Studio $TAG" \
+            --title "Stroke $TAG" \
             --target "$SHA" \
             --notes-file /tmp/notes.md \
             $PRERELEASE
@@ -132,12 +132,64 @@ jobs:
 
       - run: npm ci
 
+      # ── macOS: set proper signing identity when cert secret is present ────────
+      - name: Configure macOS code signing
+        if: startsWith(matrix.name, 'macos')
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          if [ -z "$APPLE_SIGNING_IDENTITY" ]; then
+            echo "APPLE_SIGNING_IDENTITY not set — keeping ad-hoc signing"
+          else
+            node -e "
+              const fs = require('fs');
+              const cfg = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8'));
+              cfg.bundle.macOS.signingIdentity = process.env.APPLE_SIGNING_IDENTITY;
+              fs.writeFileSync('src-tauri/tauri.conf.json', JSON.stringify(cfg, null, 2));
+              console.log('Signing identity set to:', process.env.APPLE_SIGNING_IDENTITY);
+            "
+          fi
+
+      # ── Windows: import PFX into cert store, patch config with thumbprint ─────
+      - name: Import Windows signing certificate
+        if: matrix.name == 'windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PWD: ${{ secrets.WINDOWS_CERTIFICATE_PWD }}
+        run: |
+          if (-not $env:WINDOWS_CERTIFICATE) {
+            Write-Host "WINDOWS_CERTIFICATE not set — skipping Windows signing"
+            exit 0
+          }
+          $certBytes = [System.Convert]::FromBase64String($env:WINDOWS_CERTIFICATE)
+          $certPath  = Join-Path $env:TEMP "signing.pfx"
+          [System.IO.File]::WriteAllBytes($certPath, $certBytes)
+          $secPwd = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PWD -Force -AsPlainText
+          $cert   = Import-PfxCertificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\My -Password $secPwd
+          Remove-Item $certPath -Force
+
+          $env:WIN_CERT_THUMB = $cert.Thumbprint
+          node -e "
+            const fs = require('fs');
+            const cfg = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8'));
+            cfg.bundle.windows.certificateThumbprint = process.env.WIN_CERT_THUMB;
+            fs.writeFileSync('src-tauri/tauri.conf.json', JSON.stringify(cfg, null, 2));
+            console.log('Certificate thumbprint set:', process.env.WIN_CERT_THUMB);
+          "
+
       - name: Build
         run: npx tauri build ${{ matrix.args }}
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           NO_STRIP: ${{ matrix.name == 'linux' && '1' || '' }}
+          # macOS code signing + notarization (Tauri auto-imports APPLE_CERTIFICATE)
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
       # ── macOS aarch64 ───────────────────────────────────────────────────────
       - name: Upload macOS aarch64 artifacts
@@ -153,16 +205,16 @@ jobs:
           DIR="src-tauri/target/aarch64-apple-darwin/release/bundle"
 
           pushd "$DIR/macos"
-          tar czf "db-studio.app.tar.gz" "db-studio.app"
+          tar czf "Stroke.app.tar.gz" "Stroke.app"
           popd
-          npx tauri signer sign "$DIR/macos/db-studio.app.tar.gz"
+          npx tauri signer sign "$DIR/macos/Stroke.app.tar.gz"
 
-          cp "$DIR/macos/db-studio.app.tar.gz"     db-studio_aarch64.app.tar.gz
-          cp "$DIR/macos/db-studio.app.tar.gz.sig" updater.sig
+          cp "$DIR/macos/Stroke.app.tar.gz"     stroke_aarch64.app.tar.gz
+          cp "$DIR/macos/Stroke.app.tar.gz.sig" updater.sig
 
           gh release upload "$TAG" \
-            "$DIR/dmg/db-studio_${VERSION}_aarch64.dmg" \
-            db-studio_aarch64.app.tar.gz \
+            "$DIR/dmg/stroke_${VERSION}_aarch64.dmg" \
+            stroke_aarch64.app.tar.gz \
             --clobber
 
       # ── macOS x64 ───────────────────────────────────────────────────────────
@@ -179,16 +231,16 @@ jobs:
           DIR="src-tauri/target/x86_64-apple-darwin/release/bundle"
 
           pushd "$DIR/macos"
-          tar czf "db-studio.app.tar.gz" "db-studio.app"
+          tar czf "Stroke.app.tar.gz" "Stroke.app"
           popd
-          npx tauri signer sign "$DIR/macos/db-studio.app.tar.gz"
+          npx tauri signer sign "$DIR/macos/Stroke.app.tar.gz"
 
-          cp "$DIR/macos/db-studio.app.tar.gz"     db-studio_x64.app.tar.gz
-          cp "$DIR/macos/db-studio.app.tar.gz.sig" updater.sig
+          cp "$DIR/macos/Stroke.app.tar.gz"     stroke_x64.app.tar.gz
+          cp "$DIR/macos/Stroke.app.tar.gz.sig" updater.sig
 
           gh release upload "$TAG" \
-            "$DIR/dmg/db-studio_${VERSION}_x64.dmg" \
-            db-studio_x64.app.tar.gz \
+            "$DIR/dmg/stroke_${VERSION}_x64.dmg" \
+            stroke_x64.app.tar.gz \
             --clobber
 
       # ── Linux ───────────────────────────────────────────────────────────────
@@ -205,18 +257,18 @@ jobs:
           DIR="src-tauri/target/release/bundle"
 
           pushd "$DIR/appimage"
-          tar czf "db-studio_${VERSION}_amd64.AppImage.tar.gz" "db-studio_${VERSION}_amd64.AppImage"
+          tar czf "stroke_${VERSION}_amd64.AppImage.tar.gz" "stroke_${VERSION}_amd64.AppImage"
           popd
-          npx tauri signer sign "$DIR/appimage/db-studio_${VERSION}_amd64.AppImage.tar.gz"
+          npx tauri signer sign "$DIR/appimage/stroke_${VERSION}_amd64.AppImage.tar.gz"
 
-          cp "$DIR/appimage/db-studio_${VERSION}_amd64.AppImage.tar.gz"     db-studio_amd64.AppImage.tar.gz
-          cp "$DIR/appimage/db-studio_${VERSION}_amd64.AppImage.tar.gz.sig" updater.sig
+          cp "$DIR/appimage/stroke_${VERSION}_amd64.AppImage.tar.gz"     stroke_amd64.AppImage.tar.gz
+          cp "$DIR/appimage/stroke_${VERSION}_amd64.AppImage.tar.gz.sig" updater.sig
 
           gh release upload "$TAG" \
-            "$DIR/deb/db-studio_${VERSION}_amd64.deb" \
-            "$DIR/rpm/db-studio-${VERSION}-1.x86_64.rpm" \
-            "$DIR/appimage/db-studio_${VERSION}_amd64.AppImage" \
-            db-studio_amd64.AppImage.tar.gz \
+            "$DIR/deb/stroke_${VERSION}_amd64.deb" \
+            "$DIR/rpm/stroke-${VERSION}-1.x86_64.rpm" \
+            "$DIR/appimage/stroke_${VERSION}_amd64.AppImage" \
+            stroke_amd64.AppImage.tar.gz \
             --clobber
 
       # ── Windows ─────────────────────────────────────────────────────────────
@@ -232,8 +284,8 @@ jobs:
           $version = (Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json).version
           $dir     = "src-tauri/target/release/bundle"
 
-          $exe = "$dir/nsis/db-studio_${version}_x64-setup.exe"
-          $zip = "$dir/nsis/db-studio_${version}_x64-setup.nsis.zip"
+          $exe = "$dir/nsis/stroke_${version}_x64-setup.exe"
+          $zip = "$dir/nsis/stroke_${version}_x64-setup.nsis.zip"
 
           # Use NoCompression (Store = method 0) — universally supported by every
           # ZIP implementation including Tauri's zip crate.
@@ -264,13 +316,13 @@ jobs:
 
           npx tauri signer sign $zip
 
-          Copy-Item $zip       "db-studio_x64-setup.nsis.zip"
+          Copy-Item $zip       "stroke_x64-setup.nsis.zip"
           Copy-Item "$zip.sig" "updater.sig"
 
           gh release upload "$env:TAG" `
-            "$dir/msi/db-studio_${version}_x64_en-US.msi" `
-            "$dir/nsis/db-studio_${version}_x64-setup.exe" `
-            "db-studio_x64-setup.nsis.zip" `
+            "$dir/msi/stroke_${version}_x64_en-US.msi" `
+            "$dir/nsis/stroke_${version}_x64-setup.exe" `
+            "stroke_x64-setup.nsis.zip" `
             --clobber
 
       - name: Save updater sig as artifact
@@ -342,7 +394,7 @@ jobs:
         run: |
           VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
           gh release upload "$TAG" \
-            "src-tauri/target/release/bundle/pacman/db-studio-${VERSION}-1-x86_64.pkg.tar.zst" \
+            "src-tauri/target/release/bundle/pacman/stroke-${VERSION}-1-x86_64.pkg.tar.zst" \
             --clobber
 
 # ── 3. Combine signatures into latest.json ───────────────────────────────────
@@ -362,7 +414,7 @@ jobs:
           TAG: ${{ env.RELEASE_TAG }}
         run: |
           export VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
-          export BASE="https://github.com/broisnischal/studio/releases/download/${TAG}"
+          export BASE="https://github.com/broisnischal/stroke/releases/download/${TAG}"
 
           node - <<'JSEOF'
           const fs = require('fs')
@@ -393,12 +445,12 @@ jobs:
             else console.warn(`⚠  no sig at ${sigFile} — skipping ${key}`)
           }
 
-          add('darwin-aarch64', 'sig-macos-aarch64/updater.sig', `${BASE}/db-studio_aarch64.app.tar.gz`)
-          add('darwin-x86_64',  'sig-macos-x64/updater.sig',     `${BASE}/db-studio_x64.app.tar.gz`)
-          add('linux-x86_64',   'sig-linux/updater.sig',         `${BASE}/db-studio_amd64.AppImage.tar.gz`)
-          add('windows-x86_64', 'sig-windows/updater.sig',       `${BASE}/db-studio_x64-setup.nsis.zip`)
+          add('darwin-aarch64', 'sig-macos-aarch64/updater.sig', `${BASE}/stroke_aarch64.app.tar.gz`)
+          add('darwin-x86_64',  'sig-macos-x64/updater.sig',     `${BASE}/stroke_x64.app.tar.gz`)
+          add('linux-x86_64',   'sig-linux/updater.sig',         `${BASE}/stroke_amd64.AppImage.tar.gz`)
+          add('windows-x86_64', 'sig-windows/updater.sig',       `${BASE}/stroke_x64-setup.nsis.zip`)
 
-          const notes = extractChangelog(VERSION) || `See https://github.com/broisnischal/studio/releases/tag/v${VERSION}`
+          const notes = extractChangelog(VERSION) || `See https://github.com/broisnischal/stroke/releases/tag/v${VERSION}`
 
           const out = {
             version: VERSION,

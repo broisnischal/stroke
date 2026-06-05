@@ -333,18 +333,27 @@
   const incomingForeignKeys = $derived(
     (activeSchema && activeTable) ? (incomingFkCache.get(`${activeSchema}.${activeTable}`) ?? []) : []
   )
-  /** Virtual rel column labels for the toolbar columns dropdown. Mirrors DataTable's virtualRelCols. */
+  /** Virtual rel column labels for the toolbar columns dropdown.
+   *  Must enumerate ALL incoming FK tables — no cap — so every rel column
+   *  the DataTable can ever render is always reachable in the show/hide panel.
+   *  (DataTable caps visible columns at MAX_VIRTUAL_COLS=5 but fills that
+   *   quota from whatever isn't hidden, so capping here makes it impossible
+   *   to hide the "overflow" tables that get promoted into view.) */
   const virtualRelColumnsForToolbar = $derived.by(() => {
     const seen = new Set()
     const result = []
     for (const fk of incomingForeignKeys) {
-      if (seen.has(fk.fromTable)) continue
-      seen.add(fk.fromTable)
-      result.push({ label: (fk.fromSchema && fk.fromSchema !== activeSchema) ? `${fk.fromSchema}.${fk.fromTable}` : fk.fromTable })
-      if (result.length >= 5) break
+      const label =
+        (fk.fromSchema && fk.fromSchema !== activeSchema)
+          ? `${fk.fromSchema}.${fk.fromTable}`
+          : fk.fromTable
+      if (seen.has(label)) continue
+      seen.add(label)
+      result.push({ label })
     }
     return result
   })
+  
   let rows = $state([])
   let savingCell = $state(false)
   let deletingRows = $state(false)

@@ -186,7 +186,7 @@
       <p class="text-[10px] text-muted-foreground/50">© 2025 Stroke</p>
       <div class="flex items-center gap-3">
         <a
-          href="https://github.com/broisnischal/db-studio"
+          href="https://github.com/broisnischal/stroke"
           target="_blank"
           rel="noopener noreferrer"
           class="inline-flex items-center gap-1 text-[11px] text-muted-foreground/60 transition-colors hover:text-foreground"
@@ -198,7 +198,7 @@
           GitHub
         </a>
         <a
-          href="https://dbstudio.app"
+          href="https://stroke.app"
           target="_blank"
           rel="noopener noreferrer"
           class="inline-flex items-center gap-1 text-[11px] text-muted-foreground/60 transition-colors hover:text-foreground"

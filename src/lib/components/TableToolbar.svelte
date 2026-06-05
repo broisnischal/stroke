@@ -527,7 +527,10 @@
                     showAllColumns();
                   } else {
                     onhiddencolumnschange(
-                      new Set(columns.slice(1).map((c) => c.name)),
+                      new Set([
+                        ...columns.slice(1).map((c) => c.name),
+                        ...virtualRelColumns.map((vc) => `__vrel:${vc.label}`),
+                      ]),
                     );
                   }
                 }}
@@ -574,7 +577,7 @@
                       <Link2 class="size-3 shrink-0 text-primary/60" />
                     {/if}
                     <span class={cn("truncate", hidden && "text-muted-foreground")}>{vc.label}</span>
-                    <span class="ml-auto shrink-0 text-ui-2xs text-muted-foreground/35">rel</span>
+                    <span class={cn("ml-auto shrink-0 text-ui-2xs", hidden ? "text-muted-foreground/20" : "text-muted-foreground/35")}>rel</span>
                   </button>
                 {/each}
               {/if}

@@ -1,10 +1,10 @@
-# AGENT.md — DB Studio
+# AGENT.md — Stroke
 
 Instructions for AI agents working in this repository. Read this file before making changes.
 
 ## Project overview
 
-**DB Studio** is a desktop database management app (Drizzle Studio–style) built with:
+**Stroke** is a desktop database management app (Drizzle Studio–style) built with:
 
 | Layer | Stack |
 |-------|--------|
@@ -175,7 +175,7 @@ Workflow: `.github/workflows/release.yml`
 | Tag push | `git tag v0.1.0 && git push origin v0.1.0` |
 | Manual | Actions → **Release** → Run workflow (set tag, e.g. `v0.1.0`) |
 
-Builds **Linux** (`.deb`, `.AppImage`) on `ubuntu-22.04` and **Windows** (`.msi`) on `windows-latest`, then uploads assets to [GitHub Releases](https://github.com/broisnischal/studio/releases).
+Builds **Linux** (`.deb`, `.AppImage`) on `ubuntu-22.04` and **Windows** (`.msi`) on `windows-latest`, then uploads assets to [GitHub Releases](https://github.com/broisnischal/stroke/releases).
 
 Local build:
 

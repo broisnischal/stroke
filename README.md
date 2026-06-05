@@ -1,4 +1,4 @@
-# DB Studio
+# Stroke
 
 A desktop database client for PostgreSQL, SQLite, and Cloudflare D1. Browse tables, run SQL, edit rows inline, and connect AI tools directly to your database through a built-in MCP server.
 
@@ -10,16 +10,16 @@ Go to the [Releases](../../releases) page and grab the installer for your platfo
 
 | Platform | File |
 |----------|------|
-| macOS (Apple Silicon) | `db-studio_x.x.x_aarch64.dmg` |
-| macOS (Intel) | `db-studio_x.x.x_x64.dmg` |
-| Windows | `db-studio_x.x.x_x64-setup.exe` |
-| Linux (Debian/Ubuntu) | `db-studio_x.x.x_amd64.deb` |
-| Linux (AppImage) | `db-studio_x.x.x_amd64.AppImage` |
+| macOS (Apple Silicon) | `stroke_x.x.x_aarch64.dmg` |
+| macOS (Intel) | `stroke_x.x.x_x64.dmg` |
+| Windows | `stroke_x.x.x_x64-setup.exe` |
+| Linux (Debian/Ubuntu) | `stroke_x.x.x_amd64.deb` |
+| Linux (AppImage) | `stroke_x.x.x_amd64.AppImage` |
 
 ### macOS
 
 1. Open the `.dmg` file.
-2. Drag **db-studio** into your Applications folder.
+2. Drag **Stroke** into your Applications folder.
 3. On first launch, right-click → Open if macOS shows an unverified developer warning.
 
 ### Windows
@@ -29,15 +29,15 @@ Run the `.exe` installer and follow the prompts. No additional dependencies need
 ### Linux (Debian/Ubuntu)
 
 ```bash
-sudo dpkg -i db-studio_*_amd64.deb
+sudo dpkg -i stroke_*_amd64.deb
 ```
 
-Then launch from your application menu or run `db-studio` in a terminal.
+Then launch from your application menu or run `stroke` in a terminal.
 
 ### Linux (Arch)
 
 ```bash
-./db-studio_*_amd64.AppImage
+./stroke_*_amd64.AppImage
 ```
 
 Or build from source (see [Build from Source](#build-from-source) below).
@@ -46,7 +46,7 @@ Or build from source (see [Build from Source](#build-from-source) below).
 
 ## Connecting to a Database
 
-When you open DB Studio you'll see the connection screen. Choose your database type and fill in the details.
+When you open Stroke you'll see the connection screen. Choose your database type and fill in the details.
 
 ### PostgreSQL
 
@@ -71,7 +71,7 @@ Enter your Cloudflare **Account ID**, **Database ID**, and **API Token** from th
 
 ---
 
-Saved connections are stored locally on your machine. You can save as many connections as you like and switch between them at any time. DB Studio reopens your last-used connection automatically on the next launch.
+Saved connections are stored locally on your machine. You can save as many connections as you like and switch between them at any time. Stroke reopens your last-used connection automatically on the next launch.
 
 ---
 
@@ -100,7 +100,7 @@ Filters combine with AND logic. Sorting and filters work together.
 
 ### Inline Cell Editing
 
-Double-click any cell to edit it in place. DB Studio knows the column type:
+Double-click any cell to edit it in place. Stroke knows the column type:
 
 - Text, numbers, and booleans each get the right input
 - Enum columns show a dropdown of valid values
@@ -113,7 +113,7 @@ Changes are saved to the database immediately when you confirm.
 
 ### Insert Rows
 
-Click **Insert row** to open the insert form. Every column is listed with its data type and whether it's required. DB Studio pre-fills sensible defaults:
+Click **Insert row** to open the insert form. Every column is listed with its data type and whether it's required. Stroke pre-fills sensible defaults:
 
 - Auto-increment and identity columns are skipped automatically
 - `created_at` / `updated_at` style columns get the current timestamp
@@ -137,7 +137,7 @@ The inspector panel is resizable and its state persists between sessions.
 
 ### Foreign Key Navigation
 
-When a column is a foreign key, DB Studio detects the relationship and lets you click the cell value to jump to the referenced table with the matching filter already applied.
+When a column is a foreign key, Stroke detects the relationship and lets you click the cell value to jump to the referenced table with the matching filter already applied.
 
 ### Index Browser
 
@@ -180,11 +180,11 @@ Configure any OpenAI-compatible API (OpenAI, Mistral, Ollama, etc.) in Settings 
 
 ### AI SQL Suggestions
 
-In the SQL editor, DB Studio can suggest relevant queries for the table you're viewing — common filters, joins to related tables, aggregations, and more. Click a suggestion to insert it into the editor.
+In the SQL editor, Stroke can suggest relevant queries for the table you're viewing — common filters, joins to related tables, aggregations, and more. Click a suggestion to insert it into the editor.
 
 ### MCP Server (Connect AI Tools)
 
-DB Studio includes a built-in **Model Context Protocol (MCP) server** that exposes your connected database to AI tools like Claude Desktop, Cursor, and any other MCP-compatible client.
+Stroke includes a built-in **Model Context Protocol (MCP) server** that exposes your connected database to AI tools like Claude Desktop, Cursor, and any other MCP-compatible client.
 
 1. Open **Settings → MCP Server**
 2. Click **Start** — the server starts on port `39847` (or the next available port)
@@ -211,8 +211,8 @@ The server uses bearer token authentication. The token is stable across restarts
 You'll need [Node.js](https://nodejs.org) (v18+) and the [Rust toolchain](https://rustup.rs).
 
 ```bash
-git clone https://github.com/broisnischal/studio
-cd studio
+git clone https://github.com/broisnischal/stroke
+cd stroke
 npm install
 npm run tauri dev
 ```
@@ -239,4 +239,4 @@ npm run tauri:build:arch
 
 ## Reporting Issues
 
-Found a bug or want to request a feature? Open an issue at [github.com/broisnischal/studio/issues](https://github.com/broisnischal/studio/issues).
+Found a bug or want to request a feature? Open an issue at [github.com/broisnischal/stroke/issues](https://github.com/broisnischal/stroke/issues).
