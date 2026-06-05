@@ -5,7 +5,7 @@ import { monacoThemeName, THEME_IDS, getThemeDefinition } from '$lib/themes/regi
 let defined = false
 
 /** Register one Monaco theme per app theme id. */
-export function defineDbStudioMonacoThemes() {
+export function defineStrokeMonacoThemes() {
   if (defined) return
   defined = true
 

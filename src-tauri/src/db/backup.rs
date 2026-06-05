@@ -116,7 +116,7 @@ pub async fn backup_import(
 fn backup_header(engine: &str, schema: Option<&str>) -> String {
     let schema_line = schema.map_or_else(String::new, |s| format!("-- Schema   : {s}\n"));
     format!(
-        "-- DB Studio Backup\n-- Engine   : {engine}\n{schema_line}-- Restore  : execute this file against a {engine} database\n\n"
+        "-- Stroke Backup\n-- Engine   : {engine}\n{schema_line}-- Restore  : execute this file against a {engine} database\n\n"
     )
 }
 

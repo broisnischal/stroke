@@ -56,7 +56,7 @@
         <Database class="size-7 text-primary" />
       </div>
       <div>
-        <h2 class="text-lg font-semibold text-foreground tracking-tight">DB Studio</h2>
+        <h2 class="text-lg font-semibold text-foreground tracking-tight">Stroke</h2>
         <p class="text-xs text-muted-foreground mt-0.5">Database management, reimagined</p>
       </div>
       <div class="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-background px-3 py-1 text-[11px] font-mono text-muted-foreground">
@@ -183,7 +183,7 @@
 
     <!-- Footer links -->
     <div class="flex items-center justify-between border-t border-border/60 px-6 py-3">
-      <p class="text-[10px] text-muted-foreground/50">© 2025 DB Studio</p>
+      <p class="text-[10px] text-muted-foreground/50">© 2025 Stroke</p>
       <div class="flex items-center gap-3">
         <a
           href="https://github.com/broisnischal/db-studio"

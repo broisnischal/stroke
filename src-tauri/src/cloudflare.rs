@@ -1,5 +1,5 @@
 /*!
- * Cloudflare OAuth 2.0 + PKCE flow for DB Studio.
+ * Cloudflare OAuth 2.0 + PKCE flow for Stroke.
  *
  * Uses the same public client_id as the Wrangler CLI — Cloudflare's official
  * developer tool — which accepts localhost redirect URIs for desktop apps.
@@ -49,7 +49,7 @@ static CF_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 fn http() -> &'static reqwest::Client {
     CF_CLIENT.get_or_init(|| {
         reqwest::Client::builder()
-            .user_agent("db-studio/1.0")
+            .user_agent("stroke/1.0")
             .tcp_keepalive(std::time::Duration::from_secs(60))
             .pool_max_idle_per_host(4)
             .build()
@@ -108,7 +108,7 @@ async fn bind_callback_listener() -> Result<(TcpListener, String), String> {
     }
     Err(format!(
         "Could not bind to any of the pre-registered callback ports ({}-{}). \
-         Close other Wrangler or DB Studio processes and try again.",
+         Close other Wrangler or Stroke processes and try again.",
         CF_CALLBACK_PORTS[0],
         CF_CALLBACK_PORTS[CF_CALLBACK_PORTS.len() - 1]
     ))
@@ -121,24 +121,24 @@ async fn await_oauth_callback(
 ) -> Result<String, String> {
     let success_html = r#"<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><title>DB Studio — authorized</title>
+<head><meta charset="UTF-8"><title>Stroke — authorized</title>
 <style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0d0d0d;color:#eee}
 .card{text-align:center;padding:48px;border-radius:16px;border:1px solid #333;background:#111}
 h2{color:#22c55e;margin-bottom:12px}p{color:#888;margin:0}</style></head>
 <body><div class="card">
 <h2>Authorization successful</h2>
-<p>You can close this tab and return to DB Studio.</p>
+<p>You can close this tab and return to Stroke.</p>
 </div></body></html>"#;
 
     let error_html = r#"<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><title>DB Studio — error</title>
+<head><meta charset="UTF-8"><title>Stroke — error</title>
 <style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0d0d0d;color:#eee}
 .card{text-align:center;padding:48px;border-radius:16px;border:1px solid #4b1c1c;background:#1a0f0f}
 h2{color:#ef4444;margin-bottom:12px}p{color:#888;margin:0}</style></head>
 <body><div class="card">
 <h2>Authorization failed</h2>
-<p>You can close this tab and try again in DB Studio.</p>
+<p>You can close this tab and try again in Stroke.</p>
 </div></body></html>"#;
 
     let send_html = |html: &str| -> String {

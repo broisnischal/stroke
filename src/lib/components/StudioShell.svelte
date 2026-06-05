@@ -181,9 +181,9 @@
     if (map.size > COLUMNS_CACHE_MAX) map.delete(/** @type {string} */ (map.keys().next().value))
   }
 
-  const ONBOARDING_KEY = 'db-studio:onboarded'
-  const SAMPLE_SEEDED_KEY = 'db-studio:sample-seeded'
-  const SAMPLE_DB_ID = 'db-studio:sample-sqlite'
+  const ONBOARDING_KEY = 'stroke:onboarded'
+  const SAMPLE_SEEDED_KEY = 'stroke:sample-seeded'
+  const SAMPLE_DB_ID = 'stroke:sample-sqlite'
   let showOnboarding = $state(false)
 
   // Dev-only: Alt+Shift+O resets and re-shows the onboarding. Dead code in prod.
@@ -265,12 +265,12 @@
   let loadingTables = $state(false)
 
   // AI Mode — full-screen chat, hides sidebar and tabs
-  function loadAiMode() { try { return localStorage.getItem('db-studio:ai-mode') === '1' } catch { return false } }
-  function saveAiMode(v) { try { localStorage.setItem('db-studio:ai-mode', v ? '1' : '0') } catch {} }
+  function loadAiMode() { try { return localStorage.getItem('stroke:ai-mode') === '1' } catch { return false } }
+  function saveAiMode(v) { try { localStorage.setItem('stroke:ai-mode', v ? '1' : '0') } catch {} }
 
   // Hidden columns — persisted per connection+schema+table
   /** @param {string} connId @param {string} schema @param {string} table */
-  function hiddenColsKey(connId, schema, table) { return `db-studio:hidden-cols:${connId}:${schema}.${table}` }
+  function hiddenColsKey(connId, schema, table) { return `stroke:hidden-cols:${connId}:${schema}.${table}` }
   /** @param {string} connId @param {string} schema @param {string} table @returns {Set<string>} */
   function loadHiddenCols(connId, schema, table) {
     try { const v = localStorage.getItem(hiddenColsKey(connId, schema, table)); if (v) return new Set(JSON.parse(v)) } catch {}
@@ -503,7 +503,7 @@
     void mcpUpdateConnections(savedConnections, activeConnectionId || null)
   })
 
-  const QUERY_HISTORY_OPEN_KEY = 'db-studio:query-history-open'
+  const QUERY_HISTORY_OPEN_KEY = 'stroke:query-history-open'
   function loadQueryHistoryPref() {
     try {
       return localStorage.getItem(QUERY_HISTORY_OPEN_KEY) === '1'
@@ -2805,7 +2805,7 @@
           <Database class="size-6 text-muted-foreground" />
         </div>
         <div class="flex flex-col gap-1">
-          <h1 class="text-base font-medium">DB Studio</h1>
+          <h1 class="text-base font-medium">Stroke</h1>
           <p class="max-w-sm text-ui text-muted-foreground">
             Connect to PostgreSQL to browse schemas and table data.
           </p>

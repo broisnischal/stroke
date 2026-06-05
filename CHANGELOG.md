@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to DB Studio are listed here, newest first.
+All notable changes to Stroke are listed here, newest first.
 
 ---
 

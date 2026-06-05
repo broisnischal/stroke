@@ -279,9 +279,10 @@
     d1Databases = []; d1SelectedAccountId = ''; d1DbLoadPhase = 'idle'
   }
 
-  const lbl = 'mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-foreground/50'
-  const inp = 'h-8 w-full border-border/25 bg-muted/[0.4] text-sm placeholder:text-muted-foreground/30 focus-visible:border-border/50 focus-visible:ring-0'
-  const divider = 'border-t border-border/25 my-0.5'
+  const lbl = 'mb-1.5 block text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground/80'
+  const inp = 'h-9 w-full border-border/50 bg-muted/40 text-sm text-foreground placeholder:text-muted-foreground/40 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30'
+  const inpNum = inp + ' [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
+  const divider = 'border-t border-border/30 my-0.5'
 
   async function pickSqliteFile() {
     try {
@@ -321,7 +322,7 @@
 
         <div class="shrink-0 px-4 py-4">
           <p class="text-[15px] font-semibold tracking-tight text-foreground">Connect</p>
-          <p class="mt-0.5 text-[11px] text-muted-foreground/50">Select or add a connection</p>
+          <p class="mt-0.5 text-[11px] text-muted-foreground/70">Select or add a connection</p>
         </div>
 
         <ScrollArea class="min-h-0 flex-1 px-1.5 pb-3">
@@ -342,7 +343,7 @@
           </button>
 
           {#if saved.length > 0}
-            <p class="px-3 pb-1.5 pt-4 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/30">
+            <p class="px-3 pb-1.5 pt-4 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/55">
               Recent
             </p>
             {#each saved as conn (conn.id)}
@@ -364,10 +365,10 @@
                   <div class="flex items-center gap-1.5">
                     <p class="min-w-0 truncate text-[13px] font-medium leading-none text-foreground">{conn.name}</p>
                     {#if conn.id === lastId}
-                      <span class="shrink-0 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/30">last</span>
+                      <span class="shrink-0 rounded bg-muted px-1 py-px text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/70">last</span>
                     {/if}
                   </div>
-                  <p class="mt-0.5 truncate font-mono text-[10px] text-muted-foreground/40">{connDetail(conn)}</p>
+                  <p class="mt-0.5 truncate font-mono text-[10px] text-muted-foreground/55">{connDetail(conn)}</p>
                 </div>
 
                 <div class="hidden shrink-0 items-center gap-1 group-hover:flex">
@@ -387,9 +388,9 @@
             {/each}
 
           {:else}
-            <div class="mx-1 mt-2 flex flex-col items-center gap-2 rounded-xl border border-dashed border-border/20 px-3 py-8 text-center">
-              <Clock class="size-4 text-muted-foreground/20" />
-              <p class="text-[11px] text-muted-foreground/30">No saved connections</p>
+            <div class="mx-1 mt-2 flex flex-col items-center gap-2 rounded-xl border border-dashed border-border/40 px-3 py-8 text-center">
+              <Clock class="size-4 text-muted-foreground/40" />
+              <p class="text-[11px] text-muted-foreground/55">No saved connections</p>
             </div>
           {/if}
         </ScrollArea>
@@ -408,7 +409,7 @@
                 value={dbType}
                 onValueChange={(v) => v && switchDriver(v)}
               >
-                <Select.Trigger class="h-9 w-full border-border/25 bg-muted/[0.4] text-sm hover:border-border/40 hover:bg-muted/50 focus:border-border/50 focus:ring-0">
+                <Select.Trigger class="h-9 w-full border-border/50 bg-muted/40 text-sm hover:border-border/70 hover:bg-muted/50 focus:border-ring focus:ring-2 focus:ring-ring/30">
                   <div class="flex items-center gap-2">
                     {@render dicon(dbType, 'size-[14px]')}
                     <span class="text-foreground">{activeDriver.label}</span>
@@ -444,7 +445,7 @@
             <!-- Connection name -->
             <div>
               <label for="cn-name" class={lbl}>Connection name</label>
-              <Input id="cn-name" bind:value={name} class="h-9 w-full border-border/20 bg-transparent text-[15px] font-medium placeholder:text-muted-foreground/20 focus-visible:border-border/40 focus-visible:ring-0" />
+              <Input id="cn-name" bind:value={name} class="h-9 w-full border-border/50 bg-muted/40 text-sm font-medium text-foreground placeholder:text-muted-foreground/40 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30" />
             </div>
 
             <!-- ════ PostgreSQL ════════════════════════════════════ -->
@@ -458,12 +459,12 @@
                 <div class="flex gap-2">
                   <Input id="cn-uri" bind:value={connectionUri}
                     placeholder="postgresql://user:pass@host:5432/db"
-                    class="h-8 flex-1 border-border/25 bg-muted/[0.4] font-mono text-xs placeholder:text-muted-foreground/30 focus-visible:border-border/50 focus-visible:ring-0"
+                    class="h-9 flex-1 border-border/50 bg-muted/40 font-mono text-xs text-foreground placeholder:text-muted-foreground/40 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
                     onpaste={() => requestAnimationFrame(applyConnectionUri)}
                     onkeydown={(e) => e.key === 'Enter' && (e.preventDefault(), applyConnectionUri())}
                   />
                   <button type="button"
-                    class="h-8 shrink-0 rounded-lg bg-muted/40 px-3.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground disabled:opacity-40"
+                    class="h-9 shrink-0 rounded-lg border border-border/50 bg-muted/40 px-4 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground disabled:opacity-40"
                     onclick={applyConnectionUri} disabled={!connectionUri.trim()}>Parse</button>
                 </div>
                 {#if uriHint}
@@ -482,14 +483,14 @@
               <div class={divider}></div>
 
               <!-- Host + Port -->
-              <div class="grid grid-cols-[1fr_80px] gap-3">
+              <div class="grid grid-cols-[1fr_104px] gap-3">
                 <div>
                   <label for="cn-host" class={lbl}>Host</label>
                   <Input id="cn-host" bind:value={host} class={inp} />
                 </div>
                 <div>
                   <label for="cn-port" class={lbl}>Port</label>
-                  <Input id="cn-port" bind:value={port} type="number" class={inp} />
+                  <Input id="cn-port" bind:value={port} type="text" inputmode="numeric" class={inpNum} />
                 </div>
               </div>
 
@@ -526,14 +527,14 @@
 
               <div class={divider}></div>
 
-              <div class="grid grid-cols-[1fr_80px] gap-3">
+              <div class="grid grid-cols-[1fr_104px] gap-3">
                 <div>
                   <label for="cn-mysql-host" class={lbl}>Host</label>
                   <Input id="cn-mysql-host" bind:value={host} class={inp} />
                 </div>
                 <div>
                   <label for="cn-mysql-port" class={lbl}>Port</label>
-                  <Input id="cn-mysql-port" bind:value={port} type="number" class={inp} />
+                  <Input id="cn-mysql-port" bind:value={port} type="text" inputmode="numeric" class={inpNum} />
                 </div>
               </div>
 
@@ -573,10 +574,10 @@
                 <div class="flex gap-2">
                   <Input id="cn-path" bind:value={filePath}
                     placeholder="/path/to/database.db"
-                    class="h-8 flex-1 border-border/25 bg-muted/[0.4] font-mono text-sm placeholder:text-muted-foreground/30 focus-visible:border-border/50 focus-visible:ring-0" />
+                    class="h-9 flex-1 border-border/50 bg-muted/40 font-mono text-sm text-foreground placeholder:text-muted-foreground/40 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30" />
                   <button
                     type="button"
-                    class="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-muted/40 px-3 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/70 hover:text-foreground"
+                    class="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-border/50 bg-muted/40 px-3.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
                     onclick={pickSqliteFile}
                     title="Browse for file"
                   >
@@ -584,7 +585,7 @@
                     Browse
                   </button>
                 </div>
-                <p class="mt-1.5 text-[11px] text-muted-foreground/40">
+                <p class="mt-1.5 text-[11px] text-muted-foreground/60">
                   Absolute path to a <code class="font-mono">.db</code> or <code class="font-mono">.sqlite</code> file
                 </p>
               </div>
@@ -611,8 +612,8 @@
                 <label for="cn-libsql-url" class={lbl}>Database URL</label>
                 <Input id="cn-libsql-url" bind:value={libsqlUrl}
                   placeholder="libsql://your-db.turso.io"
-                  class="h-8 w-full border-border/25 bg-muted/[0.4] font-mono text-sm placeholder:text-muted-foreground/30 focus-visible:border-border/50 focus-visible:ring-0" />
-                <p class="mt-1.5 text-[11px] text-muted-foreground/40">
+                  class="h-9 w-full border-border/50 bg-muted/40 font-mono text-sm text-foreground placeholder:text-muted-foreground/40 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30" />
+                <p class="mt-1.5 text-[11px] text-muted-foreground/60">
                   Accepts <code class="font-mono">libsql://</code>, <code class="font-mono">https://</code>, or <code class="font-mono">http://localhost:PORT</code>
                 </p>
               </div>
@@ -623,7 +624,7 @@
                 </label>
                 <Input id="cn-libsql-token" bind:value={libsqlToken} type="password"
                   placeholder="eyJhbGciOiJFZERTQSJ9…"
-                  class="h-8 w-full border-border/25 bg-muted/[0.4] font-mono text-sm placeholder:text-muted-foreground/30 focus-visible:border-border/50 focus-visible:ring-0" />
+                  class="h-9 w-full border-border/50 bg-muted/40 font-mono text-sm text-foreground placeholder:text-muted-foreground/40 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30" />
               </div>
 
             <!-- ════ Cloudflare D1 ═════════════════════════════════ -->
@@ -650,11 +651,11 @@
                   <div class="grid grid-cols-2 gap-3">
                     <div>
                       <label for="cn-d1-account" class={lbl}>Account ID</label>
-                      <Input id="cn-d1-account" bind:value={accountId} placeholder="abcdef1234…" class="h-8 w-full border-border/25 bg-muted/[0.4] font-mono text-xs placeholder:text-muted-foreground/30 focus-visible:border-border/50 focus-visible:ring-0" />
+                      <Input id="cn-d1-account" bind:value={accountId} placeholder="abcdef1234…" class="h-9 w-full border-border/50 bg-muted/40 font-mono text-xs text-foreground placeholder:text-muted-foreground/40 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30" />
                     </div>
                     <div>
                       <label for="cn-d1-dbid" class={lbl}>Database ID</label>
-                      <Input id="cn-d1-dbid" bind:value={databaseId} placeholder="xxxxxxxx-xxxx-…" class="h-8 w-full border-border/25 bg-muted/[0.4] font-mono text-xs placeholder:text-muted-foreground/30 focus-visible:border-border/50 focus-visible:ring-0" />
+                      <Input id="cn-d1-dbid" bind:value={databaseId} placeholder="xxxxxxxx-xxxx-…" class="h-9 w-full border-border/50 bg-muted/40 font-mono text-xs text-foreground placeholder:text-muted-foreground/40 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30" />
                     </div>
                   </div>
                   <div>
@@ -691,21 +692,21 @@
             <div>
               {#if editingId}
                 <button type="button"
-                  class="text-xs text-muted-foreground/30 transition-colors hover:text-muted-foreground"
+                  class="text-xs text-muted-foreground/60 transition-colors hover:text-foreground"
                   onclick={() => resetForm(null)}>Clear form</button>
               {/if}
             </div>
             <div class="flex items-center gap-2">
               {#if canTest}
                 <button type="button"
-                  class="inline-flex h-8 items-center gap-1.5 rounded-lg px-4 text-sm text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-40"
+                  class="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border/50 px-4 text-sm text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground disabled:opacity-40"
                   onclick={handleTest} disabled={isBusy}
                 >
                   {#if testing}<Loader2 class="size-3.5 animate-spin" />Testing…{:else}Test connection{/if}
                 </button>
               {/if}
               <button type="button"
-                class="inline-flex h-8 items-center gap-1.5 rounded-lg bg-foreground px-5 text-sm font-medium text-background transition-colors hover:bg-foreground/85 disabled:opacity-50"
+                class="inline-flex h-9 items-center gap-1.5 rounded-lg bg-foreground px-5 text-sm font-medium text-background transition-colors hover:bg-foreground/85 disabled:opacity-50"
                 onclick={handleConnect} disabled={isBusy || dbType === 'bigquery'}
               >
                 {#if connecting === (editingId ?? '__new__')}

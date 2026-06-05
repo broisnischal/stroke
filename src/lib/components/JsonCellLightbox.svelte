@@ -5,7 +5,7 @@
   import CheckCheck from '@lucide/svelte/icons/check-check'
   import Braces from '@lucide/svelte/icons/braces'
   import * as monaco from 'monaco-editor'
-  import { defineDbStudioMonacoThemes, monacoThemeId, readEditorFontOptions } from '$lib/monaco-themes.js'
+  import { defineStrokeMonacoThemes, monacoThemeId, readEditorFontOptions } from '$lib/monaco-themes.js'
   import { normalizeThemeId } from '$lib/themes/registry.js'
 
   /**
@@ -45,7 +45,7 @@
     const el = container
     if (!el) return
 
-    defineDbStudioMonacoThemes()
+    defineStrokeMonacoThemes()
     const { fontSize, lineHeight } = readEditorFontOptions()
 
     const ed = monaco.editor.create(el, {

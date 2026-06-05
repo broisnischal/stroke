@@ -30,9 +30,9 @@ pub fn run() {
         // setups (2× displays) and can cause rendering panics on Wayland compositors.
     }
 
-    // Set a human-readable process title so the app shows as "db-studio" in
+    // Set a human-readable process title so the app shows as "stroke" in
     // htop / ps / /proc — makes it easy to identify among WebKit helper processes.
-    let _ = metrics::set_process_title("db-studio".into());
+    let _ = metrics::set_process_title("stroke".into());
     // Create the shared connection Arc — both DbState and McpState point to the same lock.
     let db_conn: Arc<Mutex<Option<ActiveConnection>>> = Arc::new(Mutex::new(None));
     let db_state = DbState { conn: Arc::clone(&db_conn) };
@@ -53,7 +53,7 @@ pub fn run() {
                 "main",
                 tauri::WebviewUrl::App("/".into()),
             )
-            .title("DB Studio")
+            .title("Stroke")
             .inner_size(1280.0, 800.0)
             .min_inner_size(960.0, 600.0)
             .resizable(true)
