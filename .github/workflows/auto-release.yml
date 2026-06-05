@@ -7,8 +7,9 @@
 #
 # The workflow will:
 #   1. Bump the version in tauri.conf.json + package.json
-#   2. Commit the bump directly to master
-#   3. Push a vX.Y.Z tag → triggers release.yml to build and publish
+#   2. Fold .changeset/*.md files into CHANGELOG.md under the new version
+#   3. Commit the bump + changelog to master
+#   4. Push tag vX.Y.Z  →  triggers release.yml to build and publish
 
 name: Auto Release
 
@@ -28,11 +29,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Fetch full history so the version-bump commit can be pushed
           fetch-depth: 0
-          # Use the default GITHUB_TOKEN — requires "contents: write" above.
-          # If master has branch protection that blocks bot pushes, replace
-          # with a PAT stored in secrets.RELEASE_TOKEN.
+          # If master has branch protection that blocks the default bot token,
+          # replace with: token: ${{ secrets.RELEASE_TOKEN }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/setup-node@v4
@@ -51,21 +50,24 @@ jobs:
           elif echo "$LABELS" | grep -q '"release:patch"'; then echo "type=patch" >> "$GITHUB_OUTPUT"
           else
             echo "type=skip" >> "$GITHUB_OUTPUT"
-            echo "No release:* label found — skipping release."
+            echo "No release:* label — skipping release."
           fi
 
-      # ── 2. Bump version in tauri.conf.json + package.json ─────────────────
-      - name: Bump version
+      # ── 2. Bump versions + fold changesets into CHANGELOG.md ──────────────
+      - name: Bump version and update changelog
         if: steps.bump.outputs.type != 'skip'
         id: version
         env:
           BUMP_TYPE: ${{ steps.bump.outputs.type }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           node - <<'EOF'
           const fs   = require('fs')
+          const path = require('path')
           const bump = process.env.BUMP_TYPE
 
-          // ── tauri.conf.json ──────────────────────────────────────────────
+          // ── Compute new version ──────────────────────────────────────────
           const cfgPath = 'src-tauri/tauri.conf.json'
           const cfg     = JSON.parse(fs.readFileSync(cfgPath, 'utf8'))
           const [maj, min, pat] = cfg.version.split('.').map(Number)
@@ -75,22 +77,96 @@ jobs:
             bump === 'minor' ? `${maj}.${min + 1}.0` :
                                `${maj}.${min}.${pat + 1}`
 
+          // ── Update tauri.conf.json ───────────────────────────────────────
           cfg.version = next
           fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n')
-          console.log(`tauri.conf.json: ${cfg.version.split('.').slice(0,-1).join('.')+'.'+pat} → ${next}`)
 
-          // ── package.json ─────────────────────────────────────────────────
+          // ── Update package.json ──────────────────────────────────────────
           const pkgPath = 'package.json'
           const pkg     = JSON.parse(fs.readFileSync(pkgPath, 'utf8'))
           pkg.version   = next
           fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n')
-          console.log(`package.json: bumped to ${next}`)
 
-          // ── Expose to subsequent steps ───────────────────────────────────
+          // ── Collect .changeset/*.md files ────────────────────────────────
+          const csDir = '.changeset'
+          const files = fs.existsSync(csDir)
+            ? fs.readdirSync(csDir).filter(f => f.endsWith('.md') && f !== 'README.md')
+            : []
+
+          // sections: { 'New Features': { '#### Canvas Table': ['- item'] } }
+          /** @type {Record<string, Record<string, string[]>>} */
+          const sections = {}
+
+          for (const file of files) {
+            const content = fs.readFileSync(path.join(csDir, file), 'utf8')
+            let h3 = null
+            let h4 = null
+
+            for (const line of content.split('\n')) {
+              const t = line.trim()
+              if (t.startsWith('### ')) {
+                h3 = t.slice(4).trim()
+                if (!sections[h3]) sections[h3] = {}
+                h4 = null
+              } else if (t.startsWith('#### ')) {
+                h4 = t   // keep full "#### Foo"
+                if (h3 && !sections[h3][h4]) sections[h3][h4] = []
+              } else if (/^[-*]\s/.test(t) && h3) {
+                const key = h4 ?? '__top__'
+                if (!sections[h3][key]) sections[h3][key] = []
+                sections[h3][key].push(t)
+              }
+            }
+          }
+
+          // ── Build the new CHANGELOG entry ────────────────────────────────
+          const today    = new Date().toISOString().slice(0, 10)
+          const order    = ['New Features', 'Bug Fixes', 'Changes']
+          const allKeys  = [...new Set([...order, ...Object.keys(sections)])]
+          let entry      = `## [${next}] - ${today}\n`
+          let hasContent = false
+
+          for (const heading of allKeys) {
+            if (!sections[heading] || Object.keys(sections[heading]).length === 0) continue
+            hasContent = true
+            entry += `\n### ${heading}\n`
+
+            // Top-level bullets (no sub-section)
+            const top = sections[heading]['__top__'] ?? []
+            for (const item of top) entry += `${item}\n`
+
+            // Sub-sections
+            for (const [sub, items] of Object.entries(sections[heading])) {
+              if (sub === '__top__') continue
+              entry += `\n${sub}\n`
+              for (const item of items) entry += `${item}\n`
+            }
+          }
+
+          if (!hasContent) {
+            // No changeset files — generate a minimal entry from PR title
+            const pr = process.env.PR_TITLE || 'No changelog provided'
+            const num = process.env.PR_NUMBER
+            entry += `\n### Changes\n- ${pr}${num ? ` (#${num})` : ''}\n`
+          }
+
+          // ── Inject at top of CHANGELOG.md (after the "---" separator) ───
+          const clPath = 'CHANGELOG.md'
+          const cl     = fs.existsSync(clPath) ? fs.readFileSync(clPath, 'utf8') : '# Changelog\n\n---\n'
+          const sep    = '---\n'
+          const idx    = cl.indexOf(sep)
+          const before = idx !== -1 ? cl.slice(0, idx + sep.length) : cl
+          const after  = idx !== -1 ? cl.slice(idx + sep.length)    : ''
+          fs.writeFileSync(clPath, `${before}\n${entry}\n${after}`)
+
+          // ── Delete consumed changeset files ──────────────────────────────
+          for (const file of files) fs.unlinkSync(path.join(csDir, file))
+
+          console.log(`v${next} — merged ${files.length} changeset(s)`)
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `new_version=${next}\n`)
           EOF
 
-      # ── 3. Commit bump, tag, and push ─────────────────────────────────────
+      # ── 3. Commit everything and push the release tag ─────────────────────
       - name: Commit and tag
         if: steps.bump.outputs.type != 'skip'
         env:
@@ -99,13 +175,11 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add src-tauri/tauri.conf.json package.json
-          git commit -m "chore: bump version to ${{ steps.version.outputs.new_version }}"
+          git add src-tauri/tauri.conf.json package.json CHANGELOG.md .changeset/
+          git commit -m "chore: release ${{ steps.version.outputs.new_version }}"
 
           git tag "$NEW_TAG"
-
-          # Push commit + tag together; the tag push triggers release.yml
           git push origin master
           git push origin "$NEW_TAG"
 
-          echo "✅ Tagged $NEW_TAG — release.yml will now build and publish."
+          echo "✅ $NEW_TAG pushed — release.yml will now build and publish."

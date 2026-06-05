@@ -71,7 +71,7 @@ jobs:
 
           > **"damaged and can't be opened"?** Run once: \`xattr -cr /Applications/Stroke.app\`
 
-          **Linux:** \`.deb\` · \`.rpm\` · \`.AppImage\` · \`.pkg.tar.zst\` (Arch)
+          **Linux:** \`.deb\` · \`.rpm\` · \`.AppImage\`
 
           **Windows:** \`.exe\` NSIS setup (recommended) · \`.msi\`
 
@@ -331,71 +331,6 @@ jobs:
           name: sig-${{ matrix.name }}
           path: updater.sig
           if-no-files-found: warn
-
-  build-arch:
-    needs: create-release
-    runs-on: ubuntu-latest
-    name: build-linux-arch
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - run: npm ci
-
-      - name: Build pacman package inside Arch container
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: |
-          docker run --rm \
-            --volume "$GITHUB_WORKSPACE:/workspace" \
-            --workdir /workspace \
-            --env TAURI_SIGNING_PRIVATE_KEY \
-            --env TAURI_SIGNING_PRIVATE_KEY_PASSWORD \
-            --env NO_STRIP=1 \
-            archlinux/archlinux:latest \
-            bash -uec '
-              # Refresh package database and install build dependencies
-              pacman -Syu --noconfirm
-              pacman -S --noconfirm --needed \
-                base-devel \
-                nodejs \
-                npm \
-                rustup \
-                webkit2gtk-4.1 \
-                libayatana-appindicator \
-                librsvg \
-                patchelf
-
-              # makepkg refuses to run as root; patch the check — safe in CI containers.
-              sed -i "s/if (( EUID == 0 ))/if (( 0 ))/" /usr/bin/makepkg
-
-              # Set up stable Rust toolchain.
-              # The Arch rustup package does not create ~/.cargo/env (that is only
-              # produced by the rustup.rs installer script).  Export the bin path directly.
-              rustup toolchain install stable --no-self-update
-              rustup default stable
-              export PATH="$HOME/.cargo/bin:$PATH"
-
-              # node_modules were already installed on the host via "npm ci";
-              # the workspace is bind-mounted so they are available here.
-              npx tauri build --bundles pacman
-            '
-
-      - name: Upload pacman artifact
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ env.RELEASE_TAG }}
-        run: |
-          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
-          gh release upload "$TAG" \
-            "src-tauri/target/release/bundle/pacman/stroke-${VERSION}-1-x86_64.pkg.tar.zst" \
-            --clobber
 
 # ── 3. Combine signatures into latest.json ───────────────────────────────────
   publish-updater-json:
