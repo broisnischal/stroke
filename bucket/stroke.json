@@ -1,0 +1,27 @@
+{
+  "version": "0.4.1",
+  "description": "Fast desktop database client for PostgreSQL, MySQL, SQLite, and Cloudflare D1",
+  "homepage": "https://github.com/broisnischal/stroke",
+  "license": "Freeware",
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/broisnischal/stroke/releases/download/v0.4.1/stroke_0.4.1_x64-setup.exe#/dl.7z",
+      "hash": "3cb2d9371ec4d0eec1b388ae6ff8d00d4cd8d5f1e5f0964097b423fe668d7990"
+    }
+  },
+  "bin": "Stroke.exe",
+  "shortcuts": [
+    [
+      "Stroke.exe",
+      "Stroke"
+    ]
+  ],
+  "checkver": "github",
+  "autoupdate": {
+    "architecture": {
+      "64bit": {
+        "url": "https://github.com/broisnischal/stroke/releases/download/v$version/stroke_$version_x64-setup.exe#/dl.7z"
+      }
+    }
+  }
+}

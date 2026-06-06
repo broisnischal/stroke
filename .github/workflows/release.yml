@@ -65,15 +65,26 @@ jobs:
 
           ### Install
 
-          **macOS**
-          - Apple Silicon: \`stroke_*_aarch64.dmg\`
-          - Intel Mac: \`stroke_*_x64.dmg\`
+          **Easiest — package managers (no security warnings):**
 
-          > **"damaged and can't be opened"?** Run once: \`xattr -cr /Applications/Stroke.app\`
+          \`\`\`sh
+          # macOS
+          brew install --cask broisnischal/tap/stroke
 
-          **Linux:** \`.deb\` · \`.rpm\` · \`.AppImage\`
+          # Windows
+          scoop bucket add stroke https://github.com/broisnischal/stroke
+          scoop install stroke
+          \`\`\`
 
-          **Windows:** \`.exe\` NSIS setup (recommended) · \`.msi\`
+          **Or download directly below:**
+
+          **macOS** — \`stroke_*_aarch64.dmg\` (Apple Silicon) · \`stroke_*_x64.dmg\` (Intel)
+          > Ad-hoc signed. If macOS says it's "damaged", run once: \`xattr -cr /Applications/Stroke.app\`
+
+          **Windows** — \`stroke_*_x64-setup.exe\` (recommended) · \`.msi\`
+          > Unsigned. On SmartScreen, click **More info → Run anyway**.
+
+          **Linux** — \`.deb\` · \`.rpm\` · \`.AppImage\`
 
           Built from \`${SHA}\`.
           EOF
@@ -136,33 +147,11 @@ jobs:
       #    No Apple Developer cert / notarization. Users run `xattr -cr` once.
       #    See install notes in the create-release step.
 
-      # ── Windows: import PFX into cert store, patch config with thumbprint ─────
-      - name: Import Windows signing certificate
-        if: matrix.name == 'windows'
-        shell: pwsh
-        env:
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PWD: ${{ secrets.WINDOWS_CERTIFICATE_PWD }}
-        run: |
-          if (-not $env:WINDOWS_CERTIFICATE) {
-            Write-Host "WINDOWS_CERTIFICATE not set — skipping Windows signing"
-            exit 0
-          }
-          $certBytes = [System.Convert]::FromBase64String($env:WINDOWS_CERTIFICATE)
-          $certPath  = Join-Path $env:TEMP "signing.pfx"
-          [System.IO.File]::WriteAllBytes($certPath, $certBytes)
-          $secPwd = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PWD -Force -AsPlainText
-          $cert   = Import-PfxCertificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\My -Password $secPwd
-          Remove-Item $certPath -Force
-
-          $env:WIN_CERT_THUMB = $cert.Thumbprint
-          node -e "
-            const fs = require('fs');
-            const cfg = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8'));
-            cfg.bundle.windows.certificateThumbprint = process.env.WIN_CERT_THUMB;
-            fs.writeFileSync('src-tauri/tauri.conf.json', JSON.stringify(cfg, null, 2));
-            console.log('Certificate thumbprint set:', process.env.WIN_CERT_THUMB);
-          "
+      # ── Windows: unsigned. A self-signed cert gives no benefit (SmartScreen
+      #    still blocks it), so we don't sign. Users either click
+      #    "More info → Run anyway" on the direct .exe, or install warning-free
+      #    via Scoop (`scoop install stroke`). To enable real signing later, add
+      #    an EV cert / Azure Trusted Signing step here and set the thumbprint.
 
       - name: Build
         run: npx tauri build ${{ matrix.args }}
@@ -239,18 +228,28 @@ jobs:
           VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
           DIR="src-tauri/target/release/bundle"
 
-          pushd "$DIR/appimage"
-          tar czf "stroke_${VERSION}_amd64.AppImage.tar.gz" "stroke_${VERSION}_amd64.AppImage"
-          popd
-          npx tauri signer sign "$DIR/appimage/stroke_${VERSION}_amd64.AppImage.tar.gz"
+          # Tauri names Linux bundles after the product name ("Stroke", capital),
+          # so glob the actual files instead of assuming a case, then normalize to
+          # lowercase stroke_* asset names for predictable download URLs.
+          DEB=$(ls "$DIR"/deb/*.deb       | head -1)
+          RPM=$(ls "$DIR"/rpm/*.rpm       | head -1)
+          APP=$(ls "$DIR"/appimage/*.AppImage | head -1)
 
-          cp "$DIR/appimage/stroke_${VERSION}_amd64.AppImage.tar.gz"     stroke_amd64.AppImage.tar.gz
-          cp "$DIR/appimage/stroke_${VERSION}_amd64.AppImage.tar.gz.sig" updater.sig
+          cp "$DEB" "stroke_${VERSION}_amd64.deb"
+          cp "$RPM" "stroke-${VERSION}-1.x86_64.rpm"
+          cp "$APP" "stroke_${VERSION}_amd64.AppImage"
+
+          # Sign the AppImage for the auto-updater.
+          tar czf "stroke_${VERSION}_amd64.AppImage.tar.gz" "stroke_${VERSION}_amd64.AppImage"
+          npx tauri signer sign "stroke_${VERSION}_amd64.AppImage.tar.gz"
+
+          cp "stroke_${VERSION}_amd64.AppImage.tar.gz"     stroke_amd64.AppImage.tar.gz
+          cp "stroke_${VERSION}_amd64.AppImage.tar.gz.sig" updater.sig
 
           gh release upload "$TAG" \
-            "$DIR/deb/stroke_${VERSION}_amd64.deb" \
-            "$DIR/rpm/stroke-${VERSION}-1.x86_64.rpm" \
-            "$DIR/appimage/stroke_${VERSION}_amd64.AppImage" \
+            "stroke_${VERSION}_amd64.deb" \
+            "stroke-${VERSION}-1.x86_64.rpm" \
+            "stroke_${VERSION}_amd64.AppImage" \
             stroke_amd64.AppImage.tar.gz \
             --clobber
 
@@ -388,3 +387,73 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ env.RELEASE_TAG }}
         run: gh release upload "$TAG" latest.json --clobber
+
+# ── 4. Refresh the Scoop manifest in this repo (Windows clean-install path) ───
+  update-scoop:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Update bucket/stroke.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ env.RELEASE_TAG }}
+        run: |
+          VERSION="${TAG#v}"
+          EXE="stroke_${VERSION}_x64-setup.exe"
+          URL="https://github.com/broisnischal/stroke/releases/download/${TAG}/${EXE}"
+
+          # Hash the published installer so the manifest is always accurate.
+          curl -fsSL -o "$EXE" "$URL"
+          HASH=$(sha256sum "$EXE" | cut -d' ' -f1)
+          rm -f "$EXE"
+
+          VERSION="$VERSION" HASH="$HASH" node - <<'JSEOF'
+          const fs = require('fs')
+          const { VERSION, HASH } = process.env
+          const manifest = {
+            version: VERSION,
+            description: 'Fast desktop database client for PostgreSQL, MySQL, SQLite, and Cloudflare D1',
+            homepage: 'https://github.com/broisnischal/stroke',
+            license: 'Freeware',
+            architecture: {
+              '64bit': {
+                url: `https://github.com/broisnischal/stroke/releases/download/v${VERSION}/stroke_${VERSION}_x64-setup.exe#/dl.7z`,
+                hash: HASH,
+              },
+            },
+            bin: 'Stroke.exe',
+            shortcuts: [['Stroke.exe', 'Stroke']],
+            checkver: 'github',
+            autoupdate: {
+              architecture: {
+                '64bit': { url: 'https://github.com/broisnischal/stroke/releases/download/v$version/stroke_$version_x64-setup.exe#/dl.7z' },
+              },
+            },
+          }
+          fs.mkdirSync('bucket', { recursive: true })
+          fs.writeFileSync('bucket/stroke.json', JSON.stringify(manifest, null, 2) + '\n')
+          JSEOF
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bucket/stroke.json
+          if git diff --cached --quiet; then
+            echo "Scoop manifest already current."
+          else
+            git commit -m "chore(scoop): stroke v${VERSION}"
+            git push origin master
+          fi
+
+      # Optional instant Homebrew tap refresh. Without a PAT this is skipped and
+      # the tap updates itself on its own schedule instead (see homebrew-tap repo).
+      - name: Trigger Homebrew tap update
+        if: ${{ secrets.TAP_DISPATCH_TOKEN != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.TAP_DISPATCH_TOKEN }}
+        run: |
+          gh workflow run update-cask.yml -R broisnischal/homebrew-tap || \
+            echo "Tap dispatch failed — tap will self-update on schedule."
