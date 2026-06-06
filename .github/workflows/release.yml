@@ -132,23 +132,9 @@ jobs:
 
       - run: npm ci
 
-      # ── macOS: set proper signing identity when cert secret is present ────────
-      - name: Configure macOS code signing
-        if: startsWith(matrix.name, 'macos')
-        env:
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-        run: |
-          if [ -z "$APPLE_SIGNING_IDENTITY" ]; then
-            echo "APPLE_SIGNING_IDENTITY not set — keeping ad-hoc signing"
-          else
-            node -e "
-              const fs = require('fs');
-              const cfg = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8'));
-              cfg.bundle.macOS.signingIdentity = process.env.APPLE_SIGNING_IDENTITY;
-              fs.writeFileSync('src-tauri/tauri.conf.json', JSON.stringify(cfg, null, 2));
-              console.log('Signing identity set to:', process.env.APPLE_SIGNING_IDENTITY);
-            "
-          fi
+      # ── macOS: ad-hoc signing only (signingIdentity "-" in tauri.conf.json).
+      #    No Apple Developer cert / notarization. Users run `xattr -cr` once.
+      #    See install notes in the create-release step.
 
       # ── Windows: import PFX into cert store, patch config with thumbprint ─────
       - name: Import Windows signing certificate
@@ -184,12 +170,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           NO_STRIP: ${{ matrix.name == 'linux' && '1' || '' }}
-          # macOS code signing + notarization (Tauri auto-imports APPLE_CERTIFICATE)
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # macOS: ad-hoc signed only — no APPLE_CERTIFICATE, so Tauri skips the
+          # PKCS12 import and notarization. Re-add the Apple secrets here to
+          # restore full signing once a valid cert + password are available.
 
       # ── macOS aarch64 ───────────────────────────────────────────────────────
       - name: Upload macOS aarch64 artifacts
