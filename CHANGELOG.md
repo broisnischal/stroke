@@ -4,6 +4,14 @@ All notable changes to Stroke are listed here, newest first.
 
 ---
 
+## [0.4.1] - 2026-06-06
+
+### Bug Fixes
+
+#### Release Pipeline
+- Fixed release builds failing on all platforms — regenerated the Tauri updater signing key so the private key and password match again (`incorrect updater private key password: failed to fill whole buffer`)
+- Fixed macOS builds failing during code signing (`PKCS12 import MAC verification failed`) by switching macOS to ad-hoc signing; mac users run `xattr -cr /Applications/Stroke.app` once after install
+
 ## [0.4.0] - 2026-06-05
 
 ### New Features
