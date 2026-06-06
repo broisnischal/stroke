@@ -4,6 +4,15 @@ All notable changes to Stroke are listed here, newest first.
 
 ---
 
+## [0.4.3] - 2026-06-06
+
+### Bug Fixes
+
+#### Auto-update
+- Fixed auto-update failing on macOS (and all platforms) with "invalid encoding in minisign data" — the updater public key in `tauri.conf.json` was accidentally base64-encoded twice, so the embedded key couldn't be parsed. It's now the correct single-encoded value.
+
+> **Note:** 0.4.1 and 0.4.2 shipped with the malformed key baked in, so those installs cannot auto-update — download 0.4.3 manually (or via `brew`/`scoop`) once. Auto-update works normally from 0.4.3 onward.
+
 ## [0.4.2] - 2026-06-06
 
 ### Bug Fixes
