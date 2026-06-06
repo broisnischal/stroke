@@ -46,6 +46,27 @@ Connect to PostgreSQL, MySQL, SQLite, Turso/LibSQL, and Cloudflare D1 — browse
 
 ## Install
 
+### Recommended: package managers (no warnings)
+
+The smoothest, warning-free way to install on macOS and Windows:
+
+**macOS** — [Homebrew](https://brew.sh)
+
+```bash
+brew install --cask broisnischal/tap/stroke
+```
+
+**Windows** — [Scoop](https://scoop.sh)
+
+```powershell
+scoop bucket add stroke https://github.com/broisnischal/stroke
+scoop install stroke
+```
+
+These handle the OS security prompts for you, so the app just opens.
+
+### Or download directly
+
 Grab the installer for your platform from the [Releases](https://github.com/broisnischal/stroke/releases) page.
 
 | Platform | File |
@@ -56,9 +77,15 @@ Grab the installer for your platform from the [Releases](https://github.com/broi
 | Linux (Debian/Ubuntu) | `stroke_x.x.x_amd64.deb` |
 | Linux (AppImage) | `stroke_x.x.x_amd64.AppImage` |
 
-**macOS** — open the `.dmg`, drag **Stroke** to Applications. On first launch, right-click → Open if you see an unverified developer warning.
+**macOS** — open the `.dmg`, drag **Stroke** to Applications. Stroke is ad-hoc signed (no paid Apple cert), so on first launch macOS may say it's from an unidentified developer or "damaged". Fix it once with:
 
-**Windows** — run the `.exe` installer and follow the prompts.
+```bash
+xattr -cr /Applications/Stroke.app
+```
+
+…then open normally. (The Homebrew install above does this for you.)
+
+**Windows** — run the `.exe` installer. It's unsigned, so SmartScreen shows "Windows protected your PC" — click **More info → Run anyway**. (The Scoop install above avoids this.)
 
 **Linux (Debian/Ubuntu)**
 

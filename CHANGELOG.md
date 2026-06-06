@@ -4,6 +4,20 @@ All notable changes to Stroke are listed here, newest first.
 
 ---
 
+## [0.4.2] - 2026-06-06
+
+### Bug Fixes
+
+#### Release Pipeline
+- Fixed the Linux release job failing to find its bundles — Tauri names them after the product name (`Stroke_*`), but the upload step expected lowercase `stroke_*`; it now globs the real files and normalizes the asset names. This also restores `latest.json` (auto-update) publishing.
+
+### Changes
+
+#### Distribution
+- **Homebrew (macOS):** `brew install --cask broisnischal/tap/stroke` — installs warning-free, no manual `xattr`
+- **Scoop (Windows):** `scoop bucket add stroke https://github.com/broisnischal/stroke && scoop install stroke` — installs without the SmartScreen block
+- Dropped the self-signed Windows certificate (it never cleared SmartScreen, so it added nothing); direct `.exe` downloads are unsigned — use Scoop, or click "More info → Run anyway"
+
 ## [0.4.1] - 2026-06-06
 
 ### Bug Fixes
