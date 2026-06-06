@@ -450,10 +450,14 @@ jobs:
 
       # Optional instant Homebrew tap refresh. Without a PAT this is skipped and
       # the tap updates itself on its own schedule instead (see homebrew-tap repo).
+      # (secrets can't be used in an `if:`, so the check lives in the script.)
       - name: Trigger Homebrew tap update
-        if: ${{ secrets.TAP_DISPATCH_TOKEN != '' }}
         env:
           GH_TOKEN: ${{ secrets.TAP_DISPATCH_TOKEN }}
         run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "No TAP_DISPATCH_TOKEN — tap will self-update on its schedule."
+            exit 0
+          fi
           gh workflow run update-cask.yml -R broisnischal/homebrew-tap || \
             echo "Tap dispatch failed — tap will self-update on schedule."
