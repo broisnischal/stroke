@@ -1966,15 +1966,17 @@
     ctx.textBaseline = 'middle'
 
     const bodyTopY = Math.max(0, _scrollTop - HEADER_H - insertRowOffset)
-    let i = rowIndexAtY(rowTops, n, bodyTopY)
-    for (; i < n; i++) {
-      const ry = rowViewportY(i)
-      if (ry >= H) break
-      if (ry + ROW_HEIGHT <= HEADER_H) continue
-      drawBodyRow(ctx, i, ry, {
-        cFg, cText, cMuted, cGrid, cMutedBg, cRing, cAccent, cPanel, usedW, navName,
-        AMBER, BLUE_FG, cPrimary, frozenW,
-      })
+    if (visibleColumns.length > 0) {
+      let i = rowIndexAtY(rowTops, n, bodyTopY)
+      for (; i < n; i++) {
+        const ry = rowViewportY(i)
+        if (ry >= H) break
+        if (ry + ROW_HEIGHT <= HEADER_H) continue
+        drawBodyRow(ctx, i, ry, {
+          cFg, cText, cMuted, cGrid, cMutedBg, cRing, cAccent, cPanel, usedW, navName,
+          AMBER, BLUE_FG, cPrimary, frozenW,
+        })
+      }
     }
     ctx.restore()
 
