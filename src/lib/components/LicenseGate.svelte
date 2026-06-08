@@ -3,7 +3,6 @@
   import {
     licenseStatus,
     isBlocked,
-    refreshLicenseStatus,
     runLicenseCheck,
   } from '$lib/stores/license.js'
   import LicenseActivation from './LicenseActivation.svelte'
@@ -14,11 +13,9 @@
 
   let { children } = $props()
 
-  onMount(async () => {
-    await refreshLicenseStatus()
-    // Run daily phone-home in background — doesn't block app startup
-    runLicenseCheck()
-  })
+  // Awaited — keeps licenseStatus null (pass-through) until the server
+  // responds. On network failure runLicenseCheck falls back to local sig.
+  onMount(() => runLicenseCheck())
 </script>
 
 <!-- Loading — pass through -->
