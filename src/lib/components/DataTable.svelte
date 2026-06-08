@@ -181,6 +181,14 @@
      *  (page/filter/sort/search change). On change the table jumps its scroll
      *  and virtual window back to the top. */
     reloadToken = 0,
+    /** Infinite scroll mode — when true the table fires onloadmore near the bottom. */
+    infiniteScroll = false,
+    /** True while an incremental "load more" fetch is in flight. */
+    loadingMore = false,
+    /** Called when the user scrolls near the bottom in infinite scroll mode. */
+    onloadmore = /** @type {() => void} */ (() => {}),
+    /** When true the select + expand gutter columns are frozen at the left edge. */
+    stickyGutters = $bindable(true),
   } = $props();
 
   /**
@@ -1601,6 +1609,13 @@
     const el = e.currentTarget
     if (el.scrollTop !== _scrollTop) _scrollTop = el.scrollTop
     if (el.scrollLeft !== _scrollLeft) _scrollLeft = el.scrollLeft
+    // Infinite scroll — trigger load when within 3 rows of the bottom
+    if (infiniteScroll && !loadingMore) {
+      const threshold = ROW_HEIGHT * 3
+      if (el.scrollTop + el.clientHeight >= el.scrollHeight - threshold) {
+        onloadmore()
+      }
+    }
   }
 
   // ── Canvas backing context + colour reader ────────────────────────────────
@@ -1705,8 +1720,8 @@
     if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "y" || e.key === "Y")) {
       if (!editingCell) { e.preventDefault(); void redoEdit(); return; }
     }
-    // Ctrl+Enter when not editing: start edit (same as Enter / F2)
-    if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && !editingCell) {
+    // Ctrl+Enter / Alt+Enter when not editing: start edit (same as Enter / F2)
+    if (((e.ctrlKey || e.metaKey) || e.altKey) && e.key === "Enter" && !editingCell) {
       e.preventDefault();
       if (focusedRow !== null && focusedCol !== null) {
         const ai = visToActualColIdx(focusedCol);
@@ -1952,10 +1967,8 @@
     const usedW = Math.max(0, Math.min(W, geom.totalWidth - _scrollLeft))
     const navName = focusedCol !== null ? navigableColumns[focusedCol]?.name : null
 
-    // Frozen left region (gutter + pinned columns). Non-pinned grid separators
-    // behind it are skipped in the batched grid pass so they don't draw over the
-    // opaque pinned/gutter fills.
-    let frozenW = gutterWidth
+    // Frozen left region. Gutter only counts when sticky; pinned cols always.
+    let frozenW = stickyGutters ? gutterWidth : 0
     for (const col of geom.cols) if (col.pinned) frozenW += col.w
 
     // ── Body ─────────────────────────────────────────────────────────────
@@ -2018,8 +2031,8 @@
       drawCell(ctx, idx, col, dx, ry, rh, c, true)
     }
 
-    // Gutters scroll with content — drawn on top to cover any cell bleed.
-    drawRowGutters(ctx, idx, -_scrollLeft, ry, rh, c)
+    // Gutters: sticky = always at viewport left; non-sticky = scroll with content.
+    drawRowGutters(ctx, idx, stickyGutters ? 0 : -_scrollLeft, ry, rh, c)
 
     // Row ring when focused + selected.
     if (focusedRow === idx && isSel) {
@@ -2103,9 +2116,9 @@
       if (ex <= 0 || ex >= vw) continue
       ctx.moveTo(ex, ry); ctx.lineTo(ex, ry + rh)
     }
-    // Gutter separator (scrolls with content).
+    // Gutter separator.
     if (gutterWidth > 0) {
-      const gex = gutterWidth - _scrollLeft - 0.5
+      const gex = (stickyGutters ? gutterWidth : gutterWidth - _scrollLeft) - 0.5
       if (gex > 0 && gex < vw) { ctx.moveTo(gex, ry); ctx.lineTo(gex, ry + rh) }
     }
     // Bottom row line.
@@ -2248,7 +2261,10 @@
 
   /** @param {CanvasRenderingContext2D} ctx */
   function drawHeaderRow(ctx, c) {
+    // Subtle background to visually distinguish the header from body rows.
     ctx.fillStyle = c.cPanel
+    ctx.fillRect(0, 0, c.W, HEADER_H)
+    ctx.fillStyle = withAlpha(c.cMutedBg, 0.18)
     ctx.fillRect(0, 0, c.W, HEADER_H)
 
     // Non-pinned headers.
@@ -2265,9 +2281,9 @@
       drawHeaderCell(ctx, col, colDrawnX(col, geom, _scrollLeft), c)
     }
 
-    // Gutter headers — scroll with content.
+    // Gutter headers — sticky = viewport left; non-sticky = scroll with content.
     if (gutterWidth > 0) {
-      const gx0 = -_scrollLeft
+      const gx0 = stickyGutters ? 0 : -_scrollLeft
       ctx.fillStyle = c.cPanel
       ctx.fillRect(gx0, 0, gutterWidth, HEADER_H)
       let gx = gx0
@@ -2314,8 +2330,8 @@
       }
     }
 
-    // Header bottom border.
-    ctx.strokeStyle = c.cBorder
+    // Header bottom border
+    ctx.strokeStyle = withAlpha(c.cBorder, 0.35)
     ctx.lineWidth = 1
     ctx.beginPath(); ctx.moveTo(0, HEADER_H - 0.5); ctx.lineTo(c.W, HEADER_H - 0.5); ctx.stroke()
   }
@@ -2328,38 +2344,40 @@
 
     // Pinned headers are painted on top of scrolled columns — give them an opaque
     // backing so the columns sliding underneath don't bleed through.
-    if (col.pinned) { ctx.fillStyle = c.cPanel; ctx.fillRect(x, 0, w, HEADER_H) }
+    if (col.pinned) {
+      ctx.fillStyle = c.cPanel; ctx.fillRect(x, 0, w, HEADER_H)
+      ctx.fillStyle = withAlpha(c.cMutedBg, 0.18); ctx.fillRect(x, 0, w, HEADER_H)
+    }
 
     // Background tint.
-    if (resizingColName === col.name) { ctx.fillStyle = withAlpha(c.cAccent, 0.3); ctx.fillRect(x, 0, w, HEADER_H) }
-    else if (sorted) { ctx.fillStyle = withAlpha(c.cMutedBg, 0.3); ctx.fillRect(x, 0, w, HEADER_H) }
+    if (resizingColName === col.name) { ctx.fillStyle = withAlpha(c.cPrimary, 0.08); ctx.fillRect(x, 0, w, HEADER_H) }
+    else if (sorted) { ctx.fillStyle = withAlpha(c.cPrimary, 0.05); ctx.fillRect(x, 0, w, HEADER_H) }
+    else if (hoveredColName === col.name && hoveredRow === null && _resizeHoverCol !== col.name) {
+      ctx.fillStyle = withAlpha(c.cMutedBg, 0.25); ctx.fillRect(x, 0, w, HEADER_H)
+    }
 
     // Right grid separator.
-    ctx.strokeStyle = c.cGrid
+    ctx.strokeStyle = withAlpha(c.cGrid, 0.7)
     ctx.lineWidth = 1
     ctx.beginPath(); ctx.moveTo(x + w - 0.5, 0); ctx.lineTo(x + w - 0.5, HEADER_H); ctx.stroke()
 
     const meta = colMeta.get(col.name)
     const cy = HEADER_H / 2
     const sortReserve = 18
-    // Single line, vertically centered (Drizzle/Linear style): bold name, then
-    // metadata badges, then the inline muted datatype, with a sort chevron at the
-    // right edge.
     ctx.textBaseline = 'middle'
     ctx.textAlign = 'left'
 
-    // Relational indicators only (primary + foreign key). Uniqueness/index were
-    // dropped from the header to cut clutter — they still surface in the inspector.
+    // Relational indicators — PK (amber) and FK (blue).
     const badges = []
     if (meta) {
-      if (meta.pk) badges.push({ letter: 'K', bg: withAlpha(c.AMBER, 0.15), fg: c.AMBER_FG })
-      if (meta.fk) badges.push({ letter: 'F', bg: 'rgba(59,130,246,0.12)', fg: c.BLUE_FG })
+      if (meta.pk) badges.push({ letter: 'K', bg: withAlpha(c.AMBER, 0.18), fg: c.AMBER_FG })
+      if (meta.fk) badges.push({ letter: 'F', bg: 'rgba(59,130,246,0.14)', fg: c.BLUE_FG })
     }
     const badgeW = badges.length * 16
 
-    // Name (medium weight).
+    // Column name — muted foreground for a cleaner header feel.
     ctx.font = _fonts.header
-    ctx.fillStyle = c.cFg
+    ctx.fillStyle = withAlpha(c.cFg, sorted ? 1 : 0.7)
     const nameMaxW = w - CELL_PAD_X - sortReserve - badgeW - 8
     const name = truncText(ctx, col.name, Math.max(0, nameMaxW))
     ctx.fillText(name, x + CELL_PAD_X, cy + 0.5)
@@ -2371,28 +2389,28 @@
       tx += 16
     }
 
-    // Inline datatype — muted, no dot separator (cleaner), only when there's room.
+    // Inline datatype — clearly readable but secondary.
     const typeStartX = tx + (badges.length ? 4 : 2)
     const typeRoom = x + w - sortReserve - 4 - typeStartX
     if (typeRoom > 24 && col.dataType) {
       ctx.font = _fonts.type
-      ctx.fillStyle = withAlpha(c.cMuted, 0.5)
+      ctx.fillStyle = withAlpha(c.cMuted, 0.65)
       ctx.fillText(truncText(ctx, col.dataType, typeRoom), typeStartX, cy + 0.5)
     }
 
-    // Sort indicator — Lucide icons.
+    // Sort indicator — primary color when active, subtle when just hovered.
     if (sorted) {
       const iconName = rowSort?.direction === 'asc' ? 'arrow-up' : 'arrow-down'
-      drawIcon(ctx, iconName, x + w - sortReserve + 2, cy - 7, 14, withAlpha(c.cPrimary, 0.9), 1.8)
+      drawIcon(ctx, iconName, x + w - sortReserve + 2, cy - 7, 14, withAlpha(c.cPrimary, 0.95), 1.8)
     } else if (_resizeHoverCol !== col.name && hoveredColName === col.name && hoveredRow === null) {
-      drawIcon(ctx, 'arrow-up-down', x + w - sortReserve + 2, cy - 7, 14, withAlpha(c.cMuted, 0.4), 1.6)
+      drawIcon(ctx, 'arrow-up-down', x + w - sortReserve + 2, cy - 7, 14, withAlpha(c.cMuted, 0.5), 1.6)
     }
 
     // Resize-edge affordance.
     if (_resizeHoverCol === col.name || resizingColName === col.name) {
-      ctx.strokeStyle = withAlpha(c.cPrimary, 0.7)
+      ctx.strokeStyle = withAlpha(c.cPrimary, 0.8)
       ctx.lineWidth = 2
-      ctx.beginPath(); ctx.moveTo(x + w - 1, 5); ctx.lineTo(x + w - 1, HEADER_H - 5); ctx.stroke()
+      ctx.beginPath(); ctx.moveTo(x + w - 1, 4); ctx.lineTo(x + w - 1, HEADER_H - 4); ctx.stroke()
     }
   }
 
@@ -2861,11 +2879,12 @@
             <!-- Column resize handles: DOM overlay so header edge interaction never
                  hits the canvas (macOS trackpad pinch on canvas was page-zooming
                  the webview and making the grid look huge/blurry).
-                 height:0 + overflow:visible keeps this out of flow so it does NOT
-                 push the sizer down (which would mis-align all DOM overlays). -->
+                 Mirrors the canvas sticky wrapper (sticky top+left 0, width:0,
+                 overflow:visible) so handles stay in viewport coordinates even
+                 when the table is scrolled horizontally — without left:0 the
+                 wrapper drifts with the content and every handle shifts by scrollLeft. -->
             <div
-              class="sticky top-0 z-[2] pointer-events-none"
-              style="height:0; overflow:visible; width:{_viewportWidth}px"
+              style="position:sticky;top:0;left:0;width:0;height:0;z-index:2;overflow:visible;pointer-events:none"
               aria-hidden="true"
             >
               {#each resizeHandles as h (h.name)}
@@ -3137,6 +3156,22 @@
               <div class="flex flex-col items-center gap-2 px-4 text-center">
                 <Table2 class="size-8 text-muted-foreground/25" />
                 <p class="text-ui-sm text-muted-foreground">No rows in this table</p>
+              </div>
+            </div>
+          {/if}
+
+          <!-- Infinite scroll: sticky bottom loading bar -->
+          {#if infiniteScroll && loadingMore}
+            <div
+              style="position:sticky;bottom:0;left:0;width:100%;pointer-events:none;z-index:5"
+              aria-live="polite"
+              aria-label="Loading more rows"
+            >
+              <div class="flex items-center justify-center py-2">
+                <div class="flex items-center gap-1.5 rounded-full border border-border/20 bg-background/90 px-3 py-1 shadow-md backdrop-blur-sm">
+                  <Loader class="size-3 animate-spin text-muted-foreground/50" />
+                  <span class="text-[11px] text-muted-foreground/50">Loading more…</span>
+                </div>
               </div>
             </div>
           {/if}
