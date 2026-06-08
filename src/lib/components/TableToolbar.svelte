@@ -9,6 +9,8 @@
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
   import Plus from "@lucide/svelte/icons/plus";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import Infinity from "@lucide/svelte/icons/infinity";
+  import PanelLeft from "@lucide/svelte/icons/panel-left";
   import MoreHorizontal from "@lucide/svelte/icons/more-horizontal";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import FileDown from "@lucide/svelte/icons/file-down";
@@ -85,6 +87,12 @@
     onstructuresearchchange = /** @type {(v: string) => void} */ (() => {}),
     /** When true, all write operations are disabled in the table */
     readonly = false,
+    /** Infinite scroll mode — hides pagination, shows rows-loaded counter */
+    infiniteScroll = false,
+    oninfinitescrolltoggle = () => {},
+    /** Freeze the select + expand gutter columns on horizontal scroll */
+    stickyGutters = true,
+    onstickygutterstoggle = () => {},
   } = $props();
 
   /** @type {HTMLInputElement | null} */
@@ -610,90 +618,128 @@
             title="Query execution time">{queryMs}ms</span
           >
         {/if}
-        {#if total > 0}
-          <span
-            class="font-mono text-ui-xs text-muted-foreground tabular-nums"
-            title="{from.toLocaleString('en-US')}–{to.toLocaleString(
-              'en-US',
-            )} of {total.toLocaleString('en-US')} rows"
-            >{formatCompactCount(from)}–{formatCompactCount(to)} of {total.toLocaleString(
-              "en-US",
-            )}</span
+        {#if infiniteScroll}
+          <!-- Infinite scroll: show loaded count -->
+          {#if total > 0}
+            <span class="font-mono text-ui-xs text-muted-foreground tabular-nums"
+              title="{to.toLocaleString('en-US')} of {total.toLocaleString('en-US')} rows loaded">
+              {formatCompactCount(to)} / {formatCompactCount(total)}
+            </span>
+          {/if}
+        {:else}
+          {#if total > 0}
+            <span
+              class="font-mono text-ui-xs text-muted-foreground tabular-nums"
+              title="{from.toLocaleString('en-US')}–{to.toLocaleString(
+                'en-US',
+              )} of {total.toLocaleString('en-US')} rows"
+              >{formatCompactCount(from)}–{formatCompactCount(to)} of {total.toLocaleString(
+                "en-US",
+              )}</span
+            >
+          {/if}
+
+          <span class="mx-0.5 h-4 w-px bg-border"></span>
+
+          <Select.Root
+            type="single"
+            value={String(pageSize)}
+            onValueChange={(v) => {
+              if (v) onpagesizechange(Number(v));
+            }}
+            disabled={loading}
           >
-        {/if}
+            <Select.Trigger
+              size="sm"
+              class={pageSelectTrigger}
+              title="Rows per page"
+              aria-label="Rows per page"
+            >
+              {pageSize}
+            </Select.Trigger>
+            <Select.Content align="end" class="min-w-0">
+              {#each PAGE_SIZE_OPTIONS as size (size)}
+                <Select.Item value={String(size)} label={String(size)} />
+              {/each}
+            </Select.Content>
+          </Select.Root>
+
+          <Select.Root
+            type="single"
+            value={String(page)}
+            onValueChange={(v) => {
+              if (v) onpagechange(Number(v));
+            }}
+            disabled={loading || total === 0}
+          >
+            <Select.Trigger
+              size="sm"
+              class={pageSelectTrigger}
+              title="Go to page"
+              aria-label="Go to page"
+            >
+              {page}
+            </Select.Trigger>
+            <Select.Content align="end" class="max-h-56">
+              {#each pageMenuItems as p (p)}
+                <Select.Item value={String(p)} label={String(p)} />
+              {/each}
+            </Select.Content>
+          </Select.Root>
+
+          <span
+            class="hidden text-ui-xs text-muted-foreground tabular-nums sm:inline"
+            title={pageCount.toLocaleString("en-US")}
+            >of {formatCompactCount(pageCount)}</span
+          >
+
+          <button
+            type="button"
+            class={iconBtn}
+            disabled={!canPrev || loading}
+            onclick={onprev}
+            aria-label="Previous page"
+          >
+            <ChevronLeft class="size-3.5" />
+          </button>
+          <button
+            type="button"
+            class={iconBtn}
+            disabled={!canNext || loading}
+            onclick={onnext}
+            aria-label="Next page"
+          >
+            <ChevronRight class="size-3.5" />
+          </button>
+        {/if}<!-- end infiniteScroll branch -->
 
         <span class="mx-0.5 h-4 w-px bg-border"></span>
 
-        <Select.Root
-          type="single"
-          value={String(pageSize)}
-          onValueChange={(v) => {
-            if (v) onpagesizechange(Number(v));
-          }}
-          disabled={loading}
-        >
-          <Select.Trigger
-            size="sm"
-            class={pageSelectTrigger}
-            title="Rows per page"
-            aria-label="Rows per page"
-          >
-            {pageSize}
-          </Select.Trigger>
-          <Select.Content align="end" class="min-w-0">
-            {#each PAGE_SIZE_OPTIONS as size (size)}
-              <Select.Item value={String(size)} label={String(size)} />
-            {/each}
-          </Select.Content>
-        </Select.Root>
-
-        <Select.Root
-          type="single"
-          value={String(page)}
-          onValueChange={(v) => {
-            if (v) onpagechange(Number(v));
-          }}
-          disabled={loading || total === 0}
-        >
-          <Select.Trigger
-            size="sm"
-            class={pageSelectTrigger}
-            title="Go to page"
-            aria-label="Go to page"
-          >
-            {page}
-          </Select.Trigger>
-          <Select.Content align="end" class="max-h-56">
-            {#each pageMenuItems as p (p)}
-              <Select.Item value={String(p)} label={String(p)} />
-            {/each}
-          </Select.Content>
-        </Select.Root>
-
-        <span
-          class="hidden text-ui-xs text-muted-foreground tabular-nums sm:inline"
-          title={pageCount.toLocaleString("en-US")}
-          >of {formatCompactCount(pageCount)}</span
-        >
-
+        <!-- Gutter sticky toggle — hidden for now
         <button
           type="button"
-          class={iconBtn}
-          disabled={!canPrev || loading}
-          onclick={onprev}
-          aria-label="Previous page"
+          class={cn(iconBtn, stickyGutters && "bg-primary/10 text-primary")}
+          onclick={onstickygutterstoggle}
+          title={stickyGutters ? "Unfreeze select & expand columns" : "Freeze select & expand columns"}
+          aria-label="Toggle sticky gutter columns"
+          aria-pressed={stickyGutters}
         >
-          <ChevronLeft class="size-3.5" />
+          <PanelLeft class="size-3.5" />
         </button>
+        -->
+
+        <!-- Infinite scroll toggle -->
         <button
           type="button"
-          class={iconBtn}
-          disabled={!canNext || loading}
-          onclick={onnext}
-          aria-label="Next page"
+          class={cn(iconBtn, infiniteScroll && "bg-primary/10 text-primary")}
+          onclick={oninfinitescrolltoggle}
+          title={infiniteScroll ? "Disable infinite scroll (switch to pages)" : "Enable infinite scroll"}
+          aria-label="Toggle infinite scroll"
+          aria-pressed={infiniteScroll}
         >
-          <ChevronRight class="size-3.5" />
+          <Infinity class="size-3.5" />
         </button>
+
       {/if}<!-- end structure hide -->
       <button
         type="button"

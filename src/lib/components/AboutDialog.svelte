@@ -10,7 +10,7 @@
   import KeyRound from '@lucide/svelte/icons/key-round'
   import ExternalLink from '@lucide/svelte/icons/external-link'
 
-  let { open = $bindable(false) } = $props()
+  let { open = $bindable(false), onopenreport = () => {} } = $props()
 
   let appVersion = $state('—')
   let showActivate = $state(false)
@@ -183,7 +183,13 @@
 
     <!-- Footer links -->
     <div class="flex items-center justify-between border-t border-border/60 px-6 py-3">
-      <p class="text-[10px] text-muted-foreground/50">© 2025 Stroke</p>
+      <button
+        type="button"
+        onclick={() => { open = false; onopenreport() }}
+        class="inline-flex items-center gap-1 text-[10px] text-muted-foreground/40 transition-colors hover:text-foreground"
+      >
+        Report an issue
+      </button>
       <div class="flex items-center gap-3">
         <a
           href="https://github.com/broisnischal/stroke"
@@ -198,7 +204,7 @@
           GitHub
         </a>
         <a
-          href="https://stroke.app"
+          href="https://stroke.click"
           target="_blank"
           rel="noopener noreferrer"
           class="inline-flex items-center gap-1 text-[11px] text-muted-foreground/60 transition-colors hover:text-foreground"

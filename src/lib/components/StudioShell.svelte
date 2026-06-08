@@ -37,6 +37,7 @@
   import KeyboardShortcutsDialog from './KeyboardShortcutsDialog.svelte'
   import InsiderDialog from './InsiderDialog.svelte'
   import AboutDialog from './AboutDialog.svelte'
+  import ReportIssueDialog from './ReportIssueDialog.svelte'
   import UpdateDialog from './UpdateDialog.svelte'
   import StatusBar from './StatusBar.svelte'
   import DisconnectDialog from './DisconnectDialog.svelte'
@@ -205,6 +206,7 @@
   let showShortcutsModal = $state(false)
   let showInsiderModal = $state(false)
   let showAboutModal = $state(false)
+  let showReportIssueDialog = $state(false)
   let showDisconnectDialog = $state(false)
   let showAiModelSettings = $state(false)
   let commandOpen = $state(false)
@@ -383,6 +385,7 @@
   let total = $state(0)
   let queryMs = $state(0)
   let loadingRows = $state(false)
+  let loadingMore = $state(false)
   let page = $state(1)
   let pageSize = $state(DEFAULT_PAGE_SIZE)
   let rawOffset = $state(/** @type {number | null} */ (null))
@@ -394,6 +397,10 @@
   // Monotonic id so an out-of-order / superseded row fetch can't clobber a
   // newer one when the user pages rapidly.
   let _loadSeq = 0
+  // Infinite scroll — accumulated rows across all "load more" fetches.
+  let _infiniteRows = $state(/** @type {any[]} */ ([]))
+  let infiniteScroll = $state((() => { try { return localStorage.getItem('stroke:infiniteScroll') === '1' } catch { return false } })())
+  let stickyGutters = $state((() => { try { return localStorage.getItem('stroke:stickyGutters') !== '0' } catch { return true } })())
   let rowSearch = $state('')
   let rowSort = $state(/** @type {TableSort | null} */ (null))
   let rowFilters = $state(/** @type {TableFilter[]} */ ([]))
@@ -1145,6 +1152,7 @@
   }
 
   function toggleSidebar() {
+    if (!connection) return
     sidebarOpen = !sidebarOpen
     saveLayout({ navSidebarOpen: sidebarOpen })
   }
@@ -2042,11 +2050,13 @@
     if (!activeTable) {
       columns = []
       rows = []
+      _infiniteRows = []
       total = 0
       return
     }
     const seq = ++_loadSeq
     loadingRows = true
+    _infiniteRows = []
     selected = new Set()
     focusedRow = null
     inspectorRow = null
@@ -2061,14 +2071,7 @@
         sortDirection,
         filters: filtersForApi(rowFilters, columns),
       })
-      // A newer load started while this one was in flight — discard this stale
-      // result so it can't overwrite the newer page (avoids flicker + races
-      // when paging rapidly).
       if (seq !== _loadSeq) return
-      // Keep the existing columns array reference when the schema is unchanged
-      // (the common case when paging/filtering the same table). Reassigning a
-      // fresh array would needlessly invalidate every column-derived value
-      // (colMeta, pinned offsets, per-column caches) and re-render all headers.
       const nextColumns = data.columns ?? []
       if (!sameColumnShape(columns, nextColumns)) columns = nextColumns
       if (activeTable) {
@@ -2076,15 +2079,14 @@
       }
       primaryKey = data.primaryKey ?? data.primary_key ?? []
       foreignKeys = normalizeForeignKeys(data.foreignKeys ?? data.foreign_keys)
-      rows = data.rows ?? []
+      const fetched = data.rows ?? []
+      rows = fetched
+      _infiniteRows = fetched
       total = Number(data.total ?? 0)
       queryMs = Number(data.queryMs ?? data.query_ms ?? 0)
-      // Fresh dataset → tell the DataTable to reset scroll to the top.
       reloadToken++
       const maxPage = Math.max(1, Math.ceil(total / pageSize) || 1)
-      if (page > maxPage) {
-        page = maxPage
-      }
+      if (page > maxPage) page = maxPage
     } catch (e) {
       if (seq !== _loadSeq) return
       error = String(e)
@@ -2092,11 +2094,55 @@
       primaryKey = []
       foreignKeys = []
       rows = []
+      _infiniteRows = []
       total = 0
       recordActivity({ type: 'row_fetch', title: `Failed to load ${activeTable}`, schema: activeSchema, table: activeTable ?? undefined, success: false, error: String(e) })
     } finally {
       if (seq === _loadSeq) loadingRows = false
     }
+  }
+
+  async function handleLoadMore() {
+    if (!infiniteScroll || !activeTable || loadingRows || loadingMore) return
+    if (_infiniteRows.length >= total) return
+    loadingMore = true
+    try {
+      const offset = _infiniteRows.length
+      const { sortColumn, sortDirection } = sortForApi(rowSort)
+      const data = await getTableRows(activeSchema, activeTable, pageSize, offset, {
+        search: rowSearch,
+        sortColumn,
+        sortDirection,
+        filters: filtersForApi(rowFilters, columns),
+      })
+      const fetched = data.rows ?? []
+      if (!fetched.length) return
+      _infiniteRows = [..._infiniteRows, ...fetched]
+      rows = _infiniteRows
+      total = Number(data.total ?? total)
+    } catch (e) {
+      error = String(e)
+    } finally {
+      loadingMore = false
+    }
+  }
+
+  function toggleInfiniteScroll() {
+    infiniteScroll = !infiniteScroll
+    try { localStorage.setItem('stroke:infiniteScroll', infiniteScroll ? '1' : '0') } catch {}
+    if (infiniteScroll) {
+      // reset to page 1 with current pageSize so infinite starts from the top
+      page = 1; rawOffset = null
+      void loadRows()
+    } else {
+      // switching off: go back to normal page view (already on page 1)
+      void loadRows()
+    }
+  }
+
+  function toggleStickyGutters() {
+    stickyGutters = !stickyGutters
+    try { localStorage.setItem('stroke:stickyGutters', stickyGutters ? '1' : '0') } catch {}
   }
 
   /**
@@ -2673,7 +2719,8 @@
 
 <InsiderDialog bind:open={showInsiderModal} />
 
-<AboutDialog bind:open={showAboutModal} />
+<AboutDialog bind:open={showAboutModal} onopenreport={() => (showReportIssueDialog = true)} />
+<ReportIssueDialog bind:open={showReportIssueDialog} />
 
 <UpdateDialog bind:this={updateDialog} onupdatefound={() => (statusBarHasUpdate = true)} />
 
@@ -2710,6 +2757,7 @@
   onopenJsonViewer={() => { if (aiMode) exitAiMode(); openJsonTab() }}
   onopenshortcuts={() => (showShortcutsModal = true)}
   onopenabout={() => (showAboutModal = true)}
+  onopenreport={() => (showReportIssueDialog = true)}
   oncheckupdate={() => void updateDialog?.checkNow()}
   ondockerlaunch={(dbType) => { commandOpen = false; dockerInitialDb = dbType; showDockerModal = true }}
   onswitchdatabase={handleSwitchDatabase}
@@ -2737,6 +2785,7 @@
 <TitleBar
   title={connection?.database ?? connection?.filePath ?? connection?.name ?? 'studio'}
   {sidebarOpen}
+  connected={!!connection}
   {aiMode}
   {aiSidebarOpen}
   {canGoBack}
@@ -2750,8 +2799,8 @@
 <div class="flex min-h-0 flex-1 overflow-hidden">
   {#if sidebarEverOpened}
     <div
-      style={sidebarOpen && !aiMode ? '' : 'display:none'}
-      inert={!sidebarOpen || aiMode || undefined}
+      style={sidebarOpen && !aiMode && connection ? '' : 'display:none'}
+      inert={!sidebarOpen || aiMode || !connection || undefined}
     >
       <Sidebar
         connectionName={connection?.name ?? ''}
@@ -3171,6 +3220,10 @@
             onpagesizechange={(s) => void handlePageSizeChange(s)}
             onpagechange={(p) => void handlePageChange(p)}
             onlimitoffsetchange={(l, o) => void handleLimitOffsetChange(l, o)}
+            {infiniteScroll}
+            oninfinitescrolltoggle={toggleInfiniteScroll}
+            {stickyGutters}
+            onstickygutterstoggle={toggleStickyGutters}
             ondeleteselected={() => void deleteSelectedRows()}
             onexport={handleExport}
             onaddrow={() => dtBeginInsertRow?.()}
@@ -3207,6 +3260,10 @@
                 {reloadToken}
                 columnWidthsKey={activeTable ? `${activeSchema}.${activeTable}` : undefined}
                 loading={loadingRows}
+                {loadingMore}
+                {infiniteScroll}
+                onloadmore={handleLoadMore}
+                {stickyGutters}
                 saving={savingCell || deletingRows || insertingRow}
                 bind:selected
                 bind:focusedRow

@@ -6,8 +6,13 @@
   import PanelLeft     from '@lucide/svelte/icons/panel-left'
   import Sparkles      from '@lucide/svelte/icons/sparkles'
   import MessageSquare from '@lucide/svelte/icons/message-square'
+  import X             from '@lucide/svelte/icons/x'
+  import KeyRound      from '@lucide/svelte/icons/key-round'
   import { cn } from '$lib/utils.js'
   import { detectOs } from '$lib/platform.js'
+  import { isTrialActive, licenseStatus } from '$lib/stores/license.js'
+  import LicenseActivation from './LicenseActivation.svelte'
+  import * as Dialog from '$lib/components/ui/dialog/index.js'
 
   const isMac = typeof navigator !== 'undefined' && detectOs() === 'macos'
   const mod   = isMac ? '⌘' : 'Ctrl'
@@ -17,6 +22,7 @@
     canGoBack = false,
     canGoForward = false,
     sidebarOpen = true,
+    connected = false,
     aiMode = false,
     aiSidebarOpen = false,
     ongoback          = () => {},
@@ -29,6 +35,12 @@
   let maximized  = $state(false)
   let fullscreen = $state(false)
   let isTauri    = $state(false)
+  let showActivationDialog = $state(false)
+
+  const trialDays = $derived(
+    $licenseStatus?.status === 'Trial' ? $licenseStatus.days_remaining : 0
+  )
+  const trialUrgent = $derived(trialDays <= 3)
 
   onMount(() => {
     isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
@@ -61,7 +73,7 @@
   async function winToggleFullscreen() { try { await getCurrentWindow().setFullscreen(!fullscreen) } catch {} }
   async function winToggleMaximize()   { try { await getCurrentWindow().toggleMaximize()           } catch {} }
 
-  const iconBtn = 'inline-flex size-[22px] items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-white/[0.07] hover:text-muted-foreground'
+  const iconBtn = 'inline-flex size-[24px] items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-white/[0.07] hover:text-muted-foreground'
 </script>
 
 {#if isTauri && !fullscreen}
@@ -70,7 +82,7 @@
     OVERLAY (z-10) which is NOT marked data-tauri-drag-region, so Tauri's
     drag intercept never sees pointer events on the buttons.
   -->
-  <div class="studio-chrome relative flex h-[30px] shrink-0 border-b border-border/30 bg-background select-none" data-studio-chrome>
+  <div class="studio-chrome relative flex h-[38px] shrink-0 border-b border-border/40 bg-background select-none" data-studio-chrome>
 
     <!-- ── Drag underlay ──────────────────────────────────────────── -->
     <div
@@ -80,7 +92,7 @@
       ondblclick={winToggleMaximize}
     ></div>
 
-    <!-- ── Button overlay — pointer-events-none so background clicks pass to drag underlay ── -->
+    <!-- ── Button overlay ── -->
     <div class="pointer-events-none relative z-10 flex h-full w-full items-center">
 
       <!-- Traffic lights -->
@@ -108,39 +120,47 @@
         </button>
       </div>
 
-      <!-- Sidebar toggle -->
+      <!-- Divider -->
+      <div class="mx-2.5 h-[14px] w-px shrink-0 bg-border/30"></div>
+
+      <!-- Sidebar toggle — disabled when not connected -->
       <button
         type="button"
-        class={cn('pointer-events-auto ml-2 shrink-0', iconBtn, !sidebarOpen && 'bg-white/[0.05] text-foreground/60')}
+        class={cn(
+          'pointer-events-auto shrink-0',
+          iconBtn,
+          !connected ? 'opacity-25 !pointer-events-none' : !sidebarOpen && 'bg-white/[0.05] text-foreground/50',
+        )}
         onclick={ontogglesidebar}
-        title={sidebarOpen ? `Hide sidebar (${mod}B)` : `Show sidebar (${mod}B)`}
+        disabled={!connected}
+        title={connected ? (sidebarOpen ? `Hide sidebar (${mod}B)` : `Show sidebar (${mod}B)`) : 'No active connection'}
       >
-        <PanelLeft class="size-3" />
+        <PanelLeft class="size-[13px]" />
       </button>
 
-      <!-- Back / Forward navigation -->
+      <!-- Back / Forward -->
       <button
         type="button"
-        class={cn('pointer-events-auto ml-0.5 shrink-0', iconBtn, !canGoBack && 'opacity-25 !pointer-events-none')}
+        class={cn('pointer-events-auto ml-0.5 shrink-0', iconBtn, !canGoBack && 'opacity-20 !pointer-events-none')}
         onclick={ongoback}
         disabled={!canGoBack}
         title="Go back"
       >
-        <ChevronLeft class="size-3" />
+        <ChevronLeft class="size-[13px]" />
       </button>
       <button
         type="button"
-        class={cn('pointer-events-auto shrink-0', iconBtn, !canGoForward && 'opacity-25 !pointer-events-none')}
+        class={cn('pointer-events-auto shrink-0', iconBtn, !canGoForward && 'opacity-20 !pointer-events-none')}
         onclick={ongoforward}
         disabled={!canGoForward}
         title="Go forward"
       >
-        <ChevronRight class="size-3" />
+        <ChevronRight class="size-[13px]" />
       </button>
 
-      <!-- Center title (pointer-events-none — passes clicks through to drag underlay) -->
+      <!-- Center title -->
       <div class="pointer-events-none absolute inset-x-0 flex items-center justify-center">
-        <span class="font-mono text-[11px] font-medium tracking-wide text-muted-foreground/40 lowercase select-none">
+        <span class="font-mono text-[11px] font-medium tracking-widest text-muted-foreground/30 lowercase select-none">
           {title}
         </span>
       </div>
@@ -148,12 +168,32 @@
       <!-- Spacer -->
       <div class="min-w-0 flex-1"></div>
 
-      <!-- Right: Agent + Chat -->
-      <div class="pointer-events-auto mr-2 flex shrink-0 items-center gap-0.5">
+      <!-- Right: trial pill + Agent + Chat -->
+      <div class="pointer-events-auto mr-3 flex shrink-0 items-center gap-1">
+
+        <!-- Trial pill — shown only during active trial -->
+        {#if $isTrialActive}
+          <button
+            type="button"
+            onclick={() => (showActivationDialog = true)}
+            class={cn(
+              'flex h-[22px] items-center gap-1.5 rounded px-2.5 text-[10px] font-semibold transition-all',
+              trialUrgent
+                ? 'border border-amber-500/40 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20'
+                : 'border border-border/50 bg-muted/30 text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+            )}
+            title="Activate license"
+          >
+            <span class={cn('size-1.5 rounded-full', trialUrgent ? 'bg-amber-400' : 'bg-muted-foreground/50')}></span>
+            {trialDays}d trial
+          </button>
+        {/if}
+
+        <!-- Agent mode -->
         <button
           type="button"
           class={cn(
-            'flex h-[20px] items-center gap-1 rounded px-2 text-[11px] font-medium transition-colors',
+            'flex h-[22px] items-center gap-1 rounded px-2 text-[11px] font-medium transition-colors',
             aiMode
               ? 'bg-primary/15 text-primary hover:bg-primary/20'
               : 'text-muted-foreground/50 hover:bg-white/[0.07] hover:text-muted-foreground',
@@ -161,23 +201,53 @@
           onclick={ontoggleaimode}
           title={aiMode ? `Exit agent mode (${mod}⇧E)` : `Enter agent mode (${mod}⇧E)`}
         >
-          <Sparkles class="size-[10px]" />
+          <Sparkles class="size-[11px]" />
           <span>Agent</span>
         </button>
 
+        <!-- Chat sidebar -->
         <button
           type="button"
           class={cn(iconBtn, aiSidebarOpen && 'bg-white/[0.05] text-foreground/60')}
           onclick={ontoggleaisidebar}
           title={aiSidebarOpen ? `Close chat (${mod}I)` : `Open chat (${mod}I)`}
         >
-          <MessageSquare class="size-3" />
+          <MessageSquare class="size-[13px]" />
         </button>
       </div>
 
     </div>
   </div>
 {/if}
+
+<!-- License activation dialog (from trial pill) -->
+<Dialog.Root bind:open={showActivationDialog}>
+  <Dialog.Portal>
+    <Dialog.Overlay class="fixed inset-0 z-[70] bg-background/60 backdrop-blur-sm" />
+    <Dialog.Content showCloseButton={false} class="fixed left-1/2 top-1/2 z-[71] w-full max-w-[420px] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border border-border bg-card p-0 shadow-2xl outline-none">
+      <div class="flex items-center justify-between border-b border-border/60 px-5 py-4">
+        <div class="flex items-center gap-2.5">
+          <div class="flex size-7 items-center justify-center rounded-lg bg-primary/10">
+            <KeyRound class="size-3.5 text-primary" />
+          </div>
+          <div>
+            <Dialog.Title class="text-sm font-semibold leading-none text-foreground">Activate License</Dialog.Title>
+            <Dialog.Description class="mt-0.5 text-xs text-muted-foreground">Enter your key to unlock all features.</Dialog.Description>
+          </div>
+        </div>
+        <Dialog.Close class="inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+          <X class="size-4" />
+        </Dialog.Close>
+      </div>
+      <LicenseActivation compact onactivated={() => { showActivationDialog = false }} />
+      <div class="border-t border-border/60 px-5 py-3">
+        <p class="text-xs text-muted-foreground/50">
+          No license? <a href="https://stroke.click" target="_blank" rel="noopener noreferrer" class="text-primary/70 underline-offset-2 hover:underline">stroke.click →</a>
+        </p>
+      </div>
+    </Dialog.Content>
+  </Dialog.Portal>
+</Dialog.Root>
 
 <style>
   .traffic-group { pointer-events: auto; }

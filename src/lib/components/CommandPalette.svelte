@@ -15,6 +15,7 @@
   import ArrowLeftRight from '@lucide/svelte/icons/arrow-left-right'
   import ArrowDownToLine from '@lucide/svelte/icons/arrow-down-to-line'
   import Info           from '@lucide/svelte/icons/info'
+  import Bug            from '@lucide/svelte/icons/bug'
   import History        from '@lucide/svelte/icons/history'
   import Bookmark       from '@lucide/svelte/icons/bookmark'
   import ShieldCheck    from '@lucide/svelte/icons/shield-check'
@@ -63,6 +64,7 @@
     onopenJsonViewer = () => {},
     onopenshortcuts = () => {},
     onopenabout = () => {},
+    onopenreport = () => {},
     oncheckupdate = () => {},
     /** @param {'postgres'|'mysql'} dbType */
     ondockerlaunch = (dbType) => {},
@@ -398,6 +400,10 @@
               <Command.Item value="about license version info app" onSelect={() => run(onopenabout)}>
                 <Info class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">About Stroke</span>
+              </Command.Item>
+              <Command.Item value="report issue bug crash problem feedback github" onSelect={() => run(onopenreport)}>
+                <Bug class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">Report an issue</span>
               </Command.Item>
               <Command.Item value="check for updates upgrade version" onSelect={() => run(oncheckupdate)}>
                 <ArrowDownToLine class="size-4 shrink-0 opacity-60" />
