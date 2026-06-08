@@ -64,3 +64,16 @@ export async function deactivateLicense() {
     return { ok: false, error: String(e) }
   }
 }
+
+/**
+ * Run the daily phone-home check. Skips network call if checked <24h ago.
+ * Deletes the local license and updates the store if the server reports revocation.
+ */
+export async function runLicenseCheck() {
+  try {
+    const status = await invoke('run_license_check')
+    licenseStatus.set(/** @type {LicenseStatus} */ (status))
+  } catch {
+    // Non-critical — ignore errors, license state is already loaded
+  }
+}

@@ -4,6 +4,7 @@
     licenseStatus,
     isBlocked,
     refreshLicenseStatus,
+    runLicenseCheck,
   } from '$lib/stores/license.js'
   import LicenseActivation from './LicenseActivation.svelte'
   import Database from '@lucide/svelte/icons/database'
@@ -13,7 +14,11 @@
 
   let { children } = $props()
 
-  onMount(() => refreshLicenseStatus())
+  onMount(async () => {
+    await refreshLicenseStatus()
+    // Run daily phone-home in background — doesn't block app startup
+    runLicenseCheck()
+  })
 </script>
 
 <!-- Loading — pass through -->

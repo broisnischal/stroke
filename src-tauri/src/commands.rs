@@ -386,8 +386,37 @@ pub fn check_license_status(app: tauri::AppHandle) -> crate::license::LicenseSta
 }
 
 #[tauri::command]
-pub fn activate_license(app: tauri::AppHandle, key: String) -> Result<serde_json::Value, String> {
+pub async fn activate_license(
+    app: tauri::AppHandle,
+    key: String,
+) -> Result<serde_json::Value, String> {
+    // 1. Verify signature locally (works offline, catches forged keys)
     let parsed = crate::license::verify_key(&key)?;
+    let device_id = crate::license::device_id();
+
+    // 2. Register with server. Blocks on seat_limit_exceeded / revoked.
+    //    On network failure api_activate returns Ok(None) — we allow offline activation.
+    match crate::license::api_activate(&key, &device_id).await {
+        Ok(None) => {} // offline — proceed with local-only activation
+        Ok(Some(_)) => {} // server accepted
+        Err(e) => {
+            // Convert server error codes to user-friendly messages
+            let msg = match e.as_str() {
+                "seat_limit_exceeded" => "Seat limit reached. Deactivate another device first.",
+                "revoked" => "This license key has been revoked.",
+                "expired" => "This license key has expired.",
+                "not_found" => "License key not found.",
+                _ => return Err(e),
+            };
+            return Err(msg.to_string());
+        }
+    }
+
+    // 3. Save locally
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let lic = crate::license::LicenseFile {
         version: 1,
@@ -396,11 +425,9 @@ pub fn activate_license(app: tauri::AppHandle, key: String) -> Result<serde_json
         plan: parsed.plan.clone(),
         issued_at: parsed.issued_at,
         expires_at: parsed.expires_at,
-        device_id: crate::license::device_id(),
-        activated_at: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0),
+        device_id,
+        activated_at: now,
+        last_check_at: now,
     };
     crate::license::save_license(&dir, &lic)?;
     Ok(serde_json::json!({
@@ -412,9 +439,51 @@ pub fn activate_license(app: tauri::AppHandle, key: String) -> Result<serde_json
 }
 
 #[tauri::command]
-pub fn deactivate_license(app: tauri::AppHandle) -> Result<(), String> {
+pub async fn deactivate_license(app: tauri::AppHandle) -> Result<(), String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    // Best-effort server deactivation (release the seat)
+    if let Some(lic) = crate::license::load_license(&dir) {
+        crate::license::api_deactivate(&lic.key, &lic.device_id).await;
+    }
     crate::license::delete_license(&dir)
+}
+
+/// Runs the daily license phone-home check.
+/// If the server reports the license as revoked, deletes the local file and
+/// returns the new status (TrialExpired or Trial).
+/// Safe to call on every startup — skips the network call if checked <24h ago.
+#[tauri::command]
+pub async fn run_license_check(
+    app: tauri::AppHandle,
+) -> crate::license::LicenseStatus {
+    let dir = match app.path().app_data_dir() {
+        Ok(d) => d,
+        Err(e) => return crate::license::LicenseStatus::Error { message: e.to_string() },
+    };
+
+    if let Some(mut lic) = crate::license::load_license(&dir) {
+        if crate::license::needs_daily_check(&lic) {
+            match crate::license::api_check(&lic.key, &lic.device_id).await {
+                Some(true) => {
+                    // Still valid — stamp the check time
+                    lic.last_check_at = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    let _ = crate::license::save_license(&dir, &lic);
+                }
+                Some(false) => {
+                    // Server says invalid/revoked — remove local license
+                    let _ = crate::license::delete_license(&dir);
+                }
+                None => {
+                    // Network unreachable — skip, will retry next startup
+                }
+            }
+        }
+    }
+
+    crate::license::check_status(&dir)
 }
 
 // ── License debug helpers (debug builds only) ─────────────────────────────────

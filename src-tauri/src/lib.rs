@@ -191,6 +191,7 @@ pub fn run() {
             commands::check_license_status,
             commands::activate_license,
             commands::deactivate_license,
+            commands::run_license_check,
             commands::init_sample_db,
             metrics::get_app_metrics,
             metrics::set_process_title,

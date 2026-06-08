@@ -1609,6 +1609,12 @@
     const el = e.currentTarget
     if (el.scrollTop !== _scrollTop) _scrollTop = el.scrollTop
     if (el.scrollLeft !== _scrollLeft) _scrollLeft = el.scrollLeft
+    // While editing, cancel any pending rAF and draw immediately so the canvas
+    // stays in sync with the DOM overlay — avoids the 1-frame drift.
+    if (editingCell && _ctx) {
+      if (_drawRafId) { cancelAnimationFrame(_drawRafId); _drawRafId = 0 }
+      draw()
+    }
     // Infinite scroll — trigger load when within 3 rows of the bottom
     if (infiniteScroll && !loadingMore) {
       const threshold = ROW_HEIGHT * 3
@@ -1960,6 +1966,7 @@
     const AMBER_FG = 'rgba(251, 191, 36, 0.85)'
     const BLUE_FG = 'rgba(96, 165, 250, 0.8)'
 
+    ctx.imageSmoothingEnabled = false
     ctx.clearRect(0, 0, W, H)
     ctx.fillStyle = cPanel
     ctx.fillRect(0, 0, W, H)
