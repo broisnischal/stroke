@@ -411,11 +411,6 @@ pub async fn api_deactivate(key: &str, device_id: &str) {
         .await;
 }
 
-/// Returns true if the license hasn't been checked in the last 24 hours.
-pub fn needs_daily_check(lic: &LicenseFile) -> bool {
-    now_secs().saturating_sub(lic.last_check_at) >= 86_400
-}
-
 // ── High-level status check ───────────────────────────────────────────────────
 
 pub fn check_status(data_dir: &Path) -> LicenseStatus {

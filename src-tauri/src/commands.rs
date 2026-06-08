@@ -448,10 +448,11 @@ pub async fn deactivate_license(app: tauri::AppHandle) -> Result<(), String> {
     crate::license::delete_license(&dir)
 }
 
-/// Runs the daily license phone-home check.
-/// If the server reports the license as revoked, deletes the local file and
-/// returns the new status (TrialExpired or Trial).
-/// Safe to call on every startup — skips the network call if checked <24h ago.
+/// Validates the license against the server on every launch.
+/// - valid: true  → update last_check_at, return Valid
+/// - valid: false → delete local license, return Trial/TrialExpired
+/// - network error → fall back to local signature (offline grace)
+/// - no license → local trial check only (no network call)
 #[tauri::command]
 pub async fn run_license_check(
     app: tauri::AppHandle,
@@ -462,23 +463,22 @@ pub async fn run_license_check(
     };
 
     if let Some(mut lic) = crate::license::load_license(&dir) {
-        if crate::license::needs_daily_check(&lic) {
-            match crate::license::api_check(&lic.key, &lic.device_id).await {
-                Some(true) => {
-                    // Still valid — stamp the check time
-                    lic.last_check_at = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0);
-                    let _ = crate::license::save_license(&dir, &lic);
-                }
-                Some(false) => {
-                    // Server says invalid/revoked — remove local license
-                    let _ = crate::license::delete_license(&dir);
-                }
-                None => {
-                    // Network unreachable — skip, will retry next startup
-                }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        match crate::license::api_check(&lic.key, &lic.device_id).await {
+            Some(true) => {
+                lic.last_check_at = now;
+                let _ = crate::license::save_license(&dir, &lic);
+            }
+            Some(false) => {
+                // Server says invalid/revoked — remove local license
+                let _ = crate::license::delete_license(&dir);
+            }
+            None => {
+                // Network unreachable — use local signature as offline grace
             }
         }
     }
