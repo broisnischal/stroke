@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import * as monaco from 'monaco-editor'
+  import { configureMonacoWorkers } from '$lib/monaco-env.js'
   import { defineStrokeMonacoThemes, monacoThemeId, readEditorFontOptions } from '$lib/monaco-themes.js'
   import { normalizeThemeId } from '$lib/themes/registry.js'
   import Table2 from '@lucide/svelte/icons/table-2'
@@ -95,6 +96,7 @@
   }
 
   onMount(() => {
+    configureMonacoWorkers()
     defineStrokeMonacoThemes()
     if (!container) return
 

@@ -1993,11 +1993,13 @@
     }
     ctx.restore()
 
-    // ── Header (pinned) ────────────────────────────────────────────────────
-    drawHeaderRow(ctx, {
-      W, cPanel, cFg, cMuted, cGrid, cBorder, cMutedBg, cAccent, cPrimary, cRing,
-      AMBER, AMBER_FG, BLUE_FG, usedW,
-    })
+    // ── Header (pinned) — skip entirely when no columns visible ───────────
+    if (visibleColumns.length > 0) {
+      drawHeaderRow(ctx, {
+        W, cPanel, cFg, cMuted, cGrid, cBorder, cMutedBg, cAccent, cPrimary, cRing,
+        AMBER, AMBER_FG, BLUE_FG, usedW,
+      })
+    }
   }
 
   /** @param {CanvasRenderingContext2D} ctx */
@@ -2261,10 +2263,10 @@
 
   /** @param {CanvasRenderingContext2D} ctx */
   function drawHeaderRow(ctx, c) {
-    // Subtle background to visually distinguish the header from body rows.
+    // Distinct header background — panel base + muted overlay for clear separation from body rows.
     ctx.fillStyle = c.cPanel
     ctx.fillRect(0, 0, c.W, HEADER_H)
-    ctx.fillStyle = withAlpha(c.cMutedBg, 0.18)
+    ctx.fillStyle = withAlpha(c.cMutedBg, 0.38)
     ctx.fillRect(0, 0, c.W, HEADER_H)
 
     // Non-pinned headers.
@@ -2285,6 +2287,8 @@
     if (gutterWidth > 0) {
       const gx0 = stickyGutters ? 0 : -_scrollLeft
       ctx.fillStyle = c.cPanel
+      ctx.fillRect(gx0, 0, gutterWidth, HEADER_H)
+      ctx.fillStyle = withAlpha(c.cMutedBg, 0.38)
       ctx.fillRect(gx0, 0, gutterWidth, HEADER_H)
       let gx = gx0
       if (showRowExpand) {
@@ -2331,7 +2335,7 @@
     }
 
     // Header bottom border
-    ctx.strokeStyle = withAlpha(c.cBorder, 0.35)
+    ctx.strokeStyle = withAlpha(c.cBorder, 0.65)
     ctx.lineWidth = 1
     ctx.beginPath(); ctx.moveTo(0, HEADER_H - 0.5); ctx.lineTo(c.W, HEADER_H - 0.5); ctx.stroke()
   }
@@ -2346,7 +2350,7 @@
     // backing so the columns sliding underneath don't bleed through.
     if (col.pinned) {
       ctx.fillStyle = c.cPanel; ctx.fillRect(x, 0, w, HEADER_H)
-      ctx.fillStyle = withAlpha(c.cMutedBg, 0.18); ctx.fillRect(x, 0, w, HEADER_H)
+      ctx.fillStyle = withAlpha(c.cMutedBg, 0.38); ctx.fillRect(x, 0, w, HEADER_H)
     }
 
     // Background tint.
@@ -2357,7 +2361,7 @@
     }
 
     // Right grid separator.
-    ctx.strokeStyle = withAlpha(c.cGrid, 0.7)
+    ctx.strokeStyle = withAlpha(c.cBorder, 0.25)
     ctx.lineWidth = 1
     ctx.beginPath(); ctx.moveTo(x + w - 0.5, 0); ctx.lineTo(x + w - 0.5, HEADER_H); ctx.stroke()
 
@@ -2377,7 +2381,7 @@
 
     // Column name — muted foreground for a cleaner header feel.
     ctx.font = _fonts.header
-    ctx.fillStyle = withAlpha(c.cFg, sorted ? 1 : 0.7)
+    ctx.fillStyle = withAlpha(c.cFg, sorted ? 1 : 0.8)
     const nameMaxW = w - CELL_PAD_X - sortReserve - badgeW - 8
     const name = truncText(ctx, col.name, Math.max(0, nameMaxW))
     ctx.fillText(name, x + CELL_PAD_X, cy + 0.5)
