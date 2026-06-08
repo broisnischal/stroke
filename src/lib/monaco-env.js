@@ -1,3 +1,4 @@
+import * as monaco from 'monaco-editor'
 import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
 import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker'
 import cssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker'
@@ -22,4 +23,13 @@ export function configureMonacoWorkers() {
       return new editorWorker()
     },
   }
+
+  // Disable external schema fetching — network requests fail in Tauri desktop env.
+  // Still validates JSON syntax; just no $schema-driven remote schema downloads.
+  monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
+    validate: true,
+    allowComments: false,
+    enableSchemaRequest: false,
+    schemas: [],
+  })
 }

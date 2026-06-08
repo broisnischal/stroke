@@ -26,16 +26,16 @@ export function monacoThemeId(themeId) {
   return monacoThemeName(def?.isDark ? 'dark' : 'light')
 }
 
-/** Read editor font metrics from CSS (falls back to 16 / 26). */
+/** Read editor font metrics from CSS (falls back to 13 / 22). */
 export function readEditorFontOptions() {
   if (typeof document === 'undefined') {
-    return { fontSize: 16, lineHeight: 26 }
+    return { fontSize: 13, lineHeight: 22 }
   }
   const root = document.documentElement
   const size = parseFloat(getComputedStyle(root).getPropertyValue('--editor-font-size'))
   const line = parseFloat(getComputedStyle(root).getPropertyValue('--editor-line-height'))
   return {
-    fontSize: Number.isFinite(size) && size >= 12 ? size : 16,
-    lineHeight: Number.isFinite(line) && line >= 16 ? line : 26,
+    fontSize: Number.isFinite(size) && size >= 10 ? size : 13,
+    lineHeight: Number.isFinite(line) && line >= 14 ? line : 22,
   }
 }

@@ -12,8 +12,8 @@
   --radius: 0.375rem;
   --app-zoom: 1;
   --app-font-size: 14px;
-  --editor-font-size: 16px;
-  --editor-line-height: 26px;
+  --editor-font-size: 13px;
+  --editor-line-height: 22px;
 }
 
 /* OS-native border-radius conventions */

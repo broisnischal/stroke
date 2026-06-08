@@ -608,38 +608,30 @@
 
     <!-- Right: perf + pagination -->
     <div
-      class="order-2 ms-auto flex shrink-0 items-center gap-1 md:order-3 max-lg:max-w-[calc(100%-5rem)] max-lg:overflow-x-auto max-lg:[scrollbar-width:none] max-lg:[&::-webkit-scrollbar]:hidden"
+      class="order-2 ms-auto flex shrink-0 items-center gap-1.5 md:order-3 max-lg:max-w-[calc(100%-5rem)] max-lg:overflow-x-auto max-lg:[scrollbar-width:none] max-lg:[&::-webkit-scrollbar]:hidden"
     >
       {#if tableViewMode !== "structure"}
-        {#if queryMs > 0}
-          <span
-            class="font-mono text-ui-xs text-muted-foreground tabular-nums"
-            data-font="mono"
-            title="Query execution time">{queryMs}ms</span
-          >
-        {/if}
         {#if infiniteScroll}
           <!-- Infinite scroll: show loaded count -->
           {#if total > 0}
-            <span class="font-mono text-ui-xs text-muted-foreground tabular-nums"
+            <span class="font-mono text-ui-xs text-muted-foreground/70 tabular-nums"
               title="{to.toLocaleString('en-US')} of {total.toLocaleString('en-US')} rows loaded">
               {formatCompactCount(to)} / {formatCompactCount(total)}
+              {#if queryMs > 0}<span class="text-muted-foreground/35"> · {queryMs}ms</span>{/if}
             </span>
           {/if}
         {:else}
           {#if total > 0}
             <span
-              class="font-mono text-ui-xs text-muted-foreground tabular-nums"
-              title="{from.toLocaleString('en-US')}–{to.toLocaleString(
-                'en-US',
-              )} of {total.toLocaleString('en-US')} rows"
-              >{formatCompactCount(from)}–{formatCompactCount(to)} of {total.toLocaleString(
-                "en-US",
-              )}</span
+              class="font-mono text-ui-xs text-muted-foreground/70 tabular-nums"
+              title="{from.toLocaleString('en-US')}–{to.toLocaleString('en-US')} of {total.toLocaleString('en-US')} rows{queryMs > 0 ? ` · ${queryMs}ms` : ''}"
+            >{formatCompactCount(from)}–{formatCompactCount(to)} of {total.toLocaleString("en-US")}{#if queryMs > 0}<span class="text-muted-foreground/35"> · {queryMs}ms</span>{/if}</span
             >
+          {:else if queryMs > 0}
+            <span class="font-mono text-ui-xs text-muted-foreground/35 tabular-nums">{queryMs}ms</span>
           {/if}
 
-          <span class="mx-0.5 h-4 w-px bg-border"></span>
+          <span class="mx-0.5 h-4 w-px bg-border/60"></span>
 
           <Select.Root
             type="single"
@@ -688,7 +680,7 @@
           </Select.Root>
 
           <span
-            class="hidden text-ui-xs text-muted-foreground tabular-nums sm:inline"
+            class="hidden text-ui-xs text-muted-foreground/50 tabular-nums sm:inline"
             title={pageCount.toLocaleString("en-US")}
             >of {formatCompactCount(pageCount)}</span
           >
@@ -713,7 +705,7 @@
           </button>
         {/if}<!-- end infiniteScroll branch -->
 
-        <span class="mx-0.5 h-4 w-px bg-border"></span>
+        <span class="mx-0.5 h-4 w-px bg-border/60"></span>
 
         <!-- Gutter sticky toggle — hidden for now
         <button

@@ -14,6 +14,7 @@
   import LayoutDashboard from '@lucide/svelte/icons/layout-dashboard'
   import GitBranch from '@lucide/svelte/icons/git-branch'
   import History from '@lucide/svelte/icons/history'
+  import Plus from '@lucide/svelte/icons/plus'
   import { createHotkey, createHotkeySequence } from '@tanstack/svelte-hotkeys'
   import { cycleTheme, restorePreviousTheme, isCurrentThemeDark } from '$lib/stores/settings.js'
   import { pickRandomTip } from '$lib/insider-tips.js'
@@ -2858,20 +2859,33 @@
 
   <main class="flex min-h-0 min-w-0 flex-1 flex-col bg-panel" data-studio-region="main">
     {#if !connection}
-      <div class="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
-        <div class="flex size-12 items-center justify-center rounded-lg bg-muted">
-          <Database class="size-6 text-muted-foreground" />
+      <div class="relative flex flex-1 flex-col items-center justify-center gap-6 p-8 text-center">
+        <!-- Ambient glow behind the icon -->
+        <div
+          class="pointer-events-none absolute left-1/2 top-1/2 size-72 -translate-x-1/2 -translate-y-[68%]"
+          style="background: radial-gradient(circle, color-mix(in oklch, var(--primary) 9%, transparent), transparent 68%);"
+        ></div>
+
+        <div class="relative flex size-16 items-center justify-center rounded-2xl border border-border bg-gradient-to-b from-muted/70 to-muted/20 shadow-sm">
+          <Database class="size-7 text-foreground/80" />
         </div>
-        <div class="flex flex-col gap-1">
-          <h1 class="text-base font-medium">Stroke</h1>
-          <p class="max-w-sm text-ui text-muted-foreground">
-            Connect to PostgreSQL to browse schemas and table data.
+
+        <div class="relative flex max-w-sm flex-col gap-1.5">
+          <h1 class="text-xl font-semibold tracking-tight text-foreground">Connect a database</h1>
+          <p class="text-ui text-muted-foreground">
+            Add a PostgreSQL, MySQL, SQLite, or Cloudflare D1 connection to browse schemas, edit rows, and run SQL.
           </p>
         </div>
-        <Button type="button" onclick={() => (showConnectionModal = true)}>Add connection</Button>
-        <p class="text-ui-xs text-muted-foreground">
-          <kbd>⌘K</kbd> command menu
-        </p>
+
+        <div class="relative flex flex-col items-center gap-3">
+          <Button type="button" onclick={() => (showConnectionModal = true)}>
+            <Plus class="size-4" />
+            Add connection
+          </Button>
+          <p class="text-ui-xs text-muted-foreground">
+            or press <kbd>⌘K</kbd> for the command menu
+          </p>
+        </div>
       </div>
     {:else}
       <!-- Full-window AI chat — kept mounted after first open so state is preserved -->
