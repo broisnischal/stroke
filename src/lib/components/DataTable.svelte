@@ -1611,9 +1611,13 @@
     if (el.scrollLeft !== _scrollLeft) _scrollLeft = el.scrollLeft
     // While editing, cancel any pending rAF and draw immediately so the canvas
     // stays in sync with the DOM overlay — avoids the 1-frame drift.
+    // Immediately re-arm _drawRafId with a self-clearing rAF so the Svelte
+    // effect's scheduleDraw() call (which runs as a microtask after this handler
+    // returns) sees a non-zero id and skips — preventing a second draw this frame.
     if (editingCell && _ctx) {
-      if (_drawRafId) { cancelAnimationFrame(_drawRafId); _drawRafId = 0 }
+      if (_drawRafId) cancelAnimationFrame(_drawRafId)
       draw()
+      _drawRafId = requestAnimationFrame(() => { _drawRafId = 0 })
     }
     // Infinite scroll — trigger load when within 3 rows of the bottom
     if (infiniteScroll && !loadingMore) {
@@ -2461,7 +2465,10 @@
       if (_ctx) draw()
     })
   }
-  onDestroy(() => { if (_drawRafId) cancelAnimationFrame(_drawRafId) })
+  onDestroy(() => {
+    if (_drawRafId) cancelAnimationFrame(_drawRafId)
+    if (_resizeRafId) cancelAnimationFrame(_resizeRafId)
+  })
 
   // Layout / sizing effect — resize the backing store when geometry or viewport changes.
   $effect(() => {
