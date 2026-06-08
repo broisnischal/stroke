@@ -90,9 +90,6 @@
     /** Infinite scroll mode — hides pagination, shows rows-loaded counter */
     infiniteScroll = false,
     oninfinitescrolltoggle = () => {},
-    /** Freeze the select + expand gutter columns on horizontal scroll */
-    stickyGutters = true,
-    onstickygutterstoggle = () => {},
   } = $props();
 
   /** @type {HTMLInputElement | null} */
@@ -706,19 +703,6 @@
         {/if}<!-- end infiniteScroll branch -->
 
         <span class="mx-0.5 h-4 w-px bg-border/60"></span>
-
-        <!-- Gutter sticky toggle — hidden for now
-        <button
-          type="button"
-          class={cn(iconBtn, stickyGutters && "bg-primary/10 text-primary")}
-          onclick={onstickygutterstoggle}
-          title={stickyGutters ? "Unfreeze select & expand columns" : "Freeze select & expand columns"}
-          aria-label="Toggle sticky gutter columns"
-          aria-pressed={stickyGutters}
-        >
-          <PanelLeft class="size-3.5" />
-        </button>
-        -->
 
         <!-- Infinite scroll toggle -->
         <button

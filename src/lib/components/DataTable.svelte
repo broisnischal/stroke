@@ -187,8 +187,6 @@
     loadingMore = false,
     /** Called when the user scrolls near the bottom in infinite scroll mode. */
     onloadmore = /** @type {() => void} */ (() => {}),
-    /** When true the select + expand gutter columns are frozen at the left edge. */
-    stickyGutters = $bindable(true),
   } = $props();
 
   /**
@@ -1978,8 +1976,8 @@
     const usedW = Math.max(0, Math.min(W, geom.totalWidth - _scrollLeft))
     const navName = focusedCol !== null ? navigableColumns[focusedCol]?.name : null
 
-    // Frozen left region. Gutter only counts when sticky; pinned cols always.
-    let frozenW = stickyGutters ? gutterWidth : 0
+    // Frozen left region. Pinned cols only (gutters scroll with content).
+    let frozenW = 0
     for (const col of geom.cols) if (col.pinned) frozenW += col.w
 
     // ── Body ─────────────────────────────────────────────────────────────
@@ -2044,8 +2042,7 @@
       drawCell(ctx, idx, col, dx, ry, rh, c, true)
     }
 
-    // Gutters: sticky = always at viewport left; non-sticky = scroll with content.
-    drawRowGutters(ctx, idx, stickyGutters ? 0 : -_scrollLeft, ry, rh, c)
+    drawRowGutters(ctx, idx, -_scrollLeft, ry, rh, c)
 
     // Row ring when focused + selected.
     if (focusedRow === idx && isSel) {
@@ -2131,7 +2128,7 @@
     }
     // Gutter separator.
     if (gutterWidth > 0) {
-      const gex = (stickyGutters ? gutterWidth : gutterWidth - _scrollLeft) - 0.5
+      const gex = (gutterWidth - _scrollLeft) - 0.5
       if (gex > 0 && gex < vw) { ctx.moveTo(gex, ry); ctx.lineTo(gex, ry + rh) }
     }
     // Bottom row line.
@@ -2294,9 +2291,8 @@
       drawHeaderCell(ctx, col, colDrawnX(col, geom, _scrollLeft), c)
     }
 
-    // Gutter headers — sticky = viewport left; non-sticky = scroll with content.
     if (gutterWidth > 0) {
-      const gx0 = stickyGutters ? 0 : -_scrollLeft
+      const gx0 = -_scrollLeft
       ctx.fillStyle = c.cPanel
       ctx.fillRect(gx0, 0, gutterWidth, HEADER_H)
       ctx.fillStyle = withAlpha(c.cMutedBg, 0.38)
