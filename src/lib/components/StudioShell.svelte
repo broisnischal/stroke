@@ -401,8 +401,7 @@
   // Infinite scroll — accumulated rows across all "load more" fetches.
   let _infiniteRows = $state(/** @type {any[]} */ ([]))
   let infiniteScroll = $state((() => { try { return localStorage.getItem('stroke:infiniteScroll') === '1' } catch { return false } })())
-  let stickyGutters = $state((() => { try { return localStorage.getItem('stroke:stickyGutters') !== '0' } catch { return true } })())
-  let rowSearch = $state('')
+let rowSearch = $state('')
   let rowSort = $state(/** @type {TableSort | null} */ (null))
   let rowFilters = $state(/** @type {TableFilter[]} */ ([]))
   let filterBarOpen = $state(false)
@@ -2141,12 +2140,7 @@
     }
   }
 
-  function toggleStickyGutters() {
-    stickyGutters = !stickyGutters
-    try { localStorage.setItem('stroke:stickyGutters', stickyGutters ? '1' : '0') } catch {}
-  }
-
-  /**
+/**
    * Whether two column lists describe the same shape (name + type, in order).
    * Used to preserve the array reference across page fetches of the same table.
    * @param {any[]} a @param {any[]} b
@@ -3236,8 +3230,6 @@
             onlimitoffsetchange={(l, o) => void handleLimitOffsetChange(l, o)}
             {infiniteScroll}
             oninfinitescrolltoggle={toggleInfiniteScroll}
-            {stickyGutters}
-            onstickygutterstoggle={toggleStickyGutters}
             ondeleteselected={() => void deleteSelectedRows()}
             onexport={handleExport}
             onaddrow={() => dtBeginInsertRow?.()}
@@ -3277,7 +3269,6 @@
                 {loadingMore}
                 {infiniteScroll}
                 onloadmore={handleLoadMore}
-                {stickyGutters}
                 saving={savingCell || deletingRows || insertingRow}
                 bind:selected
                 bind:focusedRow

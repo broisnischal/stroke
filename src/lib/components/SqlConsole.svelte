@@ -775,7 +775,7 @@
                 oncharttypechange={(t) => setChartType(t)}
               />
             {:else}
-              <DataTable columns={currentDisplay.columns} rows={currentDisplay.rows} loading={activeResult.loading} stickyGutters={false} bind:selected />
+              <DataTable columns={currentDisplay.columns} rows={currentDisplay.rows} loading={activeResult.loading} bind:selected />
             {/if}
           {:else if activeResult.loading}
             <TableLoading />
