@@ -14,6 +14,11 @@
   import SquareCheck from "@lucide/svelte/icons/square-check";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import Eraser from "@lucide/svelte/icons/eraser";
+  import Code2 from "@lucide/svelte/icons/code-2";
+  import FileDown from "@lucide/svelte/icons/file-down";
+  import Download from "@lucide/svelte/icons/download";
+  import Sparkles from "@lucide/svelte/icons/sparkles";
+  import ClipboardCopy from "@lucide/svelte/icons/clipboard-copy";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Plus from "@lucide/svelte/icons/plus";
@@ -65,6 +70,10 @@
     onrecentselect = /** @type {(schema: string, table: string) => void} */ (() => {}),
     onrecentremove = /** @type {(schema: string, table: string) => void} */ (() => {}),
     onrecentclear = () => {},
+    onviewddl = /** @type {(table: string) => void} */ (() => {}),
+    onexportsql = /** @type {(table: string) => void} */ (() => {}),
+    onexportdata = /** @type {(table: string) => void} */ (() => {}),
+    ongeneratetestdata = /** @type {(table: string) => void} */ (() => {}),
   } = $props();
 
   let localFilter = $state(untrack(() => tableFilter));
@@ -622,10 +631,32 @@
                           {/if}
                         </button>
                       </ContextMenu.Trigger>
-                      <ContextMenu.Content class="w-44 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                      <ContextMenu.Content class="w-48 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                        <ContextMenu.Item onSelect={() => { navigator.clipboard.writeText(tableName) }}>
+                          <ClipboardCopy />
+                          Copy name
+                        </ContextMenu.Item>
                         <ContextMenu.Item onSelect={() => togglePin(tableName)}>
                           <PinOff />
                           Unpin table
+                        </ContextMenu.Item>
+                        <ContextMenu.Separator />
+                        <ContextMenu.Item onSelect={() => onviewddl(tableName)}>
+                          <Code2 />
+                          View DDL
+                        </ContextMenu.Item>
+                        <ContextMenu.Item onSelect={() => onexportsql(tableName)}>
+                          <FileDown />
+                          Export as SQL
+                        </ContextMenu.Item>
+                        <ContextMenu.Item onSelect={() => onexportdata(tableName)}>
+                          <Download />
+                          Export data
+                        </ContextMenu.Item>
+                        <ContextMenu.Separator />
+                        <ContextMenu.Item onSelect={() => ongeneratetestdata(tableName)}>
+                          <Sparkles />
+                          Generate test data
                         </ContextMenu.Item>
                       </ContextMenu.Content>
                     </ContextMenu.Root>
@@ -725,7 +756,11 @@
                             {/if}
                           </button>
                         </ContextMenu.Trigger>
-                        <ContextMenu.Content class="w-44 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                        <ContextMenu.Content class="w-48 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                          <ContextMenu.Item onSelect={() => { navigator.clipboard.writeText(table.name) }}>
+                            <ClipboardCopy />
+                            Copy name
+                          </ContextMenu.Item>
                           <ContextMenu.Item onSelect={() => togglePin(table.name)}>
                             {#if pinnedTables.includes(table.name)}
                               <PinOff />
@@ -743,6 +778,24 @@
                               <SquareCheck />
                               Select
                             {/if}
+                          </ContextMenu.Item>
+                          <ContextMenu.Separator />
+                          <ContextMenu.Item onSelect={() => onviewddl(table.name)}>
+                            <Code2 />
+                            View DDL
+                          </ContextMenu.Item>
+                          <ContextMenu.Item onSelect={() => onexportsql(table.name)}>
+                            <FileDown />
+                            Export as SQL
+                          </ContextMenu.Item>
+                          <ContextMenu.Item onSelect={() => onexportdata(table.name)}>
+                            <Download />
+                            Export data
+                          </ContextMenu.Item>
+                          <ContextMenu.Separator />
+                          <ContextMenu.Item onSelect={() => ongeneratetestdata(table.name)}>
+                            <Sparkles />
+                            Generate test data
                           </ContextMenu.Item>
                           <ContextMenu.Separator />
                           <ContextMenu.Item onSelect={() => openDangerDialog('truncate', table.name)}>

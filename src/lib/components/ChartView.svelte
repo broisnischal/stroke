@@ -18,6 +18,7 @@
   import BarChart2    from '@lucide/svelte/icons/bar-chart-2'
   import Plus         from '@lucide/svelte/icons/plus'
   import Search       from '@lucide/svelte/icons/search'
+  import CarbonMeterChart from './CarbonMeterChart.svelte'
 
   /** @typedef {{ name: string, dataType?: string, data_type?: string }} ColInfo */
 
@@ -140,11 +141,23 @@
   // ── Chart option ──────────────────────────────────────────────────────────
   const isDark = $derived($isCurrentThemeDark)
 
+  // Canvas renderer is faster for data charts; SVG only for small previews.
+  // Threshold at 500: below that SVG is fine, above that canvas wins noticeably.
+  const renderer = $derived(effectiveRows.length > 500 ? 'canvas' : 'svg')
+
   const option = $derived.by(() => {
     if (!xCol || effectiveRows.length === 0) return {}
     const needsY = !['histogram', 'tree'].includes(chartType)
     if (needsY && !yCol) return {}
     return buildOption({ type: chartType, columns: effectiveColumns, rows: effectiveRows, xCol, yCol: yCol || xCol, zCol: zCol || undefined, groupCol: groupCol || undefined, isDark })
+  })
+
+  const meterSpec = $derived.by(() => {
+    if (chartType !== 'meter') return null
+    const xi2 = effectiveColumns.findIndex(c => c.name === xCol)
+    const yi2 = effectiveColumns.findIndex(c => c.name === yCol)
+    const zi2 = zCol ? effectiveColumns.findIndex(c => c.name === zCol) : -1
+    return { data: effectiveRows, x_col: xi2, y_col: yi2, z_col: zi2 >= 0 ? zi2 : undefined }
   })
 
   // ── Actions ───────────────────────────────────────────────────────────────
@@ -194,8 +207,10 @@
 
   const chartable = $derived(isChartable(effectiveColumns))
 
-  const sel = 'h-7 appearance-none rounded-md border border-border/50 bg-background/60 pl-2.5 pr-7 font-mono text-ui-xs text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring/30'
-  const iconBtn = 'inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
+  const axisToken = 'relative flex h-7 items-center overflow-hidden rounded-md border border-border/40 bg-muted/20 transition-colors hover:border-border/60 focus-within:border-ring/50'
+  const axisLabel = 'shrink-0 select-none border-r border-border/30 px-2 text-ui-2xs font-semibold uppercase tracking-widest text-muted-foreground/35'
+  const axisSelect = 'h-full cursor-pointer appearance-none bg-transparent pl-2 pr-5 font-mono text-ui-xs text-foreground outline-none'
+  const iconBtn = 'inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground'
 </script>
 
 <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -222,8 +237,8 @@
           class={cn(
             'flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-ui-xs font-medium transition-colors',
             pickerOpen
-              ? 'border-ring bg-accent text-foreground'
-              : 'border-border/50 bg-background/60 text-foreground hover:bg-accent',
+              ? 'border-ring/60 bg-accent text-foreground'
+              : 'border-border/40 bg-muted/20 text-foreground hover:border-border/60 hover:bg-muted/30',
           )}
         >
           <BarChart2 class="size-3.5 shrink-0 text-muted-foreground" />
@@ -292,66 +307,58 @@
       <!-- Separator -->
       <span class="h-4 w-px shrink-0 bg-border/50"></span>
 
-      <!-- Axis pickers -->
+      <!-- Axis pickers — integrated label + select tokens -->
       {#if requiredAxes.x}
-        <div class="flex items-center gap-1">
-          <span class="text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/50">{requiredAxes.x.split(' ')[0]}</span>
-          <div class="relative">
-            <select bind:value={xCol} class={sel}>
-              {#each allCols as col (col)}<option value={col}>{col}</option>{/each}
-            </select>
-            <ChevronDown class="pointer-events-none absolute right-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/50" />
-          </div>
+        <div class={axisToken}>
+          <span class={axisLabel}>{requiredAxes.x.split(' ')[0]}</span>
+          <select bind:value={xCol} class={axisSelect}>
+            {#each allCols as col (col)}<option value={col}>{col}</option>{/each}
+          </select>
+          <ChevronDown class="pointer-events-none absolute right-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/40" />
         </div>
       {/if}
 
       {#if requiredAxes.y}
-        <div class="flex items-center gap-1">
-          <span class="text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/50">{requiredAxes.y.split(' ')[0]}</span>
-          <div class="relative">
-            <select bind:value={yCol} class={sel}>
-              {#each (['scatter','bubble'].includes(chartType) ? allCols : numericCols.map(c => c.name)) as col (col)}
-                <option value={col}>{col}</option>
-              {/each}
-            </select>
-            <ChevronDown class="pointer-events-none absolute right-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/50" />
-          </div>
+        <div class={axisToken}>
+          <span class={axisLabel}>{requiredAxes.y.split(' ')[0]}</span>
+          <select bind:value={yCol} class={axisSelect}>
+            {#each (['scatter','bubble'].includes(chartType) ? allCols : numericCols.map(c => c.name)) as col (col)}
+              <option value={col}>{col}</option>
+            {/each}
+          </select>
+          <ChevronDown class="pointer-events-none absolute right-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/40" />
         </div>
       {/if}
 
       {#if requiredAxes.z}
-        <div class="flex items-center gap-1">
-          <span class="text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/50">{requiredAxes.z.split(' ')[0]}</span>
-          <div class="relative">
-            <select bind:value={zCol} class={sel}>
-              <option value="">—</option>
-              {#each numericCols.map(c => c.name).filter(n => n !== xCol && n !== yCol) as col (col)}
-                <option value={col}>{col}</option>
-              {/each}
-            </select>
-            <ChevronDown class="pointer-events-none absolute right-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/50" />
-          </div>
+        <div class={axisToken}>
+          <span class={axisLabel}>{requiredAxes.z.split(' ')[0]}</span>
+          <select bind:value={zCol} class={axisSelect}>
+            <option value="">—</option>
+            {#each numericCols.map(c => c.name).filter(n => n !== xCol && n !== yCol) as col (col)}
+              <option value={col}>{col}</option>
+            {/each}
+          </select>
+          <ChevronDown class="pointer-events-none absolute right-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/40" />
         </div>
       {/if}
 
       {#if requiredAxes.group}
-        <div class="flex items-center gap-1">
-          <span class="text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/50">Group</span>
-          <div class="relative">
-            <select bind:value={groupCol} class={sel}>
-              <option value="">—</option>
-              {#each allCols.filter(c => c !== xCol && c !== yCol) as col (col)}
-                <option value={col}>{col}</option>
-              {/each}
-            </select>
-            <ChevronDown class="pointer-events-none absolute right-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/50" />
-          </div>
+        <div class={axisToken}>
+          <span class={axisLabel}>Group</span>
+          <select bind:value={groupCol} class={axisSelect}>
+            <option value="">—</option>
+            {#each allCols.filter(c => c !== xCol && c !== yCol) as col (col)}
+              <option value={col}>{col}</option>
+            {/each}
+          </select>
+          <ChevronDown class="pointer-events-none absolute right-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/40" />
         </div>
       {/if}
 
       <!-- Right actions -->
       <div class="ml-auto flex items-center gap-0.5">
-        <span class="mr-1 font-mono text-ui-2xs text-muted-foreground/40">{rows.length.toLocaleString()} rows</span>
+        <span class="mr-1.5 tabular-nums font-mono text-ui-2xs text-muted-foreground/30">{rows.length.toLocaleString()} rows</span>
         <button type="button" class={iconBtn} title="Save chart" onclick={openSavePanel}>
           <Bookmark class="size-3.5" />
         </button>
@@ -420,8 +427,10 @@
         <div class="absolute inset-0 flex items-center justify-center">
           <p class="text-ui-sm text-muted-foreground/40">No data to display</p>
         </div>
+      {:else if chartType === 'meter' && meterSpec}
+        <CarbonMeterChart spec={meterSpec} />
       {:else}
-        <EChartPanel {option} class="absolute inset-0" />
+        <EChartPanel {option} {renderer} class="absolute inset-0" />
       {/if}
     </div>
 

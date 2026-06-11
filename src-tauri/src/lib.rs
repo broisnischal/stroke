@@ -11,7 +11,11 @@ mod secrets;
 use db::{ActiveConnection, DbState};
 use mcp::McpState;
 use std::sync::{Arc, Mutex};
-use tauri::Manager;
+use tauri::{
+    menu::{Menu, MenuItem, PredefinedMenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Manager,
+};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -42,6 +46,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::AppleScript, None))
         .manage(db_state)
         .manage(mcp_state)
         .setup(|app| {
@@ -127,6 +132,54 @@ pub fn run() {
                         .build(),
                 )?;
             }
+            // ── System tray ───────────────────────────────────────────────────
+            let show_item = MenuItem::with_id(app, "show", "Open Stroke", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "Quit Stroke", true, None::<&str>)?;
+            let sep = PredefinedMenuItem::separator(app)?;
+
+            let tray_menu = Menu::with_items(app, &[&show_item, &sep, &quit_item])?;
+
+            let _tray = TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&tray_menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => {
+                        if let Some(w) = app.get_webview_window("main") {
+                            let _ = w.show();
+                            let _ = w.set_focus();
+                        }
+                    }
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        if let Some(w) = app.get_webview_window("main") {
+                            let _ = w.show();
+                            let _ = w.set_focus();
+                        }
+                    }
+                })
+                .build(app)?;
+
+            // ── Hide to tray on close instead of quitting ─────────────────────
+            let app_handle = app.handle().clone();
+            window.on_window_event(move |event| {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    if let Some(w) = app_handle.get_webview_window("main") {
+                        let _ = w.hide();
+                    }
+                }
+            });
+
             // Suppress unused-variable warning in release builds
             let _ = &window;
 
@@ -158,6 +211,7 @@ pub fn run() {
             commands::pg_list_sequences,
             commands::pg_truncate_table,
             commands::pg_drop_table,
+            commands::get_table_ddl,
             commands::pg_get_table_rows,
             commands::pg_execute_sql,
             commands::pg_execute_sql_multi,
@@ -195,6 +249,9 @@ pub fn run() {
             commands::init_sample_db,
             metrics::get_app_metrics,
             metrics::set_process_title,
+            commands::enable_autostart,
+            commands::disable_autostart,
+            commands::get_autostart_status,
             #[cfg(debug_assertions)]
             commands::debug_set_trial_days_ago,
             #[cfg(debug_assertions)]

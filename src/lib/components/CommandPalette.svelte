@@ -25,6 +25,7 @@
   import ChevronLeft    from '@lucide/svelte/icons/chevron-left'
   import Eye            from '@lucide/svelte/icons/eye'
   import Network        from '@lucide/svelte/icons/network'
+import Search         from '@lucide/svelte/icons/search'
   import * as Command from '$lib/components/ui/command/index.js'
   import { formatTableRowCount } from '$lib/table-list.js'
 
@@ -77,6 +78,7 @@
     /** @param {string} sql */
     onqueryselect = (sql) => {},
     onopenqueryhistory = () => {},
+    onglobalsearch = () => {},
   } = $props()
 
   /** @param {'docker' | 'connections' | 'tables'} target */
@@ -257,6 +259,11 @@
                 <Table2 class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">Table data</span>
                 <Command.Shortcut keys="⌘⇧D" />
+              </Command.Item>
+              <Command.Item value="find search rows data across all tables global database" onSelect={() => run(onglobalsearch)}>
+                <Search class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">Find in database</span>
+                <Command.Shortcut keys="⌘⇧G" />
               </Command.Item>
               <Command.Item value="open sql editor query console" onSelect={() => run(onopensql)}>
                 <Terminal class="size-4 shrink-0 opacity-60" />

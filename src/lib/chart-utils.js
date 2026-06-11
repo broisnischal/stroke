@@ -29,9 +29,14 @@ export function guessXCol(columns) {
 
 /** @param {ColInfo[]} columns @param {string} xCol */
 export function guessYCol(columns, xCol) {
+  const isIdish = (/** @type {ColInfo} */ c) =>
+    /^(id|_id|rowid|oid|pk|key|uuid)$/i.test(c.name) ||
+    /_(id|key|pk)$/i.test(c.name)
   return (
-    columns.find((c) => c.name !== xCol && colType(c) === 'number')
-  )?.name ?? columns.find((c) => c.name !== xCol)?.name ?? ''
+    columns.find(c => c.name !== xCol && colType(c) === 'number' && !isIdish(c)) ??
+    columns.find(c => c.name !== xCol && colType(c) === 'number') ??
+    columns.find(c => c.name !== xCol)
+  )?.name ?? ''
 }
 
 /**
@@ -85,6 +90,10 @@ export function getRequiredAxes(chartType) {
     case 'bar-stacked-100':
     case 'area-stacked':
       return { x: 'Category', y: 'Value', group: 'Series' }
+    case 'waterfall': return { x: 'Category', y: 'Value (delta)' }
+    case 'pareto':    return { x: 'Category', y: 'Value' }
+    case 'step':      return { x: 'Category', y: 'Value', group: 'Group (optional)' }
+    case 'sunburst':  return { x: 'Name', y: 'Value', group: 'Parent (optional)' }
     default:
       return { x: 'Category', y: 'Value', group: 'Group (optional)' }
   }
@@ -101,6 +110,7 @@ const PALETTE = [
  * or ISO "2026-01-01T00:00:00.000Z" — convert to "Dec 2025" / "Jan 2026".
  */
 function fmtTooltipValue(val) {
+  if (Array.isArray(val)) return fmtTooltipValue(val[val.length - 1])
   if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}/.test(val)) {
     try {
       const d = new Date(val.replace(' UTC', 'Z').replace(' ', 'T'))
@@ -115,6 +125,17 @@ function fmtTooltipValue(val) {
     return val.toLocaleString()
   }
   return String(val ?? '')
+}
+
+/**
+ * Performance options injected into the root ECharts option.
+ * ECharts auto-disables animation via animationThreshold, but we explicitly
+ * turn it off past 2k rows to avoid the threshold check overhead too.
+ * @param {number} n
+ */
+function animOpts(n) {
+  if (n >= 2000) return { animation: false }
+  return { animation: true, animationDuration: 400, animationThreshold: 2000 }
 }
 
 /** @param {boolean} isDark @param {boolean} [noTitle] */
@@ -135,12 +156,13 @@ function baseOption(isDark, noTitle = false) {
       formatter(params) {
         const items = Array.isArray(params) ? params : [params]
         const header = fmtTooltipValue(items[0]?.axisValue ?? items[0]?.name ?? '')
+        const multi = items.length > 1
         const rows = items.map(p => {
           const color = p.color ?? '#6366f1'
           const val = fmtTooltipValue(p.value ?? p.data)
           return `<div style="display:flex;align-items:center;gap:6px;margin-top:3px">
             <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></span>
-            <span style="opacity:0.65;font-size:11px">${p.seriesName ?? ''}</span>
+            ${multi ? `<span style="opacity:0.65;font-size:11px">${p.seriesName ?? ''}</span>` : ''}
             <span style="margin-left:auto;padding-left:12px;font-weight:600">${val}</span>
           </div>`
         }).join('')
@@ -162,6 +184,30 @@ function axisStyle(isDark) {
     axisLine: { lineStyle: { color: 'rgba(128,128,128,0.2)' } },
     splitLine: { lineStyle: { color: lineColor } },
   }
+}
+
+/** Build the unique x-axis category list, sorted chronologically for date columns */
+function sortedXData(rows, xi) {
+  const vals = [...new Set(rows.map(r => String(r[xi] ?? '')))]
+  if (isTimestampAxis(vals)) {
+    vals.sort((a, b) => {
+      const da = new Date(a.replace(' UTC', 'Z').replace(' ', 'T')).getTime()
+      const db = new Date(b.replace(' UTC', 'Z').replace(' ', 'T')).getTime()
+      return (isNaN(da) || isNaN(db)) ? 0 : da - db
+    })
+  }
+  return vals
+}
+
+/** Aggregate rows by x-key, summing y-values. Replaces the last-wins Object.fromEntries pattern. */
+function aggDataMap(rows, xi, yi) {
+  /** @type {Record<string, number>} */
+  const map = {}
+  rows.forEach(r => {
+    const key = String(r[xi] ?? '')
+    map[key] = (map[key] ?? 0) + (Number(r[yi]) || 0)
+  })
+  return map
 }
 
 /** Detect if an array of strings looks like timestamps */
@@ -224,7 +270,8 @@ function valueYAxis(isDark) {
  * @returns {import('echarts').EChartsOption}
  */
 export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, isDark = false, title, noTitle = false }) {
-  const base = baseOption(isDark, noTitle)
+  const n = rows.length
+  const base = { ...baseOption(isDark, noTitle), ...animOpts(n) }
   const xi = columns.findIndex((c) => c.name === xCol)
   const yi = columns.findIndex((c) => c.name === yCol)
   const zi = zCol ? columns.findIndex((c) => c.name === zCol) : -1
@@ -304,12 +351,25 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
   // ── Scatter ────────────────────────────────────────────────────────────────
   if (type === 'scatter') {
     const data = rows.map((r) => [Number(r[xi]) || 0, Number(r[yi]) || 0])
+    const large = n > 2000
     return {
       ...base,
       xAxis: { type: 'value', name: xCol, nameLocation: 'middle', nameGap: 28, nameTextStyle: base.textStyle, ...axisStyle(isDark) },
       yAxis: { type: 'value', name: yCol, nameLocation: 'middle', nameGap: 40, nameTextStyle: base.textStyle, ...axisStyle(isDark) },
-      series: [{ type: 'scatter', data, symbolSize: 7, itemStyle: { color: PALETTE[0] } }],
-      tooltip: { ...base.tooltip, trigger: 'item' },
+      series: [{ type: 'scatter', name: yCol, data, symbolSize: large ? 4 : 7, itemStyle: { color: PALETTE[0] }, ...(large ? { large: true, largeThreshold: 2000 } : {}) }],
+      tooltip: {
+        ...base.tooltip,
+        trigger: 'item',
+        formatter(p) {
+          const [vx, vy] = Array.isArray(p.value) ? p.value : [0, p.value]
+          const bg2 = base.tooltip.backgroundColor
+          return `<div style="font-size:11px;opacity:0.65;margin-bottom:4px">${p.seriesName || ''}</div>` +
+            `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:2px;font-size:12px">` +
+            `<span style="opacity:0.65">${xCol}</span><span style="font-weight:600">${fmtTooltipValue(vx)}</span></div>` +
+            `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:2px;font-size:12px">` +
+            `<span style="opacity:0.65">${yCol}</span><span style="font-weight:600">${fmtTooltipValue(vy)}</span></div>`
+        },
+      },
       ...titleOpt(title ?? ''),
     }
   }
@@ -328,11 +388,26 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
       yAxis: { type: 'value', name: yCol, nameLocation: 'middle', nameGap: 40, nameTextStyle: base.textStyle, ...axisStyle(isDark) },
       series: [{
         type: 'scatter',
+        name: yCol,
         data,
         symbolSize: /** @param {number[]} d */ (d) => Math.max(8, (d[2] / maxZ) * 48),
         itemStyle: { color: PALETTE[0], opacity: 0.75 },
+        ...(n > 2000 ? { large: true, largeThreshold: 2000 } : {}),
       }],
-      tooltip: { ...base.tooltip, trigger: 'item' },
+      tooltip: {
+        ...base.tooltip,
+        trigger: 'item',
+        formatter(p) {
+          const [vx, vy, vz] = Array.isArray(p.value) ? p.value : [0, p.value, 0]
+          return `<div style="font-size:11px;opacity:0.65;margin-bottom:4px">${p.seriesName || ''}</div>` +
+            `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:2px;font-size:12px">` +
+            `<span style="opacity:0.65">${xCol}</span><span style="font-weight:600">${fmtTooltipValue(vx)}</span></div>` +
+            `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:2px;font-size:12px">` +
+            `<span style="opacity:0.65">${yCol}</span><span style="font-weight:600">${fmtTooltipValue(vy)}</span></div>` +
+            `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:2px;font-size:12px">` +
+            `<span style="opacity:0.65">${zCol || 'size'}</span><span style="font-weight:600">${fmtTooltipValue(vz)}</span></div>`
+        },
+      },
       ...titleOpt(title ?? ''),
     }
   }
@@ -349,6 +424,19 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
     const lineColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)'
     return {
       ...base,
+      tooltip: {
+        ...base.tooltip,
+        trigger: 'item',
+        formatter(p) {
+          const [xi2, yi2, val] = Array.isArray(p.value) ? p.value : [0, 0, p.value]
+          const xLabel = xVals[xi2] ?? xi2
+          const yLabel = yVals[yi2] ?? yi2
+          return `<div style="font-size:11px;opacity:0.65;margin-bottom:2px">${xLabel} · ${yLabel}</div>` +
+            `<div style="display:flex;align-items:center;gap:6px;margin-top:3px">` +
+            `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${p.color ?? '#6366f1'};flex-shrink:0"></span>` +
+            `<span style="margin-left:auto;padding-left:12px;font-weight:600;font-size:12px">${fmtTooltipValue(val)}</span></div>`
+        },
+      },
       xAxis: { type: 'category', data: xVals, splitArea: { show: true }, ...axisStyle(isDark) },
       yAxis: { type: 'category', data: yVals, splitArea: { show: true }, ...axisStyle(isDark) },
       visualMap: { min: 0, max: Math.max(...data.map((d) => d[2])), calculable: true, orient: 'horizontal', left: 'center', bottom: 4, textStyle: base.textStyle },
@@ -419,7 +507,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
       tooltip: { ...base.tooltip, trigger: 'axis' },
       xAxis: categoryXAxis(isDark, labels),
       yAxis: valueYAxis(isDark),
-      series: [{ type: 'bar', data: counts, itemStyle: { color: PALETTE[0], borderRadius: [3, 3, 0, 0] }, barCategoryGap: '2%' }],
+      series: [{ type: 'bar', name: xCol, data: counts, itemStyle: { color: PALETTE[0], borderRadius: [3, 3, 0, 0] }, barCategoryGap: '2%' }],
       ...titleOpt(title ?? ''),
     }
   }
@@ -611,6 +699,161 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
     }
   }
 
+  // ── Waterfall ─────────────────────────────────────────────────────────────
+  if (type === 'waterfall') {
+    const xData = rows.map(r => String(r[xi] ?? ''))
+    const vals = rows.map(r => Number(r[yi]) || 0)
+    let running = 0
+    /** @type {any[]} */ const baseData = []
+    /** @type {any[]} */ const incrData = []
+    vals.forEach(v => {
+      if (v >= 0) {
+        baseData.push(running)
+        incrData.push({ value: v, originalValue: v, itemStyle: { color: '#22c55e', borderRadius: [3, 3, 0, 0] } })
+      } else {
+        baseData.push(running + v)
+        incrData.push({ value: -v, originalValue: v, itemStyle: { color: '#ef4444', borderRadius: [3, 3, 0, 0] } })
+      }
+      running += v
+    })
+    return {
+      ...base,
+      ...animOpts(n),
+      tooltip: {
+        ...base.tooltip,
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        formatter(params) {
+          const all = Array.isArray(params) ? params : [params]
+          const vis = all.filter(p => !String(p.seriesName ?? '').startsWith('__'))
+          const header = fmtTooltipValue(vis[0]?.axisValue ?? all[0]?.axisValue ?? '')
+          const rowsHtml = vis.map(p => {
+            const orig = p.data?.originalValue ?? p.value
+            const color = p.color ?? PALETTE[0]
+            const sign = Number(orig) >= 0 ? '+' : ''
+            return `<div style="display:flex;align-items:center;gap:6px;margin-top:3px">` +
+              `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></span>` +
+              `<span style="margin-left:auto;padding-left:12px;font-weight:600">${sign}${fmtTooltipValue(orig)}</span></div>`
+          }).join('')
+          return `<div style="font-size:11px;opacity:0.65;margin-bottom:2px">${header}</div>${rowsHtml}`
+        },
+      },
+      xAxis: categoryXAxis(isDark, xData),
+      yAxis: valueYAxis(isDark),
+      series: [
+        {
+          type: 'bar', name: '__base__', stack: 'wf',
+          data: baseData,
+          itemStyle: { color: 'transparent', borderColor: 'transparent' },
+          emphasis: { itemStyle: { color: 'transparent' } },
+          silent: true, tooltip: { show: false },
+        },
+        { type: 'bar', name: yCol, stack: 'wf', data: incrData, barMaxWidth: 48 },
+      ],
+      ...titleOpt(title ?? ''),
+    }
+  }
+
+  // ── Pareto ────────────────────────────────────────────────────────────────
+  if (type === 'pareto') {
+    const rawPairs = rows.map(r => [String(r[xi] ?? ''), Number(r[yi]) || 0])
+    const sorted = [...rawPairs].sort((a, b) => /** @type {number} */ (b[1]) - /** @type {number} */ (a[1]))
+    const xData = sorted.map(p => String(p[0]))
+    const barData = sorted.map(p => Number(p[1]))
+    const total = barData.reduce((s, v) => s + v, 0)
+    let cum = 0
+    const lineData = barData.map(v => {
+      cum += v
+      return total > 0 ? parseFloat((cum / total * 100).toFixed(1)) : 0
+    })
+    return {
+      ...base,
+      ...animOpts(n),
+      tooltip: { ...base.tooltip, trigger: 'axis' },
+      legend: { textStyle: base.textStyle, top: 4, data: [yCol, 'Cumulative %'] },
+      xAxis: categoryXAxis(isDark, xData),
+      yAxis: [
+        valueYAxis(isDark),
+        {
+          ...valueYAxis(isDark),
+          name: '%', max: 100,
+          axisLabel: { ...axisStyle(isDark).axisLabel, formatter: '{value}%' },
+          splitLine: { show: false },
+        },
+      ],
+      series: [
+        {
+          type: 'bar', name: yCol, data: barData,
+          itemStyle: { color: PALETTE[0], borderRadius: [3, 3, 0, 0] },
+          barMaxWidth: 48,
+        },
+        {
+          type: 'line', name: 'Cumulative %', data: lineData, yAxisIndex: 1,
+          symbol: 'circle', symbolSize: 4, smooth: false,
+          lineStyle: { color: PALETTE[2], width: 2 },
+          itemStyle: { color: PALETTE[2] },
+          markLine: {
+            silent: true, symbol: 'none',
+            data: [{ yAxis: 80 }],
+            lineStyle: { color: PALETTE[2], opacity: 0.35, type: 'dashed', width: 1 },
+            label: { formatter: '80%', color: base.textStyle.color, fontSize: 10, position: 'insideEndTop' },
+          },
+        },
+      ],
+      ...titleOpt(title ?? ''),
+    }
+  }
+
+  // ── Sunburst ──────────────────────────────────────────────────────────────
+  if (type === 'sunburst') {
+    /** @type {Map<string, any>} */
+    const nodeMap = new Map()
+    rows.forEach(r => {
+      const name = String(r[xi] ?? '')
+      if (!nodeMap.has(name)) nodeMap.set(name, { name, value: Number(r[yi]) || 0, children: [] })
+    })
+    /** @type {any[]} */ let roots = []
+    if (gi >= 0) {
+      rows.forEach(r => {
+        const name = String(r[xi] ?? '')
+        const parent = String(r[gi] ?? '')
+        const node = nodeMap.get(name)
+        if (!node) return
+        if (parent && nodeMap.has(parent)) {
+          nodeMap.get(parent).children.push(node)
+        } else { roots.push(node) }
+      })
+      roots = roots.length > 0 ? roots : [{ name: 'Root', children: [...nodeMap.values()] }]
+    } else {
+      roots = [...nodeMap.values()]
+    }
+    return {
+      ...base,
+      grid: undefined,
+      color: PALETTE,
+      tooltip: {
+        ...base.tooltip,
+        trigger: 'item',
+        formatter(p) {
+          return `<div style="font-size:11px;opacity:0.65;margin-bottom:2px">${p.name}</div>` +
+            `<div style="display:flex;align-items:center;gap:6px;margin-top:3px">` +
+            `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color ?? PALETTE[0]};flex-shrink:0"></span>` +
+            `<span style="margin-left:auto;padding-left:12px;font-weight:600;font-size:12px">${fmtTooltipValue(p.value)}</span></div>`
+        },
+      },
+      series: [{
+        type: 'sunburst',
+        data: roots,
+        radius: ['15%', '80%'],
+        nodeClick: 'rootToNode',
+        label: { fontSize: 10, minAngle: 8, overflow: 'truncate' },
+        itemStyle: { borderRadius: 4, borderWidth: 1, borderColor: 'transparent' },
+        emphasis: { focus: 'ancestor' },
+      }],
+      ...titleOpt(title ?? ''),
+    }
+  }
+
   // ── Choropleth / Meter — handled by dedicated Svelte components ────────────
   // buildOption is not called for these types; return empty so callers get {}
   if (type === 'choropleth' || type === 'meter') return {}
@@ -656,6 +899,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
       series: [
         {
           type: 'line',
+          name: yCol,
           data: yData,
           symbol: 'circle',
           symbolSize: 8,
@@ -696,7 +940,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
           itemStyle: { color: PALETTE[0] }, silent: true,
         },
         {
-          type: 'scatter', data: xData.map((v, i) => [v, i]),
+          type: 'scatter', name: yCol, data: xData.map((v, i) => [v, i]),
           symbolSize: 10, itemStyle: { color: PALETTE[0] },
         },
       ],
@@ -740,7 +984,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
       tooltip: { ...base.tooltip, trigger: 'axis' },
       xAxis: categoryXAxis(isDark, xData),
       yAxis: valueYAxis(isDark),
-      series: [{ type: 'bar', data, itemStyle: { color: PALETTE[0], borderRadius: [3, 3, 0, 0] }, barMaxWidth: 48 }],
+      series: [{ type: 'bar', name: yCol, data, itemStyle: { color: PALETTE[0], borderRadius: [3, 3, 0, 0] }, barMaxWidth: 48 }],
       ...titleOpt(title ?? ''),
     }
   }
@@ -781,14 +1025,14 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
 
   // ── Bar Horizontal ─────────────────────────────────────────────────────────
   if (type === 'bar-horizontal') {
-    const xData = [...new Set(rows.map((r) => String(r[xi] ?? '')))]
-    const dataMap = Object.fromEntries(rows.map((r) => [String(r[xi]), Number(r[yi]) || 0]))
+    const xData = sortedXData(rows, xi)
+    const dataMap = aggDataMap(rows, xi, yi)
     return {
       ...base,
       tooltip: { ...base.tooltip, trigger: 'axis', axisPointer: { type: 'shadow' } },
       xAxis: { type: 'value', ...axisStyle(isDark) },
       yAxis: { type: 'category', data: xData, ...axisStyle(isDark) },
-      series: [{ type: 'bar', data: xData.map((x) => dataMap[x] ?? null), itemStyle: { color: PALETTE[0], borderRadius: [0, 3, 3, 0] }, barMaxWidth: 32 }],
+      series: [{ type: 'bar', name: yCol, data: xData.map((x) => dataMap[x] ?? null), itemStyle: { color: PALETTE[0], borderRadius: [0, 3, 3, 0] }, barMaxWidth: 32 }],
       grid: { ...base.grid, left: 16 },
       ...titleOpt(title ?? ''),
     }
@@ -796,13 +1040,14 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
 
   // ── Bar Grouped ────────────────────────────────────────────────────────────
   if (type === 'bar-grouped') {
-    const xData = [...new Set(rows.map((r) => String(r[xi] ?? '')))]
+    const xData = sortedXData(rows, xi)
     const groups = gi >= 0 ? [...new Set(rows.map((r) => String(r[gi])))] : [yCol]
+    const prog = n > 1000 ? { progressive: 400, progressiveThreshold: 1000 } : {}
     const series = groups.map((grp, i) => {
       const dataMap = gi >= 0
-        ? Object.fromEntries(rows.filter((r) => String(r[gi]) === grp).map((r) => [String(r[xi]), Number(r[yi]) || 0]))
-        : Object.fromEntries(rows.map((r) => [String(r[xi]), Number(r[yi]) || 0]))
-      return { type: 'bar', name: grp, data: xData.map((x) => dataMap[x] ?? null), itemStyle: { color: PALETTE[i % PALETTE.length], borderRadius: [3, 3, 0, 0] }, barMaxWidth: 32 }
+        ? aggDataMap(rows.filter(r => String(r[gi]) === grp), xi, yi)
+        : aggDataMap(rows, xi, yi)
+      return { type: 'bar', name: grp, data: xData.map((x) => dataMap[x] ?? null), itemStyle: { color: PALETTE[i % PALETTE.length], borderRadius: n > 300 ? 0 : [3, 3, 0, 0] }, barMaxWidth: 32, ...prog }
     })
     return {
       ...base,
@@ -817,12 +1062,12 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
 
   // ── Bar Stacked ────────────────────────────────────────────────────────────
   if (type === 'bar-stacked') {
-    const xData = [...new Set(rows.map((r) => String(r[xi] ?? '')))]
+    const xData = sortedXData(rows, xi)
     const groups = gi >= 0 ? [...new Set(rows.map((r) => String(r[gi])))] : [yCol]
     const series = groups.map((grp, i) => {
       const dataMap = gi >= 0
-        ? Object.fromEntries(rows.filter((r) => String(r[gi]) === grp).map((r) => [String(r[xi]), Number(r[yi]) || 0]))
-        : Object.fromEntries(rows.map((r) => [String(r[xi]), Number(r[yi]) || 0]))
+        ? aggDataMap(rows.filter(r => String(r[gi]) === grp), xi, yi)
+        : aggDataMap(rows, xi, yi)
       return { type: 'bar', name: grp, stack: 'total', data: xData.map((x) => dataMap[x] ?? null), itemStyle: { color: PALETTE[i % PALETTE.length] }, barMaxWidth: 48 }
     })
     return {
@@ -838,15 +1083,15 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
 
   // ── Bar Stacked 100% ───────────────────────────────────────────────────────
   if (type === 'bar-stacked-100') {
-    const xData = [...new Set(rows.map((r) => String(r[xi] ?? '')))]
+    const xData = sortedXData(rows, xi)
     const groups = gi >= 0 ? [...new Set(rows.map((r) => String(r[gi])))] : [yCol]
     // Compute totals per x category
     const totals = Object.fromEntries(xData.map((x) => [x, 0]))
-    rows.forEach((r) => { totals[String(r[xi])] = (totals[String(r[xi])] || 0) + (Number(r[yi]) || 0) })
+    rows.forEach((r) => { totals[String(r[xi] ?? '')] = (totals[String(r[xi] ?? '')] || 0) + (Number(r[yi]) || 0) })
     const series = groups.map((grp, i) => {
       const dataMap = gi >= 0
-        ? Object.fromEntries(rows.filter((r) => String(r[gi]) === grp).map((r) => [String(r[xi]), Number(r[yi]) || 0]))
-        : Object.fromEntries(rows.map((r) => [String(r[xi]), Number(r[yi]) || 0]))
+        ? aggDataMap(rows.filter(r => String(r[gi]) === grp), xi, yi)
+        : aggDataMap(rows, xi, yi)
       return {
         type: 'bar',
         name: grp,
@@ -858,7 +1103,24 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
     })
     return {
       ...base,
-      tooltip: { ...base.tooltip, trigger: 'axis' },
+      tooltip: {
+        ...base.tooltip,
+        trigger: 'axis',
+        formatter(params) {
+          const items = Array.isArray(params) ? params : [params]
+          const header = fmtTooltipValue(items[0]?.axisValue ?? items[0]?.name ?? '')
+          const multi = items.length > 1
+          const rowsHtml = items.map(p => {
+            const color = p.color ?? '#6366f1'
+            const val = `${fmtTooltipValue(p.value)}%`
+            return `<div style="display:flex;align-items:center;gap:6px;margin-top:3px">` +
+              `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></span>` +
+              (multi ? `<span style="opacity:0.65;font-size:11px">${p.seriesName ?? ''}</span>` : '') +
+              `<span style="margin-left:auto;padding-left:12px;font-weight:600">${val}</span></div>`
+          }).join('')
+          return `<div style="font-size:11px;opacity:0.65;margin-bottom:2px">${header}</div>${rowsHtml}`
+        },
+      },
       legend: { textStyle: base.textStyle, top: 4 },
       xAxis: categoryXAxis(isDark, xData),
       yAxis: { type: 'value', max: 100, axisLabel: { ...axisStyle(isDark).axisLabel, formatter: '{value}%' }, ...axisStyle(isDark) },
@@ -869,24 +1131,29 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
 
   // ── Area Stacked ──────────────────────────────────────────────────────────
   if (type === 'area-stacked') {
-    const xData = [...new Set(rows.map((r) => String(r[xi] ?? '')))]
+    const xData = sortedXData(rows, xi)
     const groups = gi >= 0 ? [...new Set(rows.map((r) => String(r[gi])))] : [yCol]
+    const prog = n > 1000 ? { progressive: 400, progressiveThreshold: 1000 } : {}
+    const showSym = n < 200
+    const sampling = n > 500 ? { sampling: 'lttb' } : {}
     const series = groups.map((grp, i) => {
       const dataMap = gi >= 0
-        ? Object.fromEntries(rows.filter((r) => String(r[gi]) === grp).map((r) => [String(r[xi]), Number(r[yi]) || 0]))
-        : Object.fromEntries(rows.map((r) => [String(r[xi]), Number(r[yi]) || 0]))
+        ? aggDataMap(rows.filter(r => String(r[gi]) === grp), xi, yi)
+        : aggDataMap(rows, xi, yi)
       const color = PALETTE[i % PALETTE.length]
       return {
         type: 'line',
         name: grp,
         stack: 'total',
         data: xData.map((x) => dataMap[x] ?? null),
-        smooth: true,
-        symbol: 'circle',
+        smooth: n < 5000,
+        symbol: showSym ? 'circle' : 'none',
         symbolSize: 4,
         lineStyle: { color, width: 1.5 },
         itemStyle: { color },
         areaStyle: { opacity: 0.2 },
+        ...sampling,
+        ...prog,
       }
     })
     return {
@@ -901,7 +1168,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
   }
 
   // ── Bar / Line / Area (with optional group) ────────────────────────────────
-  const xData = [...new Set(rows.map((r) => String(r[xi] ?? '')))]
+  const xData = sortedXData(rows, xi)
 
   /** @type {any[]} */
   let series
@@ -909,13 +1176,32 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
     const groups = [...new Set(rows.map((r) => String(r[gi])))]
     series = groups.map((grp, i) => {
       const grpRows = rows.filter((r) => String(r[gi]) === grp)
-      const dataMap = Object.fromEntries(grpRows.map((r) => [String(r[xi]), Number(r[yi]) || 0]))
-      return makeSeries(type, grp, xData.map((x) => dataMap[x] ?? null), PALETTE[i % PALETTE.length])
+      const dataMap = aggDataMap(grpRows, xi, yi)
+      return makeSeries(type, grp, xData.map((x) => dataMap[x] ?? null), PALETTE[i % PALETTE.length], n)
     })
   } else {
-    const dataMap = Object.fromEntries(rows.map((r) => [String(r[xi]), Number(r[yi]) || 0]))
-    series = [makeSeries(type, yCol, xData.map((x) => dataMap[x] ?? null), PALETTE[0])]
+    const dataMap = aggDataMap(rows, xi, yi)
+    series = [makeSeries(type, yCol, xData.map((x) => dataMap[x] ?? null), PALETTE[0], n)]
   }
+
+  // Add a scroll/zoom viewport when there are many x-axis categories so the
+  // chart doesn't cram hundreds of labels into a small width.
+  const needsZoom = xData.length > 80
+  const dataZoom = needsZoom ? [
+    {
+      type: 'slider',
+      xAxisIndex: 0,
+      start: 0,
+      end: 100,
+      height: 18,
+      bottom: 4,
+      borderColor: 'transparent',
+      fillerColor: 'rgba(99,102,241,0.12)',
+      handleStyle: { color: PALETTE[0] },
+      textStyle: { color: 'transparent' },
+    },
+    { type: 'inside', xAxisIndex: 0 },
+  ] : []
 
   return {
     ...base,
@@ -924,35 +1210,76 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
     xAxis: categoryXAxis(isDark, xData),
     yAxis: valueYAxis(isDark),
     series,
+    ...(needsZoom ? { grid: { ...base.grid, bottom: 44 } } : {}),
+    ...(needsZoom ? { dataZoom } : {}),
     ...titleOpt(title ?? ''),
   }
 }
 
-/** @param {string} type @param {string} name @param {any[]} data @param {string} color */
-function makeSeries(type, name, data, color) {
+/**
+ * @param {string} type
+ * @param {string} name
+ * @param {any[]} data
+ * @param {string} color
+ * @param {number} [n] total row count for perf decisions
+ */
+function makeSeries(type, name, data, color, n = 0) {
+  // Progressive rendering kicks in above this threshold — renders in 400-item
+  // chunks per animation frame so the thread stays responsive.
+  const prog = n > 1000 ? { progressive: 400, progressiveThreshold: 1000 } : {}
+
   if (type === 'bar') {
-    return { type: 'bar', name, data, itemStyle: { color, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 48 }
+    return {
+      type: 'bar', name, data,
+      itemStyle: { color, borderRadius: n > 300 ? 0 : [3, 3, 0, 0] },
+      barMaxWidth: 48,
+      ...prog,
+      ...(n > 5000 ? { large: true, largeThreshold: 5000 } : {}),
+    }
   }
+
+  if (type === 'step') {
+    return {
+      type: 'line', name, data,
+      step: 'end',
+      smooth: false,
+      symbol: n < 200 ? 'circle' : 'none',
+      symbolSize: 4,
+      lineStyle: { color, width: 2 },
+      itemStyle: { color },
+      ...(n > 1000 ? { progressive: 400, progressiveThreshold: 1000 } : {}),
+    }
+  }
+
   const isArea = type === 'area'
+  // Hide per-point symbols when there are many points — they cost more to render
+  // than the line itself and become invisible noise past ~200 points anyway.
+  const showSymbols = n < 200
+  // LTTB (Largest-Triangle-Three-Buckets) down-samples the visible line while
+  // preserving shape — the chart looks identical but draws far fewer paths.
+  const sampling = n > 500 ? { sampling: 'lttb' } : {}
+
   return {
     type: 'line',
     name,
     data,
-    smooth: true,
-    symbol: 'circle',
+    smooth: n < 5000,
+    symbol: showSymbols ? 'circle' : 'none',
     symbolSize: 4,
-    lineStyle: { color, width: 2 },
+    lineStyle: { color, width: n > 2000 ? 1.5 : 2 },
     itemStyle: { color },
+    ...sampling,
+    ...prog,
     ...(isArea ? { areaStyle: { color, opacity: 0.12 } } : {}),
   }
 }
 
 /**
- * Detect if a column set is suitable for a chart (at least one numeric and one other col).
+ * Detect if a column set is suitable for a chart (at least 2 columns).
  * @param {ColInfo[]} columns
  */
 export function isChartable(columns) {
-  return columns.length >= 2 && columns.some((c) => colType(c) === 'number')
+  return columns.length >= 2
 }
 
 /**
@@ -1268,5 +1595,45 @@ export const CHART_CATALOG = [
     axes: { x: 'segment label', y: 'value', z: 'total (optional)' },
     requires: { x: 'any', y: 'number' },
     aiHint: 'Query segment name and numeric value columns; optionally a total column',
+  },
+  {
+    id: 'waterfall',
+    label: 'Waterfall',
+    group: 'Bar',
+    icon: 'trending-up',
+    description: 'Incremental bar chart showing how values add up (gains in green, losses in red)',
+    axes: { x: 'category', y: 'delta value' },
+    requires: { x: 'any', y: 'number' },
+    aiHint: 'Values represent increments (positive or negative); sorted by sequence',
+  },
+  {
+    id: 'pareto',
+    label: 'Pareto',
+    group: 'Bar',
+    icon: 'chart-no-axes-combined',
+    description: 'Sorted bar + cumulative % line — identifies top contributors (80/20 rule)',
+    axes: { x: 'category', y: 'value' },
+    requires: { x: 'any', y: 'number' },
+    aiHint: 'Query category and count/value; chart auto-sorts descending and adds cumulative line',
+  },
+  {
+    id: 'step',
+    label: 'Step',
+    group: 'Line & Area',
+    icon: 'step-forward',
+    description: 'Step-interpolated line — ideal for inventory, prices, or status changes',
+    axes: { x: 'date or category', y: 'value', group: 'optional' },
+    requires: { x: 'any', y: 'number', group: 'optional-category' },
+    aiHint: 'Same data as a line chart; ORDER BY date for correct sequence',
+  },
+  {
+    id: 'sunburst',
+    label: 'Sunburst',
+    group: 'Hierarchical',
+    icon: 'sun',
+    description: 'Radial hierarchical chart showing part-to-whole at multiple levels',
+    axes: { x: 'name', y: 'value', group: 'parent (optional)' },
+    requires: { x: 'any', y: 'number' },
+    aiHint: 'Query name, value, and optional parent_name for multi-level hierarchy',
   },
 ]

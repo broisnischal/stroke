@@ -27,6 +27,7 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-start-dragging",
     "dialog:default",
-    "dialog:allow-save"
+    "dialog:allow-save",
+    "autostart:default"
   ]
 }

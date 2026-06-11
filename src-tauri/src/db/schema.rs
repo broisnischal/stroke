@@ -1187,3 +1187,173 @@ pub async fn get_incoming_foreign_keys(
         _                                => Ok(vec![]),
     }
 }
+
+// ── DDL reconstruction ────────────────────────────────────────────────────────
+
+async fn get_ddl_pg(pool: &PgPool, schema: &str, table: &str) -> Result<String, String> {
+    let col_rows = sqlx::query(
+        r#"SELECT
+            a.attname,
+            pg_catalog.format_type(a.atttypid, a.atttypmod),
+            NOT a.attnotnull,
+            pg_catalog.pg_get_expr(d.adbin, d.adrelid)
+        FROM pg_catalog.pg_attribute a
+        LEFT JOIN pg_catalog.pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+        WHERE a.attrelid = ('"' || $1 || '"."' || $2 || '"')::regclass
+          AND a.attnum > 0 AND NOT a.attisdropped
+        ORDER BY a.attnum"#,
+    )
+    .bind(schema)
+    .bind(table)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("DDL columns query failed: {e}"))?;
+
+    let pk_rows = sqlx::query(
+        r#"SELECT a.attname
+           FROM pg_catalog.pg_constraint c
+           JOIN pg_catalog.pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+           WHERE c.conrelid = ('"' || $1 || '"."' || $2 || '"')::regclass
+             AND c.contype = 'p'
+           ORDER BY array_position(c.conkey, a.attnum)"#,
+    )
+    .bind(schema)
+    .bind(table)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
+    let pk_cols: Vec<String> = pk_rows
+        .iter()
+        .filter_map(|r| r.try_get::<Option<String>, _>(0).ok().flatten())
+        .collect();
+
+    let mut lines: Vec<String> = col_rows
+        .iter()
+        .filter_map(|r| {
+            let name: String = r.try_get::<Option<String>, _>(0).ok().flatten()?;
+            let typ: String = r
+                .try_get::<Option<String>, _>(1)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| "text".to_string());
+            let nullable: bool = r
+                .try_get::<Option<bool>, _>(2)
+                .ok()
+                .flatten()
+                .unwrap_or(true);
+            let default: Option<String> = r.try_get::<Option<String>, _>(3).ok().flatten();
+            let mut col = format!("  \"{}\" {}", name, typ);
+            if let Some(d) = default {
+                col.push_str(&format!(" DEFAULT {}", d));
+            }
+            if !nullable {
+                col.push_str(" NOT NULL");
+            }
+            Some(col)
+        })
+        .collect();
+
+    if !pk_cols.is_empty() {
+        let pk_list = pk_cols
+            .iter()
+            .map(|c| format!("\"{}\"", c))
+            .collect::<Vec<_>>()
+            .join(", ");
+        lines.push(format!("  PRIMARY KEY ({})", pk_list));
+    }
+
+    Ok(format!(
+        "CREATE TABLE \"{}\".\"{}\" (\n{}\n);",
+        schema,
+        table,
+        lines.join(",\n")
+    ))
+}
+
+async fn get_ddl_sqlite(pool: &sqlx::SqlitePool, table: &str) -> Result<String, String> {
+    let row = sqlx::query("SELECT sql FROM sqlite_master WHERE type='table' AND name=?")
+        .bind(table)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| format!("DDL query failed: {e}"))?;
+    Ok(row
+        .try_get::<Option<String>, _>(0)
+        .ok()
+        .flatten()
+        .unwrap_or_default())
+}
+
+async fn get_ddl_mysql(pool: &MySqlPool, schema: &str, table: &str) -> Result<String, String> {
+    let sql = format!(
+        "SHOW CREATE TABLE `{}`.`{}`",
+        schema.replace('`', ""),
+        table.replace('`', "")
+    );
+    let row = sqlx::query(&sql)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| format!("SHOW CREATE TABLE failed: {e}"))?;
+    Ok(row
+        .try_get::<Option<String>, _>(1)
+        .ok()
+        .flatten()
+        .unwrap_or_default())
+}
+
+async fn get_ddl_d1(cfg: &super::connection::D1Config, table: &str) -> Result<String, String> {
+    let result = super::d1::query(
+        cfg,
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
+        vec![serde_json::Value::String(table.to_string())],
+    )
+    .await
+    .map_err(|e| format!("D1 DDL query failed: {e}"))?;
+
+    let sql_idx = result.columns.iter().position(|c| c.name == "sql").unwrap_or(0);
+    Ok(result
+        .rows
+        .first()
+        .and_then(|r| r.get(sql_idx))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string())
+}
+
+async fn get_ddl_libsql(
+    cfg: &super::connection::LibSqlConfig,
+    table: &str,
+) -> Result<String, String> {
+    let result = super::libsql::query(
+        cfg,
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
+        vec![serde_json::Value::String(table.to_string())],
+    )
+    .await
+    .map_err(|e| format!("LibSQL DDL query failed: {e}"))?;
+
+    let sql_idx = result.columns.iter().position(|c| c.name == "sql").unwrap_or(0);
+    Ok(result
+        .rows
+        .first()
+        .and_then(|r| r.get(sql_idx))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string())
+}
+
+pub async fn get_table_ddl(
+    state: State<'_, DbState>,
+    schema: String,
+    table: String,
+) -> Result<String, String> {
+    validate_ident(&schema)?;
+    validate_ident(&table)?;
+    match require_conn(&state)? {
+        ActiveConnection::Postgres(pool) => get_ddl_pg(&pool, &schema, &table).await,
+        ActiveConnection::Mysql(pool) => get_ddl_mysql(&pool, &schema, &table).await,
+        ActiveConnection::Sqlite(pool) => get_ddl_sqlite(&pool, &table).await,
+        ActiveConnection::D1(cfg) => get_ddl_d1(&cfg, &table).await,
+        ActiveConnection::LibSql(cfg) => get_ddl_libsql(&cfg, &table).await,
+    }
+}

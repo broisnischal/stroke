@@ -11,7 +11,7 @@ import { zoomState, ZOOM_MIN, ZOOM_MAX } from '$lib/stores/canvas-zoom.svelte.js
 const STORAGE_KEY = 'stroke:settings'
 
 /** @typedef {import('$lib/themes/registry.js').ThemeId} ThemeId */
-/** @typedef {{ theme: ThemeId, zoom: number, mcpAutoStart: boolean }} AppSettings */
+/** @typedef {{ theme: ThemeId, zoom: number, mcpAutoStart: boolean, launchAtLogin: boolean }} AppSettings */
 
 /** UI zoom scale (font + layout). 1 = 100%. */
 export const ZOOM_STEPS = [0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.25, 1.5]
@@ -22,6 +22,7 @@ export const DEFAULT_SETTINGS = {
   theme: DEFAULT_THEME_ID,
   zoom: DEFAULT_ZOOM,
   mcpAutoStart: false,
+  launchAtLogin: false,
 }
 
 /** Reactive app theme id (synced by applySettings). */
@@ -86,7 +87,8 @@ export function loadSettings() {
       )
     }
     const mcpAutoStart = parsed.mcpAutoStart === true
-    return { theme, zoom, mcpAutoStart }
+    const launchAtLogin = parsed.launchAtLogin === true
+    return { theme, zoom, mcpAutoStart, launchAtLogin }
   } catch {
     return { ...DEFAULT_SETTINGS }
   }

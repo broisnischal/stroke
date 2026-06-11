@@ -247,6 +247,15 @@ export async function listSequences(schema) {
 /**
  * @param {string} schema
  * @param {string} table
+ * @returns {Promise<string>}
+ */
+export async function getTableDdl(schema, table) {
+  return /** @type {string} */ (await inv('get_table_ddl', { schema, table }))
+}
+
+/**
+ * @param {string} schema
+ * @param {string} table
  */
 export async function truncateTable(schema, table) {
   try {
@@ -490,4 +499,18 @@ export async function getAppMetrics() {
 /** Rename the OS process so it appears as `name` in htop / ps / Activity Monitor. */
 export async function setProcessTitle(name) {
   return invoke('set_process_title', { name })
+}
+
+// ── Autostart ─────────────────────────────────────────────────────────────────
+
+export async function enableAutostart() {
+  return inv('enable_autostart')
+}
+
+export async function disableAutostart() {
+  return inv('disable_autostart')
+}
+
+export async function getAutostartStatus() {
+  return /** @type {Promise<boolean>} */ (inv('get_autostart_status'))
 }
