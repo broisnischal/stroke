@@ -12,6 +12,7 @@
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
   import EyeOff from "@lucide/svelte/icons/eye-off";
   import ListFilter from "@lucide/svelte/icons/list-filter";
+import FilterX from "@lucide/svelte/icons/filter-x";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import KeyRound from "@lucide/svelte/icons/key-round";
   import Link2 from "@lucide/svelte/icons/link-2";
@@ -159,6 +160,8 @@
     scrollToBottom = $bindable(/** @type {() => void} */ (() => {})),
     /** Called when user picks "Filter by this column" from the column header context menu. */
     onfiltercolumn = /** @type {(colName: string) => void} */ (() => {}),
+    /** Called when user right-clicks a cell and picks "Filter by value" or "Exclude value". */
+    onfilterbyvalue = /** @type {(colName: string, value: unknown, exclude?: boolean) => void} */ (() => {}),
     /** Called when user picks "Hide column" from the column header context menu. */
     onhidecolumn = /** @type {(colName: string) => void} */ (() => {}),
     /**
@@ -1585,21 +1588,17 @@
     _scrollTop = container.scrollTop
     _scrollLeft = container.scrollLeft
 
-    // Resize is rare; one RAF is fine to avoid hammering during window drag.
-    let roRafId = 0
-    const ro = new ResizeObserver(() => {
-      if (roRafId) return
-      roRafId = requestAnimationFrame(() => {
-        roRafId = 0
-        _viewportWidth = container.clientWidth
-        _viewportHeight = container.clientHeight
-      })
+    // Use contentRect directly — it's provided synchronously by the ResizeObserver
+    // entry with no forced layout reflow. Removing the rAF here eliminates one full
+    // frame of latency between the resize and the canvas redraw.
+    const ro = new ResizeObserver((entries) => {
+      const r = entries[0]?.contentRect
+      if (!r) return
+      _viewportWidth = r.width
+      _viewportHeight = r.height
     })
     ro.observe(container)
-    return () => {
-      if (roRafId) cancelAnimationFrame(roRafId)
-      ro.disconnect()
-    }
+    return () => ro.disconnect()
   })
 
   /** @param {Event & { currentTarget: HTMLElement }} e */
@@ -2441,13 +2440,15 @@
     canvas.style.height = cssH + 'px'
     // Only touch canvas.width/height when it actually changes — assigning clears
     // the canvas, and we want to avoid a redundant clear on every repaint.
+    let resized = false
     if (canvas.width !== bw || canvas.height !== bh) {
       canvas.width = bw
       canvas.height = bh
+      resized = true
     }
     _ctx = canvas.getContext('2d')
     if (_ctx) _ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    return !!_ctx
+    return { ok: !!_ctx, resized }
   }
 
   // rAF-batched paint — coalesces bursts of scroll/state changes into a single
@@ -2476,7 +2477,14 @@
     void geom; void rowTops; void _redrawToken; void foreignKeys; void indexes
     void _colCache; void expandedRowHeights; void fkSubview; void virtualRelCols; void VIRTUAL_COL_W
     void zoomState.value; void canvasZoom
-    if (syncCanvasSurface()) scheduleDraw()
+    const { ok, resized } = syncCanvasSurface()
+    if (ok) {
+      // When the backing store was cleared by a dimension change, draw immediately
+      // (synchronously in this microtask) so the browser never composites a black
+      // canvas. scheduleDraw() still queues a RAF for any concurrent state updates.
+      if (resized) draw()
+      scheduleDraw()
+    }
   })
 
   // Hover / affordance repaint — pointer moves must not re-touch canvas dimensions.
@@ -3280,6 +3288,14 @@
           <Copy />
           Copy
           <ContextMenu.Shortcut>⌘C</ContextMenu.Shortcut>
+        </ContextMenu.Item>
+        <ContextMenu.Item onSelect={() => runMenuAction(() => onfilterbyvalue(menuColName, rows[contextRowIdx]?.[contextColIdx]))}>
+          <ListFilter />
+          {menuCellNull ? 'Filter: is NULL' : 'Filter by value'}
+        </ContextMenu.Item>
+        <ContextMenu.Item onSelect={() => runMenuAction(() => onfilterbyvalue(menuColName, rows[contextRowIdx]?.[contextColIdx], true))}>
+          <FilterX />
+          {menuCellNull ? 'Exclude: not NULL' : 'Exclude this value'}
         </ContextMenu.Item>
         <ContextMenu.Item
           disabled={!menuEditable || menuCellNull || readonly}

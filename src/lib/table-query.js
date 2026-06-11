@@ -9,11 +9,14 @@ export const ANY_COLUMN = '__any__'
 
 /** @typedef {{ id: string, column: string, op: FilterOp, value: string, conjunct: 'and' | 'or' }} TableFilter */
 
-export const PAGE_SIZE_OPTIONS = [25, 50, 100, 250]
+export const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 1_000_000, -1]
 
 export const DEFAULT_PAGE_SIZE = 50
 
 export const MAX_PAGE_SIZE = 1_000_000
+
+/** Sentinel page size meaning "load all rows" (uses the table's total count). */
+export const PAGE_SIZE_ALL = -1
 
 export const FILTER_OPS = /** @type {{ value: FilterOp, label: string, needsValue: boolean }[]} */ ([
   { value: 'eq', label: 'equals', needsValue: true },

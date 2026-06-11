@@ -9,6 +9,7 @@
   import ShieldCheck from '@lucide/svelte/icons/shield-check'
   import Eye from '@lucide/svelte/icons/eye'
   import Layers from '@lucide/svelte/icons/layers'
+  import Search from '@lucide/svelte/icons/search'
   import X from '@lucide/svelte/icons/x'
   import Plus from '@lucide/svelte/icons/plus'
   import Clock from '@lucide/svelte/icons/clock'
@@ -70,6 +71,7 @@
     if (tab.kind === 'schema') return LayoutTemplate
     if (tab.kind === 'orm') return Code2
     if (tab.kind === 'security') return ShieldCheck
+    if (tab.kind === 'search') return Search
     return FileText
   }
 </script>

@@ -117,7 +117,7 @@ use crate::db::{
     connect, connect_d1, connect_libsql, connect_mysql, connect_sqlite, disconnect,
     delete_table_row, delete_table_rows, execute_ddl, execute_sql, execute_sql_multi, get_table_rows, insert_table_row,
     list_schemas, list_tables, list_indexes, list_enums, list_triggers, list_sequences,
-    truncate_table, drop_table, get_table_column_structure, get_incoming_foreign_keys,
+    truncate_table, drop_table, get_table_column_structure, get_incoming_foreign_keys, get_table_ddl as db_get_table_ddl,
     test_connection, test_d1_connection, test_libsql_connection, test_mysql_connection, test_sqlite_connection,
     update_table_cell, ConnectionConfig, D1Config, DbState, EnumInfo, IndexInfo, LibSqlConfig, TriggerInfo, SequenceInfo,
     InsertRowResult, MysqlConfig, SqlResult, SqliteConfig, TableInfo, TableRows, ColumnStructureRow, IncomingForeignKey,
@@ -287,6 +287,15 @@ pub async fn pg_drop_table(
     cascade: bool,
 ) -> Result<(), String> {
     drop_table(state, schema, table, cascade).await
+}
+
+#[tauri::command]
+pub async fn get_table_ddl(
+    state: State<'_, DbState>,
+    schema: String,
+    table: String,
+) -> Result<String, String> {
+    db_get_table_ddl(state, schema, table).await
 }
 
 #[tauri::command]
@@ -535,6 +544,26 @@ pub async fn init_sample_db(app: tauri::AppHandle) -> Result<String, String> {
     pool.close().await;
 
     Ok(db_path_str)
+}
+
+// ── Autostart ─────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn enable_autostart(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().enable().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn disable_autostart(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().disable().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_autostart_status(app: tauri::AppHandle) -> Result<bool, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().is_enabled().map_err(|e| e.to_string())
 }
 
 async fn seed_sample_database(pool: &sqlx::SqlitePool) -> Result<(), String> {

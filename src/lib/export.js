@@ -48,7 +48,7 @@ export function buildExportFilename(tableName, format) {
  * Falls back to a browser blob download when running outside Tauri.
  * @param {string} content
  * @param {string} defaultFilename  e.g. "users_2025-05-24.csv"
- * @param {'csv' | 'json'} format
+ * @param {'csv' | 'json' | 'sql'} format
  * @returns {Promise<boolean>} true if the file was saved, false if cancelled
  */
 export async function saveExportFile(content, defaultFilename, format) {
@@ -58,7 +58,7 @@ export async function saveExportFile(content, defaultFilename, format) {
     const { save } = await import('@tauri-apps/plugin-dialog')
     const { invoke } = await import('@tauri-apps/api/core')
 
-    const filterName = format === 'csv' ? 'CSV files' : 'JSON files'
+    const filterName = format === 'csv' ? 'CSV files' : format === 'json' ? 'JSON files' : 'SQL files'
     const path = await save({
       defaultPath: defaultFilename,
       filters: [{ name: filterName, extensions: [format] }],
@@ -70,7 +70,7 @@ export async function saveExportFile(content, defaultFilename, format) {
   }
 
   // Browser fallback
-  const mime = format === 'csv' ? 'text/csv;charset=utf-8;' : 'application/json'
+  const mime = format === 'csv' ? 'text/csv;charset=utf-8;' : format === 'json' ? 'application/json' : 'text/plain'
   const blob = new Blob([content], { type: mime })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')

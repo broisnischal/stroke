@@ -19,5 +19,6 @@ pub use query::{
 pub use schema::{
     list_schemas, list_tables, list_indexes, list_enums, list_triggers, list_sequences,
     truncate_table, drop_table, get_table_column_structure, get_incoming_foreign_keys,
+    get_table_ddl,
     TableInfo, IndexInfo, EnumInfo, TriggerInfo, SequenceInfo, ColumnStructureRow, IncomingForeignKey,
 };

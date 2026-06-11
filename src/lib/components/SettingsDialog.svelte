@@ -18,6 +18,11 @@
     canDecreaseZoom,
   } from "$lib/stores/settings.js";
   import { cn } from "$lib/utils.js";
+  import {
+    enableAutostart,
+    disableAutostart,
+    getAutostartStatus,
+  } from "$lib/api.js";
 
   let {
     open = $bindable(false),
@@ -63,6 +68,31 @@
 
   function toggleMcpAutoStart() {
     settings = updateSettings({ mcpAutoStart: !settings.mcpAutoStart });
+  }
+
+  /** @type {boolean | null} */
+  let launchAtLogin = $state(null);
+
+  $effect(() => {
+    if (launchAtLogin === null) {
+      getAutostartStatus()
+        .then((v) => { launchAtLogin = v; })
+        .catch(() => { launchAtLogin = false; });
+    }
+  });
+
+  async function toggleLaunchAtLogin() {
+    const next = !launchAtLogin;
+    launchAtLogin = next;
+    try {
+      if (next) {
+        await enableAutostart();
+      } else {
+        await disableAutostart();
+      }
+    } catch {
+      launchAtLogin = !next;
+    }
   }
 
   function openModelConfiguration() {
@@ -215,6 +245,30 @@
               class={cn(
                 "pointer-events-none block size-4 rounded-full bg-background shadow-sm transition-transform",
                 settings.mcpAutoStart ? "translate-x-4" : "translate-x-0.5",
+              )}
+            ></span>
+          </button>
+        </div>
+
+        <div class="flex items-center justify-between gap-3 px-3 py-2.5">
+          <div class="min-w-0">
+            <p class="text-xs text-muted-foreground">Launch at login</p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-label="Toggle launch at login"
+            aria-checked={launchAtLogin ?? false}
+            class={cn(
+              "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors",
+              launchAtLogin ? "bg-foreground" : "bg-muted",
+            )}
+            onclick={toggleLaunchAtLogin}
+          >
+            <span
+              class={cn(
+                "pointer-events-none block size-4 rounded-full bg-background shadow-sm transition-transform",
+                launchAtLogin ? "translate-x-4" : "translate-x-0.5",
               )}
             ></span>
           </button>

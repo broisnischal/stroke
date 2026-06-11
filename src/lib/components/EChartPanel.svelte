@@ -9,7 +9,7 @@
      * 'svg' (default): resolution-independent, always crisp, lower memory.
      * 'canvas': use only when GPU acceleration is needed (interactive 3D, etc).
      */
-    renderer = /** @type {'svg' | 'canvas'} */ ('svg'),
+    renderer = /** @type {'svg' | 'canvas'} */ ('canvas'),
     class: cls = '',
   } = $props()
 
@@ -24,6 +24,7 @@
 
   $effect(() => {
     const container = el
+    const r = renderer  // track so effect re-runs if renderer prop changes
     if (!container) return
 
     let disposed = false

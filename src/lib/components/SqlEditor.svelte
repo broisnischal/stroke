@@ -118,9 +118,9 @@
       fontFamily: '"Geist Mono Variable", ui-monospace, monospace',
       fontSize,
       lineHeight,
-      fontLigatures: false,
-      fontWeight: 'normal',
-      padding: { top: 12, bottom: 12 },
+      fontLigatures: true,
+      fontWeight: '400',
+      padding: { top: 14, bottom: 14 },
       scrollBeyondLastLine: false,
       wordWrap: 'on',
       readOnly,
@@ -129,7 +129,7 @@
       lineNumbersMinChars: 3,
       glyphMargin: false,
       folding: false,
-      scrollbar: { verticalScrollbarSize: 8, horizontalScrollbarSize: 8 },
+      scrollbar: { verticalScrollbarSize: 6, horizontalScrollbarSize: 6 },
       overviewRulerLanes: 0,
       hideCursorInOverviewRuler: true,
       overviewRulerBorder: false,
@@ -137,14 +137,27 @@
       cursorSmoothCaretAnimation: 'on',
       smoothScrolling: true,
       quickSuggestions: { other: true, comments: false, strings: true },
+      quickSuggestionsDelay: 50,
       suggestOnTriggerCharacters: true,
       tabCompletion: 'on',
       wordBasedSuggestions: 'off',
       acceptSuggestionOnEnter: 'on',
-      snippetSuggestions: 'inline',
+      snippetSuggestions: 'none',
       renderWhitespace: 'none',
       bracketPairColorization: { enabled: true },
       inlineSuggest: { enabled: false },
+      suggest: {
+        localityBonus: true,
+        showKeywords: true,
+        showFunctions: true,
+        showSnippets: true,
+        filterGraceful: true,
+        insertMode: 'insert',
+        showStatusBar: false,
+        preview: false,
+      },
+      suggestSelection: 'recentlyUsedByPrefix',
+      parameterHints: { enabled: true, cycle: true },
     })
 
     registerAppShortcuts(editor)
@@ -242,8 +255,83 @@
     font-weight: 400 !important;
   }
 
-  /* Remove the default focus outline Monaco adds */
   .sql-editor-host :global(.monaco-editor .monaco-editor-background) {
     outline: none !important;
+  }
+
+  /* ── Suggestion widget ──────────────────────────────────────────────── */
+
+  .sql-editor-host :global(.suggest-widget) {
+    border-radius: 10px !important;
+    overflow: hidden !important;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.25) !important;
+  }
+
+  /* Details panel (right side when expanded) */
+  .sql-editor-host :global(.suggest-widget .suggest-widget-details) {
+    border-radius: 0 10px 10px 0 !important;
+    border-left-width: 1px !important;
+  }
+
+  /* Each row: uniform height + horizontal padding */
+  .sql-editor-host :global(.suggest-widget .monaco-list-row) {
+    border-radius: 0 !important;
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+  }
+
+  /* Label text: slightly tighter tracking for mono */
+  .sql-editor-host :global(.suggest-widget .monaco-list-row .label-name) {
+    letter-spacing: -0.01em;
+  }
+
+  /* Detail text on right side of each row */
+  .sql-editor-host :global(.suggest-widget .details-label) {
+    opacity: 0.45 !important;
+    font-size: 0.8em !important;
+  }
+
+  /* The full documentation text in expanded detail panel */
+  .sql-editor-host :global(.suggest-widget .suggest-widget-details .docs) {
+    opacity: 0.8;
+    font-size: 0.82em !important;
+    line-height: 1.5 !important;
+    padding: 4px 2px !important;
+  }
+
+  /* Signature text (bold param names etc.) */
+  .sql-editor-host :global(.suggest-widget .suggest-widget-details .signature) {
+    font-size: 0.85em !important;
+    letter-spacing: -0.01em;
+  }
+
+  /* ── Parameter hints (shows while typing fn args) ───────────────────── */
+
+  .sql-editor-host :global(.parameter-hints-widget) {
+    border-radius: 8px !important;
+    overflow: hidden !important;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4) !important;
+  }
+
+  .sql-editor-host :global(.parameter-hints-widget .phContent) {
+    font-size: 0.85em !important;
+    padding: 4px 8px !important;
+  }
+
+  /* ── Hover widget ───────────────────────────────────────────────────── */
+
+  .sql-editor-host :global(.monaco-hover) {
+    border-radius: 8px !important;
+    overflow: hidden !important;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4) !important;
+  }
+
+  /* ── Thin scrollbar inside suggestion list ──────────────────────────── */
+
+  .sql-editor-host :global(.suggest-widget .monaco-scrollable-element > .scrollbar.vertical) {
+    width: 4px !important;
+  }
+  .sql-editor-host :global(.suggest-widget .monaco-scrollable-element > .scrollbar.horizontal) {
+    height: 4px !important;
   }
 </style>

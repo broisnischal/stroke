@@ -1,4 +1,4 @@
-/** @typedef {'table' | 'sql' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams'} StudioTabKind */
+/** @typedef {'table' | 'sql' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search'} StudioTabKind */
 
 /** @typedef {import('$lib/table-query.js').TableSort} TableSort */
 /** @typedef {import('$lib/table-query.js').TableFilter} TableFilter */
@@ -341,6 +341,7 @@ export function tabDisplayTitle(tab) {
   if (tab.kind === 'erd') return 'ER Diagram'
   if (tab.kind === 'reltree') return 'Relation Tree'
   if (tab.kind === 'diagrams') return 'Diagrams'
+  if (tab.kind === 'search') return 'Find in database'
   return tab.title
 }
 
@@ -372,4 +373,18 @@ export function findLastTableTab(tabs) {
 export function cycleTabIndex(tabs, fromIndex, direction) {
   if (tabs.length === 0) return -1
   return (fromIndex + direction + tabs.length) % tabs.length
+}
+
+export function createSearchTab() {
+  return /** @type {StudioTab} */ ({
+    id: nextTabId(),
+    kind: 'search',
+    title: 'Find in database',
+    state: null,
+  })
+}
+
+/** @param {StudioTab[]} tabs */
+export function findSearchTab(tabs) {
+  return tabs.find((t) => t.kind === 'search') ?? null
 }

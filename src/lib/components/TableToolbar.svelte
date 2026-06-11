@@ -10,7 +10,6 @@
   import Plus from "@lucide/svelte/icons/plus";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Infinity from "@lucide/svelte/icons/infinity";
-  import PanelLeft from "@lucide/svelte/icons/panel-left";
   import MoreHorizontal from "@lucide/svelte/icons/more-horizontal";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import FileDown from "@lucide/svelte/icons/file-down";
@@ -31,6 +30,7 @@
     NUM_FILTER_OPS,
     MAX_PAGE_SIZE,
     PAGE_SIZE_OPTIONS,
+    PAGE_SIZE_ALL,
     activeFilters,
     createFilter,
     ANY_COLUMN,
@@ -116,11 +116,15 @@
       : `Delete ${formatCompactCount(selectedCount)} rows`,
   );
 
+  const _effectivePageSize = $derived(
+    pageSize === PAGE_SIZE_ALL ? (total > 0 ? total : 1) : pageSize,
+  );
+
   const from = $derived(total === 0 ? 0 : offset + 1);
-  const to = $derived(Math.min(offset + pageSize, total));
-  const pageCount = $derived(Math.max(1, Math.ceil(total / pageSize) || 1));
+  const to = $derived(Math.min(offset + _effectivePageSize, total));
+  const pageCount = $derived(Math.max(1, Math.ceil(total / _effectivePageSize) || 1));
   const canPrev = $derived(page > 1);
-  const canNext = $derived(page * pageSize < total);
+  const canNext = $derived(page * _effectivePageSize < total);
 
   const filterCount = $derived(activeFilters(rowFilters).length);
   const sortLabel = $derived(
@@ -201,7 +205,7 @@
   const iconBtn =
     "inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30";
 
-  /** Matches the “more actions” / delete menu panel */
+  /** Matches the "more actions" / delete menu panel */
   const menuContent = "w-44 text-ui-sm";
 
   /** Compact shadcn select trigger for pagination */
@@ -338,539 +342,470 @@
 
 <div class="flex shrink-0 flex-col">
   <header
-    class="studio-chrome studio-table-toolbar flex min-h-9 shrink-0 flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-border bg-panel px-3 py-1 md:flex-nowrap"
+    class="studio-chrome studio-table-toolbar flex h-9 shrink-0 items-center gap-1 border-b border-border bg-panel px-2"
     data-studio-chrome
   >
-    <!-- Left -->
-    <div class="order-1 flex shrink-0 items-center gap-0.5">
-      {#if structureAllowed}
-        <button
-          type="button"
+    <!-- Search — far left -->
+    <div class="relative flex h-7 w-52 shrink-0 items-center">
+      <Search class="pointer-events-none absolute left-2 size-3.5 text-muted-foreground" />
+      {#if tableViewMode === "structure"}
+        <input
+          bind:this={structureSearchEl}
+          type="text"
+          aria-label="Search column"
+          class="h-7 w-full min-w-0 rounded-md border border-input bg-input/30 pl-7 pr-7 font-mono text-ui-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          placeholder="Search column…"
+          value={structureSearch}
+          oninput={(e) =>
+            onstructuresearchchange(
+              /** @type {HTMLInputElement} */ (e.currentTarget).value,
+            )}
+        />
+      {:else}
+        <Input
+          bind:ref={searchInputRef}
+          type="text"
+          role="searchbox"
+          aria-label="Search all columns"
           class={cn(
-            iconBtn,
-            tableViewMode === "structure" && "bg-accent text-foreground",
+            "h-7 w-full min-w-0 border-input bg-input/30 pl-7 pr-7 text-ui-sm shadow-none focus-visible:ring-2",
+            localSearch.trim() && "border-ring/40",
           )}
-          title={tableViewMode === "structure"
-            ? "Switch to Data view"
-            : "Switch to Structure view"}
-          aria-pressed={tableViewMode === "structure"}
-          onclick={ontogglestructure}
-        >
-          <LayoutList class="size-3.5" />
-        </button>
+          placeholder="Search…"
+          value={localSearch}
+          disabled={columns.length === 0}
+          oninput={(e) => handleSearchInput(e.currentTarget.value)}
+        />
       {/if}
+      <button
+        type="button"
+        class={cn(
+          "absolute right-1 inline-flex size-5 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+          localSearch ? "opacity-100" : "pointer-events-none opacity-0",
+        )}
+        aria-label="Clear search"
+        tabindex={localSearch ? 0 : -1}
+        onclick={clearSearch}
+      >
+        <X class="size-3" />
+      </button>
     </div>
 
-    <!-- Center: search + filter + sort (full-width row below pagination when narrow) -->
-    <div
-      class="order-3 flex min-w-0 flex-1 basis-full items-center gap-1 md:order-2 md:min-w-[12rem] md:basis-auto lg:max-w-xl"
-    >
-      <div class="relative flex h-7 min-w-0 flex-1 items-center">
-        <Search
-          class="pointer-events-none absolute left-2 size-3.5 text-muted-foreground"
-        />
-        {#if tableViewMode === "structure"}
-          <input
-            bind:this={structureSearchEl}
-            type="text"
-            aria-label="Search column"
-            class="h-7 w-full min-w-0 rounded-md border border-input bg-input/30 pl-7 pr-7 font-mono text-ui-sm focus:outline-none focus:ring-2 focus:ring-ring"
-            placeholder="Search column…"
-            value={structureSearch}
-            oninput={(e) =>
-              onstructuresearchchange(
-                /** @type {HTMLInputElement} */ (e.currentTarget).value,
-              )}
-          />
-        {:else}
-          <Input
-            bind:ref={searchInputRef}
-            type="text"
-            role="searchbox"
-            aria-label="Search all columns"
-            class={cn(
-              "h-7 w-full min-w-0 border-input bg-input/30 pl-7 pr-7 text-ui-sm shadow-none focus-visible:ring-2",
-              localSearch.trim() && "border-ring/40",
-            )}
-            placeholder="Search all columns…"
-            value={localSearch}
-            disabled={columns.length === 0}
-            oninput={(e) => handleSearchInput(e.currentTarget.value)}
-          />
+    {#if tableViewMode !== "structure"}
+      <!-- Filter -->
+      <button
+        type="button"
+        class={cn(
+          iconBtn,
+          "relative shrink-0",
+          (filterCount > 0 || filterBarOpen) && "bg-accent text-foreground",
+        )}
+        title="Filter rows"
+        disabled={loading || columns.length === 0}
+        onclick={() => {
+          if (!filterBarOpen) {
+            filterBarOpen = true;
+            if (rowFilters.length === 0) addFilter();
+          } else {
+            filterBarOpen = false;
+          }
+        }}
+      >
+        <ListFilter class="size-3.5" />
+        {#if filterCount > 0}
+          <span
+            class="absolute -top-0.5 -right-0.5 flex size-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-0.5 text-ui-3xs font-medium text-primary-foreground"
+            aria-hidden="true"
+          >{formatCompactCount(filterCount)}</span>
         {/if}
-        <button
-          type="button"
-          class={cn(
-            "absolute right-1 inline-flex size-5 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
-            localSearch ? "opacity-100" : "pointer-events-none opacity-0",
-          )}
-          aria-label="Clear search"
-          tabindex={localSearch ? 0 : -1}
-          onclick={clearSearch}
-        >
-          <X class="size-3" />
-        </button>
-      </div>
+      </button>
 
-      {#if tableViewMode !== "structure"}
-        <button
-          type="button"
+      <!-- Sort -->
+      <DropdownMenu.Root bind:open={sortMenuOpen}>
+        <DropdownMenu.Trigger
+          class={cn(
+            iconBtn,
+            "shrink-0",
+            (rowSort?.column || sortMenuOpen) && "bg-accent text-foreground",
+          )}
+          title={sortLabel}
+          disabled={loading || columns.length === 0}
+        >
+          <ArrowUpDown class="size-3.5" />
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Content align="start" class={cn(menuContent, "max-h-64 overflow-y-auto")}>
+          <DropdownMenu.Label>Sort by</DropdownMenu.Label>
+          {#if rowSort?.column}
+            <DropdownMenu.Item onSelect={clearSort}>
+              <X class="size-3.5" />
+              Clear sort
+            </DropdownMenu.Item>
+            <DropdownMenu.Separator />
+          {/if}
+          {#each columns as col (col.name)}
+            <DropdownMenu.Sub>
+              <DropdownMenu.SubTrigger>
+                <span class="truncate">{col.name}</span>
+                {#if rowSort?.column === col.name}
+                  <span class="ml-auto text-muted-foreground">
+                    {rowSort.direction === "desc" ? "↓" : "↑"}
+                  </span>
+                {/if}
+              </DropdownMenu.SubTrigger>
+              <DropdownMenu.SubContent class={menuContent}>
+                <DropdownMenu.Item onSelect={() => applySort(col.name, "asc")}>
+                  <ArrowUp class="size-3.5" />
+                  Ascending
+                </DropdownMenu.Item>
+                <DropdownMenu.Item onSelect={() => applySort(col.name, "desc")}>
+                  <ArrowDown class="size-3.5" />
+                  Descending
+                </DropdownMenu.Item>
+              </DropdownMenu.SubContent>
+            </DropdownMenu.Sub>
+          {/each}
+        </DropdownMenu.Content>
+      </DropdownMenu.Root>
+
+      <!-- Columns -->
+      <DropdownMenu.Root bind:open={columnsMenuOpen}>
+        <DropdownMenu.Trigger
           class={cn(
             iconBtn,
             "relative shrink-0",
-            (filterCount > 0 || filterBarOpen) && "bg-accent text-foreground",
+            (hiddenCount > 0 || columnsMenuOpen) && "bg-accent text-foreground",
           )}
-          title="Filter rows"
+          title="Toggle columns"
           disabled={loading || columns.length === 0}
-          onclick={() => {
-            if (!filterBarOpen) {
-              filterBarOpen = true;
-              if (rowFilters.length === 0) addFilter();
-            } else {
-              filterBarOpen = false;
-            }
-          }}
         >
-          <ListFilter class="size-3.5" />
-          {#if filterCount > 0}
+          <Columns3 class="size-3.5" />
+          {#if hiddenCount > 0}
             <span
               class="absolute -top-0.5 -right-0.5 flex size-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-0.5 text-ui-3xs font-medium text-primary-foreground"
               aria-hidden="true"
-            >
-              {formatCompactCount(filterCount)}
-            </span>
+            >{hiddenCount}</span>
           {/if}
-        </button>
-
-        <DropdownMenu.Root bind:open={sortMenuOpen}>
-          <DropdownMenu.Trigger
-            class={cn(
-              iconBtn,
-              "shrink-0",
-              (rowSort?.column || sortMenuOpen) && "bg-accent text-foreground",
-            )}
-            title={sortLabel}
-            disabled={loading || columns.length === 0}
-          >
-            <ArrowUpDown class="size-3.5" />
-          </DropdownMenu.Trigger>
-          <DropdownMenu.Content
-            align="center"
-            class={cn(menuContent, "max-h-64 overflow-y-auto")}
-          >
-            <DropdownMenu.Label>Sort by</DropdownMenu.Label>
-            {#if rowSort?.column}
-              <DropdownMenu.Item onSelect={clearSort}>
-                <X class="size-3.5" />
-                Clear sort
-              </DropdownMenu.Item>
-              <DropdownMenu.Separator />
-            {/if}
-            {#each columns as col (col.name)}
-              <DropdownMenu.Sub>
-                <DropdownMenu.SubTrigger>
-                  <span class="truncate">{col.name}</span>
-                  {#if rowSort?.column === col.name}
-                    <span class="ml-auto text-muted-foreground">
-                      {rowSort.direction === "desc" ? "↓" : "↑"}
-                    </span>
-                  {/if}
-                </DropdownMenu.SubTrigger>
-                <DropdownMenu.SubContent class={menuContent}>
-                  <DropdownMenu.Item
-                    onSelect={() => applySort(col.name, "asc")}
-                  >
-                    <ArrowUp class="size-3.5" />
-                    Ascending
-                  </DropdownMenu.Item>
-                  <DropdownMenu.Item
-                    onSelect={() => applySort(col.name, "desc")}
-                  >
-                    <ArrowDown class="size-3.5" />
-                    Descending
-                  </DropdownMenu.Item>
-                </DropdownMenu.SubContent>
-              </DropdownMenu.Sub>
-            {/each}
-          </DropdownMenu.Content>
-        </DropdownMenu.Root>
-
-        <DropdownMenu.Root bind:open={columnsMenuOpen}>
-          <DropdownMenu.Trigger
-            class={cn(
-              iconBtn,
-              "relative shrink-0",
-              (hiddenCount > 0 || columnsMenuOpen) &&
-                "bg-accent text-foreground",
-            )}
-            title="Toggle columns"
-            disabled={loading || columns.length === 0}
-          >
-            <Columns3 class="size-3.5" />
-            {#if hiddenCount > 0}
-              <span
-                class="absolute -top-0.5 -right-0.5 flex size-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-0.5 text-ui-3xs font-medium text-primary-foreground"
-                aria-hidden="true"
-              >
-                {hiddenCount}
-              </span>
-            {/if}
-          </DropdownMenu.Trigger>
-          <DropdownMenu.Content
-            align="center"
-            class="w-36 rounded-sm p-0 text-ui-sm"
-          >
-            <div
-              class="flex items-center justify-between border-b border-border px-2 py-1.5"
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Content align="start" class="w-36 rounded-sm p-0 text-ui-sm">
+          <div class="flex items-center justify-between border-b border-border px-2 py-1.5">
+            <p class="text-ui-xs font-medium text-foreground">Columns</p>
+            <button
+              type="button"
+              class="text-ui-2xs text-muted-foreground transition-colors hover:text-foreground"
+              onclick={() => {
+                if (hiddenCount > 0) {
+                  showAllColumns();
+                } else {
+                  onhiddencolumnschange(
+                    new Set([
+                      ...columns.slice(1).map((c) => c.name),
+                      ...virtualRelColumns.map((vc) => `__vrel:${vc.label}`),
+                    ]),
+                  );
+                }
+              }}
             >
-              <p class="text-ui-xs font-medium text-foreground">Columns</p>
+              {hiddenCount > 0 ? "Show" : "Hide"}
+            </button>
+          </div>
+          <div class="max-h-48 overflow-y-auto p-0.5">
+            {#each columns as col (col.name)}
+              {@const hidden = hiddenColumns.has(col.name)}
               <button
                 type="button"
-                class="text-ui-2xs text-muted-foreground transition-colors hover:text-foreground"
-                onclick={() => {
-                  if (hiddenCount > 0) {
-                    showAllColumns();
-                  } else {
-                    onhiddencolumnschange(
-                      new Set([
-                        ...columns.slice(1).map((c) => c.name),
-                        ...virtualRelColumns.map((vc) => `__vrel:${vc.label}`),
-                      ]),
-                    );
-                  }
-                }}
+                class="flex w-full items-center gap-1.5 rounded-[2px] px-1.5 py-1 text-left text-ui-xs hover:bg-accent hover:text-foreground"
+                onclick={() => toggleColumn(col.name)}
               >
-                {hiddenCount > 0 ? "Show" : "Hide"}
+                {#if hidden}
+                  <EyeOff class="size-3 shrink-0 text-muted-foreground" />
+                {:else}
+                  <Eye class="size-3 shrink-0" />
+                {/if}
+                <span class={cn("truncate", hidden && "text-muted-foreground")}>{col.name}</span>
               </button>
-            </div>
-            <div class="max-h-48 overflow-y-auto p-0.5">
-              {#each columns as col (col.name)}
-                {@const hidden = hiddenColumns.has(col.name)}
+            {/each}
+            {#if virtualRelColumns.length > 0}
+              <div class="my-0.5 h-px bg-border/30"></div>
+              {#each virtualRelColumns as vc (vc.label)}
+                {@const vcKey = `__vrel:${vc.label}`}
+                {@const hidden = hiddenColumns.has(vcKey)}
                 <button
                   type="button"
                   class="flex w-full items-center gap-1.5 rounded-[2px] px-1.5 py-1 text-left text-ui-xs hover:bg-accent hover:text-foreground"
-                  onclick={() => toggleColumn(col.name)}
+                  onclick={() => {
+                    const next = new Set(hiddenColumns);
+                    if (next.has(vcKey)) next.delete(vcKey); else next.add(vcKey);
+                    onhiddencolumnschange(next);
+                  }}
                 >
                   {#if hidden}
                     <EyeOff class="size-3 shrink-0 text-muted-foreground" />
                   {:else}
-                    <Eye class="size-3 shrink-0" />
+                    <Link2 class="size-3 shrink-0 text-primary/60" />
                   {/if}
-                  <span
-                    class={cn("truncate", hidden && "text-muted-foreground")}
-                    >{col.name}</span
-                  >
+                  <span class={cn("truncate", hidden && "text-muted-foreground")}>{vc.label}</span>
+                  <span class={cn("ml-auto shrink-0 text-ui-2xs", hidden ? "text-muted-foreground/20" : "text-muted-foreground/35")}>rel</span>
                 </button>
               {/each}
-              {#if virtualRelColumns.length > 0}
-                <div class="my-0.5 h-px bg-border/30"></div>
-                {#each virtualRelColumns as vc (vc.label)}
-                  {@const vcKey = `__vrel:${vc.label}`}
-                  {@const hidden = hiddenColumns.has(vcKey)}
-                  <button
-                    type="button"
-                    class="flex w-full items-center gap-1.5 rounded-[2px] px-1.5 py-1 text-left text-ui-xs hover:bg-accent hover:text-foreground"
-                    onclick={() => {
-                      const next = new Set(hiddenColumns);
-                      if (next.has(vcKey)) next.delete(vcKey); else next.add(vcKey);
-                      onhiddencolumnschange(next);
-                    }}
-                  >
-                    {#if hidden}
-                      <EyeOff class="size-3 shrink-0 text-muted-foreground" />
-                    {:else}
-                      <Link2 class="size-3 shrink-0 text-primary/60" />
-                    {/if}
-                    <span class={cn("truncate", hidden && "text-muted-foreground")}>{vc.label}</span>
-                    <span class={cn("ml-auto shrink-0 text-ui-2xs", hidden ? "text-muted-foreground/20" : "text-muted-foreground/35")}>rel</span>
-                  </button>
-                {/each}
-              {/if}
-            </div>
-          </DropdownMenu.Content>
-        </DropdownMenu.Root>
+            {/if}
+          </div>
+        </DropdownMenu.Content>
+      </DropdownMenu.Root>
 
-        <button
-          type="button"
-          class="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-border/60 px-2 text-ui-sm text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30 md:px-2.5"
-          disabled={loading || columns.length === 0 || readonly}
-          title={readonly ? "Read-only mode" : "Insert row (Add)"}
-          onclick={onaddrow}
-        >
-          <Plus class="size-3.5 shrink-0" />
-          <span class="hidden md:inline">Add</span>
-        </button>
-      {/if}
-    </div>
+      <span class="mx-0.5 h-4 w-px shrink-0 bg-border/60"></span>
 
-    <!-- Right: perf + pagination -->
-    <div
-      class="order-2 ms-auto flex shrink-0 items-center gap-1.5 md:order-3 max-lg:max-w-[calc(100%-5rem)] max-lg:overflow-x-auto max-lg:[scrollbar-width:none] max-lg:[&::-webkit-scrollbar]:hidden"
-    >
-      {#if tableViewMode !== "structure"}
-        {#if infiniteScroll}
-          <!-- Infinite scroll: show loaded count -->
-          {#if total > 0}
-            <span class="font-mono text-ui-xs text-muted-foreground/70 tabular-nums"
-              title="{to.toLocaleString('en-US')} of {total.toLocaleString('en-US')} rows loaded">
-              {formatCompactCount(to)} / {formatCompactCount(total)}
-              {#if queryMs > 0}<span class="text-muted-foreground/35"> · {queryMs}ms</span>{/if}
-            </span>
-          {/if}
-        {:else}
-          {#if total > 0}
-            <span
-              class="font-mono text-ui-xs text-muted-foreground/70 tabular-nums"
-              title="{from.toLocaleString('en-US')}–{to.toLocaleString('en-US')} of {total.toLocaleString('en-US')} rows{queryMs > 0 ? ` · ${queryMs}ms` : ''}"
-            >{formatCompactCount(from)}–{formatCompactCount(to)} of {total.toLocaleString("en-US")}{#if queryMs > 0}<span class="text-muted-foreground/35"> · {queryMs}ms</span>{/if}</span
-            >
-          {:else if queryMs > 0}
-            <span class="font-mono text-ui-xs text-muted-foreground/35 tabular-nums">{queryMs}ms</span>
-          {/if}
-
-          <span class="mx-0.5 h-4 w-px bg-border/60"></span>
-
-          <Select.Root
-            type="single"
-            value={String(pageSize)}
-            onValueChange={(v) => {
-              if (v) onpagesizechange(Number(v));
-            }}
-            disabled={loading}
-          >
-            <Select.Trigger
-              size="sm"
-              class={pageSelectTrigger}
-              title="Rows per page"
-              aria-label="Rows per page"
-            >
-              {pageSize}
-            </Select.Trigger>
-            <Select.Content align="end" class="min-w-0">
-              {#each PAGE_SIZE_OPTIONS as size (size)}
-                <Select.Item value={String(size)} label={String(size)} />
-              {/each}
-            </Select.Content>
-          </Select.Root>
-
-          <Select.Root
-            type="single"
-            value={String(page)}
-            onValueChange={(v) => {
-              if (v) onpagechange(Number(v));
-            }}
-            disabled={loading || total === 0}
-          >
-            <Select.Trigger
-              size="sm"
-              class={pageSelectTrigger}
-              title="Go to page"
-              aria-label="Go to page"
-            >
-              {page}
-            </Select.Trigger>
-            <Select.Content align="end" class="max-h-56">
-              {#each pageMenuItems as p (p)}
-                <Select.Item value={String(p)} label={String(p)} />
-              {/each}
-            </Select.Content>
-          </Select.Root>
-
-          <span
-            class="hidden text-ui-xs text-muted-foreground/50 tabular-nums sm:inline"
-            title={pageCount.toLocaleString("en-US")}
-            >of {formatCompactCount(pageCount)}</span
-          >
-
-          <button
-            type="button"
-            class={iconBtn}
-            disabled={!canPrev || loading}
-            onclick={onprev}
-            aria-label="Previous page"
-          >
-            <ChevronLeft class="size-3.5" />
-          </button>
-          <button
-            type="button"
-            class={iconBtn}
-            disabled={!canNext || loading}
-            onclick={onnext}
-            aria-label="Next page"
-          >
-            <ChevronRight class="size-3.5" />
-          </button>
-        {/if}<!-- end infiniteScroll branch -->
-
-        <span class="mx-0.5 h-4 w-px bg-border/60"></span>
-
-        <!-- Infinite scroll toggle -->
-        <button
-          type="button"
-          class={cn(iconBtn, infiniteScroll && "bg-primary/10 text-primary")}
-          onclick={oninfinitescrolltoggle}
-          title={infiniteScroll ? "Disable infinite scroll (switch to pages)" : "Enable infinite scroll"}
-          aria-label="Toggle infinite scroll"
-          aria-pressed={infiniteScroll}
-        >
-          <Infinity class="size-3.5" />
-        </button>
-
-      {/if}<!-- end structure hide -->
+      <!-- Add row -->
       <button
         type="button"
-        class={iconBtn}
-        disabled={loading}
-        onclick={onrefresh}
-        title="Refresh data (⌘R)"
-        aria-label="Refresh data"
+        class="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-border/60 px-2 text-ui-sm text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+        disabled={loading || columns.length === 0 || readonly}
+        title={readonly ? "Read-only mode" : "Insert row (Add)"}
+        onclick={onaddrow}
       >
-        <RefreshCw class={cn("size-3.5", loading && "animate-spin")} />
+        <Plus class="size-3.5 shrink-0" />
+        Add
       </button>
+    {/if}
 
-      {#if tableViewMode !== "structure"}
-        <DropdownMenu.Root
-          bind:open={limitOffsetOpen}
-          onOpenChange={(open) => {
-            if (open) {
-              draftLimit = pageSize;
-              draftOffset = offset;
-            }
-          }}
+    <!-- Spacer -->
+    <div class="flex-1"></div>
+
+    {#if tableViewMode !== "structure"}
+      {#if infiniteScroll}
+        {#if total > 0}
+          <span
+            class="flex shrink-0 items-center gap-1 font-mono text-ui-xs tabular-nums"
+            title="{to.toLocaleString('en-US')} of {total.toLocaleString('en-US')} rows loaded"
+          >
+            <span class="text-foreground/65">{to.toLocaleString("en-US")}</span>
+            <span class="text-muted-foreground/40">of {total.toLocaleString("en-US")} loaded</span>
+            {#if queryMs > 0}<span class="text-muted-foreground/30">· {queryMs}ms</span>{/if}
+          </span>
+        {/if}
+      {:else}
+        {#if total > 0}
+          <span
+            class="flex shrink-0 items-center gap-1 font-mono text-ui-xs tabular-nums"
+            title="{from.toLocaleString('en-US')}–{to.toLocaleString('en-US')} of {total.toLocaleString('en-US')} rows{queryMs > 0 ? ` · ${queryMs}ms` : ''}"
+          >
+            <span class="text-foreground/65">{from.toLocaleString("en-US")}–{to.toLocaleString("en-US")}</span>
+            <span class="text-muted-foreground/40">of {total.toLocaleString("en-US")}</span>
+            {#if queryMs > 0}<span class="text-muted-foreground/30">· {queryMs}ms</span>{/if}
+          </span>
+        {:else if queryMs > 0}
+          <span class="shrink-0 font-mono text-ui-xs text-muted-foreground/35 tabular-nums">{queryMs}ms</span>
+        {/if}
+
+        <span class="mx-0.5 h-4 w-px shrink-0 bg-border/60"></span>
+
+        <Select.Root
+          type="single"
+          value={String(pageSize)}
+          onValueChange={(v) => { if (v) onpagesizechange(Number(v)); }}
+          disabled={loading}
         >
-          <DropdownMenu.Trigger
-            class={cn(iconBtn, limitOffsetOpen && "bg-accent text-foreground")}
-            title="Custom limit & offset"
-            aria-label="Custom limit & offset"
-            disabled={loading || total === 0}
-          >
-            <SlidersHorizontal class="size-3.5" />
-          </DropdownMenu.Trigger>
-          <DropdownMenu.Content align="end" class="w-52 p-0 text-ui-sm">
-            <div class="border-b border-border px-3 py-2.5">
-              <p class="font-medium text-foreground">Pagination</p>
-            </div>
-            <div class="flex flex-col gap-3 p-3">
-              <label class="flex flex-col gap-1">
-                <span class="text-ui-xs text-muted-foreground"> Limit </span>
-                <Input
-                  class={cn(
-                    "h-7 font-mono text-ui-sm",
-                    limitError &&
-                      "border-destructive focus-visible:ring-destructive/30",
-                  )}
-                  type="number"
-                  min="1"
-                  max={MAX_PAGE_SIZE}
-                  value={draftLimit}
-                  oninput={(e) => {
-                    const v = Math.max(1, Number(e.currentTarget.value) || 1);
-                    draftLimit = v;
-                    limitError =
-                      v > MAX_PAGE_SIZE
-                        ? `Maximum is ${MAX_PAGE_SIZE.toLocaleString()} rows`
-                        : "";
-                  }}
-                />
-                {#if limitError}
-                  <p class="text-ui-xs text-destructive">{limitError}</p>
-                {/if}
-              </label>
-              <label class="flex flex-col gap-1">
-                <span class="text-ui-xs text-muted-foreground"
-                  >Offset (skip rows)</span
-                >
-                <Input
-                  class="h-7 font-mono text-ui-sm"
-                  type="number"
-                  min="0"
-                  value={draftOffset}
-                  oninput={(e) => {
-                    draftOffset = Math.max(
-                      0,
-                      Number(e.currentTarget.value) || 0,
-                    );
-                  }}
-                />
-              </label>
-              <div class="flex gap-1.5">
-                <button
-                  type="button"
-                  class="inline-flex flex-1 h-7 items-center justify-center rounded-md border border-border text-ui-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-                  onclick={() => {
-                    limitOffsetOpen = false;
-                    limitError = "";
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  class="inline-flex flex-1 h-7 items-center justify-center rounded-md bg-primary text-ui-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-40 disabled:pointer-events-none"
-                  disabled={!!limitError || draftLimit < 1}
-                  onclick={() => {
-                    const l = Math.max(1, Math.floor(draftLimit));
-                    const o = Math.max(0, Math.floor(draftOffset));
-                    if (l > MAX_PAGE_SIZE) {
-                      limitError = `Maximum is ${MAX_PAGE_SIZE.toLocaleString()} rows`;
-                      return;
-                    }
-                    onlimitoffsetchange(l, o);
-                    limitOffsetOpen = false;
-                    limitError = "";
-                  }}
-                >
-                  Apply
-                </button>
-              </div>
-            </div>
-          </DropdownMenu.Content>
-        </DropdownMenu.Root>
+          <Select.Trigger size="sm" class={pageSelectTrigger} title="Rows per page" aria-label="Rows per page">
+            {pageSize === PAGE_SIZE_ALL ? "All" : pageSize === 1_000_000 ? "1M" : pageSize}
+          </Select.Trigger>
+          <Select.Content align="end" class="min-w-0">
+            {#each PAGE_SIZE_OPTIONS as size (size)}
+              {@const label = size === PAGE_SIZE_ALL ? "All" : size === 1_000_000 ? "1M" : String(size)}
+              <Select.Item value={String(size)} {label} />
+            {/each}
+          </Select.Content>
+        </Select.Root>
 
-        <DropdownMenu.Root>
-          <DropdownMenu.Trigger
-            class={cn(iconBtn, selectedCount > 0 && "text-foreground")}
-            title="More actions"
-            disabled={loading || deleting}
-          >
-            <MoreHorizontal class="size-3.5" />
-          </DropdownMenu.Trigger>
-          <DropdownMenu.Content align="end" class={menuContent}>
-            <DropdownMenu.Label
-              class="text-ui-xs font-normal text-muted-foreground"
-            >
-              {selectedCount > 0
-                ? `${selectedCount} row${selectedCount === 1 ? "" : "s"} selected`
-                : "Current page"}
-            </DropdownMenu.Label>
-            <DropdownMenu.Item
-              disabled={total === 0}
-              onSelect={() => onexport("csv")}
-            >
-              <FileDown />
-              Export as CSV
-            </DropdownMenu.Item>
-            <DropdownMenu.Item
-              disabled={total === 0}
-              onSelect={() => onexport("json")}
-            >
-              <FileDown />
-              Export as JSON
-            </DropdownMenu.Item>
+        <Select.Root
+          type="single"
+          value={String(page)}
+          onValueChange={(v) => { if (v) onpagechange(Number(v)); }}
+          disabled={loading || total === 0}
+        >
+          <Select.Trigger size="sm" class={pageSelectTrigger} title="Go to page" aria-label="Go to page">
+            {page}
+          </Select.Trigger>
+          <Select.Content align="end" class="max-h-56">
+            {#each pageMenuItems as p (p)}
+              <Select.Item value={String(p)} label={String(p)} />
+            {/each}
+          </Select.Content>
+        </Select.Root>
+
+        <span
+          class="shrink-0 text-ui-xs text-muted-foreground/50 tabular-nums"
+          title={pageCount.toLocaleString("en-US")}
+        >of {formatCompactCount(pageCount)}</span>
+
+        <button
+          type="button"
+          class={iconBtn}
+          disabled={!canPrev || loading}
+          onclick={onprev}
+          aria-label="Previous page"
+        >
+          <ChevronLeft class="size-3.5" />
+        </button>
+        <button
+          type="button"
+          class={iconBtn}
+          disabled={!canNext || loading}
+          onclick={onnext}
+          aria-label="Next page"
+        >
+          <ChevronRight class="size-3.5" />
+        </button>
+      {/if}
+
+    {/if}
+
+    <button
+      type="button"
+      class={cn(iconBtn, "shrink-0")}
+      disabled={loading}
+      onclick={onrefresh}
+      title="Refresh data (⌘R)"
+      aria-label="Refresh data"
+    >
+      <RefreshCw class={cn("size-3.5", loading && "animate-spin")} />
+    </button>
+
+    <!-- ⋯ More menu — always visible: structure, ∞, export, delete -->
+    <DropdownMenu.Root bind:open={limitOffsetOpen}
+      onOpenChange={(open) => {
+        if (open) {
+          draftLimit = pageSize === PAGE_SIZE_ALL ? _effectivePageSize : pageSize;
+          draftOffset = offset;
+        }
+      }}
+    >
+      <DropdownMenu.Trigger
+        class={cn(iconBtn, "shrink-0", limitOffsetOpen && "bg-accent text-foreground")}
+        title="Custom limit & offset"
+        aria-label="Custom limit & offset"
+        disabled={loading || tableViewMode === "structure" || total === 0}
+      >
+        <SlidersHorizontal class="size-3.5" />
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Content align="end" class="w-52 p-0 text-ui-sm">
+        <div class="border-b border-border px-3 py-2.5">
+          <p class="font-medium text-foreground">Pagination</p>
+        </div>
+        <div class="flex flex-col gap-3 p-3">
+          <label class="flex flex-col gap-1">
+            <span class="text-ui-xs text-muted-foreground">Limit</span>
+            <Input
+              class={cn(
+                "h-7 font-mono text-ui-sm",
+                limitError && "border-destructive focus-visible:ring-destructive/30",
+              )}
+              type="number"
+              min="1"
+              max={MAX_PAGE_SIZE}
+              value={draftLimit}
+              oninput={(e) => {
+                const v = Math.max(1, Number(e.currentTarget.value) || 1);
+                draftLimit = v;
+                limitError = v > MAX_PAGE_SIZE
+                  ? `Maximum is ${MAX_PAGE_SIZE.toLocaleString()} rows`
+                  : "";
+              }}
+            />
+            {#if limitError}
+              <p class="text-ui-xs text-destructive">{limitError}</p>
+            {/if}
+          </label>
+          <label class="flex flex-col gap-1">
+            <span class="text-ui-xs text-muted-foreground">Offset (skip rows)</span>
+            <Input
+              class="h-7 font-mono text-ui-sm"
+              type="number"
+              min="0"
+              value={draftOffset}
+              oninput={(e) => {
+                draftOffset = Math.max(0, Number(e.currentTarget.value) || 0);
+              }}
+            />
+          </label>
+          <div class="flex gap-1.5">
+            <button
+              type="button"
+              class="inline-flex flex-1 h-7 items-center justify-center rounded-md border border-border text-ui-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+              onclick={() => { limitOffsetOpen = false; limitError = ""; }}
+            >Cancel</button>
+            <button
+              type="button"
+              class="inline-flex flex-1 h-7 items-center justify-center rounded-md bg-primary text-ui-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-40 disabled:pointer-events-none"
+              disabled={!!limitError || draftLimit < 1}
+              onclick={() => {
+                const l = Math.max(1, Math.floor(draftLimit));
+                const o = Math.max(0, Math.floor(draftOffset));
+                if (l > MAX_PAGE_SIZE) {
+                  limitError = `Maximum is ${MAX_PAGE_SIZE.toLocaleString()} rows`;
+                  return;
+                }
+                onlimitoffsetchange(l, o);
+                limitOffsetOpen = false;
+                limitError = "";
+              }}
+            >Apply</button>
+          </div>
+        </div>
+      </DropdownMenu.Content>
+    </DropdownMenu.Root>
+
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger
+        class={cn(iconBtn, "shrink-0")}
+        title="More actions"
+        disabled={loading || deleting}
+      >
+        <MoreHorizontal class="size-3.5" />
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Content align="end" class="w-48 text-ui-sm">
+        {#if structureAllowed}
+          <DropdownMenu.Item onSelect={ontogglestructure}>
+            <LayoutList class="size-3.5" />
+            {tableViewMode === "structure" ? "View Data" : "View Structure"}
+          </DropdownMenu.Item>
+          {#if tableViewMode !== "structure"}
             <DropdownMenu.Separator />
-            <DropdownMenu.Item
-              variant="destructive"
-              disabled={selectedCount === 0 || !hasPrimaryKey || deleting || readonly}
-              onSelect={ondeleteselected}
-            >
-              <Trash2 />
-              {deleteLabel}
-              <DropdownMenu.Shortcut>⌘⌫</DropdownMenu.Shortcut>
-            </DropdownMenu.Item>
-          </DropdownMenu.Content>
-        </DropdownMenu.Root>
-      {/if}<!-- end structure hide (limit/offset + more menu) -->
-    </div>
+          {/if}
+        {/if}
+        {#if tableViewMode !== "structure"}
+          <DropdownMenu.Item onSelect={oninfinitescrolltoggle}>
+            <Infinity class="size-3.5" />
+            {infiniteScroll ? "Disable infinite scroll" : "Infinite scroll"}
+            {#if infiniteScroll}
+              <DropdownMenu.Shortcut class="text-primary">✓</DropdownMenu.Shortcut>
+            {/if}
+          </DropdownMenu.Item>
+          <DropdownMenu.Separator />
+          {#if selectedCount > 0}
+            <DropdownMenu.Label class="text-ui-xs font-normal text-muted-foreground">
+              {selectedCount} row{selectedCount === 1 ? "" : "s"} selected
+            </DropdownMenu.Label>
+          {/if}
+          <DropdownMenu.Item disabled={total === 0} onSelect={() => onexport("csv")}>
+            <FileDown />
+            Export as CSV
+          </DropdownMenu.Item>
+          <DropdownMenu.Item disabled={total === 0} onSelect={() => onexport("json")}>
+            <FileDown />
+            Export as JSON
+          </DropdownMenu.Item>
+          <DropdownMenu.Separator />
+          <DropdownMenu.Item
+            variant="destructive"
+            disabled={selectedCount === 0 || !hasPrimaryKey || deleting || readonly}
+            onSelect={ondeleteselected}
+          >
+            <Trash2 />
+            {deleteLabel}
+            <DropdownMenu.Shortcut>⌘⌫</DropdownMenu.Shortcut>
+          </DropdownMenu.Item>
+        {/if}
+      </DropdownMenu.Content>
+    </DropdownMenu.Root>
   </header>
 
   <!-- Inline filter bar -->

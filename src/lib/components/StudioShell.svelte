@@ -36,6 +36,7 @@
   import Onboarding from './Onboarding.svelte'
   import SettingsDialog from './SettingsDialog.svelte'
   import KeyboardShortcutsDialog from './KeyboardShortcutsDialog.svelte'
+  import DdlDialog from './DdlDialog.svelte'
   import InsiderDialog from './InsiderDialog.svelte'
   import AboutDialog from './AboutDialog.svelte'
   import ReportIssueDialog from './ReportIssueDialog.svelte'
@@ -44,6 +45,7 @@
   import DisconnectDialog from './DisconnectDialog.svelte'
   // InsertRowDialog removed — replaced by inline draft row in DataTable
   import McpPanel from './McpPanel.svelte'
+  import SearchPage from './SearchPage.svelte'
   import OrmRunner from './OrmRunner.svelte'
   import SchemaPage from './SchemaPage.svelte'
   import SecurityPage from './SecurityPage.svelte'
@@ -92,6 +94,8 @@
     findErdTab,
     createDiagramsTab,
     findDiagramsTab,
+    createSearchTab,
+    findSearchTab,
     findTableTab,
     findSqlTab,
     findAiTab,
@@ -113,6 +117,7 @@
   import {
     DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE,
+    PAGE_SIZE_ALL,
     activeFilters,
     filtersApiSignature,
     filtersForApi,
@@ -144,6 +149,7 @@
     truncateTable,
     dropTable,
     initSampleDb,
+    getTableDdl,
   } from '$lib/api.js'
   import {
     remapNullableRowIndex,
@@ -210,6 +216,9 @@
   let showReportIssueDialog = $state(false)
   let showDisconnectDialog = $state(false)
   let showAiModelSettings = $state(false)
+  let ddlDialogOpen = $state(false)
+  let ddlDialogTable = $state('')
+  let ddlDialogSql = $state('')
   let commandOpen = $state(false)
   let commandPage = $state(/** @type {'root'|'docker'|'connections'|'tables'} */ ('root'))
 
@@ -300,6 +309,7 @@
   let dashboardEverOpened = $state(false)
   let erdEverOpened     = $state(false)
   let diagramsEverOpened = $state(false)
+  let searchEverOpened = $state(false)
   /** @type {{ focusEditor: () => void } | null} */
   let sqlConsoleRef = $state(null)
 
@@ -320,6 +330,7 @@
     if (activeTab?.kind === 'dashboard') dashboardEverOpened = true
     if (activeTab?.kind === 'erd') erdEverOpened = true
     if (activeTab?.kind === 'diagrams') diagramsEverOpened = true
+    if (activeTab?.kind === 'search') searchEverOpened = true
   })
 
   let columns = $state([])
@@ -390,7 +401,10 @@
   let page = $state(1)
   let pageSize = $state(DEFAULT_PAGE_SIZE)
   let rawOffset = $state(/** @type {number | null} */ (null))
-  const currentOffset = $derived(rawOffset ?? (page - 1) * pageSize)
+  // When "All rows" sentinel is active, always fetch from offset 0.
+  const currentOffset = $derived(
+    pageSize === PAGE_SIZE_ALL ? 0 : (rawOffset ?? (page - 1) * pageSize),
+  )
   // Bumped whenever a fresh page of rows is applied (page/filter/sort/search).
   // The DataTable watches it to jump its scroll + virtual window back to the
   // top, so a reload never leaves the view stranded mid-table.
@@ -815,6 +829,13 @@ let rowSearch = $state('')
     tableToolbar?.focusRowSearch?.()
   })
 
+  createHotkey('Mod+Shift+G', (e) => {
+    if (!connection) return
+    e.preventDefault()
+    commandOpen = false
+    openSearchTab()
+  })
+
   // Ctrl/Cmd+T when viewing a table: clear the row search (and focus it).
   // This lets the user quickly reset filters without reaching for the mouse.
   createHotkey('Mod+T', (e) => {
@@ -1007,7 +1028,7 @@ let rowSearch = $state('')
           e.preventDefault()
           void handlePageChange(1)
         } else {
-          const lastPage = Math.max(1, Math.ceil(total / pageSize))
+          const lastPage = Math.max(1, Math.ceil(total / effectivePageSize))
           if (page >= lastPage) return
           e.preventDefault()
           void handlePageChange(lastPage)
@@ -1018,7 +1039,7 @@ let rowSearch = $state('')
           e.preventDefault()
           void handlePageChange(page - 1)
         } else {
-          if (page * pageSize >= total) return
+          if (page * effectivePageSize >= total) return
           e.preventDefault()
           void handlePageChange(page + 1)
         }
@@ -1390,6 +1411,20 @@ let rowSearch = $state('')
     activeTabId = tab.id
   }
 
+  function openSearchTab() {
+    const existing = findSearchTab(tabs)
+    if (existing) {
+      void activateTab(existing.id)
+      return
+    }
+    saveActiveTabState()
+    dropWelcomeTabs()
+    const tab = createSearchTab()
+    tabs = [...tabs, tab]
+    activeTabId = tab.id
+    clearTableEditor()
+  }
+
   /** @param {{ sql: string, mode: string }} detail */
   async function runOrm(detail) {
     if (!connection || !detail.sql.trim()) return
@@ -1498,19 +1533,22 @@ let rowSearch = $state('')
    * @param {{ filters?: TableFilter[], resetQuery?: boolean }} [options]
    */
   async function openTableTab(schema, table, options = {}) {
-    const { filters = null, resetQuery = false } = options
+    const { filters = null, resetQuery = false, search = null } = options
     const existing = findTableTab(tabs, schema, table)
     if (existing) {
       tableViewMode = 'data'
       structureColumns = []
       await activateTab(existing.id)
-      if (filters) {
+      if (filters || search !== null) {
         if (resetQuery) {
           rowSearch = ''
           rowSort = null
         }
-        rowFilters = filters.map((f) => ({ ...f }))
-        filterBarOpen = filters.length > 0
+        if (search !== null) rowSearch = search
+        if (filters) {
+          rowFilters = filters.map((f) => ({ ...f }))
+          filterBarOpen = filters.length > 0
+        }
         page = 1
         await loadRows()
       } else if (activeTable === table && columns.length === 0) {
@@ -1527,8 +1565,9 @@ let rowSearch = $state('')
     }
     const tab = createTableTab(schema, table, /** @type {any} */ (tableKind))
     // Pre-bake any filters/search into the tab state before fetching
-    if (tab.state && filters) {
-      /** @type {TableTabState} */ (tab.state).rowFilters = filters.map((f) => ({ ...f }))
+    if (tab.state) {
+      if (filters) /** @type {TableTabState} */ (tab.state).rowFilters = filters.map((f) => ({ ...f }))
+      if (search !== null) /** @type {TableTabState} */ (tab.state).rowSearch = search
     }
     tabs = [...tabs, tab]
     activeTabId = tab.id
@@ -1538,7 +1577,7 @@ let rowSearch = $state('')
     structureSearch = ''
     page = 1
     pageSize = DEFAULT_PAGE_SIZE
-    rowSearch = ''
+    rowSearch = search ?? ''
     rowSort = null
     rowFilters = filters ? filters.map((f) => ({ ...f })) : []
     filterBarOpen = filters ? filters.length > 0 : false
@@ -1930,10 +1969,20 @@ let rowSearch = $state('')
 
   /** @param {number} size */
   async function handlePageSizeChange(size) {
-    if (!Number.isFinite(size) || size <= 0) return
-    pageSize = Math.min(size, MAX_PAGE_SIZE)
+    if (!Number.isFinite(size)) return
+    if (size === PAGE_SIZE_ALL) {
+      pageSize = PAGE_SIZE_ALL
+    } else {
+      if (size <= 0) return
+      pageSize = Math.min(size, MAX_PAGE_SIZE)
+    }
     await reloadTableFromQuery(true)
   }
+
+  /** Resolve the effective fetch limit for the current pageSize. */
+  const effectivePageSize = $derived(
+    pageSize === PAGE_SIZE_ALL ? (total > 0 ? total : MAX_PAGE_SIZE) : pageSize,
+  )
 
   /** @param {number} nextPage */
   async function handlePageChange(nextPage) {
@@ -2065,7 +2114,7 @@ let rowSearch = $state('')
     try {
       const offset = currentOffset
       const { sortColumn, sortDirection } = sortForApi(rowSort)
-      const data = await getTableRows(activeSchema, activeTable, pageSize, offset, {
+      const data = await getTableRows(activeSchema, activeTable, effectivePageSize, offset, {
         search: rowSearch,
         sortColumn,
         sortDirection,
@@ -2085,7 +2134,7 @@ let rowSearch = $state('')
       total = Number(data.total ?? 0)
       queryMs = Number(data.queryMs ?? data.query_ms ?? 0)
       reloadToken++
-      const maxPage = Math.max(1, Math.ceil(total / pageSize) || 1)
+      const maxPage = Math.max(1, Math.ceil(total / effectivePageSize) || 1)
       if (page > maxPage) page = maxPage
     } catch (e) {
       if (seq !== _loadSeq) return
@@ -2109,7 +2158,7 @@ let rowSearch = $state('')
     try {
       const offset = _infiniteRows.length
       const { sortColumn, sortDirection } = sortForApi(rowSort)
-      const data = await getTableRows(activeSchema, activeTable, pageSize, offset, {
+      const data = await getTableRows(activeSchema, activeTable, effectivePageSize, offset, {
         search: rowSearch,
         sortColumn,
         sortDirection,
@@ -2467,6 +2516,83 @@ let rowSearch = $state('')
     }
   }
 
+  /** @param {string} tableName */
+  async function handleViewDdl(tableName) {
+    try {
+      const ddl = await getTableDdl(activeSchema, tableName)
+      ddlDialogTable = tableName
+      ddlDialogSql = ddl
+      ddlDialogOpen = true
+    } catch (e) {
+      toast.error('Could not load DDL', { description: String(e) })
+    }
+  }
+
+  /** @param {string} tableName */
+  async function handleExportSql(tableName) {
+    try {
+      toast.info('Preparing SQL export…')
+      const [ddl, result] = await Promise.all([
+        getTableDdl(activeSchema, tableName),
+        getTableRows(activeSchema, tableName, 100000, 0),
+      ])
+      const cols = result.columns ?? []
+      const rows = result.rows ?? []
+
+      const inserts = rows.map((row) => {
+        const vals = cols.map((col, i) => {
+          const v = row[i]
+          if (v === null || v === undefined) return 'NULL'
+          if (typeof v === 'number' || typeof v === 'boolean') return String(v)
+          if (typeof v === 'object') return `'${JSON.stringify(v).replace(/'/g, "''")}'`
+          return `'${String(v).replace(/'/g, "''")}'`
+        })
+        return `INSERT INTO "${tableName}" (${cols.map((c) => `"${c.name}"`).join(', ')}) VALUES (${vals.join(', ')});`
+      }).join('\n')
+
+      const sql = inserts.length ? `${ddl}\n\n${inserts}` : ddl
+      const filename = `${tableName}_${new Date().toISOString().slice(0, 10)}.sql`
+      await saveExportFile(sql, filename, 'sql')
+    } catch (e) {
+      toast.error('Export failed', { description: String(e) })
+    }
+  }
+
+  /** @param {string} tableName */
+  async function handleExportData(tableName) {
+    try {
+      toast.info('Preparing CSV export…')
+      const result = await getTableRows(activeSchema, tableName, 100000, 0)
+      const cols = result.columns ?? []
+      const rows = result.rows ?? []
+      const csv = rowsToCsv(cols, rows)
+      const filename = buildExportFilename(tableName, 'csv')
+      await saveExportFile(csv, filename, 'csv')
+    } catch (e) {
+      toast.error('Export failed', { description: String(e) })
+    }
+  }
+
+  /** @param {string} tableName */
+  async function handleGenerateTestData(tableName) {
+    try {
+      const cols = await getTableColumnStructure(activeSchema, tableName)
+      const colNames = cols.map((c) => `"${c.name}"`).join(',\n  ')
+      const colPlaceholders = cols.map((c) => {
+        const t = (c.dataType ?? c.data_type ?? '').toLowerCase()
+        if (t.includes('int') || t.includes('serial')) return '0'
+        if (t.includes('bool')) return 'true'
+        if (t.includes('date') || t.includes('timestamp')) return `'${new Date().toISOString().slice(0, 10)}'`
+        if (t.includes('numeric') || t.includes('float') || t.includes('double') || t.includes('decimal')) return '0.0'
+        return `'sample_${c.name}'`
+      }).join(',\n  ')
+      const sql = `-- Generated test data template for ${tableName}\nINSERT INTO "${tableName}" (\n  ${colNames}\n) VALUES (\n  ${colPlaceholders}\n);`
+      await openQueryInEditor(sql)
+    } catch (e) {
+      toast.error('Could not generate test data', { description: String(e) })
+    }
+  }
+
   /** @param {number} rowIdx */
   function primaryKeyForRow(rowIdx) {
     const row = rows[rowIdx]
@@ -2556,8 +2682,8 @@ let rowSearch = $state('')
 
       if (!hasActiveFilters && page === 1) {
         rows = [row, ...rows]
-        if (rows.length > pageSize) {
-          rows = rows.slice(0, pageSize)
+        if (rows.length > effectivePageSize) {
+          rows = rows.slice(0, effectivePageSize)
         }
         total += 1
         saveActiveTabState()
@@ -2712,6 +2838,8 @@ let rowSearch = $state('')
 
 <KeyboardShortcutsDialog bind:open={showShortcutsModal} />
 
+<DdlDialog bind:open={ddlDialogOpen} tableName={ddlDialogTable} ddl={ddlDialogSql} />
+
 <InsiderDialog bind:open={showInsiderModal} />
 
 <AboutDialog bind:open={showAboutModal} onopenreport={() => (showReportIssueDialog = true)} />
@@ -2760,7 +2888,9 @@ let rowSearch = $state('')
   {savedQueries}
   onqueryselect={(sql) => { if (aiMode) exitAiMode(); void openQueryInEditor(sql) }}
   onopenqueryhistory={() => { if (aiMode) exitAiMode(); void openQueryHistory() }}
+  onglobalsearch={() => { commandOpen = false; openSearchTab() }}
 />
+
 
 {#if autoConnecting}
   <div class="fixed inset-0 z-50 flex items-center justify-center bg-background/90">
@@ -2833,6 +2963,10 @@ let rowSearch = $state('')
         onnewtable={() => (showCreateTableDialog = true)}
         ontruncatetable={handleTruncateTable}
         ondroptable={(t, c) => void handleDropTable(t, c)}
+        onviewddl={(t) => void handleViewDdl(t)}
+        onexportsql={(t) => void handleExportSql(t)}
+        onexportdata={(t) => void handleExportData(t)}
+        ongeneratetestdata={(t) => void handleGenerateTestData(t)}
         {recentTabs}
         onrecentselect={(schema, table) => { if (aiMode) exitAiMode(); void openTableTab(schema, table) }}
         onrecentremove={(schema, table) => {
@@ -3057,6 +3191,25 @@ let rowSearch = $state('')
         </div>
       {/if}
 
+      <!-- Search tab - mount once, keep alive -->
+      {#if searchEverOpened}
+        <div
+          class={activeTab?.kind === 'search' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+          inert={activeTab?.kind !== 'search' || undefined}
+        >
+          <svelte:boundary failed={tabError}>
+            <SearchPage
+              {tables}
+              schema={activeSchema}
+              onopentable={(tableName, searchTerm) => {
+                if (aiMode) exitAiMode()
+                void openTableTab(activeSchema, tableName, { search: searchTerm })
+              }}
+            />
+          </svelte:boundary>
+        </div>
+      {/if}
+
       <!-- ORM tab: mount once, keep alive so Monaco is not destroyed on tab switch -->
       {#if ormEverOpened}
         <div
@@ -3245,7 +3398,7 @@ let rowSearch = $state('')
               await handlePageChange(page - 1)
             }}
             onnext={async () => {
-              if (page * pageSize >= total) return
+              if (page * effectivePageSize >= total) return
               await handlePageChange(page + 1)
             }}
           />
@@ -3292,6 +3445,19 @@ let rowSearch = $state('')
                   void handleRowFiltersChange([...rowFilters, newFilter])
                   filterBarOpen = true
                   tableToolbar?.focusLastFilter?.()
+                }}
+                onfilterbyvalue={(colName, value, exclude) => {
+                  /** @type {string} */ let op
+                  let filterValue = ''
+                  if (value === null || value === undefined) {
+                    op = exclude ? 'is_not_null' : 'is_null'
+                  } else {
+                    op = exclude ? 'neq' : 'eq'
+                    filterValue = String(value)
+                  }
+                  const newFilter = { id: crypto.randomUUID(), column: colName, op: /** @type {any} */ (op), value: filterValue, conjunct: /** @type {any} */ ('and') }
+                  void handleRowFiltersChange([...rowFilters, newFilter])
+                  filterBarOpen = true
                 }}
                 onsave={handleSaveCell}
                 ondelete={handleDeleteRow}
