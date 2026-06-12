@@ -1,4 +1,4 @@
-/** @typedef {'table' | 'sql' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search'} StudioTabKind */
+/** @typedef {'table' | 'sql' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search' | 'notebook' | 'schema-timeline' | 'data-diff'} StudioTabKind */
 
 /** @typedef {import('$lib/table-query.js').TableSort} TableSort */
 /** @typedef {import('$lib/table-query.js').TableFilter} TableFilter */
@@ -342,6 +342,9 @@ export function tabDisplayTitle(tab) {
   if (tab.kind === 'reltree') return 'Relation Tree'
   if (tab.kind === 'diagrams') return 'Diagrams'
   if (tab.kind === 'search') return 'Find in database'
+  if (tab.kind === 'notebook') return tab.title || 'Untitled Notebook'
+  if (tab.kind === 'schema-timeline') return 'Schema Timeline'
+  if (tab.kind === 'data-diff') return 'Data Diff'
   return tab.title
 }
 
@@ -387,4 +390,52 @@ export function createSearchTab() {
 /** @param {StudioTab[]} tabs */
 export function findSearchTab(tabs) {
   return tabs.find((t) => t.kind === 'search') ?? null
+}
+
+/**
+ * @typedef {object} NotebookTabState
+ * @property {string | null} filePath
+ * @property {import('$lib/notebook.js').Notebook} notebook
+ * @property {boolean} dirty
+ */
+
+/**
+ * @param {import('$lib/notebook.js').Notebook} notebook
+ * @param {string | null} [filePath]
+ */
+export function createNotebookTab(notebook, filePath = null) {
+  return /** @type {StudioTab} */ ({
+    id: nextTabId(),
+    kind: 'notebook',
+    title: notebook.title || 'Untitled Notebook',
+    state: /** @type {NotebookTabState} */ ({ filePath, notebook, dirty: false }),
+  })
+}
+
+export function createSchemaTimelineTab() {
+  return /** @type {StudioTab} */ ({
+    id: nextTabId(),
+    kind: 'schema-timeline',
+    title: 'Schema Timeline',
+    state: null,
+  })
+}
+
+/** @param {StudioTab[]} tabs */
+export function findSchemaTimelineTab(tabs) {
+  return tabs.find((t) => t.kind === 'schema-timeline') ?? null
+}
+
+export function createDataDiffTab() {
+  return /** @type {StudioTab} */ ({
+    id: nextTabId(),
+    kind: 'data-diff',
+    title: 'Data Diff',
+    state: null,
+  })
+}
+
+/** @param {StudioTab[]} tabs */
+export function findDataDiffTab(tabs) {
+  return tabs.find((t) => t.kind === 'data-diff') ?? null
 }

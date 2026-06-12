@@ -46,6 +46,9 @@
   // InsertRowDialog removed — replaced by inline draft row in DataTable
   import McpPanel from './McpPanel.svelte'
   import SearchPage from './SearchPage.svelte'
+  import NotebookEditor from './NotebookEditor.svelte'
+  import SchemaTimelinePage from './SchemaTimelinePage.svelte'
+  import DataDiffPage from './DataDiffPage.svelte'
   import OrmRunner from './OrmRunner.svelte'
   import SchemaPage from './SchemaPage.svelte'
   import SecurityPage from './SecurityPage.svelte'
@@ -96,6 +99,11 @@
     findDiagramsTab,
     createSearchTab,
     findSearchTab,
+    createNotebookTab,
+    createSchemaTimelineTab,
+    findSchemaTimelineTab,
+    createDataDiffTab,
+    findDataDiffTab,
     findTableTab,
     findSqlTab,
     findAiTab,
@@ -113,6 +121,9 @@
     cloneTableTabState,
     cloneSqlTabState,
   } from '$lib/studio-tabs.js'
+  import { createNotebook, deserializeNotebook, titleFromPath } from '$lib/notebook.js'
+  import { captureSnapshot } from '$lib/stores/schema-snapshots.js'
+  import { openNotebookFile } from '$lib/api.js'
   import { formatCompactCount, normalizeTableRowCount } from '$lib/table-list.js'
   import {
     DEFAULT_PAGE_SIZE,
@@ -310,6 +321,8 @@
   let erdEverOpened     = $state(false)
   let diagramsEverOpened = $state(false)
   let searchEverOpened = $state(false)
+  let schemaTimelineEverOpened = $state(false)
+  let dataDiffEverOpened = $state(false)
   /** @type {{ focusEditor: () => void } | null} */
   let sqlConsoleRef = $state(null)
 
@@ -331,6 +344,8 @@
     if (activeTab?.kind === 'erd') erdEverOpened = true
     if (activeTab?.kind === 'diagrams') diagramsEverOpened = true
     if (activeTab?.kind === 'search') searchEverOpened = true
+    if (activeTab?.kind === 'schema-timeline') schemaTimelineEverOpened = true
+    if (activeTab?.kind === 'data-diff') dataDiffEverOpened = true
   })
 
   let columns = $state([])
@@ -1425,6 +1440,72 @@ let rowSearch = $state('')
     clearTableEditor()
   }
 
+  function openNewNotebookTab() {
+    saveActiveTabState()
+    dropWelcomeTabs()
+    const nb = createNotebook()
+    const tab = createNotebookTab(nb, null)
+    tabs = [...tabs, tab]
+    activeTabId = tab.id
+    clearTableEditor()
+  }
+
+  async function openNotebookFromFile() {
+    try {
+      const result = await openNotebookFile()
+      if (!result) return
+      const nb = deserializeNotebook(result.content)
+      saveActiveTabState()
+      dropWelcomeTabs()
+      const tab = createNotebookTab(nb, result.path)
+      tabs = [...tabs, tab]
+      activeTabId = tab.id
+      clearTableEditor()
+    } catch (err) {
+      toast.error(`Failed to open notebook: ${/** @type {Error} */ (err).message}`)
+    }
+  }
+
+  function openSchemaTimelineTab() {
+    const existing = findSchemaTimelineTab(tabs)
+    if (existing) { void activateTab(existing.id); return }
+    saveActiveTabState()
+    dropWelcomeTabs()
+    const tab = createSchemaTimelineTab()
+    tabs = [...tabs, tab]
+    activeTabId = tab.id
+    clearTableEditor()
+  }
+
+  function openDataDiffTab() {
+    const existing = findDataDiffTab(tabs)
+    if (existing) { void activateTab(existing.id); return }
+    saveActiveTabState()
+    dropWelcomeTabs()
+    const tab = createDataDiffTab()
+    tabs = [...tabs, tab]
+    activeTabId = tab.id
+    clearTableEditor()
+  }
+
+  /**
+   * Update the state of a notebook tab (called by NotebookEditor via onupdate).
+   * @param {string} tabId
+   * @param {{ notebook?: import('$lib/notebook.js').Notebook, filePath?: string | null, dirty?: boolean, title?: string }} updates
+   */
+  function updateNotebookTab(tabId, updates) {
+    tabs = tabs.map((t) => {
+      if (t.id !== tabId || t.kind !== 'notebook') return t
+      const next = { ...t }
+      if (updates.title) next.title = updates.title
+      next.state = { .../** @type {any} */ (t.state) }
+      if (updates.notebook !== undefined) next.state.notebook = updates.notebook
+      if (updates.filePath !== undefined) next.state.filePath = updates.filePath
+      if (updates.dirty !== undefined) next.state.dirty = updates.dirty
+      return next
+    })
+  }
+
   /** @param {{ sql: string, mode: string }} detail */
   async function runOrm(detail) {
     if (!connection || !detail.sql.trim()) return
@@ -2288,6 +2369,10 @@ let rowSearch = $state('')
         mcpRunning = s.running
       }
     } catch { /* ignore */ }
+    // Auto-capture schema snapshot in the background (non-blocking)
+    const snapConnId = savedId || connectionId
+    const snapLabel = conn.name ?? conn.database ?? conn.filePath ?? 'database'
+    void captureSnapshot(snapConnId, snapLabel, conn.type ?? 'postgres').catch(() => {})
   }
 
   onMount(() => installInputShortcuts())
@@ -2889,6 +2974,10 @@ let rowSearch = $state('')
   onqueryselect={(sql) => { if (aiMode) exitAiMode(); void openQueryInEditor(sql) }}
   onopenqueryhistory={() => { if (aiMode) exitAiMode(); void openQueryHistory() }}
   onglobalsearch={() => { commandOpen = false; openSearchTab() }}
+  onopennotebook={() => { commandOpen = false; openNewNotebookTab() }}
+  onopennotebookfile={() => { commandOpen = false; void openNotebookFromFile() }}
+  openschematimeline={() => { commandOpen = false; openSchemaTimelineTab() }}
+  opendatadiff={() => { commandOpen = false; openDataDiffTab() }}
 />
 
 
@@ -3205,6 +3294,59 @@ let rowSearch = $state('')
                 if (aiMode) exitAiMode()
                 void openTableTab(activeSchema, tableName, { search: searchTerm })
               }}
+            />
+          </svelte:boundary>
+        </div>
+      {/if}
+
+      <!-- Notebook tabs — one instance per open notebook, kept alive -->
+      {#each tabs.filter((t) => t.kind === 'notebook') as nbTab (nbTab.id)}
+        {@const nbState = /** @type {import('$lib/studio-tabs.js').NotebookTabState} */ (nbTab.state)}
+        <div
+          class={activeTab?.id === nbTab.id ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+          inert={activeTab?.id !== nbTab.id || undefined}
+        >
+          <svelte:boundary failed={tabError}>
+            <NotebookEditor
+              notebook={nbState.notebook}
+              filePath={nbState.filePath}
+              dirty={nbState.dirty}
+              onupdate={(updates) => updateNotebookTab(nbTab.id, updates)}
+            />
+          </svelte:boundary>
+        </div>
+      {/each}
+
+      <!-- Schema Timeline tab - mount once, keep alive -->
+      {#if schemaTimelineEverOpened}
+        <div
+          class={activeTab?.kind === 'schema-timeline' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+          inert={activeTab?.kind !== 'schema-timeline' || undefined}
+        >
+          <svelte:boundary failed={tabError}>
+            <SchemaTimelinePage
+              connectionId={persistConnectionId}
+              connectionLabel={connection?.name ?? connection?.database ?? connection?.filePath ?? ''}
+              dbType={dbType}
+              connections={savedConnections}
+            />
+          </svelte:boundary>
+        </div>
+      {/if}
+
+      <!-- Data Diff tab - mount once, keep alive -->
+      {#if dataDiffEverOpened}
+        <div
+          class={activeTab?.kind === 'data-diff' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+          inert={activeTab?.kind !== 'data-diff' || undefined}
+        >
+          <svelte:boundary failed={tabError}>
+            <DataDiffPage
+              {schemas}
+              {tables}
+              activeSchema={activeSchema}
+              connections={savedConnections}
+              currentConnectionId={persistConnectionId}
             />
           </svelte:boundary>
         </div>

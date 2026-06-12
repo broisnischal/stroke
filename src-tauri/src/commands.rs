@@ -91,6 +91,12 @@ pub async fn save_file(path: String, content: String) -> Result<(), String> {
     tokio::fs::write(&path, content).await.map_err(|e| e.to_string())
 }
 
+/// Read a text file from disk — used by the notebook open flow.
+#[tauri::command]
+pub async fn read_file(path: String) -> Result<String, String> {
+    tokio::fs::read_to_string(&path).await.map_err(|e| e.to_string())
+}
+
 /// Restart the application — called after an update is installed.
 #[tauri::command]
 pub fn restart_app(app: tauri::AppHandle) {
@@ -299,6 +305,15 @@ pub async fn get_table_ddl(
 }
 
 #[tauri::command]
+pub async fn get_table_ddl_on_connection(
+    config: crate::db::AnyConnectionConfig,
+    schema: String,
+    table: String,
+) -> Result<String, String> {
+    crate::db::get_table_ddl_on_conn(config, schema, table).await
+}
+
+#[tauri::command]
 pub async fn pg_get_table_rows(
     state: State<'_, DbState>,
     schema: String,
@@ -332,6 +347,33 @@ pub async fn pg_execute_sql(state: State<'_, DbState>, sql: String) -> Result<Sq
 #[tauri::command]
 pub async fn pg_execute_sql_multi(state: State<'_, DbState>, sql: String) -> Result<Vec<SqlResult>, String> {
     execute_sql_multi(state, sql).await
+}
+
+/// Execute SQL against an arbitrary saved connection without switching the
+/// global active connection. Used by Data Diff for cross-host comparisons.
+#[tauri::command]
+pub async fn execute_sql_on_connection(
+    config: crate::db::AnyConnectionConfig,
+    sql: String,
+) -> Result<SqlResult, String> {
+    crate::db::execute_sql_on_conn(config, &sql).await
+}
+
+/// List schemas for a saved connection without switching the active connection.
+#[tauri::command]
+pub async fn list_schemas_on_connection(
+    config: crate::db::AnyConnectionConfig,
+) -> Result<Vec<String>, String> {
+    crate::db::list_schemas_on_conn(config).await
+}
+
+/// List table names for a saved connection + schema without switching the active connection.
+#[tauri::command]
+pub async fn list_tables_on_connection(
+    config: crate::db::AnyConnectionConfig,
+    schema: String,
+) -> Result<Vec<String>, String> {
+    crate::db::list_tables_on_conn(config, schema).await
 }
 
 /// Run a DDL statement outside a transaction (required for CREATE/DROP DATABASE etc.).
