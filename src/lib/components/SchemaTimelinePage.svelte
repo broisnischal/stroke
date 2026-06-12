@@ -633,12 +633,12 @@
       {:else}
         <div class="flex min-h-0 flex-1 overflow-hidden">
           <!-- Changed tables tree -->
-          <div class="flex w-48 shrink-0 flex-col overflow-hidden border-r border-border/30">
+          <div class="flex w-52 shrink-0 flex-col overflow-hidden border-r border-border/30">
             <div class="flex h-8 shrink-0 items-center border-b border-border/25 px-3">
-              <span class="flex-1 text-[9px] font-medium uppercase tracking-widest text-muted-foreground/60">Changed</span>
-              <span class="tabular-nums text-[10px] text-muted-foreground/50">{totalChanges}</span>
+              <span class="flex-1 text-ui-3xs font-medium uppercase tracking-widest text-muted-foreground/60">Changed</span>
+              <span class="font-mono text-ui-3xs text-muted-foreground/50 tabular-nums">{totalChanges}</span>
             </div>
-            <div class="min-h-0 flex-1 overflow-y-auto py-1">
+            <div class="min-h-0 flex-1 overflow-y-auto">
               {@render FileTree(diff)}
             </div>
           </div>
@@ -852,40 +852,61 @@
 
 {#snippet FileTree(d)}
   {@const grouped = groupBySchema(d)}
-  {#each Object.entries(grouped) as [schema, items] (schema)}
-    {@const collapsed = collapsedSchemas.has(schema)}
-    <div>
-      <button
-        onclick={() => toggleSchemaGroup(schema)}
-        class="flex w-full items-center gap-1.5 px-3 py-1 text-[10px] text-muted-foreground/50 hover:text-foreground/70"
-      >
-        {#if collapsed}<ChevronRight class="size-3 shrink-0" />{:else}<ChevronDown class="size-3 shrink-0" />{/if}
-        <span class="truncate font-mono">{schema}</span>
-        <span class="ml-auto shrink-0 tabular-nums opacity-40">{items.length}</span>
-      </button>
-      {#if !collapsed}
-        {#each items as item (item.name)}
-          {@const key = `${item.schema}.${item.name}`}
-          {@const isActive = selectedTable === key}
-          <button
-            onclick={() => { selectedTable = key }}
+  <ul class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
+    {#each Object.entries(grouped) as [schema, items] (schema)}
+      {@const collapsed = collapsedSchemas.has(schema)}
+      <li>
+        <!-- Schema group header — mirrors Sidebar section header -->
+        <button
+          onclick={() => toggleSchemaGroup(schema)}
+          class="flex w-full items-center gap-1 px-2.5 pb-1 pt-2 text-left"
+        >
+          <ChevronRight
             class={cn(
-              'flex w-full items-center gap-1.5 px-3 py-1 text-xs transition-colors',
-              isActive ? 'bg-muted text-foreground' : 'text-muted-foreground/55 hover:bg-muted/40 hover:text-foreground',
+              'size-3 shrink-0 text-muted-foreground/60 transition-transform duration-100',
+              !collapsed && 'rotate-90',
             )}
-          >
-            <span class={cn(
-              'w-3 shrink-0 text-center font-mono text-[10px] font-bold',
-              item.status === 'added' ? 'text-emerald-500' : item.status === 'removed' ? 'text-red-500' : 'text-amber-500',
-            )}>
-              {item.status === 'added' ? '+' : item.status === 'removed' ? '−' : '~'}
-            </span>
-            <span class="min-w-0 truncate font-mono text-[11px]">{item.name}</span>
-          </button>
-        {/each}
-      {/if}
-    </div>
-  {/each}
+          />
+          <span class="min-w-0 flex-1 truncate font-mono text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground">
+            {schema}
+          </span>
+          <span class="ml-1 shrink-0 font-mono text-ui-2xs text-muted-foreground/60 tabular-nums">{items.length}</span>
+        </button>
+
+        {#if !collapsed}
+          <!-- Table rows — mirrors Sidebar table rows exactly -->
+          <ul class="flex flex-col gap-0.5">
+            {#each items as item (item.name)}
+              {@const key = `${item.schema}.${item.name}`}
+              {@const isActive = selectedTable === key}
+              {@const statusColor =
+                item.status === 'added'   ? 'text-emerald-500' :
+                item.status === 'removed' ? 'text-red-400' :
+                'text-amber-400'}
+              <li class="[contain-intrinsic-size:auto_30px] [content-visibility:auto]">
+                <button
+                  onclick={() => { selectedTable = key }}
+                  class={cn(
+                    'grid w-full grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 rounded-md px-2 py-1.5 text-left',
+                    isActive
+                      ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                      : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground',
+                  )}
+                >
+                  <!-- Status glyph col -->
+                  <span class={cn('w-3 shrink-0 text-center font-mono text-ui-3xs font-bold leading-none', statusColor)}>
+                    {item.status === 'added' ? '+' : item.status === 'removed' ? '−' : '~'}
+                  </span>
+                  <!-- Table name col -->
+                  <span class="min-w-0 truncate font-mono text-ui-sm leading-none">{item.name}</span>
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </li>
+    {/each}
+  </ul>
 {/snippet}
 
 {#snippet DdlDiff(tableKey)}

@@ -122,7 +122,6 @@
     cloneSqlTabState,
   } from '$lib/studio-tabs.js'
   import { createNotebook, deserializeNotebook, titleFromPath } from '$lib/notebook.js'
-  import { captureSnapshot } from '$lib/stores/schema-snapshots.js'
   import { openNotebookFile } from '$lib/api.js'
   import { formatCompactCount, normalizeTableRowCount } from '$lib/table-list.js'
   import {
@@ -2369,10 +2368,6 @@ let rowSearch = $state('')
         mcpRunning = s.running
       }
     } catch { /* ignore */ }
-    // Auto-capture schema snapshot in the background (non-blocking)
-    const snapConnId = savedId || connectionId
-    const snapLabel = conn.name ?? conn.database ?? conn.filePath ?? 'database'
-    void captureSnapshot(snapConnId, snapLabel, conn.type ?? 'postgres').catch(() => {})
   }
 
   onMount(() => installInputShortcuts())

@@ -1591,7 +1591,7 @@ pub async fn execute_sql_on_conn(
 }
 
 /// Hard row cap for ad-hoc SQL execution. Prevents OOM on tables with millions of rows.
-const EXECUTE_SQL_MAX_ROWS: usize = 5_000;
+const EXECUTE_SQL_MAX_ROWS: usize = 1_000_000_000;
 /// Statement timeout for ad-hoc queries (milliseconds).
 const EXECUTE_SQL_TIMEOUT_MS: i64 = 30_000;
 
@@ -1670,7 +1670,7 @@ async fn execute_sql_pg(pool: &sqlx::PgPool, sql: &str) -> Result<SqlResult, Str
                 row_count: Some(row_count),
                 message: if capped {
                     Some(format!(
-                        "Showing first {EXECUTE_SQL_MAX_ROWS} rows — query returned more. Add a LIMIT clause to fetch a specific range."
+                        "Result capped at {EXECUTE_SQL_MAX_ROWS} rows — add a LIMIT clause to fetch a specific range."
                     ))
                 } else {
                     None
@@ -1786,7 +1786,7 @@ async fn execute_sql_multi_pg(pool: &sqlx::PgPool, sql: &str) -> Result<Vec<SqlR
                 rows: data,
                 row_count: Some(row_count),
                 message: if capped {
-                    Some(format!("Showing first {EXECUTE_SQL_MAX_ROWS} rows"))
+                    Some(format!("Result capped at {EXECUTE_SQL_MAX_ROWS} rows"))
                 } else {
                     None
                 },
