@@ -1,4 +1,4 @@
-use super::connection::{require_conn, ActiveConnection, DbState};
+use super::connection::{require_conn, ActiveConnection, AnyConnectionConfig, DbState};
 use serde::Serialize;
 use sqlx::{MySqlPool, PgPool, Row};
 use tauri::State;
@@ -1355,5 +1355,92 @@ pub async fn get_table_ddl(
         ActiveConnection::Sqlite(pool) => get_ddl_sqlite(&pool, &table).await,
         ActiveConnection::D1(cfg) => get_ddl_d1(&cfg, &table).await,
         ActiveConnection::LibSql(cfg) => get_ddl_libsql(&cfg, &table).await,
+    }
+}
+
+// ── Cross-connection introspection (for Data Diff) ────────────────────────────
+
+/// List schemas for an arbitrary saved connection without changing global state.
+pub async fn list_schemas_on_conn(config: AnyConnectionConfig) -> Result<Vec<String>, String> {
+    use super::connection::{open_mysql, open_pg};
+    match config {
+        AnyConnectionConfig::Postgres(c) => {
+            let pool = open_pg(&c).await?;
+            let result = list_schemas_pg(&pool).await;
+            pool.close().await;
+            result
+        }
+        AnyConnectionConfig::Mysql(c) => {
+            let pool = open_mysql(&c).await?;
+            let result = list_schemas_mysql(&pool).await;
+            pool.close().await;
+            result
+        }
+        _ => Ok(vec!["main".to_string()]),
+    }
+}
+
+/// List table names for an arbitrary saved connection without changing global state.
+pub async fn list_tables_on_conn(
+    config: AnyConnectionConfig,
+    schema: String,
+) -> Result<Vec<String>, String> {
+    use super::connection::{open_mysql, open_pg, open_sqlite};
+    let to_names = |ts: Vec<TableInfo>| ts.into_iter().map(|t| t.name).collect::<Vec<_>>();
+    match config {
+        AnyConnectionConfig::Postgres(c) => {
+            validate_ident(&schema)?;
+            let pool = open_pg(&c).await?;
+            let result = list_tables_pg(&pool, &schema).await.map(to_names);
+            pool.close().await;
+            result
+        }
+        AnyConnectionConfig::Mysql(c) => {
+            let pool = open_mysql(&c).await?;
+            let result = list_tables_mysql(&pool, &schema).await.map(to_names);
+            pool.close().await;
+            result
+        }
+        AnyConnectionConfig::Sqlite(c) => {
+            let pool = open_sqlite(&c).await?;
+            let result = list_tables_sqlite(&pool).await.map(to_names);
+            pool.close().await;
+            result
+        }
+        AnyConnectionConfig::D1(c) => list_tables_d1(&c).await.map(to_names),
+        AnyConnectionConfig::Libsql(c) => list_tables_libsql(&c).await.map(to_names),
+    }
+}
+
+/// Get CREATE TABLE DDL for a table on an arbitrary saved connection.
+pub async fn get_table_ddl_on_conn(
+    config: AnyConnectionConfig,
+    schema: String,
+    table: String,
+) -> Result<String, String> {
+    use super::connection::{open_mysql, open_pg, open_sqlite};
+    validate_ident(&schema)?;
+    validate_ident(&table)?;
+    match config {
+        AnyConnectionConfig::Postgres(c) => {
+            let pool = open_pg(&c).await?;
+            let result = get_ddl_pg(&pool, &schema, &table).await;
+            pool.close().await;
+            result
+        }
+        AnyConnectionConfig::Mysql(c) => {
+            let pool = open_mysql(&c).await?;
+            let result = get_ddl_mysql(&pool, &schema, &table).await;
+            pool.close().await;
+            result
+        }
+        AnyConnectionConfig::Sqlite(c) => {
+            let pool = open_sqlite(&c).await?;
+            let result = get_ddl_sqlite(&pool, &table).await;
+            pool.close().await;
+            result
+        }
+        AnyConnectionConfig::D1(c) => get_ddl_d1(&c, &table).await,
+        AnyConnectionConfig::Libsql(c) => get_ddl_libsql(&c, &table).await,
     }
 }

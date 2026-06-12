@@ -26,6 +26,9 @@
   import Eye            from '@lucide/svelte/icons/eye'
   import Network        from '@lucide/svelte/icons/network'
 import Search         from '@lucide/svelte/icons/search'
+  import FileText       from '@lucide/svelte/icons/file-text'
+  import GitCompare     from '@lucide/svelte/icons/git-compare'
+  import GitBranch      from '@lucide/svelte/icons/git-branch'
   import * as Command from '$lib/components/ui/command/index.js'
   import { formatTableRowCount } from '$lib/table-list.js'
 
@@ -79,6 +82,10 @@ import Search         from '@lucide/svelte/icons/search'
     onqueryselect = (sql) => {},
     onopenqueryhistory = () => {},
     onglobalsearch = () => {},
+    onopennotebook = () => {},
+    onopennotebookfile = () => {},
+    openschematimeline = () => {},
+    opendatadiff = () => {},
   } = $props()
 
   /** @param {'docker' | 'connections' | 'tables'} target */
@@ -298,6 +305,22 @@ import Search         from '@lucide/svelte/icons/search'
               <Command.Item value="open json viewer explorer jsonpath tool" onSelect={() => run(onopenJsonViewer)}>
                 <Braces class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">JSON Viewer</span>
+              </Command.Item>
+              <Command.Item value="new sql notebook jupyter cells sql markdown" onSelect={() => run(onopennotebook)}>
+                <FileText class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">New Notebook</span>
+              </Command.Item>
+              <Command.Item value="open notebook file sqlnb" onSelect={() => run(onopennotebookfile)}>
+                <FileText class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">Open Notebook…</span>
+              </Command.Item>
+              <Command.Item value="schema timeline drift detection history changes diff" onSelect={() => run(openschematimeline)}>
+                <GitBranch class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">Schema Timeline</span>
+              </Command.Item>
+              <Command.Item value="data diff compare tables rows changes" onSelect={() => run(opendatadiff)}>
+                <GitCompare class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">Data Diff</span>
               </Command.Item>
             </Command.Group>
 

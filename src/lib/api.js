@@ -254,6 +254,16 @@ export async function getTableDdl(schema, table) {
 }
 
 /**
+ * @param {import('$lib/stores/connections.js').SavedConnection} connectionConfig
+ * @param {string} schema
+ * @param {string} table
+ * @returns {Promise<string>}
+ */
+export async function getTableDdlOnConnection(connectionConfig, schema, table) {
+  return /** @type {string} */ (await inv('get_table_ddl_on_connection', { config: connectionConfig, schema, table }))
+}
+
+/**
  * @param {string} schema
  * @param {string} table
  */
@@ -319,6 +329,40 @@ export async function executeSql(sql) {
 /** Execute one or more SQL statements and return each result as a separate entry. */
 export async function executeSqlMulti(sql) {
   return await inv('pg_execute_sql_multi', { sql })
+}
+
+/**
+ * Execute SQL against a specific saved connection without switching the active connection.
+ * @param {import('$lib/stores/connections.js').SavedConnection} connectionConfig
+ * @param {string} sql
+ */
+export async function executeSqlOnConnection(connectionConfig, sql) {
+  try {
+    return await invoke('execute_sql_on_connection', { config: connectionConfig, sql })
+  } catch (err) {
+    throw new Error(formatInvokeError(err))
+  }
+}
+
+/** @param {import('$lib/stores/connections.js').SavedConnection} connectionConfig */
+export async function listSchemasOnConnection(connectionConfig) {
+  try {
+    return /** @type {string[]} */ (await invoke('list_schemas_on_connection', { config: connectionConfig }))
+  } catch (err) {
+    throw new Error(formatInvokeError(err))
+  }
+}
+
+/**
+ * @param {import('$lib/stores/connections.js').SavedConnection} connectionConfig
+ * @param {string} schema
+ */
+export async function listTablesOnConnection(connectionConfig, schema) {
+  try {
+    return /** @type {string[]} */ (await invoke('list_tables_on_connection', { config: connectionConfig, schema }))
+  } catch (err) {
+    throw new Error(formatInvokeError(err))
+  }
 }
 
 /** Execute a DDL statement outside a transaction (CREATE/DROP DATABASE, etc.). */
@@ -513,4 +557,52 @@ export async function disableAutostart() {
 
 export async function getAutostartStatus() {
   return /** @type {Promise<boolean>} */ (inv('get_autostart_status'))
+}
+
+// ── File I/O ──────────────────────────────────────────────────────────────────
+
+/** @param {string} path @returns {Promise<string>} */
+export async function readFile(path) {
+  return inv('read_file', { path })
+}
+
+/**
+ * Show an open dialog filtered to .sqlnb files, then read the selected file.
+ * @returns {Promise<{ path: string, content: string } | null>}
+ */
+export async function openNotebookFile() {
+  const { open } = await import('@tauri-apps/plugin-dialog')
+  const path = await open({
+    filters: [{ name: 'SQL Notebook', extensions: ['sqlnb'] }],
+    multiple: false,
+  })
+  if (!path || typeof path !== 'string') return null
+  const content = await readFile(path)
+  return { path, content }
+}
+
+/**
+ * Show a save dialog for .sqlnb files, then write the content.
+ * @param {string} content
+ * @param {string} [defaultName]
+ * @returns {Promise<string | null>} saved path or null if cancelled
+ */
+export async function saveNotebookAs(content, defaultName = 'notebook.sqlnb') {
+  const { save } = await import('@tauri-apps/plugin-dialog')
+  const path = await save({
+    filters: [{ name: 'SQL Notebook', extensions: ['sqlnb'] }],
+    defaultPath: defaultName,
+  })
+  if (!path) return null
+  await inv('save_file', { path, content })
+  return path
+}
+
+/**
+ * Write notebook content to a known path (no dialog).
+ * @param {string} path
+ * @param {string} content
+ */
+export async function saveNotebook(path, content) {
+  return inv('save_file', { path, content })
 }

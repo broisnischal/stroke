@@ -1554,6 +1554,42 @@ pub async fn execute_sql(state: State<'_, DbState>, sql: String) -> Result<SqlRe
     }
 }
 
+/// Execute a SQL query against an arbitrary saved connection without changing
+/// the global active connection. Opens a temporary pool, runs the query, then
+/// drops the pool. Used by the Data Diff feature for cross-host comparisons.
+pub async fn execute_sql_on_conn(
+    config: super::connection::AnyConnectionConfig,
+    sql: &str,
+) -> Result<SqlResult, String> {
+    use super::connection::{open_mysql, open_pg, open_sqlite, AnyConnectionConfig};
+    let sql = sql.trim();
+    if sql.is_empty() {
+        return Err("Query is empty".into());
+    }
+    match config {
+        AnyConnectionConfig::Postgres(c) => {
+            let pool = open_pg(&c).await?;
+            let result = execute_sql_pg(&pool, sql).await;
+            pool.close().await;
+            result
+        }
+        AnyConnectionConfig::Sqlite(c) => {
+            let pool = open_sqlite(&c).await?;
+            let result = super::sqlite::execute_sql(&pool, sql).await;
+            pool.close().await;
+            result
+        }
+        AnyConnectionConfig::D1(c) => super::d1::query(&c, sql, vec![]).await,
+        AnyConnectionConfig::Mysql(c) => {
+            let pool = open_mysql(&c).await?;
+            let result = super::mysql::execute_sql(&pool, sql).await;
+            pool.close().await;
+            result
+        }
+        AnyConnectionConfig::Libsql(c) => super::libsql::query(&c, sql, vec![]).await,
+    }
+}
+
 /// Hard row cap for ad-hoc SQL execution. Prevents OOM on tables with millions of rows.
 const EXECUTE_SQL_MAX_ROWS: usize = 5_000;
 /// Statement timeout for ad-hoc queries (milliseconds).

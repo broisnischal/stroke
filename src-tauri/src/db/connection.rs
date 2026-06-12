@@ -100,6 +100,25 @@ pub struct LibSqlConfig {
     pub auth_token: Option<String>,
 }
 
+// ── Any-connection config for cross-connection queries ────────────────────────
+
+/// Accepts the full saved-connection JSON from the frontend and routes to the
+/// correct backend without touching the global active-connection state.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(tag = "type")]
+pub enum AnyConnectionConfig {
+    #[serde(rename = "postgres")]
+    Postgres(PgConfig),
+    #[serde(rename = "sqlite")]
+    Sqlite(SqliteConfig),
+    #[serde(rename = "d1")]
+    D1(D1Config),
+    #[serde(rename = "mysql")]
+    Mysql(MysqlConfig),
+    #[serde(rename = "libsql")]
+    Libsql(LibSqlConfig),
+}
+
 // ── Active connection ─────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -183,7 +202,7 @@ async fn close_existing(state: &State<'_, DbState>) {
 
 // ── PostgreSQL connect / test ─────────────────────────────────────────────────
 
-async fn open_pg(config: &PgConfig) -> Result<PgPool, String> {
+pub(crate) async fn open_pg(config: &PgConfig) -> Result<PgPool, String> {
     PgPoolOptions::new()
         // Desktop app: at most 2-3 tabs open simultaneously, each running 1-2
         // queries. 4 connections is the real-world ceiling; monitored logs showed
@@ -241,7 +260,7 @@ fn sqlite_url(path: &str) -> String {
     }
 }
 
-async fn open_sqlite(config: &SqliteConfig) -> Result<SqlitePool, String> {
+pub(crate) async fn open_sqlite(config: &SqliteConfig) -> Result<SqlitePool, String> {
     SqlitePoolOptions::new()
         .max_connections(1)
         .connect(&sqlite_url(&config.file_path))
@@ -267,7 +286,7 @@ pub async fn connect_sqlite(state: State<'_, DbState>, config: SqliteConfig) -> 
 
 // ── MySQL connect / test ──────────────────────────────────────────────────────
 
-async fn open_mysql(config: &MysqlConfig) -> Result<MySqlPool, String> {
+pub(crate) async fn open_mysql(config: &MysqlConfig) -> Result<MySqlPool, String> {
     MySqlPoolOptions::new()
         // Same rationale as PG: 4 is the real-world ceiling for a desktop app.
         .max_connections(4)

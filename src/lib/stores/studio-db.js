@@ -1,12 +1,13 @@
 import { openDB } from 'idb'
 
 export const DB_NAME = 'stroke'
-export const DB_VERSION = 2
+export const DB_VERSION = 3
 
 export const STORES = {
   conversations: 'conversations',
   queryHistory: 'query-history',
   savedQueries: 'saved-queries',
+  schemaSnapshots: 'schema-snapshots',
 }
 
 /** @returns {Promise<import('idb').IDBPDatabase>} */
@@ -26,6 +27,11 @@ export function getStudioDb() {
         const store = db.createObjectStore(STORES.savedQueries, { keyPath: 'id' })
         store.createIndex('connectionId', 'connectionId')
         store.createIndex('updatedAt', 'updatedAt')
+      }
+      if (!db.objectStoreNames.contains(STORES.schemaSnapshots)) {
+        const store = db.createObjectStore(STORES.schemaSnapshots, { keyPath: 'id' })
+        store.createIndex('connectionId', 'connectionId')
+        store.createIndex('capturedAt', 'capturedAt')
       }
     },
   })
