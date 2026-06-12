@@ -35,6 +35,7 @@
   } from "$lib/stores/layout.js";
   import { untrack, onDestroy } from "svelte";
   import { buildSystemPrompt } from "$lib/ai.js";
+  import { formatCompactCount } from "$lib/table-list.js";
 
   /** @typedef {import('$lib/monaco-sql-complete.js').SqlSchemaHints} SqlSchemaHints */
 
@@ -718,7 +719,7 @@
       <!-- Right: metadata + toggle -->
       <div class="ml-auto flex shrink-0 items-center gap-3 pr-1.5">
         {#if outputVisible && currentDisplay.rows.length > 0}
-          <span class="font-mono text-ui-2xs tabular-nums text-muted-foreground">{currentDisplay.rows.length} rows</span>
+          <span class="font-mono text-ui-2xs tabular-nums text-muted-foreground">{formatCompactCount(currentDisplay.rows.length)} rows</span>
         {/if}
         {#if outputVisible && currentDisplay.queryMs > 0}
           <span class="font-mono text-ui-2xs tabular-nums text-muted-foreground">{currentDisplay.queryMs}ms</span>

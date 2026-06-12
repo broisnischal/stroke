@@ -7,7 +7,7 @@ use sqlx::{Column, MySqlPool, Row, TypeInfo};
 use std::collections::HashMap;
 use std::time::Instant;
 
-const EXECUTE_SQL_MAX_ROWS: usize = 5_000;
+const EXECUTE_SQL_MAX_ROWS: usize = 1_000_000_000;
 
 fn bt(s: &str) -> String {
     format!("`{}`", s.replace('`', "``"))
@@ -396,7 +396,7 @@ pub async fn execute_sql(pool: &MySqlPool, sql: &str) -> Result<SqlResult, Strin
             rows: data,
             row_count: Some(row_count),
             message: if capped {
-                Some(format!("Showing first {EXECUTE_SQL_MAX_ROWS} rows. Add LIMIT to fetch a specific range."))
+                Some(format!("Result capped at {EXECUTE_SQL_MAX_ROWS} rows — add a LIMIT clause to fetch a specific range."))
             } else {
                 None
             },

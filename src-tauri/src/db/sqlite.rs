@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use sqlx::{Column, Row, SqlitePool, TypeInfo};
 use std::time::Instant;
 
-const EXECUTE_SQL_MAX_ROWS: usize = 5_000;
+const EXECUTE_SQL_MAX_ROWS: usize = 1_000_000_000;
 
 // ── Cell conversion ───────────────────────────────────────────────────────────
 
@@ -143,7 +143,7 @@ pub async fn execute_sql(pool: &SqlitePool, sql: &str) -> Result<SqlResult, Stri
             row_count: Some(n),
             message: if capped {
                 Some(format!(
-                    "Showing first {EXECUTE_SQL_MAX_ROWS} rows — query returned more. Add a LIMIT clause to fetch a specific range."
+                    "Result capped at {EXECUTE_SQL_MAX_ROWS} rows — add a LIMIT clause to fetch a specific range."
                 ))
             } else {
                 None
