@@ -14,6 +14,7 @@
   import Cloud        from '@lucide/svelte/icons/cloud'
   import BarChart2    from '@lucide/svelte/icons/bar-chart-2'
   import FolderOpen   from '@lucide/svelte/icons/folder-open'
+  import Terminal     from '@lucide/svelte/icons/terminal'
   import CloudflareLogin from './CloudflareLogin.svelte'
   import {
     testPostgresConnection, connectPostgres,
@@ -93,6 +94,13 @@
   let connectionUri = $state('')
   let uriHint       = $state('')
 
+  // ── SSH tunnel state ─────────────────────────────────────────────────────────
+  let sshEnabled      = $state(false)
+  let sshHost         = $state('')
+  let sshPort         = $state('22')
+  let sshUsername     = $state('')
+  let sshKeyPath      = $state('')
+
   let d1DiscoverPhase     = $state(/** @type {'idle'|'loading'|'done'|'error'} */ ('idle'))
   let d1DiscoverError     = $state('')
   let d1Accounts          = $state(/** @type {Array<{id:string,name:string}>} */ ([]))
@@ -111,13 +119,24 @@
 
   const activeDriver = $derived(ALL_DRIVERS.find(d => d.id === dbType) ?? ALL_DRIVERS[0])
 
+  function sshPayload() {
+    if (!sshEnabled || !sshHost.trim() || !sshUsername.trim()) return undefined
+    return {
+      host: sshHost.trim(),
+      port: Number(sshPort) || 22,
+      username: sshUsername.trim(),
+      privateKeyPath: sshKeyPath.trim(),
+    }
+  }
+
   function formPayload() {
+    const ssh = sshPayload()
     if (dbType === 'sqlite' || dbType === 'sqlite-memory')
       return { type: 'sqlite', name, filePath: dbType === 'sqlite-memory' ? ':memory:' : filePath }
     if (dbType === 'libsql') return { type: 'libsql', name, url: libsqlUrl, authToken: libsqlToken || undefined }
     if (dbType === 'd1')     return { type: 'd1', name, accountId, databaseId, apiToken }
-    if (dbType === 'mysql')  return { type: 'mysql', name, host, port, database, user, password, ssl }
-    return { type: 'postgres', name, host, port, database, user, password, ssl }
+    if (dbType === 'mysql')  return { type: 'mysql', name, host, port, database, user, password, ssl, ...(ssh && { ssh }) }
+    return { type: 'postgres', name, host, port, database, user, password, ssl, ...(ssh && { ssh }) }
   }
 
   function resetForm(conn) {
@@ -130,11 +149,16 @@
       filePath = conn.filePath ?? ''; accountId = conn.accountId ?? ''
       databaseId = conn.databaseId ?? ''; apiToken = conn.apiToken ?? ''
       libsqlUrl = conn.url ?? ''; libsqlToken = conn.authToken ?? ''
+      // Restore SSH fields
+      const s = conn.ssh
+      sshEnabled = !!s?.host; sshHost = s?.host ?? ''; sshPort = String(s?.port ?? 22)
+      sshUsername = s?.username ?? ''; sshKeyPath = s?.privateKeyPath ?? ''
     } else {
       dbType = 'postgres'; name = 'Local PostgreSQL'; host = '127.0.0.1'; port = '5432'
       database = 'postgres'; user = 'postgres'; password = ''; ssl = false
       filePath = ''; accountId = ''; databaseId = ''; apiToken = ''
       libsqlUrl = ''; libsqlToken = ''
+      sshEnabled = false; sshHost = ''; sshPort = '22'; sshUsername = ''; sshKeyPath = ''
     }
     error = ''; testOk = false; connectionUri = ''; uriHint = ''
     d1Reset()
@@ -318,6 +342,50 @@
     } catch { /* browser/non-Tauri env */ }
   }
 </script>
+
+<!-- SSH Tunnel section (shared by PG and MySQL forms) -->
+{#snippet sshSection(_driver)}
+  <div class="border-t border-border/15 pt-3">
+    <label class="flex cursor-pointer select-none items-center gap-2">
+      <Checkbox id="cn-ssh-enabled" checked={sshEnabled} onCheckedChange={(v) => (sshEnabled = v === true)} />
+      <span class="flex items-center gap-1.5 text-[11px] text-muted-foreground/60">
+        <Terminal class="size-3 shrink-0" />
+        Connect via SSH tunnel
+      </span>
+    </label>
+
+    {#if sshEnabled}
+      <div class="mt-3 flex flex-col gap-2.5 rounded-lg border border-border/20 bg-muted/[0.03] p-3">
+        <div class="grid grid-cols-[1fr_68px] gap-2">
+          <div>
+            <label for="cn-ssh-host" class={lbl}>SSH Host</label>
+            <Input id="cn-ssh-host" bind:value={sshHost} placeholder="bastion.example.com" class={inp} />
+          </div>
+          <div>
+            <label for="cn-ssh-port" class={lbl}>Port</label>
+            <Input id="cn-ssh-port" bind:value={sshPort} type="text" inputmode="numeric" class={inpNum} />
+          </div>
+        </div>
+
+        <div>
+          <label for="cn-ssh-user" class={lbl}>SSH Username</label>
+          <Input id="cn-ssh-user" bind:value={sshUsername} placeholder="ec2-user" autocomplete="username" class={inp} />
+        </div>
+
+        <div>
+          <label for="cn-ssh-key" class={lbl}>
+            Identity file <span class="normal-case font-normal opacity-50">(optional — leave blank to use SSH agent)</span>
+          </label>
+          <Input
+            id="cn-ssh-key" bind:value={sshKeyPath}
+            placeholder="~/.ssh/id_rsa"
+            class={cn(inp, 'font-mono text-[11px]')}
+          />
+        </div>
+      </div>
+    {/if}
+  </div>
+{/snippet}
 
 <!-- Driver icon -->
 {#snippet dicon(id, cls = 'size-4', colored = false)}
@@ -506,6 +574,9 @@
                 <span class="text-[11px] text-muted-foreground/60">Use SSL / TLS</span>
               </label>
 
+              <!-- SSH Tunnel -->
+              {@render sshSection('pg')}
+
             <!-- ── MySQL ──────────────────────────────────────── -->
             {:else if dbType === 'mysql'}
 
@@ -540,6 +611,9 @@
                 <Checkbox id="cn-mysql-ssl" checked={ssl} onCheckedChange={(v) => (ssl = v === true)} />
                 <span class="text-[11px] text-muted-foreground/60">Use SSL / TLS</span>
               </label>
+
+              <!-- SSH Tunnel -->
+              {@render sshSection('mysql')}
 
             <!-- ── SQLite ─────────────────────────────────────── -->
             {:else if dbType === 'sqlite'}

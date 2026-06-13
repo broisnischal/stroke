@@ -428,8 +428,7 @@
         <!-- More menu -->
         <div class="relative">
           {#if moreMenuOpen}
-            <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
-            <div class="fixed inset-0 z-10" onclick={() => { moreMenuOpen = false }}></div>
+            <div class="fixed inset-0 z-10" role="presentation" onclick={() => { moreMenuOpen = false }}></div>
           {/if}
           <button
             onclick={() => { moreMenuOpen = !moreMenuOpen }}
@@ -661,9 +660,9 @@
 
 <!-- ── Capture modal ─────────────────────────────────────────────────────── -->
 {#if captureOpen}
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
   <div
     class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+    role="presentation"
     onclick={(e) => { if (e.target === e.currentTarget) captureOpen = false }}
   >
     <div class="flex w-[460px] flex-col overflow-hidden rounded-xl border border-border/60 bg-popover shadow-2xl">
@@ -793,11 +792,11 @@
                   </p>
                 {/if}
                 {#each captureSchemaList as schema (schema)}
-                  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
-                  <div
+                  <button
+                    type="button"
                     onclick={() => toggleCaptureSchema(schema)}
                     class={cn(
-                      'flex cursor-pointer items-center gap-2.5 px-4 py-1.5 text-xs',
+                      'flex w-full cursor-pointer items-center gap-2.5 px-4 py-1.5 text-xs',
                       captureChecked.has(schema)
                         ? 'text-foreground/75'
                         : 'text-muted-foreground/40 hover:text-foreground/55',
@@ -812,7 +811,7 @@
                       {#if captureChecked.has(schema)}<Check class="size-2.5 text-primary/80" />{/if}
                     </span>
                     <span class="truncate font-mono text-[11px]">{schema}</span>
-                  </div>
+                  </button>
                 {/each}
               </div>
             </div>

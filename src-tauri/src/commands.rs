@@ -125,9 +125,13 @@ use crate::db::{
     list_schemas, list_tables, list_indexes, list_enums, list_triggers, list_sequences,
     truncate_table, drop_table, get_table_column_structure, get_incoming_foreign_keys, get_table_ddl as db_get_table_ddl,
     test_connection, test_d1_connection, test_libsql_connection, test_mysql_connection, test_sqlite_connection,
-    update_table_cell, ConnectionConfig, D1Config, DbState, EnumInfo, IndexInfo, LibSqlConfig, TriggerInfo, SequenceInfo,
-    InsertRowResult, MysqlConfig, SqlResult, SqliteConfig, TableInfo, TableRows, ColumnStructureRow, IncomingForeignKey,
+    update_table_cell, ConnectionConfig, D1Config, DbState, EnumInfo, ExplainResult, IndexInfo, LibSqlConfig,
+    MysqlConfig, SqlResult, SqliteConfig, TableInfo, TableRows, TriggerInfo, SequenceInfo,
+    ColumnStructureRow, IncomingForeignKey, InsertRowResult, TunnelState,
+    explain_pg, explain_mysql, explain_sqlite,
 };
+use crate::db::connection::require_conn;
+use crate::db::ActiveConnection;
 use serde_json::Value;
 use std::collections::HashMap;
 use tauri::{Manager, State};
@@ -142,9 +146,10 @@ pub async fn test_postgres_connection(config: ConnectionConfig) -> Result<(), St
 #[tauri::command]
 pub async fn connect_postgres(
     state: State<'_, DbState>,
+    tunnel_state: State<'_, TunnelState>,
     config: ConnectionConfig,
 ) -> Result<(), String> {
-    connect(state, config).await
+    connect(state, tunnel_state, config).await
 }
 
 // ── SQLite ────────────────────────────────────────────────────────────────────
@@ -172,9 +177,10 @@ pub async fn test_mysql(config: MysqlConfig) -> Result<(), String> {
 #[tauri::command]
 pub async fn connect_mysql_db(
     state: State<'_, DbState>,
+    tunnel_state: State<'_, TunnelState>,
     config: MysqlConfig,
 ) -> Result<(), String> {
-    connect_mysql(state, config).await
+    connect_mysql(state, tunnel_state, config).await
 }
 
 // ── Cloudflare D1 ─────────────────────────────────────────────────────────────
@@ -207,8 +213,24 @@ pub async fn connect_libsql_db(state: State<'_, DbState>, config: LibSqlConfig) 
 // ── Shared disconnect ────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn disconnect_postgres(state: State<'_, DbState>) -> Result<(), String> {
-    disconnect(state).await
+pub async fn disconnect_postgres(
+    state: State<'_, DbState>,
+    tunnel_state: State<'_, TunnelState>,
+) -> Result<(), String> {
+    disconnect(state, tunnel_state).await
+}
+
+#[tauri::command]
+pub async fn pg_explain_sql(
+    state: State<'_, DbState>,
+    sql: String,
+) -> Result<ExplainResult, String> {
+    match require_conn(&state)? {
+        ActiveConnection::Postgres(pool) => explain_pg(&pool, &sql).await,
+        ActiveConnection::Mysql(pool) => explain_mysql(&pool, &sql).await,
+        ActiveConnection::Sqlite(pool) => explain_sqlite(&pool, &sql).await,
+        _ => Err("EXPLAIN is only supported for PostgreSQL, MySQL, and SQLite".into()),
+    }
 }
 
 // ── DB-agnostic query commands ────────────────────────────────────────────────

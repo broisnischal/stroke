@@ -36,6 +36,7 @@
    */
   let { schemas, tables, activeSchema, connections = [], currentConnectionId = '' } = $props()
 
+  // svelte-ignore state_referenced_locally
   const _init = activeSchema
 
   /** @param {string} connId @param {string} database @param {string} schema @returns {SourceState} */
@@ -44,8 +45,10 @@
   }
 
   /** @type {SourceState} */
+  // svelte-ignore state_referenced_locally
   let L = $state(makeSource(currentConnectionId, '', _init))
   /** @type {SourceState} */
+  // svelte-ignore state_referenced_locally
   let R = $state(makeSource(currentConnectionId, '', _init))
 
   // ── Dropdown ──────────────────────────────────────────────────────────────────
@@ -418,6 +421,7 @@
     </button>
     {#if isOpen}
       <div
+        role="presentation"
         class={cn('fixed z-40 w-56 overflow-hidden rounded-lg border border-border/50 bg-popover shadow-2xl', ddFlipUp && '-translate-y-full')}
         style="top:{ddTop}px;left:{ddLeft}px"
         onpointerdown={(e) => e.stopPropagation()}
@@ -463,6 +467,7 @@
     </button>
     {#if isOpen}
       <div
+        role="presentation"
         class={cn('fixed z-40 w-64 overflow-hidden rounded-lg border border-border/50 bg-popover shadow-2xl', ddFlipUp && '-translate-y-full')}
         style="top:{ddTop}px;left:{ddLeft}px"
         onpointerdown={(e) => e.stopPropagation()}

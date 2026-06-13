@@ -37,12 +37,30 @@ async function inv(command, args = {}) {
 
 // ── PostgreSQL ────────────────────────────────────────────────────────────────
 
+/** @param {{ host: string, port?: number, username: string, privateKeyPath?: string }} ssh */
+function normalizeSshConfig(ssh) {
+  return {
+    host: String(ssh.host || '').trim(),
+    port: Math.min(65535, Math.max(1, Number(ssh.port) || 22)),
+    username: String(ssh.username || '').trim(),
+    privateKeyPath: String(ssh.privateKeyPath || '').trim(),
+  }
+}
+
+/** Attach SSH config to a connection payload when the user has configured a tunnel. */
+function withSsh(payload, config) {
+  if (config.ssh && config.ssh.host && config.ssh.username) {
+    return { ...payload, ssh: normalizeSshConfig(config.ssh) }
+  }
+  return payload
+}
+
 export async function testPostgresConnection(config) {
-  return inv('test_postgres_connection', { config: normalizeConnectionConfig(config) })
+  return inv('test_postgres_connection', { config: withSsh(normalizeConnectionConfig(config), config) })
 }
 
 export async function connectPostgres(config) {
-  return inv('connect_postgres', { config: normalizeConnectionConfig(config) })
+  return inv('connect_postgres', { config: withSsh(normalizeConnectionConfig(config), config) })
 }
 
 /** Toggle the WebView DevTools (no-op in release builds). */
@@ -73,34 +91,32 @@ export async function initSampleDb() {
 
 // ── MySQL ─────────────────────────────────────────────────────────────────────
 
-/** @param {{ name: string, host: string, port: number, database: string, user: string, password: string, ssl: boolean }} config */
+/** @param {{ name: string, host: string, port: number, database: string, user: string, password: string, ssl: boolean, ssh?: object }} config */
 export async function testMysqlConnection(config) {
-  return inv('test_mysql', {
-    config: {
-      name: String(config.name || 'MySQL'),
-      host: String(config.host || '127.0.0.1'),
-      port: Math.min(65535, Math.max(1, Number(config.port) || 3306)),
-      database: String(config.database || ''),
-      user: String(config.user || 'root'),
-      password: String(config.password || ''),
-      ssl: Boolean(config.ssl),
-    },
-  })
+  const base = {
+    name: String(config.name || 'MySQL'),
+    host: String(config.host || '127.0.0.1'),
+    port: Math.min(65535, Math.max(1, Number(config.port) || 3306)),
+    database: String(config.database || ''),
+    user: String(config.user || 'root'),
+    password: String(config.password || ''),
+    ssl: Boolean(config.ssl),
+  }
+  return inv('test_mysql', { config: withSsh(base, config) })
 }
 
-/** @param {{ name: string, host: string, port: number, database: string, user: string, password: string, ssl: boolean }} config */
+/** @param {{ name: string, host: string, port: number, database: string, user: string, password: string, ssl: boolean, ssh?: object }} config */
 export async function connectMysql(config) {
-  return inv('connect_mysql_db', {
-    config: {
-      name: String(config.name || 'MySQL'),
-      host: String(config.host || '127.0.0.1'),
-      port: Math.min(65535, Math.max(1, Number(config.port) || 3306)),
-      database: String(config.database || ''),
-      user: String(config.user || 'root'),
-      password: String(config.password || ''),
-      ssl: Boolean(config.ssl),
-    },
-  })
+  const base = {
+    name: String(config.name || 'MySQL'),
+    host: String(config.host || '127.0.0.1'),
+    port: Math.min(65535, Math.max(1, Number(config.port) || 3306)),
+    database: String(config.database || ''),
+    user: String(config.user || 'root'),
+    password: String(config.password || ''),
+    ssl: Boolean(config.ssl),
+  }
+  return inv('connect_mysql_db', { config: withSsh(base, config) })
 }
 
 // ── Cloudflare D1 ─────────────────────────────────────────────────────────────
@@ -329,6 +345,16 @@ export async function executeSql(sql) {
 /** Execute one or more SQL statements and return each result as a separate entry. */
 export async function executeSqlMulti(sql) {
   return await inv('pg_execute_sql_multi', { sql })
+}
+
+/**
+ * Run EXPLAIN ANALYZE on `sql` and return the parsed plan tree.
+ * Works for PostgreSQL (JSON plan), MySQL (FORMAT=JSON), and SQLite (QUERY PLAN).
+ * @param {string} sql
+ * @returns {Promise<{ plan: object, planningTime: number, executionTime: number, driver: string }>}
+ */
+export async function explainSql(sql) {
+  return inv('pg_explain_sql', { sql })
 }
 
 /**

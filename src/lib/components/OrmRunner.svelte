@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import * as monaco from "monaco-editor";
   import { configureMonacoWorkers } from "$lib/monaco-env.js";
   import {
@@ -225,7 +225,7 @@
       `  toSQL(): QueryResult;`,
       `}`,
       `declare const db: {`,
-      `  select(cols?: Record<string, DbCol>): SelectBuilder;`,
+      `  select(cols?: Record<string, DbCol | SqlCond>): SelectBuilder;`,
       `  insert(table: any): InsertBuilder;`,
       `  update(table: any): UpdateBuilder;`,
       `  delete(table: any): DeleteBuilder;`,
@@ -238,21 +238,23 @@
       `declare function lte(col: DbCol | string, val: any): SqlCond;`,
       `declare function like(col: DbCol | string, pattern: string): SqlCond;`,
       `declare function ilike(col: DbCol | string, pattern: string): SqlCond;`,
+      `declare function notIlike(col: DbCol | string, pattern: string): SqlCond;`,
       `declare function isNull(col: DbCol | string): SqlCond;`,
       `declare function isNotNull(col: DbCol | string): SqlCond;`,
       `declare function inArray(col: DbCol | string, vals: any[]): SqlCond;`,
       `declare function notInArray(col: DbCol | string, vals: any[]): SqlCond;`,
       `declare function between(col: DbCol | string, min: any, max: any): SqlCond;`,
+      `declare function notBetween(col: DbCol | string, min: any, max: any): SqlCond;`,
       `declare function and(...conds: (SqlCond | undefined)[]): SqlCond;`,
       `declare function or(...conds: (SqlCond | undefined)[]): SqlCond;`,
       `declare function not(cond: SqlCond): SqlCond;`,
       `declare function asc(col: DbCol | string): OrderSpec;`,
       `declare function desc(col: DbCol | string): OrderSpec;`,
-      `declare function count(col?: DbCol | string): DbCol;`,
-      `declare function sum(col: DbCol | string): DbCol;`,
-      `declare function avg(col: DbCol | string): DbCol;`,
-      `declare function max(col: DbCol | string): DbCol;`,
-      `declare function min(col: DbCol | string): DbCol;`,
+      `declare function count(col?: DbCol | string): SqlCond;`,
+      `declare function sum(col: DbCol | string): SqlCond;`,
+      `declare function avg(col: DbCol | string): SqlCond;`,
+      `declare function max(col: DbCol | string): SqlCond;`,
+      `declare function min(col: DbCol | string): SqlCond;`,
       `declare function sql(strings: TemplateStringsArray | string, ...vals: any[]): SqlCond;`,
     ];
     for (const name of tableNames) {
@@ -274,17 +276,23 @@
       `interface StringFilter { equals?: string; contains?: string; startsWith?: string; endsWith?: string; not?: string; in?: string[]; notIn?: string[]; }`,
       `interface NumberFilter { equals?: number; gt?: number; gte?: number; lt?: number; lte?: number; not?: number; in?: number[]; notIn?: number[]; }`,
       `interface OrderByClause { [field: string]: 'asc' | 'desc'; }`,
+      `interface AggregateArgs { _count?: true | Record<string, boolean>; _sum?: Record<string, boolean>; _avg?: Record<string, boolean>; _min?: Record<string, boolean>; _max?: Record<string, boolean>; where?: Record<string, any>; }`,
+      `interface GroupByArgs { by: string[]; _count?: true | Record<string, boolean>; _sum?: Record<string, boolean>; _avg?: Record<string, boolean>; _min?: Record<string, boolean>; _max?: Record<string, boolean>; where?: Record<string, any>; having?: Record<string, any>; orderBy?: OrderByClause | OrderByClause[]; take?: number; skip?: number; }`,
       `interface PrismaModel {`,
-      `  findMany(args?: { where?: Record<string, any>; orderBy?: OrderByClause | OrderByClause[]; take?: number; skip?: number; select?: Record<string, boolean> }): QueryResult;`,
-      `  findFirst(args?: { where?: Record<string, any>; orderBy?: OrderByClause | OrderByClause[] }): QueryResult;`,
-      `  findUnique(args: { where: Record<string, any> }): QueryResult;`,
-      `  create(args: { data: Record<string, any> }): QueryResult;`,
-      `  createMany(args: { data: Record<string, any>[] }): QueryResult;`,
-      `  update(args: { data: Record<string, any>; where: Record<string, any> }): QueryResult;`,
+      `  findMany(args?: { where?: Record<string, any>; orderBy?: OrderByClause | OrderByClause[]; take?: number; skip?: number; select?: Record<string, boolean>; cursor?: Record<string, any> }): QueryResult;`,
+      `  findFirst(args?: { where?: Record<string, any>; orderBy?: OrderByClause | OrderByClause[]; select?: Record<string, boolean> }): QueryResult;`,
+      `  findFirstOrThrow(args?: { where?: Record<string, any>; select?: Record<string, boolean> }): QueryResult;`,
+      `  findUnique(args: { where: Record<string, any>; select?: Record<string, boolean> }): QueryResult;`,
+      `  findUniqueOrThrow(args: { where: Record<string, any>; select?: Record<string, boolean> }): QueryResult;`,
+      `  create(args: { data: Record<string, any>; select?: Record<string, boolean> }): QueryResult;`,
+      `  createMany(args: { data: Record<string, any>[]; skipDuplicates?: boolean }): QueryResult;`,
+      `  update(args: { data: Record<string, any>; where: Record<string, any>; select?: Record<string, boolean> }): QueryResult;`,
       `  updateMany(args: { data: Record<string, any>; where?: Record<string, any> }): QueryResult;`,
-      `  delete(args: { where: Record<string, any> }): QueryResult;`,
+      `  delete(args: { where: Record<string, any>; select?: Record<string, boolean> }): QueryResult;`,
       `  deleteMany(args?: { where?: Record<string, any> }): QueryResult;`,
       `  count(args?: { where?: Record<string, any> }): QueryResult;`,
+      `  aggregate(args?: AggregateArgs): QueryResult;`,
+      `  groupBy(args: GroupByArgs): QueryResult;`,
       `  upsert(args: { create: Record<string, any>; update: Record<string, any>; where?: Record<string, any> }): QueryResult;`,
       `}`,
     ];
@@ -299,16 +307,20 @@
           `interface ${name}Where { ${colFields}; AND?: ${name}Where[]; OR?: ${name}Where[]; NOT?: ${name}Where; }`,
           `interface ${name}Select { ${selectFields}; }`,
           `interface ${name}Model {`,
-          `  findMany(args?: { where?: ${name}Where; orderBy?: OrderByClause | OrderByClause[]; take?: number; skip?: number; select?: ${name}Select }): QueryResult;`,
+          `  findMany(args?: { where?: ${name}Where; orderBy?: OrderByClause | OrderByClause[]; take?: number; skip?: number; select?: ${name}Select; cursor?: ${name}Where }): QueryResult;`,
           `  findFirst(args?: { where?: ${name}Where; select?: ${name}Select }): QueryResult;`,
+          `  findFirstOrThrow(args?: { where?: ${name}Where; select?: ${name}Select }): QueryResult;`,
           `  findUnique(args: { where: ${name}Where; select?: ${name}Select }): QueryResult;`,
-          `  create(args: { data: Partial<${name}Where> }): QueryResult;`,
-          `  createMany(args: { data: Partial<${name}Where>[] }): QueryResult;`,
-          `  update(args: { data: Partial<${name}Where>; where: ${name}Where }): QueryResult;`,
+          `  findUniqueOrThrow(args: { where: ${name}Where; select?: ${name}Select }): QueryResult;`,
+          `  create(args: { data: Partial<${name}Where>; select?: ${name}Select }): QueryResult;`,
+          `  createMany(args: { data: Partial<${name}Where>[]; skipDuplicates?: boolean }): QueryResult;`,
+          `  update(args: { data: Partial<${name}Where>; where: ${name}Where; select?: ${name}Select }): QueryResult;`,
           `  updateMany(args: { data: Partial<${name}Where>; where?: ${name}Where }): QueryResult;`,
-          `  delete(args: { where: ${name}Where }): QueryResult;`,
+          `  delete(args: { where: ${name}Where; select?: ${name}Select }): QueryResult;`,
           `  deleteMany(args?: { where?: ${name}Where }): QueryResult;`,
           `  count(args?: { where?: ${name}Where }): QueryResult;`,
+          `  aggregate(args?: AggregateArgs): QueryResult;`,
+          `  groupBy(args: GroupByArgs): QueryResult;`,
           `  upsert(args: { create: Partial<${name}Where>; update: Partial<${name}Where>; where?: ${name}Where }): QueryResult;`,
           `}`,
         );
@@ -416,13 +428,17 @@
     codeByMode[mode] = code;
   });
 
+  // Fill default only when mode switches (not on every code change).
+  // Using untrack for the code read so clearing the editor stays empty.
   $effect(() => {
     void mode;
-    if (!code.trim()) {
-      const next = defaultCode();
-      code = next;
-      if (editor && editor.getValue() !== next) editor.setValue(next);
-    }
+    untrack(() => {
+      if (!code.trim()) {
+        const next = defaultCode();
+        code = next;
+        if (editor && editor.getValue() !== next) editor.setValue(next);
+      }
+    });
   });
 
 
@@ -437,6 +453,8 @@
 
     if (!code.trim()) code = defaultCode();
 
+    // JavaScript mode with type declaration injection gives correct ORM completions.
+    // TypeScript mode + noLib:false floods the suggestion list with DOM/WebGL types.
     monaco.languages.typescript.javascriptDefaults.setCompilerOptions({
       target: monaco.languages.typescript.ScriptTarget.ES2020,
       allowNonTsExtensions: true,
@@ -500,8 +518,7 @@
     return () => {
       editor?.dispose();
       editor = null;
-      // Dispose the Monaco global TS extra-lib too — it lives on the shared
-      // javascriptDefaults and would otherwise outlive this component.
+      // Dispose the Monaco extra-lib — it lives on javascriptDefaults globally.
       if (_extraLibDisposable) { _extraLibDisposable.dispose(); _extraLibDisposable = null; }
       themeObs.disconnect();
     };
