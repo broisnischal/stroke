@@ -1,10 +1,14 @@
+use log::LevelFilter;
 use serde::{Deserialize, Serialize};
-use sqlx::mysql::MySqlPoolOptions;
-use sqlx::postgres::PgPoolOptions;
-use sqlx::sqlite::SqlitePoolOptions;
-use sqlx::{MySqlPool, PgPool, SqlitePool};
+use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions};
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use sqlx::{ConnectOptions, MySqlPool, PgPool, SqlitePool};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tauri::State;
+
+use super::ssh_tunnel::{SshConfig, SshTunnel, TunnelState};
 
 // ── PostgreSQL ────────────────────────────────────────────────────────────────
 
@@ -18,6 +22,8 @@ pub struct PgConfig {
     pub user: String,
     pub password: String,
     pub ssl: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh: Option<SshConfig>,
 }
 
 impl PgConfig {
@@ -60,6 +66,8 @@ pub struct MysqlConfig {
     pub user: String,
     pub password: String,
     pub ssl: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh: Option<SshConfig>,
 }
 
 impl MysqlConfig {
@@ -203,6 +211,12 @@ async fn close_existing(state: &State<'_, DbState>) {
 // ── PostgreSQL connect / test ─────────────────────────────────────────────────
 
 pub(crate) async fn open_pg(config: &PgConfig) -> Result<PgPool, String> {
+    let opts: PgConnectOptions = config
+        .connection_url()
+        .parse()
+        .map_err(|e| format!("Connection failed: {e}"))?;
+    let opts = opts.log_slow_statements(LevelFilter::Debug, Duration::from_secs(5));
+
     PgPoolOptions::new()
         // Desktop app: at most 2-3 tabs open simultaneously, each running 1-2
         // queries. 4 connections is the real-world ceiling; monitored logs showed
@@ -213,12 +227,12 @@ pub(crate) async fn open_pg(config: &PgConfig) -> Result<PgPool, String> {
         // No min_connections: keeping idle connections alive causes ping failures
         // after network changes or laptop sleep/wake (os error 60), then a 27 s
         // stall while the pool replaces the dead connection.
-        .acquire_timeout(std::time::Duration::from_secs(10))
+        .acquire_timeout(Duration::from_secs(10))
         // Release idle connections after 30 s (was 60 s). Logs showed the app
         // goes fully idle within 30 s of the user stopping interaction, so
         // halving this cuts FD and memory hold-time without affecting responsiveness.
-        .idle_timeout(std::time::Duration::from_secs(30))
-        .max_lifetime(std::time::Duration::from_secs(300))
+        .idle_timeout(Duration::from_secs(30))
+        .max_lifetime(Duration::from_secs(300))
         // Kill truly runaway queries. 10 min covers bulk inserts / migrations while
         // still bounding accidental full-table scans that would pin a connection.
         .after_connect(|conn, _meta| {
@@ -229,13 +243,14 @@ pub(crate) async fn open_pg(config: &PgConfig) -> Result<PgPool, String> {
                 Ok(())
             })
         })
-        .connect(&config.connection_url())
+        .connect_with(opts)
         .await
         .map_err(|e| format!("Connection failed: {e}"))
 }
 
 pub async fn test_connection(config: PgConfig) -> Result<(), String> {
-    let pool = open_pg(&config).await?;
+    let (effective, _tunnel) = resolve_pg_ssh(config).await?;
+    let pool = open_pg(&effective).await?;
     sqlx::query("SELECT 1")
         .execute(&pool)
         .await
@@ -244,10 +259,34 @@ pub async fn test_connection(config: PgConfig) -> Result<(), String> {
     Ok(())
 }
 
-pub async fn connect(state: State<'_, DbState>, config: PgConfig) -> Result<(), String> {
-    let pool = open_pg(&config).await?;
+pub async fn connect(
+    state: State<'_, DbState>,
+    tunnel_state: State<'_, TunnelState>,
+    config: PgConfig,
+) -> Result<(), String> {
+    tunnel_state.clear();
+    let (effective, tunnel) = resolve_pg_ssh(config).await?;
+    let pool = open_pg(&effective).await?;
     close_existing(&state).await;
-    set_conn(&state, Some(ActiveConnection::Postgres(pool)))
+    set_conn(&state, Some(ActiveConnection::Postgres(pool)))?;
+    tunnel_state.set(tunnel);
+    Ok(())
+}
+
+/// Establish an SSH tunnel if `config.ssh` is set, return a direct config pointing
+/// at the local forwarded port. The tunnel's lifetime must outlive the connection.
+async fn resolve_pg_ssh(config: PgConfig) -> Result<(PgConfig, Option<SshTunnel>), String> {
+    if let Some(ref ssh_cfg) = config.ssh {
+        let tunnel = SshTunnel::establish(ssh_cfg, &config.host, config.port).await?;
+        let local_port = tunnel.local_port;
+        let mut direct = config.clone();
+        direct.host = "127.0.0.1".to_string();
+        direct.port = local_port;
+        direct.ssh = None;
+        Ok((direct, Some(tunnel)))
+    } else {
+        Ok((config, None))
+    }
 }
 
 // ── SQLite connect / test ─────────────────────────────────────────────────────
@@ -261,9 +300,14 @@ fn sqlite_url(path: &str) -> String {
 }
 
 pub(crate) async fn open_sqlite(config: &SqliteConfig) -> Result<SqlitePool, String> {
+    let opts: SqliteConnectOptions = sqlite_url(&config.file_path)
+        .parse()
+        .map_err(|e| format!("SQLite connection failed: {e}"))?;
+    let opts = opts.log_slow_statements(LevelFilter::Debug, Duration::from_secs(5));
+
     SqlitePoolOptions::new()
         .max_connections(1)
-        .connect(&sqlite_url(&config.file_path))
+        .connect_with(opts)
         .await
         .map_err(|e| format!("SQLite connection failed: {e}"))
 }
@@ -287,12 +331,18 @@ pub async fn connect_sqlite(state: State<'_, DbState>, config: SqliteConfig) -> 
 // ── MySQL connect / test ──────────────────────────────────────────────────────
 
 pub(crate) async fn open_mysql(config: &MysqlConfig) -> Result<MySqlPool, String> {
+    let opts: MySqlConnectOptions = config
+        .connection_url()
+        .parse()
+        .map_err(|e| format!("Connection failed: {e}"))?;
+    let opts = opts.log_slow_statements(LevelFilter::Debug, Duration::from_secs(5));
+
     MySqlPoolOptions::new()
         // Same rationale as PG: 4 is the real-world ceiling for a desktop app.
         .max_connections(4)
-        .acquire_timeout(std::time::Duration::from_secs(10))
-        .idle_timeout(std::time::Duration::from_secs(30))
-        .max_lifetime(std::time::Duration::from_secs(300))
+        .acquire_timeout(Duration::from_secs(10))
+        .idle_timeout(Duration::from_secs(30))
+        .max_lifetime(Duration::from_secs(300))
         // Enable ANSI_QUOTES on every connection so double-quoted identifiers
         // ("col") work the same as backtick identifiers (`col`). This makes
         // standard SQL and AI-generated queries work without rewriting syntax.
@@ -304,13 +354,14 @@ pub(crate) async fn open_mysql(config: &MysqlConfig) -> Result<MySqlPool, String
                     .map(|_| ())
             })
         })
-        .connect(&config.connection_url())
+        .connect_with(opts)
         .await
         .map_err(|e| format!("Connection failed: {e}"))
 }
 
 pub async fn test_mysql_connection(config: MysqlConfig) -> Result<(), String> {
-    let pool = open_mysql(&config).await?;
+    let (effective, _tunnel) = resolve_mysql_ssh(config).await?;
+    let pool = open_mysql(&effective).await?;
     sqlx::query("SELECT 1")
         .execute(&pool)
         .await
@@ -319,10 +370,32 @@ pub async fn test_mysql_connection(config: MysqlConfig) -> Result<(), String> {
     Ok(())
 }
 
-pub async fn connect_mysql(state: State<'_, DbState>, config: MysqlConfig) -> Result<(), String> {
-    let pool = open_mysql(&config).await?;
+pub async fn connect_mysql(
+    state: State<'_, DbState>,
+    tunnel_state: State<'_, TunnelState>,
+    config: MysqlConfig,
+) -> Result<(), String> {
+    tunnel_state.clear();
+    let (effective, tunnel) = resolve_mysql_ssh(config).await?;
+    let pool = open_mysql(&effective).await?;
     close_existing(&state).await;
-    set_conn(&state, Some(ActiveConnection::Mysql(pool)))
+    set_conn(&state, Some(ActiveConnection::Mysql(pool)))?;
+    tunnel_state.set(tunnel);
+    Ok(())
+}
+
+async fn resolve_mysql_ssh(config: MysqlConfig) -> Result<(MysqlConfig, Option<SshTunnel>), String> {
+    if let Some(ref ssh_cfg) = config.ssh {
+        let tunnel = SshTunnel::establish(ssh_cfg, &config.host, config.port).await?;
+        let local_port = tunnel.local_port;
+        let mut direct = config.clone();
+        direct.host = "127.0.0.1".to_string();
+        direct.port = local_port;
+        direct.ssh = None;
+        Ok((direct, Some(tunnel)))
+    } else {
+        Ok((config, None))
+    }
 }
 
 // ── D1 connect / test ─────────────────────────────────────────────────────────
@@ -354,11 +427,16 @@ pub async fn connect_libsql(state: State<'_, DbState>, config: LibSqlConfig) -> 
 
 // ── Disconnect ────────────────────────────────────────────────────────────────
 
-pub async fn disconnect(state: State<'_, DbState>) -> Result<(), String> {
+pub async fn disconnect(
+    state: State<'_, DbState>,
+    tunnel_state: State<'_, TunnelState>,
+) -> Result<(), String> {
     // close_existing already sets state to None atomically via take() before
     // starting the (potentially slow) pool close. Calling set_conn(None) again
     // after the async close would race with any concurrent connect_* call that
     // set a new connection while the pool was draining, wiping it out.
     close_existing(&state).await;
+    // Kill the SSH tunnel (if any) after the pool is closed.
+    tunnel_state.clear();
     Ok(())
 }

@@ -12,6 +12,8 @@
   import Plus from "@lucide/svelte/icons/plus";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import Download from "@lucide/svelte/icons/download";
+  import Table2 from "@lucide/svelte/icons/table-2";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import { cn } from "$lib/utils.js";
   import SqlEditor from "./SqlEditor.svelte";
   import { sqlToDrizzle, sqlToPrisma } from "$lib/orm-builder.js";
@@ -26,7 +28,10 @@
   import JsonViewer from "./JsonViewer.svelte";
   import ChartView from "./ChartView.svelte";
   import BarChart2 from "@lucide/svelte/icons/bar-chart-2";
+  import ScanSearch from "@lucide/svelte/icons/scan-search";
   import ResizeHandle from "./ResizeHandle.svelte";
+  import ExplainPlan from "./ExplainPlan.svelte";
+  import { explainSql } from "$lib/api.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import {
     clampSqlEditorHeight,
@@ -154,10 +159,13 @@
    *   queryMs: number,
    *   message: string,
    *   loading: boolean,
-   *   outputView: 'table' | 'chart' | 'json',
+   *   outputView: 'table' | 'chart' | 'json' | 'explain',
    *   chartType: string,
    *   resultSets: ResultSet[],
    *   activeResultIdx: number,
+   *   explainResult: object | null,
+   *   explainLoading: boolean,
+   *   explainError: string,
    * }} TabResult
    *
    * @typedef {{
@@ -172,7 +180,11 @@
 
   /** @returns {TabResult} */
   function defaultResult() {
-    return { columns: [], rows: [], error: '', queryMs: 0, message: '', loading: false, outputView: 'table', chartType: 'bar', resultSets: [], activeResultIdx: 0 }
+    return {
+      columns: [], rows: [], error: '', queryMs: 0, message: '', loading: false,
+      outputView: 'table', chartType: 'bar', resultSets: [], activeResultIdx: 0,
+      explainResult: null, explainLoading: false, explainError: '',
+    }
   }
 
   /** @type {Map<string, TabResult>} */
@@ -223,6 +235,32 @@
   function handleRun() {
     runningTabId = activeTabId
     onrun()
+  }
+
+  async function handleExplain() {
+    const tabId = activeTabId
+    const querySql = activeTab.content.trim()
+    if (!querySql) return
+
+    // Switch to explain view and mark loading
+    const prev = tabResults.get(tabId) ?? defaultResult()
+    tabResults = new Map(tabResults).set(tabId, {
+      ...prev, outputView: 'explain', explainLoading: true, explainError: '', explainResult: null,
+    })
+    if (!outputVisible) outputVisible = true
+
+    try {
+      const res = await explainSql(querySql)
+      const cur = tabResults.get(tabId) ?? defaultResult()
+      tabResults = new Map(tabResults).set(tabId, {
+        ...cur, explainLoading: false, explainResult: res,
+      })
+    } catch (e) {
+      const cur = tabResults.get(tabId) ?? defaultResult()
+      tabResults = new Map(tabResults).set(tabId, {
+        ...cur, explainLoading: false, explainError: String(e),
+      })
+    }
   }
 
   /** @param {'table'|'chart'|'json'} view */
@@ -516,6 +554,27 @@
         <Bookmark class="size-3.5 shrink-0" />
         <span class="text-ui-xs">Save</span>
       </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        class={cn(
+          'h-7 gap-1.5 px-2 hover:text-foreground',
+          activeResult.outputView === 'explain'
+            ? 'text-foreground'
+            : 'text-muted-foreground',
+        )}
+        disabled={!sql.trim() || activeResult.explainLoading}
+        title="Explain query plan"
+        onclick={handleExplain}
+      >
+        {#if activeResult.explainLoading}
+          <Loader2 class="size-3.5 shrink-0 animate-spin" />
+        {:else}
+          <ScanSearch class="size-3.5 shrink-0" />
+        {/if}
+        <span class="text-ui-xs">Explain</span>
+      </Button>
 
       <div class="h-4 w-px shrink-0 bg-border" aria-hidden="true"></div>
 
@@ -692,29 +751,32 @@
         <div class="mx-1.5 h-3.5 w-px shrink-0 self-center bg-border/60"></div>
       {/if}
 
-      <!-- View tabs -->
-      {#each [
-        { id: 'table', label: 'Table', Icon: null },
-        { id: 'chart', label: 'Chart', Icon: BarChart2 },
-        { id: 'json',  label: 'JSON',  Icon: Braces },
-      ] as tab (tab.id)}
-        {@const active = outputVisible && currentDisplay.outputView === tab.id}
-        {@const Icon = tab.Icon}
-        <button
-          type="button"
-          onclick={() => { setOutputView(tab.id); if (!outputVisible) toggleOutput() }}
-          class={cn(
-            'relative flex items-center gap-1.5 border-b-2 px-3 font-mono text-ui-xs transition-colors',
-            active ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground/50 hover:text-muted-foreground',
-          )}
-          title="{tab.label} view"
-        >
-          {#if Icon}
-            <Icon class="size-3 shrink-0" />
-          {/if}
-          {tab.label}
-        </button>
-      {/each}
+      <!-- View tabs (icon-only) -->
+      <div class="flex items-center gap-0.5 px-1">
+        {#each [
+          { id: 'table',   label: 'Table',   Icon: Table2 },
+          { id: 'chart',   label: 'Chart',   Icon: BarChart2 },
+          { id: 'json',    label: 'JSON',    Icon: Braces },
+          { id: 'explain', label: 'Explain', Icon: ScanSearch },
+        ] as tab (tab.id)}
+          {@const active = outputVisible && (tab.id === 'explain' ? activeResult.outputView === 'explain' : currentDisplay.outputView === tab.id)}
+          {@const Icon = tab.Icon}
+          <button
+            type="button"
+            onclick={() => {
+              if (tab.id === 'explain') { void handleExplain() }
+              else { setOutputView(tab.id); if (!outputVisible) toggleOutput() }
+            }}
+            class={cn(
+              'flex size-7 items-center justify-center rounded transition-colors',
+              active ? 'bg-muted/70 text-foreground' : 'text-muted-foreground/50 hover:bg-muted/40 hover:text-muted-foreground',
+            )}
+            title="{tab.label} view"
+          >
+            <Icon class="size-3.5 shrink-0" />
+          </button>
+        {/each}
+      </div>
 
       <!-- Right: metadata + toggle -->
       <div class="ml-auto flex shrink-0 items-center gap-3 pr-1.5">
@@ -728,26 +790,26 @@
           <span class="max-w-[160px] truncate font-mono text-ui-2xs text-muted-foreground">{currentDisplay.message}</span>
         {/if}
 
-        <!-- Export buttons — only when there are results -->
+        <!-- Export dropdown — only when there are results -->
         {#if outputVisible && currentDisplay.rows.length > 0}
-          <button
-            type="button"
-            class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-foreground"
-            title="Export as CSV"
-            onclick={exportCsv}
-          >
-            <Download class="size-3" />
-            <span class="text-[10px]">CSV</span>
-          </button>
-          <button
-            type="button"
-            class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-foreground"
-            title="Export as JSON"
-            onclick={exportJson}
-          >
-            <Download class="size-3" />
-            <span class="text-[10px]">JSON</span>
-          </button>
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger
+              class="flex size-6 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-foreground"
+              title="Export results"
+            >
+              <Download class="size-3.5" />
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Content align="end" class="min-w-36">
+              <DropdownMenu.Item class="gap-2 font-mono text-xs" onclick={exportCsv}>
+                <Download class="size-3.5 shrink-0 text-muted-foreground/50" />
+                Export CSV
+              </DropdownMenu.Item>
+              <DropdownMenu.Item class="gap-2 font-mono text-xs" onclick={exportJson}>
+                <Download class="size-3.5 shrink-0 text-muted-foreground/50" />
+                Export JSON
+              </DropdownMenu.Item>
+            </DropdownMenu.Content>
+          </DropdownMenu.Root>
         {/if}
 
         <button
@@ -764,7 +826,22 @@
     {#if outputVisible}
       <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-panel">
         {#key `${activeTabId}:${activeResult.activeResultIdx ?? 0}`}
-          {#if currentDisplay.columns.length > 0}
+          {#if currentDisplay.outputView === 'explain'}
+            {#if activeResult.explainLoading}
+              <TableLoading />
+            {:else if activeResult.explainError}
+              <div class="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+                <p class="font-mono text-ui-xs text-destructive/70">{activeResult.explainError}</p>
+              </div>
+            {:else if activeResult.explainResult}
+              <ExplainPlan result={activeResult.explainResult} />
+            {:else}
+              <div class="flex h-full flex-col items-center justify-center gap-2 text-center">
+                <ScanSearch class="size-6 text-muted-foreground/20" />
+                <p class="font-mono text-ui-sm text-muted-foreground/50">Click Explain to analyze the query plan</p>
+              </div>
+            {/if}
+          {:else if currentDisplay.columns.length > 0}
             {#if currentDisplay.outputView === 'json'}
               <JsonViewer json={jsonText} rowCount={currentDisplay.rows.length} onshowtable={() => setOutputView('table')} />
             {:else if currentDisplay.outputView === 'chart'}

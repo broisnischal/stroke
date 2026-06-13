@@ -1,85 +1,136 @@
 <script>
   import { Handle, Position } from '@xyflow/svelte'
-  import KeyRound from '@lucide/svelte/icons/key-round'
-  import Link from '@lucide/svelte/icons/link'
+  import Table2 from '@lucide/svelte/icons/table-2'
 
   let { data = {} } = $props()
 
-  const NODE_W = 220
+  const NODE_W = 230
 </script>
 
 <!-- svelte-ignore a11y_interactive_supports_focus -->
 <div
-  class="flex flex-col overflow-hidden rounded-xl border bg-card shadow-sm transition-colors duration-150
+  class="erd-card flex flex-col overflow-visible rounded-lg border shadow-lg transition-all duration-100
     {data.selected
-      ? 'border-primary/60 ring-1 ring-primary/20'
+      ? 'border-primary/70 shadow-primary/10 ring-1 ring-primary/25'
       : !data.highlighted
-        ? 'border-border/20 opacity-35'
-        : 'border-border/40 hover:border-primary/40'}"
-  style="width:{NODE_W}px; cursor: pointer"
+        ? 'border-border/10 opacity-20'
+        : 'border-border/40 hover:border-border/70 hover:shadow-xl'}"
+  style="width:{NODE_W}px; cursor:pointer; background:hsl(var(--card))"
   role="button"
   onclick={() => data.onSelect?.(data.name)}
   ondblclick={() => data.onOpen?.(data.name)}
   onkeydown={(e) => { if (e.key === 'Enter') data.onOpen?.(data.name) }}
 >
-  <!-- Target handle — receives incoming FK arrows -->
+  <!--
+    Target handle — invisible 1×1 px anchor at the vertical center of the left edge.
+    Uses !important to beat XYFlow's base CSS `min-width/min-height: 5px` rule.
+  -->
   <Handle
     type="target"
     position={Position.Left}
     id="tgt"
-    style="left:-5px; width:10px; height:10px; background:hsl(var(--primary)/0.7); border:2px solid hsl(var(--background)); border-radius:50%; top:18px; box-shadow:0 0 0 1.5px hsl(var(--primary)/0.4)"
+    style="position:absolute; left:0; top:50%; transform:translateY(-50%);
+           width:1px!important; height:1px!important;
+           min-width:0!important; min-height:0!important;
+           background:transparent!important; border:none!important;
+           box-shadow:none!important; border-radius:0!important; opacity:0"
   />
 
-  <!-- Table header -->
-  <div class="flex items-center gap-2 border-b border-border/30 bg-muted/20 px-3 py-2.5">
-    <span class="min-w-0 flex-1 truncate font-mono text-[11px] font-bold tracking-tight text-foreground">{data.name}</span>
-    <span class="shrink-0 rounded-md bg-muted/50 px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground/60">{data.columns?.length ?? 0}</span>
+  <!-- Header -->
+  <div
+    class="flex items-center gap-2 border-b px-3 py-2"
+    style="background:hsl(var(--muted)/0.45); border-color:hsl(var(--border)/0.5)"
+  >
+    <span
+      class="min-w-0 flex-1 truncate font-mono text-[11px] font-semibold tracking-tight"
+      style="color:hsl(var(--foreground))"
+    >{data.name}</span>
+    <Table2 class="size-3.5 shrink-0" style="color:hsl(var(--muted-foreground)/0.3)" />
   </div>
 
   <!-- Column rows -->
-  <div class="flex flex-col">
+  <div class="flex flex-col divide-y" style="divide-color:hsl(var(--border)/0.1)">
     {#each (data.columns ?? []) as col (col.name)}
       {@const isPk = data.pkCols?.has(col.name)}
       {@const isFk = !!col.foreignKey}
-      <div class="relative flex items-center gap-2 px-3 py-[4px]
-        {isPk ? 'bg-amber-500/8 border-b border-amber-500/10' : isFk ? 'bg-blue-500/5 border-b border-blue-500/8' : 'border-b border-border/8'}">
-        <!-- Source handle for FK columns -->
+      <div class="relative flex items-center gap-1 px-3 py-[4px]">
+        <!--
+          Source handle — invisible 1×1 px anchor at vertical center of THIS column row.
+          Placed inside the row div so getBoundingClientRect() returns the row's y.
+        -->
         {#if isFk}
           <Handle
             type="source"
             position={Position.Right}
             id="src-{col.name}"
-            style="right:-5px; width:9px; height:9px; background:hsl(var(--primary)/0.65); border:2px solid hsl(var(--background)); border-radius:50%; top:50%; box-shadow:0 0 0 1.5px hsl(var(--primary)/0.35)"
+            style="position:absolute; right:0; top:50%; transform:translateY(-50%);
+                   width:1px!important; height:1px!important;
+                   min-width:0!important; min-height:0!important;
+                   background:transparent!important; border:none!important;
+                   box-shadow:none!important; border-radius:0!important; opacity:0"
           />
         {/if}
 
-        <div class="flex size-3.5 shrink-0 items-center justify-center">
-          {#if isPk}
-            <KeyRound class="size-3 text-amber-400" />
-          {:else if isFk}
-            <Link class="size-3 text-blue-400/80" />
-          {:else}
-            <div class="size-1 rounded-full bg-muted-foreground/20"></div>
-          {/if}
-        </div>
-
-        <span class="min-w-0 flex-1 truncate font-mono text-[10px] leading-snug
-          {isPk ? 'font-semibold text-amber-300' : isFk ? 'text-blue-300/90' : 'text-foreground/65'}"
+        <!-- Column name -->
+        <span
+          class="min-w-0 flex-1 truncate font-mono text-[10px] leading-[1.45]"
+          style="color:{isPk
+            ? 'hsl(var(--foreground)/0.9)'
+            : isFk
+              ? 'hsl(var(--foreground)/0.72)'
+              : 'hsl(var(--muted-foreground)/0.75)'}"
         >{col.name}</span>
 
-        <span class="shrink-0 font-mono text-[9px] leading-snug text-muted-foreground/30">{col.dataType}</span>
+        <!-- Data type — always right-aligned, clipped when long -->
+        <span
+          class="ml-1 max-w-[80px] shrink-0 truncate font-mono text-[9px] leading-[1.45] text-right"
+          style="color:hsl(var(--muted-foreground)/0.38)"
+        >{col.dataType}</span>
+
+        <!-- PK / FK badge -->
+        {#if isPk}
+          <span
+            class="ml-1 shrink-0 rounded px-[5px] py-[1px] font-mono text-[7.5px] font-bold uppercase tracking-wide"
+            style="background:hsl(38 92% 50% / 0.18); color:hsl(38 92% 65%); letter-spacing:0.04em"
+          >pk</span>
+        {:else if isFk}
+          <span
+            class="ml-1 shrink-0 rounded px-[5px] py-[1px] font-mono text-[7.5px] font-semibold uppercase tracking-wide"
+            style="background:hsl(217 91% 60% / 0.14); color:hsl(217 91% 67% / 0.8); letter-spacing:0.04em"
+          >fk</span>
+        {/if}
       </div>
     {/each}
   </div>
 </div>
 
 <style>
-  /* Let our card styles fully override XYFlow default node box */
+  /* Remove all XYFlow default node chrome */
   :global(.svelte-flow__node-tableNode) {
     background: transparent !important;
     border: none !important;
     padding: 0 !important;
     border-radius: 0 !important;
     box-shadow: none !important;
+  }
+  :global(.svelte-flow__node-tableNode.selected) {
+    box-shadow: none !important;
+    outline: none !important;
+  }
+  /* Nuke ALL handle visuals — !important here works because these are stylesheet rules */
+  :global(.svelte-flow__node-tableNode .svelte-flow__handle) {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    outline: none !important;
+    opacity: 0 !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+  }
+  :global(.svelte-flow__node-tableNode .svelte-flow__handle:hover),
+  :global(.svelte-flow__node-tableNode .svelte-flow__handle.connectingfrom),
+  :global(.svelte-flow__node-tableNode .svelte-flow__handle.valid) {
+    background: transparent !important;
+    border: none !important;
   }
 </style>

@@ -8,7 +8,7 @@ mod mcp;
 mod metrics;
 mod secrets;
 
-use db::{ActiveConnection, DbState};
+use db::{ActiveConnection, DbState, TunnelState};
 use mcp::McpState;
 use std::sync::{Arc, Mutex};
 use tauri::{
@@ -49,6 +49,7 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::AppleScript, None))
         .manage(db_state)
         .manage(mcp_state)
+        .manage(TunnelState::new())
         .setup(|app| {
             // Load or generate a stable MCP token from the app data directory.
             app.state::<McpState>().init_token(app.handle());
@@ -217,6 +218,7 @@ pub fn run() {
             commands::pg_get_table_rows,
             commands::pg_execute_sql,
             commands::pg_execute_sql_multi,
+            commands::pg_explain_sql,
             commands::execute_sql_on_connection,
             commands::list_schemas_on_connection,
             commands::list_tables_on_connection,

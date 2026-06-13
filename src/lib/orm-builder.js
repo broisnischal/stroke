@@ -1,11 +1,9 @@
 /**
- * ORM query builder utilities for Drizzle-like and Prisma-like query evaluation
- * and SQL-to-ORM conversion.
+ * ORM query builder utilities — Drizzle and Prisma query simulation + SQL conversion.
  */
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Wrap an identifier in double-quotes, escaping embedded quotes. */
 function quoteIdent(name) {
   return `"${String(name).replace(/"/g, '""')}"`
 }
@@ -15,6 +13,15 @@ function literalSql(v) {
   if (v === null || v === undefined) return 'NULL'
   if (typeof v === 'boolean') return v ? 'true' : 'false'
   if (typeof v === 'number') return String(v)
+  if (v && typeof v === 'object') {
+    // SQL expression (sql`...`, count(), eq(), …) — embed as-is
+    if ('__sql' in /** @type {any} */ (v)) return /** @type {any} */ (v).__sql
+    // Column reference — use qualified name for column-to-column comparisons
+    if ('col' in /** @type {any} */ (v)) {
+      const r = /** @type {any} */ (v)
+      return r.table ? `${r.table}.${r.col}` : r.col
+    }
+  }
   return `'${String(v).replace(/'/g, "''")}'`
 }
 
@@ -25,18 +32,27 @@ function literalSql(v) {
 function whereClauseFromObject(where) {
   const parts = []
   for (const [k, v] of Object.entries(where)) {
-    if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+    if (k === 'AND' && Array.isArray(v)) {
+      const inner = v.map(w => `(${whereClauseFromObject(w)})`).join(' AND ')
+      if (inner) parts.push(inner)
+    } else if (k === 'OR' && Array.isArray(v)) {
+      const inner = v.map(w => `(${whereClauseFromObject(w)})`).join(' OR ')
+      if (inner) parts.push(`(${inner})`)
+    } else if (k === 'NOT' && v && typeof v === 'object') {
+      parts.push(`NOT (${whereClauseFromObject(/** @type {any} */ (v))})`)
+    } else if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
       const ops = /** @type {Record<string, unknown>} */ (v)
-      if ('equals' in ops) parts.push(`${k} = ${literalSql(ops.equals)}`)
-      else if ('not' in ops) parts.push(`${k} != ${literalSql(ops.not)}`)
-      else if ('gt' in ops) parts.push(`${k} > ${literalSql(ops.gt)}`)
-      else if ('gte' in ops) parts.push(`${k} >= ${literalSql(ops.gte)}`)
-      else if ('lt' in ops) parts.push(`${k} < ${literalSql(ops.lt)}`)
-      else if ('lte' in ops) parts.push(`${k} <= ${literalSql(ops.lte)}`)
+      if ('equals' in ops)      parts.push(`${k} = ${literalSql(ops.equals)}`)
+      else if ('not' in ops)    parts.push(`${k} != ${literalSql(ops.not)}`)
+      else if ('gt' in ops)     parts.push(`${k} > ${literalSql(ops.gt)}`)
+      else if ('gte' in ops)    parts.push(`${k} >= ${literalSql(ops.gte)}`)
+      else if ('lt' in ops)     parts.push(`${k} < ${literalSql(ops.lt)}`)
+      else if ('lte' in ops)    parts.push(`${k} <= ${literalSql(ops.lte)}`)
       else if ('contains' in ops) parts.push(`${k} LIKE '%${ops.contains}%'`)
       else if ('startsWith' in ops) parts.push(`${k} LIKE '${ops.startsWith}%'`)
       else if ('endsWith' in ops) parts.push(`${k} LIKE '%${ops.endsWith}'`)
       else if ('in' in ops && Array.isArray(ops.in)) parts.push(`${k} IN (${ops.in.map(literalSql).join(', ')})`)
+      else if ('notIn' in ops && Array.isArray(ops.notIn)) parts.push(`${k} NOT IN (${ops.notIn.map(literalSql).join(', ')})`)
     } else {
       parts.push(`${k} = ${literalSql(v)}`)
     }
@@ -46,11 +62,6 @@ function whereClauseFromObject(where) {
 
 // ── Drizzle mock builder ──────────────────────────────────────────────────────
 
-/**
- * Build a Proxy-based table object so that `users.id`, `users.name` etc. return
- * column references that stringify to their column name.
- * @param {string} tableName
- */
 function makeTableProxy(tableName) {
   return new Proxy(
     { __tableName: tableName },
@@ -66,29 +77,28 @@ function makeTableProxy(tableName) {
   )
 }
 
-/**
- * Create the fluent Drizzle-like mock builder.
- * Each chain records intent and `.toSQL()` compiles to a SQL string.
- */
 function makeDrizzleBuilder() {
   /** @type {'select' | 'insert' | 'update' | 'delete' | null} */
   let _op = null
-  /** @type {string | null} */
   let _table = null
-  /** @type {Record<string, { table: string, col: string } | string> | null} */
+  /** @type {Record<string, any> | null} */
   let _selectCols = null
-  /** @type {Record<string, unknown>[] | Record<string, unknown> | null} */
   let _insertValues = null
-  /** @type {Record<string, unknown> | null} */
   let _setValues = null
-  /** @type {string | null} */
   let _where = null
   /** @type {number | null} */
   let _limit = null
   /** @type {number | null} */
   let _offset = null
-  /** @type {{ col: string, dir: 'ASC' | 'DESC' }[] } */
+  /** @type {{ col: string, dir: 'ASC' | 'DESC' }[]} */
   let _orderBy = []
+  /** @type {{ type: string, table: string, on: string }[]} */
+  let _joins = []
+  /** @type {string[]} */
+  let _groupBy = []
+  let _having = null
+  let _onConflict = null
+  let _returning = false
 
   function toSQL() {
     if (_op === 'select') {
@@ -96,7 +106,9 @@ function makeDrizzleBuilder() {
       if (_selectCols) {
         const parts = []
         for (const [alias, ref] of Object.entries(_selectCols)) {
-          if (ref && typeof ref === 'object' && 'col' in ref) {
+          if (ref && typeof ref === 'object' && '__sql' in ref) {
+            parts.push(`${ref.__sql} AS ${alias}`)
+          } else if (ref && typeof ref === 'object' && 'col' in ref) {
             parts.push(ref.col === alias ? ref.col : `${ref.col} AS ${alias}`)
           } else {
             parts.push(String(alias))
@@ -104,10 +116,12 @@ function makeDrizzleBuilder() {
         }
         if (parts.length) cols = parts.join(', ')
       }
-      const qt = quoteIdent(_table)
-      let sql = `SELECT ${cols} FROM ${qt}`
+      let sql = `SELECT ${cols} FROM ${quoteIdent(_table)}`
+      for (const j of _joins) sql += ` ${j.type} JOIN ${quoteIdent(j.table)} ON ${j.on}`
       if (_where) sql += ` WHERE ${_where}`
-      if (_orderBy.length) sql += ` ORDER BY ${_orderBy.map((o) => `${o.col} ${o.dir}`).join(', ')}`
+      if (_groupBy.length) sql += ` GROUP BY ${_groupBy.join(', ')}`
+      if (_having) sql += ` HAVING ${_having}`
+      if (_orderBy.length) sql += ` ORDER BY ${_orderBy.map(o => `${o.col} ${o.dir}`).join(', ')}`
       if (_limit !== null) sql += ` LIMIT ${_limit}`
       if (_offset !== null) sql += ` OFFSET ${_offset}`
       return { sql, params: [] }
@@ -117,26 +131,47 @@ function makeDrizzleBuilder() {
       const rows = Array.isArray(_insertValues) ? _insertValues : [_insertValues ?? {}]
       const keys = Object.keys(rows[0] ?? {})
       const cols = keys.join(', ')
-      const valSets = rows.map((r) => `(${keys.map((k) => literalSql(r[k])).join(', ')})`).join(', ')
-      return { sql: `INSERT INTO ${quoteIdent(_table)} (${cols}) VALUES ${valSets}`, params: [] }
+      const valSets = rows.map(r => `(${keys.map(k => literalSql(r[k])).join(', ')})`).join(', ')
+      let sql = `INSERT INTO ${quoteIdent(_table)} (${cols}) VALUES ${valSets}`
+      if (_onConflict) sql += ` ${_onConflict}`
+      if (_returning) sql += ` RETURNING *`
+      return { sql, params: [] }
     }
 
     if (_op === 'update') {
       const setCols = Object.entries(_setValues ?? {})
-        .map(([k, v]) => `${k} = ${literalSql(v)}`)
-        .join(', ')
+        .map(([k, v]) => `${k} = ${literalSql(v)}`).join(', ')
       let sql = `UPDATE ${quoteIdent(_table)} SET ${setCols}`
       if (_where) sql += ` WHERE ${_where}`
+      if (_returning) sql += ` RETURNING *`
       return { sql, params: [] }
     }
 
     if (_op === 'delete') {
       let sql = `DELETE FROM ${quoteIdent(_table)}`
       if (_where) sql += ` WHERE ${_where}`
+      if (_returning) sql += ` RETURNING *`
       return { sql, params: [] }
     }
 
     throw new Error('Incomplete query: call db.select(), db.insert(), db.update(), or db.delete()')
+  }
+
+  /** @param {any} col */
+  function colStr(col) {
+    if (col && typeof col === 'object' && 'col' in col) return col.col
+    if (col && typeof col === 'object' && '__sql' in col) return col.__sql
+    return String(col)
+  }
+
+  /** @param {any} table */
+  function tableName(table) {
+    return table?.__tableName ?? String(table)
+  }
+
+  /** @param {any} on */
+  function onStr(on) {
+    return on?.__sql ?? String(on)
   }
 
   const chain = {
@@ -146,11 +181,8 @@ function makeDrizzleBuilder() {
       return chain
     },
     where(condition) {
-      if (typeof condition === 'string') {
-        _where = condition
-      } else if (condition && typeof condition === 'object' && '__sql' in condition) {
-        _where = condition.__sql
-      }
+      if (typeof condition === 'string') _where = condition
+      else if (condition && typeof condition === 'object' && '__sql' in condition) _where = condition.__sql
       return chain
     },
     limit(n) { _limit = Number(n); return chain },
@@ -163,72 +195,93 @@ function makeDrizzleBuilder() {
       }
       return chain
     },
+    groupBy(...cols) {
+      for (const col of cols) _groupBy.push(colStr(col))
+      return chain
+    },
+    having(condition) {
+      if (typeof condition === 'string') _having = condition
+      else if (condition && '__sql' in condition) _having = condition.__sql
+      return chain
+    },
     set(values) { _setValues = values; return chain },
     values(vals) { _insertValues = vals; return chain },
-    returning() { return chain },
+    returning() { _returning = true; return chain },
+    leftJoin(table, on) { _joins.push({ type: 'LEFT', table: tableName(table), on: onStr(on) }); return chain },
+    innerJoin(table, on) { _joins.push({ type: 'INNER', table: tableName(table), on: onStr(on) }); return chain },
+    rightJoin(table, on) { _joins.push({ type: 'RIGHT', table: tableName(table), on: onStr(on) }); return chain },
+    fullJoin(table, on) { _joins.push({ type: 'FULL', table: tableName(table), on: onStr(on) }); return chain },
+    onConflictDoNothing(opts = {}) {
+      if (opts?.target) {
+        const cols = Array.isArray(opts.target)
+          ? opts.target.map(c => c?.col ?? String(c)).join(', ')
+          : opts.target?.col ?? String(opts.target)
+        _onConflict = `ON CONFLICT (${cols}) DO NOTHING`
+      } else {
+        _onConflict = `ON CONFLICT DO NOTHING`
+      }
+      return chain
+    },
+    onConflictDoUpdate(opts = {}) {
+      const setCols = Object.entries(opts.set ?? {}).map(([k, v]) => `${k} = ${literalSql(v)}`).join(', ')
+      const target = opts.target
+      if (target) {
+        const cols = Array.isArray(target)
+          ? target.map(c => c?.col ?? String(c)).join(', ')
+          : target?.col ?? String(target)
+        _onConflict = `ON CONFLICT (${cols}) DO UPDATE SET ${setCols}`
+      } else {
+        _onConflict = `ON CONFLICT DO UPDATE SET ${setCols}`
+      }
+      return chain
+    },
   }
 
   return { chain, setOp(op) { _op = op }, setTable(t) { _table = t }, setSelectCols(c) { _selectCols = c } }
 }
 
 /**
- * Build the mock `db` object, table proxies, and helper functions (eq, ne, gt, lt, asc, desc, …)
- * that are injected into the user's code evaluation context.
  * @param {string[]} tableNames
  */
 function buildDrizzleContext(tableNames) {
-  const tableProxies = Object.fromEntries(tableNames.map((n) => [n, makeTableProxy(n)]))
+  const tableProxies = Object.fromEntries(tableNames.map(n => [n, makeTableProxy(n)]))
 
-  /** @type {Record<string, Function>} */
+  /** @param {any} col */
+  function colExpr(col) {
+    if (col && typeof col === 'object' && '__sql' in col) return col.__sql
+    if (col && typeof col === 'object' && 'col' in col) return col.table ? `${col.table}.${col.col}` : col.col
+    return col ? String(col) : '*'
+  }
+
   const helpers = {
-    eq: (col, val) => ({
-      __sql: `${col?.col ?? col} = ${literalSql(val)}`,
-    }),
-    ne: (col, val) => ({
-      __sql: `${col?.col ?? col} != ${literalSql(val)}`,
-    }),
-    gt: (col, val) => ({
-      __sql: `${col?.col ?? col} > ${literalSql(val)}`,
-    }),
-    gte: (col, val) => ({
-      __sql: `${col?.col ?? col} >= ${literalSql(val)}`,
-    }),
-    lt: (col, val) => ({
-      __sql: `${col?.col ?? col} < ${literalSql(val)}`,
-    }),
-    lte: (col, val) => ({
-      __sql: `${col?.col ?? col} <= ${literalSql(val)}`,
-    }),
-    like: (col, pattern) => ({
-      __sql: `${col?.col ?? col} LIKE ${literalSql(pattern)}`,
-    }),
-    ilike: (col, pattern) => ({
-      __sql: `${col?.col ?? col} ILIKE ${literalSql(pattern)}`,
-    }),
-    isNull: (col) => ({
-      __sql: `${col?.col ?? col} IS NULL`,
-    }),
-    isNotNull: (col) => ({
-      __sql: `${col?.col ?? col} IS NOT NULL`,
-    }),
-    inArray: (col, vals) => ({
-      __sql: `${col?.col ?? col} IN (${(vals ?? []).map(literalSql).join(', ')})`,
-    }),
-    notInArray: (col, vals) => ({
-      __sql: `${col?.col ?? col} NOT IN (${(vals ?? []).map(literalSql).join(', ')})`,
-    }),
-    and: (...conds) => ({
-      __sql: conds.map((c) => (c?.__sql ? `(${c.__sql})` : String(c))).join(' AND '),
-    }),
-    or: (...conds) => ({
-      __sql: conds.map((c) => (c?.__sql ? `(${c.__sql})` : String(c))).join(' OR '),
-    }),
-    not: (cond) => ({
-      __sql: `NOT (${cond?.__sql ?? cond})`,
-    }),
-    asc: (col) => ({ __orderBy: { col: col?.col ?? col, dir: 'ASC' } }),
-    desc: (col) => ({ __orderBy: { col: col?.col ?? col, dir: 'DESC' } }),
-    sql: (strings, ...vals) => {
+    eq:         (col, val) => ({ __sql: `${colExpr(col)} = ${literalSql(val)}` }),
+    ne:         (col, val) => ({ __sql: `${colExpr(col)} != ${literalSql(val)}` }),
+    gt:         (col, val) => ({ __sql: `${colExpr(col)} > ${literalSql(val)}` }),
+    gte:        (col, val) => ({ __sql: `${colExpr(col)} >= ${literalSql(val)}` }),
+    lt:         (col, val) => ({ __sql: `${colExpr(col)} < ${literalSql(val)}` }),
+    lte:        (col, val) => ({ __sql: `${colExpr(col)} <= ${literalSql(val)}` }),
+    like:       (col, pattern) => ({ __sql: `${colExpr(col)} LIKE ${literalSql(pattern)}` }),
+    ilike:      (col, pattern) => ({ __sql: `${colExpr(col)} ILIKE ${literalSql(pattern)}` }),
+    notIlike:   (col, pattern) => ({ __sql: `${colExpr(col)} NOT ILIKE ${literalSql(pattern)}` }),
+    isNull:     (col) => ({ __sql: `${colExpr(col)} IS NULL` }),
+    isNotNull:  (col) => ({ __sql: `${colExpr(col)} IS NOT NULL` }),
+    inArray:    (col, vals) => ({ __sql: `${colExpr(col)} IN (${(vals ?? []).map(literalSql).join(', ')})` }),
+    notInArray: (col, vals) => ({ __sql: `${colExpr(col)} NOT IN (${(vals ?? []).map(literalSql).join(', ')})` }),
+    between:    (col, lo, hi) => ({ __sql: `${colExpr(col)} BETWEEN ${literalSql(lo)} AND ${literalSql(hi)}` }),
+    notBetween: (col, lo, hi) => ({ __sql: `${colExpr(col)} NOT BETWEEN ${literalSql(lo)} AND ${literalSql(hi)}` }),
+    and:        (...conds) => ({ __sql: conds.filter(Boolean).map(c => (c?.__sql ? `(${c.__sql})` : String(c))).join(' AND ') }),
+    or:         (...conds) => ({ __sql: conds.filter(Boolean).map(c => (c?.__sql ? `(${c.__sql})` : String(c))).join(' OR ') }),
+    not:        (cond) => ({ __sql: `NOT (${cond?.__sql ?? cond})` }),
+    asc:        (col) => ({ __orderBy: { col: colExpr(col), dir: 'ASC' } }),
+    desc:       (col) => ({ __orderBy: { col: colExpr(col), dir: 'DESC' } }),
+    // Aggregate functions — usable in db.select({ alias: count() })
+    count:      (col) => ({ __sql: col ? `COUNT(${colExpr(col)})` : 'COUNT(*)' }),
+    sum:        (col) => ({ __sql: `SUM(${colExpr(col)})` }),
+    avg:        (col) => ({ __sql: `AVG(${colExpr(col)})` }),
+    max:        (col) => ({ __sql: `MAX(${colExpr(col)})` }),
+    min:        (col) => ({ __sql: `MIN(${colExpr(col)})` }),
+    // SQL template tag
+    sql:        (strings, ...vals) => {
       if (Array.isArray(strings)) {
         let raw = ''
         strings.forEach((s, i) => { raw += s; if (i < vals.length) raw += literalSql(vals[i]) })
@@ -245,7 +298,13 @@ function buildDrizzleContext(tableNames) {
       if (cols && typeof cols === 'object' && !Array.isArray(cols)) {
         const mapped = {}
         for (const [alias, ref] of Object.entries(cols)) {
-          mapped[alias] = ref && typeof ref === 'object' && 'col' in ref ? ref : { col: alias, table: '' }
+          if (ref && typeof ref === 'object' && '__sql' in ref) {
+            mapped[alias] = { __sql: ref.__sql }
+          } else if (ref && typeof ref === 'object' && 'col' in ref) {
+            mapped[alias] = ref
+          } else {
+            mapped[alias] = { col: alias, table: '' }
+          }
         }
         setSelectCols(mapped)
       }
@@ -276,85 +335,160 @@ function buildDrizzleContext(tableNames) {
 
 // ── Prisma mock builder ───────────────────────────────────────────────────────
 
-/**
- * @param {string[]} tableNames
- */
+/** @param {string[]} tableNames */
 function buildPrismaContext(tableNames) {
   function makeModelProxy(modelName) {
     const qt = quoteIdent(modelName)
+
+    function selectClause(opts = {}) {
+      if (opts.select && typeof opts.select === 'object') {
+        const cols = Object.entries(opts.select)
+          .filter(([, v]) => v === true)
+          .map(([k]) => k)
+        if (cols.length) return cols.join(', ')
+      }
+      return '*'
+    }
+
+    function applyWhere(sql, where) {
+      if (where && typeof where === 'object' && Object.keys(where).length) {
+        sql += ` WHERE ${whereClauseFromObject(where)}`
+      }
+      return sql
+    }
+
+    function applyOrderBy(sql, orderBy) {
+      if (orderBy) {
+        const ob = Array.isArray(orderBy) ? orderBy : [orderBy]
+        const parts = ob.flatMap(o => Object.entries(o).map(([col, dir]) => `${col} ${String(dir).toUpperCase()}`))
+        if (parts.length) sql += ` ORDER BY ${parts.join(', ')}`
+      }
+      return sql
+    }
+
     return {
       findMany(opts = {}) {
-        let sql = `SELECT * FROM ${qt}`
-        const where = opts.where
-        if (where && typeof where === 'object' && Object.keys(where).length) {
-          sql += ` WHERE ${whereClauseFromObject(where)}`
-        }
-        if (opts.orderBy) {
-          const ob = Array.isArray(opts.orderBy) ? opts.orderBy : [opts.orderBy]
-          const parts = ob.flatMap((o) =>
-            Object.entries(o).map(([col, dir]) => `${col} ${String(dir).toUpperCase()}`),
-          )
-          if (parts.length) sql += ` ORDER BY ${parts.join(', ')}`
-        }
+        let sql = `SELECT ${selectClause(opts)} FROM ${qt}`
+        sql = applyWhere(sql, opts.where)
+        sql = applyOrderBy(sql, opts.orderBy)
         if (opts.take != null) sql += ` LIMIT ${Number(opts.take)}`
         if (opts.skip != null) sql += ` OFFSET ${Number(opts.skip)}`
+        if (opts.cursor) sql += ` /* cursor pagination */`
         return { sql, params: [] }
       },
       findFirst(opts = {}) {
-        let sql = `SELECT * FROM ${qt}`
-        const where = opts.where
-        if (where && typeof where === 'object' && Object.keys(where).length) {
-          sql += ` WHERE ${whereClauseFromObject(where)}`
-        }
+        let sql = `SELECT ${selectClause(opts)} FROM ${qt}`
+        sql = applyWhere(sql, opts.where)
+        sql = applyOrderBy(sql, opts.orderBy)
         sql += ` LIMIT 1`
         return { sql, params: [] }
       },
+      findFirstOrThrow(opts = {}) {
+        return this.findFirst(opts)
+      },
       findUnique(opts = {}) {
-        let sql = `SELECT * FROM ${qt}`
-        const where = opts.where ?? {}
-        if (Object.keys(where).length) {
-          sql += ` WHERE ${whereClauseFromObject(where)}`
-        }
+        let sql = `SELECT ${selectClause(opts)} FROM ${qt}`
+        sql = applyWhere(sql, opts.where ?? {})
         sql += ` LIMIT 1`
         return { sql, params: [] }
+      },
+      findUniqueOrThrow(opts = {}) {
+        return this.findUnique(opts)
       },
       create(opts = {}) {
         const data = opts.data ?? {}
         const keys = Object.keys(data)
         const cols = keys.join(', ')
-        const vals = keys.map((k) => literalSql(data[k])).join(', ')
-        return { sql: `INSERT INTO ${qt} (${cols}) VALUES (${vals})`, params: [] }
+        const vals = keys.map(k => literalSql(data[k])).join(', ')
+        let sql = `INSERT INTO ${qt} (${cols}) VALUES (${vals})`
+        if (opts.select) sql += ` RETURNING ${selectClause(opts)}`
+        return { sql, params: [] }
+      },
+      createMany(opts = {}) {
+        const data = Array.isArray(opts.data) ? opts.data : [opts.data ?? {}]
+        const keys = Object.keys(data[0] ?? {})
+        const cols = keys.join(', ')
+        const valSets = data.map(r => `(${keys.map(k => literalSql(r[k])).join(', ')})`).join(', ')
+        const sql = `INSERT INTO ${qt} (${cols}) VALUES ${valSets}${opts.skipDuplicates ? ' ON CONFLICT DO NOTHING' : ''}`
+        return { sql, params: [] }
       },
       update(opts = {}) {
         const data = opts.data ?? {}
         const setCols = Object.entries(data).map(([k, v]) => `${k} = ${literalSql(v)}`).join(', ')
-        const where = opts.where ?? {}
         let sql = `UPDATE ${qt} SET ${setCols}`
-        if (Object.keys(where).length) sql += ` WHERE ${whereClauseFromObject(where)}`
+        sql = applyWhere(sql, opts.where ?? {})
+        if (opts.select) sql += ` RETURNING ${selectClause(opts)}`
+        return { sql, params: [] }
+      },
+      updateMany(opts = {}) {
+        const data = opts.data ?? {}
+        const setCols = Object.entries(data).map(([k, v]) => `${k} = ${literalSql(v)}`).join(', ')
+        let sql = `UPDATE ${qt} SET ${setCols}`
+        sql = applyWhere(sql, opts.where ?? {})
         return { sql, params: [] }
       },
       delete(opts = {}) {
-        const where = opts.where ?? {}
         let sql = `DELETE FROM ${qt}`
-        if (Object.keys(where).length) sql += ` WHERE ${whereClauseFromObject(where)}`
+        sql = applyWhere(sql, opts.where ?? {})
+        if (opts.select) sql += ` RETURNING ${selectClause(opts)}`
+        return { sql, params: [] }
+      },
+      deleteMany(opts = {}) {
+        let sql = `DELETE FROM ${qt}`
+        sql = applyWhere(sql, opts?.where ?? {})
         return { sql, params: [] }
       },
       count(opts = {}) {
         let sql = `SELECT COUNT(*) FROM ${qt}`
-        const where = opts?.where
-        if (where && typeof where === 'object' && Object.keys(where).length) {
-          sql += ` WHERE ${whereClauseFromObject(where)}`
+        sql = applyWhere(sql, opts?.where ?? {})
+        return { sql, params: [] }
+      },
+      aggregate(opts = {}) {
+        const parts = []
+        if (opts._count) {
+          if (opts._count === true) parts.push(`COUNT(*) AS _count`)
+          else Object.keys(opts._count).forEach(k => parts.push(`COUNT(${k}) AS _count_${k}`))
         }
+        if (opts._sum) Object.keys(opts._sum).forEach(k => parts.push(`SUM(${k}) AS _sum_${k}`))
+        if (opts._avg) Object.keys(opts._avg).forEach(k => parts.push(`AVG(${k}) AS _avg_${k}`))
+        if (opts._min) Object.keys(opts._min).forEach(k => parts.push(`MIN(${k}) AS _min_${k}`))
+        if (opts._max) Object.keys(opts._max).forEach(k => parts.push(`MAX(${k}) AS _max_${k}`))
+        if (!parts.length) parts.push('COUNT(*) AS _count')
+        let sql = `SELECT ${parts.join(', ')} FROM ${qt}`
+        sql = applyWhere(sql, opts.where ?? {})
+        return { sql, params: [] }
+      },
+      groupBy(opts = {}) {
+        const by = Array.isArray(opts.by) ? opts.by : (opts.by ? [opts.by] : [])
+        const selParts = [...by]
+        if (opts._count) {
+          if (opts._count === true) selParts.push(`COUNT(*) AS _count`)
+          else Object.keys(opts._count).forEach(k => selParts.push(`COUNT(${k}) AS _count_${k}`))
+        }
+        if (opts._sum) Object.keys(opts._sum).forEach(k => selParts.push(`SUM(${k}) AS _sum_${k}`))
+        if (opts._avg) Object.keys(opts._avg).forEach(k => selParts.push(`AVG(${k}) AS _avg_${k}`))
+        if (opts._min) Object.keys(opts._min).forEach(k => selParts.push(`MIN(${k}) AS _min_${k}`))
+        if (opts._max) Object.keys(opts._max).forEach(k => selParts.push(`MAX(${k}) AS _max_${k}`))
+        let sql = `SELECT ${selParts.join(', ')} FROM ${qt}`
+        sql = applyWhere(sql, opts.where ?? {})
+        if (by.length) sql += ` GROUP BY ${by.join(', ')}`
+        if (opts.having) sql += ` HAVING ${whereClauseFromObject(opts.having)}`
+        sql = applyOrderBy(sql, opts.orderBy)
+        if (opts.take != null) sql += ` LIMIT ${Number(opts.take)}`
+        if (opts.skip != null) sql += ` OFFSET ${Number(opts.skip)}`
         return { sql, params: [] }
       },
       upsert(opts = {}) {
         const create = opts.create ?? {}
         const keys = Object.keys(create)
         const cols = keys.join(', ')
-        const vals = keys.map((k) => literalSql(create[k])).join(', ')
+        const vals = keys.map(k => literalSql(create[k])).join(', ')
         const update = opts.update ?? {}
         const setCols = Object.entries(update).map(([k, v]) => `${k} = ${literalSql(v)}`).join(', ')
-        const sql = `INSERT INTO ${qt} (${cols}) VALUES (${vals}) ON CONFLICT DO UPDATE SET ${setCols}`
+        const whereStr = whereClauseFromObject(opts.where ?? {})
+        let sql = `INSERT INTO ${qt} (${cols}) VALUES (${vals})`
+        if (setCols) sql += ` ON CONFLICT DO UPDATE SET ${setCols}`
+        if (whereStr) sql += ` -- where: ${whereStr}`
         return { sql, params: [] }
       },
     }
@@ -362,11 +496,7 @@ function buildPrismaContext(tableNames) {
 
   const prisma = new Proxy(
     {},
-    {
-      get(_, prop) {
-        return makeModelProxy(String(prop))
-      },
-    },
+    { get(_, prop) { return makeModelProxy(String(prop)) } },
   )
 
   return { prisma }
@@ -375,8 +505,6 @@ function buildPrismaContext(tableNames) {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
- * Evaluate a Drizzle-style query string in a sandboxed context.
- * Returns `{ sql: string, params: unknown[] }`.
  * @param {string} code
  * @param {string[]} tableNames
  * @returns {{ sql: string, params: unknown[] }}
@@ -387,7 +515,6 @@ export function evalDrizzleQuery(code, tableNames) {
   const argNames = ['db', ...Object.keys(tableProxies), ...Object.keys(helpers)]
   const argValues = [db, ...Object.values(tableProxies), ...Object.values(helpers)]
 
-  // Wrap user code so the last expression value is captured
   const wrappedCode = `
     "use strict";
     let __result;
@@ -408,20 +535,13 @@ export function evalDrizzleQuery(code, tableNames) {
     throw new Error('Query did not return a value. Make sure your last expression is the query chain (e.g. db.select().from(users))')
   }
 
-  if (typeof result.toSQL === 'function') {
-    return result.toSQL()
-  }
-
-  if (result.sql && typeof result.sql === 'string') {
-    return { sql: result.sql, params: result.params ?? [] }
-  }
+  if (typeof result.toSQL === 'function') return result.toSQL()
+  if (result.sql && typeof result.sql === 'string') return { sql: result.sql, params: result.params ?? [] }
 
   throw new Error('Query result does not have a .toSQL() method or .sql property')
 }
 
 /**
- * Evaluate a Prisma-style query string in a sandboxed context.
- * Returns `{ sql: string, params: unknown[] }`.
  * @param {string} code
  * @param {string[]} tableNames
  * @returns {{ sql: string, params: unknown[] }}
@@ -449,21 +569,14 @@ export function evalPrismaQuery(code, tableNames) {
     throw new Error('Query did not return a value. Make sure your last expression is the query call (e.g. prisma.user.findMany({}))')
   }
 
-  if (result.sql && typeof result.sql === 'string') {
-    return { sql: result.sql, params: result.params ?? [] }
-  }
+  if (result.sql && typeof result.sql === 'string') return { sql: result.sql, params: result.params ?? [] }
 
   throw new Error('Query result does not have a .sql property')
 }
 
 // ── SQL → Drizzle ─────────────────────────────────────────────────────────────
 
-/**
- * Convert a simple SELECT SQL to Drizzle chain notation.
- * Only handles SELECT; returns a comment for others.
- * @param {string} sql
- * @returns {string}
- */
+/** @param {string} sql */
 export function sqlToDrizzle(sql) {
   const trimmed = sql.trim().replace(/;$/, '')
 
@@ -485,27 +598,30 @@ export function sqlToDrizzle(sql) {
     const limitIdx = afterFrom.search(/\bLIMIT\b/i)
     const offsetIdx = afterFrom.search(/\bOFFSET\b/i)
 
-    const tableEndIdx = [whereIdx, orderIdx, limitIdx, offsetIdx].filter((i) => i >= 0).sort((a, b) => a - b)[0] ?? afterFrom.length
+    const tableEndIdx = [whereIdx, orderIdx, limitIdx, offsetIdx]
+      .filter(i => i >= 0).sort((a, b) => a - b)[0] ?? afterFrom.length
     const tableName = afterFrom.slice(0, tableEndIdx).trim().replace(/^"([^"]+)"$/, '$1')
 
     let whereStr = ''
     if (whereIdx >= 0) {
       const afterWhere = afterFrom.slice(whereIdx + 5).trim()
       const whereEndIdx = [orderIdx, limitIdx, offsetIdx]
-        .map((i) => (i >= 0 ? i - (whereIdx + 5) : Infinity))
-        .filter((i) => i > 0)
-        .sort((a, b) => a - b)[0]
-      whereStr = whereEndIdx != null && isFinite(whereEndIdx) ? afterWhere.slice(0, whereEndIdx).trim() : afterWhere
+        .map(i => (i >= 0 ? i - (whereIdx + 5) : Infinity))
+        .filter(i => i > 0).sort((a, b) => a - b)[0]
+      whereStr = whereEndIdx != null && isFinite(whereEndIdx)
+        ? afterWhere.slice(0, whereEndIdx).trim()
+        : afterWhere
     }
 
     let orderStr = ''
     if (orderIdx >= 0) {
       const afterOrder = afterFrom.slice(orderIdx).replace(/ORDER\s+BY\s+/i, '').trim()
       const orderEndIdx = [limitIdx, offsetIdx]
-        .map((i) => (i >= 0 ? i - orderIdx : Infinity))
-        .filter((i) => i > 0)
-        .sort((a, b) => a - b)[0]
-      orderStr = orderEndIdx != null && isFinite(orderEndIdx) ? afterOrder.slice(0, orderEndIdx).trim() : afterOrder
+        .map(i => (i >= 0 ? i - orderIdx : Infinity))
+        .filter(i => i > 0).sort((a, b) => a - b)[0]
+      orderStr = orderEndIdx != null && isFinite(orderEndIdx)
+        ? afterOrder.slice(0, orderEndIdx).trim()
+        : afterOrder
     }
 
     let limitStr = ''
@@ -522,8 +638,8 @@ export function sqlToDrizzle(sql) {
 
     let selectArg = ''
     if (selectPart !== '*') {
-      const cols = selectPart.split(',').map((c) => c.trim())
-      const colParts = cols.map((c) => {
+      const cols = selectPart.split(',').map(c => c.trim())
+      const colParts = cols.map(c => {
         const asMatch = c.match(/^(.+?)\s+AS\s+(.+)$/i)
         if (asMatch) {
           const raw = asMatch[1].trim().replace(/^"([^"]+)"$/, '$1')
@@ -538,12 +654,10 @@ export function sqlToDrizzle(sql) {
 
     let chain = `db.select(${selectArg}).from(${tableName})`
 
-    if (whereStr) {
-      chain += `.where(${convertWhereToEq(whereStr, tableName)})`
-    }
+    if (whereStr) chain += `.where(${convertWhereToEq(whereStr, tableName)})`
 
     if (orderStr) {
-      const orderParts = orderStr.split(',').map((part) => {
+      const orderParts = orderStr.split(',').map(part => {
         const segments = part.trim().split(/\s+/)
         const col = segments[0].replace(/^"([^"]+)"$/, '$1')
         const dir = (segments[1] ?? 'ASC').toUpperCase() === 'DESC' ? 'desc' : 'asc'
@@ -561,12 +675,8 @@ export function sqlToDrizzle(sql) {
   }
 }
 
-/**
- * @param {string} where
- * @param {string} tableName
- */
+/** @param {string} where @param {string} tableName */
 function convertWhereToEq(where, tableName) {
-  // Handles simple `col = val` or `col = 'val'` expressions.
   const eqMatch = where.match(/^(\w+)\s*=\s*(.+)$/)
   if (eqMatch) {
     const col = eqMatch[1]
@@ -580,7 +690,6 @@ function convertWhereToEq(where, tableName) {
 // ── SQL → Prisma ──────────────────────────────────────────────────────────────
 
 /**
- * Convert a simple SELECT SQL to Prisma findMany notation.
  * @param {string} sql
  * @param {string[]} [tableNames]
  * @returns {string}
@@ -604,7 +713,8 @@ export function sqlToPrisma(sql, tableNames) {
     const limitIdx = afterFrom.search(/\bLIMIT\b/i)
     const offsetIdx = afterFrom.search(/\bOFFSET\b/i)
 
-    const tableEndIdx = [whereIdx, orderIdx, limitIdx, offsetIdx].filter((i) => i >= 0).sort((a, b) => a - b)[0] ?? afterFrom.length
+    const tableEndIdx = [whereIdx, orderIdx, limitIdx, offsetIdx]
+      .filter(i => i >= 0).sort((a, b) => a - b)[0] ?? afterFrom.length
     const tableName = afterFrom.slice(0, tableEndIdx).trim().replace(/^"([^"]+)"$/, '$1')
 
     const opts = []
@@ -612,10 +722,11 @@ export function sqlToPrisma(sql, tableNames) {
     if (whereIdx >= 0) {
       const afterWhere = afterFrom.slice(whereIdx + 5).trim()
       const whereEndIdx = [orderIdx, limitIdx, offsetIdx]
-        .map((i) => (i >= 0 ? i - (whereIdx + 5) : Infinity))
-        .filter((i) => i > 0)
-        .sort((a, b) => a - b)[0]
-      const whereStr = whereEndIdx != null && isFinite(whereEndIdx) ? afterWhere.slice(0, whereEndIdx).trim() : afterWhere
+        .map(i => (i >= 0 ? i - (whereIdx + 5) : Infinity))
+        .filter(i => i > 0).sort((a, b) => a - b)[0]
+      const whereStr = whereEndIdx != null && isFinite(whereEndIdx)
+        ? afterWhere.slice(0, whereEndIdx).trim()
+        : afterWhere
       const eqMatch = whereStr.match(/^(\w+)\s*=\s*(.+)$/)
       if (eqMatch) {
         const col = eqMatch[1]
@@ -628,11 +739,12 @@ export function sqlToPrisma(sql, tableNames) {
     if (orderIdx >= 0) {
       const afterOrder = afterFrom.slice(orderIdx).replace(/ORDER\s+BY\s+/i, '').trim()
       const orderEndIdx = [limitIdx, offsetIdx]
-        .map((i) => (i >= 0 ? i - orderIdx : Infinity))
-        .filter((i) => i > 0)
-        .sort((a, b) => a - b)[0]
-      const orderStr = orderEndIdx != null && isFinite(orderEndIdx) ? afterOrder.slice(0, orderEndIdx).trim() : afterOrder
-      const parts = orderStr.split(',').map((p) => {
+        .map(i => (i >= 0 ? i - orderIdx : Infinity))
+        .filter(i => i > 0).sort((a, b) => a - b)[0]
+      const orderStr = orderEndIdx != null && isFinite(orderEndIdx)
+        ? afterOrder.slice(0, orderEndIdx).trim()
+        : afterOrder
+      const parts = orderStr.split(',').map(p => {
         const segs = p.trim().split(/\s+/)
         const col = segs[0].replace(/^"([^"]+)"$/, '$1')
         const dir = (segs[1] ?? 'asc').toLowerCase() === 'desc' ? 'desc' : 'asc'
@@ -653,7 +765,7 @@ export function sqlToPrisma(sql, tableNames) {
       opts.push(`skip: ${offsetVal}`)
     }
 
-    const optsStr = opts.length ? `{ ${opts.join(', ')} }` : '{}'
+    const optsStr = opts.length ? `{\n  ${opts.join(',\n  ')}\n}` : '{}'
     return `prisma.${tableName}.findMany(${optsStr})`
   } catch {
     return `// Cannot auto-convert: ${sql}`

@@ -4,6 +4,8 @@ const LAST_ID_KEY  = 'stroke:last-connection-id'
 /**
  * @typedef {'postgres' | 'sqlite' | 'd1'} DbType
  *
+ * @typedef {{ host: string, port?: number, username: string, privateKeyPath?: string }} SshConfig
+ *
  * @typedef {{
  *   id: string
  *   type: DbType
@@ -19,6 +21,7 @@ const LAST_ID_KEY  = 'stroke:last-connection-id'
  *   accountId?: string
  *   databaseId?: string
  *   apiToken?: string
+ *   ssh?: SshConfig
  * }} SavedConnection
  */
 

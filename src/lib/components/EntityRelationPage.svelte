@@ -5,6 +5,7 @@
   import dagre from '@dagrejs/dagre'
   import { listTables, getTableColumnStructure, listIndexes } from '$lib/api.js'
   import ErdTableNode from './ErdTableNode.svelte'
+  import ErdRelationEdge from './ErdRelationEdge.svelte'
   import ErdFocusController from './ErdFocusController.svelte'
   import Loader from '@lucide/svelte/icons/loader'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
@@ -15,6 +16,10 @@
   import X from '@lucide/svelte/icons/x'
   import ChevronDown from '@lucide/svelte/icons/chevron-down'
   import Network from '@lucide/svelte/icons/network'
+  import Download from '@lucide/svelte/icons/download'
+  import FileImage from '@lucide/svelte/icons/file-image'
+  import FileCode from '@lucide/svelte/icons/file-code'
+  import FileText from '@lucide/svelte/icons/file-text'
 
   let {
     schema = 'public',
@@ -22,7 +27,6 @@
     onopentable = /** @type {((schema:string, table:string)=>void)|undefined} */ (undefined),
   } = $props()
 
-  // ── Types ─────────────────────────────────────────────────────────────────
   /**
    * @typedef {{ name: string, dataType: string, isNullable: boolean,
    *   columnDefault: string|null, foreignKey: string|null,
@@ -31,14 +35,15 @@
    */
 
   // ── Config ────────────────────────────────────────────────────────────────
-  const NODE_W    = 220
+  const NODE_W    = 230
   const ROW_H     = 22
-  const HDR_H     = 36
-  const PAD_H     = 8
-  const BATCH     = 8   // tables loaded per async chunk
-  const WARN_MANY = 60  // show "connected only" hint above this count
+  const HDR_H     = 34
+  const PAD_B     = 4
+  const BATCH     = 16
+  const WARN_MANY = 60
 
   const nodeTypes = { tableNode: ErdTableNode }
+  const edgeTypes = { relation: ErdRelationEdge }
 
   // ── State ─────────────────────────────────────────────────────────────────
   let loading       = $state(false)
@@ -49,54 +54,79 @@
   let searchEl      = $state(/** @type {HTMLInputElement | null} */ (null))
   let activeSchema  = $state(untrack(() => schema))
   let schemaOpen    = $state(false)
-  let connectedOnly = $state(false)   // hide tables with no FK in/out
+  let downloadOpen  = $state(false)
+  let exporting     = $state(false)
+  let connectedOnly = $state(false)
   /** @type {string|null} */
   let selectedTable = $state(null)
   /** @type {Map<string, TableMeta>} */
   let tableMeta     = $state(new Map())
 
-  // XYFlow controlled state
   /** @type {any[]} */
   let nodes = $state([])
   /** @type {any[]} */
   let edges = $state([])
 
-  // debounce handle for graph rebuilds
-  let _rebuildTimer = /** @type {ReturnType<typeof setTimeout>|null} */ (null)
-  function scheduleRebuild() {
-    if (_rebuildTimer) clearTimeout(_rebuildTimer)
-    _rebuildTimer = setTimeout(() => { buildGraph(); _rebuildTimer = null }, 60)
-  }
+  /** @type {Map<string, {x: number, y: number}>} */
+  const _posCache = new Map()
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
+  // ── Node height ───────────────────────────────────────────────────────────
   /** @param {TableMeta} t */
-  function nodeH(t) { return HDR_H + t.columns.length * ROW_H + PAD_H }
+  function nodeH(t) { return HDR_H + t.columns.length * ROW_H + PAD_B }
 
+  // ── Layout ────────────────────────────────────────────────────────────────
   /**
-   * Dagre auto-layout.
-   * @param {any[]} ns  @param {any[]} es
-   * @returns {any[]}
+   * Connected nodes → Dagre LR.
+   * Orphan nodes (no FK edges) → compact grid below connected graph.
    */
   function layoutNodes(ns, es) {
-    const g = new dagre.graphlib.Graph()
-    g.setGraph({ rankdir: 'LR', ranksep: 90, nodesep: 36, marginx: 40, marginy: 40 })
-    g.setDefaultEdgeLabel(() => ({}))
-    for (const n of ns) g.setNode(n.id, { width: NODE_W, height: nodeH(n.data) })
-    for (const e of es) g.setEdge(e.source, e.target)
-    dagre.layout(g)
-    return ns.map(n => {
-      const p = g.node(n.id)
-      return { ...n, position: { x: p.x - NODE_W / 2, y: p.y - nodeH(n.data) / 2 } }
-    })
+    const linked = new Set()
+    for (const e of es) { linked.add(e.source); linked.add(e.target) }
+
+    const conn    = ns.filter(n => linked.has(n.id))
+    const orphans = ns.filter(n => !linked.has(n.id))
+
+    let laidConn = []
+    let bottomY  = 0
+
+    if (conn.length) {
+      const g = new dagre.graphlib.Graph()
+      g.setGraph({ rankdir: 'LR', ranksep: 200, nodesep: 72, marginx: 64, marginy: 64 })
+      g.setDefaultEdgeLabel(() => ({}))
+      for (const n of conn) {
+        g.setNode(n.id, { width: NODE_W, height: n.data ? nodeH(n.data) : HDR_H })
+      }
+      for (const e of es) g.setEdge(e.source, e.target)
+      dagre.layout(g)
+      laidConn = conn.map(n => {
+        const p = g.node(n.id)
+        const h = n.data ? nodeH(n.data) : HDR_H
+        const pos = { x: p.x - NODE_W / 2, y: p.y - h / 2 }
+        bottomY = Math.max(bottomY, pos.y + h)
+        return { ...n, position: pos }
+      })
+    }
+
+    // Orphans in a responsive grid below the connected graph
+    const orphanY = laidConn.length ? bottomY + 80 : 0
+    const maxH = orphans.reduce((m, n) => Math.max(m, n.data ? nodeH(n.data) : HDR_H), HDR_H)
+    const GCOLS = Math.max(3, Math.min(6, Math.ceil(Math.sqrt(orphans.length * 1.8))))
+    const laidOrphans = orphans.map((n, i) => ({
+      ...n,
+      position: {
+        x: (i % GCOLS) * (NODE_W + 32),
+        y: orphanY + Math.floor(i / GCOLS) * (maxH + 48),
+      },
+    }))
+
+    return [...laidConn, ...laidOrphans]
   }
 
-  // ── Graph build ───────────────────────────────────────────────────────────
-  function buildGraph() {
-    const all = [...tableMeta.values()]
-    const q   = search.trim().toLowerCase()
-
-    // Build edge list first (needed for connected-only filter)
-    const rawEdges = /** @type {any[]} */ ([])
+  // ── Edge list ─────────────────────────────────────────────────────────────
+  /** @param {TableMeta[]} all */
+  function buildEdgeData(all) {
+    /** @type {any[]} */
+    const rawEdges = []
     /** @type {Set<string>} */
     const connected = new Set()
     for (const t of all) {
@@ -111,67 +141,92 @@
           target:       refTable,
           sourceHandle: `src-${col.name}`,
           targetHandle: 'tgt',
-          type:         'default',
-          style:        'stroke:hsl(var(--primary)/0.55); stroke-width:1.5',
-          animated:     true,
+          type:         'relation',
         })
         connected.add(t.name)
         connected.add(refTable)
       }
     }
+    return { rawEdges, connected }
+  }
 
-    // Search highlighting
-    /** @type {Set<string>} */
-    const hi = new Set()
-    if (q) {
-      for (const t of all) {
-        if (t.name.toLowerCase().includes(q) ||
-            t.columns.some(c => c.name.toLowerCase().includes(q)))
-          hi.add(t.name)
-      }
-    }
-
-    // Filter tables
-    const visible = all.filter(t => {
-      if (connectedOnly && !connected.has(t.name)) return false
-      return true
-    })
+  // ── Build graph ───────────────────────────────────────────────────────────
+  /** @param {boolean} [forceLayout] */
+  function buildGraph(forceLayout = false) {
+    const all = [...tableMeta.values()]
+    const { rawEdges, connected } = buildEdgeData(all)
+    const visible = all.filter(t => !connectedOnly || connected.has(t.name))
+    const visibleIds = new Set(visible.map(t => t.name))
+    const filteredEdges = rawEdges.filter(e => visibleIds.has(e.source) && visibleIds.has(e.target))
 
     const rawNodes = visible.map(t => ({
       id:       t.name,
       type:     'tableNode',
-      position: { x: 0, y: 0 },
+      position: _posCache.get(t.name) ?? { x: 0, y: 0 },
       data: {
         ...t,
-        highlighted: q ? hi.has(t.name) : true,
-        selected:    selectedTable === t.name,
+        highlighted: true,
+        selected:    t.name === selectedTable,
         onSelect: (/** @type {string} */ name) => { selectedTable = selectedTable === name ? null : name },
         onOpen:   (/** @type {string} */ name) => onopentable?.(activeSchema, name),
       },
     }))
 
-    const visibleIds = new Set(rawNodes.map(n => n.id))
-    const filteredEdges = rawEdges.filter(e => visibleIds.has(e.source) && visibleIds.has(e.target))
-
-    nodes = layoutNodes(rawNodes, filteredEdges)
+    const needsLayout = forceLayout || visible.some(t => !_posCache.has(t.name))
+    if (needsLayout) {
+      const laid = layoutNodes(rawNodes, filteredEdges)
+      for (const n of laid) _posCache.set(n.id, n.position)
+      nodes = laid
+    } else {
+      nodes = rawNodes
+    }
     edges = filteredEdges
+    if (search.trim()) _applySearch(search.trim().toLowerCase())
   }
 
-  // ── Load — batch strategy so UI stays responsive on large schemas ─────────
+  // ── Search ────────────────────────────────────────────────────────────────
+  /** @param {string} q */
+  function _applySearch(q) {
+    if (!q) {
+      nodes = nodes.map(n => ({ ...n, data: { ...n.data, highlighted: true } }))
+      return
+    }
+    const hi = new Set()
+    for (const [name, t] of tableMeta) {
+      if (name.toLowerCase().includes(q) || t.columns.some(c => c.name.toLowerCase().includes(q)))
+        hi.add(name)
+    }
+    nodes = nodes.map(n => ({ ...n, data: { ...n.data, highlighted: hi.has(n.id) } }))
+  }
+
+  let _rebuildTimer = /** @type {ReturnType<typeof setTimeout>|null} */ (null)
+  function scheduleRebuild() {
+    if (_rebuildTimer) clearTimeout(_rebuildTimer)
+    _rebuildTimer = setTimeout(() => { buildGraph(); _rebuildTimer = null }, 80)
+  }
+
+  function reLayout() {
+    _posCache.clear()
+    buildGraph(true)
+  }
+
+  // ── Load ──────────────────────────────────────────────────────────────────
   async function load() {
     loading     = true
     loadedCount = 0
+    totalCount  = 0
     error       = ''
     tableMeta   = new Map()
+    nodes       = []
+    edges       = []
+    _posCache.clear()
     if (_rebuildTimer) { clearTimeout(_rebuildTimer); _rebuildTimer = null }
+
     try {
       const tableList = /** @type {{ name: string }[]} */ (await listTables(activeSchema))
       totalCount = tableList.length
-
-      // Auto-enable connectedOnly when schema is very large (user can toggle off)
       if (tableList.length > WARN_MANY) connectedOnly = true
 
-      // Load in chunks so each batch renders as it arrives
       for (let i = 0; i < tableList.length; i += BATCH) {
         const chunk = tableList.slice(i, i + BATCH)
         const results = await Promise.allSettled(
@@ -184,17 +239,16 @@
               ).map(c => c.name)
             )
             return /** @type {TableMeta} */ ({ name: t.name, columns: cols, pkCols })
-          })
+          }),
         )
         for (const r of results) {
           if (r.status === 'fulfilled') tableMeta.set(r.value.name, r.value)
         }
-        loadedCount += chunk.length
-        tableMeta = new Map(tableMeta) // trigger reactivity
+        loadedCount = Math.min(i + BATCH, tableList.length)
+        tableMeta = new Map(tableMeta)
         await tick()
-        buildGraph() // incremental render after each batch
       }
-
+      buildGraph(true)
       void refinePk()
     } catch (e) {
       error = String(e)
@@ -216,26 +270,37 @@
         meta.pkCols = new Set(idx.columns.split(',').map(s => s.trim().replace(/"/g, '')))
         changed = true
       }
-      if (changed) {
-        tableMeta = new Map(tableMeta)
-        buildGraph()
-      }
+      if (changed) { tableMeta = new Map(tableMeta); buildGraph() }
     } catch { /* non-critical */ }
   }
 
   // ── Reactivity ────────────────────────────────────────────────────────────
+  $effect(() => { void activeSchema; void load() })
+
   $effect(() => {
-    void load()
-    // eslint-disable-next-line no-unused-expressions
-    activeSchema
+    void connectedOnly
+    if (tableMeta.size > 0) scheduleRebuild()
   })
 
-  $effect(() => { search; connectedOnly; if (tableMeta.size > 0) scheduleRebuild() })
-  $effect(() => { selectedTable; if (tableMeta.size > 0) scheduleRebuild() })
+  $effect(() => {
+    const q = search.trim().toLowerCase()
+    const sel = selectedTable
+    untrack(() => {
+      if (!nodes.length) return
+      nodes = nodes.map(n => ({
+        ...n,
+        data: {
+          ...n.data,
+          selected: n.id === sel,
+          highlighted: q
+            ? (n.id.toLowerCase().includes(q) ||
+               (tableMeta.get(n.id)?.columns.some(c => c.name.toLowerCase().includes(q)) ?? false))
+            : true,
+        },
+      }))
+    })
+  })
 
-  function reLayout() { buildGraph() }
-
-  // ── Focus on exact or single search match ─────────────────────────────────
   const focusNodeId = $derived.by(() => {
     const q = search.trim().toLowerCase()
     if (!q) return null
@@ -246,7 +311,6 @@
     return hits.length === 1 ? hits[0] : null
   })
 
-  // ── Detail panel data ─────────────────────────────────────────────────────
   const selMeta = $derived(selectedTable ? (tableMeta.get(selectedTable) ?? null) : null)
   const selFks  = $derived(selMeta?.columns.filter(c => c.foreignKey) ?? [])
   const refBy   = $derived(
@@ -260,12 +324,192 @@
         )
       : []
   )
+
+  // ── Export / Download ─────────────────────────────────────────────────────
+  /** @param {string} s */
+  function xesc(s) {
+    return String(s ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  }
+
+  function generateSvg() {
+    const vis = nodes.filter(n => n.data?.highlighted !== false)
+    if (!vis.length) return null
+
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+    for (const n of vis) {
+      const h = HDR_H + (n.data?.columns?.length ?? 0) * ROW_H + PAD_B
+      x0 = Math.min(x0, n.position.x)
+      y0 = Math.min(y0, n.position.y)
+      x1 = Math.max(x1, n.position.x + NODE_W)
+      y1 = Math.max(y1, n.position.y + h)
+    }
+    const P = 56
+    const W = x1 - x0 + P * 2
+    const H = y1 - y0 + P * 2
+    const dx = -x0 + P
+    const dy = -y0 + P
+    const FONT = 'ui-monospace,Cascadia Code,Menlo,Consolas,monospace'
+    const visIds = new Set(vis.map(n => n.id))
+
+    const o = []
+    o.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">`)
+    o.push(`<rect width="${W}" height="${H}" fill="#0d0d10"/>`)
+    o.push(`<defs><pattern id="dp" width="22" height="22" patternUnits="userSpaceOnUse">`)
+    o.push(`<circle cx="1.2" cy="1.2" r="0.8" fill="#1d1d24"/></pattern></defs>`)
+    o.push(`<rect width="${W}" height="${H}" fill="url(#dp)"/>`)
+
+    // edges first (behind nodes)
+    for (const e of edges) {
+      if (!visIds.has(e.source) || !visIds.has(e.target)) continue
+      const sn = vis.find(n => n.id === e.source)
+      const tn = vis.find(n => n.id === e.target)
+      if (!sn || !tn) continue
+      const cols = sn.data?.columns ?? []
+      const ci = cols.findIndex(c => `src-${c.name}` === e.sourceHandle)
+      const sx = sn.position.x + dx + NODE_W
+      const sy = sn.position.y + dy + HDR_H + (ci >= 0 ? ci * ROW_H + ROW_H / 2 : HDR_H / 2)
+      const tx = tn.position.x + dx
+      const ty = tn.position.y + dy + HDR_H / 2
+      const mx = (sx + tx) / 2
+      o.push(`<path d="M${sx} ${sy} C${mx} ${sy} ${mx} ${ty} ${tx} ${ty}" fill="none" stroke="#252535" stroke-width="1.5" stroke-linecap="round"/>`)
+      o.push(`<text x="${sx+10}" y="${sy-5}" font-size="9" font-family="${FONT}" fill="#404060" text-anchor="middle">*</text>`)
+      o.push(`<text x="${tx-10}" y="${ty-5}" font-size="9" font-family="${FONT}" fill="#404060" text-anchor="middle">1</text>`)
+    }
+
+    // nodes
+    for (const n of vis) {
+      const cols = n.data?.columns ?? []
+      const pkCols = n.data?.pkCols ?? new Set()
+      const h = HDR_H + cols.length * ROW_H + PAD_B
+      const nx = n.position.x + dx
+      const ny = n.position.y + dy
+      const isSel = n.data?.selected
+
+      // shadow
+      o.push(`<rect x="${nx+3}" y="${ny+4}" width="${NODE_W}" height="${h}" rx="8" fill="rgba(0,0,0,0.45)"/>`)
+      // card bg
+      o.push(`<rect x="${nx}" y="${ny}" width="${NODE_W}" height="${h}" rx="8" fill="#141418" stroke="${isSel ? '#6366f1' : '#252535'}" stroke-width="${isSel ? 1.5 : 1}"/>`)
+      // header
+      o.push(`<clipPath id="hc${n.id.replace(/\W/g,'_')}"><rect x="${nx}" y="${ny}" width="${NODE_W}" height="${HDR_H + 8}" rx="8"/></clipPath>`)
+      o.push(`<rect x="${nx}" y="${ny}" width="${NODE_W}" height="${HDR_H + 8}" fill="#1d1d26" clip-path="url(#hc${n.id.replace(/\W/g,'_')})"/>`)
+      o.push(`<line x1="${nx}" y1="${ny+HDR_H}" x2="${nx+NODE_W}" y2="${ny+HDR_H}" stroke="#252535" stroke-width="1"/>`)
+      o.push(`<text x="${nx+12}" y="${ny+HDR_H/2+4}" font-size="11" font-weight="600" font-family="${FONT}" fill="#e2e2ea">${xesc(n.data.name)}</text>`)
+
+      for (let i = 0; i < cols.length; i++) {
+        const col = cols[i]
+        const isPk = pkCols.has(col.name)
+        const isFk = !!col.foreignKey
+        const cy = ny + HDR_H + i * ROW_H
+        if (i > 0) o.push(`<line x1="${nx}" y1="${cy}" x2="${nx+NODE_W}" y2="${cy}" stroke="#1a1a22" stroke-width="0.5"/>`)
+        const nc = isPk ? '#fbbf24' : isFk ? '#60a5fa' : '#6b6b80'
+        const ts = String(col.dataType ?? '').slice(0, 11)
+        const tyY = cy + ROW_H / 2 + 4
+        o.push(`<text x="${nx+12}" y="${tyY}" font-size="10" font-family="${FONT}" fill="${nc}">${xesc(col.name)}</text>`)
+        if (isPk || isFk) {
+          const b  = isPk ? 'pk' : 'fk'
+          const bc = isPk ? 'rgba(251,191,36,0.14)' : 'rgba(96,165,250,0.11)'
+          const tc = isPk ? '#b45309' : '#2563eb'
+          o.push(`<rect x="${nx+NODE_W-42}" y="${cy+5}" width="18" height="13" rx="2" fill="${bc}"/>`)
+          o.push(`<text x="${nx+NODE_W-33}" y="${cy+15}" font-size="7.5" font-weight="700" font-family="${FONT}" fill="${tc}" text-anchor="middle">${b}</text>`)
+          o.push(`<text x="${nx+NODE_W-50}" y="${tyY}" font-size="9" font-family="${FONT}" fill="#333345" text-anchor="end">${xesc(ts)}</text>`)
+        } else {
+          o.push(`<text x="${nx+NODE_W-12}" y="${tyY}" font-size="9" font-family="${FONT}" fill="#333345" text-anchor="end">${xesc(ts)}</text>`)
+        }
+      }
+    }
+    o.push('</svg>')
+    return o.join('')
+  }
+
+  function dlFile(content, name, mime) {
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(new Blob([content], { type: mime }))
+    a.download = name
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(a.href), 1500)
+    downloadOpen = false
+  }
+
+  function exportMarkdown() {
+    const visIds = new Set(nodes.map(n => n.id))
+    const lines = ['# ER Diagram', '', '```mermaid', 'erDiagram']
+    // relationships
+    for (const e of edges) {
+      if (!visIds.has(e.source) || !visIds.has(e.target)) continue
+      const sm = tableMeta.get(e.source)
+      const fkCol = sm?.columns.find(c => `src-${c.name}` === e.sourceHandle)
+      lines.push(`    ${e.source} }|--|| ${e.target} : "${fkCol?.name ?? ''}"`)
+    }
+    // entities
+    for (const n of nodes) {
+      const t = tableMeta.get(n.id)
+      if (!t) continue
+      lines.push(`    ${t.name} {`)
+      for (const col of t.columns) {
+        const typ = (col.dataType || 'text').replace(/[^a-zA-Z0-9_]/g, '_').replace(/_+/g, '_').replace(/^_|_$/, '')
+        const flags = [t.pkCols.has(col.name) && 'PK', !!col.foreignKey && 'FK'].filter(Boolean)
+        lines.push(`        ${typ || 'text'} ${col.name}${flags.length ? ' ' + flags.join(',') : ''}`)
+      }
+      lines.push('    }')
+    }
+    lines.push('```')
+    dlFile(lines.join('\n'), `erd-${activeSchema}.md`, 'text/markdown')
+  }
+
+  function exportSVG() {
+    const svg = generateSvg()
+    if (svg) dlFile(svg, `erd-${activeSchema}.svg`, 'image/svg+xml')
+  }
+
+  async function exportPNG() {
+    exporting = true
+    downloadOpen = false
+    try {
+      const svg = generateSvg()
+      if (!svg) return
+      const m = svg.match(/width="(\d+)" height="(\d+)"/)
+      const W = m ? +m[1] : 1200
+      const H = m ? +m[2] : 800
+      const scale = Math.min(2, 6000 / Math.max(W, H))
+      const canvas = document.createElement('canvas')
+      canvas.width  = Math.round(W * scale)
+      canvas.height = Math.round(H * scale)
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+      const img = new Image()
+      const blobUrl = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }))
+      await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = blobUrl })
+      URL.revokeObjectURL(blobUrl)
+      ctx.scale(scale, scale)
+      ctx.drawImage(img, 0, 0, W, H)
+      canvas.toBlob(blob => {
+        if (!blob) return
+        const a = document.createElement('a')
+        a.href = URL.createObjectURL(blob)
+        a.download = `erd-${activeSchema}.png`
+        a.click()
+        setTimeout(() => URL.revokeObjectURL(a.href), 1500)
+      }, 'image/png')
+    } finally {
+      exporting = false
+    }
+  }
 </script>
 
 <svelte:window onkeydown={(e) => {
   if (!searchEl || !searchEl.offsetParent) return
   if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key === 'f') {
     e.preventDefault(); searchEl.focus(); searchEl.select()
+  }
+  if (e.key === 'Escape') { downloadOpen = false; schemaOpen = false }
+}} />
+
+<!-- click-outside to close dropdowns -->
+<svelte:document onclick={(e) => {
+  if (!(/** @type {Element} */ (e.target)).closest?.('[data-dropdown]')) {
+    downloadOpen = false; schemaOpen = false
   }
 }} />
 
@@ -275,9 +519,8 @@
     <Network class="size-4 shrink-0 text-muted-foreground/50" />
     <span class="shrink-0 whitespace-nowrap font-mono text-ui-xs font-semibold text-foreground/80">ER Diagram</span>
 
-    <!-- Schema selector (only when multiple schemas) -->
     {#if schemas.length > 1}
-      <div class="relative ml-1 shrink-0">
+      <div class="relative ml-1 shrink-0" data-dropdown>
         <button
           type="button"
           class="flex h-7 items-center gap-1.5 rounded-md border border-border/50 bg-background/60 px-2.5 font-mono text-ui-xs font-medium transition-colors hover:bg-accent"
@@ -287,11 +530,7 @@
           <ChevronDown class="size-3 text-muted-foreground/60" />
         </button>
         {#if schemaOpen}
-          <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <div
-            class="absolute left-0 top-full z-50 mt-1 min-w-[140px] overflow-hidden rounded-lg border border-border bg-popover shadow-lg"
-            onmouseleave={() => (schemaOpen = false)}
-          >
+          <div class="absolute left-0 top-full z-50 mt-1 min-w-[140px] overflow-hidden rounded-lg border border-border bg-popover shadow-lg">
             {#each schemas as s (s)}
               <button
                 type="button"
@@ -304,7 +543,6 @@
       </div>
     {/if}
 
-    <!-- Search -->
     <div class="relative flex min-w-0 shrink items-center">
       <Search class="pointer-events-none absolute left-2.5 size-3 text-muted-foreground/40" />
       <input
@@ -322,27 +560,26 @@
     </div>
 
     <div class="ml-auto flex shrink-0 items-center gap-2">
-      <!-- Loading progress / stats -->
       {#if loading && totalCount > 0}
         <div class="flex items-center gap-2">
-          <div class="h-1 w-20 overflow-hidden rounded-full bg-muted/40">
-            <div class="h-full rounded-full bg-primary/60 transition-all duration-300" style="width:{Math.round(loadedCount/totalCount*100)}%"></div>
+          <div class="h-1 w-24 overflow-hidden rounded-full bg-muted/40">
+            <div class="h-full rounded-full bg-primary/60 transition-all duration-200" style="width:{Math.round(loadedCount/totalCount*100)}%"></div>
           </div>
           <span class="font-mono text-ui-2xs text-muted-foreground/50">{loadedCount}/{totalCount}</span>
         </div>
-      {:else if tableMeta.size > 0}
+      {:else if tableMeta.size > 0 && !loading}
         <span class="whitespace-nowrap font-mono text-ui-2xs text-muted-foreground/45">
-          {nodes.length}/{tableMeta.size} · {edges.length} fk
+          {nodes.length}/{tableMeta.size} tables · {edges.length} fk
         </span>
       {/if}
 
-      <!-- Connected-only toggle -->
       {#if tableMeta.size > 0}
         <button
           type="button"
-          class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 font-mono text-ui-xs whitespace-nowrap transition-colors {connectedOnly ? 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/15' : 'border-border/50 text-muted-foreground hover:bg-accent hover:text-foreground'}"
+          class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 font-mono text-ui-xs whitespace-nowrap transition-colors
+            {connectedOnly ? 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/15' : 'border-border/50 text-muted-foreground hover:bg-accent hover:text-foreground'}"
           onclick={() => (connectedOnly = !connectedOnly)}
-          title="Only show tables that have FK relationships"
+          title="Only show tables with FK relationships"
         >
           <Link class="size-3.5 shrink-0" />
           Connected
@@ -357,6 +594,55 @@
       >
         <LayoutDashboard class="size-3.5" />
       </button>
+
+      <!-- Download dropdown -->
+      {#if tableMeta.size > 0}
+        <div class="relative shrink-0" data-dropdown>
+          <button
+            type="button"
+            disabled={exporting}
+            class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/50 bg-background/60 px-2.5 font-mono text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+            onclick={() => (downloadOpen = !downloadOpen)}
+            title="Download diagram"
+          >
+            {#if exporting}
+              <Loader class="size-3.5 animate-spin" />
+            {:else}
+              <Download class="size-3.5" />
+            {/if}
+            Export
+            <ChevronDown class="size-3 text-muted-foreground/60" />
+          </button>
+          {#if downloadOpen}
+            <div class="absolute right-0 top-full z-50 mt-1 w-40 overflow-hidden rounded-lg border border-border bg-popover shadow-lg">
+              <button
+                type="button"
+                class="flex w-full items-center gap-2.5 px-3 py-2 font-mono text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                onclick={exportPNG}
+              >
+                <FileImage class="size-3.5 shrink-0 text-sky-400/70" />
+                PNG image
+              </button>
+              <button
+                type="button"
+                class="flex w-full items-center gap-2.5 px-3 py-2 font-mono text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                onclick={exportSVG}
+              >
+                <FileCode class="size-3.5 shrink-0 text-orange-400/70" />
+                SVG vector
+              </button>
+              <button
+                type="button"
+                class="flex w-full items-center gap-2.5 px-3 py-2 font-mono text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                onclick={exportMarkdown}
+              >
+                <FileText class="size-3.5 shrink-0 text-green-400/70" />
+                Markdown (Mermaid)
+              </button>
+            </div>
+          {/if}
+        </div>
+      {/if}
 
       <button
         type="button"
@@ -378,6 +664,17 @@
         <p class="font-mono text-ui-xs text-muted-foreground/50">Loading schema structure…</p>
       </div>
 
+    {:else if loading && totalCount > 0}
+      <div class="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-background">
+        <div class="flex flex-col items-center gap-2">
+          <Loader class="size-5 animate-spin text-muted-foreground/40" />
+          <p class="font-mono text-ui-xs text-muted-foreground/50">Loading {loadedCount}/{totalCount} tables…</p>
+        </div>
+        <div class="h-1 w-48 overflow-hidden rounded-full bg-muted/40">
+          <div class="h-full rounded-full bg-primary/60 transition-all duration-200" style="width:{Math.round(loadedCount/totalCount*100)}%"></div>
+        </div>
+      </div>
+
     {:else if error}
       <div class="absolute inset-0 flex items-center justify-center bg-background">
         <p class="max-w-sm text-center font-mono text-ui-xs text-destructive">{error}</p>
@@ -388,29 +685,26 @@
         bind:nodes
         bind:edges
         {nodeTypes}
+        {edgeTypes}
         fitView
         fitViewOptions={{ padding: 0.12 }}
-        minZoom={0.08}
+        minZoom={0.04}
         maxZoom={2.5}
+        nodesDraggable={true}
+        nodesConnectable={false}
+        elementsSelectable={true}
+        onlyRenderVisibleElements={nodes.length > 40}
         class="erd-canvas"
         style="background: hsl(var(--background))"
         onpaneclick={() => (selectedTable = null)}
       >
-        <Background
-          variant="dots"
-          gap={20}
-          size={1}
-          class="opacity-20"
-        />
-
+        <Background variant="dots" gap={22} size={1} class="opacity-[0.12]" />
         <Controls showInteractive={false} />
-
         <MiniMap
           nodeColor={() => 'hsl(var(--muted))'}
           maskColor="hsl(var(--background)/0.75)"
           style="background:hsl(var(--panel)); border:1px solid hsl(var(--border)/0.5); border-radius:8px; right:16px; bottom:16px;"
         />
-
         <ErdFocusController {focusNodeId} />
 
         {#if tableMeta.size === 0 && !loading}
@@ -425,8 +719,7 @@
       <!-- ── Detail panel ───────────────────────────────────────────────── -->
       {#if selMeta}
         <div class="absolute right-4 top-4 z-50 w-64 overflow-hidden rounded-xl border border-border/60 bg-card shadow-xl">
-          <!-- Header -->
-          <div class="flex items-center gap-2 border-b border-border/40 bg-panel px-3 py-2.5">
+          <div class="flex items-center gap-2 border-b border-border/40 bg-muted/20 px-3 py-2.5">
             <Network class="size-3.5 shrink-0 text-primary/60" />
             <span class="min-w-0 flex-1 truncate font-mono text-ui-xs font-bold text-foreground">{selMeta.name}</span>
             <button
@@ -436,13 +729,11 @@
             ><X class="size-3" /></button>
           </div>
 
-          <!-- Column list -->
           <div class="max-h-56 overflow-y-auto">
             {#each selMeta.columns as col (col.name)}
               {@const isPk = selMeta.pkCols.has(col.name)}
               {@const isFk = !!col.foreignKey}
-              <div class="flex items-center gap-2 border-b border-border/15 px-3 py-1 last:border-0
-                {isPk ? 'bg-amber-500/5' : isFk ? 'bg-blue-500/4' : ''}">
+              <div class="flex items-center gap-2 border-b border-border/10 px-3 py-1 last:border-0">
                 {#if isPk}<KeyRound class="size-3 shrink-0 text-amber-400/80" />
                 {:else if isFk}<Link class="size-3 shrink-0 text-blue-400/60" />
                 {:else}<span class="size-3 shrink-0"></span>{/if}
@@ -454,7 +745,6 @@
             {/each}
           </div>
 
-          <!-- FK references -->
           {#if selFks.length > 0}
             <div class="border-t border-border/40 bg-muted/10 px-3 py-2">
               <p class="mb-1 font-mono text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/50">References</p>
@@ -473,7 +763,6 @@
             </div>
           {/if}
 
-          <!-- Referenced by -->
           {#if refBy.length > 0}
             <div class="border-t border-border/40 bg-muted/10 px-3 py-2">
               <p class="mb-1 font-mono text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/50">Referenced by</p>
@@ -487,7 +776,6 @@
             </div>
           {/if}
 
-          <!-- Open table -->
           <div class="border-t border-border/40 px-3 py-2.5">
             <button
               type="button"
@@ -502,7 +790,6 @@
 </div>
 
 <style>
-  /* Strip XYFlow's default node chrome so our ErdTableNode card shows cleanly */
   :global(.erd-canvas .svelte-flow__node) {
     background: transparent !important;
     border: none !important;
