@@ -2355,8 +2355,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       }
     }
 
-    // Header bottom border
-    ctx.strokeStyle = withAlpha(c.cBorder, 0.65)
+    // Header bottom border — kept subtle (not a hard divider).
+    ctx.strokeStyle = withAlpha(c.cBorder, 0.3)
     ctx.lineWidth = 1
     ctx.beginPath(); ctx.moveTo(0, HEADER_H - 0.5); ctx.lineTo(c.W, HEADER_H - 0.5); ctx.stroke()
   }
@@ -2388,47 +2388,54 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
     const meta = colMeta.get(col.name)
     const cy = HEADER_H / 2
-    const sortReserve = 18
+    // Reserve enough room on the right that the sort glyph keeps a clear margin
+    // from both the edge and the type text.
+    const SORT_ICON = 13
+    const SORT_MARGIN_R = 9
+    const sortReserve = SORT_ICON + SORT_MARGIN_R + 4
     ctx.textBaseline = 'middle'
     ctx.textAlign = 'left'
 
-    // Relational indicators — PK (amber) and FK (blue).
-    const badges = []
+    // Relational indicators — a small amber key (PK) and blue link (FK) glyph
+    // read more cleanly than lettered boxes and keep the colour coding.
+    const indicators = []
     if (meta) {
-      if (meta.pk) badges.push({ letter: 'K', bg: withAlpha(c.AMBER, 0.18), fg: c.AMBER_FG })
-      if (meta.fk) badges.push({ letter: 'F', bg: 'rgba(59,130,246,0.14)', fg: c.BLUE_FG })
+      if (meta.pk) indicators.push({ icon: 'key-round', color: c.AMBER_FG })
+      if (meta.fk) indicators.push({ icon: 'link-2', color: c.BLUE_FG })
     }
-    const badgeW = badges.length * 16
+    const indReserve = indicators.length * 18
 
-    // Column name — muted foreground for a cleaner header feel.
+    // Column name — primary, medium weight.
     ctx.font = _fonts.header
-    ctx.fillStyle = withAlpha(c.cFg, sorted ? 1 : 0.8)
-    const nameMaxW = w - CELL_PAD_X - sortReserve - badgeW - 8
+    ctx.fillStyle = withAlpha(c.cFg, sorted ? 1 : 0.9)
+    const nameMaxW = w - CELL_PAD_X - sortReserve - indReserve - 8
     const name = truncText(ctx, col.name, Math.max(0, nameMaxW))
     ctx.fillText(name, x + CELL_PAD_X, cy + 0.5)
     let tx = x + CELL_PAD_X + textWidth(ctx, name) + 7
 
-    // Key badges.
-    for (const b of badges) {
-      drawBadge(ctx, tx, cy - 6.5, 13, { bg: b.bg, fg: b.fg, letter: b.letter ?? '', dot: b.dot })
-      tx += 16
+    // PK / FK glyphs (vertically centred, accent-coloured).
+    for (const ind of indicators) {
+      drawIcon(ctx, ind.icon, tx, cy - 6.5, 13, ind.color, 1.5)
+      tx += 18
     }
 
-    // Inline datatype — clearly readable but secondary.
-    const typeStartX = tx + (badges.length ? 4 : 2)
-    const typeRoom = x + w - sortReserve - 4 - typeStartX
+    // Inline datatype — secondary, lower contrast, a touch of breathing room.
+    const typeStartX = tx + (indicators.length ? 5 : 3)
+    const typeRoom = x + w - sortReserve - typeStartX
     if (typeRoom > 24 && col.dataType) {
       ctx.font = _fonts.type
-      ctx.fillStyle = withAlpha(c.cMuted, 0.65)
+      ctx.fillStyle = withAlpha(c.cMuted, 0.6)
       ctx.fillText(truncText(ctx, col.dataType, typeRoom), typeStartX, cy + 0.5)
     }
 
-    // Sort indicator — primary color when active, subtle when just hovered.
+    // Sort indicator — right-aligned with a clear margin, vertically centred.
+    const sortX = x + w - SORT_ICON - SORT_MARGIN_R
+    const sortY = cy - SORT_ICON / 2
     if (sorted) {
       const iconName = rowSort?.direction === 'asc' ? 'arrow-up' : 'arrow-down'
-      drawIcon(ctx, iconName, x + w - sortReserve + 2, cy - 7, 14, withAlpha(c.cPrimary, 0.95), 1.8)
+      drawIcon(ctx, iconName, sortX, sortY, SORT_ICON, withAlpha(c.cPrimary, 0.95), 1.7)
     } else if (_resizeHoverCol !== col.name && hoveredColName === col.name && hoveredRow === null) {
-      drawIcon(ctx, 'arrow-up-down', x + w - sortReserve + 2, cy - 7, 14, withAlpha(c.cMuted, 0.5), 1.6)
+      drawIcon(ctx, 'chevrons-up-down', sortX, sortY, SORT_ICON, withAlpha(c.cMuted, 0.55), 1.6)
     }
 
     // Resize-edge affordance.

@@ -208,9 +208,27 @@ async fn close_existing(state: &State<'_, DbState>) {
     }
 }
 
+// ── Fast reachability preflight ───────────────────────────────────────────────
+
+/// Confirm the host:port is reachable before building a pool. Unreachable hosts,
+/// wrong ports, and empty values fail here in a few seconds instead of stalling
+/// on the pool's much longer acquire timeout ("pool timed out…").
+async fn tcp_preflight(host: &str, port: u16) -> Result<(), String> {
+    if host.trim().is_empty() {
+        return Err("Host is empty".to_string());
+    }
+    let addr = format!("{host}:{port}");
+    match tokio::time::timeout(Duration::from_secs(4), tokio::net::TcpStream::connect(&addr)).await {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(e)) => Err(format!("Can't reach {addr}: {e}")),
+        Err(_) => Err(format!("Can't reach {addr} (timed out after 4s)")),
+    }
+}
+
 // ── PostgreSQL connect / test ─────────────────────────────────────────────────
 
 pub(crate) async fn open_pg(config: &PgConfig) -> Result<PgPool, String> {
+    tcp_preflight(&config.host, config.port).await?;
     let opts: PgConnectOptions = config
         .connection_url()
         .parse()
@@ -227,7 +245,9 @@ pub(crate) async fn open_pg(config: &PgConfig) -> Result<PgPool, String> {
         // No min_connections: keeping idle connections alive causes ping failures
         // after network changes or laptop sleep/wake (os error 60), then a 27 s
         // stall while the pool replaces the dead connection.
-        .acquire_timeout(Duration::from_secs(10))
+        // Preflight already filtered unreachable hosts, so a short acquire timeout
+        // keeps auth/handshake failures snappy instead of hanging ~10 s.
+        .acquire_timeout(Duration::from_secs(6))
         // Release idle connections after 30 s (was 60 s). Logs showed the app
         // goes fully idle within 30 s of the user stopping interaction, so
         // halving this cuts FD and memory hold-time without affecting responsiveness.
@@ -331,6 +351,7 @@ pub async fn connect_sqlite(state: State<'_, DbState>, config: SqliteConfig) -> 
 // ── MySQL connect / test ──────────────────────────────────────────────────────
 
 pub(crate) async fn open_mysql(config: &MysqlConfig) -> Result<MySqlPool, String> {
+    tcp_preflight(&config.host, config.port).await?;
     let opts: MySqlConnectOptions = config
         .connection_url()
         .parse()
@@ -340,7 +361,7 @@ pub(crate) async fn open_mysql(config: &MysqlConfig) -> Result<MySqlPool, String
     MySqlPoolOptions::new()
         // Same rationale as PG: 4 is the real-world ceiling for a desktop app.
         .max_connections(4)
-        .acquire_timeout(Duration::from_secs(10))
+        .acquire_timeout(Duration::from_secs(6))
         .idle_timeout(Duration::from_secs(30))
         .max_lifetime(Duration::from_secs(300))
         // Enable ANSI_QUOTES on every connection so double-quoted identifiers

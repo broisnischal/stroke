@@ -77,6 +77,17 @@
   let error      = $state('')
   let testOk     = $state(false)
 
+  // Cancellation token. The Tauri command keeps running, but bumping this makes
+  // the in-flight handler ignore its result and unblock the UI immediately.
+  let opId = 0
+  function stopOp() {
+    opId += 1
+    connecting = null
+    testing = false
+    error = ''
+    testOk = false
+  }
+
   let dbType      = $state('postgres')
   let name        = $state('')
   let host        = $state('127.0.0.1')
@@ -219,6 +230,7 @@
   }
 
   async function connectWith(conn) {
+    const myOp = ++opId
     connecting = conn.id; error = ''
     try {
       if (conn.type === 'sqlite') await connectSqlite(conn)
@@ -226,16 +238,18 @@
       else if (conn.type === 'libsql') await connectLibSql(conn)
       else if (conn.type === 'mysql') await connectMysql(conn)
       else await connectPostgres(conn)
+      if (myOp !== opId) return // cancelled by the user
       const updated = { ...conn, lastConnectedAt: Date.now() }
       saved = upsertConnection(updated).sort((a, b) => (b.lastConnectedAt ?? 0) - (a.lastConnectedAt ?? 0))
       setLastConnectionId(conn.id)
       open = false
       await onconnected(updated, conn.id)
-    } catch (e) { error = String(e) }
-    finally { connecting = null }
+    } catch (e) { if (myOp === opId) error = String(e) }
+    finally { if (myOp === opId) connecting = null }
   }
 
   async function handleTest() {
+    const myOp = ++opId
     testing = true; error = ''; testOk = false
     try {
       const p = formPayload()
@@ -244,12 +258,14 @@
       else if (p.type === 'libsql') await testLibSqlConnection(p)
       else if (p.type === 'mysql') await testMysqlConnection(p)
       else await testPostgresConnection(p)
+      if (myOp !== opId) return // cancelled by the user
       testOk = true
-    } catch (e) { error = String(e) }
-    finally { testing = false }
+    } catch (e) { if (myOp === opId) error = String(e) }
+    finally { if (myOp === opId) testing = false }
   }
 
   async function handleConnect() {
+    const myOp = ++opId
     connecting = editingId ?? '__new__'; error = ''
     try {
       const payload = formPayload()
@@ -258,6 +274,7 @@
       else if (payload.type === 'libsql') await connectLibSql(payload)
       else if (payload.type === 'mysql') await connectMysql(payload)
       else await connectPostgres(payload)
+      if (myOp !== opId) return // cancelled by the user
       const existing = editingId ? saved.find(s => s.id === editingId) : null
       const id = existing?.id ?? newConnectionId()
       const saved_conn = {
@@ -270,8 +287,8 @@
       setLastConnectionId(id)
       open = false
       await onconnected(saved_conn, id)
-    } catch (e) { error = String(e) }
-    finally { connecting = null }
+    } catch (e) { if (myOp === opId) error = String(e) }
+    finally { if (myOp === opId) connecting = null }
   }
 
   const canTest = $derived(dbType !== 'bigquery')
@@ -765,6 +782,12 @@
             </div>
             <!-- Test + Connect -->
             <div class="flex shrink-0 items-center gap-1.5">
+              {#if isBusy}
+                <button type="button" onclick={stopOp}
+                  class="inline-flex h-[30px] items-center gap-1 rounded-md border border-destructive/30 px-3 text-[12px] font-medium text-destructive transition-colors hover:bg-destructive/10">
+                  <X class="size-3" />Stop
+                </button>
+              {/if}
               {#if canTest}
                 <button type="button" onclick={handleTest} disabled={isBusy}
                   class="inline-flex h-[30px] items-center gap-1 rounded-md border border-border/30 px-3 text-[12px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-25">

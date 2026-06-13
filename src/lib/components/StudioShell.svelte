@@ -3069,6 +3069,11 @@ let rowSearch = $state('')
         onexportsql={(t) => void handleExportSql(t)}
         onexportdata={(t) => void handleExportData(t)}
         ongeneratetestdata={(t) => void handleGenerateTestData(t)}
+        openTables={tabs.filter((t) => t.kind === 'table' && t.state && /** @type {any} */ (t.state).schema === activeSchema).map((t) => /** @type {any} */ (t.state).table)}
+        onclosetable={(name) => {
+          const tab = findTableTab(tabs, activeSchema, name)
+          if (tab) void closeTab(tab.id)
+        }}
         {recentTabs}
         onrecentselect={(schema, table) => { if (aiMode) exitAiMode(); void openTableTab(schema, table) }}
         onrecentremove={(schema, table) => {
@@ -3089,46 +3094,47 @@ let rowSearch = $state('')
 
   <main class="flex min-h-0 min-w-0 flex-1 flex-col bg-panel" data-studio-region="main">
     {#if !connection}
-      <div class="relative flex flex-1 flex-col items-center justify-center gap-7 p-8 text-center">
-        <!-- Ambient glow behind the mark -->
+      <div class="relative flex flex-1 flex-col items-center justify-center gap-8 p-8 text-center">
+        <!-- Subtle vignette — kept faint for a flat, crisp surface -->
         <div
-          class="pointer-events-none absolute left-1/2 top-1/2 size-80 -translate-x-1/2 -translate-y-[72%] opacity-80"
-          style="background: radial-gradient(circle, color-mix(in oklch, var(--primary) 12%, transparent), transparent 65%);"
+          class="pointer-events-none absolute inset-0"
+          style="background: radial-gradient(58% 48% at 50% 36%, color-mix(in oklch, var(--primary) 7%, transparent), transparent 72%);"
         ></div>
 
         <!-- Brand mark -->
-        <div class="relative">
-          <div
-            class="pointer-events-none absolute -inset-3 rounded-[2rem] bg-gradient-to-b from-foreground/[0.06] to-transparent blur-md"
-          ></div>
-          <div class="relative flex size-20 items-center justify-center rounded-[1.4rem] border border-border/70 bg-gradient-to-b from-muted/60 to-muted/10 shadow-lg shadow-black/20 ring-1 ring-inset ring-white/[0.04]">
-            <Logo class="size-10" />
-          </div>
+        <div class="relative flex size-[72px] items-center justify-center rounded-[20px] border border-border/60 bg-card ring-1 ring-inset ring-white/[0.04] shadow-[0_10px_30px_-14px_rgba(0,0,0,0.7)]">
+          <Logo class="size-9" />
         </div>
 
-        <div class="relative flex max-w-md flex-col items-center gap-2">
-          <h1 class="text-2xl font-semibold tracking-tight text-foreground">Connect a database</h1>
-          <p class="max-w-sm text-ui text-muted-foreground">
+        <div class="relative flex max-w-md flex-col items-center gap-2.5">
+          <h1 class="text-[1.7rem] font-bold leading-tight tracking-tight text-foreground">Connect a database</h1>
+          <p class="max-w-[21rem] text-[0.95rem] leading-relaxed text-muted-foreground">
             Browse schemas, edit rows, and run SQL — all in one fast, native window.
           </p>
         </div>
 
         <!-- Supported engines -->
-        <div class="relative flex flex-wrap items-center justify-center gap-1.5">
+        <div class="relative flex flex-wrap items-center justify-center gap-2">
           {#each ['PostgreSQL', 'MySQL', 'SQLite', 'Cloudflare D1'] as engine}
-            <span class="rounded-full border border-border/60 bg-muted/30 px-2.5 py-1 text-ui-xs font-medium text-muted-foreground">
+            <span class="rounded-full border border-border/50 bg-muted/20 px-3 py-1.5 text-ui-xs font-medium text-muted-foreground/80">
               {engine}
             </span>
           {/each}
         </div>
 
-        <div class="relative mt-1 flex flex-col items-center gap-3">
-          <Button type="button" size="lg" onclick={() => (showConnectionModal = true)}>
+        <div class="relative flex flex-col items-center gap-4 pt-1">
+          <Button
+            type="button"
+            class="h-10 rounded-xl px-5 text-sm font-semibold shadow-sm"
+            onclick={() => (showConnectionModal = true)}
+          >
             <Plus class="size-4" />
             Add connection
           </Button>
-          <p class="text-ui-xs text-muted-foreground">
-            or press <kbd>⌘K</kbd> for the command menu
+          <p class="flex items-center gap-1.5 text-ui-xs text-muted-foreground/70">
+            or press
+            <kbd class="inline-flex h-5 min-w-[20px] items-center justify-center rounded-md border border-border/60 bg-muted/40 px-1.5 font-mono text-[10px] leading-none text-muted-foreground">⌘K</kbd>
+            for the command menu
           </p>
         </div>
       </div>

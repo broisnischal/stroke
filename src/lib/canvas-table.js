@@ -114,6 +114,14 @@ const ICON_PATHS = {
   "arrow-up": ["M12 19V5", "m5 12 7-7 7 7"],
   "arrow-down": ["M12 5v14", "m19 12-7 7-7-7"],
   "arrow-up-down": ["m21 16-4 4-4-4", "M17 20V4", "m3 8 4-4 4 4", "M7 4v16"],
+  // Primary-key (key-round) and foreign-key (link) column-header glyphs — exact
+  // lucide path data so they match the rest of the app's icon set.
+  "key-round": [
+    "M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 0 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 0 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z",
+  ],
+  "link-2": ["M9 17H7A5 5 0 0 1 7 7h2", "M15 7h2a5 5 0 1 1 0 10h-2", "M8 12h8"],
+  // Sortable-column glyph (cleaner than arrow-up-down).
+  "chevrons-up-down": ["m7 15 5 5 5-5", "m7 9 5-5 5 5"],
 };
 
 /** @type {Map<string, Path2D[]>} */
