@@ -1,7 +1,7 @@
 <script>
   import { onMount, tick, untrack } from 'svelte'
   import * as monaco from 'monaco-editor'
-  import { configureMonacoWorkers } from '$lib/monaco-env.js'
+  import { configureMonacoWorkers, monacoFontFamily } from '$lib/monaco-env.js'
   import { defineStrokeMonacoThemes, monacoThemeId, readEditorFontOptions } from '$lib/monaco-themes.js'
   import { normalizeThemeId } from '$lib/themes/registry.js'
   import ResizeHandle from './ResizeHandle.svelte'
@@ -222,7 +222,7 @@
     // page is open. A ResizeObserver fires only when the size actually changes.
     automaticLayout: false,
     minimap: { enabled: false },
-    fontFamily: '"Geist Mono Variable", ui-monospace, monospace',
+    fontFamily: monacoFontFamily(),
     fontLigatures: false,
     fontWeight: 'normal',
     scrollBeyondLastLine: false,

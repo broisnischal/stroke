@@ -1,4 +1,5 @@
 import { writable } from 'svelte/store'
+import { debounce } from '$lib/utils.js'
 
 /** @typedef {{ id: string, name: string, code: string, group: string, createdAt: number, updatedAt: number }} SavedDiagram */
 
@@ -22,7 +23,13 @@ let _connId = ''
 
 export const savedDiagrams = writable(/** @type {SavedDiagram[]} */ ([]))
 
-savedDiagrams.subscribe((v) => { persist(v, _connId) })
+// Debounced: diagram editing (node drags, code edits) fires rapidly; one
+// JSON.stringify + localStorage write per change janks the main thread.
+const persistDebounced = debounce((/** @type {SavedDiagram[]} */ v, /** @type {string} */ connId) => persist(v, connId), 300)
+savedDiagrams.subscribe((v) => { persistDebounced(v, _connId) })
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', () => persistDebounced.flush())
+}
 
 /** Switch active connection. Loads diagrams for the given connection. */
 export function switchDiagramsConnection(connectionId) {

@@ -2,7 +2,7 @@ const STORAGE_KEY = 'stroke:connections'
 const LAST_ID_KEY  = 'stroke:last-connection-id'
 
 /**
- * @typedef {'postgres' | 'sqlite' | 'd1'} DbType
+ * @typedef {'postgres' | 'sqlite' | 'd1' | 'mysql' | 'mariadb' | 'cockroachdb' | 'libsql' | 'clickhouse' | 'duckdb' | 'mssql'} DbType
  *
  * @typedef {{ host: string, port?: number, username: string, privateKeyPath?: string }} SshConfig
  *
@@ -27,6 +27,20 @@ const LAST_ID_KEY  = 'stroke:last-connection-id'
 
 export function newConnectionId() {
   return crypto.randomUUID()
+}
+
+/**
+ * Maps a saved connection `type` to the underlying engine family that drives
+ * capability flags and dialect-specific behavior. Wire-compatible aliases
+ * (MariaDB → MySQL, CockroachDB → PostgreSQL) collapse to their base so every
+ * `dbType === 'mysql'` / `'postgres'` check keeps working unchanged.
+ * @param {string | undefined | null} type
+ * @returns {DbType}
+ */
+export function engineFamily(type) {
+  if (type === 'mariadb') return 'mysql'
+  if (type === 'cockroachdb') return 'postgres'
+  return /** @type {DbType} */ (type ?? 'postgres')
 }
 
 /** @returns {SavedConnection[]} */

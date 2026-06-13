@@ -4,6 +4,7 @@
  * that connection's charts. An empty connectionId shows nothing.
  */
 import { writable } from 'svelte/store'
+import { debounce } from '$lib/utils.js'
 
 /**
  * @typedef {{
@@ -69,8 +70,16 @@ function persist(v, key) {
 export const savedCharts = writable(/** @type {SavedChart[]} */ ([]))
 export const chartGroups = writable(/** @type {string[]} */ (['Default']))
 
-savedCharts.subscribe(v => { if (_connId) persist(v, CHARTS_KEY(_connId)) })
-chartGroups.subscribe(v => { if (_connId) persist(v, GROUPS_KEY(_connId)) })
+// Debounced persistence — chart edits can fire in bursts; avoid a synchronous
+// JSON.stringify + localStorage write on every change. Charts and groups use
+// separate debouncers so their distinct keys never coalesce/clobber.
+const persistCharts = debounce((/** @type {any} */ v, /** @type {string} */ key) => persist(v, key), 300)
+const persistGroups = debounce((/** @type {any} */ v, /** @type {string} */ key) => persist(v, key), 300)
+savedCharts.subscribe(v => { if (_connId) persistCharts(v, CHARTS_KEY(_connId)) })
+chartGroups.subscribe(v => { if (_connId) persistGroups(v, GROUPS_KEY(_connId)) })
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', () => { persistCharts.flush(); persistGroups.flush() })
+}
 
 /**
  * Switch the active connection. Reloads charts and groups from the

@@ -37,6 +37,7 @@
   import { aiProfiles, activeProfileId, setActiveProfile } from '$lib/stores/ai-settings.js'
   import { toggleLightDark, isCurrentThemeDark } from '$lib/stores/settings.js'
   import { executeSql } from '$lib/api.js'
+  import { engineFamily } from '$lib/stores/connections.js'
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js'
   import CreateDatabaseDialog from './CreateDatabaseDialog.svelte'
 
@@ -95,7 +96,7 @@
       ? (connection?.url ?? '').replace(/^(libsql|https?):\/\//, '').split('/')[0]
       : (connection?.database ?? connection?.filePath ?? '')
   )
-  const isPostgres = $derived(connection?.type === 'postgres' || connection?.type === 'mysql')
+  const isPostgres = $derived(engineFamily(connection?.type) === 'postgres' || engineFamily(connection?.type) === 'mysql')
   const dbFiltered = $derived(
     dbSearch.trim()
       ? databases.filter((d) => d.toLowerCase().includes(dbSearch.toLowerCase()))
@@ -132,6 +133,8 @@
     connection?.type === 'sqlite' ? 'SQLite'
       : connection?.type === 'libsql' ? 'Turso'
       : connection?.type === 'mysql' ? 'MySQL'
+      : connection?.type === 'mariadb' ? 'MariaDB'
+      : connection?.type === 'cockroachdb' ? 'CockroachDB'
       : connection?.type === 'd1' ? 'D1'
       : 'PostgreSQL',
   )

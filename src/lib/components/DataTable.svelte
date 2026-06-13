@@ -72,7 +72,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     nowTimeOnly,
   } from "$lib/insert-field.js";
   import { cellLinkHref, cellUrlType } from "$lib/cell-display.js";
-  import { formatCellValue, transformsFor, enabledGenerators, linkifyValue, statsNeeded, annotatorEnabled } from "$lib/plugins/registry.js";
+  import { formatCellValue, transformsFor, enabledGenerators, linkifyValue, statsNeeded, annotatorEnabled, anyDisplayExtEnabled } from "$lib/plugins/registry.js";
   import { pluginState } from "$lib/stores/plugins.js";
   import Wand2 from "@lucide/svelte/icons/wand-2";
   import Sparkles from "@lucide/svelte/icons/sparkles";
@@ -454,6 +454,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const s = formatCell(value);
     return s.length > CELL_DISPLAY_LIMIT ? s.slice(0, CELL_DISPLAY_LIMIT) + "…" : s;
   }
+
+  // Whether any formatter/linkifier is enabled — gates the per-cell directive
+  // lookup so the scroll hot path does zero extension work in the common case.
+  const _extActive = $derived.by(() => { void $pluginState; return anyDisplayExtEnabled(); });
 
   // Repaint when extension settings or column stats change — both affect drawn
   // cell text, badges, tints, and the header annotator strip.
@@ -1736,6 +1740,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (_drawRafId) cancelAnimationFrame(_drawRafId)
       draw()
       _drawRafId = requestAnimationFrame(() => { _drawRafId = 0 })
+    } else {
+      // Repaint directly from the scroll handler. The big layout effect no longer
+      // tracks _scrollTop/_scrollLeft, so scrolling skips syncCanvasSurface()
+      // (style writes + getContext + setTransform) and only does the rAF draw.
+      scheduleDraw()
     }
     // Infinite scroll — trigger load when within 3 rows of the bottom
     if (infiniteScroll && !loadingMore) {
@@ -2282,7 +2291,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Extension render directive (badges, tints, masks, links, swatches, …).
     // Computed once per cell and merged across enabled formatters; null/JSON
     // cells skip it entirely so the common path allocates nothing.
-    const dir = (!isNull && !isJson)
+    const dir = (_extActive && !isNull && !isJson)
       ? formatCellValue(value, cached?.colType ?? '', col.name, _colStats ? { stats: _colStats.get(actualIdx) } : undefined)
       : null
 
@@ -2693,7 +2702,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     void rows; void columns; void columnWidths
     void pinnedColumns; void hiddenColumns; void selected; void focusedRow
     void focusedCol; void editingCell; void pendingEdits; void expandedRows
-    void rowSort; void _scrollTop; void _scrollLeft; void _viewportWidth
+    void rowSort; void _viewportWidth
+    // NOTE: _scrollTop / _scrollLeft are intentionally NOT tracked here — scrolling
+    // repaints via scheduleDraw() inside onContainerScroll, so this effect (which
+    // also re-syncs the canvas backing store) doesn't run on every scroll frame.
     void _viewportHeight; void newRowDrafts; void insertSaving; void colMeta
     void geom; void rowTops; void _redrawToken; void foreignKeys; void indexes
     void _colCache; void expandedRowHeights; void fkSubview; void virtualRelCols; void VIRTUAL_COL_W
@@ -3434,7 +3446,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               aria-label="Loading more rows"
             >
               <div class="flex items-center justify-center py-2">
-                <div class="flex items-center gap-1.5 rounded-full border border-border/20 bg-background/90 px-3 py-1 shadow-md backdrop-blur-sm">
+                <div class="flex items-center gap-1.5 rounded-full border border-border/20 bg-background px-3 py-1 shadow-md">
                   <Loader class="size-3 animate-spin text-muted-foreground/50" />
                   <span class="text-[11px] text-muted-foreground/50">Loading more…</span>
                 </div>

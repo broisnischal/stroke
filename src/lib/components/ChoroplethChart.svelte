@@ -13,6 +13,7 @@
   let el = $state(null)
   /** @type {any} */
   let chart = $state(null)
+  let chartListeners = null
   /** @type {ResizeObserver|null} */
   let ro = null
   let loadError = $state('')
@@ -99,6 +100,12 @@
     })
     ro.observe(container)
 
+    // Re-init (theme/data change, IntersectionObserver re-trigger) must not stack
+    // listeners on the same container — abort the prior set first.
+    chartListeners?.abort()
+    chartListeners = new AbortController()
+    const { signal } = chartListeners
+
     // scrollZoom=true (fullscreen): ECharts handles all wheel natively
     // inline: only Ctrl/Cmd+scroll zooms; plain scroll → page
     if (!scrollZoom) {
@@ -113,13 +120,13 @@
             bubbles: false, cancelable: true,
           }))
         }
-      }, { capture: true, passive: false })
+      }, { capture: true, passive: false, signal })
     }
 
     // Double-click → reset pan/zoom to initial world view
     container.addEventListener('dblclick', () => {
       instance.dispatchAction({ type: 'restore' })
-    })
+    }, { signal })
 
     loading = false
     applyOption(instance)
@@ -206,6 +213,7 @@
       disposed = true
       io.disconnect()
       ro?.disconnect(); ro = null
+      chartListeners?.abort(); chartListeners = null
       chart?.dispose(); chart = null
     }
   })
@@ -220,7 +228,7 @@
     chart?.dispatchAction({ type: 'restore' })
   }
 
-  onDestroy(() => { ro?.disconnect(); chart?.dispose() })
+  onDestroy(() => { ro?.disconnect(); chartListeners?.abort(); chart?.dispose() })
 </script>
 
 {#if !spec?.data?.length}

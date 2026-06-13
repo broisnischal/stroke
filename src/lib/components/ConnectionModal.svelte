@@ -45,8 +45,10 @@
     {
       label: 'Relational',
       drivers: [
-        { id: 'postgres', label: 'PostgreSQL',      desc: 'Open-source relational database' },
-        { id: 'mysql',    label: 'MySQL',            desc: 'Popular relational database' },
+        { id: 'postgres',    label: 'PostgreSQL',  desc: 'Open-source relational database' },
+        { id: 'mysql',       label: 'MySQL',        desc: 'Popular relational database' },
+        { id: 'mariadb',     label: 'MariaDB',      desc: 'MySQL-compatible relational database' },
+        { id: 'cockroachdb', label: 'CockroachDB',  desc: 'Distributed Postgres-compatible SQL' },
       ],
     },
     {
@@ -122,6 +124,8 @@
   const DEFAULTS = {
     postgres:        { name: 'Local PostgreSQL', host: '127.0.0.1', port: '5432', database: 'postgres', user: 'postgres' },
     mysql:           { name: 'Local MySQL',       host: '127.0.0.1', port: '3306', database: 'mysql',    user: 'root' },
+    mariadb:         { name: 'Local MariaDB',     host: '127.0.0.1', port: '3306', database: 'mysql',    user: 'root' },
+    cockroachdb:     { name: 'Local CockroachDB', host: '127.0.0.1', port: '26257', database: 'defaultdb', user: 'root' },
     sqlite:          { name: 'Local SQLite',      filePath: '' },
     'sqlite-memory': { name: 'In-Memory SQLite',  filePath: ':memory:' },
     libsql:          { name: 'My Turso DB',       libsqlUrl: '', libsqlToken: '' },
@@ -146,7 +150,10 @@
       return { type: 'sqlite', name, filePath: dbType === 'sqlite-memory' ? ':memory:' : filePath }
     if (dbType === 'libsql') return { type: 'libsql', name, url: libsqlUrl, authToken: libsqlToken || undefined }
     if (dbType === 'd1')     return { type: 'd1', name, accountId, databaseId, apiToken }
-    if (dbType === 'mysql')  return { type: 'mysql', name, host, port, database, user, password, ssl, ...(ssh && { ssh }) }
+    if (dbType === 'mysql' || dbType === 'mariadb')
+      return { type: dbType, name, host, port, database, user, password, ssl, ...(ssh && { ssh }) }
+    if (dbType === 'cockroachdb')
+      return { type: 'cockroachdb', name, host, port, database, user, password, ssl, ...(ssh && { ssh }) }
     return { type: 'postgres', name, host, port, database, user, password, ssl, ...(ssh && { ssh }) }
   }
 
@@ -177,7 +184,8 @@
   function switchDriver(id) {
     dbType = id
     if (id === 'postgres') port = '5432'
-    if (id === 'mysql')    port = '3306'
+    if (id === 'mysql' || id === 'mariadb') port = '3306'
+    if (id === 'cockroachdb') port = '26257'
     if (id === 'sqlite-memory') filePath = ':memory:'
     error = ''; testOk = false; connectionUri = ''; uriHint = ''
     if (id !== 'd1') d1Reset()
@@ -236,7 +244,7 @@
       if (conn.type === 'sqlite') await connectSqlite(conn)
       else if (conn.type === 'd1') await connectD1(conn)
       else if (conn.type === 'libsql') await connectLibSql(conn)
-      else if (conn.type === 'mysql') await connectMysql(conn)
+      else if (conn.type === 'mysql' || conn.type === 'mariadb') await connectMysql(conn)
       else await connectPostgres(conn)
       if (myOp !== opId) return // cancelled by the user
       const updated = { ...conn, lastConnectedAt: Date.now() }
@@ -256,7 +264,7 @@
       if (p.type === 'sqlite') await testSqliteConnection(p)
       else if (p.type === 'd1') await testD1Connection(p)
       else if (p.type === 'libsql') await testLibSqlConnection(p)
-      else if (p.type === 'mysql') await testMysqlConnection(p)
+      else if (p.type === 'mysql' || p.type === 'mariadb') await testMysqlConnection(p)
       else await testPostgresConnection(p)
       if (myOp !== opId) return // cancelled by the user
       testOk = true
@@ -272,15 +280,16 @@
       if (payload.type === 'sqlite') await connectSqlite(payload)
       else if (payload.type === 'd1') await connectD1(payload)
       else if (payload.type === 'libsql') await connectLibSql(payload)
-      else if (payload.type === 'mysql') await connectMysql(payload)
+      else if (payload.type === 'mysql' || payload.type === 'mariadb') await connectMysql(payload)
       else await connectPostgres(payload)
       if (myOp !== opId) return // cancelled by the user
       const existing = editingId ? saved.find(s => s.id === editingId) : null
       const id = existing?.id ?? newConnectionId()
+      const hasHostPort = ['postgres', 'mysql', 'mariadb', 'cockroachdb'].includes(payload.type)
+      const defaultPort = { mysql: 3306, mariadb: 3306, cockroachdb: 26257, postgres: 5432 }[payload.type] ?? 5432
       const saved_conn = {
         id, ...payload,
-        port: (payload.type === 'postgres' || payload.type === 'mysql')
-          ? (Number(payload.port) || (payload.type === 'mysql' ? 3306 : 5432)) : undefined,
+        port: hasHostPort ? (Number(payload.port) || defaultPort) : undefined,
         lastConnectedAt: Date.now(),
       }
       saved = upsertConnection(saved_conn).sort((a, b) => (b.lastConnectedAt ?? 0) - (a.lastConnectedAt ?? 0))
@@ -325,6 +334,8 @@
   function driverColor(id) {
     if (id === 'postgres')        return 'text-blue-400'
     if (id === 'mysql')           return 'text-amber-400'
+    if (id === 'mariadb')         return 'text-amber-500'
+    if (id === 'cockroachdb')     return 'text-indigo-400'
     if (id === 'sqlite')          return 'text-emerald-400'
     if (id === 'sqlite-memory')   return 'text-violet-400'
     if (id === 'libsql')          return 'text-sky-400'
@@ -334,6 +345,8 @@
   function driverBg(id) {
     if (id === 'postgres')        return 'bg-blue-500/10'
     if (id === 'mysql')           return 'bg-amber-500/10'
+    if (id === 'mariadb')         return 'bg-amber-500/10'
+    if (id === 'cockroachdb')     return 'bg-indigo-500/10'
     if (id === 'sqlite')          return 'bg-emerald-500/10'
     if (id === 'sqlite-memory')   return 'bg-violet-500/10'
     if (id === 'libsql')          return 'bg-sky-500/10'
@@ -403,6 +416,8 @@
   {@const c = colored ? driverColor(id) : 'text-muted-foreground'}
   {#if id === 'postgres'}           <Database  class="{cls} shrink-0 {c}" />
   {:else if id === 'mysql'}         <Database  class="{cls} shrink-0 {c}" />
+  {:else if id === 'mariadb'}       <Database  class="{cls} shrink-0 {c}" />
+  {:else if id === 'cockroachdb'}   <Database  class="{cls} shrink-0 {c}" />
   {:else if id === 'sqlite'}        <HardDrive class="{cls} shrink-0 {c}" />
   {:else if id === 'sqlite-memory'} <Zap       class="{cls} shrink-0 {c}" />
   {:else if id === 'libsql'}        <Globe     class="{cls} shrink-0 {c}" />
@@ -558,8 +573,8 @@
         <ScrollArea class="min-h-0 flex-1 scroll-smooth">
           <div class="flex flex-col gap-3 px-5 py-5">
 
-            <!-- ── PostgreSQL ──────────────────────────────── -->
-            {#if dbType === 'postgres'}
+            <!-- ── PostgreSQL / CockroachDB ────────────────── -->
+            {#if dbType === 'postgres' || dbType === 'cockroachdb'}
 
               <div>
                 <label for="cn-uri" class={lbl}>Connection string</label>
@@ -622,8 +637,8 @@
 
               {@render sshSection('pg')}
 
-            <!-- ── MySQL ────────────────────────────────── -->
-            {:else if dbType === 'mysql'}
+            <!-- ── MySQL / MariaDB ──────────────────────── -->
+            {:else if dbType === 'mysql' || dbType === 'mariadb'}
 
               <div class="grid grid-cols-[1fr_80px] gap-2">
                 <div>

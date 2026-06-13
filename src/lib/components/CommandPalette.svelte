@@ -148,36 +148,41 @@ import Search         from '@lucide/svelte/icons/search'
   let paletteSearch = $state('')
   const TABLES_PAGE_CAP = 100
 
+  // Pre-lowercase table names ONCE per table-list change (not per keystroke), so
+  // filtering thousands of tables stays cheap as the user types — the keystroke
+  // path then only runs the integer-scoring loop, never N× String.toLowerCase().
+  const _loweredRegular  = $derived(regularTables.map((t) => ({ t, l: t.name.toLowerCase() })))
+  const _loweredViews    = $derived(viewTables.map((t) => ({ t, l: t.name.toLowerCase() })))
+  const _loweredMatViews = $derived(matViewTables.map((t) => ({ t, l: t.name.toLowerCase() })))
+
   /**
-   * Substring score: exact > starts-with > contains. No fuzzy scattered-char matching.
-   * @param {string} name
-   * @param {string} query
-   * @returns {number}
+   * Substring score against an already-lowercased name: exact > starts-with > contains.
+   * @param {string} nLower @param {string} q (already trimmed + lowercased)
    */
-  function filterScore(name, query) {
-    if (!query) return 1
-    const n = name.toLowerCase()
-    const q = query.toLowerCase()
-    if (n === q) return 1000
-    if (n.startsWith(q)) return 900
-    const sub = n.indexOf(q)
+  function scoreLower(nLower, q) {
+    if (nLower === q) return 1000
+    if (nLower.startsWith(q)) return 900
+    const sub = nLower.indexOf(q)
     return sub !== -1 ? 800 - sub : 0
   }
 
-  /** @param {{ name: string }[]} list */
-  function filterAndCap(list) {
+  /** @param {{ t: { name: string }, l: string }[]} lowered */
+  function filterAndCap(lowered) {
     const q = paletteSearch.trim().toLowerCase()
-    if (!q) return { items: list.slice(0, TABLES_PAGE_CAP), total: list.length }
-    const scored = list
-      .map((t) => ({ t, s: filterScore(t.name, q) }))
-      .filter((x) => x.s > 0)
-      .sort((a, b) => b.s - a.s)
+    if (!q) return { items: lowered.slice(0, TABLES_PAGE_CAP).map((x) => x.t), total: lowered.length }
+    /** @type {{ t: { name: string }, s: number }[]} */
+    const scored = []
+    for (const x of lowered) {
+      const s = scoreLower(x.l, q)
+      if (s > 0) scored.push({ t: x.t, s })
+    }
+    scored.sort((a, b) => b.s - a.s)
     return { items: scored.slice(0, TABLES_PAGE_CAP).map((x) => x.t), total: scored.length }
   }
 
-  const tablesPageRegular  = $derived(filterAndCap(regularTables))
-  const tablesPageViews    = $derived(filterAndCap(viewTables))
-  const tablesPageMatViews = $derived(filterAndCap(matViewTables))
+  const tablesPageRegular  = $derived(filterAndCap(_loweredRegular))
+  const tablesPageViews    = $derived(filterAndCap(_loweredViews))
+  const tablesPageMatViews = $derived(filterAndCap(_loweredMatViews))
 
   // On tables page: shouldFilter=false so bits-ui skips its sort/filter pass entirely
   // (no CSS `order` reordering, no keyboard-nav interference). We pre-filter in JS.

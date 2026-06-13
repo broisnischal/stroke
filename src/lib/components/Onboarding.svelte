@@ -1,5 +1,4 @@
 <script>
-  import { fly } from 'svelte/transition'
   import { fade } from 'svelte/transition'
   import { cubicOut } from 'svelte/easing'
   import Database      from '@lucide/svelte/icons/database'
@@ -12,16 +11,25 @@
   import Plus          from '@lucide/svelte/icons/plus'
   import Sparkles      from '@lucide/svelte/icons/sparkles'
   import FlaskConical  from '@lucide/svelte/icons/flask-conical'
+  import LayoutTemplate from '@lucide/svelte/icons/layout-template'
+  import Workflow      from '@lucide/svelte/icons/workflow'
+  import Share2        from '@lucide/svelte/icons/share-2'
+  import BarChart3     from '@lucide/svelte/icons/bar-chart-3'
+  import GitCompare    from '@lucide/svelte/icons/git-compare'
+  import History       from '@lucide/svelte/icons/history'
+  import Blocks        from '@lucide/svelte/icons/blocks'
+  import Archive       from '@lucide/svelte/icons/archive'
+  import Plug          from '@lucide/svelte/icons/plug'
+  import ShieldCheck   from '@lucide/svelte/icons/shield-check'
+  import Search        from '@lucide/svelte/icons/search'
+  import NotebookPen   from '@lucide/svelte/icons/notebook-pen'
 
   let { open = $bindable(false), onconnect = () => {}, onsample = () => {} } = $props()
 
   let step = $state(1)
-  let prev = $state(0)
   let activeFeature = $state(0)
   const TOTAL = 3
   const KEY = 'stroke:onboarded'
-
-  const forward = $derived(step >= prev)
 
   const FEATURES = [
     { icon: Database, title: 'Connect any database', desc: 'PostgreSQL, MySQL, SQLite, and Cloudflare D1 — all from one window.', preview: 'connect' },
@@ -30,24 +38,33 @@
     { icon: Bot,      title: 'AI assistance',        desc: 'Generate SQL, fix errors, and ask questions with any AI model.',        preview: 'ai'      },
   ]
 
-  const TIPS = [
-    'Press ⌘K anytime to open the command palette and jump anywhere.',
-    'Ask the AI to write or fix SQL — it already knows your schema.',
-    'Edit cells inline, then review every change before you commit.',
-    'Save queries and revisit your full run history whenever you need.',
+  // Everything beyond the core four — shown as a minimal capability grid.
+  const CAPABILITIES = [
+    { icon: LayoutTemplate, title: 'Schema explorer',   desc: 'Browse schemas, tables, indexes, enums & views.' },
+    { icon: Workflow,       title: 'Visual ERD',         desc: 'See table relationships as a live diagram.' },
+    { icon: Share2,         title: 'Diagrams',           desc: 'Author & render Mermaid diagrams from your DB.' },
+    { icon: BarChart3,      title: 'Charts & dashboards', desc: 'Turn query results into charts and pin them.' },
+    { icon: GitCompare,     title: 'Data diff',          desc: 'Compare two tables or result sets row by row.' },
+    { icon: History,        title: 'Schema timeline',    desc: 'Track how your schema changed via snapshots.' },
+    { icon: NotebookPen,    title: 'SQL notebooks',      desc: 'Mix SQL cells and notes in one document.' },
+    { icon: Blocks,         title: 'Extensions',         desc: 'Cell formatters, ID generators & transforms.' },
+    { icon: Search,         title: 'Global search',      desc: 'Find rows across every table at once.' },
+    { icon: ShieldCheck,    title: 'Security',           desc: 'Inspect roles, users & row-level policies.' },
+    { icon: Archive,        title: 'Backup & restore',   desc: 'Export and import your data in a click.' },
+    { icon: Plug,           title: 'MCP server',         desc: 'Expose your DB to external AI tools.' },
   ]
 
   const HEADINGS = [
-    { title: 'Welcome to Stroke',   desc: "The developer's database client — connect, explore, and query with AI." },
-    { title: 'Get productive fast', desc: 'A few things worth knowing before you dive in.' },
-    { title: "You're all set",      desc: 'Connect a real database, or explore with sample data first.' },
+    { title: 'Welcome to Stroke',     desc: "The developer's database client — connect, explore, and query with AI." },
+    { title: 'Everything in Stroke',  desc: 'A full toolkit for working with your data — all in one window.' },
+    { title: "You're all set",        desc: 'Connect a real database, or explore with sample data first.' },
   ]
 
   const heading = $derived(HEADINGS[step - 1])
   const previewType = $derived(FEATURES[activeFeature].preview)
 
-  function next() { prev = step; step = Math.min(step + 1, TOTAL) }
-  function back() { prev = step; step = Math.max(step - 1, 1) }
+  function next() { step = Math.min(step + 1, TOTAL) }
+  function back() { step = Math.max(step - 1, 1) }
 
   function selectFeature(i) {
     activeFeature = Math.max(0, Math.min(i, FEATURES.length - 1))
@@ -121,17 +138,19 @@
     <!-- ── Slide area ── -->
     <div class="relative min-h-0 flex-1 overflow-hidden">
       {#key step}
+        <!-- Opacity-only crossfade — no transform animation (transform tweens on
+             the large step content janked the Next click on WebKitGTK). -->
         <div
           class="absolute inset-0 flex flex-col items-center justify-center overflow-y-auto px-6 py-10"
-          in:fly={{ x: forward ? 50 : -50, duration: 280, easing: cubicOut }}
-          out:fly={{ x: forward ? -50 : 50, duration: 220, easing: cubicOut }}
+          in:fade={{ duration: 130, easing: cubicOut }}
+          out:fade={{ duration: 90 }}
         >
-          <div class="flex w-full max-w-3xl flex-col items-center gap-9">
+          <div class="flex w-full max-w-4xl flex-col items-center gap-8">
 
             <!-- Step heading -->
-            <div class="flex flex-col items-center gap-2.5 text-center">
-              <h1 class="text-3xl font-bold tracking-tight text-foreground">{heading.title}</h1>
-              <p class="max-w-md text-base leading-relaxed text-muted-foreground">{heading.desc}</p>
+            <div class="flex flex-col items-center gap-2 text-center">
+              <h1 class="text-2xl font-semibold tracking-tight text-foreground">{heading.title}</h1>
+              <p class="max-w-md text-[15px] leading-relaxed text-muted-foreground/90">{heading.desc}</p>
             </div>
 
             <!-- ── Step 1: Feature carousel ── -->
@@ -175,9 +194,9 @@
                 <div class="relative hidden overflow-hidden rounded-xl border border-border bg-muted/25 sm:block">
                   <div class="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-border to-transparent"></div>
                   {#key activeFeature}
-                    <div class="absolute inset-0 p-4" in:fade={{ duration: 200 }}>
+                    <div class="absolute inset-0 flex items-center p-4" in:fade={{ duration: 160 }}>
                       {#if previewType === 'connect'}
-                        <div class="flex h-full flex-col gap-2">
+                        <div class="flex w-full flex-col gap-2">
                           {#each [['PostgreSQL', true], ['MySQL', false], ['SQLite', false], ['Cloudflare D1', false]] as [name, on]}
                             <div class="flex items-center gap-2.5 rounded-lg border border-border bg-card/60 px-3 py-2">
                               <span class="size-2 rounded-full {on ? 'bg-emerald-500' : 'bg-muted-foreground/30'}"></span>
@@ -188,7 +207,7 @@
                         </div>
 
                       {:else if previewType === 'table'}
-                        <div class="flex h-full flex-col overflow-hidden rounded-lg border border-border">
+                        <div class="flex w-full flex-col overflow-hidden rounded-lg border border-border">
                           <div class="grid grid-cols-3 border-b border-border bg-muted/60 text-[10px] font-medium text-muted-foreground">
                             {#each ['id', 'name', 'status'] as h}<div class="border-r border-border px-2.5 py-1.5 last:border-r-0">{h}</div>{/each}
                           </div>
@@ -200,7 +219,7 @@
                         </div>
 
                       {:else if previewType === 'sql'}
-                        <div class="flex h-full flex-col overflow-hidden rounded-lg border border-border bg-card/60 font-mono text-[10px] leading-relaxed">
+                        <div class="flex w-full flex-col overflow-hidden rounded-lg border border-border bg-card/60 font-mono text-[10px] leading-relaxed">
                           <div class="flex items-center gap-1.5 border-b border-border px-3 py-1.5">
                             <span class="size-2 rounded-full bg-muted-foreground/30"></span>
                             <span class="size-2 rounded-full bg-muted-foreground/30"></span>
@@ -217,7 +236,7 @@
                         </div>
 
                       {:else}
-                        <div class="flex h-full flex-col justify-center gap-2.5">
+                        <div class="flex w-full flex-col justify-center gap-2.5">
                           <div class="ml-auto max-w-[80%] rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-[10px] font-medium text-primary-foreground">
                             Show me the 10 newest signups
                           </div>
@@ -234,16 +253,24 @@
                 </div>
               </div>
 
-            <!-- ── Step 2: Tips ── -->
+            <!-- ── Step 2: Everything in Stroke (capability grid) ── -->
             {:else if step === 2}
-              <ol class="flex w-full max-w-md flex-col gap-2.5">
-                {#each TIPS as tip, i}
-                  <li class="flex items-start gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3">
-                    <span class="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">{i + 1}</span>
-                    <span class="pt-0.5 text-sm leading-relaxed text-foreground">{tip}</span>
-                  </li>
+              <div class="grid w-full grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+                {#each CAPABILITIES as c}
+                  <div class="group flex flex-col gap-2 rounded-xl border border-border/60 bg-card/30 p-3.5 transition-colors duration-150 hover:border-border hover:bg-muted/30">
+                    <span class="flex size-8 items-center justify-center rounded-lg border border-border/60 bg-muted/40 text-muted-foreground transition-colors group-hover:text-foreground">
+                      <c.icon class="size-4" />
+                    </span>
+                    <div class="min-w-0">
+                      <p class="text-[13px] font-semibold text-foreground">{c.title}</p>
+                      <p class="mt-0.5 text-[11.5px] leading-relaxed text-muted-foreground">{c.desc}</p>
+                    </div>
+                  </div>
                 {/each}
-              </ol>
+              </div>
+              <p class="-mt-3 flex items-center gap-1.5 text-xs text-muted-foreground/70">
+                <Sparkles class="size-3.5 text-primary/70" /> Press ⌘K anytime to jump to any of these.
+              </p>
 
             <!-- ── Step 3: Connect ── -->
             {:else}

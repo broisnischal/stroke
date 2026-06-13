@@ -1,7 +1,7 @@
 <script>
   import { onMount, untrack } from "svelte";
   import * as monaco from "monaco-editor";
-  import { configureMonacoWorkers } from "$lib/monaco-env.js";
+  import { configureMonacoWorkers, monacoFontFamily } from "$lib/monaco-env.js";
   import {
     defineStrokeMonacoThemes,
     monacoThemeId,
@@ -477,7 +477,7 @@
       theme: monacoThemeId(currentTheme()),
       automaticLayout: true,
       minimap: { enabled: false },
-      fontFamily: '"Geist Mono Variable", ui-monospace, monospace',
+      fontFamily: monacoFontFamily(),
       fontSize,
       lineHeight,
       fontLigatures: false,

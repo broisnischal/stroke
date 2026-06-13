@@ -79,9 +79,14 @@
     return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
   }
 
+  let _scrollRaf = 0
   function handleScroll() {
-    if (!logEl) return
-    autoScroll = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40
+    if (!logEl || _scrollRaf) return
+    _scrollRaf = requestAnimationFrame(() => {
+      _scrollRaf = 0
+      if (!logEl) return
+      autoScroll = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40
+    })
   }
 </script>
 
