@@ -11,19 +11,57 @@ import { zoomState, ZOOM_MIN, ZOOM_MAX } from '$lib/stores/canvas-zoom.svelte.js
 const STORAGE_KEY = 'stroke:settings'
 
 /** @typedef {import('$lib/themes/registry.js').ThemeId} ThemeId */
-/** @typedef {{ theme: ThemeId, zoom: number, mcpAutoStart: boolean, launchAtLogin: boolean }} AppSettings */
+/** @typedef {'geist' | 'system' | 'developer'} FontId */
+/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, mcpAutoStart: boolean, launchAtLogin: boolean }} AppSettings */
 
 /** UI zoom scale (font + layout). 1 = 100%. */
 export const ZOOM_STEPS = [0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.25, 1.5]
 const DEFAULT_ZOOM = 1
 
+/**
+ * Selectable font stacks. Each sets the UI (`--font-sans`) and data/SQL/grid
+ * (`--font-mono`) families. Stacks fall back gracefully when a font isn't
+ * installed, so an unavailable option degrades instead of breaking.
+ * @type {Record<FontId, { label: string, description: string, sans: string, mono: string }>}
+ */
+export const FONT_PRESETS = {
+  geist: {
+    label: 'Geist',
+    description: 'Default — clean variable sans paired with Geist Mono.',
+    sans: '"Geist Variable", ui-sans-serif, system-ui, sans-serif',
+    mono: '"Geist Mono Variable", ui-monospace, monospace',
+  },
+  system: {
+    label: 'System Native',
+    description: 'Your OS UI font with SF Mono / Menlo on macOS.',
+    sans: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif',
+    mono: 'ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+  },
+  developer: {
+    label: 'Developer Mono',
+    description: 'JetBrains Mono and friends — tuned for dense data.',
+    sans: '"Geist Variable", ui-sans-serif, system-ui, sans-serif',
+    mono: '"JetBrains Mono", "Cascadia Code", "Fira Code", "Roboto Mono", "DejaVu Sans Mono", ui-monospace, monospace',
+  },
+}
+/** @type {FontId} */
+export const DEFAULT_FONT = 'geist'
+/** @returns {FontId} */
+function normalizeFont(/** @type {unknown} */ id) {
+  return FONT_PRESETS[/** @type {FontId} */ (id)] ? /** @type {FontId} */ (id) : DEFAULT_FONT
+}
+
 /** @type {AppSettings} */
 export const DEFAULT_SETTINGS = {
   theme: DEFAULT_THEME_ID,
   zoom: DEFAULT_ZOOM,
+  font: DEFAULT_FONT,
   mcpAutoStart: false,
   launchAtLogin: false,
 }
+
+/** Reactive app font id (synced by applySettings). */
+export const appFont = writable(/** @type {FontId} */ (DEFAULT_FONT))
 
 /** Reactive app theme id (synced by applySettings). */
 export const appThemeId = writable(/** @type {ThemeId} */ (DEFAULT_THEME_ID))
@@ -86,7 +124,8 @@ export function loadSettings() {
     }
     const mcpAutoStart = parsed.mcpAutoStart === true
     const launchAtLogin = parsed.launchAtLogin === true
-    return { theme, zoom, mcpAutoStart, launchAtLogin }
+    const font = normalizeFont(parsed.font)
+    return { theme, zoom, font, mcpAutoStart, launchAtLogin }
   } catch {
     return { ...DEFAULT_SETTINGS }
   }
@@ -111,6 +150,14 @@ export function applySettings(settings) {
   isCurrentThemeDark.set(dark)
   root.style.setProperty('--app-zoom', String(zoom))
   root.style.setProperty('--app-font-size', `${Math.round(14 * zoom)}px`)
+
+  // Font family — overrides the stylesheet :root defaults inline (inline style
+  // wins), so the whole UI + canvas grid pick it up. The canvas re-measures its
+  // font metrics via the documentElement style MutationObserver.
+  const font = normalizeFont(settings.font)
+  root.style.setProperty('--font-sans', FONT_PRESETS[font].sans)
+  root.style.setProperty('--font-mono', FONT_PRESETS[font].mono)
+  appFont.set(font)
 
   // Keep the canvas-table zoom in lockstep with the app zoom so Cmd +/-/0 (and
   // the zoom buttons) scale the grid alongside the rest of the UI. The canvas

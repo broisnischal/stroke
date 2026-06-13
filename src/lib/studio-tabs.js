@@ -28,6 +28,8 @@
  * @property {boolean} savingCell
  * @property {Set<string>} hiddenColumns
  * @property {boolean} filterBarOpen
+ * @property {number} [scrollLeft]
+ * @property {number} [scrollTop]
  */
 
 /** @typedef {object} SqlTabState
@@ -106,6 +108,8 @@ export function createTableTabState(schema = 'public', table = null, tableKind =
     savingCell: false,
     hiddenColumns: new Set(),
     filterBarOpen: false,
+    scrollLeft: 0,
+    scrollTop: 0,
   }
 }
 
@@ -195,6 +199,20 @@ export function createLogsTab() {
     title: 'Activity Log',
     state: null,
   })
+}
+
+export function createExtensionsTab() {
+  return /** @type {StudioTab} */ ({
+    id: nextTabId(),
+    kind: 'extensions',
+    title: 'Extensions',
+    state: null,
+  })
+}
+
+/** @param {StudioTab[]} tabs */
+export function findExtensionsTab(tabs) {
+  return tabs.find((t) => t.kind === 'extensions') ?? null
 }
 
 /** @param {StudioTab[]} tabs */

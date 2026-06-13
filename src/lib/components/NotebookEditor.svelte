@@ -30,7 +30,7 @@
    *   onupdate: (updates: { notebook?: Notebook, filePath?: string | null, dirty?: boolean, title?: string }) => void,
    * }}
    */
-  let { notebook, filePath, dirty, onupdate } = $props()
+  let { notebook, filePath, dirty, onupdate, active = true } = $props()
 
   /** @type {Set<string>} */
   let running = $state(new Set())
@@ -159,6 +159,7 @@
 
   /** @param {KeyboardEvent} e */
   function onGlobalKeydown(e) {
+    if (!active) return // keep-alive on other tabs; only the visible notebook saves
     if ((e.ctrlKey || e.metaKey) && e.key === 's' && !e.shiftKey) {
       e.preventDefault()
       void save()

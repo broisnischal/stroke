@@ -16,6 +16,7 @@
     resetZoom,
     canIncreaseZoom,
     canDecreaseZoom,
+    FONT_PRESETS,
   } from "$lib/stores/settings.js";
   import { cn } from "$lib/utils.js";
   import {
@@ -29,6 +30,7 @@
     onopenmcp = () => {},
     onopenmodelconfiguration = () => {},
     onopenabout = () => {},
+    onopenextensions = () => {},
   } = $props();
 
   let settings = $state(loadSettings());
@@ -65,6 +67,13 @@
   function bumpZoom(delta) {
     settings = delta > 0 ? increaseZoom() : decreaseZoom();
   }
+
+  /** @param {import('$lib/stores/settings.js').FontId} font */
+  function setFont(font) {
+    if (font === settings.font) return;
+    settings = updateSettings({ font });
+  }
+  const fontEntries = Object.entries(FONT_PRESETS);
 
   function toggleMcpAutoStart() {
     settings = updateSettings({ mcpAutoStart: !settings.mcpAutoStart });
@@ -188,6 +197,38 @@
         </div>
 
         <div class="flex items-center justify-between gap-3 px-3 py-2.5">
+          <span class="text-xs text-muted-foreground">Font</span>
+          <Select.Root
+            type="single"
+            value={settings.font}
+            onValueChange={(v) => { if (v) setFont(/** @type {import('$lib/stores/settings.js').FontId} */ (v)); }}
+          >
+            <Select.Trigger
+              size="sm"
+              class={themeSelectTrigger}
+              aria-label="Font family"
+            >
+              <span class="truncate font-medium">{FONT_PRESETS[settings.font]?.label ?? "Geist"}</span>
+            </Select.Trigger>
+            <Select.Content
+              class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1"
+              sideOffset={6}
+            >
+              {#each fontEntries as [id, preset] (id)}
+                <Select.Item value={id} label={preset.label} class="rounded-md py-1.5 pr-8 pl-2">
+                  {#snippet children()}
+                    <span class="flex min-w-0 flex-col">
+                      <span class="truncate text-xs font-medium" style="font-family: {preset.mono}">{preset.label}</span>
+                      <span class="truncate text-[10px] text-muted-foreground">{preset.description}</span>
+                    </span>
+                  {/snippet}
+                </Select.Item>
+              {/each}
+            </Select.Content>
+          </Select.Root>
+        </div>
+
+        <div class="flex items-center justify-between gap-3 px-3 py-2.5">
           <span class="text-xs text-muted-foreground">Zoom</span>
           <div class="flex items-center gap-1">
             <Button
@@ -274,6 +315,17 @@
           </button>
         </div>
 
+        <button
+          type="button"
+          class="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+          onclick={() => {
+            open = false;
+            onopenextensions();
+          }}
+        >
+          <span>Extensions</span>
+          <ChevronRight class="size-3.5 shrink-0 opacity-60" />
+        </button>
         <button
           type="button"
           class="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"

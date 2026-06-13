@@ -1,0 +1,62 @@
+// Persisted state for the extensions ("plugins") system: which extensions are
+// enabled and their per-extension config.
+//
+// Two read paths intentionally coexist:
+//  - `pluginState` (Svelte store) for reactive UI + canvas repaint triggers.
+//  - `isPluginEnabled()` / `getPluginConfig()` read a plain module-level snapshot
+//    so hot paths (per-cell canvas rendering) never pay store-subscription cost.
+import { writable, get } from 'svelte/store'
+
+const KEY = 'stroke:plugins'
+
+/** @typedef {{ enabled: Record<string, boolean>, config: Record<string, Record<string, unknown>> }} PluginState */
+
+/** @returns {PluginState} */
+function load() {
+  try {
+    const raw = localStorage.getItem(KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      return {
+        enabled: parsed?.enabled ?? {},
+        config: parsed?.config ?? {},
+      }
+    }
+  } catch {}
+  return { enabled: {}, config: {} }
+}
+
+/** Reactive snapshot — subscribe in components/effects that must react. */
+export const pluginState = writable(load())
+
+/** Plain snapshot kept in sync for synchronous hot-path reads. */
+let _snap = get(pluginState)
+pluginState.subscribe((v) => {
+  _snap = v
+  try {
+    localStorage.setItem(KEY, JSON.stringify(v))
+  } catch {}
+})
+
+/** @param {string} id */
+export function isPluginEnabled(id) {
+  return _snap.enabled[id] === true
+}
+
+/** @param {string} id @returns {Record<string, unknown>} */
+export function getPluginConfig(id) {
+  return _snap.config[id] ?? {}
+}
+
+/** @param {string} id @param {boolean} on */
+export function setPluginEnabled(id, on) {
+  pluginState.update((s) => ({ ...s, enabled: { ...s.enabled, [id]: on } }))
+}
+
+/** @param {string} id @param {Record<string, unknown>} patch */
+export function setPluginConfig(id, patch) {
+  pluginState.update((s) => ({
+    ...s,
+    config: { ...s.config, [id]: { ...(s.config[id] ?? {}), ...patch } },
+  }))
+}

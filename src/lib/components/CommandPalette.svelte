@@ -21,6 +21,7 @@
   import ShieldCheck    from '@lucide/svelte/icons/shield-check'
   import Package        from '@lucide/svelte/icons/package'
   import Braces         from '@lucide/svelte/icons/braces'
+  import Blocks         from '@lucide/svelte/icons/blocks'
   import ChevronRight   from '@lucide/svelte/icons/chevron-right'
   import ChevronLeft    from '@lucide/svelte/icons/chevron-left'
   import Eye            from '@lucide/svelte/icons/eye'
@@ -65,6 +66,7 @@ import Search         from '@lucide/svelte/icons/search'
     hasSchemaExplorer = true,
     hasSecurity = true,
     onopenlogs = () => {},
+    onopenextensions = () => {},
     onopenJsonViewer = () => {},
     onopenshortcuts = () => {},
     onopenabout = () => {},
@@ -301,6 +303,10 @@ import Search         from '@lucide/svelte/icons/search'
               <Command.Item value="open activity log events history operations" onSelect={() => run(onopenlogs)}>
                 <History class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">Activity Log</span>
+              </Command.Item>
+              <Command.Item value="open extensions plugins formatters generators transforms better time uuid" onSelect={() => run(onopenextensions)}>
+                <Blocks class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">Extensions</span>
               </Command.Item>
               <Command.Item value="open json viewer explorer jsonpath tool" onSelect={() => run(onopenJsonViewer)}>
                 <Braces class="size-4 shrink-0 opacity-60" />

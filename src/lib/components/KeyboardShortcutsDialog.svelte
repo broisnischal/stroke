@@ -77,6 +77,9 @@
       icon: Table2,
       shortcuts: [
         { keys: [mod, "F"], desc: "Search rows" },
+        { keys: [opt, "⇧", "F"], desc: "Open filter menu" },
+        { keys: [opt, "⇧", "S"], desc: "Open sort menu" },
+        { keys: [opt, "⇧", "C"], desc: "Open columns menu" },
         { keys: ["↵", "F2"], desc: "Edit cell" },
         { keys: ["Esc"], desc: "Cancel edit" },
         { keys: [mod, "↵"], desc: "Navigate to FK row" },
