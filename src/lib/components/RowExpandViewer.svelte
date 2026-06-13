@@ -177,6 +177,32 @@
   }
 
   /**
+   * When wrap is off the box is `overflow-x-auto`, which makes the browser
+   * promote `overflow-y` to `auto` too — turning it into a nested scroll
+   * container. WebKitGTK won't chain a trapped vertical wheel up to the
+   * virtual-scroll table, so vertical scrolling stalls over the JSON. Forward
+   * vertical deltas to the table's native scroller; leave genuine horizontal
+   * gestures to scroll the JSON box itself. (With wrap on the box isn't a
+   * scroll container, so native chaining handles everything smoothly and this
+   * never runs.)
+   * @param {WheelEvent} e
+   */
+  function handleWheel(e) {
+    const el = rootEl
+    if (!el) return
+    const canScrollH = el.scrollWidth > el.clientWidth
+    if (!canScrollH) return // not a scroll trap — let native chaining scroll the table
+    if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return // horizontal gesture → scroll the JSON
+    const scroller = el.closest('[data-canvas-table]')
+    if (!(scroller instanceof HTMLElement)) return
+    // Normalize line/page deltas to pixels so forwarded scroll matches native feel.
+    const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? scroller.clientHeight : 1
+    if (e.shiftKey) scroller.scrollLeft += (e.deltaY || e.deltaX) * unit
+    else scroller.scrollTop += e.deltaY * unit
+    e.preventDefault()
+  }
+
+  /**
    * @param {HTMLElement} node
    */
   function portal(node) {
@@ -231,7 +257,8 @@
   <div
     bind:this={rootEl}
     data-studio-selectable="text"
-    class="overflow-x-auto px-5 py-2"
+    class={['px-5 py-2', wordWrap ? '' : 'overflow-x-auto'].join(' ')}
+    onwheel={handleWheel}
     oncontextmenu={handleContextMenu}
   >
     {#if !html}
