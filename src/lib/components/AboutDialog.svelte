@@ -3,7 +3,7 @@
   import * as Dialog from '$lib/components/ui/dialog/index.js'
   import { licenseStatus, deactivateLicense, refreshLicenseStatus } from '$lib/stores/license.js'
   import LicenseActivation from './LicenseActivation.svelte'
-  import Database from '@lucide/svelte/icons/database'
+  import Logo from './Logo.svelte'
   import ShieldCheck from '@lucide/svelte/icons/shield-check'
   import Clock from '@lucide/svelte/icons/clock'
   import AlertTriangle from '@lucide/svelte/icons/alert-triangle'
@@ -53,7 +53,7 @@
     <!-- Hero -->
     <div class="flex flex-col items-center gap-3 bg-muted/30 px-8 py-8 text-center border-b border-border/60">
       <div class="flex size-14 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/20 shadow-sm">
-        <Database class="size-7 text-primary" />
+        <Logo class="size-8" />
       </div>
       <div>
         <h2 class="text-lg font-semibold text-foreground tracking-tight">Stroke</h2>

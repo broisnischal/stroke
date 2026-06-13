@@ -184,6 +184,8 @@
   // ── Selection state ───────────────────────────────────────────────────────
   /** @type {Set<string>} */
   let selectedItems = $state(new Set())
+  /** Anchor for shift range-select. @type {string | null} */
+  let lastSelectedName = $state(null)
 
   /** @param {string} name */
   function toggleSelect(name) {
@@ -191,6 +193,35 @@
     if (next.has(name)) next.delete(name)
     else next.add(name)
     selectedItems = next
+  }
+
+  // ── Bulk actions on the current multi-selection ───────────────────────────
+  /** True when every selected table is already pinned. */
+  const allSelectedPinned = $derived(
+    selectedItems.size > 0 && [...selectedItems].every((n) => pinnedTables.includes(n)),
+  )
+
+  /** Pin every selected table (no-op for ones already pinned). */
+  function pinSelected() {
+    const set = new Set(_allPinned[_connKey] ?? [])
+    for (const n of selectedItems) set.add(n)
+    _allPinned = { ..._allPinned, [_connKey]: [...set] }
+    savePinnedAll(_allPinned)
+  }
+
+  /** Unpin every selected table. */
+  function unpinSelected() {
+    const next = (_allPinned[_connKey] ?? []).filter((n) => !selectedItems.has(n))
+    _allPinned = { ..._allPinned, [_connKey]: next }
+    savePinnedAll(_allPinned)
+  }
+
+  function copySelectedNames() {
+    navigator.clipboard.writeText([...selectedItems].join('\n'))
+  }
+
+  function clearSelection() {
+    selectedItems = new Set()
   }
 
   // ── Dangerous action dialog ───────────────────────────────────────────────
@@ -272,6 +303,37 @@
   const filteredRegularTables = $derived(
     applySortBy(regularTables.filter((t) => !pinnedTables.includes(t.name) && t.name.toLowerCase().includes(lf))),
   );
+
+  // Selectable rows in display order (pinned first, then regular) — drives shift range-select.
+  const selectableOrder = $derived([
+    ...visiblePinnedTables,
+    ...filteredRegularTables.map((t) => t.name),
+  ]);
+
+  /**
+   * Toggle a row's selection. With Shift held, extend a contiguous range from
+   * the last-clicked anchor across the combined pinned + regular ordering.
+   * @param {string} name @param {boolean} [shiftKey]
+   */
+  function selectItem(name, shiftKey = false) {
+    if (shiftKey && lastSelectedName && lastSelectedName !== name) {
+      const a = selectableOrder.indexOf(lastSelectedName)
+      const b = selectableOrder.indexOf(name)
+      if (a !== -1 && b !== -1) {
+        const [lo, hi] = a < b ? [a, b] : [b, a]
+        const next = new Set(selectedItems)
+        for (let i = lo; i <= hi; i++) next.add(selectableOrder[i])
+        selectedItems = next
+        lastSelectedName = name
+        return
+      }
+    }
+    const next = new Set(selectedItems)
+    if (next.has(name)) next.delete(name)
+    else next.add(name)
+    selectedItems = next
+    lastSelectedName = name
+  }
   const filteredViews = $derived(
     applySortBy(views.filter((t) => t.name.toLowerCase().includes(lf))),
   );
@@ -695,20 +757,41 @@
               </div>
               <ul class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
                 {#each visiblePinnedTables as tableName, idx (tableName)}
+                  {@const isSelected = selectedItems.has(tableName)}
                   <li class="[content-visibility:auto] [contain-intrinsic-size:auto_28px]">
                     <ContextMenu.Root>
                       <ContextMenu.Trigger class="w-full">
                         <button
                           type="button"
                           class={cn(
-                            "grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 text-left transition-colors",
-                            activeTable === tableName
-                              ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                              : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
+                            "group grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 text-left transition-colors",
+                            isSelected
+                              ? "bg-primary/10 text-foreground"
+                              : activeTable === tableName
+                                ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                                : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
                           )}
-                          onclick={() => ontableselect(tableName)}
+                          onclick={(e) => {
+                            if (e.shiftKey) { e.preventDefault(); selectItem(tableName, true) }
+                            else if (e.metaKey || e.ctrlKey) { e.preventDefault(); selectItem(tableName, false) }
+                            else ontableselect(tableName)
+                          }}
                         >
-                          <Pin class="size-3 shrink-0 text-primary/50" />
+                          <span
+                            class="relative size-3 shrink-0"
+                            onclick={(e) => { e.stopPropagation(); selectItem(tableName, e.shiftKey) }}
+                            onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); selectItem(tableName, e.shiftKey); } }}
+                            role="checkbox"
+                            aria-checked={isSelected}
+                            tabindex="-1"
+                          >
+                            {#if isSelected}
+                              <SquareCheck class="size-3 text-primary" />
+                            {:else}
+                              <Pin class="size-3 text-primary/50 group-hover:hidden" />
+                              <Square class="size-3 hidden opacity-40 group-hover:block" />
+                            {/if}
+                          </span>
                           <span class="min-w-0 truncate font-mono text-ui-sm leading-none">{tableName}</span>
                           {#if showRowCount}
                           <span class="shrink-0 text-right font-mono text-ui-xs leading-none tabular-nums text-muted-foreground/60">
@@ -718,6 +801,27 @@
                         </button>
                       </ContextMenu.Trigger>
                       <ContextMenu.Content class="w-48 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                        {#if isSelected && selectedItems.size > 1}
+                          <!-- Multi-select: actions apply to all selected tables -->
+                          <ContextMenu.Item onSelect={copySelectedNames}>
+                            <ClipboardCopy />
+                            Copy {selectedItems.size} names
+                          </ContextMenu.Item>
+                          <ContextMenu.Item onSelect={() => (allSelectedPinned ? unpinSelected() : pinSelected())}>
+                            {#if allSelectedPinned}
+                              <PinOff />
+                              Unpin {selectedItems.size} tables
+                            {:else}
+                              <Pin />
+                              Pin {selectedItems.size} tables
+                            {/if}
+                          </ContextMenu.Item>
+                          <ContextMenu.Separator />
+                          <ContextMenu.Item onSelect={clearSelection}>
+                            <Square />
+                            Deselect all
+                          </ContextMenu.Item>
+                        {:else}
                         <ContextMenu.Item onSelect={() => { navigator.clipboard.writeText(tableName) }}>
                           <ClipboardCopy />
                           Copy name
@@ -744,6 +848,7 @@
                           <Sparkles />
                           Generate test data
                         </ContextMenu.Item>
+                        {/if}
                       </ContextMenu.Content>
                     </ContextMenu.Root>
                   </li>
@@ -808,12 +913,16 @@
                                   ? "bg-sidebar-accent text-sidebar-accent-foreground"
                                   : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
                             )}
-                            onclick={() => ontableselect(table.name)}
+                            onclick={(e) => {
+                              if (e.shiftKey) { e.preventDefault(); selectItem(table.name, true) }
+                              else if (e.metaKey || e.ctrlKey) { e.preventDefault(); selectItem(table.name, false) }
+                              else ontableselect(table.name)
+                            }}
                           >
                             <span
                               class="relative size-3 shrink-0"
-                              onclick={(e) => { e.stopPropagation(); toggleSelect(table.name) }}
-                              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); toggleSelect(table.name); } }}
+                              onclick={(e) => { e.stopPropagation(); selectItem(table.name, e.shiftKey) }}
+                              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); selectItem(table.name, e.shiftKey); } }}
                               role="checkbox"
                               aria-checked={isSelected}
                               tabindex="-1"
@@ -840,6 +949,27 @@
                           </button>
                         </ContextMenu.Trigger>
                         <ContextMenu.Content class="w-48 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                          {#if isSelected && selectedItems.size > 1}
+                            <!-- Multi-select: actions apply to all selected tables -->
+                            <ContextMenu.Item onSelect={copySelectedNames}>
+                              <ClipboardCopy />
+                              Copy {selectedItems.size} names
+                            </ContextMenu.Item>
+                            <ContextMenu.Item onSelect={() => (allSelectedPinned ? unpinSelected() : pinSelected())}>
+                              {#if allSelectedPinned}
+                                <PinOff />
+                                Unpin {selectedItems.size} tables
+                              {:else}
+                                <Pin />
+                                Pin {selectedItems.size} tables
+                              {/if}
+                            </ContextMenu.Item>
+                            <ContextMenu.Separator />
+                            <ContextMenu.Item onSelect={clearSelection}>
+                              <Square />
+                              Deselect all
+                            </ContextMenu.Item>
+                          {:else}
                           <ContextMenu.Item onSelect={() => { navigator.clipboard.writeText(table.name) }}>
                             <ClipboardCopy />
                             Copy name
@@ -889,6 +1019,7 @@
                             <Trash2 />
                             Drop table
                           </ContextMenu.Item>
+                          {/if}
                         </ContextMenu.Content>
                       </ContextMenu.Root>
                     </li>
