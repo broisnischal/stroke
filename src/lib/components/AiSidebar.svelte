@@ -729,7 +729,10 @@
       <div class="flex flex-col gap-3 px-3 py-3" data-studio-selectable="text">
 
         {#each items as item (item.id)}
-
+          <!-- content-visibility:auto skips layout/paint for off-screen messages so
+               scrolling long conversations stays smooth (transient animated rows are
+               excluded so their ping/bounce isn't clipped by paint containment). -->
+          <div class={item.kind === 'thinking' || item.kind === 'executing' || item.kind === 'streaming' ? '' : '[content-visibility:auto] [contain-intrinsic-size:auto_100px]'}>
           {#if item.kind === 'user'}
             <div class="flex justify-end">
               <div class="max-w-[88%] rounded-2xl rounded-tr-sm bg-primary px-3 py-2 text-ui-xs leading-relaxed text-primary-foreground whitespace-pre-wrap">{item.text}</div>
@@ -878,7 +881,7 @@
               {/if}
             </div>
           {/if}
-
+          </div>
         {/each}
 
         {#if showWorking}

@@ -6,7 +6,6 @@
   import PowerOff  from "@lucide/svelte/icons/power-off";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import ShieldCheck  from "@lucide/svelte/icons/shield-check";
-  import X         from "@lucide/svelte/icons/x";
   import Bot       from "@lucide/svelte/icons/bot";
   import Code2     from "@lucide/svelte/icons/code-2";
   import Wand2     from "@lucide/svelte/icons/wand-2";
@@ -106,11 +105,6 @@
           </p>
         </div>
       </div>
-      <Dialog.Close
-        class="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground/40 transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none"
-      >
-        <X class="size-4" />
-      </Dialog.Close>
     </div>
 
     <!-- ── Scrollable body ── -->

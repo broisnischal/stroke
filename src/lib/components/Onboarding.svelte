@@ -3,6 +3,7 @@
   import { fade } from 'svelte/transition'
   import { cubicOut } from 'svelte/easing'
   import Database      from '@lucide/svelte/icons/database'
+  import Logo          from './Logo.svelte'
   import Table2        from '@lucide/svelte/icons/table-2'
   import Bot           from '@lucide/svelte/icons/bot'
   import Terminal      from '@lucide/svelte/icons/terminal'
@@ -91,7 +92,7 @@
     <!-- ── Header ── -->
     <header class="relative flex h-14 shrink-0 items-center justify-between border-b border-border/50 px-8">
       <div class="flex items-center gap-2.5">
-        <Database class="size-5 text-primary" />
+        <Logo class="size-5" />
         <span class="text-sm font-semibold text-foreground">Stroke</span>
       </div>
 

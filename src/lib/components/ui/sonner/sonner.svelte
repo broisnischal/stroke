@@ -21,17 +21,17 @@
   const showClearAll = $derived(activeCount > 1)
 
   const base =
-    'group/toast pointer-events-auto relative flex w-full items-start gap-2.5 overflow-hidden rounded-xl border border-border/40 bg-popover px-3 py-2.5 text-popover-foreground shadow-[0_0_0_0.5px_rgba(0,0,0,0.03),0_10px_38px_-8px_rgba(0,0,0,0.14),0_2px_10px_-3px_rgba(0,0,0,0.06)] dark:border-white/[0.07] dark:shadow-[0_0_0_0.5px_rgba(255,255,255,0.05),0_16px_48px_-10px_rgba(0,0,0,0.55),0_4px_14px_-4px_rgba(0,0,0,0.35)]'
+    'group/toast pointer-events-auto relative flex w-full items-start gap-2 overflow-hidden rounded-xl border border-border/40 bg-popover px-2.5 py-2 text-popover-foreground shadow-[0_0_0_0.5px_rgba(0,0,0,0.03),0_10px_38px_-8px_rgba(0,0,0,0.14),0_2px_10px_-3px_rgba(0,0,0,0.06)] dark:border-white/[0.07] dark:shadow-[0_0_0_0.5px_rgba(255,255,255,0.05),0_16px_48px_-10px_rgba(0,0,0,0.55),0_4px_14px_-4px_rgba(0,0,0,0.35)]'
 
   const toastOptions = {
     unstyled: true,
     classes: {
       toast: base,
       title:
-        'text-[13px] font-medium capitalize leading-snug tracking-[-0.01em] text-foreground',
-      description: 'mt-0.5 text-[11.5px] leading-snug text-muted-foreground/90',
+        'text-[12px] font-medium capitalize leading-tight tracking-[-0.01em] text-foreground',
+      description: 'mt-0.5 text-[11px] leading-snug text-muted-foreground/80',
       content: 'flex min-w-0 flex-1 flex-col pr-5',
-      icon: 'm-0 mt-0.5 flex shrink-0 items-center self-start [&_svg]:pointer-events-none',
+      icon: 'm-0 flex shrink-0 items-center self-start [&_svg]:pointer-events-none',
       actionButton:
         'h-6 shrink-0 rounded-md bg-foreground/90 px-2.5 text-[11px] font-medium text-background transition-[background-color,transform] duration-200 hover:bg-foreground active:scale-[0.98] dark:bg-foreground/85 dark:hover:bg-foreground',
       cancelButton:
@@ -46,7 +46,7 @@
   }
 
   const iconWrap =
-    'flex size-6 shrink-0 items-center justify-center rounded-lg'
+    'flex size-5 shrink-0 items-center justify-center rounded-md'
 
   /** @param {string} pos @param {string | Record<string, string | number>} off */
   function hostInsetStyle(pos, off) {
@@ -116,7 +116,7 @@
         class="{iconWrap} bg-muted/60 text-muted-foreground"
         aria-hidden="true"
       >
-        <Loader2 class="size-3.5 animate-spin" />
+        <Loader2 class="size-3 animate-spin" />
       </span>
     {/snippet}
     {#snippet successIcon()}
@@ -124,7 +124,7 @@
         class="{iconWrap} bg-emerald-500/12 text-emerald-600 dark:bg-emerald-400/12 dark:text-emerald-400"
         aria-hidden="true"
       >
-        <CircleCheck class="size-3.5" strokeWidth={2.25} />
+        <CircleCheck class="size-3" strokeWidth={2.25} />
       </span>
     {/snippet}
     {#snippet errorIcon()}
@@ -132,7 +132,7 @@
         class="{iconWrap} bg-destructive/10 text-destructive dark:bg-destructive/15"
         aria-hidden="true"
       >
-        <OctagonX class="size-3.5" strokeWidth={2.25} />
+        <OctagonX class="size-3" strokeWidth={2.25} />
       </span>
     {/snippet}
     {#snippet infoIcon()}
@@ -140,7 +140,7 @@
         class="{iconWrap} bg-blue-500/10 text-blue-600 dark:bg-blue-400/12 dark:text-blue-400"
         aria-hidden="true"
       >
-        <Info class="size-3.5" strokeWidth={2.25} />
+        <Info class="size-3" strokeWidth={2.25} />
       </span>
     {/snippet}
     {#snippet warningIcon()}
@@ -148,7 +148,7 @@
         class="{iconWrap} bg-amber-500/12 text-amber-600 dark:bg-amber-400/12 dark:text-amber-400"
         aria-hidden="true"
       >
-        <TriangleAlert class="size-3.5" strokeWidth={2.25} />
+        <TriangleAlert class="size-3" strokeWidth={2.25} />
       </span>
     {/snippet}
     {#snippet closeIcon()}

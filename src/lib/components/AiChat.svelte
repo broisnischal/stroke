@@ -27,7 +27,7 @@
   import Cpu from "@lucide/svelte/icons/cpu";
   import Maximize2 from "@lucide/svelte/icons/maximize-2";
   import Minimize2 from "@lucide/svelte/icons/minimize-2";
-  import Download from "@lucide/svelte/icons/download";
+  import ArrowDownToLine from "@lucide/svelte/icons/arrow-down-to-line";
   import ZoomIn from "@lucide/svelte/icons/zoom-in";
   import ZoomOut from "@lucide/svelte/icons/zoom-out";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
@@ -76,13 +76,14 @@
   import { saveDiagram } from "$lib/stores/saved-diagrams.js";
   import { buildOption } from "$lib/chart-utils.js";
   import { isCurrentThemeDark } from "$lib/stores/settings.js";
-  import Bookmark from "@lucide/svelte/icons/bookmark";
-  import BookmarkCheck from "@lucide/svelte/icons/bookmark-check";
+  import Save from "@lucide/svelte/icons/save";
+  import Check from "@lucide/svelte/icons/check";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import Search from "@lucide/svelte/icons/search";
   import TrendingUp from "@lucide/svelte/icons/trending-up";
   import Layers from "@lucide/svelte/icons/layers";
   import GitBranch from "@lucide/svelte/icons/git-branch";
+  import Brain from "@lucide/svelte/icons/brain";
   import AiModelPicker from "./AiModelPicker.svelte";
   import {
     listConversations,
@@ -514,20 +515,36 @@
   let aiStatusHint = $state("");
 
   // ── Thinking phrase cycling ───────────────────────────────────────────────
+  // Each phase pairs a label with an icon so the indicator communicates *what*
+  // the agent is doing, not just that it's busy.
   const THINKING_PHRASES = [
-    "Thinking…",
-    "Analyzing schema…",
-    "Writing the query…",
-    "Reading the data…",
-    "Checking relationships…",
-    "Running the numbers…",
-    "Exploring tables…",
-    "Crafting response…",
-    "Connecting the dots…",
-    "Almost there…",
+    { text: "Thinking…", icon: Brain },
+    { text: "Analyzing schema…", icon: Layers },
+    { text: "Writing the query…", icon: PenLine },
+    { text: "Reading the data…", icon: Database },
+    { text: "Checking relationships…", icon: GitBranch },
+    { text: "Running the numbers…", icon: BarChart2 },
+    { text: "Exploring tables…", icon: Search },
+    { text: "Crafting response…", icon: Sparkles },
+    { text: "Connecting the dots…", icon: Zap },
+    { text: "Almost there…", icon: Sparkles },
   ];
   let thinkingPhrase = $state(THINKING_PHRASES[0]);
   let thinkingVisible = $state(true);
+
+  /** Pick an icon for an explicit status hint (e.g. "Analyzing schema…", "Rate limited…"). */
+  function statusHintIcon(/** @type {string} */ hint) {
+    if (/retry|rate.?limit/i.test(hint)) return RotateCcw;
+    if (/schema|analyz/i.test(hint)) return Layers;
+    if (/quer|writing/i.test(hint)) return PenLine;
+    if (/read|fetch|load/i.test(hint)) return Database;
+    if (/review|result|interpret|summar/i.test(hint)) return Search;
+    if (/condens|compress|context/i.test(hint)) return Layers;
+    return Sparkles;
+  }
+  // Single source of truth for what the loading indicator shows right now.
+  const loadingText = $derived(aiStatusHint || thinkingPhrase.text);
+  const loadingIcon = $derived(aiStatusHint ? statusHintIcon(aiStatusHint) : thinkingPhrase.icon);
 
   $effect(() => {
     if (!loading) {
@@ -1039,6 +1056,23 @@
 
   /** @type {HTMLDivElement | null} */
   let scrollEl = $state(null);
+  /** @type {HTMLElement | null} The messages content wrapper (observed to stay pinned to bottom). */
+  let msgListEl = $state(null);
+
+  // Stick-to-bottom: the final assistant message renders asynchronously (markdown +
+  // shiki highlighting), and charts/mermaid settle even later, so a one-shot scroll
+  // fires too early. Instead, observe the message content and keep the view pinned to
+  // the bottom whenever it grows — unless the user has deliberately scrolled up.
+  $effect(() => {
+    const content = msgListEl;
+    if (!content) return;
+    const ro = new ResizeObserver(() => {
+      if (!userScrolledUp && scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
+    });
+    ro.observe(content);
+    return () => ro.disconnect();
+  });
+
   /** @type {HTMLTextAreaElement | null} */
   let inputRef = $state(null);
 
@@ -1615,6 +1649,9 @@
       for (const call of toolCalls) {
         await runToolCall(call);
       }
+      // The next turn is the model interpreting the tool output — show that as a
+      // distinct phase instead of a generic "Thinking…". Cleared when it streams.
+      aiStatusHint = "Reviewing results…";
       items.push(/** @type {ChatItem} */ ({ id: uid(), kind: "thinking" }));
       scrollBottomSoon();
       await runAiTurn(depth + 1);
@@ -2197,6 +2234,7 @@
     items = [];
     apiHistory = [];
     rawApiHistory = [];
+    fetchedSchemas = {}; // drop the previous DB's cached schema columns (avoids cross-connection growth)
     error = "";
     loadConvList();
   });
@@ -2229,6 +2267,27 @@
     }
   });
 </script>
+
+<!-- Single, unified agent loading indicator (icon + phase label + dots). Used for
+     both the in-flow "thinking" placeholder and the bottom "working" state so they
+     are pixel-identical and never visually drift or double up. -->
+{#snippet agentIndicator()}
+  {@const Icon = loadingIcon}
+  <div class="flex items-center gap-3" role="status" aria-live="polite">
+    <div class="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/15">
+      <Icon class="size-3 text-primary transition-opacity duration-200 {thinkingVisible ? 'opacity-100' : 'opacity-40'}" />
+    </div>
+    <span
+      class="text-ui-xs text-muted-foreground/70 transition-opacity duration-200 {thinkingVisible ? 'opacity-100' : 'opacity-0'}"
+      >{loadingText}</span
+    >
+    <span class="flex gap-1" aria-hidden="true">
+      <span class="size-1 animate-bounce rounded-full bg-muted-foreground/30" style="animation-delay:0ms"></span>
+      <span class="size-1 animate-bounce rounded-full bg-muted-foreground/30" style="animation-delay:120ms"></span>
+      <span class="size-1 animate-bounce rounded-full bg-muted-foreground/30" style="animation-delay:240ms"></span>
+    </span>
+  </div>
+{/snippet}
 
 <div class="flex h-full min-h-0 overflow-hidden bg-background">
   <!-- ── Conversation sidebar ───────────────────────────────────────── -->
@@ -2554,8 +2613,16 @@
             </div>
           {/if}
         {:else}
-          <div class="flex flex-col gap-5 py-6" data-studio-selectable="text">
+          <div bind:this={msgListEl} class="flex flex-col gap-5 py-6" data-studio-selectable="text">
             {#each items as item (item.id)}
+              <!-- content-visibility:auto lets the browser skip layout/paint for
+                   off-screen messages (markdown, code, mermaid, charts), so scrolling
+                   a long conversation stays smooth. `auto` intrinsic-size remembers each
+                   message's real height once rendered, avoiding re-scroll jumps.
+                   Skipped for the transient thinking/executing/streaming rows: they're
+                   always at the bottom (visible) and their ping/bounce animations would
+                   be clipped by the paint containment cv:auto adds. -->
+              <div class={item.kind === "thinking" || item.kind === "executing" || item.kind === "streaming" ? "" : "[content-visibility:auto] [contain-intrinsic-size:auto_120px]"}>
               <!-- ── User message ───────────────────────── -->
               {#if item.kind === "user"}
                 <div class="flex justify-end px-1">
@@ -2568,32 +2635,7 @@
 
                 <!-- ── Thinking ───────────────────────────── -->
               {:else if item.kind === "thinking"}
-                <div class="flex items-center gap-3">
-                  <div
-                    class="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/15"
-                  >
-                    <Sparkles class="size-3 animate-pulse text-primary" />
-                  </div>
-                  <span
-                    class="text-ui-xs text-muted-foreground/70 transition-opacity duration-200 {thinkingVisible
-                      ? 'opacity-100'
-                      : 'opacity-0'}">{aiStatusHint || thinkingPhrase}</span
-                  >
-                  <span class="flex gap-1">
-                    <span
-                      class="size-1 animate-bounce rounded-full bg-muted-foreground/30"
-                      style="animation-delay:0ms"
-                    ></span>
-                    <span
-                      class="size-1 animate-bounce rounded-full bg-muted-foreground/30"
-                      style="animation-delay:120ms"
-                    ></span>
-                    <span
-                      class="size-1 animate-bounce rounded-full bg-muted-foreground/30"
-                      style="animation-delay:240ms"
-                    ></span>
-                  </span>
-                </div>
+                {@render agentIndicator()}
 
                 <!-- ── Streaming ──────────────────────────── -->
               {:else if item.kind === "streaming"}
@@ -2703,7 +2745,7 @@
                                 class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
                                 onclick={() => exportDiagramSvg(part.content)}
                                 title="Export SVG"
-                                ><Download class="size-2.5" />SVG</button
+                                ><ArrowDownToLine class="size-3" />SVG</button
                               >
                               <button
                                 type="button"
@@ -2711,7 +2753,7 @@
                                 onclick={() =>
                                   void exportDiagramPng(part.content)}
                                 title="Export PNG"
-                                ><Download class="size-2.5" />PNG</button
+                                ><ArrowDownToLine class="size-3" />PNG</button
                               >
                               <button
                                 type="button"
@@ -2735,7 +2777,7 @@
                                   });
                                 }}
                                 title="Save diagram"
-                                ><Bookmark class="size-2.5" />Save</button
+                                ><Save class="size-3" />Save</button
                               >
                               <button
                                 type="button"
@@ -3067,7 +3109,7 @@
                             ).toDataURL("image/png");
                             a.download = `${item.spec.title || "chart"}.png`;
                             a.click();
-                          }}><Download class="size-3" /></button
+                          }}><ArrowDownToLine class="size-3" /></button
                         >
                         <button
                           type="button"
@@ -3162,9 +3204,9 @@
                           }}
                         >
                           {#if savedChartIds.has(item.id)}
-                            <BookmarkCheck class="size-3" />
+                            <Check class="size-3" />
                           {:else}
-                            <Bookmark class="size-3" />
+                            <Save class="size-3" />
                           {/if}
                         </button>
                       </div>
@@ -3222,14 +3264,14 @@
                         class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
                         onclick={() => exportDiagramSvg(item.code)}
                         title="Export SVG"
-                        ><Download class="size-2.5" />SVG</button
+                        ><ArrowDownToLine class="size-3" />SVG</button
                       >
                       <button
                         type="button"
                         class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
                         onclick={() => void exportDiagramPng(item.code)}
                         title="Export PNG"
-                        ><Download class="size-2.5" />PNG</button
+                        ><ArrowDownToLine class="size-3" />PNG</button
                       >
                       <button
                         type="button"
@@ -3239,9 +3281,9 @@
                       >
                       <button
                         type="button"
-                        class="inline-flex size-5 items-center justify-center rounded transition-colors text-primary/60 hover:text-primary"
+                        class="inline-flex size-5 items-center justify-center rounded text-emerald-500/70"
                         title="Saved to Diagrams library"
-                        ><BookmarkCheck class="size-3" /></button
+                        ><Check class="size-3" strokeWidth={2.5} /></button
                       >
                     </div>
                   </div>
@@ -3250,35 +3292,11 @@
                   </div>
                 </div>
               {/if}
+              </div>
             {/each}
 
             {#if showWorking}
-              <div class="flex items-center gap-3">
-                <div
-                  class="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/15"
-                >
-                  <Sparkles class="size-3 animate-pulse text-primary" />
-                </div>
-                <span
-                  class="text-ui-xs text-muted-foreground/70 transition-opacity duration-200 {thinkingVisible
-                    ? 'opacity-100'
-                    : 'opacity-0'}">{aiStatusHint || thinkingPhrase}</span
-                >
-                <span class="flex gap-1">
-                  <span
-                    class="size-1 animate-bounce rounded-full bg-muted-foreground/30"
-                    style="animation-delay:0ms"
-                  ></span>
-                  <span
-                    class="size-1 animate-bounce rounded-full bg-muted-foreground/30"
-                    style="animation-delay:120ms"
-                  ></span>
-                  <span
-                    class="size-1 animate-bounce rounded-full bg-muted-foreground/30"
-                    style="animation-delay:240ms"
-                  ></span>
-                </span>
-              </div>
+              {@render agentIndicator()}
             {/if}
           </div>
         {/if}
@@ -4084,7 +4102,7 @@
             );
             a.download = `${fullscreenChart?.title || "chart"}.png`;
             a.click();
-          }}><Download class="size-3.5" /></button
+          }}><ArrowDownToLine class="size-3.5" /></button
         >
         <button
           type="button"
@@ -4157,7 +4175,7 @@
           onclick={() => exportDiagramSvg(fullscreenDiagramCode ?? "")}
           title="Export as SVG"
         >
-          <Download class="size-3" />SVG
+          <ArrowDownToLine class="size-3" />SVG
         </button>
         <button
           type="button"
@@ -4165,7 +4183,7 @@
           onclick={() => void exportDiagramPng(fullscreenDiagramCode ?? "")}
           title="Export as PNG"
         >
-          <Download class="size-3" />PNG
+          <ArrowDownToLine class="size-3" />PNG
         </button>
         <div class="mx-1 h-4 w-px bg-border"></div>
         <!-- Close -->

@@ -1,5 +1,6 @@
 <script>
   import { onMount, onDestroy, untrack, tick } from 'svelte'
+  import Logo from './Logo.svelte'
   import Database from '@lucide/svelte/icons/database'
   import Terminal from '@lucide/svelte/icons/terminal'
   import Table2 from '@lucide/svelte/icons/table-2'
@@ -13,6 +14,7 @@
   import BarChart2 from '@lucide/svelte/icons/bar-chart-2'
   import LayoutDashboard from '@lucide/svelte/icons/layout-dashboard'
   import GitBranch from '@lucide/svelte/icons/git-branch'
+  import GitCompare from '@lucide/svelte/icons/git-compare'
   import History from '@lucide/svelte/icons/history'
   import Plus from '@lucide/svelte/icons/plus'
   import { createHotkey, createHotkeySequence } from '@tanstack/svelte-hotkeys'
@@ -323,10 +325,11 @@
   /** @type {{ focusEditor: () => void } | null} */
   let sqlConsoleRef = $state(null)
 
-  // Auto-focus the SQL editor whenever the SQL tab becomes active
+  // Auto-focus the SQL editor whenever the SQL tab becomes active. Uses whenRefReady
+  // so focus still lands on the first open while the lazy SqlConsole chunk mounts.
   $effect(() => {
     if (activeTab?.kind !== 'sql') return
-    tick().then(() => sqlConsoleRef?.focusEditor())
+    whenRefReady(() => sqlConsoleRef, (r) => { if (activeTab?.kind === 'sql') r.focusEditor?.() })
   })
 
   $effect(() => {
@@ -406,6 +409,22 @@
   let securityPageRef = $state(null)
   /** @type {{ sendMessage: (text: string) => void } | null} */
   let aiSidebarRef = $state(null)
+
+  /**
+   * Run `fn` once a lazily-mounted component ref becomes available. These panels
+   * (SQL console, AI sidebar, …) are now loaded via dynamic import, so their
+   * `bind:this` ref is null for the first few frames after opening — a single
+   * tick/microtask isn't enough. Polls a bounded number of animation frames so
+   * the action still fires on first open without ever spinning forever.
+   * @template T @param {() => T | null} getRef @param {(ref: T) => void} fn @param {number} [frames]
+   */
+  function whenRefReady(getRef, fn, frames = 90) {
+    const ref = getRef()
+    if (ref) { fn(ref); return }
+    if (frames <= 0) return
+    requestAnimationFrame(() => whenRefReady(getRef, fn, frames - 1))
+  }
+
   let total = $state(0)
   let queryMs = $state(0)
   let loadingRows = $state(false)
@@ -1213,8 +1232,9 @@ let rowSearch = $state('')
     const msg =
       `Fix this SQL error.\n\nError:\n${error}\n\nSQL:\n\`\`\`sql\n${sql}\n\`\`\`\n\n` +
       `Return the corrected SQL in a \`\`\`sql block and a brief explanation.`
-    // Defer slightly so the sidebar has time to mount/unhide if it was closed
-    void Promise.resolve().then(() => aiSidebarRef?.sendMessage(msg))
+    // Wait for the (lazily-imported) sidebar to mount before sending, so the very
+    // first "Fix with AI" use doesn't drop the message while the chunk loads.
+    whenRefReady(() => aiSidebarRef, (r) => r.sendMessage(msg))
   }
 
   /** Context-aware Accept from the AI sidebar — routes into the right editor. */
@@ -3069,26 +3089,41 @@ let rowSearch = $state('')
 
   <main class="flex min-h-0 min-w-0 flex-1 flex-col bg-panel" data-studio-region="main">
     {#if !connection}
-      <div class="relative flex flex-1 flex-col items-center justify-center gap-6 p-8 text-center">
-        <!-- Ambient glow behind the icon -->
+      <div class="relative flex flex-1 flex-col items-center justify-center gap-7 p-8 text-center">
+        <!-- Ambient glow behind the mark -->
         <div
-          class="pointer-events-none absolute left-1/2 top-1/2 size-72 -translate-x-1/2 -translate-y-[68%]"
-          style="background: radial-gradient(circle, color-mix(in oklch, var(--primary) 9%, transparent), transparent 68%);"
+          class="pointer-events-none absolute left-1/2 top-1/2 size-80 -translate-x-1/2 -translate-y-[72%] opacity-80"
+          style="background: radial-gradient(circle, color-mix(in oklch, var(--primary) 12%, transparent), transparent 65%);"
         ></div>
 
-        <div class="relative flex size-16 items-center justify-center rounded-2xl border border-border bg-gradient-to-b from-muted/70 to-muted/20 shadow-sm">
-          <Database class="size-7 text-foreground/80" />
+        <!-- Brand mark -->
+        <div class="relative">
+          <div
+            class="pointer-events-none absolute -inset-3 rounded-[2rem] bg-gradient-to-b from-foreground/[0.06] to-transparent blur-md"
+          ></div>
+          <div class="relative flex size-20 items-center justify-center rounded-[1.4rem] border border-border/70 bg-gradient-to-b from-muted/60 to-muted/10 shadow-lg shadow-black/20 ring-1 ring-inset ring-white/[0.04]">
+            <Logo class="size-10" />
+          </div>
         </div>
 
-        <div class="relative flex max-w-sm flex-col gap-1.5">
-          <h1 class="text-xl font-semibold tracking-tight text-foreground">Connect a database</h1>
-          <p class="text-ui text-muted-foreground">
-            Add a PostgreSQL, MySQL, SQLite, or Cloudflare D1 connection to browse schemas, edit rows, and run SQL.
+        <div class="relative flex max-w-md flex-col items-center gap-2">
+          <h1 class="text-2xl font-semibold tracking-tight text-foreground">Connect a database</h1>
+          <p class="max-w-sm text-ui text-muted-foreground">
+            Browse schemas, edit rows, and run SQL — all in one fast, native window.
           </p>
         </div>
 
-        <div class="relative flex flex-col items-center gap-3">
-          <Button type="button" onclick={() => (showConnectionModal = true)}>
+        <!-- Supported engines -->
+        <div class="relative flex flex-wrap items-center justify-center gap-1.5">
+          {#each ['PostgreSQL', 'MySQL', 'SQLite', 'Cloudflare D1'] as engine}
+            <span class="rounded-full border border-border/60 bg-muted/30 px-2.5 py-1 text-ui-xs font-medium text-muted-foreground">
+              {engine}
+            </span>
+          {/each}
+        </div>
+
+        <div class="relative mt-1 flex flex-col items-center gap-3">
+          <Button type="button" size="lg" onclick={() => (showConnectionModal = true)}>
             <Plus class="size-4" />
             Add connection
           </Button>
@@ -3658,10 +3693,16 @@ let rowSearch = $state('')
         {@const labelCls = 'text-[11px] font-medium leading-none text-foreground/50 transition-colors group-hover:text-foreground/80'}
         {@const hotkeyCls = 'text-[9px] tabular-nums text-muted-foreground/20 group-hover:text-muted-foreground/40 transition-colors self-end'}
 
-        <div class="flex flex-1 flex-col items-center justify-center gap-9 overflow-auto p-12">
+        <!-- Scroll container keeps top/bottom padding reachable when the content
+             outgrows the viewport (e.g. at high zoom); inner wrapper centers when it fits. -->
+        <div class="min-h-0 flex-1 overflow-auto">
+          <div class="flex min-h-full flex-col items-center justify-center gap-7 px-6 py-10 sm:gap-9 sm:py-12">
 
           <!-- Header -->
-          <div class="flex flex-col items-center gap-1.5">
+          <div class="flex flex-col items-center gap-3">
+            <div class="flex size-11 items-center justify-center rounded-2xl border border-border/40 bg-gradient-to-b from-muted/50 to-muted/10 shadow-sm ring-1 ring-inset ring-white/[0.03]">
+              <Logo class="size-6" />
+            </div>
             <p class="text-[9px] font-medium uppercase tracking-[0.25em] text-muted-foreground/25">Quick access</p>
             {#if connection}
               <div class="flex items-center gap-2 text-sm font-medium text-foreground/80">
@@ -3738,6 +3779,16 @@ let rowSearch = $state('')
               <span class={labelCls}>Diagrams</span>
             </button>
 
+            <button onclick={openSchemaTimelineTab} class={cell}>
+              <History class={iconCls} />
+              <span class={labelCls}>Timeline</span>
+            </button>
+
+            <button onclick={openDataDiffTab} class={cell}>
+              <GitCompare class={iconCls} />
+              <span class={labelCls}>Data Diff</span>
+            </button>
+
             <button onclick={() => (showConnectionModal = true)} class={cell}>
               <Database class={iconCls} />
               <span class={labelCls}>Connect</span>
@@ -3774,6 +3825,7 @@ let rowSearch = $state('')
             <span class="font-mono">{mod}B sidebar</span>
             <span>·</span>
             <span class="font-mono">{mod}W close tab</span>
+          </div>
           </div>
         </div>
       {/if}
