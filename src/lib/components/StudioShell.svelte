@@ -2889,7 +2889,7 @@ let rowSearch = $state('')
 
 <Onboarding bind:open={showOnboarding} onconnect={() => (showConnectionModal = true)} onsample={handleSampleConnect} />
 <ConnectionModal bind:open={showConnectionModal} onconnected={(conn, id) => onConnected(conn, id)} />
-<DisconnectDialog bind:open={showDisconnectDialog} connectionName={connection?.name ?? ''} ondisconnect={handleDisconnect} />
+<DisconnectDialog bind:open={showDisconnectDialog} connectionName={connection ? (connection.name || connection.database || connection.host || connection.filePath || 'Connected') : ''} ondisconnect={handleDisconnect} />
 <CreateTableDialog
   bind:open={showCreateTableDialog}
   {activeSchema}
@@ -3010,7 +3010,7 @@ let rowSearch = $state('')
       inert={!sidebarOpen || aiMode || !connection || undefined}
     >
       <Sidebar
-        connectionName={connection?.name ?? ''}
+        connectionName={connection ? (connection.name || connection.database || connection.host || connection.filePath || 'Connected') : ''}
         {schemas}
         {tables}
         bind:activeSchema

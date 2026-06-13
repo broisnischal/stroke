@@ -2,6 +2,7 @@
   import { tick } from 'svelte'
   import Copy from '@lucide/svelte/icons/copy'
   import Check from '@lucide/svelte/icons/check'
+  import WrapText from '@lucide/svelte/icons/wrap-text'
   import { appThemeId } from '$lib/stores/settings.js'
   import { highlightCode } from '$lib/shiki-highlighter.js'
   import { formatJsonValue } from '$lib/row-inspector.js'
@@ -20,7 +21,13 @@
   } = $props()
 
   let html = $state('')
+  const WRAP_KEY = 'stroke:json-word-wrap'
+  function loadWrap() {
+    try { return localStorage.getItem(WRAP_KEY) === 'true' } catch { return false }
+  }
+
   let copied = $state(false)
+  let wordWrap = $state(loadWrap())
   /** @type {ReturnType<typeof setTimeout> | null} */
   let copiedTimer = null
   /** @type {HTMLDivElement | null} */
@@ -75,6 +82,9 @@
       })
     return () => { cancelled = true }
   })
+
+  // keep the wordWrap reactive — the pre's whitespace class is toggled via CSS var
+  const wrapClass = $derived(wordWrap ? 'whitespace-pre-wrap break-all' : 'whitespace-pre')
 
   $effect(() => {
     if (!html || !rootEl) return
@@ -199,6 +209,21 @@
         <span>Copy JSON</span>
       {/if}
     </button>
+    <button
+      type="button"
+      title="Toggle word wrap"
+      class={[
+        'inline-flex items-center gap-1.5 rounded px-2 py-0.5 font-mono text-xs transition-colors hover:bg-accent/40 hover:text-foreground',
+        wordWrap ? 'text-foreground bg-accent/30' : 'text-muted-foreground/60',
+      ].join(' ')}
+      onclick={() => {
+        wordWrap = !wordWrap
+        try { localStorage.setItem(WRAP_KEY, String(wordWrap)) } catch { /* ignore */ }
+      }}
+    >
+      <WrapText class="size-3" />
+      <span>Wrap</span>
+    </button>
   </div>
 
   <!-- JSON content -->
@@ -206,14 +231,14 @@
   <div
     bind:this={rootEl}
     data-studio-selectable="text"
-    class="px-5 py-2"
+    class="overflow-x-auto px-5 py-2"
     oncontextmenu={handleContextMenu}
   >
     {#if !html}
       <p class="font-mono text-sm text-muted-foreground/40">Loading…</p>
     {:else}
       <div
-        class="[&_pre]:m-0 [&_pre]:bg-transparent! [&_pre]:p-0 [&_pre]:font-mono [&_pre]:text-sm [&_pre]:leading-relaxed [&_pre]:whitespace-pre [&_.json-inspector-url]:text-link [&_.json-inspector-url]:underline [&_.json-inspector-url]:underline-offset-2"
+        class="[&_pre]:m-0 [&_pre]:bg-transparent! [&_pre]:p-0 [&_pre]:font-mono [&_pre]:text-sm [&_pre]:leading-relaxed [&_.json-inspector-url]:text-link [&_.json-inspector-url]:underline [&_.json-inspector-url]:underline-offset-2 {wrapClass === 'whitespace-pre-wrap break-all' ? '[&_pre]:whitespace-pre-wrap [&_pre]:break-all' : '[&_pre]:whitespace-pre'}"
       >
         {@html html}
       </div>

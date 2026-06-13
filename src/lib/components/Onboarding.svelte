@@ -1,5 +1,6 @@
 <script>
-  import { fly, fade } from 'svelte/transition'
+  import { fly } from 'svelte/transition'
+  import { fade } from 'svelte/transition'
   import { cubicOut } from 'svelte/easing'
   import Database      from '@lucide/svelte/icons/database'
   import Table2        from '@lucide/svelte/icons/table-2'

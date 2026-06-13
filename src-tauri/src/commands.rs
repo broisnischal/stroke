@@ -126,11 +126,11 @@ use crate::db::{
     truncate_table, drop_table, get_table_column_structure, get_incoming_foreign_keys, get_table_ddl as db_get_table_ddl,
     test_connection, test_d1_connection, test_libsql_connection, test_mysql_connection, test_sqlite_connection,
     update_table_cell, ConnectionConfig, D1Config, DbState, EnumInfo, ExplainResult, IndexInfo, LibSqlConfig,
-    MysqlConfig, SqlResult, SqliteConfig, TableInfo, TableRows, TriggerInfo, SequenceInfo,
+    SqlResult, SqliteConfig, TableInfo, TableRows, TriggerInfo, SequenceInfo,
     ColumnStructureRow, IncomingForeignKey, InsertRowResult, TunnelState,
     explain_pg, explain_mysql, explain_sqlite,
 };
-use crate::db::connection::require_conn;
+use crate::db::connection::{require_conn, MysqlConfig};
 use crate::db::ActiveConnection;
 use serde_json::Value;
 use std::collections::HashMap;

@@ -222,12 +222,7 @@ export function parseCellInput(raw, dataType, enumValues = null) {
 export function isLikelyAutoColumn(dataType, columnName, primaryKey) {
   if (!primaryKey.includes(columnName)) return false
   const t = normalizedType(dataType)
-  return (
-    t.includes('serial') ||
-    t === 'bigserial' ||
-    t === 'smallserial' ||
-    (t.includes('int') && columnName.toLowerCase() === 'id')
-  )
+  return t.includes('serial') || t === 'bigserial' || t === 'smallserial'
 }
 
 /**
@@ -239,10 +234,15 @@ export function isLikelyAutoColumn(dataType, columnName, primaryKey) {
 export function buildInsertPayload(columns, primaryKey, drafts) {
   /** @type {Record<string, unknown>} */
   const values = {}
+  let hasNonAutoEditableColumn = false
 
   for (const col of columns) {
     const dataType = col.dataType ?? col.data_type ?? 'text'
     if (!isEditableType(dataType)) continue
+
+    if (!isLikelyAutoColumn(dataType, col.name, primaryKey)) {
+      hasNonAutoEditableColumn = true
+    }
 
     const raw = drafts[col.name] ?? ''
     const trimmed = raw.trim()
@@ -259,7 +259,9 @@ export function buildInsertPayload(columns, primaryKey, drafts) {
     values[col.name] = parsed.value
   }
 
-  if (Object.keys(values).length === 0) {
+  // Only block empty inserts when there are actual non-auto columns the user should fill.
+  // If every column is auto-generated (e.g. a table with only a serial PK), allow the insert.
+  if (Object.keys(values).length === 0 && hasNonAutoEditableColumn) {
     return {
       ok: false,
       message: 'Enter at least one column value (or leave auto columns empty)',

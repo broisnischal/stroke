@@ -5,82 +5,149 @@
     isBlocked,
     runLicenseCheck,
   } from '$lib/stores/license.js'
+  import { toggleLightDark, isCurrentThemeDark } from '$lib/stores/settings.js'
   import LicenseActivation from './LicenseActivation.svelte'
-  import Database from '@lucide/svelte/icons/database'
-  import Zap from '@lucide/svelte/icons/zap'
+  import TitleBar from './TitleBar.svelte'
+  import Database   from '@lucide/svelte/icons/database'
+  import Zap        from '@lucide/svelte/icons/zap'
   import ShieldCheck from '@lucide/svelte/icons/shield-check'
-  import RefreshCw from '@lucide/svelte/icons/refresh-cw'
+  import RefreshCw  from '@lucide/svelte/icons/refresh-cw'
+  import Sun        from '@lucide/svelte/icons/sun'
+  import Moon       from '@lucide/svelte/icons/moon'
+  import Settings   from '@lucide/svelte/icons/settings'
+  import Bot        from '@lucide/svelte/icons/bot'
+  import Command    from '@lucide/svelte/icons/command'
+  import Lock       from '@lucide/svelte/icons/lock'
+  import WifiOff    from '@lucide/svelte/icons/wifi-off'
 
   let { children } = $props()
 
-  // Awaited — keeps licenseStatus null (pass-through) until the server
-  // responds. On network failure runLicenseCheck falls back to local sig.
   onMount(() => runLicenseCheck())
+
+  const FEATURES = [
+    [Zap,         'All features'],
+    [RefreshCw,   'Future updates'],
+    [ShieldCheck, 'Unlimited connections'],
+  ]
 </script>
 
 <!-- Loading — pass through -->
 {#if $licenseStatus === null}
   {@render children()}
 
-<!-- Blocked — full-page activation -->
+<!-- Blocked — full-page activation with app chrome -->
 {:else if $isBlocked}
-  <div class="relative flex h-full min-h-0 flex-col items-center justify-center overflow-hidden bg-background p-6">
+  <div class="flex h-full min-h-0 flex-col bg-background">
 
-    <!-- Subtle radial fade -->
-    <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_-10%,hsl(var(--primary)/0.07),transparent)]"></div>
+    <!-- ── Window title bar ─────────────────────────────────────────── -->
+    <TitleBar title="Stroke" />
 
-    <div class="relative flex w-full max-w-[400px] flex-col gap-8">
+    <!-- ── Main content ─────────────────────────────────────────────── -->
+    <div class="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-8 py-12">
+      <div class="flex w-full max-w-[440px] flex-col gap-8">
 
-      <!-- Branding -->
-      <div class="flex flex-col items-center gap-4 text-center">
-        <div class="relative flex size-[60px] items-center justify-center rounded-2xl border border-primary/20 bg-primary/8 shadow-lg shadow-primary/10 ring-4 ring-primary/5">
-          <Database class="size-7 text-primary" />
-        </div>
-        <div class="flex flex-col gap-1">
-          <h1 class="text-2xl font-bold tracking-tight text-foreground">Stroke</h1>
-          <p class="text-sm text-muted-foreground">Your trial has ended. Activate a license to continue.</p>
-        </div>
-      </div>
-
-      <!-- Card -->
-      <div class="overflow-hidden rounded-2xl border border-border bg-card shadow-xl shadow-black/5">
-
-        <!-- What's included -->
-        <div class="border-b border-border/60 bg-muted/20 px-5 py-3.5">
-          <div class="flex flex-wrap gap-x-5 gap-y-1.5">
-            {#each [
-              [Zap, 'All features'],
-              [RefreshCw, 'Future updates'],
-              [ShieldCheck, 'Unlimited connections'],
-            ] as [Icon, label] (label)}
-              <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Icon class="size-3 shrink-0 text-primary/70" />
-                {label}
-              </span>
-            {/each}
+        <!-- ── Branding ─────────────────────────────────────────────── -->
+        <div class="flex flex-col items-center gap-5 text-center">
+          <div class="flex size-[44px] items-center justify-center rounded-xl border border-border bg-card">
+            <Database class="size-[18px] text-foreground" />
+          </div>
+          <div>
+            <h1 class="text-[19px] font-semibold tracking-tight text-foreground">Activate Stroke</h1>
+            <p class="mt-1.5 text-[13px] leading-relaxed text-muted-foreground/70">
+              Your trial has ended. Enter your license key to get full access.
+            </p>
           </div>
         </div>
 
-        <!-- Form -->
-        <LicenseActivation onactivated={() => refreshLicenseStatus()} />
+        <!-- ── Form (no card — Resend style) ────────────────────────── -->
+        <div class="flex flex-col gap-2">
+          <div>
+            <p class="text-[13px] font-medium text-foreground">License key</p>
+            <p class="mt-0.5 text-xs text-muted-foreground/50">Sent to your email after purchase.</p>
+          </div>
+          <LicenseActivation naked onactivated={runLicenseCheck} />
+        </div>
+
+        <!-- ── Features ──────────────────────────────────────────────── -->
+        <div class="flex items-center justify-center gap-6">
+          {#each FEATURES as [Icon, label] (label)}
+            <span class="flex items-center gap-1.5 text-[11.5px] text-muted-foreground/40">
+              <Icon class="size-3 shrink-0" />
+              {label}
+            </span>
+          {/each}
+        </div>
+
+        <!-- ── Purchase link ─────────────────────────────────────────── -->
+        <p class="text-center text-xs text-muted-foreground/40">
+          No license yet?&thinsp;
+          <a
+            href="https://stroke.click"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-muted-foreground/60 underline-offset-2 transition-colors hover:text-foreground hover:underline"
+          >stroke.click →</a>
+        </p>
+
+      </div>
+    </div>
+
+    <!-- ── Status bar (simplified) ──────────────────────────────────── -->
+    <div
+      class="flex h-8 shrink-0 items-center border-t border-border/30 bg-background px-2 text-[11px] select-none"
+      data-studio-region="statusbar"
+    >
+      <!-- Left: not connected indicator -->
+      <div class="flex min-w-0 flex-1 items-center">
+        <span class="flex items-center gap-1.5 px-2 py-1 text-muted-foreground/20">
+          <WifiOff class="size-3 shrink-0" />
+          <span class="font-medium">Not connected</span>
+        </span>
       </div>
 
-      <!-- Purchase link -->
-      <p class="text-center text-xs text-muted-foreground/50">
-        No license yet? &nbsp;
-        <a
-          href="https://stroke.click"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="font-medium text-primary/80 underline-offset-2 transition-opacity hover:opacity-70 hover:underline"
+      <!-- Right: disabled items + active theme toggle -->
+      <div class="flex shrink-0 items-center gap-0.5 text-muted-foreground/20">
+        <span class="inline-flex size-6 cursor-not-allowed items-center justify-center rounded-md"><Bot class="size-3.5" /></span>
+        <span class="inline-flex size-6 cursor-not-allowed items-center justify-center rounded-md"><Command class="size-3.5" /></span>
+        <span class="inline-flex size-6 cursor-not-allowed items-center justify-center rounded-md"><Lock class="size-3.5" /></span>
+
+        <span class="mx-1 h-3.5 w-px shrink-0 bg-border/20"></span>
+
+        <!-- ACTIVE: Theme toggle -->
+        <button
+          type="button"
+          class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-muted/50 hover:text-foreground"
+          title={$isCurrentThemeDark ? 'Switch to light (⌘M)' : 'Switch to dark (⌘M)'}
+          onclick={() => toggleLightDark()}
         >
-          Get one at stroke.click →
-        </a>
-      </p>
+          {#if $isCurrentThemeDark}
+            <Sun class="size-3.5" />
+          {:else}
+            <Moon class="size-3.5" />
+          {/if}
+        </button>
+
+        <span class="inline-flex size-6 cursor-not-allowed items-center justify-center rounded-md"><Settings class="size-3.5" /></span>
+
+        <span class="mx-1 h-3.5 w-px shrink-0 bg-border/20"></span>
+
+        <span class="flex cursor-not-allowed items-center gap-1 rounded-md px-2 py-1">
+          <span class="size-1.5 shrink-0 rounded-full bg-muted-foreground/20"></span>
+          <span class="font-medium">MCP</span>
+        </span>
+
+        <span class="mx-1 h-3.5 w-px shrink-0 bg-border/20"></span>
+
+        <span class="flex cursor-not-allowed items-center gap-1 rounded-md px-2 py-1">
+          <Bot class="size-3 shrink-0 opacity-60" />
+          <span class="font-medium">No model</span>
+        </span>
+      </div>
     </div>
+
   </div>
 
-<!-- Active — app + optional banner -->
+<!-- Active — render app -->
 {:else}
   {@render children()}
 {/if}

@@ -117,12 +117,12 @@ function loadProfiles() {
           name: modelShortName(String(s.model || '')),
           provider,
           baseUrl: String(s.baseUrl || 'https://openrouter.ai/api/v1'),
-          model: String(s.model || 'deepseek/deepseek-chat-v3-0324:free'),
+          model: String(s.model || ''),
         }]
       }
     }
   } catch { /* ignore */ }
-  return [makeDefaultProfile()]
+  return []
 }
 
 /** @param {string} url */
@@ -158,13 +158,13 @@ function saveActiveId(id) {
 // ── Stores ───────────────────────────────────────────────────────────────────
 
 export const aiProfiles = writable(/** @type {ModelProfile[]} */ (loadProfiles()))
-export const activeProfileId = writable(/** @type {string} */ (loadActiveId() ?? loadProfiles()[0]?.id ?? 'default'))
+export const activeProfileId = writable(/** @type {string | null} */ (loadActiveId() ?? loadProfiles()[0]?.id ?? null))
 
 /** Merged runtime settings (baseUrl + model from profile, apiKey from secure store). */
 export const aiSettings = writable(/** @type {AiSettings} */ ({
   baseUrl: 'https://openrouter.ai/api/v1',
   apiKey: '',
-  model: 'deepseek/deepseek-chat-v3-0324:free',
+  model: '',
 }))
 
 // ── Bootstrap: load API key from secure store ────────────────────────────────
@@ -219,14 +219,20 @@ export async function saveProfile(profile, apiKey) {
 export async function deleteProfile(id) {
   const profiles = get(aiProfiles)
   const next = profiles.filter((p) => p.id !== id)
-  if (next.length === 0) next.push(makeDefaultProfile())
   aiProfiles.set(next)
   saveProfiles(next)
   try { await invoke('ai_delete_key', { profileId: id }) } catch { /* ignore */ }
 
   const activeId = get(activeProfileId)
   if (activeId === id) {
-    await setActiveProfile(next[0].id)
+    const nextId = next[0]?.id ?? null
+    if (nextId) {
+      await setActiveProfile(nextId)
+    } else {
+      activeProfileId.set(null)
+      try { localStorage.removeItem(ACTIVE_KEY) } catch { /* ignore */ }
+      aiSettings.set({ baseUrl: 'https://openrouter.ai/api/v1', apiKey: '', model: '' })
+    }
   }
 }
 
@@ -241,7 +247,7 @@ export async function setActiveProfile(id) {
 
 export const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
 export const OPENROUTER_KEYS_URL = 'https://openrouter.ai/keys'
-export const DEFAULT_AI_SETTINGS = { baseUrl: OPENROUTER_BASE_URL, apiKey: '', model: 'deepseek/deepseek-chat-v3-0324:free' }
+export const DEFAULT_AI_SETTINGS = { baseUrl: OPENROUTER_BASE_URL, apiKey: '', model: '' }
 export function loadAiSettings() { return get(aiSettings) }
 export function saveAiSettings(s) { return setAiSettings(s) }
 export function setAiSettings(s) { aiSettings.set(s); return s }

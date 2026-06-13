@@ -4,6 +4,7 @@
   import Clock        from '@lucide/svelte/icons/clock'
   import Loader2      from '@lucide/svelte/icons/loader-2'
   import Plus         from '@lucide/svelte/icons/plus'
+  import Play         from '@lucide/svelte/icons/play'
   import CheckCircle2 from '@lucide/svelte/icons/check-circle-2'
   import AlertCircle  from '@lucide/svelte/icons/alert-circle'
   import Trash2       from '@lucide/svelte/icons/trash-2'
@@ -32,7 +33,6 @@
   import { Checkbox }   from '$lib/components/ui/checkbox/index.js'
   import { ScrollArea } from '$lib/components/ui/scroll-area/index.js'
   import * as Dialog    from '$lib/components/ui/dialog/index.js'
-  import * as Select    from '$lib/components/ui/select/index.js'
   import { cn }         from '$lib/utils.js'
   import { parseConnectionUri } from '$lib/connection-uri.js'
 
@@ -53,7 +53,7 @@
       label: 'SQLite',
       drivers: [
         { id: 'sqlite',        label: 'SQLite',           desc: 'Local file-based database' },
-        { id: 'sqlite-memory', label: 'In-Memory SQLite', desc: 'Ephemeral, nothing on disk' },
+        { id: 'sqlite-memory', label: 'In-Memory',        desc: 'Ephemeral, nothing on disk' },
         { id: 'libsql',        label: 'Turso / LibSQL',   desc: 'Serverless SQLite at the edge' },
       ],
     },
@@ -78,7 +78,7 @@
   let testOk     = $state(false)
 
   let dbType      = $state('postgres')
-  let name        = $state('Local PostgreSQL')
+  let name        = $state('')
   let host        = $state('127.0.0.1')
   let port        = $state('5432')
   let database    = $state('postgres')
@@ -149,12 +149,11 @@
       filePath = conn.filePath ?? ''; accountId = conn.accountId ?? ''
       databaseId = conn.databaseId ?? ''; apiToken = conn.apiToken ?? ''
       libsqlUrl = conn.url ?? ''; libsqlToken = conn.authToken ?? ''
-      // Restore SSH fields
       const s = conn.ssh
       sshEnabled = !!s?.host; sshHost = s?.host ?? ''; sshPort = String(s?.port ?? 22)
       sshUsername = s?.username ?? ''; sshKeyPath = s?.privateKeyPath ?? ''
     } else {
-      dbType = 'postgres'; name = 'Local PostgreSQL'; host = '127.0.0.1'; port = '5432'
+      dbType = 'postgres'; name = ''; host = '127.0.0.1'; port = '5432'
       database = 'postgres'; user = 'postgres'; password = ''; ssl = false
       filePath = ''; accountId = ''; databaseId = ''; apiToken = ''
       libsqlUrl = ''; libsqlToken = ''
@@ -166,8 +165,6 @@
 
   function switchDriver(id) {
     dbType = id
-    const d = DEFAULTS[id] ?? DEFAULTS.postgres
-    if (Object.values(DEFAULTS).map(v => v.name).includes(name)) name = d.name
     if (id === 'postgres') port = '5432'
     if (id === 'mysql')    port = '3306'
     if (id === 'sqlite-memory') filePath = ':memory:'
@@ -303,10 +300,9 @@
     d1Databases = []; d1SelectedAccountId = ''; d1DbLoadPhase = 'idle'
   }
 
-  const lbl = 'mb-1 block text-[10px] font-medium uppercase tracking-wide text-muted-foreground/45'
-  const inp = 'h-[30px] w-full rounded-md border border-border/30 bg-muted/20 px-2.5 text-[13px] text-foreground placeholder:text-[13px] placeholder:text-muted-foreground/25 placeholder:font-normal transition-colors focus-visible:border-ring/50 focus-visible:ring-1 focus-visible:ring-ring/15 focus-visible:outline-none'
+  const lbl = 'mb-1.5 block text-[11px] font-medium uppercase tracking-wide text-muted-foreground/65'
+  const inp = 'h-[34px] w-full rounded-md border border-border/50 bg-muted/20 px-3 text-[13px] text-foreground placeholder:text-muted-foreground/40 placeholder:font-normal transition-colors focus-visible:border-ring/60 focus-visible:ring-1 focus-visible:ring-ring/20 focus-visible:outline-none'
   const inpNum = inp + ' [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
-  const divider = 'border-t border-border/20 my-0.5'
 
   /** Color class for a driver id */
   function driverColor(id) {
@@ -348,7 +344,7 @@
   <div class="border-t border-border/15 pt-3">
     <label class="flex cursor-pointer select-none items-center gap-2">
       <Checkbox id="cn-ssh-enabled" checked={sshEnabled} onCheckedChange={(v) => (sshEnabled = v === true)} />
-      <span class="flex items-center gap-1.5 text-[11px] text-muted-foreground/60">
+      <span class="flex items-center gap-1.5 text-[12px] text-muted-foreground/65">
         <Terminal class="size-3 shrink-0" />
         Connect via SSH tunnel
       </span>
@@ -366,12 +362,10 @@
             <Input id="cn-ssh-port" bind:value={sshPort} type="text" inputmode="numeric" class={inpNum} />
           </div>
         </div>
-
         <div>
           <label for="cn-ssh-user" class={lbl}>SSH Username</label>
           <Input id="cn-ssh-user" bind:value={sshUsername} placeholder="ec2-user" autocomplete="username" class={inp} />
         </div>
-
         <div>
           <label for="cn-ssh-key" class={lbl}>
             Identity file <span class="normal-case font-normal opacity-50">(optional — leave blank to use SSH agent)</span>
@@ -402,117 +396,152 @@
 <Dialog.Root bind:open>
   <Dialog.Content
     showCloseButton={false}
-    class="flex h-auto max-h-[min(90vh,640px)] w-[min(800px,calc(100vw-2rem))] max-w-none sm:max-w-none flex-col gap-0 overflow-hidden rounded-xl border border-border/25 bg-background p-0 shadow-2xl shadow-black/50"
+    class="flex h-[min(90vh,660px)] w-[min(880px,calc(100vw-2rem))] max-w-none sm:max-w-none flex-col gap-0 overflow-hidden rounded-xl border border-border/25 bg-background p-0 shadow-2xl shadow-black/50"
   >
-    <div class="grid min-h-0 flex-1 grid-cols-[200px_minmax(0,1fr)] overflow-hidden">
+    <div class="grid min-h-0 flex-1 grid-cols-[240px_minmax(0,1fr)] overflow-hidden">
 
       <!-- ── Sidebar ─────────────────────────────────────────────── -->
-      <aside class="flex min-h-0 flex-col border-r border-border/15 bg-muted/[0.025]">
-        <div class="shrink-0 px-2.5 pt-3 pb-2">
+      <aside class="flex min-h-0 flex-col border-r border-border/15">
+
+        <!-- New connection button -->
+        <div class="shrink-0 px-3 pt-3 pb-2.5">
           <button
             type="button"
             onclick={() => resetForm(null)}
             class={cn(
-              'flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11px] whitespace-nowrap transition-colors',
+              'flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-[12px] transition-colors',
               !editingId
-                ? 'text-foreground font-medium bg-muted/40'
-                : 'text-muted-foreground/40 hover:text-foreground hover:bg-muted/25'
+                ? 'font-medium text-foreground'
+                : 'text-muted-foreground/50 hover:text-foreground'
             )}
           >
-            <Plus class="size-3 shrink-0" />
+            <Plus class="size-3.5 shrink-0" />
             New connection
           </button>
         </div>
 
         {#if saved.length > 0}
           <div class="mx-3 border-t border-border/10"></div>
-          <ScrollArea class="min-h-0 flex-1 px-2.5 py-1.5">
-            {#each saved as conn (conn.id)}
-              {@const isSel = conn.id === editingId}
-              {@const busy2 = connecting === conn.id}
-              {@const cid   = conn.type === 'sqlite' && conn.filePath === ':memory:' ? 'sqlite-memory' : conn.type}
-              <div
-                class={cn(
-                  'group flex cursor-pointer items-center gap-1.5 rounded px-2 py-[5px] transition-colors',
-                  isSel ? 'bg-muted/60 text-foreground' : 'text-muted-foreground/45 hover:bg-muted/30 hover:text-foreground'
-                )}
-                role="button" tabindex="0"
-                onclick={() => resetForm(conn)}
-                onkeydown={(e) => e.key === 'Enter' && resetForm(conn)}
-              >
-                {@render dicon(cid, 'size-3 shrink-0')}
-                <span class="min-w-0 flex-1 truncate text-[11px]">{conn.name}</span>
-                <div class="hidden shrink-0 items-center group-hover:flex">
-                  <button type="button"
-                    class="rounded px-1 py-px text-[9px] text-primary/60 hover:text-primary disabled:opacity-40"
-                    disabled={!!connecting}
-                    onclick={(e) => { e.stopPropagation(); void connectWith(conn) }}
-                  >
-                    {#if busy2}<Loader2 class="size-2.5 animate-spin inline" />{:else}Open{/if}
-                  </button>
-                  <button type="button"
-                    class="rounded p-0.5 text-muted-foreground/20 hover:text-destructive"
-                    onclick={(e) => { e.stopPropagation(); handleDelete(conn.id) }}
-                  ><Trash2 class="size-2.5" /></button>
-                </div>
-              </div>
-            {/each}
-          </ScrollArea>
-        {:else}
-          <div class="flex flex-1 items-center justify-center pb-6">
-            <p class="text-[10px] text-muted-foreground/25">No connections</p>
-          </div>
         {/if}
+
+        <div class="min-h-0 flex-1">
+          {#if saved.length > 0}
+            <ScrollArea class="h-full scroll-smooth">
+              <div class="px-2 py-2 flex flex-col gap-0.5">
+                {#each saved as conn (conn.id)}
+                  {@const isSel = conn.id === editingId}
+                  {@const busy2 = connecting === conn.id}
+                  {@const cid   = conn.type === 'sqlite' && conn.filePath === ':memory:' ? 'sqlite-memory' : conn.type}
+                  <div
+                    class={cn(
+                      'group flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 transition-colors',
+                      isSel
+                        ? 'bg-muted/50 text-foreground'
+                        : 'text-muted-foreground/55 hover:bg-muted/30 hover:text-foreground'
+                    )}
+                    role="button" tabindex="0"
+                    onclick={() => resetForm(conn)}
+                    onkeydown={(e) => e.key === 'Enter' && resetForm(conn)}
+                  >
+                    <!-- Icon: fades to Play on hover — clicking it connects directly -->
+                    <button
+                      type="button"
+                      class="relative size-3.5 shrink-0 disabled:opacity-30"
+                      title="Connect"
+                      disabled={!!connecting}
+                      onclick={(e) => { e.stopPropagation(); void connectWith(conn) }}
+                    >
+                      <span class="absolute inset-0 flex items-center justify-center transition-opacity duration-150 group-hover:opacity-0">
+                        {#if busy2}
+                          <Loader2 class="size-3.5 animate-spin" />
+                        {:else}
+                          {@render dicon(cid, 'size-3.5', isSel)}
+                        {/if}
+                      </span>
+                      <span class="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+                        <Play class="size-3" />
+                      </span>
+                    </button>
+
+                    <!-- Name + detail when selected -->
+                    <div class="min-w-0 flex-1">
+                      <p class="truncate text-[12px] {isSel ? 'font-medium' : ''} leading-tight">
+                        {conn.name || 'Unnamed'}
+                      </p>
+                      {#if isSel}
+                        <p class="mt-0.5 truncate text-[10px] leading-tight text-muted-foreground/40">{connDetail(conn)}</p>
+                      {/if}
+                    </div>
+
+                    <!-- Trash: hidden until hover -->
+                    <button type="button"
+                      class="shrink-0 rounded p-0.5 text-muted-foreground/25 opacity-0 transition-opacity duration-150 hover:text-destructive group-hover:opacity-100"
+                      onclick={(e) => { e.stopPropagation(); handleDelete(conn.id) }}
+                    ><Trash2 class="size-3" /></button>
+                  </div>
+                {/each}
+              </div>
+            </ScrollArea>
+          {:else}
+            <div class="flex h-full items-center justify-center pb-8">
+              <p class="text-[11px] text-muted-foreground/25">No saved connections</p>
+            </div>
+          {/if}
+        </div>
       </aside>
 
-      <!-- ── Form ────────────────────────────────────────────────── -->
+      <!-- ── Form panel ──────────────────────────────────────────── -->
       <div class="flex min-h-0 min-w-0 flex-col">
 
-        <!-- Name + DB type -->
-        <div class="shrink-0 border-b border-border/15 px-5 pt-4 pb-3">
-          <div class="grid grid-cols-[1fr_156px] gap-3">
-            <!-- Name -->
+        <!-- ── Header: connection name + driver type tabs ─────── -->
+        <div class="shrink-0 border-b border-border/15 px-5 pt-4 pb-0">
+
+          <!-- Connection name field -->
+          <div class="mb-3 grid grid-cols-[1fr_auto] items-end gap-3">
             <div>
               <label for="cn-name" class={lbl}>Name</label>
-              <Input
-                id="cn-name" bind:value={name}
-                class={inp}
-                placeholder="My connection"
-              />
+              <Input id="cn-name" bind:value={name} class={inp} placeholder="e.g. Production DB" />
             </div>
-            <!-- Type -->
-            <div>
-              <p class={lbl}>Type</p>
-              <Select.Root type="single" value={dbType} onValueChange={(v) => v && switchDriver(v)}>
-                <Select.Trigger class="!h-[30px] w-full gap-1.5 rounded-md border border-border/30 bg-muted/20 px-2.5 text-[12px] font-normal text-foreground hover:bg-muted/40 focus-visible:ring-1 focus-visible:ring-ring/15">
-                  <div class="flex items-center gap-1.5 min-w-0 overflow-hidden">
-                    {@render dicon(dbType, 'size-3 shrink-0')}
-                    <span class="truncate text-[12px]">{activeDriver.label}</span>
-                  </div>
-                </Select.Trigger>
-                <Select.Content class="min-w-[156px] rounded-lg p-1">
-                  {#each CATEGORIES as cat, i}
-                    {#if i > 0}<Select.Separator class="my-0.5 opacity-20" />{/if}
-                    {#each cat.drivers as d (d.id)}
-                      <Select.Item value={d.id} label={d.label} disabled={!!d.soon} class="rounded-md py-1 pl-2 pr-6 text-[12px]">
-                        <div class="flex items-center gap-2">
-                          {@render dicon(d.id, 'size-3')}
-                          <span>{d.label}</span>
-                          {#if d.soon}<span class="ml-auto text-[9px] text-muted-foreground/35">Soon</span>{/if}
-                        </div>
-                      </Select.Item>
-                    {/each}
-                  {/each}
-                </Select.Content>
-              </Select.Root>
-            </div>
+          </div>
+
+          <!-- Driver type tabs — horizontal scrollable, replaces the dropdown -->
+          <div class="flex items-center gap-0 overflow-x-auto" style="scrollbar-width: none; -webkit-overflow-scrolling: touch">
+            {#each CATEGORIES as cat, ci}
+              {#if ci > 0}
+                <span class="mx-2 h-3 w-px shrink-0 bg-border/20"></span>
+              {/if}
+              {#each cat.drivers as d (d.id)}
+                <button
+                  type="button"
+                  onclick={() => !d.soon && switchDriver(d.id)}
+                  disabled={!!d.soon}
+                  title={d.desc}
+                  class={cn(
+                    'relative flex shrink-0 items-center gap-1.5 pb-2.5 pt-1.5 pr-3 pl-1 text-[11px] transition-colors select-none',
+                    dbType === d.id
+                      ? 'font-semibold text-foreground'
+                      : 'text-muted-foreground/55 hover:text-foreground',
+                    d.soon && 'cursor-not-allowed opacity-25 pointer-events-none'
+                  )}
+                >
+                  {@render dicon(d.id, 'size-[11px] shrink-0', dbType === d.id)}
+                  {d.label}
+                  {#if d.soon}<span class="text-[8px] opacity-60">soon</span>{/if}
+                  <!-- Active underline -->
+                  {#if dbType === d.id}
+                    <span class="absolute bottom-0 left-0 right-0 h-[2px] rounded-t-full bg-foreground"></span>
+                  {/if}
+                </button>
+              {/each}
+            {/each}
           </div>
         </div>
 
-        <ScrollArea class="min-h-0 flex-1">
-          <div class="flex flex-col gap-3 px-5 py-4">
+        <!-- ── Scrollable form body ─────────────────────────────── -->
+        <ScrollArea class="min-h-0 flex-1 scroll-smooth">
+          <div class="flex flex-col gap-3 px-5 py-5">
 
-            <!-- ── PostgreSQL ─────────────────────────────────── -->
+            <!-- ── PostgreSQL ──────────────────────────────── -->
             {#if dbType === 'postgres'}
 
               <div>
@@ -571,13 +600,12 @@
 
               <label class="flex cursor-pointer select-none items-center gap-2 pt-0.5">
                 <Checkbox id="cn-ssl" checked={ssl} onCheckedChange={(v) => (ssl = v === true)} />
-                <span class="text-[11px] text-muted-foreground/60">Use SSL / TLS</span>
+                <span class="text-[12px] text-muted-foreground/65">Use SSL / TLS</span>
               </label>
 
-              <!-- SSH Tunnel -->
               {@render sshSection('pg')}
 
-            <!-- ── MySQL ──────────────────────────────────────── -->
+            <!-- ── MySQL ────────────────────────────────── -->
             {:else if dbType === 'mysql'}
 
               <div class="grid grid-cols-[1fr_80px] gap-2">
@@ -609,13 +637,12 @@
 
               <label class="flex cursor-pointer select-none items-center gap-2 pt-0.5">
                 <Checkbox id="cn-mysql-ssl" checked={ssl} onCheckedChange={(v) => (ssl = v === true)} />
-                <span class="text-[11px] text-muted-foreground/60">Use SSL / TLS</span>
+                <span class="text-[12px] text-muted-foreground/65">Use SSL / TLS</span>
               </label>
 
-              <!-- SSH Tunnel -->
               {@render sshSection('mysql')}
 
-            <!-- ── SQLite ─────────────────────────────────────── -->
+            <!-- ── SQLite ────────────────────────────────── -->
             {:else if dbType === 'sqlite'}
 
               <div>
@@ -632,14 +659,17 @@
                 </div>
               </div>
 
-            <!-- ── In-Memory ──────────────────────────────────── -->
+            <!-- ── In-Memory ─────────────────────────────── -->
             {:else if dbType === 'sqlite-memory'}
 
-              <p class="text-[12px] text-muted-foreground/50 leading-relaxed py-2">
-                Ephemeral — data lives only for this session. Nothing written to disk.
-              </p>
+              <div class="flex flex-col gap-1.5 rounded-lg border border-border/15 bg-muted/[0.04] px-4 py-3.5">
+                <p class="text-[12px] font-medium text-foreground/70">Ephemeral in-memory database</p>
+                <p class="text-[11px] leading-relaxed text-muted-foreground/45">
+                  Data lives only for this session. Nothing is written to disk — closing the connection discards everything.
+                </p>
+              </div>
 
-            <!-- ── LibSQL / Turso ─────────────────────────────── -->
+            <!-- ── LibSQL / Turso ─────────────────────────── -->
             {:else if dbType === 'libsql'}
 
               <div>
@@ -657,7 +687,7 @@
                   class={cn(inp, 'font-mono text-[11px]')} />
               </div>
 
-            <!-- ── Cloudflare D1 ──────────────────────────────── -->
+            <!-- ── Cloudflare D1 ──────────────────────────── -->
             {:else if dbType === 'd1'}
 
               <CloudflareLogin
@@ -698,37 +728,43 @@
           </div>
         </ScrollArea>
 
-        <!-- ── Footer ─────────────────────────────────────────────── -->
-        <div class="shrink-0 border-t border-border/15 px-5 py-3">
-          {#if error}
-            <p class="mb-2 flex items-start gap-1 text-[11px] text-destructive">
-              <AlertCircle class="mt-px size-2.5 shrink-0" />{error}
-            </p>
-          {/if}
-          {#if testOk && !error}
-            <p class="mb-2 flex items-center gap-1 text-[11px] text-emerald-500">
-              <CheckCircle2 class="size-2.5 shrink-0" />Connected successfully
-            </p>
-          {/if}
+        <!-- ── Footer — fixed height, no layout shift ──────────── -->
+        <div class="shrink-0 border-t border-border/15 px-5 pb-3 pt-2.5">
+
+          <!-- Feedback slot — always occupies height, shows message when needed -->
+          <div class="mb-2 flex min-h-[18px] items-center">
+            {#if error}
+              <p class="flex items-start gap-1 text-[11px] leading-snug text-destructive">
+                <AlertCircle class="mt-px size-2.5 shrink-0" />{error}
+              </p>
+            {:else if testOk}
+              <p class="flex items-center gap-1 text-[11px] text-emerald-500">
+                <CheckCircle2 class="size-2.5 shrink-0" />Connected successfully
+              </p>
+            {/if}
+          </div>
+
+          <!-- Button row -->
           <div class="flex items-center justify-between gap-1.5">
             <!-- Resume last -->
-            <div>
+            <div class="min-w-0">
               {#if lastId && saved.find(c => c.id === lastId)}
                 {@const lastConn = saved.find(c => c.id === lastId)}
                 <button type="button"
                   onclick={() => connectWith(lastConn)}
                   disabled={isBusy}
-                  class="inline-flex h-[30px] items-center gap-1.5 rounded-md border border-border/25 px-3 text-[12px] text-muted-foreground/55 transition-colors hover:bg-muted/30 hover:text-foreground disabled:opacity-25"
+                  class="inline-flex h-[30px] max-w-[180px] items-center gap-1.5 rounded-md border border-border/25 px-3 text-[12px] text-muted-foreground/55 transition-colors hover:bg-muted/30 hover:text-foreground disabled:opacity-25"
                 >
                   {#if connecting === lastConn.id}
                     <Loader2 class="size-3 animate-spin" />Resuming…
                   {:else}
-                    Resume <span class="max-w-[100px] truncate text-foreground/70">{lastConn.name}</span>
+                    Resume <span class="min-w-0 truncate text-foreground/70">{lastConn.name}</span>
                   {/if}
                 </button>
               {/if}
             </div>
-            <div class="flex items-center gap-1.5">
+            <!-- Test + Connect -->
+            <div class="flex shrink-0 items-center gap-1.5">
               {#if canTest}
                 <button type="button" onclick={handleTest} disabled={isBusy}
                   class="inline-flex h-[30px] items-center gap-1 rounded-md border border-border/30 px-3 text-[12px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-25">
@@ -747,8 +783,10 @@
           </div>
         </div>
       </div>
+
     </div>
 
+    <!-- Close button -->
     <Dialog.Close class="absolute right-3 top-3 inline-flex size-5 items-center justify-center rounded text-muted-foreground/20 transition-colors hover:bg-muted/60 hover:text-muted-foreground focus-visible:outline-none">
       <X class="size-3" />
     </Dialog.Close>

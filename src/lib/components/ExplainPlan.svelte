@@ -16,7 +16,7 @@
   /** @type {{ result: ExplainResult }} */
   let { result } = $props()
 
-  const isSqlite = result?.driver === 'sqlite'
+  const isSqlite = $derived(result?.driver === 'sqlite')
 
   // NODE_H is used only as a midpoint estimate for arrow anchors — cards auto-size.
   const NODE_W = 216
@@ -201,6 +201,8 @@
 
   <!-- Pannable canvas — explicit top/left so transform is relative to container origin -->
   <div
+    role="img"
+    aria-label="Query execution plan diagram"
     style="position: absolute; top: 0; left: 0; transform: translate({panX}px,{panY}px) scale({scale}); transform-origin: 0 0; width: {canvasW}px; height: {canvasH}px; cursor: {isPanning ? 'grabbing' : 'grab'}"
     onpointerdown={onPD}
     onpointermove={onPM}

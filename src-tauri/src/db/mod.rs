@@ -12,10 +12,10 @@ pub mod ssh_tunnel;
 pub use connection::{
     connect, connect_d1, connect_libsql, connect_mysql, connect_sqlite, disconnect,
     test_connection, test_d1_connection, test_libsql_connection, test_mysql_connection, test_sqlite_connection,
-    ActiveConnection, AnyConnectionConfig, ConnectionConfig, D1Config, DbState, LibSqlConfig, MysqlConfig, PgConfig, SqliteConfig,
+    ActiveConnection, AnyConnectionConfig, ConnectionConfig, D1Config, DbState, LibSqlConfig, PgConfig, SqliteConfig,
 };
 pub use explain::{explain_pg, explain_mysql, explain_sqlite, ExplainResult};
-pub use ssh_tunnel::{SshConfig, SshTunnel, TunnelState};
+pub use ssh_tunnel::TunnelState;
 pub use query::{
     delete_table_row, delete_table_rows, execute_ddl, execute_sql, execute_sql_multi, execute_sql_on_conn,
     get_table_rows, insert_table_row, update_table_cell, InsertRowResult, RowFilter, SqlResult, TableRows,

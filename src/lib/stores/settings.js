@@ -42,7 +42,7 @@ function saveLastForMode(id) {
 /** @returns {{ dark: ThemeId, light: ThemeId }} */
 function loadLastForMode() {
   try {
-    const dark  = normalizeThemeId(localStorage.getItem(LAST_DARK_KEY)  ?? 'dark')
+    const dark  = normalizeThemeId(localStorage.getItem(LAST_DARK_KEY)  ?? 'broisnees')
     const light = normalizeThemeId(localStorage.getItem(LAST_LIGHT_KEY) ?? 'light')
     return { dark, light }
   } catch {
@@ -66,10 +66,8 @@ export function loadSettings() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) {
-      // First launch — follow the OS theme, don't save so we keep tracking it
-      const mq = window.matchMedia?.('(prefers-color-scheme: dark)')
-      const prefersDark = mq ? mq.matches : true
-      return { ...DEFAULT_SETTINGS, theme: normalizeThemeId(prefersDark ? 'dark' : 'light') }
+      // First launch — use broisnees as the default theme
+      return { ...DEFAULT_SETTINGS, theme: 'broisnees' }
     }
     const parsed = JSON.parse(raw)
     const theme = normalizeThemeId(parsed.theme)

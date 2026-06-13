@@ -1,11 +1,23 @@
 <script>
   import { activateLicense } from '$lib/stores/license.js'
+  import confetti from 'canvas-confetti'
   import KeyRound from '@lucide/svelte/icons/key-round'
   import Loader2 from '@lucide/svelte/icons/loader-2'
   import Check from '@lucide/svelte/icons/check'
   import AlertTriangle from '@lucide/svelte/icons/alert-triangle'
 
-  let { onactivated = () => {}, compact = false } = $props()
+  let { onactivated = () => {}, compact = false, naked = false } = $props()
+
+  function fireConfetti() {
+    const burst = (angle, origin) =>
+      confetti({ angle, origin, spread: 55, particleCount: 80, startVelocity: 45, decay: 0.92, scalar: 1.1, ticks: 200 })
+    burst(60,  { x: 0, y: 0.65 })
+    burst(120, { x: 1, y: 0.65 })
+    setTimeout(() => {
+      burst(75,  { x: 0.15, y: 0.5 })
+      burst(105, { x: 0.85, y: 0.5 })
+    }, 150)
+  }
 
   let key = $state('')
   let loading = $state(false)
@@ -20,7 +32,8 @@
     loading = false
     if (result.ok) {
       success = true
-      setTimeout(() => onactivated(), 1400)
+      fireConfetti()
+      setTimeout(() => onactivated(), 1800)
     } else {
       error = result.error.replace(/^Error invoking remote method '[^']+': /, '')
     }
@@ -32,8 +45,8 @@
   }
 </script>
 
-<div class="flex flex-col gap-3 {compact ? 'p-5' : 'p-6'}">
-  {#if !compact}
+<div class="flex flex-col gap-3 {naked ? '' : compact ? 'p-5' : 'p-6'}">
+  {#if !compact && !naked}
     <div class="flex flex-col gap-0.5">
       <p class="text-sm font-semibold text-foreground">Enter your license key</p>
       <p class="text-xs text-muted-foreground">Sent to your email after purchase.</p>
@@ -51,7 +64,7 @@
       spellcheck="false"
       autocomplete="off"
       disabled={loading || success}
-      class="h-10 w-full rounded-lg border border-border bg-muted/30 pl-9 pr-3 font-mono text-sm tracking-wider text-foreground outline-none transition-all placeholder:font-sans placeholder:tracking-normal placeholder:text-muted-foreground/35 focus:border-ring focus:bg-background focus:ring-2 focus:ring-ring/20 disabled:opacity-50"
+      class="h-10 w-full rounded-md border border-border bg-muted/20 pl-9 pr-3 font-mono text-[13px] tracking-wider text-foreground outline-none transition-colors placeholder:font-sans placeholder:tracking-normal placeholder:text-muted-foreground/30 focus:border-muted-foreground/50 focus:bg-background disabled:opacity-50"
     />
   </div>
 
@@ -76,7 +89,7 @@
     type="button"
     disabled={!key.trim() || loading || success}
     onclick={() => void submit()}
-    class="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-primary text-sm font-semibold text-primary-foreground shadow-sm transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+    class="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-foreground text-sm font-semibold text-background transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
   >
     {#if loading}
       <Loader2 class="size-4 animate-spin" />
