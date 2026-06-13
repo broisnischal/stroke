@@ -61,7 +61,6 @@
   } from "$lib/stores/ai-skills.js";
   import { renderMermaidSync, THEMES } from "beautiful-mermaid";
   import { mermaidThemeFor, normalizeThemeId } from "$lib/themes/registry.js";
-  import mermaid from "mermaid";
   import { toast } from "svelte-sonner";
   import {
     aiSettings,
@@ -725,11 +724,15 @@
   let _asyncDiagrams = $state({});
   let _asyncDiagramKeys = /** @type {string[]} */ ([]);
   let _mermaidJsInit = false;
+  /** @type {typeof import('mermaid').default | null} Lazily-loaded mermaid module. */
+  let _mermaid = null;
 
   async function _ensureMermaidJs() {
-    if (_mermaidJsInit) return;
+    if (_mermaidJsInit) return _mermaid;
+    _mermaid = (await import("mermaid")).default;
+    _mermaid.initialize({ startOnLoad: false, securityLevel: "loose" });
     _mermaidJsInit = true;
-    mermaid.initialize({ startOnLoad: false, securityLevel: "loose" });
+    return _mermaid;
   }
 
   async function _renderWithMermaidJs(code, asyncKey) {
@@ -744,7 +747,7 @@
       }
     }
     try {
-      await _ensureMermaidJs();
+      const mermaid = await _ensureMermaidJs();
       const id = `mermaid-${Math.random().toString(36).slice(2)}`;
       const { svg } = await mermaid.render(id, code);
       _asyncDiagrams[asyncKey] = svg;
@@ -1040,12 +1043,17 @@
   /** @type {ReturnType<typeof setTimeout> | null} */
   let historyTimer = null;
 
+  const INPUT_HISTORY_MAX = 100;
+
   function pushHistory(text) {
     if (historyTimer) clearTimeout(historyTimer);
     historyTimer = setTimeout(() => {
       historyTimer = null;
       if (text === inputHistory[inputHistoryIdx]) return;
-      inputHistory = [...inputHistory.slice(0, inputHistoryIdx + 1), text];
+      let next = [...inputHistory.slice(0, inputHistoryIdx + 1), text];
+      // Cap the input-undo stack so a long editing session can't grow it forever.
+      if (next.length > INPUT_HISTORY_MAX) next = next.slice(next.length - INPUT_HISTORY_MAX);
+      inputHistory = next;
       inputHistoryIdx = inputHistory.length - 1;
     }, 250);
   }

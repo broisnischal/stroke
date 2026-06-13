@@ -99,6 +99,8 @@
       initializing = true
       try {
         const { init } = await import('echarts')
+        // Register the wordcloud series plugin lazily (keeps echarts out of startup bundle).
+        await import('echarts-wordcloud')
         if (disposed) return
         const instance = init(container, null, {
           renderer: 'canvas',
