@@ -1,4 +1,5 @@
 import { writable, get } from 'svelte/store'
+import { debounce } from '$lib/utils.js'
 
 const KEY = 'stroke:ai-chat-params'
 
@@ -31,9 +32,18 @@ function defaults() {
 
 export const aiChatParams = writable(load())
 
-aiChatParams.subscribe((v) => {
+// Persist is debounced: sliders / the custom-instructions textarea fire on every
+// keystroke or drag tick, and JSON.stringify + localStorage on each is wasteful.
+const persist = debounce((/** @type {AiChatParams} */ v) => {
   try { localStorage.setItem(KEY, JSON.stringify(v)) } catch { /* ignore */ }
-})
+}, 300)
+
+aiChatParams.subscribe((v) => persist(v))
+
+// Flush any pending write before the window goes away so nothing is lost on quit.
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', () => persist.flush())
+}
 
 /** @param {Partial<AiChatParams>} patch */
 export function updateChatParams(patch) {

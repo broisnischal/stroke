@@ -28,6 +28,9 @@
   import ArrowUpAZ from "@lucide/svelte/icons/arrow-up-a-z";
   import ArrowDown01 from "@lucide/svelte/icons/arrow-down-0-1";
   import ArrowUp01 from "@lucide/svelte/icons/arrow-up-0-1";
+  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
+  import ChevronsDownUp from "@lucide/svelte/icons/chevrons-down-up";
+  import ChevronsUpDown from "@lucide/svelte/icons/chevrons-up-down";
   import DangerousActionDialog from "./DangerousActionDialog.svelte";
   import * as Select from "$lib/components/ui/select/index.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
@@ -151,7 +154,7 @@
       const raw = localStorage.getItem(DISPLAY_PREFS_KEY)
       if (raw) return JSON.parse(raw)
     } catch {}
-    return { showTables: true, showViews: true, showMatViews: true, showRecent: true, sortBy: 'name', showPins: true, showRowCount: true, sortDir: 'asc', hideEmpty: false }
+    return { showTables: true, showViews: true, showMatViews: true, showRecent: true, sortBy: 'name', showPins: true, showRowCount: true, sortDir: 'asc', hideEmpty: false, hideSystem: false }
   }
   function saveDisplayPrefs(prefs) {
     try { localStorage.setItem(DISPLAY_PREFS_KEY, JSON.stringify(prefs)) } catch {}
@@ -165,12 +168,18 @@
   let showPins = $state(_dp.showPins ?? true)
   let showRowCount = $state(_dp.showRowCount ?? true)
   let hideEmpty = $state(_dp.hideEmpty ?? false)
+  let hideSystem = $state(_dp.hideSystem ?? false)
   /** @type {'name' | 'rowCount'} */
   let sortBy = $state(_dp.sortBy ?? 'name')
   /** @type {'asc' | 'desc'} */
   let sortDir = $state(_dp.sortDir ?? 'asc')
 
-  $effect(() => { saveDisplayPrefs({ showTables, showViews, showMatViews, showRecent, sortBy, showPins, showRowCount, sortDir, hideEmpty }) })
+  $effect(() => { saveDisplayPrefs({ showTables, showViews, showMatViews, showRecent, sortBy, showPins, showRowCount, sortDir, hideEmpty, hideSystem }) })
+
+  /** System / migration tables that are usually noise: `_prisma_migrations`, `pg_*`, `sqlite_*`, leading-underscore. */
+  function isSystemTable(/** @type {string} */ name) {
+    return /^(_|pg_|sql_|sqlite_)/i.test(name)
+  }
 
   // ── Selection state ───────────────────────────────────────────────────────
   /** @type {Set<string>} */
@@ -226,6 +235,12 @@
     }, 200);
   }
 
+  // Release the pending scroll frame and filter timer when the sidebar unmounts.
+  $effect(() => () => {
+    if (scrollRaf != null) cancelAnimationFrame(scrollRaf);
+    if (filterDebounce) clearTimeout(filterDebounce);
+  });
+
   const lf = $derived(localFilter.toLowerCase());
 
   const regularTables = $derived(
@@ -242,6 +257,7 @@
   function applySortBy(list) {
     let result = list
     if (hideEmpty) result = result.filter((t) => (t.rowCount ?? 0) > 0)
+    if (hideSystem) result = result.filter((t) => !isSystemTable(t.name))
     if (sortBy === 'rowCount') {
       result = [...result].sort((a, b) => (b.rowCount ?? 0) - (a.rowCount ?? 0))
     }
@@ -262,6 +278,34 @@
   const filteredMatViews = $derived(
     applySortBy(matViews.filter((t) => t.name.toLowerCase().includes(lf))),
   );
+
+  // ── Counts for section badges ──────────────────────────────────────────────
+  // The TABLES list draws from regular tables minus pins; use that as the "total"
+  // so pinning (which just relocates a row) doesn't read as a hidden/filtered row.
+  const regularTablesUnpinned = $derived(regularTables.filter((t) => !pinnedTables.includes(t.name)));
+  /** How many rows the active filters (search / hide-empty / hide-system) are hiding right now. */
+  const hiddenCount = $derived(
+    Math.max(0, regularTablesUnpinned.length - filteredRegularTables.length) +
+    Math.max(0, views.length - filteredViews.length) +
+    Math.max(0, matViews.length - filteredMatViews.length),
+  );
+  /** Whether any non-default filter/sort is active (drives the Reset action). */
+  const filtersActive = $derived(
+    lf !== '' || hideEmpty || hideSystem || sortBy !== 'name' || sortDir !== 'asc',
+  );
+
+  function resetFilters() {
+    localFilter = '';
+    if (filterDebounce) { clearTimeout(filterDebounce); filterDebounce = null; }
+    ontablefilter('');
+    hideEmpty = false;
+    hideSystem = false;
+    sortBy = 'name';
+    sortDir = 'asc';
+  }
+  function setAllSections(/** @type {boolean} */ open) {
+    recentOpen = open; tablesOpen = open; viewsOpen = open; matViewsOpen = open;
+  }
   // ── Virtual list (tables only) ───────────────────────────────────────────
   const VIRT_THRESHOLD = 40   // kick in early — 40+ tables already benefits from virtualization
   const ROW_H = 28            // px — matches contain-intrinsic-size on each <li>
@@ -278,6 +322,16 @@
   let tableListEl = $state(null)
   let sidebarScrollTop = $state(0)
   let sidebarHeight = $state(0)
+  /** RAF handle so scroll events update the virtual-window state at most once per
+   *  frame instead of on every (60–120Hz) scroll event. @type {number | null} */
+  let scrollRaf = null
+  function onSidebarScroll() {
+    if (scrollRaf != null) return
+    scrollRaf = requestAnimationFrame(() => {
+      scrollRaf = null
+      if (scrollContainerEl) sidebarScrollTop = scrollContainerEl.scrollTop
+    })
+  }
   /** Offset of the tables <ul> from the top of the scroll container. Re-measured
    *  whenever sections above it open/close (recent, pinned) or refs change. */
   let tableListOffsetTop = $state(0)
@@ -324,6 +378,16 @@
     e.preventDefault(); filterEl.focus(); filterEl.select()
   }
 }} />
+
+<!-- Section count badge: shows "visible/total" when filters hide rows, else just the total. -->
+{#snippet countBadge(visible, total)}
+  {#if visible !== total}
+    <span class="ml-auto font-mono text-ui-2xs text-muted-foreground/60" title="{visible} shown · {total - visible} hidden of {total}"
+      >{visible}<span class="text-muted-foreground/40">/{total}</span></span>
+  {:else}
+    <span class="ml-auto font-mono text-ui-2xs text-muted-foreground/60">{total}</span>
+  {/if}
+{/snippet}
 
 <div
   class="flex h-full shrink-0"
@@ -393,7 +457,12 @@
             >
               <ListFilter class="size-3.5" />
             </DropdownMenu.Trigger>
-            <DropdownMenu.Content align="start" class="w-52 p-1 text-ui-sm">
+            <DropdownMenu.Content align="start" class="w-56 p-1 text-ui-sm">
+              <div class="px-2 pt-1 pb-1.5 text-ui-2xs text-muted-foreground/70 leading-relaxed">
+                <span class="font-mono text-foreground/80">{regularTables.length}</span> tables{#if views.length} · <span class="font-mono text-foreground/80">{views.length}</span> views{/if}{#if matViews.length} · <span class="font-mono text-foreground/80">{matViews.length}</span> mat.{/if}
+                {#if hiddenCount > 0}<br /><span class="text-amber-500/80">{hiddenCount} hidden by filters</span>{/if}
+              </div>
+              <DropdownMenu.Separator />
               <DropdownMenu.Label class="px-2 py-1 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Show</DropdownMenu.Label>
               <DropdownMenu.CheckboxItem
                 checked={showRecent}
@@ -424,6 +493,10 @@
                 checked={hideEmpty}
                 onCheckedChange={(v) => (hideEmpty = v)}
               >Hide empty tables</DropdownMenu.CheckboxItem>
+              <DropdownMenu.CheckboxItem
+                checked={hideSystem}
+                onCheckedChange={(v) => (hideSystem = v)}
+              >Hide system tables</DropdownMenu.CheckboxItem>
               <DropdownMenu.Separator />
               <DropdownMenu.Label class="px-2 py-1 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Sort by</DropdownMenu.Label>
               <DropdownMenu.RadioGroup value={sortBy} onValueChange={(v) => { if (v === 'name' || v === 'rowCount') sortBy = v }}>
@@ -454,6 +527,21 @@
                   {/if}
                 {/if}
                 <span class="ml-auto text-muted-foreground/50 text-ui-2xs">click to flip</span>
+              </DropdownMenu.Item>
+              <DropdownMenu.Separator />
+              <DropdownMenu.Label class="px-2 py-1 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Sections</DropdownMenu.Label>
+              <DropdownMenu.Item onSelect={() => setAllSections(true)} closeOnSelect={false} class="gap-2">
+                <ChevronsUpDown class="size-3.5 shrink-0 text-muted-foreground" />
+                Expand all
+              </DropdownMenu.Item>
+              <DropdownMenu.Item onSelect={() => setAllSections(false)} closeOnSelect={false} class="gap-2">
+                <ChevronsDownUp class="size-3.5 shrink-0 text-muted-foreground" />
+                Collapse all
+              </DropdownMenu.Item>
+              <DropdownMenu.Separator />
+              <DropdownMenu.Item onSelect={resetFilters} disabled={!filtersActive} class="gap-2">
+                <RotateCcw class="size-3.5 shrink-0 text-muted-foreground" />
+                Reset filters &amp; sort
               </DropdownMenu.Item>
             </DropdownMenu.Content>
           </DropdownMenu.Root>
@@ -502,9 +590,7 @@
           bind:this={scrollContainerEl}
           bind:clientHeight={sidebarHeight}
           class="app-scroll min-h-0 w-full flex-1 overflow-y-auto"
-          onscroll={() => {
-            if (scrollContainerEl) sidebarScrollTop = scrollContainerEl.scrollTop
-          }}
+          onscroll={onSidebarScroll}
         >
           {#if loadingTables}
             <div
@@ -684,11 +770,8 @@
                 class="text-ui-2xs font-medium tracking-wide text-muted-foreground uppercase"
                 >Tables</span
               >
-              {#if regularTables.length > 0}
-                <span
-                  class="ml-auto font-mono text-ui-2xs text-muted-foreground/60"
-                  >{regularTables.length}</span
-                >
+              {#if regularTablesUnpinned.length > 0}
+                {@render countBadge(filteredRegularTables.length, regularTablesUnpinned.length)}
               {/if}
             </button>
             {#if tablesOpen}
@@ -836,10 +919,7 @@
                   >Views</span
                 >
                 {#if views.length > 0}
-                  <span
-                    class="ml-auto font-mono text-ui-2xs text-muted-foreground/60"
-                    >{views.length}</span
-                  >
+                  {@render countBadge(filteredViews.length, views.length)}
                 {/if}
               </button>
               {#if viewsOpen}
@@ -959,10 +1039,7 @@
                   >Materialized Views</span
                 >
                 {#if matViews.length > 0}
-                  <span
-                    class="ml-auto font-mono text-ui-2xs text-muted-foreground/60"
-                    >{matViews.length}</span
-                  >
+                  {@render countBadge(filteredMatViews.length, matViews.length)}
                 {/if}
               </button>
               {#if matViewsOpen}

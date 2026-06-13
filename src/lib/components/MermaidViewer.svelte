@@ -1,6 +1,5 @@
 <script>
   import { renderMermaidSync, THEMES } from 'beautiful-mermaid'
-  import { default as mermaid } from 'mermaid'
   import { mermaidThemeFor, normalizeThemeId } from '$lib/themes/registry.js'
   import { cn } from '$lib/utils.js'
 
@@ -41,11 +40,15 @@
   let _asyncDiagrams = $state(/** @type {Record<string,string>} */ ({}))
   let _asyncKeys = /** @type {string[]} */ ([])
   let _mermaidJsInit = false
+  /** @type {typeof import('mermaid').default | null} Lazily-loaded mermaid module (kept out of startup bundle). */
+  let _mermaid = null
 
   async function _ensureMermaidJs() {
-    if (_mermaidJsInit) return
+    if (_mermaidJsInit) return _mermaid
+    _mermaid = (await import('mermaid')).default
+    _mermaid.initialize({ startOnLoad: false, securityLevel: 'loose' })
     _mermaidJsInit = true
-    mermaid.initialize({ startOnLoad: false, securityLevel: 'loose' })
+    return _mermaid
   }
 
   async function _renderWithMermaidJs(c, asyncKey) {
@@ -57,7 +60,7 @@
       if (evicted) { const { [evicted]: _, ...rest } = _asyncDiagrams; _asyncDiagrams = rest }
     }
     try {
-      await _ensureMermaidJs()
+      const mermaid = await _ensureMermaidJs()
       const id = `mermaid-${Math.random().toString(36).slice(2)}`
       const { svg } = await mermaid.render(id, c)
       _asyncDiagrams[asyncKey] = svg

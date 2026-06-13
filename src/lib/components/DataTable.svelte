@@ -75,7 +75,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import MediaLightbox from "./MediaLightbox.svelte";
   import RowExpandViewer from "./RowExpandViewer.svelte";
   import FkSubviewPanel from "./FkSubviewPanel.svelte";
-  import JsonCellLightbox from "./JsonCellLightbox.svelte";
+  // JsonCellLightbox (Monaco-based) is imported lazily at its render site below.
   import CellQuickLook from "./CellQuickLook.svelte";
   import Maximize2 from "@lucide/svelte/icons/maximize-2";
   import Check from "@lucide/svelte/icons/check";
@@ -1594,6 +1594,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const ro = new ResizeObserver((entries) => {
       const r = entries[0]?.contentRect
       if (!r) return
+      invalidateCanvasRect() // size/layout change can move the canvas — refresh hit-test rect
       _viewportWidth = r.width
       _viewportHeight = r.height
     })
@@ -1604,6 +1605,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   /** @param {Event & { currentTarget: HTMLElement }} e */
   function onContainerScroll(e) {
     const el = e.currentTarget
+    // Page/layout scroll can shift the canvas on screen — drop the cached rect.
+    invalidateCanvasRect()
     if (el.scrollTop !== _scrollTop) _scrollTop = el.scrollTop
     if (el.scrollLeft !== _scrollLeft) _scrollLeft = el.scrollLeft
     // While editing, cancel any pending rAF and draw immediately so the canvas
@@ -2494,8 +2497,19 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   })
 
   // ── Canvas pointer interaction ──────────────────────────────────────────
+  // The canvas element doesn't move while the pointer hovers — only scrolling,
+  // resizing or zooming can shift it. So we cache its bounding rect and reuse it
+  // across the many pointermove events, instead of forcing a layout reflow with
+  // getBoundingClientRect() on every single move. Invalidated on scroll/resize.
+  /** @type {DOMRect | null} */
+  let _canvasRect = null
+  function invalidateCanvasRect() { _canvasRect = null }
   function canvasXY(/** @type {{ clientX: number, clientY: number }} */ e) {
-    const r = canvasEl?.getBoundingClientRect()
+    let r = _canvasRect
+    if (!r) {
+      r = canvasEl?.getBoundingClientRect() ?? null
+      _canvasRect = r
+    }
     if (!r) return { x: 0, y: 0 }
     return { x: e.clientX - r.left, y: e.clientY - r.top }
   }
@@ -2763,6 +2777,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (!tableContainer) return
     let lastDpr = window.devicePixelRatio
     const resync = () => {
+      invalidateCanvasRect() // window/zoom change moves the canvas — refresh on next hit-test
       const dpr = window.devicePixelRatio
       if (dpr === lastDpr) return
       lastDpr = dpr
@@ -3369,10 +3384,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   }}
 />
 
-<JsonCellLightbox
-  data={jsonLightbox}
-  onclose={() => { jsonLightbox = null }}
-/>
+<!-- Lazy: only loads Monaco the first time a JSON cell is expanded, keeping the
+     editor out of the startup bundle/memory for plain table browsing. -->
+{#if jsonLightbox}
+  {#await import('./JsonCellLightbox.svelte') then { default: JsonCellLightbox }}
+    <JsonCellLightbox
+      data={jsonLightbox}
+      onclose={() => { jsonLightbox = null }}
+    />
+  {/await}
+{/if}
 
 <CellQuickLook
   bind:cell={quickLookCell}

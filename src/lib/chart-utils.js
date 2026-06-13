@@ -2,9 +2,10 @@
  * Utilities for converting SQL result sets (columns + rows) into ECharts option objects.
  * All functions return pure JSON — no callbacks — so AI can generate them too.
  *
- * echarts-wordcloud auto-registers when imported.
+ * NOTE: echarts-wordcloud is registered lazily at the chart init sites (EChartPanel,
+ * AiChartRenderer) so that importing this pure-JSON util module does NOT drag echarts
+ * (and the wordcloud plugin) into the startup bundle. See loadEcharts() in those files.
  */
-import 'echarts-wordcloud'
 
 /** @typedef {{ name: string, dataType?: string, data_type?: string }} ColInfo */
 /** @typedef {unknown[][]} Rows */

@@ -38,6 +38,8 @@
       initializing = true
       try {
         const { init } = await import('echarts')
+        // Register the wordcloud series plugin lazily (keeps echarts out of startup bundle).
+        await import('echarts-wordcloud')
         if (disposed) return
         const opts = renderer === 'canvas'
           ? { renderer: /** @type {'canvas'} */ ('canvas'), devicePixelRatio: window.devicePixelRatio || 2 }

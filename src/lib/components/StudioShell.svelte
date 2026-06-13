@@ -25,10 +25,9 @@
   import StructureView from './StructureView.svelte'
   import DataTable from './DataTable.svelte'
   import RowDetailPanel from './RowDetailPanel.svelte'
-  import SqlConsole from './SqlConsole.svelte'
   import CommandPalette from './CommandPalette.svelte'
-  import AiChat from './AiChat.svelte'
-  import AiSidebar from './AiSidebar.svelte'
+  // AiChat / AiSidebar (large, pull in marked + shiki) are loaded lazily the first time
+  // the AI panel is opened — see the {#await import()} blocks below.
   import AiSettingsDialog from './AiSettingsDialog.svelte'
   import ConnectionModal from './ConnectionModal.svelte'
   import DockerLaunchModal from './DockerLaunchModal.svelte'
@@ -46,19 +45,18 @@
   // InsertRowDialog removed — replaced by inline draft row in DataTable
   import McpPanel from './McpPanel.svelte'
   import SearchPage from './SearchPage.svelte'
-  import NotebookEditor from './NotebookEditor.svelte'
+  // NotebookEditor (pulls Monaco via SqlCell + marked via MarkdownCell) is lazy-loaded
+  // at its render site so notebooks don't drag those into the startup bundle.
   import SchemaTimelinePage from './SchemaTimelinePage.svelte'
-  import DataDiffPage from './DataDiffPage.svelte'
-  import OrmRunner from './OrmRunner.svelte'
   import SchemaPage from './SchemaPage.svelte'
-  import SecurityPage from './SecurityPage.svelte'
   import BackupPage from './BackupPage.svelte'
   import LogsPage from './LogsPage.svelte'
-  import JsonViewerPage from './JsonViewerPage.svelte'
-  import ChartsPage from './ChartsPage.svelte'
-  import DiagramsPage from './DiagramsPage.svelte'
-  import DashboardPage from './DashboardPage.svelte'
-  import EntityRelationPage from './EntityRelationPage.svelte'
+  // Monaco-backed pages (DataDiffPage, OrmRunner, SecurityPage, JsonViewerPage, SqlConsole)
+  // are loaded lazily at their render sites so the Monaco editor stays out of the
+  // startup bundle until the user actually opens a SQL / ORM / JSON / diff / security tab.
+  // Heavy feature pages (echarts / mermaid / swapy / xyflow+dagre) are loaded lazily
+  // the first time their tab is opened — see the {#await import()} blocks below.
+  // This keeps those large libraries out of the startup bundle and idle memory.
   import { Button } from '$lib/components/ui/button/index.js'
   import AlertTriangle from '@lucide/svelte/icons/triangle-alert'
   import X from '@lucide/svelte/icons/x'
@@ -3106,16 +3104,18 @@ let rowSearch = $state('')
           class={aiMode ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
           inert={!aiMode}
         >
-          <AiChat
-            schemaContext={{ ...aiSchemaContext, activeTable: null, columns: [], primaryKey: [], foreignKeys: [] }}
-            {connectionId}
-            isActive={aiMode}
-            mode="full"
-            onexit={exitAiMode}
-            onwritesql={(sql) => void handleAiWriteSql(sql)}
-            onopenmodelsettings={() => (showAiModelSettings = true)}
-            onopendiagramspage={() => { exitAiMode(); openDiagramsTab() }}
-          />
+          {#await import('./AiChat.svelte') then { default: AiChat }}
+            <AiChat
+              schemaContext={{ ...aiSchemaContext, activeTable: null, columns: [], primaryKey: [], foreignKeys: [] }}
+              {connectionId}
+              isActive={aiMode}
+              mode="full"
+              onexit={exitAiMode}
+              onwritesql={(sql) => void handleAiWriteSql(sql)}
+              onopenmodelsettings={() => (showAiModelSettings = true)}
+              onopendiagramspage={() => { exitAiMode(); openDiagramsTab() }}
+            />
+          {/await}
         </div>
       {/if}
 
@@ -3179,7 +3179,9 @@ let rowSearch = $state('')
           inert={activeTab?.kind !== 'security' || undefined}
         >
           <svelte:boundary failed={tabError}>
-            <SecurityPage bind:this={securityPageRef} active={activeTab?.kind === 'security'} />
+            {#await import('./SecurityPage.svelte') then { default: SecurityPage }}
+              <SecurityPage bind:this={securityPageRef} active={activeTab?.kind === 'security'} />
+            {/await}
           </svelte:boundary>
         </div>
       {/if}
@@ -3215,7 +3217,9 @@ let rowSearch = $state('')
           inert={activeTab?.kind !== 'json' || undefined}
         >
           <svelte:boundary failed={tabError}>
-            <JsonViewerPage active={activeTab?.kind === 'json'} />
+            {#await import('./JsonViewerPage.svelte') then { default: JsonViewerPage }}
+              <JsonViewerPage active={activeTab?.kind === 'json'} />
+            {/await}
           </svelte:boundary>
         </div>
       {/if}
@@ -3227,10 +3231,12 @@ let rowSearch = $state('')
           inert={activeTab?.kind !== 'charts' || undefined}
         >
           <svelte:boundary failed={tabError}>
-            <ChartsPage
-              {connection}
-              onrunsql={(sql) => { if (aiMode) exitAiMode(); void openQueryInEditor(sql) }}
-            />
+            {#await import('./ChartsPage.svelte') then { default: ChartsPage }}
+              <ChartsPage
+                {connection}
+                onrunsql={(sql) => { if (aiMode) exitAiMode(); void openQueryInEditor(sql) }}
+              />
+            {/await}
           </svelte:boundary>
         </div>
       {/if}
@@ -3242,7 +3248,9 @@ let rowSearch = $state('')
           inert={activeTab?.kind !== 'diagrams' || undefined}
         >
           <svelte:boundary failed={tabError}>
-            <DiagramsPage {connection} />
+            {#await import('./DiagramsPage.svelte') then { default: DiagramsPage }}
+              <DiagramsPage {connection} />
+            {/await}
           </svelte:boundary>
         </div>
       {/if}
@@ -3254,7 +3262,9 @@ let rowSearch = $state('')
           inert={activeTab?.kind !== 'dashboard' || undefined}
         >
           <svelte:boundary failed={tabError}>
-            <DashboardPage {connection} />
+            {#await import('./DashboardPage.svelte') then { default: DashboardPage }}
+              <DashboardPage {connection} />
+            {/await}
           </svelte:boundary>
         </div>
       {/if}
@@ -3266,11 +3276,13 @@ let rowSearch = $state('')
           inert={activeTab?.kind !== 'erd' || undefined}
         >
           <svelte:boundary failed={tabError}>
-            <EntityRelationPage
-              schema={activeSchema}
-              {schemas}
-              onopentable={(s, t) => void openTableTab(s, t)}
-            />
+            {#await import('./EntityRelationPage.svelte') then { default: EntityRelationPage }}
+              <EntityRelationPage
+                schema={activeSchema}
+                {schemas}
+                onopentable={(s, t) => void openTableTab(s, t)}
+              />
+            {/await}
           </svelte:boundary>
         </div>
       {/if}
@@ -3302,12 +3314,14 @@ let rowSearch = $state('')
           inert={activeTab?.id !== nbTab.id || undefined}
         >
           <svelte:boundary failed={tabError}>
-            <NotebookEditor
-              notebook={nbState.notebook}
-              filePath={nbState.filePath}
-              dirty={nbState.dirty}
-              onupdate={(updates) => updateNotebookTab(nbTab.id, updates)}
-            />
+            {#await import('./NotebookEditor.svelte') then { default: NotebookEditor }}
+              <NotebookEditor
+                notebook={nbState.notebook}
+                filePath={nbState.filePath}
+                dirty={nbState.dirty}
+                onupdate={(updates) => updateNotebookTab(nbTab.id, updates)}
+              />
+            {/await}
           </svelte:boundary>
         </div>
       {/each}
@@ -3336,13 +3350,15 @@ let rowSearch = $state('')
           inert={activeTab?.kind !== 'data-diff' || undefined}
         >
           <svelte:boundary failed={tabError}>
-            <DataDiffPage
-              {schemas}
-              {tables}
-              activeSchema={activeSchema}
-              connections={savedConnections}
-              currentConnectionId={persistConnectionId}
-            />
+            {#await import('./DataDiffPage.svelte') then { default: DataDiffPage }}
+              <DataDiffPage
+                {schemas}
+                {tables}
+                activeSchema={activeSchema}
+                connections={savedConnections}
+                currentConnectionId={persistConnectionId}
+              />
+            {/await}
           </svelte:boundary>
         </div>
       {/if}
@@ -3354,6 +3370,7 @@ let rowSearch = $state('')
           inert={activeTab?.kind !== 'orm' || undefined}
         >
           <svelte:boundary failed={tabError}>
+          {#await import('./OrmRunner.svelte') then { default: OrmRunner }}
           <OrmRunner
             bind:code={ormCode}
             bind:mode={ormMode}
@@ -3373,6 +3390,7 @@ let rowSearch = $state('')
             onmodshifte={() => { if (connection) aiMode ? exitAiMode() : enterAiMode() }}
             onmodshiftd={() => { if (connection) void focusDataView() }}
           />
+          {/await}
           </svelte:boundary>
         </div>
       {/if}
@@ -3384,6 +3402,7 @@ let rowSearch = $state('')
           inert={activeTab?.kind !== 'sql' || undefined}
         >
           <svelte:boundary failed={tabError}>
+          {#await import('./SqlConsole.svelte') then { default: SqlConsole }}
           <SqlConsole
             bind:this={sqlConsoleRef}
             bind:sql={sqlText}
@@ -3417,6 +3436,7 @@ let rowSearch = $state('')
             onsavequery={handleSaveQuery}
             onfixwithai={handleFixWithAi}
           />
+          {/await}
           </svelte:boundary>
         </div>
       {/if}
@@ -3767,19 +3787,21 @@ let rowSearch = $state('')
       style={aiSidebarOpen && !aiMode ? '' : 'display:none'}
       inert={!aiSidebarOpen || aiMode || undefined}
     >
-      <AiSidebar
-        bind:this={aiSidebarRef}
-        schemaContext={aiSchemaContext}
-        {connectionId}
-        isActive={aiSidebarOpen && !aiMode}
-        currentView={activeTab?.kind ?? 'welcome'}
-        currentSql={sqlText}
-        currentCode={ormCode}
-        {ormMode}
-        onclose={toggleAiSidebar}
-        onaccept={(d) => void handleAiSidebarAccept(d)}
-        onopensettings={() => (showAiModelSettings = true)}
-      />
+      {#await import('./AiSidebar.svelte') then { default: AiSidebar }}
+        <AiSidebar
+          bind:this={aiSidebarRef}
+          schemaContext={aiSchemaContext}
+          {connectionId}
+          isActive={aiSidebarOpen && !aiMode}
+          currentView={activeTab?.kind ?? 'welcome'}
+          currentSql={sqlText}
+          currentCode={ormCode}
+          {ormMode}
+          onclose={toggleAiSidebar}
+          onaccept={(d) => void handleAiSidebarAccept(d)}
+          onopensettings={() => (showAiModelSettings = true)}
+        />
+      {/await}
     </div>
   {/if}
 </div>
