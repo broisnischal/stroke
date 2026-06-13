@@ -24,6 +24,7 @@
   import Plus from "@lucide/svelte/icons/plus";
   import Clock from "@lucide/svelte/icons/clock";
   import X from "@lucide/svelte/icons/x";
+  import ExternalLink from "@lucide/svelte/icons/external-link";
   import ArrowDownAZ from "@lucide/svelte/icons/arrow-down-a-z";
   import ArrowUpAZ from "@lucide/svelte/icons/arrow-up-a-z";
   import ArrowDown01 from "@lucide/svelte/icons/arrow-down-0-1";
@@ -77,7 +78,12 @@
     onexportsql = /** @type {(table: string) => void} */ (() => {}),
     onexportdata = /** @type {(table: string) => void} */ (() => {}),
     ongeneratetestdata = /** @type {(table: string) => void} */ (() => {}),
+    /** Names of tables that currently have an open tab (current schema). @type {string[]} */
+    openTables = [],
+    onclosetable = /** @type {(table: string) => void} */ (() => {}),
   } = $props();
+
+  const openTableSet = $derived(new Set(openTables))
 
   let localFilter = $state(untrack(() => tableFilter));
   let filterEl = $state(/** @type {HTMLInputElement | null} */ (null));
@@ -222,6 +228,7 @@
 
   function clearSelection() {
     selectedItems = new Set()
+    lastSelectedName = null
   }
 
   // ── Dangerous action dialog ───────────────────────────────────────────────
@@ -316,7 +323,8 @@
    * @param {string} name @param {boolean} [shiftKey]
    */
   function selectItem(name, shiftKey = false) {
-    if (shiftKey && lastSelectedName && lastSelectedName !== name) {
+    // Range-select only extends an existing selection (needs an anchor already selected).
+    if (shiftKey && lastSelectedName && lastSelectedName !== name && selectedItems.size > 0) {
       const a = selectableOrder.indexOf(lastSelectedName)
       const b = selectableOrder.indexOf(name)
       if (a !== -1 && b !== -1) {
@@ -333,6 +341,16 @@
     else next.add(name)
     selectedItems = next
     lastSelectedName = name
+  }
+
+  /** Open every selected table in its own tab. */
+  function openSelected() {
+    for (const n of selectableOrder) if (selectedItems.has(n)) ontableselect(n)
+  }
+
+  /** Close the tabs of every selected table that's currently open. */
+  function closeSelectedTabs() {
+    for (const n of selectedItems) if (openTableSet.has(n)) onclosetable(n)
   }
   const filteredViews = $derived(
     applySortBy(views.filter((t) => t.name.toLowerCase().includes(lf))),
@@ -803,6 +821,17 @@
                       <ContextMenu.Content class="w-48 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
                         {#if isSelected && selectedItems.size > 1}
                           <!-- Multi-select: actions apply to all selected tables -->
+                          <ContextMenu.Item onSelect={openSelected}>
+                            <ExternalLink />
+                            Open {selectedItems.size} tables
+                          </ContextMenu.Item>
+                          {#if [...selectedItems].some((n) => openTableSet.has(n))}
+                            <ContextMenu.Item onSelect={closeSelectedTabs}>
+                              <X />
+                              Close open tabs
+                            </ContextMenu.Item>
+                          {/if}
+                          <ContextMenu.Separator />
                           <ContextMenu.Item onSelect={copySelectedNames}>
                             <ClipboardCopy />
                             Copy {selectedItems.size} names
@@ -826,6 +855,12 @@
                           <ClipboardCopy />
                           Copy name
                         </ContextMenu.Item>
+                        {#if openTableSet.has(tableName)}
+                          <ContextMenu.Item onSelect={() => onclosetable(tableName)}>
+                            <X />
+                            Close tab
+                          </ContextMenu.Item>
+                        {/if}
                         <ContextMenu.Item onSelect={() => togglePin(tableName)}>
                           <PinOff />
                           Unpin table
@@ -951,6 +986,17 @@
                         <ContextMenu.Content class="w-48 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
                           {#if isSelected && selectedItems.size > 1}
                             <!-- Multi-select: actions apply to all selected tables -->
+                            <ContextMenu.Item onSelect={openSelected}>
+                              <ExternalLink />
+                              Open {selectedItems.size} tables
+                            </ContextMenu.Item>
+                            {#if [...selectedItems].some((n) => openTableSet.has(n))}
+                              <ContextMenu.Item onSelect={closeSelectedTabs}>
+                                <X />
+                                Close open tabs
+                              </ContextMenu.Item>
+                            {/if}
+                            <ContextMenu.Separator />
                             <ContextMenu.Item onSelect={copySelectedNames}>
                               <ClipboardCopy />
                               Copy {selectedItems.size} names
@@ -974,6 +1020,12 @@
                             <ClipboardCopy />
                             Copy name
                           </ContextMenu.Item>
+                          {#if openTableSet.has(table.name)}
+                            <ContextMenu.Item onSelect={() => onclosetable(table.name)}>
+                              <X />
+                              Close tab
+                            </ContextMenu.Item>
+                          {/if}
                           <ContextMenu.Item onSelect={() => togglePin(table.name)}>
                             {#if pinnedTables.includes(table.name)}
                               <PinOff />
