@@ -354,7 +354,19 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   /** @param {unknown} value @param {string} colName @param {MouseEvent} e */
   function openJsonLightbox(value, colName, e) {
     e.stopPropagation()
+    void prefetchJsonLightbox() // ensure the chunk is loading even if hover didn't warm it
     jsonLightbox = { value, colName }
+  }
+
+  // The JSON lightbox loads Monaco lazily (kept out of startup memory). To avoid a
+  // first-open jank — importing/parsing the ~4MB Monaco chunk + creating the editor
+  // on the main thread while the canvas is mid-interaction — we warm the module the
+  // moment the pointer hovers a JSON cell, a beat before the click actually opens it.
+  let _lightboxWarmed = false
+  function prefetchJsonLightbox() {
+    if (_lightboxWarmed) return
+    _lightboxWarmed = true
+    return import('./JsonCellLightbox.svelte')
   }
 
   /** @type {'image' | 'pdf'} */
@@ -2757,6 +2769,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (t.kind === 'cell') {
       hoveredRow = /** @type {number} */ (t.idx)
       hoveredColName = t.col.name
+      // Hovering a JSON (object) cell → preload the lightbox/Monaco chunk so the
+      // click-to-expand is instant. Gated by the warm flag so it runs at most once.
+      if (!_lightboxWarmed) {
+        const v = effectiveCellValue(/** @type {number} */ (t.idx), /** @type {number} */ (t.actualIdx))
+        if (v !== null && v !== undefined && typeof v === 'object') void prefetchJsonLightbox()
+      }
     } else {
       hoveredRow = t.kind === 'row-expand' || t.kind === 'row-select' ? /** @type {number} */ (t.idx ?? null) : null
       hoveredColName = null
