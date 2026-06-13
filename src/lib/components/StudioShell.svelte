@@ -14,6 +14,7 @@
   import BarChart2 from '@lucide/svelte/icons/bar-chart-2'
   import LayoutDashboard from '@lucide/svelte/icons/layout-dashboard'
   import GitBranch from '@lucide/svelte/icons/git-branch'
+  import Blocks from '@lucide/svelte/icons/blocks'
   import GitCompare from '@lucide/svelte/icons/git-compare'
   import History from '@lucide/svelte/icons/history'
   import Plus from '@lucide/svelte/icons/plus'
@@ -35,6 +36,7 @@
   import ConnectionModal from './ConnectionModal.svelte'
   import DockerLaunchModal from './DockerLaunchModal.svelte'
   import CreateTableDialog from './CreateTableDialog.svelte'
+  import CreateSchemaDialog from './CreateSchemaDialog.svelte'
   import Onboarding from './Onboarding.svelte'
   import SettingsDialog from './SettingsDialog.svelte'
   import KeyboardShortcutsDialog from './KeyboardShortcutsDialog.svelte'
@@ -148,6 +150,7 @@
     loadSavedConnections,
     setLastConnectionId,
     upsertConnection,
+    engineFamily,
   } from '$lib/stores/connections.js'
   import {
     connectPostgres,
@@ -221,6 +224,7 @@
   let showDockerModal = $state(false)
   let dockerInitialDb = $state(/** @type {string | null} */ (null))
   let showCreateTableDialog = $state(false)
+  let showCreateSchemaDialog = $state(false)
   let savedConnections = $state(loadSavedConnections())
   let showSettingsModal = $state(false)
   let showShortcutsModal = $state(false)
@@ -236,7 +240,9 @@
   let commandPage = $state(/** @type {'root'|'docker'|'connections'|'tables'} */ ('root'))
 
   // ── DB-type capability flags ───────────────────────────────────────────────
-  const dbType = $derived(connection?.type ?? 'postgres')
+  // Normalize wire-compatible aliases (mariadb → mysql, cockroachdb → postgres)
+  // so every capability/dialect check below keeps working unchanged.
+  const dbType = $derived(engineFamily(connection?.type))
   /** Schema Explorer is useful for postgres + mysql; sqlite/d1 have no meaningful schema pages. */
   const hasSchemaExplorer = $derived(dbType === 'postgres' || dbType === 'mysql')
   /** Security (RLS, policies, roles) is PostgreSQL-only. */
@@ -667,7 +673,7 @@ let rowSearch = $state('')
       return {
         schemas, activeSchema, tables: _tableNames,
         activeTable, columns: [], primaryKey: [], foreignKeys: [],
-        allTableColumns: {}, dbType: /** @type {any} */ (connection)?.type ?? 'postgres',
+        allTableColumns: {}, dbType: engineFamily(connection?.type),
       }
     }
     return {
@@ -684,8 +690,8 @@ let rowSearch = $state('')
       primaryKey,
       foreignKeys,
       allTableColumns: _allTableColumns,
-      /** @type {'postgres' | 'sqlite' | 'd1'} */
-      dbType: /** @type {any} */ (connection)?.type ?? 'postgres',
+      /** @type {import('$lib/stores/connections.js').DbType} */
+      dbType: engineFamily(connection?.type),
     }
   })
 
@@ -1759,15 +1765,30 @@ let rowSearch = $state('')
     void loadIncomingForeignKeys(schema, table)
   }
 
+  /** Cap on the incoming-FK cache so long sessions across many tables don't grow it unbounded. */
+  const INCOMING_FK_CACHE_MAX = 120
+  /** @param {string} key @param {any[]} value */
+  function setIncomingFkCache(key, value) {
+    const next = new Map(incomingFkCache)
+    next.set(key, value)
+    // FIFO eviction — Map preserves insertion order, so drop the oldest entries.
+    while (next.size > INCOMING_FK_CACHE_MAX) {
+      const oldest = next.keys().next().value
+      if (oldest === undefined) break
+      next.delete(oldest)
+    }
+    incomingFkCache = next
+  }
+
   /** Load incoming FKs for a table into the cache (no-op if already cached). */
   async function loadIncomingForeignKeys(schema, table) {
     const key = `${schema}.${table}`
     if (incomingFkCache.has(key)) return
     try {
       const result = await getIncomingForeignKeys(schema, table)
-      incomingFkCache = new Map(incomingFkCache).set(key, result ?? [])
+      setIncomingFkCache(key, result ?? [])
     } catch {
-      incomingFkCache = new Map(incomingFkCache).set(key, [])
+      setIncomingFkCache(key, [])
     }
   }
 
@@ -2477,7 +2498,7 @@ let rowSearch = $state('')
       if (last.type === 'sqlite') await connectSqlite(last)
       else if (last.type === 'd1') await connectD1(last)
       else if (last.type === 'libsql') await connectLibSql(last)
-      else if (last.type === 'mysql') await connectMysql(last)
+      else if (last.type === 'mysql' || last.type === 'mariadb') await connectMysql(last)
       else await connectPostgres(last)
       await onConnected(last, last.id)
       await refreshQueryStores()
@@ -2575,7 +2596,7 @@ let rowSearch = $state('')
     clearConnectionState()
     autoConnecting = true
     try {
-      if (conn.type === 'mysql') await connectMysql(conn)
+      if (conn.type === 'mysql' || conn.type === 'mariadb') await connectMysql(conn)
       else await connectPostgres(conn)
       await onConnected(conn, conn.id)
       showDockerModal = false
@@ -2625,7 +2646,7 @@ let rowSearch = $state('')
       if (conn.type === 'sqlite') await connectSqlite(conn)
       else if (conn.type === 'd1') await connectD1(conn)
       else if (conn.type === 'libsql') await connectLibSql(conn)
-      else if (conn.type === 'mysql') await connectMysql(conn)
+      else if (conn.type === 'mysql' || conn.type === 'mariadb') await connectMysql(conn)
       else await connectPostgres(conn)
       await onConnected(conn, conn.id)
     } catch (e) {
@@ -2971,9 +2992,22 @@ let rowSearch = $state('')
 <CreateTableDialog
   bind:open={showCreateTableDialog}
   {activeSchema}
-  dbType={connection?.type ?? 'postgres'}
+  dbType={dbType}
   onexecute={async (sql) => { await executeSql(sql) }}
   oncreated={async () => { await loadTables() }}
+/>
+<CreateSchemaDialog
+  bind:open={showCreateSchemaDialog}
+  existingSchemas={schemas}
+  onexecute={async (sql) => {
+    try { await executeDdl(sql) }
+    catch (e) { toast.error(String(e)); throw e }
+  }}
+  oncreated={async (schemaName) => {
+    toast.success(`Schema "${schemaName}" created`)
+    await loadSchemas()
+    await handleSchemaChange(schemaName)
+  }}
 />
 <DockerLaunchModal
   bind:open={showDockerModal}
@@ -3124,6 +3158,7 @@ let rowSearch = $state('')
           void handleSwitchDatabase({ ...connection, database: dbName, name: `${connection.host ?? connection.name}/${dbName}` })
         }}
         onnewtable={() => (showCreateTableDialog = true)}
+        onnewschema={() => (showCreateSchemaDialog = true)}
         ontruncatetable={handleTruncateTable}
         ondroptable={(t, c) => void handleDropTable(t, c)}
         onviewddl={(t) => void handleViewDdl(t)}
@@ -3874,6 +3909,11 @@ let rowSearch = $state('')
               <span class={labelCls}>Data Diff</span>
             </button>
 
+            <button onclick={openExtensionsTab} class={cell}>
+              <Blocks class={iconCls} />
+              <span class={labelCls}>Extensions</span>
+            </button>
+
             <button onclick={() => (showConnectionModal = true)} class={cell}>
               <Database class={iconCls} />
               <span class={labelCls}>Connect</span>
@@ -3985,7 +4025,7 @@ let rowSearch = $state('')
   oncreatedatabase={async ({ name, owner, encoding, lcCollate, lcCtype, template, connectionLimit }) => {
     const escaped = name.replace(/"/g, '""')
     let sql
-    if (connection?.type === 'mysql') {
+    if (dbType === 'mysql') {
       sql = `CREATE DATABASE \`${name.replace(/`/g, '``')}\``
       if (encoding) sql += ` CHARACTER SET ${encoding}`
       if (lcCollate) sql += ` COLLATE ${lcCollate}`

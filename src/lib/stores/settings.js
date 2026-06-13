@@ -11,7 +11,7 @@ import { zoomState, ZOOM_MIN, ZOOM_MAX } from '$lib/stores/canvas-zoom.svelte.js
 const STORAGE_KEY = 'stroke:settings'
 
 /** @typedef {import('$lib/themes/registry.js').ThemeId} ThemeId */
-/** @typedef {'geist' | 'system' | 'developer'} FontId */
+/** @typedef {'geist' | 'serif' | 'apple'} FontId */
 /** @typedef {{ theme: ThemeId, zoom: number, font: FontId, mcpAutoStart: boolean, launchAtLogin: boolean }} AppSettings */
 
 /** UI zoom scale (font + layout). 1 = 100%. */
@@ -27,21 +27,21 @@ const DEFAULT_ZOOM = 1
 export const FONT_PRESETS = {
   geist: {
     label: 'Geist',
-    description: 'Default — clean variable sans paired with Geist Mono.',
+    description: 'Clean variable sans',
     sans: '"Geist Variable", ui-sans-serif, system-ui, sans-serif',
     mono: '"Geist Mono Variable", ui-monospace, monospace',
   },
-  system: {
-    label: 'System Native',
-    description: 'Your OS UI font with SF Mono / Menlo on macOS.',
-    sans: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif',
-    mono: 'ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+  serif: {
+    label: 'Serif',
+    description: 'Editorial serif UI',
+    sans: 'ui-serif, "New York", "Iowan Old Style", Georgia, "Times New Roman", serif',
+    mono: 'ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace',
   },
-  developer: {
-    label: 'Developer Mono',
-    description: 'JetBrains Mono and friends — tuned for dense data.',
-    sans: '"Geist Variable", ui-sans-serif, system-ui, sans-serif',
-    mono: '"JetBrains Mono", "Cascadia Code", "Fira Code", "Roboto Mono", "DejaVu Sans Mono", ui-monospace, monospace',
+  apple: {
+    label: 'Apple',
+    description: 'San Francisco + SF Mono',
+    sans: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif',
+    mono: 'ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Monaco, Consolas, monospace',
   },
 }
 /** @type {FontId} */

@@ -92,6 +92,7 @@
     if (!container) return
     let disposed = false
     let initializing = false
+    const ac = new AbortController()
 
     async function tryInit() {
       if (disposed || chart || initializing) return
@@ -129,12 +130,12 @@
                 bubbles: false, cancelable: true,
               }))
             }
-          }, { capture: true, passive: false })
+          }, { capture: true, passive: false, signal: ac.signal })
         }
         // Double-click → restore to initial view
         container.addEventListener('dblclick', () => {
           instance.dispatchAction({ type: 'restore' })
-        })
+        }, { signal: ac.signal })
       } finally {
         initializing = false
       }
@@ -149,6 +150,7 @@
 
     return () => {
       disposed = true
+      ac.abort()
       io.disconnect()
       ro?.disconnect(); ro = null
       chart?.dispose(); chart = null

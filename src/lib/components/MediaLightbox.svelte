@@ -57,7 +57,7 @@
     role="dialog"
     aria-modal="true"
     aria-label="Media viewer"
-    class="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/85 outline-none backdrop-blur-sm"
+    class="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/90 outline-none"
     onclick={onclose}
     onkeydown={handleKey}
   >

@@ -4024,7 +4024,7 @@
 <!-- ── Image viewer ──────────────────────────────────────────────────────── -->
 {#if imageViewerSrc}
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-md"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-background/90"
     onclick={() => (imageViewerSrc = null)}
     onkeydown={(e) => e.key === "Escape" && (imageViewerSrc = null)}
     role="dialog"
@@ -4072,7 +4072,7 @@
     tabindex="-1"
     aria-modal="true"
     aria-label="Chart fullscreen"
-    class="fixed inset-0 z-[500] flex flex-col bg-background/96 backdrop-blur-sm"
+    class="fixed inset-0 z-[500] flex flex-col bg-background"
     onkeydown={(e) => {
       if (e.key === "Escape") closeChartFullscreen();
     }}
@@ -4134,7 +4134,7 @@
     role="dialog"
     aria-modal="true"
     aria-label="Diagram fullscreen"
-    class="fixed inset-0 z-[500] flex flex-col bg-background/95 backdrop-blur-sm"
+    class="fixed inset-0 z-[500] flex flex-col bg-background"
   >
     <!-- Header toolbar -->
     <div

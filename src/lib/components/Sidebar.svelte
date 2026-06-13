@@ -22,6 +22,7 @@
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Plus from "@lucide/svelte/icons/plus";
+  import Box from "@lucide/svelte/icons/box";
   import Clock from "@lucide/svelte/icons/clock";
   import X from "@lucide/svelte/icons/x";
   import ExternalLink from "@lucide/svelte/icons/external-link";
@@ -32,6 +33,9 @@
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import ChevronsDownUp from "@lucide/svelte/icons/chevrons-down-up";
   import ChevronsUpDown from "@lucide/svelte/icons/chevrons-up-down";
+  import Hash from "@lucide/svelte/icons/hash";
+  import CircleSlash from "@lucide/svelte/icons/circle-slash";
+  import Cog from "@lucide/svelte/icons/cog";
   import DangerousActionDialog from "./DangerousActionDialog.svelte";
   import * as Select from "$lib/components/ui/select/index.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
@@ -62,6 +66,7 @@
     ontablefilter = () => {},
     onrefresh = () => {},
     onnewtable = () => {},
+    onnewschema = () => {},
     /** @type {import('$lib/stores/query-history.js').QueryHistoryEntry[]} */
     queryHistory = [],
     onqueryselect = /** @type {(sql: string) => void} */ (() => {}),
@@ -84,6 +89,10 @@
   } = $props();
 
   const openTableSet = $derived(new Set(openTables))
+
+  // PostgreSQL is the only driver where "schema" is a CREATE SCHEMA namespace.
+  // (MySQL schemas are databases; SQLite/D1 have none.) Gate the "New schema" action on it.
+  const supportsSchemas = $derived(connection?.type === "postgres")
 
   let localFilter = $state(untrack(() => tableFilter));
   let filterEl = $state(/** @type {HTMLInputElement | null} */ (null));
@@ -388,13 +397,12 @@
   }
   // ── Virtual list (tables only) ───────────────────────────────────────────
   const VIRT_THRESHOLD = 40   // kick in early — 40+ tables already benefits from virtualization
-  const ROW_H = 28            // px — matches contain-intrinsic-size on each <li>
-  const VIRT_BUFFER = 16      // extra rows rendered above and below the viewport
-  // Snap the window to a row grid so it only shifts once per chunk of scrolling
-  // (the derived short-circuits on every scroll event in between → no re-render,
-  // no padding-row resize). Must be ≤ VIRT_BUFFER so the buffer covers the
-  // in-chunk scroll distance before the next snap.
-  const VIRT_CHUNK = 8
+  const ROW_H = 28            // px — fixed row stride (row height + gap-0.5); drives spacer math
+  const VIRT_BUFFER = 12      // extra rows rendered above and below the viewport
+  // The window shifts one row at a time: `virtStart` is floored to ROW_H, so the
+  // derived already short-circuits (returns the same value) for every scroll event
+  // within a row — no re-render, no spacer resize until you actually cross a row
+  // boundary. That keeps each update tiny (±1 row) instead of a batched chunk hitch.
 
   /** @type {HTMLElement | null} */
   let scrollContainerEl = $state(null)
@@ -434,13 +442,11 @@
 
   const virtStart = $derived.by(() => {
     if (!shouldVirtualize) return 0
-    let start = Math.max(0, Math.floor((sidebarScrollTop - tableListOffsetTop) / ROW_H) - VIRT_BUFFER)
-    return start - (start % VIRT_CHUNK) // snap down to the chunk grid
+    return Math.max(0, Math.floor((sidebarScrollTop - tableListOffsetTop) / ROW_H) - VIRT_BUFFER)
   })
   const virtEnd = $derived.by(() => {
     if (!shouldVirtualize) return filteredRegularTables.length
-    let end = Math.ceil((sidebarScrollTop + sidebarHeight - tableListOffsetTop) / ROW_H) + VIRT_BUFFER
-    end += (VIRT_CHUNK - 1) - ((end % VIRT_CHUNK + VIRT_CHUNK) % VIRT_CHUNK) // snap up
+    const end = Math.ceil((sidebarScrollTop + sidebarHeight - tableListOffsetTop) / ROW_H) + VIRT_BUFFER
     return Math.min(filteredRegularTables.length, end)
   })
   const virtTopPad  = $derived(shouldVirtualize ? virtStart * ROW_H : 0)
@@ -537,7 +543,17 @@
             >
               <ListFilter class="size-3.5" />
             </DropdownMenu.Trigger>
-            <DropdownMenu.Content align="start" class="w-56 p-1 text-ui-sm">
+            <DropdownMenu.Content
+              align="start"
+              class={cn(
+                "w-56 p-1",
+                // Readable 13px rows with a leading icon + label, comfortable padding — matches the cell context menu.
+                "[&_[data-slot=dropdown-menu-checkbox-item]]:gap-2 [&_[data-slot=dropdown-menu-checkbox-item]]:rounded-md [&_[data-slot=dropdown-menu-checkbox-item]]:py-1.5 [&_[data-slot=dropdown-menu-checkbox-item]]:pr-8 [&_[data-slot=dropdown-menu-checkbox-item]]:pl-2 [&_[data-slot=dropdown-menu-checkbox-item]]:text-ui-sm",
+                "[&_[data-slot=dropdown-menu-radio-item]]:gap-2 [&_[data-slot=dropdown-menu-radio-item]]:py-1.5 [&_[data-slot=dropdown-menu-radio-item]]:pr-8 [&_[data-slot=dropdown-menu-radio-item]]:pl-2 [&_[data-slot=dropdown-menu-radio-item]]:text-ui-sm",
+                "[&_[data-slot=dropdown-menu-item]]:gap-2 [&_[data-slot=dropdown-menu-item]]:py-1.5 [&_[data-slot=dropdown-menu-item]]:pl-2 [&_[data-slot=dropdown-menu-item]]:text-ui-sm",
+                "[&_svg]:size-3.5 [&_svg]:shrink-0",
+              )}
+            >
               <div class="px-2 pt-1 pb-1.5 text-ui-2xs text-muted-foreground/70 leading-relaxed">
                 <span class="font-mono text-foreground/80">{regularTables.length}</span> tables{#if views.length} · <span class="font-mono text-foreground/80">{views.length}</span> views{/if}{#if matViews.length} · <span class="font-mono text-foreground/80">{matViews.length}</span> mat.{/if}
                 {#if hiddenCount > 0}<br /><span class="text-amber-500/80">{hiddenCount} hidden by filters</span>{/if}
@@ -547,41 +563,41 @@
               <DropdownMenu.CheckboxItem
                 checked={showRecent}
                 onCheckedChange={(v) => (showRecent = v)}
-              >Recent</DropdownMenu.CheckboxItem>
+              ><Clock class="text-muted-foreground" />Recent</DropdownMenu.CheckboxItem>
               <DropdownMenu.CheckboxItem
                 checked={showTables}
                 onCheckedChange={(v) => (showTables = v)}
-              >Tables</DropdownMenu.CheckboxItem>
+              ><Table2 class="text-muted-foreground" />Tables</DropdownMenu.CheckboxItem>
               <DropdownMenu.CheckboxItem
                 checked={showViews}
                 onCheckedChange={(v) => (showViews = v)}
-              >Views</DropdownMenu.CheckboxItem>
+              ><Eye class="text-muted-foreground" />Views</DropdownMenu.CheckboxItem>
               <DropdownMenu.CheckboxItem
                 checked={showMatViews}
                 onCheckedChange={(v) => (showMatViews = v)}
-              >Materialized Views</DropdownMenu.CheckboxItem>
+              ><Layers class="text-muted-foreground" />Materialized Views</DropdownMenu.CheckboxItem>
               <DropdownMenu.CheckboxItem
                 checked={showPins}
                 onCheckedChange={(v) => (showPins = v)}
-              >Pins</DropdownMenu.CheckboxItem>
+              ><Pin class="text-muted-foreground" />Pins</DropdownMenu.CheckboxItem>
               <DropdownMenu.Separator />
               <DropdownMenu.CheckboxItem
                 checked={showRowCount}
                 onCheckedChange={(v) => (showRowCount = v)}
-              >Row counts</DropdownMenu.CheckboxItem>
+              ><Hash class="text-muted-foreground" />Row counts</DropdownMenu.CheckboxItem>
               <DropdownMenu.CheckboxItem
                 checked={hideEmpty}
                 onCheckedChange={(v) => (hideEmpty = v)}
-              >Hide empty tables</DropdownMenu.CheckboxItem>
+              ><CircleSlash class="text-muted-foreground" />Hide empty tables</DropdownMenu.CheckboxItem>
               <DropdownMenu.CheckboxItem
                 checked={hideSystem}
                 onCheckedChange={(v) => (hideSystem = v)}
-              >Hide system tables</DropdownMenu.CheckboxItem>
+              ><Cog class="text-muted-foreground" />Hide system tables</DropdownMenu.CheckboxItem>
               <DropdownMenu.Separator />
               <DropdownMenu.Label class="px-2 py-1 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Sort by</DropdownMenu.Label>
               <DropdownMenu.RadioGroup value={sortBy} onValueChange={(v) => { if (v === 'name' || v === 'rowCount') sortBy = v }}>
-                <DropdownMenu.RadioItem value="name">Name</DropdownMenu.RadioItem>
-                <DropdownMenu.RadioItem value="rowCount">Row count</DropdownMenu.RadioItem>
+                <DropdownMenu.RadioItem value="name"><ArrowDownAZ class="text-muted-foreground" />Name</DropdownMenu.RadioItem>
+                <DropdownMenu.RadioItem value="rowCount"><Hash class="text-muted-foreground" />Row count</DropdownMenu.RadioItem>
               </DropdownMenu.RadioGroup>
               <DropdownMenu.Separator />
               <DropdownMenu.Label class="px-2 py-1 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Direction</DropdownMenu.Label>
@@ -636,15 +652,37 @@
               class={cn("size-3.5", loadingTables && "animate-spin")}
             />
           </button>
-          <button
-            type="button"
-            class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
-            title="New table"
-            disabled={!connectionName}
-            onclick={onnewtable}
-          >
-            <Plus class="size-3.5" />
-          </button>
+          {#if supportsSchemas}
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger
+                class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                title="Create new…"
+                disabled={!connectionName}
+              >
+                <Plus class="size-3.5" />
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Content align="end" class="w-44 p-1 text-ui-sm">
+                <DropdownMenu.Item onSelect={onnewtable} class="gap-2">
+                  <Table2 class="size-3.5 shrink-0 text-muted-foreground" />
+                  New table
+                </DropdownMenu.Item>
+                <DropdownMenu.Item onSelect={onnewschema} class="gap-2">
+                  <Box class="size-3.5 shrink-0 text-muted-foreground" />
+                  New schema
+                </DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Root>
+          {:else}
+            <button
+              type="button"
+              class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+              title="New table"
+              disabled={!connectionName}
+              onclick={onnewtable}
+            >
+              <Plus class="size-3.5" />
+            </button>
+          {/if}
         </div>
 
         <div class="relative min-w-0 w-full">
@@ -935,7 +973,7 @@
                   {#if virtTopPad > 0}<li style="height:{virtTopPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
                   {#each filteredRegularTables.slice(virtStart, virtEnd) as table (table.name)}
                     {@const isSelected = selectedItems.has(table.name)}
-                    <li class="[content-visibility:auto] [contain-intrinsic-size:auto_28px]">
+                    <li>
                       <ContextMenu.Root>
                         <ContextMenu.Trigger class="w-full">
                           <button

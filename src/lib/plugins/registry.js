@@ -112,6 +112,17 @@ export function statsNeeded() {
   return STATS_EXTENSION_IDS.some((id) => isPluginEnabled(id))
 }
 
+/**
+ * Whether any formatter or linkifier is enabled. Lets the renderer skip the
+ * per-cell formatCellValue() loop entirely in the common case (no display
+ * extensions on) — zero added cost on the scroll hot path.
+ */
+export function anyDisplayExtEnabled() {
+  for (const ext of FORMATTERS) if (isPluginEnabled(ext.id)) return true
+  for (const ext of LINKIFIERS) if (isPluginEnabled(ext.id)) return true
+  return false
+}
+
 /** Whether the column annotator strip should render. */
 export function annotatorEnabled() {
   return isPluginEnabled('column-annotator')

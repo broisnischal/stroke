@@ -116,7 +116,7 @@
 <!-- Backdrop -->
 <!-- svelte-ignore a11y_interactive_supports_focus a11y_click_events_have_key_events -->
 <div
-  class="fixed inset-0 z-50 flex items-center justify-center bg-black/65 backdrop-blur-sm"
+  class="fixed inset-0 z-50 flex items-center justify-center bg-black/65"
   role="dialog"
   aria-modal="true"
   tabindex="-1"

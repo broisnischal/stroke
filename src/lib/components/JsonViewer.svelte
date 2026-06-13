@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import * as monaco from 'monaco-editor'
-  import { configureMonacoWorkers } from '$lib/monaco-env.js'
+  import { configureMonacoWorkers, monacoFontFamily } from '$lib/monaco-env.js'
   import { defineStrokeMonacoThemes, monacoThemeId, readEditorFontOptions } from '$lib/monaco-themes.js'
   import { normalizeThemeId } from '$lib/themes/registry.js'
   import Table2 from '@lucide/svelte/icons/table-2'
@@ -109,7 +109,7 @@
       readOnly: true,
       automaticLayout: true,
       minimap: { enabled: false },
-      fontFamily: '"Geist Mono Variable", ui-monospace, monospace',
+      fontFamily: monacoFontFamily(),
       fontSize,
       lineHeight,
       fontLigatures: false,
