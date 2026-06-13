@@ -618,11 +618,17 @@
   /** True when user has manually scrolled away from bottom during streaming */
   let userScrolledUp = $state(false);
 
+  let _scrollRafId = /** @type {number | null} */ (null)
+
   function onScrollAreaScroll() {
-    if (!scrollEl) return;
-    const distFromBottom =
-      scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
-    userScrolledUp = distFromBottom > 80;
+    if (_scrollRafId !== null) return
+    _scrollRafId = requestAnimationFrame(() => {
+      _scrollRafId = null
+      if (!scrollEl) return
+      const distFromBottom =
+        scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight
+      userScrolledUp = distFromBottom > 80
+    })
   }
 
   /** Scroll to bottom on the next animation frame (throttled; skipped if user scrolled up). */
@@ -2209,6 +2215,10 @@
       cancelAnimationFrame(rafId);
       rafId = null;
     }
+    if (_scrollRafId !== null) {
+      cancelAnimationFrame(_scrollRafId);
+      _scrollRafId = null;
+    }
     if (_streamTimer !== null) {
       clearTimeout(_streamTimer);
       _streamTimer = null;
@@ -2431,7 +2441,7 @@
     <div
       bind:this={scrollEl}
       onscroll={onScrollAreaScroll}
-      class="app-scroll min-h-0 flex-1 overflow-y-auto relative [will-change:transform] [overflow-anchor:none]"
+      class="app-scroll min-h-0 flex-1 overflow-y-auto relative [overflow-anchor:none]"
       onclick={undefined}
       role="region"
       aria-label="Chat messages"

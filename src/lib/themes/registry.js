@@ -4,7 +4,7 @@
 
 /** @typedef {{ id: ThemeId, name: string, description: string, isDark: boolean, group: ThemeGroup, preview: { bg: string, fg: string, accent: string } }} ThemeDefinition */
 
-export const DEFAULT_THEME_ID = /** @type {const} */ ('dark')
+export const DEFAULT_THEME_ID = /** @type {const} */ ('broisnees')
 
 /** @type {Record<ThemeGroup, string>} */
 export const THEME_GROUP_LABELS = {
