@@ -23,6 +23,7 @@
   import { toast } from 'svelte-sonner'
   import Sidebar from './Sidebar.svelte'
   import TabBar from './TabBar.svelte'
+  import TabLoading from './TabLoading.svelte'
   import TableToolbar from './TableToolbar.svelte'
   import StructureView from './StructureView.svelte'
   import DataTable from './DataTable.svelte'
@@ -89,6 +90,8 @@
     createOrmTab,
     createSecurityTab,
     createLogsTab,
+    createExtensionsTab,
+    findExtensionsTab,
     createJsonTab,
     createBackupTab,
     createChartsTab,
@@ -313,6 +316,7 @@
   let ormEverOpened = $state(false)
   let securityEverOpened = $state(false)
   let logsEverOpened = $state(false)
+  let extensionsEverOpened = $state(false)
   let jsonEverOpened = $state(false)
   let backupEverOpened = $state(false)
   let chartsEverOpened = $state(false)
@@ -337,6 +341,7 @@
     if (activeTab?.kind === 'orm') ormEverOpened = true
     if (activeTab?.kind === 'security') securityEverOpened = true
     if (activeTab?.kind === 'logs') logsEverOpened = true
+    if (activeTab?.kind === 'extensions') extensionsEverOpened = true
     if (activeTab?.kind === 'json') jsonEverOpened = true
     if (activeTab?.kind === 'backup') backupEverOpened = true
     if (activeTab?.kind === 'charts') chartsEverOpened = true
@@ -405,6 +410,12 @@
   let scrollTableTop = $state(() => {})
   /** @type {() => void} */
   let scrollTableBottom = $state(() => {})
+  // Read/restore the data grid's scroll so horizontal (+ vertical) position is
+  // preserved across tab switches.
+  /** @type {() => { left: number, top: number }} */
+  let tableGetScroll = $state(() => ({ left: 0, top: 0 }))
+  /** @type {(pos: { left?: number, top?: number }) => void} */
+  let tableApplyScroll = $state(() => {})
   /** @type {{ refresh: () => void } | null} */
   let securityPageRef = $state(null)
   /** @type {{ sendMessage: (text: string) => void } | null} */
@@ -715,6 +726,7 @@ let rowSearch = $state('')
       savingCell: false,
       hiddenColumns: new Set(hiddenColumns),
       filterBarOpen,
+      ...(() => { const s = tableGetScroll(); return { scrollLeft: s.left, scrollTop: s.top } })(),
     }
   }
 
@@ -741,6 +753,8 @@ let rowSearch = $state('')
     activeTable = s.table
     hiddenColumns = new Set(s.hiddenColumns)
     filterBarOpen = s.filterBarOpen ?? false
+    // Restore the grid scroll position for this tab (after layout settles).
+    tableApplyScroll({ left: s.scrollLeft ?? 0, top: s.scrollTop ?? 0 })
   }
 
   /** @returns {SqlTabState} */
@@ -975,6 +989,35 @@ let rowSearch = $state('')
     }
   })
 
+  // Table toolbar menus — open the Filter / Sort / Columns menu for the active
+  // table tab (data view only). Guarded so they don't fire while typing.
+  /** @param {KeyboardEvent} e */
+  function tableMenuHotkeyGuard(e) {
+    if (activeTab?.kind !== 'table' || tableViewMode !== 'data') return false
+    if (commandOpen || showConnectionModal || showSettingsModal) return false
+    const el = document.activeElement
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || (el instanceof HTMLElement && el.isContentEditable)) return false
+    return true
+  }
+
+  createHotkey('Alt+Shift+F', (e) => {
+    if (!tableMenuHotkeyGuard(e)) return
+    e.preventDefault()
+    tableToolbar?.openFilterMenu?.()
+  })
+
+  createHotkey('Alt+Shift+S', (e) => {
+    if (!tableMenuHotkeyGuard(e)) return
+    e.preventDefault()
+    tableToolbar?.openSortMenu?.()
+  })
+
+  createHotkey('Alt+Shift+C', (e) => {
+    if (!tableMenuHotkeyGuard(e)) return
+    e.preventDefault()
+    tableToolbar?.openColumnsMenu?.()
+  })
+
   createHotkey('Escape', (e) => {
     // Close dialogs in reverse z-index order (topmost first).
     // Each branch prevents lower-priority handlers from firing.
@@ -994,6 +1037,7 @@ let rowSearch = $state('')
       editingCell = null
       return
     }
+    if (filterBarOpen) { e.preventDefault(); filterBarOpen = false; return }
     if (!inspectorTarget) return
     e.preventDefault()
     closeInspector()
@@ -1377,6 +1421,20 @@ let rowSearch = $state('')
     saveActiveTabState()
     dropWelcomeTabs()
     const tab = createLogsTab()
+    tabs = [...tabs, tab]
+    activeTabId = tab.id
+    clearTableEditor()
+  }
+
+  function openExtensionsTab() {
+    const existing = findExtensionsTab(tabs)
+    if (existing) {
+      void activateTab(existing.id)
+      return
+    }
+    saveActiveTabState()
+    dropWelcomeTabs()
+    const tab = createExtensionsTab()
     tabs = [...tabs, tab]
     activeTabId = tab.id
     clearTableEditor()
@@ -2930,6 +2988,7 @@ let rowSearch = $state('')
   onopenmcp={() => (showMcpPanel = true)}
   onopenmodelconfiguration={() => (showAiModelSettings = true)}
   onopenabout={() => (showAboutModal = true)}
+  onopenextensions={() => openExtensionsTab()}
 />
 
 <AiSettingsDialog bind:open={showAiModelSettings} />
@@ -2973,6 +3032,7 @@ let rowSearch = $state('')
   onopenSchema={() => { if (aiMode) exitAiMode(); openSchemaTab() }}
   onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
   onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
+  onopenextensions={() => { if (aiMode) exitAiMode(); openExtensionsTab() }}
   {hasSchemaExplorer}
   {hasSecurity}
   onopenJsonViewer={() => { if (aiMode) exitAiMode(); openJsonTab() }}
@@ -3057,6 +3117,7 @@ let rowSearch = $state('')
         onqueryselect={(sql) => { if (aiMode) exitAiMode(); void openQueryInEditor(sql) }}
         onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
         onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
+        onopenextensions={() => { if (aiMode) exitAiMode(); openExtensionsTab() }}
         {connection}
         onswitchtodb={(dbName) => {
           if (!connection) return
@@ -3145,7 +3206,7 @@ let rowSearch = $state('')
           class={aiMode ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
           inert={!aiMode}
         >
-          {#await import('./AiChat.svelte') then { default: AiChat }}
+          {#await import('./AiChat.svelte')}<TabLoading />{:then { default: AiChat }}
             <AiChat
               schemaContext={{ ...aiSchemaContext, activeTable: null, columns: [], primaryKey: [], foreignKeys: [] }}
               {connectionId}
@@ -3220,7 +3281,7 @@ let rowSearch = $state('')
           inert={activeTab?.kind !== 'security' || undefined}
         >
           <svelte:boundary failed={tabError}>
-            {#await import('./SecurityPage.svelte') then { default: SecurityPage }}
+            {#await import('./SecurityPage.svelte')}<TabLoading />{:then { default: SecurityPage }}
               <SecurityPage bind:this={securityPageRef} active={activeTab?.kind === 'security'} />
             {/await}
           </svelte:boundary>
@@ -3251,6 +3312,20 @@ let rowSearch = $state('')
         </div>
       {/if}
 
+      <!-- Extensions tab - mount once, keep alive -->
+      {#if extensionsEverOpened}
+        <div
+          class={activeTab?.kind === 'extensions' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+          inert={activeTab?.kind !== 'extensions' || undefined}
+        >
+          <svelte:boundary failed={tabError}>
+            {#await import('./ExtensionsPage.svelte')}<TabLoading />{:then { default: ExtensionsPage }}
+              <ExtensionsPage />
+            {/await}
+          </svelte:boundary>
+        </div>
+      {/if}
+
       <!-- JSON Viewer tab - mount once, keep alive -->
       {#if jsonEverOpened}
         <div
@@ -3258,7 +3333,7 @@ let rowSearch = $state('')
           inert={activeTab?.kind !== 'json' || undefined}
         >
           <svelte:boundary failed={tabError}>
-            {#await import('./JsonViewerPage.svelte') then { default: JsonViewerPage }}
+            {#await import('./JsonViewerPage.svelte')}<TabLoading />{:then { default: JsonViewerPage }}
               <JsonViewerPage active={activeTab?.kind === 'json'} />
             {/await}
           </svelte:boundary>
@@ -3272,7 +3347,7 @@ let rowSearch = $state('')
           inert={activeTab?.kind !== 'charts' || undefined}
         >
           <svelte:boundary failed={tabError}>
-            {#await import('./ChartsPage.svelte') then { default: ChartsPage }}
+            {#await import('./ChartsPage.svelte')}<TabLoading />{:then { default: ChartsPage }}
               <ChartsPage
                 {connection}
                 onrunsql={(sql) => { if (aiMode) exitAiMode(); void openQueryInEditor(sql) }}
@@ -3289,7 +3364,7 @@ let rowSearch = $state('')
           inert={activeTab?.kind !== 'diagrams' || undefined}
         >
           <svelte:boundary failed={tabError}>
-            {#await import('./DiagramsPage.svelte') then { default: DiagramsPage }}
+            {#await import('./DiagramsPage.svelte')}<TabLoading />{:then { default: DiagramsPage }}
               <DiagramsPage {connection} />
             {/await}
           </svelte:boundary>
@@ -3303,7 +3378,7 @@ let rowSearch = $state('')
           inert={activeTab?.kind !== 'dashboard' || undefined}
         >
           <svelte:boundary failed={tabError}>
-            {#await import('./DashboardPage.svelte') then { default: DashboardPage }}
+            {#await import('./DashboardPage.svelte')}<TabLoading />{:then { default: DashboardPage }}
               <DashboardPage {connection} />
             {/await}
           </svelte:boundary>
@@ -3317,7 +3392,7 @@ let rowSearch = $state('')
           inert={activeTab?.kind !== 'erd' || undefined}
         >
           <svelte:boundary failed={tabError}>
-            {#await import('./EntityRelationPage.svelte') then { default: EntityRelationPage }}
+            {#await import('./EntityRelationPage.svelte')}<TabLoading />{:then { default: EntityRelationPage }}
               <EntityRelationPage
                 schema={activeSchema}
                 {schemas}
@@ -3355,8 +3430,9 @@ let rowSearch = $state('')
           inert={activeTab?.id !== nbTab.id || undefined}
         >
           <svelte:boundary failed={tabError}>
-            {#await import('./NotebookEditor.svelte') then { default: NotebookEditor }}
+            {#await import('./NotebookEditor.svelte')}<TabLoading />{:then { default: NotebookEditor }}
               <NotebookEditor
+                active={activeTab?.id === nbTab.id}
                 notebook={nbState.notebook}
                 filePath={nbState.filePath}
                 dirty={nbState.dirty}
@@ -3391,7 +3467,7 @@ let rowSearch = $state('')
           inert={activeTab?.kind !== 'data-diff' || undefined}
         >
           <svelte:boundary failed={tabError}>
-            {#await import('./DataDiffPage.svelte') then { default: DataDiffPage }}
+            {#await import('./DataDiffPage.svelte')}<TabLoading />{:then { default: DataDiffPage }}
               <DataDiffPage
                 {schemas}
                 {tables}
@@ -3411,7 +3487,7 @@ let rowSearch = $state('')
           inert={activeTab?.kind !== 'orm' || undefined}
         >
           <svelte:boundary failed={tabError}>
-          {#await import('./OrmRunner.svelte') then { default: OrmRunner }}
+          {#await import('./OrmRunner.svelte')}<TabLoading />{:then { default: OrmRunner }}
           <OrmRunner
             bind:code={ormCode}
             bind:mode={ormMode}
@@ -3443,9 +3519,10 @@ let rowSearch = $state('')
           inert={activeTab?.kind !== 'sql' || undefined}
         >
           <svelte:boundary failed={tabError}>
-          {#await import('./SqlConsole.svelte') then { default: SqlConsole }}
+          {#await import('./SqlConsole.svelte')}<TabLoading />{:then { default: SqlConsole }}
           <SqlConsole
             bind:this={sqlConsoleRef}
+            active={activeTab?.kind === 'sql'}
             bind:sql={sqlText}
             bind:queryHistoryVisible
             {queryHistory}
@@ -3630,6 +3707,8 @@ let rowSearch = $state('')
                 bind:resetEdits
                 bind:scrollToTop={scrollTableTop}
                 bind:scrollToBottom={scrollTableBottom}
+                bind:getScroll={tableGetScroll}
+                bind:applyScroll={tableApplyScroll}
                 {rowSort}
                 onsortchange={(s) => void handleRowSortChange(s)}
                 onhidecolumn={(colName) => {
@@ -3845,7 +3924,7 @@ let rowSearch = $state('')
       style={aiSidebarOpen && !aiMode ? '' : 'display:none'}
       inert={!aiSidebarOpen || aiMode || undefined}
     >
-      {#await import('./AiSidebar.svelte') then { default: AiSidebar }}
+      {#await import('./AiSidebar.svelte')}<TabLoading />{:then { default: AiSidebar }}
         <AiSidebar
           bind:this={aiSidebarRef}
           schemaContext={aiSchemaContext}
@@ -3891,6 +3970,7 @@ let rowSearch = $state('')
   onopenaimode={() => (aiMode ? exitAiMode() : enterAiMode())}
   onopenSchema={openSchemaTab}
   onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
+  onopenextensions={() => { if (aiMode) exitAiMode(); openExtensionsTab() }}
   onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
   onopenorm={openOrmTab}
         onopenbackup={openBackupTab}

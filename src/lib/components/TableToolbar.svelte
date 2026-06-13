@@ -2,6 +2,7 @@
   import LayoutList from "@lucide/svelte/icons/layout-list";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   import ListFilter from "@lucide/svelte/icons/list-filter";
   import ArrowUpDown from "@lucide/svelte/icons/arrow-up-down";
@@ -22,6 +23,7 @@
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
+  import SearchableMenu from "./SearchableMenu.svelte";
   import { cn } from "$lib/utils.js";
   import {
     FILTER_OPS,
@@ -173,6 +175,23 @@
     searchInputRef?.select();
   }
 
+  /** Open the Sort menu (hotkey from the parent). */
+  export function openSortMenu() {
+    if (columns.length) sortMenuOpen = true;
+  }
+  /** Open the Columns hide/show menu (hotkey from the parent). */
+  export function openColumnsMenu() {
+    if (columns.length) columnsMenuOpen = true;
+  }
+  /** Open the filter bar, seeding an empty filter row (hotkey from the parent). */
+  export function openFilterMenu() {
+    if (!columns.length) return;
+    if (!filterBarOpen) {
+      filterBarOpen = true;
+      if (rowFilters.length === 0) addFilter();
+    }
+  }
+
   /** Clear the row search and focus the input (Ctrl+T shortcut). */
   export function clearRowSearch() {
     clearSearch()
@@ -204,6 +223,58 @@
 
   const iconBtn =
     "inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30";
+
+  // ── Searchable-menu item lists ──────────────────────────────────────────
+  // Sort: two rows per column (ascending / descending), searchable by name.
+  const sortItems = $derived(
+    columns.flatMap((c) => [
+      { value: `${c.name} ascending`, label: c.name, col: c.name, dir: "asc", keywords: [c.name], active: rowSort?.column === c.name && rowSort?.direction === "asc" },
+      { value: `${c.name} descending`, label: c.name, col: c.name, dir: "desc", keywords: [c.name], active: rowSort?.column === c.name && rowSort?.direction === "desc" },
+    ]),
+  );
+
+  // Columns hide/show: real columns + virtual relationship columns.
+  const columnItems = $derived([
+    ...columns.map((c) => ({ value: c.name, label: c.name, kind: "col", hidden: hiddenColumns.has(c.name) })),
+    ...virtualRelColumns.map((vc) => ({ value: `__vrel:${vc.label}`, label: vc.label, kind: "vrel", hidden: hiddenColumns.has(`__vrel:${vc.label}`) })),
+  ]);
+
+  function toggleColumnItem(/** @type {any} */ it) {
+    if (it.kind === "vrel") {
+      const next = new Set(hiddenColumns);
+      if (next.has(it.value)) next.delete(it.value); else next.add(it.value);
+      onhiddencolumnschange(next);
+    } else {
+      toggleColumn(it.value);
+    }
+  }
+
+  function toggleAllColumns() {
+    if (hiddenCount > 0) {
+      showAllColumns();
+    } else {
+      onhiddencolumnschange(
+        new Set([
+          ...columns.slice(1).map((c) => c.name),
+          ...virtualRelColumns.map((vc) => `__vrel:${vc.label}`),
+        ]),
+      );
+    }
+  }
+
+  /** Filter-row column options: "Any column" + every column. */
+  const filterColumnItems = $derived([
+    { value: ANY_COLUMN, label: "Any column", keywords: ["any", "all"] },
+    ...columns.map((c) => ({ value: c.name, label: c.name })),
+  ]);
+
+  /** @param {{ id: string, column: string, op: string }} filter @param {string} v */
+  function pickFilterColumn(filter, v) {
+    if (!v) return;
+    const newOps = opsForCol(v);
+    const newOp = newOps.some((o) => o.value === filter.op) ? filter.op : defaultOpForCol(v);
+    patchFilter(filter.id, { column: v, op: /** @type {FilterOp} */ (newOp), value: "" });
+  }
 
   /** Matches the "more actions" / delete menu panel */
   const menuContent = "w-44 text-ui-sm";
@@ -421,136 +492,91 @@
       </button>
 
       <!-- Sort -->
-      <DropdownMenu.Root bind:open={sortMenuOpen}>
-        <DropdownMenu.Trigger
-          class={cn(
-            iconBtn,
-            "shrink-0",
-            (rowSort?.column || sortMenuOpen) && "bg-accent text-foreground",
-          )}
-          title={sortLabel}
-          disabled={loading || columns.length === 0}
-        >
-          <ArrowUpDown class="size-3.5" />
-        </DropdownMenu.Trigger>
-        <DropdownMenu.Content align="start" class={cn(menuContent, "max-h-64 overflow-y-auto")}>
-          <DropdownMenu.Label>Sort by</DropdownMenu.Label>
+      <SearchableMenu
+        bind:open={sortMenuOpen}
+        items={sortItems}
+        placeholder="Sort by column…"
+        contentClass="w-60"
+        onselect={(it) => applySort(it.col, it.dir)}
+      >
+        {#snippet trigger(props)}
+          <button
+            {...props}
+            class={cn(iconBtn, "shrink-0", (rowSort?.column || sortMenuOpen) && "bg-accent text-foreground")}
+            title={sortLabel}
+            disabled={loading || columns.length === 0}
+          >
+            <ArrowUpDown class="size-3.5" />
+          </button>
+        {/snippet}
+        {#snippet header()}
           {#if rowSort?.column}
-            <DropdownMenu.Item onSelect={clearSort}>
-              <X class="size-3.5" />
-              Clear sort
-            </DropdownMenu.Item>
-            <DropdownMenu.Separator />
+            <button
+              type="button"
+              class="flex w-full items-center gap-1.5 border-b border-border/40 px-3 py-1.5 text-left text-ui-xs text-muted-foreground transition-colors hover:text-foreground"
+              onclick={() => { clearSort(); sortMenuOpen = false; }}
+            >
+              <X class="size-3.5" /> Clear sort
+            </button>
           {/if}
-          {#each columns as col (col.name)}
-            <DropdownMenu.Sub>
-              <DropdownMenu.SubTrigger>
-                <span class="truncate">{col.name}</span>
-                {#if rowSort?.column === col.name}
-                  <span class="ml-auto text-muted-foreground">
-                    {rowSort.direction === "desc" ? "↓" : "↑"}
-                  </span>
-                {/if}
-              </DropdownMenu.SubTrigger>
-              <DropdownMenu.SubContent class={menuContent}>
-                <DropdownMenu.Item onSelect={() => applySort(col.name, "asc")}>
-                  <ArrowUp class="size-3.5" />
-                  Ascending
-                </DropdownMenu.Item>
-                <DropdownMenu.Item onSelect={() => applySort(col.name, "desc")}>
-                  <ArrowDown class="size-3.5" />
-                  Descending
-                </DropdownMenu.Item>
-              </DropdownMenu.SubContent>
-            </DropdownMenu.Sub>
-          {/each}
-        </DropdownMenu.Content>
-      </DropdownMenu.Root>
+        {/snippet}
+        {#snippet item(it)}
+          {#if it.dir === "asc"}<ArrowUp class="size-3.5 text-muted-foreground" />{:else}<ArrowDown class="size-3.5 text-muted-foreground" />{/if}
+          <span class="min-w-0 flex-1 truncate">{it.label}</span>
+          <span class="shrink-0 text-ui-3xs text-muted-foreground/60">{it.dir === "asc" ? "Asc" : "Desc"}</span>
+          {#if it.active}<span class="shrink-0 text-primary">✓</span>{/if}
+        {/snippet}
+      </SearchableMenu>
 
       <!-- Columns -->
-      <DropdownMenu.Root bind:open={columnsMenuOpen}>
-        <DropdownMenu.Trigger
-          class={cn(
-            iconBtn,
-            "relative shrink-0",
-            (hiddenCount > 0 || columnsMenuOpen) && "bg-accent text-foreground",
-          )}
-          title="Toggle columns"
-          disabled={loading || columns.length === 0}
-        >
-          <Columns3 class="size-3.5" />
-          {#if hiddenCount > 0}
-            <span
-              class="absolute -top-0.5 -right-0.5 flex size-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-0.5 text-ui-3xs font-medium text-primary-foreground"
-              aria-hidden="true"
-            >{hiddenCount}</span>
-          {/if}
-        </DropdownMenu.Trigger>
-        <DropdownMenu.Content align="start" class="w-36 rounded-sm p-0 text-ui-sm">
-          <div class="flex items-center justify-between border-b border-border px-2 py-1.5">
-            <p class="text-ui-xs font-medium text-foreground">Columns</p>
+      <SearchableMenu
+        bind:open={columnsMenuOpen}
+        items={columnItems}
+        placeholder="Search columns…"
+        contentClass="w-56"
+        closeOnSelect={false}
+        onselect={toggleColumnItem}
+      >
+        {#snippet trigger(props)}
+          <button
+            {...props}
+            class={cn(iconBtn, "relative shrink-0", (hiddenCount > 0 || columnsMenuOpen) && "bg-accent text-foreground")}
+            title="Toggle columns"
+            disabled={loading || columns.length === 0}
+          >
+            <Columns3 class="size-3.5" />
+            {#if hiddenCount > 0}
+              <span
+                class="absolute -top-0.5 -right-0.5 flex size-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-0.5 text-ui-3xs font-medium text-primary-foreground"
+                aria-hidden="true"
+              >{hiddenCount}</span>
+            {/if}
+          </button>
+        {/snippet}
+        {#snippet header()}
+          <div class="flex items-center justify-between border-b border-border/40 px-3 py-1.5">
+            <span class="text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground">Columns</span>
             <button
               type="button"
               class="text-ui-2xs text-muted-foreground transition-colors hover:text-foreground"
-              onclick={() => {
-                if (hiddenCount > 0) {
-                  showAllColumns();
-                } else {
-                  onhiddencolumnschange(
-                    new Set([
-                      ...columns.slice(1).map((c) => c.name),
-                      ...virtualRelColumns.map((vc) => `__vrel:${vc.label}`),
-                    ]),
-                  );
-                }
-              }}
+              onclick={toggleAllColumns}
             >
-              {hiddenCount > 0 ? "Show" : "Hide"}
+              {hiddenCount > 0 ? "Show all" : "Hide all"}
             </button>
           </div>
-          <div class="max-h-48 overflow-y-auto p-0.5">
-            {#each columns as col (col.name)}
-              {@const hidden = hiddenColumns.has(col.name)}
-              <button
-                type="button"
-                class="flex w-full items-center gap-1.5 rounded-[2px] px-1.5 py-1 text-left text-ui-xs hover:bg-accent hover:text-foreground"
-                onclick={() => toggleColumn(col.name)}
-              >
-                {#if hidden}
-                  <EyeOff class="size-3 shrink-0 text-muted-foreground" />
-                {:else}
-                  <Eye class="size-3 shrink-0" />
-                {/if}
-                <span class={cn("truncate", hidden && "text-muted-foreground")}>{col.name}</span>
-              </button>
-            {/each}
-            {#if virtualRelColumns.length > 0}
-              <div class="my-0.5 h-px bg-border/30"></div>
-              {#each virtualRelColumns as vc (vc.label)}
-                {@const vcKey = `__vrel:${vc.label}`}
-                {@const hidden = hiddenColumns.has(vcKey)}
-                <button
-                  type="button"
-                  class="flex w-full items-center gap-1.5 rounded-[2px] px-1.5 py-1 text-left text-ui-xs hover:bg-accent hover:text-foreground"
-                  onclick={() => {
-                    const next = new Set(hiddenColumns);
-                    if (next.has(vcKey)) next.delete(vcKey); else next.add(vcKey);
-                    onhiddencolumnschange(next);
-                  }}
-                >
-                  {#if hidden}
-                    <EyeOff class="size-3 shrink-0 text-muted-foreground" />
-                  {:else}
-                    <Link2 class="size-3 shrink-0 text-primary/60" />
-                  {/if}
-                  <span class={cn("truncate", hidden && "text-muted-foreground")}>{vc.label}</span>
-                  <span class={cn("ml-auto shrink-0 text-ui-2xs", hidden ? "text-muted-foreground/20" : "text-muted-foreground/35")}>rel</span>
-                </button>
-              {/each}
-            {/if}
-          </div>
-        </DropdownMenu.Content>
-      </DropdownMenu.Root>
+        {/snippet}
+        {#snippet item(it)}
+          {#if it.hidden}
+            <EyeOff class="size-3.5 text-muted-foreground" />
+          {:else if it.kind === "vrel"}
+            <Link2 class="size-3.5 text-primary/60" />
+          {:else}
+            <Eye class="size-3.5" />
+          {/if}
+          <span class={cn("min-w-0 flex-1 truncate", it.hidden && "text-muted-foreground")}>{it.label}</span>
+          {#if it.kind === "vrel"}<span class="shrink-0 text-ui-3xs text-muted-foreground/40">rel</span>{/if}
+        {/snippet}
+      </SearchableMenu>
 
       <span class="mx-0.5 h-4 w-px shrink-0 bg-border/60"></span>
 
@@ -846,41 +872,30 @@
               {filter.conjunct === "or" ? "or" : "and"}
             </button>
           {/if}
-          <Select.Root
-            type="single"
-            value={filter.column}
-            onValueChange={(v) => {
-              if (!v) return;
-              const newOps = opsForCol(v);
-              const newOp = newOps.some((o) => o.value === filter.op)
-                ? filter.op
-                : defaultOpForCol(v);
-              patchFilter(filter.id, {
-                column: v,
-                op: /** @type {FilterOp} */ (newOp),
-                value: "",
-              });
-            }}
+          <SearchableMenu
+            items={filterColumnItems}
+            placeholder="Search columns…"
+            contentClass="w-52"
+            onselect={(it) => pickFilterColumn(filter, it.value)}
           >
-            <Select.Trigger
-              size="sm"
-              class="h-7 w-32 shrink-0 gap-1 px-2 text-ui-sm font-normal shadow-none"
-              title="Column"
-            >
-              <span class="truncate">
-                {filter.column === ANY_COLUMN
-                  ? "Any column"
-                  : filter.column || "Column"}
-              </span>
-            </Select.Trigger>
-            <Select.Content class="max-h-56">
-              <Select.Item value={ANY_COLUMN} label="Any column" />
-              <Select.Separator />
-              {#each columns as col (col.name)}
-                <Select.Item value={col.name} label={col.name} />
-              {/each}
-            </Select.Content>
-          </Select.Root>
+            {#snippet trigger(props)}
+              <button
+                {...props}
+                type="button"
+                class="inline-flex h-7 w-32 shrink-0 items-center gap-1 rounded-md border border-border/60 bg-transparent px-2 text-ui-sm font-normal text-foreground shadow-none transition-colors hover:bg-accent"
+                title="Column"
+              >
+                <span class="min-w-0 flex-1 truncate text-left">
+                  {filter.column === ANY_COLUMN ? "Any column" : filter.column || "Column"}
+                </span>
+                <ChevronDown class="size-3 shrink-0 opacity-50" />
+              </button>
+            {/snippet}
+            {#snippet item(it)}
+              <span class="min-w-0 flex-1 truncate">{it.label}</span>
+              {#if filter.column === it.value}<span class="shrink-0 text-primary">✓</span>{/if}
+            {/snippet}
+          </SearchableMenu>
           <Select.Root
             type="single"
             value={filter.op}

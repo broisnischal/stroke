@@ -72,6 +72,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     nowTimeOnly,
   } from "$lib/insert-field.js";
   import { cellLinkHref, cellUrlType } from "$lib/cell-display.js";
+  import { formatCellValue, transformsFor, enabledGenerators, linkifyValue, statsNeeded, annotatorEnabled } from "$lib/plugins/registry.js";
+  import { pluginState } from "$lib/stores/plugins.js";
+  import Wand2 from "@lucide/svelte/icons/wand-2";
+  import Sparkles from "@lucide/svelte/icons/sparkles";
   import MediaLightbox from "./MediaLightbox.svelte";
   import RowExpandViewer from "./RowExpandViewer.svelte";
   import FkSubviewPanel from "./FkSubviewPanel.svelte";
@@ -158,6 +162,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
      *  table to the top / bottom. */
     scrollToTop = $bindable(/** @type {() => void} */ (() => {})),
     scrollToBottom = $bindable(/** @type {() => void} */ (() => {})),
+    /** Assigned by this component so the parent can persist/restore scroll per
+     *  tab. getScroll() reads the live position; applyScroll() restores it once
+     *  layout settles. */
+    getScroll = $bindable(/** @type {() => { left: number, top: number }} */ (() => ({ left: 0, top: 0 }))),
+    applyScroll = $bindable(/** @type {(pos: { left?: number, top?: number }) => void} */ (() => {})),
     /** Called when user picks "Filter by this column" from the column header context menu. */
     onfiltercolumn = /** @type {(colName: string) => void} */ (() => {}),
     /** Called when user right-clicks a cell and picks "Filter by value" or "Exclude value". */
@@ -408,6 +417,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     rows[contextRowIdx]?.[contextColIdx] === null ||
       rows[contextRowIdx]?.[contextColIdx] === undefined,
   );
+  // Extension-provided transforms applicable to the right-clicked cell.
+  const menuTransforms = $derived.by(() => {
+    void $pluginState;
+    const v = rows[contextRowIdx]?.[contextColIdx];
+    if (v === null || v === undefined) return [];
+    return transformsFor(v, _colCache[contextColIdx]?.colType ?? "", menuColName);
+  });
+  // Value generators (UUIDv7, nanoid, …) offered when the cell is editable.
+  const menuGenerators = $derived.by(() => {
+    void $pluginState;
+    return enabledGenerators();
+  });
 
   const CELL_DISPLAY_LIMIT = 400
 
@@ -433,6 +454,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const s = formatCell(value);
     return s.length > CELL_DISPLAY_LIMIT ? s.slice(0, CELL_DISPLAY_LIMIT) + "…" : s;
   }
+
+  // Repaint when extension settings or column stats change — both affect drawn
+  // cell text, badges, tints, and the header annotator strip.
+  $effect(() => { void $pluginState; void _colStats; scheduleDraw(); });
 
   function focusRow(rowIdx) {
     if (editingCell) return;
@@ -788,6 +813,20 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   $effect(() => {
     scrollToTop = () => tableContainer?.scrollTo({ top: 0 });
     scrollToBottom = () => { if (tableContainer) tableContainer.scrollTo({ top: tableContainer.scrollHeight }); };
+    getScroll = () => ({ left: _scrollLeft, top: _scrollTop });
+    applyScroll = (pos) => {
+      // Wait for the new tab's columns/rows to lay out (spacer width) before
+      // setting scroll — otherwise the container clamps to 0.
+      tick().then(() => requestAnimationFrame(() => {
+        const el = tableContainer;
+        if (!el) return;
+        el.scrollLeft = Math.max(0, pos.left ?? 0);
+        el.scrollTop = Math.max(0, pos.top ?? 0);
+        _scrollLeft = el.scrollLeft;
+        _scrollTop = el.scrollTop;
+        scheduleDraw();
+      }));
+    };
   });
 
   // Surface beginInsertRow to the parent (→ toolbar Add Row button).
@@ -991,6 +1030,30 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const prevValue = effectiveCellValue(rowIdx, colIdx);
     stageEdit(rowIdx, colIdx, null);
     pastEdits = [...pastEdits.slice(-49), { rowIdx, colIdx, oldValue: prevValue, newValue: null }];
+    futureEdits = [];
+  }
+
+  /** Run an extension transform on a cell and copy the result to the clipboard. */
+  async function runCellTransform(rowIdx, colIdx, transform) {
+    const value = effectiveCellValue(rowIdx, colIdx);
+    try {
+      const out = transform.run(value);
+      await navigator.clipboard.writeText(out);
+      toast.success(`${transform.label} — copied`, {
+        description: out.length > 120 ? out.slice(0, 120) + "…" : out,
+      });
+    } catch (e) {
+      toast.error("Transform failed", { description: String(e?.message ?? e) });
+    }
+  }
+
+  /** Stage a generated value (UUIDv7, nanoid, …) into an editable cell. */
+  function insertGeneratedValue(rowIdx, colIdx, generator) {
+    if (!canEditColumn(colIdx)) return;
+    const prevValue = effectiveCellValue(rowIdx, colIdx);
+    const next = generator.generate();
+    stageEdit(rowIdx, colIdx, next);
+    pastEdits = [...pastEdits.slice(-49), { rowIdx, colIdx, oldValue: prevValue, newValue: next }];
     futureEdits = [];
   }
 
@@ -1382,6 +1445,49 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     fk: fkByColumn[col?.name ?? ''] ?? null,
   })))
 
+  // Per-column numeric stats for heatmap + annotator extensions. Computed once
+  // per data/settings change (NOT per render), sampled to bound cost on big
+  // infinite-scroll result sets. Returns null when no stats-dependent extension
+  // is enabled, so the scan is skipped entirely in the common case.
+  const STATS_SAMPLE = 5000
+  const STATS_BUCKETS = 24
+  const _statsNumericRe = /(int|numeric|decimal|real|double|float|money|number|serial)/i
+  const _colStats = $derived.by(() => {
+    void $pluginState
+    if (!statsNeeded() && !annotatorEnabled()) return null
+    const wantHist = annotatorEnabled()
+    const n = Math.min(rows.length, STATS_SAMPLE)
+    /** @type {Map<number, { numeric: boolean, min: number, max: number, nulls: number, total: number, hist: number[] | null }>} */
+    const map = new Map()
+    for (let a = 0; a < columns.length; a++) {
+      const numeric = _statsNumericRe.test(String(columns[a]?.dataType ?? columns[a]?.data_type ?? ''))
+      let min = Infinity, max = -Infinity, nulls = 0
+      for (let r = 0; r < n; r++) {
+        const v = rows[r]?.[a]
+        if (v === null || v === undefined) { nulls++; continue }
+        if (numeric) {
+          const num = typeof v === 'number' ? v : Number(v)
+          if (Number.isFinite(num)) { if (num < min) min = num; if (num > max) max = num }
+        }
+      }
+      let hist = null
+      if (wantHist && numeric && max > min) {
+        hist = new Array(STATS_BUCKETS).fill(0)
+        const span = max - min
+        for (let r = 0; r < n; r++) {
+          const v = rows[r]?.[a]
+          if (v === null || v === undefined) continue
+          const num = typeof v === 'number' ? v : Number(v)
+          if (!Number.isFinite(num)) continue
+          const b = Math.min(STATS_BUCKETS - 1, Math.floor(((num - min) / span) * STATS_BUCKETS))
+          hist[b]++
+        }
+      }
+      map.set(a, { numeric, min: numeric ? min : NaN, max: numeric ? max : NaN, nulls, total: n, hist })
+    }
+    return map
+  })
+
   const colMeta = $derived.by(() => {
     /** @type {Map<string, { pk: boolean, fk: boolean, indexed: boolean, unique: boolean, nullable: boolean }>} */
     const map = new Map()
@@ -1696,6 +1802,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (!probe || typeof MutationObserver === 'undefined') return
     const mo = new MutationObserver(() => {
       _readColor = createColorReader(probe)
+      _fonts = null // font family may have changed (--font-mono) — re-measure
       _redrawToken++
     })
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] })
@@ -2172,11 +2279,19 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const activeFk = fk && !isNull
     const isFocusedCell = focusedRow === idx && c.navName === col.name && !editing
 
+    // Extension render directive (badges, tints, masks, links, swatches, …).
+    // Computed once per cell and merged across enabled formatters; null/JSON
+    // cells skip it entirely so the common path allocates nothing.
+    const dir = (!isNull && !isJson)
+      ? formatCellValue(value, cached?.colType ?? '', col.name, _colStats ? { stats: _colStats.get(actualIdx) } : undefined)
+      : null
+
     // Cell background tints.
     if (!editing) {
       if (isDirty) { ctx.fillStyle = withAlpha(c.AMBER, 0.15); ctx.fillRect(cellX, ry, w, rh) }
       else if (activeFk) { ctx.fillStyle = withAlpha(c.cAccent, 0.15); ctx.fillRect(cellX, ry, w, rh) }
       else if (isFocusedCell) { ctx.fillStyle = withAlpha(c.cPrimary, 0.08); ctx.fillRect(cellX, ry, w, rh) }
+      else if (dir?.bgTint) { ctx.fillStyle = dir.bgTint; ctx.fillRect(cellX, ry, w, rh) }
     } else {
       // Active edit cell — overlay input covers it; leave panel + ring.
       ctx.strokeStyle = c.cPrimary
@@ -2194,30 +2309,86 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
     if (editing) return // text drawn by the DOM overlay
 
-    // Text.
-    const textColor = isFocusedCell || isDirty || activeFk ? c.cFg
-      : isNull ? c.cMuted
-      : c.cText
-    const text = displayCell(value)
     const rowHover = hoveredRow === idx
     const isHover = rowHover && hoveredColName === col.name
     const canExpand = (cached?.canEdit ?? false) && !cached?.enumValues && !isBooleanType(cached?.colType ?? '')
+    const cy = ry + rh / 2
+
+    // Cell text — directive display wins; masked cells reveal on hover.
+    const revealed = dir?.mask && isHover
+    const text = dir
+      ? String(revealed ? (dir.reveal ?? dir.display) : (dir.display ?? displayCell(value)))
+      : displayCell(value)
+
+    // Text color — directive link/fg may override (but never over a stronger
+    // dirty/fk/focused state highlight).
+    let textColor = isFocusedCell || isDirty || activeFk ? c.cFg
+      : isNull ? c.cMuted
+      : c.cText
+    if (dir?.link) textColor = c.cAccent
+    else if (dir?.fg && !isFocusedCell && !isDirty && !activeFk) textColor = dir.fg
 
     // Right-side content widths (sequential, no overlap).
+    const warnW = dir?.warn ? Math.round(14 * canvasZoom) : 0
     const hoverW = isHover ? ICON_HIT + (canExpand ? ICON_HIT : 0) : 0
     const fkW = (activeFk && rowHover) ? 20 : 0
     const jsonW = isJson ? Math.round(36 * canvasZoom) : 0
-    const rightReserve = 4 + hoverW + fkW + jsonW  // 4 = right margin
-    const textMaxW = w - CELL_PAD_X * 2 - rightReserve
+    const rightReserve = 4 + hoverW + fkW + jsonW + warnW  // 4 = right margin
+
+    // Left-side decorations (color swatch / boolean dot) push the text right.
+    let textX = cellX + CELL_PAD_X
+    let leftPad = 0
+    if (dir?.swatch) {
+      const sw = Math.round(11 * canvasZoom)
+      roundRect(ctx, textX, cy - sw / 2, sw, sw, Math.round(2.5 * canvasZoom))
+      ctx.fillStyle = dir.swatch; ctx.fill()
+      ctx.strokeStyle = withAlpha(c.cBorder, 0.6); ctx.lineWidth = 1
+      roundRect(ctx, textX, cy - sw / 2, sw, sw, Math.round(2.5 * canvasZoom)); ctx.stroke()
+      leftPad = sw + Math.round(7 * canvasZoom)
+    } else if (dir?.dot) {
+      const dr = Math.round(7 * canvasZoom)
+      ctx.fillStyle = dir.dot
+      ctx.beginPath(); ctx.arc(textX + dr / 2, cy, dr / 2, 0, Math.PI * 2); ctx.fill()
+      leftPad = dr + Math.round(7 * canvasZoom)
+    }
+    textX += leftPad
+    const textMaxW = w - CELL_PAD_X - leftPad - rightReserve
 
     ctx.font = _fonts.cell
-    ctx.fillStyle = textColor
     ctx.textAlign = 'left'
-    ctx.fillText(truncText(ctx, text, Math.max(0, textMaxW)), cellX + CELL_PAD_X, ry + rh / 2 + 0.5)
+    if (dir?.badge) {
+      // Status pill — label inside a rounded, tinted capsule.
+      const padX = Math.round(7 * canvasZoom)
+      const label = truncText(ctx, text, Math.max(0, textMaxW - padX * 2))
+      const pillH = Math.min(rh - Math.round(6 * canvasZoom), Math.round(17 * canvasZoom))
+      const pillW = Math.min(Math.max(0, textMaxW), textWidth(ctx, label) + padX * 2)
+      const py = ry + (rh - pillH) / 2
+      roundRect(ctx, textX, py, pillW, pillH, pillH / 2)
+      ctx.fillStyle = dir.badge.bg; ctx.fill()
+      ctx.fillStyle = dir.badge.fg
+      ctx.fillText(label, textX + padX, cy + 0.5)
+    } else {
+      const drawn = truncText(ctx, text, Math.max(0, textMaxW))
+      ctx.fillStyle = textColor
+      ctx.fillText(drawn, textX, cy + 0.5)
+      if (dir?.link) {
+        const uy = cy + Math.round(7 * canvasZoom)
+        const uw = Math.min(textWidth(ctx, drawn), Math.max(0, textMaxW))
+        ctx.strokeStyle = withAlpha(textColor, 0.5); ctx.lineWidth = 1
+        ctx.beginPath(); ctx.moveTo(textX, uy); ctx.lineTo(textX + uw, uy); ctx.stroke()
+      }
+    }
 
     // Draw right-side items right-to-left with a running cursor.
-    const cy = ry + rh / 2
     let rx = cellX + w - 4  // 4px right margin
+
+    // 0. Validation warning marker (amber dot).
+    if (dir?.warn) {
+      const wr = Math.round(4 * canvasZoom)
+      ctx.fillStyle = withAlpha(c.AMBER, 0.95)
+      ctx.beginPath(); ctx.arc(rx - wr, cy, wr, 0, Math.PI * 2); ctx.fill()
+      rx -= warnW
+    }
 
     // 1. Hover buttons (rightmost when hovering the cell).
     if (isHover) {
@@ -2436,6 +2607,34 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       drawIcon(ctx, iconName, sortX, sortY, SORT_ICON, withAlpha(c.cPrimary, 0.95), 1.7)
     } else if (_resizeHoverCol !== col.name && hoveredColName === col.name && hoveredRow === null) {
       drawIcon(ctx, 'chevrons-up-down', sortX, sortY, SORT_ICON, withAlpha(c.cMuted, 0.55), 1.6)
+    }
+
+    // Column annotator strip — mini histogram (numeric) or non-null fill bar.
+    if (_colStats && annotatorEnabled()) {
+      const st = _colStats.get(_nameToActualIdx.get(col.name) ?? -1)
+      const stripH = Math.round(6 * canvasZoom)
+      const sx = x + 4, sw = w - 8
+      const sy = HEADER_H - stripH - 1
+      if (st && sw > 8) {
+        if (st.numeric && st.hist && st.max > st.min) {
+          let maxCount = 0
+          for (let i = 0; i < st.hist.length; i++) if (st.hist[i] > maxCount) maxCount = st.hist[i]
+          if (maxCount > 0) {
+            const bw = sw / st.hist.length
+            ctx.fillStyle = withAlpha(c.cPrimary, 0.5)
+            for (let i = 0; i < st.hist.length; i++) {
+              if (!st.hist[i]) continue
+              const bh = Math.max(1, (st.hist[i] / maxCount) * stripH)
+              ctx.fillRect(sx + i * bw, sy + (stripH - bh), Math.max(1, bw - 1), bh)
+            }
+          }
+        } else if (st.total > 0) {
+          const ratio = (st.total - st.nulls) / st.total
+          const barY = sy + stripH - 2
+          ctx.fillStyle = withAlpha(c.cMutedBg, 0.5); ctx.fillRect(sx, barY, sw, 2)
+          ctx.fillStyle = withAlpha(c.cPrimary, 0.45); ctx.fillRect(sx, barY, sw * ratio, 2)
+        }
+      }
     }
 
     // Resize-edge affordance.
@@ -2668,6 +2867,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             else if (ut === 'image' || ut === 'pdf') { lightboxUrl = href; lightboxType = /** @type {'image'|'pdf'} */ (ut) }
             else void openExternal(href)
             return
+          }
+          // Linkifier extension → deep-link an ID to an external system.
+          if (!isNull) {
+            const linked = linkifyValue(value, cached?.colType ?? '', t.col.name)
+            if (linked) { void openExternal(linked); return }
           }
         }
         tableContainer?.focus({ preventScroll: true })
@@ -3349,6 +3553,40 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             <Braces />
             {isRowExpanded(contextRowIdx) ? "Collapse row JSON" : "Expand"}
           </ContextMenu.Item>
+        {/if}
+        {#if menuTransforms.length > 0}
+          <ContextMenu.Separator />
+          <ContextMenu.Sub>
+            <ContextMenu.SubTrigger>
+              <Wand2 />
+              Transform
+            </ContextMenu.SubTrigger>
+            <ContextMenu.SubContent class="w-48 [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+              {#each menuTransforms as t (t.id)}
+                <ContextMenu.Item onSelect={() => runMenuAction(() => runCellTransform(contextRowIdx, contextColIdx, t))}>
+                  <Wand2 />
+                  {t.label}
+                </ContextMenu.Item>
+              {/each}
+            </ContextMenu.SubContent>
+          </ContextMenu.Sub>
+        {/if}
+        {#if menuGenerators.length > 0 && menuEditable && !readonly}
+          {#if menuTransforms.length === 0}<ContextMenu.Separator />{/if}
+          <ContextMenu.Sub>
+            <ContextMenu.SubTrigger>
+              <Sparkles />
+              Insert generated value
+            </ContextMenu.SubTrigger>
+            <ContextMenu.SubContent class="w-48 [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+              {#each menuGenerators as g (g.id)}
+                <ContextMenu.Item onSelect={() => runMenuAction(() => insertGeneratedValue(contextRowIdx, contextColIdx, g))}>
+                  <Sparkles />
+                  {g.label}
+                </ContextMenu.Item>
+              {/each}
+            </ContextMenu.SubContent>
+          </ContextMenu.Sub>
         {/if}
         <ContextMenu.Separator />
         <ContextMenu.Sub>

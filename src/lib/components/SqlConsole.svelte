@@ -45,6 +45,8 @@
   /** @typedef {import('$lib/monaco-sql-complete.js').SqlSchemaHints} SqlSchemaHints */
 
   let {
+    /** Whether the SQL tab is the active/visible tab — gates global hotkeys. */
+    active = true,
     sql = $bindable("SELECT 1;"),
     columns = [],
     rows = [],
@@ -315,6 +317,9 @@
   $effect(() => {
     /** @param {KeyboardEvent} e */
     function onKey(e) {
+      // SqlConsole stays mounted (keep-alive) on other tabs; only handle these
+      // window-level shortcuts when the SQL tab is actually visible.
+      if (!active) return
       const mod = e.metaKey || e.ctrlKey
       if (!mod || e.altKey) return
       if (e.key === 'j' && !e.shiftKey) {
