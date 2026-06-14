@@ -70,6 +70,8 @@
     listSchemas,
     listTables,
     getTableRows,
+    liveStart,
+    liveStop,
     getTableColumnStructure,
     getIncomingForeignKeys,
     executeSql,
@@ -301,6 +303,63 @@
   const activeTableTriggers = $derived(activeTable ? triggers.filter((t) => t.tableName === activeTable) : [])
   let tableFilter = $state('')
   let loadingTables = $state(false)
+
+  // ── Live mode ─────────────────────────────────────────────────────────────
+  // Auto-refresh the active table when its data changes. The backend polls a
+  // cheap change signal (Postgres pg_stat counters / SQLite data_version). Off by
+  // default; per-session, applies to the active table tab.
+  let liveEnabled = $state(false)
+  const liveSupported = $derived(connection?.type === 'postgres' || connection?.type === 'sqlite')
+  // Stable identity of what should be watched — only changes when the target
+  // table changes, so row refetches (which replace the tab object) don't churn it.
+  const liveTableKey = $derived.by(() => {
+    if (!liveEnabled || !liveSupported) return ''
+    const t = activeTab
+    if (t?.kind !== 'table') return ''
+    const s = /** @type {TableTabState} */ (t.state)
+    return s?.table ? JSON.stringify([s.schema, s.table]) : ''
+  })
+  let _liveRefetchTimer = /** @type {ReturnType<typeof setTimeout> | null} */ (null)
+
+  // Start/stop the backend watcher whenever the watched table (or toggle) changes.
+  $effect(() => {
+    const key = liveTableKey
+    if (!key) { void liveStop().catch(() => {}); return }
+    const [schema, table] = JSON.parse(key)
+    void liveStart(schema, table).catch((e) => {
+      liveEnabled = false
+      toast.error(`Live mode unavailable: ${String(e)}`)
+    })
+  })
+
+  // Auto-disable when the connection can't support live mode (switched to MySQL,
+  // disconnected, etc.) so the toggle never lingers in an impossible state.
+  $effect(() => { if (!liveSupported && liveEnabled) liveEnabled = false })
+
+  /** Refetch the active table (throttled) when the backend reports a change. */
+  function onLiveChange(/** @type {{ schema: string, table: string } | undefined} */ payload) {
+    if (!liveEnabled || !payload) return
+    if (typeof document !== 'undefined' && document.hidden) return
+    const t = activeTab
+    if (t?.kind !== 'table') return
+    const s = /** @type {TableTabState} */ (t.state)
+    if (!s || s.schema !== payload.schema || s.table !== payload.table) return
+    if (editingCell) return // never clobber an in-progress edit
+    if (_liveRefetchTimer) return // coalesce bursts
+    _liveRefetchTimer = setTimeout(() => {
+      _liveRefetchTimer = null
+      if (liveEnabled && activeTabId && !editingCell) void fetchRowsForTab(activeTabId)
+    }, 350)
+  }
+
+  onMount(() => {
+    let unlisten = () => {}
+    void (async () => {
+      const { listen } = await import('@tauri-apps/api/event')
+      unlisten = await listen('live-change', (e) => onLiveChange(/** @type {any} */ (e.payload)))
+    })()
+    return () => { unlisten(); if (_liveRefetchTimer) clearTimeout(_liveRefetchTimer) }
+  })
 
   // AI Mode — full-screen chat, hides sidebar and tabs
   function loadAiMode() { try { return localStorage.getItem('stroke:ai-mode') === '1' } catch { return false } }
@@ -3745,6 +3804,7 @@ let rowSearch = $state('')
             onlimitoffsetchange={(l, o) => void handleLimitOffsetChange(l, o)}
             {infiniteScroll}
             oninfinitescrolltoggle={toggleInfiniteScroll}
+            live={liveEnabled}
             ondeleteselected={() => void deleteSelectedRows()}
             onexport={handleExport}
             onaddrow={() => dtBeginInsertRow?.()}
@@ -4053,6 +4113,9 @@ let rowSearch = $state('')
   showTableNav={activeTab?.kind === 'table'}
   onscrolltabletop={() => scrollTableTop()}
   onscrolltablebottom={() => scrollTableBottom()}
+  live={liveEnabled}
+  {liveSupported}
+  ontogglelive={() => { liveEnabled = !liveEnabled }}
   onswitchconnection={handleSwitchDatabase}
   {mcpRunning}
   hasUpdate={statusBarHasUpdate}

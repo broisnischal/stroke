@@ -246,13 +246,39 @@ pub async fn connect_mssql_db(state: State<'_, DbState>, config: MssqlConfig) ->
     connect_mssql(state, config).await
 }
 
+// ── Live mode ─────────────────────────────────────────────────────────────────
+
+use crate::db::live::{self, LiveState};
+
+/// Start pushing change notifications for `schema.table` (Postgres / SQLite only).
+#[tauri::command]
+pub async fn live_start(
+    app: tauri::AppHandle,
+    state: State<'_, DbState>,
+    live_state: State<'_, LiveState>,
+    schema: String,
+    table: String,
+) -> Result<(), String> {
+    let conn = require_conn(&state)?;
+    live::start(app, conn, &live_state, schema, table)
+}
+
+/// Stop live mode.
+#[tauri::command]
+pub async fn live_stop(live_state: State<'_, LiveState>) -> Result<(), String> {
+    live::stop(&live_state);
+    Ok(())
+}
+
 // ── Shared disconnect ────────────────────────────────────────────────────────
 
 #[tauri::command]
 pub async fn disconnect_postgres(
     state: State<'_, DbState>,
     tunnel_state: State<'_, TunnelState>,
+    live_state: State<'_, LiveState>,
 ) -> Result<(), String> {
+    live::stop(&live_state);
     disconnect(state, tunnel_state).await
 }
 

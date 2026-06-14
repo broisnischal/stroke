@@ -9,6 +9,7 @@
   import Settings2    from '@lucide/svelte/icons/settings-2'
   import ChevronDown  from '@lucide/svelte/icons/chevron-down'
   import RefreshCw    from '@lucide/svelte/icons/refresh-cw'
+  import Radio        from '@lucide/svelte/icons/radio'
   import Check        from '@lucide/svelte/icons/check'
   import Table2       from '@lucide/svelte/icons/table-2'
   import Terminal     from '@lucide/svelte/icons/terminal'
@@ -76,6 +77,10 @@
     showTableNav = false,
     onscrolltabletop = /** @type {() => void} */ (() => {}),
     onscrolltablebottom = /** @type {() => void} */ (() => {}),
+    /** Live mode (auto-refresh active table) — Postgres/SQLite only. */
+    live = false,
+    liveSupported = false,
+    ontogglelive = /** @type {() => void} */ (() => {}),
     oncreatedatabase = /** @type {(opts: import('./CreateDatabaseDialog.svelte').CreateDbOptions) => Promise<void>} */ (async () => {}),
     /** Global read-only toggle — prevents all writes across the whole session */
     readonly = $bindable(false),
@@ -363,6 +368,31 @@
             <ChevronsDown class="size-3.5" />
           </button>
         </div>
+      {/if}
+
+      <!-- Live mode toggle -->
+      {#if showTableNav && liveSupported}
+        {@render sep()}
+        <button
+          type="button"
+          class={cn(
+            'flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors',
+            live ? 'text-emerald-500 hover:bg-emerald-500/10' : 'text-muted-foreground/50 hover:bg-muted/50 hover:text-foreground',
+          )}
+          onclick={ontogglelive}
+          aria-pressed={live}
+          title={live ? 'Live: on — auto-refreshes when this table changes' : 'Live: off — click to auto-refresh on changes'}
+        >
+          {#if live}
+            <span class="relative flex size-3 items-center justify-center">
+              <span class="absolute inline-flex size-2.5 animate-ping rounded-full bg-emerald-500/50"></span>
+              <span class="relative inline-flex size-1.5 rounded-full bg-emerald-500"></span>
+            </span>
+          {:else}
+            <Radio class="size-3 shrink-0" />
+          {/if}
+          <span class={live ? 'font-medium' : ''}>Live</span>
+        </button>
       {/if}
 
     {:else}

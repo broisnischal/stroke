@@ -24,6 +24,7 @@
   import * as Select from "$lib/components/ui/select/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import SearchableMenu from "./SearchableMenu.svelte";
+  import { slotRoll } from "$lib/actions/slot-text.js";
   import { cn } from "$lib/utils.js";
   import {
     FILTER_OPS,
@@ -92,6 +93,8 @@
     /** Infinite scroll mode — hides pagination, shows rows-loaded counter */
     infiniteScroll = false,
     oninfinitescrolltoggle = () => {},
+    /** Live mode on — animates the row-count total as it changes. */
+    live = false,
   } = $props();
 
   /** @type {HTMLInputElement | null} */
@@ -615,7 +618,11 @@
             title="{from.toLocaleString('en-US')}–{to.toLocaleString('en-US')} of {total.toLocaleString('en-US')} rows{queryMs > 0 ? ` · ${queryMs}ms` : ''}"
           >
             <span class="text-foreground/65">{from.toLocaleString("en-US")}–{to.toLocaleString("en-US")}</span>
-            <span class="text-muted-foreground/40">of {total.toLocaleString("en-US")}</span>
+            {#if live}
+              <span class="text-muted-foreground/40">of <span class="inline-block tabular-nums" use:slotRoll={total.toLocaleString("en-US")}></span></span>
+            {:else}
+              <span class="text-muted-foreground/40">of {total.toLocaleString("en-US")}</span>
+            {/if}
             {#if queryMs > 0}<span class="text-muted-foreground/30">· {queryMs}ms</span>{/if}
           </span>
         {:else if queryMs > 0}
