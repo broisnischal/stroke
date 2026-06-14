@@ -251,6 +251,24 @@ async fn execute_sql(
             Ok(json!({"columns":result.columns.iter().map(|c|&c.name).collect::<Vec<_>>(),"rows":&result.rows,"row_count":result.rows.len(),"truncated":result.rows.len()>=max_rows}).to_string())
         }
         ActiveConnection::Mysql(pool) => execute_sql_mysql(pool, sql, max_rows).await,
+        ActiveConnection::Clickhouse(cfg) => {
+            let result = crate::db::clickhouse::query(cfg, sql).await?;
+            let truncated = result.rows.len() > max_rows;
+            let rows: Vec<_> = result.rows.iter().take(max_rows).collect();
+            Ok(json!({"columns":result.columns.iter().map(|c|&c.name).collect::<Vec<_>>(),"rows":rows,"row_count":rows.len(),"truncated":truncated}).to_string())
+        }
+        ActiveConnection::Duckdb(h) => {
+            let result = crate::db::duckdb::execute_sql(h, sql).await?;
+            let truncated = result.rows.len() > max_rows;
+            let rows: Vec<_> = result.rows.iter().take(max_rows).collect();
+            Ok(json!({"columns":result.columns.iter().map(|c|&c.name).collect::<Vec<_>>(),"rows":rows,"row_count":rows.len(),"truncated":truncated}).to_string())
+        }
+        ActiveConnection::Mssql(h) => {
+            let result = crate::db::mssql::execute_sql(h, sql).await?;
+            let truncated = result.rows.len() > max_rows;
+            let rows: Vec<_> = result.rows.iter().take(max_rows).collect();
+            Ok(json!({"columns":result.columns.iter().map(|c|&c.name).collect::<Vec<_>>(),"rows":rows,"row_count":rows.len(),"truncated":truncated}).to_string())
+        }
     }
 }
 
@@ -370,6 +388,18 @@ async fn list_tables(conn: &ActiveConnection, schema: &str) -> Result<String, St
             Ok(json!({"tables":r.rows.iter().filter_map(|row|row.first()?.as_str().map(|n|n.to_string())).collect::<Vec<_>>()}).to_string())
         }
         ActiveConnection::Mysql(pool) => list_tables_mysql(pool, schema).await,
+        ActiveConnection::Clickhouse(cfg) => {
+            let tables = crate::db::clickhouse::list_tables(cfg).await?;
+            Ok(json!({"tables":tables.iter().map(|t|&t.name).collect::<Vec<_>>()}).to_string())
+        }
+        ActiveConnection::Duckdb(h) => {
+            let tables = crate::db::duckdb::list_tables(h).await?;
+            Ok(json!({"tables":tables.iter().map(|t|&t.name).collect::<Vec<_>>()}).to_string())
+        }
+        ActiveConnection::Mssql(h) => {
+            let tables = crate::db::mssql::list_tables(h, schema).await?;
+            Ok(json!({"tables":tables.iter().map(|t|&t.name).collect::<Vec<_>>()}).to_string())
+        }
     }
 }
 
@@ -472,6 +502,30 @@ async fn describe_table(
             Ok(json!({"table":table,"pragma_info":r.rows}).to_string())
         }
         ActiveConnection::Mysql(pool) => describe_table_mysql(pool, schema, table).await,
+        ActiveConnection::Clickhouse(cfg) => {
+            let cols = crate::db::clickhouse::get_column_structure(cfg, table).await?;
+            let columns: Vec<_> = cols.iter().map(|c| json!({
+                "name": c.name, "type": c.data_type, "nullable": c.is_nullable,
+                "default": c.column_default, "comment": c.comment,
+            })).collect();
+            Ok(json!({"table":table,"columns":columns}).to_string())
+        }
+        ActiveConnection::Duckdb(h) => {
+            let cols = crate::db::duckdb::get_column_structure(h, table).await?;
+            let columns: Vec<_> = cols.iter().map(|c| json!({
+                "name": c.name, "type": c.data_type, "nullable": c.is_nullable,
+                "default": c.column_default, "comment": c.comment,
+            })).collect();
+            Ok(json!({"table":table,"columns":columns}).to_string())
+        }
+        ActiveConnection::Mssql(h) => {
+            let cols = crate::db::mssql::get_column_structure(h, schema, table).await?;
+            let columns: Vec<_> = cols.iter().map(|c| json!({
+                "name": c.name, "type": c.data_type, "nullable": c.is_nullable,
+                "default": c.column_default, "comment": c.comment,
+            })).collect();
+            Ok(json!({"table":table,"columns":columns}).to_string())
+        }
     }
 }
 
@@ -725,6 +779,9 @@ async fn check_migrations(conn: &ActiveConnection, schema: &str) -> Result<Strin
         ActiveConnection::D1(cfg) => check_migrations_d1(cfg).await,
         ActiveConnection::LibSql(_) => Ok(json!({"migrations":[],"note":"Migration detection not yet supported for LibSQL"}).to_string()),
         ActiveConnection::Mysql(pool) => check_migrations_mysql(pool, schema).await,
+        ActiveConnection::Clickhouse(_) => Ok(json!({"migrations":[],"note":"Migration detection not supported for ClickHouse"}).to_string()),
+        ActiveConnection::Duckdb(_) => Ok(json!({"migrations":[],"note":"Migration detection not supported for DuckDB"}).to_string()),
+        ActiveConnection::Mssql(_) => Ok(json!({"migrations":[],"note":"Migration detection not supported for MS SQL Server"}).to_string()),
     }
 }
 
@@ -926,6 +983,18 @@ async fn explain_query(conn: &ActiveConnection, sql: &str) -> Result<String, Str
             Ok(json!({"plan":r.rows,"database":"libsql"}).to_string())
         }
         ActiveConnection::Mysql(pool) => explain_query_mysql(pool, sql).await,
+        ActiveConnection::Clickhouse(cfg) => {
+            let r = crate::db::clickhouse::query(cfg, &format!("EXPLAIN {sql}")).await?;
+            Ok(json!({"plan":r.rows,"database":"clickhouse"}).to_string())
+        }
+        ActiveConnection::Duckdb(h) => {
+            let r = crate::db::duckdb::execute_sql(h, &format!("EXPLAIN {sql}")).await?;
+            Ok(json!({"plan":r.rows,"database":"duckdb"}).to_string())
+        }
+        ActiveConnection::Mssql(h) => {
+            let r = crate::db::mssql::execute_sql(h, &format!("SET SHOWPLAN_ALL ON; {sql}")).await?;
+            Ok(json!({"plan":r.rows,"database":"mssql"}).to_string())
+        }
     }
 }
 
@@ -997,6 +1066,18 @@ async fn get_database_stats(conn: &ActiveConnection, schema: &str) -> Result<Str
             Ok(json!({"database":"libsql","table_count":count}).to_string())
         }
         ActiveConnection::Mysql(pool) => get_database_stats_mysql(pool, schema).await,
+        ActiveConnection::Clickhouse(cfg) => {
+            let tables = crate::db::clickhouse::list_tables(cfg).await?;
+            Ok(json!({"database":"clickhouse","table_count":tables.len()}).to_string())
+        }
+        ActiveConnection::Duckdb(h) => {
+            let tables = crate::db::duckdb::list_tables(h).await?;
+            Ok(json!({"database":"duckdb","table_count":tables.len()}).to_string())
+        }
+        ActiveConnection::Mssql(h) => {
+            let tables = crate::db::mssql::list_tables(h, schema).await?;
+            Ok(json!({"database":"mssql","table_count":tables.len()}).to_string())
+        }
     }
 }
 

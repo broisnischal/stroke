@@ -14,15 +14,22 @@
   import Globe        from '@lucide/svelte/icons/globe'
   import Cloud        from '@lucide/svelte/icons/cloud'
   import BarChart2    from '@lucide/svelte/icons/bar-chart-2'
+  import Server       from '@lucide/svelte/icons/server'
   import FolderOpen   from '@lucide/svelte/icons/folder-open'
   import Terminal     from '@lucide/svelte/icons/terminal'
+  import ChevronDown  from '@lucide/svelte/icons/chevron-down'
+  import Check        from '@lucide/svelte/icons/check'
   import CloudflareLogin from './CloudflareLogin.svelte'
+  import SearchableMenu from './SearchableMenu.svelte'
   import {
     testPostgresConnection, connectPostgres,
     testSqliteConnection,   connectSqlite,
     testMysqlConnection,    connectMysql,
     testD1Connection,       connectD1,
     testLibSqlConnection,   connectLibSql,
+    testClickhouseConnection, connectClickhouse,
+    testDuckdbConnection,   connectDuckdb,
+    testMssqlConnection,    connectMssql,
     cloudflareListAccounts, cloudflareListD1Databases,
   } from '$lib/api.js'
   import {
@@ -49,6 +56,7 @@
         { id: 'mysql',       label: 'MySQL',        desc: 'Popular relational database' },
         { id: 'mariadb',     label: 'MariaDB',      desc: 'MySQL-compatible relational database' },
         { id: 'cockroachdb', label: 'CockroachDB',  desc: 'Distributed Postgres-compatible SQL' },
+        { id: 'mssql',       label: 'SQL Server',   desc: 'Microsoft SQL Server' },
       ],
     },
     {
@@ -57,6 +65,14 @@
         { id: 'sqlite',        label: 'SQLite',           desc: 'Local file-based database' },
         { id: 'sqlite-memory', label: 'In-Memory',        desc: 'Ephemeral, nothing on disk' },
         { id: 'libsql',        label: 'Turso / LibSQL',   desc: 'Serverless SQLite at the edge' },
+      ],
+    },
+    {
+      label: 'Analytics',
+      drivers: [
+        { id: 'clickhouse', label: 'ClickHouse', desc: 'Columnar OLAP over HTTP' },
+        { id: 'duckdb',     label: 'DuckDB',     desc: 'In-process analytical database' },
+        { id: 'duckdb-memory', label: 'DuckDB In-Memory', desc: 'Ephemeral DuckDB, nothing on disk' },
       ],
     },
     {
@@ -70,6 +86,17 @@
 
   const ALL_DRIVERS = CATEGORIES.flatMap(c => c.drivers)
   function driverById(id) { return ALL_DRIVERS.find(d => d.id === id) ?? ALL_DRIVERS[0] }
+
+  // Flat, explicitly-ordered list for the searchable Type dropdown.
+  // PostgreSQL → SQLite → MySQL pinned to the top, then the rest.
+  const DRIVER_ORDER = [
+    'postgres', 'sqlite', 'mysql', 'mariadb', 'cockroachdb', 'mssql',
+    'clickhouse', 'duckdb', 'sqlite-memory', 'duckdb-memory', 'libsql', 'd1', 'bigquery',
+  ]
+  const driverItems = DRIVER_ORDER
+    .map((id) => ALL_DRIVERS.find((d) => d.id === id))
+    .filter(Boolean)
+    .map((d) => ({ value: d.id, label: d.label, keywords: [d.label, d.desc], disabled: !!d.soon }))
 
   let saved      = $state(loadSavedConnections().sort((a, b) => (b.lastConnectedAt ?? 0) - (a.lastConnectedAt ?? 0)))
   let lastId     = $state(getLastConnectionId())
@@ -90,7 +117,8 @@
     testOk = false
   }
 
-  let dbType      = $state('postgres')
+  let dbType        = $state('postgres')
+  let driverMenuOpen = $state(false)
   let name        = $state('')
   let host        = $state('127.0.0.1')
   let port        = $state('5432')
@@ -98,6 +126,9 @@
   let user        = $state('postgres')
   let password    = $state('')
   let ssl         = $state(false)
+  let secure      = $state(false)
+  let encrypt     = $state(false)
+  let trustCert   = $state(true)
   let filePath    = $state('')
   let accountId   = $state('')
   let databaseId  = $state('')
@@ -130,6 +161,10 @@
     'sqlite-memory': { name: 'In-Memory SQLite',  filePath: ':memory:' },
     libsql:          { name: 'My Turso DB',       libsqlUrl: '', libsqlToken: '' },
     d1:              { name: 'Cloudflare D1',     accountId: '', databaseId: '', apiToken: '' },
+    clickhouse:      { name: 'Local ClickHouse',  host: '127.0.0.1', port: '8123', database: 'default', user: 'default' },
+    duckdb:          { name: 'Local DuckDB',      filePath: '' },
+    'duckdb-memory': { name: 'In-Memory DuckDB',  filePath: ':memory:' },
+    mssql:           { name: 'Local SQL Server',  host: '127.0.0.1', port: '1433', database: 'master', user: 'sa' },
   }
 
   const activeDriver = $derived(ALL_DRIVERS.find(d => d.id === dbType) ?? ALL_DRIVERS[0])
@@ -154,16 +189,26 @@
       return { type: dbType, name, host, port, database, user, password, ssl, ...(ssh && { ssh }) }
     if (dbType === 'cockroachdb')
       return { type: 'cockroachdb', name, host, port, database, user, password, ssl, ...(ssh && { ssh }) }
+    if (dbType === 'clickhouse')
+      return { type: 'clickhouse', name, host, port, database, user, password, secure }
+    if (dbType === 'duckdb' || dbType === 'duckdb-memory')
+      return { type: 'duckdb', name, filePath: dbType === 'duckdb-memory' ? ':memory:' : filePath }
+    if (dbType === 'mssql')
+      return { type: 'mssql', name, host, port, database, user, password, encrypt, trustCert }
     return { type: 'postgres', name, host, port, database, user, password, ssl, ...(ssh && { ssh }) }
   }
 
   function resetForm(conn) {
     editingId = conn?.id ?? null
     if (conn) {
-      const t = conn.type === 'sqlite' && conn.filePath === ':memory:' ? 'sqlite-memory' : (conn.type ?? 'postgres')
+      const t = conn.filePath === ':memory:' && (conn.type === 'sqlite' || conn.type === 'duckdb')
+        ? `${conn.type}-memory`
+        : (conn.type ?? 'postgres')
       dbType = t; name = conn.name ?? ''; host = conn.host ?? '127.0.0.1'
       port = String(conn.port ?? 5432); database = conn.database ?? 'postgres'
       user = conn.user ?? 'postgres'; password = conn.password ?? ''; ssl = Boolean(conn.ssl)
+      secure = Boolean(conn.secure)
+      encrypt = Boolean(conn.encrypt); trustCert = conn.trustCert ?? true
       filePath = conn.filePath ?? ''; accountId = conn.accountId ?? ''
       databaseId = conn.databaseId ?? ''; apiToken = conn.apiToken ?? ''
       libsqlUrl = conn.url ?? ''; libsqlToken = conn.authToken ?? ''
@@ -172,7 +217,8 @@
       sshUsername = s?.username ?? ''; sshKeyPath = s?.privateKeyPath ?? ''
     } else {
       dbType = 'postgres'; name = ''; host = '127.0.0.1'; port = '5432'
-      database = 'postgres'; user = 'postgres'; password = ''; ssl = false
+      database = 'postgres'; user = 'postgres'; password = ''; ssl = false; secure = false
+      encrypt = false; trustCert = true
       filePath = ''; accountId = ''; databaseId = ''; apiToken = ''
       libsqlUrl = ''; libsqlToken = ''
       sshEnabled = false; sshHost = ''; sshPort = '22'; sshUsername = ''; sshKeyPath = ''
@@ -186,7 +232,10 @@
     if (id === 'postgres') port = '5432'
     if (id === 'mysql' || id === 'mariadb') port = '3306'
     if (id === 'cockroachdb') port = '26257'
-    if (id === 'sqlite-memory') filePath = ':memory:'
+    if (id === 'clickhouse') port = secure ? '8443' : '8123'
+    if (id === 'mssql') port = '1433'
+    if (id === 'sqlite-memory' || id === 'duckdb-memory') filePath = ':memory:'
+    if (id === 'duckdb') filePath = ''
     error = ''; testOk = false; connectionUri = ''; uriHint = ''
     if (id !== 'd1') d1Reset()
   }
@@ -207,7 +256,7 @@
   }
 
   function connDetail(conn) {
-    if (conn.type === 'sqlite') return conn.filePath === ':memory:' ? 'in-memory' : (conn.filePath || '—')
+    if (conn.type === 'sqlite' || conn.type === 'duckdb') return conn.filePath === ':memory:' ? 'in-memory' : (conn.filePath || '—')
     if (conn.type === 'libsql') return conn.url || '—'
     if (conn.type === 'd1')     return conn.accountId?.slice(0, 8) ? `${conn.accountId.slice(0,8)}…` : '—'
     return `${conn.host ?? ''}/${conn.database ?? ''}`
@@ -245,6 +294,9 @@
       else if (conn.type === 'd1') await connectD1(conn)
       else if (conn.type === 'libsql') await connectLibSql(conn)
       else if (conn.type === 'mysql' || conn.type === 'mariadb') await connectMysql(conn)
+      else if (conn.type === 'clickhouse') await connectClickhouse(conn)
+      else if (conn.type === 'duckdb') await connectDuckdb(conn)
+      else if (conn.type === 'mssql') await connectMssql(conn)
       else await connectPostgres(conn)
       if (myOp !== opId) return // cancelled by the user
       const updated = { ...conn, lastConnectedAt: Date.now() }
@@ -265,6 +317,9 @@
       else if (p.type === 'd1') await testD1Connection(p)
       else if (p.type === 'libsql') await testLibSqlConnection(p)
       else if (p.type === 'mysql' || p.type === 'mariadb') await testMysqlConnection(p)
+      else if (p.type === 'clickhouse') await testClickhouseConnection(p)
+      else if (p.type === 'duckdb') await testDuckdbConnection(p)
+      else if (p.type === 'mssql') await testMssqlConnection(p)
       else await testPostgresConnection(p)
       if (myOp !== opId) return // cancelled by the user
       testOk = true
@@ -281,12 +336,15 @@
       else if (payload.type === 'd1') await connectD1(payload)
       else if (payload.type === 'libsql') await connectLibSql(payload)
       else if (payload.type === 'mysql' || payload.type === 'mariadb') await connectMysql(payload)
+      else if (payload.type === 'clickhouse') await connectClickhouse(payload)
+      else if (payload.type === 'duckdb') await connectDuckdb(payload)
+      else if (payload.type === 'mssql') await connectMssql(payload)
       else await connectPostgres(payload)
       if (myOp !== opId) return // cancelled by the user
       const existing = editingId ? saved.find(s => s.id === editingId) : null
       const id = existing?.id ?? newConnectionId()
-      const hasHostPort = ['postgres', 'mysql', 'mariadb', 'cockroachdb'].includes(payload.type)
-      const defaultPort = { mysql: 3306, mariadb: 3306, cockroachdb: 26257, postgres: 5432 }[payload.type] ?? 5432
+      const hasHostPort = ['postgres', 'mysql', 'mariadb', 'cockroachdb', 'clickhouse', 'mssql'].includes(payload.type)
+      const defaultPort = { mysql: 3306, mariadb: 3306, cockroachdb: 26257, postgres: 5432, clickhouse: 8123, mssql: 1433 }[payload.type] ?? 5432
       const saved_conn = {
         id, ...payload,
         port: hasHostPort ? (Number(payload.port) || defaultPort) : undefined,
@@ -340,6 +398,10 @@
     if (id === 'sqlite-memory')   return 'text-violet-400'
     if (id === 'libsql')          return 'text-sky-400'
     if (id === 'd1')              return 'text-orange-400'
+    if (id === 'clickhouse')      return 'text-yellow-400'
+    if (id === 'duckdb')          return 'text-yellow-500'
+    if (id === 'duckdb-memory')   return 'text-amber-300'
+    if (id === 'mssql')           return 'text-red-400'
     return 'text-muted-foreground'
   }
   function driverBg(id) {
@@ -351,6 +413,10 @@
     if (id === 'sqlite-memory')   return 'bg-violet-500/10'
     if (id === 'libsql')          return 'bg-sky-500/10'
     if (id === 'd1')              return 'bg-orange-500/10'
+    if (id === 'clickhouse')      return 'bg-yellow-500/10'
+    if (id === 'duckdb')          return 'bg-yellow-500/10'
+    if (id === 'duckdb-memory')   return 'bg-amber-500/10'
+    if (id === 'mssql')           return 'bg-red-500/10'
     return 'bg-muted/40'
   }
 
@@ -361,6 +427,20 @@
         title: 'Select SQLite database',
         filters: [
           { name: 'SQLite', extensions: ['db', 'sqlite', 'sqlite3'] },
+          { name: 'All files', extensions: ['*'] },
+        ],
+      })
+      if (typeof path === 'string' && path) filePath = path
+    } catch { /* browser/non-Tauri env */ }
+  }
+
+  async function pickDuckdbFile() {
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog')
+      const path = await open({
+        title: 'Select DuckDB database',
+        filters: [
+          { name: 'DuckDB', extensions: ['duckdb', 'ddb', 'db'] },
           { name: 'All files', extensions: ['*'] },
         ],
       })
@@ -422,6 +502,10 @@
   {:else if id === 'sqlite-memory'} <Zap       class="{cls} shrink-0 {c}" />
   {:else if id === 'libsql'}        <Globe     class="{cls} shrink-0 {c}" />
   {:else if id === 'd1'}            <Cloud     class="{cls} shrink-0 {c}" />
+  {:else if id === 'clickhouse'}    <BarChart2 class="{cls} shrink-0 {c}" />
+  {:else if id === 'duckdb'}        <HardDrive class="{cls} shrink-0 {c}" />
+  {:else if id === 'duckdb-memory'} <Zap       class="{cls} shrink-0 {c}" />
+  {:else if id === 'mssql'}         <Server    class="{cls} shrink-0 {c}" />
   {:else}                           <BarChart2 class="{cls} shrink-0 {c}" />{/if}
 {/snippet}
 
@@ -463,7 +547,7 @@
                 {#each saved as conn (conn.id)}
                   {@const isSel = conn.id === editingId}
                   {@const busy2 = connecting === conn.id}
-                  {@const cid   = conn.type === 'sqlite' && conn.filePath === ':memory:' ? 'sqlite-memory' : conn.type}
+                  {@const cid   = conn.filePath === ':memory:' && (conn.type === 'sqlite' || conn.type === 'duckdb') ? `${conn.type}-memory` : conn.type}
                   <div
                     class={cn(
                       'group flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 transition-colors',
@@ -525,47 +609,47 @@
       <!-- ── Form panel ──────────────────────────────────────────── -->
       <div class="flex min-h-0 min-w-0 flex-col">
 
-        <!-- ── Header: connection name + driver type tabs ─────── -->
-        <div class="shrink-0 border-b border-border/15 px-5 pt-4 pb-0">
+        <!-- ── Header: connection name + driver type ──────────── -->
+        <div class="shrink-0 border-b border-border/15 px-5 pt-4 pb-4">
 
-          <!-- Connection name field -->
-          <div class="mb-3 grid grid-cols-[1fr_auto] items-end gap-3">
+          <div class="grid grid-cols-[1fr_11rem] items-end gap-3">
+            <!-- Connection name -->
             <div>
               <label for="cn-name" class={lbl}>Name</label>
               <Input id="cn-name" bind:value={name} class={inp} placeholder="e.g. Production DB" />
             </div>
-          </div>
 
-          <!-- Driver type tabs — horizontal scrollable, replaces the dropdown -->
-          <div class="flex items-center gap-0 overflow-x-auto" style="scrollbar-width: none; -webkit-overflow-scrolling: touch">
-            {#each CATEGORIES as cat, ci}
-              {#if ci > 0}
-                <span class="mx-2 h-3 w-px shrink-0 bg-border/20"></span>
-              {/if}
-              {#each cat.drivers as d (d.id)}
-                <button
-                  type="button"
-                  onclick={() => !d.soon && switchDriver(d.id)}
-                  disabled={!!d.soon}
-                  title={d.desc}
-                  class={cn(
-                    'relative flex shrink-0 items-center gap-1.5 pb-2.5 pt-1.5 pr-3 pl-1 text-[11px] transition-colors select-none',
-                    dbType === d.id
-                      ? 'font-semibold text-foreground'
-                      : 'text-muted-foreground/55 hover:text-foreground',
-                    d.soon && 'cursor-not-allowed opacity-25 pointer-events-none'
-                  )}
-                >
-                  {@render dicon(d.id, 'size-[11px] shrink-0', dbType === d.id)}
-                  {d.label}
-                  {#if d.soon}<span class="text-[8px] opacity-60">soon</span>{/if}
-                  <!-- Active underline -->
-                  {#if dbType === d.id}
-                    <span class="absolute bottom-0 left-0 right-0 h-[2px] rounded-t-full bg-foreground"></span>
+            <!-- Driver type — searchable dropdown -->
+            <div>
+              <span class={lbl}>Type</span>
+              <SearchableMenu
+                bind:open={driverMenuOpen}
+                items={driverItems}
+                placeholder="Search databases…"
+                contentClass="w-56"
+                align="end"
+                onselect={(it) => switchDriver(it.value)}
+              >
+                {#snippet trigger(props)}
+                  <button
+                    {...props}
+                    type="button"
+                    class={cn(inp, 'flex items-center justify-between gap-2 text-left', driverMenuOpen && 'border-ring/60 ring-1 ring-ring/20')}
+                  >
+                    <span class="min-w-0 truncate">{activeDriver.label}</span>
+                    <ChevronDown class="size-3.5 shrink-0 text-muted-foreground/50" />
+                  </button>
+                {/snippet}
+                {#snippet item(it)}
+                  <span class="min-w-0 flex-1 truncate">{it.label}</span>
+                  {#if it.disabled}
+                    <span class="shrink-0 text-ui-3xs text-muted-foreground/45">soon</span>
+                  {:else if it.value === dbType}
+                    <Check class="size-3.5 shrink-0 text-primary" />
                   {/if}
-                </button>
-              {/each}
-            {/each}
+                {/snippet}
+              </SearchableMenu>
+            </div>
           </div>
         </div>
 
@@ -754,6 +838,110 @@
                   </div>
                 </div>
               </details>
+
+            <!-- ── ClickHouse ─────────────────────────────── -->
+            {:else if dbType === 'clickhouse'}
+
+              <div class="grid grid-cols-[1fr_80px] gap-2">
+                <div>
+                  <label for="cn-ch-host" class={lbl}>Host</label>
+                  <Input id="cn-ch-host" bind:value={host} class={inp} />
+                </div>
+                <div>
+                  <label for="cn-ch-port" class={lbl}>Port</label>
+                  <Input id="cn-ch-port" bind:value={port} type="text" inputmode="numeric" class={inpNum} />
+                </div>
+              </div>
+
+              <div>
+                <label for="cn-ch-db" class={lbl}>Database</label>
+                <Input id="cn-ch-db" bind:value={database} class={inp} />
+              </div>
+
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label for="cn-ch-user" class={lbl}>Username</label>
+                  <Input id="cn-ch-user" bind:value={user} autocomplete="username" class={inp} />
+                </div>
+                <div>
+                  <label for="cn-ch-pass" class={lbl}>Password</label>
+                  <Input id="cn-ch-pass" bind:value={password} type="password" autocomplete="current-password" class={inp} />
+                </div>
+              </div>
+
+              <label class="flex cursor-pointer select-none items-center gap-2 pt-0.5">
+                <Checkbox id="cn-ch-secure" checked={secure} onCheckedChange={(v) => { secure = v === true; if (secure && port === '8123') port = '8443'; else if (!secure && port === '8443') port = '8123' }} />
+                <span class="text-[12px] text-muted-foreground/65">Use HTTPS (TLS)</span>
+              </label>
+
+            <!-- ── DuckDB (file) ──────────────────────────── -->
+            {:else if dbType === 'duckdb'}
+
+              <div>
+                <label for="cn-duck-path" class={lbl}>File</label>
+                <div class="flex gap-1.5">
+                  <Input id="cn-duck-path" bind:value={filePath}
+                    placeholder="/path/to/database.duckdb"
+                    class={cn(inp, 'font-mono text-[11px]')} />
+                  <button type="button" onclick={pickDuckdbFile}
+                    class="inline-flex h-[30px] shrink-0 items-center gap-1 rounded-md border border-border/25 px-2.5 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground">
+                    <FolderOpen class="size-3" />
+                    Browse
+                  </button>
+                </div>
+                <p class="mt-1 text-[10px] text-muted-foreground/30">A new file is created if it doesn't exist.</p>
+              </div>
+
+            <!-- ── DuckDB (in-memory) ─────────────────────── -->
+            {:else if dbType === 'duckdb-memory'}
+
+              <div class="flex flex-col gap-1.5 rounded-lg border border-border/15 bg-muted/[0.04] px-4 py-3.5">
+                <p class="text-[12px] font-medium text-foreground/70">Ephemeral in-memory DuckDB</p>
+                <p class="text-[11px] leading-relaxed text-muted-foreground/45">
+                  A columnar analytical database that lives only for this session. Nothing is written to disk — closing the connection discards everything.
+                </p>
+              </div>
+
+            <!-- ── MS SQL Server ──────────────────────────── -->
+            {:else if dbType === 'mssql'}
+
+              <div class="grid grid-cols-[1fr_80px] gap-2">
+                <div>
+                  <label for="cn-mssql-host" class={lbl}>Host</label>
+                  <Input id="cn-mssql-host" bind:value={host} class={inp} />
+                </div>
+                <div>
+                  <label for="cn-mssql-port" class={lbl}>Port</label>
+                  <Input id="cn-mssql-port" bind:value={port} type="text" inputmode="numeric" class={inpNum} />
+                </div>
+              </div>
+
+              <div>
+                <label for="cn-mssql-db" class={lbl}>Database</label>
+                <Input id="cn-mssql-db" bind:value={database} class={inp} />
+              </div>
+
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label for="cn-mssql-user" class={lbl}>Username</label>
+                  <Input id="cn-mssql-user" bind:value={user} autocomplete="username" class={inp} />
+                </div>
+                <div>
+                  <label for="cn-mssql-pass" class={lbl}>Password</label>
+                  <Input id="cn-mssql-pass" bind:value={password} type="password" autocomplete="current-password" class={inp} />
+                </div>
+              </div>
+
+              <div class="flex flex-col gap-2 pt-0.5">
+                <label class="flex cursor-pointer select-none items-center gap-2">
+                  <Checkbox id="cn-mssql-encrypt" checked={encrypt} onCheckedChange={(v) => (encrypt = v === true)} />
+                  <span class="text-[12px] text-muted-foreground/65">Encrypt connection (TLS)</span>
+                </label>
+                <label class="flex cursor-pointer select-none items-center gap-2">
+                  <Checkbox id="cn-mssql-trust" checked={trustCert} onCheckedChange={(v) => (trustCert = v === true)} />
+                  <span class="text-[12px] text-muted-foreground/65">Trust server certificate</span>
+                </label>
+              </div>
 
             {/if}
 

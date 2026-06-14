@@ -160,6 +160,77 @@ export async function connectLibSql(config) {
   return inv('connect_libsql_db', { config })
 }
 
+// ── ClickHouse ────────────────────────────────────────────────────────────────
+
+/** @param {{ name: string, host: string, port: number|string, database: string, user: string, password: string, secure?: boolean }} config */
+function normalizeClickhouse(config) {
+  return {
+    name: String(config.name || 'ClickHouse'),
+    host: String(config.host || '127.0.0.1'),
+    port: Math.min(65535, Math.max(1, Number(config.port) || 8123)),
+    database: String(config.database || 'default'),
+    user: String(config.user || 'default'),
+    password: String(config.password || ''),
+    secure: Boolean(config.secure),
+  }
+}
+
+/** @param {{ name: string, host: string, port: number|string, database: string, user: string, password: string, secure?: boolean }} config */
+export async function testClickhouseConnection(config) {
+  return inv('test_clickhouse', { config: normalizeClickhouse(config) })
+}
+
+/** @param {{ name: string, host: string, port: number|string, database: string, user: string, password: string, secure?: boolean }} config */
+export async function connectClickhouse(config) {
+  return inv('connect_clickhouse_db', { config: normalizeClickhouse(config) })
+}
+
+// ── DuckDB ──────────────────────────────────────────────────────────────────────
+
+/** @param {{ name: string, filePath: string }} config */
+function normalizeDuckdb(config) {
+  return {
+    name: String(config.name || 'DuckDB'),
+    filePath: String(config.filePath || ':memory:'),
+  }
+}
+
+/** @param {{ name: string, filePath: string }} config */
+export async function testDuckdbConnection(config) {
+  return inv('test_duckdb', { config: normalizeDuckdb(config) })
+}
+
+/** @param {{ name: string, filePath: string }} config */
+export async function connectDuckdb(config) {
+  return inv('connect_duckdb_db', { config: normalizeDuckdb(config) })
+}
+
+// ── MS SQL Server ─────────────────────────────────────────────────────────────
+
+/** @param {{ name: string, host: string, port: number|string, database: string, user: string, password: string, encrypt?: boolean, trustCert?: boolean }} config */
+function normalizeMssql(config) {
+  return {
+    name: String(config.name || 'SQL Server'),
+    host: String(config.host || '127.0.0.1'),
+    port: Math.min(65535, Math.max(1, Number(config.port) || 1433)),
+    database: String(config.database || 'master'),
+    user: String(config.user || 'sa'),
+    password: String(config.password || ''),
+    encrypt: Boolean(config.encrypt),
+    trustCert: Boolean(config.trustCert),
+  }
+}
+
+/** @param {{ name: string, host: string, port: number|string, database: string, user: string, password: string, encrypt?: boolean, trustCert?: boolean }} config */
+export async function testMssqlConnection(config) {
+  return inv('test_mssql', { config: normalizeMssql(config) })
+}
+
+/** @param {{ name: string, host: string, port: number|string, database: string, user: string, password: string, encrypt?: boolean, trustCert?: boolean }} config */
+export async function connectMssql(config) {
+  return inv('connect_mssql_db', { config: normalizeMssql(config) })
+}
+
 // ── Docker ────────────────────────────────────────────────────────────────────
 
 /** Returns Docker server version string, or throws a user-facing error. */

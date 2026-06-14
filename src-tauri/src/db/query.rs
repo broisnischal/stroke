@@ -866,6 +866,21 @@ pub async fn get_table_rows(
                 &pool, &schema, &table, limit, offset, search, sort_column, sort_direction, filters,
             ).await;
         }
+        ActiveConnection::Clickhouse(cfg) => {
+            return super::clickhouse::get_table_rows(
+                &cfg, &table, limit, offset, search, sort_column, sort_direction, filters,
+            ).await;
+        }
+        ActiveConnection::Duckdb(h) => {
+            return super::duckdb::get_table_rows(
+                &h, &table, limit, offset, search, sort_column, sort_direction, filters,
+            ).await;
+        }
+        ActiveConnection::Mssql(h) => {
+            return super::mssql::get_table_rows(
+                &h, &schema, &table, limit, offset, search, sort_column, sort_direction, filters,
+            ).await;
+        }
         ActiveConnection::Postgres(_) => {}
     }
     let pool = require_pool(&state)?;
@@ -1037,6 +1052,15 @@ pub async fn update_table_cell(
         ActiveConnection::Mysql(pool) => {
             return super::mysql::update_table_cell(&pool, &schema, &table, primary_key, &column, &value).await;
         }
+        ActiveConnection::Clickhouse(_) => {
+            return Err("Inline row editing is not supported for ClickHouse (OLAP). Use ALTER TABLE … UPDATE in the SQL console.".into());
+        }
+        ActiveConnection::Duckdb(h) => {
+            return super::duckdb::update_table_cell(&h, &table, primary_key, &column, &value).await;
+        }
+        ActiveConnection::Mssql(h) => {
+            return super::mssql::update_table_cell(&h, &schema, &table, primary_key, &column, &value).await;
+        }
         ActiveConnection::Postgres(_) => {}
     }
     let pool = require_pool(&state)?;
@@ -1163,6 +1187,17 @@ pub async fn insert_table_row(
         }
         ActiveConnection::Mysql(pool) => {
             let row = super::mysql::insert_table_row(&pool, &schema, &table, values).await?;
+            return Ok(InsertRowResult { row });
+        }
+        ActiveConnection::Clickhouse(_) => {
+            return Err("Row insertion via the grid is not supported for ClickHouse. Use INSERT INTO … in the SQL console.".into());
+        }
+        ActiveConnection::Duckdb(h) => {
+            let row = super::duckdb::insert_table_row(&h, &table, values).await?;
+            return Ok(InsertRowResult { row });
+        }
+        ActiveConnection::Mssql(h) => {
+            let row = super::mssql::insert_table_row(&h, &schema, &table, values).await?;
             return Ok(InsertRowResult { row });
         }
         ActiveConnection::Postgres(_) => {}
@@ -1332,6 +1367,15 @@ pub async fn delete_table_rows(
         }
         ActiveConnection::Mysql(pool) => {
             return super::mysql::delete_table_rows(&pool, &schema, &table, primary_keys).await;
+        }
+        ActiveConnection::Clickhouse(_) => {
+            return Err("Row deletion via the grid is not supported for ClickHouse. Use ALTER TABLE … DELETE in the SQL console.".into());
+        }
+        ActiveConnection::Duckdb(h) => {
+            return super::duckdb::delete_table_rows(&h, &table, primary_keys).await;
+        }
+        ActiveConnection::Mssql(h) => {
+            return super::mssql::delete_table_rows(&h, &schema, &table, primary_keys).await;
         }
         ActiveConnection::Postgres(_) => {}
     }
@@ -1551,6 +1595,9 @@ pub async fn execute_sql(state: State<'_, DbState>, sql: String) -> Result<SqlRe
         ActiveConnection::D1(cfg) => super::d1::query(&cfg, sql_str, vec![]).await,
         ActiveConnection::LibSql(cfg) => super::libsql::query(&cfg, sql_str, vec![]).await,
         ActiveConnection::Mysql(pool) => super::mysql::execute_sql(&pool, sql_str).await,
+        ActiveConnection::Clickhouse(cfg) => super::clickhouse::query(&cfg, sql_str).await,
+        ActiveConnection::Duckdb(h) => super::duckdb::execute_sql(&h, sql_str).await,
+        ActiveConnection::Mssql(h) => super::mssql::execute_sql(&h, sql_str).await,
     }
 }
 
@@ -1587,6 +1634,15 @@ pub async fn execute_sql_on_conn(
             result
         }
         AnyConnectionConfig::Libsql(c) => super::libsql::query(&c, sql, vec![]).await,
+        AnyConnectionConfig::Clickhouse(c) => super::clickhouse::query(&c, sql).await,
+        AnyConnectionConfig::Duckdb(c) => {
+            let h = super::connection::open_duckdb(&c).await?;
+            super::duckdb::execute_sql(&h, sql).await
+        }
+        AnyConnectionConfig::Mssql(c) => {
+            let h = super::connection::open_mssql(&c).await?;
+            super::mssql::execute_sql(&h, sql).await
+        }
     }
 }
 
@@ -1834,6 +1890,15 @@ pub async fn execute_sql_multi(state: State<'_, DbState>, sql: String) -> Result
         }
         ActiveConnection::Mysql(pool) => {
             super::mysql::execute_sql(&pool, sql_str).await.map(|r| vec![r])
+        }
+        ActiveConnection::Clickhouse(cfg) => {
+            super::clickhouse::query(&cfg, sql_str).await.map(|r| vec![r])
+        }
+        ActiveConnection::Duckdb(h) => {
+            super::duckdb::execute_sql(&h, sql_str).await.map(|r| vec![r])
+        }
+        ActiveConnection::Mssql(h) => {
+            super::mssql::execute_sql(&h, sql_str).await.map(|r| vec![r])
         }
     }
 }
