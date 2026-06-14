@@ -68,6 +68,7 @@ pub fn run() {
         .manage(db_state)
         .manage(mcp_state)
         .manage(TunnelState::new())
+        .manage(db::live::LiveState::default())
         .setup(|app| {
             // Load or generate a stable MCP token from the app data directory.
             app.state::<McpState>().init_token(app.handle());
@@ -228,6 +229,8 @@ pub fn run() {
             commands::test_postgres_connection,
             commands::connect_postgres,
             commands::disconnect_postgres,
+            commands::live_start,
+            commands::live_stop,
             commands::test_sqlite,
             commands::connect_sqlite_db,
             commands::test_mysql,

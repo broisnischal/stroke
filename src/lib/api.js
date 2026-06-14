@@ -35,6 +35,22 @@ async function inv(command, args = {}) {
   }
 }
 
+// ── Live mode ───────────────────────────────────────────────────────────────
+
+/**
+ * Start live updates for a table on the active connection (Postgres / SQLite).
+ * The backend emits a `live-change` event when the table changes.
+ * @param {string} schema @param {string} table
+ */
+export async function liveStart(schema, table) {
+  return await inv('live_start', { schema, table })
+}
+
+/** Stop live updates and clean up any installed triggers. */
+export async function liveStop() {
+  return await inv('live_stop', {})
+}
+
 // ── PostgreSQL ────────────────────────────────────────────────────────────────
 
 /** @param {{ host: string, port?: number, username: string, privateKeyPath?: string }} ssh */

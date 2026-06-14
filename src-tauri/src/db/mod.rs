@@ -6,6 +6,7 @@ pub mod duckdb;
 pub mod mssql;
 pub mod explain;
 pub mod libsql;
+pub mod live;
 pub mod mysql;
 mod query;
 mod schema;
