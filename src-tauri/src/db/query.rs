@@ -838,6 +838,11 @@ pub async fn get_table_rows(
     sort_column: Option<String>,
     sort_direction: Option<String>,
     filters: Option<Vec<RowFilter>>,
+    // When false, skip the catalog metadata queries (enums/nullable/pk/fk) and
+    // return only rows + column types. Used for repeat fetches of the same table
+    // (pagination, sort, filter, live refresh) where that metadata is unchanged
+    // and the frontend already holds it — cutting several round-trips per fetch.
+    include_meta: bool,
 ) -> Result<TableRows, String> {
     if limit > MAX_PAGE_LIMIT {
         return Err(format!("Limit {limit} exceeds the maximum of {MAX_PAGE_LIMIT} rows per page"));
@@ -938,18 +943,16 @@ pub async fn get_table_rows(
     let rows;
     let total: i64;
     if where_clause.sql.is_empty() {
-        let estimate: Option<i64> = sqlx::query_scalar::<_, i64>(
+        // Estimate and data fetch are independent — run them together so the
+        // planner estimate adds no extra round-trip in series.
+        let estimate_query = sqlx::query_scalar::<_, i64>(
             "SELECT reltuples::bigint FROM pg_class WHERE oid = $1::regclass",
         )
-        .bind(&table_ref)
-        .fetch_optional(&pool)
-        .await
-        .ok()
-        .flatten();
-        rows = data_query
-            .fetch_all(&pool)
-            .await
-            .map_err(|e| format!("Failed to fetch rows: {e}"))?;
+        .bind(&table_ref);
+        let (estimate_res, rows_res) =
+            tokio::join!(estimate_query.fetch_optional(&pool), data_query.fetch_all(&pool));
+        rows = rows_res.map_err(|e| format!("Failed to fetch rows: {e}"))?;
+        let estimate = estimate_res.ok().flatten();
         total = match estimate {
             Some(est) if est >= ESTIMATE_THRESHOLD => est,
             _ => count_query
@@ -967,12 +970,16 @@ pub async fn get_table_rows(
         rows = rows_result.map_err(|e| format!("Failed to fetch rows: {e}"))?;
     }
 
+    // Column names + types come from the result set itself (free, always fresh).
     let mut columns: Vec<ColumnInfo> = if let Some(first) = rows.first() {
         first
             .columns()
             .iter()
             .map(|c| ColumnInfo::new(c.name(), pg_type_label(c.type_info().name())))
             .collect()
+    } else if !include_meta {
+        // Repeat fetch with an empty result page — frontend keeps its columns.
+        Vec::new()
     } else {
         let meta = sqlx::query(
             r#"
@@ -1008,18 +1015,24 @@ pub async fn get_table_rows(
         .map(|row| (0..row.len()).map(|i| cell_to_json(row, i)).collect())
         .collect();
 
-    // All four metadata queries are independent — run them in parallel to halve
-    // the number of sequential round-trips and release connections faster.
-    let (enums_result, nullable_result, pk_result, fk_result) = tokio::join!(
-        fetch_table_column_enums(&pool, &schema, &table),
-        fetch_table_column_nullable(&pool, &schema, &table),
-        fetch_primary_key(&pool, &schema, &table),
-        fetch_foreign_keys(&pool, &schema, &table),
-    );
-    if let Ok(enums) = enums_result { apply_column_enums(&mut columns, &enums); }
-    if let Ok(nullable) = nullable_result { apply_column_nullable(&mut columns, &nullable); }
-    let primary_key = pk_result?;
-    let foreign_keys = fk_result?;
+    // Catalog metadata (enums/nullable/pk/fk) is stable per table, so only fetch
+    // it on the first load — repeat fetches (pagination/sort/filter/live) reuse
+    // what the frontend already holds, saving four round-trips and connections.
+    let (primary_key, foreign_keys) = if include_meta {
+        // All four metadata queries are independent — run them in parallel to halve
+        // the number of sequential round-trips and release connections faster.
+        let (enums_result, nullable_result, pk_result, fk_result) = tokio::join!(
+            fetch_table_column_enums(&pool, &schema, &table),
+            fetch_table_column_nullable(&pool, &schema, &table),
+            fetch_primary_key(&pool, &schema, &table),
+            fetch_foreign_keys(&pool, &schema, &table),
+        );
+        if let Ok(enums) = enums_result { apply_column_enums(&mut columns, &enums); }
+        if let Ok(nullable) = nullable_result { apply_column_nullable(&mut columns, &nullable); }
+        (pk_result?, fk_result?)
+    } else {
+        (Vec::new(), Vec::new())
+    };
 
     Ok(TableRows {
         columns,

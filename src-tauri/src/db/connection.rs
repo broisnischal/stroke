@@ -322,11 +322,15 @@ pub(crate) async fn open_pg(config: &PgConfig) -> Result<PgPool, String> {
         // Preflight already filtered unreachable hosts, so a short acquire timeout
         // keeps auth/handshake failures snappy instead of hanging ~10 s.
         .acquire_timeout(Duration::from_secs(6))
-        // Release idle connections after 30 s (was 60 s). Logs showed the app
-        // goes fully idle within 30 s of the user stopping interaction, so
-        // halving this cuts FD and memory hold-time without affecting responsiveness.
-        .idle_timeout(Duration::from_secs(30))
-        .max_lifetime(Duration::from_secs(300))
+        // Keep connections warm for the whole active session. A short idle_timeout
+        // (was 30 s) meant any pause longer than that forced a full TCP+TLS+auth
+        // re-handshake on the next query — on a remote/SSL host that's seconds of
+        // latency per connection, and a single table open opens several. 10 min
+        // keeps the pool warm between interactions so repeat fetches stay fast;
+        // test_before_acquire (sqlx default) still drops connections killed by
+        // sleep/wake. max_lifetime caps server-side staleness.
+        .idle_timeout(Duration::from_secs(600))
+        .max_lifetime(Duration::from_secs(1800))
         // Kill truly runaway queries. 10 min covers bulk inserts / migrations while
         // still bounding accidental full-table scans that would pin a connection.
         .after_connect(|conn, _meta| {
@@ -436,8 +440,10 @@ pub(crate) async fn open_mysql(config: &MysqlConfig) -> Result<MySqlPool, String
         // Same rationale as PG: 4 is the real-world ceiling for a desktop app.
         .max_connections(4)
         .acquire_timeout(Duration::from_secs(6))
-        .idle_timeout(Duration::from_secs(30))
-        .max_lifetime(Duration::from_secs(300))
+        // Keep connections warm for the session (see open_pg for the full rationale)
+        // so repeat fetches don't pay a fresh TCP+TLS+auth handshake.
+        .idle_timeout(Duration::from_secs(600))
+        .max_lifetime(Duration::from_secs(1800))
         // Enable ANSI_QUOTES on every connection so double-quoted identifiers
         // ("col") work the same as backtick identifiers (`col`). This makes
         // standard SQL and AI-generated queries work without rewriting syntax.

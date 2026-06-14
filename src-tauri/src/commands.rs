@@ -408,6 +408,8 @@ pub async fn pg_get_table_rows(
     sort_column: Option<String>,
     sort_direction: Option<String>,
     filters: Option<Vec<crate::db::RowFilter>>,
+    // Optional — defaults to true (full metadata). Repeat fetches pass false.
+    include_meta: Option<bool>,
 ) -> Result<TableRows, String> {
     get_table_rows(
         state,
@@ -419,6 +421,7 @@ pub async fn pg_get_table_rows(
         sort_column,
         sort_direction,
         filters,
+        include_meta.unwrap_or(true),
     )
     .await
 }
