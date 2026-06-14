@@ -30,7 +30,7 @@ jobs:
   create-release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Create GitHub release
         env:
@@ -105,7 +105,10 @@ jobs:
           - platform: ubuntu-22.04
             name: linux
             args: ''
-          - platform: windows-latest
+          # Pin to windows-2022 (stable VS 2022 / MSVC 14.4x). windows-latest now
+          # redirects to a preview VS 2026 image (MSVC 14.51) that fails to compile
+          # DuckDB (libduckdb-sys, cc-rs exit code 2). VS 2022 builds it reliably.
+          - platform: windows-2022
             name: windows
             args: ''
           - platform: macos-latest
@@ -119,9 +122,9 @@ jobs:
     name: build-${{ matrix.name }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -319,7 +322,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Download all sig artifacts
         uses: actions/download-artifact@v4
@@ -393,7 +396,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: master
 
