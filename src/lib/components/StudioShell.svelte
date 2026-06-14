@@ -257,6 +257,10 @@
   let sidebarEverOpened = $state(loadLayout().navSidebarOpen)
   let aiSidebarOpen = $state(loadLayout().aiSidebarOpen)
   let aiSidebarEverOpened = $state(loadLayout().aiSidebarOpen)
+  // Width for the loading-fallback shell, so the spinner fills a properly-sized
+  // sidebar panel (matching saved width) instead of a zero-width strip while the
+  // lazy AiSidebar chunk downloads.
+  const aiSidebarFallbackWidth = loadLayout().aiSidebarWidth
 
   /** @type {StudioTab[]} */
   let tabs = $state([])
@@ -2472,6 +2476,45 @@ let rowSearch = $state('')
 
   onMount(() => installInputShortcuts())
 
+  // Warm the lazy page/panel chunks during browser idle time so the first
+  // navigation to a tab is instant instead of paying a cold chunk fetch+parse.
+  // These chunks pull in heavy deps (monaco, echarts, marked+shiki), so we warm
+  // ONE per idle slot — never blocking interaction. Ordered by how commonly each
+  // is opened; the monaco-backed editors come first since they dominate latency.
+  // If the user opens a page sooner, import() dedups to the same promise and
+  // resolves immediately. Fire-and-forget; failures are harmless.
+  //
+  // Keep these specifiers identical to the {#await import('./X.svelte')} blocks
+  // below so Vite resolves them to the same chunk.
+  onMount(() => {
+    const warmers = [
+      () => import('./SqlConsole.svelte'),       // monaco
+      () => import('./AiSidebar.svelte'),        // marked + shiki
+      () => import('./AiChat.svelte'),           // marked + shiki
+      () => import('./OrmRunner.svelte'),        // monaco
+      () => import('./ChartsPage.svelte'),       // echarts
+      () => import('./DashboardPage.svelte'),
+      () => import('./SecurityPage.svelte'),
+      () => import('./DiagramsPage.svelte'),     // echarts
+      () => import('./EntityRelationPage.svelte'),
+      () => import('./DataDiffPage.svelte'),     // monaco
+      () => import('./NotebookEditor.svelte'),
+      () => import('./JsonViewerPage.svelte'),
+      () => import('./ExtensionsPage.svelte'),
+    ]
+    const ric = window.requestIdleCallback ?? ((/** @type {Function} */ fn) => setTimeout(() => fn(), 200))
+    const cancel = window.cancelIdleCallback ?? clearTimeout
+    let i = 0
+    let handle = 0
+    const pump = () => {
+      if (i >= warmers.length) return
+      warmers[i++]().catch(() => {})
+      handle = ric(pump, { timeout: 3000 })
+    }
+    handle = ric(pump, { timeout: 3000 })
+    return () => cancel(handle)
+  })
+
   onMount(async () => {
     // Seed the sample SQLite database once on first launch (any install, any user).
     // Uses a sentinel key so re-seeding is skipped if the user later deletes the connection.
@@ -3973,7 +4016,15 @@ let rowSearch = $state('')
       style={aiSidebarOpen && !aiMode ? '' : 'display:none'}
       inert={!aiSidebarOpen || aiMode || undefined}
     >
-      {#await import('./AiSidebar.svelte')}<TabLoading />{:then { default: AiSidebar }}
+      {#await import('./AiSidebar.svelte')}
+        <div
+          class="flex h-full min-h-0 shrink-0 flex-col border-l border-border/50 bg-background"
+          style="width: {aiSidebarFallbackWidth}px; min-width: {aiSidebarFallbackWidth}px; max-width: {aiSidebarFallbackWidth}px"
+          data-studio-region="ai-sidebar"
+        >
+          <TabLoading />
+        </div>
+      {:then { default: AiSidebar }}
         <AiSidebar
           bind:this={aiSidebarRef}
           schemaContext={aiSchemaContext}

@@ -1,9 +1,10 @@
 <script>
   import { tick } from 'svelte'
-  import { highlightCode } from '$lib/shiki-highlighter.js'
   import { cn } from '$lib/utils.js'
   import { appThemeId } from '$lib/stores/settings.js'
   import {
+    escapeHtml,
+    highlightJson,
     getJsonValueRangeAtOffset,
     getTextOffsetInRoot,
     linkifyJsonInElement,
@@ -41,9 +42,21 @@
     const source = code ?? ''
     const language = lang
     const theme = appTheme
+
+    // JSON / plaintext never touch shiki — keeps the heavy highlighter (and its
+    // wasm engine) out of the startup bundle, since the data-browsing path only
+    // ever renders these. Other languages lazy-load shiki on demand.
+    if (language === 'json') { html = highlightJson(source); loading = false; return }
+    if (!language || language === 'plaintext') {
+      html = `<pre class="p-3 font-mono text-ui-sm text-foreground whitespace-pre-wrap break-all">${escapeHtml(source)}</pre>`
+      loading = false
+      return
+    }
+
     let cancelled = false
     loading = true
-    highlightCode(source, language, theme)
+    import('$lib/shiki-highlighter.js')
+      .then(({ highlightCode }) => highlightCode(source, language, theme))
       .then((result) => {
         if (!cancelled) html = result
       })
@@ -68,14 +81,6 @@
       if (pre instanceof HTMLElement) linkifyJsonInElement(pre, source)
     })
   })
-
-  /** @param {string} s */
-  function escapeHtml(s) {
-    return s
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-  }
 
   /** @param {MouseEvent} e */
   function caretRangeFromEvent(e) {
