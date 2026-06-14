@@ -8,7 +8,7 @@
   import { toggleLightDark, isCurrentThemeDark } from '$lib/stores/settings.js'
   import LicenseActivation from './LicenseActivation.svelte'
   import TitleBar from './TitleBar.svelte'
-  import Database   from '@lucide/svelte/icons/database'
+  import Logo       from './Logo.svelte'
   import Zap        from '@lucide/svelte/icons/zap'
   import ShieldCheck from '@lucide/svelte/icons/shield-check'
   import RefreshCw  from '@lucide/svelte/icons/refresh-cw'
@@ -49,7 +49,7 @@
         <!-- ── Branding ─────────────────────────────────────────────── -->
         <div class="flex flex-col items-center gap-5 text-center">
           <div class="flex size-[44px] items-center justify-center rounded-xl border border-border bg-card">
-            <Database class="size-[18px] text-foreground" />
+            <Logo class="size-[22px]" />
           </div>
           <div>
             <h1 class="text-[19px] font-semibold tracking-tight text-foreground">Activate Stroke</h1>

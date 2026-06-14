@@ -302,6 +302,13 @@
     const tmp = L; L = R; R = tmp
   }
 
+  // Source/target share one input mode — a single toggle drives both.
+  const mode = $derived(L.mode)
+  function setMode(/** @type {'table'|'sql'} */ m) {
+    L = { ...L, mode: m }
+    R = { ...R, mode: m }
+  }
+
   $effect(() => {
     if (!columns.length) return
     const suggested = columns.map((c) => c.name).filter((n) => {
@@ -412,16 +419,24 @@
       onclick={(e) => { e.stopPropagation(); if (isOpen) closeDd(); else if (!loading && options.length > 0) openDd(id, e) }}
       disabled={loading || (!value && options.length === 0 && !loading)}
       class={cn(
-        'flex h-6 items-center gap-1 rounded px-1.5 text-xs transition-colors select-none',
-        value ? 'text-foreground/80 hover:text-foreground' : options.length || loading ? 'text-muted-foreground/40 hover:text-muted-foreground/70' : 'cursor-default text-muted-foreground/20 pointer-events-none',
+        'flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-xs transition-colors select-none',
+        loading
+          ? 'border-border/30 bg-muted/15 text-muted-foreground/40'
+          : value
+            ? 'border-border/40 bg-muted/25 text-foreground/90 hover:bg-muted/45'
+            : options.length
+              ? 'border-dashed border-border/40 bg-transparent text-muted-foreground/45 hover:border-border/60 hover:text-muted-foreground/75'
+              : 'cursor-default border-border/20 bg-transparent text-muted-foreground/20 pointer-events-none',
+        isOpen && 'border-border/70 bg-muted/50 text-foreground',
       )}
     >
       {#if loading}
         <Loader2 class="size-3 animate-spin text-muted-foreground/30" />
+        <span class="text-muted-foreground/40">{placeholder}</span>
       {:else}
-        <span class={cn('max-w-[120px] truncate', value && 'font-medium')}>{value || placeholder}</span>
+        <span class={cn('max-w-[140px] truncate', value && 'font-medium')}>{value || placeholder}</span>
         {#if options.length > 0 || value}
-          <ChevronDown class={cn('size-3 shrink-0 text-muted-foreground/25 transition-transform', isOpen && 'rotate-180')} />
+          <ChevronDown class={cn('ml-auto size-3 shrink-0 text-muted-foreground/40 transition-transform', isOpen && 'rotate-180')} />
         {/if}
       {/if}
     </button>
@@ -465,11 +480,11 @@
   <div class="relative inline-flex">
     <button type="button"
       onclick={(e) => { e.stopPropagation(); if (isOpen) closeDd(); else openDd(id, e) }}
-      class={cn('flex h-6 max-w-[180px] items-center gap-1.5 rounded px-1.5 text-xs font-medium transition-colors text-foreground/80 hover:text-foreground select-none', isOpen && 'text-foreground')}
+      class={cn('flex h-7 max-w-[200px] items-center gap-1.5 rounded-md border border-border/40 bg-muted/25 px-2.5 text-xs font-medium text-foreground/90 transition-colors hover:bg-muted/45 select-none', isOpen && 'border-border/70 bg-muted/50 text-foreground')}
     >
+      {#if value === currentConnectionId}<span class="size-1.5 shrink-0 rounded-full bg-blue-400" title="Active connection"></span>{/if}
       <span class="max-w-[140px] truncate">{selected?.name ?? 'Connection'}</span>
-      {#if value === currentConnectionId}<span class="size-1.5 shrink-0 rounded-full bg-blue-400/60"></span>{/if}
-      <ChevronDown class={cn('size-3 shrink-0 text-muted-foreground/25 transition-transform', isOpen && 'rotate-180')} />
+      <ChevronDown class={cn('ml-auto size-3 shrink-0 text-muted-foreground/40 transition-transform', isOpen && 'rotate-180')} />
     </button>
     {#if isOpen}
       <div
@@ -505,12 +520,11 @@
 
 <!-- ── Mode toggle ────────────────────────────────────────────────────────────── -->
 {#snippet ModeToggle({ mode, onset })}
-  <div class="flex shrink-0 items-center gap-2 text-xs">
+  <div class="flex shrink-0 items-center rounded-md border border-border/40 bg-muted/15 p-0.5 text-[11px]">
     <button onclick={() => onset('table')}
-      class={cn('transition-colors', mode === 'table' ? 'text-foreground' : 'text-muted-foreground/35 hover:text-muted-foreground/70')}>Table</button>
-    <span class="text-border/50">|</span>
+      class={cn('rounded px-2 py-0.5 font-medium transition-colors', mode === 'table' ? 'bg-muted text-foreground shadow-sm' : 'text-muted-foreground/45 hover:text-muted-foreground/80')}>Table</button>
     <button onclick={() => onset('sql')}
-      class={cn('transition-colors', mode === 'sql' ? 'text-foreground' : 'text-muted-foreground/35 hover:text-muted-foreground/70')}>SQL</button>
+      class={cn('rounded px-2 py-0.5 font-medium transition-colors', mode === 'sql' ? 'bg-muted text-foreground shadow-sm' : 'text-muted-foreground/45 hover:text-muted-foreground/80')}>SQL</button>
   </div>
 {/snippet}
 
@@ -519,60 +533,66 @@
   <!-- ══ Config ════════════════════════════════════════════════════════════════ -->
   <div class="shrink-0 border-b border-border/30 bg-background">
 
-    <!-- SOURCE row -->
-    <div class="flex items-center gap-3 px-5 py-2">
-      <span class="w-[52px] shrink-0 text-[10px] font-semibold uppercase tracking-widest text-blue-500/80">Source</span>
-      {@render ConnSelect({ id: 'L.conn', value: L.connId, onchange: (v) => { L = { ...L, connId: v }; onConnChange('L') } })}
-      {#if L.mode === 'table'}
-        <span class="text-muted-foreground/20 text-[10px] select-none">›</span>
-        {@render SearchSelect({ id: 'L.db', value: L.database, options: L.databases, loading: L.loadingDbs, placeholder: 'database', onchange: (v) => { L = { ...L, database: v }; onDatabaseChange('L') } })}
-        <span class="text-muted-foreground/20 text-[10px] select-none">›</span>
-        {@render SearchSelect({ id: 'L.schema', value: L.schema, options: L.schemas, loading: L.loadingSchemas, placeholder: 'schema', onchange: (v) => { L = { ...L, schema: v, table: '', tables: [] }; onSchemaChange('L') } })}
-        <span class="text-muted-foreground/20 text-[10px] select-none">›</span>
-        {@render SearchSelect({ id: 'L.table', value: L.table, options: L.tables, loading: L.loadingTables, placeholder: 'table', onchange: (v) => { L = { ...L, table: v } } })}
-      {:else}
-        <div bind:this={lSqlEl} class="min-h-[64px] flex-1 overflow-hidden rounded-md" style="border: 1px solid rgba(255,255,255,0.06)"></div>
-      {/if}
-      <div class="ml-auto">
-        {@render ModeToggle({ mode: L.mode, onset: (m) => { L = { ...L, mode: m } } })}
+    <div class="flex items-stretch">
+      <!-- Source / Target stacked -->
+      <div class="min-w-0 flex-1">
+
+        <!-- SOURCE row -->
+        <div class="flex items-center gap-2.5 px-5 py-2.5">
+          <span class="flex w-[74px] shrink-0 items-center gap-1.5">
+            <span class="size-1.5 shrink-0 rounded-full bg-blue-500"></span>
+            <span class="text-[10px] font-semibold uppercase tracking-wider text-blue-500/90">Source</span>
+          </span>
+          {@render ConnSelect({ id: 'L.conn', value: L.connId, onchange: (v) => { L = { ...L, connId: v }; onConnChange('L') } })}
+          {#if L.mode === 'table'}
+            {@render SearchSelect({ id: 'L.db', value: L.database, options: L.databases, loading: L.loadingDbs, placeholder: 'database', onchange: (v) => { L = { ...L, database: v }; onDatabaseChange('L') } })}
+            {@render SearchSelect({ id: 'L.schema', value: L.schema, options: L.schemas, loading: L.loadingSchemas, placeholder: 'schema', onchange: (v) => { L = { ...L, schema: v, table: '', tables: [] }; onSchemaChange('L') } })}
+            {@render SearchSelect({ id: 'L.table', value: L.table, options: L.tables, loading: L.loadingTables, placeholder: 'table', onchange: (v) => { L = { ...L, table: v } } })}
+          {:else}
+            <div bind:this={lSqlEl} class="min-h-[64px] flex-1 overflow-hidden rounded-md" style="border: 1px solid rgba(255,255,255,0.06)"></div>
+          {/if}
+        </div>
+
+        <div class="relative flex items-center px-5">
+          <div class="h-px flex-1 bg-border/10"></div>
+          <button
+            onclick={swapSources}
+            title="Swap source and target"
+            aria-label="Swap source and target"
+            class="mx-2 flex size-6 items-center justify-center rounded-md border border-border/40 bg-muted/20 text-muted-foreground/50 transition-colors hover:bg-muted/50 hover:text-foreground"
+          >
+            <ArrowUpDown class="size-3" />
+          </button>
+          <div class="h-px flex-1 bg-border/10"></div>
+        </div>
+
+        <!-- TARGET row -->
+        <div class="flex items-center gap-2.5 px-5 py-2.5">
+          <span class="flex w-[74px] shrink-0 items-center gap-1.5">
+            <span class="size-1.5 shrink-0 rounded-full bg-emerald-500"></span>
+            <span class="text-[10px] font-semibold uppercase tracking-wider text-emerald-500/90">Target</span>
+          </span>
+          {@render ConnSelect({ id: 'R.conn', value: R.connId, onchange: (v) => { R = { ...R, connId: v }; onConnChange('R') } })}
+          {#if R.mode === 'table'}
+            {@render SearchSelect({ id: 'R.db', value: R.database, options: R.databases, loading: R.loadingDbs, placeholder: 'database', onchange: (v) => { R = { ...R, database: v }; onDatabaseChange('R') } })}
+            {@render SearchSelect({ id: 'R.schema', value: R.schema, options: R.schemas, loading: R.loadingSchemas, placeholder: 'schema', onchange: (v) => { R = { ...R, schema: v, table: '', tables: [] }; onSchemaChange('R') } })}
+            {@render SearchSelect({ id: 'R.table', value: R.table, options: R.tables, loading: R.loadingTables, placeholder: 'table', onchange: (v) => { R = { ...R, table: v } } })}
+          {:else}
+            <div bind:this={rSqlEl} class="min-h-[64px] flex-1 overflow-hidden rounded-md" style="border: 1px solid rgba(255,255,255,0.06)"></div>
+          {/if}
+        </div>
+
       </div>
-    </div>
 
-    <div class="relative mx-5 flex items-center">
-      <div class="h-px flex-1 bg-border/10"></div>
-      <button
-        onclick={swapSources}
-        title="Swap Source ↔ Target"
-        class="mx-2 flex items-center gap-1 rounded px-2 py-0.5 text-[10px] text-muted-foreground/40 hover:bg-muted/40 hover:text-foreground/70"
-      >
-        <ArrowUpDown class="size-3" />
-        swap
-      </button>
-      <div class="h-px flex-1 bg-border/10"></div>
-    </div>
-
-    <!-- TARGET row -->
-    <div class="flex items-center gap-3 px-5 py-2">
-      <span class="w-[52px] shrink-0 text-[10px] font-semibold uppercase tracking-widest text-emerald-500/80">Target</span>
-      {@render ConnSelect({ id: 'R.conn', value: R.connId, onchange: (v) => { R = { ...R, connId: v }; onConnChange('R') } })}
-      {#if R.mode === 'table'}
-        <span class="text-muted-foreground/20 text-[10px] select-none">›</span>
-        {@render SearchSelect({ id: 'R.db', value: R.database, options: R.databases, loading: R.loadingDbs, placeholder: 'database', onchange: (v) => { R = { ...R, database: v }; onDatabaseChange('R') } })}
-        <span class="text-muted-foreground/20 text-[10px] select-none">›</span>
-        {@render SearchSelect({ id: 'R.schema', value: R.schema, options: R.schemas, loading: R.loadingSchemas, placeholder: 'schema', onchange: (v) => { R = { ...R, schema: v, table: '', tables: [] }; onSchemaChange('R') } })}
-        <span class="text-muted-foreground/20 text-[10px] select-none">›</span>
-        {@render SearchSelect({ id: 'R.table', value: R.table, options: R.tables, loading: R.loadingTables, placeholder: 'table', onchange: (v) => { R = { ...R, table: v } } })}
-      {:else}
-        <div bind:this={rSqlEl} class="min-h-[64px] flex-1 overflow-hidden rounded-md" style="border: 1px solid rgba(255,255,255,0.06)"></div>
-      {/if}
-      <div class="ml-auto">
-        {@render ModeToggle({ mode: R.mode, onset: (m) => { R = { ...R, mode: m } } })}
+      <!-- Single shared mode toggle for both rows -->
+      <div class="flex shrink-0 items-center border-l border-border/15 px-4">
+        {@render ModeToggle({ mode, onset: setMode })}
       </div>
     </div>
 
     <!-- Key cols + compare -->
-    <div class="flex items-center gap-3 border-t border-border/15 px-5 py-2">
-      <span class="shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground/35">Key cols</span>
+    <div class="flex items-center gap-2.5 border-t border-border/15 px-5 py-2.5">
+      <span class="w-[74px] shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/40" title="Columns used to match rows between source and target">Key cols</span>
       <div class="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
         {#each [...selectedKeyCols] as col}
           <button onclick={() => toggleKeyCol(col)}

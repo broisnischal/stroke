@@ -3,6 +3,50 @@
 
 export const JSON_URL_RE = /^https?:\/\/\S+$/i
 
+/** @param {string} s */
+export function escapeHtml(s) {
+  return String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+}
+
+// Matches one JSON token: a string, a literal (true/false/null), or a number.
+// Whitespace and structural punctuation ({}[],:) fall through as plain gap text.
+const JSON_TOKEN_RE = /"(?:\\.|[^"\\])*"|\b(?:true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g
+
+/**
+ * Lightweight, dependency-free JSON syntax colorizer. Single regex pass, no
+ * TextMate grammar / wasm — a fast stand-in for shiki on the JSON viewing path.
+ * Returns a `<pre>` whose tokens are wrapped in `.json-tok-*` spans (colored via
+ * CSS vars in app.css). Text-node structure stays linkify-compatible.
+ * @param {string} source @returns {string}
+ */
+export function highlightJson(source) {
+  const s = String(source ?? '')
+  let out = ''
+  let last = 0
+  let m
+  JSON_TOKEN_RE.lastIndex = 0
+  while ((m = JSON_TOKEN_RE.exec(s)) !== null) {
+    const tok = m[0]
+    const start = m.index
+    if (start > last) out += escapeHtml(s.slice(last, start))
+    last = start + tok.length
+    if (tok[0] === '"') {
+      // Property key when the next non-space character is a colon.
+      let j = last
+      while (j < s.length && (s[j] === ' ' || s[j] === '\t')) j++
+      out += `<span class="${s[j] === ':' ? 'json-tok-key' : 'json-tok-str'}">${escapeHtml(tok)}</span>`
+    } else if (tok === 'true' || tok === 'false') {
+      out += `<span class="json-tok-bool">${tok}</span>`
+    } else if (tok === 'null') {
+      out += `<span class="json-tok-null">${tok}</span>`
+    } else {
+      out += `<span class="json-tok-num">${tok}</span>`
+    }
+  }
+  if (last < s.length) out += escapeHtml(s.slice(last))
+  return `<pre>${out}</pre>`
+}
+
 /** @param {string} text @param {number} quoteIndex */
 function isEscapedQuote(text, quoteIndex) {
   let backslashes = 0

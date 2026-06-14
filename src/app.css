@@ -16,6 +16,27 @@
   --editor-line-height: 24px;
 }
 
+/* JSON colorizer tokens (highlightJson) — dark-friendly defaults, light override
+   below. Most themes are dark, so they inherit these via the `html` selector. */
+html {
+  --json-key: oklch(0.74 0.1 245);     /* property keys — blue */
+  --json-string: oklch(0.78 0.13 150); /* strings — green */
+  --json-number: oklch(0.8 0.12 75);   /* numbers — amber */
+  --json-boolean: oklch(0.76 0.13 310);/* true/false — purple */
+  --json-null: var(--muted-foreground);
+}
+html[data-theme="light"] {
+  --json-key: oklch(0.5 0.16 250);
+  --json-string: oklch(0.48 0.13 150);
+  --json-number: oklch(0.55 0.13 60);
+  --json-boolean: oklch(0.5 0.18 310);
+}
+.json-tok-key { color: var(--json-key); }
+.json-tok-str { color: var(--json-string); }
+.json-tok-num { color: var(--json-number); }
+.json-tok-bool { color: var(--json-boolean); }
+.json-tok-null { color: var(--json-null); font-style: italic; }
+
 /* OS-native border-radius conventions */
 html[data-os="macos"]   { --radius: 0.5rem; --window-radius: 10px; }  /* macOS Big Sur+ system radius */
 html[data-os="windows"] { --radius: 0.4375rem; --window-radius: 8px; } /* Windows 11 */

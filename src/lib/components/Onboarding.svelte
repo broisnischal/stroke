@@ -3,6 +3,9 @@
   import { cubicOut } from 'svelte/easing'
   import Database      from '@lucide/svelte/icons/database'
   import Logo          from './Logo.svelte'
+  import LicenseActivation from './LicenseActivation.svelte'
+  import Zap           from '@lucide/svelte/icons/zap'
+  import RefreshCw     from '@lucide/svelte/icons/refresh-cw'
   import Table2        from '@lucide/svelte/icons/table-2'
   import Bot           from '@lucide/svelte/icons/bot'
   import Terminal      from '@lucide/svelte/icons/terminal'
@@ -28,8 +31,16 @@
 
   let step = $state(1)
   let activeFeature = $state(0)
-  const TOTAL = 3
+  const TOTAL = 4
+  const LICENSE_STEP = 3
   const KEY = 'stroke:onboarded'
+
+  // License-step perks, shown under the activation form.
+  const LICENSE_PERKS = [
+    { icon: Zap, label: 'All features' },
+    { icon: RefreshCw, label: 'Future updates' },
+    { icon: ShieldCheck, label: 'Unlimited connections' },
+  ]
 
   const FEATURES = [
     { icon: Database, title: 'Connect any database', desc: 'PostgreSQL, MySQL, SQLite, and Cloudflare D1 — all from one window.', preview: 'connect' },
@@ -57,6 +68,7 @@
   const HEADINGS = [
     { title: 'Welcome to Stroke',     desc: "The developer's database client — connect, explore, and query with AI." },
     { title: 'Everything in Stroke',  desc: 'A full toolkit for working with your data — all in one window.' },
+    { title: 'Activate Stroke',       desc: 'Enter your license key, or start a free trial — you can always activate later.' },
     { title: "You're all set",        desc: 'Connect a real database, or explore with sample data first.' },
   ]
 
@@ -65,6 +77,13 @@
 
   function next() { step = Math.min(step + 1, TOTAL) }
   function back() { step = Math.max(step - 1, 1) }
+
+  // "Skip" on the license step means "skip for now" → continue to the connection
+  // screen (still in trial), not abandon onboarding. Elsewhere it exits the tour.
+  function headerSkip() {
+    if (step === LICENSE_STEP) next()
+    else done(false)
+  }
 
   function selectFeature(i) {
     activeFeature = Math.max(0, Math.min(i, FEATURES.length - 1))
@@ -128,8 +147,8 @@
         <button
           type="button"
           class="text-sm text-muted-foreground transition-colors hover:text-foreground"
-          onclick={() => done(false)}
-        >Skip</button>
+          onclick={headerSkip}
+        >{step === LICENSE_STEP ? 'Skip for now' : 'Skip'}</button>
       {:else}
         <div class="w-8"></div>
       {/if}
@@ -272,7 +291,35 @@
                 <Sparkles class="size-3.5 text-primary/70" /> Press ⌘K anytime to jump to any of these.
               </p>
 
-            <!-- ── Step 3: Connect ── -->
+            <!-- ── Step 3: Activate license ── -->
+            {:else if step === LICENSE_STEP}
+              <div class="flex w-full max-w-sm flex-col gap-5">
+                <div class="rounded-2xl border border-border bg-card/30">
+                  <LicenseActivation compact onactivated={next} />
+                </div>
+
+                <!-- Perks -->
+                <div class="flex items-center justify-center gap-5">
+                  {#each LICENSE_PERKS as perk (perk.label)}
+                    <span class="flex items-center gap-1.5 text-[11.5px] text-muted-foreground/50">
+                      <perk.icon class="size-3 shrink-0" />
+                      {perk.label}
+                    </span>
+                  {/each}
+                </div>
+
+                <p class="text-center text-xs text-muted-foreground/60">
+                  No license yet?
+                  <a
+                    href="https://stroke.click"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
+                  >stroke.click →</a>
+                </p>
+              </div>
+
+            <!-- ── Step 4: Connect ── -->
             {:else}
               <div class="flex w-full max-w-md flex-col gap-3">
                 <button
@@ -326,7 +373,16 @@
 
       <span class="text-sm text-muted-foreground">Step {step} of {TOTAL}</span>
 
-      {#if step < TOTAL}
+      {#if step === LICENSE_STEP}
+        <button
+          type="button"
+          class="group flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-6 py-2.5 text-sm font-semibold text-foreground transition-all hover:bg-muted/60 active:scale-[0.98]"
+          onclick={next}
+        >
+          Start free trial
+          <ArrowRight class="size-4 transition-transform duration-200 group-hover:translate-x-0.5" />
+        </button>
+      {:else if step < TOTAL}
         <button
           type="button"
           class="group flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground transition-all hover:opacity-90 active:scale-[0.98]"

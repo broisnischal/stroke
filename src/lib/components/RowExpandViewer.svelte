@@ -3,10 +3,10 @@
   import Copy from '@lucide/svelte/icons/copy'
   import Check from '@lucide/svelte/icons/check'
   import WrapText from '@lucide/svelte/icons/wrap-text'
-  import { appThemeId } from '$lib/stores/settings.js'
-  import { highlightCode } from '$lib/shiki-highlighter.js'
   import { formatJsonValue } from '$lib/row-inspector.js'
   import {
+    escapeHtml,
+    highlightJson,
     linkifyJsonInElement,
     getTextOffsetInRoot,
     getJsonValueRangeAtOffset,
@@ -37,7 +37,6 @@
   let contextMenu = $state(null)
 
   const displayText = $derived(formatJsonValue(truncateDeep(record, TRUNCATE_LIMIT)))
-  const appTheme = $derived($appThemeId)
 
   function fullJsonText() {
     return formatJsonValue(record)
@@ -68,19 +67,11 @@
 
   $effect(() => {
     const source = displayText
-    const theme = appTheme
-    if (source.length > HIGHLIGHT_LIMIT) {
-      html = `<pre class="m-0 p-0 font-mono text-sm leading-relaxed whitespace-pre text-foreground">${escapeHtml(source)}</pre>`
-      return
-    }
-    let cancelled = false
-    highlightCode(source, 'json', theme)
-      .then((result) => { if (!cancelled) html = result })
-      .catch(() => {
-        if (!cancelled)
-          html = `<pre class="m-0 p-0 font-mono text-sm leading-relaxed whitespace-pre text-foreground">${escapeHtml(source)}</pre>`
-      })
-    return () => { cancelled = true }
+    // Above the limit, skip per-token spans entirely — plain escaped text keeps
+    // very large values cheap to render.
+    html = source.length > HIGHLIGHT_LIMIT
+      ? `<pre class="m-0 p-0 font-mono text-sm leading-relaxed whitespace-pre text-foreground">${escapeHtml(source)}</pre>`
+      : highlightJson(source)
   })
 
   // keep the wordWrap reactive — the pre's whitespace class is toggled via CSS var
@@ -95,11 +86,6 @@
       if (pre instanceof HTMLElement) linkifyJsonInElement(pre, source)
     })
   })
-
-  /** @param {string} s */
-  function escapeHtml(s) {
-    return s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
-  }
 
   async function copyJson() {
     try {
