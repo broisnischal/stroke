@@ -19,10 +19,12 @@
   const isSqlite = $derived(result?.driver === 'sqlite')
 
   // NODE_H is used only as a midpoint estimate for arrow anchors — cards auto-size.
+  // Derived (not a plain const) so it tracks the driver instead of freezing on the
+  // initial value of `isSqlite`.
   const NODE_W = 216
-  const NODE_H = isSqlite ? 48 : 136
+  const NODE_H = $derived(isSqlite ? 48 : 136)
   const COL_W = NODE_W + 64
-  const ROW_H = NODE_H + 40
+  const ROW_H = $derived(NODE_H + 40)
   const PAD = 32
   const QR_W = 110
   const QR_H = 40
