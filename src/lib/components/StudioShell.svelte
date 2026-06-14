@@ -348,7 +348,12 @@
     if (_liveRefetchTimer) return // coalesce bursts
     _liveRefetchTimer = setTimeout(() => {
       _liveRefetchTimer = null
-      if (liveEnabled && activeTabId && !editingCell) void fetchRowsForTab(activeTabId)
+      // loadRows() (not fetchRowsForTab) so the refresh honours the CURRENT
+      // filters/sort/search/page held in global state; keepScroll avoids the
+      // grid jumping to the top on every change.
+      if (liveEnabled && activeTabId && !editingCell && activeTab?.kind === 'table') {
+        void loadRows({ keepScroll: true })
+      }
     }, 350)
   }
 
@@ -2338,7 +2343,13 @@ let rowSearch = $state('')
     }
   }
 
-  async function loadRows() {
+  /**
+   * @param {{ keepScroll?: boolean }} [opts]
+   *   keepScroll — used by live refresh: re-run the *current* query (filters,
+   *   sort, search, page from global state) but update rows in place without
+   *   jumping the grid to the top or closing the row inspector.
+   */
+  async function loadRows({ keepScroll = false } = {}) {
     if (!activeTable) {
       columns = []
       rows = []
@@ -2349,34 +2360,49 @@ let rowSearch = $state('')
     const seq = ++_loadSeq
     loadingRows = true
     _infiniteRows = []
-    selected = new Set()
-    focusedRow = null
-    inspectorRow = null
-    editingCell = null
+    if (!keepScroll) {
+      selected = new Set()
+      focusedRow = null
+      inspectorRow = null
+      editingCell = null
+    }
     error = ''
     try {
       const offset = currentOffset
       const { sortColumn, sortDirection } = sortForApi(rowSort)
+      // Catalog metadata (pk/fk/enums/nullable) only changes when the table's
+      // structure does, so request it only on the first load of a table; repeat
+      // fetches (pagination, sort, filter, live) reuse what we already hold,
+      // skipping several round-trips per fetch.
+      const includeMeta = columns.length === 0
       const data = await getTableRows(activeSchema, activeTable, effectivePageSize, offset, {
         search: rowSearch,
         sortColumn,
         sortDirection,
         filters: filtersForApi(rowFilters, columns),
+        includeMeta,
       })
       if (seq !== _loadSeq) return
       const nextColumns = data.columns ?? []
-      if (!sameColumnShape(columns, nextColumns)) columns = nextColumns
-      if (activeTable) {
-        lruSet(tableColumnsCache, `${activeSchema}.${activeTable}`, columns)
+      // Update column shape whenever it actually changes (e.g. a column was
+      // added/dropped) even on a metadata-skipping fetch; otherwise keep the
+      // richer existing columns (which carry enum/nullable info).
+      if (nextColumns.length && !sameColumnShape(columns, nextColumns)) columns = nextColumns
+      if (includeMeta) {
+        if (activeTable) {
+          lruSet(tableColumnsCache, `${activeSchema}.${activeTable}`, columns)
+        }
+        primaryKey = data.primaryKey ?? data.primary_key ?? []
+        foreignKeys = normalizeForeignKeys(data.foreignKeys ?? data.foreign_keys)
       }
-      primaryKey = data.primaryKey ?? data.primary_key ?? []
-      foreignKeys = normalizeForeignKeys(data.foreignKeys ?? data.foreign_keys)
       const fetched = data.rows ?? []
       rows = fetched
       _infiniteRows = fetched
       total = Number(data.total ?? 0)
       queryMs = Number(data.queryMs ?? data.query_ms ?? 0)
-      reloadToken++
+      // Live refresh updates in place — only reset scroll for user-driven loads
+      // (page/filter/sort/search), where jumping to the top is expected.
+      if (!keepScroll) reloadToken++
       const maxPage = Math.max(1, Math.ceil(total / effectivePageSize) || 1)
       if (page > maxPage) page = maxPage
     } catch (e) {

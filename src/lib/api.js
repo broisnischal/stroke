@@ -401,7 +401,13 @@ export async function dropTable(schema, table, cascade = false) {
  *   sortColumn?: string
  *   sortDirection?: 'asc' | 'desc'
  *   filters?: { column: string, op: string, value?: string }[]
+ *   includeMeta?: boolean
  * }} [query]
+ *
+ * `includeMeta` (default true): fetch column enums/nullability, primary key and
+ * foreign keys. Pass false on repeat fetches of a table already loaded
+ * (pagination, sort, filter, live refresh) to skip those catalog round-trips —
+ * the caller keeps the metadata it already has.
  */
 export async function getTableRows(schema, table, limit, offset, query = {}) {
   try {
@@ -414,6 +420,7 @@ export async function getTableRows(schema, table, limit, offset, query = {}) {
       sortColumn: query.sortColumn || null,
       sortDirection: query.sortDirection || null,
       filters: query.filters?.length ? query.filters : null,
+      includeMeta: query.includeMeta !== false,
     })
   } catch (err) {
     throw new Error(formatInvokeError(err))
