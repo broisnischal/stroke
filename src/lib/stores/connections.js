@@ -17,6 +17,9 @@ const LAST_ID_KEY  = 'stroke:last-connection-id'
  *   user?: string
  *   password?: string
  *   ssl?: boolean
+ *   secure?: boolean
+ *   encrypt?: boolean
+ *   trustCert?: boolean
  *   filePath?: string
  *   accountId?: string
  *   databaseId?: string

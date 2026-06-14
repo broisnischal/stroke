@@ -113,7 +113,10 @@
       value,
       language: 'sql',
       theme: monacoThemeId(currentTheme()),
-      automaticLayout: true,
+      // automaticLayout:false — that option runs a 100ms setInterval per editor
+      // that never stops, even while this tab is hidden (tabs are kept alive, not
+      // unmounted). A ResizeObserver fires only on actual size changes. See below.
+      automaticLayout: false,
       minimap: { enabled: false },
       fontFamily: monacoFontFamily(),
       fontSize,
@@ -162,6 +165,11 @@
 
     registerAppShortcuts(editor)
 
+    // Replaces automaticLayout's polling loop: relayout only when the container
+    // actually resizes.
+    const ro = new ResizeObserver(() => editor?.layout())
+    ro.observe(container)
+
     // Document-level capture so Ctrl/Cmd+Enter fires even when the user hasn't
     // yet clicked into the editor (no focus = no container-level events).
     // Guards:
@@ -209,6 +217,7 @@
 
     return () => {
       document.removeEventListener('keydown', docRunHandler, { capture: true })
+      ro.disconnect()
       editor?.dispose()
       editor = null
       themeObserver.disconnect()

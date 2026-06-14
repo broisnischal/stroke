@@ -93,6 +93,9 @@ pub async fn backup_export(
         ActiveConnection::Mysql(pool) => export_mysql(&app, &pool, schema.as_deref(), tables.as_deref(), &opts).await,
         ActiveConnection::D1(cfg) => export_d1(&app, &cfg, tables.as_deref(), &opts).await,
         ActiveConnection::LibSql(_) => Err("Backup export is not supported for LibSQL/Turso connections".to_string()),
+        ActiveConnection::Clickhouse(_) => Err("Backup export is not supported for ClickHouse connections".to_string()),
+        ActiveConnection::Duckdb(_) => Err("Backup export is not yet supported for DuckDB connections".to_string()),
+        ActiveConnection::Mssql(_) => Err("Backup export is not yet supported for MS SQL Server connections".to_string()),
     }
 }
 
@@ -108,6 +111,9 @@ pub async fn backup_import(
         ActiveConnection::Mysql(pool) => import_mysql(&app, &pool, &sql).await,
         ActiveConnection::D1(cfg) => import_d1(&app, &cfg, &sql).await,
         ActiveConnection::LibSql(_) => Err("Backup import is not supported for LibSQL/Turso connections".to_string()),
+        ActiveConnection::Clickhouse(_) => Err("Backup import is not supported for ClickHouse connections".to_string()),
+        ActiveConnection::Duckdb(_) => Err("Backup import is not yet supported for DuckDB connections".to_string()),
+        ActiveConnection::Mssql(_) => Err("Backup import is not yet supported for MS SQL Server connections".to_string()),
     }
 }
 

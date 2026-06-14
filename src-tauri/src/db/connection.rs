@@ -108,6 +108,68 @@ pub struct LibSqlConfig {
     pub auth_token: Option<String>,
 }
 
+// ── ClickHouse ────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClickhouseConfig {
+    pub name: String,
+    pub host: String,
+    pub port: u16,
+    pub database: String,
+    pub user: String,
+    pub password: String,
+    /// Use HTTPS (port 8443) instead of plain HTTP (port 8123).
+    #[serde(default)]
+    pub secure: bool,
+}
+
+impl ClickhouseConfig {
+    /// Base HTTP(S) URL for the ClickHouse HTTP interface, no trailing slash.
+    pub fn base_url(&self) -> String {
+        let scheme = if self.secure { "https" } else { "http" };
+        format!("{scheme}://{}:{}", self.host, self.port)
+    }
+}
+
+// ── DuckDB ────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DuckdbConfig {
+    pub name: String,
+    /// Absolute file path, or `:memory:` for an in-memory database.
+    pub file_path: String,
+}
+
+/// DuckDB's `Connection` is synchronous and not clonable, so we wrap it in an
+/// `Arc<Mutex<…>>`. All access happens inside `spawn_blocking` to keep the async
+/// runtime free; the lock is held only for the duration of a single statement.
+pub type DuckdbHandle = Arc<Mutex<duckdb::Connection>>;
+
+// ── MS SQL Server ───────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MssqlConfig {
+    pub name: String,
+    pub host: String,
+    pub port: u16,
+    pub database: String,
+    pub user: String,
+    pub password: String,
+    /// Negotiate TLS encryption for the connection.
+    #[serde(default)]
+    pub encrypt: bool,
+    /// Skip TLS certificate validation (self-signed dev servers).
+    #[serde(default)]
+    pub trust_cert: bool,
+}
+
+/// tiberius `Client` is async and not clonable; share it behind an async mutex.
+/// Only one desktop connection is ever live, so lock contention is a non-issue.
+pub type MssqlHandle = Arc<tokio::sync::Mutex<crate::db::mssql::MssqlClient>>;
+
 // ── Any-connection config for cross-connection queries ────────────────────────
 
 /// Accepts the full saved-connection JSON from the frontend and routes to the
@@ -125,6 +187,12 @@ pub enum AnyConnectionConfig {
     Mysql(MysqlConfig),
     #[serde(rename = "libsql")]
     Libsql(LibSqlConfig),
+    #[serde(rename = "clickhouse")]
+    Clickhouse(ClickhouseConfig),
+    #[serde(rename = "duckdb")]
+    Duckdb(DuckdbConfig),
+    #[serde(rename = "mssql")]
+    Mssql(MssqlConfig),
 }
 
 // ── Active connection ─────────────────────────────────────────────────────────
@@ -136,6 +204,9 @@ pub enum ActiveConnection {
     Mysql(MySqlPool),
     D1(D1Config),
     LibSql(LibSqlConfig),
+    Clickhouse(ClickhouseConfig),
+    Duckdb(DuckdbHandle),
+    Mssql(MssqlHandle),
 }
 
 impl ActiveConnection {
@@ -146,6 +217,9 @@ impl ActiveConnection {
             Self::Mysql(_) => "mysql",
             Self::D1(_) => "d1",
             Self::LibSql(_) => "libsql",
+            Self::Clickhouse(_) => "clickhouse",
+            Self::Duckdb(_) => "duckdb",
+            Self::Mssql(_) => "mssql",
         }
     }
 }
@@ -444,6 +518,70 @@ pub async fn connect_libsql(state: State<'_, DbState>, config: LibSqlConfig) -> 
     test_libsql_connection(config.clone()).await?;
     close_existing(&state).await;
     set_conn(&state, Some(ActiveConnection::LibSql(config)))
+}
+
+// ── ClickHouse connect / test ─────────────────────────────────────────────────
+
+pub async fn test_clickhouse_connection(config: ClickhouseConfig) -> Result<(), String> {
+    tcp_preflight(&config.host, config.port).await?;
+    crate::db::clickhouse::query(&config, "SELECT 1").await?;
+    Ok(())
+}
+
+pub async fn connect_clickhouse(state: State<'_, DbState>, config: ClickhouseConfig) -> Result<(), String> {
+    // Validate credentials/reachability before storing.
+    test_clickhouse_connection(config.clone()).await?;
+    close_existing(&state).await;
+    set_conn(&state, Some(ActiveConnection::Clickhouse(config)))
+}
+
+// ── DuckDB connect / test ──────────────────────────────────────────────────────
+
+/// Open a DuckDB connection on a blocking thread (the driver is synchronous).
+pub(crate) async fn open_duckdb(config: &DuckdbConfig) -> Result<DuckdbHandle, String> {
+    let path = config.file_path.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = if path == ":memory:" || path.is_empty() {
+            duckdb::Connection::open_in_memory()
+        } else {
+            duckdb::Connection::open(&path)
+        }
+        .map_err(|e| format!("DuckDB connection failed: {e}"))?;
+        Ok::<DuckdbHandle, String>(Arc::new(Mutex::new(conn)))
+    })
+    .await
+    .map_err(|e| format!("DuckDB open task failed: {e}"))?
+}
+
+pub async fn test_duckdb_connection(config: DuckdbConfig) -> Result<(), String> {
+    let handle = open_duckdb(&config).await?;
+    crate::db::duckdb::ping(&handle).await
+}
+
+pub async fn connect_duckdb(state: State<'_, DbState>, config: DuckdbConfig) -> Result<(), String> {
+    let handle = open_duckdb(&config).await?;
+    crate::db::duckdb::ping(&handle).await?;
+    close_existing(&state).await;
+    set_conn(&state, Some(ActiveConnection::Duckdb(handle)))
+}
+
+// ── MS SQL Server connect / test ────────────────────────────────────────────────
+
+pub(crate) async fn open_mssql(config: &MssqlConfig) -> Result<MssqlHandle, String> {
+    tcp_preflight(&config.host, config.port).await?;
+    let client = crate::db::mssql::connect(config).await?;
+    Ok(Arc::new(tokio::sync::Mutex::new(client)))
+}
+
+pub async fn test_mssql_connection(config: MssqlConfig) -> Result<(), String> {
+    let handle = open_mssql(&config).await?;
+    crate::db::mssql::ping(&handle).await
+}
+
+pub async fn connect_mssql(state: State<'_, DbState>, config: MssqlConfig) -> Result<(), String> {
+    let handle = open_mssql(&config).await?;
+    close_existing(&state).await;
+    set_conn(&state, Some(ActiveConnection::Mssql(handle)))
 }
 
 // ── Disconnect ────────────────────────────────────────────────────────────────

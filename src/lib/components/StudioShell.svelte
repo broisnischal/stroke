@@ -158,6 +158,9 @@
     connectD1,
     connectLibSql,
     connectMysql,
+    connectClickhouse,
+    connectDuckdb,
+    connectMssql,
     listIndexes,
     listEnums,
     listTriggers,
@@ -2499,6 +2502,9 @@ let rowSearch = $state('')
       else if (last.type === 'd1') await connectD1(last)
       else if (last.type === 'libsql') await connectLibSql(last)
       else if (last.type === 'mysql' || last.type === 'mariadb') await connectMysql(last)
+      else if (last.type === 'clickhouse') await connectClickhouse(last)
+      else if (last.type === 'duckdb') await connectDuckdb(last)
+      else if (last.type === 'mssql') await connectMssql(last)
       else await connectPostgres(last)
       await onConnected(last, last.id)
       await refreshQueryStores()
@@ -2642,11 +2648,14 @@ let rowSearch = $state('')
     // Connect to the chosen saved connection
     autoConnecting = true
     try {
-      const { connectPostgres, connectSqlite, connectD1, connectLibSql, connectMysql } = await import('$lib/api.js')
+      const { connectPostgres, connectSqlite, connectD1, connectLibSql, connectMysql, connectClickhouse, connectDuckdb, connectMssql } = await import('$lib/api.js')
       if (conn.type === 'sqlite') await connectSqlite(conn)
       else if (conn.type === 'd1') await connectD1(conn)
       else if (conn.type === 'libsql') await connectLibSql(conn)
       else if (conn.type === 'mysql' || conn.type === 'mariadb') await connectMysql(conn)
+      else if (conn.type === 'clickhouse') await connectClickhouse(conn)
+      else if (conn.type === 'duckdb') await connectDuckdb(conn)
+      else if (conn.type === 'mssql') await connectMssql(conn)
       else await connectPostgres(conn)
       await onConnected(conn, conn.id)
     } catch (e) {

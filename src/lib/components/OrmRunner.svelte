@@ -475,7 +475,9 @@
       value: code,
       language: "javascript",
       theme: monacoThemeId(currentTheme()),
-      automaticLayout: true,
+      // automaticLayout:false — that option polls via setInterval(100ms) forever,
+      // even while this tab is hidden. ResizeObserver fires only on real resizes.
+      automaticLayout: false,
       minimap: { enabled: false },
       fontFamily: monacoFontFamily(),
       fontSize,
@@ -502,6 +504,8 @@
     });
 
     registerShortcuts(editor);
+    const ro = new ResizeObserver(() => editor?.layout());
+    ro.observe(container);
     editor.onDidChangeModelContent(() => {
       const next = editor?.getValue() ?? "";
       if (next !== code) code = next;
@@ -516,6 +520,7 @@
     });
 
     return () => {
+      ro.disconnect();
       editor?.dispose();
       editor = null;
       // Dispose the Monaco extra-lib — it lives on javascriptDefaults globally.

@@ -135,6 +135,9 @@
       : connection?.type === 'mysql' ? 'MySQL'
       : connection?.type === 'mariadb' ? 'MariaDB'
       : connection?.type === 'cockroachdb' ? 'CockroachDB'
+      : connection?.type === 'clickhouse' ? 'ClickHouse'
+      : connection?.type === 'duckdb' ? 'DuckDB'
+      : connection?.type === 'mssql' ? 'SQL Server'
       : connection?.type === 'd1' ? 'D1'
       : 'PostgreSQL',
   )

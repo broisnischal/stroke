@@ -99,7 +99,9 @@
     lineNumbersMinChars: 0,
     glyphMargin: false,
     folding: false,
-    automaticLayout: true,
+    // automaticLayout:false — it polls via setInterval(100ms) per editor (two here)
+    // and never stops, even when this tab is hidden. ResizeObserver is event-driven.
+    automaticLayout: false,
     scrollbar: { vertical: 'auto', horizontal: 'hidden', alwaysConsumeMouseWheel: false },
     quickSuggestions: { other: true, comments: false, strings: true },
     suggestOnTriggerCharacters: true,
@@ -113,7 +115,9 @@
     const ed = monaco.editor.create(el, { ...MONACO_OPTS, value: untrack(() => L.sql) })
     ed.onDidChangeModelContent(() => { L = { ...L, sql: ed.getValue() } })
     lMonaco = ed
-    return () => { ed.dispose(); lMonaco = null }
+    const ro = new ResizeObserver(() => ed.layout())
+    ro.observe(el)
+    return () => { ro.disconnect(); ed.dispose(); lMonaco = null }
   })
 
   $effect(() => {
@@ -122,7 +126,9 @@
     const ed = monaco.editor.create(el, { ...MONACO_OPTS, value: untrack(() => R.sql) })
     ed.onDidChangeModelContent(() => { R = { ...R, sql: ed.getValue() } })
     rMonaco = ed
-    return () => { ed.dispose(); rMonaco = null }
+    const ro = new ResizeObserver(() => ed.layout())
+    ro.observe(el)
+    return () => { ro.disconnect(); ed.dispose(); rMonaco = null }
   })
 
   // ── Key columns ───────────────────────────────────────────────────────────────
