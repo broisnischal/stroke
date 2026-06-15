@@ -1,13 +1,13 @@
-pkgbase = discerns
+pkgbase = stroke
 	pkgdesc = Cross-database desktop studio built with Tauri
-	pkgver = 0.1.22
-	pkgrel = 4
-	url = https://github.com/broisnischal/studio
+	pkgver = 0.4.7
+	pkgrel = 1
+	url = https://github.com/broisnischal/stroke
 	arch = x86_64
 	license = custom
 	depends = fuse2
 	options = !strip
-	source = discerns-0.1.22.AppImage::https://github.com/broisnischal/studio/releases/download/v0.1.22/db-studio_0.1.22_amd64.AppImage
-	sha256sums = 7214b7bd75519a191898b7f124c4667f358bef61b65f6b43b34baa06e51cf10d
+	source = stroke-0.4.7.AppImage::https://github.com/broisnischal/stroke/releases/download/v0.4.7/Stroke_0.4.7_amd64.AppImage
+	sha256sums = 0afe45214f7a8bfba026cb2b5783adb8f5b2feadea1d5b1ce818dc8a483edfc7
 
-pkgname = discerns
+pkgname = stroke
