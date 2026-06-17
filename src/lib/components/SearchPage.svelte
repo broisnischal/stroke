@@ -270,7 +270,7 @@
       <div class="flex flex-col items-center justify-center gap-2 py-12 text-center">
         <Search class="size-8 text-muted-foreground/12" />
         <p class="text-sm text-muted-foreground/40">Search across all {tables.length} tables</p>
-        <p class="text-xs text-muted-foreground/25">Type a value and press <kbd class="rounded border border-border/50 px-1 py-0.5 font-mono text-[10px]">Enter</kbd></p>
+        <p class="text-xs text-muted-foreground/25">Type a value and press <kbd>Enter</kbd></p>
       </div>
     {/if}
   </div>

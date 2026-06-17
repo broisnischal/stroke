@@ -40,6 +40,7 @@
   import { executeSql } from '$lib/api.js'
   import { engineFamily } from '$lib/stores/connections.js'
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js'
+  import AppearanceMenu from './AppearanceMenu.svelte'
   import CreateDatabaseDialog from './CreateDatabaseDialog.svelte'
 
   let {
@@ -84,6 +85,14 @@
     oncreatedatabase = /** @type {(opts: import('./CreateDatabaseDialog.svelte').CreateDbOptions) => Promise<void>} */ (async () => {}),
     /** Global read-only toggle — prevents all writes across the whole session */
     readonly = $bindable(false),
+    sidebarVisible       = true,
+    tabBarVisible        = true,
+    tableToolbarVisible  = true,
+    statusBarVisible     = true,
+    ontoggleSidebar       = /** @type {() => void} */ (() => {}),
+    ontoggletabbar        = /** @type {() => void} */ (() => {}),
+    ontoggletabletoolbar  = /** @type {() => void} */ (() => {}),
+    ontogglestatusbar     = /** @type {() => void} */ (() => {}),
   } = $props()
 
   const activeProfile = $derived($aiProfiles.find((p) => p.id === $activeProfileId) ?? $aiProfiles[0])
@@ -253,6 +262,7 @@
                   placeholder="Filter databases…"
                   class="h-7 w-full rounded-lg bg-muted/40 px-2.5 text-[11px] outline-none placeholder:text-muted-foreground/35 focus:ring-0"
                   bind:value={dbSearch}
+                  onkeydown={(e) => { if (e.key === 'Escape') { dbSearch = ''; dbOpen = false } }}
                 />
               </div>
             {/if}
@@ -520,6 +530,18 @@
         <Moon class="size-3.5" />
       {/if}
     </button>
+
+    <!-- Appearance -->
+    <AppearanceMenu
+      {sidebarVisible}
+      {tabBarVisible}
+      {tableToolbarVisible}
+      {statusBarVisible}
+      {ontoggleSidebar}
+      {ontoggletabbar}
+      {ontoggletabletoolbar}
+      {ontogglestatusbar}
+    />
 
     <!-- Settings -->
     <button type="button" class={iconBtn} onclick={onopensettings} title="Settings (⌘,)">

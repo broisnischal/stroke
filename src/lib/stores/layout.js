@@ -2,7 +2,7 @@ const STORAGE_KEY = 'stroke:layout'
 
 /** @typedef {'normal' | 'json'} InspectorView */
 
-/** @typedef {{ navSidebarWidth: number, navSidebarOpen: boolean, inspectorWidth: number, inspectorView: InspectorView, sqlEditorHeight: number, logPanelWidth: number, logPanelOpen: boolean, aiSidebarWidth: number, aiSidebarOpen: boolean }} PanelLayout */
+/** @typedef {{ navSidebarWidth: number, navSidebarOpen: boolean, inspectorWidth: number, inspectorView: InspectorView, sqlEditorHeight: number, logPanelWidth: number, logPanelOpen: boolean, aiSidebarWidth: number, aiSidebarOpen: boolean, statusBarVisible: boolean, tabBarVisible: boolean, tableToolbarVisible: boolean }} PanelLayout */
 
 export const DEFAULT_LAYOUT = {
   navSidebarWidth: 220,
@@ -14,6 +14,9 @@ export const DEFAULT_LAYOUT = {
   logPanelOpen: false,
   aiSidebarWidth: 400,
   aiSidebarOpen: false,
+  statusBarVisible: true,
+  tabBarVisible: true,
+  tableToolbarVisible: true,
 }
 
 export const NAV_SIDEBAR_MIN = 180
@@ -76,6 +79,9 @@ export function loadLayout() {
     const navSidebarOpen = parsed.navSidebarOpen !== false
     const logPanelOpen = parsed.logPanelOpen === true
     const aiSidebarOpen = parsed.aiSidebarOpen === true
+    const statusBarVisible = parsed.statusBarVisible !== false
+    const tabBarVisible = parsed.tabBarVisible !== false
+    const tableToolbarVisible = parsed.tableToolbarVisible !== false
     return {
       navSidebarWidth: clampNavSidebarWidth(navSidebarWidth),
       navSidebarOpen,
@@ -86,6 +92,9 @@ export function loadLayout() {
       logPanelOpen,
       aiSidebarWidth: clampAiSidebarWidth(aiSidebarWidth),
       aiSidebarOpen,
+      statusBarVisible,
+      tabBarVisible,
+      tableToolbarVisible,
     }
   } catch {
     return { ...DEFAULT_LAYOUT }

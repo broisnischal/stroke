@@ -133,12 +133,13 @@
   $effect(() => {
     if (!loading) { thinkingPhrase = THINKING_PHRASES[0]; thinkingVisible = true; return }
     let i = 0
+    let fadeId = 0
     const tick2 = () => {
       thinkingVisible = false
-      setTimeout(() => { i = (i + 1) % THINKING_PHRASES.length; thinkingPhrase = THINKING_PHRASES[i]; thinkingVisible = true }, 220)
+      fadeId = setTimeout(() => { fadeId = 0; i = (i + 1) % THINKING_PHRASES.length; thinkingPhrase = THINKING_PHRASES[i]; thinkingVisible = true }, 220)
     }
     const id = setInterval(tick2, 2600)
-    return () => clearInterval(id)
+    return () => { clearInterval(id); clearTimeout(fadeId) }
   })
 
   // ── @ mention system ──────────────────────────────────────────────────────
