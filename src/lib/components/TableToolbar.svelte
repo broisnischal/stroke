@@ -24,6 +24,8 @@
   import * as Select from "$lib/components/ui/select/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import SearchableMenu from "./SearchableMenu.svelte";
+  import DateFilterPicker from "./DateFilterPicker.svelte";
+  import DateRangePicker from "./DateRangePicker.svelte";
   import { slotRoll } from "$lib/actions/slot-text.js";
   import { cn } from "$lib/utils.js";
   import {
@@ -141,6 +143,10 @@
   let sortMenuOpen = $state(false);
   let columnsMenuOpen = $state(false);
   let limitOffsetOpen = $state(false);
+  let moreMenuOpen = $state(false);
+  let deleteConfirmPending = $state(false);
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let _deleteConfirmTimer = null;
   let draftLimit = $state(untrack(() => pageSize));
   let draftOffset = $state(0);
   let limitError = $state("");
@@ -786,7 +792,15 @@
       </DropdownMenu.Content>
     </DropdownMenu.Root>
 
-    <DropdownMenu.Root>
+    <DropdownMenu.Root
+      bind:open={moreMenuOpen}
+      onOpenChange={(open) => {
+        if (!open) {
+          deleteConfirmPending = false;
+          if (_deleteConfirmTimer) { clearTimeout(_deleteConfirmTimer); _deleteConfirmTimer = null; }
+        }
+      }}
+    >
       <DropdownMenu.Trigger
         class={cn(iconBtn, "shrink-0")}
         title="More actions"
@@ -830,10 +844,25 @@
           <DropdownMenu.Item
             variant="destructive"
             disabled={selectedCount === 0 || !hasPrimaryKey || deleting || readonly}
-            onSelect={ondeleteselected}
+            class={deleteConfirmPending ? "animate-pulse" : ""}
+            onSelect={(e) => {
+              if (!deleteConfirmPending) {
+                e.preventDefault();
+                deleteConfirmPending = true;
+                if (_deleteConfirmTimer) clearTimeout(_deleteConfirmTimer);
+                _deleteConfirmTimer = setTimeout(() => {
+                  deleteConfirmPending = false;
+                  _deleteConfirmTimer = null;
+                }, 2500);
+              } else {
+                deleteConfirmPending = false;
+                if (_deleteConfirmTimer) { clearTimeout(_deleteConfirmTimer); _deleteConfirmTimer = null; }
+                ondeleteselected();
+              }
+            }}
           >
             <Trash2 />
-            {deleteLabel}
+            {deleteConfirmPending ? "Click again to confirm" : deleteLabel}
             <DropdownMenu.Shortcut>⌘⌫</DropdownMenu.Shortcut>
           </DropdownMenu.Item>
         {/if}
@@ -946,42 +975,15 @@
               </div>
             {:else if colKind === "date"}
               {#if filter.op === "between"}
-                <div class="flex min-w-0 flex-1 items-center gap-1.5">
-                  <input
-                    type="date"
-                    value={betweenFrom(filter.value)}
-                    class="h-7 min-w-0 flex-1 rounded-md border border-input bg-input/30 px-2 text-ui-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
-                    oninput={(e) =>
-                      patchFilter(filter.id, {
-                        value: betweenJoin(
-                          e.currentTarget.value,
-                          betweenTo(filter.value),
-                        ),
-                      })}
-                  />
-                  <span class="shrink-0 text-ui-xs text-muted-foreground"
-                    >to</span
-                  >
-                  <input
-                    type="date"
-                    value={betweenTo(filter.value)}
-                    class="h-7 min-w-0 flex-1 rounded-md border border-input bg-input/30 px-2 text-ui-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
-                    oninput={(e) =>
-                      patchFilter(filter.id, {
-                        value: betweenJoin(
-                          betweenFrom(filter.value),
-                          e.currentTarget.value,
-                        ),
-                      })}
-                  />
-                </div>
+                <DateRangePicker
+                  from={betweenFrom(filter.value)}
+                  to={betweenTo(filter.value)}
+                  onchange={(f, t) => patchFilter(filter.id, { value: betweenJoin(f, t) })}
+                />
               {:else}
-                <input
-                  type="date"
+                <DateFilterPicker
                   value={filter.value}
-                  class="h-7 w-36 shrink-0 rounded-md border border-input bg-input/30 px-2 text-ui-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
-                  oninput={(e) =>
-                    patchFilter(filter.id, { value: e.currentTarget.value })}
+                  onchange={(v) => patchFilter(filter.id, { value: v })}
                 />
               {/if}
             {:else if colKind === "number"}
