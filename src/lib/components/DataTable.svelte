@@ -85,6 +85,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import Check from "@lucide/svelte/icons/check";
   import Loader from "@lucide/svelte/icons/loader";
   import X from "@lucide/svelte/icons/x";
+  import DateTimePicker from "./DateTimePicker.svelte";
   import {
     createColorReader,
     withAlpha,
@@ -233,6 +234,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let pendingContextMenu = $state(false);
   /** Block item activation from the right-click pointerup that opened the menu */
   let suppressMenuSelect = $state(false);
+  /** True while waiting for a second click to confirm row delete in context menu */
+  let deleteRowConfirmPending = $state(false);
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let _deleteRowConfirmTimer = null;
   /** Row indices with inline JSON detail open */
   let expandedRows = $state(new Set());
   /** @type {Record<string, number>} */
@@ -843,12 +848,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         drafts[col.name] = defaultInsertDraft(col, primaryKey)
       }
       newRowDrafts = drafts
-      // Focus first non-auto visible column
-      const first = visibleColumns.find(c => {
+      // Focus first non-auto column (all columns, including hidden ones)
+      const first = columns.find(c => {
         const dt = c.dataType ?? c.data_type ?? ''
         return !isLikelyAutoColumn(dt, c.name, primaryKey)
       })
-      newRowFocusCol = first?.name ?? visibleColumns[0]?.name ?? null
+      newRowFocusCol = first?.name ?? columns[0]?.name ?? null
       // Scroll to top so the draft row is visible
       tableContainer?.scrollTo({ top: 0, behavior: 'smooth' })
     }
@@ -887,7 +892,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Shift+Tab moves left. Enter at the last cell submits.
     if (e.key === 'Tab' || e.key === 'Enter') {
       e.preventDefault()
-      const editableCols = visibleColumns.filter(c => {
+      const editableCols = columns.filter(c => {
         const dt = c.dataType ?? c.data_type ?? ''
         return !isLikelyAutoColumn(dt, c.name, primaryKey)
       })
@@ -1207,9 +1212,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       void commitEditWithAction(e.shiftKey ? "left" : "right", true);
       return;
     }
-    // Ctrl/Cmd+Shift+Enter saves this cell straight to the database, bypassing
+    // Alt+Enter saves this cell straight to the database, bypassing
     // the staged Apply/Reset queue.
-    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "Enter") {
+    if (e.altKey && e.key === "Enter") {
       e.preventDefault();
       e.stopPropagation();
       void commitEditImmediate("down");
@@ -1217,7 +1222,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
     // Enter (or Ctrl/Cmd+Enter) confirms the edit into the staged queue and
     // moves to the next row.
-    if (e.key === "Enter" && !e.altKey) {
+    if (e.key === "Enter") {
       e.preventDefault();
       e.stopPropagation();
       void commitEditWithAction("down");
@@ -1321,6 +1326,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   })
   // Total scrollable width includes virtual rel columns
   const totalContentWidth = $derived(geom.totalWidth + virtualRelCols.length * VIRTUAL_COL_W)
+  // Insert row spans ALL columns (including hidden) so every field can be filled.
+  const insertRowTotalWidth = $derived(
+    gutterWidth + columns.reduce((acc, c) => acc + widthForColumn(c.name, c.dataType ?? c.data_type ?? ''), 0)
+  )
 
   // +1 for the trailing auto-width spacer column (keeps real columns stable).
   const dataColSpan = $derived(visibleColumns.length + 1);
@@ -1858,8 +1867,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "y" || e.key === "Y")) {
       if (!editingCell) { e.preventDefault(); void redoEdit(); return; }
     }
-    // Ctrl+Enter / Alt+Enter when not editing: start edit (same as Enter / F2)
-    if (((e.ctrlKey || e.metaKey) || e.altKey) && e.key === "Enter" && !editingCell) {
+    // Ctrl+Enter when not editing: start edit (same as Enter / F2)
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key === "Enter" && !editingCell) {
       e.preventDefault();
       if (focusedRow !== null && focusedCol !== null) {
         const ai = visToActualColIdx(focusedCol);
@@ -1881,6 +1890,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
 
     if (editingCell) return;
+    if (newRowDrafts) return;
 
     const visLen = navigableColumns.length;
     const rowLen = rows.length;
@@ -2039,12 +2049,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const len = text.length
     if (len === 0) return text
     _syncGlyphW(ctx)
-    if (_glyphW > 0) {
-      if (len * _glyphW <= maxW) return text
-      const maxChars = Math.floor(maxW / _glyphW)
-      return maxChars <= 1 ? (maxChars === 1 ? '…' : '') : text.slice(0, maxChars - 1) + '…'
-    }
-    // Proportional fallback (non-monospace fonts only).
+    // Fast no-truncation check: if the monospace estimate fits, trust it.
+    if (_glyphW > 0 && len * _glyphW <= maxW) return text
+    // For truncation, always measure accurately — the monospace estimate can
+    // over-count for non-ASCII characters (Arabic, CJK, etc.) that fall back
+    // to a narrower font, leaving an apparent gap after the ellipsis.
     if (ctx.measureText(text).width <= maxW) return text
     let lo = 0, hi = len
     while (lo < hi) {
@@ -3087,6 +3096,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       } else {
         pendingContextMenu = false;
         suppressMenuSelect = false;
+        deleteRowConfirmPending = false;
+        if (_deleteRowConfirmTimer) { clearTimeout(_deleteRowConfirmTimer); _deleteRowConfirmTimer = null; }
       }
     }}
   >
@@ -3195,7 +3206,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                 <div
                   role="none"
                   class="absolute left-0 z-20 flex border-b border-border/30 bg-emerald-500/[0.04] ring-1 ring-inset ring-emerald-500/20"
-                  style="top:{HEADER_H}px; height:{ROW_HEIGHT}px; width:{geom.totalWidth}px"
+                  style="top:{HEADER_H}px; height:{ROW_HEIGHT}px; width:{insertRowTotalWidth}px"
                   onkeydown={onNewRowKeydown}
                 >
                   {#if showRowExpand}
@@ -3223,7 +3234,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                       </button>
                     </div>
                   {/if}
-                  {#each visibleColumns as col (col.name)}
+                  {#each columns as col (col.name)}
                     {@const dt = col.dataType ?? col.data_type ?? ''}
                     {@const isAuto = isLikelyAutoColumn(dt, col.name, primaryKey)}
                     {@const enumValues = getColumnEnumValues(col)}
@@ -3261,23 +3272,21 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                           <option value="false">false</option>
                         </select>
                       {:else if isDateTime}
-                        <input
-                          data-new-row-input={col.name}
-                          type="datetime-local"
+                        <DateTimePicker
+                          colName={col.name}
+                          showTime={true}
                           disabled={insertSaving}
-                          class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none placeholder:text-muted-foreground/40 disabled:opacity-50"
                           value={newRowDrafts[col.name] ?? ''}
-                          oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
+                          onchange={(v) => setNewRowDraft(col.name, v)}
                           onfocus={() => (newRowFocusCol = col.name)}
                         />
                       {:else if isDateOnly}
-                        <input
-                          data-new-row-input={col.name}
-                          type="date"
+                        <DateTimePicker
+                          colName={col.name}
+                          showTime={false}
                           disabled={insertSaving}
-                          class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none disabled:opacity-50"
                           value={newRowDrafts[col.name] ?? ''}
-                          oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
+                          onchange={(v) => setNewRowDraft(col.name, v)}
                           onfocus={() => (newRowFocusCol = col.name)}
                         />
                       {:else if isTimeOnly}
@@ -3638,12 +3647,30 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         <ContextMenu.Item
           variant="destructive"
           disabled={!hasPrimaryKey || saving || readonly}
-          onSelect={() => runMenuAction(() => deleteRow(contextRowIdx))}
+          class={deleteRowConfirmPending ? "animate-pulse" : ""}
+          onSelect={(e) => {
+            if (suppressMenuSelect) return;
+            if (!deleteRowConfirmPending) {
+              e.preventDefault();
+              deleteRowConfirmPending = true;
+              if (_deleteRowConfirmTimer) clearTimeout(_deleteRowConfirmTimer);
+              _deleteRowConfirmTimer = setTimeout(() => {
+                deleteRowConfirmPending = false;
+                _deleteRowConfirmTimer = null;
+              }, 2500);
+            } else {
+              deleteRowConfirmPending = false;
+              if (_deleteRowConfirmTimer) { clearTimeout(_deleteRowConfirmTimer); _deleteRowConfirmTimer = null; }
+              deleteRow(contextRowIdx);
+            }
+          }}
         >
           <Trash2 />
-          {selected.size > 1 && selected.has(contextRowIdx)
-            ? `Delete ${formatCompactCount(selected.size)} rows`
-            : "Delete row"}
+          {deleteRowConfirmPending
+            ? "Click again to confirm"
+            : selected.size > 1 && selected.has(contextRowIdx)
+              ? `Delete ${formatCompactCount(selected.size)} rows`
+              : "Delete row"}
           <ContextMenu.Shortcut>⌘⌫</ContextMenu.Shortcut>
         </ContextMenu.Item>
       {/if}
