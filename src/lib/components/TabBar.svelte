@@ -103,10 +103,10 @@
               {...ctxProps}
               class={cn(
                 'group/tab relative flex min-w-0 max-w-[200px] shrink-0 items-stretch transition-colors duration-100',
-                active ? 'bg-panel' : 'hover:bg-muted/25',
+                active ? 'bg-panel' : 'hover:bg-muted/20',
               )}
               style={active
-                ? 'box-shadow: 0 1px 0 0 var(--color-panel), inset 0 2px 0 0 hsl(var(--foreground) / 0.18)'
+                ? 'box-shadow: 0 1px 0 0 var(--color-panel), inset 0 -2px 0 0 color-mix(in oklch, var(--foreground) 55%, transparent)'
                 : ''}
             >
               <!-- Tab button — font-medium on ALL states to prevent layout shift on activation -->
@@ -117,11 +117,11 @@
                 title={tabDisplayTitle(tab)}
                 class={cn(
                   'flex min-w-0 flex-1 items-center gap-1.5 pl-3 pr-1 text-left text-xs font-medium leading-none transition-colors duration-100',
-                  active ? 'text-foreground' : 'text-muted-foreground/60 hover:text-muted-foreground',
+                  active ? 'text-foreground' : 'text-muted-foreground/50 hover:text-muted-foreground/80',
                 )}
                 onclick={() => onselect(tab.id)}
               >
-                <Icon class={cn('size-3 shrink-0', active ? 'opacity-60' : 'opacity-40')} />
+                <Icon class={cn('size-3 shrink-0', active ? 'opacity-70' : 'opacity-35')} />
                 <span class="truncate">{tabDisplayTitle(tab)}</span>
               </button>
 
@@ -144,7 +144,7 @@
 
               <!-- Separator: hidden adjacent to any active tab -->
               {#if !active && !nextActive}
-                <span class="pointer-events-none absolute inset-y-[28%] right-0 w-px bg-border/40"></span>
+                <span class="pointer-events-none absolute inset-y-[25%] right-0 w-px bg-border/30"></span>
               {/if}
             </div>
           {/snippet}

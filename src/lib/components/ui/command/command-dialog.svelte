@@ -26,7 +26,7 @@
 	</Dialog.Header>
 	<Dialog.Content
 		class={cn(
-			"rounded-2xl! top-[18vh] translate-y-0 overflow-hidden p-0 shadow-2xl shadow-black/50",
+			"rounded-xl! top-[18vh] translate-y-0 overflow-hidden p-0 shadow-lg",
 			className
 		)}
 		{showCloseButton}

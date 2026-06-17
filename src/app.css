@@ -333,19 +333,18 @@ html[data-os="linux"]   { --window-radius: 8px; }
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 18px;
-    height: 18px;
-    padding: 0 4px;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 5px;
     font-family: var(--font-mono);
-    font-size: calc(10 / 14 * 1rem);  /* 10px — same as text-ui-3xs */
+    font-size: 10px;
+    font-weight: 500;
     line-height: 1;
     color: var(--muted-foreground);
-    background: color-mix(in oklch, var(--muted) 70%, transparent);
-    border: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
-    border-bottom-color: var(--border);
-    border-radius: 3px;
-    box-shadow: 0 1px 0 color-mix(in oklch, var(--border) 60%, transparent),
-                inset 0 1px 0 color-mix(in oklch, var(--background) 12%, transparent);
+    background: color-mix(in oklch, var(--muted) 60%, transparent);
+    border: 1px solid color-mix(in oklch, var(--border) 90%, transparent);
+    border-bottom: 2px solid var(--border);
+    border-radius: 5px;
     white-space: nowrap;
     user-select: none;
     vertical-align: middle;
@@ -353,11 +352,10 @@ html[data-os="linux"]   { --window-radius: 8px; }
 
   /* kbd inside a primary-coloured surface (e.g. Save button) */
   kbd.kbd-on-primary {
-    color: color-mix(in oklch, var(--primary-foreground) 70%, transparent);
-    background: color-mix(in oklch, var(--primary-foreground) 12%, transparent);
-    border-color: color-mix(in oklch, var(--primary-foreground) 25%, transparent);
-    border-bottom-color: color-mix(in oklch, var(--primary-foreground) 35%, transparent);
-    box-shadow: 0 1px 0 color-mix(in oklch, var(--primary-foreground) 20%, transparent);
+    color: color-mix(in oklch, var(--primary-foreground) 80%, transparent);
+    background: color-mix(in oklch, var(--primary-foreground) 14%, transparent);
+    border-color: color-mix(in oklch, var(--primary-foreground) 28%, transparent);
+    border-bottom-color: color-mix(in oklch, var(--primary-foreground) 42%, transparent);
   }
 
   .studio-data-table {

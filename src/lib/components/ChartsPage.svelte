@@ -377,7 +377,7 @@
                 {#each grpData.charts as chart (chart.id)}
                   {@const entry = catalogEntry(chart.config.type)}
                   <div
-                    class="group relative flex flex-col overflow-hidden rounded-lg border border-border/50 bg-card transition-all hover:border-border hover:shadow-lg"
+                    class="group relative flex flex-col overflow-hidden rounded-lg border border-border/50 bg-card transition-colors hover:border-border"
                   >
                     <!-- Preview: dominant, fills top of card. Absolute child for crisp canvas sizing -->
                     <div class="relative h-36 shrink-0 bg-muted/10">

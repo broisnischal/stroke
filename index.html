@@ -6,11 +6,8 @@
         const raw = localStorage.getItem('db-studio:settings')
         const parsed = raw ? JSON.parse(raw) : null
         const valid = [
-          'light', 'notion', 'github-light', 'vscode-light', 'linear-light',
-          'linear', 'cursor', 'raycast', 'vercel',
-          'vscode', 'github', 'onedark', 'catppuccin', 'rosepine',
-          'dark', 'vitesse', 'midnight', 'slate',
-          'nord', 'dracula', 'forest', 'solarized',
+          'light', 'parchment', 'ice',
+          'dark', 'midnight', 'vitesse', 'slate', 'forest', 'mono',
         ]
         let theme = parsed?.theme
         if (!valid.includes(theme)) {

@@ -463,6 +463,9 @@
   if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key === 'f') {
     e.preventDefault(); filterEl.focus(); filterEl.select()
   }
+  if (e.key === 'Escape' && selectedItems.size > 0) {
+    clearSelection()
+  }
 }} />
 
 <!-- Section count badge: shows "visible/total" when filters hide rows, else just the total. -->
@@ -709,6 +712,11 @@
           bind:clientHeight={sidebarHeight}
           class="app-scroll min-h-0 w-full flex-1 overflow-y-auto"
           onscroll={onSidebarScroll}
+          onclick={(e) => {
+            if (selectedItems.size > 0 && !/** @type {Element} */(e.target).closest?.('li')) {
+              clearSelection()
+            }
+          }}
         >
           {#if loadingTables}
             <div
