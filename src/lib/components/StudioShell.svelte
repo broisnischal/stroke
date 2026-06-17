@@ -192,6 +192,7 @@
   import { dashboards, activeDashboardId, switchDashboardsConnection } from '$lib/stores/dashboards.js'
   import { buildOption } from '$lib/chart-utils.js'
   import { get } from 'svelte/store'
+  import { virtualColumnsStore } from '$lib/stores/virtual-columns.js'
 
   /** @typedef {import('$lib/studio-tabs.js').StudioTab} StudioTab */
   /** @typedef {import('$lib/studio-tabs.js').TableTabState} TableTabState */
@@ -538,6 +539,13 @@ let rowSearch = $state('')
   let rowSort = $state(/** @type {TableSort | null} */ (null))
   let rowFilters = $state(/** @type {TableFilter[]} */ ([]))
   let filterBarOpen = $state(false)
+  let vcolPanelOpen = $state(false)
+
+  const _vcolTableKey = $derived(`${activeSchema}.${activeTable ?? ''}`)
+  const vcolCount = $derived(
+    ($virtualColumnsStore[_vcolTableKey] ?? []).filter(c => c.enabled).length
+  )
+  const virtualExprColsForToolbar = $derived($virtualColumnsStore[_vcolTableKey] ?? [])
   /** @type {{ focusRowSearch?: () => void, clearRowSearch?: () => void } | null} */
   let tableToolbar = $state(null)
   /** @type {ReturnType<typeof setTimeout> | null} */
@@ -830,8 +838,13 @@ let rowSearch = $state('')
     activeTable = s.table
     hiddenColumns = new Set(s.hiddenColumns)
     filterBarOpen = s.filterBarOpen ?? false
-    // Restore the grid scroll position for this tab (after layout settles).
-    tableApplyScroll({ left: s.scrollLeft ?? 0, top: s.scrollTop ?? 0 })
+    // Restore the grid scroll position for this tab. Defer one tick so that
+    // if DataTable just remounted (switching from a non-table tab), the new
+    // applyScroll binding is in place before we call it — otherwise the old
+    // closure reads a null tableContainer and the restore is silently dropped.
+    const _restoreLeft = s.scrollLeft ?? 0
+    const _restoreTop = s.scrollTop ?? 0
+    tick().then(() => tableApplyScroll({ left: _restoreLeft, top: _restoreTop }))
   }
 
   /** @returns {SqlTabState} */
@@ -3585,6 +3598,7 @@ let rowSearch = $state('')
             <SearchPage
               {tables}
               schema={activeSchema}
+              active={activeTab?.kind === 'search'}
               onopentable={(tableName, searchTerm) => {
                 if (aiMode) exitAiMode()
                 void openTableTab(activeSchema, tableName, { search: searchTerm })
@@ -3836,7 +3850,15 @@ let rowSearch = $state('')
             onaddrow={() => dtBeginInsertRow?.()}
             readonly={tableReadonly}
             {hiddenColumns}
+            virtualColCount={vcolCount}
+            onopenvirtualcols={() => { vcolPanelOpen = !vcolPanelOpen }}
             virtualRelColumns={virtualRelColumnsForToolbar}
+            virtualExprCols={virtualExprColsForToolbar}
+            ontogglevexpr={(id) => {
+              const all = $virtualColumnsStore[_vcolTableKey] ?? []
+              const col = all.find(c => c.id === id)
+              if (col) virtualColumnsStore.patch(_vcolTableKey, id, { enabled: !col.enabled })
+            }}
             onhiddencolumnschange={(next) => {
               hiddenColumns = next
               if (activeTable) saveHiddenCols(persistConnectionId, activeSchema, activeTable, next)
@@ -3882,6 +3904,7 @@ let rowSearch = $state('')
                 bind:scrollToBottom={scrollTableBottom}
                 bind:getScroll={tableGetScroll}
                 bind:applyScroll={tableApplyScroll}
+                bind:vcolPanelOpen
                 {rowSort}
                 onsortchange={(s) => void handleRowSortChange(s)}
                 onhidecolumn={(colName) => {
