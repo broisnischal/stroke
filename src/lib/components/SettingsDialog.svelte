@@ -208,18 +208,32 @@
               class={themeSelectTrigger}
               aria-label="Font family"
             >
-              <span class="truncate font-medium" style="font-family: {FONT_PRESETS[settings.font]?.sans}">{FONT_PRESETS[settings.font]?.label ?? "Geist"}</span>
+              <span class="flex min-w-0 items-center gap-2">
+                <span
+                  class="shrink-0 text-[11px] font-semibold text-muted-foreground/70"
+                  style="font-family: {FONT_PRESETS[settings.font]?.sans}"
+                  aria-hidden="true"
+                >Aa</span>
+                <span class="truncate font-medium">{FONT_PRESETS[settings.font]?.label ?? "Geist"}</span>
+              </span>
             </Select.Trigger>
             <Select.Content
-              class="z-[100] min-w-[16rem] p-1"
+              class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1"
               sideOffset={6}
             >
               {#each fontEntries as [id, preset] (id)}
-                <Select.Item value={id} label={preset.label} class="rounded-md py-2 pr-8 pl-2.5">
+                <Select.Item value={id} label={preset.label} class="rounded-md py-1.5 pr-8 pl-2">
                   {#snippet children()}
-                    <span class="flex min-w-0 flex-col gap-0.5">
-                      <span class="text-sm font-medium leading-none" style="font-family: {preset.sans}">{preset.label}</span>
-                      <span class="text-[11px] leading-none text-muted-foreground">{preset.description}</span>
+                    <span class="flex min-w-0 items-center gap-2.5">
+                      <span
+                        class="flex size-8 shrink-0 items-center justify-center rounded border border-border/40 bg-muted/30 text-[14px] font-semibold text-foreground/70"
+                        style="font-family: {preset.sans}"
+                        aria-hidden="true"
+                      >Aa</span>
+                      <span class="min-w-0">
+                        <span class="block text-xs font-medium leading-snug">{preset.label}</span>
+                        <span class="block text-[10px] leading-snug text-muted-foreground/65">{preset.description}</span>
+                      </span>
                     </span>
                   {/snippet}
                 </Select.Item>

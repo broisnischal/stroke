@@ -2400,10 +2400,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       else if (isFocusedCell) { ctx.fillStyle = withAlpha(c.cPrimary, 0.08); ctx.fillRect(cellX, ry, w, rh) }
       else if (dir?.bgTint) { ctx.fillStyle = dir.bgTint; ctx.fillRect(cellX, ry, w, rh) }
     } else {
-      // Active edit cell — overlay input covers it; leave panel + ring.
-      ctx.strokeStyle = c.cPrimary
-      ctx.lineWidth = 2
-      ctx.strokeRect(cellX + 1, ry + 1, w - 2, rh - 2)
+      // Active edit cell — the DOM overlay draws its own ring-inset; no canvas
+      // border needed here (a canvas strokeRect would bleed outside the cell on
+      // the right/bottom edges and create a misaligned double-border with the DOM ring).
     }
 
     // (Vertical grid separators are batched once per row in drawBodyRow.)
@@ -2528,11 +2527,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       drawIcon(ctx, 'braces', px + 1.5 * canvasZoom, py + 2.5 * canvasZoom, Math.round(8 * canvasZoom), c.cMuted, 2.2)
     }
 
-    // Focused-cell outline — bright primary border.
+    // Focused-cell outline — primary border, fully inset (no bleed to neighbours).
+    // +1.5 offset keeps the 2px stroke's outer edge 0.5px inside the cell boundary
+    // on all four sides, so left=top=right=bottom are visually symmetric.
     if (isFocusedCell) {
-      ctx.strokeStyle = withAlpha(c.cPrimary, 0.85)
+      ctx.strokeStyle = withAlpha(c.cPrimary, 0.9)
       ctx.lineWidth = 2
-      ctx.strokeRect(cellX + 1, ry + 1, w - 2, rh - 2)
+      ctx.strokeRect(cellX + 1.5, ry + 1.5, w - 3, rh - 3)
     }
   }
 
@@ -3844,7 +3845,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         <ContextMenu.Item
           variant="destructive"
           disabled={!hasPrimaryKey || saving || readonly}
-          class={deleteRowConfirmPending ? "animate-pulse" : ""}
+          class={cn("whitespace-nowrap", deleteRowConfirmPending ? "animate-pulse" : "")}
           onSelect={(e) => {
             if (suppressMenuSelect) return;
             if (!deleteRowConfirmPending) {
@@ -3864,7 +3865,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         >
           <Trash2 />
           {deleteRowConfirmPending
-            ? "Click again to confirm"
+            ? "Confirm Delete"
             : selected.size > 1 && selected.has(contextRowIdx)
               ? `Delete ${formatCompactCount(selected.size)} rows`
               : "Delete row"}

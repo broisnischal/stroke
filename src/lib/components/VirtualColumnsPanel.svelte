@@ -41,9 +41,9 @@
     try { localStorage.setItem('stroke:vcol-panel-w', String(w)) } catch {}
   }
 
-  const tableKey   = $derived(`${schema}.${tableName}`)
-  const vcols      = $derived($virtualColumnsStore[tableKey] ?? [])
-  const fnGroups   = $derived(
+  const tableKey = $derived(`${schema}.${tableName}`)
+  const vcols    = $derived($virtualColumnsStore[tableKey] ?? [])
+  const fnGroups = $derived(
     ['String', 'Math', 'Logic'].map(g => ({
       label: g,
       fns: FN_SNIPPETS.filter(f => f.group === g),
@@ -55,9 +55,8 @@
   let formOpen  = $state(false)
   let draftName = $state('')
   let draftExpr = $state('')
-
-  // Column search inside the form
   let colSearch = $state('')
+
   const filteredColumns = $derived(
     colSearch.trim()
       ? columns.filter(c => c.name.toLowerCase().includes(colSearch.toLowerCase()))
@@ -68,7 +67,6 @@
   const badRefs   = $derived(draftRefs.filter(r => !columns.some(c => c.name === r)))
   const canSave   = $derived(draftName.trim().length > 0 && draftExpr.trim().length > 0 && badRefs.length === 0)
 
-  /** Evaluate expr for a preview row using the real evaluator */
   function preview(expr, row) {
     if (!row || !nameToIdx) return '—'
     try {
@@ -80,12 +78,8 @@
 
   const previewRows = $derived(rows.slice(0, 2))
 
-  function openAdd() {
-    editId = null; draftName = ''; draftExpr = ''; colSearch = ''; formOpen = true
-  }
-  function openEdit(col) {
-    editId = col.id; draftName = col.name; draftExpr = col.expression; colSearch = ''; formOpen = true
-  }
+  function openAdd()  { editId = null; draftName = ''; draftExpr = ''; colSearch = ''; formOpen = true }
+  function openEdit(col) { editId = col.id; draftName = col.name; draftExpr = col.expression; colSearch = ''; formOpen = true }
   function save() {
     if (!canSave) return
     const name = draftName.trim(), expression = draftExpr.trim()
@@ -98,7 +92,6 @@
   /** @type {HTMLTextAreaElement|null} */
   let exprEl = $state(null)
 
-  /** Insert text at caret; cursor = offset from insert start, null = after insert */
   function insertAt(text, cursor) {
     if (!exprEl) { draftExpr += text; return }
     const start = exprEl.selectionStart ?? draftExpr.length
@@ -112,7 +105,6 @@
   function insertFn(snip)     { insertAt(snip.insert, snip.cursor) }
 </script>
 
-<!-- Resize handle sits outside the panel div so it doesn't clip -->
 <ResizeHandle
   axis="x"
   edge="start"
@@ -126,49 +118,49 @@
   style="width: {panelWidth}px"
 >
 
-  <!-- ── Header ──────────────────────────────────────────────────────────── -->
-  <div class="flex h-9 shrink-0 items-center gap-2 border-b border-border/30 px-3">
+  <!-- Header -->
+  <div class="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
     <FunctionSquare class="size-3.5 shrink-0 text-primary/60" />
-    <span class="flex-1 text-[12px] font-semibold tracking-tight text-foreground">Virtual columns</span>
-    <span class="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/60">{tableName}</span>
+    <span class="flex-1 text-[12px] font-semibold tracking-tight">Virtual columns</span>
+    <span class="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/55">{tableName}</span>
     <button
       type="button"
-      class="flex size-5 items-center justify-center rounded text-muted-foreground/40 hover:bg-muted hover:text-foreground"
+      class="flex size-5 items-center justify-center rounded text-muted-foreground/35 hover:bg-muted hover:text-foreground"
       onclick={onclose}
     ><X class="size-3" /></button>
   </div>
 
   <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
 
-    <!-- ── Edit / add form ─────────────────────────────────────────────── -->
     {#if formOpen}
+      <!-- ── Form ────────────────────────────────────────────────────────── -->
       <div class="flex min-h-0 flex-1 flex-col overflow-y-auto">
 
-        <!-- Section label -->
-        <div class="px-3 pt-3 pb-2">
-          <span class="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/45">
+        <!-- Section title -->
+        <div class="border-b border-border/60 px-3 py-2.5">
+          <span class="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/40">
             {editId ? 'Edit column' : 'New column'}
           </span>
         </div>
 
-        <!-- Name -->
-        <div class="px-3 pb-3">
+        <!-- Name ─────────────────────────────────────────────────────────── -->
+        <div class="border-b border-border/60 px-3 py-3">
           <label class="block">
-            <span class="mb-1.5 block text-[11px] font-medium text-muted-foreground/70">Name</span>
+            <span class="mb-1.5 block text-[11px] font-medium text-muted-foreground/60">Name</span>
             <input
               type="text"
               bind:value={draftName}
               placeholder="full_url"
-              class="w-full rounded-md border border-border/30 bg-background/60 px-2.5 py-1.5 font-mono text-[12px] text-foreground outline-none placeholder:text-muted-foreground/25 focus:border-primary/40"
+              class="w-full rounded border border-border/30 bg-background/50 px-2.5 py-1.5 font-mono text-[12px] text-foreground outline-none placeholder:text-muted-foreground/25 focus:border-primary/50 focus:ring-0"
             />
           </label>
         </div>
 
-        <!-- Expression -->
-        <div class="px-3 pb-3">
+        <!-- Expression ───────────────────────────────────────────────────── -->
+        <div class="border-b border-border/60 px-3 py-3">
           <div class="mb-1.5 flex items-center justify-between">
-            <span class="text-[11px] font-medium text-muted-foreground/70">Expression</span>
-            <span class="text-[10px] text-muted-foreground/35">{'{ col }'} for columns</span>
+            <span class="text-[11px] font-medium text-muted-foreground/60">Expression</span>
+            <span class="font-mono text-[10px] text-muted-foreground/30">{'{ col }'}</span>
           </div>
           <textarea
             bind:this={exprEl}
@@ -176,49 +168,45 @@
             rows={3}
             spellcheck={false}
             placeholder={"https://cdn.com/{file_key}"}
-            class="w-full resize-none rounded-md border border-border/30 bg-background/60 px-2.5 py-1.5 font-mono text-[11.5px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/25 focus:border-primary/40"
+            class="w-full resize-none rounded border border-border/30 bg-background/50 px-2.5 py-1.5 font-mono text-[11.5px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/20 focus:border-primary/50"
           ></textarea>
           {#if badRefs.length > 0}
-            <p class="mt-1 text-[10px] text-destructive/80">Unknown: {badRefs.map(r => `{${r}}`).join(', ')}</p>
+            <p class="mt-1.5 text-[10px] text-destructive/75">Unknown: {badRefs.map(r => `{${r}}`).join(', ')}</p>
           {/if}
         </div>
 
-        <!-- Searchable columns -->
+        <!-- Columns ──────────────────────────────────────────────────────── -->
         {#if columns.length > 0}
-          <div class="px-3 pb-3">
-            <p class="mb-1.5 text-[11px] font-medium text-muted-foreground/70">Columns</p>
-            <!-- Search input -->
-            <div class="mb-1.5 flex items-center gap-1.5 rounded-md border border-border/30 bg-background/50 px-2 py-1">
-              <Search class="size-3 shrink-0 text-muted-foreground/35" />
+          <div class="border-b border-border/60 px-3 py-3">
+            <p class="mb-2 text-[11px] font-medium text-muted-foreground/60">Columns</p>
+            <div class="flex items-center gap-1.5 rounded border border-border/30 bg-background/50 px-2 py-1 mb-1.5">
+              <Search class="size-3 shrink-0 text-muted-foreground/30" />
               <input
                 type="text"
                 bind:value={colSearch}
                 placeholder="Search columns…"
-                class="min-w-0 flex-1 bg-transparent text-[11px] outline-none placeholder:text-muted-foreground/30"
+                class="min-w-0 flex-1 bg-transparent text-[11px] outline-none placeholder:text-muted-foreground/25"
                 autocomplete="off"
                 spellcheck="false"
               />
               {#if colSearch}
                 <button
                   type="button"
-                  class="flex size-3.5 items-center justify-center rounded text-muted-foreground/35 hover:text-muted-foreground"
+                  class="flex size-3.5 items-center justify-center rounded text-muted-foreground/30 hover:text-muted-foreground"
                   onclick={() => { colSearch = '' }}
                 ><X class="size-2.5" /></button>
               {/if}
             </div>
-            <!-- Column list -->
-            <div class="max-h-36 overflow-y-auto rounded-md border border-border/20 bg-background/30">
+            <div class="max-h-40 overflow-y-auto rounded border border-border/20 bg-background/30">
               {#if filteredColumns.length === 0}
-                <p class="px-2.5 py-2 text-[10px] text-muted-foreground/35">No columns match</p>
+                <p class="px-2.5 py-2.5 text-[10px] text-muted-foreground/30">No columns match</p>
               {:else}
                 {#each filteredColumns as col (col.name)}
                   <button
                     type="button"
                     class={cn(
-                      "flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-accent/40",
-                      draftRefs.includes(col.name)
-                        ? "bg-primary/8 text-primary"
-                        : "text-foreground/80"
+                      "flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-accent/40 border-b border-border/50 last:border-0",
+                      draftRefs.includes(col.name) ? "text-primary" : "text-foreground/75"
                     )}
                     onclick={() => insertCol(col.name)}
                   >
@@ -233,58 +221,61 @@
           </div>
         {/if}
 
-        <!-- Function palette -->
-        <div class="px-3 pb-3">
-          <p class="mb-1.5 text-[11px] font-medium text-muted-foreground/70">Functions</p>
-          <div class="flex flex-col gap-1.5">
+        <!-- Functions ────────────────────────────────────────────────────── -->
+        <div class="border-b border-border/60 px-3 py-3">
+          <p class="mb-2.5 text-[11px] font-medium text-muted-foreground/60">Functions</p>
+          <div class="flex flex-col gap-2.5">
             {#each fnGroups as group}
-              <div class="flex flex-wrap items-center gap-1">
-                <span class="w-9 shrink-0 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/30">{group.label}</span>
-                {#each group.fns as fn}
-                  <button
-                    type="button"
-                    class="rounded bg-muted/30 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
-                    onclick={() => insertFn(fn)}
-                  >{fn.label}</button>
-                {/each}
+              <div>
+                <p class="mb-1.5 text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/35">{group.label}</p>
+                <div class="flex flex-wrap gap-1">
+                  {#each group.fns as fn}
+                    <button
+                      type="button"
+                      class="inline-flex items-center justify-center rounded border border-border/30 bg-background/40 px-2 py-0.5 font-mono text-[10.5px] text-muted-foreground/65 transition-colors hover:border-primary/35 hover:bg-primary/8 hover:text-primary"
+                      onclick={() => insertFn(fn)}
+                    >{fn.label}</button>
+                  {/each}
+                </div>
               </div>
             {/each}
           </div>
         </div>
 
-        <!-- Live preview -->
+        <!-- Preview (conditional) ────────────────────────────────────────── -->
         {#if draftExpr.trim() && previewRows.length > 0}
-          <div class="mx-3 mb-3 rounded-md border border-border/20 bg-muted/10">
-            <div class="border-b border-border/15 px-2.5 py-1">
-              <span class="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/40">Preview</span>
+          <div class="border-b border-border/60 px-3 py-3">
+            <p class="mb-2 text-[11px] font-medium text-muted-foreground/60">Preview</p>
+            <div class="rounded border border-border/20 bg-muted/10 overflow-hidden">
+              {#each previewRows as row, i}
+                <div class="flex items-center gap-2 px-2.5 py-1.5 {i > 0 ? 'border-t border-border/50' : ''}">
+                  <span class="shrink-0 font-mono text-[9px] text-muted-foreground/30">#{i+1}</span>
+                  <span class="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground/70">{preview(draftExpr, row)}</span>
+                </div>
+              {/each}
             </div>
-            {#each previewRows as row, i}
-              <div class="flex items-center gap-2 px-2.5 py-1.5 {i > 0 ? 'border-t border-border/10' : ''}">
-                <span class="shrink-0 font-mono text-[9px] text-muted-foreground/30">#{i+1}</span>
-                <span class="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground/70">{preview(draftExpr, row)}</span>
-              </div>
-            {/each}
           </div>
         {/if}
 
-        <!-- Actions -->
-        <div class="flex gap-2 px-3 pb-4">
-          <button
-            type="button"
-            onclick={save}
-            disabled={!canSave}
-            class="inline-flex h-7 flex-1 items-center justify-center gap-1.5 rounded-md bg-primary text-[11px] font-medium text-primary-foreground transition-opacity disabled:opacity-35"
-          >
-            <Check class="size-3" /> Save
-          </button>
-          <button
-            type="button"
-            onclick={cancelForm}
-            class="inline-flex h-7 items-center justify-center rounded-md border border-border/30 px-3 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            Cancel
-          </button>
+        <!-- Actions ──────────────────────────────────────────────────────── -->
+        <div class="px-3 py-3">
+          <div class="flex gap-2">
+            <button
+              type="button"
+              onclick={save}
+              disabled={!canSave}
+              class="inline-flex h-7 flex-1 items-center justify-center gap-1.5 rounded bg-primary text-[11px] font-medium text-primary-foreground transition-opacity disabled:opacity-30"
+            >
+              <Check class="size-3" /> Save
+            </button>
+            <button
+              type="button"
+              onclick={cancelForm}
+              class="inline-flex h-7 items-center justify-center rounded border border-border/35 px-3 text-[11px] text-muted-foreground/70 hover:bg-muted hover:text-foreground"
+            >Cancel</button>
+          </div>
         </div>
+
       </div>
 
     {:else}
@@ -293,11 +284,11 @@
         {#if vcols.length === 0}
           <div class="flex flex-col items-center gap-3 px-5 py-10 text-center">
             <div class="flex size-10 items-center justify-center rounded-lg border border-border/25 bg-muted/15">
-              <FunctionSquare class="size-5 text-muted-foreground/25" />
+              <FunctionSquare class="size-5 text-muted-foreground/20" />
             </div>
             <div>
-              <p class="text-[12px] font-medium text-muted-foreground/55">No virtual columns</p>
-              <p class="mt-0.5 text-[11px] text-muted-foreground/35">Compute values from existing columns using templates and functions.</p>
+              <p class="text-[12px] font-medium text-muted-foreground/50">No virtual columns</p>
+              <p class="mt-0.5 text-[11px] text-muted-foreground/30">Compute values from existing columns using templates and functions.</p>
             </div>
           </div>
         {:else}
@@ -305,10 +296,9 @@
             {#each vcols as col (col.id)}
               {@const firstRowVal = rows[0] ? preview(col.expression, rows[0]) : null}
               <div class={cn(
-                "group relative flex items-center gap-2 px-3 py-2 transition-colors hover:bg-muted/15",
+                "group relative flex items-center gap-2 border-b border-border/50 px-3 py-2.5 last:border-0 transition-colors hover:bg-muted/15",
                 !col.enabled && "opacity-40"
               )}>
-                <!-- Eye toggle -->
                 <button
                   type="button"
                   class={cn(
@@ -320,34 +310,26 @@
                   title={col.enabled ? 'Disable' : 'Enable'}
                   onclick={() => virtualColumnsStore.patch(tableKey, col.id, { enabled: !col.enabled })}
                 >
-                  {#if col.enabled}
-                    <Eye class="size-3.5" />
-                  {:else}
-                    <EyeOff class="size-3.5" />
-                  {/if}
+                  {#if col.enabled}<Eye class="size-3.5" />{:else}<EyeOff class="size-3.5" />{/if}
                 </button>
-
-                <!-- Content -->
                 <div class="min-w-0 flex-1 overflow-hidden">
                   <div class="flex items-baseline gap-1.5">
-                    <span class="shrink-0 font-mono text-[12px] font-medium text-foreground">{col.name}</span>
+                    <span class="shrink-0 font-mono text-[12px] font-medium">{col.name}</span>
                     {#if firstRowVal && col.enabled}
-                      <span class="min-w-0 truncate font-mono text-[10px] text-primary/55">{firstRowVal}</span>
+                      <span class="min-w-0 truncate font-mono text-[10px] text-primary/50">{firstRowVal}</span>
                     {/if}
                   </div>
-                  <p class="truncate font-mono text-[10px] text-muted-foreground/35">{col.expression}</p>
+                  <p class="truncate font-mono text-[10px] text-muted-foreground/30">{col.expression}</p>
                 </div>
-
-                <!-- Hover actions -->
                 <div class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                   <button
                     type="button"
-                    class="flex size-6 items-center justify-center rounded text-muted-foreground/40 hover:bg-muted hover:text-foreground"
+                    class="flex size-6 items-center justify-center rounded text-muted-foreground/35 hover:bg-muted hover:text-foreground"
                     onclick={() => openEdit(col)}
                   ><Pencil class="size-3" /></button>
                   <button
                     type="button"
-                    class="flex size-6 items-center justify-center rounded text-muted-foreground/40 hover:bg-destructive/10 hover:text-destructive"
+                    class="flex size-6 items-center justify-center rounded text-muted-foreground/35 hover:bg-destructive/10 hover:text-destructive"
                     onclick={() => virtualColumnsStore.remove(tableKey, col.id)}
                   ><Trash2 class="size-3" /></button>
                 </div>
@@ -357,16 +339,17 @@
         {/if}
       </div>
 
-      <!-- ── Footer ──────────────────────────────────────────────────────── -->
-      <div class="shrink-0 border-t border-border/25 px-3 py-2.5">
+      <!-- Footer -->
+      <div class="shrink-0 border-t border-border/60 px-3 py-2.5">
         <button
           type="button"
           onclick={openAdd}
-          class="flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-border/40 py-1.5 text-[11px] text-muted-foreground/55 transition-colors hover:border-primary/30 hover:text-primary"
+          class="flex w-full items-center justify-center gap-1.5 rounded border border-dashed border-border/35 py-1.5 text-[11px] text-muted-foreground/50 transition-colors hover:border-primary/30 hover:text-primary"
         >
           <Plus class="size-3" /> Add virtual column
         </button>
       </div>
     {/if}
+
   </div>
 </div>

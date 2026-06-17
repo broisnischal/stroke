@@ -3957,22 +3957,10 @@ let rowSearch = $state('')
       {#if !activeTab || activeTab.kind === 'welcome'}
         {@const isMac = navigator.platform.toUpperCase().includes('MAC')}
         {@const mod = isMac ? '⌘' : 'Ctrl'}
-        {@const recentQueries = queryHistory.slice(0, 5)}
-        {@const _now = Date.now()}
-        {@const relTime = (/** @type {number} */ ts) => {
-          const diff = _now - ts, sec = Math.floor(diff / 1000)
-          if (sec < 60) return 'just now'
-          const min = Math.floor(sec / 60)
-          if (min < 60) return `${min}m`
-          const hr = Math.floor(min / 60)
-          if (hr < 24) return `${hr}h`
-          const day = Math.floor(hr / 24)
-          return day < 7 ? `${day}d` : new Date(ts).toLocaleDateString()
-        }}
-        {@const cell = 'group flex flex-col gap-3 rounded-xl border border-border/25 bg-card/50 p-3 text-left transition-all hover:border-border/50 hover:bg-accent/10'}
-        {@const iconCls = 'size-3.5 text-muted-foreground/50 transition-colors group-hover:text-foreground/80'}
-        {@const labelCls = 'text-[11px] font-medium leading-none text-foreground/50 transition-colors group-hover:text-foreground/80'}
-        {@const hotkeyCls = 'text-[9px] tabular-nums text-muted-foreground/20 group-hover:text-muted-foreground/40 transition-colors self-end'}
+        {@const cell = 'group flex flex-col gap-3 rounded-lg border border-border/60 bg-card p-3 text-left transition-colors hover:border-border hover:bg-accent/40'}
+        {@const iconCls = 'size-3.5 text-muted-foreground transition-colors group-hover:text-foreground'}
+        {@const labelCls = 'text-[11px] font-medium leading-none text-foreground/70 transition-colors group-hover:text-foreground'}
+        {@const hotkeyCls = 'text-[9px] tabular-nums text-muted-foreground/50 group-hover:text-muted-foreground transition-colors self-end'}
 
         <!-- Scroll container keeps top/bottom padding reachable when the content
              outgrows the viewport (e.g. at high zoom); inner wrapper centers when it fits. -->
@@ -3981,19 +3969,19 @@ let rowSearch = $state('')
 
           <!-- Header -->
           <div class="flex flex-col items-center gap-3">
-            <div class="flex size-11 items-center justify-center rounded-2xl border border-border/40 bg-gradient-to-b from-muted/50 to-muted/10 shadow-sm ring-1 ring-inset ring-white/[0.03]">
+            <div class="flex size-11 items-center justify-center rounded-xl border border-border bg-muted">
               <Logo class="size-6" />
             </div>
-            <p class="text-[9px] font-medium uppercase tracking-[0.25em] text-muted-foreground/25">Quick access</p>
+            <p class="text-[9px] font-medium uppercase tracking-[0.25em] text-muted-foreground/60">Quick access</p>
             {#if connection}
               <div class="flex items-center gap-2 text-sm font-medium text-foreground/80">
                 <span class="size-1.5 rounded-full bg-emerald-500 shrink-0"></span>
                 <span class="font-mono">{connection.database ?? connection.filePath?.split('/').at(-1) ?? connection.databaseId ?? 'connected'}</span>
-                <span class="text-muted-foreground/30 text-xs">·</span>
-                <span class="capitalize text-muted-foreground/50 text-xs font-normal">{dbType}</span>
+                <span class="text-muted-foreground/50 text-xs">·</span>
+                <span class="capitalize text-muted-foreground/70 text-xs font-normal">{dbType}</span>
                 {#if tables.length > 0}
-                  <span class="text-muted-foreground/30 text-xs">·</span>
-                  <span class="text-xs text-muted-foreground/40 font-normal">{tables.length} tables</span>
+                  <span class="text-muted-foreground/50 text-xs">·</span>
+                  <span class="text-xs text-muted-foreground/60 font-normal">{tables.length} tables</span>
                 {/if}
               </div>
             {/if}
@@ -4081,28 +4069,12 @@ let rowSearch = $state('')
             </button>
           </div>
 
-          <!-- Recent queries — same max-w-sm as the grid -->
-          {#if recentQueries.length > 0}
-            <div class="w-full max-w-sm flex flex-col gap-0.5">
-              <p class="mb-1 px-2 text-[9px] font-semibold uppercase tracking-[0.15em] text-muted-foreground/25">Recent</p>
-              {#each recentQueries as q (q.id)}
-                <button
-                  onclick={() => void openQueryInEditor(q.sql)}
-                  class="group flex w-full min-w-0 items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-muted/25"
-                >
-                  <History class="size-3 shrink-0 text-muted-foreground/20 transition-colors group-hover:text-muted-foreground/40" />
-                  <span class="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground/35 transition-colors group-hover:text-foreground/60">{q.title}</span>
-                  <span class="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/20">{relTime(q.executedAt)}</span>
-                </button>
-              {/each}
-            </div>
-          {/if}
 
           <!-- Footer -->
-          <div class="flex items-center gap-3 text-[10px] text-muted-foreground/20">
+          <div class="flex items-center gap-3 text-[10px] text-muted-foreground/50">
             <button
               onclick={() => showShortcutsModal = true}
-              class="flex items-center gap-1 transition-colors hover:text-muted-foreground/40"
+              class="flex items-center gap-1 transition-colors hover:text-muted-foreground"
             >
               <Command size={9} />
               <span>shortcuts</span>
