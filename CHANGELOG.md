@@ -4,6 +4,12 @@ All notable changes to Stroke are listed here, newest first.
 
 ---
 
+## [0.5.0] - 2026-06-17
+
+### Changes
+- feat:: bugs, optimizations, virtual cols and many more  (#8)
+
+
 ## [0.4.3] - 2026-06-06
 
 ### Bug Fixes
