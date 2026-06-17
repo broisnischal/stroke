@@ -1,5 +1,6 @@
 <script>
   import { onMount, onDestroy, untrack, tick } from 'svelte'
+  import { fade } from 'svelte/transition'
   import Logo from './Logo.svelte'
   import Database from '@lucide/svelte/icons/database'
   import Terminal from '@lucide/svelte/icons/terminal'
@@ -19,7 +20,7 @@
   import History from '@lucide/svelte/icons/history'
   import Plus from '@lucide/svelte/icons/plus'
   import { createHotkey, createHotkeySequence } from '@tanstack/svelte-hotkeys'
-  import { cycleTheme, restorePreviousTheme, isCurrentThemeDark } from '$lib/stores/settings.js'
+  import { cycleTheme, restorePreviousTheme, isCurrentThemeDark, loadSettings, updateSettings } from '$lib/stores/settings.js'
   import { pickRandomTip } from '$lib/insider-tips.js'
   import { toast } from 'svelte-sonner'
   import Sidebar from './Sidebar.svelte'
@@ -192,6 +193,7 @@
   import { dashboards, activeDashboardId, switchDashboardsConnection } from '$lib/stores/dashboards.js'
   import { buildOption } from '$lib/chart-utils.js'
   import { get } from 'svelte/store'
+  import { virtualColumnsStore } from '$lib/stores/virtual-columns.js'
 
   /** @typedef {import('$lib/studio-tabs.js').StudioTab} StudioTab */
   /** @typedef {import('$lib/studio-tabs.js').TableTabState} TableTabState */
@@ -259,6 +261,9 @@
   let sidebarEverOpened = $state(loadLayout().navSidebarOpen)
   let aiSidebarOpen = $state(loadLayout().aiSidebarOpen)
   let aiSidebarEverOpened = $state(loadLayout().aiSidebarOpen)
+  let statusBarVisible = $state(loadLayout().statusBarVisible)
+  let tabBarVisible = $state(loadLayout().tabBarVisible)
+  let tableToolbarVisible = $state(loadLayout().tableToolbarVisible)
   // Width for the loading-fallback shell, so the spinner fills a properly-sized
   // sidebar panel (matching saved width) instead of a zero-width strip while the
   // lazy AiSidebar chunk downloads.
@@ -538,6 +543,13 @@ let rowSearch = $state('')
   let rowSort = $state(/** @type {TableSort | null} */ (null))
   let rowFilters = $state(/** @type {TableFilter[]} */ ([]))
   let filterBarOpen = $state(false)
+  let vcolPanelOpen = $state(false)
+
+  const _vcolTableKey = $derived(`${activeSchema}.${activeTable ?? ''}`)
+  const vcolCount = $derived(
+    ($virtualColumnsStore[_vcolTableKey] ?? []).filter(c => c.enabled).length
+  )
+  const virtualExprColsForToolbar = $derived($virtualColumnsStore[_vcolTableKey] ?? [])
   /** @type {{ focusRowSearch?: () => void, clearRowSearch?: () => void } | null} */
   let tableToolbar = $state(null)
   /** @type {ReturnType<typeof setTimeout> | null} */
@@ -830,8 +842,13 @@ let rowSearch = $state('')
     activeTable = s.table
     hiddenColumns = new Set(s.hiddenColumns)
     filterBarOpen = s.filterBarOpen ?? false
-    // Restore the grid scroll position for this tab (after layout settles).
-    tableApplyScroll({ left: s.scrollLeft ?? 0, top: s.scrollTop ?? 0 })
+    // Restore the grid scroll position for this tab. Defer one tick so that
+    // if DataTable just remounted (switching from a non-table tab), the new
+    // applyScroll binding is in place before we call it — otherwise the old
+    // closure reads a null tableContainer and the restore is silently dropped.
+    const _restoreLeft = s.scrollLeft ?? 0
+    const _restoreTop = s.scrollTop ?? 0
+    tick().then(() => tableApplyScroll({ left: _restoreLeft, top: _restoreTop }))
   }
 
   /** @returns {SqlTabState} */
@@ -1023,6 +1040,16 @@ let rowSearch = $state('')
     toggleSidebar()
   })
 
+  createHotkey('Mod+Shift+B', (e) => {
+    e.preventDefault()
+    toggleStatusBar()
+  })
+
+  createHotkey('Mod+Shift+T', (e) => {
+    e.preventDefault()
+    toggleTabBar()
+  })
+
   createHotkey('Mod+Shift+L', (e) => {
     e.preventDefault()
     openLogsTab()
@@ -1109,6 +1136,7 @@ let rowSearch = $state('')
     if (showMcpPanel)          { e.preventDefault(); showMcpPanel = false;          return }
     if (showConnectionModal)   { e.preventDefault(); showConnectionModal = false;   return }
     if (showSettingsModal)     { e.preventDefault(); showSettingsModal = false;     return }
+    if (vcolPanelOpen)         { e.preventDefault(); vcolPanelOpen = false;         return }
     if (editingCell) {
       e.preventDefault()
       editingCell = null
@@ -1335,6 +1363,21 @@ let rowSearch = $state('')
     if (!connection) return
     aiSidebarOpen = !aiSidebarOpen
     saveLayout({ aiSidebarOpen })
+  }
+
+  function toggleStatusBar() {
+    statusBarVisible = !statusBarVisible
+    saveLayout({ statusBarVisible })
+  }
+
+  function toggleTabBar() {
+    tabBarVisible = !tabBarVisible
+    saveLayout({ tabBarVisible })
+  }
+
+  function toggleTableToolbar() {
+    tableToolbarVisible = !tableToolbarVisible
+    saveLayout({ tableToolbarVisible })
   }
 
   /**
@@ -2624,6 +2667,11 @@ let rowSearch = $state('')
 
     const last = getLastConnection()
     if (!last) { showConnectionModal = true; return }
+
+    // Respect the "auto reconnect on startup" setting — if disabled, go straight
+    // to the connection modal instead of re-connecting silently.
+    if (!loadSettings().autoReconnectOnStartup) { showConnectionModal = true; return }
+
     autoConnecting = true
     try {
       if (last.type === 'sqlite') await connectSqlite(last)
@@ -3226,14 +3274,56 @@ let rowSearch = $state('')
 
 
 {#if autoConnecting}
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-background/90">
-    <div class="flex flex-col items-center gap-3 text-muted-foreground">
-      <span class="inline-flex gap-1">
-        <span class="size-2 animate-bounce rounded-full bg-muted-foreground" style="animation-delay:0ms"></span>
-        <span class="size-2 animate-bounce rounded-full bg-muted-foreground" style="animation-delay:150ms"></span>
-        <span class="size-2 animate-bounce rounded-full bg-muted-foreground" style="animation-delay:300ms"></span>
-      </span>
-      <p class="text-sm">Reconnecting…</p>
+  <div
+    class="fixed inset-0 z-50 flex flex-col overflow-hidden bg-background"
+    out:fade={{ duration: 220 }}
+  >
+    <!-- Skeleton TitleBar -->
+    <div class="flex h-10 shrink-0 items-center border-b border-border/20 bg-background px-3 gap-2">
+      <div class="size-4 rounded bg-muted/40 animate-pulse"></div>
+      <div class="h-3 w-24 rounded bg-muted/30 animate-pulse"></div>
+    </div>
+
+    <div class="flex min-h-0 flex-1 overflow-hidden">
+      <!-- Skeleton sidebar -->
+      <div class="flex w-[220px] shrink-0 flex-col gap-2 border-r border-border/20 bg-sidebar p-3">
+        <div class="h-3 w-3/4 rounded bg-muted/30 animate-pulse"></div>
+        <div class="mt-2 flex flex-col gap-1.5">
+          {#each [80, 60, 95, 70, 55, 85, 65] as w}
+            <div class="h-2.5 rounded bg-muted/25 animate-pulse" style="width:{w}%"></div>
+          {/each}
+        </div>
+      </div>
+
+      <!-- Skeleton main content -->
+      <div class="flex min-h-0 min-w-0 flex-1 flex-col bg-panel">
+        <!-- Skeleton tab bar -->
+        <div class="flex h-9 shrink-0 items-center gap-1 border-b border-border/20 bg-background px-2">
+          <div class="h-5 w-24 rounded bg-muted/25 animate-pulse"></div>
+          <div class="h-5 w-20 rounded bg-muted/20 animate-pulse"></div>
+        </div>
+        <!-- Skeleton toolbar -->
+        <div class="flex h-9 shrink-0 items-center gap-2 border-b border-border/20 bg-background px-3">
+          <div class="h-5 w-16 rounded bg-muted/25 animate-pulse"></div>
+          <div class="h-5 w-12 rounded bg-muted/20 animate-pulse"></div>
+          <div class="ml-auto h-5 w-20 rounded bg-muted/20 animate-pulse"></div>
+        </div>
+        <!-- Centered connecting indicator -->
+        <div class="flex flex-1 flex-col items-center justify-center gap-3">
+          <span class="inline-flex gap-1.5">
+            <span class="size-1.5 animate-bounce rounded-full bg-muted-foreground/40" style="animation-delay:0ms"></span>
+            <span class="size-1.5 animate-bounce rounded-full bg-muted-foreground/40" style="animation-delay:120ms"></span>
+            <span class="size-1.5 animate-bounce rounded-full bg-muted-foreground/40" style="animation-delay:240ms"></span>
+          </span>
+          <p class="text-xs text-muted-foreground/50">Connecting…</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Skeleton status bar -->
+    <div class="flex h-8 shrink-0 items-center border-t border-border/20 bg-background px-3 gap-2">
+      <div class="h-2.5 w-20 rounded bg-muted/25 animate-pulse"></div>
+      <div class="ml-auto h-2.5 w-16 rounded bg-muted/20 animate-pulse"></div>
     </div>
   </div>
 {/if}
@@ -3366,7 +3456,7 @@ let rowSearch = $state('')
           </Button>
           <p class="flex items-center gap-1.5 text-ui-xs text-muted-foreground/70">
             or press
-            <kbd class="inline-flex h-5 min-w-[20px] items-center justify-center rounded-md border border-border/60 bg-muted/40 px-1.5 font-mono text-[10px] leading-none text-muted-foreground">⌘K</kbd>
+            <kbd>⌘K</kbd>
             for the command menu
           </p>
         </div>
@@ -3397,6 +3487,7 @@ let rowSearch = $state('')
         <!-- AI mode: tabs + content hidden above via always-mounted block -->
       {:else}
 
+      {#if tabBarVisible}
       <TabBar
         tabs={tabs.filter((t) => t.kind !== 'ai')}
         {activeTabId}
@@ -3408,6 +3499,7 @@ let rowSearch = $state('')
         {recentTabs}
         onrecentselect={(schema, table) => { if (aiMode) exitAiMode(); void openTableTab(schema, table) }}
       />
+      {/if}
 
       {#snippet tabError(/** @type {unknown} */ error, /** @type {() => void} */ reset)}
         <div class="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
@@ -3585,6 +3677,7 @@ let rowSearch = $state('')
             <SearchPage
               {tables}
               schema={activeSchema}
+              active={activeTab?.kind === 'search'}
               onopentable={(tableName, searchTerm) => {
                 if (aiMode) exitAiMode()
                 void openTableTab(activeSchema, tableName, { search: searchTerm })
@@ -3760,6 +3853,7 @@ let rowSearch = $state('')
           </div>
         {:else}
           {#if tableViewMode === 'structure' && canShowStructure}
+            {#if tableToolbarVisible}
             <TableToolbar
               bind:this={tableToolbar}
               bind:filterBarOpen
@@ -3786,6 +3880,7 @@ let rowSearch = $state('')
               {structureSearch}
               onstructuresearchchange={(v) => (structureSearch = v)}
             />
+            {/if}
             <StructureView
               schema={activeSchema}
               table={activeTable ?? ''}
@@ -3800,6 +3895,7 @@ let rowSearch = $state('')
               onrefresh={() => { void loadStructure(); void loadTriggers() }}
             />
           {:else}
+          {#if tableToolbarVisible}
           <TableToolbar
             bind:this={tableToolbar}
             bind:filterBarOpen
@@ -3836,7 +3932,15 @@ let rowSearch = $state('')
             onaddrow={() => dtBeginInsertRow?.()}
             readonly={tableReadonly}
             {hiddenColumns}
+            virtualColCount={vcolCount}
+            onopenvirtualcols={() => { vcolPanelOpen = !vcolPanelOpen }}
             virtualRelColumns={virtualRelColumnsForToolbar}
+            virtualExprCols={virtualExprColsForToolbar}
+            ontogglevexpr={(id) => {
+              const all = $virtualColumnsStore[_vcolTableKey] ?? []
+              const col = all.find(c => c.id === id)
+              if (col) virtualColumnsStore.patch(_vcolTableKey, id, { enabled: !col.enabled })
+            }}
             onhiddencolumnschange={(next) => {
               hiddenColumns = next
               if (activeTable) saveHiddenCols(persistConnectionId, activeSchema, activeTable, next)
@@ -3850,6 +3954,7 @@ let rowSearch = $state('')
               await handlePageChange(page + 1)
             }}
           />
+          {/if}
 
           <div class="flex min-h-0 min-w-0 flex-1">
             <svelte:boundary failed={tabError}>
@@ -3882,6 +3987,7 @@ let rowSearch = $state('')
                 bind:scrollToBottom={scrollTableBottom}
                 bind:getScroll={tableGetScroll}
                 bind:applyScroll={tableApplyScroll}
+                bind:vcolPanelOpen
                 {rowSort}
                 onsortchange={(s) => void handleRowSortChange(s)}
                 onhidecolumn={(colName) => {
@@ -3934,22 +4040,10 @@ let rowSearch = $state('')
       {#if !activeTab || activeTab.kind === 'welcome'}
         {@const isMac = navigator.platform.toUpperCase().includes('MAC')}
         {@const mod = isMac ? '⌘' : 'Ctrl'}
-        {@const recentQueries = queryHistory.slice(0, 5)}
-        {@const _now = Date.now()}
-        {@const relTime = (/** @type {number} */ ts) => {
-          const diff = _now - ts, sec = Math.floor(diff / 1000)
-          if (sec < 60) return 'just now'
-          const min = Math.floor(sec / 60)
-          if (min < 60) return `${min}m`
-          const hr = Math.floor(min / 60)
-          if (hr < 24) return `${hr}h`
-          const day = Math.floor(hr / 24)
-          return day < 7 ? `${day}d` : new Date(ts).toLocaleDateString()
-        }}
-        {@const cell = 'group flex flex-col gap-3 rounded-xl border border-border/25 bg-card/50 p-3 text-left transition-all hover:border-border/50 hover:bg-accent/10'}
-        {@const iconCls = 'size-3.5 text-muted-foreground/50 transition-colors group-hover:text-foreground/80'}
-        {@const labelCls = 'text-[11px] font-medium leading-none text-foreground/50 transition-colors group-hover:text-foreground/80'}
-        {@const hotkeyCls = 'text-[9px] tabular-nums text-muted-foreground/20 group-hover:text-muted-foreground/40 transition-colors self-end'}
+        {@const cell = 'group flex flex-col gap-3 rounded-lg border border-border/60 bg-card p-3 text-left transition-colors hover:border-border hover:bg-accent/40'}
+        {@const iconCls = 'size-3.5 text-muted-foreground transition-colors group-hover:text-foreground'}
+        {@const labelCls = 'text-[11px] font-medium leading-none text-foreground/70 transition-colors group-hover:text-foreground'}
+        {@const hotkeyCls = 'text-[9px] tabular-nums text-muted-foreground/50 group-hover:text-muted-foreground transition-colors self-end'}
 
         <!-- Scroll container keeps top/bottom padding reachable when the content
              outgrows the viewport (e.g. at high zoom); inner wrapper centers when it fits. -->
@@ -3958,19 +4052,19 @@ let rowSearch = $state('')
 
           <!-- Header -->
           <div class="flex flex-col items-center gap-3">
-            <div class="flex size-11 items-center justify-center rounded-2xl border border-border/40 bg-gradient-to-b from-muted/50 to-muted/10 shadow-sm ring-1 ring-inset ring-white/[0.03]">
+            <div class="flex size-11 items-center justify-center rounded-xl border border-border bg-muted">
               <Logo class="size-6" />
             </div>
-            <p class="text-[9px] font-medium uppercase tracking-[0.25em] text-muted-foreground/25">Quick access</p>
+            <p class="text-[9px] font-medium uppercase tracking-[0.25em] text-muted-foreground/60">Quick access</p>
             {#if connection}
               <div class="flex items-center gap-2 text-sm font-medium text-foreground/80">
                 <span class="size-1.5 rounded-full bg-emerald-500 shrink-0"></span>
                 <span class="font-mono">{connection.database ?? connection.filePath?.split('/').at(-1) ?? connection.databaseId ?? 'connected'}</span>
-                <span class="text-muted-foreground/30 text-xs">·</span>
-                <span class="capitalize text-muted-foreground/50 text-xs font-normal">{dbType}</span>
+                <span class="text-muted-foreground/50 text-xs">·</span>
+                <span class="capitalize text-muted-foreground/70 text-xs font-normal">{dbType}</span>
                 {#if tables.length > 0}
-                  <span class="text-muted-foreground/30 text-xs">·</span>
-                  <span class="text-xs text-muted-foreground/40 font-normal">{tables.length} tables</span>
+                  <span class="text-muted-foreground/50 text-xs">·</span>
+                  <span class="text-xs text-muted-foreground/60 font-normal">{tables.length} tables</span>
                 {/if}
               </div>
             {/if}
@@ -4058,28 +4152,12 @@ let rowSearch = $state('')
             </button>
           </div>
 
-          <!-- Recent queries — same max-w-sm as the grid -->
-          {#if recentQueries.length > 0}
-            <div class="w-full max-w-sm flex flex-col gap-0.5">
-              <p class="mb-1 px-2 text-[9px] font-semibold uppercase tracking-[0.15em] text-muted-foreground/25">Recent</p>
-              {#each recentQueries as q (q.id)}
-                <button
-                  onclick={() => void openQueryInEditor(q.sql)}
-                  class="group flex w-full min-w-0 items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-muted/25"
-                >
-                  <History class="size-3 shrink-0 text-muted-foreground/20 transition-colors group-hover:text-muted-foreground/40" />
-                  <span class="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground/35 transition-colors group-hover:text-foreground/60">{q.title}</span>
-                  <span class="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/20">{relTime(q.executedAt)}</span>
-                </button>
-              {/each}
-            </div>
-          {/if}
 
           <!-- Footer -->
-          <div class="flex items-center gap-3 text-[10px] text-muted-foreground/20">
+          <div class="flex items-center gap-3 text-[10px] text-muted-foreground/50">
             <button
               onclick={() => showShortcutsModal = true}
-              class="flex items-center gap-1 transition-colors hover:text-muted-foreground/40"
+              class="flex items-center gap-1 transition-colors hover:text-muted-foreground"
             >
               <Command size={9} />
               <span>shortcuts</span>
@@ -4129,6 +4207,7 @@ let rowSearch = $state('')
   {/if}
 </div>
 
+{#if statusBarVisible}
 <StatusBar
   {connection}
   {savedConnections}
@@ -4154,6 +4233,14 @@ let rowSearch = $state('')
   }}
   oncheckupdate={() => updateDialog?.checkNow()}
   onopenmodelsettings={() => (showAiModelSettings = true)}
+  sidebarVisible={sidebarOpen}
+  {statusBarVisible}
+  {tabBarVisible}
+  {tableToolbarVisible}
+  ontoggleSidebar={toggleSidebar}
+  ontoggletabbar={toggleTabBar}
+  ontoggletabletoolbar={toggleTableToolbar}
+  ontogglestatusbar={toggleStatusBar}
   onviewchange={handleSidebarViewChange}
   {aiMode}
   onopenaimode={() => (aiMode ? exitAiMode() : enterAiMode())}
@@ -4191,4 +4278,5 @@ let rowSearch = $state('')
     toast.success(`Database "${name}" created`)
   }}
 />
+{/if}
 </div>

@@ -405,6 +405,7 @@ pub async fn pg_get_table_rows(
     limit: i64,
     offset: i64,
     search: Option<String>,
+    search_is_regex: Option<bool>,
     sort_column: Option<String>,
     sort_direction: Option<String>,
     filters: Option<Vec<crate::db::RowFilter>>,
@@ -418,12 +419,23 @@ pub async fn pg_get_table_rows(
         limit,
         offset,
         search,
+        search_is_regex.unwrap_or(false),
         sort_column,
         sort_direction,
         filters,
         include_meta.unwrap_or(true),
     )
     .await
+}
+
+#[tauri::command]
+pub async fn pg_get_column_stats(
+    state: State<'_, DbState>,
+    schema: String,
+    table: String,
+    column: String,
+) -> Result<crate::db::ColumnStats, String> {
+    crate::db::get_column_stats(state, schema, table, column).await
 }
 
 #[tauri::command]

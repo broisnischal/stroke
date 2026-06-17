@@ -398,6 +398,7 @@ export async function dropTable(schema, table, cascade = false) {
  * @param {number} offset
  * @param {{
  *   search?: string
+ *   searchIsRegex?: boolean
  *   sortColumn?: string
  *   sortDirection?: 'asc' | 'desc'
  *   filters?: { column: string, op: string, value?: string }[]
@@ -417,11 +418,25 @@ export async function getTableRows(schema, table, limit, offset, query = {}) {
       limit,
       offset,
       search: query.search?.trim() || null,
+      searchIsRegex: query.searchIsRegex ?? false,
       sortColumn: query.sortColumn || null,
       sortDirection: query.sortDirection || null,
       filters: query.filters?.length ? query.filters : null,
       includeMeta: query.includeMeta !== false,
     })
+  } catch (err) {
+    throw new Error(formatInvokeError(err))
+  }
+}
+
+/**
+ * @param {string} schema
+ * @param {string} table
+ * @param {string} column
+ */
+export async function getColumnStats(schema, table, column) {
+  try {
+    return await invoke('pg_get_column_stats', { schema, table, column })
   } catch (err) {
     throw new Error(formatInvokeError(err))
   }

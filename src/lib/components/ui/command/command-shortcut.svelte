@@ -8,19 +8,25 @@
 		...restProps
 	} = $props();
 
-	const keyChars = $derived(keys ? [...keys] : []);
+	// Split on "+" separators ("Ctrl+Shift+B") or spread Unicode codepoints ("⌘⇧B").
+	// Unicode spread handles symbols correctly: [...'⌘⇧B'] = ['⌘','⇧','B'].
+	const tokens = $derived(
+		!keys ? [] :
+		keys.includes('+') ? keys.split('+').filter(Boolean) :
+		[...keys]
+	);
 </script>
 
-{#if keyChars.length > 0}
+{#if tokens.length > 0}
 	<span
 		bind:this={ref}
 		data-slot="command-shortcut"
-		class={cn("ml-auto shrink-0 flex items-center gap-[2px] pl-2", className)}
+		class={cn("ml-auto flex shrink-0 items-center gap-[3px] pl-3", className)}
 		{...restProps}
 	>
-		{#each keyChars as key}
-			<kbd class="min-w-[18px] rounded-md border border-border/30 bg-muted/40 px-1 py-px font-mono text-[9px] text-muted-foreground/50 shadow-none group-data-[selected]/command-item:border-border/50 group-data-[selected]/command-item:bg-muted/60 group-data-[selected]/command-item:text-muted-foreground/70">
-				{key}
+		{#each tokens as token}
+			<kbd class="min-w-[18px] rounded border border-border/50 bg-muted/50 px-[5px] py-0 font-mono text-[10px] font-medium leading-[18px] text-muted-foreground/70 [border-bottom-width:2px] [border-bottom-color:var(--border)] group-data-[selected]/command-item:border-border/70 group-data-[selected]/command-item:bg-muted/70 group-data-[selected]/command-item:text-muted-foreground/90">
+				{token}
 			</kbd>
 		{/each}
 	</span>
@@ -28,7 +34,7 @@
 	<span
 		bind:this={ref}
 		data-slot="command-shortcut"
-		class={cn("ml-auto shrink-0 pl-2 font-mono text-[10px] tabular-nums text-muted-foreground/40 group-data-[selected]/command-item:text-muted-foreground/60", className)}
+		class={cn("ml-auto shrink-0 pl-3 font-mono text-[10px] tabular-nums text-muted-foreground/40 group-data-[selected]/command-item:text-muted-foreground/60", className)}
 		{...restProps}
 	>
 		{@render children?.()}

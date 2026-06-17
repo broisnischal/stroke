@@ -237,7 +237,13 @@
                 Connection limit
                 <span class="font-normal text-muted-foreground/50">(-1 = unlimited)</span>
               </label>
-              <input id="cdb-connlimit" type="number" min="-1" bind:value={connectionLimit} class={cn(inputCls, 'w-28')} disabled={loading} />
+              <input id="cdb-connlimit" type="text" inputmode="numeric" value={connectionLimit}
+                oninput={(e) => {
+                  const raw = e.currentTarget.value.replace(/[^\d-]/g, '').replace(/(?!^)-/g, '')
+                  e.currentTarget.value = raw
+                  connectionLimit = Number(raw) || -1
+                }}
+                class={cn(inputCls, 'w-28 font-mono')} disabled={loading} />
             </div>
           {/if}
         </div>

@@ -12,7 +12,7 @@ const STORAGE_KEY = 'stroke:settings'
 
 /** @typedef {import('$lib/themes/registry.js').ThemeId} ThemeId */
 /** @typedef {'geist' | 'serif' | 'apple'} FontId */
-/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, mcpAutoStart: boolean, launchAtLogin: boolean }} AppSettings */
+/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean }} AppSettings */
 
 /** UI zoom scale (font + layout). 1 = 100%. */
 export const ZOOM_STEPS = [0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.25, 1.5]
@@ -58,6 +58,7 @@ export const DEFAULT_SETTINGS = {
   font: DEFAULT_FONT,
   mcpAutoStart: false,
   launchAtLogin: false,
+  autoReconnectOnStartup: true,
 }
 
 /** Reactive app font id (synced by applySettings). */
@@ -80,7 +81,7 @@ function saveLastForMode(id) {
 /** @returns {{ dark: ThemeId, light: ThemeId }} */
 function loadLastForMode() {
   try {
-    const dark  = normalizeThemeId(localStorage.getItem(LAST_DARK_KEY)  ?? 'broisnees')
+    const dark  = normalizeThemeId(localStorage.getItem(LAST_DARK_KEY)  ?? 'dark')
     const light = normalizeThemeId(localStorage.getItem(LAST_LIGHT_KEY) ?? 'light')
     return { dark, light }
   } catch {
@@ -104,8 +105,7 @@ export function loadSettings() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) {
-      // First launch — use broisnees as the default theme
-      return { ...DEFAULT_SETTINGS, theme: 'broisnees' }
+      return { ...DEFAULT_SETTINGS }
     }
     const parsed = JSON.parse(raw)
     const theme = normalizeThemeId(parsed.theme)
@@ -124,8 +124,9 @@ export function loadSettings() {
     }
     const mcpAutoStart = parsed.mcpAutoStart === true
     const launchAtLogin = parsed.launchAtLogin === true
+    const autoReconnectOnStartup = parsed.autoReconnectOnStartup !== false
     const font = normalizeFont(parsed.font)
-    return { theme, zoom, font, mcpAutoStart, launchAtLogin }
+    return { theme, zoom, font, mcpAutoStart, launchAtLogin, autoReconnectOnStartup }
   } catch {
     return { ...DEFAULT_SETTINGS }
   }

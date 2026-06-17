@@ -37,7 +37,13 @@
   function handleSelect(/** @type {any} */ it) {
     if (it?.disabled) return;
     onselect(it);
-    if (closeOnSelect) open = false;
+    if (closeOnSelect) {
+      open = false;
+    } else {
+      // Refocus the search input after a non-closing select so cmdk's keyboard
+      // selection cursor returns to the input and clears the item highlight.
+      requestAnimationFrame(() => inputEl?.focus());
+    }
   }
 
   /** Esc closes; Tab / Shift+Tab map onto the Command's Arrow navigation. */
@@ -56,6 +62,21 @@
     el.dispatchEvent(new KeyboardEvent("keydown", { key: e.shiftKey ? "ArrowUp" : "ArrowDown", bubbles: true }));
   }
 </script>
+
+<!--
+  cmdk always calls #selectFirstItem() on every re-render (sort/filter pass), so "id"
+  gets data-selected any time the parent state changes — even if the mouse is over a
+  different row. The :has() rule below suppresses that background while the mouse is
+  inside the list: the hovered item shows its own :hover highlight, and the stale
+  cmdk auto-selection on other items is invisible. Keyboard navigation is unaffected
+  because the mouse isn't hovering any item during pure keyboard use.
+-->
+<style>
+  :global(.sm-item-list:has([data-command-item]:hover) [data-command-item][data-selected]:not(:hover)) {
+    background-color: transparent !important;
+    color: inherit !important;
+  }
+</style>
 
 <Popover.Root bind:open>
   <Popover.Trigger>
@@ -90,7 +111,7 @@
           </Command.Input>
         </div>
         {@render header?.()}
-        <Command.List class="min-h-0 flex-1 overflow-y-auto p-1">
+        <Command.List class="sm-item-list min-h-0 flex-1 overflow-y-auto p-1">
           <Command.Empty class="px-2 py-5 text-center text-ui-xs text-muted-foreground/50">{empty}</Command.Empty>
           {#each items as it (it.value)}
             <Command.Item
@@ -100,7 +121,7 @@
               onSelect={() => handleSelect(it)}
               class={cn(
                 "flex w-full min-w-0 cursor-default items-center gap-1.5 rounded-[5px] px-1.5 py-1.5 text-ui-xs outline-hidden select-none",
-                "text-foreground/85 data-selected:bg-accent data-selected:text-foreground",
+                "text-foreground/85 hover:bg-accent hover:text-foreground data-selected:bg-accent data-selected:text-foreground",
                 "data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-40",
                 "[&_svg]:pointer-events-none [&_svg]:shrink-0",
               )}

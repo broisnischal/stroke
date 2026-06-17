@@ -707,14 +707,33 @@ fn build_filter_condition(
             let mut parts = raw.splitn(2, ',');
             let from = parts.next().unwrap_or("").trim().to_string();
             let to   = parts.next().unwrap_or("").trim().to_string();
-            let p1 = builder.push_bind(from);
-            let p2 = builder.push_bind(to);
-            let cond = if typed {
-                format!("({col} >= {p1}{cast} AND {col} <= {p2}{cast})")
-            } else {
-                format!("({col}::text >= {p1} AND {col}::text <= {p2})")
-            };
-            builder.push_condition(cond, conjunct);
+            match (from.is_empty(), to.is_empty()) {
+                (true, true) => { /* both empty — nothing to filter on, skip */ }
+                (false, true) => {
+                    // only lower bound set
+                    let p1 = builder.push_bind(from);
+                    let cond = if typed { format!("{col} >= {p1}{cast}") }
+                               else    { format!("{col}::text >= {p1}") };
+                    builder.push_condition(cond, conjunct);
+                }
+                (true, false) => {
+                    // only upper bound set
+                    let p2 = builder.push_bind(to);
+                    let cond = if typed { format!("{col} <= {p2}{cast}") }
+                               else    { format!("{col}::text <= {p2}") };
+                    builder.push_condition(cond, conjunct);
+                }
+                (false, false) => {
+                    let p1 = builder.push_bind(from);
+                    let p2 = builder.push_bind(to);
+                    let cond = if typed {
+                        format!("({col} >= {p1}{cast} AND {col} <= {p2}{cast})")
+                    } else {
+                        format!("({col}::text >= {p1} AND {col}::text <= {p2})")
+                    };
+                    builder.push_condition(cond, conjunct);
+                }
+            }
         }
         _ => return Err(format!("Unsupported filter operator: {op}")),
     }
@@ -765,18 +784,30 @@ fn build_any_column_condition(
 fn build_where(
     columns: &[String],
     search: Option<&str>,
+    search_is_regex: bool,
     filters: &[RowFilter],
 ) -> Result<WhereClause, String> {
     let mut builder = QueryBuilder::new();
 
     if let Some(term) = search.map(str::trim).filter(|s| !s.is_empty()) {
-        let pattern = builder.push_bind(format!("%{}%", escape_ilike_pattern(term)));
-        let parts: Vec<String> = columns
-            .iter()
-            .filter_map(|c| quoted_column(c).ok().map(|col| format!("{col}::text ILIKE {pattern} ESCAPE '\\'")))
-            .collect();
-        if !parts.is_empty() {
-            builder.push_condition(format!("({})", parts.join(" OR ")), None);
+        if search_is_regex {
+            let pattern = builder.push_bind(term.to_string());
+            let parts: Vec<String> = columns
+                .iter()
+                .filter_map(|c| quoted_column(c).ok().map(|col| format!("{col}::text ~* {pattern}")))
+                .collect();
+            if !parts.is_empty() {
+                builder.push_condition(format!("({})", parts.join(" OR ")), None);
+            }
+        } else {
+            let pattern = builder.push_bind(format!("%{}%", escape_ilike_pattern(term)));
+            let parts: Vec<String> = columns
+                .iter()
+                .filter_map(|c| quoted_column(c).ok().map(|col| format!("{col}::text ILIKE {pattern} ESCAPE '\\'")))
+                .collect();
+            if !parts.is_empty() {
+                builder.push_condition(format!("({})", parts.join(" OR ")), None);
+            }
         }
     }
 
@@ -796,7 +827,9 @@ fn build_where(
         let data_type = filter.data_type.as_deref();
         if op != "is_null" && op != "is_not_null" {
             let value = filter.value.as_deref().unwrap_or("").trim();
-            if value.is_empty() {
+            // For "between", allow partial values (handled inside build_filter_condition).
+            // For everything else, skip if the value is blank.
+            if value.is_empty() && op != "between" {
                 continue;
             }
             build_filter_condition(&mut builder, &filter.column, op, Some(value), conjunct, data_type)?;
@@ -835,6 +868,7 @@ pub async fn get_table_rows(
     limit: i64,
     offset: i64,
     search: Option<String>,
+    search_is_regex: bool,
     sort_column: Option<String>,
     sort_direction: Option<String>,
     filters: Option<Vec<RowFilter>>,
@@ -902,7 +936,7 @@ pub async fn get_table_rows(
     } else {
         vec![]
     };
-    let where_clause = build_where(&table_columns, search.as_deref(), &filters)?;
+    let where_clause = build_where(&table_columns, search.as_deref(), search_is_regex, &filters)?;
     let order_by = build_order_by(
         &table_columns,
         sort_column.as_deref(),
@@ -2462,4 +2496,98 @@ async fn delete_table_rows_libsql(
         total += res.row_count.unwrap_or(0).max(0) as u64;
     }
     Ok(total)
+}
+
+// ── Column Stats ─────────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ColumnStats {
+    pub column: String,
+    pub count: i64,
+    pub null_count: i64,
+    pub distinct_count: Option<i64>,
+    pub min: Option<Value>,
+    pub max: Option<Value>,
+    pub avg: Option<f64>,
+}
+
+pub async fn get_column_stats(
+    state: State<'_, DbState>,
+    schema: String,
+    table: String,
+    column: String,
+) -> Result<ColumnStats, String> {
+    let pool = require_pool(&state)?;
+
+    validate_ident(&schema).map_err(|e| e.to_string())?;
+    validate_ident(&table).map_err(|e| e.to_string())?;
+    validate_ident(&column).map_err(|e| e.to_string())?;
+
+    let tq  = format!("\"{}\".\"{}\"", schema.replace('"', "\"\""), table.replace('"', "\"\""));
+    let col = format!("\"{}\"", column.replace('"', "\"\""));
+
+    let type_row = sqlx::query(
+        "SELECT data_type FROM information_schema.columns
+         WHERE table_schema = $1 AND table_name = $2 AND column_name = $3 LIMIT 1"
+    )
+    .bind(&schema)
+    .bind(&table)
+    .bind(&column)
+    .fetch_optional(&pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let data_type: String = type_row
+        .as_ref()
+        .and_then(|r| r.try_get::<String, _>(0).ok())
+        .unwrap_or_default()
+        .to_lowercase();
+
+    let is_array = data_type == "array";
+    let is_numeric = !is_array && ["int","numeric","decimal","real","double","float","money","serial"]
+        .iter().any(|t| data_type.contains(t));
+
+    // For array columns skip min/max/distinct/avg — PostgreSQL would return
+    // array-literal strings like "{val1,val2}" which are meaningless here.
+    if is_array {
+        let count_sql = format!("SELECT COUNT(*) AS total, COUNT(*) - COUNT({col}) AS null_count FROM {tq}");
+        let row = sqlx::query(&count_sql)
+            .fetch_one(&pool)
+            .await
+            .map_err(|e| e.to_string())?;
+        let count: i64      = row.try_get("total").unwrap_or(0);
+        let null_count: i64 = row.try_get("null_count").unwrap_or(0);
+        return Ok(ColumnStats { column, count, null_count, distinct_count: None, min: None, max: None, avg: None });
+    }
+
+    let avg_expr = if is_numeric {
+        format!("AVG({col}::numeric)")
+    } else {
+        "NULL::double precision".to_string()
+    };
+
+    let sql = format!(
+        "SELECT COUNT(*) AS total,
+                COUNT(*) - COUNT({col}) AS null_count,
+                COUNT(DISTINCT {col}) AS distinct_count,
+                MIN({col}::text) AS min_val,
+                MAX({col}::text) AS max_val,
+                {avg_expr} AS avg_val
+         FROM {tq}"
+    );
+
+    let row = sqlx::query(&sql)
+        .fetch_one(&pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let count: i64      = row.try_get("total").unwrap_or(0);
+    let null_count: i64 = row.try_get("null_count").unwrap_or(0);
+    let distinct_count: Option<i64> = row.try_get("distinct_count").ok();
+    let avg: Option<f64> = row.try_get::<Option<f64>, _>("avg_val").unwrap_or(None);
+    let min: Option<Value> = row.try_get::<Option<String>, _>("min_val").ok().flatten().map(Value::String);
+    let max: Option<Value> = row.try_get::<Option<String>, _>("max_val").ok().flatten().map(Value::String);
+
+    Ok(ColumnStats { column, count, null_count, distinct_count, min, max, avg })
 }
