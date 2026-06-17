@@ -65,12 +65,16 @@
                         "inline-flex size-9 items-center justify-center rounded-md text-[13px] font-normal transition-colors",
                         "hover:bg-muted hover:text-foreground",
                         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                        "data-selected:bg-primary data-selected:text-primary-foreground data-selected:hover:bg-primary/90",
-                        "data-selection-start:rounded-l-md data-selection-end:rounded-r-md",
-                        "data-highlighted:bg-primary/15 data-highlighted:text-foreground data-highlighted:rounded-none",
-                        "data-selection-start:rounded-l-md data-selection-end:rounded-r-md",
-                        "data-today:bg-muted/60 data-today:font-medium",
-                        "data-outside-month:text-muted-foreground/30 data-outside-month:pointer-events-none",
+                        // All days in range: light tint, no rounding (continuous strip)
+                        "data-selected:bg-primary/12 data-selected:text-foreground data-selected:rounded-none data-selected:hover:bg-primary/20",
+                        // Hover preview
+                        "data-highlighted:bg-primary/8 data-highlighted:text-foreground data-highlighted:rounded-none",
+                        // Endpoints: solid bg, restore rounding — use ! to override data-selected
+                        "data-selection-start:!bg-primary data-selection-start:!text-primary-foreground data-selection-start:rounded-l-full data-selection-start:rounded-r-none",
+                        "data-selection-end:!bg-primary data-selection-end:!text-primary-foreground data-selection-end:rounded-r-full data-selection-end:rounded-l-none",
+                        // Today marker (ring instead of bg so it doesn't fight the range tint)
+                        "data-today:ring-1 data-today:ring-inset data-today:ring-border/60 data-today:font-medium",
+                        "data-outside-month:text-muted-foreground/25 data-outside-month:pointer-events-none data-outside-month:!bg-transparent",
                         "data-disabled:pointer-events-none data-disabled:opacity-30"
                       )}
                     />

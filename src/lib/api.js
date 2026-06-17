@@ -427,6 +427,19 @@ export async function getTableRows(schema, table, limit, offset, query = {}) {
   }
 }
 
+/**
+ * @param {string} schema
+ * @param {string} table
+ * @param {string} column
+ */
+export async function getColumnStats(schema, table, column) {
+  try {
+    return await invoke('pg_get_column_stats', { schema, table, column })
+  } catch (err) {
+    throw new Error(formatInvokeError(err))
+  }
+}
+
 /** @param {string} sql */
 export async function executeSql(sql) {
   try {
