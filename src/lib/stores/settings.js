@@ -80,7 +80,7 @@ function saveLastForMode(id) {
 /** @returns {{ dark: ThemeId, light: ThemeId }} */
 function loadLastForMode() {
   try {
-    const dark  = normalizeThemeId(localStorage.getItem(LAST_DARK_KEY)  ?? 'broisnees')
+    const dark  = normalizeThemeId(localStorage.getItem(LAST_DARK_KEY)  ?? 'dark')
     const light = normalizeThemeId(localStorage.getItem(LAST_LIGHT_KEY) ?? 'light')
     return { dark, light }
   } catch {
@@ -104,8 +104,7 @@ export function loadSettings() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) {
-      // First launch — use broisnees as the default theme
-      return { ...DEFAULT_SETTINGS, theme: 'broisnees' }
+      return { ...DEFAULT_SETTINGS }
     }
     const parsed = JSON.parse(raw)
     const theme = normalizeThemeId(parsed.theme)
