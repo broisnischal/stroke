@@ -398,6 +398,7 @@ export async function dropTable(schema, table, cascade = false) {
  * @param {number} offset
  * @param {{
  *   search?: string
+ *   searchIsRegex?: boolean
  *   sortColumn?: string
  *   sortDirection?: 'asc' | 'desc'
  *   filters?: { column: string, op: string, value?: string }[]
@@ -417,6 +418,7 @@ export async function getTableRows(schema, table, limit, offset, query = {}) {
       limit,
       offset,
       search: query.search?.trim() || null,
+      searchIsRegex: query.searchIsRegex ?? false,
       sortColumn: query.sortColumn || null,
       sortDirection: query.sortDirection || null,
       filters: query.filters?.length ? query.filters : null,

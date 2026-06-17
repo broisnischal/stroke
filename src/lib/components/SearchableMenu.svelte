@@ -37,7 +37,14 @@
   function handleSelect(/** @type {any} */ it) {
     if (it?.disabled) return;
     onselect(it);
-    if (closeOnSelect) open = false;
+    if (closeOnSelect) {
+      open = false;
+    } else {
+      // Refocus the search input so cmdk clears its keyboard-selection cursor.
+      // Without this, cmdk resets data-selected to the first item on the next
+      // re-render (triggered by the parent state change), making hover jump to "id".
+      requestAnimationFrame(() => inputEl?.focus());
+    }
   }
 
   /** Esc closes; Tab / Shift+Tab map onto the Command's Arrow navigation. */

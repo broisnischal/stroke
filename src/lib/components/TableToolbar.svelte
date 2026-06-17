@@ -15,6 +15,7 @@
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import FileDown from "@lucide/svelte/icons/file-down";
   import Columns3 from "@lucide/svelte/icons/columns-3";
+  import FunctionSquare from "@lucide/svelte/icons/function-square";
   import Eye from "@lucide/svelte/icons/eye";
   import EyeOff from "@lucide/svelte/icons/eye-off";
   import Link2 from "@lucide/svelte/icons/link-2";
@@ -81,6 +82,10 @@
     onhiddencolumnschange = () => {},
     /** Virtual FK relationship columns (reverse FK badge cols) to show in the hide/show dropdown. */
     virtualRelColumns = /** @type {Array<{ label: string }>} */ ([]),
+    /** User-defined virtual expression columns to show in the hide/show dropdown. */
+    virtualExprCols = /** @type {Array<{id: string, name: string, enabled: boolean}>} */ ([]),
+    /** Called when user toggles a virtual expression column in the dropdown. */
+    ontogglevexpr = /** @type {(id: string) => void} */ (() => {}),
     filterBarOpen = $bindable(false),
     /** @type {'data' | 'structure'} */
     tableViewMode = $bindable("data"),
@@ -97,6 +102,10 @@
     oninfinitescrolltoggle = () => {},
     /** Live mode on — animates the row-count total as it changes. */
     live = false,
+    /** Number of active virtual expression columns for this table (badge). */
+    virtualColCount = 0,
+    /** Called when user clicks the virtual columns button. */
+    onopenvirtualcols = () => {},
   } = $props();
 
   /** @type {HTMLInputElement | null} */
@@ -242,13 +251,18 @@
     ]),
   );
 
-  // Columns hide/show: real columns + virtual relationship columns.
+  // Columns hide/show: real columns + virtual relationship columns + virtual expr columns.
   const columnItems = $derived([
     ...columns.map((c) => ({ value: c.name, label: c.name, kind: "col", hidden: hiddenColumns.has(c.name) })),
     ...virtualRelColumns.map((vc) => ({ value: `__vrel:${vc.label}`, label: vc.label, kind: "vrel", hidden: hiddenColumns.has(`__vrel:${vc.label}`) })),
+    ...virtualExprCols.map((vc) => ({ value: `__vexpr:${vc.id}`, label: `ƒ ${vc.name}`, kind: "vexpr", hidden: !vc.enabled })),
   ]);
 
   function toggleColumnItem(/** @type {any} */ it) {
+    if (it.kind === "vexpr") {
+      ontogglevexpr(it.value.slice(8));
+      return;
+    }
     if (it.kind === "vrel") {
       const next = new Set(hiddenColumns);
       if (next.has(it.value)) next.delete(it.value); else next.add(it.value);
@@ -264,7 +278,7 @@
     } else {
       onhiddencolumnschange(
         new Set([
-          ...columns.slice(1).map((c) => c.name),
+          ...columns.map((c) => c.name),
           ...virtualRelColumns.map((vc) => `__vrel:${vc.label}`),
         ]),
       );
@@ -418,6 +432,20 @@
     onsortchange(/** @type {TableSort} */ ({ column, direction }));
     sortMenuOpen = false;
   }
+
+  /** Strips non-digit characters — for whole-number-only inputs (limit, offset). */
+  function sanitizeDigits(val) {
+    return val.replace(/\D/g, '')
+  }
+
+  /** Keeps digits, one optional leading minus, and one optional decimal point. */
+  function sanitizeNumericStr(val) {
+    let s = val.replace(/[^\d.-]/g, '')
+    s = s.replace(/(?!^)-/g, '')
+    const dot = s.indexOf('.')
+    if (dot !== -1) s = s.slice(0, dot + 1) + s.slice(dot + 1).replace(/\./g, '')
+    return s
+  }
 </script>
 
 <div class="flex shrink-0 flex-col">
@@ -477,7 +505,8 @@
         type="button"
         class={cn(
           iconBtn,
-          "relative shrink-0",
+          "shrink-0",
+          filterCount > 0 ? "gap-1 !w-auto px-2" : "",
           (filterCount > 0 || filterBarOpen) && "bg-accent text-foreground",
         )}
         title="Filter rows"
@@ -493,10 +522,7 @@
       >
         <ListFilter class="size-3.5" />
         {#if filterCount > 0}
-          <span
-            class="absolute -top-0.5 -right-0.5 flex size-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-0.5 text-ui-3xs font-medium text-primary-foreground"
-            aria-hidden="true"
-          >{formatCompactCount(filterCount)}</span>
+          <span class="tabular-nums text-[11px] font-medium text-primary" aria-hidden="true">{formatCompactCount(filterCount)}</span>
         {/if}
       </button>
 
@@ -549,16 +575,13 @@
         {#snippet trigger(props)}
           <button
             {...props}
-            class={cn(iconBtn, "relative shrink-0", (hiddenCount > 0 || columnsMenuOpen) && "bg-accent text-foreground")}
+            class={cn(iconBtn, "shrink-0", hiddenCount > 0 ? "gap-1 w-auto px-2" : "", (hiddenCount > 0 || columnsMenuOpen) && "bg-accent text-foreground")}
             title="Toggle columns"
             disabled={loading || columns.length === 0}
           >
             <Columns3 class="size-3.5" />
             {#if hiddenCount > 0}
-              <span
-                class="absolute -top-0.5 -right-0.5 flex size-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-0.5 text-ui-3xs font-medium text-primary-foreground"
-                aria-hidden="true"
-              >{hiddenCount}</span>
+              <span class="tabular-nums text-[11px] font-medium text-primary" aria-hidden="true">{hiddenCount}</span>
             {/if}
           </button>
         {/snippet}
@@ -579,13 +602,33 @@
             <EyeOff class="size-3.5 text-muted-foreground" />
           {:else if it.kind === "vrel"}
             <Link2 class="size-3.5 text-primary/60" />
+          {:else if it.kind === "vexpr"}
+            <Eye class="size-3.5 text-primary/60" />
           {:else}
             <Eye class="size-3.5" />
           {/if}
           <span class={cn("min-w-0 flex-1 truncate", it.hidden && "text-muted-foreground")}>{it.label}</span>
           {#if it.kind === "vrel"}<span class="shrink-0 text-ui-3xs text-muted-foreground/40">rel</span>{/if}
+          {#if it.kind === "vexpr"}<span class="shrink-0 text-ui-3xs text-primary/40">expr</span>{/if}
         {/snippet}
       </SearchableMenu>
+
+      <!-- Virtual columns button -->
+      <button
+        type="button"
+        class={cn(
+          "inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-ui-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30",
+          virtualColCount > 0 && "bg-accent/50 text-foreground"
+        )}
+        title="Virtual columns"
+        disabled={loading || columns.length === 0}
+        onclick={onopenvirtualcols}
+      >
+        <FunctionSquare class="size-3.5 shrink-0" />
+        {#if virtualColCount > 0}
+          <span class="tabular-nums text-[11px] font-medium text-primary">{virtualColCount}</span>
+        {/if}
+      </button>
 
       <span class="mx-0.5 h-4 w-px shrink-0 bg-border/60"></span>
 
@@ -737,12 +780,14 @@
                 "h-7 font-mono text-ui-sm",
                 limitError && "border-destructive focus-visible:ring-destructive/30",
               )}
-              type="number"
-              min="1"
-              max={MAX_PAGE_SIZE}
+              type="text"
+              inputmode="numeric"
               value={draftLimit}
+              placeholder="e.g. 50"
               oninput={(e) => {
-                const v = Math.max(1, Number(e.currentTarget.value) || 1);
+                const raw = sanitizeDigits(e.currentTarget.value)
+                e.currentTarget.value = raw
+                const v = Math.max(1, Number(raw) || 1);
                 draftLimit = v;
                 limitError = v > MAX_PAGE_SIZE
                   ? `Maximum is ${MAX_PAGE_SIZE.toLocaleString()} rows`
@@ -757,11 +802,14 @@
             <span class="text-ui-xs text-muted-foreground">Offset (skip rows)</span>
             <Input
               class="h-7 font-mono text-ui-sm"
-              type="number"
-              min="0"
+              type="text"
+              inputmode="numeric"
               value={draftOffset}
+              placeholder="e.g. 0"
               oninput={(e) => {
-                draftOffset = Math.max(0, Number(e.currentTarget.value) || 0);
+                const raw = sanitizeDigits(e.currentTarget.value)
+                e.currentTarget.value = raw
+                draftOffset = Math.max(0, Number(raw) || 0);
               }}
             />
           </label>
@@ -808,7 +856,7 @@
       >
         <MoreHorizontal class="size-3.5" />
       </DropdownMenu.Trigger>
-      <DropdownMenu.Content align="end" class="w-48 text-ui-sm">
+      <DropdownMenu.Content align="end" class="w-52 text-ui-sm">
         {#if structureAllowed}
           <DropdownMenu.Item onSelect={ontogglestructure}>
             <LayoutList class="size-3.5" />
@@ -821,9 +869,9 @@
         {#if tableViewMode !== "structure"}
           <DropdownMenu.Item onSelect={oninfinitescrolltoggle}>
             <Infinity class="size-3.5" />
-            {infiniteScroll ? "Disable infinite scroll" : "Infinite scroll"}
+            Infinite scroll
             {#if infiniteScroll}
-              <DropdownMenu.Shortcut class="text-primary">✓</DropdownMenu.Shortcut>
+              <span class="ml-auto text-[10px] text-primary">✓</span>
             {/if}
           </DropdownMenu.Item>
           <DropdownMenu.Separator />
@@ -988,13 +1036,17 @@
               {/if}
             {:else if colKind === "number"}
               <Input
-                type="number"
+                type="text"
+                inputmode="decimal"
                 data-filter-value
-                class="h-7 min-w-[6rem] flex-1 border-input bg-input/30 text-ui-sm shadow-none"
+                class="h-7 min-w-[6rem] flex-1 border-input bg-input/30 font-mono text-ui-sm shadow-none"
                 value={filter.value}
-                placeholder="Value…"
-                oninput={(e) =>
-                  patchFilter(filter.id, { value: e.currentTarget.value })}
+                placeholder="Number…"
+                oninput={(e) => {
+                  const raw = sanitizeNumericStr(e.currentTarget.value)
+                  e.currentTarget.value = raw
+                  patchFilter(filter.id, { value: raw })
+                }}
               />
             {:else}
               <Input

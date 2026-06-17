@@ -784,18 +784,30 @@ fn build_any_column_condition(
 fn build_where(
     columns: &[String],
     search: Option<&str>,
+    search_is_regex: bool,
     filters: &[RowFilter],
 ) -> Result<WhereClause, String> {
     let mut builder = QueryBuilder::new();
 
     if let Some(term) = search.map(str::trim).filter(|s| !s.is_empty()) {
-        let pattern = builder.push_bind(format!("%{}%", escape_ilike_pattern(term)));
-        let parts: Vec<String> = columns
-            .iter()
-            .filter_map(|c| quoted_column(c).ok().map(|col| format!("{col}::text ILIKE {pattern} ESCAPE '\\'")))
-            .collect();
-        if !parts.is_empty() {
-            builder.push_condition(format!("({})", parts.join(" OR ")), None);
+        if search_is_regex {
+            let pattern = builder.push_bind(term.to_string());
+            let parts: Vec<String> = columns
+                .iter()
+                .filter_map(|c| quoted_column(c).ok().map(|col| format!("{col}::text ~* {pattern}")))
+                .collect();
+            if !parts.is_empty() {
+                builder.push_condition(format!("({})", parts.join(" OR ")), None);
+            }
+        } else {
+            let pattern = builder.push_bind(format!("%{}%", escape_ilike_pattern(term)));
+            let parts: Vec<String> = columns
+                .iter()
+                .filter_map(|c| quoted_column(c).ok().map(|col| format!("{col}::text ILIKE {pattern} ESCAPE '\\'")))
+                .collect();
+            if !parts.is_empty() {
+                builder.push_condition(format!("({})", parts.join(" OR ")), None);
+            }
         }
     }
 
@@ -856,6 +868,7 @@ pub async fn get_table_rows(
     limit: i64,
     offset: i64,
     search: Option<String>,
+    search_is_regex: bool,
     sort_column: Option<String>,
     sort_direction: Option<String>,
     filters: Option<Vec<RowFilter>>,
@@ -923,7 +936,7 @@ pub async fn get_table_rows(
     } else {
         vec![]
     };
-    let where_clause = build_where(&table_columns, search.as_deref(), &filters)?;
+    let where_clause = build_where(&table_columns, search.as_deref(), search_is_regex, &filters)?;
     let order_by = build_order_by(
         &table_columns,
         sort_column.as_deref(),
