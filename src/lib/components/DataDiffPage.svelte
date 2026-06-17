@@ -700,7 +700,7 @@
                   class="absolute right-0 top-0 h-full w-4 cursor-col-resize"
                   onmousedown={(e) => startResize(ci, e)}
                 >
-                  <div class={cn('absolute right-1.5 top-1/2 h-3 w-px -translate-y-1/2 transition-all', resizingCol === ci ? 'bg-primary/60 opacity-100' : 'bg-border/40 opacity-0 group-hover:opacity-100')}></div>
+                  <div class={cn('absolute right-1.5 top-1/2 h-3 w-px -translate-y-1/2 transition-opacity', resizingCol === ci ? 'bg-primary/60 opacity-100' : 'bg-border/40 opacity-0 group-hover:opacity-100')}></div>
                 </div>
               </th>
             {/each}

@@ -329,6 +329,33 @@
           </button>
         </div>
 
+        <div class="flex items-center justify-between gap-3 px-3 py-2.5">
+          <div class="min-w-0">
+            <p class="text-xs text-muted-foreground">Auto reconnect on startup</p>
+            <p class="text-[10px] text-muted-foreground/80">
+              Reconnect to last database on launch
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-label="Toggle auto reconnect on startup"
+            aria-checked={settings.autoReconnectOnStartup}
+            class={cn(
+              "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors",
+              settings.autoReconnectOnStartup ? "bg-foreground" : "bg-muted",
+            )}
+            onclick={() => { settings = updateSettings({ autoReconnectOnStartup: !settings.autoReconnectOnStartup }) }}
+          >
+            <span
+              class={cn(
+                "pointer-events-none block size-4 rounded-full bg-background shadow-sm transition-transform",
+                settings.autoReconnectOnStartup ? "translate-x-4" : "translate-x-0.5",
+              )}
+            ></span>
+          </button>
+        </div>
+
         <button
           type="button"
           class="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"

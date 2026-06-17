@@ -698,7 +698,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (a === b) return true;
     if (a === null || b === null || a === undefined || b === undefined) return false;
     if (typeof a === "object" || typeof b === "object") {
-      try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
+      try { const sa = JSON.stringify(a); return sa === JSON.stringify(b); } catch { return false; }
     }
     return false;
   }
@@ -1488,7 +1488,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     /** @type {Map<string, typeof indexes>} */
     const m = new Map()
     for (const idx of indexes) {
-      for (const col of idx.columns.split(',').map((s) => s.trim())) {
+      for (const raw of idx.columns.split(',')) {
+        const col = raw.trim()
         const list = m.get(col) ?? []
         list.push(idx)
         m.set(col, list)
@@ -1799,14 +1800,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const el = e.currentTarget
     // Page/layout scroll can shift the canvas on screen — drop the cached rect.
     invalidateCanvasRect()
+    const hScrolled = el.scrollLeft !== _scrollLeft
     if (el.scrollTop !== _scrollTop) _scrollTop = el.scrollTop
-    if (el.scrollLeft !== _scrollLeft) _scrollLeft = el.scrollLeft
-    // While editing, cancel any pending rAF and draw immediately so the canvas
-    // stays in sync with the DOM overlay — avoids the 1-frame drift.
-    // Immediately re-arm _drawRafId with a self-clearing rAF so the Svelte
-    // effect's scheduleDraw() call (which runs as a microtask after this handler
-    // returns) sees a non-zero id and skips — preventing a second draw this frame.
-    if (editingCell && _ctx) {
+    if (hScrolled) _scrollLeft = el.scrollLeft
+    // For horizontal scroll, draw synchronously — the sticky canvas shows stale
+    // column positions for a full frame when deferred via rAF, which the eye
+    // reads as a column shift. Vertical scroll is imperceptible at 1-frame lag
+    // because adjacent rows look similar, so it stays on the rAF path.
+    // Re-arm a cleanup rAF so any concurrent reactive updates still get redrawn.
+    if (_ctx && (editingCell || hScrolled)) {
       if (_drawRafId) cancelAnimationFrame(_drawRafId)
       draw()
       _drawRafId = requestAnimationFrame(() => { _drawRafId = 0 })
