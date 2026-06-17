@@ -427,6 +427,16 @@ pub async fn pg_get_table_rows(
 }
 
 #[tauri::command]
+pub async fn pg_get_column_stats(
+    state: State<'_, DbState>,
+    schema: String,
+    table: String,
+    column: String,
+) -> Result<crate::db::ColumnStats, String> {
+    crate::db::get_column_stats(state, schema, table, column).await
+}
+
+#[tauri::command]
 pub async fn pg_execute_sql(state: State<'_, DbState>, sql: String) -> Result<SqlResult, String> {
     execute_sql(state, sql).await
 }

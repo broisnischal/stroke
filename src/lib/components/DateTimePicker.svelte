@@ -55,6 +55,31 @@
     return `${hh}:${mm}`;
   });
 
+  const hourVal = $derived(parsed ? parsed.getHours() : 0);
+  const minVal = $derived(parsed ? parsed.getMinutes() : 0);
+
+  function handleHourChange(e) {
+    const h = Math.max(0, Math.min(23, parseInt(e.currentTarget.value) || 0));
+    const base = calValue ?? new CalendarDate(new Date().getFullYear(), new Date().getMonth() + 1, new Date().getDate());
+    const m = String(minVal).padStart(2, "0");
+    onchange(buildIsoString(base, `${String(h).padStart(2, "0")}:${m}`));
+  }
+
+  function handleMinChange(e) {
+    const m = Math.max(0, Math.min(59, parseInt(e.currentTarget.value) || 0));
+    const base = calValue ?? new CalendarDate(new Date().getFullYear(), new Date().getMonth() + 1, new Date().getDate());
+    const h = String(hourVal).padStart(2, "0");
+    onchange(buildIsoString(base, `${h}:${String(m).padStart(2, "0")}`));
+  }
+
+  function setNow() {
+    const now = new Date();
+    const d = new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getDate());
+    const h = String(now.getHours()).padStart(2, "0");
+    const m = String(now.getMinutes()).padStart(2, "0");
+    onchange(buildIsoString(d, `${h}:${m}`));
+  }
+
   const displayLabel = $derived.by(() => {
     if (!parsed) return "Pick a date…";
     const date = parsed.toLocaleDateString("en-CA"); // YYYY-MM-DD
@@ -78,12 +103,7 @@
     if (!showTime) open = false;
   }
 
-  function handleTimeChange(e) {
-    const t = e.currentTarget.value;
-    const base = calValue ?? new CalendarDate(new Date().getFullYear(), new Date().getMonth() + 1, new Date().getDate());
-    const iso = buildIsoString(base, t);
-    onchange(iso);
-  }
+
 </script>
 
 <Popover bind:open>
@@ -106,14 +126,40 @@
       onValueChange={handleCalendarChange}
     />
     {#if showTime}
-      <div class="border-t border-border/30 px-3 pb-3 pt-2">
-        <p class="mb-1.5 text-[11px] text-muted-foreground">Time</p>
-        <input
-          type="time"
-          value={timeStr}
-          oninput={handleTimeChange}
-          class="w-full rounded-md border border-border/40 bg-muted/30 px-2 py-1 font-mono text-[13px] text-foreground outline-none focus:border-primary/60 focus:ring-0"
-        />
+      <div class="border-t border-border/20 px-3 pb-3 pt-2.5">
+        <div class="mb-2 flex items-center justify-between">
+          <span class="text-[11px] font-medium text-muted-foreground/70 uppercase tracking-wider">Time</span>
+          <button
+            type="button"
+            onclick={setNow}
+            class="rounded px-1.5 py-0.5 text-[11px] text-muted-foreground/60 hover:bg-muted hover:text-foreground transition-colors"
+          >Now</button>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <div class="flex flex-1 items-center overflow-hidden rounded-md border border-border/40 bg-muted/20 focus-within:border-primary/50">
+            <input
+              type="number"
+              min="0"
+              max="23"
+              value={hourVal}
+              oninput={handleHourChange}
+              class="w-full bg-transparent px-2 py-1.5 text-center font-mono text-[13px] text-foreground outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              placeholder="HH"
+            />
+          </div>
+          <span class="shrink-0 font-mono text-[14px] font-bold text-muted-foreground/50">:</span>
+          <div class="flex flex-1 items-center overflow-hidden rounded-md border border-border/40 bg-muted/20 focus-within:border-primary/50">
+            <input
+              type="number"
+              min="0"
+              max="59"
+              value={minVal}
+              oninput={handleMinChange}
+              class="w-full bg-transparent px-2 py-1.5 text-center font-mono text-[13px] text-foreground outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              placeholder="MM"
+            />
+          </div>
+        </div>
       </div>
     {/if}
   </PopoverContent>

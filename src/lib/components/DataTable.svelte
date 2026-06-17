@@ -86,6 +86,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import Loader from "@lucide/svelte/icons/loader";
   import X from "@lucide/svelte/icons/x";
   import DateTimePicker from "./DateTimePicker.svelte";
+  import ColumnStatsPanel from "./ColumnStatsPanel.svelte";
+  import BarChart2 from "@lucide/svelte/icons/bar-chart-2";
   import {
     createColorReader,
     withAlpha,
@@ -227,6 +229,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * @type {{ rowIdx:number, kind:'forward'|'reverse', label:string, data:{ loading:boolean, columns:any[], rows:any[], error:string|null } } | null}
    */
   let fkSubview = $state(null)
+
+  /** Column whose quick-stats panel is open, or null. */
+  let statsCol = $state(/** @type {string | null} */ (null))
 
   let contextRowIdx = $state(0);
   let contextColIdx = $state(0);
@@ -3085,6 +3090,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   })
 </script>
 
+<div class="flex min-h-0 flex-1 overflow-hidden">
+<div class="flex min-h-0 flex-1 flex-col overflow-hidden">
 {#if loading && columns.length === 0}
   <TableLoading {embedded} />
 {:else}
@@ -3516,6 +3523,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           <RotateCcw />
           Reset column width
         </ContextMenu.Item>
+        <ContextMenu.Separator />
+        <ContextMenu.Item onSelect={() => runMenuAction(() => { statsCol = statsCol === hcol ? null : hcol })}>
+          <BarChart2 />
+          Column stats
+          {#if statsCol === hcol}<span class="ml-auto text-[10px] text-primary">✓</span>{/if}
+        </ContextMenu.Item>
       {:else}
         <ContextMenu.Item onSelect={() => runMenuAction(() => openInInspector(contextRowIdx))}>
           <PanelRight />
@@ -3677,6 +3690,19 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     </ContextMenu.Content>
   </ContextMenu.Root>
 {/if}
+</div>
+
+{#if statsCol}
+  {@const statsColInfo = columns.find(c => c.name === statsCol)}
+  <ColumnStatsPanel
+    {schema}
+    table={tableName}
+    column={statsCol}
+    dataType={statsColInfo?.dataType ?? statsColInfo?.data_type ?? ""}
+    onclose={() => { statsCol = null }}
+  />
+{/if}
+</div>
 
 <MediaLightbox
   url={lightboxUrl}
