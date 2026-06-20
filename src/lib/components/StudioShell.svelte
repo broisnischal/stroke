@@ -492,6 +492,8 @@
   let scrollTableTop = $state(() => {})
   /** @type {() => void} */
   let scrollTableBottom = $state(() => {})
+  /** @type {(name: string) => void} */
+  let focusTableColumn = $state(() => {})
   // Read/restore the data grid's scroll so horizontal (+ vertical) position is
   // preserved across tab switches.
   /** @type {() => { left: number, top: number }} */
@@ -3945,6 +3947,7 @@ let rowSearch = $state('')
               hiddenColumns = next
               if (activeTable) saveHiddenCols(persistConnectionId, activeSchema, activeTable, next)
             }}
+            onfocuscolumn={(name) => focusTableColumn?.(name)}
             onprev={async () => {
               if (page <= 1) return
               await handlePageChange(page - 1)
@@ -3985,6 +3988,7 @@ let rowSearch = $state('')
                 bind:resetEdits
                 bind:scrollToTop={scrollTableTop}
                 bind:scrollToBottom={scrollTableBottom}
+                bind:focusColumn={focusTableColumn}
                 bind:getScroll={tableGetScroll}
                 bind:applyScroll={tableApplyScroll}
                 bind:vcolPanelOpen

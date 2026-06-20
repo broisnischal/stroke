@@ -168,6 +168,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
      *  table to the top / bottom. */
     scrollToTop = $bindable(/** @type {() => void} */ (() => {})),
     scrollToBottom = $bindable(/** @type {() => void} */ (() => {})),
+    /** Assigned by this component; the parent (toolbar "Jump to column" menu)
+     *  calls focusColumn(name) to scroll a column into view and briefly
+     *  highlight it. */
+    focusColumn = $bindable(/** @type {(name: string) => void} */ (() => {})),
     /** Assigned by this component so the parent can persist/restore scroll per
      *  tab. getScroll() reads the live position; applyScroll() restores it once
      *  layout settles. */
@@ -263,6 +267,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // ── Keyboard navigation / undo ────────────────────────────────────────────
   /** Visible-column index of the focused cell (null = no cell focus). */
   let focusedCol = $state(/** @type {number | null} */ (null));
+  /** Column name briefly highlighted after the user picks it from the toolbar's
+   *  "Jump to column" menu (header + body band). null = no highlight. */
+  let focusColName = $state(/** @type {string | null} */ (null));
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let _focusColTimer = null;
   /** Scrollable container element for programmatic focus + scroll. */
   let tableContainer = $state(/** @type {HTMLDivElement | null} */ (null));
   /** Whether to select-all text when the edit input is focused. */
@@ -513,6 +522,41 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     } else if (bottom > st + ch) {
       tableContainer.scrollTop = bottom - ch
     }
+  }
+
+  /**
+   * Scroll a visible column into view (if it's off-screen) and briefly highlight
+   * it. Pinned columns are always visible, so they only get the highlight.
+   * @param {string} name
+   */
+  function focusColumnByName(name) {
+    const col = geom.cols.find((c) => c.name === name)
+    if (!col) return
+    if (tableContainer && !col.pinned) {
+      // Left edge of the scrollable area is occluded by the gutters + pinned cols.
+      const frozen = geom.frozenWidth
+      const PAD = 28
+      const vLeft = col.contentX - _scrollLeft
+      const vRight = vLeft + col.w
+      let target = _scrollLeft
+      if (vLeft < frozen + PAD) {
+        target = col.contentX - frozen - PAD
+      } else if (vRight > _viewportWidth - PAD) {
+        target = col.contentX + col.w - _viewportWidth + PAD
+      }
+      target = Math.max(0, target)
+      if (Math.abs(target - _scrollLeft) > 1) {
+        tableContainer.scrollTo({ left: target, behavior: "smooth" })
+      }
+    }
+    focusColName = name
+    if (_focusColTimer) clearTimeout(_focusColTimer)
+    _focusColTimer = setTimeout(() => {
+      focusColName = null
+      _focusColTimer = null
+      scheduleDraw()
+    }, 2200)
+    scheduleDraw()
   }
 
   const fkByColumn = $derived(
@@ -836,6 +880,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   $effect(() => {
     scrollToTop = () => tableContainer?.scrollTo({ top: 0 });
     scrollToBottom = () => { if (tableContainer) tableContainer.scrollTo({ top: tableContainer.scrollHeight }); };
+    focusColumn = focusColumnByName;
     getScroll = () => ({ left: _scrollLeft, top: _scrollTop });
     applyScroll = (pos) => {
       // Wait for the new tab's columns/rows to lay out (spacer width) before
@@ -2397,6 +2442,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
     // Cell background tints.
     if (!editing) {
+      // Focused-column band (drawn first so per-cell tints layer on top).
+      if (focusColName !== null && col.name === focusColName) {
+        ctx.fillStyle = withAlpha(c.cPrimary, 0.1); ctx.fillRect(cellX, ry, w, rh)
+      }
       if (isDirty) { ctx.fillStyle = withAlpha(c.AMBER, 0.15); ctx.fillRect(cellX, ry, w, rh) }
       else if (activeFk) { ctx.fillStyle = withAlpha(c.cAccent, 0.15); ctx.fillRect(cellX, ry, w, rh) }
       else if (isFocusedCell) { ctx.fillStyle = withAlpha(c.cPrimary, 0.08); ctx.fillRect(cellX, ry, w, rh) }
@@ -2695,6 +2744,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     else if (sorted) { ctx.fillStyle = withAlpha(c.cPrimary, 0.05); ctx.fillRect(x, 0, w, HEADER_H) }
     else if (hoveredColName === col.name && hoveredRow === null && _resizeHoverCol !== col.name) {
       ctx.fillStyle = withAlpha(c.cMutedBg, 0.25); ctx.fillRect(x, 0, w, HEADER_H)
+    }
+
+    // Focused-column highlight (toolbar "Jump to column") — tint + accent underline.
+    if (focusColName === col.name) {
+      ctx.fillStyle = withAlpha(c.cPrimary, 0.18); ctx.fillRect(x, 0, w, HEADER_H)
+      ctx.fillStyle = withAlpha(c.cPrimary, 0.9); ctx.fillRect(x, HEADER_H - 2, w, 2)
     }
 
     // Right grid separator.
