@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri dev",
+    "tauri:fresh": "VITE_FRESH_START=1 tauri dev",
     "tauri:build": "tauri build",
     "tauri:build:arch": "cross-env NO_STRIP=1 tauri build"
   },

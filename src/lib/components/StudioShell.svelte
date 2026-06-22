@@ -40,6 +40,7 @@
   import CreateSchemaDialog from './CreateSchemaDialog.svelte'
   import Onboarding from './Onboarding.svelte'
   import SettingsDialog from './SettingsDialog.svelte'
+  import GitHubSyncDialog from './GitHubSyncDialog.svelte'
   import KeyboardShortcutsDialog from './KeyboardShortcutsDialog.svelte'
   import DdlDialog from './DdlDialog.svelte'
   import InsiderDialog from './InsiderDialog.svelte'
@@ -155,6 +156,7 @@
     upsertConnection,
     engineFamily,
   } from '$lib/stores/connections.js'
+  import { githubSync } from '$lib/stores/github-sync.svelte.js'
   import {
     connectPostgres,
     connectSqlite,
@@ -234,6 +236,7 @@
   let showCreateSchemaDialog = $state(false)
   let savedConnections = $state(loadSavedConnections())
   let showSettingsModal = $state(false)
+  let showGitHubSync = $state(false)
   let showShortcutsModal = $state(false)
   let showInsiderModal = $state(false)
   let showAboutModal = $state(false)
@@ -2646,6 +2649,9 @@ let rowSearch = $state('')
   })
 
   onMount(async () => {
+    // Restore GitHub session if the user was previously logged in.
+    githubSync.init().catch(() => {})
+
     // Seed the sample SQLite database once on first launch (any install, any user).
     // Uses a sentinel key so re-seeding is skipped if the user later deletes the connection.
     try {
@@ -3210,6 +3216,16 @@ let rowSearch = $state('')
   onopenmodelconfiguration={() => (showAiModelSettings = true)}
   onopenabout={() => (showAboutModal = true)}
   onopenextensions={() => openExtensionsTab()}
+  onopengithubsync={() => (showGitHubSync = true)}
+/>
+
+<GitHubSyncDialog
+  bind:open={showGitHubSync}
+  onpush={async () => { await githubSync.push(savedConnections) }}
+  onpull={(conns) => {
+    for (const c of conns) upsertConnection(c)
+    savedConnections = loadSavedConnections()
+  }}
 />
 
 <AiSettingsDialog bind:open={showAiModelSettings} />
@@ -4259,6 +4275,7 @@ let rowSearch = $state('')
   onopendiagrams={() => { if (aiMode) exitAiMode(); openDiagramsTab() }}
   onopenerd={() => { if (aiMode) exitAiMode(); openErdTab() }}
   onopensettings={() => (showSettingsModal = true)}
+  onopengithubsync={() => (showGitHubSync = true)}
   onopencommand={() => (commandOpen = true)}
   bind:readonly={tableReadonly}
   ondisconnect={requestDisconnect}
