@@ -3701,7 +3701,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     <ContextMenu.Content
       onOpenAutoFocus={(e) => e.preventDefault()}
       class={cn(
-        "w-max min-w-32 p-0.5 text-ui-xs",
+        "min-w-52 p-0.5 text-ui-xs",
         "[&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs",
         "[&_[data-slot=context-menu-shortcut]]:text-ui-2xs",
         "[&_[data-slot=context-menu-item]_svg]:size-3.5",
@@ -3787,7 +3787,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               )}
           >
             <ExternalLink />
-            Open {menuForeignKeyLabel}
+            Open Tab
             <ContextMenu.Shortcut>⌘↵</ContextMenu.Shortcut>
           </ContextMenu.Item>
         {/if}
