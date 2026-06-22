@@ -36,7 +36,6 @@
   import LockOpen     from '@lucide/svelte/icons/lock-open'
   import { cn }       from '$lib/utils.js'
   import { aiProfiles, activeProfileId, setActiveProfile } from '$lib/stores/ai-settings.js'
-  import { githubSync } from '$lib/stores/github-sync.svelte.js'
   import { toggleLightDark, isCurrentThemeDark } from '$lib/stores/settings.js'
   import { executeSql } from '$lib/api.js'
   import { engineFamily } from '$lib/stores/connections.js'
@@ -69,7 +68,6 @@
     onopendashboard = /** @type {() => void} */ (() => {}),
     onopendiagrams = /** @type {() => void} */ (() => {}),
     onopensettings = /** @type {() => void} */ (() => {}),
-    onopengithubsync = /** @type {() => void} */ (() => {}),
     onopencommand = /** @type {() => void} */ (() => {}),
     ondisconnect = /** @type {() => void} */ (() => {}),
     activeView = /** @type {'table' | 'sql'} */ ('table'),
@@ -544,19 +542,6 @@
       {ontoggletabletoolbar}
       {ontogglestatusbar}
     />
-
-    <!-- GitHub Sync -->
-    <button
-      type="button"
-      class={cn(iconBtn, 'relative')}
-      onclick={onopengithubsync}
-      title={githubSync.user ? `GitHub Sync — signed in as @${githubSync.user.login}` : 'GitHub Sync — click to sign in'}
-    >
-      <Cloud class="size-3.5" />
-      {#if githubSync.user}
-        <span class="absolute top-0.5 right-0.5 size-1.5 rounded-full bg-emerald-500"></span>
-      {/if}
-    </button>
 
     <!-- Settings -->
     <button type="button" class={iconBtn} onclick={onopensettings} title="Settings (⌘,)">

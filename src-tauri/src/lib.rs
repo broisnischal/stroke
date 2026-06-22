@@ -3,7 +3,6 @@ mod commands;
 mod copilot;
 mod db;
 mod docker;
-mod github_sync;
 mod license;
 mod mcp;
 mod metrics;
@@ -291,13 +290,6 @@ pub fn run() {
             cloudflare::cloudflare_logout,
             cloudflare::cloudflare_list_accounts,
             cloudflare::cloudflare_list_d1_databases,
-            github_sync::github_auth_start,
-            github_sync::github_auth_poll,
-            github_sync::github_auth_load_token,
-            github_sync::github_auth_get_user,
-            github_sync::github_auth_logout,
-            github_sync::github_gist_push,
-            github_sync::github_gist_pull,
             db::backup::backup_export,
             db::backup::backup_import,
             commands::check_license_status,
