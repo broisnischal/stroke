@@ -102,7 +102,6 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "chrono",
- "dotenvy",
  "duckdb",
  "ed25519-dalek",
  "futures",

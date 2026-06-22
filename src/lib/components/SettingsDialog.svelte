@@ -2,7 +2,6 @@
   import Minus from "@lucide/svelte/icons/minus";
   import Plus from "@lucide/svelte/icons/plus";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
-  import Cloud from "@lucide/svelte/icons/cloud";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
@@ -32,7 +31,6 @@
     onopenmodelconfiguration = () => {},
     onopenabout = () => {},
     onopenextensions = () => {},
-    onopengithubsync = /** @type {() => void} */ (() => {}),
   } = $props();
 
   let settings = $state(loadSettings());
@@ -358,17 +356,6 @@
           </button>
         </div>
 
-        <button
-          type="button"
-          class="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
-          onclick={() => { open = false; onopengithubsync(); }}
-        >
-          <span class="flex items-center gap-2">
-            <Cloud class="size-3.5 opacity-70" />
-            GitHub Sync
-          </span>
-          <ChevronRight class="size-3.5 shrink-0 opacity-60" />
-        </button>
         <button
           type="button"
           class="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
