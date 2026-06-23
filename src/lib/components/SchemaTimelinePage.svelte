@@ -13,7 +13,7 @@
   import Clock from '@lucide/svelte/icons/clock'
   import Tag from '@lucide/svelte/icons/tag'
   import { onMount } from 'svelte'
-  import { toast } from 'svelte-sonner'
+  import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import { cn } from '$lib/utils.js'
   import { listSchemas, listSchemasOnConnection, executeSql, executeSqlOnConnection } from '$lib/api.js'
   import {

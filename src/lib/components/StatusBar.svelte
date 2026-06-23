@@ -37,7 +37,7 @@
   import { cn }       from '$lib/utils.js'
   import { aiProfiles, activeProfileId, setActiveProfile } from '$lib/stores/ai-settings.js'
   import { toggleLightDark, isCurrentThemeDark } from '$lib/stores/settings.js'
-  import { executeSql } from '$lib/api.js'
+  import { executeSql, cloudflareListD1Databases } from '$lib/api.js'
   import { engineFamily } from '$lib/stores/connections.js'
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js'
   import AppearanceMenu from './AppearanceMenu.svelte'
@@ -54,6 +54,7 @@
     onopenmcp = /** @type {() => void} */ (() => {}),
     onconnect = /** @type {() => void} */ (() => {}),
     onswitchtodb = /** @type {(db: string) => void} */ ((_db) => {}),
+    onswitchd1database = /** @type {(db: { databaseId: string, name: string }) => void} */ ((_db) => {}),
     onswitchconnection = /** @type {(conn: import('$lib/stores/connections.js').SavedConnection) => void} */ ((_c) => {}),
     oncheckupdate = /** @type {() => void} */ (() => {}),
     onopenmodelsettings = /** @type {() => void} */ (() => {}),
@@ -101,8 +102,8 @@
 
   let dbOpen = $state(false)
   let createDbOpen = $state(false)
-  /** @type {string[]} */
-  let databases = $state([])
+  /** Unified database list — `key` is what identifies a db (name for SQL, uuid for D1), `label` is what we show. */
+  let dbList = $state(/** @type {{ key: string, label: string }[]} */ ([]))
   let dbLoading = $state(false)
   let dbSearch = $state('')
 
@@ -112,36 +113,67 @@
       : (connection?.database ?? connection?.filePath ?? '')
   )
   const isPostgres = $derived(engineFamily(connection?.type) === 'postgres' || engineFamily(connection?.type) === 'mysql')
+  const isD1 = $derived(connection?.type === 'd1')
+  /** Whether this connection supports switching databases in-place. */
+  const canSwitchDb = $derived(isPostgres || isD1)
+  /** Label shown in the trigger for the active db (D1 has no `database` field, so fall back to the connection name). */
+  const currentDbLabel = $derived(isD1 ? (connection?.database || connection?.name || '') : currentDb)
+  /** Key of the active db, used to mark the current row. */
+  const currentDbKey = $derived(isD1 ? (connection?.databaseId ?? '') : currentDb)
+
   const dbFiltered = $derived(
     dbSearch.trim()
-      ? databases.filter((d) => d.toLowerCase().includes(dbSearch.toLowerCase()))
-      : databases,
+      ? dbList.filter((d) => d.label.toLowerCase().includes(dbSearch.toLowerCase()))
+      : dbList,
   )
 
   async function fetchDatabases() {
-    if (!isPostgres) return
-    dbLoading = true
-    try {
-      const result = await executeSql(
-        `SELECT datname FROM pg_catalog.pg_database WHERE datistemplate = false ORDER BY datname`,
-      )
-      databases = (result?.rows ?? []).map((r) => String(r[0]))
-    } catch {
-      databases = []
-    } finally {
-      dbLoading = false
+    if (isPostgres) {
+      dbLoading = true
+      try {
+        const result = await executeSql(
+          `SELECT datname FROM pg_catalog.pg_database WHERE datistemplate = false ORDER BY datname`,
+        )
+        dbList = (result?.rows ?? []).map((r) => ({ key: String(r[0]), label: String(r[0]) }))
+      } catch {
+        dbList = []
+      } finally {
+        dbLoading = false
+      }
+    } else if (isD1 && connection?.accountId) {
+      dbLoading = true
+      try {
+        // OAuth D1 connections keep the token in the Cloudflare token store
+        // rather than on the connection, so fall back to it when absent.
+        let token = connection.apiToken
+        if (!token) {
+          const { cfGetValidToken } = await import('$lib/cloudflare.js')
+          token = await cfGetValidToken()
+        }
+        const dbs = await cloudflareListD1Databases(token, connection.accountId)
+        dbList = (dbs ?? [])
+          .map((/** @type {{ uuid: string, name: string }} */ d) => ({ key: d.uuid, label: d.name }))
+          .sort((a, b) => a.label.localeCompare(b.label))
+      } catch {
+        dbList = []
+      } finally {
+        dbLoading = false
+      }
     }
   }
 
-  function switchDb(/** @type {string} */ db) {
-    if (db !== currentDb) onswitchtodb(db)
+  function switchDb(/** @type {{ key: string, label: string }} */ db) {
+    if (db.key !== currentDbKey) {
+      if (isD1) onswitchd1database({ databaseId: db.key, name: db.label })
+      else onswitchtodb(db.label)
+    }
     dbOpen = false
     dbSearch = ''
   }
 
   $effect(() => {
     connection
-    databases = []
+    dbList = []
   })
 
   const connType = $derived(
@@ -171,7 +203,28 @@
   const iconBtn = 'inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-muted/50 hover:text-foreground'
   /** Shared label+icon button */
   const labelBtn = 'flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors hover:bg-muted/50 hover:text-foreground data-[state=open]:bg-muted/50 data-[state=open]:text-foreground'
+
+  // Tools menu — built from one list so every row renders identically.
+  const toolItems = $derived.by(() => {
+    const t = connection?.type ?? 'postgres'
+    /** @type {{ label: string, icon: any, onclick: () => void }[]} */
+    const items = []
+    if (t === 'postgres' || t === 'mysql') items.push({ label: 'Schema Explorer', icon: LayoutTemplate, onclick: onopenSchema })
+    items.push({ label: 'Activity Log', icon: History, onclick: onopenlogs })
+    if (t === 'postgres') items.push({ label: 'Security', icon: ShieldCheck, onclick: onopensecurity })
+    items.push({ label: 'ORM Runner', icon: Code2, onclick: onopenorm })
+    items.push({ label: 'Backup & Restore', icon: Archive, onclick: onopenbackup })
+    items.push({ label: 'Charts', icon: BarChart2, onclick: onopenchartspage })
+    items.push({ label: 'Dashboard', icon: LayoutDashboard, onclick: onopendashboard })
+    items.push({ label: 'Diagrams', icon: GitBranch, onclick: onopendiagrams })
+    return items
+  })
 </script>
+
+<!-- PRO chip -->
+{#snippet proBadge()}
+  <span class="ml-auto shrink-0 rounded bg-amber-400/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-500/90 dark:text-amber-400/80">PRO</span>
+{/snippet}
 
 <!-- Vertical separator -->
 {#snippet sep()}
@@ -203,29 +256,40 @@
         </DropdownMenu.Trigger>
 
         {#if savedConnections.length > 0}
-          <DropdownMenu.Content side="top" align="start" class="w-60">
+          <DropdownMenu.Content side="top" align="start" class="w-64">
+            <DropdownMenu.Label>Connections</DropdownMenu.Label>
             {#each savedConnections as conn (conn.id)}
               {@const isCurrent = conn.id === activeConnectionId}
               {@const Icon = connIcon(conn)}
+              {@const subtitle = conn.database && conn.database !== (conn.name ?? conn.host) ? conn.database : (conn.host ?? '')}
               <DropdownMenu.Item
-                class={cn('cursor-pointer', isCurrent && 'font-semibold')}
+                class="cursor-pointer items-start gap-2.5 py-1.5"
                 onclick={() => { if (!isCurrent) onswitchconnection(conn); connOpen = false }}
               >
-                <Icon class={cn('size-3.5 shrink-0', isCurrent ? 'text-foreground' : 'text-muted-foreground/35')} />
+                <span class={cn(
+                  'mt-px flex size-5 shrink-0 items-center justify-center rounded-md',
+                  isCurrent ? 'bg-emerald-500/12 text-emerald-500' : 'bg-muted/50 text-muted-foreground/55',
+                )}>
+                  <Icon class="size-3.5" />
+                </span>
                 <div class="min-w-0 flex-1">
-                  <div class="truncate">{conn.name ?? conn.host ?? conn.filePath ?? 'Connection'}</div>
-                  {#if conn.database && conn.database !== (conn.name ?? conn.host)}
-                    <div class="truncate font-mono text-[10px] text-muted-foreground/45">{conn.database}</div>
+                  <div class={cn('truncate text-[12px] leading-tight', isCurrent ? 'font-semibold text-foreground' : 'font-medium text-foreground/90')}>
+                    {conn.name ?? conn.host ?? conn.filePath ?? 'Connection'}
+                  </div>
+                  {#if subtitle}
+                    <div class="mt-0.5 truncate font-mono text-[10px] leading-tight text-muted-foreground/45">{subtitle}</div>
                   {/if}
                 </div>
-                {#if isCurrent}<Check class="ml-auto size-3 shrink-0 text-emerald-500" />{/if}
+                {#if isCurrent}<Check class="ml-auto mt-0.5 size-3.5 shrink-0 text-emerald-500" />{/if}
               </DropdownMenu.Item>
             {/each}
 
             <DropdownMenu.Separator />
 
-            <DropdownMenu.Item class="cursor-pointer" onclick={() => { connOpen = false; onconnect() }}>
-              <WifiOff class="size-3.5 shrink-0 text-muted-foreground/40" />
+            <DropdownMenu.Item class="cursor-pointer gap-2.5" onclick={() => { connOpen = false; onconnect() }}>
+              <span class="flex size-5 shrink-0 items-center justify-center rounded-md bg-muted/50 text-muted-foreground/55">
+                <WifiOff class="size-3.5" />
+              </span>
               Manage connections…
             </DropdownMenu.Item>
           </DropdownMenu.Content>
@@ -238,7 +302,7 @@
       <div class="flex items-center">
         <DropdownMenu.Root
           bind:open={dbOpen}
-          onOpenChange={(o) => { if (o && databases.length === 0) void fetchDatabases(); if (!o) dbSearch = '' }}
+          onOpenChange={(o) => { if (o && dbList.length === 0) void fetchDatabases(); if (!o) dbSearch = '' }}
         >
           <DropdownMenu.Trigger
             class={cn(labelBtn, 'text-muted-foreground/80')}
@@ -246,21 +310,23 @@
           >
             {#if connection?.type === 'sqlite'}
               <HardDrive class="size-3 shrink-0" />
+            {:else if isD1}
+              <Cloud class="size-3 shrink-0" />
             {:else}
               <Database class="size-3 shrink-0" />
             {/if}
-            <span class="max-w-[8rem] truncate font-mono">{currentDb || 'No database'}</span>
-            {#if isPostgres}
+            <span class="max-w-[8rem] truncate font-mono">{currentDbLabel || 'No database'}</span>
+            {#if canSwitchDb}
               <ChevronDown class={cn('size-3 shrink-0 opacity-40 transition-transform', dbOpen && 'rotate-180')} />
             {/if}
           </DropdownMenu.Trigger>
 
           <DropdownMenu.Content side="top" align="start" class="w-56 overflow-hidden p-0">
-            {#if databases.length > 5}
+            {#if dbList.length > 5}
               <div class="border-b border-border/25 px-2 py-1.5">
                 <input
                   type="text"
-                  placeholder="Filter databases…"
+                  placeholder={isD1 ? 'Filter D1 databases…' : 'Filter databases…'}
                   class="h-7 w-full rounded-lg bg-muted/40 px-2.5 text-[11px] outline-none placeholder:text-muted-foreground/35 focus:ring-0"
                   bind:value={dbSearch}
                   onkeydown={(e) => { if (e.key === 'Escape') { dbSearch = ''; dbOpen = false } }}
@@ -279,24 +345,28 @@
                   {dbSearch ? 'No match' : 'No databases found'}
                 </div>
               {:else}
-                {#each dbFiltered.slice(0, 200) as db (db)}
-                  {@const isCurrent = db === currentDb}
+                {#each dbFiltered.slice(0, 200) as db (db.key)}
+                  {@const isCurrent = db.key === currentDbKey}
                   <DropdownMenu.Item
                     class={cn('cursor-pointer font-mono', isCurrent && 'font-semibold')}
                     onclick={() => switchDb(db)}
                   >
-                    <Database class={cn('size-3.5 shrink-0', isCurrent ? 'text-foreground' : 'text-muted-foreground/35')} />
-                    <span class="min-w-0 flex-1 truncate">{db}</span>
+                    {#if isD1}
+                      <Cloud class={cn('size-3.5 shrink-0', isCurrent ? 'text-amber-500' : 'text-muted-foreground/35')} />
+                    {:else}
+                      <Database class={cn('size-3.5 shrink-0', isCurrent ? 'text-foreground' : 'text-muted-foreground/35')} />
+                    {/if}
+                    <span class="min-w-0 flex-1 truncate">{db.label}</span>
                     {#if isCurrent}<Check class="ml-auto size-3 shrink-0 text-emerald-500" />{/if}
                   </DropdownMenu.Item>
                 {/each}
               {/if}
             </div>
 
-            {#if isPostgres}
+            {#if canSwitchDb}
               <div class="flex items-center justify-between border-t border-border/25 px-2.5 py-1.5">
                 <span class="text-[10px] text-muted-foreground/40">
-                  {databases.length} database{databases.length === 1 ? '' : 's'}
+                  {dbList.length} database{dbList.length === 1 ? '' : 's'}
                 </span>
                 <div class="flex items-center gap-0.5">
                   <button
@@ -307,14 +377,16 @@
                   >
                     <RefreshCw class={cn('size-3', dbLoading && 'animate-spin')} />
                   </button>
-                  <button
-                    type="button"
-                    class="inline-flex size-5 items-center justify-center rounded-md text-muted-foreground/40 transition-colors hover:bg-muted/50 hover:text-foreground"
-                    onclick={() => { dbOpen = false; createDbOpen = true }}
-                    title="Create database"
-                  >
-                    <Plus class="size-3" />
-                  </button>
+                  {#if isPostgres}
+                    <button
+                      type="button"
+                      class="inline-flex size-5 items-center justify-center rounded-md text-muted-foreground/40 transition-colors hover:bg-muted/50 hover:text-foreground"
+                      onclick={() => { dbOpen = false; createDbOpen = true }}
+                      title="Create database"
+                    >
+                      <Plus class="size-3" />
+                    </button>
+                  {/if}
                 </div>
               </div>
             {/if}
@@ -448,49 +520,20 @@
 
     <!-- Tools overflow (all navigation tools in one dropdown) -->
     {#if connection}
-      {@const dbT = connection.type ?? 'postgres'}
       <DropdownMenu.Root>
         <DropdownMenu.Trigger class={iconBtn} title="Tools">
           <MoreHorizontal class="size-3.5" />
         </DropdownMenu.Trigger>
-        <DropdownMenu.Content side="top" align="end" class="w-48">
+        <DropdownMenu.Content side="top" align="end" class="w-52">
           <DropdownMenu.Label>Tools</DropdownMenu.Label>
-          {#if dbT === 'postgres' || dbT === 'mysql'}
-            <DropdownMenu.Item class="cursor-pointer" onclick={onopenSchema}>
-              <LayoutTemplate class="size-3.5 shrink-0 text-muted-foreground/50" /> Schema Explorer
-              {#if !hasPro}<span class="ml-auto text-[8px] font-bold tracking-wider text-amber-400/80">PRO</span>{/if}
+          {#each toolItems as item (item.label)}
+            {@const Icon = item.icon}
+            <DropdownMenu.Item class="cursor-pointer" onclick={item.onclick}>
+              <Icon class="size-3.5 shrink-0 text-muted-foreground/45" />
+              <span class="truncate">{item.label}</span>
+              {#if !hasPro}{@render proBadge()}{/if}
             </DropdownMenu.Item>
-          {/if}
-          <DropdownMenu.Item class="cursor-pointer" onclick={onopenlogs}>
-            <History class="size-3.5 shrink-0 text-muted-foreground/50" /> Activity Log
-            {#if !hasPro}<span class="ml-auto text-[8px] font-bold tracking-wider text-amber-400/80">PRO</span>{/if}
-          </DropdownMenu.Item>
-          {#if dbT === 'postgres'}
-            <DropdownMenu.Item class="cursor-pointer" onclick={onopensecurity}>
-              <ShieldCheck class="size-3.5 shrink-0 text-muted-foreground/50" /> Security
-              {#if !hasPro}<span class="ml-auto text-[8px] font-bold tracking-wider text-amber-400/80">PRO</span>{/if}
-            </DropdownMenu.Item>
-          {/if}
-          <DropdownMenu.Item class="cursor-pointer" onclick={onopenorm}>
-            <Code2 class="size-3.5 shrink-0 text-muted-foreground/50" /> ORM Runner
-            {#if !hasPro}<span class="ml-auto text-[8px] font-bold tracking-wider text-amber-400/80">PRO</span>{/if}
-          </DropdownMenu.Item>
-          <DropdownMenu.Item class="cursor-pointer" onclick={onopenbackup}>
-            <Archive class="size-3.5 shrink-0 text-muted-foreground/50" /> Backup & Restore
-            {#if !hasPro}<span class="ml-auto text-[8px] font-bold tracking-wider text-amber-400/80">PRO</span>{/if}
-          </DropdownMenu.Item>
-          <DropdownMenu.Item class="cursor-pointer" onclick={onopenchartspage}>
-            <BarChart2 class="size-3.5 shrink-0 text-muted-foreground/50" /> Charts
-            {#if !hasPro}<span class="ml-auto text-[8px] font-bold tracking-wider text-amber-400/80">PRO</span>{/if}
-          </DropdownMenu.Item>
-          <DropdownMenu.Item class="cursor-pointer" onclick={onopendashboard}>
-            <LayoutDashboard class="size-3.5 shrink-0 text-muted-foreground/50" /> Dashboard
-            {#if !hasPro}<span class="ml-auto text-[8px] font-bold tracking-wider text-amber-400/80">PRO</span>{/if}
-          </DropdownMenu.Item>
-          <DropdownMenu.Item class="cursor-pointer" onclick={onopendiagrams}>
-            <GitBranch class="size-3.5 shrink-0 text-muted-foreground/50" /> Diagrams
-            {#if !hasPro}<span class="ml-auto text-[8px] font-bold tracking-wider text-amber-400/80">PRO</span>{/if}
-          </DropdownMenu.Item>
+          {/each}
         </DropdownMenu.Content>
       </DropdownMenu.Root>
       {@render sep()}
@@ -641,6 +684,6 @@
   connType={connection?.type ?? 'postgres'}
   oncreate={async (opts) => {
     await oncreatedatabase(opts)
-    databases = []
+    dbList = []
   }}
 />

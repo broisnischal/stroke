@@ -129,7 +129,10 @@
       readOnly,
       renderLineHighlight: 'line',
       lineNumbers: 'on',
-      lineNumbersMinChars: 3,
+      // Tighter gutter: only as wide as the digits need, and no extra decoration
+      // strip between the numbers and the code.
+      lineNumbersMinChars: 2,
+      lineDecorationsWidth: 6,
       glyphMargin: false,
       folding: false,
       scrollbar: { verticalScrollbarSize: 6, horizontalScrollbarSize: 6 },

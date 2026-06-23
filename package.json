@@ -10,8 +10,7 @@
     "tauri": "tauri dev",
     "tauri:fresh": "VITE_FRESH_START=1 tauri dev",
     "tauri:build": "tauri build",
-    "tauri:build:arch": "cross-env NO_STRIP=1 tauri build",
-    "postinstall": "patch-package"
+    "tauri:build:arch": "cross-env NO_STRIP=1 tauri build"
   },
   "devDependencies": {
     "@emnapi/core": "^1.10.0",
@@ -23,9 +22,7 @@
     "@tauri-apps/cli": "^2.11.2",
     "cross-env": "^10.1.0",
     "mode-watcher": "^1.1.0",
-    "patch-package": "^8.0.1",
     "svelte": "^5.55.5",
-    "svelte-sonner": "^1.1.1",
     "vite": "^8.0.12"
   },
   "dependencies": {

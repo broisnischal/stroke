@@ -22,7 +22,7 @@
   import { createHotkey, createHotkeySequence } from '@tanstack/svelte-hotkeys'
   import { cycleTheme, restorePreviousTheme, isCurrentThemeDark, loadSettings, updateSettings } from '$lib/stores/settings.js'
   import { pickRandomTip } from '$lib/insider-tips.js'
-  import { toast } from 'svelte-sonner'
+  import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import Sidebar from './Sidebar.svelte'
   import TabBar from './TabBar.svelte'
   import TabLoading from './TabLoading.svelte'
@@ -141,6 +141,7 @@
     filtersApiSignature,
     filtersForApi,
     sortForApi,
+    buildSelectSql,
   } from '$lib/table-query.js'
   import {
     buildForeignKeyFilters,
@@ -413,8 +414,28 @@
   let searchEverOpened = $state(false)
   let schemaTimelineEverOpened = $state(false)
   let dataDiffEverOpened = $state(false)
-  /** @type {{ focusEditor: () => void } | null} */
+  /** @type {{ focusEditor: () => void, openInNewTab?: (content: string, name?: string) => void } | null} */
   let sqlConsoleRef = $state(null)
+
+  /** "Open in SQL editor" — generate a SELECT reflecting the current table view and open it in a new query tab. */
+  function openTableInSqlEditor() {
+    if (!activeTable) return
+    const sql = buildSelectSql({
+      schema: activeSchema,
+      table: activeTable,
+      columns,
+      filters: rowFilters,
+      search: rowSearch,
+      sort: rowSort,
+      limit: pageSize,
+      engine: connection?.type ?? 'postgres',
+    })
+    if (aiMode) exitAiMode()
+    void (async () => {
+      await focusSqlView()
+      whenRefReady(() => sqlConsoleRef, (r) => r.openInNewTab?.(sql, activeTable ?? undefined))
+    })()
+  }
 
   // Auto-focus the SQL editor whenever the SQL tab becomes active. Uses whenRefReady
   // so focus still lands on the first open while the lazy SqlConsole chunk mounts.
@@ -1071,6 +1092,16 @@ let rowSearch = $state('')
   createHotkey('Mod+Shift+M', (e) => {
     e.preventDefault()
     restorePreviousTheme()
+  })
+
+  // Refresh everything — schemas, table list, and the active table's rows.
+  createHotkey('Mod+Shift+R', (e) => {
+    if (!connection) return
+    e.preventDefault()
+    void (async () => {
+      await handleRefresh()
+      toast.success('Refreshed', { description: 'Schemas, tables, and rows reloaded' })
+    })()
   })
 
   createHotkey('Mod+Shift+D', (e) => {
@@ -3962,6 +3993,7 @@ let rowSearch = $state('')
             ondeleteselected={() => void deleteSelectedRows()}
             onexport={handleExport}
             onaddrow={() => dtBeginInsertRow?.()}
+            onopeninsql={openTableInSqlEditor}
             readonly={tableReadonly}
             {hiddenColumns}
             virtualColCount={vcolCount}
@@ -4278,6 +4310,10 @@ let rowSearch = $state('')
   onswitchtodb={(dbName) => {
     if (!connection) return
     void handleSwitchDatabase({ ...connection, database: dbName, name: `${connection.host ?? connection.name}/${dbName}` })
+  }}
+  onswitchd1database={({ databaseId, name }) => {
+    if (!connection) return
+    void handleSwitchDatabase({ ...connection, databaseId, database: name, name })
   }}
   oncheckupdate={() => updateDialog?.checkNow()}
   onopenmodelsettings={() => (showAiModelSettings = true)}

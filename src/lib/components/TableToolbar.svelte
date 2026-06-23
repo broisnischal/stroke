@@ -15,6 +15,7 @@
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import FileDown from "@lucide/svelte/icons/file-down";
   import Columns3 from "@lucide/svelte/icons/columns-3";
+  import Terminal from "@lucide/svelte/icons/terminal";
   import Crosshair from "@lucide/svelte/icons/crosshair";
   import FunctionSquare from "@lucide/svelte/icons/function-square";
   import Eye from "@lucide/svelte/icons/eye";
@@ -77,6 +78,7 @@
     /** @type {(format: 'csv' | 'json') => void | Promise<void>} */
     onexport = () => {},
     onaddrow = () => {},
+    onopeninsql = () => {},
     /** @type {Set<string>} */
     hiddenColumns = new Set(),
     /** @type {(next: Set<string>) => void} */
@@ -673,6 +675,17 @@
         {#if virtualColCount > 0}
           <span class="tabular-nums text-[11px] font-medium text-primary">{virtualColCount}</span>
         {/if}
+      </button>
+
+      <!-- Open in SQL editor — opens a new query tab pre-filled with the current view's SELECT -->
+      <button
+        type="button"
+        class="inline-flex h-7 shrink-0 items-center justify-center rounded-md px-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+        title="Open in SQL editor — new query with current filters & sort"
+        disabled={loading || columns.length === 0}
+        onclick={onopeninsql}
+      >
+        <Terminal class="size-3.5 shrink-0" />
       </button>
 
       </div><!-- /action group -->

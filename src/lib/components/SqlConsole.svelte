@@ -101,6 +101,21 @@
     sqlEditorRef?.focus()
   }
 
+  /**
+   * Open `content` in a brand-new query tab and focus it. Used by
+   * "Open in SQL editor" so the current editor content is never clobbered.
+   * @param {string} content @param {string} [name]
+   */
+  export function openInNewTab(content, name) {
+    tabCounter += 1
+    const id = crypto.randomUUID()
+    sqlTabs = [...sqlTabs, { id, name: name || `Query ${tabCounter}`, content }]
+    activeTabId = id
+    sql = content
+    _lastSyncedSql = content
+    queueMicrotask(() => sqlEditorRef?.focus())
+  }
+
   const initialTabId = crypto.randomUUID();
   /** @type {SqlTab[]} */
   let sqlTabs = $state([{ id: initialTabId, name: 'Query 1', content: sql }])

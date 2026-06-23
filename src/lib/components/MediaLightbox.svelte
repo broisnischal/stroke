@@ -3,7 +3,7 @@
   import ExternalLink from '@lucide/svelte/icons/external-link'
   import ZoomIn from '@lucide/svelte/icons/zoom-in'
   import ZoomOut from '@lucide/svelte/icons/zoom-out'
-  import { toast } from 'svelte-sonner'
+  import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
 
   /** @type {{ url: string | null, type?: 'image' | 'pdf', onclose: () => void }} */
   let { url = null, type = 'image', onclose } = $props()
