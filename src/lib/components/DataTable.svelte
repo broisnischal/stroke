@@ -23,6 +23,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ChevronsDownUp from "@lucide/svelte/icons/chevrons-down-up";
   import Copy from "@lucide/svelte/icons/copy";
+  import CopyPlus from "@lucide/svelte/icons/copy-plus";
   import Pencil from "@lucide/svelte/icons/pencil";
   import CircleSlash from "@lucide/svelte/icons/circle-slash";
   import Trash2 from "@lucide/svelte/icons/trash-2";
@@ -945,9 +946,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       toast.error('Cannot insert row', { description: built.message })
       return
     }
-    await oninsertrow(/** @type {Record<string, unknown>} */ (built.values))
-    newRowDrafts = null
-    newRowFocusCol = null
+    try {
+      await oninsertrow(/** @type {Record<string, unknown>} */ (built.values))
+      newRowDrafts = null
+      newRowFocusCol = null
+    } catch {
+      // error toast already shown by oninsertrow
+    }
   }
 
   /** @param {string} colName @param {string} value */
@@ -1189,6 +1194,20 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       );
     } catch (err) {
       toast.error("Delete failed", { description: String(err) });
+    }
+  }
+
+  /** @param {number} rowIdx */
+  async function duplicateRow(rowIdx) {
+    if (readonly) return;
+    const row = rows[rowIdx];
+    if (!row) return;
+    const record = rowToRecord(columns, row);
+    for (const pk of primaryKey) delete record[pk];
+    try {
+      await oninsertrow(record);
+    } catch {
+      // error toast already shown by oninsertrow
     }
   }
 
@@ -2946,6 +2965,25 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (_resizeRafId) cancelAnimationFrame(_resizeRafId)
   })
 
+  // Shift+wheel → horizontal scroll. Non-passive so we can call preventDefault,
+  // but bails out immediately on non-Shift events so the compositor waits <0.05ms.
+  // Registered via $effect (not onwheel attribute) to keep the Svelte template
+  // free of any non-passive wheel binding, which would otherwise force the
+  // compositor to consult JS on every 120Hz trackpad tick.
+  $effect(() => {
+    const el = tableContainer
+    if (!el) return
+    const onShiftWheel = (/** @type {WheelEvent} */ e) => {
+      if (!e.shiftKey) return
+      if (e.deltaY || e.deltaX) {
+        e.preventDefault()
+        el.scrollLeft += e.deltaY || e.deltaX
+      }
+    }
+    el.addEventListener('wheel', onShiftWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onShiftWheel)
+  })
+
   // Layout / sizing effect — resize the backing store when geometry or viewport changes.
   $effect(() => {
     void rows; void columns; void columnWidths
@@ -3427,19 +3465,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           oncontextmenu={(e) => onCanvasContextMenu(e, bitsContextMenu)}
           onscroll={onContainerScroll}
           onkeydown={handleTableKeydown}
-          onwheel={(e) => {
-            // Shift+wheel → horizontal scroll (maps a mouse wheel's vertical
-            // delta onto the X axis). Everything else — vertical, trackpad,
-            // diagonal — is left to the browser so macOS momentum/inertia and
-            // edge overscroll-chaining to the parent stay buttery smooth.
-            if (e.shiftKey) {
-              const tc = tableContainer
-              if (tc && (e.deltaY || e.deltaX)) {
-                e.preventDefault()
-                tc.scrollLeft += e.deltaY || e.deltaX
-              }
-            }
-          }}
           onfocusin={() => { isTableFocused = true; }}
           onfocusout={(e) => {
             if (!tableContainer?.contains(e.relatedTarget instanceof Element ? e.relatedTarget : null)) {
@@ -3459,11 +3484,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           <!-- Canvas: always mounted so the 2D context survives table navigation
                (each mount creates a new GPU-tracked context; keeping it alive
                across table switches eliminates the accumulation shown in DevTools). -->
-          <div style="position:sticky;top:0;left:0;width:0;height:0;z-index:1;overflow:visible">
+          <div style="position:sticky;top:0;left:0;width:0;height:0;z-index:1;overflow:visible;will-change:transform">
             <canvas
               bind:this={canvasEl}
               class="block"
-              style="cursor:default"
+              style="cursor:default;will-change:transform"
               onclick={onCanvasClick}
               ondblclick={onCanvasDblClick}
               onauxclick={onCanvasAuxClick}
@@ -3975,6 +4000,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         <ContextMenu.Item onSelect={() => runMenuAction(() => toggleRow(contextRowIdx))}>
           <CheckSquare />
           {selected.has(contextRowIdx) ? "Deselect row" : "Select row"}
+        </ContextMenu.Item>
+        <ContextMenu.Item
+          disabled={readonly}
+          onSelect={() => runMenuAction(() => duplicateRow(contextRowIdx))}
+        >
+          <CopyPlus />
+          Duplicate row
         </ContextMenu.Item>
         <ContextMenu.Separator />
         <ContextMenu.Item

@@ -2585,6 +2585,10 @@ let rowSearch = $state('')
 
   async function runSql() {
     if (!connection || !sqlText.trim()) return
+    if (tableReadonly && /^\s*(insert|update|delete|drop|truncate|alter|create|replace)\b/i.test(sqlText)) {
+      sqlError = 'Connection is read-only — write queries are blocked.'
+      return
+    }
     sqlLoading = true
     sqlError = ''
     sqlMessage = ''
@@ -2623,6 +2627,7 @@ let rowSearch = $state('')
     recordActivity({ type: 'connect', title: `Connected to ${conn.name ?? conn.database ?? conn.filePath ?? 'database'}`, success: true })
     connection = conn
     savedConnections = loadSavedConnections()
+    tableReadonly = savedConnections.find(c => c.id === savedId)?.readOnly ?? conn.readOnly ?? false
     // Persist last-used ID and bump timestamp
     if (savedId) {
       setLastConnectionId(savedId)
@@ -3116,6 +3121,7 @@ let rowSearch = $state('')
       }
     } catch (err) {
       toast.error('Insert failed', { description: String(err) })
+      throw err
     } finally {
       insertingRow = false
     }
@@ -3412,6 +3418,18 @@ let rowSearch = $state('')
       style={sidebarOpen && !aiMode && connection ? '' : 'display:none'}
       inert={!sidebarOpen || aiMode || !connection || undefined}
     >
+      <svelte:boundary>
+        {#snippet failed(err, reset)}
+          <div class="flex h-full w-[220px] shrink-0 flex-col items-center justify-center gap-3 border-r border-border/50 bg-sidebar p-4 text-center">
+            <AlertTriangle class="size-5 text-destructive/60" />
+            <p class="text-ui-xs font-medium text-muted-foreground">Sidebar error</p>
+            <button
+              type="button"
+              class="rounded-md border border-border bg-muted/40 px-2.5 py-1 text-ui-xs font-medium transition-colors hover:bg-accent"
+              onclick={reset}
+            >Reload</button>
+          </div>
+        {/snippet}
       <Sidebar
         connectionName={connection ? (connection.name || connection.database || connection.host || connection.filePath || 'Connected') : ''}
         {schemas}
@@ -3474,6 +3492,7 @@ let rowSearch = $state('')
           }
         }}
       />
+      </svelte:boundary>
     </div>
   {/if}
 
@@ -3531,6 +3550,7 @@ let rowSearch = $state('')
           inert={!aiMode}
         >
           {#await import('./AiChat.svelte')}<TabLoading />{:then { default: AiChat }}
+            <svelte:boundary failed={tabError}>
             <AiChat
               schemaContext={{ ...aiSchemaContext, activeTable: null, columns: [], primaryKey: [], foreignKeys: [] }}
               {connectionId}
@@ -3541,6 +3561,7 @@ let rowSearch = $state('')
               onopenmodelsettings={() => (showAiModelSettings = true)}
               onopendiagramspage={() => { exitAiMode(); openDiagramsTab() }}
             />
+            </svelte:boundary>
           {/await}
         </div>
       {/if}
@@ -4269,19 +4290,36 @@ let rowSearch = $state('')
           <TabLoading />
         </div>
       {:then { default: AiSidebar }}
-        <AiSidebar
-          bind:this={aiSidebarRef}
-          schemaContext={aiSchemaContext}
-          {connectionId}
-          isActive={aiSidebarOpen && !aiMode}
-          currentView={activeTab?.kind ?? 'welcome'}
-          currentSql={sqlText}
-          currentCode={ormCode}
-          {ormMode}
-          onclose={toggleAiSidebar}
-          onaccept={(d) => void handleAiSidebarAccept(d)}
-          onopensettings={() => (showAiModelSettings = true)}
-        />
+        <svelte:boundary>
+          {#snippet failed(err, reset)}
+            <div class="flex h-full min-h-0 shrink-0 flex-col items-center justify-center gap-3 border-l border-border/50 bg-background p-4 text-center"
+              style="width: {aiSidebarFallbackWidth}px; min-width: {aiSidebarFallbackWidth}px; max-width: {aiSidebarFallbackWidth}px">
+              <AlertTriangle class="size-5 text-destructive/60" />
+              <div class="space-y-1">
+                <p class="text-ui-xs font-medium text-foreground">AI sidebar error</p>
+                <p class="font-mono text-[10px] text-muted-foreground/60 break-words">{err instanceof Error ? err.message : String(err)}</p>
+              </div>
+              <button
+                type="button"
+                class="rounded-md border border-border bg-muted/40 px-2.5 py-1 text-ui-xs font-medium transition-colors hover:bg-accent"
+                onclick={reset}
+              >Reload</button>
+            </div>
+          {/snippet}
+          <AiSidebar
+            bind:this={aiSidebarRef}
+            schemaContext={aiSchemaContext}
+            {connectionId}
+            isActive={aiSidebarOpen && !aiMode}
+            currentView={activeTab?.kind ?? 'welcome'}
+            currentSql={sqlText}
+            currentCode={ormCode}
+            {ormMode}
+            onclose={toggleAiSidebar}
+            onaccept={(d) => void handleAiSidebarAccept(d)}
+            onopensettings={() => (showAiModelSettings = true)}
+          />
+        </svelte:boundary>
       {/await}
     </div>
   {/if}

@@ -57,7 +57,10 @@ pub fn run() {
     let _ = metrics::set_process_title("stroke".into());
     // Create the shared connection Arc — both DbState and McpState point to the same lock.
     let db_conn: Arc<Mutex<Option<ActiveConnection>>> = Arc::new(Mutex::new(None));
-    let db_state = DbState { conn: Arc::clone(&db_conn) };
+    let db_state = DbState {
+        conn: Arc::clone(&db_conn),
+        cancel_tx: Arc::new(std::sync::Mutex::new(None)),
+    };
     let mcp_state = McpState::new(db_conn);
 
     tauri::Builder::default()
@@ -302,6 +305,7 @@ pub fn run() {
             commands::enable_autostart,
             commands::disable_autostart,
             commands::get_autostart_status,
+            commands::cancel_query,
             #[cfg(debug_assertions)]
             commands::debug_set_trial_days_ago,
             #[cfg(debug_assertions)]
