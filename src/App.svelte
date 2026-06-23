@@ -3,6 +3,7 @@
   import { Toaster } from '$lib/components/ui/sonner/index.js'
   import StudioShell from './lib/components/StudioShell.svelte'
   import LicenseGate from './lib/components/LicenseGate.svelte'
+  import AppErrorBoundary from './lib/components/AppErrorBoundary.svelte'
   import { loadSettings, applySettings, installZoomShortcuts } from '$lib/stores/settings.js'
   import { installPlatformClass } from '$lib/platform.js'
 
@@ -41,6 +42,8 @@
 </script>
 
 <Toaster position="top-right" offset={{ top: '52px', right: '12px' }} closeButton />
-<LicenseGate>
-  <StudioShell />
-</LicenseGate>
+<AppErrorBoundary>
+  <LicenseGate>
+    <StudioShell />
+  </LicenseGate>
+</AppErrorBoundary>

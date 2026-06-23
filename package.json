@@ -23,7 +23,8 @@
     "cross-env": "^10.1.0",
     "mode-watcher": "^1.1.0",
     "svelte": "^5.55.5",
-    "vite": "^8.0.12"
+    "vite": "^8.0.12",
+    "vitest": "^4.1.9"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",
