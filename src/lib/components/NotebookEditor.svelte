@@ -5,7 +5,7 @@
   import Play from '@lucide/svelte/icons/play'
   import FileCode2 from '@lucide/svelte/icons/file-code-2'
   import ChevronDown from '@lucide/svelte/icons/chevron-down'
-  import { toast } from 'svelte-sonner'
+  import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import { cn } from '$lib/utils.js'
   import { executeSql } from '$lib/api.js'
   import { saveNotebook, saveNotebookAs, openNotebookFile } from '$lib/api.js'

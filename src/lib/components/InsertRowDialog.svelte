@@ -1,5 +1,5 @@
 <script>
-  import { toast } from 'svelte-sonner'
+  import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import CalendarClock from '@lucide/svelte/icons/calendar-clock'
   import Fingerprint from '@lucide/svelte/icons/fingerprint'
   import Hash from '@lucide/svelte/icons/hash'

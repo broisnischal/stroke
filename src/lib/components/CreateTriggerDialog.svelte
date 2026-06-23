@@ -1,6 +1,6 @@
 <script>
   import { untrack } from 'svelte'
-  import { toast } from 'svelte-sonner'
+  import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import { executeSql } from '$lib/api.js'
   import * as Dialog from '$lib/components/ui/dialog/index.js'
   import DdlConfirmDialog from './DdlConfirmDialog.svelte'

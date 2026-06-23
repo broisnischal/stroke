@@ -19,7 +19,7 @@
   import Check from '@lucide/svelte/icons/check'
   import Search from '@lucide/svelte/icons/search'
   import { cn } from '$lib/utils.js'
-  import { toast } from 'svelte-sonner'
+  import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
 
   let {
     onopendiagram = undefined,

@@ -1,6 +1,6 @@
 <script>
   import { onDestroy } from "svelte";
-  import { toast } from "svelte-sonner";
+  import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
   import Download from "@lucide/svelte/icons/download";
   import Upload from "@lucide/svelte/icons/upload";
   import Check from "@lucide/svelte/icons/check";

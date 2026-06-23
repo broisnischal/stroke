@@ -4,7 +4,7 @@
   // Zoom is driven through the app-level settings so the canvas scales together
   // with the rest of the UI (applySettings mirrors the app zoom into zoomState).
   import { increaseZoom, decreaseZoom, resetZoom } from '$lib/stores/settings.js'
-  import { toast } from "svelte-sonner";
+  import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
   import ArrowUpDown from "@lucide/svelte/icons/arrow-up-down";
@@ -434,7 +434,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         window.open(url, "_blank", "noopener,noreferrer");
       }
     } catch (err) {
-      const { toast } = await import("svelte-sonner");
+      const { toast } = await import("$lib/components/ui/sonner/toast.svelte.js");
       toast.error(`Could not open URL: ${String(err)}`);
     }
   }
