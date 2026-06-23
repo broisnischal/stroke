@@ -67,6 +67,8 @@
   import AlertTriangle from '@lucide/svelte/icons/triangle-alert'
   import X from '@lucide/svelte/icons/x'
   import Lock from '@lucide/svelte/icons/lock'
+  import WifiOff from '@lucide/svelte/icons/wifi-off'
+  import RefreshCw from '@lucide/svelte/icons/refresh-cw'
   import {
     disconnectPostgres,
     listSchemas,
@@ -171,6 +173,8 @@
     connectMssql,
     listIndexes,
     listEnums,
+    listFunctions,
+    pingConnection,
     listTriggers,
     listSequences,
     truncateTable,
@@ -197,6 +201,7 @@
   import { switchDiagramsConnection } from '$lib/stores/saved-diagrams.js'
   import { dashboards, activeDashboardId, switchDashboardsConnection } from '$lib/stores/dashboards.js'
   import { buildOption } from '$lib/chart-utils.js'
+  import { isNetworkError } from '$lib/utils.js'
   import { get } from 'svelte/store'
   import { virtualColumnsStore } from '$lib/stores/virtual-columns.js'
 
@@ -231,6 +236,8 @@
   }
 
   let connection = $state(null)
+  /** @type {boolean} - true when the DB went away mid-session */
+  let connectionLost = $state(false)
   let autoConnecting = $state(false)
   let showConnectionModal = $state(false)
   let showDockerModal = $state(false)
@@ -644,6 +651,56 @@ let rowSearch = $state('')
   const _sqlColNames = $derived(sqlColumns.map((c) => c.name))
   const _tableNames = $derived(tables.map((t) => t.name))
 
+  // ── Async SQL-completion hints (enums + user functions) ──────────────────────
+  // Loaded lazily when the SQL tab becomes active. Stored as reactive state so
+  // sqlSchemaHints (a $derived) picks them up automatically once they arrive.
+  let _sqlEnumValues = $state(/** @type {Record<string, string[]>} */ ({}))
+  let _sqlUserFunctions = $state(/** @type {Array<{name:string,signature:string,returnType:string,kind:string}>} */ ([]))
+
+  $effect(() => {
+    if (activeView !== 'sql' || !connection || !activeSchema) return
+    const schema = activeSchema
+    listEnums(schema).then((enums) => {
+      /** @type {Record<string, string[]>} */
+      const ev = {}
+      for (const e of enums) ev[e.name] = e.values
+      _sqlEnumValues = ev
+    }).catch(() => {})
+    listFunctions(schema).then((fns) => {
+      _sqlUserFunctions = fns
+    }).catch(() => {})
+  })
+
+  // ── Connection health monitor ─────────────────────────────────────────────────
+  // Pings the active DB every 30 seconds. On failure, shows a persistent toast
+  // with a Reconnect button. Clears automatically when the connection recovers.
+  $effect(() => {
+    if (!connection) {
+      connectionLost = false
+      return
+    }
+    const conn = connection
+    const id = setInterval(async () => {
+      try {
+        await pingConnection()
+        if (connectionLost) connectionLost = false
+      } catch {
+        if (!connectionLost) {
+          connectionLost = true
+          toast.error('Connection lost', {
+            description: 'The database connection was interrupted.',
+            duration: Infinity,
+            action: {
+              label: 'Reconnect',
+              onClick: () => handleSwitchDatabase(conn),
+            },
+          })
+        }
+      }
+    }, 30_000)
+    return () => clearInterval(id)
+  })
+
   const sqlSchemaHints = $derived.by(() => {
     // Only the SQL editor consumes this, and building columnsByTable iterates the
     // whole table-column cache (dozens of tables). Skip that work entirely unless
@@ -665,7 +722,7 @@ let rowSearch = $state('')
     if (_sqlColNames.length) {
       columnsByTable.__result__ = _sqlColNames
     }
-    return { schemas, activeSchema, tables: _tableNames, columnsByTable }
+    return { schemas, activeSchema, tables: _tableNames, columnsByTable, enumValues: _sqlEnumValues, userFunctions: _sqlUserFunctions }
   })
 
   const connectionId = $derived(
@@ -785,6 +842,7 @@ let rowSearch = $state('')
         schemas, activeSchema, tables: _tableNames,
         activeTable, columns: [], primaryKey: [], foreignKeys: [],
         allTableColumns: {}, dbType: engineFamily(connection?.type),
+        environment: connection?.environment ?? null,
       }
     }
     return {
@@ -803,6 +861,7 @@ let rowSearch = $state('')
       allTableColumns: _allTableColumns,
       /** @type {import('$lib/stores/connections.js').DbType} */
       dbType: engineFamily(connection?.type),
+      environment: connection?.environment ?? null,
     }
   })
 
@@ -2427,6 +2486,7 @@ let rowSearch = $state('')
       }
     } catch (e) {
       const errStr = String(e)
+      if (isNetworkError(errStr)) connectionLost = true
       patchTab({ loadingRows: false, error: errStr, columns: [], rows: [], total: 0 })
       if (tabId === activeTabId) {
         loadingRows = false
@@ -2506,14 +2566,16 @@ let rowSearch = $state('')
       if (page > maxPage) page = maxPage
     } catch (e) {
       if (seq !== _loadSeq) return
-      error = String(e)
+      const errStr = String(e)
+      if (isNetworkError(errStr)) connectionLost = true
+      error = errStr
       columns = []
       primaryKey = []
       foreignKeys = []
       rows = []
       _infiniteRows = []
       total = 0
-      recordActivity({ type: 'row_fetch', title: `Failed to load ${activeTable}`, schema: activeSchema, table: activeTable ?? undefined, success: false, error: String(e) })
+      recordActivity({ type: 'row_fetch', title: `Failed to load ${activeTable}`, schema: activeSchema, table: activeTable ?? undefined, success: false, error: errStr })
     } finally {
       if (seq === _loadSeq) loadingRows = false
     }
@@ -2610,6 +2672,7 @@ let rowSearch = $state('')
     } catch (e) {
       sqlError = String(e)
       sqlMultiResults = []
+      if (isNetworkError(sqlError)) connectionLost = true
     } finally {
       sqlLoading = false
       recordActivity({ type: 'sql_exec', title: sqlRan.trim().slice(0, 80) + (sqlRan.trim().length > 80 ? '…' : ''), detail: sqlRan, durationMs: sqlQueryMs, rowCount: sqlRows.length || undefined, success: !sqlError, error: sqlError || undefined })
@@ -3629,7 +3692,7 @@ let rowSearch = $state('')
         >
           <svelte:boundary failed={tabError}>
             {#await import('./SecurityPage.svelte')}<TabLoading />{:then { default: SecurityPage }}
-              <SecurityPage bind:this={securityPageRef} active={activeTab?.kind === 'security'} />
+              <SecurityPage bind:this={securityPageRef} active={activeTab?.kind === 'security'} connectionType={connection?.type ?? null} />
             {/await}
           </svelte:boundary>
         </div>
@@ -3910,18 +3973,38 @@ let rowSearch = $state('')
 
       {#if activeTab?.kind === 'table'}
         {#if error}
-          <div class="flex shrink-0 items-start gap-2.5 border-b border-destructive/15 bg-destructive/[0.04] px-3 py-2">
-            <AlertTriangle class="mt-px size-3.5 shrink-0 text-destructive/70" />
-            <p class="min-w-0 flex-1 font-mono text-ui-xs leading-relaxed text-destructive/90">{error}</p>
-            <button
-              type="button"
-              class="mt-px shrink-0 text-destructive/40 transition-colors hover:text-destructive"
-              onclick={() => (error = '')}
-              title="Dismiss"
-            >
-              <X class="size-3.5" />
-            </button>
-          </div>
+          {#if isNetworkError(error)}
+            <!-- ── Network / offline error — full-area friendly state ── -->
+            <div class="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
+              <WifiOff class="size-8 text-muted-foreground/20" />
+              <div class="space-y-1">
+                <p class="font-mono text-ui font-medium text-foreground/70">Cannot reach database</p>
+                <p class="font-mono text-ui-xs text-muted-foreground/50">Check your internet connection or whether the server is reachable.</p>
+              </div>
+              <button
+                type="button"
+                class="flex items-center gap-1.5 rounded-md border border-border/30 bg-muted/30 px-3 py-1.5 font-mono text-ui-xs text-muted-foreground/70 transition-colors hover:bg-muted/60 hover:text-foreground"
+                onclick={() => { error = ''; connectionLost = false; void loadRows() }}
+              >
+                <RefreshCw class="size-3" />
+                Retry
+              </button>
+            </div>
+          {:else}
+            <!-- ── SQL / application error — compact banner ── -->
+            <div class="flex shrink-0 items-start gap-2.5 border-b border-destructive/15 bg-destructive/[0.04] px-3 py-2">
+              <AlertTriangle class="mt-px size-3.5 shrink-0 text-destructive/70" />
+              <p class="min-w-0 flex-1 font-mono text-ui-xs leading-relaxed text-destructive/90">{error}</p>
+              <button
+                type="button"
+                class="mt-px shrink-0 text-destructive/40 transition-colors hover:text-destructive"
+                onclick={() => (error = '')}
+                title="Dismiss"
+              >
+                <X class="size-3.5" />
+              </button>
+            </div>
+          {/if}
         {/if}
 
         {#if !activeTable}
@@ -3931,11 +4014,11 @@ let rowSearch = $state('')
               <kbd>⌘K</kbd>
             </p>
           </div>
-        {:else if error}
+        {:else if error && !isNetworkError(error)}
           <div class="flex flex-1 items-center justify-center">
             <p class="font-mono text-ui-sm text-muted-foreground/40">Dismiss the error above to continue.</p>
           </div>
-        {:else}
+        {:else if !error}
           {#if tableViewMode === 'structure' && canShowStructure}
             {#if tableToolbarVisible}
             <TableToolbar
@@ -4328,6 +4411,7 @@ let rowSearch = $state('')
 {#if statusBarVisible}
 <StatusBar
   {connection}
+  {connectionLost}
   {savedConnections}
   {activeConnectionId}
   {pendingEditCount}

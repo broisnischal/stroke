@@ -2611,3 +2611,26 @@ pub async fn get_column_stats(
 
     Ok(ColumnStats { column, count, null_count, distinct_count, min, max, avg })
 }
+
+/// Lightweight connection health check — runs `SELECT 1` against the active
+/// connection. HTTP-based engines (D1, LibSQL, Clickhouse) are stateless so we
+/// return Ok immediately; a real request would validate their tokens but also
+/// incur network cost every 30 s.
+pub async fn ping_connection(state: State<'_, DbState>) -> Result<(), String> {
+    let conn = require_conn(&state)?;
+    match conn {
+        ActiveConnection::Postgres(pool) => {
+            sqlx::query("SELECT 1").execute(&pool).await.map(|_| ()).map_err(|e| e.to_string())
+        }
+        ActiveConnection::Sqlite(pool) => {
+            sqlx::query("SELECT 1").execute(&pool).await.map(|_| ()).map_err(|e| e.to_string())
+        }
+        ActiveConnection::Mysql(pool) => {
+            sqlx::query("SELECT 1").execute(&pool).await.map(|_| ()).map_err(|e| e.to_string())
+        }
+        // HTTP-based: stateless, no persistent TCP connection to validate
+        ActiveConnection::D1(_) | ActiveConnection::LibSql(_) | ActiveConnection::Clickhouse(_) => Ok(()),
+        ActiveConnection::Duckdb(h) => super::duckdb::execute_sql(&h, "SELECT 1").await.map(|_| ()),
+        ActiveConnection::Mssql(h) => super::mssql::execute_sql(&h, "SELECT 1").await.map(|_| ()),
+    }
+}

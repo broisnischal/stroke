@@ -46,6 +46,7 @@
   let {
     /** @type {import('$lib/stores/connections.js').SavedConnection | null} */
     connection = null,
+    connectionLost = false,
     /** @type {import('$lib/stores/connections.js').SavedConnection[]} */
     savedConnections = [],
     activeConnectionId = '',
@@ -245,10 +246,17 @@
           class={cn(labelBtn, 'text-muted-foreground/80')}
           title="Switch connection"
         >
-          <Wifi class="size-3 shrink-0 text-emerald-500" />
-          <span class="max-w-[7rem] truncate font-medium">{connType}</span>
+          {#if connectionLost}
+            <WifiOff class="size-3 shrink-0 text-red-500" />
+          {:else}
+            <Wifi class="size-3 shrink-0 text-emerald-500" />
+          {/if}
+          <span class={cn('max-w-[7rem] truncate font-medium', connectionLost && 'text-red-500/70')}>{connType}</span>
           {#if connLabel}
             <span class="hidden max-w-[6rem] truncate text-muted-foreground/45 sm:inline">· {connLabel}</span>
+          {/if}
+          {#if connection?.environment}
+            <span class="size-1.5 shrink-0 rounded-full bg-muted-foreground/35" title={connection.environment}></span>
           {/if}
           {#if savedConnections.length > 1}
             <ChevronDown class={cn('size-3 shrink-0 opacity-40 transition-transform', connOpen && 'rotate-180')} />
@@ -273,8 +281,13 @@
                   <Icon class="size-3.5" />
                 </span>
                 <div class="min-w-0 flex-1">
-                  <div class={cn('truncate text-[12px] leading-tight', isCurrent ? 'font-semibold text-foreground' : 'font-medium text-foreground/90')}>
-                    {conn.name ?? conn.host ?? conn.filePath ?? 'Connection'}
+                  <div class="flex items-center gap-1.5">
+                    <span class={cn('min-w-0 truncate text-[12px] leading-tight', isCurrent ? 'font-semibold text-foreground' : 'font-medium text-foreground/90')}>
+                      {conn.name ?? conn.host ?? conn.filePath ?? 'Connection'}
+                    </span>
+                    {#if conn.environment}
+                      <span class="size-1.5 shrink-0 rounded-full bg-muted-foreground/30" title={conn.environment}></span>
+                    {/if}
                   </div>
                   {#if subtitle}
                     <div class="mt-0.5 truncate font-mono text-[10px] leading-tight text-muted-foreground/45">{subtitle}</div>

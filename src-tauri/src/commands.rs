@@ -122,10 +122,10 @@ pub fn toggle_devtools(window: tauri::WebviewWindow) {
 use crate::db::{
     connect, connect_clickhouse, connect_d1, connect_duckdb, connect_libsql, connect_mssql, connect_mysql, connect_sqlite, disconnect,
     delete_table_row, delete_table_rows, execute_ddl, execute_sql, execute_sql_multi, get_table_rows, insert_table_row,
-    list_schemas, list_tables, list_indexes, list_enums, list_triggers, list_sequences,
+    list_schemas, list_tables, list_indexes, list_enums, list_functions, list_triggers, list_sequences, ping_connection,
     truncate_table, drop_table, get_table_column_structure, get_incoming_foreign_keys, get_table_ddl as db_get_table_ddl,
     test_clickhouse_connection, test_connection, test_d1_connection, test_duckdb_connection, test_libsql_connection, test_mssql_connection, test_mysql_connection, test_sqlite_connection,
-    update_table_cell, ConnectionConfig, D1Config, DbState, EnumInfo, ExplainResult, IndexInfo, LibSqlConfig,
+    update_table_cell, ConnectionConfig, D1Config, DbState, EnumInfo, FunctionInfo, ExplainResult, IndexInfo, LibSqlConfig,
     SqlResult, SqliteConfig, TableInfo, TableRows, TriggerInfo, SequenceInfo,
     ColumnStructureRow, IncomingForeignKey, InsertRowResult, TunnelState,
     explain_pg, explain_mysql, explain_sqlite,
@@ -358,6 +358,19 @@ pub async fn pg_list_sequences(
     schema: String,
 ) -> Result<Vec<SequenceInfo>, String> {
     list_sequences(state, schema).await
+}
+
+#[tauri::command]
+pub async fn pg_list_functions(
+    state: State<'_, DbState>,
+    schema: String,
+) -> Result<Vec<FunctionInfo>, String> {
+    list_functions(state, schema).await
+}
+
+#[tauri::command]
+pub async fn ping_db_connection(state: State<'_, DbState>) -> Result<(), String> {
+    ping_connection(state).await
 }
 
 #[tauri::command]

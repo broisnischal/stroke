@@ -347,6 +347,24 @@ export async function listSequences(schema) {
   }
 }
 
+/** @param {string} schema */
+export async function listFunctions(schema) {
+  try {
+    return await invoke('pg_list_functions', { schema })
+  } catch (err) {
+    throw new Error(formatInvokeError(err))
+  }
+}
+
+/** @returns {Promise<void>} */
+export async function pingConnection() {
+  try {
+    await invoke('ping_db_connection')
+  } catch (err) {
+    throw new Error(formatInvokeError(err))
+  }
+}
+
 /**
  * @param {string} schema
  * @param {string} table
