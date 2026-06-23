@@ -1900,28 +1900,42 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   })
 
   /** @param {Event & { currentTarget: HTMLElement }} e */
+  // Continuous rAF loop that drives canvas redraws during scroll.
+  // Reading scrollTop/scrollLeft inside rAF gives the compositor-synchronized
+  // position for the frame being painted, eliminating the 1-frame lag that
+  // a one-shot scheduleDraw() produces (queued from onscroll → fires next frame).
+  // The loop runs while the user is scrolling and for 200ms after the last
+  // scroll event to cover momentum/inertia, then stops to save GPU time.
+  let _scrollLoopId = 0
+  let _scrollLoopDeadline = 0
+
+  function startScrollLoop() {
+    _scrollLoopDeadline = performance.now() + 200
+    if (_scrollLoopId) return
+    function loop() {
+      const el = tableContainer
+      if (!el || !_ctx || performance.now() > _scrollLoopDeadline) {
+        _scrollLoopId = 0
+        return
+      }
+      _scrollTop = el.scrollTop
+      _scrollLeft = el.scrollLeft
+      draw()
+      _scrollLoopId = requestAnimationFrame(loop)
+    }
+    _scrollLoopId = requestAnimationFrame(loop)
+  }
+
   function onContainerScroll(e) {
     const el = e.currentTarget
-    // Page/layout scroll can shift the canvas on screen — drop the cached rect.
     invalidateCanvasRect()
-    const hScrolled = el.scrollLeft !== _scrollLeft
-    if (el.scrollTop !== _scrollTop) _scrollTop = el.scrollTop
-    if (hScrolled) _scrollLeft = el.scrollLeft
-    // For horizontal scroll, draw synchronously — the sticky canvas shows stale
-    // column positions for a full frame when deferred via rAF, which the eye
-    // reads as a column shift. Vertical scroll is imperceptible at 1-frame lag
-    // because adjacent rows look similar, so it stays on the rAF path.
-    // Re-arm a cleanup rAF so any concurrent reactive updates still get redrawn.
-    if (_ctx && (editingCell || hScrolled)) {
-      if (_drawRafId) cancelAnimationFrame(_drawRafId)
-      draw()
-      _drawRafId = requestAnimationFrame(() => { _drawRafId = 0 })
-    } else {
-      // Repaint directly from the scroll handler. The big layout effect no longer
-      // tracks _scrollTop/_scrollLeft, so scrolling skips syncCanvasSurface()
-      // (style writes + getContext + setTransform) and only does the rAF draw.
-      scheduleDraw()
-    }
+    // Update state immediately so any synchronous consumers (hit-test etc.) are current.
+    _scrollTop = el.scrollTop
+    _scrollLeft = el.scrollLeft
+    // Cancel any pending one-shot draw — the loop handles all scroll redraws at
+    // the display's native frame rate (120Hz on ProMotion).
+    if (_drawRafId) { cancelAnimationFrame(_drawRafId); _drawRafId = 0 }
+    startScrollLoop()
     // Infinite scroll — trigger load when within 3 rows of the bottom
     if (infiniteScroll && !loadingMore) {
       const threshold = ROW_HEIGHT * 3
@@ -2963,6 +2977,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   onDestroy(() => {
     if (_drawRafId) cancelAnimationFrame(_drawRafId)
     if (_resizeRafId) cancelAnimationFrame(_resizeRafId)
+    if (_scrollLoopId) cancelAnimationFrame(_scrollLoopId)
   })
 
   // Shift+wheel → horizontal scroll. Non-passive so we can call preventDefault,
