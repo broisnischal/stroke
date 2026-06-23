@@ -4,6 +4,12 @@ All notable changes to Stroke are listed here, newest first.
 
 ---
 
+## [0.6.0] - 2026-06-23
+
+### Changes
+- feat:: features and improvements (#9)
+
+
 ## [0.5.0] - 2026-06-17
 
 ### Changes
