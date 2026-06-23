@@ -32,7 +32,8 @@
   import ScanSearch from "@lucide/svelte/icons/scan-search";
   import ResizeHandle from "./ResizeHandle.svelte";
   import ExplainPlan from "./ExplainPlan.svelte";
-  import { explainSql } from "$lib/api.js";
+  import { explainSql, cancelQuery } from "$lib/api.js";
+  import Square from "@lucide/svelte/icons/square";
   import { Button } from "$lib/components/ui/button/index.js";
   import {
     clampSqlEditorHeight,
@@ -512,17 +513,30 @@
     class="studio-chrome flex h-9 shrink-0 items-center gap-2 border-b border-border bg-panel px-3"
     data-studio-chrome
   >
-    <Button
-      type="button"
-      variant="default"
-      size="sm"
-      class="h-7 shrink-0 gap-2 pl-2.5 pr-2 font-medium shadow-sm"
-      disabled={activeResult.loading || !sql.trim()}
-      onclick={handleRun}
-    >
-      <Play class="size-3.5 shrink-0" data-icon="inline-start" />
-      Run
-    </Button>
+    {#if activeResult.loading}
+      <Button
+        type="button"
+        variant="destructive"
+        size="sm"
+        class="h-7 shrink-0 gap-2 pl-2.5 pr-2 font-medium shadow-sm"
+        onclick={() => void cancelQuery()}
+      >
+        <Square class="size-3 shrink-0 fill-current" data-icon="inline-start" />
+        Stop
+      </Button>
+    {:else}
+      <Button
+        type="button"
+        variant="default"
+        size="sm"
+        class="h-7 shrink-0 gap-2 pl-2.5 pr-2 font-medium shadow-sm"
+        disabled={!sql.trim()}
+        onclick={handleRun}
+      >
+        <Play class="size-3.5 shrink-0" data-icon="inline-start" />
+        Run
+      </Button>
+    {/if}
 
     <div class="h-4 w-px shrink-0 bg-border" aria-hidden="true"></div>
 

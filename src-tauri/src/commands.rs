@@ -523,6 +523,18 @@ pub async fn pg_insert_table_row(
     insert_table_row(state, schema, table, values).await
 }
 
+// ── Cancel running query ──────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn cancel_query(state: State<'_, DbState>) -> Result<(), String> {
+    if let Ok(mut guard) = state.cancel_tx.lock() {
+        if let Some(tx) = guard.take() {
+            let _ = tx.send(());
+        }
+    }
+    Ok(())
+}
+
 // ── License ───────────────────────────────────────────────────────────────────
 
 #[tauri::command]

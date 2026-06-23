@@ -442,6 +442,11 @@ export async function getColumnStats(schema, table, column) {
   }
 }
 
+/** Cancel the currently-running SQL query (no-op if none is running). */
+export async function cancelQuery() {
+  return inv('cancel_query')
+}
+
 /** @param {string} sql */
 export async function executeSql(sql) {
   try {

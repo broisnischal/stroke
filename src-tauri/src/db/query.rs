@@ -1632,20 +1632,30 @@ pub async fn execute_ddl(state: State<'_, DbState>, sql: String) -> Result<(), S
 }
 
 pub async fn execute_sql(state: State<'_, DbState>, sql: String) -> Result<SqlResult, String> {
-    let sql_str = sql.trim();
+    let sql_str = sql.trim().to_string();
     if sql_str.is_empty() {
         return Err("Query is empty".into());
     }
-    match require_conn(&state)? {
-        ActiveConnection::Postgres(pool) => execute_sql_pg(&pool, sql_str).await,
-        ActiveConnection::Sqlite(pool) => super::sqlite::execute_sql(&pool, sql_str).await,
-        ActiveConnection::D1(cfg) => super::d1::query(&cfg, sql_str, vec![]).await,
-        ActiveConnection::LibSql(cfg) => super::libsql::query(&cfg, sql_str, vec![]).await,
-        ActiveConnection::Mysql(pool) => super::mysql::execute_sql(&pool, sql_str).await,
-        ActiveConnection::Clickhouse(cfg) => super::clickhouse::query(&cfg, sql_str).await,
-        ActiveConnection::Duckdb(h) => super::duckdb::execute_sql(&h, sql_str).await,
-        ActiveConnection::Mssql(h) => super::mssql::execute_sql(&h, sql_str).await,
-    }
+    let conn = require_conn(&state)?;
+    let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+    *state.cancel_tx.lock().map_err(|e| e.to_string())? = Some(cancel_tx);
+    let result = tokio::select! {
+        r = async move {
+            match conn {
+                ActiveConnection::Postgres(pool) => execute_sql_pg(&pool, &sql_str).await,
+                ActiveConnection::Sqlite(pool) => super::sqlite::execute_sql(&pool, &sql_str).await,
+                ActiveConnection::D1(cfg) => super::d1::query(&cfg, &sql_str, vec![]).await,
+                ActiveConnection::LibSql(cfg) => super::libsql::query(&cfg, &sql_str, vec![]).await,
+                ActiveConnection::Mysql(pool) => super::mysql::execute_sql(&pool, &sql_str).await,
+                ActiveConnection::Clickhouse(cfg) => super::clickhouse::query(&cfg, &sql_str).await,
+                ActiveConnection::Duckdb(h) => super::duckdb::execute_sql(&h, &sql_str).await,
+                ActiveConnection::Mssql(h) => super::mssql::execute_sql(&h, &sql_str).await,
+            }
+        } => r,
+        _ = async { let _ = cancel_rx.await; } => Err("Query cancelled".to_string()),
+    };
+    if let Ok(mut guard) = state.cancel_tx.lock() { *guard = None; }
+    result
 }
 
 /// Execute a SQL query against an arbitrary saved connection without changing
@@ -1920,34 +1930,44 @@ async fn execute_sql_multi_pg(pool: &sqlx::PgPool, sql: &str) -> Result<Vec<SqlR
 }
 
 pub async fn execute_sql_multi(state: State<'_, DbState>, sql: String) -> Result<Vec<SqlResult>, String> {
-    let sql_str = sql.trim();
+    let sql_str = sql.trim().to_string();
     if sql_str.is_empty() {
         return Err("Query is empty".into());
     }
-    match require_conn(&state)? {
-        ActiveConnection::Postgres(pool) => execute_sql_multi_pg(&pool, sql_str).await,
-        ActiveConnection::Sqlite(pool) => {
-            super::sqlite::execute_sql(&pool, sql_str).await.map(|r| vec![r])
-        }
-        ActiveConnection::D1(cfg) => {
-            super::d1::query(&cfg, sql_str, vec![]).await.map(|r| vec![r])
-        }
-        ActiveConnection::LibSql(cfg) => {
-            super::libsql::query(&cfg, sql_str, vec![]).await.map(|r| vec![r])
-        }
-        ActiveConnection::Mysql(pool) => {
-            super::mysql::execute_sql(&pool, sql_str).await.map(|r| vec![r])
-        }
-        ActiveConnection::Clickhouse(cfg) => {
-            super::clickhouse::query(&cfg, sql_str).await.map(|r| vec![r])
-        }
-        ActiveConnection::Duckdb(h) => {
-            super::duckdb::execute_sql(&h, sql_str).await.map(|r| vec![r])
-        }
-        ActiveConnection::Mssql(h) => {
-            super::mssql::execute_sql(&h, sql_str).await.map(|r| vec![r])
-        }
-    }
+    let conn = require_conn(&state)?;
+    let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+    *state.cancel_tx.lock().map_err(|e| e.to_string())? = Some(cancel_tx);
+    let result = tokio::select! {
+        r = async move {
+            match conn {
+                ActiveConnection::Postgres(pool) => execute_sql_multi_pg(&pool, &sql_str).await,
+                ActiveConnection::Sqlite(pool) => {
+                    super::sqlite::execute_sql(&pool, &sql_str).await.map(|r| vec![r])
+                }
+                ActiveConnection::D1(cfg) => {
+                    super::d1::query(&cfg, &sql_str, vec![]).await.map(|r| vec![r])
+                }
+                ActiveConnection::LibSql(cfg) => {
+                    super::libsql::query(&cfg, &sql_str, vec![]).await.map(|r| vec![r])
+                }
+                ActiveConnection::Mysql(pool) => {
+                    super::mysql::execute_sql(&pool, &sql_str).await.map(|r| vec![r])
+                }
+                ActiveConnection::Clickhouse(cfg) => {
+                    super::clickhouse::query(&cfg, &sql_str).await.map(|r| vec![r])
+                }
+                ActiveConnection::Duckdb(h) => {
+                    super::duckdb::execute_sql(&h, &sql_str).await.map(|r| vec![r])
+                }
+                ActiveConnection::Mssql(h) => {
+                    super::mssql::execute_sql(&h, &sql_str).await.map(|r| vec![r])
+                }
+            }
+        } => r,
+        _ = async { let _ = cancel_rx.await; } => Err("Query cancelled".to_string()),
+    };
+    if let Ok(mut guard) = state.cancel_tx.lock() { *guard = None; }
+    result
 }
 
 // ── D1 helpers (thin wrappers that build SQLite-compatible SQL) ───────────────
