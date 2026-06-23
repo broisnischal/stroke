@@ -4,7 +4,7 @@
   // Zoom is driven through the app-level settings so the canvas scales together
   // with the rest of the UI (applySettings mirrors the app zoom into zoomState).
   import { increaseZoom, decreaseZoom, resetZoom } from '$lib/stores/settings.js'
-  import { toast } from "svelte-sonner";
+  import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
   import ArrowUpDown from "@lucide/svelte/icons/arrow-up-down";
@@ -168,6 +168,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
      *  table to the top / bottom. */
     scrollToTop = $bindable(/** @type {() => void} */ (() => {})),
     scrollToBottom = $bindable(/** @type {() => void} */ (() => {})),
+    /** Assigned by this component; the parent (toolbar "Jump to column" menu)
+     *  calls focusColumn(name) to scroll a column into view and briefly
+     *  highlight it. */
+    focusColumn = $bindable(/** @type {(name: string) => void} */ (() => {})),
     /** Assigned by this component so the parent can persist/restore scroll per
      *  tab. getScroll() reads the live position; applyScroll() restores it once
      *  layout settles. */
@@ -263,6 +267,25 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // ── Keyboard navigation / undo ────────────────────────────────────────────
   /** Visible-column index of the focused cell (null = no cell focus). */
   let focusedCol = $state(/** @type {number | null} */ (null));
+  /** Column name briefly highlighted after the user picks it from the toolbar's
+   *  "Jump to column" menu (header + body band). null = no highlight. */
+  let focusColName = $state(/** @type {string | null} */ (null));
+  /** Column names selected via click / shift+click on column headers. */
+  let selectedCols = $state(/** @type {Set<string>} */ (new Set()));
+  /** Anchor column for shift+click range selection (plain var — not reactive). */
+  let _lastHeaderClickedCol = /** @type {string | null} */ (null);
+
+  /** Extend column selection from anchor to `toColName`, using geom.cols order. */
+  function extendColSelection(toColName) {
+    if (!_lastHeaderClickedCol) { selectedCols = new Set([toColName]); _lastHeaderClickedCol = toColName; return }
+    const startIdx = geom.cols.findIndex((c) => c.name === _lastHeaderClickedCol)
+    const endIdx   = geom.cols.findIndex((c) => c.name === toColName)
+    if (startIdx < 0 || endIdx < 0) return
+    const [lo, hi] = [Math.min(startIdx, endIdx), Math.max(startIdx, endIdx)]
+    selectedCols = new Set(geom.cols.slice(lo, hi + 1).map((c) => c.name))
+  }
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let _focusColTimer = null;
   /** Scrollable container element for programmatic focus + scroll. */
   let tableContainer = $state(/** @type {HTMLDivElement | null} */ (null));
   /** Whether to select-all text when the edit input is focused. */
@@ -411,7 +434,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         window.open(url, "_blank", "noopener,noreferrer");
       }
     } catch (err) {
-      const { toast } = await import("svelte-sonner");
+      const { toast } = await import("$lib/components/ui/sonner/toast.svelte.js");
       toast.error(`Could not open URL: ${String(err)}`);
     }
   }
@@ -513,6 +536,41 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     } else if (bottom > st + ch) {
       tableContainer.scrollTop = bottom - ch
     }
+  }
+
+  /**
+   * Scroll a visible column into view (if it's off-screen) and briefly highlight
+   * it. Pinned columns are always visible, so they only get the highlight.
+   * @param {string} name
+   */
+  function focusColumnByName(name) {
+    const col = geom.cols.find((c) => c.name === name)
+    if (!col) return
+    if (tableContainer && !col.pinned) {
+      // Left edge of the scrollable area is occluded by the gutters + pinned cols.
+      const frozen = geom.frozenWidth
+      const PAD = 28
+      const vLeft = col.contentX - _scrollLeft
+      const vRight = vLeft + col.w
+      let target = _scrollLeft
+      if (vLeft < frozen + PAD) {
+        target = col.contentX - frozen - PAD
+      } else if (vRight > _viewportWidth - PAD) {
+        target = col.contentX + col.w - _viewportWidth + PAD
+      }
+      target = Math.max(0, target)
+      if (Math.abs(target - _scrollLeft) > 1) {
+        tableContainer.scrollTo({ left: target, behavior: "smooth" })
+      }
+    }
+    focusColName = name
+    if (_focusColTimer) clearTimeout(_focusColTimer)
+    _focusColTimer = setTimeout(() => {
+      focusColName = null
+      _focusColTimer = null
+      scheduleDraw()
+    }, 2200)
+    scheduleDraw()
   }
 
   const fkByColumn = $derived(
@@ -836,6 +894,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   $effect(() => {
     scrollToTop = () => tableContainer?.scrollTo({ top: 0 });
     scrollToBottom = () => { if (tableContainer) tableContainer.scrollTo({ top: tableContainer.scrollHeight }); };
+    focusColumn = focusColumnByName;
     getScroll = () => ({ left: _scrollLeft, top: _scrollTop });
     applyScroll = (pos) => {
       // Wait for the new tab's columns/rows to lay out (spacer width) before
@@ -996,6 +1055,30 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (value === null || value === undefined) return 'NULL';
     const s = typeof value === 'object' ? JSON.stringify(value) : String(value);
     return s.replace(/\|/g, '\\|').replace(/\n/g, ' ');
+  }
+
+  async function copyColSelection() {
+    const activeCols = columns.filter((c) => selectedCols.has(c.name))
+    if (!activeCols.length) return
+    const rowIndices = selected.size > 0
+      ? [...selected].sort((a, b) => a - b)
+      : rows.map((_, i) => i)
+    const header = activeCols.map((c) => csvCell(c.name)).join('\t')
+    const body = rowIndices
+      .map((i) => activeCols.map((c) => {
+        const ci = columns.indexOf(c)
+        const v = rows[i]?.[ci]
+        return v === null || v === undefined ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v)
+      }).join('\t'))
+      .join('\n')
+    const text = header + '\n' + body
+    try {
+      await navigator.clipboard.writeText(text)
+      const colLabel = activeCols.length === 1 ? activeCols[0].name : `${activeCols.length} columns`
+      toast.success(`Copied ${colLabel} (${rowIndices.length} rows)`)
+    } catch {
+      toast.error('Could not copy to clipboard')
+    }
   }
 
   async function copyAs(rowIdx, format) {
@@ -1741,6 +1824,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       focusedCol = null
       pastEdits = []
       futureEdits = []
+      selectedCols = new Set()
+      _lastHeaderClickedCol = null
       _lastTabKey = newKey
     })
   });
@@ -1919,6 +2004,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (!editingCell) selected = new Set(rows.map((_, i) => i));
       return;
     }
+
+    // Ctrl+C: copy selected columns (all rows, or row-selection intersection)
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "c" || e.key === "C") && selectedCols.size && !editingCell) {
+      e.preventDefault();
+      void copyColSelection();
+      return;
+    }
     // Undo / redo — active even while the cell input has focus
     if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "z" || e.key === "Z")) {
       if (!editingCell) {
@@ -2015,8 +2107,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       }
       case "Escape": {
         e.preventDefault();
-        // Priority: close FK sub-view first, then clear cell focus
+        // Priority: close FK sub-view → clear col selection → clear cell focus
         if (fkSubview !== null) { fkSubview = null; break; }
+        if (selectedCols.size) { selectedCols = new Set(); _lastHeaderClickedCol = null; scheduleDraw(); break; }
         focusedRow = null; focusedCol = null;
         break;
       }
@@ -2397,6 +2490,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
     // Cell background tints.
     if (!editing) {
+      // Column-selection band (drawn first so other tints layer on top).
+      if (selectedCols.has(col.name)) {
+        ctx.fillStyle = withAlpha(c.cPrimary, 0.08); ctx.fillRect(cellX, ry, w, rh)
+      }
+      // Focused-column band (drawn first so per-cell tints layer on top).
+      if (focusColName !== null && col.name === focusColName) {
+        ctx.fillStyle = withAlpha(c.cPrimary, 0.1); ctx.fillRect(cellX, ry, w, rh)
+      }
       if (isDirty) { ctx.fillStyle = withAlpha(c.AMBER, 0.15); ctx.fillRect(cellX, ry, w, rh) }
       else if (activeFk) { ctx.fillStyle = withAlpha(c.cAccent, 0.15); ctx.fillRect(cellX, ry, w, rh) }
       else if (isFocusedCell) { ctx.fillStyle = withAlpha(c.cPrimary, 0.08); ctx.fillRect(cellX, ry, w, rh) }
@@ -2697,6 +2798,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ctx.fillStyle = withAlpha(c.cMutedBg, 0.25); ctx.fillRect(x, 0, w, HEADER_H)
     }
 
+    // Focused-column highlight (toolbar "Jump to column") — tint + accent underline.
+    if (focusColName === col.name) {
+      ctx.fillStyle = withAlpha(c.cPrimary, 0.18); ctx.fillRect(x, 0, w, HEADER_H)
+      ctx.fillStyle = withAlpha(c.cPrimary, 0.9); ctx.fillRect(x, HEADER_H - 2, w, 2)
+    }
+
+    // Column-selection highlight (shift+click range) — stronger tint + thick underline.
+    if (selectedCols.has(col.name)) {
+      ctx.fillStyle = withAlpha(c.cPrimary, 0.22); ctx.fillRect(x, 0, w, HEADER_H)
+      ctx.fillStyle = c.cPrimary; ctx.fillRect(x, HEADER_H - 3, w, 3)
+    }
+
     // Right grid separator.
     ctx.strokeStyle = withAlpha(c.cBorder, 0.25)
     ctx.lineWidth = 1
@@ -2974,7 +3087,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       case 'header-expand-all': collapseAllRows(); return
       case 'header-select-all': toggleAll(!allSelected); return
       case 'header': {
-        handleHeaderSort(t.col.name)
+        if (e.shiftKey && _lastHeaderClickedCol) {
+          // Shift+click with anchor: range-select.
+          extendColSelection(t.col.name)
+        } else {
+          // Plain click (or first shift+click with no anchor): set anchor + sort.
+          selectedCols = new Set([t.col.name])
+          _lastHeaderClickedCol = t.col.name
+          if (!e.shiftKey) handleHeaderSort(t.col.name)
+        }
+        scheduleDraw()
         return
       }
       case 'row-expand': toggleRowExpand(/** @type {number} */ (t.idx)); return
@@ -2983,6 +3105,17 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         const idx = /** @type {number} */ (t.idx)
         const actualIdx = /** @type {number} */ (t.actualIdx)
 
+        if (e.shiftKey && selectedCols.size && t.col) {
+          // Shift+click body cell while cols selected → extend column range.
+          extendColSelection(t.col.name)
+          scheduleDraw()
+          return
+        }
+        if (selectedCols.size) {
+          selectedCols = new Set()
+          _lastHeaderClickedCol = null
+          scheduleDraw()
+        }
         if (editingCell) cancelEdit()
         focusedRow = idx
         const vi = actualToVisColIdx(actualIdx)
@@ -3646,7 +3779,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     <ContextMenu.Content
       onOpenAutoFocus={(e) => e.preventDefault()}
       class={cn(
-        "w-max min-w-32 p-0.5 text-ui-xs",
+        "min-w-52 p-0.5 text-ui-xs",
         "[&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs",
         "[&_[data-slot=context-menu-shortcut]]:text-ui-2xs",
         "[&_[data-slot=context-menu-item]_svg]:size-3.5",
@@ -3732,7 +3865,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               )}
           >
             <ExternalLink />
-            Open {menuForeignKeyLabel}
+            Open Tab
             <ContextMenu.Shortcut>⌘↵</ContextMenu.Shortcut>
           </ContextMenu.Item>
         {/if}

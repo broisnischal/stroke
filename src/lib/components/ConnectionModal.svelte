@@ -46,6 +46,7 @@
   let {
     open = $bindable(false),
     onconnected = (conn, id) => {},
+    maxConnections = Infinity,
   } = $props()
 
   const CATEGORIES = [
@@ -328,6 +329,10 @@
   }
 
   async function handleConnect() {
+    if (!editingId && saved.length >= maxConnections) {
+      error = `Free plan allows ${maxConnections} saved connections. Upgrade to Stroke Pro for unlimited.`
+      return
+    }
     const myOp = ++opId
     connecting = editingId ?? '__new__'; error = ''
     try {

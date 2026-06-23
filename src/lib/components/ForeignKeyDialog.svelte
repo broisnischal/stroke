@@ -1,6 +1,6 @@
 <script>
   import * as Dialog from '$lib/components/ui/dialog/index.js'
-  import { toast } from 'svelte-sonner'
+  import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import { executeSql } from '$lib/api.js'
   import Loader from '@lucide/svelte/icons/loader'
   import Link from '@lucide/svelte/icons/link'

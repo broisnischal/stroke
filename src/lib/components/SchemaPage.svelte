@@ -1,5 +1,5 @@
 <script>
-  import { toast } from 'svelte-sonner'
+  import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import { executeSql } from '$lib/api.js'
   import Zap from '@lucide/svelte/icons/zap'
   import Tags from '@lucide/svelte/icons/tags'

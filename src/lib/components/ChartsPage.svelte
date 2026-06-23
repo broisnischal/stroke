@@ -18,7 +18,7 @@
   } from "$lib/stores/dashboards.js";
   import { CHART_CATALOG, isTimestampAxis, fmtAxisLabel } from "$lib/chart-utils.js";
   import { cn } from "$lib/utils.js";
-  import { toast } from "svelte-sonner";
+  import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
   import BarChart2 from "@lucide/svelte/icons/bar-chart-2";
   import Play from "@lucide/svelte/icons/play";
   import Pencil from "@lucide/svelte/icons/pencil";

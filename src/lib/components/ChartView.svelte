@@ -8,7 +8,7 @@
   import { isCurrentThemeDark } from '$lib/stores/settings.js'
   import { chartGroups, saveChart, addGroup } from '$lib/stores/saved-charts.js'
   import { cn } from '$lib/utils.js'
-  import { toast } from 'svelte-sonner'
+  import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import ChevronDown  from '@lucide/svelte/icons/chevron-down'
   import Download     from '@lucide/svelte/icons/download'
   import Copy         from '@lucide/svelte/icons/copy'

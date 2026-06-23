@@ -8,6 +8,7 @@
   import ChevronDown from '@lucide/svelte/icons/chevron-down'
   import Database from '@lucide/svelte/icons/database'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
+  import Search from '@lucide/svelte/icons/search'
   import { cfStartOAuth, cfOAuthStatus, cfLogout } from '$lib/cloudflare.js'
   import { cloudflareListAccounts, cloudflareListD1Databases } from '$lib/api.js'
   import { cn } from '$lib/utils.js'
@@ -35,6 +36,13 @@
   let databases = $state([])
   let selectedDbUuid = $state('')
   let loadingDbs = $state(false)
+  let dbSearch = $state('')
+
+  const filteredDatabases = $derived(
+    dbSearch.trim()
+      ? databases.filter((d) => d.name.toLowerCase().includes(dbSearch.toLowerCase()))
+      : databases,
+  )
 
   onMount(async () => {
     const status = await cfOAuthStatus()
@@ -218,31 +226,43 @@
         </label>
 
         {#if databases.length > 0}
-          <div class="flex flex-col gap-1.5 rounded-lg border border-border/50 p-1.5">
-            {#each databases as db (db.uuid)}
-              {@const selected = db.uuid === selectedDbUuid}
-              <button
-                type="button"
-                class={cn(
-                  "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors",
-                  selected
-                    ? "bg-amber-500/15 ring-1 ring-amber-500/30"
-                    : "hover:bg-muted/50"
-                )}
-                onclick={() => selectDatabase(db.uuid)}
-              >
-                <Database class={cn("size-3.5 shrink-0", selected ? "text-amber-500" : "text-muted-foreground/50")} />
-                <div class="min-w-0 flex-1">
-                  <p class="truncate font-mono text-[12px] font-medium leading-snug text-foreground">{db.name}</p>
-                  {#if db.num_tables != null}
-                    <p class="text-[10px] text-muted-foreground/50">{db.num_tables} table{db.num_tables !== 1 ? 's' : ''}</p>
+          <div class="flex flex-col overflow-hidden rounded-lg border border-border/50">
+            {#if databases.length > 6}
+              <div class="relative border-b border-border/40">
+                <Search class="pointer-events-none absolute top-1/2 left-2.5 size-3 -translate-y-1/2 text-muted-foreground/40" />
+                <input
+                  type="text"
+                  placeholder="Search databases…"
+                  bind:value={dbSearch}
+                  class="h-8 w-full bg-transparent pl-7 pr-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/35"
+                  onkeydown={(e) => { if (e.key === 'Escape') dbSearch = '' }}
+                />
+              </div>
+            {/if}
+            <div class="db-list-scroll flex max-h-[220px] flex-col gap-0.5 overflow-y-auto p-1.5">
+              {#each filteredDatabases as db (db.uuid)}
+                {@const selected = db.uuid === selectedDbUuid}
+                <button
+                  type="button"
+                  class={cn(
+                    "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition-colors",
+                    selected
+                      ? "bg-amber-500/15 ring-1 ring-amber-500/30"
+                      : "hover:bg-muted/50"
+                  )}
+                  onclick={() => selectDatabase(db.uuid)}
+                >
+                  <Database class={cn("size-3.5 shrink-0", selected ? "text-amber-500" : "text-muted-foreground/45")} />
+                  <span class="min-w-0 flex-1 truncate font-mono text-[12px] font-medium leading-snug {selected ? 'text-foreground' : 'text-foreground/85'}">{db.name}</span>
+                  {#if selected}
+                    <Check class="size-3.5 shrink-0 text-amber-500" />
                   {/if}
-                </div>
-                {#if selected}
-                  <Check class="size-3.5 shrink-0 text-amber-500" />
-                {/if}
-              </button>
-            {/each}
+                </button>
+              {/each}
+              {#if filteredDatabases.length === 0}
+                <p class="px-2.5 py-3 text-center text-[11px] text-muted-foreground/45">No match for “{dbSearch}”</p>
+              {/if}
+            </div>
           </div>
         {:else if !loadingDbs}
           <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border/50 px-4 py-5 text-center">

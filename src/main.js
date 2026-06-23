@@ -3,6 +3,19 @@ import './app.css'
 import App from './App.svelte'
 import { applySettings, installZoomShortcuts, loadSettings, resetWebviewZoom } from '$lib/stores/settings.js'
 
+// Clear all local storage when VITE_FRESH_START=1 (used by `npm run tauri:fresh`)
+if (import.meta.env.VITE_FRESH_START === '1') {
+  try {
+    localStorage.clear()
+    sessionStorage.clear()
+    if (window.indexedDB?.databases) {
+      window.indexedDB.databases().then((dbs) => {
+        for (const db of dbs) if (db.name) window.indexedDB.deleteDatabase(db.name)
+      })
+    }
+  } catch (_) {}
+}
+
 applySettings(loadSettings())
 installZoomShortcuts()
 resetWebviewZoom()

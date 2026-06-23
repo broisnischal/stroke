@@ -9,7 +9,7 @@
   import Check from "@lucide/svelte/icons/check";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import KeyRound from "@lucide/svelte/icons/key-round";
-  import { toast } from "svelte-sonner";
+  import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
   import { cn } from "$lib/utils.js";
   import SecuritySqlModal from "./SecuritySqlModal.svelte";
 

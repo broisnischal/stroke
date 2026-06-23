@@ -112,3 +112,92 @@ export function hasTableQuery(search, filters, sort) {
     Boolean(sort?.column)
   )
 }
+
+/**
+ * Build a SELECT statement that reflects the current table view (columns,
+ * filters, search, sort). Meant as an editable starting point in the SQL editor,
+ * NOT a parameterized query — values are inlined and escaped for display.
+ *
+ * @param {object} opts
+ * @param {string} [opts.schema]
+ * @param {string} opts.table
+ * @param {{ name: string }[]} [opts.columns]   — when given, emits an explicit column list
+ * @param {TableFilter[]} [opts.filters]
+ * @param {string} [opts.search]
+ * @param {TableSort | null} [opts.sort]
+ * @param {number} [opts.limit]
+ * @param {string} [opts.engine]                — connection type, for quoting/casing
+ * @returns {string}
+ */
+export function buildSelectSql({ schema, table, columns = [], filters = [], search = '', sort = null, limit = 100, engine = 'postgres' }) {
+  const mysql = engine === 'mysql' || engine === 'mariadb'
+  const pg = !mysql // postgres/sqlite/etc. use double-quote identifiers + ILIKE-ish
+  /** quote identifier */
+  const q = (/** @type {string} */ id) =>
+    mysql ? '`' + id.replace(/`/g, '``') + '`' : '"' + id.replace(/"/g, '""') + '"'
+  /** quote a string literal */
+  const lit = (/** @type {string} */ v) => `'${String(v).replace(/'/g, "''")}'`
+  const like = pg ? 'ILIKE' : 'LIKE'
+  /** text-cast a column for substring search */
+  const asText = (/** @type {string} */ col) => (engine === 'postgres' ? `${col}::text` : col)
+
+  const target = schema ? `${q(schema)}.${q(table)}` : q(table)
+  // SELECT * keeps the generated query clean and avoids referencing virtual /
+  // hidden columns. `columns` is still used below to expand the search clause.
+  const cols = '*'
+
+  /** @param {TableFilter} f */
+  const cond = (f) => {
+    const col = q(f.column)
+    const v = f.value.trim()
+    switch (f.op) {
+      case 'eq': return `${col} = ${lit(v)}`
+      case 'neq': return `${col} <> ${lit(v)}`
+      case 'gt': return `${col} > ${lit(v)}`
+      case 'gte': return `${col} >= ${lit(v)}`
+      case 'lt': return `${col} < ${lit(v)}`
+      case 'lte': return `${col} <= ${lit(v)}`
+      case 'contains': return `${asText(col)} ${like} ${lit('%' + v + '%')}`
+      case 'not_contains': return `${asText(col)} NOT ${like} ${lit('%' + v + '%')}`
+      case 'starts_with': return `${asText(col)} ${like} ${lit(v + '%')}`
+      case 'ends_with': return `${asText(col)} ${like} ${lit('%' + v)}`
+      case 'is_null': return `${col} IS NULL`
+      case 'is_not_null': return `${col} IS NOT NULL`
+      case 'between': {
+        const [a = '', b = ''] = v.split(',').map((s) => s.trim())
+        return `${col} BETWEEN ${lit(a)} AND ${lit(b)}`
+      }
+      default: return ''
+    }
+  }
+
+  /** @type {string[]} */
+  const where = []
+
+  // Cross-column search (only when we know the columns)
+  const s = search.trim()
+  if (s && columns.length) {
+    const ors = columns.map((c) => `${asText(q(c.name))} ${like} ${lit('%' + s + '%')}`)
+    where.push(`(${ors.join(' OR ')})`)
+  }
+
+  // Column filters, chained with their and/or conjunct
+  const fs = activeFilters(filters).filter((f) => f.column !== ANY_COLUMN)
+  fs.forEach((f, i) => {
+    const c = cond(f)
+    if (!c) return
+    where.push(i === 0 && where.length === 0 ? c : `${(f.conjunct ?? 'and').toUpperCase()} ${c}`)
+  })
+
+  let sql = `SELECT ${cols}\nFROM ${target}`
+  if (where.length) {
+    // First clause has no leading AND/OR; the search group (if present) leads.
+    sql += `\nWHERE ${where[0].replace(/^(AND|OR)\s+/, '')}`
+    for (let i = 1; i < where.length; i++) {
+      sql += /^(AND|OR)\s/.test(where[i]) ? `\n  ${where[i]}` : `\n  AND ${where[i]}`
+    }
+  }
+  if (sort?.column) sql += `\nORDER BY ${q(sort.column)} ${sort.direction === 'desc' ? 'DESC' : 'ASC'}`
+  if (limit && limit > 0 && limit !== MAX_PAGE_SIZE) sql += `\nLIMIT ${limit}`
+  return sql + ';'
+}
