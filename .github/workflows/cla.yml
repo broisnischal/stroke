@@ -1,0 +1,38 @@
+name: CLA Assistant
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_target:
+    types: [opened, closed, synchronize]
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+  statuses: write
+
+jobs:
+  cla-assistant:
+    runs-on: ubuntu-latest
+    if: |
+      (github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA') ||
+      (github.event_name == 'pull_request_target')
+    steps:
+      - name: CLA assistant
+        uses: contributor-assistant/github-action@v2.6.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Personal access token with repo scope — add as a repo secret named
+          # PERSONAL_ACCESS_TOKEN so signatures can be committed back to the repo.
+          PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+        with:
+          # Signatures are stored in this file in the default branch.
+          path-to-signatures: '.github/cla/signatures.json'
+          # The CLA document contributors will be asked to read.
+          path-to-document: 'https://github.com/${{ github.repository }}/blob/master/.github/cla/cla.md'
+          # The comment added to PRs asking contributors to sign.
+          custom-pr-sign-comment: >
+            I have read the CLA Document and I hereby sign the CLA
+          # Allowlist — bots and the repo owner don't need to sign.
+          allowlist: bot,broisnischal
