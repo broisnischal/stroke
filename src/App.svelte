@@ -40,7 +40,7 @@
   })
 </script>
 
-<Toaster position="top-right" offset="12px" closeButton />
+<Toaster position="top-right" offset={{ top: '52px', right: '12px' }} closeButton />
 <LicenseGate>
   <StudioShell />
 </LicenseGate>

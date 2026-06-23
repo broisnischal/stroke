@@ -77,3 +77,35 @@ export async function runLicenseCheck() {
     // Non-critical — ignore errors, license state is already loaded
   }
 }
+
+// ── Free-tier feature gating ─────────────────────────────────────────────────
+
+export const FREE_CONNECTION_LIMIT = 3
+
+/** Features only available on a Pro plan (Valid license or active Trial). */
+const PRO_FEATURES = new Set([
+  'ai', 'dashboard', 'orm', 'security', 'logs',
+  'sql_chart', 'sql_json', 'sql_explain',
+  'charts', 'diagrams', 'schema_timeline', 'data_diff',
+  'extensions', 'backup', 'erd', 'search', 'notebook', 'json_tab',
+])
+
+/**
+ * Reactive: true when the user has Pro access (Valid license or active Trial).
+ * Null state (still loading from Tauri) also returns true to prevent UI flicker.
+ */
+export const hasPro = derived(
+  licenseStatus,
+  ($s) => $s === null || $s?.status === 'Valid' || $s?.status === 'Trial',
+)
+
+/**
+ * Check feature availability given a pro status value.
+ * Use in Svelte templates: canUseFeature('ai', $hasPro)
+ * @param {string} feature
+ * @param {boolean} pro
+ * @returns {boolean}
+ */
+export function canUseFeature(feature, pro) {
+  return pro || !PRO_FEATURES.has(feature)
+}

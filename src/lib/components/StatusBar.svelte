@@ -93,6 +93,7 @@
     ontoggletabbar        = /** @type {() => void} */ (() => {}),
     ontoggletabletoolbar  = /** @type {() => void} */ (() => {}),
     ontogglestatusbar     = /** @type {() => void} */ (() => {}),
+    hasPro = true,
   } = $props()
 
   const activeProfile = $derived($aiProfiles.find((p) => p.id === $activeProfileId) ?? $aiProfiles[0])
@@ -457,30 +458,38 @@
           {#if dbT === 'postgres' || dbT === 'mysql'}
             <DropdownMenu.Item class="cursor-pointer" onclick={onopenSchema}>
               <LayoutTemplate class="size-3.5 shrink-0 text-muted-foreground/50" /> Schema Explorer
+              {#if !hasPro}<span class="ml-auto text-[8px] font-bold tracking-wider text-amber-400/80">PRO</span>{/if}
             </DropdownMenu.Item>
           {/if}
           <DropdownMenu.Item class="cursor-pointer" onclick={onopenlogs}>
             <History class="size-3.5 shrink-0 text-muted-foreground/50" /> Activity Log
+            {#if !hasPro}<span class="ml-auto text-[8px] font-bold tracking-wider text-amber-400/80">PRO</span>{/if}
           </DropdownMenu.Item>
           {#if dbT === 'postgres'}
             <DropdownMenu.Item class="cursor-pointer" onclick={onopensecurity}>
               <ShieldCheck class="size-3.5 shrink-0 text-muted-foreground/50" /> Security
+              {#if !hasPro}<span class="ml-auto text-[8px] font-bold tracking-wider text-amber-400/80">PRO</span>{/if}
             </DropdownMenu.Item>
           {/if}
           <DropdownMenu.Item class="cursor-pointer" onclick={onopenorm}>
             <Code2 class="size-3.5 shrink-0 text-muted-foreground/50" /> ORM Runner
+            {#if !hasPro}<span class="ml-auto text-[8px] font-bold tracking-wider text-amber-400/80">PRO</span>{/if}
           </DropdownMenu.Item>
           <DropdownMenu.Item class="cursor-pointer" onclick={onopenbackup}>
             <Archive class="size-3.5 shrink-0 text-muted-foreground/50" /> Backup & Restore
+            {#if !hasPro}<span class="ml-auto text-[8px] font-bold tracking-wider text-amber-400/80">PRO</span>{/if}
           </DropdownMenu.Item>
           <DropdownMenu.Item class="cursor-pointer" onclick={onopenchartspage}>
             <BarChart2 class="size-3.5 shrink-0 text-muted-foreground/50" /> Charts
+            {#if !hasPro}<span class="ml-auto text-[8px] font-bold tracking-wider text-amber-400/80">PRO</span>{/if}
           </DropdownMenu.Item>
           <DropdownMenu.Item class="cursor-pointer" onclick={onopendashboard}>
             <LayoutDashboard class="size-3.5 shrink-0 text-muted-foreground/50" /> Dashboard
+            {#if !hasPro}<span class="ml-auto text-[8px] font-bold tracking-wider text-amber-400/80">PRO</span>{/if}
           </DropdownMenu.Item>
           <DropdownMenu.Item class="cursor-pointer" onclick={onopendiagrams}>
             <GitBranch class="size-3.5 shrink-0 text-muted-foreground/50" /> Diagrams
+            {#if !hasPro}<span class="ml-auto text-[8px] font-bold tracking-wider text-amber-400/80">PRO</span>{/if}
           </DropdownMenu.Item>
         </DropdownMenu.Content>
       </DropdownMenu.Root>

@@ -66,6 +66,7 @@
   import { Button } from '$lib/components/ui/button/index.js'
   import AlertTriangle from '@lucide/svelte/icons/triangle-alert'
   import X from '@lucide/svelte/icons/x'
+  import Lock from '@lucide/svelte/icons/lock'
   import {
     disconnectPostgres,
     listSchemas,
@@ -155,6 +156,9 @@
     upsertConnection,
     engineFamily,
   } from '$lib/stores/connections.js'
+  import { hasPro, FREE_CONNECTION_LIMIT } from '$lib/stores/license.js'
+  import * as Dialog from '$lib/components/ui/dialog/index.js'
+  import ExternalLink from '@lucide/svelte/icons/external-link'
   import {
     connectPostgres,
     connectSqlite,
@@ -240,6 +244,7 @@
   let showReportIssueDialog = $state(false)
   let showDisconnectDialog = $state(false)
   let showAiModelSettings = $state(false)
+  let showProGate = $state(false)
   let ddlDialogOpen = $state(false)
   let ddlDialogTable = $state('')
   let ddlDialogSql = $state('')
@@ -959,6 +964,7 @@ let rowSearch = $state('')
   createHotkey('Mod+Shift+E', (e) => {
     if (!connection) return
     e.preventDefault()
+    if (!$hasPro) { showProGate = true; return }
     if (aiMode) exitAiMode()
     else enterAiMode()
   })
@@ -1476,10 +1482,12 @@ let rowSearch = $state('')
   }
 
   function openAiTab() {
+    if (!$hasPro) { showProGate = true; return }
     enterAiMode()
   }
 
   function openSchemaTab() {
+    if (!$hasPro) { showProGate = true; return }
     if (!hasSchemaExplorer) return
     const existing = findSchemaTab(tabs)
     if (existing) {
@@ -1495,6 +1503,7 @@ let rowSearch = $state('')
   }
 
   function openOrmTab() {
+    if (!$hasPro) { showProGate = true; return }
     const existing = findOrmTab(tabs)
     if (existing) {
       void activateTab(existing.id)
@@ -1510,6 +1519,7 @@ let rowSearch = $state('')
 
   function openSecurityTab() {
     if (!hasSecurity) return
+    if (!$hasPro) { showProGate = true; return }
     const existing = findSecurityTab(tabs)
     if (existing) {
       void activateTab(existing.id)
@@ -1524,6 +1534,7 @@ let rowSearch = $state('')
   }
 
   function openBackupTab() {
+    if (!$hasPro) { showProGate = true; return }
     const existing = findBackupTab(tabs)
     if (existing) { void activateTab(existing.id); return }
     saveActiveTabState()
@@ -1535,6 +1546,7 @@ let rowSearch = $state('')
   }
 
   function openLogsTab() {
+    if (!$hasPro) { showProGate = true; return }
     const existing = findLogsTab(tabs)
     if (existing) {
       void activateTab(existing.id)
@@ -1549,6 +1561,7 @@ let rowSearch = $state('')
   }
 
   function openExtensionsTab() {
+    if (!$hasPro) { showProGate = true; return }
     const existing = findExtensionsTab(tabs)
     if (existing) {
       void activateTab(existing.id)
@@ -1563,6 +1576,7 @@ let rowSearch = $state('')
   }
 
   function openJsonTab() {
+    if (!$hasPro) { showProGate = true; return }
     const existing = findJsonTab(tabs)
     if (existing) {
       void activateTab(existing.id)
@@ -1577,6 +1591,7 @@ let rowSearch = $state('')
   }
 
   function openChartsTab() {
+    if (!$hasPro) { showProGate = true; return }
     const existing = findChartsTab(tabs)
     if (existing) {
       void activateTab(existing.id)
@@ -1591,6 +1606,7 @@ let rowSearch = $state('')
   }
 
   function openDashboardTab() {
+    if (!$hasPro) { showProGate = true; return }
     const existing = findDashboardTab(tabs)
     if (existing) {
       void activateTab(existing.id)
@@ -1605,6 +1621,7 @@ let rowSearch = $state('')
   }
 
   function openErdTab() {
+    if (!$hasPro) { showProGate = true; return }
     const existing = findErdTab(tabs)
     if (existing) { void activateTab(existing.id); return }
     saveActiveTabState()
@@ -1616,6 +1633,7 @@ let rowSearch = $state('')
   }
 
   function openDiagramsTab() {
+    if (!$hasPro) { showProGate = true; return }
     const existing = findDiagramsTab(tabs)
     if (existing) { activateTab(existing.id); return }
     const tab = createDiagramsTab()
@@ -1624,6 +1642,7 @@ let rowSearch = $state('')
   }
 
   function openSearchTab() {
+    if (!$hasPro) { showProGate = true; return }
     const existing = findSearchTab(tabs)
     if (existing) {
       void activateTab(existing.id)
@@ -1638,6 +1657,7 @@ let rowSearch = $state('')
   }
 
   function openNewNotebookTab() {
+    if (!$hasPro) { showProGate = true; return }
     saveActiveTabState()
     dropWelcomeTabs()
     const nb = createNotebook()
@@ -1648,6 +1668,7 @@ let rowSearch = $state('')
   }
 
   async function openNotebookFromFile() {
+    if (!$hasPro) { showProGate = true; return }
     try {
       const result = await openNotebookFile()
       if (!result) return
@@ -1664,6 +1685,7 @@ let rowSearch = $state('')
   }
 
   function openSchemaTimelineTab() {
+    if (!$hasPro) { showProGate = true; return }
     const existing = findSchemaTimelineTab(tabs)
     if (existing) { void activateTab(existing.id); return }
     saveActiveTabState()
@@ -1675,6 +1697,7 @@ let rowSearch = $state('')
   }
 
   function openDataDiffTab() {
+    if (!$hasPro) { showProGate = true; return }
     const existing = findDataDiffTab(tabs)
     if (existing) { void activateTab(existing.id); return }
     saveActiveTabState()
@@ -3174,7 +3197,7 @@ let rowSearch = $state('')
 </script>
 
 <Onboarding bind:open={showOnboarding} onconnect={() => (showConnectionModal = true)} onsample={handleSampleConnect} />
-<ConnectionModal bind:open={showConnectionModal} onconnected={(conn, id) => onConnected(conn, id)} />
+<ConnectionModal bind:open={showConnectionModal} onconnected={(conn, id) => onConnected(conn, id)} maxConnections={$hasPro ? Infinity : FREE_CONNECTION_LIMIT} />
 <DisconnectDialog bind:open={showDisconnectDialog} connectionName={connection ? (connection.name || connection.database || connection.host || connection.filePath || 'Connected') : ''} ondisconnect={handleDisconnect} />
 <CreateTableDialog
   bind:open={showCreateTableDialog}
@@ -3222,6 +3245,42 @@ let rowSearch = $state('')
 
 <AboutDialog bind:open={showAboutModal} onopenreport={() => (showReportIssueDialog = true)} />
 <ReportIssueDialog bind:open={showReportIssueDialog} />
+
+<Dialog.Root bind:open={showProGate} closeOnEscape={true} closeOnOutsideClick={true}>
+  <Dialog.Portal>
+    <Dialog.Overlay class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" />
+    <Dialog.Content class="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border/60 bg-popover p-6 shadow-2xl outline-none">
+      <div class="mb-5 flex size-10 items-center justify-center rounded-lg border border-amber-500/20 bg-amber-500/10">
+        <Lock class="size-5 text-amber-500/80" />
+      </div>
+      <h2 class="mb-1.5 text-sm font-semibold text-foreground">Stroke Pro required</h2>
+      <p class="mb-5 text-[12px] leading-relaxed text-muted-foreground">This feature is not available on the free plan. Upgrade to Stroke Pro to unlock AI, dashboards, ORM runner, schema explorer, and more.</p>
+      <div class="flex items-center gap-2">
+        <button
+          onclick={() => (showProGate = false)}
+          class="flex h-8 flex-1 items-center justify-center rounded-lg border border-border/60 bg-muted/50 px-4 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        >
+          Back
+        </button>
+        <button
+          onclick={async () => {
+            showProGate = false
+            try {
+              const { openUrl } = await import('@tauri-apps/plugin-opener')
+              await openUrl('https://stroke.click')
+            } catch {
+              window.open('https://stroke.click', '_blank', 'noopener,noreferrer')
+            }
+          }}
+          class="flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-foreground px-4 text-[12px] font-medium text-background transition-colors hover:bg-foreground/90"
+        >
+          <ExternalLink class="size-3" />
+          Activate Pro
+        </button>
+      </div>
+    </Dialog.Content>
+  </Dialog.Portal>
+</Dialog.Root>
 
 <UpdateDialog bind:this={updateDialog} onupdatefound={() => (statusBarHasUpdate = true)} />
 
@@ -3277,55 +3336,25 @@ let rowSearch = $state('')
 
 {#if autoConnecting}
   <div
-    class="fixed inset-0 z-50 flex flex-col overflow-hidden bg-background"
-    out:fade={{ duration: 220 }}
+    class="fixed inset-0 z-50 flex flex-col items-center justify-center gap-7 bg-background"
+    out:fade={{ duration: 200 }}
   >
-    <!-- Skeleton TitleBar -->
-    <div class="flex h-10 shrink-0 items-center border-b border-border/20 bg-background px-3 gap-2">
-      <div class="size-4 rounded bg-muted/40 animate-pulse"></div>
-      <div class="h-3 w-24 rounded bg-muted/30 animate-pulse"></div>
-    </div>
-
-    <div class="flex min-h-0 flex-1 overflow-hidden">
-      <!-- Skeleton sidebar -->
-      <div class="flex w-[220px] shrink-0 flex-col gap-2 border-r border-border/20 bg-sidebar p-3">
-        <div class="h-3 w-3/4 rounded bg-muted/30 animate-pulse"></div>
-        <div class="mt-2 flex flex-col gap-1.5">
-          {#each [80, 60, 95, 70, 55, 85, 65] as w}
-            <div class="h-2.5 rounded bg-muted/25 animate-pulse" style="width:{w}%"></div>
-          {/each}
-        </div>
-      </div>
-
-      <!-- Skeleton main content -->
-      <div class="flex min-h-0 min-w-0 flex-1 flex-col bg-panel">
-        <!-- Skeleton tab bar -->
-        <div class="flex h-9 shrink-0 items-center gap-1 border-b border-border/20 bg-background px-2">
-          <div class="h-5 w-24 rounded bg-muted/25 animate-pulse"></div>
-          <div class="h-5 w-20 rounded bg-muted/20 animate-pulse"></div>
-        </div>
-        <!-- Skeleton toolbar -->
-        <div class="flex h-9 shrink-0 items-center gap-2 border-b border-border/20 bg-background px-3">
-          <div class="h-5 w-16 rounded bg-muted/25 animate-pulse"></div>
-          <div class="h-5 w-12 rounded bg-muted/20 animate-pulse"></div>
-          <div class="ml-auto h-5 w-20 rounded bg-muted/20 animate-pulse"></div>
-        </div>
-        <!-- Centered connecting indicator -->
-        <div class="flex flex-1 flex-col items-center justify-center gap-3">
-          <span class="inline-flex gap-1.5">
-            <span class="size-1.5 animate-bounce rounded-full bg-muted-foreground/40" style="animation-delay:0ms"></span>
-            <span class="size-1.5 animate-bounce rounded-full bg-muted-foreground/40" style="animation-delay:120ms"></span>
-            <span class="size-1.5 animate-bounce rounded-full bg-muted-foreground/40" style="animation-delay:240ms"></span>
-          </span>
-          <p class="text-xs text-muted-foreground/50">Connecting…</p>
-        </div>
+    <!-- Spinning ring + logo -->
+    <div class="relative size-[60px]">
+      <svg class="absolute inset-0 size-full animate-spin" viewBox="0 0 60 60" fill="none" aria-hidden="true">
+        <circle cx="30" cy="30" r="28" stroke="currentColor" stroke-width="1.5"
+          stroke-dasharray="30 146" stroke-linecap="round"
+          class="text-foreground/20" />
+      </svg>
+      <div class="absolute inset-[5px] flex items-center justify-center rounded-[14px] bg-foreground/[0.05] ring-1 ring-border/40">
+        <Logo class="size-[26px]" />
       </div>
     </div>
 
-    <!-- Skeleton status bar -->
-    <div class="flex h-8 shrink-0 items-center border-t border-border/20 bg-background px-3 gap-2">
-      <div class="h-2.5 w-20 rounded bg-muted/25 animate-pulse"></div>
-      <div class="ml-auto h-2.5 w-16 rounded bg-muted/20 animate-pulse"></div>
+    <!-- Text -->
+    <div class="flex flex-col items-center gap-1.5 text-center">
+      <p class="text-[13px] font-medium text-foreground/70">Reconnecting</p>
+      <p class="text-[11px] text-muted-foreground/35">Establishing database connection…</p>
     </div>
   </div>
 {/if}
@@ -3820,6 +3849,7 @@ let rowSearch = $state('')
             onhistoryselect={(sql) => void openQueryInEditor(sql)}
             onsavequery={handleSaveQuery}
             onfixwithai={handleFixWithAi}
+            onprorequired={() => (showProGate = true)}
           />
           {/await}
           </svelte:boundary>
@@ -4044,9 +4074,12 @@ let rowSearch = $state('')
       {#if !activeTab || activeTab.kind === 'welcome'}
         {@const isMac = navigator.platform.toUpperCase().includes('MAC')}
         {@const mod = isMac ? '⌘' : 'Ctrl'}
-        {@const cell = 'group flex flex-col gap-3 rounded-lg border border-border/60 bg-card p-3 text-left transition-colors hover:border-border hover:bg-accent/40'}
+        {@const cell = 'group relative flex flex-col gap-3 rounded-lg border border-border/60 bg-card p-3 text-left transition-colors hover:border-border hover:bg-accent/40'}
+        {@const proCell = 'group relative flex flex-col gap-3 rounded-lg border border-border/40 bg-card/70 p-3 text-left cursor-not-allowed transition-colors hover:border-amber-500/30 hover:bg-amber-500/[0.03]'}
         {@const iconCls = 'size-3.5 text-muted-foreground transition-colors group-hover:text-foreground'}
+        {@const proIconCls = 'size-3.5 text-muted-foreground/40'}
         {@const labelCls = 'text-[11px] font-medium leading-none text-foreground/70 transition-colors group-hover:text-foreground'}
+        {@const proLabelCls = 'text-[11px] font-medium leading-none text-foreground/35'}
         {@const hotkeyCls = 'text-[9px] tabular-nums text-muted-foreground/50 group-hover:text-muted-foreground transition-colors self-end'}
 
         <!-- Scroll container keeps top/bottom padding reachable when the content
@@ -4085,69 +4118,80 @@ let rowSearch = $state('')
               </div>
             </button>
 
-            <button onclick={openDashboardTab} class={cell}>
-              <LayoutDashboard class={iconCls} />
-              <span class={labelCls}>Dashboard</span>
+            <button onclick={openDashboardTab} class={$hasPro ? cell : proCell}>
+              {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
+              <LayoutDashboard class={$hasPro ? iconCls : proIconCls} />
+              <span class={$hasPro ? labelCls : proLabelCls}>Dashboard</span>
             </button>
 
-            <button onclick={openAiTab} class={cell}>
-              <Bot class={iconCls} />
+            <button onclick={openAiTab} class={$hasPro ? cell : proCell}>
+              {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
+              <Bot class={$hasPro ? iconCls : proIconCls} />
               <div class="flex items-end justify-between gap-1">
-                <span class={labelCls}>AI</span>
-                <span class={hotkeyCls}>{mod}⇧E</span>
+                <span class={$hasPro ? labelCls : proLabelCls}>AI</span>
+                {#if $hasPro}<span class={hotkeyCls}>{mod}⇧E</span>{/if}
               </div>
             </button>
 
-            <button onclick={openOrmTab} class={cell}>
-              <Code2 class={iconCls} />
+            <button onclick={openOrmTab} class={$hasPro ? cell : proCell}>
+              {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
+              <Code2 class={$hasPro ? iconCls : proIconCls} />
               <div class="flex items-end justify-between gap-1">
-                <span class={labelCls}>ORM</span>
-                <span class={hotkeyCls}>{mod}⇧O</span>
+                <span class={$hasPro ? labelCls : proLabelCls}>ORM</span>
+                {#if $hasPro}<span class={hotkeyCls}>{mod}⇧O</span>{/if}
               </div>
             </button>
 
             {#if hasSchemaExplorer}
-              <button onclick={openSchemaTab} class={cell}>
-                <LayoutTemplate class={iconCls} />
-                <span class={labelCls}>Schema</span>
+              <button onclick={openSchemaTab} class={$hasPro ? cell : proCell}>
+                {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
+                <LayoutTemplate class={$hasPro ? iconCls : proIconCls} />
+                <span class={$hasPro ? labelCls : proLabelCls}>Schema</span>
               </button>
             {/if}
 
             {#if hasSecurity}
-              <button onclick={openSecurityTab} class={cell}>
-                <ShieldCheck class={iconCls} />
-                <span class={labelCls}>Security</span>
+              <button onclick={openSecurityTab} class={$hasPro ? cell : proCell}>
+                {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
+                <ShieldCheck class={$hasPro ? iconCls : proIconCls} />
+                <span class={$hasPro ? labelCls : proLabelCls}>Security</span>
               </button>
             {/if}
 
-            <button onclick={openLogsTab} class={cell}>
-              <ScrollText class={iconCls} />
-              <span class={labelCls}>Logs</span>
+            <button onclick={openLogsTab} class={$hasPro ? cell : proCell}>
+              {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
+              <ScrollText class={$hasPro ? iconCls : proIconCls} />
+              <span class={$hasPro ? labelCls : proLabelCls}>Logs</span>
             </button>
 
-            <button onclick={openChartsTab} class={cell}>
-              <BarChart2 class={iconCls} />
-              <span class={labelCls}>Charts</span>
+            <button onclick={openChartsTab} class={$hasPro ? cell : proCell}>
+              {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
+              <BarChart2 class={$hasPro ? iconCls : proIconCls} />
+              <span class={$hasPro ? labelCls : proLabelCls}>Charts</span>
             </button>
 
-            <button onclick={openDiagramsTab} class={cell}>
-              <GitBranch class={iconCls} />
-              <span class={labelCls}>Diagrams</span>
+            <button onclick={openDiagramsTab} class={$hasPro ? cell : proCell}>
+              {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
+              <GitBranch class={$hasPro ? iconCls : proIconCls} />
+              <span class={$hasPro ? labelCls : proLabelCls}>Diagrams</span>
             </button>
 
-            <button onclick={openSchemaTimelineTab} class={cell}>
-              <History class={iconCls} />
-              <span class={labelCls}>Timeline</span>
+            <button onclick={openSchemaTimelineTab} class={$hasPro ? cell : proCell}>
+              {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
+              <History class={$hasPro ? iconCls : proIconCls} />
+              <span class={$hasPro ? labelCls : proLabelCls}>Timeline</span>
             </button>
 
-            <button onclick={openDataDiffTab} class={cell}>
-              <GitCompare class={iconCls} />
-              <span class={labelCls}>Data Diff</span>
+            <button onclick={openDataDiffTab} class={$hasPro ? cell : proCell}>
+              {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
+              <GitCompare class={$hasPro ? iconCls : proIconCls} />
+              <span class={$hasPro ? labelCls : proLabelCls}>Data Diff</span>
             </button>
 
-            <button onclick={openExtensionsTab} class={cell}>
-              <Blocks class={iconCls} />
-              <span class={labelCls}>Extensions</span>
+            <button onclick={openExtensionsTab} class={$hasPro ? cell : proCell}>
+              {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
+              <Blocks class={$hasPro ? iconCls : proIconCls} />
+              <span class={$hasPro ? labelCls : proLabelCls}>Extensions</span>
             </button>
 
             <button onclick={() => (showConnectionModal = true)} class={cell}>
@@ -4247,7 +4291,8 @@ let rowSearch = $state('')
   ontogglestatusbar={toggleStatusBar}
   onviewchange={handleSidebarViewChange}
   {aiMode}
-  onopenaimode={() => (aiMode ? exitAiMode() : enterAiMode())}
+  onopenaimode={() => (aiMode ? exitAiMode() : openAiTab())}
+  hasPro={$hasPro}
   onopenSchema={openSchemaTab}
   onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
   onopenextensions={() => { if (aiMode) exitAiMode(); openExtensionsTab() }}

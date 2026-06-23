@@ -1,0 +1,13 @@
+diff --git a/node_modules/svelte-sonner/dist/toast-state.svelte.js b/node_modules/svelte-sonner/dist/toast-state.svelte.js
+index 5923dfc..54a0a95 100644
+--- a/node_modules/svelte-sonner/dist/toast-state.svelte.js
++++ b/node_modules/svelte-sonner/dist/toast-state.svelte.js
+@@ -152,7 +152,7 @@ class ToastState {
+         return id;
+     };
+     removeHeight = (id) => {
+-        this.heights = this.heights.filter((height) => height.toastId !== id);
++        this.heights = this.heights.filter((height) => height && height.toastId !== id);
+     };
+     setHeight = (data) => {
+         const toastIdx = this.#findToastIdx(data.toastId);

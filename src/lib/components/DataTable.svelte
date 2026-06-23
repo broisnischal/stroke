@@ -270,6 +270,20 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   /** Column name briefly highlighted after the user picks it from the toolbar's
    *  "Jump to column" menu (header + body band). null = no highlight. */
   let focusColName = $state(/** @type {string | null} */ (null));
+  /** Column names selected via click / shift+click on column headers. */
+  let selectedCols = $state(/** @type {Set<string>} */ (new Set()));
+  /** Anchor column for shift+click range selection (plain var — not reactive). */
+  let _lastHeaderClickedCol = /** @type {string | null} */ (null);
+
+  /** Extend column selection from anchor to `toColName`, using geom.cols order. */
+  function extendColSelection(toColName) {
+    if (!_lastHeaderClickedCol) { selectedCols = new Set([toColName]); _lastHeaderClickedCol = toColName; return }
+    const startIdx = geom.cols.findIndex((c) => c.name === _lastHeaderClickedCol)
+    const endIdx   = geom.cols.findIndex((c) => c.name === toColName)
+    if (startIdx < 0 || endIdx < 0) return
+    const [lo, hi] = [Math.min(startIdx, endIdx), Math.max(startIdx, endIdx)]
+    selectedCols = new Set(geom.cols.slice(lo, hi + 1).map((c) => c.name))
+  }
   /** @type {ReturnType<typeof setTimeout> | null} */
   let _focusColTimer = null;
   /** Scrollable container element for programmatic focus + scroll. */
@@ -1043,6 +1057,30 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     return s.replace(/\|/g, '\\|').replace(/\n/g, ' ');
   }
 
+  async function copyColSelection() {
+    const activeCols = columns.filter((c) => selectedCols.has(c.name))
+    if (!activeCols.length) return
+    const rowIndices = selected.size > 0
+      ? [...selected].sort((a, b) => a - b)
+      : rows.map((_, i) => i)
+    const header = activeCols.map((c) => csvCell(c.name)).join('\t')
+    const body = rowIndices
+      .map((i) => activeCols.map((c) => {
+        const ci = columns.indexOf(c)
+        const v = rows[i]?.[ci]
+        return v === null || v === undefined ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v)
+      }).join('\t'))
+      .join('\n')
+    const text = header + '\n' + body
+    try {
+      await navigator.clipboard.writeText(text)
+      const colLabel = activeCols.length === 1 ? activeCols[0].name : `${activeCols.length} columns`
+      toast.success(`Copied ${colLabel} (${rowIndices.length} rows)`)
+    } catch {
+      toast.error('Could not copy to clipboard')
+    }
+  }
+
   async function copyAs(rowIdx, format) {
     const indices = copyTargetIndices(rowIdx);
     const colNames = columns.map((c) => c.name);
@@ -1786,6 +1824,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       focusedCol = null
       pastEdits = []
       futureEdits = []
+      selectedCols = new Set()
+      _lastHeaderClickedCol = null
       _lastTabKey = newKey
     })
   });
@@ -1964,6 +2004,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (!editingCell) selected = new Set(rows.map((_, i) => i));
       return;
     }
+
+    // Ctrl+C: copy selected columns (all rows, or row-selection intersection)
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "c" || e.key === "C") && selectedCols.size && !editingCell) {
+      e.preventDefault();
+      void copyColSelection();
+      return;
+    }
     // Undo / redo — active even while the cell input has focus
     if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "z" || e.key === "Z")) {
       if (!editingCell) {
@@ -2060,8 +2107,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       }
       case "Escape": {
         e.preventDefault();
-        // Priority: close FK sub-view first, then clear cell focus
+        // Priority: close FK sub-view → clear col selection → clear cell focus
         if (fkSubview !== null) { fkSubview = null; break; }
+        if (selectedCols.size) { selectedCols = new Set(); _lastHeaderClickedCol = null; scheduleDraw(); break; }
         focusedRow = null; focusedCol = null;
         break;
       }
@@ -2442,6 +2490,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
     // Cell background tints.
     if (!editing) {
+      // Column-selection band (drawn first so other tints layer on top).
+      if (selectedCols.has(col.name)) {
+        ctx.fillStyle = withAlpha(c.cPrimary, 0.08); ctx.fillRect(cellX, ry, w, rh)
+      }
       // Focused-column band (drawn first so per-cell tints layer on top).
       if (focusColName !== null && col.name === focusColName) {
         ctx.fillStyle = withAlpha(c.cPrimary, 0.1); ctx.fillRect(cellX, ry, w, rh)
@@ -2752,6 +2804,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ctx.fillStyle = withAlpha(c.cPrimary, 0.9); ctx.fillRect(x, HEADER_H - 2, w, 2)
     }
 
+    // Column-selection highlight (shift+click range) — stronger tint + thick underline.
+    if (selectedCols.has(col.name)) {
+      ctx.fillStyle = withAlpha(c.cPrimary, 0.22); ctx.fillRect(x, 0, w, HEADER_H)
+      ctx.fillStyle = c.cPrimary; ctx.fillRect(x, HEADER_H - 3, w, 3)
+    }
+
     // Right grid separator.
     ctx.strokeStyle = withAlpha(c.cBorder, 0.25)
     ctx.lineWidth = 1
@@ -3029,7 +3087,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       case 'header-expand-all': collapseAllRows(); return
       case 'header-select-all': toggleAll(!allSelected); return
       case 'header': {
-        handleHeaderSort(t.col.name)
+        if (e.shiftKey && _lastHeaderClickedCol) {
+          // Shift+click with anchor: range-select.
+          extendColSelection(t.col.name)
+        } else {
+          // Plain click (or first shift+click with no anchor): set anchor + sort.
+          selectedCols = new Set([t.col.name])
+          _lastHeaderClickedCol = t.col.name
+          if (!e.shiftKey) handleHeaderSort(t.col.name)
+        }
+        scheduleDraw()
         return
       }
       case 'row-expand': toggleRowExpand(/** @type {number} */ (t.idx)); return
@@ -3038,6 +3105,17 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         const idx = /** @type {number} */ (t.idx)
         const actualIdx = /** @type {number} */ (t.actualIdx)
 
+        if (e.shiftKey && selectedCols.size && t.col) {
+          // Shift+click body cell while cols selected → extend column range.
+          extendColSelection(t.col.name)
+          scheduleDraw()
+          return
+        }
+        if (selectedCols.size) {
+          selectedCols = new Set()
+          _lastHeaderClickedCol = null
+          scheduleDraw()
+        }
         if (editingCell) cancelEdit()
         focusedRow = idx
         const vi = actualToVisColIdx(actualIdx)
