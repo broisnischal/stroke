@@ -12,7 +12,7 @@
   import ResizeHandle from './ResizeHandle.svelte'
   import * as Tabs from '$lib/components/ui/tabs/index.js'
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js'
-  import { toast } from 'svelte-sonner'
+  import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import {
     normalizeCellValue,
     formatJsonValue,

@@ -699,6 +699,16 @@
             value={localFilter}
             disabled={!connectionName}
             oninput={(e) => handleFilterInput(e.currentTarget.value)}
+            onkeydown={(e) => {
+              // Tab / ArrowDown from the filter → jump focus into the result list
+              // so the user can keyboard-navigate the matched tables directly.
+              if ((e.key === 'Tab' && !e.shiftKey) || e.key === 'ArrowDown') {
+                const first = /** @type {HTMLElement | null} */ (
+                  (tableListEl ?? scrollContainerEl)?.querySelector('button')
+                )
+                if (first) { e.preventDefault(); first.focus() }
+              }
+            }}
             class={cn(sidebarFieldClass, "w-full pl-8 pr-2.5 outline-none disabled:opacity-40 disabled:cursor-not-allowed")}
             aria-label="Filter tables"
             data-sidebar-filter
@@ -961,7 +971,20 @@
               {/if}
             </button>
             {#if tablesOpen}
-              <ul bind:this={tableListEl} class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
+              <ul
+                bind:this={tableListEl}
+                class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1"
+                onkeydown={(e) => {
+                  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+                  const btns = /** @type {HTMLButtonElement[]} */ ([...(tableListEl?.querySelectorAll('button') ?? [])])
+                  const i = btns.indexOf(/** @type {HTMLButtonElement} */ (document.activeElement))
+                  if (i === -1) return
+                  e.preventDefault()
+                  if (e.key === 'ArrowDown') btns[i + 1]?.focus()
+                  else if (i === 0) filterEl?.focus()
+                  else btns[i - 1]?.focus()
+                }}
+              >
                 {#if regularTables.length === 0 && tables.length > 0}
                   <li
                     class="flex w-full flex-col items-center gap-2 px-4 py-8 text-center"

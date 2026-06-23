@@ -61,7 +61,7 @@
   } from "$lib/stores/ai-skills.js";
   import { renderMermaidSync, THEMES } from "beautiful-mermaid";
   import { mermaidThemeFor, normalizeThemeId } from "$lib/themes/registry.js";
-  import { toast } from "svelte-sonner";
+  import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
   import {
     aiSettings,
     aiProfiles,
@@ -553,16 +553,18 @@
       return;
     }
     let i = 0;
+    let fadeId = 0;
     const tick = () => {
       thinkingVisible = false;
-      setTimeout(() => {
+      fadeId = setTimeout(() => {
+        fadeId = 0;
         i = (i + 1) % THINKING_PHRASES.length;
         thinkingPhrase = THINKING_PHRASES[i];
         thinkingVisible = true;
       }, 220);
     };
     const id = setInterval(tick, 2600);
-    return () => clearInterval(id);
+    return () => { clearInterval(id); clearTimeout(fadeId); };
   });
   let inputText = $state("");
   const isDraftChat = $derived(!activeConvId && items.length > 0);

@@ -107,7 +107,9 @@
       language: 'json',
       theme: monacoThemeId(currentTheme()),
       readOnly: true,
-      automaticLayout: true,
+      // automaticLayout:false — that option runs a 100ms setInterval per editor
+      // forever; a ResizeObserver (below) handles relayout without the polling.
+      automaticLayout: false,
       minimap: { enabled: false },
       fontFamily: monacoFontFamily(),
       fontSize,
@@ -144,7 +146,11 @@
       attributeFilter: ['class', 'data-theme'],
     })
 
+    const ro = new ResizeObserver(() => editor?.layout())
+    ro.observe(container)
+
     return () => {
+      ro.disconnect()
       editor?.dispose()
       editor = null
       themeObs.disconnect()

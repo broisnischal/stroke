@@ -1,6 +1,6 @@
 <script>
   import { tick } from 'svelte'
-  import { toast } from 'svelte-sonner'
+  import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import { executeSql } from '$lib/api.js'
   import Loader from '@lucide/svelte/icons/loader'
   import KeyRound from '@lucide/svelte/icons/key-round'

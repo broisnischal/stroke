@@ -7,6 +7,9 @@
   import Sparkles      from '@lucide/svelte/icons/sparkles'
   import MessageSquare from '@lucide/svelte/icons/message-square'
   import X             from '@lucide/svelte/icons/x'
+  import Minus         from '@lucide/svelte/icons/minus'
+  import Square        from '@lucide/svelte/icons/square'
+  import Copy          from '@lucide/svelte/icons/copy'
   import KeyRound      from '@lucide/svelte/icons/key-round'
   import { cn } from '$lib/utils.js'
   import { detectOs } from '$lib/platform.js'
@@ -74,6 +77,8 @@
   async function winToggleMaximize()   { try { await getCurrentWindow().toggleMaximize()           } catch {} }
 
   const iconBtn = 'inline-flex size-[24px] items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-white/[0.07] hover:text-muted-foreground'
+  // Windows / Linux native-style caption buttons: full-height, square, flush right.
+  const winCtl = 'pointer-events-auto inline-flex h-full w-[46px] items-center justify-center text-muted-foreground/55 transition-colors hover:bg-white/[0.08] hover:text-foreground'
 </script>
 
 {#if isTauri && !fullscreen}
@@ -95,33 +100,38 @@
     <!-- ── Button overlay ── -->
     <div class="pointer-events-none relative z-10 flex h-full w-full items-center">
 
-      <!-- Traffic lights -->
-      <div class="traffic-group pointer-events-auto flex shrink-0 items-center gap-[7px] pl-[14px]">
-        <button type="button" class="traffic-dot traffic-close"    onclick={winClose}            aria-label="Close">
-          <svg class="traffic-icon" viewBox="0 0 8 8" width="6" height="6" fill="none">
-            <path d="M1.5 1.5l5 5M6.5 1.5l-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-          </svg>
-        </button>
-        <button type="button" class="traffic-dot traffic-minimize" onclick={winMinimize}          aria-label="Minimize">
-          <svg class="traffic-icon" viewBox="0 0 8 8" width="6" height="6" fill="none">
-            <path d="M1 4h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-          </svg>
-        </button>
-        <button type="button" class="traffic-dot traffic-maximize" onclick={winToggleFullscreen}  aria-label={fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}>
-          {#if fullscreen}
+      {#if isMac}
+        <!-- macOS traffic lights -->
+        <div class="traffic-group pointer-events-auto flex shrink-0 items-center gap-[7px] pl-[14px]">
+          <button type="button" class="traffic-dot traffic-close"    onclick={winClose}            aria-label="Close">
             <svg class="traffic-icon" viewBox="0 0 8 8" width="6" height="6" fill="none">
-              <path d="M1.5 3.5h2v-2M6.5 4.5h-2v2" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M1.5 1.5l5 5M6.5 1.5l-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
-          {:else}
+          </button>
+          <button type="button" class="traffic-dot traffic-minimize" onclick={winMinimize}          aria-label="Minimize">
             <svg class="traffic-icon" viewBox="0 0 8 8" width="6" height="6" fill="none">
-              <path d="M1.5 3.5v-2h2M6.5 4.5v2h-2" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M1 4h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
-          {/if}
-        </button>
-      </div>
+          </button>
+          <button type="button" class="traffic-dot traffic-maximize" onclick={winToggleFullscreen}  aria-label={fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}>
+            {#if fullscreen}
+              <svg class="traffic-icon" viewBox="0 0 8 8" width="6" height="6" fill="none">
+                <path d="M1.5 3.5h2v-2M6.5 4.5h-2v2" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            {:else}
+              <svg class="traffic-icon" viewBox="0 0 8 8" width="6" height="6" fill="none">
+                <path d="M1.5 3.5v-2h2M6.5 4.5v2h-2" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            {/if}
+          </button>
+        </div>
 
-      <!-- Divider -->
-      <div class="mx-2.5 h-[14px] w-px shrink-0 bg-border/30"></div>
+        <!-- Divider -->
+        <div class="mx-2.5 h-[14px] w-px shrink-0 bg-border/30"></div>
+      {:else}
+        <!-- Windows / Linux: no left lights — pad so the first control isn't flush to the corner -->
+        <div class="w-2.5 shrink-0"></div>
+      {/if}
 
       <!-- Sidebar toggle — disabled when not connected -->
       <button
@@ -169,7 +179,7 @@
       <div class="min-w-0 flex-1"></div>
 
       <!-- Right: trial pill + Agent + Chat -->
-      <div class="pointer-events-auto mr-3 flex shrink-0 items-center gap-1">
+      <div class={cn('pointer-events-auto flex shrink-0 items-center gap-1', isMac ? 'mr-3' : 'mr-2')}>
 
         <!-- Trial pill — shown only during active trial -->
         {#if $isTrialActive}
@@ -215,6 +225,25 @@
           <MessageSquare class="size-[13px]" />
         </button>
       </div>
+
+      {#if !isMac}
+        <!-- Windows / Linux native caption buttons (flush to the top-right corner) -->
+        <div class="pointer-events-auto flex h-full shrink-0 items-stretch self-stretch">
+          <button type="button" class={winCtl} onclick={winMinimize} aria-label="Minimize" title="Minimize">
+            <Minus class="size-[15px]" strokeWidth={1.5} />
+          </button>
+          <button type="button" class={winCtl} onclick={winToggleMaximize} aria-label={maximized ? 'Restore' : 'Maximize'} title={maximized ? 'Restore' : 'Maximize'}>
+            {#if maximized}
+              <Copy class="size-[12px]" strokeWidth={1.5} />
+            {:else}
+              <Square class="size-[12px]" strokeWidth={1.5} />
+            {/if}
+          </button>
+          <button type="button" class={cn(winCtl, 'hover:bg-[#e81123] hover:text-white')} onclick={winClose} aria-label="Close" title="Close">
+            <X class="size-[15px]" strokeWidth={1.5} />
+          </button>
+        </div>
+      {/if}
 
     </div>
   </div>

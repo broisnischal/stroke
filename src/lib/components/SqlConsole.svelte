@@ -15,6 +15,7 @@
   import Table2 from "@lucide/svelte/icons/table-2";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import { cn } from "$lib/utils.js";
+  import { hasPro } from '$lib/stores/license.js'
   import SqlEditor from "./SqlEditor.svelte";
   import { sqlToDrizzle, sqlToPrisma } from "$lib/orm-builder.js";
   import QueryHistoryPanel from "./QueryHistoryPanel.svelte";
@@ -85,6 +86,7 @@
     /** Called when user clicks "Fix with AI" — parent opens sidebar and sends the message */
     /** @param {{ error: string, sql: string }} detail */
     onfixwithai = /** @type {((detail: { error: string, sql: string }) => void) | undefined} */ (undefined),
+    onprorequired = /** @type {() => void} */ (() => {}),
   } = $props();
 
   /**
@@ -97,6 +99,21 @@
   /** Focus the SQL editor — called by the parent when this tab becomes active. */
   export function focusEditor() {
     sqlEditorRef?.focus()
+  }
+
+  /**
+   * Open `content` in a brand-new query tab and focus it. Used by
+   * "Open in SQL editor" so the current editor content is never clobbered.
+   * @param {string} content @param {string} [name]
+   */
+  export function openInNewTab(content, name) {
+    tabCounter += 1
+    const id = crypto.randomUUID()
+    sqlTabs = [...sqlTabs, { id, name: name || `Query ${tabCounter}`, content }]
+    activeTabId = id
+    sql = content
+    _lastSyncedSql = content
+    queueMicrotask(() => sqlEditorRef?.focus())
   }
 
   const initialTabId = crypto.randomUUID();
@@ -759,24 +776,28 @@
       <!-- View tabs (icon-only) -->
       <div class="flex items-center gap-0.5 px-1">
         {#each [
-          { id: 'table',   label: 'Table',   Icon: Table2 },
-          { id: 'chart',   label: 'Chart',   Icon: BarChart2 },
-          { id: 'json',    label: 'JSON',    Icon: Braces },
-          { id: 'explain', label: 'Explain', Icon: ScanSearch },
+          { id: 'table',   label: 'Table',   Icon: Table2,    pro: false },
+          { id: 'chart',   label: 'Chart',   Icon: BarChart2, pro: true },
+          { id: 'json',    label: 'JSON',    Icon: Braces,    pro: true },
+          { id: 'explain', label: 'Explain', Icon: ScanSearch, pro: true },
         ] as tab (tab.id)}
-          {@const active = outputVisible && (tab.id === 'explain' ? activeResult.outputView === 'explain' : currentDisplay.outputView === tab.id)}
+          {@const locked = tab.pro && !$hasPro}
+          {@const active = !locked && outputVisible && (tab.id === 'explain' ? activeResult.outputView === 'explain' : currentDisplay.outputView === tab.id)}
           {@const Icon = tab.Icon}
           <button
             type="button"
             onclick={() => {
+              if (locked) { onprorequired(); return }
               if (tab.id === 'explain') { void handleExplain() }
               else { setOutputView(tab.id); if (!outputVisible) toggleOutput() }
             }}
             class={cn(
               'flex size-7 items-center justify-center rounded transition-colors',
-              active ? 'bg-muted/70 text-foreground' : 'text-muted-foreground/50 hover:bg-muted/40 hover:text-muted-foreground',
+              locked
+                ? 'cursor-not-allowed opacity-40 text-muted-foreground/30'
+                : active ? 'bg-muted/70 text-foreground' : 'text-muted-foreground/50 hover:bg-muted/40 hover:text-muted-foreground',
             )}
-            title="{tab.label} view"
+            title="{tab.label} view{locked ? ' · Stroke Pro' : ''}"
           >
             <Icon class="size-3.5 shrink-0" />
           </button>

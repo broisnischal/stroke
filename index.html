@@ -3,12 +3,13 @@
   <head>
     <script>
       try {
-        const raw = localStorage.getItem('db-studio:settings')
+        const raw = localStorage.getItem('stroke:settings')
         const parsed = raw ? JSON.parse(raw) : null
         const valid = [
           'light', 'parchment', 'ice',
           'dark', 'midnight', 'vitesse', 'slate', 'forest', 'mono',
         ]
+        const lightThemes = ['light', 'parchment', 'ice']
         let theme = parsed?.theme
         if (!valid.includes(theme)) {
           // No saved preference — follow the OS
@@ -16,7 +17,7 @@
           theme = prefersDark ? 'dark' : 'light'
         }
         document.documentElement.dataset.theme = theme
-        if (theme !== 'light') document.documentElement.classList.add('dark')
+        if (!lightThemes.includes(theme)) document.documentElement.classList.add('dark')
         let zoom = 1
         if (parsed?.zoom != null) zoom = Number(parsed.zoom)
         else if (parsed?.fontSize != null) zoom = Number(parsed.fontSize) / 14

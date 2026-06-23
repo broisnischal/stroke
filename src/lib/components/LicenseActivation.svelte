@@ -89,7 +89,7 @@
     type="button"
     disabled={!key.trim() || loading || success}
     onclick={() => void submit()}
-    class="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-foreground text-sm font-semibold text-background transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+    class="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-foreground text-background transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 {naked ? 'h-9 text-[12px] font-medium' : 'h-10 text-sm font-semibold'}"
   >
     {#if loading}
       <Loader2 class="size-4 animate-spin" />

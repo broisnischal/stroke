@@ -15,6 +15,8 @@
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import FileDown from "@lucide/svelte/icons/file-down";
   import Columns3 from "@lucide/svelte/icons/columns-3";
+  import Terminal from "@lucide/svelte/icons/terminal";
+  import Crosshair from "@lucide/svelte/icons/crosshair";
   import FunctionSquare from "@lucide/svelte/icons/function-square";
   import Eye from "@lucide/svelte/icons/eye";
   import EyeOff from "@lucide/svelte/icons/eye-off";
@@ -76,10 +78,14 @@
     /** @type {(format: 'csv' | 'json') => void | Promise<void>} */
     onexport = () => {},
     onaddrow = () => {},
+    onopeninsql = () => {},
     /** @type {Set<string>} */
     hiddenColumns = new Set(),
     /** @type {(next: Set<string>) => void} */
     onhiddencolumnschange = () => {},
+    /** Called when user picks a column from the "Jump to column" menu — the table
+     *  scrolls it into view and briefly highlights it. */
+    onfocuscolumn = /** @type {(name: string) => void} */ (() => {}),
     /** Virtual FK relationship columns (reverse FK badge cols) to show in the hide/show dropdown. */
     virtualRelColumns = /** @type {Array<{ label: string }>} */ ([]),
     /** User-defined virtual expression columns to show in the hide/show dropdown. */
@@ -151,6 +157,7 @@
 
   let sortMenuOpen = $state(false);
   let columnsMenuOpen = $state(false);
+  let focusMenuOpen = $state(false);
   let limitOffsetOpen = $state(false);
   let moreMenuOpen = $state(false);
   let deleteConfirmPending = $state(false);
@@ -257,6 +264,14 @@
     ...virtualRelColumns.map((vc) => ({ value: `__vrel:${vc.label}`, label: vc.label, kind: "vrel", hidden: hiddenColumns.has(`__vrel:${vc.label}`) })),
     ...virtualExprCols.map((vc) => ({ value: `__vexpr:${vc.id}`, label: `ƒ ${vc.name}`, kind: "vexpr", hidden: !vc.enabled })),
   ]);
+
+  // Jump-to-column: only currently-visible real columns (hidden columns aren't
+  // rendered on the canvas, so there's nothing to scroll to).
+  const focusColumnItems = $derived(
+    columns
+      .filter((c) => !hiddenColumns.has(c.name))
+      .map((c) => ({ value: c.name, label: c.name })),
+  );
 
   function toggleColumnItem(/** @type {any} */ it) {
     if (it.kind === "vexpr") {
@@ -453,8 +468,8 @@
     class="studio-chrome studio-table-toolbar flex h-9 shrink-0 items-center gap-1 border-b border-border bg-panel px-2"
     data-studio-chrome
   >
-    <!-- Search — far left -->
-    <div class="relative flex h-7 w-52 shrink-0 items-center">
+    <!-- Search — far left, expands on focus -->
+    <div class="relative flex h-7 w-32 shrink-0 items-center transition-[width] duration-200 focus-within:w-44">
       <Search class="pointer-events-none absolute left-2 size-3.5 text-muted-foreground" />
       {#if tableViewMode === "structure"}
         <input
@@ -476,8 +491,8 @@
           role="searchbox"
           aria-label="Search all columns"
           class={cn(
-            "h-7 w-full min-w-0 border-input bg-input/30 pl-7 pr-7 text-ui-sm shadow-none focus-visible:ring-2",
-            localSearch.trim() && "border-ring/40",
+            "h-7 w-full min-w-0 border-transparent bg-accent/40 pl-7 pr-7 text-ui-sm shadow-none transition-colors focus-visible:border-input focus-visible:bg-input/30 focus-visible:ring-2",
+            localSearch.trim() && "border-ring/40 bg-input/30",
           )}
           placeholder="Search…"
           value={localSearch}
@@ -500,6 +515,9 @@
     </div>
 
     {#if tableViewMode !== "structure"}
+      <!-- Action button group: filter / sort / columns / jump / virtual -->
+      <div class="flex items-center gap-0.5">
+
       <!-- Filter -->
       <button
         type="button"
@@ -613,6 +631,35 @@
         {/snippet}
       </SearchableMenu>
 
+      <!-- Jump to column -->
+      <SearchableMenu
+        bind:open={focusMenuOpen}
+        items={focusColumnItems}
+        placeholder="Jump to column…"
+        contentClass="w-56"
+        onselect={(it) => onfocuscolumn(it.value)}
+      >
+        {#snippet trigger(props)}
+          <button
+            {...props}
+            class={cn(iconBtn, "shrink-0", focusMenuOpen && "bg-accent text-foreground")}
+            title="Jump to column"
+            disabled={loading || columns.length === 0}
+          >
+            <Crosshair class="size-3.5" />
+          </button>
+        {/snippet}
+        {#snippet header()}
+          <div class="border-b border-border/40 px-3 py-1.5">
+            <span class="text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground">Jump to column</span>
+          </div>
+        {/snippet}
+        {#snippet item(it)}
+          <Crosshair class="size-3.5 text-muted-foreground" />
+          <span class="min-w-0 flex-1 truncate">{it.label}</span>
+        {/snippet}
+      </SearchableMenu>
+
       <!-- Virtual columns button -->
       <button
         type="button"
@@ -629,6 +676,19 @@
           <span class="tabular-nums text-[11px] font-medium text-primary">{virtualColCount}</span>
         {/if}
       </button>
+
+      <!-- Open in SQL editor — opens a new query tab pre-filled with the current view's SELECT -->
+      <button
+        type="button"
+        class="inline-flex h-7 shrink-0 items-center justify-center rounded-md px-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+        title="Open in SQL editor — new query with current filters & sort"
+        disabled={loading || columns.length === 0}
+        onclick={onopeninsql}
+      >
+        <Terminal class="size-3.5 shrink-0" />
+      </button>
+
+      </div><!-- /action group -->
 
       <span class="mx-0.5 h-4 w-px shrink-0 bg-border/60"></span>
 
@@ -653,11 +713,10 @@
         {#if total > 0}
           <span
             class="flex shrink-0 items-center gap-1 font-mono text-ui-xs tabular-nums"
-            title="{to.toLocaleString('en-US')} of {total.toLocaleString('en-US')} rows loaded"
+            title="{to.toLocaleString('en-US')} of {total.toLocaleString('en-US')} rows loaded{queryMs > 0 ? ` · ${queryMs}ms` : ''}"
           >
             <span class="text-foreground/65">{to.toLocaleString("en-US")}</span>
             <span class="text-muted-foreground/40">of {total.toLocaleString("en-US")} loaded</span>
-            {#if queryMs > 0}<span class="text-muted-foreground/30">· {queryMs}ms</span>{/if}
           </span>
         {/if}
       {:else}
@@ -672,13 +731,8 @@
             {:else}
               <span class="text-muted-foreground/40">of {total.toLocaleString("en-US")}</span>
             {/if}
-            {#if queryMs > 0}<span class="text-muted-foreground/30">· {queryMs}ms</span>{/if}
           </span>
-        {:else if queryMs > 0}
-          <span class="shrink-0 font-mono text-ui-xs text-muted-foreground/35 tabular-nums">{queryMs}ms</span>
         {/if}
-
-        <span class="mx-0.5 h-4 w-px shrink-0 bg-border/60"></span>
 
         <Select.Root
           type="single"
@@ -751,7 +805,7 @@
       <RefreshCw class={cn("size-3.5", loading && "animate-spin")} />
     </button>
 
-    <!-- ⋯ More menu — always visible: structure, ∞, export, delete -->
+    <!-- Custom limit / offset -->
     <DropdownMenu.Root bind:open={limitOffsetOpen}
       onOpenChange={(open) => {
         if (open) {
@@ -840,6 +894,7 @@
       </DropdownMenu.Content>
     </DropdownMenu.Root>
 
+    <!-- ⋯ More menu: structure / ∞ / export / delete -->
     <DropdownMenu.Root
       bind:open={moreMenuOpen}
       onOpenChange={(open) => {

@@ -6,7 +6,7 @@
   import { onDestroy } from 'svelte'
   import { buildOption } from '$lib/chart-utils.js'
   import { isCurrentThemeDark } from '$lib/stores/settings.js'
-  import { toast } from 'svelte-sonner'
+  import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import ChoroplethChart from './ChoroplethChart.svelte'
   import CarbonMeterChart from './CarbonMeterChart.svelte'
 

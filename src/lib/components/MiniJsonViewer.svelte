@@ -1,7 +1,7 @@
 <script>
   import { tick } from "svelte";
   import Copy from "@lucide/svelte/icons/copy";
-  import { toast } from "svelte-sonner";
+  import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
   import { formatJsonValue } from "$lib/row-inspector.js";
   import { valueForJsonViewer } from "$lib/cell-expand.js";
   import { highlightJson, linkifyJsonInElement } from "$lib/json-inspector.js";
