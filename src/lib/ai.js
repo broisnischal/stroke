@@ -1352,11 +1352,20 @@ SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() ORDER B
       (ctx.userSkills ?? []).map((s) => `### ${s.name}\n${s.content}`).join('\n\n')
     : ''
 
+  const envLine = ctx.environment
+    ? ctx.environment === 'prod'
+      ? `Environment: PRODUCTION — treat all destructive queries (DELETE, DROP, TRUNCATE, UPDATE without WHERE) with extreme caution. Always confirm scope before executing.`
+      : ctx.environment === 'staging'
+      ? `Environment: STAGING`
+      : `Environment: DEV`
+    : ''
+
   return `You are an expert ${DB_LABEL[dbType] ?? 'SQL'} database assistant embedded in Stroke — a database GUI.
 Your job: help users explore, query, analyse, and visualise their database through tool calls and clear explanations.
 
 === DATABASE ===
 Engine: ${DB_LABEL[dbType] ?? dbType}
+${envLine}
 ${DB_NOTES[dbType] ?? ''}
 
 Available schemas: ${ctx.schemas.length ? ctx.schemas.join(', ') : ctx.activeSchema}

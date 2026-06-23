@@ -3,6 +3,8 @@
  *   activeSchema?: string
  *   tables?: string[]
  *   columnsByTable?: Record<string, string[]>
+ *   enumValues?: Record<string, string[]>
+ *   userFunctions?: Array<{name: string, signature: string, returnType: string, kind: string}>
  * }} SqlSchemaHints */
 
 // ── Keywords ─────────────────────────────────────────────────────────────────
@@ -312,6 +314,8 @@ export function registerMonacoSqlCompletion(monaco, getHints) {
       const activeSchema = hints.activeSchema ?? 'public'
       const tables = hints.tables ?? []
       const columnsByTable = hints.columnsByTable ?? {}
+      const enumValues = hints.enumValues ?? {}
+      const userFunctions = hints.userFunctions ?? []
 
       const word = model.getWordUntilPosition(position)
       const range = new monaco.Range(
@@ -489,6 +493,38 @@ export function registerMonacoSqlCompletion(monaco, getHints) {
             documentation: { value: fn.doc },
             sortText: sortKey(tierFn, partial, fn.label),
           })
+        }
+        // ── 5b. User-defined functions / procedures / aggregates ──────
+        for (const ufn of userFunctions) {
+          if (partial && !ufn.name.toLowerCase().startsWith(partial)) continue
+          suggestions.push({
+            label: ufn.name,
+            kind: ufn.kind === 'aggregate' ? Kind.Operator : Kind.Function,
+            insertText: `${ufn.name}($0)`,
+            insertTextRules: InsertAsSnippet,
+            range,
+            detail: `→ ${ufn.returnType}  [${ufn.kind}]`,
+            documentation: { value: `\`\`\`sql\n${ufn.signature}\`\`\`` },
+            sortText: sortKey(tierFn, partial, ufn.name),
+          })
+        }
+      }
+
+      // ── 5c. Enum values ────────────────────────────────────────────────
+      // Show enum values in column/value context or when partial starts inside quotes
+      if (ctx !== 'table') {
+        for (const [enumName, values] of Object.entries(enumValues)) {
+          for (const val of values) {
+            if (partial && !val.toLowerCase().startsWith(partial)) continue
+            suggestions.push({
+              label: val,
+              kind: Kind.Value,
+              insertText: `'${val}'`,
+              range,
+              detail: `enum · ${enumName}`,
+              sortText: sortKey('6_', partial, val),
+            })
+          }
         }
       }
 

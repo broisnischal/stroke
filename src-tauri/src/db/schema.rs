@@ -503,6 +503,19 @@ pub struct TriggerInfo {
     pub enabled: bool,
 }
 
+// ── Functions / Procedures (PostgreSQL only) ─────────────────────────────────
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FunctionInfo {
+    pub name: String,
+    /// Full call signature e.g. "fn(arg1 text, arg2 int)"
+    pub signature: String,
+    pub return_type: String,
+    /// "function" | "procedure" | "aggregate"
+    pub kind: String,
+}
+
 // ── Sequences (PostgreSQL only) ───────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize)]
@@ -698,6 +711,57 @@ pub async fn list_indexes(state: State<'_, DbState>, schema: String) -> Result<V
         ActiveConnection::Clickhouse(cfg) => super::clickhouse::list_indexes(&cfg).await,
         ActiveConnection::Duckdb(h) => super::duckdb::list_indexes(&h).await,
         ActiveConnection::Mssql(h) => super::mssql::list_indexes(&h, &schema).await,
+    }
+}
+
+async fn list_functions_pg(pool: &PgPool, schema: &str) -> Result<Vec<FunctionInfo>, String> {
+    let rows = sqlx::query(
+        r#"
+        SELECT DISTINCT ON (p.proname)
+               p.proname::text AS name,
+               pg_get_function_arguments(p.oid) AS arg_types,
+               COALESCE(pg_get_function_result(p.oid), 'void') AS return_type,
+               CASE p.prokind
+                   WHEN 'f' THEN 'function'
+                   WHEN 'p' THEN 'procedure'
+                   WHEN 'a' THEN 'aggregate'
+                   ELSE 'function'
+               END AS kind
+        FROM pg_catalog.pg_proc p
+        JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = $1
+          AND p.prokind IN ('f', 'p', 'a')
+        ORDER BY p.proname
+        "#,
+    )
+    .bind(schema)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("Failed to list functions: {e}"))?;
+
+    rows.iter()
+        .map(|row| {
+            let name: String = row.try_get("name").map_err(|e| e.to_string())?;
+            let arg_types: String = row.try_get("arg_types").map_err(|e| e.to_string())?;
+            let return_type: String = row.try_get("return_type").map_err(|e| e.to_string())?;
+            let kind: String = row.try_get("kind").map_err(|e| e.to_string())?;
+            Ok(FunctionInfo {
+                signature: format!("{}({})", name, arg_types),
+                name,
+                return_type,
+                kind,
+            })
+        })
+        .collect()
+}
+
+pub async fn list_functions(state: State<'_, DbState>, schema: String) -> Result<Vec<FunctionInfo>, String> {
+    match require_conn(&state)? {
+        ActiveConnection::Postgres(pool) => {
+            validate_ident(&schema)?;
+            list_functions_pg(&pool, &schema).await
+        }
+        _ => Ok(vec![]),
     }
 }
 

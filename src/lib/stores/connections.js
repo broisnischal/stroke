@@ -26,6 +26,7 @@ const LAST_ID_KEY  = 'stroke:last-connection-id'
  *   apiToken?: string
  *   ssh?: SshConfig
  *   readOnly?: boolean
+ *   environment?: 'prod' | 'staging' | 'dev' | null
  * }} SavedConnection
  */
 
