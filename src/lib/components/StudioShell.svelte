@@ -160,6 +160,7 @@
     engineFamily,
   } from '$lib/stores/connections.js'
   import { hasPro, FREE_CONNECTION_LIMIT } from '$lib/stores/license.js'
+  import { engineSupports } from '$lib/db-capabilities.js'
   import * as Dialog from '$lib/components/ui/dialog/index.js'
   import ExternalLink from '@lucide/svelte/icons/external-link'
   import {
@@ -660,15 +661,25 @@ let rowSearch = $state('')
   $effect(() => {
     if (activeView !== 'sql' || !connection || !activeSchema) return
     const schema = activeSchema
-    listEnums(schema).then((enums) => {
-      /** @type {Record<string, string[]>} */
-      const ev = {}
-      for (const e of enums) ev[e.name] = e.values
-      _sqlEnumValues = ev
-    }).catch(() => {})
-    listFunctions(schema).then((fns) => {
-      _sqlUserFunctions = fns
-    }).catch(() => {})
+    // Enum/function completion hints are PostgreSQL-only — skip the round-trips
+    // (which would just return empty) on every other engine.
+    if (engineSupports('enums', connection?.type)) {
+      listEnums(schema).then((enums) => {
+        /** @type {Record<string, string[]>} */
+        const ev = {}
+        for (const e of enums) ev[e.name] = e.values
+        _sqlEnumValues = ev
+      }).catch(() => {})
+    } else {
+      _sqlEnumValues = {}
+    }
+    if (engineSupports('functions', connection?.type)) {
+      listFunctions(schema).then((fns) => {
+        _sqlUserFunctions = fns
+      }).catch(() => {})
+    } else {
+      _sqlUserFunctions = []
+    }
   })
 
   // ── Connection health monitor ─────────────────────────────────────────────────
@@ -2258,7 +2269,7 @@ let rowSearch = $state('')
   })
 
   async function loadEnums() {
-    if (!activeSchema) { enums = []; return }
+    if (!activeSchema || !engineSupports('enums', connection?.type)) { enums = []; return }
     try {
       const list = await listEnums(activeSchema)
       enums = list.map((e) => ({ name: e.name ?? '', values: e.values ?? [] }))
@@ -2268,7 +2279,7 @@ let rowSearch = $state('')
   }
 
   async function loadTriggers() {
-    if (!activeSchema) { triggers = []; return }
+    if (!activeSchema || !engineSupports('triggers', connection?.type)) { triggers = []; return }
     try {
       const list = await listTriggers(activeSchema)
       triggers = list.map((t) => ({
@@ -2285,7 +2296,7 @@ let rowSearch = $state('')
   }
 
   async function loadSequences() {
-    if (!activeSchema) { sequences = []; return }
+    if (!activeSchema || !engineSupports('sequences', connection?.type)) { sequences = []; return }
     try {
       const list = await listSequences(activeSchema)
       sequences = list.map((s) => ({
@@ -2981,7 +2992,7 @@ let rowSearch = $state('')
       toast.success(`Truncated "${tableName}"`)
       if (activeTable === tableName) await loadRows()
     } catch (err) {
-      toast.error('Truncate failed', { description: String(err) })
+      toast.error('Could not truncate table', { description: String(err) })
     }
   }
 
@@ -2998,7 +3009,7 @@ let rowSearch = $state('')
         activeTable = null
       }
     } catch (err) {
-      toast.error('Drop failed', { description: String(err) })
+      toast.error('Could not drop', { description: String(err) })
     }
   }
 
@@ -3040,7 +3051,7 @@ let rowSearch = $state('')
       const filename = `${tableName}_${new Date().toISOString().slice(0, 10)}.sql`
       await saveExportFile(sql, filename, 'sql')
     } catch (e) {
-      toast.error('Export failed', { description: String(e) })
+      toast.error('Could not export', { description: String(e) })
     }
   }
 
@@ -3055,7 +3066,7 @@ let rowSearch = $state('')
       const filename = buildExportFilename(tableName, 'csv')
       await saveExportFile(csv, filename, 'csv')
     } catch (e) {
-      toast.error('Export failed', { description: String(e) })
+      toast.error('Could not export', { description: String(e) })
     }
   }
 
@@ -3149,7 +3160,7 @@ let rowSearch = $state('')
       await handleDeleteRows([...selected])
       toast.success(n === 1 ? 'Row deleted' : `${formatCompactCount(n)} rows deleted`)
     } catch (err) {
-      toast.error('Delete failed', { description: String(err) })
+      toast.error('Could not delete', { description: String(err) })
     }
   }
 
@@ -3183,7 +3194,7 @@ let rowSearch = $state('')
         })
       }
     } catch (err) {
-      toast.error('Insert failed', { description: String(err) })
+      toast.error('Could not insert row', { description: String(err) })
       throw err
     } finally {
       insertingRow = false
@@ -3311,7 +3322,7 @@ let rowSearch = $state('')
   existingSchemas={schemas}
   onexecute={async (sql) => {
     try { await executeDdl(sql) }
-    catch (e) { toast.error(String(e)); throw e }
+    catch (e) { toast.error('Could not create schema', { description: String(e) }); throw e }
   }}
   oncreated={async (schemaName) => {
     toast.success(`Schema "${schemaName}" created`)
@@ -3672,6 +3683,7 @@ let rowSearch = $state('')
         <svelte:boundary failed={tabError}>
           <SchemaPage
             schema={activeSchema}
+            connectionType={connection?.type ?? null}
             {indexes}
             {enums}
             {triggers}

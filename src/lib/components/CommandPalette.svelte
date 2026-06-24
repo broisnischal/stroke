@@ -117,7 +117,8 @@ import Search         from '@lucide/svelte/icons/search'
   $effect(() => {
     if (!open) {
       page = 'root'
-      paletteSearch = ''  // clear search so it never persists between opens
+      paletteSearch = ''   // clear search so it never persists between opens
+      debouncedSearch = '' // keep the debounced mirror in sync (no stale results on reopen)
     }
   })
 
@@ -148,6 +149,17 @@ import Search         from '@lucide/svelte/icons/search'
   let paletteSearch = $state('')
   const TABLES_PAGE_CAP = 100
 
+  // Debounced mirror of `paletteSearch`. The input stays bound to `paletteSearch`
+  // so typing feels instant, but the expensive scoring pass (over potentially
+  // thousands of tables) reads `debouncedSearch`, which only settles ~50ms after
+  // the last keystroke — collapsing a burst of keystrokes into a single re-score.
+  let debouncedSearch = $state('')
+  $effect(() => {
+    const v = paletteSearch
+    const id = setTimeout(() => { debouncedSearch = v }, 50)
+    return () => clearTimeout(id)
+  })
+
   // Pre-lowercase table names ONCE per table-list change (not per keystroke), so
   // filtering thousands of tables stays cheap as the user types — the keystroke
   // path then only runs the integer-scoring loop, never N× String.toLowerCase().
@@ -168,7 +180,7 @@ import Search         from '@lucide/svelte/icons/search'
 
   /** @param {{ t: { name: string }, l: string }[]} lowered */
   function filterAndCap(lowered) {
-    const q = paletteSearch.trim().toLowerCase()
+    const q = debouncedSearch.trim().toLowerCase()
     if (!q) return { items: lowered.slice(0, TABLES_PAGE_CAP).map((x) => x.t), total: lowered.length }
     /** @type {{ t: { name: string }, s: number }[]} */
     const scored = []

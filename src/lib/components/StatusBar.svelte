@@ -466,14 +466,16 @@
         </div>
       {/if}
 
-      <!-- Live mode toggle -->
+      <!-- Live mode toggle — renders as an unmistakable badge when active -->
       {#if showTableNav && liveSupported}
         {@render sep()}
         <button
           type="button"
           class={cn(
             'flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors',
-            live ? 'text-emerald-500 hover:bg-emerald-500/10' : 'text-muted-foreground/50 hover:bg-muted/50 hover:text-foreground',
+            live
+              ? 'bg-emerald-500/10 font-medium text-emerald-500 ring-1 ring-inset ring-emerald-500/30 hover:bg-emerald-500/15'
+              : 'text-muted-foreground/50 hover:bg-muted/50 hover:text-foreground',
           )}
           onclick={ontogglelive}
           aria-pressed={live}
@@ -484,10 +486,11 @@
               <span class="absolute inline-flex size-2.5 animate-ping rounded-full bg-emerald-500/50"></span>
               <span class="relative inline-flex size-1.5 rounded-full bg-emerald-500"></span>
             </span>
+            <span class="text-ui-2xs font-semibold uppercase tracking-wide">Live</span>
           {:else}
             <Radio class="size-3 shrink-0" />
+            <span>Live</span>
           {/if}
-          <span class={live ? 'font-medium' : ''}>Live</span>
         </button>
       {/if}
 
