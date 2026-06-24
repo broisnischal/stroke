@@ -119,39 +119,39 @@
 <Dialog.Root bind:open>
   <Dialog.Portal>
     <Dialog.Overlay />
-    <Dialog.Content showCloseButton={false} class="w-[min(440px,calc(100vw-2rem))] sm:max-w-none gap-0 overflow-hidden p-0">
+    <Dialog.Content showCloseButton={false} class="w-[min(500px,calc(100vw-2rem))] sm:max-w-none gap-0 overflow-hidden p-0">
 
       <!-- Header -->
-      <div class="flex items-start gap-3.5 border-b border-border/25 px-5 pt-5 pb-4">
-        <div class="mt-px flex size-8 shrink-0 items-center justify-center rounded-xl bg-muted/50">
+      <div class="flex items-center gap-3 border-b border-border/25 px-5 py-3.5">
+        <div class="flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted/60">
           <Link class="size-3.5 text-muted-foreground/70" />
         </div>
         <div class="min-w-0 flex-1">
-          <Dialog.Title class="text-[13px] font-semibold text-foreground">
+          <Dialog.Title class="text-[13px] font-semibold leading-none text-foreground">
             {constraintName ? 'Edit foreign key' : 'Add foreign key'}
           </Dialog.Title>
-          <p class="mt-0.5 font-mono text-[11px] text-muted-foreground/60">
-            {table}.<span class="text-foreground/70">{column}</span>
+          <p class="mt-1 truncate font-mono text-[11px] text-muted-foreground/50">
+            {table}.<span class="text-foreground/60">{column}</span>
           </p>
         </div>
-        <Dialog.Close class="inline-flex size-6 items-center justify-center rounded-lg text-muted-foreground/30 transition-colors hover:bg-muted/50 hover:text-muted-foreground focus-visible:outline-none" />
+        <Dialog.Close class="ml-2 inline-flex size-6 shrink-0 items-center justify-center rounded-lg text-muted-foreground/30 transition-colors hover:bg-muted/50 hover:text-muted-foreground focus-visible:outline-none" />
       </div>
 
       <!-- Body -->
-      <div class="flex flex-col gap-4 px-5 py-4">
+      <div class="flex flex-col gap-5 px-5 py-4">
 
-        <!-- FK path -->
-        <div class="flex items-center gap-2 rounded-xl border border-border/20 bg-muted/[0.2] px-3.5 py-2.5">
-          <span class="font-mono text-[12px]">
+        <!-- FK path preview -->
+        <div class="flex min-w-0 items-center gap-2 overflow-hidden rounded-lg border border-border/20 bg-muted/[0.18] px-3.5 py-2.5">
+          <span class="min-w-0 shrink truncate font-mono text-[12px]">
             <span class="text-muted-foreground/40">{schema}.</span><span class="text-foreground/70">{table}</span>.<span class="font-semibold text-foreground">{column}</span>
           </span>
           <ArrowRight class="size-3 shrink-0 text-muted-foreground/30" />
           {#if refTable && refColumn}
-            <span class="font-mono text-[12px]">
+            <span class="min-w-0 shrink truncate font-mono text-[12px]">
               <span class="text-muted-foreground/40">{schema}.</span><span class="text-foreground/70">{refTable}</span>.<span class="font-semibold text-blue-400">{refColumn}</span>
             </span>
           {:else}
-            <span class="font-mono text-[11px] text-muted-foreground/30">select table and column</span>
+            <span class="shrink-0 font-mono text-[11px] text-muted-foreground/30 italic">select table and column below</span>
           {/if}
         </div>
 
@@ -175,19 +175,19 @@
           </div>
         </div>
 
-        <!-- ON UPDATE + ON DELETE -->
-        <div class="grid grid-cols-2 gap-4">
+        <!-- ON UPDATE + ON DELETE — stacked so each pill row has full width -->
+        <div class="flex flex-col gap-3.5">
           <div>
             <p class={lbl}>On update</p>
-            <div class="flex flex-wrap gap-1.5">
+            <div class="flex flex-wrap gap-1.5 pt-1">
               {#each FK_ACTIONS as a (a)}
                 <button type="button" class={actionCls(a, onUpdate === a, 'update')} onclick={() => (onUpdate = a)}>{a}</button>
               {/each}
             </div>
           </div>
-          <div>
+          <div class="border-t border-border/15 pt-3.5">
             <p class={lbl}>On delete</p>
-            <div class="flex flex-wrap gap-1.5">
+            <div class="flex flex-wrap gap-1.5 pt-1">
               {#each FK_ACTIONS as a (a)}
                 <button type="button" class={actionCls(a, onDelete === a, 'delete')} onclick={() => (onDelete = a)}>{a}</button>
               {/each}
@@ -198,24 +198,26 @@
       </div>
 
       <!-- Footer -->
-      <div class="flex items-center justify-end gap-2 border-t border-border/25 px-5 py-3">
+      <div class="flex items-center gap-2 border-t border-border/25 px-5 py-3">
         {#if constraintName}
           <button type="button" disabled={deleting || saving}
-            class="mr-auto inline-flex h-8 items-center gap-1.5 rounded-lg px-3.5 text-[13px] text-destructive/70 transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
+            class="mr-auto inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-[12px] text-destructive/70 transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
             onclick={() => (dropConfirmOpen = true)}>
             {#if deleting}<Loader class="size-3 animate-spin" />{/if}
             Remove FK
           </button>
         {/if}
-        <button type="button"
-          class="inline-flex h-8 items-center rounded-lg px-3.5 text-[13px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
-          onclick={() => (open = false)}>Cancel</button>
-        <button type="button" disabled={!isValid || saving || deleting}
-          class="inline-flex h-8 items-center gap-1.5 rounded-lg bg-foreground px-4 text-[13px] font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-40"
-          onclick={handleSave}>
-          {#if saving}<Loader class="size-3 animate-spin" />{/if}
-          {constraintName ? 'Update FK' : 'Add FK'}
-        </button>
+        <div class="ml-auto flex items-center gap-2">
+          <button type="button"
+            class="inline-flex h-8 items-center whitespace-nowrap rounded-lg px-3.5 text-[13px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
+            onclick={() => (open = false)}>Cancel</button>
+          <button type="button" disabled={!isValid || saving || deleting}
+            class="inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg bg-foreground px-4 text-[13px] font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-40"
+            onclick={handleSave}>
+            {#if saving}<Loader class="size-3 animate-spin" />{/if}
+            {constraintName ? 'Update FK' : 'Add FK'}
+          </button>
+        </div>
       </div>
 
     </Dialog.Content>
