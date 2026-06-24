@@ -187,7 +187,7 @@
       ? `COMMENT ON COLUMN ${tbl()}."${col}" IS NULL`
       : `COMMENT ON COLUMN ${tbl()}."${col}" IS '${esc}'`
     executeSql(sql).then(() => { toast.success('Comment updated'); onrefresh() })
-      .catch(e => toast.error('Failed', { description: String(e) }))
+      .catch(e => toast.error('Could not update comment', { description: String(e) }))
   }
 
   // ── Apply / Reset ─────────────────────────────────────────────────────────
@@ -344,7 +344,7 @@
   function updateIndexComment(/** @type {string} */ name, /** @type {string} */ c) {
     const sql = c.trim() === '' ? `COMMENT ON INDEX "${name}" IS NULL` : `COMMENT ON INDEX "${name}" IS '${c.replace(/'/g, "''")}'`
     executeSql(sql).then(() => { toast.success('Comment updated'); onrefresh() })
-      .catch(e => toast.error('Failed', { description: String(e) }))
+      .catch(e => toast.error('Could not update comment', { description: String(e) }))
   }
 
   // ── Filtered data ─────────────────────────────────────────────────────────

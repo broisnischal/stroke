@@ -61,7 +61,7 @@
       await executeSql(sql)
       toast.success(`Sequence "${name.trim()}" created`)
       onrefresh(); reset(); open = false
-    } catch (e) { toast.error(String(e))
+    } catch (e) { toast.error('Could not create sequence', { description: String(e) })
     } finally { saving = false; confirmOpen = false }
   }
 

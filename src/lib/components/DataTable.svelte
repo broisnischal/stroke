@@ -845,7 +845,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (afterAction) navigateAfterEdit(rowIdx, colIdx, afterAction);
       else tick().then(() => tableContainer?.focus({ preventScroll: true }));
     } catch (err) {
-      toast.error("Save failed", { description: String(err) });
+      toast.error("Could not save", { description: String(err) });
     }
   }
 
@@ -862,7 +862,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         okCount++;
       } catch (err) {
         failed.push(edit);
-        toast.error("Save failed", { description: String(err) });
+        toast.error("Could not save", { description: String(err) });
       }
     }
     // Keep only the edits that failed so the user can retry / reset them.
@@ -1154,7 +1154,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         description: out.length > 120 ? out.slice(0, 120) + "…" : out,
       });
     } catch (e) {
-      toast.error("Transform failed", { description: String(e?.message ?? e) });
+      toast.error("Could not apply transform", { description: String(e?.message ?? e) });
     }
   }
 
@@ -1193,7 +1193,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         n === 1 ? "Row deleted" : `${formatCompactCount(n)} rows deleted`,
       );
     } catch (err) {
-      toast.error("Delete failed", { description: String(err) });
+      toast.error("Could not delete", { description: String(err) });
     }
   }
 
@@ -3894,8 +3894,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           <PanelRight />
           Open
         </ContextMenu.Item>
-        {#if menuForeignKey && !menuCellNull}
+        {#if menuForeignKey}
           <ContextMenu.Item
+            disabled={menuCellNull}
+            title={menuCellNull ? 'This value is NULL — there is no referenced row to open.' : undefined}
             onSelect={() =>
               runMenuAction(() =>
                 onfollowforeignkey({
@@ -3905,8 +3907,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               )}
           >
             <ExternalLink />
-            Open Tab
-            <ContextMenu.Shortcut>⌘↵</ContextMenu.Shortcut>
+            {menuCellNull ? 'Open Tab — value is NULL' : 'Open Tab'}
+            {#if !menuCellNull}<ContextMenu.Shortcut>⌘↵</ContextMenu.Shortcut>{/if}
           </ContextMenu.Item>
         {/if}
         <ContextMenu.Separator />

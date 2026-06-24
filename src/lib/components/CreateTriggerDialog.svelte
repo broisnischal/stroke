@@ -70,7 +70,7 @@
       await executeSql(sql)
       toast.success(`Trigger "${name.trim()}" created`)
       onrefresh(); reset(); open = false
-    } catch (e) { toast.error(String(e))
+    } catch (e) { toast.error('Could not create trigger', { description: String(e) })
     } finally { saving = false; confirmOpen = false }
   }
 

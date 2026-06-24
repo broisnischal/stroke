@@ -138,7 +138,7 @@
       sqlModal = null;
       refresh();
     } catch (e) {
-      toast.error("Execution failed", { description: String(e) });
+      toast.error("Could not run statement", { description: String(e) });
     } finally {
       sqlRunning = false;
     }
