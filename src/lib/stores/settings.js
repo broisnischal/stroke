@@ -149,8 +149,12 @@ export function applySettings(settings) {
   setMode(dark ? 'dark' : 'light')
   appThemeId.set(theme)
   isCurrentThemeDark.set(dark)
+  // Linux/WebKitGTK at 1x DPI: 14px strokes are too thin for reliable readability.
+  // Bump the base from 14 → 15px so the zoom ladder scales from a legible root.
+  // The canvas table and Monaco editor both read --app-font-size, so they scale too.
+  const basePx = root.dataset.os === 'linux' ? 15 : 14
   root.style.setProperty('--app-zoom', String(zoom))
-  root.style.setProperty('--app-font-size', `${Math.round(14 * zoom)}px`)
+  root.style.setProperty('--app-font-size', `${Math.round(basePx * zoom)}px`)
 
   // Font family — overrides the stylesheet :root defaults inline (inline style
   // wins), so the whole UI + canvas grid pick it up. The canvas re-measures its
