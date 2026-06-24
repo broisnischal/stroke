@@ -1654,7 +1654,6 @@ pub async fn execute_sql(state: State<'_, DbState>, sql: String) -> Result<SqlRe
         } => r,
         _ = async { let _ = cancel_rx.await; } => Err("Query cancelled".to_string()),
     };
-    if let Ok(mut guard) = state.cancel_tx.lock() { *guard = None; }
     result
 }
 
@@ -1966,7 +1965,6 @@ pub async fn execute_sql_multi(state: State<'_, DbState>, sql: String) -> Result
         } => r,
         _ = async { let _ = cancel_rx.await; } => Err("Query cancelled".to_string()),
     };
-    if let Ok(mut guard) = state.cancel_tx.lock() { *guard = None; }
     result
 }
 
