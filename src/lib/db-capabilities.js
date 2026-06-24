@@ -31,6 +31,11 @@ const SUPPORT = {
   rls:       new Set(['postgres']),
   // Live mode (change notifications / polling) has backend support here.
   liveMode:  new Set(['postgres', 'sqlite']),
+  // Inline structure editing (ALTER COLUMN TYPE … USING, COMMENT ON COLUMN,
+  // double-quoted identifiers) generates PostgreSQL-only DDL. Other engines use
+  // incompatible syntax (MySQL MODIFY COLUMN; SQLite has no ALTER COLUMN), so we
+  // gate the editing affordances there and point users to the SQL console.
+  editStructure: new Set(['postgres']),
 }
 
 /**

@@ -214,7 +214,11 @@
   /** @typedef {import('$lib/foreign-key-nav.js').ForeignKeyInfo} ForeignKeyInfo */
 
   const SEARCH_DEBOUNCE_MS = 150
-  const COLUMNS_CACHE_MAX = 60
+  // Per-table column metadata is tiny (an array of column defs), so we can cache a
+  // lot of it. A high cap means revisiting a table almost never re-fetches columns
+  // on-demand — which is what caused a visible flicker on switch-back when the old
+  // 60-entry limit evicted earlier tables in a large schema.
+  const COLUMNS_CACHE_MAX = 400
 
   /** @param {Map<string, unknown>} map @param {string} key @param {unknown} value */
   function lruSet(map, key, value) {
@@ -3617,6 +3621,25 @@ let rowSearch = $state('')
         </div>
       </div>
     {:else}
+      {#snippet tabError(/** @type {unknown} */ error, /** @type {() => void} */ reset)}
+        <div class="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
+          <AlertTriangle class="size-8 text-destructive/60" />
+          <div class="flex flex-col gap-1">
+            <p class="text-ui-sm font-medium text-foreground">This view hit an error</p>
+            <p class="max-w-md break-words font-mono text-ui-xs text-muted-foreground">
+              {error instanceof Error ? error.message : String(error)}
+            </p>
+          </div>
+          <button
+            type="button"
+            class="rounded-md border border-border bg-muted/40 px-3 py-1.5 text-ui-xs font-medium transition-colors hover:bg-accent hover:text-foreground"
+            onclick={reset}
+          >
+            Reload this view
+          </button>
+        </div>
+      {/snippet}
+
       <!-- Full-window AI chat — kept mounted after first open so state is preserved -->
       {#if aiEverOpened}
         <div
@@ -3657,25 +3680,6 @@ let rowSearch = $state('')
         onrecentselect={(schema, table) => { if (aiMode) exitAiMode(); void openTableTab(schema, table) }}
       />
       {/if}
-
-      {#snippet tabError(/** @type {unknown} */ error, /** @type {() => void} */ reset)}
-        <div class="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
-          <AlertTriangle class="size-8 text-destructive/60" />
-          <div class="flex flex-col gap-1">
-            <p class="text-ui-sm font-medium text-foreground">This view hit an error</p>
-            <p class="max-w-md break-words font-mono text-ui-xs text-muted-foreground">
-              {error instanceof Error ? error.message : String(error)}
-            </p>
-          </div>
-          <button
-            type="button"
-            class="rounded-md border border-border bg-muted/40 px-3 py-1.5 text-ui-xs font-medium transition-colors hover:bg-accent hover:text-foreground"
-            onclick={reset}
-          >
-            Reload this view
-          </button>
-        </div>
-      {/snippet}
 
       {#if activeTab?.kind === 'ai'}
         <!-- AI is handled via AI mode toggle -->
@@ -4063,6 +4067,7 @@ let rowSearch = $state('')
             <StructureView
               schema={activeSchema}
               table={activeTable ?? ''}
+              connectionType={connection?.type ?? null}
               {primaryKey}
               columns={structureColumns}
               indexes={activeTableIndexes}
@@ -4155,6 +4160,7 @@ let rowSearch = $state('')
                 loading={loadingRows}
                 {loadingMore}
                 {infiniteScroll}
+                endOfResults={infiniteScroll && total > 0 && _infiniteRows.length >= total}
                 onloadmore={handleLoadMore}
                 saving={savingCell || deletingRows || insertingRow}
                 bind:selected

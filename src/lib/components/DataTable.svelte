@@ -212,6 +212,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     loadingMore = false,
     /** Called when the user scrolls near the bottom in infinite scroll mode. */
     onloadmore = /** @type {() => void} */ (() => {}),
+    /** True when every row has been loaded in infinite scroll mode (no more pages). */
+    endOfResults = false,
   } = $props();
 
   /**
@@ -1485,6 +1487,25 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     (showRowExpand ? 1 : 0) + (showSelection ? 1 : 0) + visibleColumns.length + 1,
   )
   const navigableColumns = $derived(visibleColumns)
+
+  // ── Accessibility: focused-cell announcement ────────────────────────────────
+  // The canvas grid has no per-cell DOM, so screen readers get nothing on
+  // navigation. This derived builds a short description of the focused cell and
+  // is rendered into an aria-live region. It depends ONLY on focus/edit state and
+  // the data — NOT on scroll offsets — so it never recomputes during the rAF draw
+  // loop and cannot affect render throughput.
+  const a11yCellAnnouncement = $derived.by(() => {
+    if (focusedRow === null || focusedCol === null) return ''
+    const ai = visToActualColIdx(focusedCol)
+    if (ai < 0) return ''
+    const col = columns[ai]
+    const row = rows[focusedRow]
+    if (!col || !row) return ''
+    const raw = formatCell(row[ai])
+    const val = raw.length > 80 ? raw.slice(0, 80) + '…' : raw
+    const editing = editingCell && editingCell.rowIdx === focusedRow && editingCell.colIdx === ai
+    return `Row ${focusedRow + 1} of ${rows.length}, ${col.name}: ${val}${editing ? ', editing' : ''}`
+  })
   /** Map of pinned column name → sticky left offset in px. Gutters are not
    *  sticky, so pinned columns stick from the left edge (0). */
   const pinnedOffsets = $derived.by(() => {
@@ -2355,11 +2376,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ctx.fillRect(0, ry, c.usedW, rh)
     }
 
-    // Non-pinned cells.
+    // Non-pinned cells. geom.cols is ordered by ascending contentX, so once a
+    // column starts past the right viewport edge every later one does too — break
+    // instead of iterating the off-screen tail (matters for very wide tables).
     for (const col of geom.cols) {
       if (col.pinned) continue
       const dx = col.contentX - _scrollLeft
-      if (dx + col.w <= 0 || dx >= _viewportWidth) continue
+      if (dx >= _viewportWidth) break
+      if (dx + col.w <= 0) continue
       drawCell(ctx, idx, col, dx, ry, rh, c)
     }
 
@@ -2461,10 +2485,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     ctx.lineWidth = 1
     ctx.beginPath()
     // Non-pinned column separators (skip ones hidden behind the frozen region).
+    // Same ascending-contentX ordering → break past the right edge.
     for (const col of geom.cols) {
       if (col.pinned) continue
       const dx = col.contentX - _scrollLeft
-      if (dx + col.w <= 0 || dx >= vw) continue
+      if (dx >= vw) break
+      if (dx + col.w <= 0) continue
       const ex = dx + col.w - 0.5
       if (ex <= frozenW) continue
       ctx.moveTo(ex, ry); ctx.lineTo(ex, ry + rh)
@@ -2706,11 +2732,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     ctx.fillStyle = withAlpha(c.cMutedBg, 0.38)
     ctx.fillRect(0, 0, c.W, HEADER_H)
 
-    // Non-pinned headers.
+    // Non-pinned headers. Ordered by ascending contentX → break past the right edge.
     for (const col of geom.cols) {
       if (col.pinned) continue
       const dx = col.contentX - _scrollLeft
-      if (dx + col.w <= 0 || dx >= c.W) continue
+      if (dx >= c.W) break
+      if (dx + col.w <= 0) continue
       drawHeaderCell(ctx, col, dx, c)
     }
 
@@ -3472,6 +3499,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           data-canvas-table=""
           {...props}
           tabindex={-1}
+          role="grid"
+          aria-label={`${tableName || 'Data'} table, ${rows.length} ${rows.length === 1 ? 'row' : 'rows'}`}
+          aria-rowcount={rows.length}
+          aria-colcount={navigableColumns.length}
           class={cn(
             "app-scroll relative overflow-auto bg-panel select-none outline-none [scrollbar-gutter:stable] [contain:layout] [overflow-anchor:none]",
             embedded ? "max-h-80" : "min-h-0 flex-1",
@@ -3495,6 +3526,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             class="font-mono"
             style="position:absolute;top:0;left:0;width:0;height:0;overflow:hidden;pointer-events:none"
           ></span>
+
+          <!-- Screen-reader announcement for the focused cell. Visually hidden;
+               updated only when focus/edit state changes (not during scroll). -->
+          <div
+            class="sr-only"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >{a11yCellAnnouncement}</div>
+
 
           <!-- Canvas: always mounted so the 2D context survives table navigation
                (each mount creates a new GPU-tracked context; keeping it alive
@@ -3808,6 +3849,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                   <Loader class="size-3 animate-spin text-muted-foreground/50" />
                   <span class="text-[11px] text-muted-foreground/50">Loading more…</span>
                 </div>
+              </div>
+            </div>
+          {:else if infiniteScroll && endOfResults && rows.length > 0}
+            <!-- Infinite scroll: all rows loaded — explicit end marker so the user
+                 knows scrolling won't fetch more (vs. "is it still loading?"). -->
+            <div style="position:relative;width:100%;pointer-events:none;z-index:5">
+              <div class="flex items-center justify-center py-2.5">
+                <span class="rounded-full border border-border/15 bg-muted/20 px-3 py-1 text-[11px] text-muted-foreground/40">
+                  End of results — {rows.length.toLocaleString()} {rows.length === 1 ? 'row' : 'rows'}
+                </span>
               </div>
             </div>
           {/if}
