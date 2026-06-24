@@ -13,12 +13,16 @@
   import Trash2 from '@lucide/svelte/icons/trash-2'
   import { Button } from '$lib/components/ui/button/index.js'
   import { cn } from '$lib/utils.js'
+  import Lock from '@lucide/svelte/icons/lock'
   import DdlConfirmDialog from './DdlConfirmDialog.svelte'
   import CreateTriggerDialog from './CreateTriggerDialog.svelte'
   import CreateSequenceDialog from './CreateSequenceDialog.svelte'
+  import { engineSupports, unsupportedReason } from '$lib/db-capabilities.js'
 
   let {
     schema = '',
+    /** @type {string | null} */
+    connectionType = null,
     /** @type {{ name: string, tableName: string, columns?: string, isUnique?: boolean, isPrimary?: boolean, indexType?: string }[]} */
     indexes = [],
     /** @type {{ name: string, values: string[], usedInTables: string[] }[]} */
@@ -60,6 +64,20 @@
     { id: 'views',     label: 'Views',      icon: Eye,       count: () => views.length },
     { id: 'matviews',  label: 'Mat. Views', icon: Layers,    count: () => matViews.length },
   ]
+
+  // Maps each tab to its capability key + user-facing label, so a tab that the
+  // current engine can't support shows a clear "requires PostgreSQL" note rather
+  // than a misleading empty pane.
+  const TAB_FEATURE = /** @type {Record<string, { key: string, label: string }>} */ ({
+    indexes:   { key: 'indexes',   label: 'Indexes' },
+    triggers:  { key: 'triggers',  label: 'Triggers' },
+    sequences: { key: 'sequences', label: 'Sequences' },
+    enums:     { key: 'enums',     label: 'Enums' },
+    views:     { key: 'views',     label: 'Views' },
+    matviews:  { key: 'matviews',  label: 'Materialized views' },
+  })
+  const activeFeature = $derived(TAB_FEATURE[activeType])
+  const activeSupported = $derived(engineSupports(activeFeature.key, connectionType))
 
   // ── DDL confirm ────────────────────────────────────────────────────────────
   let confirmOpen = $state(false)
@@ -150,11 +168,11 @@
   <div class="studio-chrome flex h-9 shrink-0 items-center gap-2 border-b border-border bg-panel px-3" data-studio-chrome>
     <span class="font-mono text-ui-sm font-medium">Schema Explorer</span>
     <div class="ml-auto flex items-center gap-1">
-      {#if activeType === 'triggers'}
+      {#if activeType === 'triggers' && activeSupported}
         <Button variant="ghost" size="sm" class="h-7 gap-1.5 px-2 text-muted-foreground hover:text-foreground" onclick={() => (createTriggerOpen = true)}>
           <Plus class="size-3.5" /><span class="text-ui-xs">New Trigger</span>
         </Button>
-      {:else if activeType === 'sequences'}
+      {:else if activeType === 'sequences' && activeSupported}
         <Button variant="ghost" size="sm" class="h-7 gap-1.5 px-2 text-muted-foreground hover:text-foreground" onclick={() => (createSequenceOpen = true)}>
           <Plus class="size-3.5" /><span class="text-ui-xs">New Sequence</span>
         </Button>
@@ -206,8 +224,12 @@
   <!-- Content -->
   <div class="app-scroll min-h-0 flex-1 overflow-y-auto [will-change:transform]">
 
+    <!-- Engine doesn't support the active section — explain why instead of a blank pane. -->
+    {#if !activeSupported}
+      {@render unsupported(activeFeature.label, activeFeature.key)}
+
     <!-- ── Indexes ───────────────────────────────────────────────────────── -->
-    {#if activeType === 'indexes'}
+    {:else if activeType === 'indexes'}
       {#if indexes.length === 0}
         {@render emptyState(Zap, 'No indexes', 'Indexes in this schema will appear here')}
       {:else if filteredIndexes.length === 0}
@@ -498,6 +520,16 @@
 
 {#snippet noMatch(type, q)}
   <p class="py-10 text-center text-ui-xs text-muted-foreground/60">No {type} match "{q}"</p>
+{/snippet}
+
+{#snippet unsupported(label, key)}
+  <div class="flex h-full flex-col items-center justify-center gap-3 p-12 text-center">
+    <Lock class="size-9 text-muted-foreground/20" />
+    <div>
+      <p class="font-mono text-ui text-muted-foreground">Not available on this database</p>
+      <p class="mx-auto mt-1 max-w-xs text-ui-xs text-muted-foreground/60">{unsupportedReason(label, key)}</p>
+    </div>
+  </div>
 {/snippet}
 
 <!-- Dialogs -->

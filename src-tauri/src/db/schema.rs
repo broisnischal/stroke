@@ -70,8 +70,15 @@ const LIST_TABLES_SQL: &str = r#"
         END AS kind,
         CASE
             WHEN c.relkind IN ('v', 'f') THEN -1
-            WHEN s.n_live_tup IS NOT NULL THEN GREATEST(s.n_live_tup::bigint, 0)
-            WHEN c.reltuples >= 0 THEN c.reltuples::bigint
+            -- Trust the stats/planner estimate ONLY when it is strictly positive.
+            -- A zero or missing estimate is ambiguous: a freshly created table,
+            -- bulk-loaded data, a restored dump, or a server where autovacuum /
+            -- the stats collector hasn't run yet all report n_live_tup = 0 even
+            -- when rows exist. We mark those as -1 (unknown) and resolve them with
+            -- an exact COUNT(*) below. Large tables keep a positive estimate and
+            -- skip the (potentially slow) exact count.
+            WHEN COALESCE(s.n_live_tup, 0) > 0 THEN s.n_live_tup::bigint
+            WHEN c.reltuples > 0 THEN c.reltuples::bigint
             ELSE -1
         END AS row_count,
         CASE WHEN c.relkind IN ('r', 'p') THEN c.relrowsecurity ELSE false END AS rls_enabled
@@ -411,6 +418,46 @@ async fn list_schemas_mysql(pool: &MySqlPool) -> Result<Vec<String>, String> {
     Ok(vec![db.unwrap_or_else(|| "default".to_string())])
 }
 
+async fn mysql_exact_row_count(pool: &MySqlPool, schema: &str, table: &str) -> Result<i64, String> {
+    let q = |id: &str| format!("`{}`", id.replace('`', "``"));
+    let sql = format!("SELECT COUNT(*) FROM {}.{}", q(schema), q(table));
+    sqlx::query_scalar::<_, i64>(&sql)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| format!("Failed to count rows for {table}: {e}"))
+}
+
+/// Replace ambiguous (-1) row counts with an exact COUNT(*). Mirrors the
+/// PostgreSQL `resolve_unknown_row_counts` path.
+async fn resolve_unknown_row_counts_mysql(pool: &MySqlPool, schema: &str, tables: &mut [TableInfo]) {
+    for t in tables.iter_mut() {
+        if t.row_count < 0 && t.kind == "view" {
+            t.row_count = 0;
+        }
+    }
+
+    let needs_count: Vec<usize> = tables
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| t.row_count < 0)
+        .map(|(i, _)| i)
+        .collect();
+
+    if needs_count.is_empty() {
+        return;
+    }
+
+    let futs: Vec<_> = needs_count
+        .iter()
+        .map(|&i| mysql_exact_row_count(pool, schema, &tables[i].name))
+        .collect();
+    let counts = futures::future::join_all(futs).await;
+
+    for (&idx, result) in needs_count.iter().zip(counts.iter()) {
+        tables[idx].row_count = result.as_ref().copied().unwrap_or(0);
+    }
+}
+
 async fn list_tables_mysql(pool: &MySqlPool, schema: &str) -> Result<Vec<TableInfo>, String> {
     let rows = sqlx::query(
         "SELECT TABLE_NAME, TABLE_TYPE, COALESCE(TABLE_ROWS, 0) \
@@ -423,18 +470,25 @@ async fn list_tables_mysql(pool: &MySqlPool, schema: &str) -> Result<Vec<TableIn
     .await
     .map_err(|e| format!("Failed to list tables: {e}"))?;
 
-    Ok(rows
+    let mut tables: Vec<TableInfo> = rows
         .iter()
         .filter_map(|r| {
             let name: String = r.try_get(0).ok()?;
             let ty: String = r.try_get(1).unwrap_or_else(|_| "BASE TABLE".to_string());
             // TABLE_ROWS is BIGINT UNSIGNED. COALESCE makes it non-nullable so
             // decode as u64 directly; Option<u64> can silently fail on non-null columns.
-            let row_count: i64 = r.try_get::<u64, _>(2).unwrap_or(0) as i64;
+            // For InnoDB this is only an estimate and is frequently 0 (or far off)
+            // until ANALYZE TABLE runs — so a 0 estimate is treated as unknown (-1)
+            // and resolved with an exact COUNT(*) below.
+            let est: i64 = r.try_get::<u64, _>(2).unwrap_or(0) as i64;
             let kind = if ty == "VIEW" { "view" } else { "table" }.to_string();
+            let row_count = if est > 0 { est } else { -1 };
             Some(TableInfo { name, kind, row_count, rls_enabled: None })
         })
-        .collect())
+        .collect();
+
+    resolve_unknown_row_counts_mysql(pool, schema, &mut tables).await;
+    Ok(tables)
 }
 
 async fn list_indexes_mysql(pool: &MySqlPool, schema: &str) -> Result<Vec<IndexInfo>, String> {
@@ -501,6 +555,19 @@ pub struct TriggerInfo {
     pub events: String,
     pub function_name: String,
     pub enabled: bool,
+}
+
+// ── Functions / Procedures (PostgreSQL only) ─────────────────────────────────
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FunctionInfo {
+    pub name: String,
+    /// Full call signature e.g. "fn(arg1 text, arg2 int)"
+    pub signature: String,
+    pub return_type: String,
+    /// "function" | "procedure" | "aggregate"
+    pub kind: String,
 }
 
 // ── Sequences (PostgreSQL only) ───────────────────────────────────────────────
@@ -698,6 +765,57 @@ pub async fn list_indexes(state: State<'_, DbState>, schema: String) -> Result<V
         ActiveConnection::Clickhouse(cfg) => super::clickhouse::list_indexes(&cfg).await,
         ActiveConnection::Duckdb(h) => super::duckdb::list_indexes(&h).await,
         ActiveConnection::Mssql(h) => super::mssql::list_indexes(&h, &schema).await,
+    }
+}
+
+async fn list_functions_pg(pool: &PgPool, schema: &str) -> Result<Vec<FunctionInfo>, String> {
+    let rows = sqlx::query(
+        r#"
+        SELECT DISTINCT ON (p.proname)
+               p.proname::text AS name,
+               pg_get_function_arguments(p.oid) AS arg_types,
+               COALESCE(pg_get_function_result(p.oid), 'void') AS return_type,
+               CASE p.prokind
+                   WHEN 'f' THEN 'function'
+                   WHEN 'p' THEN 'procedure'
+                   WHEN 'a' THEN 'aggregate'
+                   ELSE 'function'
+               END AS kind
+        FROM pg_catalog.pg_proc p
+        JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = $1
+          AND p.prokind IN ('f', 'p', 'a')
+        ORDER BY p.proname
+        "#,
+    )
+    .bind(schema)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("Failed to list functions: {e}"))?;
+
+    rows.iter()
+        .map(|row| {
+            let name: String = row.try_get("name").map_err(|e| e.to_string())?;
+            let arg_types: String = row.try_get("arg_types").map_err(|e| e.to_string())?;
+            let return_type: String = row.try_get("return_type").map_err(|e| e.to_string())?;
+            let kind: String = row.try_get("kind").map_err(|e| e.to_string())?;
+            Ok(FunctionInfo {
+                signature: format!("{}({})", name, arg_types),
+                name,
+                return_type,
+                kind,
+            })
+        })
+        .collect()
+}
+
+pub async fn list_functions(state: State<'_, DbState>, schema: String) -> Result<Vec<FunctionInfo>, String> {
+    match require_conn(&state)? {
+        ActiveConnection::Postgres(pool) => {
+            validate_ident(&schema)?;
+            list_functions_pg(&pool, &schema).await
+        }
+        _ => Ok(vec![]),
     }
 }
 

@@ -2,6 +2,8 @@
   import Loader from '@lucide/svelte/icons/loader'
   import ExternalLink from '@lucide/svelte/icons/external-link'
   import X from '@lucide/svelte/icons/x'
+  import TriangleAlert from '@lucide/svelte/icons/triangle-alert'
+  import Inbox from '@lucide/svelte/icons/inbox'
 
   let {
     data,
@@ -49,18 +51,27 @@
     {/if}
   </div>
 
-  <!-- Content — no min-height so the panel shrinks to its data -->
+  <!-- Content — three visually distinct states: loading / failed / empty -->
   {#if data?.loading}
     <div class="flex items-center gap-2 px-3 py-4">
       <Loader class="size-3.5 animate-spin text-muted-foreground/40" />
-      <span class="font-mono text-[12px] text-muted-foreground/50">Loading…</span>
+      <span class="font-mono text-[12px] text-muted-foreground/50">Loading related rows…</span>
     </div>
 
   {:else if data?.error}
-    <div class="px-3 py-3 font-mono text-[12px] text-destructive/60">{data.error}</div>
+    <div class="flex items-start gap-2 px-3 py-3">
+      <TriangleAlert class="mt-px size-3.5 shrink-0 text-destructive/70" />
+      <div class="min-w-0">
+        <div class="text-[12px] font-medium text-destructive/80">Couldn't load related rows</div>
+        <div class="mt-0.5 font-mono text-[11px] leading-relaxed break-words text-muted-foreground/55">{data.error}</div>
+      </div>
+    </div>
 
   {:else if !rowCount}
-    <div class="px-3 py-3 font-mono text-[12px] italic text-muted-foreground/35">No rows found.</div>
+    <div class="flex items-center gap-2 px-3 py-3">
+      <Inbox class="size-3.5 shrink-0 text-muted-foreground/30" />
+      <span class="text-[12px] italic text-muted-foreground/40">No related rows</span>
+    </div>
 
   {:else}
     <!-- ≤10 rows: show all (no inner scroll, main table scroll works normally).

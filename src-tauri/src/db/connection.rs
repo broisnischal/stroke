@@ -7,6 +7,7 @@ use sqlx::{ConnectOptions, MySqlPool, PgPool, SqlitePool};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::State;
+use tokio::sync::oneshot;
 
 use super::ssh_tunnel::{SshConfig, SshTunnel, TunnelState};
 
@@ -228,11 +229,15 @@ impl ActiveConnection {
 
 pub struct DbState {
     pub conn: Arc<Mutex<Option<ActiveConnection>>>,
+    pub cancel_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
 }
 
 impl Default for DbState {
     fn default() -> Self {
-        Self { conn: Arc::new(Mutex::new(None)) }
+        Self {
+            conn: Arc::new(Mutex::new(None)),
+            cancel_tx: Arc::new(Mutex::new(None)),
+        }
     }
 }
 

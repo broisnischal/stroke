@@ -1035,7 +1035,7 @@
       URL.revokeObjectURL(url);
       c.toBlob((b) => {
         if (!b) {
-          toast.error("Failed to export PNG");
+          toast.error("Could not export PNG");
           return;
         }
         const pngUrl = URL.createObjectURL(b);
@@ -1051,7 +1051,7 @@
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
-      toast.error("Failed to export PNG");
+      toast.error("Could not export PNG");
     };
     img.src = url;
   }

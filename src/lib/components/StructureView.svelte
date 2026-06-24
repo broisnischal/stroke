@@ -13,7 +13,9 @@
   import DdlConfirmDialog from './DdlConfirmDialog.svelte'
   import CreateTriggerDialog from './CreateTriggerDialog.svelte'
   import GitBranch from '@lucide/svelte/icons/git-branch'
+  import Lock from '@lucide/svelte/icons/lock'
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js'
+  import { engineSupports, engineLabel } from '$lib/db-capabilities.js'
 
   /**
    * @typedef {{ ordinalPosition: number, name: string, dataType: string, isNullable: boolean, columnDefault: string | null, foreignKey: string | null, fkConstraintName: string | null, comment: string | null }} ColumnStructureRow
@@ -23,6 +25,8 @@
   let {
     schema = '',
     table = '',
+    /** @type {string | null} */
+    connectionType = null,
     primaryKey = /** @type {string[]} */ ([]),
     /** @type {ColumnStructureRow[]} */
     columns = [],
@@ -121,7 +125,27 @@
   // ── DDL helpers ───────────────────────────────────────────────────────────
   const tbl = () => `"${schema}"."${table}"`
 
+  // The inline-edit DDL below is PostgreSQL-specific (ALTER COLUMN … TYPE … USING,
+  // COMMENT ON COLUMN, double-quoted identifiers). On other engines that SQL is
+  // invalid, so editing is gated and we point users to the SQL console. The
+  // structure itself stays fully readable everywhere.
+  const canEdit = $derived(engineSupports('editStructure', connectionType))
+
+  /**
+   * Block a structural edit on engines where our generated DDL isn't valid.
+   * Returns true when editing is allowed. Guards every entry point AND
+   * runDdlDirect, so no engine can ever execute the Postgres-only DDL.
+   */
+  function guardEdit() {
+    if (canEdit) return true
+    toast.error('Structure editing not available here', {
+      description: `Editing columns on ${engineLabel(connectionType)} isn't supported yet — use the SQL console to alter this table.`,
+    })
+    return false
+  }
+
   async function runDdlDirect(/** @type {string|string[]} */ sql) {
+    if (!guardEdit()) return
     const stmts = Array.isArray(sql) ? sql : [sql]
     for (const s of stmts) await executeSql(s)
     toast.success('Updated')
@@ -133,6 +157,7 @@
   // The user clicks "Apply N" in the action bar to run them all at once.
 
   function stageType(/** @type {string} */ colName, /** @type {string} */ t) {
+    if (!guardEdit()) return
     const type = t.trim(); if (!type) return
     const origType = columns.find(c => c.name === colName)?.dataType ?? ''
     const sql = `ALTER TABLE ${tbl()} ALTER COLUMN "${colName}" TYPE ${type} USING "${colName}"::${type}`
@@ -149,6 +174,7 @@
   }
 
   function stageNullable(/** @type {string} */ colName, /** @type {boolean} */ nullable) {
+    if (!guardEdit()) return
     const origNullable = columns.find(c => c.name === colName)?.isNullable ?? true
     const sql = `ALTER TABLE ${tbl()} ALTER COLUMN "${colName}" ${nullable ? 'DROP NOT NULL' : 'SET NOT NULL'}`
     const next = new Map(pendingDdl)
@@ -164,6 +190,7 @@
   }
 
   function stageDefault(/** @type {string} */ colName, /** @type {string|null} */ defValue) {
+    if (!guardEdit()) return
     const orig = columns.find(c => c.name === colName)?.columnDefault ?? null
     const normDef = defValue && String(defValue).trim() ? String(defValue).trim() : null
     const sql = normDef
@@ -182,12 +209,13 @@
   }
 
   function alterComment(/** @type {string} */ col, /** @type {string} */ comment) {
+    if (!guardEdit()) return
     const esc = comment.replace(/'/g, "''")
     const sql = comment.trim() === ''
       ? `COMMENT ON COLUMN ${tbl()}."${col}" IS NULL`
       : `COMMENT ON COLUMN ${tbl()}."${col}" IS '${esc}'`
     executeSql(sql).then(() => { toast.success('Comment updated'); onrefresh() })
-      .catch(e => toast.error('Failed', { description: String(e) }))
+      .catch(e => toast.error('Could not update comment', { description: String(e) }))
   }
 
   // ── Apply / Reset ─────────────────────────────────────────────────────────
@@ -225,6 +253,7 @@
   let renameDraft = $state('')
 
   async function startRename(/** @type {ColumnStructureRow} */ col) {
+    if (!guardEdit()) return
     renamingCol = col.name; renameDraft = stagedValues['name:' + col.name] ?? col.name
     await tick()
     const el = document.querySelector('[data-rename-input]')
@@ -294,7 +323,7 @@
   /** @type {{ name: string, algorithm: string, isUnique: boolean, columns: string, condition: string, comment: string } | null} */
   let newIndex = $state(null)
 
-  function startNewIndex() { newIndex = { name: '', algorithm: 'BTREE', isUnique: false, columns: '', condition: '', comment: '' } }
+  function startNewIndex() { if (!guardEdit()) return; newIndex = { name: '', algorithm: 'BTREE', isUnique: false, columns: '', condition: '', comment: '' } }
 
   function requestIndexRecreate(/** @type {IdxInfo} */ idx, /** @type {string} */ newAlg, /** @type {boolean} */ newUnique, /** @type {string} */ newCols) {
     const dropSql = `DROP INDEX "${schema}"."${idx.name}"`
@@ -342,9 +371,10 @@
   }
 
   function updateIndexComment(/** @type {string} */ name, /** @type {string} */ c) {
+    if (!guardEdit()) return
     const sql = c.trim() === '' ? `COMMENT ON INDEX "${name}" IS NULL` : `COMMENT ON INDEX "${name}" IS '${c.replace(/'/g, "''")}'`
     executeSql(sql).then(() => { toast.success('Comment updated'); onrefresh() })
-      .catch(e => toast.error('Failed', { description: String(e) }))
+      .catch(e => toast.error('Could not update comment', { description: String(e) }))
   }
 
   // ── Filtered data ─────────────────────────────────────────────────────────
@@ -378,6 +408,7 @@
   let newColTypeDraft = $state({})
 
   function startNewColumn() {
+    if (!guardEdit()) return
     newColumn = { name: '', dataType: 'text', isNullable: true, columnDefault: '', comment: '' }
     newColTypeDraft = { new: 'text' }
   }
@@ -481,6 +512,14 @@
     {/each}
   </div>
 
+  <!-- Read-only notice — engines whose structure DDL we don't generate yet. -->
+  {#if !canEdit}
+    <div class="flex shrink-0 items-center gap-2 border-b border-border/30 bg-muted/15 px-4 py-1.5 font-mono text-[11px] text-muted-foreground/70">
+      <Lock class="size-3 shrink-0 text-muted-foreground/40" />
+      <span>Read-only structure on {engineLabel(connectionType)} — alter this table from the SQL console.</span>
+    </div>
+  {/if}
+
   <!-- Tab content -->
   <div class="min-h-0 flex-1" style="overflow: auto">
     <div style="display: inline-block; min-width: 100%; vertical-align: top">
@@ -543,8 +582,10 @@
                   <input
                     type="text"
                     value={typeDraft[col.name] ?? displayType}
-                    class="{INP} pr-6 {stagedValues['type:' + col.name] ? 'text-amber-300/90' : ''}"
+                    readonly={!canEdit}
+                    class="{INP} pr-6 {stagedValues['type:' + col.name] ? 'text-amber-300/90' : ''} {canEdit ? '' : 'cursor-default'}"
                     onfocus={() => {
+                      if (!canEdit) return
                       typeDropOpen = { ...typeDropOpen, [col.name]: true }
                     }}
                     oninput={(e) => {
@@ -600,7 +641,7 @@
                 <div class="relative flex h-full items-center px-3">
                   <select
                     value={displayNullable ? 'YES' : 'NO'}
-                    disabled={isPk}
+                    disabled={isPk || !canEdit}
                     class="w-full appearance-none border-0 bg-transparent py-0 font-mono text-ui-sm focus:outline-none disabled:cursor-not-allowed disabled:opacity-40 {displayNullable ? 'text-foreground' : 'text-muted-foreground'} {stagedValues['nullable:' + col.name] !== undefined ? 'text-amber-300/90' : ''}"
                     onchange={(e) => stageNullable(col.name, /** @type {HTMLSelectElement} */ (e.target).value === 'YES')}
                   >
@@ -620,8 +661,10 @@
                     type="text"
                     value={defaultDraft[col.name] ?? displayDefault}
                     placeholder="NULL"
-                    class="{INP} pr-6 placeholder:text-muted-foreground/30 {stagedValues['default:' + col.name] !== undefined ? 'text-amber-300/90' : displayDefault ? '' : 'text-muted-foreground/35'}"
+                    readonly={!canEdit}
+                    class="{INP} pr-6 placeholder:text-muted-foreground/30 {stagedValues['default:' + col.name] !== undefined ? 'text-amber-300/90' : displayDefault ? '' : 'text-muted-foreground/35'} {canEdit ? '' : 'cursor-default'}"
                     onfocus={(e) => {
+                      if (!canEdit) return
                       defaultDraft = { ...defaultDraft, [col.name]: /** @type {HTMLInputElement} */ (e.target).value }
                       defDropOpen = { ...defDropOpen, [col.name]: true }
                     }}
@@ -687,8 +730,8 @@
 
               <!-- comment -->
               <td class={TD}>
-                <input type="text" value={col.comment ?? ''} placeholder="—"
-                  class="{INP} italic text-muted-foreground placeholder:not-italic placeholder:text-muted-foreground/20 focus:not-italic focus:text-foreground"
+                <input type="text" value={col.comment ?? ''} placeholder="—" readonly={!canEdit}
+                  class="{INP} italic text-muted-foreground placeholder:not-italic placeholder:text-muted-foreground/20 focus:not-italic focus:text-foreground {canEdit ? '' : 'cursor-default'}"
                   onblur={(e) => { const v = /** @type {HTMLInputElement} */ (e.target).value; if (v !== (col.comment ?? '')) void alterComment(col.name, v) }}
                   onkeydown={(e) => onFieldKey(e, () => { const v = /** @type {HTMLInputElement} */ (e.currentTarget).value; if (v !== (col.comment ?? '')) void alterComment(col.name, v) })}
                 />
@@ -772,7 +815,9 @@
         </tbody>
       </table>
 
-    <!-- ── Action bar: Apply/Reset pending changes + Add column ── -->
+    <!-- ── Action bar: Apply/Reset pending changes + Add column ──
+         Only meaningful when editing is supported; hidden on read-only engines. -->
+    {#if canEdit}
     <div class="flex items-center gap-2 border-t border-border/25 px-3 py-1.5 font-mono">
     {#if newColumn}
       <span class="text-[10px] text-emerald-500/70">New column — fill in details then save</span>
@@ -807,6 +852,7 @@
       </button>
     {/if}
     </div>
+    {/if}<!-- end action bar -->
     {/if}<!-- end columns tab -->
 
     <!-- ── Indexes tab ── -->
@@ -819,9 +865,11 @@
             <span class="ml-1 font-normal text-muted-foreground/40">({visibleIndexes.length}/{tableIndexes.length})</span>
           {/if}
         </span>
+        {#if canEdit}
         <button type="button" class="ml-auto inline-flex h-6 items-center gap-1 rounded-lg px-2.5 text-[10px] text-muted-foreground/50 transition-colors hover:bg-muted/40 hover:text-foreground" onclick={startNewIndex}>
           <Plus class="size-2.5" />Add index
         </button>
+        {/if}
       </div>
 
       <table class="border-collapse" style="table-layout: fixed; width: max-content; min-width: 100%">

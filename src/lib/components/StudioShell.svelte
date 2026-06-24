@@ -67,6 +67,8 @@
   import AlertTriangle from '@lucide/svelte/icons/triangle-alert'
   import X from '@lucide/svelte/icons/x'
   import Lock from '@lucide/svelte/icons/lock'
+  import WifiOff from '@lucide/svelte/icons/wifi-off'
+  import RefreshCw from '@lucide/svelte/icons/refresh-cw'
   import {
     disconnectPostgres,
     listSchemas,
@@ -158,6 +160,7 @@
     engineFamily,
   } from '$lib/stores/connections.js'
   import { hasPro, FREE_CONNECTION_LIMIT } from '$lib/stores/license.js'
+  import { engineSupports } from '$lib/db-capabilities.js'
   import * as Dialog from '$lib/components/ui/dialog/index.js'
   import ExternalLink from '@lucide/svelte/icons/external-link'
   import {
@@ -171,6 +174,8 @@
     connectMssql,
     listIndexes,
     listEnums,
+    listFunctions,
+    pingConnection,
     listTriggers,
     listSequences,
     truncateTable,
@@ -197,6 +202,7 @@
   import { switchDiagramsConnection } from '$lib/stores/saved-diagrams.js'
   import { dashboards, activeDashboardId, switchDashboardsConnection } from '$lib/stores/dashboards.js'
   import { buildOption } from '$lib/chart-utils.js'
+  import { isNetworkError } from '$lib/utils.js'
   import { get } from 'svelte/store'
   import { virtualColumnsStore } from '$lib/stores/virtual-columns.js'
 
@@ -208,7 +214,11 @@
   /** @typedef {import('$lib/foreign-key-nav.js').ForeignKeyInfo} ForeignKeyInfo */
 
   const SEARCH_DEBOUNCE_MS = 150
-  const COLUMNS_CACHE_MAX = 60
+  // Per-table column metadata is tiny (an array of column defs), so we can cache a
+  // lot of it. A high cap means revisiting a table almost never re-fetches columns
+  // on-demand — which is what caused a visible flicker on switch-back when the old
+  // 60-entry limit evicted earlier tables in a large schema.
+  const COLUMNS_CACHE_MAX = 400
 
   /** @param {Map<string, unknown>} map @param {string} key @param {unknown} value */
   function lruSet(map, key, value) {
@@ -231,6 +241,8 @@
   }
 
   let connection = $state(null)
+  /** @type {boolean} - true when the DB went away mid-session */
+  let connectionLost = $state(false)
   let autoConnecting = $state(false)
   let showConnectionModal = $state(false)
   let showDockerModal = $state(false)
@@ -644,6 +656,66 @@ let rowSearch = $state('')
   const _sqlColNames = $derived(sqlColumns.map((c) => c.name))
   const _tableNames = $derived(tables.map((t) => t.name))
 
+  // ── Async SQL-completion hints (enums + user functions) ──────────────────────
+  // Loaded lazily when the SQL tab becomes active. Stored as reactive state so
+  // sqlSchemaHints (a $derived) picks them up automatically once they arrive.
+  let _sqlEnumValues = $state(/** @type {Record<string, string[]>} */ ({}))
+  let _sqlUserFunctions = $state(/** @type {Array<{name:string,signature:string,returnType:string,kind:string}>} */ ([]))
+
+  $effect(() => {
+    if (activeView !== 'sql' || !connection || !activeSchema) return
+    const schema = activeSchema
+    // Enum/function completion hints are PostgreSQL-only — skip the round-trips
+    // (which would just return empty) on every other engine.
+    if (engineSupports('enums', connection?.type)) {
+      listEnums(schema).then((enums) => {
+        /** @type {Record<string, string[]>} */
+        const ev = {}
+        for (const e of enums) ev[e.name] = e.values
+        _sqlEnumValues = ev
+      }).catch(() => {})
+    } else {
+      _sqlEnumValues = {}
+    }
+    if (engineSupports('functions', connection?.type)) {
+      listFunctions(schema).then((fns) => {
+        _sqlUserFunctions = fns
+      }).catch(() => {})
+    } else {
+      _sqlUserFunctions = []
+    }
+  })
+
+  // ── Connection health monitor ─────────────────────────────────────────────────
+  // Pings the active DB every 30 seconds. On failure, shows a persistent toast
+  // with a Reconnect button. Clears automatically when the connection recovers.
+  $effect(() => {
+    if (!connection) {
+      connectionLost = false
+      return
+    }
+    const conn = connection
+    const id = setInterval(async () => {
+      try {
+        await pingConnection()
+        if (connectionLost) connectionLost = false
+      } catch {
+        if (!connectionLost) {
+          connectionLost = true
+          toast.error('Connection lost', {
+            description: 'The database connection was interrupted.',
+            duration: Infinity,
+            action: {
+              label: 'Reconnect',
+              onClick: () => handleSwitchDatabase(conn),
+            },
+          })
+        }
+      }
+    }, 30_000)
+    return () => clearInterval(id)
+  })
+
   const sqlSchemaHints = $derived.by(() => {
     // Only the SQL editor consumes this, and building columnsByTable iterates the
     // whole table-column cache (dozens of tables). Skip that work entirely unless
@@ -665,7 +737,7 @@ let rowSearch = $state('')
     if (_sqlColNames.length) {
       columnsByTable.__result__ = _sqlColNames
     }
-    return { schemas, activeSchema, tables: _tableNames, columnsByTable }
+    return { schemas, activeSchema, tables: _tableNames, columnsByTable, enumValues: _sqlEnumValues, userFunctions: _sqlUserFunctions }
   })
 
   const connectionId = $derived(
@@ -785,6 +857,7 @@ let rowSearch = $state('')
         schemas, activeSchema, tables: _tableNames,
         activeTable, columns: [], primaryKey: [], foreignKeys: [],
         allTableColumns: {}, dbType: engineFamily(connection?.type),
+        environment: connection?.environment ?? null,
       }
     }
     return {
@@ -803,6 +876,7 @@ let rowSearch = $state('')
       allTableColumns: _allTableColumns,
       /** @type {import('$lib/stores/connections.js').DbType} */
       dbType: engineFamily(connection?.type),
+      environment: connection?.environment ?? null,
     }
   })
 
@@ -2199,7 +2273,7 @@ let rowSearch = $state('')
   })
 
   async function loadEnums() {
-    if (!activeSchema) { enums = []; return }
+    if (!activeSchema || !engineSupports('enums', connection?.type)) { enums = []; return }
     try {
       const list = await listEnums(activeSchema)
       enums = list.map((e) => ({ name: e.name ?? '', values: e.values ?? [] }))
@@ -2209,7 +2283,7 @@ let rowSearch = $state('')
   }
 
   async function loadTriggers() {
-    if (!activeSchema) { triggers = []; return }
+    if (!activeSchema || !engineSupports('triggers', connection?.type)) { triggers = []; return }
     try {
       const list = await listTriggers(activeSchema)
       triggers = list.map((t) => ({
@@ -2226,7 +2300,7 @@ let rowSearch = $state('')
   }
 
   async function loadSequences() {
-    if (!activeSchema) { sequences = []; return }
+    if (!activeSchema || !engineSupports('sequences', connection?.type)) { sequences = []; return }
     try {
       const list = await listSequences(activeSchema)
       sequences = list.map((s) => ({
@@ -2427,6 +2501,7 @@ let rowSearch = $state('')
       }
     } catch (e) {
       const errStr = String(e)
+      if (isNetworkError(errStr)) connectionLost = true
       patchTab({ loadingRows: false, error: errStr, columns: [], rows: [], total: 0 })
       if (tabId === activeTabId) {
         loadingRows = false
@@ -2506,14 +2581,16 @@ let rowSearch = $state('')
       if (page > maxPage) page = maxPage
     } catch (e) {
       if (seq !== _loadSeq) return
-      error = String(e)
+      const errStr = String(e)
+      if (isNetworkError(errStr)) connectionLost = true
+      error = errStr
       columns = []
       primaryKey = []
       foreignKeys = []
       rows = []
       _infiniteRows = []
       total = 0
-      recordActivity({ type: 'row_fetch', title: `Failed to load ${activeTable}`, schema: activeSchema, table: activeTable ?? undefined, success: false, error: String(e) })
+      recordActivity({ type: 'row_fetch', title: `Failed to load ${activeTable}`, schema: activeSchema, table: activeTable ?? undefined, success: false, error: errStr })
     } finally {
       if (seq === _loadSeq) loadingRows = false
     }
@@ -2585,6 +2662,10 @@ let rowSearch = $state('')
 
   async function runSql() {
     if (!connection || !sqlText.trim()) return
+    if (tableReadonly && /^\s*(insert|update|delete|drop|truncate|alter|create|replace)\b/i.test(sqlText)) {
+      sqlError = 'Connection is read-only — write queries are blocked.'
+      return
+    }
     sqlLoading = true
     sqlError = ''
     sqlMessage = ''
@@ -2606,6 +2687,7 @@ let rowSearch = $state('')
     } catch (e) {
       sqlError = String(e)
       sqlMultiResults = []
+      if (isNetworkError(sqlError)) connectionLost = true
     } finally {
       sqlLoading = false
       recordActivity({ type: 'sql_exec', title: sqlRan.trim().slice(0, 80) + (sqlRan.trim().length > 80 ? '…' : ''), detail: sqlRan, durationMs: sqlQueryMs, rowCount: sqlRows.length || undefined, success: !sqlError, error: sqlError || undefined })
@@ -2623,6 +2705,7 @@ let rowSearch = $state('')
     recordActivity({ type: 'connect', title: `Connected to ${conn.name ?? conn.database ?? conn.filePath ?? 'database'}`, success: true })
     connection = conn
     savedConnections = loadSavedConnections()
+    tableReadonly = savedConnections.find(c => c.id === savedId)?.readOnly ?? conn.readOnly ?? false
     // Persist last-used ID and bump timestamp
     if (savedId) {
       setLastConnectionId(savedId)
@@ -2913,7 +2996,7 @@ let rowSearch = $state('')
       toast.success(`Truncated "${tableName}"`)
       if (activeTable === tableName) await loadRows()
     } catch (err) {
-      toast.error('Truncate failed', { description: String(err) })
+      toast.error('Could not truncate table', { description: String(err) })
     }
   }
 
@@ -2930,7 +3013,7 @@ let rowSearch = $state('')
         activeTable = null
       }
     } catch (err) {
-      toast.error('Drop failed', { description: String(err) })
+      toast.error('Could not drop', { description: String(err) })
     }
   }
 
@@ -2972,7 +3055,7 @@ let rowSearch = $state('')
       const filename = `${tableName}_${new Date().toISOString().slice(0, 10)}.sql`
       await saveExportFile(sql, filename, 'sql')
     } catch (e) {
-      toast.error('Export failed', { description: String(e) })
+      toast.error('Could not export', { description: String(e) })
     }
   }
 
@@ -2987,7 +3070,7 @@ let rowSearch = $state('')
       const filename = buildExportFilename(tableName, 'csv')
       await saveExportFile(csv, filename, 'csv')
     } catch (e) {
-      toast.error('Export failed', { description: String(e) })
+      toast.error('Could not export', { description: String(e) })
     }
   }
 
@@ -3081,7 +3164,7 @@ let rowSearch = $state('')
       await handleDeleteRows([...selected])
       toast.success(n === 1 ? 'Row deleted' : `${formatCompactCount(n)} rows deleted`)
     } catch (err) {
-      toast.error('Delete failed', { description: String(err) })
+      toast.error('Could not delete', { description: String(err) })
     }
   }
 
@@ -3115,7 +3198,8 @@ let rowSearch = $state('')
         })
       }
     } catch (err) {
-      toast.error('Insert failed', { description: String(err) })
+      toast.error('Could not insert row', { description: String(err) })
+      throw err
     } finally {
       insertingRow = false
     }
@@ -3242,7 +3326,7 @@ let rowSearch = $state('')
   existingSchemas={schemas}
   onexecute={async (sql) => {
     try { await executeDdl(sql) }
-    catch (e) { toast.error(String(e)); throw e }
+    catch (e) { toast.error('Could not create schema', { description: String(e) }); throw e }
   }}
   oncreated={async (schemaName) => {
     toast.success(`Schema "${schemaName}" created`)
@@ -3412,6 +3496,18 @@ let rowSearch = $state('')
       style={sidebarOpen && !aiMode && connection ? '' : 'display:none'}
       inert={!sidebarOpen || aiMode || !connection || undefined}
     >
+      <svelte:boundary>
+        {#snippet failed(err, reset)}
+          <div class="flex h-full w-[220px] shrink-0 flex-col items-center justify-center gap-3 border-r border-border/50 bg-sidebar p-4 text-center">
+            <AlertTriangle class="size-5 text-destructive/60" />
+            <p class="text-ui-xs font-medium text-muted-foreground">Sidebar error</p>
+            <button
+              type="button"
+              class="rounded-md border border-border bg-muted/40 px-2.5 py-1 text-ui-xs font-medium transition-colors hover:bg-accent"
+              onclick={reset}
+            >Reload</button>
+          </div>
+        {/snippet}
       <Sidebar
         connectionName={connection ? (connection.name || connection.database || connection.host || connection.filePath || 'Connected') : ''}
         {schemas}
@@ -3474,6 +3570,7 @@ let rowSearch = $state('')
           }
         }}
       />
+      </svelte:boundary>
     </div>
   {/if}
 
@@ -3524,6 +3621,25 @@ let rowSearch = $state('')
         </div>
       </div>
     {:else}
+      {#snippet tabError(/** @type {unknown} */ error, /** @type {() => void} */ reset)}
+        <div class="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
+          <AlertTriangle class="size-8 text-destructive/60" />
+          <div class="flex flex-col gap-1">
+            <p class="text-ui-sm font-medium text-foreground">This view hit an error</p>
+            <p class="max-w-md break-words font-mono text-ui-xs text-muted-foreground">
+              {error instanceof Error ? error.message : String(error)}
+            </p>
+          </div>
+          <button
+            type="button"
+            class="rounded-md border border-border bg-muted/40 px-3 py-1.5 text-ui-xs font-medium transition-colors hover:bg-accent hover:text-foreground"
+            onclick={reset}
+          >
+            Reload this view
+          </button>
+        </div>
+      {/snippet}
+
       <!-- Full-window AI chat — kept mounted after first open so state is preserved -->
       {#if aiEverOpened}
         <div
@@ -3531,6 +3647,7 @@ let rowSearch = $state('')
           inert={!aiMode}
         >
           {#await import('./AiChat.svelte')}<TabLoading />{:then { default: AiChat }}
+            <svelte:boundary failed={tabError}>
             <AiChat
               schemaContext={{ ...aiSchemaContext, activeTable: null, columns: [], primaryKey: [], foreignKeys: [] }}
               {connectionId}
@@ -3541,6 +3658,7 @@ let rowSearch = $state('')
               onopenmodelsettings={() => (showAiModelSettings = true)}
               onopendiagramspage={() => { exitAiMode(); openDiagramsTab() }}
             />
+            </svelte:boundary>
           {/await}
         </div>
       {/if}
@@ -3563,31 +3681,13 @@ let rowSearch = $state('')
       />
       {/if}
 
-      {#snippet tabError(/** @type {unknown} */ error, /** @type {() => void} */ reset)}
-        <div class="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
-          <AlertTriangle class="size-8 text-destructive/60" />
-          <div class="flex flex-col gap-1">
-            <p class="text-ui-sm font-medium text-foreground">This view hit an error</p>
-            <p class="max-w-md break-words font-mono text-ui-xs text-muted-foreground">
-              {error instanceof Error ? error.message : String(error)}
-            </p>
-          </div>
-          <button
-            type="button"
-            class="rounded-md border border-border bg-muted/40 px-3 py-1.5 text-ui-xs font-medium transition-colors hover:bg-accent hover:text-foreground"
-            onclick={reset}
-          >
-            Reload this view
-          </button>
-        </div>
-      {/snippet}
-
       {#if activeTab?.kind === 'ai'}
         <!-- AI is handled via AI mode toggle -->
       {:else if activeTab?.kind === 'schema'}
         <svelte:boundary failed={tabError}>
           <SchemaPage
             schema={activeSchema}
+            connectionType={connection?.type ?? null}
             {indexes}
             {enums}
             {triggers}
@@ -3608,7 +3708,7 @@ let rowSearch = $state('')
         >
           <svelte:boundary failed={tabError}>
             {#await import('./SecurityPage.svelte')}<TabLoading />{:then { default: SecurityPage }}
-              <SecurityPage bind:this={securityPageRef} active={activeTab?.kind === 'security'} />
+              <SecurityPage bind:this={securityPageRef} active={activeTab?.kind === 'security'} connectionType={connection?.type ?? null} />
             {/await}
           </svelte:boundary>
         </div>
@@ -3889,18 +3989,38 @@ let rowSearch = $state('')
 
       {#if activeTab?.kind === 'table'}
         {#if error}
-          <div class="flex shrink-0 items-start gap-2.5 border-b border-destructive/15 bg-destructive/[0.04] px-3 py-2">
-            <AlertTriangle class="mt-px size-3.5 shrink-0 text-destructive/70" />
-            <p class="min-w-0 flex-1 font-mono text-ui-xs leading-relaxed text-destructive/90">{error}</p>
-            <button
-              type="button"
-              class="mt-px shrink-0 text-destructive/40 transition-colors hover:text-destructive"
-              onclick={() => (error = '')}
-              title="Dismiss"
-            >
-              <X class="size-3.5" />
-            </button>
-          </div>
+          {#if isNetworkError(error)}
+            <!-- ── Network / offline error — full-area friendly state ── -->
+            <div class="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
+              <WifiOff class="size-8 text-muted-foreground/20" />
+              <div class="space-y-1">
+                <p class="font-mono text-ui font-medium text-foreground/70">Cannot reach database</p>
+                <p class="font-mono text-ui-xs text-muted-foreground/50">Check your internet connection or whether the server is reachable.</p>
+              </div>
+              <button
+                type="button"
+                class="flex items-center gap-1.5 rounded-md border border-border/30 bg-muted/30 px-3 py-1.5 font-mono text-ui-xs text-muted-foreground/70 transition-colors hover:bg-muted/60 hover:text-foreground"
+                onclick={() => { error = ''; connectionLost = false; void loadRows() }}
+              >
+                <RefreshCw class="size-3" />
+                Retry
+              </button>
+            </div>
+          {:else}
+            <!-- ── SQL / application error — compact banner ── -->
+            <div class="flex shrink-0 items-start gap-2.5 border-b border-destructive/15 bg-destructive/[0.04] px-3 py-2">
+              <AlertTriangle class="mt-px size-3.5 shrink-0 text-destructive/70" />
+              <p class="min-w-0 flex-1 font-mono text-ui-xs leading-relaxed text-destructive/90">{error}</p>
+              <button
+                type="button"
+                class="mt-px shrink-0 text-destructive/40 transition-colors hover:text-destructive"
+                onclick={() => (error = '')}
+                title="Dismiss"
+              >
+                <X class="size-3.5" />
+              </button>
+            </div>
+          {/if}
         {/if}
 
         {#if !activeTable}
@@ -3910,11 +4030,11 @@ let rowSearch = $state('')
               <kbd>⌘K</kbd>
             </p>
           </div>
-        {:else if error}
+        {:else if error && !isNetworkError(error)}
           <div class="flex flex-1 items-center justify-center">
             <p class="font-mono text-ui-sm text-muted-foreground/40">Dismiss the error above to continue.</p>
           </div>
-        {:else}
+        {:else if !error}
           {#if tableViewMode === 'structure' && canShowStructure}
             {#if tableToolbarVisible}
             <TableToolbar
@@ -3947,6 +4067,7 @@ let rowSearch = $state('')
             <StructureView
               schema={activeSchema}
               table={activeTable ?? ''}
+              connectionType={connection?.type ?? null}
               {primaryKey}
               columns={structureColumns}
               indexes={activeTableIndexes}
@@ -4039,6 +4160,7 @@ let rowSearch = $state('')
                 loading={loadingRows}
                 {loadingMore}
                 {infiniteScroll}
+                endOfResults={infiniteScroll && total > 0 && _infiniteRows.length >= total}
                 onloadmore={handleLoadMore}
                 saving={savingCell || deletingRows || insertingRow}
                 bind:selected
@@ -4269,19 +4391,36 @@ let rowSearch = $state('')
           <TabLoading />
         </div>
       {:then { default: AiSidebar }}
-        <AiSidebar
-          bind:this={aiSidebarRef}
-          schemaContext={aiSchemaContext}
-          {connectionId}
-          isActive={aiSidebarOpen && !aiMode}
-          currentView={activeTab?.kind ?? 'welcome'}
-          currentSql={sqlText}
-          currentCode={ormCode}
-          {ormMode}
-          onclose={toggleAiSidebar}
-          onaccept={(d) => void handleAiSidebarAccept(d)}
-          onopensettings={() => (showAiModelSettings = true)}
-        />
+        <svelte:boundary>
+          {#snippet failed(err, reset)}
+            <div class="flex h-full min-h-0 shrink-0 flex-col items-center justify-center gap-3 border-l border-border/50 bg-background p-4 text-center"
+              style="width: {aiSidebarFallbackWidth}px; min-width: {aiSidebarFallbackWidth}px; max-width: {aiSidebarFallbackWidth}px">
+              <AlertTriangle class="size-5 text-destructive/60" />
+              <div class="space-y-1">
+                <p class="text-ui-xs font-medium text-foreground">AI sidebar error</p>
+                <p class="font-mono text-[10px] text-muted-foreground/60 break-words">{err instanceof Error ? err.message : String(err)}</p>
+              </div>
+              <button
+                type="button"
+                class="rounded-md border border-border bg-muted/40 px-2.5 py-1 text-ui-xs font-medium transition-colors hover:bg-accent"
+                onclick={reset}
+              >Reload</button>
+            </div>
+          {/snippet}
+          <AiSidebar
+            bind:this={aiSidebarRef}
+            schemaContext={aiSchemaContext}
+            {connectionId}
+            isActive={aiSidebarOpen && !aiMode}
+            currentView={activeTab?.kind ?? 'welcome'}
+            currentSql={sqlText}
+            currentCode={ormCode}
+            {ormMode}
+            onclose={toggleAiSidebar}
+            onaccept={(d) => void handleAiSidebarAccept(d)}
+            onopensettings={() => (showAiModelSettings = true)}
+          />
+        </svelte:boundary>
       {/await}
     </div>
   {/if}
@@ -4290,6 +4429,7 @@ let rowSearch = $state('')
 {#if statusBarVisible}
 <StatusBar
   {connection}
+  {connectionLost}
   {savedConnections}
   {activeConnectionId}
   {pendingEditCount}

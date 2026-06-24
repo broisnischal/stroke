@@ -23,6 +23,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ChevronsDownUp from "@lucide/svelte/icons/chevrons-down-up";
   import Copy from "@lucide/svelte/icons/copy";
+  import CopyPlus from "@lucide/svelte/icons/copy-plus";
   import Pencil from "@lucide/svelte/icons/pencil";
   import CircleSlash from "@lucide/svelte/icons/circle-slash";
   import Trash2 from "@lucide/svelte/icons/trash-2";
@@ -211,6 +212,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     loadingMore = false,
     /** Called when the user scrolls near the bottom in infinite scroll mode. */
     onloadmore = /** @type {() => void} */ (() => {}),
+    /** True when every row has been loaded in infinite scroll mode (no more pages). */
+    endOfResults = false,
   } = $props();
 
   /**
@@ -844,7 +847,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (afterAction) navigateAfterEdit(rowIdx, colIdx, afterAction);
       else tick().then(() => tableContainer?.focus({ preventScroll: true }));
     } catch (err) {
-      toast.error("Save failed", { description: String(err) });
+      toast.error("Could not save", { description: String(err) });
     }
   }
 
@@ -861,7 +864,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         okCount++;
       } catch (err) {
         failed.push(edit);
-        toast.error("Save failed", { description: String(err) });
+        toast.error("Could not save", { description: String(err) });
       }
     }
     // Keep only the edits that failed so the user can retry / reset them.
@@ -945,9 +948,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       toast.error('Cannot insert row', { description: built.message })
       return
     }
-    await oninsertrow(/** @type {Record<string, unknown>} */ (built.values))
-    newRowDrafts = null
-    newRowFocusCol = null
+    try {
+      await oninsertrow(/** @type {Record<string, unknown>} */ (built.values))
+      newRowDrafts = null
+      newRowFocusCol = null
+    } catch {
+      // error toast already shown by oninsertrow
+    }
   }
 
   /** @param {string} colName @param {string} value */
@@ -1149,7 +1156,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         description: out.length > 120 ? out.slice(0, 120) + "…" : out,
       });
     } catch (e) {
-      toast.error("Transform failed", { description: String(e?.message ?? e) });
+      toast.error("Could not apply transform", { description: String(e?.message ?? e) });
     }
   }
 
@@ -1188,7 +1195,21 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         n === 1 ? "Row deleted" : `${formatCompactCount(n)} rows deleted`,
       );
     } catch (err) {
-      toast.error("Delete failed", { description: String(err) });
+      toast.error("Could not delete", { description: String(err) });
+    }
+  }
+
+  /** @param {number} rowIdx */
+  async function duplicateRow(rowIdx) {
+    if (readonly) return;
+    const row = rows[rowIdx];
+    if (!row) return;
+    const record = rowToRecord(columns, row);
+    for (const pk of primaryKey) delete record[pk];
+    try {
+      await oninsertrow(record);
+    } catch {
+      // error toast already shown by oninsertrow
     }
   }
 
@@ -1466,6 +1487,25 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     (showRowExpand ? 1 : 0) + (showSelection ? 1 : 0) + visibleColumns.length + 1,
   )
   const navigableColumns = $derived(visibleColumns)
+
+  // ── Accessibility: focused-cell announcement ────────────────────────────────
+  // The canvas grid has no per-cell DOM, so screen readers get nothing on
+  // navigation. This derived builds a short description of the focused cell and
+  // is rendered into an aria-live region. It depends ONLY on focus/edit state and
+  // the data — NOT on scroll offsets — so it never recomputes during the rAF draw
+  // loop and cannot affect render throughput.
+  const a11yCellAnnouncement = $derived.by(() => {
+    if (focusedRow === null || focusedCol === null) return ''
+    const ai = visToActualColIdx(focusedCol)
+    if (ai < 0) return ''
+    const col = columns[ai]
+    const row = rows[focusedRow]
+    if (!col || !row) return ''
+    const raw = formatCell(row[ai])
+    const val = raw.length > 80 ? raw.slice(0, 80) + '…' : raw
+    const editing = editingCell && editingCell.rowIdx === focusedRow && editingCell.colIdx === ai
+    return `Row ${focusedRow + 1} of ${rows.length}, ${col.name}: ${val}${editing ? ', editing' : ''}`
+  })
   /** Map of pinned column name → sticky left offset in px. Gutters are not
    *  sticky, so pinned columns stick from the left edge (0). */
   const pinnedOffsets = $derived.by(() => {
@@ -1881,28 +1921,42 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   })
 
   /** @param {Event & { currentTarget: HTMLElement }} e */
+  // Continuous rAF loop that drives canvas redraws during scroll.
+  // Reading scrollTop/scrollLeft inside rAF gives the compositor-synchronized
+  // position for the frame being painted, eliminating the 1-frame lag that
+  // a one-shot scheduleDraw() produces (queued from onscroll → fires next frame).
+  // The loop runs while the user is scrolling and for 200ms after the last
+  // scroll event to cover momentum/inertia, then stops to save GPU time.
+  let _scrollLoopId = 0
+  let _scrollLoopDeadline = 0
+
+  function startScrollLoop() {
+    _scrollLoopDeadline = performance.now() + 200
+    if (_scrollLoopId) return
+    function loop() {
+      const el = tableContainer
+      if (!el || !_ctx || performance.now() > _scrollLoopDeadline) {
+        _scrollLoopId = 0
+        return
+      }
+      _scrollTop = el.scrollTop
+      _scrollLeft = el.scrollLeft
+      draw()
+      _scrollLoopId = requestAnimationFrame(loop)
+    }
+    _scrollLoopId = requestAnimationFrame(loop)
+  }
+
   function onContainerScroll(e) {
     const el = e.currentTarget
-    // Page/layout scroll can shift the canvas on screen — drop the cached rect.
     invalidateCanvasRect()
-    const hScrolled = el.scrollLeft !== _scrollLeft
-    if (el.scrollTop !== _scrollTop) _scrollTop = el.scrollTop
-    if (hScrolled) _scrollLeft = el.scrollLeft
-    // For horizontal scroll, draw synchronously — the sticky canvas shows stale
-    // column positions for a full frame when deferred via rAF, which the eye
-    // reads as a column shift. Vertical scroll is imperceptible at 1-frame lag
-    // because adjacent rows look similar, so it stays on the rAF path.
-    // Re-arm a cleanup rAF so any concurrent reactive updates still get redrawn.
-    if (_ctx && (editingCell || hScrolled)) {
-      if (_drawRafId) cancelAnimationFrame(_drawRafId)
-      draw()
-      _drawRafId = requestAnimationFrame(() => { _drawRafId = 0 })
-    } else {
-      // Repaint directly from the scroll handler. The big layout effect no longer
-      // tracks _scrollTop/_scrollLeft, so scrolling skips syncCanvasSurface()
-      // (style writes + getContext + setTransform) and only does the rAF draw.
-      scheduleDraw()
-    }
+    // Update state immediately so any synchronous consumers (hit-test etc.) are current.
+    _scrollTop = el.scrollTop
+    _scrollLeft = el.scrollLeft
+    // Cancel any pending one-shot draw — the loop handles all scroll redraws at
+    // the display's native frame rate (120Hz on ProMotion).
+    if (_drawRafId) { cancelAnimationFrame(_drawRafId); _drawRafId = 0 }
+    startScrollLoop()
     // Infinite scroll — trigger load when within 3 rows of the bottom
     if (infiniteScroll && !loadingMore) {
       const threshold = ROW_HEIGHT * 3
@@ -2322,11 +2376,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ctx.fillRect(0, ry, c.usedW, rh)
     }
 
-    // Non-pinned cells.
+    // Non-pinned cells. geom.cols is ordered by ascending contentX, so once a
+    // column starts past the right viewport edge every later one does too — break
+    // instead of iterating the off-screen tail (matters for very wide tables).
     for (const col of geom.cols) {
       if (col.pinned) continue
       const dx = col.contentX - _scrollLeft
-      if (dx + col.w <= 0 || dx >= _viewportWidth) continue
+      if (dx >= _viewportWidth) break
+      if (dx + col.w <= 0) continue
       drawCell(ctx, idx, col, dx, ry, rh, c)
     }
 
@@ -2428,10 +2485,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     ctx.lineWidth = 1
     ctx.beginPath()
     // Non-pinned column separators (skip ones hidden behind the frozen region).
+    // Same ascending-contentX ordering → break past the right edge.
     for (const col of geom.cols) {
       if (col.pinned) continue
       const dx = col.contentX - _scrollLeft
-      if (dx + col.w <= 0 || dx >= vw) continue
+      if (dx >= vw) break
+      if (dx + col.w <= 0) continue
       const ex = dx + col.w - 0.5
       if (ex <= frozenW) continue
       ctx.moveTo(ex, ry); ctx.lineTo(ex, ry + rh)
@@ -2673,11 +2732,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     ctx.fillStyle = withAlpha(c.cMutedBg, 0.38)
     ctx.fillRect(0, 0, c.W, HEADER_H)
 
-    // Non-pinned headers.
+    // Non-pinned headers. Ordered by ascending contentX → break past the right edge.
     for (const col of geom.cols) {
       if (col.pinned) continue
       const dx = col.contentX - _scrollLeft
-      if (dx + col.w <= 0 || dx >= c.W) continue
+      if (dx >= c.W) break
+      if (dx + col.w <= 0) continue
       drawHeaderCell(ctx, col, dx, c)
     }
 
@@ -2944,6 +3004,26 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   onDestroy(() => {
     if (_drawRafId) cancelAnimationFrame(_drawRafId)
     if (_resizeRafId) cancelAnimationFrame(_resizeRafId)
+    if (_scrollLoopId) cancelAnimationFrame(_scrollLoopId)
+  })
+
+  // Shift+wheel → horizontal scroll. Non-passive so we can call preventDefault,
+  // but bails out immediately on non-Shift events so the compositor waits <0.05ms.
+  // Registered via $effect (not onwheel attribute) to keep the Svelte template
+  // free of any non-passive wheel binding, which would otherwise force the
+  // compositor to consult JS on every 120Hz trackpad tick.
+  $effect(() => {
+    const el = tableContainer
+    if (!el) return
+    const onShiftWheel = (/** @type {WheelEvent} */ e) => {
+      if (!e.shiftKey) return
+      if (e.deltaY || e.deltaX) {
+        e.preventDefault()
+        el.scrollLeft += e.deltaY || e.deltaX
+      }
+    }
+    el.addEventListener('wheel', onShiftWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onShiftWheel)
   })
 
   // Layout / sizing effect — resize the backing store when geometry or viewport changes.
@@ -3419,6 +3499,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           data-canvas-table=""
           {...props}
           tabindex={-1}
+          role="grid"
+          aria-label={`${tableName || 'Data'} table, ${rows.length} ${rows.length === 1 ? 'row' : 'rows'}`}
+          aria-rowcount={rows.length}
+          aria-colcount={navigableColumns.length}
           class={cn(
             "app-scroll relative overflow-auto bg-panel select-none outline-none [scrollbar-gutter:stable] [contain:layout] [overflow-anchor:none]",
             embedded ? "max-h-80" : "min-h-0 flex-1",
@@ -3427,19 +3511,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           oncontextmenu={(e) => onCanvasContextMenu(e, bitsContextMenu)}
           onscroll={onContainerScroll}
           onkeydown={handleTableKeydown}
-          onwheel={(e) => {
-            // Shift+wheel → horizontal scroll (maps a mouse wheel's vertical
-            // delta onto the X axis). Everything else — vertical, trackpad,
-            // diagonal — is left to the browser so macOS momentum/inertia and
-            // edge overscroll-chaining to the parent stay buttery smooth.
-            if (e.shiftKey) {
-              const tc = tableContainer
-              if (tc && (e.deltaY || e.deltaX)) {
-                e.preventDefault()
-                tc.scrollLeft += e.deltaY || e.deltaX
-              }
-            }
-          }}
           onfocusin={() => { isTableFocused = true; }}
           onfocusout={(e) => {
             if (!tableContainer?.contains(e.relatedTarget instanceof Element ? e.relatedTarget : null)) {
@@ -3456,14 +3527,24 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             style="position:absolute;top:0;left:0;width:0;height:0;overflow:hidden;pointer-events:none"
           ></span>
 
+          <!-- Screen-reader announcement for the focused cell. Visually hidden;
+               updated only when focus/edit state changes (not during scroll). -->
+          <div
+            class="sr-only"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >{a11yCellAnnouncement}</div>
+
+
           <!-- Canvas: always mounted so the 2D context survives table navigation
                (each mount creates a new GPU-tracked context; keeping it alive
                across table switches eliminates the accumulation shown in DevTools). -->
-          <div style="position:sticky;top:0;left:0;width:0;height:0;z-index:1;overflow:visible">
+          <div style="position:sticky;top:0;left:0;width:0;height:0;z-index:1;overflow:visible;will-change:transform">
             <canvas
               bind:this={canvasEl}
               class="block"
-              style="cursor:default"
+              style="cursor:default;will-change:transform"
               onclick={onCanvasClick}
               ondblclick={onCanvasDblClick}
               onauxclick={onCanvasAuxClick}
@@ -3770,6 +3851,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                 </div>
               </div>
             </div>
+          {:else if infiniteScroll && endOfResults && rows.length > 0}
+            <!-- Infinite scroll: all rows loaded — explicit end marker so the user
+                 knows scrolling won't fetch more (vs. "is it still loading?"). -->
+            <div style="position:relative;width:100%;pointer-events:none;z-index:5">
+              <div class="flex items-center justify-center py-2.5">
+                <span class="rounded-full border border-border/15 bg-muted/20 px-3 py-1 text-[11px] text-muted-foreground/40">
+                  End of results — {rows.length.toLocaleString()} {rows.length === 1 ? 'row' : 'rows'}
+                </span>
+              </div>
+            </div>
           {/if}
 
         </div>
@@ -3854,8 +3945,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           <PanelRight />
           Open
         </ContextMenu.Item>
-        {#if menuForeignKey && !menuCellNull}
+        {#if menuForeignKey}
           <ContextMenu.Item
+            disabled={menuCellNull}
+            title={menuCellNull ? 'This value is NULL — there is no referenced row to open.' : undefined}
             onSelect={() =>
               runMenuAction(() =>
                 onfollowforeignkey({
@@ -3865,8 +3958,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               )}
           >
             <ExternalLink />
-            Open Tab
-            <ContextMenu.Shortcut>⌘↵</ContextMenu.Shortcut>
+            {menuCellNull ? 'Open Tab — value is NULL' : 'Open Tab'}
+            {#if !menuCellNull}<ContextMenu.Shortcut>⌘↵</ContextMenu.Shortcut>{/if}
           </ContextMenu.Item>
         {/if}
         <ContextMenu.Separator />
@@ -3975,6 +4068,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         <ContextMenu.Item onSelect={() => runMenuAction(() => toggleRow(contextRowIdx))}>
           <CheckSquare />
           {selected.has(contextRowIdx) ? "Deselect row" : "Select row"}
+        </ContextMenu.Item>
+        <ContextMenu.Item
+          disabled={readonly}
+          onSelect={() => runMenuAction(() => duplicateRow(contextRowIdx))}
+        >
+          <CopyPlus />
+          Duplicate row
         </ContextMenu.Item>
         <ContextMenu.Separator />
         <ContextMenu.Item

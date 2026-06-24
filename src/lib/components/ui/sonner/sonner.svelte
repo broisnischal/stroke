@@ -117,7 +117,7 @@
         </span>
       {/if}
 
-      <div class="flex min-w-0 flex-1 flex-col pr-5">
+      <div class="flex min-w-0 flex-1 flex-col {t.action ? 'pr-2' : 'pr-5'}">
         <div
           class="text-[12px] font-medium capitalize leading-tight tracking-[-0.01em] text-foreground"
         >
@@ -127,6 +127,15 @@
           <div class="mt-0.5 text-[11px] leading-snug text-muted-foreground/80">
             {t.description}
           </div>
+        {/if}
+        {#if t.action}
+          <button
+            type="button"
+            class="mt-1.5 self-start rounded-md border border-border/50 bg-background/60 px-2 py-0.5 text-[11px] font-medium text-foreground transition-colors hover:bg-muted/80"
+            onclick={() => { t.action?.onClick(); toast.dismiss(t.id) }}
+          >
+            {t.action.label}
+          </button>
         {/if}
       </div>
 

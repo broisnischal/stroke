@@ -624,7 +624,7 @@
   </div>
 
   <!-- Header -->
-  <div class="studio-chrome flex h-10 shrink-0 items-center gap-1.5 border-b border-border/50 px-3" data-studio-chrome>
+  <div class="studio-chrome flex h-9 shrink-0 items-center gap-1.5 border-b border-border/50 px-3" data-studio-chrome>
     <Sparkles class="size-3.5 shrink-0 text-primary/70" />
     <span class="min-w-0 flex-1 text-ui-xs font-semibold text-foreground/70">Assistant</span>
 

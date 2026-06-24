@@ -182,7 +182,7 @@
       if (exportCancelled) return;
       exportError = String(/** @type {any} */ (e)?.message ?? e);
       exportPhase = "error";
-      toast.error("Export failed");
+      toast.error("Could not export", { description: exportError });
     } finally {
       stopExportLog();
     }
@@ -285,7 +285,7 @@
       if (importCancelled) return;
       importError = String(/** @type {any} */ (e)?.message ?? e);
       importPhase = "error";
-      toast.error("Restore failed");
+      toast.error("Could not restore", { description: importError });
     } finally {
       stopRestoreLog();
     }

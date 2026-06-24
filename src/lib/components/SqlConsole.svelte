@@ -1,5 +1,6 @@
 <script>
   import Play from "@lucide/svelte/icons/play";
+  import WifiOff from "@lucide/svelte/icons/wifi-off";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Braces from "@lucide/svelte/icons/braces";
   import Wand2 from "@lucide/svelte/icons/wand-2";
@@ -14,7 +15,7 @@
   import Download from "@lucide/svelte/icons/download";
   import Table2 from "@lucide/svelte/icons/table-2";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
-  import { cn } from "$lib/utils.js";
+  import { cn, isNetworkError } from "$lib/utils.js";
   import { hasPro } from '$lib/stores/license.js'
   import SqlEditor from "./SqlEditor.svelte";
   import { sqlToDrizzle, sqlToPrisma } from "$lib/orm-builder.js";
@@ -32,7 +33,8 @@
   import ScanSearch from "@lucide/svelte/icons/scan-search";
   import ResizeHandle from "./ResizeHandle.svelte";
   import ExplainPlan from "./ExplainPlan.svelte";
-  import { explainSql } from "$lib/api.js";
+  import { explainSql, cancelQuery } from "$lib/api.js";
+  import Square from "@lucide/svelte/icons/square";
   import { Button } from "$lib/components/ui/button/index.js";
   import {
     clampSqlEditorHeight,
@@ -512,17 +514,30 @@
     class="studio-chrome flex h-9 shrink-0 items-center gap-2 border-b border-border bg-panel px-3"
     data-studio-chrome
   >
-    <Button
-      type="button"
-      variant="default"
-      size="sm"
-      class="h-7 shrink-0 gap-2 pl-2.5 pr-2 font-medium shadow-sm"
-      disabled={activeResult.loading || !sql.trim()}
-      onclick={handleRun}
-    >
-      <Play class="size-3.5 shrink-0" data-icon="inline-start" />
-      Run
-    </Button>
+    {#if activeResult.loading}
+      <Button
+        type="button"
+        variant="destructive"
+        size="sm"
+        class="h-7 shrink-0 gap-2 pl-2.5 pr-2 font-medium shadow-sm"
+        onclick={() => void cancelQuery()}
+      >
+        <Square class="size-3 shrink-0 fill-current" data-icon="inline-start" />
+        Stop
+      </Button>
+    {:else}
+      <Button
+        type="button"
+        variant="default"
+        size="sm"
+        class="h-7 shrink-0 gap-2 pl-2.5 pr-2 font-medium shadow-sm"
+        disabled={!sql.trim()}
+        onclick={handleRun}
+      >
+        <Play class="size-3.5 shrink-0" data-icon="inline-start" />
+        Run
+      </Button>
+    {/if}
 
     <div class="h-4 w-px shrink-0 bg-border" aria-hidden="true"></div>
 
@@ -729,23 +744,31 @@
   {/if}
 
   {#if activeResult.error}
-    <!-- Console-style error strip -->
-    <div class="shrink-0 border-b border-destructive/20 bg-destructive/5">
-      <div class="flex items-start gap-2 px-3 py-2">
-        <span class="mt-px shrink-0 font-mono text-ui-2xs font-bold uppercase tracking-wide text-destructive/70">error</span>
-        <pre class="max-h-24 min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-all font-mono text-ui-xs leading-relaxed text-destructive">{activeResult.error}</pre>
-        {#if onfixwithai}
-          <button
-            type="button"
-            onclick={fixWithAi}
-            class="inline-flex shrink-0 items-center gap-1 rounded border border-destructive/25 bg-destructive/8 px-2 py-0.5 font-mono text-ui-2xs text-destructive transition-colors hover:bg-destructive/15"
-          >
-            <Wand2 class="size-2.5 shrink-0" />
-            Fix with AI
-          </button>
-        {/if}
+    {#if isNetworkError(activeResult.error)}
+      <!-- Network / offline error -->
+      <div class="flex shrink-0 items-center gap-2.5 border-b border-border/30 bg-muted/20 px-3 py-2">
+        <WifiOff class="size-3.5 shrink-0 text-muted-foreground/40" />
+        <p class="min-w-0 flex-1 font-mono text-ui-xs text-muted-foreground/70">Cannot reach database — check your connection and try again.</p>
       </div>
-    </div>
+    {:else}
+      <!-- SQL / application error strip -->
+      <div class="shrink-0 border-b border-destructive/20 bg-destructive/5">
+        <div class="flex items-start gap-2 px-3 py-2">
+          <span class="mt-px shrink-0 font-mono text-ui-2xs font-bold uppercase tracking-wide text-destructive/70">error</span>
+          <pre class="max-h-24 min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-all font-mono text-ui-xs leading-relaxed text-destructive">{activeResult.error}</pre>
+          {#if onfixwithai}
+            <button
+              type="button"
+              onclick={fixWithAi}
+              class="inline-flex shrink-0 items-center gap-1 rounded border border-destructive/25 bg-destructive/8 px-2 py-0.5 font-mono text-ui-2xs text-destructive transition-colors hover:bg-destructive/15"
+            >
+              <Wand2 class="size-2.5 shrink-0" />
+              Fix with AI
+            </button>
+          {/if}
+        </div>
+      </div>
+    {/if}
   {/if}
 
   <!-- Output panel: header always visible, content toggles with Cmd+J -->

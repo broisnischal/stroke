@@ -18,8 +18,9 @@ const DEFAULT_DURATION = 4500
 
 /**
  * @typedef {'success' | 'error' | 'info' | 'warning' | 'message'} ToastType
- * @typedef {{ id: number, type: ToastType, title: string, description: string }} Toast
- * @typedef {{ description?: string, duration?: number }} ToastOptions
+ * @typedef {{ label: string, onClick: () => void }} ToastAction
+ * @typedef {{ id: number, type: ToastType, title: string, description: string, action?: ToastAction }} Toast
+ * @typedef {{ description?: string, duration?: number, action?: ToastAction }} ToastOptions
  */
 
 class ToastStore {
@@ -47,11 +48,11 @@ class ToastStore {
   #add(type, title, opts = {}) {
     const id = ++counter
     const duration = opts.duration ?? DEFAULT_DURATION
+    /** @type {Toast} */
+    const entry = { id, type, title: String(title ?? ''), description: opts.description ?? '' }
+    if (opts.action) entry.action = opts.action
     // newest first; immutable reassignment keeps the read-side reactive
-    this.toasts = [
-      { id, type, title: String(title ?? ''), description: opts.description ?? '' },
-      ...this.toasts,
-    ]
+    this.toasts = [entry, ...this.toasts]
     this.#schedule(id, duration)
     return id
   }
