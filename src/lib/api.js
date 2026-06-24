@@ -347,6 +347,24 @@ export async function listSequences(schema) {
   }
 }
 
+/** @param {string} schema */
+export async function listFunctions(schema) {
+  try {
+    return await invoke('pg_list_functions', { schema })
+  } catch (err) {
+    throw new Error(formatInvokeError(err))
+  }
+}
+
+/** @returns {Promise<void>} */
+export async function pingConnection() {
+  try {
+    await invoke('ping_db_connection')
+  } catch (err) {
+    throw new Error(formatInvokeError(err))
+  }
+}
+
 /**
  * @param {string} schema
  * @param {string} table
@@ -440,6 +458,11 @@ export async function getColumnStats(schema, table, column) {
   } catch (err) {
     throw new Error(formatInvokeError(err))
   }
+}
+
+/** Cancel the currently-running SQL query (no-op if none is running). */
+export async function cancelQuery() {
+  return inv('cancel_query')
 }
 
 /** @param {string} sql */

@@ -13,7 +13,13 @@
   import { cn } from "$lib/utils.js";
   import SecuritySqlModal from "./SecuritySqlModal.svelte";
 
-  let { active = false } = $props();
+  /** @type {{ active?: boolean, connectionType?: string | null }} */
+  let { active = false, connectionType = null } = $props();
+
+  // Roles + RLS use pg_catalog — only available on Postgres-compatible engines.
+  const supported = $derived(
+    connectionType === 'postgres' || connectionType === 'cockroachdb'
+  );
 
   /** @type {'roles' | 'policies' | 'rls'} */
   let activeTab = $state("roles");
@@ -132,7 +138,7 @@
       sqlModal = null;
       refresh();
     } catch (e) {
-      toast.error("Execution failed", { description: String(e) });
+      toast.error("Could not run statement", { description: String(e) });
     } finally {
       sqlRunning = false;
     }
@@ -167,6 +173,7 @@
   }
 
   $effect(() => {
+    if (!supported) return;
     if (activeTab === "roles" && roles === null && !rolesLoading) loadRoles();
     else if (activeTab === "policies" && policies === null && !policiesLoading)
       loadPolicies();
@@ -177,9 +184,11 @@
   const bool = (v) => v === true || v === "t" || v === "true" || v === 1;
 
   const isLoading = $derived(
-    (activeTab === "roles" && (rolesLoading || roles === null)) ||
+    supported && (
+      (activeTab === "roles" && (rolesLoading || roles === null)) ||
       (activeTab === "policies" && (policiesLoading || policies === null)) ||
-      (activeTab === "rls" && (rlsLoading || rlsTables === null)),
+      (activeTab === "rls" && (rlsLoading || rlsTables === null))
+    )
   );
 
   const TABS = [
@@ -200,6 +209,22 @@
 />
 
 <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
+  {#if !supported}
+    {@const engineLabel = {
+      mysql: 'MySQL', mariadb: 'MariaDB', sqlite: 'SQLite', d1: 'Cloudflare D1',
+      libsql: 'LibSQL', clickhouse: 'ClickHouse', duckdb: 'DuckDB', mssql: 'SQL Server',
+    }[connectionType ?? ''] ?? (connectionType ?? 'This engine')}
+    <div class="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
+      <ShieldCheck class="size-10 text-muted-foreground/20" />
+      <div class="space-y-1.5">
+        <p class="font-mono text-ui font-medium text-foreground">{engineLabel} does not support roles or RLS</p>
+        <p class="font-mono text-ui-xs text-muted-foreground/60">
+          Row Level Security and role management require PostgreSQL or CockroachDB.<br />
+          Use the SQL console to manage {engineLabel} users and permissions directly.
+        </p>
+      </div>
+    </div>
+  {:else}
   <!-- Tab row -->
   <div class="flex shrink-0 items-center border-b border-border bg-panel">
     {#each TABS as tab (tab.id)}
@@ -670,6 +695,7 @@
       {/if}
     {/if}
   </div>
+  {/if}
 </div>
 
 {#if sqlModal}

@@ -148,35 +148,84 @@ import Search         from '@lucide/svelte/icons/search'
   let paletteSearch = $state('')
   const TABLES_PAGE_CAP = 100
 
-  // Pre-lowercase table names ONCE per table-list change (not per keystroke), so
-  // filtering thousands of tables stays cheap as the user types — the keystroke
-  // path then only runs the integer-scoring loop, never N× String.toLowerCase().
-  const _loweredRegular  = $derived(regularTables.map((t) => ({ t, l: t.name.toLowerCase() })))
-  const _loweredViews    = $derived(viewTables.map((t) => ({ t, l: t.name.toLowerCase() })))
-  const _loweredMatViews = $derived(matViewTables.map((t) => ({ t, l: t.name.toLowerCase() })))
+  // Strip word separators so "-", "_", "." and spaces are all interchangeable:
+  // "product likes", "product-likes", "productlikes" all match "product_likes".
+  const stripSep = (/** @type {string} */ s) => s.replace(/[\s_.\-]+/g, '')
+
+  // Precompute per table ONCE per table-list change (not per keystroke): lowercased
+  // name, separator-stripped form, word segments, and word initials (for acronym
+  // matches like "pv" → product_visitor). The keystroke path then only runs the
+  // integer scorer, never re-lowercasing/splitting N names — so it stays instant
+  // (sub-millisecond) for thousands of tables WITHOUT a debounce.
+  /** @param {{ name: string }} t */
+  const prep = (t) => {
+    const l = t.name.toLowerCase()
+    const words = l.split(/[\s_.\-]+/).filter(Boolean)
+    return { t, l, loose: stripSep(l), words, initials: words.map((w) => w[0]).join('') }
+  }
+  const _loweredRegular  = $derived(regularTables.map(prep))
+  const _loweredViews    = $derived(viewTables.map(prep))
+  const _loweredMatViews = $derived(matViewTables.map(prep))
 
   /**
-   * Substring score against an already-lowercased name: exact > starts-with > contains.
-   * @param {string} nLower @param {string} q (already trimmed + lowercased)
+   * Subsequence check with a tightness bonus: returns -1 if `q`'s chars don't all
+   * appear in order in `text`, otherwise a score that's higher when the matched
+   * chars are closer together (fewer gaps) and the first match is earlier.
+   * @param {string} text @param {string} q (both lowercased, separator-stripped)
    */
-  function scoreLower(nLower, q) {
-    if (nLower === q) return 1000
-    if (nLower.startsWith(q)) return 900
-    const sub = nLower.indexOf(q)
-    return sub !== -1 ? 800 - sub : 0
+  function subseqScore(text, q) {
+    let ti = 0, qi = 0, gaps = 0, first = -1, last = -1
+    while (ti < text.length && qi < q.length) {
+      if (text[ti] === q[qi]) {
+        if (first === -1) first = ti
+        if (last >= 0) gaps += ti - last - 1
+        last = ti
+        qi++
+      }
+      ti++
+    }
+    if (qi < q.length) return -1
+    return Math.max(0, 80 - gaps - first)
   }
 
-  /** @param {{ t: { name: string }, l: string }[]} lowered */
-  function filterAndCap(lowered) {
-    const q = paletteSearch.trim().toLowerCase()
-    if (!q) return { items: lowered.slice(0, TABLES_PAGE_CAP).map((x) => x.t), total: lowered.length }
-    /** @type {{ t: { name: string }, s: number }[]} */
-    const scored = []
-    for (const x of lowered) {
-      const s = scoreLower(x.l, q)
-      if (s > 0) scored.push({ t: x.t, s })
+  /**
+   * Intuitive relevance score, separator-insensitive. Tiers (high→low):
+   * exact, loose-exact, prefix, loose-prefix, word-prefix, acronym, substring,
+   * loose-substring, fuzzy subsequence. 0 = no match.
+   * @param {{ l: string, loose: string, words: string[], initials: string }} x
+   * @param {string} q lowercased query @param {string} qLoose separator-stripped query
+   */
+  function scoreName(x, q, qLoose) {
+    if (x.l === q) return 1000
+    if (x.loose === qLoose) return 980
+    if (x.l.startsWith(q)) return 940 - Math.min(x.l.length - q.length, 60)
+    if (x.loose.startsWith(qLoose)) return 900 - Math.min(x.loose.length - qLoose.length, 60)
+    for (const w of x.words) if (w.startsWith(q)) return 860
+    if (qLoose.length >= 2) {
+      if (x.initials.startsWith(qLoose)) return 840
+      if (x.initials.includes(qLoose)) return 800
     }
-    scored.sort((a, b) => b.s - a.s)
+    const sub = x.l.indexOf(q)
+    if (sub !== -1) return 760 - Math.min(sub, 60)
+    const lsub = x.loose.indexOf(qLoose)
+    if (lsub !== -1) return 700 - Math.min(lsub, 60)
+    const ss = subseqScore(x.loose, qLoose)
+    return ss >= 0 ? 400 + ss : 0
+  }
+
+  /** @param {ReturnType<typeof prep>[]} prepped */
+  function filterAndCap(prepped) {
+    const q = paletteSearch.trim().toLowerCase()
+    if (!q) return { items: prepped.slice(0, TABLES_PAGE_CAP).map((x) => x.t), total: prepped.length }
+    const qLoose = stripSep(q)
+    /** @type {{ t: { name: string }, s: number, len: number }[]} */
+    const scored = []
+    for (const x of prepped) {
+      const s = scoreName(x, q, qLoose)
+      if (s > 0) scored.push({ t: x.t, s, len: x.l.length })
+    }
+    // Higher score first; ties broken by shorter name (more relevant) then A–Z.
+    scored.sort((a, b) => b.s - a.s || a.len - b.len || (a.t.name < b.t.name ? -1 : 1))
     return { items: scored.slice(0, TABLES_PAGE_CAP).map((x) => x.t), total: scored.length }
   }
 
@@ -192,7 +241,10 @@ import Search         from '@lucide/svelte/icons/search'
   /** @type {(value: string, search: string) => number} */
   const commandFilter = (value, search) => {
     if (!search) return 1
-    return value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0
+    const v = value.toLowerCase(), s = search.toLowerCase()
+    if (v.includes(s)) return 1
+    // Separator-insensitive fallback so "newtable"/"new-table" match "new table".
+    return stripSep(v).includes(stripSep(s)) ? 1 : 0
   }
 
   /** @param {() => void} action */

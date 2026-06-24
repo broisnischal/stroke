@@ -4,6 +4,7 @@
 	import * as Dialog from "./index.js";
 	import { cn } from "$lib/utils.js";
 	import X from '@lucide/svelte/icons/x';
+	import { installFocusTracker, getLastExternalFocus } from "$lib/focus-tracker.js";
 
 	let {
 		ref = $bindable(null),
@@ -11,8 +12,27 @@
 		portalProps,
 		children,
 		showCloseButton = true,
+		/** @type {((e: Event) => void) | undefined} */
+		onCloseAutoFocus,
 		...restProps
 	} = $props();
+
+	// Track focus app-wide so we can restore it when this dialog closes. bits-ui
+	// returns focus to a Dialog.Trigger automatically, but programmatically-opened
+	// dialogs (no trigger) would otherwise drop focus to <body>.
+	installFocusTracker();
+
+	/** @param {Event} e */
+	function handleCloseAutoFocus(e) {
+		// Let an explicit consumer handler run / opt out first.
+		onCloseAutoFocus?.(e);
+		if (e.defaultPrevented) return;
+		const prev = getLastExternalFocus();
+		if (prev && document.contains(prev)) {
+			e.preventDefault();
+			try { prev.focus({ preventScroll: true }); } catch { /* element not focusable */ }
+		}
+	}
 </script>
 
 <DialogPortal {...portalProps}>
@@ -20,6 +40,7 @@
 	<DialogPrimitive.Content
 		bind:ref
 		data-slot="dialog-content"
+		onCloseAutoFocus={handleCloseAutoFocus}
 		class={cn(
 			"bg-background text-foreground data-open:animate-in data-closed:animate-out data-closed:fade-out-0 data-open:fade-in-0 data-closed:zoom-out-[0.98] data-open:zoom-in-[0.98] flex flex-col gap-4 rounded-xl border border-border/60 p-5 text-sm shadow-lg duration-100 w-full max-w-[calc(100%-2rem)] fixed top-1/2 left-1/2 z-50 -translate-x-1/2 -translate-y-1/2 outline-none",
 			className

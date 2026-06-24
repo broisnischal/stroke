@@ -30,19 +30,29 @@
   let search = $state("");
   /** @type {HTMLInputElement | null} */
   let inputEl = $state(null);
+  /** @type {HTMLElement | null} */
+  let listEl = $state(null);
 
   // Clear the query whenever the menu closes so it reopens fresh.
   $effect(() => { if (!open) search = ""; });
 
   function handleSelect(/** @type {any} */ it) {
     if (it?.disabled) return;
+    // cmdk re-selects the first item on the items-changed re-render and scrolls
+    // it into view, which jerks the list back to the top after a non-closing
+    // toggle (e.g. show/hide columns). Capture the scroll position and restore it
+    // so the user stays exactly where they were.
+    const prevTop = listEl?.scrollTop ?? 0;
     onselect(it);
     if (closeOnSelect) {
       open = false;
     } else {
       // Refocus the search input after a non-closing select so cmdk's keyboard
       // selection cursor returns to the input and clears the item highlight.
-      requestAnimationFrame(() => inputEl?.focus());
+      requestAnimationFrame(() => {
+        inputEl?.focus();
+        if (listEl && listEl.scrollTop !== prevTop) listEl.scrollTop = prevTop;
+      });
     }
   }
 
@@ -111,7 +121,7 @@
           </Command.Input>
         </div>
         {@render header?.()}
-        <Command.List class="sm-item-list min-h-0 flex-1 overflow-y-auto p-1">
+        <Command.List bind:ref={listEl} class="sm-item-list min-h-0 flex-1 overflow-y-auto p-1">
           <Command.Empty class="px-2 py-5 text-center text-ui-xs text-muted-foreground/50">{empty}</Command.Empty>
           {#each items as it (it.value)}
             <Command.Item

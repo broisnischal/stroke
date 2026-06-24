@@ -1,6 +1,38 @@
 import { clsx } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 
+const NETWORK_ERROR_PATTERNS = [
+  'failed to lookup address',
+  'nodename nor servname',
+  'error communicating with database',
+  'connection refused',
+  'connection reset',
+  'connection timed out',
+  'connect timeout',
+  'broken pipe',
+  'network is unreachable',
+  'no route to host',
+  'network error',
+  'socket error',
+  'tcp connect error',
+  'failed to connect',
+  'unable to connect',
+  'os error 61',   // ECONNREFUSED macOS
+  'os error 111',  // ECONNREFUSED Linux
+  'os error 110',  // ETIMEDOUT
+  'os error 113',  // EHOSTUNREACH
+]
+
+/**
+ * Returns true when the error message indicates a network / connectivity problem
+ * rather than a SQL or application error.
+ * @param {string} msg
+ */
+export function isNetworkError(msg) {
+  const lower = msg.toLowerCase()
+  return NETWORK_ERROR_PATTERNS.some((p) => lower.includes(p))
+}
+
 /** @param {...import('clsx').ClassValue} inputs */
 export function cn(...inputs) {
   return twMerge(clsx(inputs))

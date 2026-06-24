@@ -519,6 +519,14 @@ html[data-os="linux"]   { --window-radius: 8px; }
     }
   }
 
+  /* Canvas table: promote scroll container to a compositing layer so WebKit's
+     CADisplayLink runs at the display's native rate (120Hz on ProMotion) instead
+     of the default 60Hz timer path. will-change:scroll-position does NOT create
+     a new stacking context, so position:sticky inside is unaffected. */
+  [data-canvas-table] {
+    will-change: scroll-position;
+  }
+
   /* Minimal thin scrollbars — all platforms */
   :is(.app-scroll, .overflow-auto, .overflow-y-auto, .overflow-x-auto) {
     scrollbar-width: thin;

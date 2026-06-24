@@ -22,13 +22,13 @@ pub use explain::{explain_pg, explain_mysql, explain_sqlite, ExplainResult};
 pub use ssh_tunnel::TunnelState;
 pub use query::{
     delete_table_row, delete_table_rows, execute_ddl, execute_sql, execute_sql_multi, execute_sql_on_conn,
-    get_column_stats, get_table_rows, insert_table_row, update_table_cell,
+    get_column_stats, get_table_rows, insert_table_row, update_table_cell, ping_connection,
     ColumnStats, InsertRowResult, RowFilter, SqlResult, TableRows,
 };
 pub use schema::{
     list_schemas, list_tables, list_schemas_on_conn, list_tables_on_conn,
-    list_indexes, list_enums, list_triggers, list_sequences,
+    list_indexes, list_enums, list_functions, list_triggers, list_sequences,
     truncate_table, drop_table, get_table_column_structure, get_incoming_foreign_keys,
     get_table_ddl, get_table_ddl_on_conn,
-    TableInfo, IndexInfo, EnumInfo, TriggerInfo, SequenceInfo, ColumnStructureRow, IncomingForeignKey,
+    TableInfo, IndexInfo, EnumInfo, FunctionInfo, TriggerInfo, SequenceInfo, ColumnStructureRow, IncomingForeignKey,
 };

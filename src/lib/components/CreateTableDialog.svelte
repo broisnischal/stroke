@@ -131,7 +131,7 @@
       oncreated(tableName.trim())
       open = false
     } catch (err) {
-      toast.error('Failed to create table', { description: String(err) })
+      toast.error('Could not create table', { description: String(err) })
     } finally {
       submitting = false
     }

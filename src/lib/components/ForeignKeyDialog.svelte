@@ -64,7 +64,7 @@
       open = false
       onrefresh()
     } catch (e) {
-      toast.error('Failed to save foreign key', { description: String(e) })
+      toast.error('Could not save foreign key', { description: String(e) })
     } finally {
       saving = false
     }
@@ -81,7 +81,7 @@
       open = false
       onrefresh()
     } catch (e) {
-      toast.error('Failed to remove foreign key', { description: String(e) })
+      toast.error('Could not remove foreign key', { description: String(e) })
     } finally {
       deleting = false
     }
