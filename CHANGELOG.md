@@ -4,6 +4,12 @@ All notable changes to Stroke are listed here, newest first.
 
 ---
 
+## [0.7.0] - 2026-06-24
+
+### Changes
+- fix: cross-driver correctness, a11y, and faster command-palette, ux and ui improvement, rendering fps improvements (#10)
+
+
 ## [0.6.0] - 2026-06-23
 
 ### Changes
