@@ -103,11 +103,8 @@ html[data-os="linux"]   { --window-radius: 8px; }
     /* Transparent so the rounded body corners reveal the desktop, not a square
        html background. Body's bg-background would otherwise propagate here. */
     background: transparent;
-    /* Linux/WebKitGTK: 'auto' lets FreeType apply the system's native hinting
-       (bytecode or autohint) so strokes snap to pixel boundaries — this is what
-       makes text look crisp on a non-HiDPI Linux screen. 'antialiased' forces
-       grayscale AA which bypasses FreeType hinting and makes text look light/soft.
-       macOS: 'auto' delegates to Core Text which also produces good results. */
+    /* macOS/fallback: 'auto' delegates to Core Text which produces good results.
+       Linux overrides this to 'antialiased' below via data-os="linux". */
     -webkit-font-smoothing: auto;
     -moz-osx-font-smoothing: auto;
     /* optimizeSpeed (not optimizeLegibility): a data-grid renders tens of
@@ -127,9 +124,15 @@ html[data-os="linux"]   { --window-radius: 8px; }
     -webkit-font-smoothing: antialiased;
   }
 
-  /* Linux at non-HiDPI benefits from a touch more weight too. */
+  /* Linux/WebKitGTK: subpixel rendering is unavailable on Wayland (the compositor
+     can rotate/scale windows, so subpixel direction is unknown). Without it, Geist
+     Variable at weight 400 produces ~1px strokes that disappear on dark backgrounds.
+     'antialiased' forces consistent grayscale AA regardless of the user's fontconfig
+     setup; bumping weight to 450 restores stroke visibility lost without subpixels. */
   html[data-os="linux"] {
-    font-weight: 410;
+    font-weight: 450;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   body {
@@ -260,7 +263,8 @@ html[data-os="linux"]   { --window-radius: 8px; }
     [role='menu'],
     [role='listbox']
   ) {
-    font-weight: 410;
+    font-weight: 450;
+    -webkit-font-smoothing: antialiased;
   }
 
   /* Sonner — frosted notifications */

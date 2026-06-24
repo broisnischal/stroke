@@ -2815,15 +2815,20 @@ let rowSearch = $state('')
     if (!loadSettings().autoReconnectOnStartup) { showConnectionModal = true; return }
 
     autoConnecting = true
+    /** @param {Promise<unknown>} p */
+    const withTimeout = (p) => Promise.race([
+      p,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Connection timed out')), 5000)),
+    ])
     try {
-      if (last.type === 'sqlite') await connectSqlite(last)
-      else if (last.type === 'd1') await connectD1(last)
-      else if (last.type === 'libsql') await connectLibSql(last)
-      else if (last.type === 'mysql' || last.type === 'mariadb') await connectMysql(last)
-      else if (last.type === 'clickhouse') await connectClickhouse(last)
-      else if (last.type === 'duckdb') await connectDuckdb(last)
-      else if (last.type === 'mssql') await connectMssql(last)
-      else await connectPostgres(last)
+      if (last.type === 'sqlite') await withTimeout(connectSqlite(last))
+      else if (last.type === 'd1') await withTimeout(connectD1(last))
+      else if (last.type === 'libsql') await withTimeout(connectLibSql(last))
+      else if (last.type === 'mysql' || last.type === 'mariadb') await withTimeout(connectMysql(last))
+      else if (last.type === 'clickhouse') await withTimeout(connectClickhouse(last))
+      else if (last.type === 'duckdb') await withTimeout(connectDuckdb(last))
+      else if (last.type === 'mssql') await withTimeout(connectMssql(last))
+      else await withTimeout(connectPostgres(last))
       await onConnected(last, last.id)
       await refreshQueryStores()
     } catch {
@@ -3458,14 +3463,14 @@ let rowSearch = $state('')
     out:fade={{ duration: 200 }}
   >
     <!-- Spinning ring + logo -->
-    <div class="relative size-[60px]">
-      <svg class="absolute inset-0 size-full animate-spin" viewBox="0 0 60 60" fill="none" aria-hidden="true">
-        <circle cx="30" cy="30" r="28" stroke="currentColor" stroke-width="1.5"
-          stroke-dasharray="30 146" stroke-linecap="round"
+    <div class="relative flex size-[88px] items-center justify-center">
+      <svg class="absolute inset-0 size-full animate-spin" viewBox="0 0 88 88" fill="none" aria-hidden="true">
+        <circle cx="44" cy="44" r="42" stroke="currentColor" stroke-width="1.5"
+          stroke-dasharray="44 220" stroke-linecap="round"
           class="text-foreground/20" />
       </svg>
-      <div class="absolute inset-[5px] flex items-center justify-center rounded-[14px] bg-foreground/[0.05] ring-1 ring-border/40">
-        <Logo class="size-[26px]" />
+      <div class="flex size-[72px] items-center justify-center rounded-[20px] border border-border/60 bg-card ring-1 ring-inset ring-white/[0.04] shadow-[0_10px_30px_-14px_rgba(0,0,0,0.7)]">
+        <Logo class="size-9" />
       </div>
     </div>
 
