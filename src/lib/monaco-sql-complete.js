@@ -393,16 +393,16 @@ export function registerMonacoSqlCompletion(monaco, getHints) {
       }
 
       // ── Priority tiers by context ──────────────────────────────────────
-      // table  → tables=0  schemas=1  fns=7   kws=8   cols=9   snip=6
+      // table  → tables=0  schemas=1  kws=2   fns=7   cols=9   snip=6
       // column → cols_ref=0 cols_all=1 fns=2  kws=3   tables=7 snip=6
-      // any    → schemas=1  tables=2   cols=3  fns=4   kws=5   snip=0
+      // any    → snip=0   kws=1   schemas=2  tables=3  cols=4  fns=5
 
-      const tierTable  = ctx === 'table'  ? '0_' : ctx === 'column' ? '7_' : '2_'
-      const tierSchema = ctx === 'table'  ? '1_' : ctx === 'column' ? '8_' : '1_'
-      const tierColRef = ctx === 'column' ? '0_' : ctx === 'table'  ? '9_' : '3_' // cols from referenced tables
-      const tierColAll = ctx === 'column' ? '1_' : ctx === 'table'  ? '9_' : '3_' // cols from other tables
-      const tierFn     = ctx === 'column' ? '2_' : ctx === 'table'  ? '7_' : '4_'
-      const tierKw     = ctx === 'table'  ? '8_' : ctx === 'column' ? '3_' : '5_'
+      const tierTable  = ctx === 'table'  ? '0_' : ctx === 'column' ? '7_' : '3_'
+      const tierSchema = ctx === 'table'  ? '1_' : ctx === 'column' ? '8_' : '2_'
+      const tierColRef = ctx === 'column' ? '0_' : ctx === 'table'  ? '9_' : '4_' // cols from referenced tables
+      const tierColAll = ctx === 'column' ? '1_' : ctx === 'table'  ? '9_' : '4_' // cols from other tables
+      const tierFn     = ctx === 'column' ? '2_' : ctx === 'table'  ? '7_' : '5_'
+      const tierKw     = ctx === 'table'  ? '2_' : ctx === 'column' ? '3_' : '1_'
       const tierSnip   = ctx === 'any'    ? '0_' : '6_'
 
       // ── 2. Schemas ─────────────────────────────────────────────────────
@@ -529,9 +529,15 @@ export function registerMonacoSqlCompletion(monaco, getHints) {
       }
 
       // ── 6. Keywords (context-filtered) ────────────────────────────────
-      const kwSet = ctx === 'table' ? TABLE_CTX_KWS : ctx === 'column' ? COLUMN_CTX_KWS : null
+      // When the user has typed a partial prefix always match ALL keywords so
+      // typing "sel" → SELECT works regardless of context.  With no partial,
+      // filter to the contextually relevant subset to reduce noise.
+      const kwSet = partial
+        ? null
+        : ctx === 'table'  ? TABLE_CTX_KWS
+        : ctx === 'column' ? COLUMN_CTX_KWS
+        : null
       for (const kw of PG_KEYWORDS) {
-        // In table or column context, only show contextually relevant keywords
         if (kwSet && !kwSet.has(kw)) continue
         if (partial && !kw.toLowerCase().startsWith(partial)) continue
         suggestions.push({

@@ -64,6 +64,10 @@ export const DEFAULT_SETTINGS = {
 /** Reactive app font id (synced by applySettings). */
 export const appFont = writable(/** @type {FontId} */ (DEFAULT_FONT))
 
+/** Reactive app zoom scale (synced by applySettings). Monaco editors subscribe
+ *  to this to rescale their font/line-height in lockstep with the rest of the UI. */
+export const appZoom = writable(DEFAULT_ZOOM)
+
 /** Reactive app theme id (synced by applySettings). */
 export const appThemeId = writable(/** @type {ThemeId} */ (DEFAULT_THEME_ID))
 
@@ -151,10 +155,18 @@ export function applySettings(settings) {
   isCurrentThemeDark.set(dark)
   // Linux/WebKitGTK at 1x DPI: 14px strokes are too thin for reliable readability.
   // Bump the base from 14 → 15px so the zoom ladder scales from a legible root.
-  // The canvas table and Monaco editor both read --app-font-size, so they scale too.
+  // The canvas table reads --app-font-size, so it scales with zoom automatically.
   const basePx = root.dataset.os === 'linux' ? 15 : 14
   root.style.setProperty('--app-zoom', String(zoom))
   root.style.setProperty('--app-font-size', `${Math.round(basePx * zoom)}px`)
+
+  // Monaco editors read --editor-font-size / --editor-line-height directly (Monaco
+  // takes pixel values, not CSS units, so it can't inherit --app-font-size). Scale
+  // them off the same base + zoom so the editor grows in lockstep with the UI.
+  // The appZoom subscription in monaco-env.js pushes these to live editor instances.
+  root.style.setProperty('--editor-font-size', `${Math.round(basePx * zoom)}px`)
+  root.style.setProperty('--editor-line-height', `${Math.round(basePx * 1.5 * zoom)}px`)
+  appZoom.set(zoom)
 
   // Font family — overrides the stylesheet :root defaults inline (inline style
   // wins), so the whole UI + canvas grid pick it up. The canvas re-measures its
