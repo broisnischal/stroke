@@ -116,6 +116,7 @@
 <div
   class="flex h-full shrink-0 flex-col border-l border-border/40 bg-panel text-[13px]"
   style="width: {panelWidth}px"
+  role="none"
   onkeydown={(e) => {
     if (e.key !== 'Escape') return
     if (formOpen) { e.stopPropagation(); cancelForm() }

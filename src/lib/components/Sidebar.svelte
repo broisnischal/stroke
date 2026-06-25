@@ -721,11 +721,15 @@
           bind:this={scrollContainerEl}
           bind:clientHeight={sidebarHeight}
           class="app-scroll min-h-0 w-full flex-1 overflow-y-auto"
+          role="none"
           onscroll={onSidebarScroll}
           onclick={(e) => {
             if (selectedItems.size > 0 && !/** @type {Element} */(e.target).closest?.('li')) {
               clearSelection()
             }
+          }}
+          onkeydown={(e) => {
+            if (e.key === 'Escape' && selectedItems.size > 0) clearSelection()
           }}
         >
           {#if loadingTables}
@@ -971,9 +975,8 @@
               {/if}
             </button>
             {#if tablesOpen}
-              <ul
-                bind:this={tableListEl}
-                class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1"
+              <div
+                role="none"
                 onkeydown={(e) => {
                   if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
                   const btns = /** @type {HTMLButtonElement[]} */ ([...(tableListEl?.querySelectorAll('button') ?? [])])
@@ -984,6 +987,10 @@
                   else if (i === 0) filterEl?.focus()
                   else btns[i - 1]?.focus()
                 }}
+              >
+              <ul
+                bind:this={tableListEl}
+                class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1"
               >
                 {#if regularTables.length === 0 && tables.length > 0}
                   <li
@@ -1148,6 +1155,7 @@
                   {#if virtBotPad > 0}<li style="height:{virtBotPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
                 {/if}
               </ul>
+              </div>
             {/if}
             {/if}
 
