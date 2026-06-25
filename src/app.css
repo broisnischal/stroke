@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
+@import "@fontsource-variable/jetbrains-mono";
 @import "@fontsource-variable/inter";
 @import "./lib/themes/app-themes.css";
 
@@ -13,7 +14,13 @@
   --app-zoom: 1;
   --app-font-size: 14px;
   --editor-font-size: 14px;
-  --editor-line-height: 24px;
+  /* 1.5 ratio — matches VS Code / Cursor's default editor line height. */
+  --editor-line-height: 21px;
+  /* Dedicated code font for Monaco editors, kept independent of the app's UI /
+     data-grid mono (`--font-mono`) — same separation VS Code makes between its
+     "editor font" and everything else. JetBrains Mono is a true code typeface:
+     heavier, even rhythm, designed ligatures. */
+  --editor-font-family: "JetBrains Mono Variable", "Geist Mono Variable", ui-monospace, monospace;
 }
 
 /* JSON colorizer tokens (highlightJson) — dark-friendly defaults, light override
