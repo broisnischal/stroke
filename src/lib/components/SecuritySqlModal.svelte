@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import * as monaco from 'monaco-editor'
-  import { configureMonacoWorkers } from '$lib/monaco-env.js'
+  import { configureMonacoWorkers, editorFontFamily } from '$lib/monaco-env.js'
   import { registerMonacoSqlFormatter } from '$lib/format-sql.js'
   import {
     defineStrokeMonacoThemes,
@@ -44,7 +44,7 @@
       theme: monacoThemeId(currentTheme()),
       automaticLayout: true,
       minimap: { enabled: false },
-      fontFamily: '"Geist Mono Variable", ui-monospace, monospace',
+      fontFamily: editorFontFamily(),
       fontSize,
       lineHeight,
       fontLigatures: false,

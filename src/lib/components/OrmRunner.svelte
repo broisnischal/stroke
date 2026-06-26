@@ -1,7 +1,7 @@
 <script>
   import { onMount, untrack } from "svelte";
   import * as monaco from "monaco-editor";
-  import { configureMonacoWorkers, monacoFontFamily } from "$lib/monaco-env.js";
+  import { configureMonacoWorkers, editorFontFamily } from "$lib/monaco-env.js";
   import {
     defineStrokeMonacoThemes,
     monacoThemeId,
@@ -479,7 +479,7 @@
       // even while this tab is hidden. ResizeObserver fires only on real resizes.
       automaticLayout: false,
       minimap: { enabled: false },
-      fontFamily: monacoFontFamily(),
+      fontFamily: editorFontFamily(),
       fontSize,
       lineHeight,
       fontLigatures: false,
