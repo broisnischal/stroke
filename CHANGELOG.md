@@ -4,6 +4,12 @@ All notable changes to Stroke are listed here, newest first.
 
 ---
 
+## [0.7.2] - 2026-06-26
+
+### Changes
+- feat:: a11y, font rasterization, and more fixes. (#11)
+
+
 ## [0.7.0] - 2026-06-24
 
 ### Changes
