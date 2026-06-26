@@ -70,15 +70,18 @@ const LIST_TABLES_SQL: &str = r#"
         END AS kind,
         CASE
             WHEN c.relkind IN ('v', 'f') THEN -1
-            -- Trust the stats/planner estimate ONLY when it is strictly positive.
-            -- A zero or missing estimate is ambiguous: a freshly created table,
-            -- bulk-loaded data, a restored dump, or a server where autovacuum /
-            -- the stats collector hasn't run yet all report n_live_tup = 0 even
-            -- when rows exist. We mark those as -1 (unknown) and resolve them with
-            -- an exact COUNT(*) below. Large tables keep a positive estimate and
-            -- skip the (potentially slow) exact count.
-            WHEN COALESCE(s.n_live_tup, 0) > 0 THEN s.n_live_tup::bigint
-            WHEN c.reltuples > 0 THEN c.reltuples::bigint
+            -- Trust the stats/planner estimate ONLY for large tables, where an
+            -- exact COUNT(*) would be a slow sequential scan. For everything
+            -- else we return -1 (unknown) and resolve it with an exact COUNT(*)
+            -- below, because estimates are unreliable in both directions for
+            -- small tables: a stale reltuples reports rows for a table that was
+            -- emptied (n_live_tup catches up slowly after a bulk DELETE), and a
+            -- freshly created / bulk-loaded / restored table reports 0 before
+            -- autovacuum or the stats collector has run. The 100k threshold
+            -- mirrors ESTIMATE_THRESHOLD in query.rs::get_table_rows, where an
+            -- exact count below it is sub-millisecond.
+            WHEN GREATEST(COALESCE(s.n_live_tup, 0), c.reltuples::bigint) >= 100000
+                THEN GREATEST(COALESCE(s.n_live_tup, 0), c.reltuples::bigint)
             ELSE -1
         END AS row_count,
         CASE WHEN c.relkind IN ('r', 'p') THEN c.relrowsecurity ELSE false END AS rls_enabled
