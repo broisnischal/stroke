@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import * as monaco from 'monaco-editor'
-  import { configureMonacoWorkers, monacoFontFamily } from '$lib/monaco-env.js'
+  import { configureMonacoWorkers, editorFontFamily } from '$lib/monaco-env.js'
   import { defineStrokeMonacoThemes, monacoThemeId, readEditorFontOptions } from '$lib/monaco-themes.js'
   import { normalizeThemeId } from '$lib/themes/registry.js'
   import Table2 from '@lucide/svelte/icons/table-2'
@@ -111,7 +111,7 @@
       // forever; a ResizeObserver (below) handles relayout without the polling.
       automaticLayout: false,
       minimap: { enabled: false },
-      fontFamily: monacoFontFamily(),
+      fontFamily: editorFontFamily(),
       fontSize,
       lineHeight,
       fontLigatures: false,

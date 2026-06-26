@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import * as monaco from 'monaco-editor'
-  import { configureMonacoWorkers, monacoFontFamily } from '$lib/monaco-env.js'
+  import { configureMonacoWorkers, editorFontFamily } from '$lib/monaco-env.js'
   import { registerMonacoSqlFormatter } from '$lib/format-sql.js'
   import { registerMonacoSqlCompletion } from '$lib/monaco-sql-complete.js'
   import {
@@ -118,11 +118,12 @@
       // unmounted). A ResizeObserver fires only on actual size changes. See below.
       automaticLayout: false,
       minimap: { enabled: false },
-      fontFamily: monacoFontFamily(),
+      fontFamily: editorFontFamily(),
       fontSize,
       lineHeight,
       fontLigatures: true,
-      fontWeight: '400',
+      fontWeight: '450',
+      letterSpacing: 0.2,
       padding: { top: 14, bottom: 14 },
       scrollBeyondLastLine: false,
       wordWrap: 'on',
@@ -139,9 +140,12 @@
       overviewRulerLanes: 0,
       hideCursorInOverviewRuler: true,
       overviewRulerBorder: false,
+      cursorStyle: 'line',
+      cursorWidth: 2,
       cursorBlinking: 'smooth',
       cursorSmoothCaretAnimation: 'on',
       smoothScrolling: true,
+      fixedOverflowWidgets: true,
       quickSuggestions: { other: true, comments: false, strings: true },
       quickSuggestionsDelay: 50,
       suggestOnTriggerCharacters: true,
@@ -194,12 +198,19 @@
     }
     document.addEventListener('keydown', docRunHandler, { capture: true, passive: false })
 
-    // Monaco measures char widths at init time. If Geist Mono Variable isn't
-    // loaded yet (slow on Linux/Windows), it caches fallback-font widths and
-    // never self-corrects even after the font visually arrives.
-    document.fonts.ready.then(() => {
-      try { editor?.remeasureFonts?.() } catch { /* API not available in this Monaco build */ }
-    })
+    // Monaco caches glyph widths at init time. If the primary monospace font
+    // hasn't loaded yet (font-display:swap means it may arrive after CSS parse),
+    // Monaco uses fallback metrics and never self-corrects. Explicitly loading the
+    // font and then calling remeasureFonts + layout forces correct re-measurement.
+    const remeasure = () => {
+      try {
+        // remeasureFonts is a STATIC method on monaco.editor, not on the instance.
+        monaco.editor.remeasureFonts()
+        requestAnimationFrame(() => editor?.layout())
+      } catch { /* API not available in this Monaco build */ }
+    }
+    // Wait for the editor's primary font specifically before remeasuring.
+    document.fonts.load(`450 ${fontSize}px "JetBrains Mono Variable"`).then(remeasure, remeasure)
 
     editor.onDidChangeModelContent(() => {
       const next = editor?.getValue() ?? ''
@@ -262,49 +273,47 @@
     border-radius: inherit;
   }
 
-  .sql-editor-host :global(.monaco-editor .view-lines),
-  .sql-editor-host :global(.monaco-editor .view-line) {
-    font-weight: 400 !important;
-  }
-
   .sql-editor-host :global(.monaco-editor .monaco-editor-background) {
     outline: none !important;
   }
 
   /* ── Suggestion widget ──────────────────────────────────────────────── */
+  /* fixedOverflowWidgets:true moves these to <body>, so no host ancestor.
+     Widgets lose the editor's inherited font — set it explicitly. */
 
-  .sql-editor-host :global(.suggest-widget) {
+  :global(.suggest-widget) {
+    font-family: var(--editor-font-family) !important;
     border-radius: 10px !important;
     overflow: hidden !important;
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.25) !important;
   }
 
   /* Details panel (right side when expanded) */
-  .sql-editor-host :global(.suggest-widget .suggest-widget-details) {
+  :global(.suggest-widget .suggest-widget-details) {
     border-radius: 0 10px 10px 0 !important;
     border-left-width: 1px !important;
   }
 
   /* Each row: uniform height + horizontal padding */
-  .sql-editor-host :global(.suggest-widget .monaco-list-row) {
+  :global(.suggest-widget .monaco-list-row) {
     border-radius: 0 !important;
     padding-left: 8px !important;
     padding-right: 8px !important;
   }
 
   /* Label text: slightly tighter tracking for mono */
-  .sql-editor-host :global(.suggest-widget .monaco-list-row .label-name) {
+  :global(.suggest-widget .monaco-list-row .label-name) {
     letter-spacing: -0.01em;
   }
 
   /* Detail text on right side of each row */
-  .sql-editor-host :global(.suggest-widget .details-label) {
+  :global(.suggest-widget .details-label) {
     opacity: 0.45 !important;
     font-size: 0.8em !important;
   }
 
   /* The full documentation text in expanded detail panel */
-  .sql-editor-host :global(.suggest-widget .suggest-widget-details .docs) {
+  :global(.suggest-widget .suggest-widget-details .docs) {
     opacity: 0.8;
     font-size: 0.82em !important;
     line-height: 1.5 !important;
@@ -312,27 +321,28 @@
   }
 
   /* Signature text (bold param names etc.) */
-  .sql-editor-host :global(.suggest-widget .suggest-widget-details .signature) {
+  :global(.suggest-widget .suggest-widget-details .signature) {
     font-size: 0.85em !important;
     letter-spacing: -0.01em;
   }
 
   /* ── Parameter hints (shows while typing fn args) ───────────────────── */
 
-  .sql-editor-host :global(.parameter-hints-widget) {
+  :global(.parameter-hints-widget) {
+    font-family: var(--editor-font-family) !important;
     border-radius: 8px !important;
     overflow: hidden !important;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4) !important;
   }
 
-  .sql-editor-host :global(.parameter-hints-widget .phContent) {
+  :global(.parameter-hints-widget .phContent) {
     font-size: 0.85em !important;
     padding: 4px 8px !important;
   }
 
   /* ── Hover widget ───────────────────────────────────────────────────── */
 
-  .sql-editor-host :global(.monaco-hover) {
+  :global(.monaco-hover) {
     border-radius: 8px !important;
     overflow: hidden !important;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4) !important;
@@ -340,10 +350,10 @@
 
   /* ── Thin scrollbar inside suggestion list ──────────────────────────── */
 
-  .sql-editor-host :global(.suggest-widget .monaco-scrollable-element > .scrollbar.vertical) {
+  :global(.suggest-widget .monaco-scrollable-element > .scrollbar.vertical) {
     width: 4px !important;
   }
-  .sql-editor-host :global(.suggest-widget .monaco-scrollable-element > .scrollbar.horizontal) {
+  :global(.suggest-widget .monaco-scrollable-element > .scrollbar.horizontal) {
     height: 4px !important;
   }
 </style>

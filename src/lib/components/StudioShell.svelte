@@ -3469,7 +3469,7 @@ let rowSearch = $state('')
           stroke-dasharray="44 220" stroke-linecap="round"
           class="text-foreground/20" />
       </svg>
-      <div class="flex size-[72px] items-center justify-center rounded-[20px] border border-border/60 bg-card ring-1 ring-inset ring-white/[0.04] shadow-[0_10px_30px_-14px_rgba(0,0,0,0.7)]">
+      <div class="flex size-[72px] items-center justify-center rounded-full border border-border/60 bg-card ring-1 ring-inset ring-white/[0.04] shadow-[0_10px_30px_-14px_rgba(0,0,0,0.7)]">
         <Logo class="size-9" />
       </div>
     </div>
