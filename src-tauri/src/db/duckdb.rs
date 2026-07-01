@@ -166,12 +166,7 @@ fn collect_rows(
 }
 
 fn is_read_query(sql: &str) -> bool {
-    let head = sql
-        .trim_start()
-        .split(|c: char| c.is_whitespace() || c == '(')
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
+    let head = super::sql_util::statement_head(sql);
     matches!(
         head.as_str(),
         "select" | "with" | "show" | "describe" | "desc" | "pragma" | "explain" | "values" | "table" | "from"
@@ -179,7 +174,7 @@ fn is_read_query(sql: &str) -> bool {
 }
 
 fn quote_ident(ident: &str) -> String {
-    format!("\"{}\"", ident.replace('"', "\"\""))
+    super::sql_util::quote_double(ident)
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────────
@@ -226,15 +221,43 @@ pub async fn list_tables(handle: &DuckdbHandle) -> Result<Vec<TableInfo>, String
             };
             let ttype = row.get(1).and_then(|v| v.as_str()).unwrap_or("BASE TABLE");
             let kind = if ttype.eq_ignore_ascii_case("VIEW") { "view" } else { "table" };
-            let row_count = if kind == "view" {
-                0
-            } else {
-                collect_rows(conn, &format!("SELECT count(*) FROM {}", quote_ident(&name)), &[])
-                    .ok()
-                    .and_then(|(_, r)| r.first().and_then(|row| row.first()).and_then(json_to_i64))
-                    .unwrap_or(-1)
-            };
+            // views → 0; base tables get -1 as a "needs count" sentinel, filled below.
+            let row_count = if kind == "view" { 0 } else { -1 };
             tables.push(TableInfo { name, kind: kind.to_string(), row_count, rls_enabled: None });
+        }
+
+        // Batch all COUNT(*)s into one UNION ALL statement per chunk instead of a
+        // separate query per table (the whole list runs under a single lock).
+        const COUNT_BATCH: usize = 200;
+        let count_idx: Vec<usize> = tables
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.row_count < 0)
+            .map(|(i, _)| i)
+            .collect();
+        for chunk in count_idx.chunks(COUNT_BATCH) {
+            let sql = chunk
+                .iter()
+                .map(|&i| format!("SELECT count(*) FROM {}", quote_ident(&tables[i].name)))
+                .collect::<Vec<_>>()
+                .join(" UNION ALL ");
+            match collect_rows(conn, &sql, &[]) {
+                Ok((_, r)) if r.len() == chunk.len() => {
+                    for (&i, row) in chunk.iter().zip(r.iter()) {
+                        tables[i].row_count =
+                            row.first().and_then(json_to_i64).unwrap_or(0);
+                    }
+                }
+                _ => {
+                    for &i in chunk {
+                        let one = format!("SELECT count(*) FROM {}", quote_ident(&tables[i].name));
+                        tables[i].row_count = collect_rows(conn, &one, &[])
+                            .ok()
+                            .and_then(|(_, r)| r.first().and_then(|row| row.first()).and_then(json_to_i64))
+                            .unwrap_or(0);
+                    }
+                }
+            }
         }
         Ok(tables)
     })
@@ -347,6 +370,10 @@ pub async fn get_table_rows(
     sort_column: Option<String>,
     sort_direction: Option<String>,
     filters: Option<Vec<RowFilter>>,
+    // When false, skip the primary-key lookup — the frontend keeps it across
+    // repeat fetches (pagination/sort/filter). The column list is still fetched
+    // because sort-column validation depends on it.
+    include_meta: bool,
 ) -> Result<TableRows, String> {
     let h = handle.clone();
     let table = table.to_string();
@@ -392,7 +419,7 @@ pub async fn get_table_rows(
             rows,
             total,
             query_ms: t0.elapsed().as_millis() as u64,
-            primary_key: primary_key(conn, &table),
+            primary_key: if include_meta { primary_key(conn, &table) } else { Vec::new() },
             foreign_keys: Vec::<ForeignKeyInfo>::new(),
         })
     })
@@ -575,7 +602,7 @@ mod tests {
         assert_eq!(cols[0].name, "id");
 
         // primary key + row browsing
-        let rows = get_table_rows(&h, "users", 10, 0, None, None, None, None).await.unwrap();
+        let rows = get_table_rows(&h, "users", 10, 0, None, None, None, None, true).await.unwrap();
         assert_eq!(rows.total, 2);
         assert_eq!(rows.rows.len(), 2);
         assert_eq!(rows.primary_key, vec!["id".to_string()], "pk: {:?}", rows.primary_key);
@@ -594,7 +621,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(deleted, 1);
-        let after = get_table_rows(&h, "users", 10, 0, None, None, None, None).await.unwrap();
+        let after = get_table_rows(&h, "users", 10, 0, None, None, None, None, true).await.unwrap();
         assert_eq!(after.total, 1);
     }
 }

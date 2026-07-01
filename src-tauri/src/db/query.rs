@@ -895,29 +895,29 @@ pub async fn get_table_rows(
             ).await;
         }
         ActiveConnection::D1(cfg) => {
-            return get_table_rows_d1(&cfg, &table, limit, offset, search, sort_column, sort_direction, filters).await;
+            return get_table_rows_remote(&cfg, &table, limit, offset, search, sort_column, sort_direction, filters).await;
         }
         ActiveConnection::LibSql(cfg) => {
-            return get_table_rows_libsql(&cfg, &table, limit, offset, search, sort_column, sort_direction, filters).await;
+            return get_table_rows_remote(&cfg, &table, limit, offset, search, sort_column, sort_direction, filters).await;
         }
         ActiveConnection::Mysql(pool) => {
             return super::mysql::get_table_rows(
-                &pool, &schema, &table, limit, offset, search, sort_column, sort_direction, filters,
+                &pool, &schema, &table, limit, offset, search, sort_column, sort_direction, filters, include_meta,
             ).await;
         }
         ActiveConnection::Clickhouse(cfg) => {
             return super::clickhouse::get_table_rows(
-                &cfg, &table, limit, offset, search, sort_column, sort_direction, filters,
+                &cfg, &table, limit, offset, search, sort_column, sort_direction, filters, include_meta,
             ).await;
         }
         ActiveConnection::Duckdb(h) => {
             return super::duckdb::get_table_rows(
-                &h, &table, limit, offset, search, sort_column, sort_direction, filters,
+                &h, &table, limit, offset, search, sort_column, sort_direction, filters, include_meta,
             ).await;
         }
         ActiveConnection::Mssql(h) => {
             return super::mssql::get_table_rows(
-                &h, &schema, &table, limit, offset, search, sort_column, sort_direction, filters,
+                &h, &schema, &table, limit, offset, search, sort_column, sort_direction, filters, include_meta,
             ).await;
         }
         ActiveConnection::Postgres(_) => {}
@@ -1091,10 +1091,10 @@ pub async fn update_table_cell(
             return super::sqlite::update_table_cell(&pool, &table, primary_key, &column, &value).await;
         }
         ActiveConnection::D1(cfg) => {
-            return update_table_cell_d1(&cfg, &table, primary_key, &column, &value).await;
+            return update_table_cell_remote(&cfg, &table, primary_key, &column, &value).await;
         }
         ActiveConnection::LibSql(cfg) => {
-            return update_table_cell_libsql(&cfg, &table, primary_key, &column, &value).await;
+            return update_table_cell_remote(&cfg, &table, primary_key, &column, &value).await;
         }
         ActiveConnection::Mysql(pool) => {
             return super::mysql::update_table_cell(&pool, &schema, &table, primary_key, &column, &value).await;
@@ -1225,11 +1225,11 @@ pub async fn insert_table_row(
             return Ok(InsertRowResult { row });
         }
         ActiveConnection::D1(cfg) => {
-            let row = insert_table_row_d1(&cfg, &table, values).await?;
+            let row = insert_table_row_remote(&cfg, &table, values).await?;
             return Ok(InsertRowResult { row });
         }
         ActiveConnection::LibSql(cfg) => {
-            let row = insert_table_row_libsql(&cfg, &table, values).await?;
+            let row = insert_table_row_remote(&cfg, &table, values).await?;
             return Ok(InsertRowResult { row });
         }
         ActiveConnection::Mysql(pool) => {
@@ -1407,10 +1407,10 @@ pub async fn delete_table_rows(
             return super::sqlite::delete_table_rows(&pool, &table, primary_keys).await;
         }
         ActiveConnection::D1(cfg) => {
-            return delete_table_rows_d1(&cfg, &table, primary_keys).await;
+            return delete_table_rows_remote(&cfg, &table, primary_keys).await;
         }
         ActiveConnection::LibSql(cfg) => {
-            return delete_table_rows_libsql(&cfg, &table, primary_keys).await;
+            return delete_table_rows_remote(&cfg, &table, primary_keys).await;
         }
         ActiveConnection::Mysql(pool) => {
             return super::mysql::delete_table_rows(&pool, &schema, &table, primary_keys).await;
@@ -1593,12 +1593,7 @@ fn bind_typed_value<'a>(
 }
 
 fn is_row_returning_sql(sql: &str) -> bool {
-    let head = sql
-        .trim_start()
-        .split_whitespace()
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
+    let head = super::sql_util::statement_head(sql);
     matches!(
         head.as_str(),
         "select" | "with" | "show" | "explain" | "values" | "table"
@@ -1639,22 +1634,30 @@ pub async fn execute_sql(state: State<'_, DbState>, sql: String) -> Result<SqlRe
     let conn = require_conn(&state)?;
     let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
     *state.cancel_tx.lock().map_err(|e| e.to_string())? = Some(cancel_tx);
-    let result = tokio::select! {
-        r = async move {
-            match conn {
-                ActiveConnection::Postgres(pool) => execute_sql_pg(&pool, &sql_str).await,
-                ActiveConnection::Sqlite(pool) => super::sqlite::execute_sql(&pool, &sql_str).await,
-                ActiveConnection::D1(cfg) => super::d1::query(&cfg, &sql_str, vec![]).await,
-                ActiveConnection::LibSql(cfg) => super::libsql::query(&cfg, &sql_str, vec![]).await,
-                ActiveConnection::Mysql(pool) => super::mysql::execute_sql(&pool, &sql_str).await,
-                ActiveConnection::Clickhouse(cfg) => super::clickhouse::query(&cfg, &sql_str).await,
-                ActiveConnection::Duckdb(h) => super::duckdb::execute_sql(&h, &sql_str).await,
-                ActiveConnection::Mssql(h) => super::mssql::execute_sql(&h, &sql_str).await,
-            }
-        } => r,
-        _ = async { let _ = cancel_rx.await; } => Err("Query cancelled".to_string()),
-    };
-    result
+    match conn {
+        // Postgres and MySQL support real server-side cancellation: the engine
+        // captures its backend/connection id and cancels the running statement
+        // when the receiver fires.
+        ActiveConnection::Postgres(pool) => execute_sql_pg(&pool, &sql_str, Some(cancel_rx)).await,
+        ActiveConnection::Mysql(pool) => super::mysql::execute_sql(&pool, &sql_str, Some(cancel_rx)).await,
+        // Engines without a server-side cancel primitive: abandon the future when
+        // cancelled so the UI unblocks (the statement then finishes or times out
+        // server-side). This preserves the previous behavior for these engines.
+        other => tokio::select! {
+            r = async move {
+                match other {
+                    ActiveConnection::Sqlite(pool) => super::sqlite::execute_sql(&pool, &sql_str).await,
+                    ActiveConnection::D1(cfg) => super::d1::query(&cfg, &sql_str, vec![]).await,
+                    ActiveConnection::LibSql(cfg) => super::libsql::query(&cfg, &sql_str, vec![]).await,
+                    ActiveConnection::Clickhouse(cfg) => super::clickhouse::query(&cfg, &sql_str).await,
+                    ActiveConnection::Duckdb(h) => super::duckdb::execute_sql(&h, &sql_str).await,
+                    ActiveConnection::Mssql(h) => super::mssql::execute_sql(&h, &sql_str).await,
+                    ActiveConnection::Postgres(_) | ActiveConnection::Mysql(_) => unreachable!(),
+                }
+            } => r,
+            _ = async { let _ = cancel_rx.await; } => Err("Query cancelled".to_string()),
+        },
+    }
 }
 
 /// Execute a SQL query against an arbitrary saved connection without changing
@@ -1672,7 +1675,7 @@ pub async fn execute_sql_on_conn(
     match config {
         AnyConnectionConfig::Postgres(c) => {
             let pool = open_pg(&c).await?;
-            let result = execute_sql_pg(&pool, sql).await;
+            let result = execute_sql_pg(&pool, sql, None).await;
             pool.close().await;
             result
         }
@@ -1685,7 +1688,7 @@ pub async fn execute_sql_on_conn(
         AnyConnectionConfig::D1(c) => super::d1::query(&c, sql, vec![]).await,
         AnyConnectionConfig::Mysql(c) => {
             let pool = open_mysql(&c).await?;
-            let result = super::mysql::execute_sql(&pool, sql).await;
+            let result = super::mysql::execute_sql(&pool, sql, None).await;
             pool.close().await;
             result
         }
@@ -1707,7 +1710,15 @@ const EXECUTE_SQL_MAX_ROWS: usize = 1_000_000_000;
 /// Statement timeout for ad-hoc queries (milliseconds).
 const EXECUTE_SQL_TIMEOUT_MS: i64 = 30_000;
 
-async fn execute_sql_pg(pool: &sqlx::PgPool, sql: &str) -> Result<SqlResult, String> {
+async fn execute_sql_pg(
+    pool: &sqlx::PgPool,
+    sql: &str,
+    // When `Some`, real cancellation is armed: if the receiver fires we ask the
+    // server to cancel this query's backend (so the statement actually stops)
+    // rather than merely abandoning the future while the server keeps working.
+    // Callers that can't be cancelled (diff/multi paths) pass `None`.
+    cancel_rx: Option<tokio::sync::oneshot::Receiver<()>>,
+) -> Result<SqlResult, String> {
     let started = std::time::Instant::now();
     let query_ms = || started.elapsed().as_millis() as u64;
 
@@ -1730,6 +1741,28 @@ async fn execute_sql_pg(pool: &sqlx::PgPool, sql: &str) -> Result<SqlResult, Str
     let _ = sqlx::query(&format!("SET LOCAL statement_timeout = {EXECUTE_SQL_TIMEOUT_MS}"))
         .execute(&mut *tx)
         .await;
+
+    // Arm server-side cancellation. Capture the backend PID for THIS connection,
+    // then watch the cancel channel on a background task; on cancel we run
+    // pg_cancel_backend on a *separate* pooled connection, which makes the
+    // in-flight statement error out. If the query finishes first the sender is
+    // dropped and `rx.await` errors, so the watcher is a no-op.
+    if let Some(rx) = cancel_rx {
+        if let Ok(pid) = sqlx::query_scalar::<_, i32>("SELECT pg_backend_pid()")
+            .fetch_one(&mut *tx)
+            .await
+        {
+            let cancel_pool = pool.clone();
+            tokio::spawn(async move {
+                if rx.await.is_ok() {
+                    let _ = sqlx::query("SELECT pg_cancel_backend($1)")
+                        .bind(pid)
+                        .execute(&cancel_pool)
+                        .await;
+                }
+            });
+        }
+    }
 
     let last_idx = stmts.len() - 1;
 
@@ -1834,7 +1867,7 @@ async fn execute_sql_multi_pg(pool: &sqlx::PgPool, sql: &str) -> Result<Vec<SqlR
 
     // Single statement — delegate to existing path (avoids code duplication)
     if stmts.len() == 1 {
-        return execute_sql_pg(pool, stmts[0]).await.map(|r| vec![r]);
+        return execute_sql_pg(pool, stmts[0], None).await.map(|r| vec![r]);
     }
 
     let mut tx = pool
@@ -1950,7 +1983,7 @@ pub async fn execute_sql_multi(state: State<'_, DbState>, sql: String) -> Result
                     super::libsql::query(&cfg, &sql_str, vec![]).await.map(|r| vec![r])
                 }
                 ActiveConnection::Mysql(pool) => {
-                    super::mysql::execute_sql(&pool, &sql_str).await.map(|r| vec![r])
+                    super::mysql::execute_sql(&pool, &sql_str, None).await.map(|r| vec![r])
                 }
                 ActiveConnection::Clickhouse(cfg) => {
                     super::clickhouse::query(&cfg, &sql_str).await.map(|r| vec![r])
@@ -1968,10 +2001,31 @@ pub async fn execute_sql_multi(state: State<'_, DbState>, sql: String) -> Result
     result
 }
 
-// ── D1 helpers (thin wrappers that build SQLite-compatible SQL) ───────────────
+// ── D1 / LibSQL helpers (SQLite-over-HTTP) ────────────────────────────────────
+//
+// Cloudflare D1 and Turso/LibSQL are both SQLite reached over HTTP with an
+// identical `query(cfg, sql, params)` entry point and byte-identical row
+// browsing/mutation logic. This trait lets the helpers below be written once and
+// dispatched to either backend, instead of maintaining two verbatim copies.
+#[allow(async_fn_in_trait)]
+trait RemoteSqlite {
+    async fn run(&self, sql: &str, params: Vec<Value>) -> Result<SqlResult, String>;
+}
 
-async fn get_table_rows_d1(
-    cfg: &super::connection::D1Config,
+impl RemoteSqlite for super::connection::D1Config {
+    async fn run(&self, sql: &str, params: Vec<Value>) -> Result<SqlResult, String> {
+        super::d1::query(self, sql, params).await
+    }
+}
+
+impl RemoteSqlite for super::connection::LibSqlConfig {
+    async fn run(&self, sql: &str, params: Vec<Value>) -> Result<SqlResult, String> {
+        super::libsql::query(self, sql, params).await
+    }
+}
+
+async fn get_table_rows_remote<C: RemoteSqlite>(
+    cfg: &C,
     table: &str,
     limit: i64,
     offset: i64,
@@ -1989,8 +2043,8 @@ async fn get_table_rows_d1(
     let pragma_sql = format!("PRAGMA table_info({tq})");
     let fk_sql     = format!("PRAGMA foreign_key_list({tq})");
     let (pragma_res, fk_res) = tokio::join!(
-        super::d1::query(cfg, &pragma_sql, vec![]),
-        super::d1::query(cfg, &fk_sql, vec![]),
+        cfg.run(&pragma_sql, vec![]),
+        cfg.run(&fk_sql, vec![]),
     );
     let pragma = pragma_res?;
     let fk_res = fk_res?;
@@ -2102,8 +2156,8 @@ async fn get_table_rows_d1(
     row_params.push(Value::Number(offset.into()));
 
     let (count_res, rows_res) = tokio::join!(
-        super::d1::query(cfg, &count_sql, params),
-        super::d1::query(cfg, &rows_sql, row_params),
+        cfg.run(&count_sql, params),
+        cfg.run(&rows_sql, row_params),
     );
     let count_res = count_res?;
     let rows_res  = rows_res?;
@@ -2120,16 +2174,14 @@ async fn get_table_rows_d1(
     })
 }
 
-async fn update_table_cell_d1(
-    cfg: &super::connection::D1Config,
+async fn update_table_cell_remote<C: RemoteSqlite>(
+    cfg: &C,
     table: &str,
     primary_key: HashMap<String, Value>,
     column: &str,
     value: &Value,
 ) -> Result<(), String> {
-    use super::d1::query as d1q;
-
-    let pragma = d1q(cfg, &format!("PRAGMA table_info(\"{}\")", table.replace('"', "\"\"")), vec![]).await?;
+    let pragma = cfg.run(&format!("PRAGMA table_info(\"{}\")", table.replace('"', "\"\"")), vec![]).await?;
     let name_idx = pragma.columns.iter().position(|c| c.name == "name").unwrap_or(1);
     let pk_idx   = pragma.columns.iter().position(|c| c.name == "pk").unwrap_or(5);
     let mut pk: Vec<(i64, String)> = pragma.rows.iter().filter_map(|r| {
@@ -2149,19 +2201,17 @@ async fn update_table_cell_d1(
     for (_, col) in &pk {
         params.push(primary_key.get(col).cloned().unwrap_or(Value::Null));
     }
-    d1q(cfg, &sql, params).await?;
+    cfg.run(&sql, params).await?;
     Ok(())
 }
 
-async fn insert_table_row_d1(
-    cfg: &super::connection::D1Config,
+async fn insert_table_row_remote<C: RemoteSqlite>(
+    cfg: &C,
     table: &str,
     values: HashMap<String, Value>,
 ) -> Result<Vec<Value>, String> {
-    use super::d1::query as d1q;
-
     let tq = format!("\"{}\"", table.replace('"', "\"\""));
-    let pragma = d1q(cfg, &format!("PRAGMA table_info({tq})"), vec![]).await?;
+    let pragma = cfg.run(&format!("PRAGMA table_info({tq})"), vec![]).await?;
     let name_idx = pragma.columns.iter().position(|c| c.name == "name").unwrap_or(1);
     let type_idx = pragma.columns.iter().position(|c| c.name == "type").unwrap_or(2);
     let notnull_idx = pragma.columns.iter().position(|c| c.name == "notnull").unwrap_or(3);
@@ -2221,7 +2271,7 @@ async fn insert_table_row_d1(
         .iter()
         .map(|c| values.get(c).cloned().unwrap_or(Value::Null))
         .collect();
-    let res = d1q(cfg, &sql, params).await?;
+    let res = cfg.run(&sql, params).await?;
     let row = res
         .rows
         .first()
@@ -2240,15 +2290,14 @@ async fn insert_table_row_d1(
         .collect())
 }
 
-async fn delete_table_rows_d1(
-    cfg: &super::connection::D1Config,
+async fn delete_table_rows_remote<C: RemoteSqlite>(
+    cfg: &C,
     table: &str,
     primary_keys: Vec<HashMap<String, Value>>,
 ) -> Result<u64, String> {
-    use super::d1::query as d1q;
     if primary_keys.is_empty() { return Ok(0); }
 
-    let pragma = d1q(cfg, &format!("PRAGMA table_info(\"{}\")", table.replace('"', "\"\"")), vec![]).await?;
+    let pragma = cfg.run(&format!("PRAGMA table_info(\"{}\")", table.replace('"', "\"\"")), vec![]).await?;
     let name_idx = pragma.columns.iter().position(|c| c.name == "name").unwrap_or(1);
     let pk_idx   = pragma.columns.iter().position(|c| c.name == "pk").unwrap_or(5);
     let mut pk: Vec<(i64, String)> = pragma.rows.iter().filter_map(|r| {
@@ -2266,255 +2315,12 @@ async fn delete_table_rows_d1(
     let mut total = 0u64;
     for pk_map in primary_keys {
         let params: Vec<Value> = pk.iter().map(|(_, c)| pk_map.get(c).cloned().unwrap_or(Value::Null)).collect();
-        let res = d1q(cfg, &sql, params).await?;
+        let res = cfg.run(&sql, params).await?;
         total += res.row_count.unwrap_or(0).max(0) as u64;
     }
     Ok(total)
 }
 
-// ── LibSQL helpers (mirrors D1 helpers; calls libsql::query instead of d1::query) ──
-
-async fn get_table_rows_libsql(
-    cfg: &super::connection::LibSqlConfig,
-    table: &str,
-    limit: i64,
-    offset: i64,
-    search: Option<String>,
-    sort_column: Option<String>,
-    sort_direction: Option<String>,
-    filters: Option<Vec<RowFilter>>,
-) -> Result<TableRows, String> {
-    use super::libsql::query as lq;
-    let t0 = std::time::Instant::now();
-    let tq = format!("\"{}\"", table.replace('"', "\"\""));
-
-    let pragma_sql = format!("PRAGMA table_info({tq})");
-    let fk_sql     = format!("PRAGMA foreign_key_list({tq})");
-    let (pragma_res, fk_res) = tokio::join!(lq(cfg, &pragma_sql, vec![]), lq(cfg, &fk_sql, vec![]));
-    let pragma = pragma_res?;
-    let fk_res = fk_res?;
-
-    let name_idx = pragma.columns.iter().position(|c| c.name == "name").unwrap_or(1);
-    let pk_idx   = pragma.columns.iter().position(|c| c.name == "pk").unwrap_or(5);
-
-    let col_names: Vec<String> = pragma.rows.iter()
-        .filter_map(|r| r.get(name_idx)?.as_str().map(|s| s.to_string()))
-        .collect();
-
-    let mut pk: Vec<(i64, String)> = pragma.rows.iter().filter_map(|r| {
-        let pos = r.get(pk_idx)?.as_i64().unwrap_or(0);
-        if pos == 0 { return None; }
-        let n = r.get(name_idx)?.as_str()?.to_string();
-        Some((pos, n))
-    }).collect();
-    pk.sort_by_key(|(p, _)| *p);
-    let primary_key: Vec<String> = pk.into_iter().map(|(_, n)| n).collect();
-
-    let mut fk_map: std::collections::BTreeMap<i64, ForeignKeyInfo> = Default::default();
-    if let (Some(id_col), Some(tbl_col), Some(from_col), Some(to_col)) = (
-        fk_res.columns.iter().position(|c| c.name == "id"),
-        fk_res.columns.iter().position(|c| c.name == "table"),
-        fk_res.columns.iter().position(|c| c.name == "from"),
-        fk_res.columns.iter().position(|c| c.name == "to"),
-    ) {
-        for r in &fk_res.rows {
-            let id = r.get(id_col).and_then(|v| v.as_i64()).unwrap_or(0);
-            let ref_tbl = r.get(tbl_col).and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let from = r.get(from_col).and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let to = r.get(to_col).and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let e = fk_map.entry(id).or_insert(ForeignKeyInfo {
-                columns: vec![], referenced_schema: "main".to_string(),
-                referenced_table: ref_tbl, referenced_columns: vec![],
-            });
-            e.columns.push(from);
-            e.referenced_columns.push(to);
-        }
-    }
-    let foreign_keys: Vec<ForeignKeyInfo> = fk_map.into_values().collect();
-
-    let mut cond_parts: Vec<(Option<&'static str>, String)> = vec![];
-    let mut params: Vec<Value> = vec![];
-
-    if let Some(ref s) = search {
-        if !s.is_empty() && !col_names.is_empty() {
-            let escaped = super::sqlite::escape_like(s);
-            let parts: Vec<String> = col_names.iter()
-                .map(|c| format!("LOWER(CAST(\"{}\" AS TEXT)) LIKE LOWER(?) ESCAPE '\\'", c.replace('"', "\"\"")))
-                .collect();
-            cond_parts.push((None, format!("({})", parts.join(" OR "))));
-            for _ in &col_names { params.push(Value::String(format!("%{escaped}%"))); }
-        }
-    }
-    if let Some(ref fs) = filters {
-        for f in fs {
-            let conj: Option<&'static str> = if cond_parts.is_empty() { None }
-                else if f.conjunct.as_deref().is_some_and(|s| s.eq_ignore_ascii_case("or")) { Some("OR") }
-                else { Some("AND") };
-            if f.column == "__any__" {
-                if let Some(ref v) = f.value {
-                    let v = v.trim();
-                    if !v.is_empty() && !col_names.is_empty() {
-                        let (parts, extra) = super::sqlite::build_any_column_d1(&col_names, &f.op, v);
-                        if !parts.is_empty() {
-                            cond_parts.push((conj, format!("({})", parts.join(" OR "))));
-                            params.extend(extra);
-                        }
-                    }
-                }
-                continue;
-            }
-            let qcol = format!("\"{}\"", f.column.replace('"', "\"\""));
-            match f.op.as_str() {
-                "is_null"     => cond_parts.push((conj, format!("{qcol} IS NULL"))),
-                "is_not_null" => cond_parts.push((conj, format!("{qcol} IS NOT NULL"))),
-                _ => if let Some(ref v) = f.value {
-                    let (cond, bp) = super::sqlite::build_d1_filter(&qcol, &f.op, v);
-                    cond_parts.push((conj, cond));
-                    params.extend(bp);
-                },
-            }
-        }
-    }
-    let where_clause = if cond_parts.is_empty() { String::new() } else {
-        let mut out = String::from("WHERE ");
-        for (i, (conj, cond)) in cond_parts.into_iter().enumerate() {
-            if i > 0 { out.push(' '); out.push_str(conj.unwrap_or("AND")); out.push(' '); }
-            out.push_str(&cond);
-        }
-        out
-    };
-    let order_clause = if let Some(col) = sort_column {
-        let dir = match sort_direction.as_deref() { Some("desc") => "DESC", _ => "ASC" };
-        format!("ORDER BY \"{}\" {dir}", col.replace('"', "\"\""))
-    } else { String::new() };
-
-    let count_sql = format!("SELECT COUNT(*) FROM {tq} {where_clause}");
-    let rows_sql  = format!("SELECT * FROM {tq} {where_clause} {order_clause} LIMIT ? OFFSET ?");
-    let mut row_params = params.clone();
-    row_params.push(Value::Number(limit.into()));
-    row_params.push(Value::Number(offset.into()));
-
-    let (count_res, rows_res) = tokio::join!(lq(cfg, &count_sql, params), lq(cfg, &rows_sql, row_params));
-    let count_res = count_res?;
-    let rows_res  = rows_res?;
-    let total = count_res.rows.first().and_then(|r| r.first()).and_then(|v| v.as_i64()).unwrap_or(0);
-
-    Ok(TableRows {
-        columns: rows_res.columns,
-        rows: rows_res.rows,
-        total,
-        query_ms: t0.elapsed().as_millis() as u64,
-        primary_key,
-        foreign_keys,
-    })
-}
-
-async fn update_table_cell_libsql(
-    cfg: &super::connection::LibSqlConfig,
-    table: &str,
-    primary_key: HashMap<String, Value>,
-    column: &str,
-    value: &Value,
-) -> Result<(), String> {
-    use super::libsql::query as lq;
-    let pragma = lq(cfg, &format!("PRAGMA table_info(\"{}\")", table.replace('"', "\"\"")), vec![]).await?;
-    let name_idx = pragma.columns.iter().position(|c| c.name == "name").unwrap_or(1);
-    let pk_idx   = pragma.columns.iter().position(|c| c.name == "pk").unwrap_or(5);
-    let mut pk: Vec<(i64, String)> = pragma.rows.iter().filter_map(|r| {
-        let pos = r.get(pk_idx)?.as_i64().unwrap_or(0);
-        if pos == 0 { return None; }
-        Some((pos, r.get(name_idx)?.as_str()?.to_string()))
-    }).collect();
-    pk.sort_by_key(|(p, _)| *p);
-    if pk.is_empty() { return Err("Cannot update row: table has no primary key".into()); }
-
-    let tq = format!("\"{}\"", table.replace('"', "\"\""));
-    let set_col = format!("\"{}\"", column.replace('"', "\"\""));
-    let where_parts: Vec<String> = pk.iter().map(|(_, c)| format!("\"{}\" = ?", c.replace('"', "\"\""))).collect();
-    let sql = format!("UPDATE {tq} SET {set_col} = ? WHERE {}", where_parts.join(" AND "));
-
-    let mut params = vec![value.clone()];
-    for (_, col) in &pk { params.push(primary_key.get(col).cloned().unwrap_or(Value::Null)); }
-    lq(cfg, &sql, params).await?;
-    Ok(())
-}
-
-async fn insert_table_row_libsql(
-    cfg: &super::connection::LibSqlConfig,
-    table: &str,
-    values: HashMap<String, Value>,
-) -> Result<Vec<Value>, String> {
-    use super::libsql::query as lq;
-    let tq = format!("\"{}\"", table.replace('"', "\"\""));
-    let pragma = lq(cfg, &format!("PRAGMA table_info({tq})"), vec![]).await?;
-    let name_idx = pragma.columns.iter().position(|c| c.name == "name").unwrap_or(1);
-    let type_idx = pragma.columns.iter().position(|c| c.name == "type").unwrap_or(2);
-    let notnull_idx = pragma.columns.iter().position(|c| c.name == "notnull").unwrap_or(3);
-    let dflt_idx = pragma.columns.iter().position(|c| c.name == "dflt_value").unwrap_or(4);
-    let pk_idx = pragma.columns.iter().position(|c| c.name == "pk").unwrap_or(5);
-
-    let mut column_order: Vec<String> = Vec::new();
-    let mut optional: HashMap<String, bool> = HashMap::new();
-    for r in &pragma.rows {
-        let name = r.get(name_idx).and_then(|v| v.as_str()).ok_or("Invalid PRAGMA row")?.to_string();
-        let col_type = r.get(type_idx).and_then(|v| v.as_str()).unwrap_or("text");
-        let notnull = r.get(notnull_idx).and_then(|v| v.as_i64()).unwrap_or(0) != 0;
-        let dflt = r.get(dflt_idx).and_then(|v| v.as_str());
-        let pk = r.get(pk_idx).and_then(|v| v.as_i64()).unwrap_or(0);
-        let opt = super::sqlite::sqlite_column_optional_when_omitted(notnull, dflt, pk, col_type);
-        column_order.push(name.clone());
-        optional.insert(name, opt);
-    }
-    for col in values.keys() {
-        if !optional.contains_key(col) { return Err(format!("Unknown column: {col}")); }
-    }
-    for (name, &opt) in &optional {
-        if !opt && !values.contains_key(name) { return Err(format!("Column \"{name}\" is required")); }
-    }
-
-    let mut col_names: Vec<String> = values.keys().cloned().collect();
-    col_names.sort();
-    let cols: Vec<String> = col_names.iter().map(|c| format!("\"{}\"", c.replace('"', "\"\""))).collect();
-    let placeholders: Vec<String> = (0..col_names.len()).map(|_| "?".to_string()).collect();
-    let sql = format!("INSERT INTO {tq} ({}) VALUES ({}) RETURNING *", cols.join(", "), placeholders.join(", "));
-    let params: Vec<Value> = col_names.iter().map(|c| values.get(c).cloned().unwrap_or(Value::Null)).collect();
-    let res = lq(cfg, &sql, params).await?;
-    let row = res.rows.first().ok_or("Insert succeeded but RETURNING returned no row")?;
-    Ok(column_order.iter().map(|name| {
-        let idx = res.columns.iter().position(|c| c.name == *name).unwrap_or(0);
-        row.get(idx).cloned().unwrap_or(Value::Null)
-    }).collect())
-}
-
-async fn delete_table_rows_libsql(
-    cfg: &super::connection::LibSqlConfig,
-    table: &str,
-    primary_keys: Vec<HashMap<String, Value>>,
-) -> Result<u64, String> {
-    use super::libsql::query as lq;
-    if primary_keys.is_empty() { return Ok(0); }
-    let pragma = lq(cfg, &format!("PRAGMA table_info(\"{}\")", table.replace('"', "\"\"")), vec![]).await?;
-    let name_idx = pragma.columns.iter().position(|c| c.name == "name").unwrap_or(1);
-    let pk_idx   = pragma.columns.iter().position(|c| c.name == "pk").unwrap_or(5);
-    let mut pk: Vec<(i64, String)> = pragma.rows.iter().filter_map(|r| {
-        let pos = r.get(pk_idx)?.as_i64().unwrap_or(0);
-        if pos == 0 { return None; }
-        Some((pos, r.get(name_idx)?.as_str()?.to_string()))
-    }).collect();
-    pk.sort_by_key(|(p, _)| *p);
-    if pk.is_empty() { return Err("Cannot delete rows: table has no primary key".into()); }
-
-    let tq = format!("\"{}\"", table.replace('"', "\"\""));
-    let where_parts: Vec<String> = pk.iter().map(|(_, c)| format!("\"{}\" = ?", c.replace('"', "\"\""))).collect();
-    let sql = format!("DELETE FROM {tq} WHERE {}", where_parts.join(" AND "));
-    let mut total = 0u64;
-    for pk_map in primary_keys {
-        let params: Vec<Value> = pk.iter().map(|(_, c)| pk_map.get(c).cloned().unwrap_or(Value::Null)).collect();
-        let res = lq(cfg, &sql, params).await?;
-        total += res.row_count.unwrap_or(0).max(0) as u64;
-    }
-    Ok(total)
-}
 
 // ── Column Stats ─────────────────────────────────────────────────────────────
 

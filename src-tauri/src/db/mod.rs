@@ -10,6 +10,7 @@ pub mod live;
 pub mod mysql;
 mod query;
 mod schema;
+pub mod sql_util;
 pub mod sqlite;
 pub mod ssh_tunnel;
 
