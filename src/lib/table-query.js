@@ -1,5 +1,26 @@
+import { normalizeForeignKeys } from '$lib/foreign-key-nav.js'
+
 /** Sentinel used when the filter should match across every column. */
 export const ANY_COLUMN = '__any__'
+
+/**
+ * Map a raw `getTableRows` response (which may use camelCase or snake_case keys)
+ * into the canonical row-result fields the UI stores. Shared by both the active
+ * grid loader and the per-tab prefetch so the snake/camel fallbacks live in one
+ * place. Callers layer their own metadata-skip / column-shape logic on top.
+ * @param {any} data
+ * @returns {{ columns: any[], primaryKey: string[], foreignKeys: any[], rows: any[][], total: number, queryMs: number }}
+ */
+export function readRowsResponse(data) {
+  return {
+    columns: data.columns ?? [],
+    primaryKey: data.primaryKey ?? data.primary_key ?? [],
+    foreignKeys: normalizeForeignKeys(data.foreignKeys ?? data.foreign_keys),
+    rows: data.rows ?? [],
+    total: Number(data.total ?? 0),
+    queryMs: Number(data.queryMs ?? data.query_ms ?? 0),
+  }
+}
 
 /** @typedef {'asc' | 'desc'} SortDirection */
 

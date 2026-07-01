@@ -191,8 +191,10 @@ export async function refreshActiveSettings() {
   aiSettings.set({ baseUrl: profile.baseUrl, apiKey, model: profile.model })
 }
 
-// Bootstrap on module load
-refreshActiveSettings()
+// Bootstrap on module load. Swallow errors so a failed secret-store read can't
+// surface as an unhandled promise rejection; consumers read `aiSettings` and get
+// the default until this resolves.
+void refreshActiveSettings().catch(() => {})
 
 // ── Actions ───────────────────────────────────────────────────────────────────
 
