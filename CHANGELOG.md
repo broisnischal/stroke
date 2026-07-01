@@ -4,6 +4,37 @@ All notable changes to Stroke are listed here, newest first.
 
 ---
 
+## [Unreleased]
+
+### Performance
+- Faster (re)connect: `onConnected` now loads query history + MCP autostart concurrently with the schema/table load instead of behind it, and no longer double-fetches the query stores on startup.
+- Fixed the reconnect "slow acquire" storm: per-table `COUNT(*)` on large Postgres schemas now runs with bounded concurrency (capped at the pool size) instead of firing every count at once and starving the 4-connection pool.
+- Sidebar row counts for SQLite / D1 / LibSQL / DuckDB are batched into one `UNION ALL` round-trip per chunk (a 40-table Turso/D1 sidebar goes from ~40 requests to 1), with a per-table fallback.
+- Extended the `include_meta` fast-path to MySQL / MSSQL / ClickHouse / DuckDB so pagination, sort and filter stop re-fetching primary-key / foreign-key / column metadata every page (MSSQL plain paging drops from 4 serialized round-trips to 2).
+- Table list is cached per connection + schema (short TTL) so rapid tab/schema navigation stops re-hitting the catalog; refresh and DDL force a fresh load.
+- Real query cancellation for PostgreSQL (`pg_cancel_backend`) and MySQL (`KILL QUERY`): cancelling now stops the statement server-side instead of only abandoning the client future.
+
+### Themes & UI
+- Retuned every theme's `muted-foreground` to clear WCAG AA (≥4.5:1); secondary text (sidebar row counts, labels) was previously failing contrast and hard to read.
+- Added four curated themes: **GitHub** (light), **Rosé Pine**, **Catppuccin Mocha**, and **Solarized** (dark) — wired through the registry, editor themes, and Mermaid.
+- New selectable **icon weight** (Light / Regular / Bold) in Settings, applied globally to every Lucide icon.
+- Extensions page: refreshed detail header into an accent-tinted card that adapts to the active theme.
+- Connection modal: removed the Environment selector and reworked the layout so the action buttons are always visible and the form body scrolls cleanly.
+
+### Refactoring
+- Introduced a shared `db/sql_util` module (statement classification, identifier quoting, LIKE/literal escaping) and collapsed the near-identical D1 and LibSQL row helpers into generic functions behind a `RemoteSqlite` trait (~210 lines removed from `query.rs`).
+- Collapsed 13 duplicated `open*Tab` functions in the shell into one data-driven helper; extracted column-shape normalization (`column.js`), table/UI preferences (`stores/table-prefs.js`), and the row-response mapper (`readRowsResponse`).
+
+### Fixes
+- Fixed a crash on the schema Enums page (`each_key_duplicate`): the Postgres enum query fanned out labels once per column that used the type; values are now computed in a subquery, with a defensive frontend dedupe.
+- Guarded persisted store writes (connections / settings / layout) so a full/blocked `localStorage` can't throw into connect/disconnect flows.
+- `formatInvokeError` no longer masks genuine backend errors that happen to mention "invoke" / "Tauri".
+- Removed a shadowed duplicate `Mod+T` hotkey.
+
+### Chore
+- Removed build cruft committed to the repo (an extracted AppImage `squashfs-root/`, a stale `schema.rs.tmp` copy, `dummy.txt`, `file.txt`) and hardened `.gitignore`.
+
+
 ## [0.7.2] - 2026-06-26
 
 ### Changes
