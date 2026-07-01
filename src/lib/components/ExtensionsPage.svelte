@@ -212,22 +212,23 @@
       {@const Icon = ICONS[selected.id]}
       {@const on = isOn(selected.id)}
       <div class="mx-auto w-full max-w-[36rem] px-8 py-9">
-        <!-- Header (flat) -->
-        <div class="flex items-start gap-3.5">
-          <span class="grid size-9 shrink-0 place-items-center rounded-lg border border-border/60 bg-muted/30 text-foreground/80">
-            {#if Icon}<Icon class="size-[18px]" />{/if}
-          </span>
-          <div class="min-w-0 flex-1 pt-0.5">
-            <h2 class="text-[15px] font-semibold tracking-tight text-foreground">{selected.name}</h2>
-            <p class="mt-0.5 text-[11.5px] text-muted-foreground/60">{KIND_LABEL[selected.kind] ?? "Extension"}</p>
+        <!-- Header card — accent-tinted icon reads correctly in every theme -->
+        <div class="rounded-xl border border-border/60 bg-card/40 p-4">
+          <div class="flex items-start gap-3.5">
+            <span class="grid size-10 shrink-0 place-items-center rounded-lg border border-primary/20 bg-primary/10 text-primary">
+              {#if Icon}<Icon class="size-5" />{/if}
+            </span>
+            <div class="min-w-0 flex-1 pt-0.5">
+              <h2 class="text-[15px] font-semibold tracking-tight text-foreground">{selected.name}</h2>
+              <p class="mt-0.5 text-[11.5px] text-muted-foreground">{KIND_LABEL[selected.kind] ?? "Extension"}</p>
+            </div>
+            <label class="flex shrink-0 cursor-pointer items-center gap-2 pt-0.5">
+              <span class={cn("text-[11px] font-medium", on ? "text-emerald-500" : "text-muted-foreground/60")}>{on ? "On" : "Off"}</span>
+              {@render toggle(on, () => setPluginEnabled(selected.id, !on), `Toggle ${selected.name}`)}
+            </label>
           </div>
-          <div class="flex shrink-0 items-center gap-2 pt-1">
-            <span class={cn("text-[11px]", on ? "text-foreground/70" : "text-muted-foreground/50")}>{on ? "On" : "Off"}</span>
-            {@render toggle(on, () => setPluginEnabled(selected.id, !on), `Toggle ${selected.name}`)}
-          </div>
+          <p class="mt-3 text-[13px] leading-relaxed text-muted-foreground">{selected.description}</p>
         </div>
-
-        <p class="mt-3.5 text-[13px] leading-relaxed text-muted-foreground">{selected.description}</p>
 
         <!-- How to use -->
         {#if USAGE[selected.kind]}

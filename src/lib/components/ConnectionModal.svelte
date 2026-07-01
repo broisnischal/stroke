@@ -141,8 +141,6 @@
   let uriHint       = $state('')
 
   // ── Connection options ───────────────────────────────────────────────────────
-  /** @type {'prod' | 'staging' | 'dev' | null} */
-  let environment     = $state(null)
   let readOnly        = $state(false)
 
   // ── SSH tunnel state ─────────────────────────────────────────────────────────
@@ -223,7 +221,6 @@
       sshEnabled = !!s?.host; sshHost = s?.host ?? ''; sshPort = String(s?.port ?? 22)
       sshUsername = s?.username ?? ''; sshKeyPath = s?.privateKeyPath ?? ''
       readOnly = conn.readOnly ?? false
-      environment = conn.environment ?? null
     } else {
       dbType = 'postgres'; name = ''; host = '127.0.0.1'; port = '5432'
       database = 'postgres'; user = 'postgres'; password = ''; ssl = false; secure = false
@@ -232,7 +229,6 @@
       libsqlUrl = ''; libsqlToken = ''
       sshEnabled = false; sshHost = ''; sshPort = '22'; sshUsername = ''; sshKeyPath = ''
       readOnly = false
-      environment = null
     }
     error = ''; testOk = false; connectionUri = ''; uriHint = ''
     d1Reset()
@@ -365,7 +361,6 @@
         port: hasHostPort ? (Number(payload.port) || defaultPort) : undefined,
         lastConnectedAt: Date.now(),
         readOnly: readOnly || undefined,
-        environment: environment || undefined,
       }
       saved = upsertConnection(saved_conn).sort((a, b) => (b.lastConnectedAt ?? 0) - (a.lastConnectedAt ?? 0))
       setLastConnectionId(id)
@@ -962,45 +957,21 @@
 
             {/if}
 
-          </div>
-        </ScrollArea>
-
-        <!-- ── Footer — fixed height, no layout shift ──────────── -->
-        <div class="shrink-0 border-t border-border/15 px-5 pb-3 pt-2.5">
-
-          <!-- Environment tag -->
-          <div class="border-t border-border/15 pt-3">
-            <p class="mb-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground/50">Environment</p>
-            <div class="flex gap-1.5">
-              {#each /** @type {Array<{id: 'prod'|'staging'|'dev', label: string, cls: string}>} */ ([
-                { id: 'prod',    label: 'Production', cls: 'border-red-500/40 bg-red-500/10 text-red-500' },
-                { id: 'staging', label: 'Staging',    cls: 'border-amber-500/40 bg-amber-500/10 text-amber-500' },
-                { id: 'dev',     label: 'Dev',        cls: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500' },
-              ]) as env (env.id)}
-                <button
-                  type="button"
-                  class={cn(
-                    'flex-1 rounded-md border px-2 py-1 font-mono text-[11px] font-medium transition-colors',
-                    environment === env.id
-                      ? env.cls
-                      : 'border-border/20 text-muted-foreground/50 hover:border-border/40 hover:text-muted-foreground',
-                  )}
-                  onclick={() => { environment = environment === env.id ? null : env.id }}
-                >{env.label}</button>
-              {/each}
-            </div>
-          </div>
-
-          <!-- Read-only toggle -->
-          <div class="border-t border-border/15 pt-3">
-            <label class="flex cursor-pointer select-none items-center gap-2">
+            <!-- Read-only mode — generic option for every driver -->
+            <label class="mt-1 flex cursor-pointer select-none items-center gap-2 border-t border-border/15 pt-3.5">
               <Checkbox id="cn-readonly" checked={readOnly} onCheckedChange={(v) => (readOnly = v === true)} />
-              <span class="flex items-center gap-1.5 text-[12px] text-muted-foreground/65">
+              <span class="flex items-center gap-1.5 text-[12px] text-muted-foreground/75">
                 <Lock class="size-3 shrink-0" />
                 Open in read-only mode
               </span>
             </label>
+
           </div>
+        </ScrollArea>
+
+        <!-- ── Footer — feedback + actions only, so it stays compact and
+             the action buttons are always visible regardless of window height ── -->
+        <div class="shrink-0 border-t border-border/15 px-5 pb-3 pt-3">
 
           <!-- Feedback slot — always occupies height, shows message when needed -->
           <div class="mb-2 flex min-h-[18px] items-center">
