@@ -68,7 +68,12 @@ export function loadSavedConnections() {
 
 /** @param {SavedConnection[]} connections */
 export function saveConnections(connections) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(connections))
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(connections))
+  } catch (err) {
+    // Quota/serialization failure must not throw into connect/disconnect flows.
+    console.error('Failed to persist connections:', err)
+  }
 }
 
 /** @param {SavedConnection} conn */

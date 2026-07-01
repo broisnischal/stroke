@@ -104,6 +104,10 @@ export function loadLayout() {
 /** @param {Partial<PanelLayout>} patch */
 export function saveLayout(patch) {
   const next = { ...loadLayout(), ...patch }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+  } catch (err) {
+    console.error('Failed to persist layout:', err)
+  }
   return next
 }
