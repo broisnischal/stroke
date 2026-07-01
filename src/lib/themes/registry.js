@@ -1,6 +1,6 @@
 /** @typedef {'light' | 'dark'} ThemeGroup */
 
-/** @typedef {'light' | 'parchment' | 'ice' | 'dark' | 'midnight' | 'vitesse' | 'slate' | 'forest' | 'mono'} ThemeId */
+/** @typedef {'light' | 'parchment' | 'ice' | 'github-light' | 'dark' | 'midnight' | 'vitesse' | 'slate' | 'forest' | 'mono' | 'rose-pine' | 'catppuccin' | 'solarized'} ThemeId */
 
 /** @typedef {{ id: ThemeId, name: string, description: string, isDark: boolean, group: ThemeGroup, preview: { bg: string, fg: string, accent: string } }} ThemeDefinition */
 
@@ -41,6 +41,14 @@ export const APP_THEMES = [
     isDark: false,
     group: 'light',
     preview: { bg: '#f2f5fc', fg: '#0e1a30', accent: '#2f5fcc' },
+  },
+  {
+    id: 'github-light',
+    name: 'GitHub',
+    description: 'Crisp high-contrast light',
+    isDark: false,
+    group: 'light',
+    preview: { bg: '#ffffff', fg: '#1f2328', accent: '#0969da' },
   },
   // ── Dark ─────────────────────────────────────────────────────────────────
   {
@@ -90,6 +98,30 @@ export const APP_THEMES = [
     isDark: true,
     group: 'dark',
     preview: { bg: '#000000', fg: '#fafafa', accent: '#fafafa' },
+  },
+  {
+    id: 'rose-pine',
+    name: 'Rosé Pine',
+    description: 'Muted rose & pine',
+    isDark: true,
+    group: 'dark',
+    preview: { bg: '#191724', fg: '#e0def4', accent: '#c4a7e7' },
+  },
+  {
+    id: 'catppuccin',
+    name: 'Catppuccin',
+    description: 'Soft pastel mocha',
+    isDark: true,
+    group: 'dark',
+    preview: { bg: '#1e1e2e', fg: '#cdd6f4', accent: '#cba6f7' },
+  },
+  {
+    id: 'solarized',
+    name: 'Solarized',
+    description: 'Classic teal & blue',
+    isDark: true,
+    group: 'dark',
+    preview: { bg: '#002b36', fg: '#93a1a1', accent: '#268bd2' },
   },
 ]
 
@@ -205,6 +237,38 @@ export function mermaidThemeFor(id) {
       line: '#1a1a1a',
       accent: '#fafafa',
       border: '#2a2a2a',
+    },
+    'github-light': {
+      bg: '#ffffff',
+      fg: '#1f2328',
+      muted: '#59636e',
+      line: '#d1d9e0',
+      accent: '#0969da',
+      border: '#d1d9e0',
+    },
+    'rose-pine': {
+      bg: '#191724',
+      fg: '#e0def4',
+      muted: '#908caa',
+      line: '#403d52',
+      accent: '#c4a7e7',
+      border: '#403d52',
+    },
+    catppuccin: {
+      bg: '#1e1e2e',
+      fg: '#cdd6f4',
+      muted: '#a6adc8',
+      line: '#45475a',
+      accent: '#cba6f7',
+      border: '#45475a',
+    },
+    solarized: {
+      bg: '#002b36',
+      fg: '#93a1a1',
+      muted: '#839496',
+      line: '#0f3d49',
+      accent: '#268bd2',
+      border: '#0f3d49',
     },
   }
   return map[id]

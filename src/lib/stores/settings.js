@@ -12,7 +12,8 @@ const STORAGE_KEY = 'stroke:settings'
 
 /** @typedef {import('$lib/themes/registry.js').ThemeId} ThemeId */
 /** @typedef {'geist' | 'serif' | 'apple'} FontId */
-/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean }} AppSettings */
+/** @typedef {'regular' | 'light' | 'bold'} IconStyleId */
+/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean }} AppSettings */
 
 /** UI zoom scale (font + layout). 1 = 100%. */
 export const ZOOM_STEPS = [0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.25, 1.5]
@@ -51,11 +52,30 @@ function normalizeFont(/** @type {unknown} */ id) {
   return FONT_PRESETS[/** @type {FontId} */ (id)] ? /** @type {FontId} */ (id) : DEFAULT_FONT
 }
 
+/**
+ * Selectable icon weights. Applied globally as the `stroke-width` of every Lucide
+ * icon via a `[data-icon-style]` rule in app.css — no per-component changes. Bold
+ * also aids low-vision readability of small nav/toolbar glyphs.
+ * @type {Record<IconStyleId, { label: string, description: string, strokeWidth: number }>}
+ */
+export const ICON_STYLES = {
+  regular: { label: 'Regular', description: 'Balanced default weight', strokeWidth: 2 },
+  light:   { label: 'Light',   description: 'Thin and minimal',        strokeWidth: 1.5 },
+  bold:    { label: 'Bold',    description: 'Heavier, high-visibility', strokeWidth: 2.5 },
+}
+/** @type {IconStyleId} */
+export const DEFAULT_ICON_STYLE = 'regular'
+/** @returns {IconStyleId} */
+function normalizeIconStyle(/** @type {unknown} */ id) {
+  return ICON_STYLES[/** @type {IconStyleId} */ (id)] ? /** @type {IconStyleId} */ (id) : DEFAULT_ICON_STYLE
+}
+
 /** @type {AppSettings} */
 export const DEFAULT_SETTINGS = {
   theme: DEFAULT_THEME_ID,
   zoom: DEFAULT_ZOOM,
   font: DEFAULT_FONT,
+  iconStyle: DEFAULT_ICON_STYLE,
   mcpAutoStart: false,
   launchAtLogin: false,
   autoReconnectOnStartup: true,
@@ -63,6 +83,9 @@ export const DEFAULT_SETTINGS = {
 
 /** Reactive app font id (synced by applySettings). */
 export const appFont = writable(/** @type {FontId} */ (DEFAULT_FONT))
+
+/** Reactive app icon style (synced by applySettings). */
+export const appIconStyle = writable(/** @type {IconStyleId} */ (DEFAULT_ICON_STYLE))
 
 /** Reactive app zoom scale (synced by applySettings). Monaco editors subscribe
  *  to this to rescale their font/line-height in lockstep with the rest of the UI. */
@@ -130,7 +153,8 @@ export function loadSettings() {
     const launchAtLogin = parsed.launchAtLogin === true
     const autoReconnectOnStartup = parsed.autoReconnectOnStartup !== false
     const font = normalizeFont(parsed.font)
-    return { theme, zoom, font, mcpAutoStart, launchAtLogin, autoReconnectOnStartup }
+    const iconStyle = normalizeIconStyle(parsed.iconStyle)
+    return { theme, zoom, font, iconStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup }
   } catch {
     return { ...DEFAULT_SETTINGS }
   }
@@ -138,7 +162,11 @@ export function loadSettings() {
 
 /** @param {AppSettings} settings */
 export function saveSettings(settings) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
+  } catch (err) {
+    console.error('Failed to persist settings:', err)
+  }
 }
 
 /** @param {AppSettings} settings */
@@ -175,6 +203,12 @@ export function applySettings(settings) {
   root.style.setProperty('--font-sans', FONT_PRESETS[font].sans)
   root.style.setProperty('--font-mono', FONT_PRESETS[font].mono)
   appFont.set(font)
+
+  // Icon weight — a single [data-icon-style] attribute drives the global Lucide
+  // stroke-width rule in app.css. No per-icon or per-component changes needed.
+  const iconStyle = normalizeIconStyle(settings.iconStyle)
+  root.setAttribute('data-icon-style', iconStyle)
+  appIconStyle.set(iconStyle)
 
   // Keep the canvas-table zoom in lockstep with the app zoom so Cmd +/-/0 (and
   // the zoom buttons) scale the grid alongside the rest of the UI. The canvas
