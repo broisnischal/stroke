@@ -34,3 +34,10 @@ packaging/aur/discerns/*.tar.zstlogs/
 .env
 .env.local
 .env.*.local
+
+# Build/tooling cruft that must never be committed
+squashfs-root/
+*.AppImage
+src-tauri/src/**/*.tmp.*
+dummy.txt
+file.txt
