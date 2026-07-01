@@ -92,11 +92,7 @@ pub async fn execute_sql(pool: &SqlitePool, sql: &str) -> Result<SqlResult, Stri
     let t0 = Instant::now();
     let sql = sql.trim();
 
-    let head = sql
-        .split_whitespace()
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
+    let head = super::sql_util::statement_head(sql);
 
     if matches!(head.as_str(), "select" | "with" | "pragma" | "explain" | "values") {
         let mut stream = sqlx::query(sql).fetch(pool);
@@ -366,10 +362,7 @@ pub async fn get_table_rows(
 /// Escape special characters in a SQLite/D1 LIKE pattern.
 /// The escape character used is `\` (set via `ESCAPE '\'` in the query).
 pub fn escape_like(input: &str) -> String {
-    input
-        .replace('\\', "\\\\")
-        .replace('%',  "\\%")
-        .replace('_',  "\\_")
+    super::sql_util::escape_like_backslash(input)
 }
 
 /// Build OR-across-all-columns conditions for the `__any__` sentinel (D1 / JSON params).

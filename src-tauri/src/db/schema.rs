@@ -150,15 +150,27 @@ async fn resolve_unknown_row_counts(pool: &PgPool, schema: &str, tables: &mut [T
         return;
     }
 
-    // Fire all COUNT(*) queries in parallel — one round-trip instead of N.
-    let futs: Vec<_> = needs_count
-        .iter()
-        .map(|&i| exact_row_count(pool, schema, &tables[i].name))
-        .collect();
-    let counts = futures::future::join_all(futs).await;
+    // Run the COUNT(*) queries with bounded concurrency. Firing all of them at
+    // once (join_all) on a large schema swamps the small desktop pool — 70+
+    // acquires against max_connections=4 queue for seconds each ("time to acquire
+    // exceeded slow threshold") and starve the schema/catalog loads happening in
+    // parallel during (re)connect. Capping the in-flight count at the pool size
+    // keeps counts fast without ever saturating the pool.
+    use futures::stream::StreamExt;
+    // Matches the pool's max_connections (see open_pg). One connection is left
+    // implicitly free for interactive work by keeping the cap at the ceiling
+    // rather than above it.
+    const COUNT_CONCURRENCY: usize = 4;
+    let counts: Vec<(usize, i64)> = futures::stream::iter(needs_count.iter().copied().map(|i| {
+        let name = tables[i].name.clone();
+        async move { (i, exact_row_count(pool, schema, &name).await.unwrap_or(0)) }
+    }))
+    .buffer_unordered(COUNT_CONCURRENCY)
+    .collect()
+    .await;
 
-    for (&idx, result) in needs_count.iter().zip(counts.iter()) {
-        tables[idx].row_count = result.as_ref().copied().unwrap_or(0);
+    for (idx, count) in counts {
+        tables[idx].row_count = count;
     }
 }
 
@@ -244,18 +256,53 @@ async fn list_tables_sqlite(pool: &sqlx::SqlitePool) -> Result<Vec<TableInfo>, S
         })
         .collect();
 
-    for t in tables.iter_mut() {
-        if t.kind == "view" {
-            t.row_count = 0;
-            continue;
+    // Views are always reported as 0; only base tables need a COUNT(*).
+    let count_idx: Vec<usize> = tables
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| t.kind != "view")
+        .map(|(i, _)| i)
+        .collect();
+    // Batch the COUNT(*)s into a single UNION ALL round-trip per chunk instead of
+    // one query per table. SQLite pools use a single connection, so this is the
+    // only way to avoid N serialized statements on sidebar open.
+    for chunk in count_idx.chunks(SQLITE_COUNT_BATCH) {
+        let sql = chunk
+            .iter()
+            .map(|&i| format!("SELECT COUNT(*) FROM \"{}\"", tables[i].name.replace('"', "\"\"")))
+            .collect::<Vec<_>>()
+            .join(" UNION ALL ");
+        match sqlx::query(&sql).fetch_all(pool).await {
+            Ok(rows) => {
+                for (&i, row) in chunk.iter().zip(rows.iter()) {
+                    tables[i].row_count =
+                        row.try_get::<Option<i64>, _>(0).ok().flatten().unwrap_or(0);
+                }
+            }
+            // A single bad table (e.g. a virtual table) fails the whole batch;
+            // fall back to per-table counts for this chunk so the rest still work.
+            Err(_) => {
+                for &i in chunk {
+                    let one = format!("SELECT COUNT(*) FROM \"{}\"", tables[i].name.replace('"', "\"\""));
+                    if let Ok(row) = sqlx::query(&one).fetch_one(pool).await {
+                        tables[i].row_count =
+                            row.try_get::<Option<i64>, _>(0).ok().flatten().unwrap_or(0);
+                    }
+                }
+            }
         }
-        let sql = format!("SELECT COUNT(*) FROM \"{}\"", t.name.replace('"', "\"\""));
-        if let Ok(row) = sqlx::query(&sql).fetch_one(pool).await {
-            t.row_count = row.try_get::<Option<i64>, _>(0).ok().flatten().unwrap_or(0);
+    }
+    for t in tables.iter_mut() {
+        if t.row_count < 0 {
+            t.row_count = 0;
         }
     }
     Ok(tables)
 }
+
+/// Max number of COUNT(*) subqueries per batched UNION ALL round-trip. Kept well
+/// under SQLite's default SQLITE_MAX_COMPOUND_SELECT (500) with headroom.
+const SQLITE_COUNT_BATCH: usize = 200;
 
 async fn list_indexes_sqlite(pool: &sqlx::SqlitePool) -> Result<Vec<IndexInfo>, String> {
     let rows = sqlx::query(
@@ -309,16 +356,42 @@ async fn list_tables_d1(cfg: &super::connection::D1Config) -> Result<Vec<TableIn
         })
         .collect();
 
-    for t in tables.iter_mut() {
-        if t.kind == "view" {
-            t.row_count = 0;
-            continue;
-        }
-        let sql = format!("SELECT COUNT(*) FROM \"{}\"", t.name.replace('"', "\"\""));
-        if let Ok(res) = super::d1::query(cfg, &sql, vec![]).await {
-            if let Some(row) = res.rows.first() {
-                t.row_count = row.first().and_then(|v| v.as_i64()).unwrap_or(0);
+    // Each D1 count is a full HTTPS round-trip to Cloudflare, so N tables used to
+    // mean N sequential requests on sidebar open. Batch them into one UNION ALL
+    // request per chunk; fall back to per-table only if a batch fails.
+    let count_idx: Vec<usize> = tables
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| t.kind != "view")
+        .map(|(i, _)| i)
+        .collect();
+    for chunk in count_idx.chunks(SQLITE_COUNT_BATCH) {
+        let sql = chunk
+            .iter()
+            .map(|&i| format!("SELECT COUNT(*) FROM \"{}\"", tables[i].name.replace('"', "\"\"")))
+            .collect::<Vec<_>>()
+            .join(" UNION ALL ");
+        match super::d1::query(cfg, &sql, vec![]).await {
+            Ok(res) if res.rows.len() == chunk.len() => {
+                for (&i, row) in chunk.iter().zip(res.rows.iter()) {
+                    tables[i].row_count = row.first().and_then(|v| v.as_i64()).unwrap_or(0);
+                }
             }
+            _ => {
+                for &i in chunk {
+                    let one = format!("SELECT COUNT(*) FROM \"{}\"", tables[i].name.replace('"', "\"\""));
+                    if let Ok(res) = super::d1::query(cfg, &one, vec![]).await {
+                        if let Some(row) = res.rows.first() {
+                            tables[i].row_count = row.first().and_then(|v| v.as_i64()).unwrap_or(0);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for t in tables.iter_mut() {
+        if t.row_count < 0 {
+            t.row_count = 0;
         }
     }
     Ok(tables)
@@ -376,16 +449,41 @@ async fn list_tables_libsql(cfg: &super::connection::LibSqlConfig) -> Result<Vec
         Some(TableInfo { name, kind, row_count: -1, rls_enabled: None })
     }).collect();
 
-    for t in tables.iter_mut() {
-        if t.kind == "view" {
-            t.row_count = 0;
-            continue;
-        }
-        let sql = format!("SELECT COUNT(*) FROM \"{}\"", t.name.replace('"', "\"\""));
-        if let Ok(res) = super::libsql::query(cfg, &sql, vec![]).await {
-            if let Some(row) = res.rows.first() {
-                t.row_count = row.first().and_then(|v| v.as_i64()).unwrap_or(0);
+    // Batch counts into one round-trip per chunk (each libsql query is a remote
+    // HTTP request), with a per-table fallback if a batch fails.
+    let count_idx: Vec<usize> = tables
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| t.kind != "view")
+        .map(|(i, _)| i)
+        .collect();
+    for chunk in count_idx.chunks(SQLITE_COUNT_BATCH) {
+        let sql = chunk
+            .iter()
+            .map(|&i| format!("SELECT COUNT(*) FROM \"{}\"", tables[i].name.replace('"', "\"\"")))
+            .collect::<Vec<_>>()
+            .join(" UNION ALL ");
+        match super::libsql::query(cfg, &sql, vec![]).await {
+            Ok(res) if res.rows.len() == chunk.len() => {
+                for (&i, row) in chunk.iter().zip(res.rows.iter()) {
+                    tables[i].row_count = row.first().and_then(|v| v.as_i64()).unwrap_or(0);
+                }
             }
+            _ => {
+                for &i in chunk {
+                    let one = format!("SELECT COUNT(*) FROM \"{}\"", tables[i].name.replace('"', "\"\""));
+                    if let Ok(res) = super::libsql::query(cfg, &one, vec![]).await {
+                        if let Some(row) = res.rows.first() {
+                            tables[i].row_count = row.first().and_then(|v| v.as_i64()).unwrap_or(0);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for t in tables.iter_mut() {
+        if t.row_count < 0 {
+            t.row_count = 0;
         }
     }
     Ok(tables)
@@ -592,22 +690,31 @@ pub struct SequenceInfo {
 async fn list_enums_pg(pool: &PgPool, schema: &str) -> Result<Vec<EnumInfo>, String> {
     let rows = sqlx::query(
         r#"
+        -- Values and used-in-tables are computed as independent subqueries so the
+        -- column join can't fan out (multiply) the enum labels. A previous version
+        -- joined information_schema.columns and array_agg'd labels without DISTINCT,
+        -- so an enum used in N columns produced each label N times.
         SELECT t.typname::text AS name,
-               array_agg(e.enumlabel::text ORDER BY e.enumsortorder) AS values,
+               (
+                 SELECT array_agg(e.enumlabel::text ORDER BY e.enumsortorder)
+                 FROM pg_catalog.pg_enum e
+                 WHERE e.enumtypid = t.oid
+               ) AS values,
                COALESCE(
-                 array_agg(DISTINCT c.table_name::text)
-                 FILTER (WHERE c.table_name IS NOT NULL),
+                 (
+                   SELECT array_agg(DISTINCT c.table_name::text)
+                   FROM information_schema.columns c
+                   WHERE c.udt_schema = n.nspname
+                     AND c.udt_name   = t.typname
+                     AND c.table_schema = n.nspname
+                     AND c.table_name IS NOT NULL
+                 ),
                  ARRAY[]::text[]
                ) AS used_in_tables
         FROM pg_catalog.pg_type t
         JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
-        JOIN pg_catalog.pg_enum e ON e.enumtypid = t.oid
-        LEFT JOIN information_schema.columns c
-               ON c.udt_schema = n.nspname
-              AND c.udt_name   = t.typname
-              AND c.table_schema = n.nspname
         WHERE n.nspname = $1
-        GROUP BY t.typname
+          AND t.typtype = 'e'
         ORDER BY t.typname
         "#,
     )
