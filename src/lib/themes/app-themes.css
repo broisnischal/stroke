@@ -17,7 +17,7 @@ html[data-theme="light"] {
   --secondary:                oklch(0.956 0 0);
   --secondary-foreground:     oklch(0.20 0 0);
   --muted:                    oklch(0.956 0 0);
-  --muted-foreground:         oklch(0.50 0 0);
+  --muted-foreground:         oklch(0.448 0 0);
   --accent:                   oklch(0.946 0 0);
   --accent-foreground:        oklch(0.13 0 0);
   --destructive:              oklch(0.55 0.22 25);
@@ -50,7 +50,7 @@ html[data-theme="parchment"] {
   --secondary:                oklch(0.920 0.018 80);
   --secondary-foreground:     oklch(0.22 0.020 64);
   --muted:                    oklch(0.918 0.016 80);
-  --muted-foreground:         oklch(0.50 0.016 72);
+  --muted-foreground:         oklch(0.452 0.020 72);
   --accent:                   oklch(0.890 0.020 80);
   --accent-foreground:        oklch(0.165 0.022 64);
   --destructive:              oklch(0.55 0.22 25);
@@ -83,7 +83,7 @@ html[data-theme="ice"] {
   --secondary:                oklch(0.926 0.014 242);
   --secondary-foreground:     oklch(0.18 0.024 252);
   --muted:                    oklch(0.924 0.013 242);
-  --muted-foreground:         oklch(0.48 0.025 252);
+  --muted-foreground:         oklch(0.442 0.028 252);
   --accent:                   oklch(0.894 0.018 240);
   --accent-foreground:        oklch(0.135 0.026 252);
   --destructive:              oklch(0.55 0.22 25);
@@ -120,7 +120,7 @@ html[data-theme="dark"] {
   --secondary:                oklch(0.220 0 0);
   --secondary-foreground:     oklch(0.880 0 0);
   --muted:                    oklch(0.220 0 0);
-  --muted-foreground:         oklch(0.580 0 0);
+  --muted-foreground:         oklch(0.712 0 0);
   --accent:                   oklch(0.245 0 0);
   --accent-foreground:        oklch(0.960 0 0);
   --destructive:              oklch(0.65 0.20 25);
@@ -153,7 +153,7 @@ html[data-theme="midnight"] {
   --secondary:                oklch(0.218 0.030 265);
   --secondary-foreground:     oklch(0.868 0.018 250);
   --muted:                    oklch(0.218 0.030 265);
-  --muted-foreground:         oklch(0.600 0.022 265);
+  --muted-foreground:         oklch(0.720 0.030 265);
   --accent:                   oklch(0.252 0.035 265);
   --accent-foreground:        oklch(0.960 0.010 250);
   --destructive:              oklch(0.65 0.18 25);
@@ -186,7 +186,7 @@ html[data-theme="vitesse"] {
   --secondary:                oklch(0.238 0.016 62);
   --secondary-foreground:     oklch(0.862 0.014 70);
   --muted:                    oklch(0.238 0.016 62);
-  --muted-foreground:         oklch(0.578 0.014 66);
+  --muted-foreground:         oklch(0.706 0.020 66);
   --accent:                   oklch(0.268 0.018 62);
   --accent-foreground:        oklch(0.940 0.014 70);
   --destructive:              oklch(0.65 0.18 25);
@@ -219,7 +219,7 @@ html[data-theme="slate"] {
   --secondary:                oklch(0.228 0.024 285);
   --secondary-foreground:     oklch(0.870 0.016 290);
   --muted:                    oklch(0.228 0.024 285);
-  --muted-foreground:         oklch(0.595 0.018 288);
+  --muted-foreground:         oklch(0.716 0.024 288);
   --accent:                   oklch(0.258 0.028 285);
   --accent-foreground:        oklch(0.955 0.010 290);
   --destructive:              oklch(0.65 0.18 25);
@@ -252,7 +252,7 @@ html[data-theme="mono"] {
   --secondary:                oklch(0.150 0 0);
   --secondary-foreground:     oklch(0.900 0 0);
   --muted:                    oklch(0.150 0 0);
-  --muted-foreground:         oklch(0.550 0 0);
+  --muted-foreground:         oklch(0.698 0 0);
   --accent:                   oklch(0.168 0 0);
   --accent-foreground:        oklch(0.985 0 0);
   --destructive:              oklch(0.65 0.20 25);
@@ -285,7 +285,7 @@ html[data-theme="forest"] {
   --secondary:                oklch(0.212 0.020 152);
   --secondary-foreground:     oklch(0.852 0.016 142);
   --muted:                    oklch(0.212 0.020 152);
-  --muted-foreground:         oklch(0.572 0.018 148);
+  --muted-foreground:         oklch(0.706 0.024 148);
   --accent:                   oklch(0.245 0.024 152);
   --accent-foreground:        oklch(0.940 0.012 142);
   --destructive:              oklch(0.62 0.18 25);
@@ -303,4 +303,143 @@ html[data-theme="forest"] {
   --link-hover:               oklch(0.84 0.14 155);
   --editor-surface:           #141a14;
   --editor-line-highlight:    #1c241c;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   CURATED PALETTES
+   Kept in their canonical source hex (not oklch) so the well-known palettes stay
+   pixel-faithful to their upstream definitions. All muted-foreground values are
+   chosen to clear WCAG AA (≥4.5:1) on their own background.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* ── GitHub Light — crisp high-contrast, signature blue accent ── */
+html[data-theme="github-light"] {
+  --background:               #ffffff;
+  --foreground:               #1f2328;
+  --card:                     #ffffff;
+  --card-foreground:          #1f2328;
+  --popover:                  #ffffff;
+  --popover-foreground:       #1f2328;
+  --primary:                  #0969da;
+  --primary-foreground:       #ffffff;
+  --secondary:                #f6f8fa;
+  --secondary-foreground:     #24292f;
+  --muted:                    #f6f8fa;
+  --muted-foreground:         #59636e;
+  --accent:                   #eaeef2;
+  --accent-foreground:        #1f2328;
+  --destructive:              #cf222e;
+  --border:                   #d1d9e0;
+  --input:                    #d1d9e0;
+  --ring:                     #0969da;
+  --sidebar:                  #f6f8fa;
+  --sidebar-foreground:       #1f2328;
+  --sidebar-accent:           #eaeef2;
+  --sidebar-accent-foreground:#1f2328;
+  --sidebar-border:           #d1d9e0;
+  --panel:                    #ffffff;
+  --table-grid:               #d1d9e0;
+  --link:                     #0969da;
+  --link-hover:               #0a5cc0;
+  --editor-surface:           #ffffff;
+  --editor-line-highlight:    #f6f8fa;
+}
+
+/* ── Rosé Pine — muted rose & pine, iris accent ── */
+html[data-theme="rose-pine"] {
+  --background:               #191724;
+  --foreground:               #e0def4;
+  --card:                     #1f1d2e;
+  --card-foreground:          #e0def4;
+  --popover:                  #1f1d2e;
+  --popover-foreground:       #e0def4;
+  --primary:                  #c4a7e7;
+  --primary-foreground:       #191724;
+  --secondary:                #26233a;
+  --secondary-foreground:     #e0def4;
+  --muted:                    #26233a;
+  --muted-foreground:         #908caa;
+  --accent:                   #403d52;
+  --accent-foreground:        #e0def4;
+  --destructive:              #eb6f92;
+  --border:                   #403d52;
+  --input:                    #403d52;
+  --ring:                     #c4a7e7;
+  --sidebar:                  #16141f;
+  --sidebar-foreground:       #e0def4;
+  --sidebar-accent:           #26233a;
+  --sidebar-accent-foreground:#e0def4;
+  --sidebar-border:           #403d52;
+  --panel:                    #1c1a29;
+  --table-grid:               #403d52;
+  --link:                     #9ccfd8;
+  --link-hover:               #c4a7e7;
+  --editor-surface:           #191724;
+  --editor-line-highlight:    #1f1d2e;
+}
+
+/* ── Catppuccin Mocha — soft pastel dark, mauve accent ── */
+html[data-theme="catppuccin"] {
+  --background:               #1e1e2e;
+  --foreground:               #cdd6f4;
+  --card:                     #313244;
+  --card-foreground:          #cdd6f4;
+  --popover:                  #313244;
+  --popover-foreground:       #cdd6f4;
+  --primary:                  #cba6f7;
+  --primary-foreground:       #1e1e2e;
+  --secondary:                #313244;
+  --secondary-foreground:     #cdd6f4;
+  --muted:                    #313244;
+  --muted-foreground:         #a6adc8;
+  --accent:                   #45475a;
+  --accent-foreground:        #cdd6f4;
+  --destructive:              #f38ba8;
+  --border:                   #45475a;
+  --input:                    #45475a;
+  --ring:                     #cba6f7;
+  --sidebar:                  #181825;
+  --sidebar-foreground:       #cdd6f4;
+  --sidebar-accent:           #313244;
+  --sidebar-accent-foreground:#cdd6f4;
+  --sidebar-border:           #313244;
+  --panel:                    #1a1a2a;
+  --table-grid:               #45475a;
+  --link:                     #89b4fa;
+  --link-hover:               #b4befe;
+  --editor-surface:           #1e1e2e;
+  --editor-line-highlight:    #2a2b3c;
+}
+
+/* ── Solarized — Ethan Schoonover's classic dark, blue accent ── */
+html[data-theme="solarized"] {
+  --background:               #002b36;
+  --foreground:               #93a1a1;
+  --card:                     #073642;
+  --card-foreground:          #93a1a1;
+  --popover:                  #073642;
+  --popover-foreground:       #93a1a1;
+  --primary:                  #268bd2;
+  --primary-foreground:       #002b36;
+  --secondary:                #073642;
+  --secondary-foreground:     #eee8d5;
+  --muted:                    #073642;
+  --muted-foreground:         #839496;
+  --accent:                   #0d3b47;
+  --accent-foreground:        #eee8d5;
+  --destructive:              #dc322f;
+  --border:                   #0f3d49;
+  --input:                    #123f4b;
+  --ring:                     #268bd2;
+  --sidebar:                  #00212b;
+  --sidebar-foreground:       #93a1a1;
+  --sidebar-accent:           #073642;
+  --sidebar-accent-foreground:#eee8d5;
+  --sidebar-border:           #0f3d49;
+  --panel:                    #01313d;
+  --table-grid:               #0f3d49;
+  --link:                     #268bd2;
+  --link-hover:               #4ba3d8;
+  --editor-surface:           #002b36;
+  --editor-line-highlight:    #073642;
 }

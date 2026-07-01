@@ -471,10 +471,10 @@
 <!-- Section count badge: shows "visible/total" when filters hide rows, else just the total. -->
 {#snippet countBadge(visible, total)}
   {#if visible !== total}
-    <span class="ml-auto font-mono text-ui-2xs text-muted-foreground/60" title="{visible} shown · {total - visible} hidden of {total}"
-      >{visible}<span class="text-muted-foreground/40">/{total}</span></span>
+    <span class="ml-auto font-mono text-ui-2xs text-muted-foreground" title="{visible} shown · {total - visible} hidden of {total}"
+      >{visible}<span class="text-muted-foreground/55">/{total}</span></span>
   {:else}
-    <span class="ml-auto font-mono text-ui-2xs text-muted-foreground/60">{total}</span>
+    <span class="ml-auto font-mono text-ui-2xs text-muted-foreground">{total}</span>
   {/if}
 {/snippet}
 
@@ -872,7 +872,7 @@
                           </span>
                           <span class="min-w-0 truncate font-mono text-ui-sm leading-none">{tableName}</span>
                           {#if showRowCount}
-                          <span class="shrink-0 text-right font-mono text-ui-xs leading-none tabular-nums text-muted-foreground/60">
+                          <span class="shrink-0 text-right font-mono text-ui-xs leading-none tabular-nums text-muted-foreground/85">
                             {formatTableRowCount(tables.find((t) => t.name === tableName)?.rowCount)}
                           </span>
                           {/if}

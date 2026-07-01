@@ -18,13 +18,23 @@ export function normalizeConnectionConfig(raw) {
   }
 }
 
+/**
+ * True when the Tauri IPC bridge isn't present (e.g. `npm run dev` in a plain
+ * browser). In that case *every* `invoke` fails structurally, so we surface a
+ * dev hint. When the bridge IS present, we must pass the backend's real error
+ * through untouched — matching on substrings like "invoke"/"Tauri" used to
+ * swallow genuine DB failures whose text happened to mention those words.
+ */
+function tauriBridgeMissing() {
+  return typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)
+}
+
 /** @param {unknown} err */
 function formatInvokeError(err) {
-  const msg = String(err)
-  if (msg.includes('invoke') || msg.includes('Tauri')) {
+  if (tauriBridgeMissing()) {
     return 'Database API unavailable. Run the app with: npm run tauri dev'
   }
-  return msg
+  return err instanceof Error ? err.message : String(err)
 }
 
 async function inv(command, args = {}) {

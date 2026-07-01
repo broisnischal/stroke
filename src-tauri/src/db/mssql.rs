@@ -124,21 +124,16 @@ fn rows_to_result(rows: &[Row], elapsed: u64) -> SqlResult {
 }
 
 fn is_read_query(sql: &str) -> bool {
-    let head = sql
-        .trim_start()
-        .split(|c: char| c.is_whitespace() || c == '(')
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
+    let head = super::sql_util::statement_head(sql);
     matches!(head.as_str(), "select" | "with" | "show" | "exec" | "execute" | "values" | "declare" | "explain")
 }
 
 fn quote_ident(ident: &str) -> String {
-    format!("[{}]", ident.replace(']', "]]"))
+    super::sql_util::quote_bracket(ident)
 }
 
 fn esc_literal(s: &str) -> String {
-    s.replace('\'', "''")
+    super::sql_util::esc_single_quote(s)
 }
 
 // ── Query ────────────────────────────────────────────────────────────────────
@@ -346,10 +341,25 @@ pub async fn get_table_rows(
     sort_column: Option<String>,
     sort_direction: Option<String>,
     filters: Option<Vec<RowFilter>>,
+    // MSSQL serializes every round-trip on a single locked connection, so each
+    // skipped catalog query directly cuts latency. On plain pagination (no
+    // search/filter/sort) the column structure isn't needed, and the PK is only
+    // fetched when the frontend asks for fresh metadata.
+    include_meta: bool,
 ) -> Result<TableRows, String> {
     let t0 = Instant::now();
-    let cols = get_column_structure(handle, schema, table).await?;
-    let col_names: Vec<String> = cols.iter().map(|c| c.name.clone()).collect();
+    let has_search = search.as_deref().map(str::trim).is_some_and(|s| !s.is_empty());
+    let has_filters = filters.as_ref().is_some_and(|f| !f.is_empty());
+    let has_sort = sort_column.as_deref().map(str::trim).is_some_and(|s| !s.is_empty());
+    let col_names: Vec<String> = if include_meta || has_search || has_filters || has_sort {
+        get_column_structure(handle, schema, table)
+            .await?
+            .iter()
+            .map(|c| c.name.clone())
+            .collect()
+    } else {
+        Vec::new()
+    };
     let tq = format!("{}.{}", quote_ident(schema), quote_ident(table));
     let where_clause = build_where(&col_names, search.as_deref(), filters.as_deref());
 
@@ -382,7 +392,7 @@ pub async fn get_table_rows(
         rows: result.rows,
         total,
         query_ms: t0.elapsed().as_millis() as u64,
-        primary_key: primary_key(handle, schema, table).await,
+        primary_key: if include_meta { primary_key(handle, schema, table).await } else { Vec::new() },
         foreign_keys: Vec::<ForeignKeyInfo>::new(),
     })
 }
@@ -546,7 +556,7 @@ mod tests {
         let cols = get_column_structure(&h, "dbo", "t_users").await.unwrap();
         assert_eq!(cols.len(), 3, "cols: {cols:?}");
 
-        let rows = get_table_rows(&h, "dbo", "t_users", 10, 0, None, None, None, None).await.unwrap();
+        let rows = get_table_rows(&h, "dbo", "t_users", 10, 0, None, None, None, None, true).await.unwrap();
         assert_eq!(rows.total, 2);
         assert_eq!(rows.rows.len(), 2);
         assert_eq!(rows.primary_key, vec!["id".to_string()], "pk: {:?}", rows.primary_key);

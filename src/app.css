@@ -44,6 +44,15 @@ html[data-theme="light"] {
 .json-tok-bool { color: var(--json-boolean); }
 .json-tok-null { color: var(--json-null); font-style: italic; }
 
+/* Icon weight — user-selectable Lucide stroke width (see ICON_STYLES in
+   stores/settings.js). Lucide renders each icon as `<svg class="lucide …">` with
+   a stroke-width *attribute*; a CSS `stroke-width` on the element wins over that
+   attribute and is inherited by the child paths, so one rule restyles every icon
+   without touching a single import. "regular" (2) is the Lucide default, so it
+   needs no override. */
+html[data-icon-style="light"] svg.lucide { stroke-width: 1.5px; }
+html[data-icon-style="bold"]  svg.lucide { stroke-width: 2.5px; }
+
 /* OS-native border-radius conventions */
 html[data-os="macos"]   { --radius: 0.5rem; --window-radius: 10px; }  /* macOS Big Sur+ system radius */
 html[data-os="windows"] { --radius: 0.4375rem; --window-radius: 8px; } /* Windows 11 */

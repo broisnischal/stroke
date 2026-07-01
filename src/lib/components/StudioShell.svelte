@@ -21,6 +21,11 @@
   import Plus from '@lucide/svelte/icons/plus'
   import { createHotkey, createHotkeySequence } from '@tanstack/svelte-hotkeys'
   import { cycleTheme, restorePreviousTheme, isCurrentThemeDark, loadSettings, updateSettings } from '$lib/stores/settings.js'
+  import { normalizeColumn, columnType } from '$lib/column.js'
+  import {
+    loadAiMode, saveAiMode, loadHiddenCols, saveHiddenCols,
+    loadQueryHistoryPref, saveQueryHistoryPref, loadInfiniteScroll, saveInfiniteScroll,
+  } from '$lib/stores/table-prefs.js'
   import { pickRandomTip } from '$lib/insider-tips.js'
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import Sidebar from './Sidebar.svelte'
@@ -144,6 +149,7 @@
     filtersForApi,
     sortForApi,
     buildSelectSql,
+    readRowsResponse,
   } from '$lib/table-query.js'
   import {
     buildForeignKeyFilters,
@@ -390,22 +396,8 @@
     return () => { unlisten(); if (_liveRefetchTimer) clearTimeout(_liveRefetchTimer) }
   })
 
-  // AI Mode — full-screen chat, hides sidebar and tabs
-  function loadAiMode() { try { return localStorage.getItem('stroke:ai-mode') === '1' } catch { return false } }
-  function saveAiMode(v) { try { localStorage.setItem('stroke:ai-mode', v ? '1' : '0') } catch {} }
-
-  // Hidden columns — persisted per connection+schema+table
-  /** @param {string} connId @param {string} schema @param {string} table */
-  function hiddenColsKey(connId, schema, table) { return `stroke:hidden-cols:${connId}:${schema}.${table}` }
-  /** @param {string} connId @param {string} schema @param {string} table @returns {Set<string>} */
-  function loadHiddenCols(connId, schema, table) {
-    try { const v = localStorage.getItem(hiddenColsKey(connId, schema, table)); if (v) return new Set(JSON.parse(v)) } catch {}
-    return new Set()
-  }
-  /** @param {string} connId @param {string} schema @param {string} table @param {Set<string>} cols */
-  function saveHiddenCols(connId, schema, table, cols) {
-    try { localStorage.setItem(hiddenColsKey(connId, schema, table), JSON.stringify([...cols])) } catch {}
-  }
+  // AI mode, hidden columns, query-history visibility and infinite-scroll prefs
+  // are persisted via $lib/stores/table-prefs.js (imported above).
   let aiMode = $state(loadAiMode())
   let aiEverOpened = $state(loadAiMode())
   $effect(() => { if (aiMode) aiEverOpened = true })
@@ -579,7 +571,7 @@
   let _loadSeq = 0
   // Infinite scroll — accumulated rows across all "load more" fetches.
   let _infiniteRows = $state(/** @type {any[]} */ ([]))
-  let infiniteScroll = $state((() => { try { return localStorage.getItem('stroke:infiniteScroll') === '1' } catch { return false } })())
+  let infiniteScroll = $state(loadInfiniteScroll())
 let rowSearch = $state('')
   let rowSort = $state(/** @type {TableSort | null} */ (null))
   let rowFilters = $state(/** @type {TableFilter[]} */ ([]))
@@ -697,6 +689,10 @@ let rowSearch = $state('')
     }
     const conn = connection
     const id = setInterval(async () => {
+      // Skip the round-trip while the window is hidden (backgrounded/minimized):
+      // there's no UI to update, and idle pings only risk waking a sleeping
+      // remote connection. The next tick after the window is shown will ping.
+      if (typeof document !== 'undefined' && document.hidden) return
       try {
         await pingConnection()
         if (connectionLost) connectionLost = false
@@ -765,14 +761,6 @@ let rowSearch = $state('')
     void mcpUpdateConnections(savedConnections, activeConnectionId || null)
   })
 
-  const QUERY_HISTORY_OPEN_KEY = 'stroke:query-history-open'
-  function loadQueryHistoryPref() {
-    try {
-      return localStorage.getItem(QUERY_HISTORY_OPEN_KEY) === '1'
-    } catch {
-      return false
-    }
-  }
 
   /** @type {import('$lib/stores/query-history.js').QueryHistoryEntry[]} */
   let queryHistory = $state([])
@@ -799,12 +787,7 @@ let rowSearch = $state('')
   }
 
   $effect(() => {
-    queryHistoryVisible
-    try {
-      localStorage.setItem(QUERY_HISTORY_OPEN_KEY, queryHistoryVisible ? '1' : '0')
-    } catch {
-      /* ignore */
-    }
+    saveQueryHistoryPref(queryHistoryVisible)
   })
 
   $effect(() => {
@@ -839,12 +822,7 @@ let rowSearch = $state('')
     return Object.fromEntries(
       [...tableColumnsCache.entries()].map(([key, cols]) => [
         key,
-        cols.map((c) => ({
-          name: c.name,
-          dataType: c.dataType ?? c.data_type ?? '',
-          nullable: c.nullable ?? true,
-          enumValues: c.enumValues ?? c.enum_values ?? undefined,
-        })),
+        cols.map(normalizeColumn),
       ]),
     )
   })
@@ -866,12 +844,7 @@ let rowSearch = $state('')
       activeSchema,
       tables: tables.map((t) => ({ name: t.name, rowCount: t.rowCount })),
       activeTable,
-      columns: columns.map((c) => ({
-        name: c.name,
-        dataType: c.dataType ?? c.data_type ?? '',
-        nullable: c.nullable ?? true,
-        enumValues: c.enumValues ?? c.enum_values ?? undefined,
-      })),
+      columns: columns.map(normalizeColumn),
       primaryKey,
       foreignKeys,
       allTableColumns: _allTableColumns,
@@ -1077,15 +1050,6 @@ let rowSearch = $state('')
     e.preventDefault()
     commandOpen = false
     openSearchTab()
-  })
-
-  // Ctrl/Cmd+T when viewing a table: clear the row search (and focus it).
-  // This lets the user quickly reset filters without reaching for the mouse.
-  createHotkey('Mod+T', (e) => {
-    if (commandOpen || showConnectionModal || showSettingsModal) return
-    if (activeTab?.kind !== 'table' || !activeTable) return
-    e.preventDefault()
-    tableToolbar?.clearRowSearch?.()
   })
 
   createHotkey('Mod+Enter', (e) => {
@@ -1400,7 +1364,7 @@ let rowSearch = $state('')
 
   async function handleModRefresh() {
     if (isFocusInRegion('sidebar')) {
-      await loadTables()
+      await loadTables({ force: true })
       return
     }
     if (activeTab?.kind === 'sql') {
@@ -1413,7 +1377,7 @@ let rowSearch = $state('')
     }
     if (activeTab?.kind === 'schema') {
       await loadSchemas()
-      await loadTables()
+      await loadTables({ force: true })
       return
     }
     if (activeTab?.kind === 'security') {
@@ -1424,7 +1388,7 @@ let rowSearch = $state('')
       await refreshDashboardCharts()
       return
     }
-    await loadTables()
+    await loadTables({ force: true })
   }
 
   async function refreshDashboardCharts() {
@@ -1592,150 +1556,66 @@ let rowSearch = $state('')
     enterAiMode()
   }
 
-  function openSchemaTab() {
+  // Open a pro-gated singleton tab: focus it if already open, otherwise create,
+  // append, and activate it. Replaces ~13 near-identical open*Tab bodies.
+  // `capability` gates availability; `capabilityFirst` runs that gate before the
+  // pro check (so an unavailable feature returns silently rather than showing the
+  // pro upsell) — matching the original per-tab ordering.
+  /**
+   * @param {{ find: (tabs: any[]) => any, create: () => any, capability?: () => boolean, capabilityFirst?: boolean }} cfg
+   */
+  function openSingletonTab({ find, create, capability, capabilityFirst = false }) {
+    if (capabilityFirst && capability && !capability()) return
     if (!$hasPro) { showProGate = true; return }
-    if (!hasSchemaExplorer) return
-    const existing = findSchemaTab(tabs)
-    if (existing) {
-      void activateTab(existing.id)
-      return
-    }
+    if (!capabilityFirst && capability && !capability()) return
+    const existing = find(tabs)
+    if (existing) { void activateTab(existing.id); return }
     saveActiveTabState()
     dropWelcomeTabs()
-    const tab = createSchemaTab()
+    const tab = create()
     tabs = [...tabs, tab]
     activeTabId = tab.id
     clearTableEditor()
+  }
+
+  function openSchemaTab() {
+    openSingletonTab({ find: findSchemaTab, create: createSchemaTab, capability: () => hasSchemaExplorer })
   }
 
   function openOrmTab() {
-    if (!$hasPro) { showProGate = true; return }
-    const existing = findOrmTab(tabs)
-    if (existing) {
-      void activateTab(existing.id)
-      return
-    }
-    saveActiveTabState()
-    dropWelcomeTabs()
-    const tab = createOrmTab()
-    tabs = [...tabs, tab]
-    activeTabId = tab.id
-    clearTableEditor()
+    openSingletonTab({ find: findOrmTab, create: createOrmTab })
   }
 
   function openSecurityTab() {
-    if (!hasSecurity) return
-    if (!$hasPro) { showProGate = true; return }
-    const existing = findSecurityTab(tabs)
-    if (existing) {
-      void activateTab(existing.id)
-      return
-    }
-    saveActiveTabState()
-    dropWelcomeTabs()
-    const tab = createSecurityTab()
-    tabs = [...tabs, tab]
-    activeTabId = tab.id
-    clearTableEditor()
+    openSingletonTab({ find: findSecurityTab, create: createSecurityTab, capability: () => hasSecurity, capabilityFirst: true })
   }
 
   function openBackupTab() {
-    if (!$hasPro) { showProGate = true; return }
-    const existing = findBackupTab(tabs)
-    if (existing) { void activateTab(existing.id); return }
-    saveActiveTabState()
-    dropWelcomeTabs()
-    const tab = createBackupTab()
-    tabs = [...tabs, tab]
-    activeTabId = tab.id
-    clearTableEditor()
+    openSingletonTab({ find: findBackupTab, create: createBackupTab })
   }
 
   function openLogsTab() {
-    if (!$hasPro) { showProGate = true; return }
-    const existing = findLogsTab(tabs)
-    if (existing) {
-      void activateTab(existing.id)
-      return
-    }
-    saveActiveTabState()
-    dropWelcomeTabs()
-    const tab = createLogsTab()
-    tabs = [...tabs, tab]
-    activeTabId = tab.id
-    clearTableEditor()
+    openSingletonTab({ find: findLogsTab, create: createLogsTab })
   }
 
   function openExtensionsTab() {
-    if (!$hasPro) { showProGate = true; return }
-    const existing = findExtensionsTab(tabs)
-    if (existing) {
-      void activateTab(existing.id)
-      return
-    }
-    saveActiveTabState()
-    dropWelcomeTabs()
-    const tab = createExtensionsTab()
-    tabs = [...tabs, tab]
-    activeTabId = tab.id
-    clearTableEditor()
+    openSingletonTab({ find: findExtensionsTab, create: createExtensionsTab })
   }
 
   function openJsonTab() {
-    if (!$hasPro) { showProGate = true; return }
-    const existing = findJsonTab(tabs)
-    if (existing) {
-      void activateTab(existing.id)
-      return
-    }
-    saveActiveTabState()
-    dropWelcomeTabs()
-    const tab = createJsonTab()
-    tabs = [...tabs, tab]
-    activeTabId = tab.id
-    clearTableEditor()
+    openSingletonTab({ find: findJsonTab, create: createJsonTab })
   }
 
   function openChartsTab() {
-    if (!$hasPro) { showProGate = true; return }
-    const existing = findChartsTab(tabs)
-    if (existing) {
-      void activateTab(existing.id)
-      return
-    }
-    saveActiveTabState()
-    dropWelcomeTabs()
-    const tab = createChartsTab()
-    tabs = [...tabs, tab]
-    activeTabId = tab.id
-    clearTableEditor()
+    openSingletonTab({ find: findChartsTab, create: createChartsTab })
   }
 
   function openDashboardTab() {
-    if (!$hasPro) { showProGate = true; return }
-    const existing = findDashboardTab(tabs)
-    if (existing) {
-      void activateTab(existing.id)
-      return
-    }
-    saveActiveTabState()
-    dropWelcomeTabs()
-    const tab = createDashboardTab()
-    tabs = [...tabs, tab]
-    activeTabId = tab.id
-    clearTableEditor()
+    openSingletonTab({ find: findDashboardTab, create: createDashboardTab })
   }
 
   function openErdTab() {
-    if (!$hasPro) { showProGate = true; return }
-    const existing = findErdTab(tabs)
-    if (existing) { void activateTab(existing.id); return }
-    saveActiveTabState()
-    dropWelcomeTabs()
-    const tab = createErdTab()
-    tabs = [...tabs, tab]
-    activeTabId = tab.id
-    clearTableEditor()
+    openSingletonTab({ find: findErdTab, create: createErdTab })
   }
 
   function openDiagramsTab() {
@@ -1748,18 +1628,7 @@ let rowSearch = $state('')
   }
 
   function openSearchTab() {
-    if (!$hasPro) { showProGate = true; return }
-    const existing = findSearchTab(tabs)
-    if (existing) {
-      void activateTab(existing.id)
-      return
-    }
-    saveActiveTabState()
-    dropWelcomeTabs()
-    const tab = createSearchTab()
-    tabs = [...tabs, tab]
-    activeTabId = tab.id
-    clearTableEditor()
+    openSingletonTab({ find: findSearchTab, create: createSearchTab })
   }
 
   function openNewNotebookTab() {
@@ -1791,27 +1660,11 @@ let rowSearch = $state('')
   }
 
   function openSchemaTimelineTab() {
-    if (!$hasPro) { showProGate = true; return }
-    const existing = findSchemaTimelineTab(tabs)
-    if (existing) { void activateTab(existing.id); return }
-    saveActiveTabState()
-    dropWelcomeTabs()
-    const tab = createSchemaTimelineTab()
-    tabs = [...tabs, tab]
-    activeTabId = tab.id
-    clearTableEditor()
+    openSingletonTab({ find: findSchemaTimelineTab, create: createSchemaTimelineTab })
   }
 
   function openDataDiffTab() {
-    if (!$hasPro) { showProGate = true; return }
-    const existing = findDataDiffTab(tabs)
-    if (existing) { void activateTab(existing.id); return }
-    saveActiveTabState()
-    dropWelcomeTabs()
-    const tab = createDataDiffTab()
-    tabs = [...tabs, tab]
-    activeTabId = tab.id
-    clearTableEditor()
+    openSingletonTab({ find: findDataDiffTab, create: createDataDiffTab })
   }
 
   /**
@@ -2279,7 +2132,10 @@ let rowSearch = $state('')
     if (!activeSchema || !engineSupports('enums', connection?.type)) { enums = []; return }
     try {
       const list = await listEnums(activeSchema)
-      enums = list.map((e) => ({ name: e.name ?? '', values: e.values ?? [] }))
+      // Dedupe values defensively: enum labels are a set, but a bad introspection
+      // join could return repeats, and the schema pages key their {#each} on the
+      // value — a duplicate would crash the view (each_key_duplicate).
+      enums = list.map((e) => ({ name: e.name ?? '', values: [...new Set(e.values ?? [])] }))
     } catch {
       enums = []
     }
@@ -2321,36 +2177,66 @@ let rowSearch = $state('')
     }
   }
 
-  async function loadTables() {
+  // Table-list cache keyed by connection+schema. Rapid navigation (switching
+  // between tabs in different schemas, reopening the sidebar) used to re-run the
+  // full listTables round-trip — which includes a per-table row count — on every
+  // move. A short TTL collapses those repeats while keeping counts near-live;
+  // data-changing paths (connect, refresh, DDL) pass { force: true } to bypass it.
+  const TABLE_LIST_TTL_MS = 3000
+  /** @type {Map<string, { tables: any[], at: number }>} */
+  let _tableListCache = new Map()
+  // Which connection+schema the catalog sub-state (indexes/enums/triggers/
+  // sequences) currently reflects — so a cached table-list hit never leaves it
+  // showing another schema's catalog.
+  let _catalogLoadedFor = ''
+
+  /** @param {{ force?: boolean }} [opts] */
+  async function loadTables({ force = false } = {}) {
     if (!activeSchema) {
       tables = []
       return
     }
-    loadingTables = true
-    error = ''
-    try {
-      const list = await listTables(activeSchema)
-      tables = list
-        .map((t) => ({
-          name: t.name ?? t.table_name ?? '',
-          rowCount: normalizeTableRowCount(t.rowCount ?? t.row_count),
-          kind: t.kind ?? 'table',
-          rlsEnabled: t.rlsEnabled ?? null,
-        }))
-        .filter((t) => t.name)
+    const key = `${persistConnectionId ?? ''}:${activeSchema}`
+    const cached = force ? null : _tableListCache.get(key)
+    if (cached && Date.now() - cached.at < TABLE_LIST_TTL_MS) {
+      tables = cached.tables
       if (activeTable && !tables.find((t) => t.name === activeTable)) {
         activeTable = tables[0]?.name ?? null
       }
-    } catch (e) {
-      error = String(e)
-      tables = []
-    } finally {
-      loadingTables = false
+    } else {
+      loadingTables = true
+      error = ''
+      try {
+        const list = await listTables(activeSchema)
+        tables = list
+          .map((t) => ({
+            name: t.name ?? t.table_name ?? '',
+            rowCount: normalizeTableRowCount(t.rowCount ?? t.row_count),
+            kind: t.kind ?? 'table',
+            rlsEnabled: t.rlsEnabled ?? null,
+          }))
+          .filter((t) => t.name)
+        _tableListCache.set(key, { tables, at: Date.now() })
+        if (activeTable && !tables.find((t) => t.name === activeTable)) {
+          activeTable = tables[0]?.name ?? null
+        }
+      } catch (e) {
+        error = String(e)
+        tables = []
+      } finally {
+        loadingTables = false
+      }
     }
-    void loadIndexes()
-    void loadEnums()
-    void loadTriggers()
-    void loadSequences()
+    // Reload the catalog sub-state only when it doesn't already reflect this
+    // connection+schema (or on a forced reload): revisiting a schema skips these
+    // four round-trips, but switching schemas still refreshes them.
+    if (force || _catalogLoadedFor !== key) {
+      _catalogLoadedFor = key
+      void loadIndexes()
+      void loadEnums()
+      void loadTriggers()
+      void loadSequences()
+    }
   }
 
   async function reloadTableFromQuery(resetPage = true) {
@@ -2471,12 +2357,7 @@ let rowSearch = $state('')
       })
 
       const result = {
-        columns: data.columns ?? [],
-        primaryKey: data.primaryKey ?? data.primary_key ?? [],
-        foreignKeys: normalizeForeignKeys(data.foreignKeys ?? data.foreign_keys),
-        rows: data.rows ?? [],
-        total: Number(data.total ?? 0),
-        queryMs: Number(data.queryMs ?? data.query_ms ?? 0),
+        ...readRowsResponse(data),
         loadingRows: false,
         error: '',
         selected: new Set(),
@@ -2626,7 +2507,7 @@ let rowSearch = $state('')
 
   function toggleInfiniteScroll() {
     infiniteScroll = !infiniteScroll
-    try { localStorage.setItem('stroke:infiniteScroll', infiniteScroll ? '1' : '0') } catch {}
+    saveInfiniteScroll(infiniteScroll)
     if (infiniteScroll) {
       // reset to page 1 with current pageSize so infinite starts from the top
       page = 1; rawOffset = null
@@ -2647,7 +2528,7 @@ let rowSearch = $state('')
     if (!a || !b || a.length !== b.length) return false
     for (let i = 0; i < a.length; i++) {
       if (a[i]?.name !== b[i]?.name) return false
-      if ((a[i]?.dataType ?? a[i]?.data_type) !== (b[i]?.dataType ?? b[i]?.data_type)) return false
+      if (columnType(a[i]) !== columnType(b[i])) return false
     }
     return true
   }
@@ -2720,28 +2601,37 @@ let rowSearch = $state('')
     tables = []
     schemas = []
     activeSchema = 'public'
-    // Retry loop — backend may not be fully ready immediately after connect
+    // Query history + saved queries only depend on the connection id, not on the
+    // catalog, so kick them off concurrently with the schema/table load instead
+    // of waiting behind it. Errors are non-fatal (history is best-effort).
+    const storesReady = refreshQueryStores().catch(() => {})
+    // Schema → tables is a genuine dependency (loadTables needs activeSchema), so
+    // this pair stays serial. The retry loop only sleeps when the backend isn't
+    // ready yet (schemas come back empty); the happy path succeeds on attempt 0.
     for (let attempt = 0; attempt < 3; attempt++) {
       if (attempt > 0) await new Promise(r => setTimeout(r, attempt * 700))
       await loadSchemas()
       if (schemas.length > 0) break
     }
-    await loadTables()
+    await loadTables({ force: true })
     // If tables came back empty despite a valid schema, give the backend one more chance
     if (tables.length === 0 && schemas.length > 0) {
       await new Promise(r => setTimeout(r, 1000))
-      await loadTables()
+      await loadTables({ force: true })
     }
     tabs = []
     openWelcomeTab()
-    await refreshQueryStores()
-    try {
-      const { loadSettings } = await import('$lib/stores/settings.js')
-      if (loadSettings().mcpAutoStart) {
-        const s = await mcpStart()
-        mcpRunning = s.running
-      }
-    } catch { /* ignore */ }
+    // MCP autostart is independent of the catalog — don't block first render on it.
+    void (async () => {
+      try {
+        const { loadSettings } = await import('$lib/stores/settings.js')
+        if (loadSettings().mcpAutoStart) {
+          const s = await mcpStart()
+          mcpRunning = s.running
+        }
+      } catch { /* ignore */ }
+    })()
+    await storesReady
   }
 
   onMount(() => installInputShortcuts())
@@ -2829,8 +2719,9 @@ let rowSearch = $state('')
       else if (last.type === 'duckdb') await withTimeout(connectDuckdb(last))
       else if (last.type === 'mssql') await withTimeout(connectMssql(last))
       else await withTimeout(connectPostgres(last))
+      // onConnected already refreshes the query stores (concurrently with the
+      // catalog load) — no second fetch needed here.
       await onConnected(last, last.id)
-      await refreshQueryStores()
     } catch {
       showConnectionModal = true
     } finally {
@@ -2991,7 +2882,7 @@ let rowSearch = $state('')
 
   async function handleRefresh() {
     await loadSchemas()
-    await loadTables()
+    await loadTables({ force: true })
     if (activeTab?.kind === 'table' && activeTable) {
       await loadRows()
     }
@@ -3016,7 +2907,7 @@ let rowSearch = $state('')
     try {
       await dropTable(activeSchema, tableName, cascade)
       toast.success(`Dropped table "${tableName}"`)
-      await loadTables()
+      await loadTables({ force: true })
       if (activeTable === tableName) {
         activeTable = null
       }
@@ -3088,7 +2979,7 @@ let rowSearch = $state('')
       const cols = await getTableColumnStructure(activeSchema, tableName)
       const colNames = cols.map((c) => `"${c.name}"`).join(',\n  ')
       const colPlaceholders = cols.map((c) => {
-        const t = (c.dataType ?? c.data_type ?? '').toLowerCase()
+        const t = columnType(c)
         if (t.includes('int') || t.includes('serial')) return '0'
         if (t.includes('bool')) return 'true'
         if (t.includes('date') || t.includes('timestamp')) return `'${new Date().toISOString().slice(0, 10)}'`
@@ -3327,7 +3218,7 @@ let rowSearch = $state('')
   {activeSchema}
   dbType={dbType}
   onexecute={async (sql) => { await executeSql(sql) }}
-  oncreated={async () => { await loadTables() }}
+  oncreated={async () => { await loadTables({ force: true }) }}
 />
 <CreateSchemaDialog
   bind:open={showCreateSchemaDialog}
@@ -3703,7 +3594,7 @@ let rowSearch = $state('')
             {tables}
             loading={loadingTables}
             active={activeTab?.kind === 'schema'}
-            onrefresh={async () => { await loadSchemas(); await loadTables() }}
+            onrefresh={async () => { await loadSchemas(); await loadTables({ force: true }) }}
           />
         </svelte:boundary>
       {/if}
