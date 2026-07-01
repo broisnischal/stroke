@@ -6,10 +6,11 @@
         const raw = localStorage.getItem('stroke:settings')
         const parsed = raw ? JSON.parse(raw) : null
         const valid = [
-          'light', 'parchment', 'ice',
+          'light', 'parchment', 'ice', 'github-light',
           'dark', 'midnight', 'vitesse', 'slate', 'forest', 'mono',
+          'rose-pine', 'catppuccin', 'solarized',
         ]
-        const lightThemes = ['light', 'parchment', 'ice']
+        const lightThemes = ['light', 'parchment', 'ice', 'github-light']
         let theme = parsed?.theme
         if (!valid.includes(theme)) {
           // No saved preference — follow the OS

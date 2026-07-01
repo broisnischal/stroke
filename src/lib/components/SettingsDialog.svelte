@@ -17,7 +17,9 @@
     canIncreaseZoom,
     canDecreaseZoom,
     FONT_PRESETS,
+    ICON_STYLES,
   } from "$lib/stores/settings.js";
+  import PenTool from "@lucide/svelte/icons/pen-tool";
   import { cn } from "$lib/utils.js";
   import {
     enableAutostart,
@@ -74,6 +76,13 @@
     settings = updateSettings({ font });
   }
   const fontEntries = Object.entries(FONT_PRESETS);
+  const iconStyleEntries = Object.entries(ICON_STYLES);
+
+  /** @param {import('$lib/stores/settings.js').IconStyleId} iconStyle */
+  function setIconStyle(iconStyle) {
+    if (iconStyle === settings.iconStyle) return;
+    settings = updateSettings({ iconStyle });
+  }
 
   function toggleMcpAutoStart() {
     settings = updateSettings({ mcpAutoStart: !settings.mcpAutoStart });
@@ -230,6 +239,50 @@
                         style="font-family: {preset.sans}"
                         aria-hidden="true"
                       >Aa</span>
+                      <span class="min-w-0">
+                        <span class="block text-xs font-medium leading-snug">{preset.label}</span>
+                        <span class="block text-[10px] leading-snug text-muted-foreground/65">{preset.description}</span>
+                      </span>
+                    </span>
+                  {/snippet}
+                </Select.Item>
+              {/each}
+            </Select.Content>
+          </Select.Root>
+        </div>
+
+        <div class="flex items-center justify-between gap-3 px-3 py-2.5">
+          <span class="text-xs text-muted-foreground">Icons</span>
+          <Select.Root
+            type="single"
+            value={settings.iconStyle}
+            onValueChange={(v) => { if (v) setIconStyle(/** @type {import('$lib/stores/settings.js').IconStyleId} */ (v)); }}
+          >
+            <Select.Trigger
+              size="sm"
+              class={themeSelectTrigger}
+              aria-label="Icon style"
+            >
+              <span class="flex min-w-0 items-center gap-2">
+                <PenTool
+                  class="size-3.5 shrink-0 text-muted-foreground"
+                  style="stroke-width: {ICON_STYLES[settings.iconStyle]?.strokeWidth ?? 2}px"
+                  aria-hidden="true"
+                />
+                <span class="truncate font-medium">{ICON_STYLES[settings.iconStyle]?.label ?? "Regular"}</span>
+              </span>
+            </Select.Trigger>
+            <Select.Content
+              class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1"
+              sideOffset={6}
+            >
+              {#each iconStyleEntries as [id, preset] (id)}
+                <Select.Item value={id} label={preset.label} class="rounded-md py-1.5 pr-8 pl-2">
+                  {#snippet children()}
+                    <span class="flex min-w-0 items-center gap-2.5">
+                      <span class="flex size-8 shrink-0 items-center justify-center rounded border border-border/40 bg-muted/30">
+                        <PenTool class="size-4 text-foreground/70" style="stroke-width: {preset.strokeWidth}px" aria-hidden="true" />
+                      </span>
                       <span class="min-w-0">
                         <span class="block text-xs font-medium leading-snug">{preset.label}</span>
                         <span class="block text-[10px] leading-snug text-muted-foreground/65">{preset.description}</span>
