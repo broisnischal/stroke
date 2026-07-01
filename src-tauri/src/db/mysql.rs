@@ -10,7 +10,7 @@ use std::time::Instant;
 const EXECUTE_SQL_MAX_ROWS: usize = 1_000_000_000;
 
 fn bt(s: &str) -> String {
-    format!("`{}`", s.replace('`', "``"))
+    super::sql_util::quote_backtick(s)
 }
 
 pub fn cell_to_json(row: &sqlx::mysql::MySqlRow, idx: usize) -> Value {
@@ -79,7 +79,7 @@ async fn fetch_column_names(pool: &MySqlPool, schema: &str, table: &str) -> Resu
 }
 
 fn escape_like(input: &str) -> String {
-    input.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
+    super::sql_util::escape_like_backslash(input)
 }
 
 struct WhereClause {
@@ -200,6 +200,9 @@ pub async fn get_table_rows(
     sort_column: Option<String>,
     sort_direction: Option<String>,
     filters: Option<Vec<RowFilter>>,
+    // When false, skip the primary-key/foreign-key catalog round-trips — the
+    // frontend already holds them for repeat fetches (pagination/sort/filter/live).
+    include_meta: bool,
 ) -> Result<TableRows, String> {
     let started = Instant::now();
     let table_columns = fetch_column_names(pool, schema, table).await?;
@@ -290,8 +293,16 @@ pub async fn get_table_rows(
         .map(|row| (0..row.len()).map(|i| cell_to_json(row, i)).collect())
         .collect();
 
-    let pk = fetch_primary_key(pool, schema, table).await.unwrap_or_default();
-    let fks = fetch_foreign_keys(pool, schema, table).await.unwrap_or_default();
+    // Skip the PK/FK catalog round-trips on metadata-skipping fetches; the
+    // frontend keeps the values it already loaded for this table.
+    let (pk, fks) = if include_meta {
+        (
+            fetch_primary_key(pool, schema, table).await.unwrap_or_default(),
+            fetch_foreign_keys(pool, schema, table).await.unwrap_or_default(),
+        )
+    } else {
+        (Vec::new(), Vec::new())
+    };
 
     Ok(TableRows {
         columns,
@@ -347,15 +358,46 @@ async fn fetch_foreign_keys(pool: &MySqlPool, schema: &str, table: &str) -> Resu
     Ok(out)
 }
 
-pub async fn execute_sql(pool: &MySqlPool, sql: &str) -> Result<SqlResult, String> {
+pub async fn execute_sql(
+    pool: &MySqlPool,
+    sql: &str,
+    // When `Some`, real cancellation is armed: we capture this connection's id and
+    // issue `KILL QUERY <id>` on a separate connection if the receiver fires, so
+    // the running statement stops server-side. Callers that can't be cancelled
+    // (diff/multi paths) pass `None`.
+    cancel_rx: Option<tokio::sync::oneshot::Receiver<()>>,
+) -> Result<SqlResult, String> {
     let started = Instant::now();
     let query_ms = || started.elapsed().as_millis() as u64;
 
-    let head = sql.trim_start().split_whitespace().next().unwrap_or("").to_ascii_lowercase();
+    // Run on a dedicated connection so its CONNECTION_ID() identifies the exact
+    // backend to cancel.
+    let mut conn = pool
+        .acquire()
+        .await
+        .map_err(|e| format!("Failed to acquire connection: {e}"))?;
+    if let Some(rx) = cancel_rx {
+        if let Ok(conn_id) = sqlx::query_scalar::<_, u64>("SELECT CONNECTION_ID()")
+            .fetch_one(&mut *conn)
+            .await
+        {
+            let cancel_pool = pool.clone();
+            tokio::spawn(async move {
+                if rx.await.is_ok() {
+                    // conn_id is a numeric id from the server; safe to inline.
+                    let _ = sqlx::query(&format!("KILL QUERY {conn_id}"))
+                        .execute(&cancel_pool)
+                        .await;
+                }
+            });
+        }
+    }
+
+    let head = super::sql_util::statement_head(sql);
     let is_select = matches!(head.as_str(), "select" | "show" | "explain" | "describe" | "desc" | "with" | "call");
 
     if is_select {
-        let mut stream = sqlx::query(sql).fetch(pool);
+        let mut stream = sqlx::query(sql).fetch(&mut *conn);
         let mut mysql_rows: Vec<sqlx::mysql::MySqlRow> = Vec::new();
         let mut capped = false;
 
@@ -404,7 +446,7 @@ pub async fn execute_sql(pool: &MySqlPool, sql: &str) -> Result<SqlResult, Strin
         });
     }
 
-    let result = sqlx::query(sql).execute(pool).await.map_err(|e| format!("Statement failed: {e}"))?;
+    let result = sqlx::query(sql).execute(&mut *conn).await.map_err(|e| format!("Statement failed: {e}"))?;
     let affected = result.rows_affected() as i64;
     Ok(SqlResult {
         columns: vec![],

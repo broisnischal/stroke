@@ -44,12 +44,7 @@ struct MetaCol {
 
 /// A SQL statement that returns a result set (so we can ask for JSONCompact).
 fn is_read_query(sql: &str) -> bool {
-    let head = sql
-        .trim_start()
-        .split(|c: char| c.is_whitespace() || c == '(')
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
+    let head = super::sql_util::statement_head(sql);
     matches!(
         head.as_str(),
         "select" | "with" | "show" | "describe" | "desc" | "explain" | "values" | "exists"
@@ -136,7 +131,7 @@ fn ch_type_label(ty: &str) -> String {
 
 /// Quote a ClickHouse identifier with backticks.
 fn quote_ident(ident: &str) -> String {
-    format!("`{}`", ident.replace('`', "``"))
+    super::sql_util::quote_backtick(ident)
 }
 
 // ── Schema introspection ───────────────────────────────────────────────────────
@@ -228,11 +223,22 @@ pub async fn get_table_rows(
     sort_column: Option<String>,
     sort_direction: Option<String>,
     filters: Option<Vec<RowFilter>>,
+    // ClickHouse is OLAP/browse-only (no PK/FK to return), so the column-structure
+    // round-trip is only needed to build a WHERE clause. Skip it on plain
+    // pagination where there is no search/filter. `include_meta` forces the fetch
+    // so a first load still validates against the real column list.
+    include_meta: bool,
 ) -> Result<TableRows, String> {
     let t0 = Instant::now();
     let tq = quote_ident(table);
 
-    let cols = get_column_structure(config, table).await?;
+    let has_search = search.as_deref().map(str::trim).is_some_and(|s| !s.is_empty());
+    let has_filters = filters.as_ref().is_some_and(|f| !f.is_empty());
+    let cols = if include_meta || has_search || has_filters {
+        get_column_structure(config, table).await?
+    } else {
+        Vec::new()
+    };
     let where_clause = build_where(&cols, search.as_deref(), filters.as_deref());
 
     // Total count (respecting filters).
@@ -315,7 +321,7 @@ fn build_where(cols: &[ColumnStructureRow], search: Option<&str>, filters: Optio
 }
 
 fn esc_literal(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('\'', "\\'")
+    super::sql_util::esc_backslash_quote(s)
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
