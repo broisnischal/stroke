@@ -3,13 +3,14 @@
   import * as monaco from 'monaco-editor'
   import { configureMonacoWorkers, editorFontFamily } from '$lib/monaco-env.js'
   import { registerMonacoSqlFormatter } from '$lib/format-sql.js'
-  import { registerMonacoSqlCompletion } from '$lib/monaco-sql-complete.js'
+  import { registerMonacoSqlCompletion, setSqlHintsForModel } from '$lib/monaco-sql-complete.js'
   import {
     defineStrokeMonacoThemes,
     monacoThemeId,
     readEditorFontOptions,
   } from '$lib/monaco-themes.js'
   import { normalizeThemeId } from '$lib/themes/registry.js'
+  import { splitSqlStatements, statementAtOffset } from '$lib/sql-statements.js'
   import { cn } from '$lib/utils.js'
 
   /** @typedef {import('$lib/monaco-sql-complete.js').SqlSchemaHints} SqlSchemaHints */
@@ -21,7 +22,12 @@
     schemaHints = /** @type {SqlSchemaHints} */ ({}),
     onmodk = undefined,
     onmodenter = undefined,
-    onmodr = undefined,
+    /**
+     * Run a single statement (Ctrl/Cmd+R) — receives the selected text, or the
+     * statement under the cursor when there is no selection.
+     * @type {((sql: string) => void) | undefined}
+     */
+    onrunstatement = undefined,
     onmods = undefined,
     // Global app shortcuts — registered inside Monaco so they work when editor is focused
     onmodi = undefined,
@@ -50,10 +56,21 @@
     return normalizeThemeId(document.documentElement.dataset.theme)
   }
 
+  /**
+   * Statement under the cursor (or containing the selection anchor).
+   * @param {monaco.editor.IStandaloneCodeEditor} ed
+   */
+  function statementAtCursor(ed) {
+    const model = ed.getModel()
+    const pos = ed.getPosition()
+    if (!model || !pos) return null
+    return statementAtOffset(splitSqlStatements(model.getValue()), model.getOffsetAt(pos))
+  }
+
   /** @param {monaco.editor.IStandaloneCodeEditor} ed */
   function registerAppShortcuts(ed) {
     const { CtrlCmd, Shift } = monaco.KeyMod
-    const { KeyK, KeyR, KeyS, KeyI, KeyB, KeyW, KeyN, KeyM, KeyT, KeyD, KeyO, KeyE, KeyJ, Enter } = monaco.KeyCode
+    const { KeyK, KeyL, KeyR, KeyS, KeyI, KeyB, KeyW, KeyN, KeyM, KeyT, KeyD, KeyO, KeyE, KeyJ, Enter } = monaco.KeyCode
 
     /** @param {() => void | undefined} fn */
     const run = (fn) => fn?.()
@@ -77,8 +94,38 @@
 
     // Editor-local shortcuts
     ed.addCommand(CtrlCmd | KeyK,     () => run(onmodk))
-    ed.addCommand(CtrlCmd | KeyR,     () => run(onmodr))
     ed.addCommand(CtrlCmd | KeyS,     () => run(onmods))
+
+    // Ctrl/Cmd+L — select the statement under the cursor
+    ed.addCommand(CtrlCmd | KeyL, () => {
+      const stmt = statementAtCursor(ed)
+      const model = ed.getModel()
+      if (!stmt || !model) return
+      const s = model.getPositionAt(stmt.start)
+      const e = model.getPositionAt(stmt.end)
+      ed.setSelection(new monaco.Selection(s.lineNumber, s.column, e.lineNumber, e.column))
+      ed.revealRangeInCenterIfOutsideViewport(
+        new monaco.Range(s.lineNumber, s.column, e.lineNumber, e.column),
+      )
+    })
+
+    // Ctrl/Cmd+R — run the selection if any, else the statement under the cursor
+    ed.addCommand(CtrlCmd | KeyR, () => {
+      if (!onrunstatement) return
+      const model = ed.getModel()
+      const sel = ed.getSelection()
+      const selText = model && sel && !sel.isEmpty() ? model.getValueInRange(sel).trim() : ''
+      const stmt = selText || statementAtCursor(ed)?.text || ''
+      if (stmt) onrunstatement(stmt)
+    })
+    ed.addAction({
+      id: 'stroke.run-statement',
+      label: 'Run Statement at Cursor',
+      run: () => {
+        const stmt = statementAtCursor(ed)?.text
+        if (stmt && onrunstatement) onrunstatement(stmt)
+      },
+    })
 
     // Global app shortcuts — work even when Monaco has focus
     ed.addCommand(CtrlCmd | KeyI,           () => run(onmodi))
@@ -146,12 +193,14 @@
       cursorSmoothCaretAnimation: 'on',
       smoothScrolling: true,
       fixedOverflowWidgets: true,
-      quickSuggestions: { other: true, comments: false, strings: true },
-      quickSuggestionsDelay: 50,
+      quickSuggestions: { other: true, comments: false, strings: false },
+      quickSuggestionsDelay: 0,
       suggestOnTriggerCharacters: true,
       tabCompletion: 'on',
       wordBasedSuggestions: 'off',
-      acceptSuggestionOnEnter: 'on',
+      // 'smart' — Enter inserts a newline unless the suggestion actually
+      // changes the typed text; 'on' stole Enter constantly while writing SQL.
+      acceptSuggestionOnEnter: 'smart',
       snippetSuggestions: 'none',
       renderWhitespace: 'none',
       bracketPairColorization: { enabled: true },
@@ -162,15 +211,46 @@
         showFunctions: true,
         showSnippets: true,
         filterGraceful: true,
+        // Match anywhere in the identifier: "email" finds "user_email"
+        matchOnWordStartOnly: false,
         insertMode: 'insert',
         showStatusBar: false,
         preview: false,
       },
-      suggestSelection: 'recentlyUsedByPrefix',
+      suggestSelection: 'first',
       parameterHints: { enabled: true, cycle: true },
     })
 
+    // Bind this model to this component's (live) schema hints — the completion
+    // provider is global, so hints must be looked up per model, not captured
+    // from whichever editor happened to register first.
+    setSqlHintsForModel(editor.getModel(), () => schemaHints)
+
     registerAppShortcuts(editor)
+
+    // Subtle gutter bar marking the statement the cursor is in — only shown
+    // when the buffer holds more than one statement, so single queries stay clean.
+    const stmtDecorations = editor.createDecorationsCollection()
+    function refreshActiveStatement() {
+      const model = editor?.getModel()
+      const pos = editor?.getPosition()
+      if (!model || !pos) return
+      const stmts = splitSqlStatements(model.getValue())
+      const stmt = stmts.length > 1 ? statementAtOffset(stmts, model.getOffsetAt(pos)) : null
+      if (!stmt) {
+        stmtDecorations.clear()
+        return
+      }
+      const s = model.getPositionAt(stmt.start)
+      const e = model.getPositionAt(stmt.end)
+      stmtDecorations.set([
+        {
+          range: new monaco.Range(s.lineNumber, 1, e.lineNumber, 1),
+          options: { isWholeLine: true, linesDecorationsClassName: 'stmt-active-gutter' },
+        },
+      ])
+    }
+    editor.onDidChangeCursorPosition(refreshActiveStatement)
 
     // Replaces automaticLayout's polling loop: relayout only when the container
     // actually resizes.
@@ -218,6 +298,7 @@
         value = next
         onchange?.(next)
       }
+      refreshActiveStatement()
     })
 
     // Watch <html class="dark"> changes — reliable regardless of mode-watcher internals
@@ -275,6 +356,14 @@
 
   .sql-editor-host :global(.monaco-editor .monaco-editor-background) {
     outline: none !important;
+  }
+
+  /* Active-statement marker in the line-decorations gutter strip */
+  .sql-editor-host :global(.stmt-active-gutter) {
+    width: 2px !important;
+    margin-left: 1px;
+    border-radius: 1px;
+    background: color-mix(in srgb, var(--primary) 45%, transparent);
   }
 
   /* ── Suggestion widget ──────────────────────────────────────────────── */

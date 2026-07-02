@@ -419,10 +419,10 @@
   let searchEverOpened = $state(false)
   let schemaTimelineEverOpened = $state(false)
   let dataDiffEverOpened = $state(false)
-  /** @type {{ focusEditor: () => void, openInNewTab?: (content: string, name?: string) => void } | null} */
+  /** @type {{ focusEditor: () => void, openQuery?: (content: string) => void } | null} */
   let sqlConsoleRef = $state(null)
 
-  /** "Open in SQL editor" — generate a SELECT reflecting the current table view and open it in a new query tab. */
+  /** "Open in SQL editor" — generate a SELECT reflecting the current table view and open it in the SQL editor. */
   function openTableInSqlEditor() {
     if (!activeTable) return
     const sql = buildSelectSql({
@@ -438,7 +438,7 @@
     if (aiMode) exitAiMode()
     void (async () => {
       await focusSqlView()
-      whenRefReady(() => sqlConsoleRef, (r) => r.openInNewTab?.(sql, activeTable ?? undefined))
+      whenRefReady(() => sqlConsoleRef, (r) => r.openQuery?.(sql))
     })()
   }
 
@@ -2544,9 +2544,15 @@ let rowSearch = $state('')
     recordActivity({ type: 'export', title: `Exported ${activeTable} as ${format.toUpperCase()}`, schema: activeSchema, table: activeTable ?? undefined, rowCount: exportRows.length, success: true, detail: filename })
   }
 
-  async function runSql() {
-    if (!connection || !sqlText.trim()) return
-    if (tableReadonly && /^\s*(insert|update|delete|drop|truncate|alter|create|replace)\b/i.test(sqlText)) {
+  /**
+   * Execute SQL in the editor. With `overrideSql` (run-statement-at-cursor,
+   * ⌘R), only that statement runs; otherwise the whole editor buffer runs.
+   * @param {string} [overrideSql]
+   */
+  async function runSql(overrideSql) {
+    const sqlRan = typeof overrideSql === 'string' && overrideSql.trim() ? overrideSql : sqlText
+    if (!connection || !sqlRan.trim()) return
+    if (tableReadonly && /^\s*(insert|update|delete|drop|truncate|alter|create|replace)\b/i.test(sqlRan)) {
       sqlError = 'Connection is read-only — write queries are blocked.'
       return
     }
@@ -2556,7 +2562,6 @@ let rowSearch = $state('')
     sqlColumns = []
     sqlRows = []
     sqlMultiResults = []
-    const sqlRan = sqlText
     try {
       const results = await executeSqlMulti(sqlRan)
       sqlMultiResults = results.length > 1 ? results : []
@@ -3864,7 +3869,6 @@ let rowSearch = $state('')
             schemaContext={aiSchemaContext}
             onrun={runSql}
             onmodk={() => { commandOpen = true }}
-            onmodenter={() => runSql()}
             onmods={() => saveActiveTabState()}
             onmodi={() => { if (connection) toggleAiSidebar() }}
             onmodb={() => { sidebarOpen = !sidebarOpen }}

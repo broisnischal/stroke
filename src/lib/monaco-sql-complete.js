@@ -1,3 +1,5 @@
+import { splitSqlStatements, statementAtOffset } from './sql-statements.js'
+
 /** @typedef {{
  *   schemas?: string[]
  *   activeSchema?: string
@@ -268,16 +270,163 @@ function quoteIdent(name) {
   return /^[a-z_][a-z0-9_$]*$/i.test(name) ? name : `"${name.replace(/"/g, '""')}"`
 }
 
+// ── Per-model schema hints ────────────────────────────────────────────────────
+// The completion provider is registered once globally, but multiple editors
+// (SQL console, notebook cells, …) exist with different hints. Each editor
+// registers its model's hints getter here; the provider looks up the model it
+// is completing for, so hints never depend on which editor mounted first.
+
+/** @type {WeakMap<object, () => SqlSchemaHints>} */
+const hintsByModel = new WeakMap()
+/** @type {(() => SqlSchemaHints) | null} */
+let fallbackGetHints = null
+
 /**
- * Sort key that places exact matches before prefix matches within the same tier.
- * @param {string} tier   - e.g. '0_', '1_'
- * @param {string} partial - current partial text (lowercase)
- * @param {string} name    - candidate name (any case)
+ * @param {import('monaco-editor').editor.ITextModel | null} model
+ * @param {() => SqlSchemaHints} getHints
  */
-function sortKey(tier, partial, name) {
-  const lower = name.toLowerCase()
-  const score = partial && lower === partial ? '0' : '1'
-  return `${tier}${score}_${lower}`
+export function setSqlHintsForModel(model, getHints) {
+  if (model) hintsByModel.set(model, getHints)
+}
+
+// ── Cached suggestion templates ───────────────────────────────────────────────
+// Suggestion objects are expensive to rebuild on every request (regex per item,
+// doc markdown, …). Templates carry everything except `range`/`sortText`,
+// which get stamped per request. Static templates build once; hint-derived
+// templates rebuild only when the hints object identity changes ($derived in
+// the shell keeps it stable between schema loads).
+
+/** @typedef {{ tpl: object, lc: string }} SuggestTemplate */
+
+let staticCache = null
+
+/** @param {typeof import('monaco-editor')} monaco */
+function getStaticTemplates(monaco) {
+  if (staticCache) return staticCache
+  const Kind = monaco.languages.CompletionItemKind
+  const InsertAsSnippet = monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
+  staticCache = {
+    /** @type {SuggestTemplate[]} */
+    keywords: PG_KEYWORDS.map((kw) => ({
+      tpl: { label: kw, kind: Kind.Keyword, insertText: kw, detail: 'keyword' },
+      lc: kw.toLowerCase(),
+    })),
+    /** @type {SuggestTemplate[]} */
+    functions: PG_FUNCTIONS.map((fn) => ({
+      tpl: {
+        label: fn.label,
+        kind: Kind.Function,
+        insertText: fn.sig,
+        insertTextRules: InsertAsSnippet,
+        detail: fn.sig.replace(/\$\{\d+:?([^}]*)\}/g, '$1').replace(/\$\d+/g, ''),
+        documentation: { value: fn.doc },
+      },
+      lc: fn.label.toLowerCase(),
+    })),
+    /** @type {SuggestTemplate[]} */
+    snippets: SQL_SNIPPETS.map((snip) => ({
+      tpl: {
+        label: snip.label,
+        kind: Kind.Snippet,
+        insertText: snip.body,
+        insertTextRules: InsertAsSnippet,
+        detail: snip.detail,
+        documentation: { value: `\`\`\`sql\n${snip.body.replace(/\$\{\d+:?([^}]*)\}/g, '$1')}\n\`\`\`` },
+      },
+      lc: snip.label.toLowerCase(),
+    })),
+  }
+  return staticCache
+}
+
+/** @type {SqlSchemaHints | null} */
+let hintsCacheSrc = null
+let hintsCache = null
+
+/**
+ * @param {typeof import('monaco-editor')} monaco
+ * @param {SqlSchemaHints} hints
+ */
+function getHintTemplates(monaco, hints) {
+  if (hintsCacheSrc === hints && hintsCache) return hintsCache
+  const Kind = monaco.languages.CompletionItemKind
+  const InsertAsSnippet = monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
+  const activeSchema = hints.activeSchema ?? 'public'
+
+  /** @type {SuggestTemplate[]} */
+  const schemas = (hints.schemas ?? []).map((schema) => ({
+    tpl: {
+      label: schema,
+      kind: Kind.Module,
+      insertText: `${quoteIdent(schema)}.`,
+      detail: 'schema',
+      // Re-open the widget so schema. immediately offers its tables
+      command: { id: 'editor.action.triggerSuggest', title: 'Suggest' },
+    },
+    lc: schema.toLowerCase(),
+  }))
+
+  /** @type {SuggestTemplate[]} */
+  const tables = (hints.tables ?? []).map((table) => ({
+    tpl: { label: table, kind: Kind.Class, insertText: quoteIdent(table), detail: `table · ${activeSchema}` },
+    lc: table.toLowerCase(),
+  }))
+
+  // Columns grouped (and deduped) by short table name — schema-qualified keys
+  // like "public.users" collapse into "users".
+  /** @type {Map<string, SuggestTemplate[]>} */
+  const colsByTbl = new Map()
+  {
+    /** @type {Map<string, Set<string>>} */
+    const seen = new Map()
+    for (const [tbl, cols] of Object.entries(hints.columnsByTable ?? {})) {
+      const tblShort = (tbl.includes('.') ? tbl.split('.').pop() ?? tbl : tbl).toLowerCase()
+      let bucket = colsByTbl.get(tblShort)
+      let seenSet = seen.get(tblShort)
+      if (!bucket) {
+        bucket = []
+        seenSet = new Set()
+        colsByTbl.set(tblShort, bucket)
+        seen.set(tblShort, seenSet)
+      }
+      for (const col of cols ?? []) {
+        if (!col || seenSet?.has(col)) continue
+        seenSet?.add(col)
+        bucket.push({
+          tpl: { label: col, kind: Kind.Field, insertText: quoteIdent(col), detail: `column · ${tblShort}` },
+          lc: col.toLowerCase(),
+        })
+      }
+    }
+  }
+
+  /** @type {SuggestTemplate[]} */
+  const enums = []
+  for (const [enumName, values] of Object.entries(hints.enumValues ?? {})) {
+    for (const val of values ?? []) {
+      enums.push({
+        tpl: { label: val, kind: Kind.Value, insertText: `'${val}'`, detail: `enum · ${enumName}` },
+        lc: val.toLowerCase(),
+      })
+    }
+  }
+
+  /** @type {SuggestTemplate[]} */
+  const userFns = (hints.userFunctions ?? []).map((ufn) => ({
+    tpl: {
+      label: ufn.name,
+      kind: ufn.kind === 'aggregate' ? Kind.Operator : Kind.Function,
+      insertText: `${ufn.name}($0)`,
+      insertTextRules: InsertAsSnippet,
+      detail: `→ ${ufn.returnType}  [${ufn.kind}]`,
+      documentation: { value: `\`\`\`sql\n${ufn.signature}\`\`\`` },
+    },
+    lc: ufn.name.toLowerCase(),
+  }))
+
+  hintsCache = { activeSchema, schemas, tables, colsByTbl, enums, userFns }
+  hintsCacheSrc = hints
+  return hintsCache
 }
 
 // ── Registration ──────────────────────────────────────────────────────────────
@@ -287,6 +436,7 @@ function sortKey(tier, partial, name) {
  * @param {() => SqlSchemaHints} getHints
  */
 export function registerMonacoSqlCompletion(monaco, getHints) {
+  if (getHints) fallbackGetHints = getHints
   if (registerMonacoSqlCompletion.done) return
   registerMonacoSqlCompletion.done = true
 
@@ -307,15 +457,14 @@ export function registerMonacoSqlCompletion(monaco, getHints) {
   })
 
   monaco.languages.registerCompletionItemProvider('sql', {
-    triggerCharacters: ['.', ' ', '\n'],
+    // Only '.' — quickSuggestions covers word typing. Space/newline triggers
+    // used to rerun the whole provider on every space, which felt slow and
+    // popped the widget when it wasn't wanted.
+    triggerCharacters: ['.'],
     provideCompletionItems(model, position) {
-      const hints = getHints()
-      const schemas = hints.schemas ?? []
-      const activeSchema = hints.activeSchema ?? 'public'
-      const tables = hints.tables ?? []
-      const columnsByTable = hints.columnsByTable ?? {}
-      const enumValues = hints.enumValues ?? {}
-      const userFunctions = hints.userFunctions ?? []
+      const hints = (hintsByModel.get(model) ?? fallbackGetHints)?.() ?? {}
+      const S = getStaticTemplates(monaco)
+      const H = getHintTemplates(monaco, hints)
 
       const word = model.getWordUntilPosition(position)
       const range = new monaco.Range(
@@ -328,18 +477,23 @@ export function registerMonacoSqlCompletion(monaco, getHints) {
         endLineNumber: position.lineNumber, endColumn: position.column,
       })
 
-      const docBeforeCursor = model.getValueInRange({
-        startLineNumber: 1, startColumn: 1,
-        endLineNumber: position.lineNumber, endColumn: position.column,
-      })
-
-      const partial = word.word.toLowerCase()
-      const { kind: ctx, referencedTables, aliasMap } = analyzeQuery(docBeforeCursor, tables)
+      // Analyze only the statement under the cursor — a FROM in an earlier
+      // statement must not leak table/column context into this one.
+      const fullText = model.getValue()
+      const offset = model.getOffsetAt(position)
+      const stmt = statementAtOffset(splitSqlStatements(fullText), offset)
+      const stmtBeforeCursor = stmt && offset > stmt.start ? fullText.slice(stmt.start, offset) : ''
+      const { kind: ctx, referencedTables, aliasMap } = analyzeQuery(stmtBeforeCursor, hints.tables ?? [])
 
       /** @type {import('monaco-editor').languages.CompletionItem[]} */
       const suggestions = []
-      const Kind = monaco.languages.CompletionItemKind
-      const InsertAsSnippet = monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
+      // Stamp a template with this request's range + tier. No prefix filtering
+      // here: Monaco requests once per word session and fuzzy-filters the full
+      // list itself — pre-filtering broke matching after backspace/mid-word.
+      /** @param {SuggestTemplate} entry @param {string} tier */
+      const push = (entry, tier) => {
+        suggestions.push({ ...entry.tpl, range, sortText: tier + entry.lc })
+      }
 
       // ── 1. Dot completion: schema.table or alias/table.column ──────────
       const dotMatch = linePrefix.match(/(?:["']([^"']+)["']|([\w$]+))\.["']?([\w$]*)$/)
@@ -348,46 +502,16 @@ export function registerMonacoSqlCompletion(monaco, getHints) {
         const leftLower = left.toLowerCase()
 
         // Schema dot → tables
-        if (schemas.some((s) => s.toLowerCase() === leftLower)) {
-          for (const table of tables) {
-            if (partial && !table.toLowerCase().startsWith(partial)) continue
-            suggestions.push({
-              label: table,
-              kind: Kind.Class,
-              insertText: quoteIdent(table),
-              range,
-              detail: `table in ${left}`,
-              sortText: sortKey('0_', partial, table),
-            })
-          }
+        if (H.schemas.some((s) => s.lc === leftLower)) {
+          for (const t of H.tables) push(t, '0_')
           return { suggestions }
         }
 
         // Alias or table name dot → columns
-        // Resolve alias first, then fall back to direct table name match
         const resolvedTable = aliasMap[leftLower] ?? leftLower
-        const colKeys = [
-          resolvedTable,
-          `${activeSchema}.${resolvedTable}`,
-          left,
-          `${activeSchema}.${left}`,
-        ]
-        const cols = new Set()
-        for (const key of colKeys) {
-          for (const c of columnsByTable[key] ?? []) cols.add(c)
-        }
-        if (cols.size > 0) {
-          for (const col of cols) {
-            if (partial && !col.toLowerCase().startsWith(partial)) continue
-            suggestions.push({
-              label: col,
-              kind: Kind.Field,
-              insertText: quoteIdent(col),
-              range,
-              detail: `column · ${resolvedTable}`,
-              sortText: sortKey('0_', partial, col),
-            })
-          }
+        const bucket = H.colsByTbl.get(resolvedTable) ?? H.colsByTbl.get(leftLower)
+        if (bucket && bucket.length > 0) {
+          for (const c of bucket) push(c, '0_')
           return { suggestions }
         }
       }
@@ -405,167 +529,45 @@ export function registerMonacoSqlCompletion(monaco, getHints) {
       const tierKw     = ctx === 'table'  ? '2_' : ctx === 'column' ? '3_' : '1_'
       const tierSnip   = ctx === 'any'    ? '0_' : '6_'
 
-      // ── 2. Schemas ─────────────────────────────────────────────────────
-      for (const schema of schemas) {
-        if (partial && !schema.toLowerCase().startsWith(partial)) continue
-        suggestions.push({
-          label: schema,
-          kind: Kind.Module,
-          insertText: `${quoteIdent(schema)}.`,
-          range,
-          detail: 'schema',
-          sortText: sortKey(tierSchema, partial, schema),
-        })
-      }
+      // ── 2. Schemas + tables ────────────────────────────────────────────
+      for (const s of H.schemas) push(s, tierSchema)
+      for (const t of H.tables) push(t, tierTable)
 
-      // ── 3. Tables ──────────────────────────────────────────────────────
-      for (const table of tables) {
-        if (partial && !table.toLowerCase().startsWith(partial)) continue
-        suggestions.push({
-          label: table,
-          kind: Kind.Class,
-          insertText: quoteIdent(table),
-          range,
-          detail: `table · ${activeSchema}`,
-          sortText: sortKey(tierTable, partial, table),
-        })
-      }
-
-      // ── 4. Columns — referenced tables first, then all ─────────────────
+      // ── 3. Columns — referenced tables first, then all others ──────────
       const refTableSet = new Set(referencedTables)
-      const seenCols = new Set()
-
-      // First pass: columns from tables already in the query
       for (const refTable of referencedTables) {
-        const colKeys = [refTable, `${activeSchema}.${refTable}`]
-        for (const key of colKeys) {
-          for (const col of columnsByTable[key] ?? []) {
-            if (!col) continue
-            const ck = `${refTable}.${col}`
-            if (seenCols.has(ck)) continue
-            seenCols.add(ck)
-            if (partial && !col.toLowerCase().startsWith(partial)) continue
-            suggestions.push({
-              label: col,
-              kind: Kind.Field,
-              insertText: quoteIdent(col),
-              range,
-              detail: `column · ${refTable}`,
-              sortText: sortKey(tierColRef, partial, col),
-            })
-          }
-        }
+        for (const c of H.colsByTbl.get(refTable) ?? []) push(c, tierColRef)
       }
-
-      // Second pass: columns from all other tables
-      for (const [tbl, cols] of Object.entries(columnsByTable)) {
-        const tblShort = tbl.includes('.') ? tbl.split('.').pop() ?? tbl : tbl
+      for (const [tblShort, cols] of H.colsByTbl) {
         if (refTableSet.has(tblShort)) continue
-        for (const col of cols) {
-          if (!col) continue
-          const ck = `${tblShort}.${col}`
-          if (seenCols.has(ck)) continue
-          seenCols.add(ck)
-          if (partial && !col.toLowerCase().startsWith(partial)) continue
-          suggestions.push({
-            label: col,
-            kind: Kind.Field,
-            insertText: quoteIdent(col),
-            range,
-            detail: `column · ${tblShort}`,
-            sortText: sortKey(tierColAll, partial, col),
-          })
-        }
+        for (const c of cols) push(c, tierColAll)
       }
 
-      // ── 5. Functions ───────────────────────────────────────────────────
-      // In table context, skip functions entirely (they don't belong after FROM)
+      // ── 4. Functions + enum values (not in table context) ──────────────
       if (ctx !== 'table') {
-        for (const fn of PG_FUNCTIONS) {
-          if (partial && !fn.label.toLowerCase().startsWith(partial)) continue
-          suggestions.push({
-            label: fn.label,
-            kind: Kind.Function,
-            insertText: fn.sig,
-            insertTextRules: InsertAsSnippet,
-            range,
-            detail: fn.sig.replace(/\$\{\d+:?([^}]*)\}/g, '$1').replace(/\$\d+/g, ''),
-            documentation: { value: fn.doc },
-            sortText: sortKey(tierFn, partial, fn.label),
-          })
-        }
-        // ── 5b. User-defined functions / procedures / aggregates ──────
-        for (const ufn of userFunctions) {
-          if (partial && !ufn.name.toLowerCase().startsWith(partial)) continue
-          suggestions.push({
-            label: ufn.name,
-            kind: ufn.kind === 'aggregate' ? Kind.Operator : Kind.Function,
-            insertText: `${ufn.name}($0)`,
-            insertTextRules: InsertAsSnippet,
-            range,
-            detail: `→ ${ufn.returnType}  [${ufn.kind}]`,
-            documentation: { value: `\`\`\`sql\n${ufn.signature}\`\`\`` },
-            sortText: sortKey(tierFn, partial, ufn.name),
-          })
-        }
+        for (const f of S.functions) push(f, tierFn)
+        for (const f of H.userFns) push(f, tierFn)
+        for (const e of H.enums) push(e, '6_')
       }
 
-      // ── 5c. Enum values ────────────────────────────────────────────────
-      // Show enum values in column/value context or when partial starts inside quotes
-      if (ctx !== 'table') {
-        for (const [enumName, values] of Object.entries(enumValues)) {
-          for (const val of values) {
-            if (partial && !val.toLowerCase().startsWith(partial)) continue
-            suggestions.push({
-              label: val,
-              kind: Kind.Value,
-              insertText: `'${val}'`,
-              range,
-              detail: `enum · ${enumName}`,
-              sortText: sortKey('6_', partial, val),
-            })
-          }
-        }
-      }
-
-      // ── 6. Keywords (context-filtered) ────────────────────────────────
-      // When the user has typed a partial prefix always match ALL keywords so
-      // typing "sel" → SELECT works regardless of context.  With no partial,
-      // filter to the contextually relevant subset to reduce noise.
-      const kwSet = partial
+      // ── 5. Keywords (context-filtered) ─────────────────────────────────
+      // When the user has typed a prefix, offer ALL keywords so typing "sel"
+      // → SELECT works regardless of context. With no prefix, filter to the
+      // contextually relevant subset to reduce noise.
+      const kwSet = word.word
         ? null
         : ctx === 'table'  ? TABLE_CTX_KWS
         : ctx === 'column' ? COLUMN_CTX_KWS
         : null
-      for (const kw of PG_KEYWORDS) {
-        if (kwSet && !kwSet.has(kw)) continue
-        if (partial && !kw.toLowerCase().startsWith(partial)) continue
-        suggestions.push({
-          label: kw,
-          kind: Kind.Keyword,
-          insertText: kw,
-          range,
-          detail: 'keyword',
-          sortText: sortKey(tierKw, partial, kw),
-        })
+      for (const kw of S.keywords) {
+        if (kwSet && !kwSet.has(/** @type {string} */ (kw.tpl.label))) continue
+        push(kw, tierKw)
       }
 
-      // ── 7. Snippets ────────────────────────────────────────────────────
-      // Show snippets only in 'any' context (statement start) or when partial matches
-      if (ctx === 'any' || partial) {
-        for (const snip of SQL_SNIPPETS) {
-          if (partial && !snip.label.toLowerCase().startsWith(partial)) continue
-          suggestions.push({
-            label: snip.label,
-            kind: Kind.Snippet,
-            insertText: snip.body,
-            insertTextRules: InsertAsSnippet,
-            range,
-            detail: snip.detail,
-            documentation: { value: `\`\`\`sql\n${snip.body.replace(/\$\{\d+:?([^}]*)\}/g, '$1')}\n\`\`\`` },
-            sortText: sortKey(tierSnip, partial, snip.label),
-          })
-        }
+      // ── 6. Snippets ────────────────────────────────────────────────────
+      // Statement start or while typing a word — not right after a trigger char
+      if (ctx === 'any' || word.word) {
+        for (const s of S.snippets) push(s, tierSnip)
       }
 
       return { suggestions }

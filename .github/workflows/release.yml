@@ -1,5 +1,12 @@
 # Build Stroke for Linux, Windows, and macOS and publish to GitHub Releases.
 #
+# The source repo is PRIVATE, so releases are published to a separate PUBLIC
+# repo (RELEASES_REPO below) that anonymous users, the in-app updater, Scoop,
+# and Homebrew can all reach. Publishing cross-repo requires a fine-grained
+# PAT with "Contents: read/write" on RELEASES_REPO, stored as the
+# RELEASES_TOKEN secret in this repo (the default GITHUB_TOKEN only works
+# within this repo).
+#
 # Create a release:
 #   git tag v0.1.0
 #   git push origin v0.1.0
@@ -24,6 +31,10 @@ permissions:
 
 env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
+  # Public repo that hosts release assets, latest.json, and the Scoop bucket.
+  # Keeping the old "stroke" name means updater endpoints and package-manager
+  # URLs baked into already-shipped versions continue to resolve.
+  RELEASES_REPO: broisnischal/stroke
 
 # ── 1. Create the release before any build starts ────────────────────────────
 jobs:
@@ -34,7 +45,7 @@ jobs:
 
       - name: Create GitHub release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN }}
           TAG: ${{ env.RELEASE_TAG }}
           SHA: ${{ github.sha }}
         run: |
@@ -89,9 +100,12 @@ jobs:
           Built from \`${SHA}\`.
           EOF
 
+          # No --target: the source SHA lives in the private repo, not in
+          # RELEASES_REPO. The tag there just points at its default branch;
+          # the real source commit is recorded in the notes ("Built from …").
           gh release create "$TAG" \
+            --repo "$RELEASES_REPO" \
             --title "Stroke $TAG" \
-            --target "$SHA" \
             --notes-file /tmp/notes.md \
             $PRERELEASE
 
@@ -171,7 +185,7 @@ jobs:
         if: matrix.name == 'macos-aarch64'
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN }}
           TAG: ${{ env.RELEASE_TAG }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -187,7 +201,7 @@ jobs:
           cp "$DIR/macos/Stroke.app.tar.gz"     stroke_aarch64.app.tar.gz
           cp "$DIR/macos/Stroke.app.tar.gz.sig" updater.sig
 
-          gh release upload "$TAG" \
+          gh release upload "$TAG" --repo "$RELEASES_REPO" \
             "$DIR/dmg/stroke_${VERSION}_aarch64.dmg" \
             stroke_aarch64.app.tar.gz \
             --clobber
@@ -197,7 +211,7 @@ jobs:
         if: matrix.name == 'macos-x64'
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN }}
           TAG: ${{ env.RELEASE_TAG }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -213,7 +227,7 @@ jobs:
           cp "$DIR/macos/Stroke.app.tar.gz"     stroke_x64.app.tar.gz
           cp "$DIR/macos/Stroke.app.tar.gz.sig" updater.sig
 
-          gh release upload "$TAG" \
+          gh release upload "$TAG" --repo "$RELEASES_REPO" \
             "$DIR/dmg/stroke_${VERSION}_x64.dmg" \
             stroke_x64.app.tar.gz \
             --clobber
@@ -223,7 +237,7 @@ jobs:
         if: matrix.name == 'linux'
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN }}
           TAG: ${{ env.RELEASE_TAG }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -249,7 +263,7 @@ jobs:
           cp "stroke_${VERSION}_amd64.AppImage.tar.gz"     stroke_amd64.AppImage.tar.gz
           cp "stroke_${VERSION}_amd64.AppImage.tar.gz.sig" updater.sig
 
-          gh release upload "$TAG" \
+          gh release upload "$TAG" --repo "$RELEASES_REPO" \
             "stroke_${VERSION}_amd64.deb" \
             "stroke-${VERSION}-1.x86_64.rpm" \
             "stroke_${VERSION}_amd64.AppImage" \
@@ -261,7 +275,7 @@ jobs:
         if: matrix.name == 'windows'
         shell: pwsh
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN }}
           TAG: ${{ env.RELEASE_TAG }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -304,7 +318,7 @@ jobs:
           Copy-Item $zip       "stroke_x64-setup.nsis.zip"
           Copy-Item "$zip.sig" "updater.sig"
 
-          gh release upload "$env:TAG" `
+          gh release upload "$env:TAG" --repo "$env:RELEASES_REPO" `
             "$dir/msi/stroke_${version}_x64_en-US.msi" `
             "$dir/nsis/stroke_${version}_x64-setup.exe" `
             "stroke_x64-setup.nsis.zip" `
@@ -334,7 +348,7 @@ jobs:
           TAG: ${{ env.RELEASE_TAG }}
         run: |
           export VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
-          export BASE="https://github.com/broisnischal/stroke/releases/download/${TAG}"
+          export BASE="https://github.com/${RELEASES_REPO}/releases/download/${TAG}"
 
           node - <<'JSEOF'
           const fs = require('fs')
@@ -387,22 +401,25 @@ jobs:
 
       - name: Upload latest.json
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN }}
           TAG: ${{ env.RELEASE_TAG }}
-        run: gh release upload "$TAG" latest.json --clobber
+        run: gh release upload "$TAG" --repo "$RELEASES_REPO" latest.json --clobber
 
-# ── 4. Refresh the Scoop manifest in this repo (Windows clean-install path) ───
+# ── 4. Refresh the Scoop manifest in the public releases repo ────────────────
+#      Scoop clones the bucket repo anonymously, so the manifest must live in
+#      RELEASES_REPO, not in this private source repo.
   update-scoop:
     needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: master
+          repository: broisnischal/stroke
+          token: ${{ secrets.RELEASES_TOKEN }}
 
       - name: Update bucket/stroke.json
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN }}
           TAG: ${{ env.RELEASE_TAG }}
         run: |
           VERSION="${TAG#v}"
@@ -448,7 +465,7 @@ jobs:
             echo "Scoop manifest already current."
           else
             git commit -m "chore(scoop): stroke v${VERSION}"
-            git push origin master
+            git push origin HEAD
           fi
 
       # Optional instant Homebrew tap refresh. Without a PAT this is skipped and
