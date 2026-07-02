@@ -47,6 +47,7 @@
  * @property {StudioTabKind} kind
  * @property {string} title
  * @property {TableTabState | SqlTabState | null} state
+ * @property {boolean} [pinned] — pinned tabs stay grouped at the front and survive "Close Others"/"Close All"
  */
 
 let tabSeq = 0

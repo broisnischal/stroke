@@ -1773,18 +1773,43 @@ let rowSearch = $state('')
     }
   }
 
-  /** @param {string} id — keep only this tab, close everything else */
+  /** @param {string} id — keep this tab (and pinned tabs), close everything else */
   async function closeOtherTabs(id) {
     const keep = tabs.find((t) => t.id === id)
     if (!keep) return
-    tabs = [keep]
+    tabs = tabs.filter((t) => t.id === id || t.pinned)
     await activateTab(keep.id)
   }
 
   async function closeAllTabs() {
-    tabs = [createWelcomeTab()]
-    activeTabId = tabs[0].id
-    clearTableEditor()
+    const pinned = tabs.filter((t) => t.pinned)
+    if (pinned.length === 0) {
+      tabs = [createWelcomeTab()]
+      activeTabId = tabs[0].id
+      clearTableEditor()
+      return
+    }
+    tabs = pinned
+    if (!pinned.some((t) => t.id === activeTabId)) await activateTab(pinned[0].id)
+  }
+
+  /**
+   * "View data structure" from the sidebar — open the table's tab and switch
+   * straight to the structure view (the structure auto-load effect fetches it).
+   * @param {string} table
+   */
+  async function openTableStructure(table) {
+    if (aiMode) exitAiMode()
+    await openTableTab(activeSchema, table)
+    tableViewMode = 'structure'
+  }
+
+  /** @param {string} id — pin/unpin a tab; pinned tabs group at the front */
+  function toggleTabPin(id) {
+    const tab = tabs.find((t) => t.id === id)
+    if (!tab) return
+    tab.pinned = !tab.pinned
+    tabs = [...tabs.filter((t) => t.pinned), ...tabs.filter((t) => !t.pinned)]
   }
 
   /**
@@ -3451,6 +3476,7 @@ let rowSearch = $state('')
         ontruncatetable={handleTruncateTable}
         ondroptable={(t, c) => void handleDropTable(t, c)}
         onviewddl={(t) => void handleViewDdl(t)}
+        onviewstructure={(t) => void openTableStructure(t)}
         onexportsql={(t) => void handleExportSql(t)}
         onexportdata={(t) => void handleExportData(t)}
         ongeneratetestdata={(t) => void handleGenerateTestData(t)}
@@ -3579,6 +3605,7 @@ let rowSearch = $state('')
         onclose={closeTab}
         oncloseothers={closeOtherTabs}
         oncloseall={closeAllTabs}
+        onpintoggle={toggleTabPin}
         onnew={openWelcomeTab}
         {recentTabs}
         onrecentselect={(schema, table) => { if (aiMode) exitAiMode(); void openTableTab(schema, table) }}
