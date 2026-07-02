@@ -2644,8 +2644,9 @@ let rowSearch = $state('')
       if (schemas.length > 0) break
     }
     await loadTables({ force: true })
-    // If tables came back empty despite a valid schema, give the backend one more chance
-    if (tables.length === 0 && schemas.length > 0) {
+    // Retry only when the fetch actually failed — an empty database is a valid
+    // result and must not pay a 1 s penalty on every connect.
+    if (tables.length === 0 && schemas.length > 0 && error) {
       await new Promise(r => setTimeout(r, 1000))
       await loadTables({ force: true })
     }
