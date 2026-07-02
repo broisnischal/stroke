@@ -13,6 +13,8 @@
   import Blocks from '@lucide/svelte/icons/blocks'
   import X from '@lucide/svelte/icons/x'
   import Plus from '@lucide/svelte/icons/plus'
+  import Pin from '@lucide/svelte/icons/pin'
+  import PinOff from '@lucide/svelte/icons/pin-off'
   import Clock from '@lucide/svelte/icons/clock'
   import ChevronDown from '@lucide/svelte/icons/chevron-down'
   import { cn } from '$lib/utils.js'
@@ -42,6 +44,7 @@
     onclose = () => {},
     oncloseothers = /** @param {string} _id */ (_id) => {},
     oncloseall = () => {},
+    onpintoggle = /** @param {string} _id */ (_id) => {},
     onnew = () => {},
     /** @type {import('$lib/stores/recent-tabs.js').RecentTab[]} */
     recentTabs = [],
@@ -125,22 +128,39 @@
                 <span class="truncate">{tabDisplayTitle(tab)}</span>
               </button>
 
-              <!-- Close button -->
-              <button
-                type="button"
-                class={cn(
-                  'mr-1.5 inline-flex size-[18px] shrink-0 self-center items-center justify-center rounded transition-all duration-100',
-                  'text-muted-foreground/50 hover:bg-muted hover:text-foreground',
-                  active
-                    ? 'opacity-50 hover:opacity-100'
-                    : 'opacity-0 group-hover/tab:opacity-50 group-hover/tab:hover:opacity-100',
-                )}
-                title="Close tab"
-                aria-label="Close tab"
-                onclick={(e) => { e.stopPropagation(); onclose(tab.id) }}
-              >
-                <X class="size-2.5" />
-              </button>
+              {#if tab.pinned}
+                <!-- Pinned: pin badge replaces close — click to unpin -->
+                <button
+                  type="button"
+                  class={cn(
+                    'mr-1.5 inline-flex size-[18px] shrink-0 self-center items-center justify-center rounded transition-all duration-100',
+                    'text-muted-foreground/60 hover:bg-muted hover:text-foreground',
+                    active ? 'opacity-70 hover:opacity-100' : 'opacity-40 group-hover/tab:opacity-70',
+                  )}
+                  title="Unpin tab"
+                  aria-label="Unpin tab"
+                  onclick={(e) => { e.stopPropagation(); onpintoggle(tab.id) }}
+                >
+                  <Pin class="size-2.5 rotate-45" />
+                </button>
+              {:else}
+                <!-- Close button -->
+                <button
+                  type="button"
+                  class={cn(
+                    'mr-1.5 inline-flex size-[18px] shrink-0 self-center items-center justify-center rounded transition-all duration-100',
+                    'text-muted-foreground/50 hover:bg-muted hover:text-foreground',
+                    active
+                      ? 'opacity-50 hover:opacity-100'
+                      : 'opacity-0 group-hover/tab:opacity-50 group-hover/tab:hover:opacity-100',
+                  )}
+                  title="Close tab"
+                  aria-label="Close tab"
+                  onclick={(e) => { e.stopPropagation(); onclose(tab.id) }}
+                >
+                  <X class="size-2.5" />
+                </button>
+              {/if}
 
               <!-- Separator: hidden adjacent to any active tab -->
               {#if !active && !nextActive}
@@ -151,6 +171,16 @@
         </ContextMenu.Trigger>
 
         <ContextMenu.Content class="w-44">
+          <ContextMenu.Item onSelect={() => onpintoggle(tab.id)}>
+            {#if tab.pinned}
+              <PinOff class="size-3.5" />
+              Unpin Tab
+            {:else}
+              <Pin class="size-3.5" />
+              Pin Tab
+            {/if}
+          </ContextMenu.Item>
+          <ContextMenu.Separator />
           <ContextMenu.Item onSelect={() => onclose(tab.id)}>Close</ContextMenu.Item>
           <ContextMenu.Item disabled={tabs.length <= 1} onSelect={() => oncloseothers(tab.id)}>
             Close Others

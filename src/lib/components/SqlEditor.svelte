@@ -10,7 +10,7 @@
     readEditorFontOptions,
   } from '$lib/monaco-themes.js'
   import { normalizeThemeId } from '$lib/themes/registry.js'
-  import { splitSqlStatements, statementAtOffset } from '$lib/sql-statements.js'
+  import { splitSqlStatements, statementAtOffset, lintSql } from '$lib/sql-statements.js'
   import { cn } from '$lib/utils.js'
 
   /** @typedef {import('$lib/monaco-sql-complete.js').SqlSchemaHints} SqlSchemaHints */
@@ -50,6 +50,33 @@
   let container = $state(null)
   /** @type {monaco.editor.IStandaloneCodeEditor | null} */
   let editor = null
+  /** @type {monaco.editor.IEditorDecorationsCollection | null} */
+  let execDecorations = null
+
+  /**
+   * Mark statement(s) as successfully executed with a ✓ in the glyph margin.
+   * Pass the single statement that ran (⌘R), or null to mark every statement
+   * (run all). Marks clear automatically on the next edit.
+   * @param {string | null} [ranStatement]
+   */
+  export function markExecuted(ranStatement = null) {
+    const model = editor?.getModel()
+    if (!model || !execDecorations) return
+    const target = typeof ranStatement === 'string' ? ranStatement.trim().replace(/;+\s*$/, '') : null
+    const marks = []
+    for (const stmt of splitSqlStatements(model.getValue())) {
+      if (target !== null && stmt.text.replace(/;+\s*$/, '') !== target) continue
+      const pos = model.getPositionAt(stmt.start)
+      marks.push({
+        range: new monaco.Range(pos.lineNumber, 1, pos.lineNumber, 1),
+        options: {
+          glyphMarginClassName: 'sql-glyph-ok',
+          glyphMarginHoverMessage: { value: 'Ran successfully' },
+        },
+      })
+    }
+    execDecorations.set(marks)
+  }
 
   /** Reads current app theme from <html data-theme>. */
   function currentTheme() {
@@ -181,7 +208,8 @@
       // strip between the numbers and the code.
       lineNumbersMinChars: 2,
       lineDecorationsWidth: 6,
-      glyphMargin: false,
+      // Glyph margin hosts the executed-✓ and lint error/warning dots
+      glyphMargin: true,
       folding: false,
       scrollbar: { verticalScrollbarSize: 6, horizontalScrollbarSize: 6 },
       overviewRulerLanes: 0,
@@ -252,6 +280,41 @@
     }
     editor.onDidChangeCursorPosition(refreshActiveStatement)
 
+    // ── Lint: squiggles + gutter dots for lexical SQL problems ──────────────
+    execDecorations = editor.createDecorationsCollection()
+    const lintDecorations = editor.createDecorationsCollection()
+    /** @type {ReturnType<typeof setTimeout> | null} */
+    let lintTimer = null
+
+    function runLint() {
+      const model = editor?.getModel()
+      if (!model) return
+      const diags = readOnly ? [] : lintSql(model.getValue())
+      monaco.editor.setModelMarkers(model, 'stroke-sql', diags.map((d) => {
+        const s = model.getPositionAt(d.start)
+        const e = model.getPositionAt(d.end)
+        return {
+          message: d.message,
+          severity: d.severity === 'error' ? monaco.MarkerSeverity.Error : monaco.MarkerSeverity.Warning,
+          startLineNumber: s.lineNumber,
+          startColumn: s.column,
+          endLineNumber: e.lineNumber,
+          endColumn: e.column,
+        }
+      }))
+      lintDecorations.set(diags.map((d) => {
+        const s = model.getPositionAt(d.start)
+        return {
+          range: new monaco.Range(s.lineNumber, 1, s.lineNumber, 1),
+          options: {
+            glyphMarginClassName: d.severity === 'error' ? 'sql-glyph-error' : 'sql-glyph-warn',
+            glyphMarginHoverMessage: { value: d.message },
+          },
+        }
+      }))
+    }
+    runLint()
+
     // Replaces automaticLayout's polling loop: relayout only when the container
     // actually resizes.
     const ro = new ResizeObserver(() => editor?.layout())
@@ -299,6 +362,10 @@
         onchange?.(next)
       }
       refreshActiveStatement()
+      // Executed-✓ marks describe a previous buffer state — drop them on edit
+      execDecorations?.clear()
+      if (lintTimer) clearTimeout(lintTimer)
+      lintTimer = setTimeout(runLint, 350)
     })
 
     // Watch <html class="dark"> changes — reliable regardless of mode-watcher internals
@@ -312,9 +379,13 @@
 
     return () => {
       document.removeEventListener('keydown', docRunHandler, { capture: true })
+      if (lintTimer) clearTimeout(lintTimer)
+      const model = editor?.getModel()
+      if (model) monaco.editor.setModelMarkers(model, 'stroke-sql', [])
       ro.disconnect()
       editor?.dispose()
       editor = null
+      execDecorations = null
       themeObserver.disconnect()
     }
   })
@@ -364,6 +435,39 @@
     margin-left: 1px;
     border-radius: 1px;
     background: color-mix(in srgb, var(--primary) 45%, transparent);
+  }
+
+  /* ── Glyph margin: executed ✓ and lint dots ─────────────────────────── */
+
+  .sql-editor-host :global(.sql-glyph-ok),
+  .sql-editor-host :global(.sql-glyph-error),
+  .sql-editor-host :global(.sql-glyph-warn) {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .sql-editor-host :global(.sql-glyph-ok)::after {
+    content: '✓';
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--color-green-500, #22c55e);
+  }
+
+  .sql-editor-host :global(.sql-glyph-error)::after,
+  .sql-editor-host :global(.sql-glyph-warn)::after {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+  }
+
+  .sql-editor-host :global(.sql-glyph-error)::after {
+    background: var(--destructive, #ef4444);
+  }
+
+  .sql-editor-host :global(.sql-glyph-warn)::after {
+    background: color-mix(in srgb, var(--color-amber-500, #f59e0b) 80%, transparent);
   }
 
   /* ── Suggestion widget ──────────────────────────────────────────────── */

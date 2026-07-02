@@ -276,6 +276,9 @@ function quoteIdent(name) {
 // registers its model's hints getter here; the provider looks up the model it
 // is completing for, so hints never depend on which editor mounted first.
 
+/** Stable empty-hints object so the template cache isn't invalidated per request. */
+const EMPTY_HINTS = /** @type {SqlSchemaHints} */ ({})
+
 /** @type {WeakMap<object, () => SqlSchemaHints>} */
 const hintsByModel = new WeakMap()
 /** @type {(() => SqlSchemaHints) | null} */
@@ -462,7 +465,7 @@ export function registerMonacoSqlCompletion(monaco, getHints) {
     // popped the widget when it wasn't wanted.
     triggerCharacters: ['.'],
     provideCompletionItems(model, position) {
-      const hints = (hintsByModel.get(model) ?? fallbackGetHints)?.() ?? {}
+      const hints = (hintsByModel.get(model) ?? fallbackGetHints)?.() ?? EMPTY_HINTS
       const S = getStaticTemplates(monaco)
       const H = getHintTemplates(monaco, hints)
 
@@ -516,31 +519,61 @@ export function registerMonacoSqlCompletion(monaco, getHints) {
         }
       }
 
+      // ── Next-action detection ──────────────────────────────────────────
+      const upperStmt = stmtBeforeCursor.toUpperCase()
+      // "SELECT …" with no FROM yet → the most likely next token is FROM
+      const wantsFrom = ctx === 'column' && /\bSELECT\b/.test(upperStmt) && !/\bFROM\b/.test(upperStmt)
+      // "FROM users " (table already named) → clause keywords beat more tables
+      const afterTableName = ctx === 'table' && /\b(?:FROM|JOIN|UPDATE|INTO)\s+[\w"$.]+\s+[\w"]*$/i.test(stmtBeforeCursor)
+
       // ── Priority tiers by context ──────────────────────────────────────
       // table  → tables=0  schemas=1  kws=2   fns=7   cols=9   snip=6
       // column → cols_ref=0 cols_all=1 fns=2  kws=3   tables=7 snip=6
       // any    → snip=0   kws=1   schemas=2  tables=3  cols=4  fns=5
 
-      const tierTable  = ctx === 'table'  ? '0_' : ctx === 'column' ? '7_' : '3_'
-      const tierSchema = ctx === 'table'  ? '1_' : ctx === 'column' ? '8_' : '2_'
+      const tierTable  = ctx === 'table'  ? (afterTableName ? '7_' : '0_') : ctx === 'column' ? '7_' : '3_'
+      const tierSchema = ctx === 'table'  ? (afterTableName ? '8_' : '1_') : ctx === 'column' ? '8_' : '2_'
       const tierColRef = ctx === 'column' ? '0_' : ctx === 'table'  ? '9_' : '4_' // cols from referenced tables
       const tierColAll = ctx === 'column' ? '1_' : ctx === 'table'  ? '9_' : '4_' // cols from other tables
       const tierFn     = ctx === 'column' ? '2_' : ctx === 'table'  ? '7_' : '5_'
-      const tierKw     = ctx === 'table'  ? '2_' : ctx === 'column' ? '3_' : '1_'
+      const tierKw     = ctx === 'table'  ? (afterTableName ? '0_' : '2_') : ctx === 'column' ? '3_' : '1_'
       const tierSnip   = ctx === 'any'    ? '0_' : '6_'
+
+      if (wantsFrom) {
+        suggestions.push({
+          label: 'FROM',
+          kind: monaco.languages.CompletionItemKind.Keyword,
+          insertText: 'FROM ',
+          detail: 'keyword',
+          range,
+          sortText: '00_from',
+          // Re-open the widget so FROM immediately offers tables
+          command: { id: 'editor.action.triggerSuggest', title: 'Suggest' },
+        })
+      }
 
       // ── 2. Schemas + tables ────────────────────────────────────────────
       for (const s of H.schemas) push(s, tierSchema)
       for (const t of H.tables) push(t, tierTable)
 
       // ── 3. Columns — referenced tables first, then all others ──────────
+      // Non-referenced tables are deduped by column name: without a FROM the
+      // same column (id, count, …) would otherwise appear once per table.
       const refTableSet = new Set(referencedTables)
+      const seenColNames = new Set()
       for (const refTable of referencedTables) {
-        for (const c of H.colsByTbl.get(refTable) ?? []) push(c, tierColRef)
+        for (const c of H.colsByTbl.get(refTable) ?? []) {
+          push(c, tierColRef)
+          seenColNames.add(c.lc)
+        }
       }
       for (const [tblShort, cols] of H.colsByTbl) {
         if (refTableSet.has(tblShort)) continue
-        for (const c of cols) push(c, tierColAll)
+        for (const c of cols) {
+          if (seenColNames.has(c.lc)) continue
+          seenColNames.add(c.lc)
+          push(c, tierColAll)
+        }
       }
 
       // ── 4. Functions + enum values (not in table context) ──────────────

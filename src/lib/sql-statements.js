@@ -80,6 +80,111 @@ export function splitSqlStatements(text) {
 }
 
 /**
+ * @typedef {{ message: string, severity: 'error' | 'warning', start: number, end: number }} SqlDiagnostic
+ *   Offsets are into the source text; `end` exclusive.
+ */
+
+/**
+ * Lightweight SQL lint — catches lexical problems worth flagging while typing:
+ * unterminated strings/identifiers, unclosed block comments and dollar quotes,
+ * unbalanced parentheses, and a missing `;` on the final statement.
+ *
+ * @param {string} text
+ * @returns {SqlDiagnostic[]}
+ */
+export function lintSql(text) {
+  /** @type {SqlDiagnostic[]} */
+  const diags = []
+  const n = text.length
+  let i = 0
+  /** @type {number[]} open-paren offsets */
+  const parens = []
+
+  while (i < n) {
+    const ch = text[i]
+    const next = text[i + 1]
+    if (ch === '-' && next === '-') {
+      const nl = text.indexOf('\n', i + 2)
+      i = nl === -1 ? n : nl + 1
+    } else if (ch === '/' && next === '*') {
+      const close = text.indexOf('*/', i + 2)
+      if (close === -1) {
+        diags.push({ message: 'Unclosed block comment — missing */', severity: 'warning', start: i, end: n })
+        i = n
+      } else {
+        i = close + 2
+      }
+    } else if (ch === "'" || ch === '"' || ch === '`') {
+      const qStart = i
+      i++
+      let closed = false
+      while (i < n) {
+        if (ch === "'" && text[i] === '\\') { i += 2; continue }
+        if (text[i] === ch) {
+          if (ch === "'" && text[i + 1] === "'") { i += 2; continue }
+          i++
+          closed = true
+          break
+        }
+        i++
+      }
+      if (!closed) {
+        diags.push({
+          message: ch === "'" ? "Unterminated string — missing closing '" : `Unterminated quoted identifier — missing closing ${ch}`,
+          severity: 'error',
+          start: qStart,
+          end: n,
+        })
+      }
+    } else if (ch === '$') {
+      const m = /^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/.exec(text.slice(i))
+      if (m) {
+        const tag = m[0]
+        const close = text.indexOf(tag, i + tag.length)
+        if (close === -1) {
+          diags.push({ message: `Unterminated dollar-quoted string — missing closing ${tag}`, severity: 'error', start: i, end: n })
+          i = n
+        } else {
+          i = close + tag.length
+        }
+      } else {
+        i++
+      }
+    } else if (ch === '(') {
+      parens.push(i)
+      i++
+    } else if (ch === ')') {
+      if (parens.length === 0) {
+        diags.push({ message: 'Unmatched closing parenthesis', severity: 'error', start: i, end: i + 1 })
+      } else {
+        parens.pop()
+      }
+      i++
+    } else {
+      i++
+    }
+  }
+
+  for (const p of parens) {
+    diags.push({ message: 'Unclosed parenthesis', severity: 'warning', start: p, end: p + 1 })
+  }
+
+  // Final statement not terminated with `;`
+  const stmts = splitSqlStatements(text)
+  const last = stmts[stmts.length - 1]
+  if (last && !last.text.endsWith(';')) {
+    diags.push({
+      message: "Statement is not terminated with ';'",
+      severity: 'warning',
+      start: Math.max(last.end - 1, last.start),
+      end: last.end,
+    })
+  }
+
+  return diags
+}
+
+/**
  * Find the statement the cursor is in. When the cursor sits between two
  * statements (blank line after a `;`), prefer the previous statement; before
  * the first statement, return the first.
