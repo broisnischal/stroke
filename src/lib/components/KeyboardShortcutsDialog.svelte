@@ -58,10 +58,12 @@
       label: "SQL Editor",
       icon: Terminal,
       shortcuts: [
-        { keys: [mod, "↵"], desc: "Run query" },
-        { keys: [mod, "S"], desc: "Format SQL" },
-        { keys: [mod, "R"], desc: "Re-run last query" },
-        { keys: [mod, "K"], desc: "Search query history" },
+        { keys: [mod, "↵"], desc: "Run all statements" },
+        { keys: [mod, "R"], desc: "Run statement at cursor" },
+        { keys: [mod, "L"], desc: "Select current statement" },
+        { keys: [mod, "S"], desc: "Save query" },
+        { keys: [mod, "J"], desc: "Toggle output panel" },
+        { keys: [mod, "⇧", "B"], desc: "Query history" },
       ],
     },
     {
