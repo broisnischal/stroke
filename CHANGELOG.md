@@ -6,12 +6,6 @@ All notable changes to Stroke are listed here, newest first.
 
 ## [1.0.0] - 2026-07-01
 
-### Changes
-- feat:: perf, ux, themes and optimizations (#13)
-
-
-## [Unreleased]
-
 ### Performance
 - Faster (re)connect: `onConnected` now loads query history + MCP autostart concurrently with the schema/table load instead of behind it, and no longer double-fetches the query stores on startup.
 - Fixed the reconnect "slow acquire" storm: per-table `COUNT(*)` on large Postgres schemas now runs with bounded concurrency (capped at the pool size) instead of firing every count at once and starving the 4-connection pool.
