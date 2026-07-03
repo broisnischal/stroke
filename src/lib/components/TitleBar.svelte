@@ -90,11 +90,13 @@
   <div class="studio-chrome relative flex h-[38px] shrink-0 border-b border-border/40 bg-background select-none" data-studio-chrome>
 
     <!-- ── Drag underlay ──────────────────────────────────────────── -->
+    <!-- No ondblclick here: Tauri's injected drag-region script already
+         toggles maximize on double-click (on macOS via mouseup). Adding our
+         own handler made both fire — maximize + instant restore. -->
     <div
       class="absolute inset-0 z-0"
       data-tauri-drag-region
       role="none"
-      ondblclick={winToggleMaximize}
     ></div>
 
     <!-- ── Button overlay ── -->

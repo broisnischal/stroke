@@ -234,6 +234,14 @@ html[data-os="linux"]   { --window-radius: 8px; }
     outline: none;
   }
 
+  /* Keyboard navigation: chrome buttons (tab bar, toolbars, status bar) are
+     plain <button>s with no ring classes of their own — give them a visible
+     theme-colored ring so tabbing through the app is followable. */
+  [data-studio-chrome] :is(button, [role='button']):focus-visible {
+    outline: 2px solid color-mix(in oklch, var(--ring) 55%, transparent);
+    outline-offset: -1px;
+  }
+
   /* tabindex="-1" elements are programmatically focusable but never keyboard-navigable;
      they should never show a focus ring regardless of input method */
   [tabindex="-1"]:focus,

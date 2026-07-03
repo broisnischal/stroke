@@ -313,14 +313,7 @@ async fn tcp_preflight(host: &str, port: u16) -> Result<(), String> {
 
 // ── PostgreSQL connect / test ─────────────────────────────────────────────────
 
-pub(crate) async fn open_pg(config: &PgConfig) -> Result<PgPool, String> {
-    tcp_preflight(&config.host, config.port).await?;
-    let opts: PgConnectOptions = config
-        .connection_url()
-        .parse()
-        .map_err(|e| format!("Connection failed: {e}"))?;
-    let opts = opts.log_slow_statements(LevelFilter::Debug, Duration::from_secs(5));
-
+fn pg_pool_builder() -> PgPoolOptions {
     PgPoolOptions::new()
         // Desktop app: at most 2-3 tabs open simultaneously, each running 1-2
         // queries. 4 connections is the real-world ceiling; monitored logs showed
@@ -343,19 +336,64 @@ pub(crate) async fn open_pg(config: &PgConfig) -> Result<PgPool, String> {
         // sleep/wake. max_lifetime caps server-side staleness.
         .idle_timeout(Duration::from_secs(600))
         .max_lifetime(Duration::from_secs(1800))
-        // Kill truly runaway queries. 10 min covers bulk inserts / migrations while
-        // still bounding accidental full-table scans that would pin a connection.
-        .after_connect(|conn, _meta| {
-            Box::pin(async move {
-                sqlx::query("SET statement_timeout = '10min'")
-                    .execute(&mut *conn)
-                    .await?;
-                Ok(())
-            })
-        })
-        .connect_with(opts)
-        .await
-        .map_err(|e| format!("Connection failed: {e}"))
+}
+
+pub(crate) async fn open_pg(config: &PgConfig) -> Result<PgPool, String> {
+    let opts: PgConnectOptions = config
+        .connection_url()
+        .parse()
+        .map_err(|e| format!("Connection failed: {e}"))?;
+    let opts = opts.log_slow_statements(LevelFilter::Debug, Duration::from_secs(5));
+
+    // Kill truly runaway queries. 10 min covers bulk inserts / migrations while
+    // still bounding accidental full-table scans that would pin a connection.
+    //
+    // Preferred path: ride statement_timeout in the startup packet (`options=`),
+    // which saves one round trip per pooled connection vs an after_connect SET —
+    // on a remote host that's a full RTT for every connection the pool opens.
+    let fast_opts = opts
+        .clone()
+        .options([("statement_timeout", "10min")]);
+
+    let connect = async {
+        match pg_pool_builder().connect_with(fast_opts).await {
+            Ok(pool) => Ok(pool),
+            // Some poolers (PgBouncer without `ignore_startup_parameters=options`)
+            // reject the `options` startup parameter outright. Fall back to the
+            // slower after_connect SET so those hosts still connect.
+            Err(e) if e.to_string().contains("unsupported startup parameter") => {
+                pg_pool_builder()
+                    .after_connect(|conn, _meta| {
+                        Box::pin(async move {
+                            sqlx::query("SET statement_timeout = '10min'")
+                                .execute(&mut *conn)
+                                .await?;
+                            Ok(())
+                        })
+                    })
+                    .connect_with(opts)
+                    .await
+                    .map_err(|e| format!("Connection failed: {e}"))
+            }
+            Err(e) => Err(format!("Connection failed: {e}")),
+        }
+    };
+
+    // Race the real connect against a raw TCP preflight instead of running the
+    // preflight first: it exists only to fail fast with a clear message on
+    // unreachable hosts/wrong ports/empty values. When the host is reachable
+    // the preflight resolves Ok quickly and we simply keep waiting for the
+    // handshake — no longer a serial extra round trip before every connect.
+    let preflight = tcp_preflight(&config.host, config.port);
+    tokio::pin!(preflight);
+    tokio::pin!(connect);
+    tokio::select! {
+        pre = &mut preflight => {
+            pre?;
+            connect.await
+        }
+        pool = &mut connect => pool,
+    }
 }
 
 pub async fn test_connection(config: PgConfig) -> Result<(), String> {

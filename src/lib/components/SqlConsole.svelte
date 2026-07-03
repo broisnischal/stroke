@@ -148,6 +148,7 @@
     untrack(() => {
       selected = new Set()
       activeResultIdx = 0
+      resultSort = null
       if (outputView === 'explain') outputView = 'table'
     })
   })
@@ -164,14 +165,57 @@
     })
   })
 
-  const currentDisplay = $derived.by(() => {
-    if (resultSets.length > 1) {
-      const idx = Math.min(activeResultIdx, resultSets.length - 1)
-      const s = resultSets[idx]
-      return { columns: s.columns, rows: s.rows, queryMs: s.queryMs, message: s.message }
+  /**
+   * Header-click sort for result rows. Ad-hoc results have no table to re-query,
+   * so sorting is done client-side over the returned rows.
+   * @type {{ column: string, direction: 'asc' | 'desc' } | null}
+   */
+  let resultSort = $state(null)
+
+  /** Compare two cell values: numbers numerically, everything else as text. */
+  function compareCellValues(a, b) {
+    if (typeof a === 'number' && typeof b === 'number') return a - b
+    if (typeof a === 'boolean' && typeof b === 'boolean') return a === b ? 0 : a ? 1 : -1
+    const sa = typeof a === 'object' ? JSON.stringify(a) : String(a)
+    const sb = typeof b === 'object' ? JSON.stringify(b) : String(b)
+    if (sa.trim() !== '' && sb.trim() !== '') {
+      const na = Number(sa)
+      const nb = Number(sb)
+      if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb
     }
-    return { columns, rows, queryMs, message }
+    return sa.localeCompare(sb, undefined, { numeric: true, sensitivity: 'base' })
+  }
+
+  const currentDisplay = $derived.by(() => {
+    const base = resultSets.length > 1
+      ? (() => {
+          const idx = Math.min(activeResultIdx, resultSets.length - 1)
+          const s = resultSets[idx]
+          return { columns: s.columns, rows: s.rows, queryMs: s.queryMs, message: s.message }
+        })()
+      : { columns, rows, queryMs, message }
+    if (!resultSort) return base
+    const colIdx = base.columns.findIndex((c) => (c.name ?? c) === resultSort.column)
+    if (colIdx < 0) return base
+    const dir = resultSort.direction === 'desc' ? -1 : 1
+    const sorted = [...base.rows].sort((ra, rb) => {
+      const a = ra[colIdx]
+      const b = rb[colIdx]
+      const aNull = a === null || a === undefined
+      const bNull = b === null || b === undefined
+      // NULLs sort last in either direction.
+      if (aNull || bNull) return aNull && bNull ? 0 : aNull ? 1 : -1
+      return dir * compareCellValues(a, b)
+    })
+    return { ...base, rows: sorted }
   })
+
+  /** @param {{ column: string, direction: 'asc' | 'desc' } | null} sort */
+  function handleResultSort(sort) {
+    resultSort = sort
+    // Row indices change with the order — selection would point at the wrong rows.
+    selected = new Set()
+  }
 
   async function handleExplain() {
     const querySql = sql.trim()
@@ -632,7 +676,7 @@
           {@const rsActive = Math.min(activeResultIdx, resultSets.length - 1) === i}
           <button
             type="button"
-            onclick={() => (activeResultIdx = i)}
+            onclick={() => { activeResultIdx = i; resultSort = null; selected = new Set() }}
             class={cn(
               'relative flex items-center border-b-2 px-2.5 font-mono text-ui-xs transition-colors',
               rsActive ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground/50 hover:text-muted-foreground',
@@ -759,7 +803,15 @@
                 oncharttypechange={(t) => (chartType = t)}
               />
             {:else}
-              <DataTable columns={currentDisplay.columns} rows={currentDisplay.rows} {loading} bind:selected />
+              <DataTable
+                columns={currentDisplay.columns}
+                rows={currentDisplay.rows}
+                {loading}
+                bind:selected
+                rowSort={resultSort}
+                onsortchange={handleResultSort}
+                readonly
+              />
             {/if}
           {:else if loading}
             <TableLoading />

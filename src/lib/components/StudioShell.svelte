@@ -78,6 +78,7 @@
     disconnectPostgres,
     listSchemas,
     listTables,
+    getTableRowCounts,
     getTableRows,
     liveStart,
     liveStop,
@@ -120,6 +121,8 @@
     findSchemaTimelineTab,
     createDataDiffTab,
     findDataDiffTab,
+    createLicenseTab,
+    findLicenseTab,
     findTableTab,
     findSqlTab,
     findAiTab,
@@ -168,7 +171,7 @@
   import { hasPro, FREE_CONNECTION_LIMIT } from '$lib/stores/license.js'
   import { engineSupports } from '$lib/db-capabilities.js'
   import * as Dialog from '$lib/components/ui/dialog/index.js'
-  import ExternalLink from '@lucide/svelte/icons/external-link'
+  import KeyRound from '@lucide/svelte/icons/key-round'
   import {
     connectPostgres,
     connectSqlite,
@@ -1602,6 +1605,25 @@ let rowSearch = $state('')
     openSingletonTab({ find: findExtensionsTab, create: createExtensionsTab })
   }
 
+  /** License activation page. Deliberately NOT via openSingletonTab — that
+   *  helper is pro-gated, and this tab exists precisely for non-Pro users. */
+  function openLicenseTab() {
+    const existing = findLicenseTab(tabs)
+    if (existing) { void activateTab(existing.id); return }
+    saveActiveTabState()
+    dropWelcomeTabs()
+    const tab = createLicenseTab()
+    tabs = [...tabs, tab]
+    activeTabId = tab.id
+    clearTableEditor()
+  }
+
+  /** Close the license tab after a successful activation. */
+  function closeLicenseTab() {
+    const existing = findLicenseTab(tabs)
+    if (existing) void closeTab(existing.id)
+  }
+
   function openJsonTab() {
     openSingletonTab({ find: findJsonTab, create: createJsonTab })
   }
@@ -2219,12 +2241,17 @@ let rowSearch = $state('')
   async function loadTables({ force = false } = {}) {
     if (!activeSchema) {
       tables = []
+      loadingTables = false
       return
     }
-    const key = `${persistConnectionId ?? ''}:${activeSchema}`
+    // Captured once: activeSchema can change while the fetch is in flight, and
+    // the background count pass must target the schema this list came from.
+    const schemaAtCall = activeSchema
+    const key = `${persistConnectionId ?? ''}:${schemaAtCall}`
     const cached = force ? null : _tableListCache.get(key)
     if (cached && Date.now() - cached.at < TABLE_LIST_TTL_MS) {
       tables = cached.tables
+      loadingTables = false
       if (activeTable && !tables.find((t) => t.name === activeTable)) {
         activeTable = tables[0]?.name ?? null
       }
@@ -2232,7 +2259,7 @@ let rowSearch = $state('')
       loadingTables = true
       error = ''
       try {
-        const list = await listTables(activeSchema)
+        const list = await listTables(schemaAtCall)
         tables = list
           .map((t) => ({
             name: t.name ?? t.table_name ?? '',
@@ -2252,6 +2279,11 @@ let rowSearch = $state('')
         loadingTables = false
       }
     }
+    // The list arrives with unknown (null) counts so it renders immediately;
+    // resolve them with exact COUNT(*)s in the background and patch them in.
+    // Covers the cached path too — a list cached mid-resolve may still hold nulls.
+    const unresolved = tables.filter((t) => t.rowCount === null).map((t) => t.name)
+    if (unresolved.length > 0) void resolveRowCounts(key, schemaAtCall, unresolved)
     // Reload the catalog sub-state only when it doesn't already reflect this
     // connection+schema (or on a forced reload): revisiting a schema skips these
     // four round-trips, but switching schemas still refreshes them.
@@ -2261,6 +2293,29 @@ let rowSearch = $state('')
       void loadEnums()
       void loadTriggers()
       void loadSequences()
+    }
+  }
+
+  /**
+   * Background pass: exact counts for tables whose row count came back unknown
+   * from listTables. Patches the sidebar (and the list cache) as results land.
+   * Failures are ignored — counts are cosmetic and must never block the catalog.
+   * @param {string} key connection:schema cache key at the time of the request
+   * @param {string} schema
+   * @param {string[]} names
+   */
+  async function resolveRowCounts(key, schema, names) {
+    try {
+      const counts = await getTableRowCounts(schema, names)
+      if (!counts?.length) return
+      // Stale guard: the user may have switched connection/schema meanwhile.
+      if (`${persistConnectionId ?? ''}:${activeSchema}` !== key) return
+      const byName = new Map(counts.map((c) => [c.name, normalizeTableRowCount(c.rowCount ?? c.row_count)]))
+      tables = tables.map((t) => (byName.has(t.name) ? { ...t, rowCount: byName.get(t.name) ?? 0 } : t))
+      const cached = _tableListCache.get(key)
+      if (cached) _tableListCache.set(key, { tables, at: cached.at })
+    } catch {
+      /* ignore — counts fill in on the next refresh instead */
     }
   }
 
@@ -2631,6 +2686,14 @@ let rowSearch = $state('')
     tables = []
     schemas = []
     activeSchema = 'public'
+    // The connection is live: render the shell NOW (setting `connection` above
+    // dropped the reconnect overlay) with the welcome tab open and the sidebar
+    // in its skeleton state, and let the catalog stream in below. This is what
+    // makes reconnect feel instant — the overlay no longer waits on the
+    // schema/table/row-count round trips.
+    tabs = []
+    openWelcomeTab()
+    loadingTables = true
     // Query history + saved queries only depend on the connection id, not on the
     // catalog, so kick them off concurrently with the schema/table load instead
     // of waiting behind it. Errors are non-fatal (history is best-effort).
@@ -2650,8 +2713,6 @@ let rowSearch = $state('')
       await new Promise(r => setTimeout(r, 1000))
       await loadTables({ force: true })
     }
-    tabs = []
-    openWelcomeTab()
     // MCP autostart is independent of the catalog — don't block first render on it.
     void (async () => {
       try {
@@ -3278,6 +3339,7 @@ let rowSearch = $state('')
   onopenmodelconfiguration={() => (showAiModelSettings = true)}
   onopenabout={() => (showAboutModal = true)}
   onopenextensions={() => openExtensionsTab()}
+  onopenlicense={() => openLicenseTab()}
 />
 
 <AiSettingsDialog bind:open={showAiModelSettings} />
@@ -3308,18 +3370,13 @@ let rowSearch = $state('')
           Back
         </button>
         <button
-          onclick={async () => {
+          onclick={() => {
             showProGate = false
-            try {
-              const { openUrl } = await import('@tauri-apps/plugin-opener')
-              await openUrl('https://stroke.click')
-            } catch {
-              window.open('https://stroke.click', '_blank', 'noopener,noreferrer')
-            }
+            openLicenseTab()
           }}
           class="flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-foreground px-4 text-[12px] font-medium text-background transition-colors hover:bg-foreground/90"
         >
-          <ExternalLink class="size-3" />
+          <KeyRound class="size-3" />
           Activate Pro
         </button>
       </div>
@@ -3379,7 +3436,10 @@ let rowSearch = $state('')
 />
 
 
-{#if autoConnecting}
+{#if autoConnecting && !connection}
+  <!-- Only covers the actual connect handshake: onConnected sets `connection`
+       the moment the backend confirms, which drops this overlay and lets the
+       catalog (schemas/tables/counts) stream into the sidebar skeletons. -->
   <div
     class="fixed inset-0 z-50 flex flex-col items-center justify-center gap-7 bg-background"
     out:fade={{ duration: 200 }}
@@ -3480,7 +3540,6 @@ let rowSearch = $state('')
         onviewstructure={(t) => void openTableStructure(t)}
         onexportsql={(t) => void handleExportSql(t)}
         onexportdata={(t) => void handleExportData(t)}
-        ongeneratetestdata={(t) => void handleGenerateTestData(t)}
         openTables={tabs.filter((t) => t.kind === 'table' && t.state && /** @type {any} */ (t.state).schema === activeSchema).map((t) => /** @type {any} */ (t.state).table)}
         onclosetable={(name) => {
           const tab = findTableTab(tabs, activeSchema, name)
@@ -3679,6 +3738,17 @@ let rowSearch = $state('')
           <svelte:boundary failed={tabError}>
             {#await import('./ExtensionsPage.svelte')}<TabLoading />{:then { default: ExtensionsPage }}
               <ExtensionsPage />
+            {/await}
+          </svelte:boundary>
+        </div>
+      {/if}
+
+      <!-- License tab — rarely opened, no keep-alive needed -->
+      {#if activeTab?.kind === 'license'}
+        <div class="flex min-h-0 flex-1 flex-col">
+          <svelte:boundary failed={tabError}>
+            {#await import('./LicensePage.svelte')}<TabLoading />{:then { default: LicensePage }}
+              <LicensePage onactivated={closeLicenseTab} />
             {/await}
           </svelte:boundary>
         </div>
