@@ -34,7 +34,9 @@ export async function refreshLicenseStatus() {
     licenseStatus.set(/** @type {LicenseStatus} */ (status))
     return status
   } catch (e) {
-    licenseStatus.set({ status: 'Error', message: String(e) })
+    // Keep the last known status — flipping to Error here would drop Pro
+    // access (trial or paid) over a transient IPC failure.
+    console.error('[license] status check failed:', e)
     return null
   }
 }
@@ -92,11 +94,15 @@ const PRO_FEATURES = new Set([
 
 /**
  * Reactive: true when the user has Pro access (Valid license or active Trial).
- * Null state (still loading from Tauri) also returns true to prevent UI flicker.
+ *
+ * Fails OPEN: only a definitive `TrialExpired` verdict locks Pro features.
+ * `null` (status still loading) and `Error` (data dir inaccessible, transient
+ * check failure) must never lock out an active-trial or paid user — an
+ * expired trial is the only state where we positively know there's no Pro.
  */
 export const hasPro = derived(
   licenseStatus,
-  ($s) => $s === null || $s?.status === 'Valid' || $s?.status === 'Trial',
+  ($s) => $s?.status !== 'TrialExpired',
 )
 
 /**

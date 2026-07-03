@@ -34,6 +34,7 @@
   import Moon         from '@lucide/svelte/icons/moon'
   import Lock         from '@lucide/svelte/icons/lock'
   import LockOpen     from '@lucide/svelte/icons/lock-open'
+  import { tick }     from 'svelte'
   import { cn }       from '$lib/utils.js'
   import { aiProfiles, activeProfileId, setActiveProfile } from '$lib/stores/ai-settings.js'
   import { toggleLightDark, isCurrentThemeDark } from '$lib/stores/settings.js'
@@ -107,6 +108,113 @@
   let dbList = $state(/** @type {{ key: string, label: string }[]} */ ([]))
   let dbLoading = $state(false)
   let dbSearch = $state('')
+  /** @type {HTMLInputElement | null} */
+  let dbInputEl = $state(null)
+  /** @type {HTMLDivElement | null} */
+  let dbListEl = $state(null)
+  /** Keyboard-highlighted row in the db list — driven from the filter input. */
+  let dbHl = $state(0)
+
+  // Reset the highlight whenever the visible list changes or the menu reopens.
+  $effect(() => {
+    dbSearch; dbOpen
+    dbHl = 0
+  })
+
+  // Autofocus the filter input when the switcher opens (issue #3: "search box
+  // is not active by default"). Primary path is onOpenAutoFocus on the menu
+  // content, which pre-empts bits-ui's own focus management (it would focus
+  // the content container after our focus() and undo it). This effect is the
+  // fallback for open paths that skip that callback; the flag makes it fire
+  // once per open instead of stealing focus back while navigating.
+  let _dbFocusedThisOpen = false
+  $effect(() => {
+    if (!dbOpen) { _dbFocusedThisOpen = false; return }
+    if (_dbFocusedThisOpen) return
+    const el = dbInputEl
+    if (!el) return
+    _dbFocusedThisOpen = true
+    tick().then(() => el?.focus())
+  })
+
+  /** Take over the menu's open-autofocus so the filter input starts focused.
+   * @param {Event} e */
+  function focusDbInputOnOpen(e) {
+    e.preventDefault()
+    _dbFocusedThisOpen = true
+    tick().then(() => dbInputEl?.focus())
+  }
+
+  function scrollDbHlIntoView() {
+    tick().then(() => {
+      dbListEl?.querySelector('[data-hl]')?.scrollIntoView({ block: 'nearest' })
+    })
+  }
+
+  /**
+   * Keyboard driving for the db list while focus stays in the filter input:
+   * arrows / Tab cycle the highlight, Enter switches, Escape closes. Handled
+   * (and stopped) here so the menu's own typeahead/focus logic can't fight it.
+   * @param {KeyboardEvent} e
+   */
+  function onDbInputKeydown(e) {
+    if (e.key === 'Escape') { dbSearch = ''; dbOpen = false; return }
+    const n = Math.min(dbFiltered.length, 200)
+    if (n === 0) return
+    if (e.key === 'ArrowDown' || (e.key === 'Tab' && !e.shiftKey)) {
+      e.preventDefault(); e.stopPropagation()
+      dbHl = (dbHl + 1) % n
+      scrollDbHlIntoView()
+    } else if (e.key === 'ArrowUp' || (e.key === 'Tab' && e.shiftKey)) {
+      e.preventDefault(); e.stopPropagation()
+      dbHl = (dbHl - 1 + n) % n
+      scrollDbHlIntoView()
+    } else if (e.key === 'Enter') {
+      e.preventDefault(); e.stopPropagation()
+      const db = dbFiltered[dbHl]
+      if (db) switchDb(db)
+    }
+  }
+
+  /** @param {EventTarget | null} t */
+  function isEditableTarget(t) {
+    const el = /** @type {HTMLElement | null} */ (t)
+    if (!el || !(el instanceof HTMLElement)) return false
+    return (
+      el.tagName === 'INPUT' ||
+      el.tagName === 'TEXTAREA' ||
+      el.isContentEditable ||
+      !!el.closest('.monaco-editor')
+    )
+  }
+
+  /**
+   * Global shortcuts: ⌘D toggles the database switcher, ⌘⇧C the connection
+   * switcher. Skipped while typing (inputs, textareas, Monaco) so ⌘D keeps
+   * its editor meaning there.
+   * @param {KeyboardEvent} e
+   */
+  function onWindowKeydown(e) {
+    const mod = e.metaKey || e.ctrlKey
+    if (!mod || e.altKey || !connection) return
+    const k = e.key.toLowerCase()
+    if (k === 'd' && !e.shiftKey) {
+      if (!canSwitchDb || isEditableTarget(e.target)) return
+      e.preventDefault()
+      connOpen = false
+      if (dbOpen) {
+        dbOpen = false
+      } else {
+        dbOpen = true
+        if (dbList.length === 0) void fetchDatabases()
+      }
+    } else if (k === 'c' && e.shiftKey) {
+      if (savedConnections.length === 0 || isEditableTarget(e.target)) return
+      e.preventDefault()
+      dbOpen = false
+      connOpen = !connOpen
+    }
+  }
 
   const currentDb = $derived(
     connection?.type === 'libsql'
@@ -222,6 +330,8 @@
   })
 </script>
 
+<svelte:window onkeydown={onWindowKeydown} />
+
 <!-- PRO chip -->
 {#snippet proBadge()}
   <span class="ml-auto shrink-0 rounded bg-amber-400/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-500/90 dark:text-amber-400/80">PRO</span>
@@ -244,7 +354,7 @@
       <DropdownMenu.Root bind:open={connOpen}>
         <DropdownMenu.Trigger
           class={cn(labelBtn, 'text-muted-foreground/80')}
-          title="Switch connection"
+          title="Switch connection (⇧⌘C)"
         >
           {#if connectionLost}
             <WifiOff class="size-3 shrink-0 text-red-500" />
@@ -319,7 +429,7 @@
         >
           <DropdownMenu.Trigger
             class={cn(labelBtn, 'text-muted-foreground/80')}
-            title="Switch database"
+            title="Switch database (⌘D)"
           >
             {#if connection?.type === 'sqlite'}
               <HardDrive class="size-3 shrink-0" />
@@ -334,20 +444,27 @@
             {/if}
           </DropdownMenu.Trigger>
 
-          <DropdownMenu.Content side="top" align="start" class="w-56 overflow-hidden p-0">
-            {#if dbList.length > 5}
-              <div class="border-b border-border/25 px-2 py-1.5">
-                <input
-                  type="text"
-                  placeholder={isD1 ? 'Filter D1 databases…' : 'Filter databases…'}
-                  class="h-7 w-full rounded-lg bg-muted/40 px-2.5 text-[11px] outline-none placeholder:text-muted-foreground/35 focus:ring-0"
-                  bind:value={dbSearch}
-                  onkeydown={(e) => { if (e.key === 'Escape') { dbSearch = ''; dbOpen = false } }}
-                />
-              </div>
-            {/if}
+          <DropdownMenu.Content
+            side="top"
+            align="start"
+            class="w-56 overflow-hidden p-0"
+            onOpenAutoFocus={focusDbInputOnOpen}
+          >
+            <!-- Always mounted (not gated on list size) so the search box is
+                 active the moment the switcher opens and arrows/Tab/Enter work
+                 for any number of databases. -->
+            <div class="border-b border-border/25 px-2 py-1.5">
+              <input
+                bind:this={dbInputEl}
+                type="text"
+                placeholder={isD1 ? 'Filter D1 databases…' : 'Filter databases…'}
+                class="h-7 w-full rounded-lg bg-muted/40 px-2.5 text-[11px] outline-none placeholder:text-muted-foreground/35 focus:ring-0"
+                bind:value={dbSearch}
+                onkeydown={onDbInputKeydown}
+              />
+            </div>
 
-            <div class="db-list-scroll max-h-[200px] overflow-y-auto p-1 [contain:layout_paint]">
+            <div bind:this={dbListEl} class="db-list-scroll max-h-[200px] overflow-y-auto p-1 [contain:layout_paint]">
               {#if dbLoading}
                 <div class="flex items-center justify-center gap-2 py-4 text-muted-foreground/50">
                   <RefreshCw class="size-3 animate-spin" />
@@ -358,11 +475,21 @@
                   {dbSearch ? 'No match' : 'No databases found'}
                 </div>
               {:else}
-                {#each dbFiltered.slice(0, 200) as db (db.key)}
+                <!-- Plain buttons (not DropdownMenu.Item): highlight is driven from
+                     the filter input's keyboard handler, and menu-item roving focus
+                     would fight it. Hover moves the highlight so both stay in sync. -->
+                {#each dbFiltered.slice(0, 200) as db, i (db.key)}
                   {@const isCurrent = db.key === currentDbKey}
-                  <DropdownMenu.Item
-                    class={cn('cursor-pointer font-mono', isCurrent && 'font-semibold')}
+                  <button
+                    type="button"
+                    data-hl={dbHl === i ? '' : undefined}
+                    class={cn(
+                      'flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left font-mono text-xs text-foreground/90 transition-colors',
+                      dbHl === i && 'bg-accent/50 text-foreground',
+                      isCurrent && 'font-semibold',
+                    )}
                     onclick={() => switchDb(db)}
+                    onpointerenter={() => (dbHl = i)}
                   >
                     {#if isD1}
                       <Cloud class={cn('size-3.5 shrink-0', isCurrent ? 'text-amber-500' : 'text-muted-foreground/35')} />
@@ -371,7 +498,7 @@
                     {/if}
                     <span class="min-w-0 flex-1 truncate">{db.label}</span>
                     {#if isCurrent}<Check class="ml-auto size-3 shrink-0 text-emerald-500" />{/if}
-                  </DropdownMenu.Item>
+                  </button>
                 {/each}
               {/if}
             </div>

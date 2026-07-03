@@ -1,3 +1,5 @@
+import { oversizeCellInfo, oversizeCellText } from './cell-value.js'
+
 /**
  * @param {unknown} value
  * @returns {unknown}
@@ -5,6 +7,17 @@
 export function normalizeCellValue(value) {
   if (value === undefined) return null
   return value
+}
+
+/**
+ * JSON.stringify replacer that renders backend oversize sentinels as their
+ * marker text, so copied rows / detail views show the truncation instead of
+ * the raw sentinel wrapper.
+ * @param {string} _key @param {unknown} value
+ */
+function oversizeReplacer(_key, value) {
+  const over = oversizeCellInfo(value)
+  return over ? oversizeCellText(over) : value
 }
 
 /**
@@ -16,8 +29,10 @@ export function formatNormalValue(value) {
   if (typeof v === 'string') return v
   if (typeof v === 'number' || typeof v === 'boolean') return String(v)
   if (typeof v === 'object') {
+    const over = oversizeCellInfo(v)
+    if (over) return oversizeCellText(over)
     try {
-      return JSON.stringify(v, null, 2)
+      return JSON.stringify(v, oversizeReplacer, 2)
     } catch {
       return String(v)
     }
@@ -30,7 +45,7 @@ export function formatNormalValue(value) {
  */
 export function formatJsonValue(value) {
   try {
-    return JSON.stringify(normalizeCellValue(value), null, 2)
+    return JSON.stringify(normalizeCellValue(value), oversizeReplacer, 2)
   } catch {
     return 'null'
   }

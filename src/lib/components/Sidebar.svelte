@@ -929,7 +929,7 @@
                         <ContextMenu.Separator />
                         <ContextMenu.Item onSelect={() => onviewstructure(tableName)}>
                           <Columns3 />
-                          View data structure
+                          View structure
                         </ContextMenu.Item>
                         <ContextMenu.Item onSelect={() => onviewddl(tableName)}>
                           <Code2 />
@@ -1125,7 +1125,7 @@
                           <ContextMenu.Separator />
                           <ContextMenu.Item onSelect={() => onviewstructure(table.name)}>
                             <Columns3 />
-                            View data structure
+                            View structure
                           </ContextMenu.Item>
                           <ContextMenu.Item onSelect={() => onviewddl(table.name)}>
                             <Code2 />
