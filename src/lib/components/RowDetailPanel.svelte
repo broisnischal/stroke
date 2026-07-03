@@ -29,6 +29,7 @@
     valueToEditString,
     parseCellInput,
     normalizeColumnType,
+    oversizeCellInfo,
   } from '$lib/cell-value.js'
   import {
     clampInspectorWidth,
@@ -132,8 +133,9 @@
       const enumValues = getColumnEnumValues(col)
       const isBoolean = isBooleanType(dataType)
       const isPk = pkSet.has(col.name)
-      // PK columns and non-editable types are read-only
-      const editable = canEdit && !isPk && isEditableType(dataType)
+      // PK columns, non-editable types, and truncated oversize cells (only a
+      // preview was loaded — saving would write it back) are read-only.
+      const editable = canEdit && !isPk && isEditableType(dataType) && !oversizeCellInfo(raw)
       const isNull = raw === null
       const isEmpty = typeof raw === 'string' && raw === ''
       const isJsonType = normalType.startsWith('json')

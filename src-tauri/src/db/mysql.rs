@@ -39,10 +39,26 @@ pub fn cell_to_json(row: &sqlx::mysql::MySqlRow, idx: usize) -> Value {
         return v.map(|t| json!(t.to_string())).unwrap_or(Value::Null);
     }
     if let Ok(v) = row.try_get::<Option<serde_json::Value>, _>(idx) {
-        return v.unwrap_or(Value::Null);
+        return match v {
+            // Cap oversized JSON documents — a multi-MB cell shipped whole
+            // freezes the webview (see sql_util::CELL_VALUE_CAP).
+            Some(val) => super::sql_util::cap_json_value(
+                &row.column(idx).type_info().name().to_lowercase(),
+                val,
+            ),
+            None => Value::Null,
+        };
     }
     if let Ok(v) = row.try_get::<Option<String>, _>(idx) {
-        return v.map(|s| json!(s)).unwrap_or(Value::Null);
+        return match v {
+            Some(s) if s.len() > super::sql_util::CELL_VALUE_CAP => super::sql_util::oversize_cell(
+                &row.column(idx).type_info().name().to_lowercase(),
+                s.len(),
+                s.as_bytes(),
+            ),
+            Some(s) => json!(s),
+            None => Value::Null,
+        };
     }
     if let Ok(v) = row.try_get::<Option<Vec<u8>>, _>(idx) {
         return v.map(|b| json!(format!("[{} bytes]", b.len()))).unwrap_or(Value::Null);

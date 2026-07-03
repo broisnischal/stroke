@@ -3,6 +3,9 @@
   import Copy from '@lucide/svelte/icons/copy'
   import Check from '@lucide/svelte/icons/check'
   import WrapText from '@lucide/svelte/icons/wrap-text'
+  import ListTree from '@lucide/svelte/icons/list-tree'
+  import Braces from '@lucide/svelte/icons/braces'
+  import JsonTree from './JsonTree.svelte'
   import { formatJsonValue } from '$lib/row-inspector.js'
   import {
     escapeHtml,
@@ -18,6 +21,8 @@
   let {
     record,
     rowLabel = '',
+    /** Open a value in the Monaco JSON lightbox. @type {((value: unknown, label: string) => void) | null} */
+    onopenjson = null,
   } = $props()
 
   let html = $state('')
@@ -26,8 +31,27 @@
     try { return localStorage.getItem(WRAP_KEY) === 'true' } catch { return false }
   }
 
+  // Tree = collapsible fold view (issue #2: wrap/unwrap json inside row data);
+  // Raw = the original highlighted text block.
+  const VIEW_KEY = 'stroke:row-expand-view'
+  function loadView() {
+    try { return localStorage.getItem(VIEW_KEY) === 'raw' ? 'raw' : 'tree' } catch { return 'tree' }
+  }
+
   let copied = $state(false)
   let wordWrap = $state(loadWrap())
+  let viewMode = $state(loadView())
+
+  /** @param {'tree' | 'raw'} mode */
+  function setViewMode(mode) {
+    viewMode = mode
+    try { localStorage.setItem(VIEW_KEY, mode) } catch { /* ignore */ }
+  }
+
+  /** Copy a single tree-node value (raw string as-is, everything else as JSON). */
+  function copyNodeValue(/** @type {unknown} */ v) {
+    copyText(typeof v === 'string' ? v : formatJsonValue(v))
+  }
   /** @type {ReturnType<typeof setTimeout> | null} */
   let copiedTimer = null
   /** @type {HTMLDivElement | null} */
@@ -66,6 +90,9 @@
   }
 
   $effect(() => {
+    // Tree mode never touches the stringified text — skip the format +
+    // highlight work entirely until the raw view is actually shown.
+    if (viewMode !== 'raw') return
     const source = displayText
     // Above the limit, skip per-token spans entirely — plain escaped text keeps
     // very large values cheap to render.
@@ -221,42 +248,78 @@
         <span>Copy JSON</span>
       {/if}
     </button>
-    <button
-      type="button"
-      title="Toggle word wrap"
-      class={[
-        'inline-flex items-center gap-1.5 rounded px-2 py-0.5 font-mono text-xs transition-colors hover:bg-accent/40 hover:text-foreground',
-        wordWrap ? 'text-foreground bg-accent/30' : 'text-muted-foreground/60',
-      ].join(' ')}
-      onclick={() => {
-        wordWrap = !wordWrap
-        try { localStorage.setItem(WRAP_KEY, String(wordWrap)) } catch { /* ignore */ }
-      }}
-    >
-      <WrapText class="size-3" />
-      <span>Wrap</span>
-    </button>
+    {#if viewMode === 'raw'}
+      <button
+        type="button"
+        title="Toggle word wrap"
+        class={[
+          'inline-flex items-center gap-1.5 rounded px-2 py-0.5 font-mono text-xs transition-colors hover:bg-accent/40 hover:text-foreground',
+          wordWrap ? 'text-foreground bg-accent/30' : 'text-muted-foreground/60',
+        ].join(' ')}
+        onclick={() => {
+          wordWrap = !wordWrap
+          try { localStorage.setItem(WRAP_KEY, String(wordWrap)) } catch { /* ignore */ }
+        }}
+      >
+        <WrapText class="size-3" />
+        <span>Wrap</span>
+      </button>
+    {/if}
+
+    <!-- Tree / Raw view toggle -->
+    <div class="ml-auto flex items-center gap-0.5 rounded bg-muted/30 p-0.5">
+      <button
+        type="button"
+        title="Tree view — expand and collapse nested values"
+        class={[
+          'inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-xs transition-colors',
+          viewMode === 'tree' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground/60 hover:text-foreground',
+        ].join(' ')}
+        onclick={() => setViewMode('tree')}
+      >
+        <ListTree class="size-3" />
+        <span>Tree</span>
+      </button>
+      <button
+        type="button"
+        title="Raw JSON text"
+        class={[
+          'inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-xs transition-colors',
+          viewMode === 'raw' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground/60 hover:text-foreground',
+        ].join(' ')}
+        onclick={() => setViewMode('raw')}
+      >
+        <Braces class="size-3" />
+        <span>Raw</span>
+      </button>
+    </div>
   </div>
 
   <!-- JSON content -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div
-    bind:this={rootEl}
-    data-studio-selectable="text"
-    class={['px-5 py-2', wordWrap ? '' : 'overflow-x-auto'].join(' ')}
-    onwheel={handleWheel}
-    oncontextmenu={handleContextMenu}
-  >
-    {#if !html}
-      <p class="font-mono text-sm text-muted-foreground/40">Loading…</p>
-    {:else}
-      <div
-        class="[&_pre]:m-0 [&_pre]:bg-transparent! [&_pre]:p-0 [&_pre]:font-mono [&_pre]:text-sm [&_pre]:leading-relaxed [&_.json-inspector-url]:text-link [&_.json-inspector-url]:hover:underline [&_.json-inspector-url]:underline-offset-2 {wrapClass === 'whitespace-pre-wrap break-all' ? '[&_pre]:whitespace-pre-wrap [&_pre]:break-all' : '[&_pre]:whitespace-pre'}"
-      >
-        {@html html}
-      </div>
-    {/if}
-  </div>
+  {#if viewMode === 'tree'}
+    <div class="px-4 py-2" data-studio-selectable="text">
+      <JsonTree value={record} defaultDepth={1} oncopy={copyNodeValue} onopen={onopenjson} />
+    </div>
+  {:else}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      bind:this={rootEl}
+      data-studio-selectable="text"
+      class={['px-5 py-2', wordWrap ? '' : 'overflow-x-auto'].join(' ')}
+      onwheel={handleWheel}
+      oncontextmenu={handleContextMenu}
+    >
+      {#if !html}
+        <p class="font-mono text-sm text-muted-foreground/40">Loading…</p>
+      {:else}
+        <div
+          class="[&_pre]:m-0 [&_pre]:bg-transparent! [&_pre]:p-0 [&_pre]:font-mono [&_pre]:text-sm [&_pre]:leading-relaxed [&_.json-inspector-url]:text-link [&_.json-inspector-url]:hover:underline [&_.json-inspector-url]:underline-offset-2 {wrapClass === 'whitespace-pre-wrap break-all' ? '[&_pre]:whitespace-pre-wrap [&_pre]:break-all' : '[&_pre]:whitespace-pre'}"
+        >
+          {@html html}
+        </div>
+      {/if}
+    </div>
+  {/if}
 </div>
 
 <!-- context menu — portalled to body to escape will-change:transform on DataTable -->

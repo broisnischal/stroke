@@ -4,6 +4,8 @@
   import Copy from '@lucide/svelte/icons/copy'
   import CheckCheck from '@lucide/svelte/icons/check-check'
   import Braces from '@lucide/svelte/icons/braces'
+  import TriangleAlert from '@lucide/svelte/icons/triangle-alert'
+  import { oversizeCellInfo, formatByteSize } from '$lib/cell-value.js'
   import * as monaco from 'monaco-editor'
   import { configureMonacoWorkers, editorFontFamily } from '$lib/monaco-env.js'
   import { defineStrokeMonacoThemes, monacoThemeId, readEditorFontOptions } from '$lib/monaco-themes.js'
@@ -17,7 +19,17 @@
    */
   let { data = null, onclose } = $props()
 
-  const jsonString = $derived(data ? JSON.stringify(data.value, null, 2) : '')
+  // Oversized cells arrive as a backend sentinel carrying only a preview —
+  // show that preview directly instead of pretty-printing the sentinel wrapper.
+  const oversize = $derived(data ? oversizeCellInfo(data.value) : null)
+  const jsonString = $derived.by(() => {
+    if (!data) return ''
+    if (oversize) return oversize.preview
+    const s = JSON.stringify(data.value, null, 2)
+    // Defensive cap for engines without backend cell capping — Monaco chokes
+    // on multi-MB documents created synchronously on the main thread.
+    return s.length > 2_000_000 ? s.slice(0, 2_000_000) + '\n… [truncated]' : s
+  })
 
   /** @type {HTMLElement | null} */
   let container = $state(null)
@@ -174,6 +186,15 @@
           </button>
         </div>
       </div>
+      {#if oversize}
+        <div class="flex shrink-0 items-center gap-2 border-b border-border/50 bg-amber-500/10 px-4 py-1.5 text-ui-xs text-amber-600 dark:text-amber-400">
+          <TriangleAlert class="size-3.5 shrink-0" />
+          <span>
+            Truncated preview — full value is {formatByteSize(oversize.bytes)}{oversize.dataType ? ` (${oversize.dataType})` : ''}.
+            Query it with SQL to retrieve it in full.
+          </span>
+        </div>
+      {/if}
       <!-- Monaco editor fills the remaining space -->
       <div class="min-h-0 flex-1 overflow-hidden">
         <div bind:this={container} class="h-full w-full"></div>

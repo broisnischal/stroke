@@ -17,17 +17,35 @@ pub fn cell_to_json(row: &sqlx::sqlite::SqliteRow, idx: usize) -> Value {
         return v.map(|n| json!(n)).unwrap_or(Value::Null);
     }
     if let Ok(v) = row.try_get::<Option<String>, _>(idx) {
-        return v.map(|s| json!(s)).unwrap_or(Value::Null);
+        return match v {
+            // Cap oversized text/JSON — a multi-MB cell shipped whole freezes
+            // the webview (see sql_util::CELL_VALUE_CAP).
+            Some(s) if s.len() > super::sql_util::CELL_VALUE_CAP => {
+                super::sql_util::oversize_cell(&col_type(row, idx), s.len(), s.as_bytes())
+            }
+            Some(s) => json!(s),
+            None => Value::Null,
+        };
     }
     if let Ok(v) = row.try_get::<Option<Vec<u8>>, _>(idx) {
-        return v
-            .map(|b| Value::String(b.iter().map(|x| format!("{x:02x}")).collect()))
-            .unwrap_or(Value::Null);
+        return match v {
+            // Hex display doubles the byte count — cap blobs the same way so a
+            // file stored in a blob column can't ship megabytes of hex.
+            Some(b) if b.len() * 2 > super::sql_util::CELL_VALUE_CAP => {
+                let head: String = b
+                    .iter()
+                    .take(super::sql_util::CELL_PREVIEW_BYTES / 2)
+                    .map(|x| format!("{x:02x}"))
+                    .collect();
+                super::sql_util::oversize_cell("blob", b.len(), head.as_bytes())
+            }
+            Some(b) => Value::String(b.iter().map(|x| format!("{x:02x}")).collect()),
+            None => Value::Null,
+        };
     }
     Value::Null
 }
 
-#[allow(dead_code)]
 fn col_type(row: &sqlx::sqlite::SqliteRow, idx: usize) -> String {
     row.column(idx).type_info().name().to_lowercase()
 }
