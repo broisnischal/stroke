@@ -4,6 +4,12 @@ All notable changes to Stroke are listed here, newest first.
 
 ---
 
+## [1.1.0] - 2026-07-03
+
+### Changes
+- feat:: working on improvement, better sql editor, a11y,  new releases and more,  (#15)
+
+
 ## [1.0.0] - 2026-07-01
 
 ### Changes
