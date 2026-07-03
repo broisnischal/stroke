@@ -8,8 +8,6 @@
   import Eye from "@lucide/svelte/icons/eye";
   import Layers from "@lucide/svelte/icons/layers";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
-  import ChevronRight from "@lucide/svelte/icons/chevron-right";
-  import Loader2 from "@lucide/svelte/icons/loader-2";
   import Columns3 from "@lucide/svelte/icons/columns-3";
   import ListFilter from "@lucide/svelte/icons/list-filter";
   import Lock from "@lucide/svelte/icons/lock";
@@ -44,7 +42,6 @@
   import ResizeHandle from "./ResizeHandle.svelte";
   import { cn } from "$lib/utils.js";
   import { formatTableRowCount } from "$lib/table-list.js";
-  import { getTableColumnStructure } from "$lib/api.js";
   import {
     clampNavSidebarWidth,
     loadLayout,
@@ -91,76 +88,6 @@
     /** Open the table with its structure view active. */
     onviewstructure = /** @type {(table: string) => void} */ (() => {}),
   } = $props();
-
-  // ── Inline column expansion (chevron on table rows) ─────────────────────────
-  /** @type {Set<string>} table names expanded in the current schema */
-  let expandedTables = $state(new Set());
-  /** @type {Map<string, Array<{name:string, dataType:string}> | 'loading' | 'error'>} keyed by "schema.table" */
-  let expandedColumnsCache = $state(new Map());
-
-  /** @param {string} tableName */
-  async function toggleExpand(tableName) {
-    const next = new Set(expandedTables);
-    if (next.has(tableName)) {
-      next.delete(tableName);
-      expandedTables = next;
-      return;
-    }
-    next.add(tableName);
-    expandedTables = next;
-    const key = `${activeSchema}.${tableName}`;
-    if (expandedColumnsCache.has(key) && expandedColumnsCache.get(key) !== 'error') return;
-    expandedColumnsCache = new Map(expandedColumnsCache).set(key, 'loading');
-    try {
-      const cols = await getTableColumnStructure(activeSchema, tableName);
-      expandedColumnsCache = new Map(expandedColumnsCache).set(
-        key,
-        cols.map((c) => ({ name: c.name, dataType: c.dataType ?? '' })),
-      );
-    } catch {
-      expandedColumnsCache = new Map(expandedColumnsCache).set(key, 'error');
-    }
-  }
-
-  // Collapse everything when the schema changes — names refer to other tables now
-  $effect(() => {
-    activeSchema;
-    untrack(() => {
-      expandedTables = new Set();
-      expandedHeights = new Map();
-    });
-  });
-
-  /**
-   * Measured pixel height of each expanded row's inline column list, keyed by
-   * table name. Lets the virtual list keep working while rows are expanded:
-   * collapsed rows use the fixed ROW_H stride, expanded rows add their real
-   * rendered height. Measurements persist after a row scrolls out of the
-   * render window so the spacer math stays stable.
-   * @type {Map<string, number>}
-   */
-  let expandedHeights = $state(new Map());
-
-  /** @param {string} name @param {number} h */
-  function setExpandedHeight(name, h) {
-    if (h <= 0 || expandedHeights.get(name) === h) return;
-    const next = new Map(expandedHeights);
-    next.set(name, h);
-    expandedHeights = next;
-  }
-
-  /**
-   * Svelte action: keep the expanded column list's height in expandedHeights.
-   * offsetHeight is exact because the list uses padding (not margins) for its
-   * outer spacing.
-   * @param {HTMLElement} node @param {string} name
-   */
-  function measureExpanded(node, name) {
-    setExpandedHeight(name, node.offsetHeight);
-    const ro = new ResizeObserver(() => setExpandedHeight(name, node.offsetHeight));
-    ro.observe(node);
-    return { destroy: () => ro.disconnect() };
-  }
 
   const openTableSet = $derived(new Set(openTables))
 
@@ -514,78 +441,17 @@
 
   const shouldVirtualize = $derived(filteredRegularTables.length > VIRT_THRESHOLD)
 
-  /** Fallback extra height for an expanded row that hasn't been measured yet
-   *  (only reachable in exotic cases — expanding mounts the row, which measures
-   *  immediately). Roughly one "Loading columns…" line. */
-  const EXPANDED_FALLBACK_H = 26
-
-  /**
-   * Expanded rows within the filtered list, ascending by index, with the extra
-   * height their inline column list adds beyond the fixed ROW_H stride.
-   * Usually 0-3 entries, so the per-scroll window math below stays O(expanded)
-   * rather than O(tables).
-   */
-  const expandedExtras = $derived.by(() => {
-    if (expandedTables.size === 0) return /** @type {{ i: number, extra: number }[]} */ ([])
-    const out = []
-    for (let i = 0; i < filteredRegularTables.length; i++) {
-      const name = filteredRegularTables[i].name
-      if (expandedTables.has(name)) {
-        out.push({ i, extra: expandedHeights.get(name) ?? EXPANDED_FALLBACK_H })
-      }
-    }
-    return out
-  })
-
   const virtStart = $derived.by(() => {
     if (!shouldVirtualize) return 0
-    const y = sidebarScrollTop - tableListOffsetTop
-    // Subtract the extra height of expanded blocks that sit fully above y.
-    // If y lands INSIDE an expanded block (its tall column list), cap the
-    // start at that row so it stays mounted while any part of it is visible.
-    let acc = 0
-    let cap = Infinity
-    for (const { i, extra } of expandedExtras) {
-      const top = i * ROW_H + acc
-      if (top + ROW_H + extra <= y) {
-        acc += extra
-      } else {
-        if (top <= y) cap = i
-        break
-      }
-    }
-    const idx = Math.min(cap, Math.floor((y - acc) / ROW_H))
-    return Math.max(0, idx - VIRT_BUFFER)
+    return Math.max(0, Math.floor((sidebarScrollTop - tableListOffsetTop) / ROW_H) - VIRT_BUFFER)
   })
   const virtEnd = $derived.by(() => {
     if (!shouldVirtualize) return filteredRegularTables.length
-    const y2 = sidebarScrollTop + sidebarHeight - tableListOffsetTop
-    // Expanded blocks starting above the viewport bottom push later rows down,
-    // so fewer fixed-stride rows fit — fold their extra height out of y2.
-    // minEnd keeps a block that straddles the bottom edge mounted.
-    let acc = 0
-    let minEnd = 0
-    for (const { i, extra } of expandedExtras) {
-      if (i * ROW_H + acc <= y2) {
-        acc += extra
-        minEnd = i + 1
-      } else break
-    }
-    const end = Math.max(minEnd, Math.ceil((y2 - acc) / ROW_H)) + VIRT_BUFFER
+    const end = Math.ceil((sidebarScrollTop + sidebarHeight - tableListOffsetTop) / ROW_H) + VIRT_BUFFER
     return Math.min(filteredRegularTables.length, end)
   })
-  const virtTopPad = $derived.by(() => {
-    if (!shouldVirtualize) return 0
-    let extra = 0
-    for (const e of expandedExtras) { if (e.i < virtStart) extra += e.extra; else break }
-    return virtStart * ROW_H + extra
-  })
-  const virtBotPad = $derived.by(() => {
-    if (!shouldVirtualize) return 0
-    let extra = 0
-    for (const e of expandedExtras) { if (e.i >= virtEnd) extra += e.extra }
-    return Math.max(0, (filteredRegularTables.length - virtEnd) * ROW_H + extra)
-  })
+  const virtTopPad  = $derived(shouldVirtualize ? virtStart * ROW_H : 0)
+  const virtBotPad  = $derived(shouldVirtualize ? Math.max(0, (filteredRegularTables.length - virtEnd) * ROW_H) : 0)
 
   /** Shared field chrome for schema select + table filter (aligned in sidebar grid) */
   const sidebarFieldClass =
@@ -1145,14 +1011,13 @@
                   {#if virtTopPad > 0}<li style="height:{virtTopPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
                   {#each filteredRegularTables.slice(virtStart, virtEnd) as table (table.name)}
                     {@const isSelected = selectedItems.has(table.name)}
-                    {@const isExpanded = expandedTables.has(table.name)}
                     <li>
                       <ContextMenu.Root>
                         <ContextMenu.Trigger class="w-full">
                           <button
                             type="button"
                             class={cn(
-                              "group grid w-full grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-x-1.5 rounded-md py-1.5 pl-0.5 pr-2 text-left transition-colors",
+                              "group grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 text-left transition-colors",
                               isSelected
                                 ? "bg-primary/10 text-foreground"
                                 : activeTable === table.name
@@ -1165,18 +1030,6 @@
                               else ontableselect(table.name)
                             }}
                           >
-                            <span
-                              class="inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-muted/60 hover:text-foreground"
-                              onclick={(e) => { e.stopPropagation(); void toggleExpand(table.name) }}
-                              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); void toggleExpand(table.name) } }}
-                              role="button"
-                              aria-expanded={isExpanded}
-                              aria-label="{isExpanded ? 'Collapse' : 'Expand'} columns"
-                              tabindex="-1"
-                              title="{isExpanded ? 'Hide' : 'Show'} columns"
-                            >
-                              <ChevronRight class={cn("size-3 transition-transform duration-150", isExpanded && "rotate-90")} />
-                            </span>
                             <span
                               class="relative size-3 shrink-0"
                               onclick={(e) => { e.stopPropagation(); selectItem(table.name, e.shiftKey) }}
@@ -1298,35 +1151,6 @@
                           {/if}
                         </ContextMenu.Content>
                       </ContextMenu.Root>
-
-                      <!-- Inline column list (chevron-expanded) -->
-                      {#if isExpanded}
-                        {@const colState = expandedColumnsCache.get(`${activeSchema}.${table.name}`)}
-                        <!-- Outer spacing is padding (not margin) so offsetHeight —
-                             which drives the virtual-list math — captures it exactly. -->
-                        <ul
-                          use:measureExpanded={table.name}
-                          class="ml-[19px] flex flex-col border-l border-border/40 pt-0.5 pb-1 pl-1.5"
-                        >
-                          {#if colState === 'loading' || colState === undefined}
-                            <li class="flex items-center gap-1.5 px-1.5 py-1 text-ui-2xs text-muted-foreground/50">
-                              <Loader2 class="size-3 animate-spin" />
-                              Loading columns…
-                            </li>
-                          {:else if colState === 'error'}
-                            <li class="px-1.5 py-1 text-ui-2xs text-destructive/70">Could not load columns</li>
-                          {:else if colState.length === 0}
-                            <li class="px-1.5 py-1 text-ui-2xs text-muted-foreground/50">No columns</li>
-                          {:else}
-                            {#each colState as col (col.name)}
-                              <li class="flex items-baseline justify-between gap-2 rounded px-1.5 py-[3px] transition-colors hover:bg-sidebar-accent/40">
-                                <span class="min-w-0 truncate font-mono text-ui-xs text-muted-foreground">{col.name}</span>
-                                <span class="shrink-0 font-mono text-ui-2xs uppercase tracking-tight text-muted-foreground/45">{col.dataType}</span>
-                              </li>
-                            {/each}
-                          {/if}
-                        </ul>
-                      {/if}
                     </li>
                   {/each}
                   {#if virtBotPad > 0}<li style="height:{virtBotPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
