@@ -245,6 +245,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   /** Column whose quick-stats panel is open, or null. */
   let statsCol = $state(/** @type {string | null} */ (null))
 
+  /**
+   * True when the grid shows a real table (schema/table known). Ad-hoc result
+   * sets (SQL console, embedded AI results) have no table identity, so actions
+   * that query or mutate the source table — column stats, filter by value/
+   * column, edit, duplicate, delete — are hidden.
+   */
+  const hasTableContext = $derived(!!tableName)
+
   let contextRowIdx = $state(0);
   let contextColIdx = $state(0);
   let contextMenuOpen = $state(false);
@@ -550,7 +558,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const col = geom.cols.find((c) => c.name === name)
     if (!col) return
     if (tableContainer && !col.pinned) {
-      // Left edge of the scrollable area is occluded by the gutters + pinned cols.
+      // Left edge of the scrollable area is occluded by the frozen pinned cols.
       const frozen = geom.frozenWidth
       const PAD = 28
       const vLeft = col.contentX - _scrollLeft
@@ -1542,21 +1550,24 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   const resizeHandles = $derived.by(() => {
     /** @type {{ name: string, x: number }[]} */
     const out = []
+    // Handles hidden behind the frozen pinned region are dropped — except the
+    // pinned columns' own edges, which are what defines that region.
+    const occludeLeft = geom.frozenWidth
     for (const col of geom.cols) {
       const x = colDrawnX(col, geom, _scrollLeft) + col.w
-      if (x < gutterWidth - 6 || x > _viewportWidth + 6) continue
+      if ((!col.pinned && x < occludeLeft - 6) || x > _viewportWidth + 6) continue
       out.push({ name: col.name, x })
     }
     // Virtual expr column resize handles
     for (const vc of _vexprLayout) {
       const x = vc.x + vc.w - _scrollLeft
-      if (x < gutterWidth - 6 || x > _viewportWidth + 6) continue
+      if (x < occludeLeft - 6 || x > _viewportWidth + 6) continue
       out.push({ name: `__vcol__${vc.id}`, x })
     }
     // Virtual rel column resize handles (right edge of each virtual col)
     for (let vi = 0; vi < virtualRelCols.length; vi++) {
       const x = geom.totalWidth + vexprTotalW + (vi + 1) * VIRTUAL_COL_W - _scrollLeft
-      if (x < gutterWidth - 6 || x > _viewportWidth + 6) continue
+      if (x < occludeLeft - 6 || x > _viewportWidth + 6) continue
       out.push({ name: `__vrel__${vi}`, x })
     }
     return out
@@ -3456,7 +3467,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const top = HEADER_H + insertRowOffset + (rowTops[editingCell.rowIdx] ?? 0)
     // Pinned columns rest at their frozen x (content-space = scrollLeft + fixed).
     const left = col.pinned
-      ? _scrollLeft + (geom.pinnedFixedX.get(col.name) ?? geom.gutterWidth)
+      ? Math.max(col.contentX, _scrollLeft + (geom.pinnedFixedX.get(col.name) ?? 0))
       : col.contentX
     return { top, left, width: col.w, height: ROW_HEIGHT }
   })
@@ -3916,11 +3927,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             Clear sort
           </ContextMenu.Item>
         {/if}
-        <ContextMenu.Separator />
-        <ContextMenu.Item onSelect={() => runMenuAction(() => onfiltercolumn(hcol))}>
-          <ListFilter />
-          Filter by this column
-        </ContextMenu.Item>
+        {#if hasTableContext}
+          <ContextMenu.Separator />
+          <ContextMenu.Item onSelect={() => runMenuAction(() => onfiltercolumn(hcol))}>
+            <ListFilter />
+            Filter by this column
+          </ContextMenu.Item>
+        {/if}
         <ContextMenu.Separator />
         <ContextMenu.Item onSelect={() => runMenuAction(() => toggleColumnPin(hcol))}>
           {#if hPinned}<PinOff />Unpin column{:else}<Pin />Pin column{/if}
@@ -3934,12 +3947,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           <RotateCcw />
           Reset column width
         </ContextMenu.Item>
-        <ContextMenu.Separator />
-        <ContextMenu.Item onSelect={() => runMenuAction(() => { statsCol = statsCol === hcol ? null : hcol })}>
-          <BarChart2 />
-          Column stats
-          {#if statsCol === hcol}<span class="ml-auto text-[10px] text-primary">✓</span>{/if}
-        </ContextMenu.Item>
+        {#if hasTableContext}
+          <ContextMenu.Separator />
+          <ContextMenu.Item onSelect={() => runMenuAction(() => { statsCol = statsCol === hcol ? null : hcol })}>
+            <BarChart2 />
+            Column stats
+            {#if statsCol === hcol}<span class="ml-auto text-[10px] text-primary">✓</span>{/if}
+          </ContextMenu.Item>
+        {/if}
       {:else}
         <ContextMenu.Item onSelect={() => runMenuAction(() => openInInspector(contextRowIdx))}>
           <PanelRight />
@@ -3967,34 +3982,38 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           {#if menuColPinned}<PinOff />Unpin column{:else}<Pin />Pin column{/if}
         </ContextMenu.Item>
         <ContextMenu.Separator />
-        <ContextMenu.Item
-          disabled={!menuEditable || readonly}
-          onSelect={() => runMenuAction(() => startEdit(contextRowIdx, contextColIdx))}
-        >
-          <Pencil />
-          Edit
-          <ContextMenu.Shortcut>Enter</ContextMenu.Shortcut>
-        </ContextMenu.Item>
+        {#if hasTableContext}
+          <ContextMenu.Item
+            disabled={!menuEditable || readonly}
+            onSelect={() => runMenuAction(() => startEdit(contextRowIdx, contextColIdx))}
+          >
+            <Pencil />
+            Edit
+            <ContextMenu.Shortcut>Enter</ContextMenu.Shortcut>
+          </ContextMenu.Item>
+        {/if}
         <ContextMenu.Item onSelect={() => runMenuAction(() => copyCellValue(contextRowIdx, contextColIdx))}>
           <Copy />
           Copy
           <ContextMenu.Shortcut>⌘C</ContextMenu.Shortcut>
         </ContextMenu.Item>
-        <ContextMenu.Item onSelect={() => runMenuAction(() => onfilterbyvalue(menuColName, rows[contextRowIdx]?.[contextColIdx]))}>
-          <ListFilter />
-          {menuCellNull ? 'Filter: is NULL' : 'Filter by value'}
-        </ContextMenu.Item>
-        <ContextMenu.Item onSelect={() => runMenuAction(() => onfilterbyvalue(menuColName, rows[contextRowIdx]?.[contextColIdx], true))}>
-          <FilterX />
-          {menuCellNull ? 'Exclude: not NULL' : 'Exclude this value'}
-        </ContextMenu.Item>
-        <ContextMenu.Item
-          disabled={!menuEditable || menuCellNull || readonly}
-          onSelect={() => runMenuAction(() => setCellNull(contextRowIdx, contextColIdx))}
-        >
-          <CircleSlash />
-          Set NULL
-        </ContextMenu.Item>
+        {#if hasTableContext}
+          <ContextMenu.Item onSelect={() => runMenuAction(() => onfilterbyvalue(menuColName, rows[contextRowIdx]?.[contextColIdx]))}>
+            <ListFilter />
+            {menuCellNull ? 'Filter: is NULL' : 'Filter by value'}
+          </ContextMenu.Item>
+          <ContextMenu.Item onSelect={() => runMenuAction(() => onfilterbyvalue(menuColName, rows[contextRowIdx]?.[contextColIdx], true))}>
+            <FilterX />
+            {menuCellNull ? 'Exclude: not NULL' : 'Exclude this value'}
+          </ContextMenu.Item>
+          <ContextMenu.Item
+            disabled={!menuEditable || menuCellNull || readonly}
+            onSelect={() => runMenuAction(() => setCellNull(contextRowIdx, contextColIdx))}
+          >
+            <CircleSlash />
+            Set NULL
+          </ContextMenu.Item>
+        {/if}
         {#if showRowExpand}
           <ContextMenu.Item onSelect={() => runMenuAction(() => toggleRowExpand(contextRowIdx))}>
             <Braces />
@@ -4018,7 +4037,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             </ContextMenu.SubContent>
           </ContextMenu.Sub>
         {/if}
-        {#if menuGenerators.length > 0 && menuEditable && !readonly}
+        {#if menuGenerators.length > 0 && menuEditable && !readonly && hasTableContext}
           {#if menuTransforms.length === 0}<ContextMenu.Separator />{/if}
           <ContextMenu.Sub>
             <ContextMenu.SubTrigger>
@@ -4058,17 +4077,20 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               <Copy />
               Markdown table
             </ContextMenu.Item>
-            <ContextMenu.Separator />
-            <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'insert'))}>
-              <Copy />
-              INSERT statement
-            </ContextMenu.Item>
+            {#if hasTableContext}
+              <ContextMenu.Separator />
+              <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'insert'))}>
+                <Copy />
+                INSERT statement
+              </ContextMenu.Item>
+            {/if}
           </ContextMenu.SubContent>
         </ContextMenu.Sub>
         <ContextMenu.Item onSelect={() => runMenuAction(() => toggleRow(contextRowIdx))}>
           <CheckSquare />
           {selected.has(contextRowIdx) ? "Deselect row" : "Select row"}
         </ContextMenu.Item>
+        {#if hasTableContext}
         <ContextMenu.Item
           disabled={readonly}
           onSelect={() => runMenuAction(() => duplicateRow(contextRowIdx))}
@@ -4106,13 +4128,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               : "Delete row"}
           <ContextMenu.Shortcut>⌘⌫</ContextMenu.Shortcut>
         </ContextMenu.Item>
+        {/if}
       {/if}
     </ContextMenu.Content>
   </ContextMenu.Root>
 {/if}
 </div>
 
-{#if statsCol}
+{#if statsCol && hasTableContext}
   {@const statsColInfo = columns.find(c => c.name === statsCol)}
   <ColumnStatsPanel
     {schema}

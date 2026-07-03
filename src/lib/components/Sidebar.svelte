@@ -20,7 +20,6 @@
   import Code2 from "@lucide/svelte/icons/code-2";
   import FileDown from "@lucide/svelte/icons/file-down";
   import Download from "@lucide/svelte/icons/download";
-  import Sparkles from "@lucide/svelte/icons/sparkles";
   import ClipboardCopy from "@lucide/svelte/icons/clipboard-copy";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
@@ -86,7 +85,6 @@
     onviewddl = /** @type {(table: string) => void} */ (() => {}),
     onexportsql = /** @type {(table: string) => void} */ (() => {}),
     onexportdata = /** @type {(table: string) => void} */ (() => {}),
-    ongeneratetestdata = /** @type {(table: string) => void} */ (() => {}),
     /** Names of tables that currently have an open tab (current schema). @type {string[]} */
     openTables = [],
     onclosetable = /** @type {(table: string) => void} */ (() => {}),
@@ -129,8 +127,40 @@
     activeSchema;
     untrack(() => {
       expandedTables = new Set();
+      expandedHeights = new Map();
     });
   });
+
+  /**
+   * Measured pixel height of each expanded row's inline column list, keyed by
+   * table name. Lets the virtual list keep working while rows are expanded:
+   * collapsed rows use the fixed ROW_H stride, expanded rows add their real
+   * rendered height. Measurements persist after a row scrolls out of the
+   * render window so the spacer math stays stable.
+   * @type {Map<string, number>}
+   */
+  let expandedHeights = $state(new Map());
+
+  /** @param {string} name @param {number} h */
+  function setExpandedHeight(name, h) {
+    if (h <= 0 || expandedHeights.get(name) === h) return;
+    const next = new Map(expandedHeights);
+    next.set(name, h);
+    expandedHeights = next;
+  }
+
+  /**
+   * Svelte action: keep the expanded column list's height in expandedHeights.
+   * offsetHeight is exact because the list uses padding (not margins) for its
+   * outer spacing.
+   * @param {HTMLElement} node @param {string} name
+   */
+  function measureExpanded(node, name) {
+    setExpandedHeight(name, node.offsetHeight);
+    const ro = new ResizeObserver(() => setExpandedHeight(name, node.offsetHeight));
+    ro.observe(node);
+    return { destroy: () => ro.disconnect() };
+  }
 
   const openTableSet = $derived(new Set(openTables))
 
@@ -482,21 +512,80 @@
     tableListOffsetTop = off
   })
 
-  // Expanded rows have variable height, which breaks the fixed-stride spacer
-  // math — fall back to full rendering while anything is expanded.
-  const shouldVirtualize = $derived(filteredRegularTables.length > VIRT_THRESHOLD && expandedTables.size === 0)
+  const shouldVirtualize = $derived(filteredRegularTables.length > VIRT_THRESHOLD)
+
+  /** Fallback extra height for an expanded row that hasn't been measured yet
+   *  (only reachable in exotic cases — expanding mounts the row, which measures
+   *  immediately). Roughly one "Loading columns…" line. */
+  const EXPANDED_FALLBACK_H = 26
+
+  /**
+   * Expanded rows within the filtered list, ascending by index, with the extra
+   * height their inline column list adds beyond the fixed ROW_H stride.
+   * Usually 0-3 entries, so the per-scroll window math below stays O(expanded)
+   * rather than O(tables).
+   */
+  const expandedExtras = $derived.by(() => {
+    if (expandedTables.size === 0) return /** @type {{ i: number, extra: number }[]} */ ([])
+    const out = []
+    for (let i = 0; i < filteredRegularTables.length; i++) {
+      const name = filteredRegularTables[i].name
+      if (expandedTables.has(name)) {
+        out.push({ i, extra: expandedHeights.get(name) ?? EXPANDED_FALLBACK_H })
+      }
+    }
+    return out
+  })
 
   const virtStart = $derived.by(() => {
     if (!shouldVirtualize) return 0
-    return Math.max(0, Math.floor((sidebarScrollTop - tableListOffsetTop) / ROW_H) - VIRT_BUFFER)
+    const y = sidebarScrollTop - tableListOffsetTop
+    // Subtract the extra height of expanded blocks that sit fully above y.
+    // If y lands INSIDE an expanded block (its tall column list), cap the
+    // start at that row so it stays mounted while any part of it is visible.
+    let acc = 0
+    let cap = Infinity
+    for (const { i, extra } of expandedExtras) {
+      const top = i * ROW_H + acc
+      if (top + ROW_H + extra <= y) {
+        acc += extra
+      } else {
+        if (top <= y) cap = i
+        break
+      }
+    }
+    const idx = Math.min(cap, Math.floor((y - acc) / ROW_H))
+    return Math.max(0, idx - VIRT_BUFFER)
   })
   const virtEnd = $derived.by(() => {
     if (!shouldVirtualize) return filteredRegularTables.length
-    const end = Math.ceil((sidebarScrollTop + sidebarHeight - tableListOffsetTop) / ROW_H) + VIRT_BUFFER
+    const y2 = sidebarScrollTop + sidebarHeight - tableListOffsetTop
+    // Expanded blocks starting above the viewport bottom push later rows down,
+    // so fewer fixed-stride rows fit — fold their extra height out of y2.
+    // minEnd keeps a block that straddles the bottom edge mounted.
+    let acc = 0
+    let minEnd = 0
+    for (const { i, extra } of expandedExtras) {
+      if (i * ROW_H + acc <= y2) {
+        acc += extra
+        minEnd = i + 1
+      } else break
+    }
+    const end = Math.max(minEnd, Math.ceil((y2 - acc) / ROW_H)) + VIRT_BUFFER
     return Math.min(filteredRegularTables.length, end)
   })
-  const virtTopPad  = $derived(shouldVirtualize ? virtStart * ROW_H : 0)
-  const virtBotPad  = $derived(shouldVirtualize ? Math.max(0, (filteredRegularTables.length - virtEnd) * ROW_H) : 0)
+  const virtTopPad = $derived.by(() => {
+    if (!shouldVirtualize) return 0
+    let extra = 0
+    for (const e of expandedExtras) { if (e.i < virtStart) extra += e.extra; else break }
+    return virtStart * ROW_H + extra
+  })
+  const virtBotPad = $derived.by(() => {
+    if (!shouldVirtualize) return 0
+    let extra = 0
+    for (const e of expandedExtras) { if (e.i >= virtEnd) extra += e.extra }
+    return Math.max(0, (filteredRegularTables.length - virtEnd) * ROW_H + extra)
+  })
 
   /** Shared field chrome for schema select + table filter (aligned in sidebar grid) */
   const sidebarFieldClass =
@@ -988,11 +1077,6 @@
                           <Download />
                           Export data
                         </ContextMenu.Item>
-                        <ContextMenu.Separator />
-                        <ContextMenu.Item onSelect={() => ongeneratetestdata(tableName)}>
-                          <Sparkles />
-                          Generate test data
-                        </ContextMenu.Item>
                         {/if}
                       </ContextMenu.Content>
                     </ContextMenu.Root>
@@ -1115,8 +1199,10 @@
                               {/if}
                             </span>
                             {#if showRowCount}
+                            <!-- Fixed min-width so the column doesn't grow (shifting
+                                 every row) when lazy counts resolve from '…' to numbers. -->
                             <span
-                              class="shrink-0 text-right font-mono text-ui-xs leading-none tabular-nums text-muted-foreground"
+                              class="min-w-[4ch] shrink-0 text-right font-mono text-ui-xs leading-none tabular-nums text-muted-foreground"
                               title={table.rowCount != null ? Number(table.rowCount).toLocaleString("en-US") : undefined}
                             >{formatTableRowCount(table.rowCount)}</span>
                             {/if}
@@ -1201,11 +1287,6 @@
                             Export data
                           </ContextMenu.Item>
                           <ContextMenu.Separator />
-                          <ContextMenu.Item onSelect={() => ongeneratetestdata(table.name)}>
-                            <Sparkles />
-                            Generate test data
-                          </ContextMenu.Item>
-                          <ContextMenu.Separator />
                           <ContextMenu.Item onSelect={() => openDangerDialog('truncate', table.name)}>
                             <Eraser />
                             Truncate table
@@ -1221,7 +1302,12 @@
                       <!-- Inline column list (chevron-expanded) -->
                       {#if isExpanded}
                         {@const colState = expandedColumnsCache.get(`${activeSchema}.${table.name}`)}
-                        <ul class="mb-0.5 ml-[19px] flex flex-col border-l border-border/40 py-0.5 pl-1.5">
+                        <!-- Outer spacing is padding (not margin) so offsetHeight —
+                             which drives the virtual-list math — captures it exactly. -->
+                        <ul
+                          use:measureExpanded={table.name}
+                          class="ml-[19px] flex flex-col border-l border-border/40 pt-0.5 pb-1 pl-1.5"
+                        >
                           {#if colState === 'loading' || colState === undefined}
                             <li class="flex items-center gap-1.5 px-1.5 py-1 text-ui-2xs text-muted-foreground/50">
                               <Loader2 class="size-3 animate-spin" />

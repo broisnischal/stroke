@@ -3,6 +3,8 @@
  * @param {number | string | null | undefined} count
  */
 export function formatCompactCount(count) {
+  // null = count still being resolved in the background (see normalizeTableRowCount)
+  if (count === null) return '…'
   const n = Number(count)
   if (!Number.isFinite(n)) return '—'
 
@@ -35,10 +37,14 @@ export function formatTableRowCount(count) {
 }
 
 /**
+ * Backend reports -1 when a table's row count wasn't resolved yet (it arrives
+ * later via getTableRowCounts). Map that to null so the UI can tell
+ * "still counting" apart from a genuinely empty table.
  * @param {number | string | null | undefined} count
+ * @returns {number | null}
  */
 export function normalizeTableRowCount(count) {
   const n = Number(count)
-  if (!Number.isFinite(n) || n < 0) return 0
+  if (!Number.isFinite(n) || n < 0) return null
   return n
 }

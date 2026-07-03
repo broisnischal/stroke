@@ -1,6 +1,6 @@
 /** @typedef {'light' | 'dark'} ThemeGroup */
 
-/** @typedef {'light' | 'parchment' | 'ice' | 'github-light' | 'dark' | 'midnight' | 'vitesse' | 'slate' | 'forest' | 'mono' | 'rose-pine' | 'catppuccin' | 'solarized'} ThemeId */
+/** @typedef {'light' | 'parchment' | 'ice' | 'github-light' | 'dark' | 'graphite' | 'midnight' | 'vitesse' | 'slate' | 'forest' | 'mono' | 'rose-pine' | 'catppuccin' | 'solarized'} ThemeId */
 
 /** @typedef {{ id: ThemeId, name: string, description: string, isDark: boolean, group: ThemeGroup, preview: { bg: string, fg: string, accent: string } }} ThemeDefinition */
 
@@ -58,6 +58,14 @@ export const APP_THEMES = [
     isDark: true,
     group: 'dark',
     preview: { bg: '#1c1c1c', fg: '#f0f0f0', accent: '#f0f0f0' },
+  },
+  {
+    id: 'graphite',
+    name: 'Graphite',
+    description: 'Cool graphite, blue accent',
+    isDark: true,
+    group: 'dark',
+    preview: { bg: '#1e1f22', fg: '#dfe1e5', accent: '#3574f0' },
   },
   {
     id: 'midnight',
@@ -197,6 +205,14 @@ export function mermaidThemeFor(id) {
       line: '#404040',
       accent: '#f0f0f0',
       border: '#333333',
+    },
+    graphite: {
+      bg: '#1e1f22',
+      fg: '#dfe1e5',
+      muted: '#9da1a8',
+      line: '#37393e',
+      accent: '#3574f0',
+      border: '#37393e',
     },
     midnight: {
       bg: '#0f1520',

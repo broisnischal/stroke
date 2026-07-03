@@ -443,3 +443,39 @@ html[data-theme="solarized"] {
   --editor-surface:           #002b36;
   --editor-line-highlight:    #073642;
 }
+
+/* ── Graphite — cool JetBrains-style graphite, restrained blue accent ──
+   Flat surfaces: content #1e1f22, chrome a step darker, raised menus lighter.
+   Separation comes from hairline borders; blue is reserved for primary/
+   selection/focus so data (syntax colors, statuses) is the only other color. */
+html[data-theme="graphite"] {
+  --background:               #1e1f22;
+  --foreground:               #dfe1e5;
+  --card:                     #26282c;
+  --card-foreground:          #dfe1e5;
+  --popover:                  #26282c;
+  --popover-foreground:       #dfe1e5;
+  --primary:                  #3574f0;
+  --primary-foreground:       #ffffff;
+  --secondary:                #2b2d31;
+  --secondary-foreground:     #d3d5da;
+  --muted:                    #2b2d31;
+  --muted-foreground:         #9da1a8;
+  --accent:                   #313438;
+  --accent-foreground:        #eceef2;
+  --destructive:              #e5534b;
+  --border:                   #37393e;
+  --input:                    #3c3e44;
+  --ring:                     #3574f0;
+  --sidebar:                  #1b1c1f;
+  --sidebar-foreground:       #d3d5da;
+  --sidebar-accent:           #2b2d31;
+  --sidebar-accent-foreground:#eceef2;
+  --sidebar-border:           #313337;
+  --panel:                    #1e1f22;
+  --table-grid:               #2e3034;
+  --link:                     #548af7;
+  --link-hover:               #7ba4f9;
+  --editor-surface:           #1e1f22;
+  --editor-line-highlight:    #26282d;
+}

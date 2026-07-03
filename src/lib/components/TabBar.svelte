@@ -11,6 +11,7 @@
   import Layers from '@lucide/svelte/icons/layers'
   import Search from '@lucide/svelte/icons/search'
   import Blocks from '@lucide/svelte/icons/blocks'
+  import KeyRound from '@lucide/svelte/icons/key-round'
   import X from '@lucide/svelte/icons/x'
   import Plus from '@lucide/svelte/icons/plus'
   import Pin from '@lucide/svelte/icons/pin'
@@ -31,6 +32,11 @@
   /** @param {MouseEvent} e */
   function handleDragAreaDblClick(e) {
     if (!isTauri) return
+    // Direct double-clicks on the header are already handled by Tauri's
+    // injected drag-region script (data-tauri-drag-region) — toggling here
+    // too made the window maximize and instantly restore. This handler only
+    // covers double-clicks on non-interactive children the built-in ignores.
+    if (e.target === e.currentTarget) return
     if (/** @type {Element} */ (e.target).closest('button')) return
     import('@tauri-apps/api/window').then(({ getCurrentWindow }) => getCurrentWindow().toggleMaximize()).catch(() => {})
   }
@@ -77,6 +83,7 @@
     if (tab.kind === 'security') return ShieldCheck
     if (tab.kind === 'extensions') return Blocks
     if (tab.kind === 'search') return Search
+    if (tab.kind === 'license') return KeyRound
     return FileText
   }
 </script>
