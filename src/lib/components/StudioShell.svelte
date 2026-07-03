@@ -4178,6 +4178,7 @@ let rowSearch = $state('')
                 bind:applyScroll={tableApplyScroll}
                 bind:vcolPanelOpen
                 {rowSort}
+                searchQuery={rowSearch}
                 onsortchange={(s) => void handleRowSortChange(s)}
                 onhidecolumn={(colName) => {
                   const next = new Set(hiddenColumns)

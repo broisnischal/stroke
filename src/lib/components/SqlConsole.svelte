@@ -172,12 +172,28 @@
    */
   let resultSort = $state(null)
 
+  // Sort text for object cells is computed once per value (row references are
+  // stable until a re-run) — stringifying inside the comparator would redo the
+  // work n·log n times and stall on large JSON cells.
+  /** @type {WeakMap<object, string>} */
+  const _sortTextCache = new WeakMap()
+  /** @param {unknown} v */
+  function cellSortText(v) {
+    if (v === null || typeof v !== 'object') return String(v)
+    const hit = _sortTextCache.get(v)
+    if (hit !== undefined) return hit
+    let s
+    try { s = JSON.stringify(v) } catch { s = String(v) }
+    _sortTextCache.set(v, s)
+    return s
+  }
+
   /** Compare two cell values: numbers numerically, everything else as text. */
   function compareCellValues(a, b) {
     if (typeof a === 'number' && typeof b === 'number') return a - b
     if (typeof a === 'boolean' && typeof b === 'boolean') return a === b ? 0 : a ? 1 : -1
-    const sa = typeof a === 'object' ? JSON.stringify(a) : String(a)
-    const sb = typeof b === 'object' ? JSON.stringify(b) : String(b)
+    const sa = cellSortText(a)
+    const sb = cellSortText(b)
     if (sa.trim() !== '' && sb.trim() !== '') {
       const na = Number(sa)
       const nb = Number(sb)

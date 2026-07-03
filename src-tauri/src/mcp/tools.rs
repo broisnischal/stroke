@@ -1317,10 +1317,39 @@ fn pg_cell(row: &sqlx::postgres::PgRow, idx: usize) -> Value {
     try_str!(NaiveDate);
     try_str!(NaiveTime);
     try_str!(Uuid);
-    try_get!(String);
+    if let Ok(v) = row.try_get::<Option<String>, _>(idx) {
+        return match v {
+            // Cap oversized text the same way the grid does — a multi-MB cell
+            // in an MCP response floods the calling AI tool's context.
+            Some(s) if s.len() > crate::db::sql_util::CELL_VALUE_CAP => {
+                crate::db::sql_util::oversize_cell(
+                    &row.column(idx).type_info().name().to_lowercase(),
+                    s.len(),
+                    s.as_bytes(),
+                )
+            }
+            Some(s) => json!(s),
+            None => Value::Null,
+        };
+    }
 
     let col = row.column(idx);
-    if col.type_info().name() == "JSON" || col.type_info().name() == "JSONB" {
+    let type_name = col.type_info().name();
+    if type_name == "JSON" || type_name == "JSONB" {
+        if let Ok(raw) = row.try_get_raw(idx) {
+            if raw.is_null() {
+                return Value::Null;
+            }
+            // Peek the wire bytes before decoding (see db::query cell handling):
+            // binary-format jsonb = 1-byte version header + JSON text, and JSON
+            // text can never start with 0x01.
+            if let Ok(bytes) = raw.as_bytes() {
+                let body = if bytes.first() == Some(&1) { &bytes[1..] } else { bytes };
+                if body.len() > crate::db::sql_util::CELL_VALUE_CAP {
+                    return crate::db::sql_util::oversize_cell(&type_name.to_lowercase(), body.len(), body);
+                }
+            }
+        }
         if let Ok(v) = row.try_get::<Option<Value>, _>(idx) {
             return v.unwrap_or(Value::Null);
         }
@@ -1328,6 +1357,11 @@ fn pg_cell(row: &sqlx::postgres::PgRow, idx: usize) -> Value {
     if let Ok(raw) = row.try_get_raw(idx) {
         if raw.is_null() {
             return Value::Null;
+        }
+        if let Ok(bytes) = raw.as_bytes() {
+            if bytes.len() > crate::db::sql_util::CELL_VALUE_CAP && std::str::from_utf8(bytes).is_ok() {
+                return crate::db::sql_util::oversize_cell(&type_name.to_lowercase(), bytes.len(), bytes);
+            }
         }
         if let Ok(text) = <String as Decode<Postgres>>::decode(raw) {
             return json!(text);
