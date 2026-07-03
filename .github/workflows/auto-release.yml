@@ -30,9 +30,12 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          # If master has branch protection that blocks the default bot token,
-          # replace with: token: ${{ secrets.RELEASE_TOKEN }}
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # Push the version-bump commit + tag with the RELEASES_TOKEN PAT, not
+          # the default GITHUB_TOKEN: tags pushed by GITHUB_TOKEN never trigger
+          # other workflows (GitHub Actions rule), which is why release.yml had
+          # to be dispatched manually after every auto-release. With the PAT,
+          # the tag push starts the Release build automatically.
+          token: ${{ secrets.RELEASES_TOKEN }}
 
       - uses: actions/setup-node@v5
         with:
