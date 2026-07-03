@@ -1,3 +1,10 @@
+import { oversizeCellInfo, oversizeCellText } from './cell-value.js'
+
+// Strings longer than this are never JSON.parse-probed for expandability —
+// parsing multi-MB strings on render freezes the UI. (Backend caps cells well
+// below this; the guard covers engines without capping.)
+const EXPAND_PARSE_LIMIT = 1_000_000
+
 /**
  * @param {string} dataType
  */
@@ -19,6 +26,7 @@ export function isExpandableCellValue(value, dataType) {
   if (typeof value === 'object') return true
   if (typeof value === 'string') {
     const t = value.trim()
+    if (t.length > EXPAND_PARSE_LIMIT) return false
     if ((t.startsWith('{') && t.endsWith('}')) || (t.startsWith('[') && t.endsWith(']'))) {
       try {
         JSON.parse(t)
@@ -38,6 +46,7 @@ export function isExpandableCellValue(value, dataType) {
 export function valueForJsonViewer(value) {
   if (typeof value === 'string') {
     const t = value.trim()
+    if (t.length > EXPAND_PARSE_LIMIT) return value
     if ((t.startsWith('{') && t.endsWith('}')) || (t.startsWith('[') && t.endsWith(']'))) {
       try {
         return JSON.parse(t)
@@ -56,6 +65,8 @@ export function valueForJsonViewer(value) {
 export function cellCollapsedPreview(value) {
   if (value === null || value === undefined) return 'NULL'
   if (typeof value === 'object') {
+    const over = oversizeCellInfo(value)
+    if (over) return oversizeCellText(over)
     try {
       return JSON.stringify(value)
     } catch {

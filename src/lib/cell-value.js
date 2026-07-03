@@ -1,5 +1,53 @@
 /** @typedef {{ ok: true, value: unknown } | { ok: false, message: string }} ParseResult */
 
+// ── Oversized cells ──────────────────────────────────────────────────────────
+// The backend replaces cells whose payload exceeds its per-cell cap with a
+// small sentinel object (see src-tauri/src/db/sql_util.rs) so multi-MB values
+// (file buffers in jsonb/text/blob columns) can't freeze the webview. Only a
+// preview reaches the frontend; truncated cells must never be edited or used
+// as filter values.
+
+/** @typedef {{ dataType: string, bytes: number, preview: string }} OversizeCellInfo */
+
+/**
+ * Detect the backend's oversized-cell sentinel.
+ * @param {unknown} value
+ * @returns {OversizeCellInfo | null}
+ */
+export function oversizeCellInfo(value) {
+  if (
+    value !== null &&
+    typeof value === 'object' &&
+    /** @type {any} */ (value).__strokeOversize === true
+  ) {
+    const v = /** @type {any} */ (value)
+    return {
+      dataType: String(v.dataType ?? ''),
+      bytes: Number(v.bytes) || 0,
+      preview: String(v.preview ?? ''),
+    }
+  }
+  return null
+}
+
+/** @param {number} bytes */
+export function formatByteSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
+}
+
+/**
+ * One-line marker + preview head used wherever a truncated cell becomes text
+ * (grid, copy, row detail). The full preview stays in the JSON lightbox.
+ * @param {OversizeCellInfo} over
+ */
+export function oversizeCellText(over) {
+  const head = over.preview.length > 200 ? over.preview.slice(0, 200) + '…' : over.preview
+  return `[${over.dataType || 'value'} · ${formatByteSize(over.bytes)} — truncated] ${head}`
+}
+
 /**
  * @param {unknown} value
  */

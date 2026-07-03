@@ -64,6 +64,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     buildInsertPayload,
     isDateOnlyType,
     isTimeOnlyType,
+    oversizeCellInfo,
+    oversizeCellText,
+    formatByteSize,
   } from "$lib/cell-value.js";
   import {
     defaultInsertDraft,
@@ -214,6 +217,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     onloadmore = /** @type {() => void} */ (() => {}),
     /** True when every row has been loaded in infinite scroll mode (no more pages). */
     endOfResults = false,
+    /** Active row-search query (toolbar search). Matched substrings are
+     *  highlighted in the drawn cell text. */
+    searchQuery = '',
   } = $props();
 
   /**
@@ -470,6 +476,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     rows[contextRowIdx]?.[contextColIdx] === null ||
       rows[contextRowIdx]?.[contextColIdx] === undefined,
   );
+  // Truncated cells only hold a preview — filtering on it would build wrong SQL.
+  const menuCellOversize = $derived(!!oversizeCellInfo(rows[contextRowIdx]?.[contextColIdx]));
   // Extension-provided transforms applicable to the right-clicked cell.
   const menuTransforms = $derived.by(() => {
     void $pluginState;
@@ -495,7 +503,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (typeof value === "object") {
       const cached = _formatCache.get(value);
       if (cached !== undefined) return cached;
-      const s = JSON.stringify(value);
+      // Oversize sentinels carry a preview instead of the real (multi-MB)
+      // value — render the truncation marker + head, not the sentinel wrapper.
+      const over = oversizeCellInfo(value);
+      const s = over ? oversizeCellText(over) : JSON.stringify(value);
       _formatCache.set(value, s);
       return s;
     }
@@ -515,6 +526,38 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // Repaint when extension settings or column stats change — both affect drawn
   // cell text, badges, tints, and the header annotator strip.
   $effect(() => { void $pluginState; void _colStats; scheduleDraw(); });
+
+  // ── Search-match highlighting ──────────────────────────────────────────────
+  // The toolbar search filters rows server-side (ILIKE, case-insensitive);
+  // this paints where each match falls inside the visible cell text. Matching
+  // runs only while a search is active, on the already-truncated display
+  // string, so the scroll hot path stays free of extra work otherwise.
+  const _searchLower = $derived(String(searchQuery ?? '').trim().toLowerCase());
+  $effect(() => { void _searchLower; scheduleDraw(); });
+
+  const MAX_CELL_MATCH_HIGHLIGHTS = 8;
+  /**
+   * @param {CanvasRenderingContext2D} ctx @param {string} drawn
+   * @param {number} textX @param {number} ry @param {number} rh @param {any} c
+   */
+  function drawSearchHighlights(ctx, drawn, textX, ry, rh, c) {
+    const q = _searchLower;
+    const hay = drawn.toLowerCase();
+    let from = 0, n = 0;
+    const hh = Math.min(rh - 4, Math.round(17 * canvasZoom));
+    const hy = ry + (rh - hh) / 2;
+    ctx.fillStyle = withAlpha(c.AMBER, 0.3);
+    while (n < MAX_CELL_MATCH_HIGHLIGHTS) {
+      const at = hay.indexOf(q, from);
+      if (at === -1) break;
+      const x0 = textX + (at > 0 ? ctx.measureText(drawn.slice(0, at)).width : 0);
+      const mw = ctx.measureText(drawn.slice(at, at + q.length)).width;
+      roundRect(ctx, x0 - 1, hy, mw + 2, hh, 3);
+      ctx.fill();
+      from = at + q.length;
+      n++;
+    }
+  }
 
   function focusRow(rowIdx) {
     if (editingCell) return;
@@ -670,6 +713,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
     focusedRow = rowIdx;
     const startValue = effectiveCellValue(rowIdx, colIdx);
+    const oversize = oversizeCellInfo(startValue);
+    if (oversize) {
+      // Only a truncated preview was loaded — editing would write it back.
+      toast.error("Value too large to edit", {
+        description: `${col.name} holds ${formatByteSize(oversize.bytes)}; edit it with a SQL UPDATE instead.`,
+      });
+      return;
+    }
     lastEditOriginalValue = startValue;
     selectOnEditFocus = initialChar === undefined;
     const original = valueToEditString(startValue);
@@ -696,6 +747,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // close any inline edit first
     if (editingCell) cancelEdit();
     const startValue = effectiveCellValue(rowIdx, colIdx);
+    const oversize = oversizeCellInfo(startValue);
+    if (oversize) {
+      // Only a truncated preview was loaded — the quick-look editor would
+      // silently save it back. The JSON lightbox covers read-only viewing.
+      toast.error("Value too large to edit", {
+        description: `${col.name} holds ${formatByteSize(oversize.bytes)}; edit it with a SQL UPDATE instead.`,
+      });
+      return;
+    }
     const original = valueToEditString(startValue);
     quickLookCell = {
       rowIdx,
@@ -1043,10 +1103,17 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       : [rowIdx];
   }
 
+  /** Full text of an object cell for copy/export — oversize sentinels become
+   * their marker + preview so exports show the truncation explicitly. */
+  function cellJsonString(value) {
+    const over = oversizeCellInfo(value);
+    return over ? oversizeCellText(over) : JSON.stringify(value);
+  }
+
   /** Escape a cell value for CSV (RFC 4180). */
   function csvCell(value) {
     if (value === null || value === undefined) return '';
-    const s = typeof value === 'object' ? JSON.stringify(value) : String(value);
+    const s = typeof value === 'object' ? cellJsonString(value) : String(value);
     if (s.includes(',') || s.includes('"') || s.includes('\n') || s.includes('\r')) {
       return '"' + s.replace(/"/g, '""') + '"';
     }
@@ -1059,7 +1126,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
     if (typeof value === 'number') return String(value);
     if (typeof value === 'object') {
-      const s = JSON.stringify(value).replace(/'/g, "''");
+      const s = cellJsonString(value).replace(/'/g, "''");
       return `'${s}'`;
     }
     return "'" + String(value).replace(/'/g, "''") + "'";
@@ -1068,7 +1135,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   /** Markdown-safe cell text. */
   function mdCell(value) {
     if (value === null || value === undefined) return 'NULL';
-    const s = typeof value === 'object' ? JSON.stringify(value) : String(value);
+    const s = typeof value === 'object' ? cellJsonString(value) : String(value);
     return s.replace(/\|/g, '\\|').replace(/\n/g, ' ');
   }
 
@@ -1083,7 +1150,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       .map((i) => activeCols.map((c) => {
         const ci = columns.indexOf(c)
         const v = rows[i]?.[ci]
-        return v === null || v === undefined ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v)
+        return v === null || v === undefined ? '' : typeof v === 'object' ? cellJsonString(v) : String(v)
       }).join('\t'))
       .join('\n')
     const text = header + '\n' + body
@@ -1115,7 +1182,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         .map((r) =>
           colNames.map((name, i) => {
             const v = r[i];
-            const s = v === null || v === undefined ? 'NULL' : typeof v === 'object' ? JSON.stringify(v) : String(v);
+            const s = v === null || v === undefined ? 'NULL' : typeof v === 'object' ? cellJsonString(v) : String(v);
             return `${name}: ${s}`;
           }).join('\n'),
         )
@@ -1946,13 +2013,19 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (_scrollLoopId) return
     function loop() {
       const el = tableContainer
-      if (!el || !_ctx || performance.now() > _scrollLoopDeadline) {
+      if (!el || !_ctx || _fatalError || performance.now() > _scrollLoopDeadline) {
         _scrollLoopId = 0
         return
       }
       _scrollTop = el.scrollTop
       _scrollLeft = el.scrollLeft
-      draw()
+      try {
+        draw()
+      } catch (err) {
+        reportFatal(err)
+        _scrollLoopId = 0
+        return
+      }
       _scrollLoopId = requestAnimationFrame(loop)
     }
     _scrollLoopId = requestAnimationFrame(loop)
@@ -2648,6 +2721,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ctx.fillText(label, textX + padX, cy + 0.5)
     } else {
       const drawn = truncText(ctx, text, Math.max(0, textMaxW))
+      if (_searchLower && !isNull) drawSearchHighlights(ctx, drawn, textX, ry, rh, c)
       ctx.fillStyle = textColor
       ctx.fillText(drawn, textX, cy + 0.5)
       if (dir?.link) {
@@ -3001,6 +3075,34 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     return { ok: !!_ctx, resized }
   }
 
+  // ── Crash containment ───────────────────────────────────────────────────
+  // The draw loop and canvas event handlers run outside Svelte's effect tree
+  // (rAF callbacks / DOM events), so an exception there bypasses the tab's
+  // <svelte:boundary> — the grid would freeze with no error UI and keep
+  // throwing every frame. Capture the first such error and rethrow it from an
+  // effect, which IS inside the boundary: the per-tab error card ("Reload this
+  // view") takes over this tab only, and the rest of the app stays alive.
+  let _fatalError = $state(/** @type {unknown} */ (null))
+  function reportFatal(/** @type {unknown} */ err) {
+    console.error('[DataTable] fatal error:', err)
+    if (_fatalError === null) _fatalError = err ?? new Error('Unknown table error')
+  }
+  $effect(() => {
+    const e = _fatalError
+    if (e) throw e instanceof Error ? e : new Error(String(e))
+  })
+  /** Wrap a canvas event handler so a crash fails this tab, not the app.
+   * @template {(...args: any[]) => any} F @param {F} fn @returns {F} */
+  function guarded(fn) {
+    return /** @type {F} */ ((/** @type {any[]} */ ...args) => {
+      try {
+        return fn(...args)
+      } catch (err) {
+        reportFatal(err)
+      }
+    })
+  }
+
   // rAF-batched paint — coalesces bursts of scroll/state changes into a single
   // draw per animation frame so high-frequency trackpad scroll (up to 120Hz on
   // ProMotion) never queues multiple synchronous repaints and tears/janks.
@@ -3009,7 +3111,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (_drawRafId) return
     _drawRafId = requestAnimationFrame(() => {
       _drawRafId = 0
-      if (_ctx) draw()
+      if (!_ctx || _fatalError) return
+      try {
+        draw()
+      } catch (err) {
+        reportFatal(err)
+      }
     })
   }
   onDestroy(() => {
@@ -3556,12 +3663,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               bind:this={canvasEl}
               class="block"
               style="cursor:default;will-change:transform"
-              onclick={onCanvasClick}
-              ondblclick={onCanvasDblClick}
-              onauxclick={onCanvasAuxClick}
-              onpointerdown={onCanvasPointerDown}
-              onpointermove={onCanvasPointerMove}
-              onpointerleave={onCanvasPointerLeave}
+              onclick={guarded(onCanvasClick)}
+              ondblclick={guarded(onCanvasDblClick)}
+              onauxclick={guarded(onCanvasAuxClick)}
+              onpointerdown={guarded(onCanvasPointerDown)}
+              onpointermove={guarded(onCanvasPointerMove)}
+              onpointerleave={guarded(onCanvasPointerLeave)}
             ></canvas>
           </div>
 
@@ -3725,7 +3832,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                     style="top:{rowDocTop(exIdx) + ROW_HEIGHT}px; left:0; width:{_viewportWidth}px; transform:translateX({_scrollLeft}px); will-change:transform"
                     use:trackExpandHeight={exIdx}
                   >
-                    <RowExpandViewer record={rowToRecord(columns, rows[exIdx])} rowLabel={"row " + (exIdx + 1)} />
+                    <RowExpandViewer
+                      record={rowToRecord(columns, rows[exIdx])}
+                      rowLabel={"row " + (exIdx + 1)}
+                      onopenjson={(value, label) => {
+                        void prefetchJsonLightbox()
+                        jsonLightbox = { value, colName: label }
+                      }}
+                    />
                   </div>
                 {/if}
               {/each}
@@ -3998,11 +4112,17 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           <ContextMenu.Shortcut>⌘C</ContextMenu.Shortcut>
         </ContextMenu.Item>
         {#if hasTableContext}
-          <ContextMenu.Item onSelect={() => runMenuAction(() => onfilterbyvalue(menuColName, rows[contextRowIdx]?.[contextColIdx]))}>
+          <ContextMenu.Item
+            disabled={menuCellOversize}
+            onSelect={() => runMenuAction(() => onfilterbyvalue(menuColName, rows[contextRowIdx]?.[contextColIdx]))}
+          >
             <ListFilter />
             {menuCellNull ? 'Filter: is NULL' : 'Filter by value'}
           </ContextMenu.Item>
-          <ContextMenu.Item onSelect={() => runMenuAction(() => onfilterbyvalue(menuColName, rows[contextRowIdx]?.[contextColIdx], true))}>
+          <ContextMenu.Item
+            disabled={menuCellOversize}
+            onSelect={() => runMenuAction(() => onfilterbyvalue(menuColName, rows[contextRowIdx]?.[contextColIdx], true))}
+          >
             <FilterX />
             {menuCellNull ? 'Exclude: not NULL' : 'Exclude this value'}
           </ContextMenu.Item>

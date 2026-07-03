@@ -2507,11 +2507,15 @@
       role="region"
       aria-label="Chat messages"
     >
+      <!-- Conversation column matches the composer width (max-w-3xl): a wider
+           measure gave 200+ character lines on big windows and left the input
+           visually detached from the messages above it. Wide artifacts inside
+           messages (result grids, diagrams) scroll within their own cards. -->
       <div
         class={mode === "full"
           ? items.length === 0
             ? "mx-auto w-full max-w-2xl px-8 h-full"
-            : "mx-auto w-full max-w-6xl px-8"
+            : "mx-auto w-full max-w-3xl px-8"
           : "px-3 py-3"}
       >
         {#if items.length === 0}
@@ -2615,7 +2619,7 @@
             </div>
           {/if}
         {:else}
-          <div bind:this={msgListEl} class="flex flex-col gap-5 py-6" data-studio-selectable="text">
+          <div bind:this={msgListEl} class="flex flex-col gap-6 py-8" data-studio-selectable="text">
             {#each items as item (item.id)}
               <!-- content-visibility:auto lets the browser skip layout/paint for
                    off-screen messages (markdown, code, mermaid, charts), so scrolling

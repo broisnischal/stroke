@@ -57,6 +57,55 @@ pub fn esc_backslash_quote(s: &str) -> String {
     s.replace('\\', "\\\\").replace('\'', "\\'")
 }
 
+// ── Oversized-cell capping ────────────────────────────────────────────────────
+//
+// Cells whose payload exceeds `CELL_VALUE_CAP` are replaced with a small
+// sentinel object instead of being shipped to the webview whole. Multi-MB
+// cells (file buffers stored in jsonb/text/blob columns) otherwise freeze the
+// app: the IPC JSON payload, the webview-side parse, and the grid's per-cell
+// stringify all scale with cell size (GitHub issue: "App freezes").
+// The frontend detects the sentinel via `__strokeOversize` (see
+// `src/lib/cell-value.js`), renders the preview, and blocks editing so a
+// truncated value can never be written back.
+
+/// Per-cell payload cap, in bytes of serialized text.
+pub const CELL_VALUE_CAP: usize = 256 * 1024;
+
+/// How much of an oversized cell ships as a preview (grid text + JSON lightbox).
+pub const CELL_PREVIEW_BYTES: usize = 16 * 1024;
+
+/// Build the oversize sentinel for a cell too large to ship. `body` is the
+/// value's UTF-8 text (JSON text, plain text, or hex for blobs).
+pub fn oversize_cell(data_type: &str, total_bytes: usize, body: &[u8]) -> serde_json::Value {
+    let end = CELL_PREVIEW_BYTES.min(body.len());
+    let preview = String::from_utf8_lossy(&body[..end]);
+    serde_json::json!({
+        "__strokeOversize": true,
+        "dataType": data_type,
+        "bytes": total_bytes,
+        "preview": preview,
+    })
+}
+
+/// Cap an already-decoded JSON value (engines where the raw wire bytes can't
+/// be peeked cheaply). Containers are measured by serializing; oversized ones
+/// collapse to the sentinel. Scalars below the cap pass through untouched.
+pub fn cap_json_value(data_type: &str, v: serde_json::Value) -> serde_json::Value {
+    match &v {
+        serde_json::Value::Object(_) | serde_json::Value::Array(_) => {
+            let text = v.to_string();
+            if text.len() > CELL_VALUE_CAP {
+                return oversize_cell(data_type, text.len(), text.as_bytes());
+            }
+            v
+        }
+        serde_json::Value::String(s) if s.len() > CELL_VALUE_CAP => {
+            oversize_cell(data_type, s.len(), s.as_bytes())
+        }
+        _ => v,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

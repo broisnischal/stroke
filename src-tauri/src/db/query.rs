@@ -204,6 +204,22 @@ fn cell_to_json(row: &sqlx::postgres::PgRow, idx: usize) -> Value {
     try_get_string!(Uuid);
 
     if type_name == "JSON" || type_name == "JSONB" {
+        if let Ok(raw) = row.try_get_raw(idx) {
+            if raw.is_null() {
+                return Value::Null;
+            }
+            // Peek the wire bytes before decoding: an oversized jsonb cell (e.g. a
+            // file buffer serialized into JSON) would otherwise materialize millions
+            // of serde_json nodes here and then freeze the webview during IPC parse.
+            if let Ok(bytes) = raw.as_bytes() {
+                // Binary-format jsonb = 1-byte version header + JSON text. JSON text
+                // can never start with 0x01, so stripping it is unambiguous.
+                let body = if bytes.first() == Some(&1) { &bytes[1..] } else { bytes };
+                if body.len() > super::sql_util::CELL_VALUE_CAP {
+                    return super::sql_util::oversize_cell(&type_name.to_lowercase(), body.len(), body);
+                }
+            }
+        }
         if let Ok(v) = row.try_get::<Option<serde_json::Value>, _>(idx) {
             return v.unwrap_or(Value::Null);
         }
@@ -216,6 +232,14 @@ fn cell_to_json(row: &sqlx::postgres::PgRow, idx: usize) -> Value {
     if let Ok(raw) = row.try_get_raw(idx) {
         if raw.is_null() {
             return Value::Null;
+        }
+        // Oversize guard before allocating the String — text cells beyond the
+        // cap ship as a sentinel + preview instead of the whole value. Non-UTF-8
+        // payloads (bytea) fall through to the byte-count placeholder below.
+        if let Ok(bytes) = raw.as_bytes() {
+            if bytes.len() > super::sql_util::CELL_VALUE_CAP && std::str::from_utf8(bytes).is_ok() {
+                return super::sql_util::oversize_cell(&type_name.to_lowercase(), bytes.len(), bytes);
+            }
         }
         if let Ok(text) = <String as Decode<Postgres>>::decode(raw) {
             return json!(text);

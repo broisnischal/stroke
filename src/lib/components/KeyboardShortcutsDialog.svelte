@@ -38,6 +38,8 @@
         { keys: [mod, "⇧", "Tab"], desc: "Previous tab" },
         { keys: [mod, "B"], desc: "Toggle sidebar" },
         { keys: [mod, "⇧", "F"], desc: "Focus table filter" },
+        { keys: [mod, "D"], desc: "Switch database" },
+        { keys: [mod, "⇧", "C"], desc: "Switch connection" },
         { keys: ["F11"], desc: "Toggle fullscreen" },
       ],
     },
