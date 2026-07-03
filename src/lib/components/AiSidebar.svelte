@@ -989,7 +989,7 @@
           </button>
         {:else}
           <button type="button"
-            class={cn('flex size-7 shrink-0 items-center justify-center rounded-lg transition-all', inputText.trim() && configured ? 'bg-foreground text-background shadow-sm hover:opacity-85' : 'bg-muted/40 text-muted-foreground/25 cursor-not-allowed')}
+            class={cn('flex size-7 shrink-0 items-center justify-center rounded-lg transition-all', inputText.trim() && configured ? 'bg-primary text-primary-foreground shadow-sm hover:opacity-90' : 'bg-muted/40 text-muted-foreground/25 cursor-not-allowed')}
             disabled={!inputText.trim() || !configured}
             onclick={() => void send()}
             title="Send (Enter)"

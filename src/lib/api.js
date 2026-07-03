@@ -296,6 +296,22 @@ export async function listTables(schema) {
   }
 }
 
+/**
+ * Exact row counts for tables that `listTables` returned with an unknown
+ * (null/-1) count. Called in a background pass so the sidebar renders
+ * immediately and counts fill in as they resolve.
+ * @param {string} schema
+ * @param {string[]} tables
+ * @returns {Promise<{ name: string, rowCount: number }[]>}
+ */
+export async function getTableRowCounts(schema, tables) {
+  try {
+    return await invoke('pg_table_row_counts', { schema, tables })
+  } catch (err) {
+    throw new Error(formatInvokeError(err))
+  }
+}
+
 /** @param {string} schema */
 export async function listIndexes(schema) {
   try {

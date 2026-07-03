@@ -62,6 +62,10 @@ export function withAlpha(/** @type {string} */ color, /** @type {number} */ a) 
   const cached = _alphaCache.get(key);
   if (cached !== undefined) return cached;
   const out = _computeAlpha(color, a);
+  // Theme colors produce a few dozen stable keys, but extension-computed
+  // per-cell tints (heatmap etc.) can mint a distinct alpha per value — cap
+  // the cache so a long session over big result sets can't grow it forever.
+  if (_alphaCache.size >= 4096) _alphaCache.clear();
   _alphaCache.set(key, out);
   return out;
 }
@@ -261,7 +265,8 @@ export function drawTriangle(ctx, cx, cy, r, dir, color) {
 /**
  * Compute per-column horizontal geometry in absolute *content* coordinates
  * (0 = far left, before horizontal scroll). Pinned columns keep their content
- * slot but get a `pinnedFixedX` resting position so they freeze to the left.
+ * slot but get a `pinnedFixedX` resting position so they freeze to the
+ * viewport's left edge once scrolled past.
  *
  * @param {object} o
  * @param {{ name: string, dataType: string }[]} o.columns Visible columns in order.
@@ -279,7 +284,10 @@ export function computeColumnGeometry({ columns, widthOf, isPinned, gutterWidth 
     contentX += w;
   }
   const totalWidth = contentX;
-  let pinX = gutterWidth;
+  // Pinned columns freeze from the viewport's left edge (0), not after the
+  // gutters: the gutters scroll away with the content, so reserving their width
+  // here would leave a permanent empty band left of the frozen columns.
+  let pinX = 0;
   /** @type {Map<string, number>} */
   const pinnedFixedX = new Map();
   for (const col of cols) {

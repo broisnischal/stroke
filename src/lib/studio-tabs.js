@@ -1,4 +1,4 @@
-/** @typedef {'table' | 'sql' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search' | 'notebook' | 'schema-timeline' | 'data-diff'} StudioTabKind */
+/** @typedef {'table' | 'sql' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'extensions' | 'backup' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search' | 'notebook' | 'schema-timeline' | 'data-diff' | 'license'} StudioTabKind */
 
 /** @typedef {import('$lib/table-query.js').TableSort} TableSort */
 /** @typedef {import('$lib/table-query.js').TableFilter} TableFilter */
@@ -47,6 +47,7 @@
  * @property {StudioTabKind} kind
  * @property {string} title
  * @property {TableTabState | SqlTabState | null} state
+ * @property {boolean} [pinned] — pinned tabs stay grouped at the front and survive "Close Others"/"Close All"
  */
 
 let tabSeq = 0
@@ -338,6 +339,20 @@ export function findErdTab(tabs) {
   return tabs.find((t) => t.kind === 'erd') ?? null
 }
 
+export function createLicenseTab() {
+  return /** @type {StudioTab} */ ({
+    id: nextTabId(),
+    kind: 'license',
+    title: 'Stroke Pro',
+    state: null,
+  })
+}
+
+/** @param {StudioTab[]} tabs */
+export function findLicenseTab(tabs) {
+  return tabs.find((t) => t.kind === 'license') ?? null
+}
+
 /** @param {TableTabState} state */
 export function tableTabTitle(state) {
   if (!state.table) return 'Table'
@@ -363,6 +378,7 @@ export function tabDisplayTitle(tab) {
   if (tab.kind === 'notebook') return tab.title || 'Untitled Notebook'
   if (tab.kind === 'schema-timeline') return 'Schema Timeline'
   if (tab.kind === 'data-diff') return 'Data Diff'
+  if (tab.kind === 'license') return 'Stroke Pro'
   return tab.title
 }
 

@@ -1,20 +1,18 @@
 <script>
   import Play from "@lucide/svelte/icons/play";
   import WifiOff from "@lucide/svelte/icons/wifi-off";
-  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Braces from "@lucide/svelte/icons/braces";
   import Wand2 from "@lucide/svelte/icons/wand-2";
   import CheckCheck from "@lucide/svelte/icons/check-check";
-  import X from "@lucide/svelte/icons/x";
   import Loader2 from "@lucide/svelte/icons/loader-2";
   import History from "@lucide/svelte/icons/history";
   import Bookmark from "@lucide/svelte/icons/bookmark";
   import Code2 from "@lucide/svelte/icons/code-2";
-  import Plus from "@lucide/svelte/icons/plus";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import Download from "@lucide/svelte/icons/download";
   import Table2 from "@lucide/svelte/icons/table-2";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { cn, isNetworkError } from "$lib/utils.js";
   import { hasPro } from '$lib/stores/license.js'
   import SqlEditor from "./SqlEditor.svelte";
@@ -25,7 +23,6 @@
   import { Label } from "$lib/components/ui/label/index.js";
   import { queryTitle } from "$lib/stores/query-history.js";
   import DataTable from "./DataTable.svelte";
-  import DataTableSkeleton from "./DataTableSkeleton.svelte";
   import TableLoading from "./TableLoading.svelte";
   import JsonViewer from "./JsonViewer.svelte";
   import ChartView from "./ChartView.svelte";
@@ -61,9 +58,9 @@
     multiResults = [],
     schemaHints = /** @type {SqlSchemaHints} */ ({}),
     schemaContext = /** @type {Parameters<typeof buildSystemPrompt>[0] | null} */ (null),
-    onrun = () => {},
+    /** Run SQL — receives a single-statement override, or undefined to run the whole buffer. */
+    onrun = (/** @type {string | undefined} */ statementSql) => {},
     onmodk = undefined,
-    onmodenter = undefined,
     onmods = undefined,
     onmodi = undefined,
     onmodb = undefined,
@@ -91,11 +88,7 @@
     onprorequired = /** @type {() => void} */ (() => {}),
   } = $props();
 
-  /**
-   * @typedef {{ id: string, name: string, content: string }} SqlTab
-   */
-
-  /** @type {{ focus: () => void } | null} */
+  /** @type {{ focus: () => void, markExecuted: (ranStatement?: string | null) => void } | null} */
   let sqlEditorRef = $state(null)
 
   /** Focus the SQL editor — called by the parent when this tab becomes active. */
@@ -104,225 +97,142 @@
   }
 
   /**
-   * Open `content` in a brand-new query tab and focus it. Used by
-   * "Open in SQL editor" so the current editor content is never clobbered.
-   * @param {string} content @param {string} [name]
+   * Replace the editor content with `content` and focus it. Used by
+   * "Open in SQL editor" and history/AI flows.
+   * @param {string} content
    */
-  export function openInNewTab(content, name) {
-    tabCounter += 1
-    const id = crypto.randomUUID()
-    sqlTabs = [...sqlTabs, { id, name: name || `Query ${tabCounter}`, content }]
-    activeTabId = id
+  export function openQuery(content) {
     sql = content
-    _lastSyncedSql = content
     queueMicrotask(() => sqlEditorRef?.focus())
   }
 
-  const initialTabId = crypto.randomUUID();
-  /** @type {SqlTab[]} */
-  let sqlTabs = $state([{ id: initialTabId, name: 'Query 1', content: sql }])
-  let activeTabId = $state(initialTabId)
-  let tabCounter = $state(1)
+  /** The statement that ran last (⌘R), or null when the whole buffer ran. */
+  let lastRanStatement = /** @type {string | null} */ (null)
 
-  const activeTab = $derived(sqlTabs.find((t) => t.id === activeTabId) ?? sqlTabs[0])
+  /** @param {string | undefined} statementSql */
+  function handleRun(statementSql) {
+    const single = typeof statementSql === 'string' && statementSql.trim() ? statementSql : undefined
+    lastRanStatement = single ?? null
+    onrun(single)
+  }
 
-  // Sentinel to break bidirectional sync cycles
-  let _lastSyncedSql = sql
+  // ── Result view state ───────────────────────────────────────────────────────
+  /** @type {'table' | 'chart' | 'json' | 'explain'} */
+  let outputView = $state('table')
+  let chartType = $state('bar')
+  let activeResultIdx = $state(0)
+  /** @type {object | null} */
+  let explainResult = $state(null)
+  let explainLoading = $state(false)
+  let explainError = $state('')
+  let selected = $state(new Set())
 
-  // External write (history select, AI fix) → update active tab
+  /** @typedef {{ columns: any[], rows: any[][], message: string, queryMs: number }} ResultSet */
+
+  /** One entry per statement when the last run executed multiple statements. */
+  const resultSets = $derived(
+    (multiResults?.length ?? 0) > 1
+      ? multiResults.map((res) => /** @type {ResultSet} */ ({
+          columns: res.columns ?? [],
+          rows: res.rows ?? [],
+          message: res.message ?? '',
+          queryMs: res.query_ms ?? res.queryMs ?? 0,
+        }))
+      : []
+  )
+
+  // A new run replaces the previous results: reset selection and result-set
+  // index, and leave the explain view (it shows the previous query's plan).
   $effect(() => {
-    const incoming = sql
-    if (incoming !== _lastSyncedSql) {
-      _lastSyncedSql = incoming
-      untrack(() => {
-        const tab = sqlTabs.find((t) => t.id === activeTabId)
-        if (tab) tab.content = incoming
-      })
-    }
-  })
-
-  // Active tab content → sync back to bindable so parent stays in sync
-  $effect(() => {
-    const content = activeTab.content
+    if (!loading) return
     untrack(() => {
-      if (content !== _lastSyncedSql) {
-        _lastSyncedSql = content
-        sql = content
-      }
+      selected = new Set()
+      activeResultIdx = 0
+      resultSort = null
+      if (outputView === 'explain') outputView = 'table'
     })
   })
 
-  function addTab() {
-    tabCounter += 1
-    const id = crypto.randomUUID()
-    sqlTabs = [...sqlTabs, { id, name: `Query ${tabCounter}`, content: '' }]
-    activeTabId = id
-  }
-
-  /** @param {string} id */
-  function closeTab(id) {
-    if (sqlTabs.length === 1) return
-    const idx = sqlTabs.findIndex((t) => t.id === id)
-    const next = sqlTabs[idx === 0 ? 1 : idx - 1]
-    sqlTabs = sqlTabs.filter((t) => t.id !== id)
-    if (activeTabId === id) activeTabId = next.id
-    // Clean up stored result for the closed tab
-    const cleaned = new Map(tabResults)
-    cleaned.delete(id)
-    tabResults = cleaned
-  }
+  // When a run finishes without an error, mark the executed statement(s) with
+  // a ✓ in the editor gutter (⌘R marks one, Run marks all).
+  let wasLoading = false
+  $effect(() => {
+    const l = loading
+    const err = error
+    untrack(() => {
+      if (wasLoading && !l && !err) sqlEditorRef?.markExecuted?.(lastRanStatement)
+      wasLoading = l
+    })
+  })
 
   /**
-   * @typedef {{
-   *   columns: any[],
-   *   rows: any[][],
-   *   error: string,
-   *   queryMs: number,
-   *   message: string,
-   *   loading: boolean,
-   *   outputView: 'table' | 'chart' | 'json' | 'explain',
-   *   chartType: string,
-   *   resultSets: ResultSet[],
-   *   activeResultIdx: number,
-   *   explainResult: object | null,
-   *   explainLoading: boolean,
-   *   explainError: string,
-   * }} TabResult
-   *
-   * @typedef {{
-   *   columns: any[],
-   *   rows: any[][],
-   *   message: string,
-   *   queryMs: number,
-   *   outputView: 'table' | 'chart' | 'json',
-   *   chartType: string,
-   * }} ResultSet
+   * Header-click sort for result rows. Ad-hoc results have no table to re-query,
+   * so sorting is done client-side over the returned rows.
+   * @type {{ column: string, direction: 'asc' | 'desc' } | null}
    */
+  let resultSort = $state(null)
 
-  /** @returns {TabResult} */
-  function defaultResult() {
-    return {
-      columns: [], rows: [], error: '', queryMs: 0, message: '', loading: false,
-      outputView: 'table', chartType: 'bar', resultSets: [], activeResultIdx: 0,
-      explainResult: null, explainLoading: false, explainError: '',
+  /** Compare two cell values: numbers numerically, everything else as text. */
+  function compareCellValues(a, b) {
+    if (typeof a === 'number' && typeof b === 'number') return a - b
+    if (typeof a === 'boolean' && typeof b === 'boolean') return a === b ? 0 : a ? 1 : -1
+    const sa = typeof a === 'object' ? JSON.stringify(a) : String(a)
+    const sb = typeof b === 'object' ? JSON.stringify(b) : String(b)
+    if (sa.trim() !== '' && sb.trim() !== '') {
+      const na = Number(sa)
+      const nb = Number(sb)
+      if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb
     }
+    return sa.localeCompare(sb, undefined, { numeric: true, sensitivity: 'base' })
   }
 
-  /** @type {Map<string, TabResult>} */
-  let tabResults = $state(new Map())
-  let runningTabId = $state(/** @type {string | null} */ (null))
-
-  const activeResult = $derived(tabResults.get(activeTabId) ?? defaultResult())
-
-  // When query state arrives from parent, route it to the tab that triggered the run
-  $effect(() => {
-    const col = columns, r = rows, err = error, qms = queryMs, msg = message, l = loading
-    const multi = multiResults
-    untrack(() => {
-      if (!runningTabId) return
-      const prev = tabResults.get(runningTabId) ?? defaultResult()
-      const next = new Map(tabResults)
-      if (multi && multi.length > 1) {
-        const resultSets = multi.map((res, i) => {
-          const existing = prev.resultSets?.[i]
-          return /** @type {ResultSet} */ ({
-            columns: res.columns ?? [],
-            rows: res.rows ?? [],
-            message: res.message ?? '',
-            queryMs: res.query_ms ?? res.queryMs ?? 0,
-            outputView: existing?.outputView ?? 'table',
-            chartType: existing?.chartType ?? 'bar',
-          })
-        })
-        next.set(runningTabId, {
-          ...prev,
-          columns: col, rows: r, error: err, queryMs: qms, message: msg, loading: l,
-          resultSets,
-          activeResultIdx: Math.min(prev.activeResultIdx ?? 0, resultSets.length - 1),
-        })
-      } else {
-        next.set(runningTabId, {
-          ...prev,
-          columns: col, rows: r, error: err, queryMs: qms, message: msg, loading: l,
-          resultSets: [],
-          activeResultIdx: 0,
-        })
-      }
-      tabResults = next
+  const currentDisplay = $derived.by(() => {
+    const base = resultSets.length > 1
+      ? (() => {
+          const idx = Math.min(activeResultIdx, resultSets.length - 1)
+          const s = resultSets[idx]
+          return { columns: s.columns, rows: s.rows, queryMs: s.queryMs, message: s.message }
+        })()
+      : { columns, rows, queryMs, message }
+    if (!resultSort) return base
+    const colIdx = base.columns.findIndex((c) => (c.name ?? c) === resultSort.column)
+    if (colIdx < 0) return base
+    const dir = resultSort.direction === 'desc' ? -1 : 1
+    const sorted = [...base.rows].sort((ra, rb) => {
+      const a = ra[colIdx]
+      const b = rb[colIdx]
+      const aNull = a === null || a === undefined
+      const bNull = b === null || b === undefined
+      // NULLs sort last in either direction.
+      if (aNull || bNull) return aNull && bNull ? 0 : aNull ? 1 : -1
+      return dir * compareCellValues(a, b)
     })
+    return { ...base, rows: sorted }
   })
 
-  /** Record which SQL editor tab is running, then fire onrun */
-  function handleRun() {
-    runningTabId = activeTabId
-    onrun()
+  /** @param {{ column: string, direction: 'asc' | 'desc' } | null} sort */
+  function handleResultSort(sort) {
+    resultSort = sort
+    // Row indices change with the order — selection would point at the wrong rows.
+    selected = new Set()
   }
 
   async function handleExplain() {
-    const tabId = activeTabId
-    const querySql = activeTab.content.trim()
+    const querySql = sql.trim()
     if (!querySql) return
-
-    // Switch to explain view and mark loading
-    const prev = tabResults.get(tabId) ?? defaultResult()
-    tabResults = new Map(tabResults).set(tabId, {
-      ...prev, outputView: 'explain', explainLoading: true, explainError: '', explainResult: null,
-    })
+    outputView = 'explain'
+    explainLoading = true
+    explainError = ''
+    explainResult = null
     if (!outputVisible) outputVisible = true
-
     try {
-      const res = await explainSql(querySql)
-      const cur = tabResults.get(tabId) ?? defaultResult()
-      tabResults = new Map(tabResults).set(tabId, {
-        ...cur, explainLoading: false, explainResult: res,
-      })
+      explainResult = await explainSql(querySql)
     } catch (e) {
-      const cur = tabResults.get(tabId) ?? defaultResult()
-      tabResults = new Map(tabResults).set(tabId, {
-        ...cur, explainLoading: false, explainError: String(e),
-      })
+      explainError = String(e)
+    } finally {
+      explainLoading = false
     }
   }
-
-  /** @param {'table'|'chart'|'json'} view */
-  function setOutputView(view) {
-    const prev = tabResults.get(activeTabId) ?? defaultResult()
-    const next = new Map(tabResults)
-    if (prev.resultSets?.length > 1) {
-      const idx = prev.activeResultIdx ?? 0
-      const newSets = prev.resultSets.map((s, i) => i === idx ? { ...s, outputView: view } : s)
-      next.set(activeTabId, { ...prev, resultSets: newSets })
-    } else {
-      next.set(activeTabId, { ...prev, outputView: view })
-    }
-    tabResults = next
-  }
-
-  /** @param {string} type */
-  function setChartType(type) {
-    const prev = tabResults.get(activeTabId) ?? defaultResult()
-    const next = new Map(tabResults)
-    if (prev.resultSets?.length > 1) {
-      const idx = prev.activeResultIdx ?? 0
-      const newSets = prev.resultSets.map((s, i) => i === idx ? { ...s, chartType: type } : s)
-      next.set(activeTabId, { ...prev, resultSets: newSets })
-    } else {
-      next.set(activeTabId, { ...prev, chartType: type })
-    }
-    tabResults = next
-  }
-
-  /** @param {number} idx */
-  function setActiveResultIdx(idx) {
-    const prev = tabResults.get(activeTabId) ?? defaultResult()
-    const next = new Map(tabResults)
-    next.set(activeTabId, { ...prev, activeResultIdx: idx })
-    tabResults = next
-  }
-
-  let selected = $state(new Set())
-  // Reset row selection when switching editor tabs
-  $effect(() => { activeTabId; untrack(() => { selected = new Set() }) })
 
   let outputVisible = $state(
     (() => { try { return localStorage.getItem('sql-output-visible') !== 'false' } catch { return true } })()
@@ -355,29 +265,6 @@
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  })
-
-  const currentDisplay = $derived.by(() => {
-    if (activeResult.resultSets?.length > 1) {
-      const idx = Math.min(activeResult.activeResultIdx ?? 0, activeResult.resultSets.length - 1)
-      const s = activeResult.resultSets[idx]
-      return {
-        columns: s.columns,
-        rows: s.rows,
-        queryMs: s.queryMs,
-        message: s.message,
-        outputView: s.outputView,
-        chartType: s.chartType,
-      }
-    }
-    return {
-      columns: activeResult.columns,
-      rows: activeResult.rows,
-      queryMs: activeResult.queryMs,
-      message: activeResult.message,
-      outputView: activeResult.outputView,
-      chartType: activeResult.chartType,
-    }
   })
 
   const rowObjects = $derived(
@@ -437,8 +324,8 @@
   let savingQuery = $state(false);
 
   function fixWithAi() {
-    if (!activeResult.error || !sql.trim()) return
-    onfixwithai?.({ error: activeResult.error, sql: sql.trim() })
+    if (!error || !sql.trim()) return
+    onfixwithai?.({ error, sql: sql.trim() })
   }
 
   const isMac =
@@ -462,19 +349,11 @@
   /** @type {AbortController | null} */
   let fixAbort = null
 
-  function copyAsDrizzle() {
-    const drizzle = sqlToDrizzle(sql)
-    navigator.clipboard.writeText(drizzle).then(() => {
-      ormCopied = 'drizzle'
-      if (ormCopiedTimer) clearTimeout(ormCopiedTimer)
-      ormCopiedTimer = setTimeout(() => { ormCopied = null }, 2000)
-    })
-  }
-
-  function copyAsPrisma() {
-    const prisma = sqlToPrisma(sql, [])
-    navigator.clipboard.writeText(prisma).then(() => {
-      ormCopied = 'prisma'
+  /** @param {'drizzle' | 'prisma'} kind */
+  function copyAsOrm(kind) {
+    const code = kind === 'drizzle' ? sqlToDrizzle(sql) : sqlToPrisma(sql, [])
+    navigator.clipboard.writeText(code).then(() => {
+      ormCopied = kind
       if (ormCopiedTimer) clearTimeout(ormCopiedTimer)
       ormCopiedTimer = setTimeout(() => { ormCopied = null }, 2000)
     })
@@ -499,6 +378,27 @@
   })
 </script>
 
+{#snippet kbd(/** @type {string} */ k)}
+  <kbd class="inline-flex h-[17px] min-w-[17px] items-center justify-center rounded border border-border/70 bg-muted/60 px-1 font-mono text-[10px] font-medium leading-none text-muted-foreground shadow-[inset_0_-1px_0_var(--border)]">{k}</kbd>
+{/snippet}
+
+{#snippet hint(/** @type {string} */ label, /** @type {string} */ desc, /** @type {string[]} */ keys = [])}
+  <div class="flex max-w-[240px] flex-col gap-1">
+    <div class="flex items-center justify-between gap-4">
+      <span class="text-ui-xs font-medium text-foreground">{label}</span>
+      {#if keys.length}
+        <span class="flex shrink-0 items-center gap-0.5">
+          {#each keys as k (k)}{@render kbd(k)}{/each}
+        </span>
+      {/if}
+    </div>
+    {#if desc}
+      <p class="text-ui-2xs leading-relaxed text-muted-foreground">{desc}</p>
+    {/if}
+  </div>
+{/snippet}
+
+<Tooltip.Provider delayDuration={250} disableHoverableContent>
 <div class="flex min-h-0 flex-1 overflow-hidden">
   <QueryHistoryPanel
     bind:visible={queryHistoryVisible}
@@ -511,181 +411,179 @@
 
   <div bind:this={consoleEl} class="flex min-h-0 min-w-0 flex-1 flex-col">
   <div
-    class="studio-chrome flex h-9 shrink-0 items-center gap-2 border-b border-border bg-panel px-3"
+    class="studio-chrome flex h-9 shrink-0 items-center gap-1.5 border-b border-border bg-panel px-2"
     data-studio-chrome
   >
-    {#if activeResult.loading}
-      <Button
-        type="button"
-        variant="destructive"
-        size="sm"
-        class="h-7 shrink-0 gap-2 pl-2.5 pr-2 font-medium shadow-sm"
-        onclick={() => void cancelQuery()}
-      >
-        <Square class="size-3 shrink-0 fill-current" data-icon="inline-start" />
-        Stop
-      </Button>
+    {#if loading}
+      <Tooltip.Root>
+        <Tooltip.Trigger>
+          {#snippet child({ props })}
+            <Button
+              {...props}
+              type="button"
+              variant="destructive"
+              size="sm"
+              class="h-7 shrink-0 gap-2 pl-2.5 pr-2 font-medium shadow-sm"
+              onclick={() => void cancelQuery()}
+            >
+              <Square class="size-3 shrink-0 fill-current" data-icon="inline-start" />
+              Stop
+            </Button>
+          {/snippet}
+        </Tooltip.Trigger>
+        <Tooltip.Content>
+          {@render hint('Stop', 'Cancel the running query.')}
+        </Tooltip.Content>
+      </Tooltip.Root>
     {:else}
-      <Button
-        type="button"
-        variant="default"
-        size="sm"
-        class="h-7 shrink-0 gap-2 pl-2.5 pr-2 font-medium shadow-sm"
-        disabled={!sql.trim()}
-        onclick={handleRun}
-      >
-        <Play class="size-3.5 shrink-0" data-icon="inline-start" />
-        Run
-      </Button>
+      <Tooltip.Root>
+        <Tooltip.Trigger>
+          {#snippet child({ props })}
+            <Button
+              {...props}
+              type="button"
+              variant="default"
+              size="sm"
+              class="h-7 shrink-0 gap-2 pl-2.5 pr-2 font-medium shadow-sm"
+              disabled={!sql.trim()}
+              onclick={() => handleRun(undefined)}
+            >
+              <Play class="size-3.5 shrink-0" data-icon="inline-start" />
+              Run
+            </Button>
+          {/snippet}
+        </Tooltip.Trigger>
+        <Tooltip.Content>
+          {@render hint(
+            'Run query',
+            `Runs every statement — each gets its own result tab. ${mod}R runs only the statement under the cursor, ${mod}L selects it.`,
+            [mod, '↵'],
+          )}
+        </Tooltip.Content>
+      </Tooltip.Root>
     {/if}
 
-    <div class="h-4 w-px shrink-0 bg-border" aria-hidden="true"></div>
+    <div class="mx-0.5 h-4 w-px shrink-0 bg-border" aria-hidden="true"></div>
 
     <div class="flex min-w-0 items-center gap-0.5">
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        class="h-7 gap-1.5 px-2 text-muted-foreground hover:text-foreground"
-        disabled={activeResult.loading || !sql.trim()}
-        title="Re-run query"
-        onclick={handleRun}
-      >
-        <RefreshCw class="size-3.5 shrink-0" />
-        <span class="text-ui-xs">Refresh</span>
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        class="h-7 gap-1.5 px-2 text-muted-foreground hover:text-foreground"
-        disabled={!sql.trim()}
-        title="Format SQL"
-        onclick={() => void formatSql?.()}
-      >
-        <Braces class="size-3.5 shrink-0" />
-        <span class="text-ui-xs">Format</span>
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        class={queryHistoryVisible
-          ? "h-7 gap-1.5 px-2 text-foreground"
-          : "h-7 gap-1.5 px-2 text-muted-foreground hover:text-foreground"}
-        title="Query history"
-        onclick={() => (queryHistoryVisible = !queryHistoryVisible)}
-      >
-        <History class="size-3.5 shrink-0" />
-        <span class="text-ui-xs">History</span>
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        class="h-7 gap-1.5 px-2 text-muted-foreground hover:text-foreground"
-        disabled={!sql.trim()}
-        title="Save query"
-        onclick={openSaveDialog}
-      >
-        <Bookmark class="size-3.5 shrink-0" />
-        <span class="text-ui-xs">Save</span>
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        class={cn(
-          'h-7 gap-1.5 px-2 hover:text-foreground',
-          activeResult.outputView === 'explain'
-            ? 'text-foreground'
-            : 'text-muted-foreground',
-        )}
-        disabled={!sql.trim() || activeResult.explainLoading}
-        title="Explain query plan"
-        onclick={handleExplain}
-      >
-        {#if activeResult.explainLoading}
-          <Loader2 class="size-3.5 shrink-0 animate-spin" />
-        {:else}
-          <ScanSearch class="size-3.5 shrink-0" />
-        {/if}
-        <span class="text-ui-xs">Explain</span>
-      </Button>
+      <Tooltip.Root>
+        <Tooltip.Trigger>
+          {#snippet child({ props })}
+            <Button
+              {...props}
+              type="button"
+              variant="ghost"
+              size="sm"
+              class="size-7 p-0 text-muted-foreground hover:text-foreground"
+              disabled={!sql.trim()}
+              onclick={() => void formatSql?.()}
+            >
+              <Braces class="size-3.5 shrink-0" />
+            </Button>
+          {/snippet}
+        </Tooltip.Trigger>
+        <Tooltip.Content>
+          {@render hint('Format SQL', 'Reformat the whole editor with consistent casing and indentation.')}
+        </Tooltip.Content>
+      </Tooltip.Root>
 
-      <div class="h-4 w-px shrink-0 bg-border" aria-hidden="true"></div>
+      <Tooltip.Root>
+        <Tooltip.Trigger>
+          {#snippet child({ props })}
+            <Button
+              {...props}
+              type="button"
+              variant="ghost"
+              size="sm"
+              class="size-7 p-0 text-muted-foreground hover:text-foreground"
+              disabled={!sql.trim()}
+              onclick={openSaveDialog}
+            >
+              <Bookmark class="size-3.5 shrink-0" />
+            </Button>
+          {/snippet}
+        </Tooltip.Trigger>
+        <Tooltip.Content>
+          {@render hint('Save query', 'Keep this query for later — saved queries live in History → Saved, per connection.', [mod, 'S'])}
+        </Tooltip.Content>
+      </Tooltip.Root>
 
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        class="h-7 gap-1.5 px-2 text-muted-foreground hover:text-foreground"
-        disabled={!sql.trim()}
-        title="Copy SQL as Drizzle ORM query"
-        onclick={copyAsDrizzle}
-      >
-        {#if ormCopied === 'drizzle'}
-          <CheckCheck class="size-3.5 shrink-0 text-green-500" />
-        {:else}
-          <Code2 class="size-3.5 shrink-0" />
-        {/if}
-        <span class="text-ui-xs">{ormCopied === 'drizzle' ? 'Copied!' : 'Drizzle'}</span>
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        class="h-7 gap-1.5 px-2 text-muted-foreground hover:text-foreground"
-        disabled={!sql.trim()}
-        title="Copy SQL as Prisma query"
-        onclick={copyAsPrisma}
-      >
-        {#if ormCopied === 'prisma'}
-          <CheckCheck class="size-3.5 shrink-0 text-green-500" />
-        {:else}
-          <Code2 class="size-3.5 shrink-0" />
-        {/if}
-        <span class="text-ui-xs">{ormCopied === 'prisma' ? 'Copied!' : 'Prisma'}</span>
-      </Button>
-    </div>
+      <Tooltip.Root>
+        <Tooltip.Trigger>
+          {#snippet child({ props })}
+            <Button
+              {...props}
+              type="button"
+              variant="ghost"
+              size="sm"
+              class={cn(
+                'size-7 p-0 hover:text-foreground',
+                queryHistoryVisible ? 'text-foreground' : 'text-muted-foreground',
+              )}
+              onclick={() => (queryHistoryVisible = !queryHistoryVisible)}
+            >
+              <History class="size-3.5 shrink-0" />
+            </Button>
+          {/snippet}
+        </Tooltip.Trigger>
+        <Tooltip.Content>
+          {@render hint('Query history', 'Browse and re-run everything you have executed, plus your saved queries.', [mod, '⇧', 'B'])}
+        </Tooltip.Content>
+      </Tooltip.Root>
 
-  </div>
+      <Tooltip.Root>
+        <Tooltip.Trigger>
+          {#snippet child({ props })}
+            <Button
+              {...props}
+              type="button"
+              variant="ghost"
+              size="sm"
+              class={cn(
+                'size-7 p-0 hover:text-foreground',
+                outputView === 'explain' ? 'text-foreground' : 'text-muted-foreground',
+              )}
+              disabled={!sql.trim() || explainLoading}
+              onclick={handleExplain}
+            >
+              {#if explainLoading}
+                <Loader2 class="size-3.5 shrink-0 animate-spin" />
+              {:else}
+                <ScanSearch class="size-3.5 shrink-0" />
+              {/if}
+            </Button>
+          {/snippet}
+        </Tooltip.Trigger>
+        <Tooltip.Content>
+          {@render hint('Explain plan', 'Visualize how the database executes this query — spot slow scans and missing indexes.')}
+        </Tooltip.Content>
+      </Tooltip.Root>
 
-  <!-- SQL Tabs -->
-  <div class="flex h-8 shrink-0 items-stretch gap-0 overflow-x-auto border-b border-border bg-panel px-1" style="scrollbar-width:none">
-    {#each sqlTabs as tab (tab.id)}
-      {@const isActive = tab.id === activeTabId}
-      <div
-        class="group relative flex min-w-0 shrink-0 items-stretch"
-      >
-        <button
-          type="button"
-          class="flex min-w-0 items-center gap-1.5 rounded-t py-1 pl-3 transition-colors {sqlTabs.length > 1 ? 'pr-5' : 'pr-3'} {isActive ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground'}"
-          onclick={() => (activeTabId = tab.id)}
-          title={tab.name}
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger
+          class="flex h-7 items-center gap-1 rounded-md px-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+          disabled={!sql.trim()}
+          title="Copy as ORM query — Drizzle or Prisma"
         >
-          <span class="max-w-[100px] truncate text-ui-xs">{tab.name}</span>
-        </button>
-        {#if sqlTabs.length > 1}
-          <button
-            type="button"
-            class="absolute right-1 top-1/2 -translate-y-1/2 flex size-4 items-center justify-center rounded opacity-0 transition-[opacity,color] hover:text-foreground group-hover:opacity-100 {isActive ? 'text-muted-foreground' : 'text-muted-foreground/60'}"
-            onclick={(e) => { e.stopPropagation(); closeTab(tab.id) }}
-            title="Close tab"
-          >
-            <X class="size-2.5" />
-          </button>
-        {/if}
-      </div>
-    {/each}
-    <button
-      type="button"
-      class="flex shrink-0 items-center justify-center px-1.5 text-muted-foreground/50 transition-colors hover:text-foreground"
-      onclick={addTab}
-      title="New tab"
-    >
-      <Plus class="size-3.5" />
-    </button>
+          {#if ormCopied}
+            <CheckCheck class="size-3.5 shrink-0 text-green-500" />
+          {:else}
+            <Code2 class="size-3.5 shrink-0" />
+          {/if}
+          <ChevronDown class="size-3 shrink-0 opacity-50" />
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Content align="start" class="min-w-36">
+          <DropdownMenu.Item class="gap-2 font-mono text-xs" onclick={() => copyAsOrm('drizzle')}>
+            <Code2 class="size-3.5 shrink-0 text-muted-foreground/50" />
+            Copy as Drizzle
+          </DropdownMenu.Item>
+          <DropdownMenu.Item class="gap-2 font-mono text-xs" onclick={() => copyAsOrm('prisma')}>
+            <Code2 class="size-3.5 shrink-0 text-muted-foreground/50" />
+            Copy as Prisma
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Root>
+    </div>
   </div>
 
   <div
@@ -696,12 +594,12 @@
   >
     <SqlEditor
       bind:this={sqlEditorRef}
-      bind:value={activeTab.content}
+      bind:value={sql}
       class="absolute inset-0"
       {schemaHints}
       {onmodk}
-      onmodenter={handleRun}
-      onmodr={handleRun}
+      onmodenter={() => handleRun(undefined)}
+      onrunstatement={(stmt) => handleRun(stmt)}
       onmods={openSaveDialog}
       {onmodi}
       {onmodb}
@@ -714,12 +612,6 @@
       {onmodshifto}
       onmodj={toggleOutput}
       onmodshiftb={() => { queryHistoryVisible = !queryHistoryVisible; onmodshiftb?.() }}
-      onchange={(content) => {
-        if (content !== _lastSyncedSql) {
-          _lastSyncedSql = content
-          sql = content
-        }
-      }}
       onactionsready={(actions) => {
         formatSql = actions.format;
       }}
@@ -743,8 +635,8 @@
   />
   {/if}
 
-  {#if activeResult.error}
-    {#if isNetworkError(activeResult.error)}
+  {#if error}
+    {#if isNetworkError(error)}
       <!-- Network / offline error -->
       <div class="flex shrink-0 items-center gap-2.5 border-b border-border/30 bg-muted/20 px-3 py-2">
         <WifiOff class="size-3.5 shrink-0 text-muted-foreground/40" />
@@ -755,7 +647,7 @@
       <div class="shrink-0 border-b border-destructive/20 bg-destructive/5">
         <div class="flex items-start gap-2 px-3 py-2">
           <span class="mt-px shrink-0 font-mono text-ui-2xs font-bold uppercase tracking-wide text-destructive/70">error</span>
-          <pre class="max-h-24 min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-all font-mono text-ui-xs leading-relaxed text-destructive">{activeResult.error}</pre>
+          <pre class="max-h-24 min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-all font-mono text-ui-xs leading-relaxed text-destructive">{error}</pre>
           {#if onfixwithai}
             <button
               type="button"
@@ -779,12 +671,12 @@
       data-studio-chrome
     >
       <!-- Result-set selector tabs (only when multi-result) -->
-      {#if activeResult.resultSets?.length > 1}
-        {#each activeResult.resultSets as _rs, i (i)}
-          {@const rsActive = (activeResult.activeResultIdx ?? 0) === i}
+      {#if resultSets.length > 1}
+        {#each resultSets as _rs, i (i)}
+          {@const rsActive = Math.min(activeResultIdx, resultSets.length - 1) === i}
           <button
             type="button"
-            onclick={() => setActiveResultIdx(i)}
+            onclick={() => { activeResultIdx = i; resultSort = null; selected = new Set() }}
             class={cn(
               'relative flex items-center border-b-2 px-2.5 font-mono text-ui-xs transition-colors',
               rsActive ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground/50 hover:text-muted-foreground',
@@ -805,20 +697,20 @@
           { id: 'explain', label: 'Explain', Icon: ScanSearch, pro: true },
         ] as tab (tab.id)}
           {@const locked = tab.pro && !$hasPro}
-          {@const active = !locked && outputVisible && (tab.id === 'explain' ? activeResult.outputView === 'explain' : currentDisplay.outputView === tab.id)}
+          {@const tabActive = !locked && outputVisible && outputView === tab.id}
           {@const Icon = tab.Icon}
           <button
             type="button"
             onclick={() => {
               if (locked) { onprorequired(); return }
               if (tab.id === 'explain') { void handleExplain() }
-              else { setOutputView(tab.id); if (!outputVisible) toggleOutput() }
+              else { outputView = /** @type {'table'|'chart'|'json'} */ (tab.id); if (!outputVisible) toggleOutput() }
             }}
             class={cn(
               'flex size-7 items-center justify-center rounded transition-colors',
               locked
                 ? 'cursor-not-allowed opacity-40 text-muted-foreground/30'
-                : active ? 'bg-muted/70 text-foreground' : 'text-muted-foreground/50 hover:bg-muted/40 hover:text-muted-foreground',
+                : tabActive ? 'bg-muted/70 text-foreground' : 'text-muted-foreground/50 hover:bg-muted/40 hover:text-muted-foreground',
             )}
             title="{tab.label} view{locked ? ' · Stroke Pro' : ''}"
           >
@@ -861,29 +753,38 @@
           </DropdownMenu.Root>
         {/if}
 
-        <button
-          type="button"
-          onclick={toggleOutput}
-          title="{outputVisible ? 'Hide output' : 'Show output'} (⌘J)"
-          class="inline-flex size-5 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-foreground"
-        >
-          <ChevronDown class={cn('size-3.5 transition-transform duration-150', outputVisible ? '' : 'rotate-180')} />
-        </button>
+        <Tooltip.Root>
+          <Tooltip.Trigger>
+            {#snippet child({ props })}
+              <button
+                {...props}
+                type="button"
+                onclick={toggleOutput}
+                class="inline-flex size-5 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-foreground"
+              >
+                <ChevronDown class={cn('size-3.5 transition-transform duration-150', outputVisible ? '' : 'rotate-180')} />
+              </button>
+            {/snippet}
+          </Tooltip.Trigger>
+          <Tooltip.Content side="top" align="end">
+            {@render hint(outputVisible ? 'Hide results' : 'Show results', 'Collapse the results panel to give the editor the full height.', [mod, 'J'])}
+          </Tooltip.Content>
+        </Tooltip.Root>
       </div>
     </div>
 
     {#if outputVisible}
       <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-panel">
-        {#key `${activeTabId}:${activeResult.activeResultIdx ?? 0}`}
-          {#if currentDisplay.outputView === 'explain'}
-            {#if activeResult.explainLoading}
+        {#key `${outputView}:${Math.min(activeResultIdx, Math.max(resultSets.length - 1, 0))}`}
+          {#if outputView === 'explain'}
+            {#if explainLoading}
               <TableLoading />
-            {:else if activeResult.explainError}
+            {:else if explainError}
               <div class="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-                <p class="font-mono text-ui-xs text-destructive/70">{activeResult.explainError}</p>
+                <p class="font-mono text-ui-xs text-destructive/70">{explainError}</p>
               </div>
-            {:else if activeResult.explainResult}
-              <ExplainPlan result={activeResult.explainResult} />
+            {:else if explainResult}
+              <ExplainPlan result={explainResult} />
             {:else}
               <div class="flex h-full flex-col items-center justify-center gap-2 text-center">
                 <ScanSearch class="size-6 text-muted-foreground/20" />
@@ -891,20 +792,28 @@
               </div>
             {/if}
           {:else if currentDisplay.columns.length > 0}
-            {#if currentDisplay.outputView === 'json'}
-              <JsonViewer json={jsonText} rowCount={currentDisplay.rows.length} onshowtable={() => setOutputView('table')} />
-            {:else if currentDisplay.outputView === 'chart'}
+            {#if outputView === 'json'}
+              <JsonViewer json={jsonText} rowCount={currentDisplay.rows.length} onshowtable={() => (outputView = 'table')} />
+            {:else if outputView === 'chart'}
               <ChartView
                 columns={currentDisplay.columns}
                 rows={currentDisplay.rows}
                 {sql}
-                initialChartType={currentDisplay.chartType}
-                oncharttypechange={(t) => setChartType(t)}
+                initialChartType={chartType}
+                oncharttypechange={(t) => (chartType = t)}
               />
             {:else}
-              <DataTable columns={currentDisplay.columns} rows={currentDisplay.rows} loading={activeResult.loading} bind:selected />
+              <DataTable
+                columns={currentDisplay.columns}
+                rows={currentDisplay.rows}
+                {loading}
+                bind:selected
+                rowSort={resultSort}
+                onsortchange={handleResultSort}
+                readonly
+              />
             {/if}
-          {:else if activeResult.loading}
+          {:else if loading}
             <TableLoading />
           {:else}
             <div class="flex h-full flex-col items-center justify-center gap-2 text-center">
@@ -918,6 +827,7 @@
   </div>
   </div>
 </div>
+</Tooltip.Provider>
 
 <Dialog.Root bind:open={saveDialogOpen}>
   <Dialog.Content class="max-w-md gap-4">
