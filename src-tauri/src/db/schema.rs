@@ -123,54 +123,76 @@ const LIST_INDEXES_SQL: &str = r#"
     "#;
 
 async fn exact_row_count(pool: &PgPool, schema: &str, table: &str) -> Result<i64, String> {
-    let sql = format!(r#"SELECT COUNT(*)::bigint FROM "{schema}"."{table}""#);
+    // Names arrive from the frontend in the lazy-count pass — escape embedded
+    // quotes so an unusual (or hostile) identifier can't break out of the quoting.
+    let q = |id: &str| format!("\"{}\"", id.replace('"', "\"\""));
+    let sql = format!("SELECT COUNT(*)::bigint FROM {}.{}", q(schema), q(table));
     sqlx::query_scalar(&sql)
         .fetch_one(pool)
         .await
         .map_err(|e| format!("Failed to count rows for {table}: {e}"))
 }
 
-async fn resolve_unknown_row_counts(pool: &PgPool, schema: &str, tables: &mut [TableInfo]) {
-    // Zero out view/foreign-table entries immediately (no COUNT needed).
-    for t in tables.iter_mut() {
-        if t.row_count < 0 && (t.kind == "view" || t.kind == "foreign_table") {
-            t.row_count = 0;
-        }
-    }
+/// Bound on concurrent COUNT(*) queries in the lazy-count pass. Firing all of
+/// them at once (join_all) on a large schema swamps the small desktop pool —
+/// 70+ acquires against max_connections=4 queue for seconds each ("time to
+/// acquire exceeded slow threshold") and starve interactive queries. Matches
+/// the pool's max_connections (see open_pg).
+const COUNT_CONCURRENCY: usize = 4;
 
-    // Collect indices of materialized views / tables that still need an exact count.
-    let needs_count: Vec<usize> = tables
-        .iter()
-        .enumerate()
-        .filter(|(_, t)| t.row_count < 0)
-        .map(|(i, _)| i)
-        .collect();
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableRowCount {
+    pub name: String,
+    pub row_count: i64,
+}
 
-    if needs_count.is_empty() {
-        return;
-    }
-
-    // Run the COUNT(*) queries with bounded concurrency. Firing all of them at
-    // once (join_all) on a large schema swamps the small desktop pool — 70+
-    // acquires against max_connections=4 queue for seconds each ("time to acquire
-    // exceeded slow threshold") and starve the schema/catalog loads happening in
-    // parallel during (re)connect. Capping the in-flight count at the pool size
-    // keeps counts fast without ever saturating the pool.
+/// Exact COUNT(*) for the given tables of the active connection.
+///
+/// `list_tables` returns immediately with estimates (-1 = unknown) so the
+/// sidebar renders without waiting on counts; the UI then calls this in a
+/// background pass and patches the counts in as they resolve. Engines whose
+/// `list_tables` already returns exact counts inline (SQLite/D1/libSQL/…)
+/// never report -1, so they return an empty list here.
+pub async fn table_row_counts(
+    state: State<'_, DbState>,
+    schema: String,
+    tables: Vec<String>,
+) -> Result<Vec<TableRowCount>, String> {
     use futures::stream::StreamExt;
-    // Matches the pool's max_connections (see open_pg). One connection is left
-    // implicitly free for interactive work by keeping the cap at the ceiling
-    // rather than above it.
-    const COUNT_CONCURRENCY: usize = 4;
-    let counts: Vec<(usize, i64)> = futures::stream::iter(needs_count.iter().copied().map(|i| {
-        let name = tables[i].name.clone();
-        async move { (i, exact_row_count(pool, schema, &name).await.unwrap_or(0)) }
-    }))
-    .buffer_unordered(COUNT_CONCURRENCY)
-    .collect()
-    .await;
-
-    for (idx, count) in counts {
-        tables[idx].row_count = count;
+    match require_conn(&state)? {
+        ActiveConnection::Postgres(pool) => {
+            let counts: Vec<TableRowCount> =
+                futures::stream::iter(tables.into_iter().map(|name| {
+                    let pool = pool.clone();
+                    let schema = schema.clone();
+                    async move {
+                        let row_count = exact_row_count(&pool, &schema, &name).await.unwrap_or(0);
+                        TableRowCount { name, row_count }
+                    }
+                }))
+                .buffer_unordered(COUNT_CONCURRENCY)
+                .collect()
+                .await;
+            Ok(counts)
+        }
+        ActiveConnection::Mysql(pool) => {
+            let counts: Vec<TableRowCount> =
+                futures::stream::iter(tables.into_iter().map(|name| {
+                    let pool = pool.clone();
+                    let schema = schema.clone();
+                    async move {
+                        let row_count =
+                            mysql_exact_row_count(&pool, &schema, &name).await.unwrap_or(0);
+                        TableRowCount { name, row_count }
+                    }
+                }))
+                .buffer_unordered(COUNT_CONCURRENCY)
+                .collect()
+                .await;
+            Ok(counts)
+        }
+        _ => Ok(Vec::new()),
     }
 }
 
@@ -208,7 +230,15 @@ async fn list_tables_pg(pool: &PgPool, schema: &str) -> Result<Vec<TableInfo>, S
         })
         .collect();
 
-    resolve_unknown_row_counts(pool, schema, &mut tables).await;
+    // Views and foreign tables never get a COUNT(*) — report 0 immediately.
+    // Real tables keep -1 (unknown): returning right away lets the sidebar
+    // render instantly, and the UI resolves exact counts in a background
+    // `table_row_counts` pass instead of blocking the list on N COUNT(*)s.
+    for t in tables.iter_mut() {
+        if t.row_count < 0 && (t.kind == "view" || t.kind == "foreign_table") {
+            t.row_count = 0;
+        }
+    }
     Ok(tables)
 }
 
@@ -528,37 +558,6 @@ async fn mysql_exact_row_count(pool: &MySqlPool, schema: &str, table: &str) -> R
         .map_err(|e| format!("Failed to count rows for {table}: {e}"))
 }
 
-/// Replace ambiguous (-1) row counts with an exact COUNT(*). Mirrors the
-/// PostgreSQL `resolve_unknown_row_counts` path.
-async fn resolve_unknown_row_counts_mysql(pool: &MySqlPool, schema: &str, tables: &mut [TableInfo]) {
-    for t in tables.iter_mut() {
-        if t.row_count < 0 && t.kind == "view" {
-            t.row_count = 0;
-        }
-    }
-
-    let needs_count: Vec<usize> = tables
-        .iter()
-        .enumerate()
-        .filter(|(_, t)| t.row_count < 0)
-        .map(|(i, _)| i)
-        .collect();
-
-    if needs_count.is_empty() {
-        return;
-    }
-
-    let futs: Vec<_> = needs_count
-        .iter()
-        .map(|&i| mysql_exact_row_count(pool, schema, &tables[i].name))
-        .collect();
-    let counts = futures::future::join_all(futs).await;
-
-    for (&idx, result) in needs_count.iter().zip(counts.iter()) {
-        tables[idx].row_count = result.as_ref().copied().unwrap_or(0);
-    }
-}
-
 async fn list_tables_mysql(pool: &MySqlPool, schema: &str) -> Result<Vec<TableInfo>, String> {
     let rows = sqlx::query(
         "SELECT TABLE_NAME, TABLE_TYPE, COALESCE(TABLE_ROWS, 0) \
@@ -588,7 +587,14 @@ async fn list_tables_mysql(pool: &MySqlPool, schema: &str) -> Result<Vec<TableIn
         })
         .collect();
 
-    resolve_unknown_row_counts_mysql(pool, schema, &mut tables).await;
+    // Views report 0 immediately; base tables with no usable estimate keep -1
+    // (unknown) and are resolved lazily via `table_row_counts` — see the
+    // PostgreSQL path above.
+    for t in tables.iter_mut() {
+        if t.row_count < 0 && t.kind == "view" {
+            t.row_count = 0;
+        }
+    }
     Ok(tables)
 }
 

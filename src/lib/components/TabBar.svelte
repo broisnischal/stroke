@@ -11,8 +11,11 @@
   import Layers from '@lucide/svelte/icons/layers'
   import Search from '@lucide/svelte/icons/search'
   import Blocks from '@lucide/svelte/icons/blocks'
+  import KeyRound from '@lucide/svelte/icons/key-round'
   import X from '@lucide/svelte/icons/x'
   import Plus from '@lucide/svelte/icons/plus'
+  import Pin from '@lucide/svelte/icons/pin'
+  import PinOff from '@lucide/svelte/icons/pin-off'
   import Clock from '@lucide/svelte/icons/clock'
   import ChevronDown from '@lucide/svelte/icons/chevron-down'
   import { cn } from '$lib/utils.js'
@@ -29,6 +32,11 @@
   /** @param {MouseEvent} e */
   function handleDragAreaDblClick(e) {
     if (!isTauri) return
+    // Direct double-clicks on the header are already handled by Tauri's
+    // injected drag-region script (data-tauri-drag-region) — toggling here
+    // too made the window maximize and instantly restore. This handler only
+    // covers double-clicks on non-interactive children the built-in ignores.
+    if (e.target === e.currentTarget) return
     if (/** @type {Element} */ (e.target).closest('button')) return
     import('@tauri-apps/api/window').then(({ getCurrentWindow }) => getCurrentWindow().toggleMaximize()).catch(() => {})
   }
@@ -42,6 +50,7 @@
     onclose = () => {},
     oncloseothers = /** @param {string} _id */ (_id) => {},
     oncloseall = () => {},
+    onpintoggle = /** @param {string} _id */ (_id) => {},
     onnew = () => {},
     /** @type {import('$lib/stores/recent-tabs.js').RecentTab[]} */
     recentTabs = [],
@@ -74,6 +83,7 @@
     if (tab.kind === 'security') return ShieldCheck
     if (tab.kind === 'extensions') return Blocks
     if (tab.kind === 'search') return Search
+    if (tab.kind === 'license') return KeyRound
     return FileText
   }
 </script>
@@ -125,22 +135,39 @@
                 <span class="truncate">{tabDisplayTitle(tab)}</span>
               </button>
 
-              <!-- Close button -->
-              <button
-                type="button"
-                class={cn(
-                  'mr-1.5 inline-flex size-[18px] shrink-0 self-center items-center justify-center rounded transition-all duration-100',
-                  'text-muted-foreground/50 hover:bg-muted hover:text-foreground',
-                  active
-                    ? 'opacity-50 hover:opacity-100'
-                    : 'opacity-0 group-hover/tab:opacity-50 group-hover/tab:hover:opacity-100',
-                )}
-                title="Close tab"
-                aria-label="Close tab"
-                onclick={(e) => { e.stopPropagation(); onclose(tab.id) }}
-              >
-                <X class="size-2.5" />
-              </button>
+              {#if tab.pinned}
+                <!-- Pinned: pin badge replaces close — click to unpin -->
+                <button
+                  type="button"
+                  class={cn(
+                    'mr-1.5 inline-flex size-[18px] shrink-0 self-center items-center justify-center rounded transition-all duration-100',
+                    'text-muted-foreground/60 hover:bg-muted hover:text-foreground',
+                    active ? 'opacity-70 hover:opacity-100' : 'opacity-40 group-hover/tab:opacity-70',
+                  )}
+                  title="Unpin tab"
+                  aria-label="Unpin tab"
+                  onclick={(e) => { e.stopPropagation(); onpintoggle(tab.id) }}
+                >
+                  <Pin class="size-2.5 rotate-45" />
+                </button>
+              {:else}
+                <!-- Close button -->
+                <button
+                  type="button"
+                  class={cn(
+                    'mr-1.5 inline-flex size-[18px] shrink-0 self-center items-center justify-center rounded transition-all duration-100',
+                    'text-muted-foreground/50 hover:bg-muted hover:text-foreground',
+                    active
+                      ? 'opacity-50 hover:opacity-100'
+                      : 'opacity-0 group-hover/tab:opacity-50 group-hover/tab:hover:opacity-100',
+                  )}
+                  title="Close tab"
+                  aria-label="Close tab"
+                  onclick={(e) => { e.stopPropagation(); onclose(tab.id) }}
+                >
+                  <X class="size-2.5" />
+                </button>
+              {/if}
 
               <!-- Separator: hidden adjacent to any active tab -->
               {#if !active && !nextActive}
@@ -151,6 +178,16 @@
         </ContextMenu.Trigger>
 
         <ContextMenu.Content class="w-44">
+          <ContextMenu.Item onSelect={() => onpintoggle(tab.id)}>
+            {#if tab.pinned}
+              <PinOff class="size-3.5" />
+              Unpin Tab
+            {:else}
+              <Pin class="size-3.5" />
+              Pin Tab
+            {/if}
+          </ContextMenu.Item>
+          <ContextMenu.Separator />
           <ContextMenu.Item onSelect={() => onclose(tab.id)}>Close</ContextMenu.Item>
           <ContextMenu.Item disabled={tabs.length <= 1} onSelect={() => oncloseothers(tab.id)}>
             Close Others

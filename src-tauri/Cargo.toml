@@ -58,3 +58,33 @@ objc2-web-kit = { version = "0.3", features = ["WKWebView"] }
 strip = true
 lto = true
 codegen-units = 1
+
+# ── Dev-profile crypto optimization ───────────────────────────────────────────
+# Connect-time auth runs heavy crypto: Postgres SCRAM-SHA-256 (PBKDF2, 4096
+# HMAC-SHA-256 rounds via sha2/hmac), MySQL caching_sha2_password (RSA via
+# rsa/num-bigint-dig), and rustls/ring TLS handshakes. Unoptimized, these are
+# 50-200x slower — debug-build connects took seconds while release was instant.
+# Optimizing only these leaf crates keeps incremental dev builds fast; they are
+# compiled once and never change with app code.
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.sha1]
+opt-level = 3
+[profile.dev.package.hmac]
+opt-level = 3
+[profile.dev.package.digest]
+opt-level = 3
+[profile.dev.package.md-5]
+opt-level = 3
+[profile.dev.package.rsa]
+opt-level = 3
+[profile.dev.package.num-bigint-dig]
+opt-level = 3
+[profile.dev.package.ring]
+opt-level = 3
+[profile.dev.package.rustls]
+opt-level = 3
+[profile.dev.package.curve25519-dalek]
+opt-level = 3
+[profile.dev.package.block-buffer]
+opt-level = 3

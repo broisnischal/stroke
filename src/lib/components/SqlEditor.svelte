@@ -3,13 +3,14 @@
   import * as monaco from 'monaco-editor'
   import { configureMonacoWorkers, editorFontFamily } from '$lib/monaco-env.js'
   import { registerMonacoSqlFormatter } from '$lib/format-sql.js'
-  import { registerMonacoSqlCompletion } from '$lib/monaco-sql-complete.js'
+  import { registerMonacoSqlCompletion, setSqlHintsForModel } from '$lib/monaco-sql-complete.js'
   import {
     defineStrokeMonacoThemes,
     monacoThemeId,
     readEditorFontOptions,
   } from '$lib/monaco-themes.js'
   import { normalizeThemeId } from '$lib/themes/registry.js'
+  import { splitSqlStatements, statementAtOffset, lintSql } from '$lib/sql-statements.js'
   import { cn } from '$lib/utils.js'
 
   /** @typedef {import('$lib/monaco-sql-complete.js').SqlSchemaHints} SqlSchemaHints */
@@ -21,7 +22,12 @@
     schemaHints = /** @type {SqlSchemaHints} */ ({}),
     onmodk = undefined,
     onmodenter = undefined,
-    onmodr = undefined,
+    /**
+     * Run a single statement (Ctrl/Cmd+R) — receives the selected text, or the
+     * statement under the cursor when there is no selection.
+     * @type {((sql: string) => void) | undefined}
+     */
+    onrunstatement = undefined,
     onmods = undefined,
     // Global app shortcuts — registered inside Monaco so they work when editor is focused
     onmodi = undefined,
@@ -44,16 +50,54 @@
   let container = $state(null)
   /** @type {monaco.editor.IStandaloneCodeEditor | null} */
   let editor = null
+  /** @type {monaco.editor.IEditorDecorationsCollection | null} */
+  let execDecorations = null
+
+  /**
+   * Mark statement(s) as successfully executed with a ✓ in the glyph margin.
+   * Pass the single statement that ran (⌘R), or null to mark every statement
+   * (run all). Marks clear automatically on the next edit.
+   * @param {string | null} [ranStatement]
+   */
+  export function markExecuted(ranStatement = null) {
+    const model = editor?.getModel()
+    if (!model || !execDecorations) return
+    const target = typeof ranStatement === 'string' ? ranStatement.trim().replace(/;+\s*$/, '') : null
+    const marks = []
+    for (const stmt of splitSqlStatements(model.getValue())) {
+      if (target !== null && stmt.text.replace(/;+\s*$/, '') !== target) continue
+      const pos = model.getPositionAt(stmt.start)
+      marks.push({
+        range: new monaco.Range(pos.lineNumber, 1, pos.lineNumber, 1),
+        options: {
+          glyphMarginClassName: 'sql-glyph-ok',
+          glyphMarginHoverMessage: { value: 'Ran successfully' },
+        },
+      })
+    }
+    execDecorations.set(marks)
+  }
 
   /** Reads current app theme from <html data-theme>. */
   function currentTheme() {
     return normalizeThemeId(document.documentElement.dataset.theme)
   }
 
+  /**
+   * Statement under the cursor (or containing the selection anchor).
+   * @param {monaco.editor.IStandaloneCodeEditor} ed
+   */
+  function statementAtCursor(ed) {
+    const model = ed.getModel()
+    const pos = ed.getPosition()
+    if (!model || !pos) return null
+    return statementAtOffset(splitSqlStatements(model.getValue()), model.getOffsetAt(pos))
+  }
+
   /** @param {monaco.editor.IStandaloneCodeEditor} ed */
   function registerAppShortcuts(ed) {
     const { CtrlCmd, Shift } = monaco.KeyMod
-    const { KeyK, KeyR, KeyS, KeyI, KeyB, KeyW, KeyN, KeyM, KeyT, KeyD, KeyO, KeyE, KeyJ, Enter } = monaco.KeyCode
+    const { KeyK, KeyL, KeyR, KeyS, KeyI, KeyB, KeyW, KeyN, KeyM, KeyT, KeyD, KeyO, KeyE, KeyJ, Enter } = monaco.KeyCode
 
     /** @param {() => void | undefined} fn */
     const run = (fn) => fn?.()
@@ -77,8 +121,38 @@
 
     // Editor-local shortcuts
     ed.addCommand(CtrlCmd | KeyK,     () => run(onmodk))
-    ed.addCommand(CtrlCmd | KeyR,     () => run(onmodr))
     ed.addCommand(CtrlCmd | KeyS,     () => run(onmods))
+
+    // Ctrl/Cmd+L — select the statement under the cursor
+    ed.addCommand(CtrlCmd | KeyL, () => {
+      const stmt = statementAtCursor(ed)
+      const model = ed.getModel()
+      if (!stmt || !model) return
+      const s = model.getPositionAt(stmt.start)
+      const e = model.getPositionAt(stmt.end)
+      ed.setSelection(new monaco.Selection(s.lineNumber, s.column, e.lineNumber, e.column))
+      ed.revealRangeInCenterIfOutsideViewport(
+        new monaco.Range(s.lineNumber, s.column, e.lineNumber, e.column),
+      )
+    })
+
+    // Ctrl/Cmd+R — run the selection if any, else the statement under the cursor
+    ed.addCommand(CtrlCmd | KeyR, () => {
+      if (!onrunstatement) return
+      const model = ed.getModel()
+      const sel = ed.getSelection()
+      const selText = model && sel && !sel.isEmpty() ? model.getValueInRange(sel).trim() : ''
+      const stmt = selText || statementAtCursor(ed)?.text || ''
+      if (stmt) onrunstatement(stmt)
+    })
+    ed.addAction({
+      id: 'stroke.run-statement',
+      label: 'Run Statement at Cursor',
+      run: () => {
+        const stmt = statementAtCursor(ed)?.text
+        if (stmt && onrunstatement) onrunstatement(stmt)
+      },
+    })
 
     // Global app shortcuts — work even when Monaco has focus
     ed.addCommand(CtrlCmd | KeyI,           () => run(onmodi))
@@ -134,7 +208,8 @@
       // strip between the numbers and the code.
       lineNumbersMinChars: 2,
       lineDecorationsWidth: 6,
-      glyphMargin: false,
+      // Glyph margin hosts the executed-✓ and lint error/warning dots
+      glyphMargin: true,
       folding: false,
       scrollbar: { verticalScrollbarSize: 6, horizontalScrollbarSize: 6 },
       overviewRulerLanes: 0,
@@ -146,12 +221,14 @@
       cursorSmoothCaretAnimation: 'on',
       smoothScrolling: true,
       fixedOverflowWidgets: true,
-      quickSuggestions: { other: true, comments: false, strings: true },
-      quickSuggestionsDelay: 50,
+      quickSuggestions: { other: true, comments: false, strings: false },
+      quickSuggestionsDelay: 0,
       suggestOnTriggerCharacters: true,
       tabCompletion: 'on',
       wordBasedSuggestions: 'off',
-      acceptSuggestionOnEnter: 'on',
+      // 'smart' — Enter inserts a newline unless the suggestion actually
+      // changes the typed text; 'on' stole Enter constantly while writing SQL.
+      acceptSuggestionOnEnter: 'smart',
       snippetSuggestions: 'none',
       renderWhitespace: 'none',
       bracketPairColorization: { enabled: true },
@@ -162,15 +239,81 @@
         showFunctions: true,
         showSnippets: true,
         filterGraceful: true,
+        // Match anywhere in the identifier: "email" finds "user_email"
+        matchOnWordStartOnly: false,
         insertMode: 'insert',
         showStatusBar: false,
         preview: false,
       },
-      suggestSelection: 'recentlyUsedByPrefix',
+      suggestSelection: 'first',
       parameterHints: { enabled: true, cycle: true },
     })
 
+    // Bind this model to this component's (live) schema hints — the completion
+    // provider is global, so hints must be looked up per model, not captured
+    // from whichever editor happened to register first.
+    setSqlHintsForModel(editor.getModel(), () => schemaHints)
+
     registerAppShortcuts(editor)
+
+    // Subtle gutter bar marking the statement the cursor is in — only shown
+    // when the buffer holds more than one statement, so single queries stay clean.
+    const stmtDecorations = editor.createDecorationsCollection()
+    function refreshActiveStatement() {
+      const model = editor?.getModel()
+      const pos = editor?.getPosition()
+      if (!model || !pos) return
+      const stmts = splitSqlStatements(model.getValue())
+      const stmt = stmts.length > 1 ? statementAtOffset(stmts, model.getOffsetAt(pos)) : null
+      if (!stmt) {
+        stmtDecorations.clear()
+        return
+      }
+      const s = model.getPositionAt(stmt.start)
+      const e = model.getPositionAt(stmt.end)
+      stmtDecorations.set([
+        {
+          range: new monaco.Range(s.lineNumber, 1, e.lineNumber, 1),
+          options: { isWholeLine: true, linesDecorationsClassName: 'stmt-active-gutter' },
+        },
+      ])
+    }
+    editor.onDidChangeCursorPosition(refreshActiveStatement)
+
+    // ── Lint: squiggles + gutter dots for lexical SQL problems ──────────────
+    execDecorations = editor.createDecorationsCollection()
+    const lintDecorations = editor.createDecorationsCollection()
+    /** @type {ReturnType<typeof setTimeout> | null} */
+    let lintTimer = null
+
+    function runLint() {
+      const model = editor?.getModel()
+      if (!model) return
+      const diags = readOnly ? [] : lintSql(model.getValue())
+      monaco.editor.setModelMarkers(model, 'stroke-sql', diags.map((d) => {
+        const s = model.getPositionAt(d.start)
+        const e = model.getPositionAt(d.end)
+        return {
+          message: d.message,
+          severity: d.severity === 'error' ? monaco.MarkerSeverity.Error : monaco.MarkerSeverity.Warning,
+          startLineNumber: s.lineNumber,
+          startColumn: s.column,
+          endLineNumber: e.lineNumber,
+          endColumn: e.column,
+        }
+      }))
+      lintDecorations.set(diags.map((d) => {
+        const s = model.getPositionAt(d.start)
+        return {
+          range: new monaco.Range(s.lineNumber, 1, s.lineNumber, 1),
+          options: {
+            glyphMarginClassName: d.severity === 'error' ? 'sql-glyph-error' : 'sql-glyph-warn',
+            glyphMarginHoverMessage: { value: d.message },
+          },
+        }
+      }))
+    }
+    runLint()
 
     // Replaces automaticLayout's polling loop: relayout only when the container
     // actually resizes.
@@ -218,6 +361,11 @@
         value = next
         onchange?.(next)
       }
+      refreshActiveStatement()
+      // Executed-✓ marks describe a previous buffer state — drop them on edit
+      execDecorations?.clear()
+      if (lintTimer) clearTimeout(lintTimer)
+      lintTimer = setTimeout(runLint, 350)
     })
 
     // Watch <html class="dark"> changes — reliable regardless of mode-watcher internals
@@ -231,9 +379,13 @@
 
     return () => {
       document.removeEventListener('keydown', docRunHandler, { capture: true })
+      if (lintTimer) clearTimeout(lintTimer)
+      const model = editor?.getModel()
+      if (model) monaco.editor.setModelMarkers(model, 'stroke-sql', [])
       ro.disconnect()
       editor?.dispose()
       editor = null
+      execDecorations = null
       themeObserver.disconnect()
     }
   })
@@ -275,6 +427,47 @@
 
   .sql-editor-host :global(.monaco-editor .monaco-editor-background) {
     outline: none !important;
+  }
+
+  /* Active-statement marker in the line-decorations gutter strip */
+  .sql-editor-host :global(.stmt-active-gutter) {
+    width: 2px !important;
+    margin-left: 1px;
+    border-radius: 1px;
+    background: color-mix(in srgb, var(--primary) 45%, transparent);
+  }
+
+  /* ── Glyph margin: executed ✓ and lint dots ─────────────────────────── */
+
+  .sql-editor-host :global(.sql-glyph-ok),
+  .sql-editor-host :global(.sql-glyph-error),
+  .sql-editor-host :global(.sql-glyph-warn) {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .sql-editor-host :global(.sql-glyph-ok)::after {
+    content: '✓';
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--color-green-500, #22c55e);
+  }
+
+  .sql-editor-host :global(.sql-glyph-error)::after,
+  .sql-editor-host :global(.sql-glyph-warn)::after {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+  }
+
+  .sql-editor-host :global(.sql-glyph-error)::after {
+    background: var(--destructive, #ef4444);
+  }
+
+  .sql-editor-host :global(.sql-glyph-warn)::after {
+    background: color-mix(in srgb, var(--color-amber-500, #f59e0b) 80%, transparent);
   }
 
   /* ── Suggestion widget ──────────────────────────────────────────────── */

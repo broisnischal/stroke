@@ -1852,22 +1852,109 @@ async fn execute_sql_pg(
     })
 }
 
-async fn execute_sql_multi_pg(pool: &sqlx::PgPool, sql: &str) -> Result<Vec<SqlResult>, String> {
-    let started = std::time::Instant::now();
+/// True if `s` contains anything besides whitespace, semicolons, and comments.
+fn sql_fragment_is_meaningful(s: &str) -> bool {
+    let b = s.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'-' if i + 1 < b.len() && b[i + 1] == b'-' => {
+                while i < b.len() && b[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'/' if i + 1 < b.len() && b[i + 1] == b'*' => match s[i + 2..].find("*/") {
+                Some(p) => i = i + 2 + p + 2,
+                None => i = b.len(),
+            },
+            b';' | b' ' | b'\t' | b'\r' | b'\n' => i += 1,
+            _ => return true,
+        }
+    }
+    false
+}
 
-    let stmts: Vec<&str> = sql
-        .split(';')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .collect();
+/// Split a SQL script into individual statements on `;`, without splitting
+/// inside quoted strings (`'…'` with `''`/`\'` escapes, `"…"`, backticks),
+/// line/block comments, or Postgres dollar-quoted bodies (`$$…$$`, `$tag$…$tag$`).
+/// Comment-only fragments are dropped. Mirrors `src/lib/sql-statements.js`.
+fn split_sql_statements(sql: &str) -> Vec<String> {
+    let b = sql.as_bytes();
+    let n = b.len();
+    let mut out: Vec<String> = Vec::new();
+    let mut i = 0usize;
+    let mut start = 0usize;
 
-    if stmts.is_empty() {
-        return Err("Query is empty".into());
+    fn flush(sql: &str, start: &mut usize, end: usize, out: &mut Vec<String>) {
+        let frag = sql[*start..end].trim();
+        if sql_fragment_is_meaningful(frag) {
+            out.push(frag.to_string());
+        }
+        *start = end;
     }
 
+    while i < n {
+        match b[i] {
+            b'-' if i + 1 < n && b[i + 1] == b'-' => {
+                while i < n && b[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'/' if i + 1 < n && b[i + 1] == b'*' => match sql[i + 2..].find("*/") {
+                Some(p) => i = i + 2 + p + 2,
+                None => i = n,
+            },
+            quote @ (b'\'' | b'"' | b'`') => {
+                i += 1;
+                while i < n {
+                    if quote == b'\'' && b[i] == b'\\' {
+                        i += 2;
+                        continue;
+                    }
+                    if b[i] == quote {
+                        // '' inside a single-quoted string is an escaped quote
+                        if quote == b'\'' && i + 1 < n && b[i + 1] == b'\'' {
+                            i += 2;
+                            continue;
+                        }
+                        i += 1;
+                        break;
+                    }
+                    i += 1;
+                }
+            }
+            b'$' => {
+                // Dollar-quote opener: `$$` or `$tag$` where tag starts with alpha/_
+                let mut j = i + 1;
+                while j < n && (b[j] == b'_' || b[j].is_ascii_alphanumeric()) {
+                    j += 1;
+                }
+                let tag_ok = j == i + 1 || b[i + 1] == b'_' || b[i + 1].is_ascii_alphabetic();
+                if tag_ok && j < n && b[j] == b'$' {
+                    let tag = &sql[i..=j];
+                    match sql[j + 1..].find(tag) {
+                        Some(p) => i = j + 1 + p + tag.len(),
+                        None => i = n,
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+            b';' => {
+                i += 1;
+                flush(sql, &mut start, i, &mut out);
+            }
+            _ => i += 1,
+        }
+    }
+    flush(sql, &mut start, n, &mut out);
+    out
+}
+
+async fn execute_sql_multi_pg(pool: &sqlx::PgPool, stmts: &[String]) -> Result<Vec<SqlResult>, String> {
     // Single statement — delegate to existing path (avoids code duplication)
     if stmts.len() == 1 {
-        return execute_sql_pg(pool, stmts[0], None).await.map(|r| vec![r]);
+        return execute_sql_pg(pool, &stmts[0], None).await.map(|r| vec![r]);
     }
 
     let mut tx = pool
@@ -1879,10 +1966,9 @@ async fn execute_sql_multi_pg(pool: &sqlx::PgPool, sql: &str) -> Result<Vec<SqlR
         .execute(&mut *tx)
         .await;
 
-    let _ = started; // suppress unused warning; per-stmt timers used below
     let mut results: Vec<SqlResult> = Vec::new();
 
-    for stmt in &stmts {
+    for stmt in stmts {
         let stmt_started = std::time::Instant::now();
         let stmt_ms = || stmt_started.elapsed().as_millis() as u64;
 
@@ -1969,32 +2055,40 @@ pub async fn execute_sql_multi(state: State<'_, DbState>, sql: String) -> Result
     let conn = require_conn(&state)?;
     let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
     *state.cancel_tx.lock().map_err(|e| e.to_string())? = Some(cancel_tx);
+    let stmts = split_sql_statements(&sql_str);
+    if stmts.is_empty() {
+        return Err("Query is empty".into());
+    }
     let result = tokio::select! {
         r = async move {
-            match conn {
-                ActiveConnection::Postgres(pool) => execute_sql_multi_pg(&pool, &sql_str).await,
-                ActiveConnection::Sqlite(pool) => {
-                    super::sqlite::execute_sql(&pool, &sql_str).await.map(|r| vec![r])
-                }
-                ActiveConnection::D1(cfg) => {
-                    super::d1::query(&cfg, &sql_str, vec![]).await.map(|r| vec![r])
-                }
-                ActiveConnection::LibSql(cfg) => {
-                    super::libsql::query(&cfg, &sql_str, vec![]).await.map(|r| vec![r])
-                }
-                ActiveConnection::Mysql(pool) => {
-                    super::mysql::execute_sql(&pool, &sql_str, None).await.map(|r| vec![r])
-                }
-                ActiveConnection::Clickhouse(cfg) => {
-                    super::clickhouse::query(&cfg, &sql_str).await.map(|r| vec![r])
-                }
-                ActiveConnection::Duckdb(h) => {
-                    super::duckdb::execute_sql(&h, &sql_str).await.map(|r| vec![r])
-                }
-                ActiveConnection::Mssql(h) => {
-                    super::mssql::execute_sql(&h, &sql_str).await.map(|r| vec![r])
+            // Postgres runs multi-statement scripts inside a single transaction
+            if let ActiveConnection::Postgres(pool) = &conn {
+                return execute_sql_multi_pg(pool, &stmts).await;
+            }
+            // Other engines: execute sequentially, one result set per statement.
+            // Cancellation happens at the outer select! (the future is dropped),
+            // so per-statement executors get no cancel receiver — same as the
+            // other diff/multi callers.
+            let multi = stmts.len() > 1;
+            let mut results: Vec<SqlResult> = Vec::with_capacity(stmts.len());
+            for (idx, stmt) in stmts.iter().enumerate() {
+                let r = match &conn {
+                    ActiveConnection::Postgres(_) => unreachable!("handled above"),
+                    ActiveConnection::Sqlite(pool) => super::sqlite::execute_sql(pool, stmt).await,
+                    ActiveConnection::D1(cfg) => super::d1::query(cfg, stmt, vec![]).await,
+                    ActiveConnection::LibSql(cfg) => super::libsql::query(cfg, stmt, vec![]).await,
+                    ActiveConnection::Mysql(pool) => super::mysql::execute_sql(pool, stmt, None).await,
+                    ActiveConnection::Clickhouse(cfg) => super::clickhouse::query(cfg, stmt).await,
+                    ActiveConnection::Duckdb(h) => super::duckdb::execute_sql(h, stmt).await,
+                    ActiveConnection::Mssql(h) => super::mssql::execute_sql(h, stmt).await,
+                };
+                match r {
+                    Ok(res) => results.push(res),
+                    Err(e) if multi => return Err(format!("Statement {} failed: {e}", idx + 1)),
+                    Err(e) => return Err(e),
                 }
             }
+            Ok(results)
         } => r,
         _ = async { let _ = cancel_rx.await; } => Err("Query cancelled".to_string()),
     };
@@ -2436,5 +2530,53 @@ pub async fn ping_connection(state: State<'_, DbState>) -> Result<(), String> {
         ActiveConnection::D1(_) | ActiveConnection::LibSql(_) | ActiveConnection::Clickhouse(_) => Ok(()),
         ActiveConnection::Duckdb(h) => super::duckdb::execute_sql(&h, "SELECT 1").await.map(|_| ()),
         ActiveConnection::Mssql(h) => super::mssql::execute_sql(&h, "SELECT 1").await.map(|_| ()),
+    }
+}
+
+#[cfg(test)]
+mod split_sql_tests {
+    use super::split_sql_statements;
+
+    #[test]
+    fn splits_on_semicolons() {
+        let s = split_sql_statements("select 1; select 2;");
+        assert_eq!(s, vec!["select 1;", "select 2;"]);
+    }
+
+    #[test]
+    fn ignores_semicolons_in_strings_and_comments() {
+        let s = split_sql_statements(
+            "select 'a;b', \"c;d\" -- not; here\nfrom t; /* nor; here */ select `e;f`;",
+        );
+        assert_eq!(s.len(), 2);
+        assert!(s[0].starts_with("select 'a;b'"));
+    }
+
+    #[test]
+    fn ignores_semicolons_in_dollar_quotes() {
+        let s = split_sql_statements(
+            "create function f() returns void as $body$ begin; end; $body$ language plpgsql; select 1;",
+        );
+        assert_eq!(s.len(), 2);
+        assert!(s[1].starts_with("select 1"));
+    }
+
+    #[test]
+    fn handles_escaped_quotes() {
+        let s = split_sql_statements("select 'it''s; fine'; select 'a\\'; b';");
+        assert_eq!(s.len(), 2);
+    }
+
+    #[test]
+    fn drops_comment_only_fragments_and_empty_input() {
+        assert_eq!(split_sql_statements("select 1; -- trailing").len(), 1);
+        assert_eq!(split_sql_statements("  ;; -- nothing\n").len(), 0);
+        assert_eq!(split_sql_statements("").len(), 0);
+    }
+
+    #[test]
+    fn statement_without_trailing_semicolon() {
+        let s = split_sql_statements("select 1;\nselect 2");
+        assert_eq!(s, vec!["select 1;", "select 2"]);
     }
 }

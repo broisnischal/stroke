@@ -1,4 +1,5 @@
 <script>
+  import { onDestroy } from 'svelte'
   import { marked } from 'marked'
   import { appThemeId } from '$lib/stores/settings.js'
   import { highlightMarkdownHtml } from '$lib/markdown-highlight.js'
@@ -98,15 +99,27 @@
 
   const appTheme = $derived($appThemeId)
 
-  // Streaming: re-render on every content change using fast synchronous parse.
-  // No syntax highlighting — when streaming ends, item is replaced with a fully
-  // highlighted assistant item anyway.
+  // Streaming: fast synchronous parse, coalesced to one per animation frame.
+  // Chunks arrive faster than frames, and each parse covers the FULL message
+  // so far — parsing per chunk is quadratic work for output nobody can see.
+  // The rAF callback reads `content` at fire time, so it always renders the
+  // latest accumulated text. No syntax highlighting — when streaming ends,
+  // the item is replaced with a fully highlighted assistant item anyway.
+  let _streamRaf = 0
   $effect(() => {
     if (!streaming) return
-    const md = content
-    if (!md.trim()) { html = ''; return }
-    const result = marked.parse(md, markedOpts)
-    html = typeof result === 'string' ? result : ''
+    void content // dependency: schedule on every appended chunk
+    if (_streamRaf) return // a parse is already queued for this frame
+    _streamRaf = requestAnimationFrame(() => {
+      _streamRaf = 0
+      const md = content
+      if (!md.trim()) { html = ''; return }
+      const result = marked.parse(md, markedOpts)
+      html = typeof result === 'string' ? result : ''
+    })
+  })
+  onDestroy(() => {
+    if (_streamRaf) cancelAnimationFrame(_streamRaf)
   })
 
   // Non-streaming: full async render with syntax highlighting + optional debounce.

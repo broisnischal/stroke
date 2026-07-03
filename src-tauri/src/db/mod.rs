@@ -29,7 +29,7 @@ pub use query::{
 pub use schema::{
     list_schemas, list_tables, list_schemas_on_conn, list_tables_on_conn,
     list_indexes, list_enums, list_functions, list_triggers, list_sequences,
-    truncate_table, drop_table, get_table_column_structure, get_incoming_foreign_keys,
+    table_row_counts, truncate_table, drop_table, get_table_column_structure, get_incoming_foreign_keys,
     get_table_ddl, get_table_ddl_on_conn,
-    TableInfo, IndexInfo, EnumInfo, FunctionInfo, TriggerInfo, SequenceInfo, ColumnStructureRow, IncomingForeignKey,
+    TableInfo, TableRowCount, IndexInfo, EnumInfo, FunctionInfo, TriggerInfo, SequenceInfo, ColumnStructureRow, IncomingForeignKey,
 };

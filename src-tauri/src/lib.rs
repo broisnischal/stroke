@@ -250,6 +250,7 @@ pub fn run() {
             commands::connect_mssql_db,
             commands::pg_list_schemas,
             commands::pg_list_tables,
+            commands::pg_table_row_counts,
             commands::pg_list_indexes,
             commands::pg_get_table_column_structure,
             commands::pg_get_incoming_foreign_keys,
