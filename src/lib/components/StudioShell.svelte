@@ -549,17 +549,35 @@
     return pendingEditCount > 0 || anyPendingChanges()
   }
 
+  // In-app confirm dialog. `window.confirm` is blocked in the Tauri webview
+  // ("dialog.confirm not allowed"), so route all confirmations through this.
+  /** @type {{ message: string, confirmLabel: string, resolve: (v: boolean) => void } | null} */
+  let confirmDialog = $state(null)
+  /** @param {string} message @param {string} [confirmLabel] @returns {Promise<boolean>} */
+  function askConfirm(message, confirmLabel = 'Discard') {
+    return new Promise((resolve) => { confirmDialog = { message, confirmLabel, resolve } })
+  }
+  /** @param {boolean} v */
+  function resolveConfirm(v) {
+    const d = confirmDialog
+    confirmDialog = null
+    d?.resolve(v)
+  }
+
   // Confirm before quitting the app while table edits are still unsaved.
   onMount(() => {
     let unlisten = () => {}
     ;(async () => {
       try {
         const { getCurrentWindow } = await import('@tauri-apps/api/window')
-        unlisten = await getCurrentWindow().onCloseRequested((event) => {
-          if (hasAnyUnsavedChanges()) {
-            const ok = window.confirm('You have unsaved table changes. Discard them and quit?')
-            if (!ok) event.preventDefault()
-          }
+        const win = getCurrentWindow()
+        unlisten = await win.onCloseRequested(async (event) => {
+          if (!hasAnyUnsavedChanges()) return
+          // Stop the close, ask in-app, then force-close if confirmed. Use destroy()
+          // (not close()) so we don't re-enter this handler.
+          event.preventDefault()
+          const ok = await askConfirm('You have unsaved table changes. Discard them and quit?', 'Discard & quit')
+          if (ok) await win.destroy()
         })
       } catch { /* non-Tauri / web preview — no window close event */ }
     })()
@@ -1843,8 +1861,9 @@ let rowSearch = $state('')
     const closing = tabs[idx]
     const count = tabPendingCount(closing)
     if (count > 0) {
-      const ok = window.confirm(
+      const ok = await askConfirm(
         `This table has ${count} unsaved change${count === 1 ? '' : 's'}. Close the tab and discard them?`,
+        'Close & discard',
       )
       if (!ok) return
       if (id === activeTabId) resetEdits()
@@ -4609,5 +4628,33 @@ let rowSearch = $state('')
     toast.success(`Database "${name}" created`)
   }}
 />
+{/if}
+
+<!-- In-app confirm (window.confirm is blocked in the Tauri webview) -->
+{#if confirmDialog}
+  <div
+    class="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4"
+    role="dialog"
+    aria-modal="true"
+    onclick={(e) => { if (e.target === e.currentTarget) resolveConfirm(false) }}
+    onkeydown={(e) => { if (e.key === 'Escape') resolveConfirm(false); if (e.key === 'Enter') resolveConfirm(true) }}
+    tabindex="-1"
+  >
+    <div class="w-full max-w-sm rounded-xl border border-border/60 bg-background p-5 shadow-lg">
+      <p class="text-ui-sm text-foreground">{confirmDialog.message}</p>
+      <div class="mt-4 flex justify-end gap-2">
+        <button
+          type="button"
+          onclick={() => resolveConfirm(false)}
+          class="inline-flex h-8 items-center rounded-md px-3 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+        >Cancel</button>
+        <button
+          type="button"
+          onclick={() => resolveConfirm(true)}
+          class="inline-flex h-8 items-center rounded-md bg-destructive px-3 text-ui-xs font-medium text-destructive-foreground hover:opacity-90"
+        >{confirmDialog.confirmLabel}</button>
+      </div>
+    </div>
+  </div>
 {/if}
 </div>

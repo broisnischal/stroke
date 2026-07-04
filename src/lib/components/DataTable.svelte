@@ -2218,8 +2218,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (!container) return
     _viewportWidth = container.clientWidth
     _viewportHeight = container.clientHeight
-    _scrollTop = container.scrollTop
-    _scrollLeft = container.scrollLeft
+    _scrollTop = Math.round(container.scrollTop)
+    _scrollLeft = Math.round(container.scrollLeft)
 
     // Use contentRect directly — it's provided synchronously by the ResizeObserver
     // entry with no forced layout reflow. Removing the rAF here eliminates one full
@@ -2254,8 +2254,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         _scrollLoopId = 0
         return
       }
-      _scrollTop = el.scrollTop
-      _scrollLeft = el.scrollLeft
+      // Snap to whole CSS pixels. The canvas is sticky-pinned at the viewport's
+      // integer left edge, so drawing content at a fractional scrollLeft puts text
+      // and gridlines on sub-pixel x — WebKit then re-antialiases them every frame,
+      // which reads as horizontal "vibration". Integer offsets render stably.
+      _scrollTop = Math.round(el.scrollTop)
+      _scrollLeft = Math.round(el.scrollLeft)
       try {
         draw()
       } catch (err) {
@@ -2272,8 +2276,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const el = e.currentTarget
     invalidateCanvasRect()
     // Update state immediately so any synchronous consumers (hit-test etc.) are current.
-    _scrollTop = el.scrollTop
-    _scrollLeft = el.scrollLeft
+    // Rounded to whole pixels to avoid sub-pixel shimmer during horizontal scroll.
+    _scrollTop = Math.round(el.scrollTop)
+    _scrollLeft = Math.round(el.scrollLeft)
     // Cancel any pending one-shot draw — the loop handles all scroll redraws at
     // the display's native frame rate (120Hz on ProMotion).
     if (_drawRafId) { cancelAnimationFrame(_drawRafId); _drawRafId = 0 }
@@ -3474,7 +3479,21 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   $effect(() => {
     const el = tableContainer
     if (!el) return
+    // Accumulates pinch/ctrl-wheel delta so many small gesture ticks map to whole
+    // app-zoom steps instead of one step per event.
+    let _zoomAccum = 0
     const onShiftWheel = (/** @type {WheelEvent} */ e) => {
+      // Trackpad pinch (and ctrl+wheel) arrive as wheel events with ctrlKey=true.
+      // Left unhandled, WebKit page-zooms the whole webview — which bitmap-scales
+      // the canvas and makes the grid text blurry. Intercept it and drive the app's
+      // own (crisp, re-rendered) zoom instead, keeping the native page zoom at 1.
+      if (e.ctrlKey) {
+        e.preventDefault()
+        _zoomAccum += e.deltaY
+        while (_zoomAccum <= -24) { increaseZoom(); _zoomAccum += 24 }
+        while (_zoomAccum >= 24) { decreaseZoom(); _zoomAccum -= 24 }
+        return
+      }
       if (!e.shiftKey) return
       const delta = e.deltaY || e.deltaX
       if (!delta) return
@@ -4237,12 +4256,20 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                 </div>
               {/if}
 
-              <!-- JSON expand panels (independent from FK sub-view) -->
+              <!-- JSON expand panels (independent from FK sub-view).
+                   Same pin pattern as the FK sub-view: outer absolute for vertical
+                   position, inner position:sticky;left:0 for the horizontal pin. This
+                   lets the compositor hold it at the viewport-left edge during
+                   horizontal scroll instead of a reactive transform:translateX() that
+                   lags a frame behind the native scroll (the "vibration"). -->
               {#each [...expandedRows] as exIdx (exIdx)}
                 {#if rows[exIdx] !== undefined}
                   <div
-                    class="absolute z-10"
-                    style="top:{rowDocTop(exIdx) + ROW_HEIGHT}px; left:0; width:{_viewportWidth}px; transform:translateX({_scrollLeft}px); will-change:transform"
+                    class="absolute z-10 left-0 right-0"
+                    style="top:{rowDocTop(exIdx) + ROW_HEIGHT}px"
+                  >
+                  <div
+                    style="position:sticky; left:0; width:{_viewportWidth}px"
                     use:trackExpandHeight={exIdx}
                   >
                     <RowExpandViewer
@@ -4253,6 +4280,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                         jsonLightbox = { value, colName: label }
                       }}
                     />
+                  </div>
                   </div>
                 {/if}
               {/each}
