@@ -1082,7 +1082,7 @@ let rowSearch = $state('')
     if (!connection) return
     e.preventDefault()
     if (aiMode) { exitAiMode(); return }
-    if (activeTabId) closeTab(activeTabId)
+    closeActiveTab()
   })
 
   // Chord: Ctrl/⌘+K then W → close all tabs. (Mod+K opens the command palette;
@@ -1966,6 +1966,13 @@ let rowSearch = $state('')
         if (fallback) await activateTab(fallback.id)
       }
     }
+  }
+
+  /** Close the focused pane's active tab (Mod+W / editor shortcuts). */
+  function closeActiveTab() {
+    if (!activeTabId) return
+    if (activeGroupId) void closeTabInGroup(activeGroupId, activeTabId)
+    else void closeTab(activeTabId)
   }
 
   /** Resize a split node (splitter drag). */
@@ -4163,7 +4170,7 @@ let rowSearch = $state('')
             onrun={(d) => void runOrm(d)}
             onmodi={() => { if (connection) toggleAiSidebar() }}
             onmodb={() => { sidebarOpen = !sidebarOpen }}
-            onmodw={() => { if (activeTabId) closeTab(activeTabId) }}
+            onmodw={() => closeActiveTab()}
             onmodn={() => { if (connection) openWelcomeTab() }}
             onmodm={() => cycleTheme()}
             onmodt={() => { if (connection) { commandPage = 'tables'; commandOpen = true } }}
@@ -4204,7 +4211,7 @@ let rowSearch = $state('')
             onmods={() => saveActiveTabState()}
             onmodi={() => { if (connection) toggleAiSidebar() }}
             onmodb={() => { sidebarOpen = !sidebarOpen }}
-            onmodw={() => { if (activeTabId) closeTab(activeTabId) }}
+            onmodw={() => closeActiveTab()}
             onmodn={() => { if (connection) openWelcomeTab() }}
             onmodm={() => cycleTheme()}
             onmodt={() => { if (connection) { commandPage = 'tables'; commandOpen = true } }}
