@@ -113,8 +113,8 @@
 {#if visible}
   <aside class="flex w-56 shrink-0 flex-col border-r border-border bg-panel">
 
-    <!-- Header row: title + close -->
-    <div class="flex h-9 shrink-0 items-center justify-between border-b border-border pl-2 pr-2">
+    <!-- Header row: segmented tabs + hide-panel toggle -->
+    <div class="flex h-9 shrink-0 items-center justify-between gap-1 border-b border-border pl-1 pr-1.5">
       <div class="flex h-full min-w-0 items-stretch">
         {#each panelTabs as t (t.id)}
           {@const Icon = t.icon}
@@ -125,21 +125,31 @@
             aria-current={active ? 'page' : undefined}
             onclick={() => (tab = t.id)}
             class={cn(
-              'relative flex h-full shrink-0 items-center gap-1 px-1 transition-colors',
-              active ? 'text-foreground' : 'text-muted-foreground/50 hover:text-muted-foreground',
+              'group/pt relative flex h-full shrink-0 items-center gap-1.5 px-2.5 text-[11px] transition-colors',
+              active
+                ? 'font-medium text-foreground'
+                : 'font-normal text-muted-foreground/55 hover:text-foreground',
             )}
           >
-            {#if active}
-              <span class="absolute inset-x-1 bottom-0 h-px bg-primary" aria-hidden="true"></span>
-            {/if}
-            <Icon class="size-3 shrink-0" aria-hidden="true" />
-            <span class="text-[11px] font-normal leading-none">{t.label}</span>
+            <Icon
+              class={cn('size-3.5 shrink-0 transition-opacity', active ? 'opacity-90' : 'opacity-55 group-hover/pt:opacity-80')}
+              aria-hidden="true"
+            />
+            <span class="leading-none">{t.label}</span>
+            <!-- active underline, aligned to the header's bottom border -->
+            <span
+              class={cn(
+                'pointer-events-none absolute inset-x-1.5 -bottom-px h-0.5 rounded-full bg-primary transition-opacity',
+                active ? 'opacity-100' : 'opacity-0',
+              )}
+              aria-hidden="true"
+            ></span>
           </button>
         {/each}
       </div>
       <button
         type="button"
-        class="inline-flex size-5 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-muted/60 hover:text-foreground"
+        class="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-muted/60 hover:text-foreground"
         title="Hide panel ({modKey}⇧B)"
         onclick={onclose}
       >
