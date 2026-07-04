@@ -1,5 +1,7 @@
 /** @typedef {'table' | 'sql' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'extensions' | 'backup' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search' | 'notebook' | 'schema-timeline' | 'data-diff' | 'license'} StudioTabKind */
 
+import { loadDefaultPageSize } from '$lib/table-query.js'
+
 /** @typedef {import('$lib/table-query.js').TableSort} TableSort */
 /** @typedef {import('$lib/table-query.js').TableFilter} TableFilter */
 /** @typedef {import('$lib/foreign-key-nav.js').ForeignKeyInfo} ForeignKeyInfo */
@@ -90,7 +92,7 @@ export function createTableTabState(schema = 'public', table = null, tableKind =
     table,
     tableKind,
     page: 1,
-    pageSize: 50,
+    pageSize: loadDefaultPageSize(),
     rowSearch: '',
     rowSort: null,
     rowFilters: [],

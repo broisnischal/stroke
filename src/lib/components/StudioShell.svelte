@@ -30,6 +30,9 @@
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import Sidebar from './Sidebar.svelte'
   import TabBar from './TabBar.svelte'
+  import PaneLayout from './PaneLayout.svelte'
+  import PaneSnapshot from './PaneSnapshot.svelte'
+  import * as PaneTree from '$lib/pane-layout.js'
   import TabLoading from './TabLoading.svelte'
   import TableToolbar from './TableToolbar.svelte'
   import StructureView from './StructureView.svelte'
@@ -140,13 +143,19 @@
     cloneTableTabState,
     cloneSqlTabState,
   } from '$lib/studio-tabs.js'
+  import {
+    pendingChangesCount,
+    clearPendingChanges,
+    anyPendingChanges,
+  } from '$lib/stores/pending-table-edits.js'
   import { createNotebook, deserializeNotebook, titleFromPath } from '$lib/notebook.js'
   import { openNotebookFile } from '$lib/api.js'
   import { formatCompactCount, normalizeTableRowCount } from '$lib/table-list.js'
   import {
-    DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE,
     PAGE_SIZE_ALL,
+    saveDefaultPageSize,
+    loadDefaultPageSize,
     activeFilters,
     filtersApiSignature,
     filtersForApi,
@@ -196,7 +205,7 @@
     remapNullableRowIndex,
     remapRowIndexSet,
   } from '$lib/table-row-indices.js'
-  import { rowsToCsv, rowsToJson, saveExportFile, buildExportFilename } from '$lib/export.js'
+  import { rowsToCsv, rowsToJson, rowsToCsvAsync, rowsToJsonAsync, saveExportFile, buildExportFilename } from '$lib/export.js'
   import {
     recordQueryExecution,
     listQueryHistory,
@@ -299,6 +308,63 @@
   /** @type {StudioTab[]} */
   let tabs = $state([])
   let activeTabId = $state(/** @type {string | null} */ (null))
+
+  // ── Split-pane / editor-group layout ─────────────────────────────────────
+  // `paneRoot` is a binary split tree whose leaves ("groups") reference tab ids
+  // from the flat `tabs` array above. The FOCUSED group's active tab is kept in
+  // sync with the global `activeTabId`, so the existing data pipeline (columns,
+  // rows, loadRows, handleSaveCell, …) drives whatever the focused pane shows.
+  // Background panes render read-only snapshots from each tab's own `tab.state`.
+  /** @type {import('$lib/pane-layout.js').PaneNode | null} */
+  let paneRoot = $state(null)
+  let activeGroupId = $state(/** @type {string | null} */ (null))
+  /** Tab id currently being dragged (drives the split drop targets). */
+  let dragTabId = $state(/** @type {string | null} */ (null))
+  /** Number of panes (groups) in the layout — drives the focused-pane accent. */
+  const paneCount = $derived(paneRoot ? PaneTree.allGroups(paneRoot).length : 0)
+  /** Floating drag preview position + label (follows the cursor). */
+  let dragGhost = $state(/** @type {{ x: number, y: number, title: string } | null} */ (null))
+  /** Current drop target under the cursor: which pane + which edge. */
+  let dropTarget = $state(/** @type {{ groupId: string, edge: import('$lib/pane-layout.js').DropEdge } | null} */ (null))
+
+  /** Which edge of a pane the cursor is over (drives the split direction / hint). */
+  function edgeFromPoint(/** @type {number} */ x, /** @type {number} */ y, /** @type {DOMRect} */ r) {
+    const fx = (x - r.left) / r.width
+    const fy = (y - r.top) / r.height
+    const E = 0.25
+    if (fx < E) return /** @type {const} */ ('left')
+    if (fx > 1 - E) return /** @type {const} */ ('right')
+    if (fy < E) return /** @type {const} */ ('top')
+    if (fy > 1 - E) return /** @type {const} */ ('bottom')
+    return /** @type {const} */ ('center')
+  }
+
+  /** @param {string} id */
+  function beginTabDrag(id) {
+    dragTabId = id
+    const t = tabs.find((tab) => tab.id === id)
+    dragGhost = { x: 0, y: 0, title: t?.title ?? 'Tab' }
+    dropTarget = null
+  }
+  /** @param {number} x @param {number} y */
+  function moveTabDrag(x, y) {
+    if (!dragTabId) return
+    dragGhost = { x, y, title: dragGhost?.title ?? '' }
+    const el = /** @type {Element | null} */ (document.elementFromPoint(x, y))
+    const group = el?.closest('[data-pane-group]') ?? null
+    if (!group) { dropTarget = null; return }
+    const groupId = group.getAttribute('data-pane-group')
+    if (!groupId) { dropTarget = null; return }
+    dropTarget = { groupId, edge: edgeFromPoint(x, y, group.getBoundingClientRect()) }
+  }
+  function endTabDrag() {
+    const target = dropTarget
+    // handleDropZone reads dragTabId, so call it before clearing.
+    if (target && dragTabId) handleDropZone(target.groupId, target.edge)
+    dragTabId = null
+    dragGhost = null
+    dropTarget = null
+  }
 
   // ── Tab navigation history (back/forward) ────────────────────────────────
   /** @type {string[]} */
@@ -521,11 +587,74 @@
   let applyEdits = $state(() => {})
   /** @type {() => void} */
   let resetEdits = $state(() => {})
-  // ── Table scroll controls (StatusBar go-to-top / go-to-bottom) ──
+  /** Bound from DataTable — stages the selected rows for deletion (red diff). */
+  let stageDeleteSelectedRows = $state(() => {})
+
+  /** Table key ("schema.table") for a tab, or '' for non-table tabs. */
+  function tabTableKey(/** @type {any} */ tab) {
+    return tab?.kind === 'table' && tab.state?.table
+      ? `${tab.state.schema}.${tab.state.table}`
+      : ''
+  }
+
+  /** Count of unsaved changes staged in a given tab (live for the active one, cached otherwise). */
+  function tabPendingCount(/** @type {any} */ tab) {
+    if (!tab) return 0
+    if (tab.id === activeTabId) return pendingEditCount
+    const key = tabTableKey(tab)
+    return key ? pendingChangesCount(key) : 0
+  }
+
+  /** True when any table (active or backgrounded) has unsaved staged changes. */
+  function hasAnyUnsavedChanges() {
+    return pendingEditCount > 0 || anyPendingChanges()
+  }
+
+  // In-app confirm dialog. `window.confirm` is blocked in the Tauri webview
+  // ("dialog.confirm not allowed"), so route all confirmations through this.
+  /** @type {{ message: string, confirmLabel: string, resolve: (v: boolean) => void } | null} */
+  let confirmDialog = $state(null)
+  /** @param {string} message @param {string} [confirmLabel] @returns {Promise<boolean>} */
+  function askConfirm(message, confirmLabel = 'Discard') {
+    return new Promise((resolve) => { confirmDialog = { message, confirmLabel, resolve } })
+  }
+  /** @param {boolean} v */
+  function resolveConfirm(v) {
+    const d = confirmDialog
+    confirmDialog = null
+    d?.resolve(v)
+  }
+
+  // Confirm before quitting the app while table edits are still unsaved.
+  onMount(() => {
+    let unlisten = () => {}
+    ;(async () => {
+      try {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window')
+        const win = getCurrentWindow()
+        unlisten = await win.onCloseRequested(async (event) => {
+          if (!hasAnyUnsavedChanges()) return
+          // Stop the close, ask in-app, then force-close if confirmed. Use destroy()
+          // (not close()) so we don't re-enter this handler.
+          event.preventDefault()
+          const ok = await askConfirm('You have unsaved table changes. Discard them and quit?', 'Discard & quit')
+          if (ok) await win.destroy()
+        })
+      } catch { /* non-Tauri / web preview — no window close event */ }
+    })()
+    return () => unlisten()
+  })
+  // ── Table scroll controls (StatusBar go-to-top / go-to-bottom / left / right) ──
   /** @type {() => void} */
   let scrollTableTop = $state(() => {})
   /** @type {() => void} */
   let scrollTableBottom = $state(() => {})
+  /** @type {() => void} */
+  let scrollTableLeft = $state(() => {})
+  /** @type {() => void} */
+  let scrollTableRight = $state(() => {})
+  /** True when the active grid overflows horizontally (from DataTable). */
+  let tableCanScrollH = $state(false)
   /** @type {(name: string) => void} */
   let focusTableColumn = $state(() => {})
   // Read/restore the data grid's scroll so horizontal (+ vertical) position is
@@ -559,7 +688,7 @@
   let loadingRows = $state(false)
   let loadingMore = $state(false)
   let page = $state(1)
-  let pageSize = $state(DEFAULT_PAGE_SIZE)
+  let pageSize = $state(loadDefaultPageSize())
   let rawOffset = $state(/** @type {number | null} */ (null))
   // When "All rows" sentinel is active, always fetch from offset 0.
   const currentOffset = $derived(
@@ -626,6 +755,8 @@ let rowSearch = $state('')
   let ormError = $state('')
 
   const activeTab = $derived(tabs.find((t) => t.id === activeTabId) ?? null)
+  /** Fast id → tab lookup for per-group tab-strip rendering. */
+  const tabsById = $derived(new Map(tabs.map((t) => [t.id, t])))
   /** 'table' | 'view' | 'materialized_view' | 'foreign_table' — for the active table tab */
   const activeTableKind = $derived(
     activeTab?.kind === 'table'
@@ -901,7 +1032,7 @@ let rowSearch = $state('')
   /** @param {TableTabState} s */
   function applyTableSnapshot(s) {
     page = s.page
-    pageSize = s.pageSize ?? DEFAULT_PAGE_SIZE
+    pageSize = s.pageSize ?? loadDefaultPageSize()
     rowSearch = s.rowSearch ?? ''
     rowSort = s.rowSort ? { ...s.rowSort } : null
     rowFilters = (s.rowFilters ?? []).map((f) => ({ ...f }))
@@ -957,7 +1088,7 @@ let rowSearch = $state('')
   function clearTableEditor() {
     activeTable = null
     page = 1
-    pageSize = DEFAULT_PAGE_SIZE
+    pageSize = loadDefaultPageSize()
     rowSearch = ''
     rowSort = null
     rowFilters = []
@@ -1065,7 +1196,7 @@ let rowSearch = $state('')
     if (!connection) return
     e.preventDefault()
     if (aiMode) { exitAiMode(); return }
-    if (activeTabId) closeTab(activeTabId)
+    closeActiveTab()
   })
 
   // Chord: Ctrl/⌘+K then W → close all tabs. (Mod+K opens the command palette;
@@ -1240,7 +1371,7 @@ let rowSearch = $state('')
     ) return
     if (activeTab?.kind !== 'table' || !activeTable || selected.size === 0) return
     e.preventDefault()
-    void deleteSelectedRows()
+    stageDeleteSelectedRows()
   })
 
   createHotkey('Mod+R', (e) => {
@@ -1258,7 +1389,7 @@ let rowSearch = $state('')
     /** @param {KeyboardEvent} e */
     function onArrowKey(e) {
       const mod = e.ctrlKey || e.metaKey
-      if (!mod || e.altKey) return
+      if (!mod) return
       if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return
       if (commandOpen || showConnectionModal || showSettingsModal) return
       const el = document.activeElement
@@ -1267,6 +1398,14 @@ let rowSearch = $state('')
         el instanceof HTMLTextAreaElement ||
         (el instanceof HTMLElement && el.isContentEditable)
       ) return
+
+      // Ctrl/Cmd+Alt+Left/Right → scroll grid to the first / last column.
+      if (e.altKey) {
+        if (activeTab?.kind !== 'table' || !activeTable) return
+        if (e.key === 'ArrowLeft') { e.preventDefault(); scrollTableLeft(); return }
+        if (e.key === 'ArrowRight') { e.preventDefault(); scrollTableRight(); return }
+        return
+      }
 
       // Ctrl/Cmd+Up → scroll table to top; Ctrl/Cmd+Down → scroll table to bottom
       if (e.key === 'ArrowUp' && !e.shiftKey) {
@@ -1781,6 +1920,19 @@ let rowSearch = $state('')
   async function closeTab(id) {
     const idx = tabs.findIndex((t) => t.id === id)
     if (idx < 0) return
+    // Guard: closing a tab discards its unsaved edits/deletes.
+    const closing = tabs[idx]
+    const count = tabPendingCount(closing)
+    if (count > 0) {
+      const ok = await askConfirm(
+        `This table has ${count} unsaved change${count === 1 ? '' : 's'}. Close the tab and discard them?`,
+        'Close & discard',
+      )
+      if (!ok) return
+      if (id === activeTabId) resetEdits()
+      const key = tabTableKey(closing)
+      if (key) clearPendingChanges(key)
+    }
     const nextTabs = tabs.filter((t) => t.id !== id)
     if (nextTabs.length === 0) {
       tabs = [createWelcomeTab()]
@@ -1813,6 +1965,202 @@ let rowSearch = $state('')
     }
     tabs = pinned
     if (!pinned.some((t) => t.id === activeTabId)) await activateTab(pinned[0].id)
+  }
+
+  // ── Pane-layout reconciliation & group-aware actions ─────────────────────
+  // AI tabs live in a full-window overlay, not the tab flow, so they never
+  // belong to a group.
+  /** @param {StudioTab} t */
+  function isGroupable(t) {
+    return t.kind !== 'ai'
+  }
+
+  /**
+   * Keep `paneRoot` / `activeGroupId` consistent with `tabs` + `activeTabId`.
+   * Runs from an effect on every tab/active change. Idempotent: it only assigns
+   * new references when something actually changed, so it can't loop.
+   */
+  function reconcilePanes() {
+    const ids = tabs.filter(isGroupable).map((t) => t.id)
+    const idSet = new Set(ids)
+    const root = untrack(() => paneRoot)
+    const curGroup = untrack(() => activeGroupId)
+
+    if (ids.length === 0) {
+      if (root !== null) paneRoot = null
+      if (curGroup !== null) activeGroupId = null
+      return
+    }
+
+    let next = root
+    if (!next) {
+      next = PaneTree.makeGroup(ids, activeTabId)
+    } else {
+      // Drop tab ids that no longer exist and repair each group's active tab.
+      next = PaneTree.mapGroups(next, (g) => {
+        const kept = g.tabIds.filter((id) => idSet.has(id))
+        let active = g.activeTabId
+        if (!active || !idSet.has(active)) active = kept[kept.length - 1] ?? null
+        if (kept.length === g.tabIds.length && active === g.activeTabId) return g
+        return { ...g, tabIds: kept, activeTabId: active }
+      })
+      next = PaneTree.prune(next)
+    }
+
+    // Place brand-new tabs (not yet in any group) into the active group.
+    const placed = new Set()
+    for (const g of PaneTree.allGroups(next)) for (const id of g.tabIds) placed.add(id)
+    const missing = ids.filter((id) => !placed.has(id))
+    if (missing.length) {
+      let targetId =
+        curGroup && PaneTree.findGroup(next, curGroup) ? curGroup : PaneTree.firstGroup(next)?.id ?? null
+      if (!targetId || !next) {
+        next = PaneTree.makeGroup(missing, activeTabId)
+      } else {
+        for (const id of missing) next = PaneTree.addTabToGroup(next, targetId, id)
+      }
+    }
+
+    // Focus follows the global active tab: its holding group becomes active and
+    // mirrors `activeTabId`.
+    let nextGroup = curGroup
+    if (activeTabId && idSet.has(activeTabId)) {
+      const holder = PaneTree.groupOfTab(next, activeTabId)
+      if (holder) {
+        nextGroup = holder.id
+        if (holder.activeTabId !== activeTabId) {
+          next = PaneTree.updateGroup(next, holder.id, (g) => ({ ...g, activeTabId }))
+        }
+      }
+    }
+    if (!nextGroup || !PaneTree.findGroup(next, nextGroup)) {
+      nextGroup = PaneTree.firstGroup(next)?.id ?? null
+    }
+
+    if (next !== root) paneRoot = next
+    if (nextGroup !== curGroup) activeGroupId = nextGroup
+  }
+
+  $effect(() => {
+    // Depend on tab identity/order + the active tab.
+    tabs.map((t) => t.id).join(' ')
+    void activeTabId
+    reconcilePanes()
+  })
+
+  /** Focus a pane (its active tab drives the live pipeline). @param {string} groupId */
+  async function focusGroup(groupId) {
+    if (groupId === activeGroupId) return
+    const g = PaneTree.findGroup(paneRoot, groupId)
+    if (!g) return
+    activeGroupId = groupId
+    if (g.activeTabId && g.activeTabId !== activeTabId) await activateTab(g.activeTabId)
+  }
+
+  /** Activate a tab within a specific pane (pane tab-strip click). */
+  async function focusTabInGroup(groupId, tabId) {
+    activeGroupId = groupId
+    paneRoot = PaneTree.updateGroup(paneRoot, groupId, (g) => ({ ...g, activeTabId: tabId }))
+    await activateTab(tabId)
+  }
+
+  /** Close a tab from a specific pane, keeping focus within that pane. */
+  async function closeTabInGroup(groupId, id) {
+    const g = PaneTree.findGroup(paneRoot, groupId)
+    const idx = tabs.findIndex((t) => t.id === id)
+    if (idx < 0) return
+    // Guard: closing a tab discards its unsaved edits/deletes (same as closeTab).
+    const closing = tabs[idx]
+    const pending = tabPendingCount(closing)
+    if (pending > 0) {
+      const ok = await askConfirm(
+        `This table has ${pending} unsaved change${pending === 1 ? '' : 's'}. Close the tab and discard them?`,
+        'Close & discard',
+      )
+      if (!ok) return
+      if (id === activeTabId) resetEdits()
+      const key = tabTableKey(closing)
+      if (key) clearPendingChanges(key)
+    }
+    const nextTabs = tabs.filter((t) => t.id !== id)
+    if (nextTabs.length === 0) {
+      tabs = [createWelcomeTab()]
+      activeTabId = tabs[0].id
+      clearTableEditor()
+      return
+    }
+    // Pick the next tab to activate *within this group* when closing its active.
+    let nextActiveId = /** @type {string | null} */ (null)
+    if (id === activeTabId && g) {
+      const gi = g.tabIds.indexOf(id)
+      const rest = g.tabIds.filter((t) => t !== id)
+      if (rest.length) {
+        nextActiveId = rest[Math.min(gi, rest.length - 1)]
+      } else {
+        const other = PaneTree.allGroups(paneRoot).find(
+          (gr) => gr.id !== groupId && gr.activeTabId && gr.activeTabId !== id,
+        )
+        if (other) {
+          activeGroupId = other.id
+          nextActiveId = other.activeTabId
+        }
+      }
+    }
+    tabs = nextTabs
+    if (id === activeTabId) {
+      if (nextActiveId) await activateTab(nextActiveId)
+      else {
+        const fallback = nextTabs[Math.min(idx, nextTabs.length - 1)]
+        if (fallback) await activateTab(fallback.id)
+      }
+    }
+  }
+
+  /** Close the focused pane's active tab (Mod+W / editor shortcuts). */
+  function closeActiveTab() {
+    if (!activeTabId) return
+    if (activeGroupId) void closeTabInGroup(activeGroupId, activeTabId)
+    else void closeTab(activeTabId)
+  }
+
+  /** Resize a split node (splitter drag). */
+  function handlePaneResize(splitId, sizes) {
+    paneRoot = PaneTree.setSizes(paneRoot, splitId, sizes)
+  }
+
+  /**
+   * Handle a tab dropped on a pane drop-zone: center = move into that group,
+   * an edge = split that group and place the tab in the new pane.
+   * @param {string} targetGroupId
+   * @param {import('$lib/pane-layout.js').DropEdge} edge
+   */
+  function handleDropZone(targetGroupId, edge) {
+    const tabId = dragTabId
+    dragTabId = null
+    if (!tabId || !paneRoot) return
+    const source = PaneTree.groupOfTab(paneRoot, tabId)
+    if (!source) return
+
+    if (edge === 'center') {
+      if (source.id === targetGroupId) {
+        void focusTabInGroup(targetGroupId, tabId)
+        return
+      }
+      let next = PaneTree.removeTab(paneRoot, tabId)
+      next = PaneTree.addTabToGroup(next, targetGroupId, tabId)
+      paneRoot = PaneTree.prune(next) ?? next
+      void focusTabInGroup(targetGroupId, tabId)
+      return
+    }
+
+    // Splitting the source into itself with only one tab is a no-op.
+    if (source.id === targetGroupId && source.tabIds.length <= 1) return
+    const newGroup = PaneTree.makeGroup([tabId], tabId)
+    let next = PaneTree.removeTab(paneRoot, tabId)
+    next = PaneTree.splitGroup(next, targetGroupId, edge, newGroup)
+    paneRoot = PaneTree.prune(next) ?? next
+    activeGroupId = newGroup.id
+    void activateTab(tabId)
   }
 
   /**
@@ -1883,7 +2231,7 @@ let rowSearch = $state('')
     structureColumns = []
     structureSearch = ''
     page = 1
-    pageSize = DEFAULT_PAGE_SIZE
+    pageSize = loadDefaultPageSize()
     rowSearch = search ?? ''
     rowSort = null
     rowFilters = filters ? filters.map((f) => ({ ...f })) : []
@@ -2366,6 +2714,8 @@ let rowSearch = $state('')
       if (size <= 0) return
       pageSize = Math.min(size, MAX_PAGE_SIZE)
     }
+    // Persist as the session-wide default so new tabs open at this size too.
+    saveDefaultPageSize(pageSize)
     await reloadTableFromQuery(true)
   }
 
@@ -2385,6 +2735,8 @@ let rowSearch = $state('')
   async function handleLimitOffsetChange(limit, offset) {
     const clampedLimit = Math.min(Math.max(1, limit), MAX_PAGE_SIZE)
     pageSize = clampedLimit
+    // A custom limit (e.g. typing 100) also becomes the persisted default.
+    saveDefaultPageSize(clampedLimit)
     rawOffset = offset
     page = Math.max(1, Math.floor(offset / clampedLimit) + 1)
     await loadRows()
@@ -2411,6 +2763,9 @@ let rowSearch = $state('')
       fetchingTabIds.delete(tabId)
       return
     }
+    // A fresh fetch replaces the row set, so any row-index-keyed staged changes
+    // cached for this table no longer line up — drop them.
+    clearPendingChanges(`${s.schema}.${s.table}`)
 
     // Single helper to patch the tab state — avoids multiple tabs.map() calls per fetch
     /** @param {Partial<TableTabState>} patch */
@@ -2614,14 +2969,48 @@ let rowSearch = $state('')
   }
 
   /** @param {'csv' | 'json'} format */
+  let exportingData = $state(false)
+
   async function handleExport(format) {
+    if (exportingData) return
     const exportRows = selected.size > 0
       ? [...selected].sort((a, b) => a - b).map((i) => rows[i]).filter(Boolean)
       : rows
-    const content = format === 'csv' ? rowsToCsv(columns, exportRows) : rowsToJson(columns, exportRows)
     const filename = buildExportFilename(activeTable, format)
-    await saveExportFile(content, filename, format)
-    recordActivity({ type: 'export', title: `Exported ${activeTable} as ${format.toUpperCase()}`, schema: activeSchema, table: activeTable ?? undefined, rowCount: exportRows.length, success: true, detail: filename })
+    const n = exportRows.length
+    // Small exports build instantly; only large ones need the async/progress path.
+    const LARGE = 20000
+    exportingData = true
+    // A persistent toast that stays up for the whole build/save, dismissed on completion.
+    const toastId = toast.info(`Exporting ${formatCompactCount(n)} rows…`, {
+      description: `Preparing ${format.toUpperCase()} — please wait`,
+      duration: 60 * 60 * 1000,
+    })
+    try {
+      // Yield once so the toast paints before any heavy synchronous work.
+      await new Promise((res) => setTimeout(res, 16))
+      /** @type {string} */
+      let content
+      if (n > LARGE) {
+        content = format === 'csv'
+          ? await rowsToCsvAsync(columns, exportRows)
+          : await rowsToJsonAsync(columns, exportRows)
+      } else {
+        content = format === 'csv' ? rowsToCsv(columns, exportRows) : rowsToJson(columns, exportRows)
+      }
+      const saved = await saveExportFile(content, filename, format)
+      toast.dismiss(toastId)
+      if (saved) {
+        toast.success(`Exported ${formatCompactCount(n)} rows`, { description: filename })
+        recordActivity({ type: 'export', title: `Exported ${activeTable} as ${format.toUpperCase()}`, schema: activeSchema, table: activeTable ?? undefined, rowCount: n, success: true, detail: filename })
+      }
+    } catch (e) {
+      toast.dismiss(toastId)
+      toast.error('Export failed', { description: String(e) })
+      recordActivity({ type: 'export', title: `Failed to export ${activeTable} as ${format.toUpperCase()}`, schema: activeSchema, table: activeTable ?? undefined, success: false, error: String(e) })
+    } finally {
+      exportingData = false
+    }
   }
 
   /**
@@ -3148,17 +3537,6 @@ let rowSearch = $state('')
     await handleDeleteRows(detail.rowIndices)
   }
 
-  async function deleteSelectedRows() {
-    if (selected.size === 0) return
-    const n = selected.size
-    try {
-      await handleDeleteRows([...selected])
-      toast.success(n === 1 ? 'Row deleted' : `${formatCompactCount(n)} rows deleted`)
-    } catch (err) {
-      toast.error('Could not delete', { description: String(err) })
-    }
-  }
-
   /** @param {Record<string, unknown>} values */
   async function handleInsertRow(values) {
     if (!activeTable) return
@@ -3657,21 +4035,63 @@ let rowSearch = $state('')
         <!-- AI mode: tabs + content hidden above via always-mounted block -->
       {:else}
 
-      {#if tabBarVisible}
-      <TabBar
-        tabs={tabs.filter((t) => t.kind !== 'ai')}
-        {activeTabId}
-        onselect={(id) => activateTab(id)}
-        onclose={closeTab}
-        oncloseothers={closeOtherTabs}
-        oncloseall={closeAllTabs}
-        onpintoggle={toggleTabPin}
-        onnew={openWelcomeTab}
-        {recentTabs}
-        onrecentselect={(schema, table) => { if (aiMode) exitAiMode(); void openTableTab(schema, table) }}
-      />
+      <!-- Split-pane workspace. A single group renders exactly like the classic
+           single-tab layout (the sole focused leaf renders `sharedContent`);
+           splitting adds sibling panes. -->
+      {#if paneRoot}
+        <PaneLayout
+          node={paneRoot}
+          focusedGroupId={activeGroupId}
+          multiPane={paneCount > 1}
+          {dropTarget}
+          renderGroup={groupPane}
+          onresize={handlePaneResize}
+          onfocusgroup={(gid) => void focusGroup(gid)}
+        />
+      {:else}
+        {#if tabBarVisible}
+          <TabBar
+            tabs={tabs.filter((t) => t.kind !== 'ai')}
+            {activeTabId}
+            onselect={(id) => activateTab(id)}
+            onclose={closeTab}
+            oncloseothers={closeOtherTabs}
+            oncloseall={closeAllTabs}
+            onpintoggle={toggleTabPin}
+            onnew={openWelcomeTab}
+            {recentTabs}
+            onrecentselect={(schema, table) => { if (aiMode) exitAiMode(); void openTableTab(schema, table) }}
+          />
+        {/if}
+        {@render sharedContent()}
       {/if}
 
+      {#snippet groupPane(/** @type {import('$lib/pane-layout.js').GroupNode} */ group, /** @type {boolean} */ isFocused)}
+        {#if tabBarVisible}
+          <TabBar
+            tabs={group.tabIds.map((id) => tabsById.get(id)).filter(Boolean)}
+            activeTabId={group.activeTabId}
+            onselect={(id) => void focusTabInGroup(group.id, id)}
+            onclose={(id) => void closeTabInGroup(group.id, id)}
+            oncloseothers={closeOtherTabs}
+            oncloseall={closeAllTabs}
+            onpintoggle={toggleTabPin}
+            onnew={() => { void focusGroup(group.id); openWelcomeTab() }}
+            {recentTabs}
+            onrecentselect={(schema, table) => { if (aiMode) exitAiMode(); void focusGroup(group.id).then(() => openTableTab(schema, table)) }}
+            ondragtabstart={(id) => beginTabDrag(id)}
+            ondragtabmove={(x, y) => moveTabDrag(x, y)}
+            ondragtabend={() => endTabDrag()}
+          />
+        {/if}
+        {#if isFocused}
+          {@render sharedContent()}
+        {:else}
+          <PaneSnapshot tab={tabsById.get(group.activeTabId ?? '') ?? null} />
+        {/if}
+      {/snippet}
+
+      {#snippet sharedContent()}
       {#if activeTab?.kind === 'ai'}
         <!-- AI is handled via AI mode toggle -->
       {:else if activeTab?.kind === 'schema'}
@@ -3929,7 +4349,7 @@ let rowSearch = $state('')
             onrun={(d) => void runOrm(d)}
             onmodi={() => { if (connection) toggleAiSidebar() }}
             onmodb={() => { sidebarOpen = !sidebarOpen }}
-            onmodw={() => { if (activeTabId) closeTab(activeTabId) }}
+            onmodw={() => closeActiveTab()}
             onmodn={() => { if (connection) openWelcomeTab() }}
             onmodm={() => cycleTheme()}
             onmodt={() => { if (connection) { commandPage = 'tables'; commandOpen = true } }}
@@ -3970,7 +4390,7 @@ let rowSearch = $state('')
             onmods={() => saveActiveTabState()}
             onmodi={() => { if (connection) toggleAiSidebar() }}
             onmodb={() => { sidebarOpen = !sidebarOpen }}
-            onmodw={() => { if (activeTabId) closeTab(activeTabId) }}
+            onmodw={() => closeActiveTab()}
             onmodn={() => { if (connection) openWelcomeTab() }}
             onmodm={() => cycleTheme()}
             onmodt={() => { if (connection) { commandPage = 'tables'; commandOpen = true } }}
@@ -4112,7 +4532,7 @@ let rowSearch = $state('')
             {infiniteScroll}
             oninfinitescrolltoggle={toggleInfiniteScroll}
             live={liveEnabled}
-            ondeleteselected={() => void deleteSelectedRows()}
+            ondeleteselected={() => stageDeleteSelectedRows()}
             onexport={handleExport}
             onaddrow={() => dtBeginInsertRow?.()}
             onopeninsql={openTableInSqlEditor}
@@ -4154,6 +4574,7 @@ let rowSearch = $state('')
                 onfetchrelatedrows={handleFetchRelatedRows}
                 schema={activeSchema}
                 tableName={activeTable ?? ''}
+                dialect={dbType}
                 indexes={activeTableIndexes}
                 {hiddenColumns}
                 {reloadToken}
@@ -4173,6 +4594,9 @@ let rowSearch = $state('')
                 bind:resetEdits
                 bind:scrollToTop={scrollTableTop}
                 bind:scrollToBottom={scrollTableBottom}
+                bind:scrollToLeft={scrollTableLeft}
+                bind:scrollToRight={scrollTableRight}
+                bind:canScrollHorizontally={tableCanScrollH}
                 bind:focusColumn={focusTableColumn}
                 bind:getScroll={tableGetScroll}
                 bind:applyScroll={tableApplyScroll}
@@ -4211,6 +4635,7 @@ let rowSearch = $state('')
                 oninsertrow={handleInsertRow}
                 insertSaving={insertingRow}
                 bind:beginInsertRow={dtBeginInsertRow}
+                bind:stageDeleteSelected={stageDeleteSelectedRows}
                 readonly={tableReadonly}
               />
             </svelte:boundary>
@@ -4374,6 +4799,7 @@ let rowSearch = $state('')
           </div>
         </div>
       {/if}
+      {/snippet}
       {/if}
     {/if}
   </main>
@@ -4440,6 +4866,9 @@ let rowSearch = $state('')
   showTableNav={activeTab?.kind === 'table'}
   onscrolltabletop={() => scrollTableTop()}
   onscrolltablebottom={() => scrollTableBottom()}
+  canScrollTableHorizontally={tableCanScrollH}
+  onscrolltableleft={() => scrollTableLeft()}
+  onscrolltableright={() => scrollTableRight()}
   live={liveEnabled}
   {liveSupported}
   ontogglelive={() => { liveEnabled = !liveEnabled }}
@@ -4505,5 +4934,43 @@ let rowSearch = $state('')
     toast.success(`Database "${name}" created`)
   }}
 />
+{/if}
+
+<!-- Floating tab drag preview (follows the cursor during a split-pane drag) -->
+{#if dragGhost}
+  <div
+    class="pointer-events-none fixed z-[200] -translate-x-1/2 -translate-y-1/2 rounded-md border border-border/60 bg-panel px-3 py-1.5 text-xs font-medium text-foreground opacity-90 shadow-lg"
+    style="left:{dragGhost.x}px; top:{dragGhost.y}px"
+  >
+    {dragGhost.title}
+  </div>
+{/if}
+
+<!-- In-app confirm (window.confirm is blocked in the Tauri webview) -->
+{#if confirmDialog}
+  <div
+    class="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4"
+    role="dialog"
+    aria-modal="true"
+    onclick={(e) => { if (e.target === e.currentTarget) resolveConfirm(false) }}
+    onkeydown={(e) => { if (e.key === 'Escape') resolveConfirm(false); if (e.key === 'Enter') resolveConfirm(true) }}
+    tabindex="-1"
+  >
+    <div class="w-full max-w-sm rounded-xl border border-border/60 bg-background p-5 shadow-lg">
+      <p class="text-ui-sm text-foreground">{confirmDialog.message}</p>
+      <div class="mt-4 flex justify-end gap-2">
+        <button
+          type="button"
+          onclick={() => resolveConfirm(false)}
+          class="inline-flex h-8 items-center rounded-md px-3 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+        >Cancel</button>
+        <button
+          type="button"
+          onclick={() => resolveConfirm(true)}
+          class="inline-flex h-8 items-center rounded-md bg-destructive px-3 text-ui-xs font-medium text-destructive-foreground hover:opacity-90"
+        >{confirmDialog.confirmLabel}</button>
+      </div>
+    </div>
+  </div>
 {/if}
 </div>

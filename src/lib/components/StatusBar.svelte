@@ -27,6 +27,8 @@
   import Undo2        from '@lucide/svelte/icons/undo-2'
   import ChevronsUp   from '@lucide/svelte/icons/chevrons-up'
   import ChevronsDown from '@lucide/svelte/icons/chevrons-down'
+  import ChevronsLeft  from '@lucide/svelte/icons/chevrons-left'
+  import ChevronsRight from '@lucide/svelte/icons/chevrons-right'
   import Plus         from '@lucide/svelte/icons/plus'
   import MoreHorizontal from '@lucide/svelte/icons/more-horizontal'
   import GitBranch     from '@lucide/svelte/icons/git-branch'
@@ -81,6 +83,10 @@
     showTableNav = false,
     onscrolltabletop = /** @type {() => void} */ (() => {}),
     onscrolltablebottom = /** @type {() => void} */ (() => {}),
+    /** Show the go-to-left / go-to-right controls only when the grid overflows. */
+    canScrollTableHorizontally = false,
+    onscrolltableleft = /** @type {() => void} */ (() => {}),
+    onscrolltableright = /** @type {() => void} */ (() => {}),
     /** Live mode (auto-refresh active table) — Postgres/SQLite only. */
     live = false,
     liveSupported = false,
@@ -584,12 +590,20 @@
       {#if showTableNav}
         {@render sep()}
         <div class="flex items-center gap-px">
-          <button type="button" class={iconBtn} onclick={onscrolltabletop} title="Go to top" aria-label="Scroll to top">
+          <button type="button" class={iconBtn} onclick={onscrolltabletop} title="Go to top (⌘↑)" aria-label="Scroll to top">
             <ChevronsUp class="size-3.5" />
           </button>
-          <button type="button" class={iconBtn} onclick={onscrolltablebottom} title="Go to bottom" aria-label="Scroll to bottom">
+          <button type="button" class={iconBtn} onclick={onscrolltablebottom} title="Go to bottom (⌘↓)" aria-label="Scroll to bottom">
             <ChevronsDown class="size-3.5" />
           </button>
+          {#if canScrollTableHorizontally}
+            <button type="button" class={iconBtn} onclick={onscrolltableleft} title="Go to first column (⌘⌥←)" aria-label="Scroll to leftmost column">
+              <ChevronsLeft class="size-3.5" />
+            </button>
+            <button type="button" class={iconBtn} onclick={onscrolltableright} title="Go to last column (⌘⌥→)" aria-label="Scroll to rightmost column">
+              <ChevronsRight class="size-3.5" />
+            </button>
+          {/if}
         </div>
       {/if}
 

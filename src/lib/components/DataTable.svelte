@@ -3,7 +3,7 @@
   import { zoomState } from '$lib/stores/canvas-zoom.svelte.js'
   // Zoom is driven through the app-level settings so the canvas scales together
   // with the rest of the UI (applySettings mirrors the app zoom into zoomState).
-  import { increaseZoom, decreaseZoom, resetZoom } from '$lib/stores/settings.js'
+  import { increaseZoom, decreaseZoom, resetZoom, appPreviewDml } from '$lib/stores/settings.js'
   import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
@@ -76,6 +76,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     nowTimeOnly,
   } from "$lib/insert-field.js";
   import { cellLinkHref, cellUrlType } from "$lib/cell-display.js";
+  import {
+    buildUpdateStatements,
+    buildDeleteStatements,
+    buildInsertStatements,
+  } from "$lib/dml-preview.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import ShikiBlock from "./ShikiBlock.svelte";
+  import {
+    savePendingChanges,
+    loadPendingChanges,
+    clearPendingChanges,
+  } from "$lib/stores/pending-table-edits.js";
   import { formatCellValue, transformsFor, enabledGenerators, linkifyValue, statsNeeded, annotatorEnabled, anyDisplayExtEnabled } from "$lib/plugins/registry.js";
   import { pluginState } from "$lib/stores/plugins.js";
   import Wand2 from "@lucide/svelte/icons/wand-2";
@@ -149,6 +161,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     /** Schema + table name used for INSERT statement generation */
     schema = '',
     tableName = '',
+    /** Engine family — drives identifier quoting in the DML preview. */
+    dialect = /** @type {import('$lib/dml-preview.js').Dialect} */ ('postgres'),
     /** Set of column names to hide. Controlled externally (toolbar). */
     hiddenColumns = /** @type {Set<string>} */ (new Set()),
     /**
@@ -172,6 +186,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
      *  table to the top / bottom. */
     scrollToTop = $bindable(/** @type {() => void} */ (() => {})),
     scrollToBottom = $bindable(/** @type {() => void} */ (() => {})),
+    /** Assigned by this component; the parent (StatusBar) calls these to jump the
+     *  table to the far left / right when it scrolls horizontally. */
+    scrollToLeft = $bindable(/** @type {() => void} */ (() => {})),
+    scrollToRight = $bindable(/** @type {() => void} */ (() => {})),
+    /** Bindable: true when the grid content is wider than the viewport (so the
+     *  parent can show the horizontal go-to-edge controls). */
+    canScrollHorizontally = $bindable(false),
     /** Assigned by this component; the parent (toolbar "Jump to column" menu)
      *  calls focusColumn(name) to scroll a column into view and briefly
      *  highlight it. */
@@ -201,6 +222,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     insertSaving = false,
     /** Assigned by this component so the parent can trigger beginInsertRow(). */
     beginInsertRow = $bindable(/** @type {() => void} */ (() => {})),
+    /** Assigned by this component so the parent (⌘⌫ / toolbar) can stage the
+     *  selected rows for deletion instead of deleting them immediately. */
+    stageDeleteSelected = $bindable(/** @type {() => void} */ (() => {})),
     /** When true all write operations (edit, delete, insert) are disabled. */
     readonly = false,
     /** Bindable: controls whether the virtual columns management panel is open. */
@@ -227,11 +251,67 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * The cell shows the staged value (marked dirty) until the user clicks Apply.
    * @type {Map<string, { rowIdx: number, colIdx: number, value: unknown, original: unknown }>}
    */
-  let pendingEdits = $state(new Map());
+  // Restore any changes staged for this table before the component last unmounted
+  // (switching to a SQL/AI tab, or another table tab, tears DataTable down).
+  const _restoredPending = untrack(() => loadPendingChanges(columnWidthsKey ?? ''));
+
+  // Stable table key for persistence. `columnWidthsKey` derives from the parent's
+  // `activeTable`, which is nulled during teardown when switching to a SQL/AI tab —
+  // so reading it in onDestroy would lose the key. Track the last non-empty value.
+  let _persistKey = untrack(() => columnWidthsKey ?? '');
+  $effect(() => { if (columnWidthsKey) _persistKey = columnWidthsKey; });
+
+  let pendingEdits = $state(_restoredPending.edits);
   /** Cheap gate so per-cell staged-edit lookups are skipped entirely when there
    *  are no unsaved edits (the common case) — avoids a string alloc + Map.get
    *  on every cell of large tables. */
   const hasPendingEdits = $derived(pendingEdits.size > 0);
+
+  /**
+   * Row indices staged for deletion — shown with a red diff marker until Apply.
+   * Kept separate from `pendingEdits` so a row can be edited then deleted, and
+   * so the gutter/row rendering can distinguish the two.
+   * @type {Set<number>}
+   */
+  let pendingDeletes = $state(_restoredPending.deletes);
+  const hasPendingDeletes = $derived(pendingDeletes.size > 0);
+  /** Any unsaved change (edit or delete) — drives the tab/close guards. */
+  const hasPendingChanges = $derived(pendingEdits.size > 0 || pendingDeletes.size > 0);
+
+  /**
+   * DML preview / confirm dialog. Non-null while open. Every write path (apply
+   * staged edits, insert a new row, delete rows) routes through this so the user
+   * can review the exact SQL before it runs. `run` performs the actual write.
+   * @type {{ kind: 'update' | 'insert' | 'delete', title: string, description: string, statements: string[], confirmLabel: string, destructive: boolean, run: () => Promise<void> } | null}
+   */
+  let dmlPreview = $state(null);
+  /** True while the confirmed write is in flight. */
+  let dmlPreviewRunning = $state(false);
+
+  /** @type {import('$lib/dml-preview.js').DmlContext} */
+  const dmlContext = $derived({ dialect, schema, table: tableName, columns, primaryKey });
+
+  /**
+   * Route a write through the confirm dialog, or run it straight away when the
+   * "Preview SQL before applying" setting is off.
+   * @param {NonNullable<typeof dmlPreview>} config
+   */
+  function requestWrite(config) {
+    if ($appPreviewDml) dmlPreview = config;
+    else void config.run();
+  }
+
+  /** Run the previewed write, then close the dialog. */
+  async function confirmDmlPreview() {
+    if (!dmlPreview || dmlPreviewRunning) return;
+    dmlPreviewRunning = true;
+    try {
+      await dmlPreview.run();
+      dmlPreview = null;
+    } finally {
+      dmlPreviewRunning = false;
+    }
+  }
 
   /** @type {HTMLInputElement | HTMLSelectElement | HTMLButtonElement | null} */
   let editInput = $state(null);
@@ -265,10 +345,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let pendingContextMenu = $state(false);
   /** Block item activation from the right-click pointerup that opened the menu */
   let suppressMenuSelect = $state(false);
-  /** True while waiting for a second click to confirm row delete in context menu */
-  let deleteRowConfirmPending = $state(false);
-  /** @type {ReturnType<typeof setTimeout> | null} */
-  let _deleteRowConfirmTimer = null;
   /** Row indices with inline JSON detail open */
   let expandedRows = $state(new Set());
   /** @type {Record<string, number>} */
@@ -291,6 +367,36 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let selectedCols = $state(/** @type {Set<string>} */ (new Set()));
   /** Anchor column for shift+click range selection (plain var — not reactive). */
   let _lastHeaderClickedCol = /** @type {string | null} */ (null);
+
+  /**
+   * Rectangular cell-range selection (spreadsheet-style). The fixed corner is
+   * `selAnchor`; the moving corner is `focusedRow`/`focusedCol` (visible-column
+   * space). null = plain single-cell focus. Extended via Shift+Arrow or drag.
+   * @type {{ row: number, col: number } | null}
+   */
+  let selAnchor = $state(null);
+  /** True while a click-drag range selection is in progress. */
+  let _rangeDragging = false;
+  /** Pointer-down cell + position, to distinguish a click from a drag-select. */
+  let _rangeDownCell = /** @type {{ row: number, col: number, x: number, y: number } | null} */ (null);
+
+  /**
+   * The active rectangular range in visible-column space, or null for a single
+   * cell. A plain function (not $derived) because the canvas draw() reads it from
+   * the rAF loop — outside any reactive context — where reading a $derived would
+   * trip Svelte's `derived_inert` warning and return stale values. It only reads
+   * $state (safe to read anywhere) and stays in sync automatically.
+   * @returns {{ r0: number, r1: number, c0: number, c1: number } | null}
+   */
+  function computeCellRange() {
+    if (selAnchor === null || focusedRow === null || focusedCol === null) return null;
+    const r0 = Math.min(selAnchor.row, focusedRow);
+    const r1 = Math.max(selAnchor.row, focusedRow);
+    const c0 = Math.min(selAnchor.col, focusedCol);
+    const c1 = Math.max(selAnchor.col, focusedCol);
+    if (r0 === r1 && c0 === c1) return null; // collapsed to one cell
+    return { r0, r1, c0, c1 };
+  }
 
   /** Extend column selection from anchor to `toColName`, using geom.cols order. */
   function extendColSelection(toColName) {
@@ -919,10 +1025,35 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
   }
 
-  /** Flush all staged edits to the database. */
-  async function applyPendingEdits() {
-    if (pendingEdits.size === 0 || saving) return;
-    const entries = [...pendingEdits.values()];
+  /** Open the DML preview for all staged changes (edits + deletes); confirm flushes them. */
+  function applyPendingEdits() {
+    if (!hasPendingChanges || saving) return;
+    // A row staged for deletion doesn't need its cell updates written first.
+    const editEntries = [...pendingEdits.values()].filter((e) => !pendingDeletes.has(e.rowIdx));
+    const deleteIndices = [...pendingDeletes].sort((a, b) => a - b);
+    const statements = [
+      ...buildUpdateStatements(editEntries, rows, dmlContext),
+      ...(deleteIndices.length ? buildDeleteStatements(deleteIndices, rows, dmlContext) : []),
+    ];
+    const parts = [];
+    if (editEntries.length) parts.push(`${editEntries.length} cell${editEntries.length === 1 ? "" : "s"} updated`);
+    if (deleteIndices.length) parts.push(`${deleteIndices.length} row${deleteIndices.length === 1 ? "" : "s"} deleted`);
+    requestWrite({
+      kind: deleteIndices.length ? "delete" : "update",
+      title: "Review changes",
+      description: `${parts.join(", ")}.${deleteIndices.length ? " Deletions cannot be undone." : ""}`,
+      statements,
+      confirmLabel: "Apply changes",
+      destructive: deleteIndices.length > 0,
+      run: executePendingChanges,
+    });
+  }
+
+  /** Flush all staged edits and deletes to the database. */
+  async function executePendingChanges() {
+    if (!hasPendingChanges || saving) return;
+    // Edits first (skipping rows about to be deleted), then the deletes.
+    const entries = [...pendingEdits.values()].filter((e) => !pendingDeletes.has(e.rowIdx));
     /** @type {typeof entries} */
     const failed = [];
     let okCount = 0;
@@ -935,23 +1066,101 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         toast.error("Could not save", { description: String(err) });
       }
     }
-    // Keep only the edits that failed so the user can retry / reset them.
+
+    let deletedCount = 0;
+    const deleteIndices = [...pendingDeletes].sort((a, b) => a - b);
+    if (deleteIndices.length) {
+      try {
+        await ondelete({ rowIndices: deleteIndices });
+        deletedCount = deleteIndices.length;
+        pendingDeletes = new Set();
+      } catch (err) {
+        toast.error("Could not delete", { description: String(err) });
+      }
+    }
+
+    // Keep only the edits that failed so the user can retry / reset them — unless
+    // deletes ran, which splice `rows` and invalidate the failed edits' row indices;
+    // in that case drop them so a retry can't target the wrong row.
     const next = new Map();
-    for (const edit of failed) next.set(editKey(edit.rowIdx, edit.colIdx), edit);
+    if (deletedCount === 0) {
+      for (const edit of failed) next.set(editKey(edit.rowIdx, edit.colIdx), edit);
+    }
     pendingEdits = next;
     pastEdits = [];
     futureEdits = [];
-    if (okCount > 0) {
-      toast.success("Changes applied", { description: `${okCount} cell${okCount === 1 ? "" : "s"} updated` });
+    // Sync the cross-unmount cache to the post-apply state (clears it when empty).
+    savePendingChanges(_persistKey, pendingEdits, pendingDeletes);
+    if (okCount > 0 || deletedCount > 0) {
+      const parts = [];
+      if (okCount > 0) parts.push(`${okCount} cell${okCount === 1 ? "" : "s"} updated`);
+      if (deletedCount > 0) parts.push(`${deletedCount} row${deletedCount === 1 ? "" : "s"} deleted`);
+      toast.success("Changes applied", { description: parts.join(", ") });
     }
   }
 
-  /** Discard all staged edits. */
+  /** Discard all staged edits and deletes. */
   function resetPendingEdits() {
-    if (pendingEdits.size === 0) return;
+    if (!hasPendingChanges) return;
     pendingEdits = new Map();
+    pendingDeletes = new Set();
     pastEdits = [];
     futureEdits = [];
+    clearPendingChanges(columnWidthsKey ?? '');
+  }
+
+  /** Collapse any range back to the single focused cell. */
+  function clearCellRange() {
+    if (selAnchor !== null) selAnchor = null;
+  }
+
+  /** Write text to the clipboard, falling back to execCommand when the async
+   *  Clipboard API is unavailable/blocked (some Tauri webview configs). */
+  async function writeClipboard(/** @type {string} */ text) {
+    try {
+      if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true; }
+    } catch { /* fall through to execCommand */ }
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.top = '-1000px';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch { return false; }
+  }
+
+  /** Plain-text value of a cell for range copy (TSV). */
+  function cellCopyText(/** @type {number} */ rowIdx, /** @type {number} */ actualIdx) {
+    const v = effectiveCellValue(rowIdx, actualIdx);
+    if (v === null || v === undefined) return '';
+    if (typeof v === 'object') { try { return JSON.stringify(v); } catch { return String(v); } }
+    return String(v);
+  }
+
+  /** Copy the current rectangular range to the clipboard as TSV (paste-ready for Sheets/Excel). */
+  async function copyCellRange() {
+    const range = computeCellRange();
+    if (!range) return false;
+    const cols = navigableColumns.slice(range.c0, range.c1 + 1);
+    const actualIdxs = cols.map((col) => _nameToActualIdx.get(col.name) ?? -1);
+    /** @type {string[]} */
+    const lines = [];
+    for (let r = range.r0; r <= range.r1; r++) {
+      lines.push(actualIdxs.map((ai) => cellCopyText(r, ai).replace(/\t/g, ' ').replace(/\r?\n/g, ' ')).join('\t'));
+    }
+    const nCells = (range.r1 - range.r0 + 1) * (range.c1 - range.c0 + 1);
+    if (await writeClipboard(lines.join('\n'))) {
+      toast.success(`Copied ${nCells} cell${nCells === 1 ? '' : 's'}`);
+      return true;
+    }
+    toast.error('Could not copy');
+    return false;
   }
 
   // Surface staged-edit state to the parent (→ StatusBar Apply/Reset buttons).
@@ -959,12 +1168,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     applyEdits = applyPendingEdits;
     resetEdits = resetPendingEdits;
   });
-  $effect(() => { pendingEditCount = pendingEdits.size; });
+  $effect(() => { pendingEditCount = pendingEdits.size + pendingDeletes.size; });
 
   // Surface scroll-to-top / scroll-to-bottom to the parent (→ StatusBar buttons).
   $effect(() => {
     scrollToTop = () => tableContainer?.scrollTo({ top: 0 });
     scrollToBottom = () => { if (tableContainer) tableContainer.scrollTo({ top: tableContainer.scrollHeight }); };
+    scrollToLeft = () => tableContainer?.scrollTo({ left: 0 });
+    scrollToRight = () => { if (tableContainer) tableContainer.scrollTo({ left: tableContainer.scrollWidth }); };
     focusColumn = focusColumnByName;
     getScroll = () => ({ left: _scrollLeft, top: _scrollTop });
     applyScroll = (pos) => {
@@ -1003,12 +1214,27 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
   })
 
+  // Surface staged-delete-of-selection to the parent (⌘⌫ / toolbar delete).
+  $effect(() => {
+    stageDeleteSelected = () => {
+      if (readonly || selected.size === 0) return;
+      if (!primaryKey.length) {
+        toast.error("Cannot delete", { description: "This table has no primary key." });
+        return;
+      }
+      const next = new Set(pendingDeletes);
+      for (const ri of selected) next.add(ri);
+      pendingDeletes = next;
+      scheduleDraw();
+    }
+  })
+
   function cancelNewRow() {
     newRowDrafts = null
     newRowFocusCol = null
   }
 
-  async function submitNewRow() {
+  function submitNewRow() {
     if (!newRowDrafts || insertSaving) return
     const editableCols = columns.filter(c => isEditableType(c.dataType ?? c.data_type ?? ''))
     const built = buildInsertPayload(editableCols, primaryKey, newRowDrafts)
@@ -1016,8 +1242,22 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       toast.error('Cannot insert row', { description: built.message })
       return
     }
+    const values = /** @type {Record<string, unknown>} */ (built.values)
+    requestWrite({
+      kind: "insert",
+      title: "Review insert",
+      description: "A new row will be inserted.",
+      statements: buildInsertStatements(values, dmlContext),
+      confirmLabel: "Insert row",
+      destructive: false,
+      run: () => executeInsertRow(values),
+    })
+  }
+
+  /** @param {Record<string, unknown>} values */
+  async function executeInsertRow(values) {
     try {
-      await oninsertrow(/** @type {Record<string, unknown>} */ (built.values))
+      await oninsertrow(values)
       newRowDrafts = null
       newRowFocusCol = null
     } catch {
@@ -1253,8 +1493,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     return [rowIdx];
   }
 
-  /** @param {number} rowIdx */
-  async function deleteRow(rowIdx) {
+  /**
+   * Stage the row(s) for deletion — shown with a red diff marker until Apply.
+   * Deletes are batched with edits and flushed together from the Apply button.
+   * @param {number} rowIdx
+   */
+  function deleteRow(rowIdx) {
     if (readonly) return;
     if (!primaryKey.length) {
       toast.error("Cannot delete", {
@@ -1263,15 +1507,19 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       return;
     }
     const rowIndices = rowIndicesToDelete(rowIdx);
-    try {
-      await ondelete({ rowIndices });
-      const n = rowIndices.length;
-      toast.success(
-        n === 1 ? "Row deleted" : `${formatCompactCount(n)} rows deleted`,
-      );
-    } catch (err) {
-      toast.error("Could not delete", { description: String(err) });
-    }
+    const next = new Set(pendingDeletes);
+    for (const ri of rowIndices) next.add(ri);
+    pendingDeletes = next;
+    scheduleDraw();
+  }
+
+  /** Unstage a row previously marked for deletion. @param {number} rowIdx */
+  function undoDeleteRow(rowIdx) {
+    if (!pendingDeletes.has(rowIdx)) return;
+    const next = new Set(pendingDeletes);
+    next.delete(rowIdx);
+    pendingDeletes = next;
+    scheduleDraw();
   }
 
   /** @param {number} rowIdx */
@@ -1551,6 +1799,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   // Total scrollable width includes virtual expr cols + virtual rel columns
   const totalContentWidth = $derived(geom.totalWidth + vexprTotalW + virtualRelCols.length * VIRTUAL_COL_W)
+  // Surface whether the grid overflows horizontally so the parent can show the
+  // go-to-left / go-to-right controls only when they'd actually do something.
+  $effect(() => {
+    canScrollHorizontally = totalContentWidth > _viewportWidth + 1
+  })
   // Insert row spans ALL columns (including hidden) so every field can be filled.
   const insertRowTotalWidth = $derived(
     gutterWidth + columns.reduce((acc, c) => acc + widthForColumn(c.name, c.dataType ?? c.data_type ?? ''), 0)
@@ -1667,7 +1920,21 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       _scrollTop = 0
       if (tableContainer && tableContainer.scrollTop !== 0) tableContainer.scrollTop = 0
       fkSubview = null
+      // A fresh page of rows (page/filter/sort/search) invalidates row-index-keyed
+      // staged changes — drop them and their cache entry so a later Apply can't
+      // target the wrong rows.
+      if (pendingEdits.size) pendingEdits = new Map()
+      if (pendingDeletes.size) pendingDeletes = new Set()
+      clearPendingChanges(columnWidthsKey ?? '')
+      // A fresh row set also invalidates the row-index-keyed cell range.
+      if (selAnchor !== null) selAnchor = null
     })
+  })
+
+  // Persist staged changes when the component tears down (switching to a SQL/AI
+  // tab unmounts DataTable) so they survive until the user returns to the table.
+  onDestroy(() => {
+    savePendingChanges(_persistKey, pendingEdits, pendingDeletes)
   })
 
   const allSelected = $derived(
@@ -1932,29 +2199,27 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           expandedRows: new Set(expandedRows),
           fkSubview: fkSubview,
         })
+        // Preserve unsaved edits/deletes for the table we're leaving so they're
+        // restored when the user returns instead of being silently discarded.
+        savePendingChanges(_lastTabKey, pendingEdits, pendingDeletes)
       }
       // Restore state for the tab we're entering (fresh Set/null if first visit)
       const saved = _tabExpandCache.get(newKey)
       expandedRows = saved ? new Set(saved.expandedRows) : new Set()
       fkSubview = saved?.fkSubview ?? null
+      const restored = loadPendingChanges(newKey)
+      pendingEdits = restored.edits
+      pendingDeletes = restored.deletes
       // Always reset non-content states
       focusedRow = null
       focusedCol = null
+      selAnchor = null
       pastEdits = []
       futureEdits = []
       selectedCols = new Set()
       _lastHeaderClickedCol = null
       _lastTabKey = newKey
     })
-  });
-
-  // Drop staged edits when the table changes or rows are reordered (sort),
-  // since edits are keyed by row index — applying them afterwards could target
-  // the wrong rows.
-  $effect(() => {
-    void columnWidthsKey;
-    void (rowSort ? `${rowSort.column}:${rowSort.direction}` : "");
-    untrack(() => { if (pendingEdits.size) pendingEdits = new Map(); });
   });
 
   // Document-level capture so undo/redo fires even during the brief window between
@@ -1968,6 +2233,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       } else if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "y" || e.key === "Y")) {
         e.preventDefault();
         void redoEdit();
+      } else if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "c" || e.key === "C")) {
+        // Copy the block selection as TSV. Handled at document capture so it fires
+        // regardless of which element inside the grid holds focus.
+        if (computeCellRange()) { e.preventDefault(); void copyCellRange(); }
+        else if (selectedCols.size) { e.preventDefault(); void copyColSelection(); }
+        else if (focusedRow !== null && focusedCol !== null) {
+          const ai = visToActualColIdx(focusedCol);
+          if (ai >= 0) { e.preventDefault(); void copyCellValue(focusedRow, ai); }
+        }
       }
     }
     window.addEventListener("keydown", onCapture, true);
@@ -1981,8 +2255,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (!container) return
     _viewportWidth = container.clientWidth
     _viewportHeight = container.clientHeight
-    _scrollTop = container.scrollTop
-    _scrollLeft = container.scrollLeft
+    _scrollTop = Math.round(container.scrollTop)
+    _scrollLeft = Math.round(container.scrollLeft)
 
     // Use contentRect directly — it's provided synchronously by the ResizeObserver
     // entry with no forced layout reflow. Removing the rAF here eliminates one full
@@ -2017,8 +2291,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         _scrollLoopId = 0
         return
       }
-      _scrollTop = el.scrollTop
-      _scrollLeft = el.scrollLeft
+      // Snap to whole CSS pixels. The canvas is sticky-pinned at the viewport's
+      // integer left edge, so drawing content at a fractional scrollLeft puts text
+      // and gridlines on sub-pixel x — WebKit then re-antialiases them every frame,
+      // which reads as horizontal "vibration". Integer offsets render stably.
+      _scrollTop = Math.round(el.scrollTop)
+      _scrollLeft = Math.round(el.scrollLeft)
       try {
         draw()
       } catch (err) {
@@ -2035,8 +2313,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const el = e.currentTarget
     invalidateCanvasRect()
     // Update state immediately so any synchronous consumers (hit-test etc.) are current.
-    _scrollTop = el.scrollTop
-    _scrollLeft = el.scrollLeft
+    // Rounded to whole pixels to avoid sub-pixel shimmer during horizontal scroll.
+    _scrollTop = Math.round(el.scrollTop)
+    _scrollLeft = Math.round(el.scrollLeft)
     // Cancel any pending one-shot draw — the loop handles all scroll redraws at
     // the display's native frame rate (120Hz on ProMotion).
     if (_drawRafId) { cancelAnimationFrame(_drawRafId); _drawRafId = 0 }
@@ -2143,12 +2422,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       return;
     }
 
-    // Ctrl+C: copy selected columns (all rows, or row-selection intersection)
-    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "c" || e.key === "C") && selectedCols.size && !editingCell) {
-      e.preventDefault();
-      void copyColSelection();
-      return;
-    }
+    // Ctrl+C (copy selection/range/cell) is handled by the document-capture
+    // listener above so it works regardless of which grid element holds focus.
+
     // Undo / redo — active even while the cell input has focus
     if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "z" || e.key === "Z")) {
       if (!editingCell) {
@@ -2191,6 +2467,20 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
     const curRow = focusedRow ?? 0;
     const curCol = focusedCol ?? 0;
+
+    // Shift+Arrow extends a rectangular range from the anchor; a plain arrow (or
+    // Tab) collapses it back to the single focused cell.
+    if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "ArrowRight" || e.key === "ArrowLeft") {
+      if (e.shiftKey) {
+        if (selAnchor === null && focusedRow !== null && focusedCol !== null) {
+          selAnchor = { row: focusedRow, col: focusedCol };
+        }
+      } else {
+        clearCellRange();
+      }
+    } else if (e.key === "Tab") {
+      clearCellRange();
+    }
 
     switch (e.key) {
       case "ArrowDown": {
@@ -2245,8 +2535,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       }
       case "Escape": {
         e.preventDefault();
-        // Priority: close FK sub-view → clear col selection → clear cell focus
+        // Priority: close FK sub-view → collapse cell range → clear col selection → clear cell focus
         if (fkSubview !== null) { fkSubview = null; break; }
+        if (computeCellRange()) { clearCellRange(); scheduleDraw(); break; }
         if (selectedCols.size) { selectedCols = new Set(); _lastHeaderClickedCol = null; scheduleDraw(); break; }
         focusedRow = null; focusedCol = null;
         break;
@@ -2400,6 +2691,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const AMBER = 'rgb(245, 158, 11)'
     const AMBER_FG = 'rgba(251, 191, 36, 0.85)'
     const BLUE_FG = 'rgba(96, 165, 250, 0.8)'
+    // Staged-delete diff marker (red — matches the destructive accent).
+    const RED = 'rgb(239, 68, 68)'
 
     ctx.imageSmoothingEnabled = false
     ctx.clearRect(0, 0, W, H)
@@ -2420,6 +2713,23 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     ctx.clip()
     ctx.textBaseline = 'middle'
 
+    // Precompute the rectangular cell-range (in column-name space) once per frame
+    // so drawCell can cheaply tint in-range cells and stroke the range border.
+    const range = computeCellRange()
+    /** @type {Set<string> | null} */
+    let rangeColNames = null
+    let rangeFirstCol = '', rangeLastCol = '', rangeR0 = -1, rangeR1 = -1
+    if (range) {
+      rangeColNames = new Set()
+      for (let ci = range.c0; ci <= range.c1; ci++) {
+        const nm = navigableColumns[ci]?.name
+        if (nm) rangeColNames.add(nm)
+      }
+      rangeFirstCol = navigableColumns[range.c0]?.name ?? ''
+      rangeLastCol = navigableColumns[range.c1]?.name ?? ''
+      rangeR0 = range.r0; rangeR1 = range.r1
+    }
+
     const bodyTopY = Math.max(0, _scrollTop - HEADER_H - insertRowOffset)
     if (visibleColumns.length > 0) {
       let i = rowIndexAtY(rowTops, n, bodyTopY)
@@ -2429,7 +2739,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         if (ry + ROW_HEIGHT <= HEADER_H) continue
         drawBodyRow(ctx, i, ry, {
           cFg, cText, cMuted, cGrid, cMutedBg, cRing, cAccent, cPanel, usedW, navName,
-          AMBER, BLUE_FG, cPrimary, frozenW,
+          AMBER, BLUE_FG, RED, cPrimary, frozenW,
+          rangeColNames, rangeFirstCol, rangeLastCol, rangeR0, rangeR1,
         })
       }
     }
@@ -2449,7 +2760,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const rh = ROW_HEIGHT
     // Row background — selected uses primary tint, others use muted.
     const isSel = selected.has(idx)
-    if (isSel) {
+    const isPendingDelete = hasPendingDeletes && pendingDeletes.has(idx)
+    if (isPendingDelete) {
+      // Red diff tint for rows staged for deletion.
+      ctx.fillStyle = withAlpha(c.RED, hoveredRow === idx ? 0.2 : 0.14)
+      ctx.fillRect(0, ry, c.usedW, rh)
+    } else if (isSel) {
       ctx.fillStyle = withAlpha(c.cPrimary, hoveredRow === idx ? 0.18 : 0.13)
       ctx.fillRect(0, ry, c.usedW, rh)
     } else if (focusedRow === idx) {
@@ -2479,6 +2795,19 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
 
     drawRowGutters(ctx, idx, -_scrollLeft, ry, rh, c)
+
+    // Staged-delete decoration: a left red bar + a strikethrough across the row.
+    if (isPendingDelete) {
+      ctx.fillStyle = c.RED
+      ctx.fillRect(0, ry, 2, rh)
+      ctx.strokeStyle = withAlpha(c.RED, 0.7)
+      ctx.lineWidth = 1
+      const sy = Math.round(ry + rh / 2) + 0.5
+      ctx.beginPath()
+      ctx.moveTo(0, sy)
+      ctx.lineTo(c.usedW, sy)
+      ctx.stroke()
+    }
 
     // Row ring when focused + selected.
     if (focusedRow === idx && isSel) {
@@ -2643,8 +2972,24 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       }
       if (isDirty) { ctx.fillStyle = withAlpha(c.AMBER, 0.15); ctx.fillRect(cellX, ry, w, rh) }
       else if (activeFk) { ctx.fillStyle = withAlpha(c.cAccent, 0.15); ctx.fillRect(cellX, ry, w, rh) }
-      else if (isFocusedCell) { ctx.fillStyle = withAlpha(c.cPrimary, 0.08); ctx.fillRect(cellX, ry, w, rh) }
+      // The lone-focused-cell tint is skipped while a range is active so every
+      // in-range cell (including the drag-end corner) shares one uniform block tint.
+      else if (isFocusedCell && !c.rangeColNames) { ctx.fillStyle = withAlpha(c.cPrimary, 0.08); ctx.fillRect(cellX, ry, w, rh) }
       else if (dir?.bgTint) { ctx.fillStyle = dir.bgTint; ctx.fillRect(cellX, ry, w, rh) }
+
+      // Rectangular range selection — tint every in-range cell + stroke the outer border.
+      const inRange = c.rangeColNames && idx >= c.rangeR0 && idx <= c.rangeR1 && c.rangeColNames.has(col.name)
+      if (inRange) {
+        ctx.fillStyle = withAlpha(c.cPrimary, 0.16); ctx.fillRect(cellX, ry, w, rh)
+        ctx.strokeStyle = withAlpha(c.cPrimary, 0.9)
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        if (idx === c.rangeR0) { ctx.moveTo(cellX, ry + 0.5); ctx.lineTo(cellX + w, ry + 0.5) }
+        if (idx === c.rangeR1) { ctx.moveTo(cellX, ry + rh - 0.5); ctx.lineTo(cellX + w, ry + rh - 0.5) }
+        if (col.name === c.rangeFirstCol) { ctx.moveTo(cellX + 0.5, ry); ctx.lineTo(cellX + 0.5, ry + rh) }
+        if (col.name === c.rangeLastCol) { ctx.moveTo(cellX + w - 0.5, ry); ctx.lineTo(cellX + w - 0.5, ry + rh) }
+        ctx.stroke()
+      }
     } else {
       // Active edit cell — the DOM overlay draws its own ring-inset; no canvas
       // border needed here (a canvas strokeRect would bleed outside the cell on
@@ -2777,7 +3122,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Focused-cell outline — primary border, fully inset (no bleed to neighbours).
     // +1.5 offset keeps the 2px stroke's outer edge 0.5px inside the cell boundary
     // on all four sides, so left=top=right=bottom are visually symmetric.
-    if (isFocusedCell) {
+    // Suppressed while a rectangular range is active — the range's own outline is
+    // the selection indicator, and a per-cell ring on the drag-end cell reads as a
+    // stray highlight inside the block.
+    if (isFocusedCell && !c.rangeColNames) {
       ctx.strokeStyle = withAlpha(c.cPrimary, 0.9)
       ctx.lineWidth = 2
       ctx.strokeRect(cellX + 1.5, ry + 1.5, w - 3, rh - 3)
@@ -2787,16 +3135,35 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   /** @param {CanvasRenderingContext2D} ctx @param {number} offsetX scroll-adjusted left offset */
   function drawRowGutters(ctx, idx, offsetX, ry, rh, c) {
     if (gutterWidth <= 0) return
+    const isPendingDelete = hasPendingDeletes && pendingDeletes.has(idx)
     ctx.fillStyle = c.cPanel
     ctx.fillRect(offsetX, ry, gutterWidth, rh)
+    if (isPendingDelete) {
+      // Red diff tint over the gutter so the marker reads on the same band.
+      ctx.fillStyle = withAlpha(c.RED, hoveredRow === idx ? 0.2 : 0.14)
+      ctx.fillRect(offsetX, ry, gutterWidth, rh)
+    }
     let gx = offsetX
     if (showRowExpand) {
-      const expanded = expandedRows.has(idx) || fkSubview?.rowIdx === idx
-      const hov = hoveredRow === idx
-      if (expanded || hov) {
-        drawIcon(ctx, expanded ? 'chevron-down' : 'chevron-right',
-          gx + (GUTTER_EXPAND_W - 14) / 2, ry + (rh - 14) / 2, 14,
-          expanded ? c.cFg : c.cMuted, 2)
+      if (isPendingDelete) {
+        // A red minus in place of the expand chevron marks the staged deletion.
+        ctx.strokeStyle = c.RED
+        ctx.lineWidth = 2
+        ctx.lineCap = 'round'
+        const cx = gx + GUTTER_EXPAND_W / 2
+        const cy = Math.round(ry + rh / 2) + 0.5
+        ctx.beginPath()
+        ctx.moveTo(cx - 5, cy)
+        ctx.lineTo(cx + 5, cy)
+        ctx.stroke()
+      } else {
+        const expanded = expandedRows.has(idx) || fkSubview?.rowIdx === idx
+        const hov = hoveredRow === idx
+        if (expanded || hov) {
+          drawIcon(ctx, expanded ? 'chevron-down' : 'chevron-right',
+            gx + (GUTTER_EXPAND_W - 14) / 2, ry + (rh - 14) / 2, 14,
+            expanded ? c.cFg : c.cMuted, 2)
+        }
       }
       gx += GUTTER_EXPAND_W
     }
@@ -3125,6 +3492,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (_scrollLoopId) cancelAnimationFrame(_scrollLoopId)
   })
 
+  // End a drag-select on pointer-up anywhere (the release often lands outside the
+  // canvas). Registered on window so it fires regardless of where the pointer is.
+  $effect(() => {
+    const up = () => onCanvasPointerUp()
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+    return () => {
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+    }
+  })
+
   // Shift+wheel → horizontal scroll. Non-passive so we can call preventDefault,
   // but bails out immediately on non-Shift events so the compositor waits <0.05ms.
   // Registered via $effect (not onwheel attribute) to keep the Svelte template
@@ -3133,12 +3512,37 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   $effect(() => {
     const el = tableContainer
     if (!el) return
+    // Accumulates pinch/ctrl-wheel delta so many small gesture ticks map to whole
+    // app-zoom steps instead of one step per event.
+    let _zoomAccum = 0
     const onShiftWheel = (/** @type {WheelEvent} */ e) => {
-      if (!e.shiftKey) return
-      if (e.deltaY || e.deltaX) {
+      // Trackpad pinch (and ctrl+wheel) arrive as wheel events with ctrlKey=true.
+      // Left unhandled, WebKit page-zooms the whole webview — which bitmap-scales
+      // the canvas and makes the grid text blurry. Intercept it and drive the app's
+      // own (crisp, re-rendered) zoom instead, keeping the native page zoom at 1.
+      if (e.ctrlKey) {
         e.preventDefault()
-        el.scrollLeft += e.deltaY || e.deltaX
+        _zoomAccum += e.deltaY
+        while (_zoomAccum <= -24) { increaseZoom(); _zoomAccum += 24 }
+        while (_zoomAccum >= 24) { decreaseZoom(); _zoomAccum -= 24 }
+        return
       }
+      if (!e.shiftKey) return
+      const delta = e.deltaY || e.deltaX
+      if (!delta) return
+      // If the pointer is over a nested horizontally-scrollable panel (the FK
+      // sub-view), scroll that instead of the main grid — otherwise shift+scroll
+      // over the sub-view would move the table underneath it.
+      const inner = e.target instanceof Element
+        ? e.target.closest('[data-fk-subview-scroll]')
+        : null
+      if (inner && inner !== el && inner.scrollWidth > inner.clientWidth) {
+        e.preventDefault()
+        inner.scrollLeft += delta
+        return
+      }
+      e.preventDefault()
+      el.scrollLeft += delta
     }
     el.addEventListener('wheel', onShiftWheel, { passive: false })
     return () => el.removeEventListener('wheel', onShiftWheel)
@@ -3148,7 +3552,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   $effect(() => {
     void rows; void columns; void columnWidths
     void pinnedColumns; void hiddenColumns; void selected; void focusedRow
-    void focusedCol; void editingCell; void pendingEdits; void expandedRows
+    void focusedCol; void editingCell; void pendingEdits; void pendingDeletes; void expandedRows; void selAnchor
     void rowSort; void _viewportWidth
     // NOTE: _scrollTop / _scrollLeft are intentionally NOT tracked here — scrolling
     // repaints via scheduleDraw() inside onContainerScroll, so this effect (which
@@ -3315,10 +3719,29 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           scheduleDraw()
         }
         if (editingCell) cancelEdit()
+
+        // Shift+Click extends a rectangular range from the anchor to the clicked
+        // cell (spreadsheet-style). The anchor is the previously-focused cell.
+        if (e.shiftKey) {
+          const vi2 = actualToVisColIdx(actualIdx)
+          if (vi2 >= 0) {
+            if (selAnchor === null) {
+              selAnchor = (focusedRow !== null && focusedCol !== null)
+                ? { row: focusedRow, col: focusedCol }
+                : { row: idx, col: vi2 }
+            }
+            focusedRow = idx
+            focusedCol = vi2
+            scheduleDraw()
+          }
+          tableContainer?.focus({ preventScroll: true })
+          return
+        }
+
+        clearCellRange() // plain click collapses any rectangular range
         focusedRow = idx
         const vi = actualToVisColIdx(actualIdx)
         if (vi >= 0) focusedCol = vi
-        if (e.shiftKey) { openInInspector(idx); return }
         if (inspectorRow !== null) inspectorRow = idx
 
         const cached = _colCache[actualIdx]
@@ -3445,14 +3868,60 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   function onCanvasPointerDown(/** @type {PointerEvent} */ e) {
     if (e.button !== 0) return
-    const { y } = canvasXY(e)
+    const { x, y } = canvasXY(e)
     // Header resize is handled by the DOM overlay — canvas only handles body.
     if (y < HEADER_H) return
+    // Record the cell for a potential drag-select; the range only begins once the
+    // pointer moves past a small threshold (so plain clicks keep their behavior).
+    const t = hitTest(x, y)
+    if (t.kind === 'cell') {
+      const vi = actualToVisColIdx(/** @type {number} */ (t.actualIdx))
+      if (vi >= 0) _rangeDownCell = { row: /** @type {number} */ (t.idx), col: vi, x, y }
+    } else {
+      _rangeDownCell = null
+    }
+  }
+
+  function onCanvasPointerUp() {
+    if (_rangeDragging) {
+      _rangeDragging = false
+      _suppressNextClick = true // the drag already set focus/range; don't run the click action
+      // Focus the grid so ⌘C (copy range as TSV) and Shift+Arrow are captured.
+      tableContainer?.focus({ preventScroll: true })
+    }
+    _rangeDownCell = null
   }
 
   function onCanvasPointerMove(/** @type {PointerEvent} */ e) {
     const { x, y } = canvasXY(e)
     if (resizingColName) return
+
+    // Drag-select a rectangular cell range. Begins once the pointer leaves a small
+    // threshold from the mousedown cell, so a plain click is never treated as a drag.
+    if (_rangeDownCell && (e.buttons & 1)) {
+      if (!_rangeDragging) {
+        if (Math.abs(x - _rangeDownCell.x) > 4 || Math.abs(y - _rangeDownCell.y) > 4) {
+          _rangeDragging = true
+          selAnchor = { row: _rangeDownCell.row, col: _rangeDownCell.col }
+          focusedRow = _rangeDownCell.row
+          focusedCol = _rangeDownCell.col
+          if (selectedCols.size) { selectedCols = new Set(); _lastHeaderClickedCol = null }
+        }
+      }
+      if (_rangeDragging) {
+        const t = hitTest(x, y)
+        if (t.kind === 'cell') {
+          const vi = actualToVisColIdx(/** @type {number} */ (t.actualIdx))
+          if (vi >= 0) {
+            focusedRow = /** @type {number} */ (t.idx)
+            focusedCol = vi
+            scrollRowIntoView(/** @type {number} */ (t.idx))
+          }
+        }
+        scheduleDraw()
+        return
+      }
+    }
     if (y < HEADER_H) {
       _resizeHoverCol = null
       _zoomGuard.block = false
@@ -3603,8 +4072,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       } else {
         pendingContextMenu = false;
         suppressMenuSelect = false;
-        deleteRowConfirmPending = false;
-        if (_deleteRowConfirmTimer) { clearTimeout(_deleteRowConfirmTimer); _deleteRowConfirmTimer = null; }
       }
     }}
   >
@@ -3824,12 +4291,20 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                 </div>
               {/if}
 
-              <!-- JSON expand panels (independent from FK sub-view) -->
+              <!-- JSON expand panels (independent from FK sub-view).
+                   Same pin pattern as the FK sub-view: outer absolute for vertical
+                   position, inner position:sticky;left:0 for the horizontal pin. This
+                   lets the compositor hold it at the viewport-left edge during
+                   horizontal scroll instead of a reactive transform:translateX() that
+                   lags a frame behind the native scroll (the "vibration"). -->
               {#each [...expandedRows] as exIdx (exIdx)}
                 {#if rows[exIdx] !== undefined}
                   <div
-                    class="absolute z-10"
-                    style="top:{rowDocTop(exIdx) + ROW_HEIGHT}px; left:0; width:{_viewportWidth}px; transform:translateX({_scrollLeft}px); will-change:transform"
+                    class="absolute z-10 left-0 right-0"
+                    style="top:{rowDocTop(exIdx) + ROW_HEIGHT}px"
+                  >
+                  <div
+                    style="position:sticky; left:0; width:{_viewportWidth}px"
                     use:trackExpandHeight={exIdx}
                   >
                     <RowExpandViewer
@@ -3840,6 +4315,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                         jsonLightbox = { value, colName: label }
                       }}
                     />
+                  </div>
                   </div>
                 {/if}
               {/each}
@@ -4219,35 +4695,29 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           Duplicate row
         </ContextMenu.Item>
         <ContextMenu.Separator />
-        <ContextMenu.Item
-          variant="destructive"
-          disabled={!hasPrimaryKey || saving || readonly}
-          class={cn("whitespace-nowrap", deleteRowConfirmPending ? "animate-pulse" : "")}
-          onSelect={(e) => {
-            if (suppressMenuSelect) return;
-            if (!deleteRowConfirmPending) {
-              e.preventDefault();
-              deleteRowConfirmPending = true;
-              if (_deleteRowConfirmTimer) clearTimeout(_deleteRowConfirmTimer);
-              _deleteRowConfirmTimer = setTimeout(() => {
-                deleteRowConfirmPending = false;
-                _deleteRowConfirmTimer = null;
-              }, 2500);
-            } else {
-              deleteRowConfirmPending = false;
-              if (_deleteRowConfirmTimer) { clearTimeout(_deleteRowConfirmTimer); _deleteRowConfirmTimer = null; }
-              deleteRow(contextRowIdx);
-            }
-          }}
-        >
-          <Trash2 />
-          {deleteRowConfirmPending
-            ? "Confirm Delete"
-            : selected.size > 1 && selected.has(contextRowIdx)
+        {#if pendingDeletes.has(contextRowIdx)}
+          <ContextMenu.Item
+            disabled={readonly}
+            class="whitespace-nowrap"
+            onSelect={() => runMenuAction(() => undoDeleteRow(contextRowIdx))}
+          >
+            <RotateCcw />
+            Undo delete
+          </ContextMenu.Item>
+        {:else}
+          <ContextMenu.Item
+            variant="destructive"
+            disabled={!hasPrimaryKey || saving || readonly}
+            class="whitespace-nowrap"
+            onSelect={() => runMenuAction(() => deleteRow(contextRowIdx))}
+          >
+            <Trash2 />
+            {selected.size > 1 && selected.has(contextRowIdx)
               ? `Delete ${formatCompactCount(selected.size)} rows`
               : "Delete row"}
-          <ContextMenu.Shortcut>⌘⌫</ContextMenu.Shortcut>
-        </ContextMenu.Item>
+            <ContextMenu.Shortcut>⌘⌫</ContextMenu.Shortcut>
+          </ContextMenu.Item>
+        {/if}
         {/if}
       {/if}
     </ContextMenu.Content>
@@ -4302,4 +4772,63 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   oncancel={cancelQuickLook}
   onsave={commitQuickLook}
 />
+
+<!-- DML preview / confirm — shown before any edit, insert, or delete is applied. -->
+<Dialog.Root
+  open={dmlPreview !== null}
+  onOpenChange={(o) => { if (!o && !dmlPreviewRunning) dmlPreview = null }}
+>
+  <Dialog.Content class="max-w-2xl gap-3">
+    {#if dmlPreview}
+      <Dialog.Header class="gap-1">
+        <Dialog.Title class="text-ui-sm">{dmlPreview.title}</Dialog.Title>
+        <Dialog.Description class="text-ui-xs text-muted-foreground/70">
+          {dmlPreview.description}
+        </Dialog.Description>
+      </Dialog.Header>
+
+      <div class="flex items-center justify-between">
+        <span class="text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/50">
+          SQL to run{dmlPreview.statements.length > 1 ? ` · ${dmlPreview.statements.length} statements` : ''}
+        </span>
+      </div>
+
+      <!-- Syntax-highlighted, wrapping, scrollable SQL preview (hover to copy). -->
+      <div class="flex max-h-[45vh] min-h-0 flex-col overflow-hidden rounded-lg border border-border/50">
+        <ShikiBlock code={dmlPreview.statements.join('\n')} lang="sql" />
+      </div>
+
+      <Dialog.Footer class="gap-2 sm:justify-end">
+        <button
+          type="button"
+          onclick={() => { if (!dmlPreviewRunning) dmlPreview = null }}
+          disabled={dmlPreviewRunning}
+          class="inline-flex h-8 items-center rounded-md px-3 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onclick={confirmDmlPreview}
+          disabled={dmlPreviewRunning}
+          class={cn(
+            "inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-ui-xs font-medium disabled:opacity-60",
+            dmlPreview.destructive
+              ? "bg-destructive text-destructive-foreground hover:opacity-90"
+              : "bg-primary text-primary-foreground hover:opacity-90"
+          )}
+        >
+          {#if dmlPreviewRunning}
+            <Loader class="size-3 animate-spin" />
+          {:else if dmlPreview.destructive}
+            <Trash2 class="size-3" />
+          {:else}
+            <Check class="size-3" />
+          {/if}
+          {dmlPreview.confirmLabel}
+        </button>
+      </Dialog.Footer>
+    {/if}
+  </Dialog.Content>
+</Dialog.Root>
 

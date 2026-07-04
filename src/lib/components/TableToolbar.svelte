@@ -465,7 +465,7 @@
 
 <div class="flex shrink-0 flex-col">
   <header
-    class="studio-chrome studio-table-toolbar flex h-9 shrink-0 items-center gap-1 border-b border-border bg-panel px-2"
+    class="@container/tb studio-chrome studio-table-toolbar flex h-9 shrink-0 items-center gap-1 border-b border-border bg-panel px-2"
     data-studio-chrome
   >
     <!-- Search — far left, expands on focus -->
@@ -555,7 +555,7 @@
         {#snippet trigger(props)}
           <button
             {...props}
-            class={cn(iconBtn, "shrink-0", (rowSort?.column || sortMenuOpen) && "bg-accent text-foreground")}
+            class={cn(iconBtn, "shrink-0 @max-[420px]/tb:hidden", (rowSort?.column || sortMenuOpen) && "bg-accent text-foreground")}
             title={sortLabel}
             disabled={loading || columns.length === 0}
           >
@@ -593,7 +593,7 @@
         {#snippet trigger(props)}
           <button
             {...props}
-            class={cn(iconBtn, "shrink-0", hiddenCount > 0 ? "gap-1 w-auto px-2" : "", (hiddenCount > 0 || columnsMenuOpen) && "bg-accent text-foreground")}
+            class={cn(iconBtn, "shrink-0 @max-[460px]/tb:hidden", hiddenCount > 0 ? "gap-1 w-auto px-2" : "", (hiddenCount > 0 || columnsMenuOpen) && "bg-accent text-foreground")}
             title="Toggle columns"
             disabled={loading || columns.length === 0}
           >
@@ -642,7 +642,7 @@
         {#snippet trigger(props)}
           <button
             {...props}
-            class={cn(iconBtn, "shrink-0", focusMenuOpen && "bg-accent text-foreground")}
+            class={cn(iconBtn, "shrink-0 @max-[500px]/tb:hidden", focusMenuOpen && "bg-accent text-foreground")}
             title="Jump to column"
             disabled={loading || columns.length === 0}
           >
@@ -664,7 +664,7 @@
       <button
         type="button"
         class={cn(
-          "inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-ui-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30",
+          "inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-ui-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30 @max-[560px]/tb:hidden",
           virtualColCount > 0 && "bg-accent/50 text-foreground"
         )}
         title="Virtual columns"
@@ -680,7 +680,7 @@
       <!-- Open in SQL editor — opens a new query tab pre-filled with the current view's SELECT -->
       <button
         type="button"
-        class="inline-flex h-7 shrink-0 items-center justify-center rounded-md px-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+        class="inline-flex h-7 shrink-0 items-center justify-center rounded-md px-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30 @max-[520px]/tb:hidden"
         title="Open in SQL editor — new query with current filters & sort"
         disabled={loading || columns.length === 0}
         onclick={onopeninsql}
@@ -701,7 +701,7 @@
         onclick={onaddrow}
       >
         <Plus class="size-3.5 shrink-0" />
-        Add
+        <span class="@max-[440px]/tb:hidden">Add</span>
       </button>
     {/if}
 
@@ -712,7 +712,7 @@
       {#if infiniteScroll}
         {#if total > 0}
           <span
-            class="flex shrink-0 items-center gap-1 font-mono text-ui-xs tabular-nums"
+            class="flex shrink-0 items-center gap-1 font-mono text-ui-xs tabular-nums @max-[600px]/tb:hidden"
             title="{to.toLocaleString('en-US')} of {total.toLocaleString('en-US')} rows loaded{queryMs > 0 ? ` · ${queryMs}ms` : ''}"
           >
             <span class="text-foreground/65">{to.toLocaleString("en-US")}</span>
@@ -722,7 +722,7 @@
       {:else}
         {#if total > 0}
           <span
-            class="flex shrink-0 items-center gap-1 font-mono text-ui-xs tabular-nums"
+            class="flex shrink-0 items-center gap-1 font-mono text-ui-xs tabular-nums @max-[600px]/tb:hidden"
             title="{from.toLocaleString('en-US')}–{to.toLocaleString('en-US')} of {total.toLocaleString('en-US')} rows{queryMs > 0 ? ` · ${queryMs}ms` : ''}"
           >
             <span class="text-foreground/65">{from.toLocaleString("en-US")}–{to.toLocaleString("en-US")}</span>
@@ -734,6 +734,10 @@
           </span>
         {/if}
 
+        <!-- divider before the pagination cluster (only when the range readout shows) -->
+        <span class="mx-0.5 h-4 w-px shrink-0 bg-border/50 @max-[600px]/tb:hidden"></span>
+
+        <div class="flex shrink-0 items-center gap-1.5">
         <Select.Root
           type="single"
           value={String(pageSize)}
@@ -768,7 +772,7 @@
         </Select.Root>
 
         <span
-          class="shrink-0 text-ui-xs text-muted-foreground/50 tabular-nums"
+          class="shrink-0 text-ui-xs text-muted-foreground/50 tabular-nums @max-[500px]/tb:hidden"
           title={pageCount.toLocaleString("en-US")}
         >of {formatCompactCount(pageCount)}</span>
 
@@ -790,6 +794,7 @@
         >
           <ChevronRight class="size-3.5" />
         </button>
+        </div>
       {/if}
 
     {/if}

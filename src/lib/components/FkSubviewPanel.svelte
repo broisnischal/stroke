@@ -82,6 +82,7 @@
       class="overflow-x-auto"
       class:overflow-y-auto={needsScroll}
       style={needsScroll ? 'max-height: 280px' : ''}
+      data-fk-subview-scroll
     >
       <table class="w-max min-w-full border-collapse">
         <thead class="sticky top-0 z-10 bg-background">
