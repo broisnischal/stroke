@@ -368,6 +368,29 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   /** Anchor column for shift+click range selection (plain var — not reactive). */
   let _lastHeaderClickedCol = /** @type {string | null} */ (null);
 
+  /**
+   * Rectangular cell-range selection (spreadsheet-style). The fixed corner is
+   * `selAnchor`; the moving corner is `focusedRow`/`focusedCol` (visible-column
+   * space). null = plain single-cell focus. Extended via Shift+Arrow or drag.
+   * @type {{ row: number, col: number } | null}
+   */
+  let selAnchor = $state(null);
+  /** True while a click-drag range selection is in progress. */
+  let _rangeDragging = false;
+  /** Pointer-down cell + position, to distinguish a click from a drag-select. */
+  let _rangeDownCell = /** @type {{ row: number, col: number, x: number, y: number } | null} */ (null);
+
+  /** The active rectangular range in visible-column space, or null for a single cell. */
+  const cellRange = $derived.by(() => {
+    if (selAnchor === null || focusedRow === null || focusedCol === null) return null;
+    const r0 = Math.min(selAnchor.row, focusedRow);
+    const r1 = Math.max(selAnchor.row, focusedRow);
+    const c0 = Math.min(selAnchor.col, focusedCol);
+    const c1 = Math.max(selAnchor.col, focusedCol);
+    if (r0 === r1 && c0 === c1) return null; // collapsed to one cell
+    return { r0, r1, c0, c1 };
+  });
+
   /** Extend column selection from anchor to `toColName`, using geom.cols order. */
   function extendColSelection(toColName) {
     if (!_lastHeaderClickedCol) { selectedCols = new Set([toColName]); _lastHeaderClickedCol = toColName; return }
@@ -1077,6 +1100,41 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     pastEdits = [];
     futureEdits = [];
     clearPendingChanges(columnWidthsKey ?? '');
+  }
+
+  /** Collapse any range back to the single focused cell. */
+  function clearCellRange() {
+    if (selAnchor !== null) selAnchor = null;
+  }
+
+  /** Plain-text value of a cell for range copy (TSV). */
+  function cellCopyText(/** @type {number} */ rowIdx, /** @type {number} */ actualIdx) {
+    const v = effectiveCellValue(rowIdx, actualIdx);
+    if (v === null || v === undefined) return '';
+    if (typeof v === 'object') { try { return JSON.stringify(v); } catch { return String(v); } }
+    return String(v);
+  }
+
+  /** Copy the current rectangular range to the clipboard as TSV (paste-ready for Sheets/Excel). */
+  async function copyCellRange() {
+    const range = cellRange;
+    if (!range) return false;
+    const cols = navigableColumns.slice(range.c0, range.c1 + 1);
+    const actualIdxs = cols.map((col) => _nameToActualIdx.get(col.name) ?? -1);
+    /** @type {string[]} */
+    const lines = [];
+    for (let r = range.r0; r <= range.r1; r++) {
+      lines.push(actualIdxs.map((ai) => cellCopyText(r, ai).replace(/\t/g, ' ').replace(/\r?\n/g, ' ')).join('\t'));
+    }
+    try {
+      await navigator.clipboard.writeText(lines.join('\n'));
+      const nCells = (range.r1 - range.r0 + 1) * (range.c1 - range.c0 + 1);
+      toast.success(`Copied ${nCells} cells`);
+      return true;
+    } catch (err) {
+      toast.error('Could not copy', { description: String(err) });
+      return false;
+    }
   }
 
   // Surface staged-edit state to the parent (→ StatusBar Apply/Reset buttons).
@@ -2127,6 +2185,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       // Always reset non-content states
       focusedRow = null
       focusedCol = null
+      selAnchor = null
       pastEdits = []
       futureEdits = []
       selectedCols = new Set()
@@ -2327,6 +2386,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       void copyColSelection();
       return;
     }
+    // Ctrl+C: copy the rectangular cell range as TSV.
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "c" || e.key === "C") && cellRange && !editingCell) {
+      e.preventDefault();
+      void copyCellRange();
+      return;
+    }
     // Undo / redo — active even while the cell input has focus
     if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "z" || e.key === "Z")) {
       if (!editingCell) {
@@ -2369,6 +2434,20 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
     const curRow = focusedRow ?? 0;
     const curCol = focusedCol ?? 0;
+
+    // Shift+Arrow extends a rectangular range from the anchor; a plain arrow (or
+    // Tab) collapses it back to the single focused cell.
+    if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "ArrowRight" || e.key === "ArrowLeft") {
+      if (e.shiftKey) {
+        if (selAnchor === null && focusedRow !== null && focusedCol !== null) {
+          selAnchor = { row: focusedRow, col: focusedCol };
+        }
+      } else {
+        clearCellRange();
+      }
+    } else if (e.key === "Tab") {
+      clearCellRange();
+    }
 
     switch (e.key) {
       case "ArrowDown": {
@@ -2423,8 +2502,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       }
       case "Escape": {
         e.preventDefault();
-        // Priority: close FK sub-view → clear col selection → clear cell focus
+        // Priority: close FK sub-view → collapse cell range → clear col selection → clear cell focus
         if (fkSubview !== null) { fkSubview = null; break; }
+        if (cellRange) { clearCellRange(); scheduleDraw(); break; }
         if (selectedCols.size) { selectedCols = new Set(); _lastHeaderClickedCol = null; scheduleDraw(); break; }
         focusedRow = null; focusedCol = null;
         break;
@@ -2600,6 +2680,23 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     ctx.clip()
     ctx.textBaseline = 'middle'
 
+    // Precompute the rectangular cell-range (in column-name space) once per frame
+    // so drawCell can cheaply tint in-range cells and stroke the range border.
+    const range = cellRange
+    /** @type {Set<string> | null} */
+    let rangeColNames = null
+    let rangeFirstCol = '', rangeLastCol = '', rangeR0 = -1, rangeR1 = -1
+    if (range) {
+      rangeColNames = new Set()
+      for (let ci = range.c0; ci <= range.c1; ci++) {
+        const nm = navigableColumns[ci]?.name
+        if (nm) rangeColNames.add(nm)
+      }
+      rangeFirstCol = navigableColumns[range.c0]?.name ?? ''
+      rangeLastCol = navigableColumns[range.c1]?.name ?? ''
+      rangeR0 = range.r0; rangeR1 = range.r1
+    }
+
     const bodyTopY = Math.max(0, _scrollTop - HEADER_H - insertRowOffset)
     if (visibleColumns.length > 0) {
       let i = rowIndexAtY(rowTops, n, bodyTopY)
@@ -2610,6 +2707,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         drawBodyRow(ctx, i, ry, {
           cFg, cText, cMuted, cGrid, cMutedBg, cRing, cAccent, cPanel, usedW, navName,
           AMBER, BLUE_FG, RED, cPrimary, frozenW,
+          rangeColNames, rangeFirstCol, rangeLastCol, rangeR0, rangeR1,
         })
       }
     }
@@ -2843,6 +2941,20 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       else if (activeFk) { ctx.fillStyle = withAlpha(c.cAccent, 0.15); ctx.fillRect(cellX, ry, w, rh) }
       else if (isFocusedCell) { ctx.fillStyle = withAlpha(c.cPrimary, 0.08); ctx.fillRect(cellX, ry, w, rh) }
       else if (dir?.bgTint) { ctx.fillStyle = dir.bgTint; ctx.fillRect(cellX, ry, w, rh) }
+
+      // Rectangular range selection — tint every in-range cell + stroke the outer border.
+      const inRange = c.rangeColNames && idx >= c.rangeR0 && idx <= c.rangeR1 && c.rangeColNames.has(col.name)
+      if (inRange) {
+        ctx.fillStyle = withAlpha(c.cPrimary, 0.16); ctx.fillRect(cellX, ry, w, rh)
+        ctx.strokeStyle = withAlpha(c.cPrimary, 0.9)
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        if (idx === c.rangeR0) { ctx.moveTo(cellX, ry + 0.5); ctx.lineTo(cellX + w, ry + 0.5) }
+        if (idx === c.rangeR1) { ctx.moveTo(cellX, ry + rh - 0.5); ctx.lineTo(cellX + w, ry + rh - 0.5) }
+        if (col.name === c.rangeFirstCol) { ctx.moveTo(cellX + 0.5, ry); ctx.lineTo(cellX + 0.5, ry + rh) }
+        if (col.name === c.rangeLastCol) { ctx.moveTo(cellX + w - 0.5, ry); ctx.lineTo(cellX + w - 0.5, ry + rh) }
+        ctx.stroke()
+      }
     } else {
       // Active edit cell — the DOM overlay draws its own ring-inset; no canvas
       // border needed here (a canvas strokeRect would bleed outside the cell on
@@ -3342,6 +3454,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (_scrollLoopId) cancelAnimationFrame(_scrollLoopId)
   })
 
+  // End a drag-select on pointer-up anywhere (the release often lands outside the
+  // canvas). Registered on window so it fires regardless of where the pointer is.
+  $effect(() => {
+    const up = () => onCanvasPointerUp()
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+    return () => {
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+    }
+  })
+
   // Shift+wheel → horizontal scroll. Non-passive so we can call preventDefault,
   // but bails out immediately on non-Shift events so the compositor waits <0.05ms.
   // Registered via $effect (not onwheel attribute) to keep the Svelte template
@@ -3376,7 +3500,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   $effect(() => {
     void rows; void columns; void columnWidths
     void pinnedColumns; void hiddenColumns; void selected; void focusedRow
-    void focusedCol; void editingCell; void pendingEdits; void pendingDeletes; void expandedRows
+    void focusedCol; void editingCell; void pendingEdits; void pendingDeletes; void expandedRows; void selAnchor
     void rowSort; void _viewportWidth
     // NOTE: _scrollTop / _scrollLeft are intentionally NOT tracked here — scrolling
     // repaints via scheduleDraw() inside onContainerScroll, so this effect (which
@@ -3543,10 +3667,29 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           scheduleDraw()
         }
         if (editingCell) cancelEdit()
+
+        // Shift+Click extends a rectangular range from the anchor to the clicked
+        // cell (spreadsheet-style). The anchor is the previously-focused cell.
+        if (e.shiftKey) {
+          const vi2 = actualToVisColIdx(actualIdx)
+          if (vi2 >= 0) {
+            if (selAnchor === null) {
+              selAnchor = (focusedRow !== null && focusedCol !== null)
+                ? { row: focusedRow, col: focusedCol }
+                : { row: idx, col: vi2 }
+            }
+            focusedRow = idx
+            focusedCol = vi2
+            scheduleDraw()
+          }
+          tableContainer?.focus({ preventScroll: true })
+          return
+        }
+
+        clearCellRange() // plain click collapses any rectangular range
         focusedRow = idx
         const vi = actualToVisColIdx(actualIdx)
         if (vi >= 0) focusedCol = vi
-        if (e.shiftKey) { openInInspector(idx); return }
         if (inspectorRow !== null) inspectorRow = idx
 
         const cached = _colCache[actualIdx]
@@ -3673,14 +3816,58 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   function onCanvasPointerDown(/** @type {PointerEvent} */ e) {
     if (e.button !== 0) return
-    const { y } = canvasXY(e)
+    const { x, y } = canvasXY(e)
     // Header resize is handled by the DOM overlay — canvas only handles body.
     if (y < HEADER_H) return
+    // Record the cell for a potential drag-select; the range only begins once the
+    // pointer moves past a small threshold (so plain clicks keep their behavior).
+    const t = hitTest(x, y)
+    if (t.kind === 'cell') {
+      const vi = actualToVisColIdx(/** @type {number} */ (t.actualIdx))
+      if (vi >= 0) _rangeDownCell = { row: /** @type {number} */ (t.idx), col: vi, x, y }
+    } else {
+      _rangeDownCell = null
+    }
+  }
+
+  function onCanvasPointerUp() {
+    if (_rangeDragging) {
+      _rangeDragging = false
+      _suppressNextClick = true // the drag already set focus/range; don't run the click action
+    }
+    _rangeDownCell = null
   }
 
   function onCanvasPointerMove(/** @type {PointerEvent} */ e) {
     const { x, y } = canvasXY(e)
     if (resizingColName) return
+
+    // Drag-select a rectangular cell range. Begins once the pointer leaves a small
+    // threshold from the mousedown cell, so a plain click is never treated as a drag.
+    if (_rangeDownCell && (e.buttons & 1)) {
+      if (!_rangeDragging) {
+        if (Math.abs(x - _rangeDownCell.x) > 4 || Math.abs(y - _rangeDownCell.y) > 4) {
+          _rangeDragging = true
+          selAnchor = { row: _rangeDownCell.row, col: _rangeDownCell.col }
+          focusedRow = _rangeDownCell.row
+          focusedCol = _rangeDownCell.col
+          if (selectedCols.size) { selectedCols = new Set(); _lastHeaderClickedCol = null }
+        }
+      }
+      if (_rangeDragging) {
+        const t = hitTest(x, y)
+        if (t.kind === 'cell') {
+          const vi = actualToVisColIdx(/** @type {number} */ (t.actualIdx))
+          if (vi >= 0) {
+            focusedRow = /** @type {number} */ (t.idx)
+            focusedCol = vi
+            scrollRowIntoView(/** @type {number} */ (t.idx))
+          }
+        }
+        scheduleDraw()
+        return
+      }
+    }
     if (y < HEADER_H) {
       _resizeHoverCol = null
       _zoomGuard.block = false
