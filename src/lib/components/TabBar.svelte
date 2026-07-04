@@ -55,7 +55,41 @@
     /** @type {import('$lib/stores/recent-tabs.js').RecentTab[]} */
     recentTabs = [],
     onrecentselect = /** @type {(schema: string, table: string) => void} */ (() => {}),
+    /** Pointer-based tab drag → split panes. Start/move/end drive the drop hints. */
+    ondragtabstart = /** @param {string} _id */ (_id) => {},
+    ondragtabmove = /** @type {(clientX: number, clientY: number) => void} */ (() => {}),
+    ondragtabend = () => {},
   } = $props()
+
+  // ── Pointer-based tab drag (HTML5 DnD is unreliable in Tauri's WebKit) ──────
+  /** @type {{ id: string, startX: number, startY: number, active: boolean } | null} */
+  let _tabDrag = null
+  /** Set true when a drag occurred, so the ensuing click doesn't also select the tab. */
+  let _suppressTabClick = false
+
+  /** @param {PointerEvent} e @param {string} id */
+  function tabPointerDown(e, id) {
+    if (e.button !== 0) return
+    _tabDrag = { id, startX: e.clientX, startY: e.clientY, active: false }
+    window.addEventListener('pointermove', tabPointerMove)
+    window.addEventListener('pointerup', tabPointerUp)
+  }
+  /** @param {PointerEvent} e */
+  function tabPointerMove(e) {
+    if (!_tabDrag) return
+    if (!_tabDrag.active) {
+      if (Math.abs(e.clientX - _tabDrag.startX) <= 5 && Math.abs(e.clientY - _tabDrag.startY) <= 5) return
+      _tabDrag.active = true
+      ondragtabstart(_tabDrag.id)
+    }
+    ondragtabmove(e.clientX, e.clientY)
+  }
+  function tabPointerUp() {
+    window.removeEventListener('pointermove', tabPointerMove)
+    window.removeEventListener('pointerup', tabPointerUp)
+    if (_tabDrag?.active) { _suppressTabClick = true; ondragtabend() }
+    _tabDrag = null
+  }
 
   /** @type {HTMLElement | null} */
   let scrollEl = $state(null)
@@ -111,6 +145,7 @@
           {#snippet child({ props: ctxProps })}
             <div
               {...ctxProps}
+              onpointerdown={(e) => tabPointerDown(e, tab.id)}
               class={cn(
                 'group/tab relative flex min-w-0 max-w-[200px] shrink-0 items-stretch transition-colors duration-100',
                 active ? 'bg-panel' : 'hover:bg-muted/20',
@@ -129,7 +164,7 @@
                   'flex min-w-0 flex-1 items-center gap-1.5 pl-3 pr-1 text-left text-xs font-medium leading-none transition-colors duration-100',
                   active ? 'text-foreground' : 'text-muted-foreground/50 hover:text-muted-foreground/80',
                 )}
-                onclick={() => onselect(tab.id)}
+                onclick={() => { if (_suppressTabClick) { _suppressTabClick = false; return } onselect(tab.id) }}
               >
                 <Icon class={cn('size-3 shrink-0', active ? 'opacity-70' : 'opacity-35')} />
                 <span class="truncate">{tabDisplayTitle(tab)}</span>

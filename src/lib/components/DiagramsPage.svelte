@@ -290,7 +290,7 @@
             <textarea
               bind:value={draftCode}
               spellcheck="false"
-              class="min-h-0 flex-1 resize-none rounded-lg border border-border/50 bg-background/40 p-3 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/30 focus:border-border/80 focus:outline-none"
+              class="min-h-0 flex-1 resize-none rounded-lg border border-border/50 bg-background/40 p-3 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/30 focus:border-border/80 focus:outline-none [font-feature-settings:'liga'_0,'calt'_0] [font-variant-ligatures:none]"
             ></textarea>
           </div>
           <div class="flex w-1/2 min-w-0 flex-col overflow-hidden">
