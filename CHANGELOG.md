@@ -4,6 +4,12 @@ All notable changes to Stroke are listed here, newest first.
 
 ---
 
+## [1.4.0] - 2026-07-04
+
+### Changes
+- Release v1.3.0 — split panes, block selection, staged deletes & more (#18)
+
+
 ## [1.2.0] - 2026-07-03
 
 ### New Features
