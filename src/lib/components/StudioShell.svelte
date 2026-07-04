@@ -4154,6 +4154,7 @@ let rowSearch = $state('')
                 onfetchrelatedrows={handleFetchRelatedRows}
                 schema={activeSchema}
                 tableName={activeTable ?? ''}
+                dialect={dbType}
                 indexes={activeTableIndexes}
                 {hiddenColumns}
                 {reloadToken}
