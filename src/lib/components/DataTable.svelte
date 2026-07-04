@@ -3853,6 +3853,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (_rangeDragging) {
       _rangeDragging = false
       _suppressNextClick = true // the drag already set focus/range; don't run the click action
+      // Focus the grid so ⌘C (copy range as TSV) and Shift+Arrow are captured.
+      tableContainer?.focus({ preventScroll: true })
     }
     _rangeDownCell = null
   }
