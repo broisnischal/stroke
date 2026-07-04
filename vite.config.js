@@ -49,6 +49,11 @@ export default defineConfig({
   },
   server: {
     port: 8080,
+    // The dev server may resolve node_modules from a parent dir (e.g. when running
+    // from a git worktree that shares the repo's node_modules). Relax the fs
+    // allow-list so those assets (fonts, etc.) serve instead of being blocked.
+    // Dev-only — has no effect on `tauri build` / production.
+    fs: { strict: false },
   },
   build: {
     chunkSizeWarningLimit: 1500,
