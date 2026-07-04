@@ -380,8 +380,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   /** Pointer-down cell + position, to distinguish a click from a drag-select. */
   let _rangeDownCell = /** @type {{ row: number, col: number, x: number, y: number } | null} */ (null);
 
-  /** The active rectangular range in visible-column space, or null for a single cell. */
-  const cellRange = $derived.by(() => {
+  /**
+   * The active rectangular range in visible-column space, or null for a single
+   * cell. A plain function (not $derived) because the canvas draw() reads it from
+   * the rAF loop — outside any reactive context — where reading a $derived would
+   * trip Svelte's `derived_inert` warning and return stale values. It only reads
+   * $state (safe to read anywhere) and stays in sync automatically.
+   * @returns {{ r0: number, r1: number, c0: number, c1: number } | null}
+   */
+  function computeCellRange() {
     if (selAnchor === null || focusedRow === null || focusedCol === null) return null;
     const r0 = Math.min(selAnchor.row, focusedRow);
     const r1 = Math.max(selAnchor.row, focusedRow);
@@ -389,7 +396,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const c1 = Math.max(selAnchor.col, focusedCol);
     if (r0 === r1 && c0 === c1) return null; // collapsed to one cell
     return { r0, r1, c0, c1 };
-  });
+  }
 
   /** Extend column selection from anchor to `toColName`, using geom.cols order. */
   function extendColSelection(toColName) {
@@ -1138,7 +1145,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   /** Copy the current rectangular range to the clipboard as TSV (paste-ready for Sheets/Excel). */
   async function copyCellRange() {
-    const range = cellRange;
+    const range = computeCellRange();
     if (!range) return false;
     const cols = navigableColumns.slice(range.c0, range.c1 + 1);
     const actualIdxs = cols.map((col) => _nameToActualIdx.get(col.name) ?? -1);
@@ -2229,7 +2236,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       } else if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "c" || e.key === "C")) {
         // Copy the block selection as TSV. Handled at document capture so it fires
         // regardless of which element inside the grid holds focus.
-        if (cellRange) { e.preventDefault(); void copyCellRange(); }
+        if (computeCellRange()) { e.preventDefault(); void copyCellRange(); }
         else if (selectedCols.size) { e.preventDefault(); void copyColSelection(); }
         else if (focusedRow !== null && focusedCol !== null) {
           const ai = visToActualColIdx(focusedCol);
@@ -2530,7 +2537,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         e.preventDefault();
         // Priority: close FK sub-view → collapse cell range → clear col selection → clear cell focus
         if (fkSubview !== null) { fkSubview = null; break; }
-        if (cellRange) { clearCellRange(); scheduleDraw(); break; }
+        if (computeCellRange()) { clearCellRange(); scheduleDraw(); break; }
         if (selectedCols.size) { selectedCols = new Set(); _lastHeaderClickedCol = null; scheduleDraw(); break; }
         focusedRow = null; focusedCol = null;
         break;
@@ -2708,7 +2715,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
     // Precompute the rectangular cell-range (in column-name space) once per frame
     // so drawCell can cheaply tint in-range cells and stroke the range border.
-    const range = cellRange
+    const range = computeCellRange()
     /** @type {Set<string> | null} */
     let rangeColNames = null
     let rangeFirstCol = '', rangeLastCol = '', rangeR0 = -1, rangeR1 = -1
