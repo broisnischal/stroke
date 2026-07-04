@@ -152,9 +152,10 @@
   import { openNotebookFile } from '$lib/api.js'
   import { formatCompactCount, normalizeTableRowCount } from '$lib/table-list.js'
   import {
-    DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE,
     PAGE_SIZE_ALL,
+    saveDefaultPageSize,
+    loadDefaultPageSize,
     activeFilters,
     filtersApiSignature,
     filtersForApi,
@@ -687,7 +688,7 @@
   let loadingRows = $state(false)
   let loadingMore = $state(false)
   let page = $state(1)
-  let pageSize = $state(DEFAULT_PAGE_SIZE)
+  let pageSize = $state(loadDefaultPageSize())
   let rawOffset = $state(/** @type {number | null} */ (null))
   // When "All rows" sentinel is active, always fetch from offset 0.
   const currentOffset = $derived(
@@ -1031,7 +1032,7 @@ let rowSearch = $state('')
   /** @param {TableTabState} s */
   function applyTableSnapshot(s) {
     page = s.page
-    pageSize = s.pageSize ?? DEFAULT_PAGE_SIZE
+    pageSize = s.pageSize ?? loadDefaultPageSize()
     rowSearch = s.rowSearch ?? ''
     rowSort = s.rowSort ? { ...s.rowSort } : null
     rowFilters = (s.rowFilters ?? []).map((f) => ({ ...f }))
@@ -1087,7 +1088,7 @@ let rowSearch = $state('')
   function clearTableEditor() {
     activeTable = null
     page = 1
-    pageSize = DEFAULT_PAGE_SIZE
+    pageSize = loadDefaultPageSize()
     rowSearch = ''
     rowSort = null
     rowFilters = []
@@ -2230,7 +2231,7 @@ let rowSearch = $state('')
     structureColumns = []
     structureSearch = ''
     page = 1
-    pageSize = DEFAULT_PAGE_SIZE
+    pageSize = loadDefaultPageSize()
     rowSearch = search ?? ''
     rowSort = null
     rowFilters = filters ? filters.map((f) => ({ ...f })) : []
@@ -2713,6 +2714,8 @@ let rowSearch = $state('')
       if (size <= 0) return
       pageSize = Math.min(size, MAX_PAGE_SIZE)
     }
+    // Persist as the session-wide default so new tabs open at this size too.
+    saveDefaultPageSize(pageSize)
     await reloadTableFromQuery(true)
   }
 
@@ -2732,6 +2735,8 @@ let rowSearch = $state('')
   async function handleLimitOffsetChange(limit, offset) {
     const clampedLimit = Math.min(Math.max(1, limit), MAX_PAGE_SIZE)
     pageSize = clampedLimit
+    // A custom limit (e.g. typing 100) also becomes the persisted default.
+    saveDefaultPageSize(clampedLimit)
     rawOffset = offset
     page = Math.max(1, Math.floor(offset / clampedLimit) + 1)
     await loadRows()

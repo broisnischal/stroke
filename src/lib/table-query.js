@@ -39,6 +39,37 @@ export const MAX_PAGE_SIZE = 1_000_000
 /** Sentinel page size meaning "load all rows" (uses the table's total count). */
 export const PAGE_SIZE_ALL = -1
 
+// ── User-configurable default page size (persisted across sessions) ──────────
+// When the user changes rows-per-page, that value becomes the default for every
+// new table tab. Stored in localStorage so it survives restarts.
+const DEFAULT_PAGE_SIZE_KEY = 'stroke:default-page-size'
+
+/** Clamp an arbitrary input to a valid page size (or the "All" sentinel). */
+export function clampPageSize(/** @type {unknown} */ n) {
+  const num = Number(n)
+  if (num === PAGE_SIZE_ALL) return PAGE_SIZE_ALL
+  if (!Number.isFinite(num) || num < 1) return DEFAULT_PAGE_SIZE
+  return Math.min(Math.floor(num), MAX_PAGE_SIZE)
+}
+
+/** The user's saved default rows-per-page, or the built-in default. */
+export function loadDefaultPageSize() {
+  try {
+    const raw = localStorage.getItem(DEFAULT_PAGE_SIZE_KEY)
+    if (raw == null) return DEFAULT_PAGE_SIZE
+    return clampPageSize(raw)
+  } catch {
+    return DEFAULT_PAGE_SIZE
+  }
+}
+
+/** Persist the default rows-per-page for future tabs/sessions. @param {number} n */
+export function saveDefaultPageSize(n) {
+  try {
+    localStorage.setItem(DEFAULT_PAGE_SIZE_KEY, String(clampPageSize(n)))
+  } catch { /* storage unavailable — non-fatal */ }
+}
+
 export const FILTER_OPS = /** @type {{ value: FilterOp, label: string, needsValue: boolean }[]} */ ([
   { value: 'eq', label: 'equals', needsValue: true },
   { value: 'neq', label: 'not equal', needsValue: true },
