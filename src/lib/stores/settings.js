@@ -13,7 +13,7 @@ const STORAGE_KEY = 'stroke:settings'
 /** @typedef {import('$lib/themes/registry.js').ThemeId} ThemeId */
 /** @typedef {'geist' | 'serif' | 'apple'} FontId */
 /** @typedef {'regular' | 'light' | 'bold'} IconStyleId */
-/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean }} AppSettings */
+/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean }} AppSettings */
 
 /** UI zoom scale (font + layout). 1 = 100%. */
 export const ZOOM_STEPS = [0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.25, 1.5]
@@ -79,6 +79,7 @@ export const DEFAULT_SETTINGS = {
   mcpAutoStart: false,
   launchAtLogin: false,
   autoReconnectOnStartup: true,
+  previewDmlBeforeApply: true,
 }
 
 /** Reactive app font id (synced by applySettings). */
@@ -93,6 +94,9 @@ export const appZoom = writable(DEFAULT_ZOOM)
 
 /** Reactive app theme id (synced by applySettings). */
 export const appThemeId = writable(/** @type {ThemeId} */ (DEFAULT_THEME_ID))
+
+/** Reactive: show a SQL preview/confirm before applying grid writes (synced by applySettings). */
+export const appPreviewDml = writable(true)
 
 const LAST_DARK_KEY  = 'stroke:last-dark-theme'
 const LAST_LIGHT_KEY = 'stroke:last-light-theme'
@@ -152,9 +156,10 @@ export function loadSettings() {
     const mcpAutoStart = parsed.mcpAutoStart === true
     const launchAtLogin = parsed.launchAtLogin === true
     const autoReconnectOnStartup = parsed.autoReconnectOnStartup !== false
+    const previewDmlBeforeApply = parsed.previewDmlBeforeApply !== false
     const font = normalizeFont(parsed.font)
     const iconStyle = normalizeIconStyle(parsed.iconStyle)
-    return { theme, zoom, font, iconStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup }
+    return { theme, zoom, font, iconStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply }
   } catch {
     return { ...DEFAULT_SETTINGS }
   }
@@ -209,6 +214,9 @@ export function applySettings(settings) {
   const iconStyle = normalizeIconStyle(settings.iconStyle)
   root.setAttribute('data-icon-style', iconStyle)
   appIconStyle.set(iconStyle)
+
+  // Grid-write DML preview toggle — DataTable subscribes to gate its confirm dialog.
+  appPreviewDml.set(settings.previewDmlBeforeApply !== false)
 
   // Keep the canvas-table zoom in lockstep with the app zoom so Cmd +/-/0 (and
   // the zoom buttons) scale the grid alongside the rest of the UI. The canvas

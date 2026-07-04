@@ -3,7 +3,7 @@
   import { zoomState } from '$lib/stores/canvas-zoom.svelte.js'
   // Zoom is driven through the app-level settings so the canvas scales together
   // with the rest of the UI (applySettings mirrors the app zoom into zoomState).
-  import { increaseZoom, decreaseZoom, resetZoom } from '$lib/stores/settings.js'
+  import { increaseZoom, decreaseZoom, resetZoom, appPreviewDml } from '$lib/stores/settings.js'
   import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
@@ -76,6 +76,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     nowTimeOnly,
   } from "$lib/insert-field.js";
   import { cellLinkHref, cellUrlType } from "$lib/cell-display.js";
+  import {
+    buildUpdateStatements,
+    buildDeleteStatements,
+    buildInsertStatements,
+  } from "$lib/dml-preview.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { formatCellValue, transformsFor, enabledGenerators, linkifyValue, statsNeeded, annotatorEnabled, anyDisplayExtEnabled } from "$lib/plugins/registry.js";
   import { pluginState } from "$lib/stores/plugins.js";
   import Wand2 from "@lucide/svelte/icons/wand-2";
@@ -149,6 +155,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     /** Schema + table name used for INSERT statement generation */
     schema = '',
     tableName = '',
+    /** Engine family — drives identifier quoting in the DML preview. */
+    dialect = /** @type {import('$lib/dml-preview.js').Dialect} */ ('postgres'),
     /** Set of column names to hide. Controlled externally (toolbar). */
     hiddenColumns = /** @type {Set<string>} */ (new Set()),
     /**
@@ -233,6 +241,52 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    *  on every cell of large tables. */
   const hasPendingEdits = $derived(pendingEdits.size > 0);
 
+  /**
+   * DML preview / confirm dialog. Non-null while open. Every write path (apply
+   * staged edits, insert a new row, delete rows) routes through this so the user
+   * can review the exact SQL before it runs. `run` performs the actual write.
+   * @type {{ kind: 'update' | 'insert' | 'delete', title: string, description: string, statements: string[], confirmLabel: string, destructive: boolean, run: () => Promise<void> } | null}
+   */
+  let dmlPreview = $state(null);
+  /** True while the confirmed write is in flight. */
+  let dmlPreviewRunning = $state(false);
+
+  /** @type {import('$lib/dml-preview.js').DmlContext} */
+  const dmlContext = $derived({ dialect, schema, table: tableName, columns, primaryKey });
+
+  /**
+   * Route a write through the confirm dialog, or run it straight away when the
+   * "Preview SQL before applying" setting is off.
+   * @param {NonNullable<typeof dmlPreview>} config
+   */
+  function requestWrite(config) {
+    if ($appPreviewDml) dmlPreview = config;
+    else void config.run();
+  }
+
+  /** Run the previewed write, then close the dialog. */
+  async function confirmDmlPreview() {
+    if (!dmlPreview || dmlPreviewRunning) return;
+    dmlPreviewRunning = true;
+    try {
+      await dmlPreview.run();
+      dmlPreview = null;
+    } finally {
+      dmlPreviewRunning = false;
+    }
+  }
+
+  /** Copy the previewed statements to the clipboard. */
+  async function copyDmlPreview() {
+    if (!dmlPreview) return;
+    try {
+      await navigator.clipboard.writeText(dmlPreview.statements.join("\n"));
+      toast.success("SQL copied");
+    } catch (err) {
+      toast.error("Could not copy", { description: String(err) });
+    }
+  }
+
   /** @type {HTMLInputElement | HTMLSelectElement | HTMLButtonElement | null} */
   let editInput = $state(null);
 
@@ -265,10 +319,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let pendingContextMenu = $state(false);
   /** Block item activation from the right-click pointerup that opened the menu */
   let suppressMenuSelect = $state(false);
-  /** True while waiting for a second click to confirm row delete in context menu */
-  let deleteRowConfirmPending = $state(false);
-  /** @type {ReturnType<typeof setTimeout> | null} */
-  let _deleteRowConfirmTimer = null;
   /** Row indices with inline JSON detail open */
   let expandedRows = $state(new Set());
   /** @type {Record<string, number>} */
@@ -919,8 +969,25 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
   }
 
+  /** Open the DML preview for the staged edits; the user confirms to flush them. */
+  function applyPendingEdits() {
+    if (pendingEdits.size === 0 || saving) return;
+    const entries = [...pendingEdits.values()];
+    const statements = buildUpdateStatements(entries, rows, dmlContext);
+    const n = entries.length;
+    requestWrite({
+      kind: "update",
+      title: "Review changes",
+      description: `${n} cell${n === 1 ? "" : "s"} will be updated.`,
+      statements,
+      confirmLabel: `Apply ${n} change${n === 1 ? "" : "s"}`,
+      destructive: false,
+      run: executePendingEdits,
+    });
+  }
+
   /** Flush all staged edits to the database. */
-  async function applyPendingEdits() {
+  async function executePendingEdits() {
     if (pendingEdits.size === 0 || saving) return;
     const entries = [...pendingEdits.values()];
     /** @type {typeof entries} */
@@ -1008,7 +1075,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     newRowFocusCol = null
   }
 
-  async function submitNewRow() {
+  function submitNewRow() {
     if (!newRowDrafts || insertSaving) return
     const editableCols = columns.filter(c => isEditableType(c.dataType ?? c.data_type ?? ''))
     const built = buildInsertPayload(editableCols, primaryKey, newRowDrafts)
@@ -1016,8 +1083,22 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       toast.error('Cannot insert row', { description: built.message })
       return
     }
+    const values = /** @type {Record<string, unknown>} */ (built.values)
+    requestWrite({
+      kind: "insert",
+      title: "Review insert",
+      description: "A new row will be inserted.",
+      statements: buildInsertStatements(values, dmlContext),
+      confirmLabel: "Insert row",
+      destructive: false,
+      run: () => executeInsertRow(values),
+    })
+  }
+
+  /** @param {Record<string, unknown>} values */
+  async function executeInsertRow(values) {
     try {
-      await oninsertrow(/** @type {Record<string, unknown>} */ (built.values))
+      await oninsertrow(values)
       newRowDrafts = null
       newRowFocusCol = null
     } catch {
@@ -1254,7 +1335,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   }
 
   /** @param {number} rowIdx */
-  async function deleteRow(rowIdx) {
+  function deleteRow(rowIdx) {
     if (readonly) return;
     if (!primaryKey.length) {
       toast.error("Cannot delete", {
@@ -1263,6 +1344,20 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       return;
     }
     const rowIndices = rowIndicesToDelete(rowIdx);
+    const n = rowIndices.length;
+    requestWrite({
+      kind: "delete",
+      title: n === 1 ? "Review delete" : "Review deletes",
+      description: `${n === 1 ? "1 row" : `${formatCompactCount(n)} rows`} will be permanently deleted. This cannot be undone.`,
+      statements: buildDeleteStatements(rowIndices, rows, dmlContext),
+      confirmLabel: n === 1 ? "Delete row" : `Delete ${formatCompactCount(n)} rows`,
+      destructive: true,
+      run: () => executeDeleteRows(rowIndices),
+    });
+  }
+
+  /** @param {number[]} rowIndices */
+  async function executeDeleteRows(rowIndices) {
     try {
       await ondelete({ rowIndices });
       const n = rowIndices.length;
@@ -3603,8 +3698,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       } else {
         pendingContextMenu = false;
         suppressMenuSelect = false;
-        deleteRowConfirmPending = false;
-        if (_deleteRowConfirmTimer) { clearTimeout(_deleteRowConfirmTimer); _deleteRowConfirmTimer = null; }
       }
     }}
   >
@@ -4222,30 +4315,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         <ContextMenu.Item
           variant="destructive"
           disabled={!hasPrimaryKey || saving || readonly}
-          class={cn("whitespace-nowrap", deleteRowConfirmPending ? "animate-pulse" : "")}
-          onSelect={(e) => {
-            if (suppressMenuSelect) return;
-            if (!deleteRowConfirmPending) {
-              e.preventDefault();
-              deleteRowConfirmPending = true;
-              if (_deleteRowConfirmTimer) clearTimeout(_deleteRowConfirmTimer);
-              _deleteRowConfirmTimer = setTimeout(() => {
-                deleteRowConfirmPending = false;
-                _deleteRowConfirmTimer = null;
-              }, 2500);
-            } else {
-              deleteRowConfirmPending = false;
-              if (_deleteRowConfirmTimer) { clearTimeout(_deleteRowConfirmTimer); _deleteRowConfirmTimer = null; }
-              deleteRow(contextRowIdx);
-            }
-          }}
+          class="whitespace-nowrap"
+          onSelect={() => runMenuAction(() => deleteRow(contextRowIdx))}
         >
           <Trash2 />
-          {deleteRowConfirmPending
-            ? "Confirm Delete"
-            : selected.size > 1 && selected.has(contextRowIdx)
-              ? `Delete ${formatCompactCount(selected.size)} rows`
-              : "Delete row"}
+          {selected.size > 1 && selected.has(contextRowIdx)
+            ? `Delete ${formatCompactCount(selected.size)} rows`
+            : "Delete row"}
           <ContextMenu.Shortcut>⌘⌫</ContextMenu.Shortcut>
         </ContextMenu.Item>
         {/if}
@@ -4302,4 +4378,70 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   oncancel={cancelQuickLook}
   onsave={commitQuickLook}
 />
+
+<!-- DML preview / confirm — shown before any edit, insert, or delete is applied. -->
+<Dialog.Root
+  open={dmlPreview !== null}
+  onOpenChange={(o) => { if (!o && !dmlPreviewRunning) dmlPreview = null }}
+>
+  <Dialog.Content class="max-w-2xl gap-3">
+    {#if dmlPreview}
+      <Dialog.Header class="gap-1">
+        <Dialog.Title class="text-ui-sm">{dmlPreview.title}</Dialog.Title>
+        <Dialog.Description class="text-ui-xs text-muted-foreground/70">
+          {dmlPreview.description}
+        </Dialog.Description>
+      </Dialog.Header>
+
+      <div class="flex items-center justify-between">
+        <span class="text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/50">
+          SQL to run{dmlPreview.statements.length > 1 ? ` · ${dmlPreview.statements.length} statements` : ''}
+        </span>
+        <button
+          type="button"
+          onclick={copyDmlPreview}
+          class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-ui-2xs text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <Copy class="size-3" />
+          Copy
+        </button>
+      </div>
+
+      <div class="max-h-[45vh] overflow-auto rounded-lg border border-border/50 bg-muted/20">
+        <pre class="whitespace-pre px-3 py-2.5 font-mono text-ui-xs leading-relaxed text-foreground [font-feature-settings:'liga'_0,'calt'_0] [font-variant-ligatures:none]">{dmlPreview.statements.join('\n')}</pre>
+      </div>
+
+      <Dialog.Footer class="gap-2 sm:justify-end">
+        <button
+          type="button"
+          onclick={() => { if (!dmlPreviewRunning) dmlPreview = null }}
+          disabled={dmlPreviewRunning}
+          class="inline-flex h-8 items-center rounded-md px-3 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onclick={confirmDmlPreview}
+          disabled={dmlPreviewRunning}
+          class={cn(
+            "inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-ui-xs font-medium disabled:opacity-60",
+            dmlPreview.destructive
+              ? "bg-destructive text-destructive-foreground hover:opacity-90"
+              : "bg-primary text-primary-foreground hover:opacity-90"
+          )}
+        >
+          {#if dmlPreviewRunning}
+            <Loader class="size-3 animate-spin" />
+          {:else if dmlPreview.destructive}
+            <Trash2 class="size-3" />
+          {:else}
+            <Check class="size-3" />
+          {/if}
+          {dmlPreview.confirmLabel}
+        </button>
+      </Dialog.Footer>
+    {/if}
+  </Dialog.Content>
+</Dialog.Root>
 
