@@ -140,6 +140,11 @@
     cloneTableTabState,
     cloneSqlTabState,
   } from '$lib/studio-tabs.js'
+  import {
+    pendingChangesCount,
+    clearPendingChanges,
+    anyPendingChanges,
+  } from '$lib/stores/pending-table-edits.js'
   import { createNotebook, deserializeNotebook, titleFromPath } from '$lib/notebook.js'
   import { openNotebookFile } from '$lib/api.js'
   import { formatCompactCount, normalizeTableRowCount } from '$lib/table-list.js'
@@ -196,7 +201,7 @@
     remapNullableRowIndex,
     remapRowIndexSet,
   } from '$lib/table-row-indices.js'
-  import { rowsToCsv, rowsToJson, saveExportFile, buildExportFilename } from '$lib/export.js'
+  import { rowsToCsv, rowsToJson, rowsToCsvAsync, rowsToJsonAsync, saveExportFile, buildExportFilename } from '$lib/export.js'
   import {
     recordQueryExecution,
     listQueryHistory,
@@ -521,11 +526,56 @@
   let applyEdits = $state(() => {})
   /** @type {() => void} */
   let resetEdits = $state(() => {})
-  // ── Table scroll controls (StatusBar go-to-top / go-to-bottom) ──
+  /** Bound from DataTable — stages the selected rows for deletion (red diff). */
+  let stageDeleteSelectedRows = $state(() => {})
+
+  /** Table key ("schema.table") for a tab, or '' for non-table tabs. */
+  function tabTableKey(/** @type {any} */ tab) {
+    return tab?.kind === 'table' && tab.state?.table
+      ? `${tab.state.schema}.${tab.state.table}`
+      : ''
+  }
+
+  /** Count of unsaved changes staged in a given tab (live for the active one, cached otherwise). */
+  function tabPendingCount(/** @type {any} */ tab) {
+    if (!tab) return 0
+    if (tab.id === activeTabId) return pendingEditCount
+    const key = tabTableKey(tab)
+    return key ? pendingChangesCount(key) : 0
+  }
+
+  /** True when any table (active or backgrounded) has unsaved staged changes. */
+  function hasAnyUnsavedChanges() {
+    return pendingEditCount > 0 || anyPendingChanges()
+  }
+
+  // Confirm before quitting the app while table edits are still unsaved.
+  onMount(() => {
+    let unlisten = () => {}
+    ;(async () => {
+      try {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window')
+        unlisten = await getCurrentWindow().onCloseRequested((event) => {
+          if (hasAnyUnsavedChanges()) {
+            const ok = window.confirm('You have unsaved table changes. Discard them and quit?')
+            if (!ok) event.preventDefault()
+          }
+        })
+      } catch { /* non-Tauri / web preview — no window close event */ }
+    })()
+    return () => unlisten()
+  })
+  // ── Table scroll controls (StatusBar go-to-top / go-to-bottom / left / right) ──
   /** @type {() => void} */
   let scrollTableTop = $state(() => {})
   /** @type {() => void} */
   let scrollTableBottom = $state(() => {})
+  /** @type {() => void} */
+  let scrollTableLeft = $state(() => {})
+  /** @type {() => void} */
+  let scrollTableRight = $state(() => {})
+  /** True when the active grid overflows horizontally (from DataTable). */
+  let tableCanScrollH = $state(false)
   /** @type {(name: string) => void} */
   let focusTableColumn = $state(() => {})
   // Read/restore the data grid's scroll so horizontal (+ vertical) position is
@@ -1240,7 +1290,7 @@ let rowSearch = $state('')
     ) return
     if (activeTab?.kind !== 'table' || !activeTable || selected.size === 0) return
     e.preventDefault()
-    void deleteSelectedRows()
+    stageDeleteSelectedRows()
   })
 
   createHotkey('Mod+R', (e) => {
@@ -1258,7 +1308,7 @@ let rowSearch = $state('')
     /** @param {KeyboardEvent} e */
     function onArrowKey(e) {
       const mod = e.ctrlKey || e.metaKey
-      if (!mod || e.altKey) return
+      if (!mod) return
       if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return
       if (commandOpen || showConnectionModal || showSettingsModal) return
       const el = document.activeElement
@@ -1267,6 +1317,14 @@ let rowSearch = $state('')
         el instanceof HTMLTextAreaElement ||
         (el instanceof HTMLElement && el.isContentEditable)
       ) return
+
+      // Ctrl/Cmd+Alt+Left/Right → scroll grid to the first / last column.
+      if (e.altKey) {
+        if (activeTab?.kind !== 'table' || !activeTable) return
+        if (e.key === 'ArrowLeft') { e.preventDefault(); scrollTableLeft(); return }
+        if (e.key === 'ArrowRight') { e.preventDefault(); scrollTableRight(); return }
+        return
+      }
 
       // Ctrl/Cmd+Up → scroll table to top; Ctrl/Cmd+Down → scroll table to bottom
       if (e.key === 'ArrowUp' && !e.shiftKey) {
@@ -1781,6 +1839,18 @@ let rowSearch = $state('')
   async function closeTab(id) {
     const idx = tabs.findIndex((t) => t.id === id)
     if (idx < 0) return
+    // Guard: closing a tab discards its unsaved edits/deletes.
+    const closing = tabs[idx]
+    const count = tabPendingCount(closing)
+    if (count > 0) {
+      const ok = window.confirm(
+        `This table has ${count} unsaved change${count === 1 ? '' : 's'}. Close the tab and discard them?`,
+      )
+      if (!ok) return
+      if (id === activeTabId) resetEdits()
+      const key = tabTableKey(closing)
+      if (key) clearPendingChanges(key)
+    }
     const nextTabs = tabs.filter((t) => t.id !== id)
     if (nextTabs.length === 0) {
       tabs = [createWelcomeTab()]
@@ -2411,6 +2481,9 @@ let rowSearch = $state('')
       fetchingTabIds.delete(tabId)
       return
     }
+    // A fresh fetch replaces the row set, so any row-index-keyed staged changes
+    // cached for this table no longer line up — drop them.
+    clearPendingChanges(`${s.schema}.${s.table}`)
 
     // Single helper to patch the tab state — avoids multiple tabs.map() calls per fetch
     /** @param {Partial<TableTabState>} patch */
@@ -2614,14 +2687,48 @@ let rowSearch = $state('')
   }
 
   /** @param {'csv' | 'json'} format */
+  let exportingData = $state(false)
+
   async function handleExport(format) {
+    if (exportingData) return
     const exportRows = selected.size > 0
       ? [...selected].sort((a, b) => a - b).map((i) => rows[i]).filter(Boolean)
       : rows
-    const content = format === 'csv' ? rowsToCsv(columns, exportRows) : rowsToJson(columns, exportRows)
     const filename = buildExportFilename(activeTable, format)
-    await saveExportFile(content, filename, format)
-    recordActivity({ type: 'export', title: `Exported ${activeTable} as ${format.toUpperCase()}`, schema: activeSchema, table: activeTable ?? undefined, rowCount: exportRows.length, success: true, detail: filename })
+    const n = exportRows.length
+    // Small exports build instantly; only large ones need the async/progress path.
+    const LARGE = 20000
+    exportingData = true
+    // A persistent toast that stays up for the whole build/save, dismissed on completion.
+    const toastId = toast.info(`Exporting ${formatCompactCount(n)} rows…`, {
+      description: `Preparing ${format.toUpperCase()} — please wait`,
+      duration: 60 * 60 * 1000,
+    })
+    try {
+      // Yield once so the toast paints before any heavy synchronous work.
+      await new Promise((res) => setTimeout(res, 16))
+      /** @type {string} */
+      let content
+      if (n > LARGE) {
+        content = format === 'csv'
+          ? await rowsToCsvAsync(columns, exportRows)
+          : await rowsToJsonAsync(columns, exportRows)
+      } else {
+        content = format === 'csv' ? rowsToCsv(columns, exportRows) : rowsToJson(columns, exportRows)
+      }
+      const saved = await saveExportFile(content, filename, format)
+      toast.dismiss(toastId)
+      if (saved) {
+        toast.success(`Exported ${formatCompactCount(n)} rows`, { description: filename })
+        recordActivity({ type: 'export', title: `Exported ${activeTable} as ${format.toUpperCase()}`, schema: activeSchema, table: activeTable ?? undefined, rowCount: n, success: true, detail: filename })
+      }
+    } catch (e) {
+      toast.dismiss(toastId)
+      toast.error('Export failed', { description: String(e) })
+      recordActivity({ type: 'export', title: `Failed to export ${activeTable} as ${format.toUpperCase()}`, schema: activeSchema, table: activeTable ?? undefined, success: false, error: String(e) })
+    } finally {
+      exportingData = false
+    }
   }
 
   /**
@@ -3146,17 +3253,6 @@ let rowSearch = $state('')
   /** @param {{ rowIndices: number[] }} detail */
   async function handleDeleteRow(detail) {
     await handleDeleteRows(detail.rowIndices)
-  }
-
-  async function deleteSelectedRows() {
-    if (selected.size === 0) return
-    const n = selected.size
-    try {
-      await handleDeleteRows([...selected])
-      toast.success(n === 1 ? 'Row deleted' : `${formatCompactCount(n)} rows deleted`)
-    } catch (err) {
-      toast.error('Could not delete', { description: String(err) })
-    }
   }
 
   /** @param {Record<string, unknown>} values */
@@ -4112,7 +4208,7 @@ let rowSearch = $state('')
             {infiniteScroll}
             oninfinitescrolltoggle={toggleInfiniteScroll}
             live={liveEnabled}
-            ondeleteselected={() => void deleteSelectedRows()}
+            ondeleteselected={() => stageDeleteSelectedRows()}
             onexport={handleExport}
             onaddrow={() => dtBeginInsertRow?.()}
             onopeninsql={openTableInSqlEditor}
@@ -4174,6 +4270,9 @@ let rowSearch = $state('')
                 bind:resetEdits
                 bind:scrollToTop={scrollTableTop}
                 bind:scrollToBottom={scrollTableBottom}
+                bind:scrollToLeft={scrollTableLeft}
+                bind:scrollToRight={scrollTableRight}
+                bind:canScrollHorizontally={tableCanScrollH}
                 bind:focusColumn={focusTableColumn}
                 bind:getScroll={tableGetScroll}
                 bind:applyScroll={tableApplyScroll}
@@ -4212,6 +4311,7 @@ let rowSearch = $state('')
                 oninsertrow={handleInsertRow}
                 insertSaving={insertingRow}
                 bind:beginInsertRow={dtBeginInsertRow}
+                bind:stageDeleteSelected={stageDeleteSelectedRows}
                 readonly={tableReadonly}
               />
             </svelte:boundary>
@@ -4441,6 +4541,9 @@ let rowSearch = $state('')
   showTableNav={activeTab?.kind === 'table'}
   onscrolltabletop={() => scrollTableTop()}
   onscrolltablebottom={() => scrollTableBottom()}
+  canScrollTableHorizontally={tableCanScrollH}
+  onscrolltableleft={() => scrollTableLeft()}
+  onscrolltableright={() => scrollTableRight()}
   live={liveEnabled}
   {liveSupported}
   ontogglelive={() => { liveEnabled = !liveEnabled }}
