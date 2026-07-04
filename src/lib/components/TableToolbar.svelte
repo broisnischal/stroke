@@ -465,7 +465,7 @@
 
 <div class="flex shrink-0 flex-col">
   <header
-    class="studio-chrome studio-table-toolbar flex h-9 shrink-0 items-center gap-1 border-b border-border bg-panel px-2"
+    class="@container/tb studio-chrome studio-table-toolbar flex h-9 shrink-0 items-center gap-1 border-b border-border bg-panel px-2"
     data-studio-chrome
   >
     <!-- Search — far left, expands on focus -->
@@ -701,7 +701,7 @@
         onclick={onaddrow}
       >
         <Plus class="size-3.5 shrink-0" />
-        Add
+        <span class="@max-[440px]/tb:hidden">Add</span>
       </button>
     {/if}
 
@@ -712,7 +712,7 @@
       {#if infiniteScroll}
         {#if total > 0}
           <span
-            class="flex shrink-0 items-center gap-1 font-mono text-ui-xs tabular-nums"
+            class="flex shrink-0 items-center gap-1 font-mono text-ui-xs tabular-nums @max-[600px]/tb:hidden"
             title="{to.toLocaleString('en-US')} of {total.toLocaleString('en-US')} rows loaded{queryMs > 0 ? ` · ${queryMs}ms` : ''}"
           >
             <span class="text-foreground/65">{to.toLocaleString("en-US")}</span>
@@ -722,7 +722,7 @@
       {:else}
         {#if total > 0}
           <span
-            class="flex shrink-0 items-center gap-1 font-mono text-ui-xs tabular-nums"
+            class="flex shrink-0 items-center gap-1 font-mono text-ui-xs tabular-nums @max-[600px]/tb:hidden"
             title="{from.toLocaleString('en-US')}–{to.toLocaleString('en-US')} of {total.toLocaleString('en-US')} rows{queryMs > 0 ? ` · ${queryMs}ms` : ''}"
           >
             <span class="text-foreground/65">{from.toLocaleString("en-US")}–{to.toLocaleString("en-US")}</span>
@@ -768,7 +768,7 @@
         </Select.Root>
 
         <span
-          class="shrink-0 text-ui-xs text-muted-foreground/50 tabular-nums"
+          class="shrink-0 text-ui-xs text-muted-foreground/50 tabular-nums @max-[500px]/tb:hidden"
           title={pageCount.toLocaleString("en-US")}
         >of {formatCompactCount(pageCount)}</span>
 
