@@ -53,6 +53,33 @@ html[data-theme="light"] {
 html[data-icon-style="light"] svg.lucide { stroke-width: 1.5px; }
 html[data-icon-style="bold"]  svg.lucide { stroke-width: 2.5px; }
 
+/* Reduce motion — the app toggle (Settings → Behavior) sets [data-reduce-motion]
+   on <html>; the OS-level prefers-reduced-motion is also honored unconditionally.
+   Both neutralize transitions/animations app-wide, leaving a 1ms duration so
+   transitionend/animationend handlers still fire (state that waits on them won't
+   get stuck). Smooth scrolling is disabled too. */
+html[data-reduce-motion] *,
+html[data-reduce-motion] *::before,
+html[data-reduce-motion] *::after,
+html[data-reduce-motion] { scroll-behavior: auto !important; }
+
+html[data-reduce-motion] *,
+html[data-reduce-motion] *::before,
+html[data-reduce-motion] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* OS-native border-radius conventions */
 html[data-os="macos"]   { --radius: 0.5rem; --window-radius: 10px; }  /* macOS Big Sur+ system radius */
 html[data-os="windows"] { --radius: 0.4375rem; --window-radius: 8px; } /* Windows 11 */
