@@ -30,6 +30,9 @@
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import Sidebar from './Sidebar.svelte'
   import TabBar from './TabBar.svelte'
+  import PaneLayout from './PaneLayout.svelte'
+  import PaneSnapshot from './PaneSnapshot.svelte'
+  import * as PaneTree from '$lib/pane-layout.js'
   import TabLoading from './TabLoading.svelte'
   import TableToolbar from './TableToolbar.svelte'
   import StructureView from './StructureView.svelte'
@@ -304,6 +307,18 @@
   /** @type {StudioTab[]} */
   let tabs = $state([])
   let activeTabId = $state(/** @type {string | null} */ (null))
+
+  // ── Split-pane / editor-group layout ─────────────────────────────────────
+  // `paneRoot` is a binary split tree whose leaves ("groups") reference tab ids
+  // from the flat `tabs` array above. The FOCUSED group's active tab is kept in
+  // sync with the global `activeTabId`, so the existing data pipeline (columns,
+  // rows, loadRows, handleSaveCell, …) drives whatever the focused pane shows.
+  // Background panes render read-only snapshots from each tab's own `tab.state`.
+  /** @type {import('$lib/pane-layout.js').PaneNode | null} */
+  let paneRoot = $state(null)
+  let activeGroupId = $state(/** @type {string | null} */ (null))
+  /** Tab id currently being dragged (drives the split drop targets). */
+  let dragTabId = $state(/** @type {string | null} */ (null))
 
   // ── Tab navigation history (back/forward) ────────────────────────────────
   /** @type {string[]} */
@@ -694,6 +709,8 @@ let rowSearch = $state('')
   let ormError = $state('')
 
   const activeTab = $derived(tabs.find((t) => t.id === activeTabId) ?? null)
+  /** Fast id → tab lookup for per-group tab-strip rendering. */
+  const tabsById = $derived(new Map(tabs.map((t) => [t.id, t])))
   /** 'table' | 'view' | 'materialized_view' | 'foreign_table' — for the active table tab */
   const activeTableKind = $derived(
     activeTab?.kind === 'table'
@@ -1133,7 +1150,7 @@ let rowSearch = $state('')
     if (!connection) return
     e.preventDefault()
     if (aiMode) { exitAiMode(); return }
-    if (activeTabId) closeTab(activeTabId)
+    closeActiveTab()
   })
 
   // Chord: Ctrl/⌘+K then W → close all tabs. (Mod+K opens the command palette;
@@ -1902,6 +1919,202 @@ let rowSearch = $state('')
     }
     tabs = pinned
     if (!pinned.some((t) => t.id === activeTabId)) await activateTab(pinned[0].id)
+  }
+
+  // ── Pane-layout reconciliation & group-aware actions ─────────────────────
+  // AI tabs live in a full-window overlay, not the tab flow, so they never
+  // belong to a group.
+  /** @param {StudioTab} t */
+  function isGroupable(t) {
+    return t.kind !== 'ai'
+  }
+
+  /**
+   * Keep `paneRoot` / `activeGroupId` consistent with `tabs` + `activeTabId`.
+   * Runs from an effect on every tab/active change. Idempotent: it only assigns
+   * new references when something actually changed, so it can't loop.
+   */
+  function reconcilePanes() {
+    const ids = tabs.filter(isGroupable).map((t) => t.id)
+    const idSet = new Set(ids)
+    const root = untrack(() => paneRoot)
+    const curGroup = untrack(() => activeGroupId)
+
+    if (ids.length === 0) {
+      if (root !== null) paneRoot = null
+      if (curGroup !== null) activeGroupId = null
+      return
+    }
+
+    let next = root
+    if (!next) {
+      next = PaneTree.makeGroup(ids, activeTabId)
+    } else {
+      // Drop tab ids that no longer exist and repair each group's active tab.
+      next = PaneTree.mapGroups(next, (g) => {
+        const kept = g.tabIds.filter((id) => idSet.has(id))
+        let active = g.activeTabId
+        if (!active || !idSet.has(active)) active = kept[kept.length - 1] ?? null
+        if (kept.length === g.tabIds.length && active === g.activeTabId) return g
+        return { ...g, tabIds: kept, activeTabId: active }
+      })
+      next = PaneTree.prune(next)
+    }
+
+    // Place brand-new tabs (not yet in any group) into the active group.
+    const placed = new Set()
+    for (const g of PaneTree.allGroups(next)) for (const id of g.tabIds) placed.add(id)
+    const missing = ids.filter((id) => !placed.has(id))
+    if (missing.length) {
+      let targetId =
+        curGroup && PaneTree.findGroup(next, curGroup) ? curGroup : PaneTree.firstGroup(next)?.id ?? null
+      if (!targetId || !next) {
+        next = PaneTree.makeGroup(missing, activeTabId)
+      } else {
+        for (const id of missing) next = PaneTree.addTabToGroup(next, targetId, id)
+      }
+    }
+
+    // Focus follows the global active tab: its holding group becomes active and
+    // mirrors `activeTabId`.
+    let nextGroup = curGroup
+    if (activeTabId && idSet.has(activeTabId)) {
+      const holder = PaneTree.groupOfTab(next, activeTabId)
+      if (holder) {
+        nextGroup = holder.id
+        if (holder.activeTabId !== activeTabId) {
+          next = PaneTree.updateGroup(next, holder.id, (g) => ({ ...g, activeTabId }))
+        }
+      }
+    }
+    if (!nextGroup || !PaneTree.findGroup(next, nextGroup)) {
+      nextGroup = PaneTree.firstGroup(next)?.id ?? null
+    }
+
+    if (next !== root) paneRoot = next
+    if (nextGroup !== curGroup) activeGroupId = nextGroup
+  }
+
+  $effect(() => {
+    // Depend on tab identity/order + the active tab.
+    tabs.map((t) => t.id).join(' ')
+    void activeTabId
+    reconcilePanes()
+  })
+
+  /** Focus a pane (its active tab drives the live pipeline). @param {string} groupId */
+  async function focusGroup(groupId) {
+    if (groupId === activeGroupId) return
+    const g = PaneTree.findGroup(paneRoot, groupId)
+    if (!g) return
+    activeGroupId = groupId
+    if (g.activeTabId && g.activeTabId !== activeTabId) await activateTab(g.activeTabId)
+  }
+
+  /** Activate a tab within a specific pane (pane tab-strip click). */
+  async function focusTabInGroup(groupId, tabId) {
+    activeGroupId = groupId
+    paneRoot = PaneTree.updateGroup(paneRoot, groupId, (g) => ({ ...g, activeTabId: tabId }))
+    await activateTab(tabId)
+  }
+
+  /** Close a tab from a specific pane, keeping focus within that pane. */
+  async function closeTabInGroup(groupId, id) {
+    const g = PaneTree.findGroup(paneRoot, groupId)
+    const idx = tabs.findIndex((t) => t.id === id)
+    if (idx < 0) return
+    // Guard: closing a tab discards its unsaved edits/deletes (same as closeTab).
+    const closing = tabs[idx]
+    const pending = tabPendingCount(closing)
+    if (pending > 0) {
+      const ok = await askConfirm(
+        `This table has ${pending} unsaved change${pending === 1 ? '' : 's'}. Close the tab and discard them?`,
+        'Close & discard',
+      )
+      if (!ok) return
+      if (id === activeTabId) resetEdits()
+      const key = tabTableKey(closing)
+      if (key) clearPendingChanges(key)
+    }
+    const nextTabs = tabs.filter((t) => t.id !== id)
+    if (nextTabs.length === 0) {
+      tabs = [createWelcomeTab()]
+      activeTabId = tabs[0].id
+      clearTableEditor()
+      return
+    }
+    // Pick the next tab to activate *within this group* when closing its active.
+    let nextActiveId = /** @type {string | null} */ (null)
+    if (id === activeTabId && g) {
+      const gi = g.tabIds.indexOf(id)
+      const rest = g.tabIds.filter((t) => t !== id)
+      if (rest.length) {
+        nextActiveId = rest[Math.min(gi, rest.length - 1)]
+      } else {
+        const other = PaneTree.allGroups(paneRoot).find(
+          (gr) => gr.id !== groupId && gr.activeTabId && gr.activeTabId !== id,
+        )
+        if (other) {
+          activeGroupId = other.id
+          nextActiveId = other.activeTabId
+        }
+      }
+    }
+    tabs = nextTabs
+    if (id === activeTabId) {
+      if (nextActiveId) await activateTab(nextActiveId)
+      else {
+        const fallback = nextTabs[Math.min(idx, nextTabs.length - 1)]
+        if (fallback) await activateTab(fallback.id)
+      }
+    }
+  }
+
+  /** Close the focused pane's active tab (Mod+W / editor shortcuts). */
+  function closeActiveTab() {
+    if (!activeTabId) return
+    if (activeGroupId) void closeTabInGroup(activeGroupId, activeTabId)
+    else void closeTab(activeTabId)
+  }
+
+  /** Resize a split node (splitter drag). */
+  function handlePaneResize(splitId, sizes) {
+    paneRoot = PaneTree.setSizes(paneRoot, splitId, sizes)
+  }
+
+  /**
+   * Handle a tab dropped on a pane drop-zone: center = move into that group,
+   * an edge = split that group and place the tab in the new pane.
+   * @param {string} targetGroupId
+   * @param {import('$lib/pane-layout.js').DropEdge} edge
+   */
+  function handleDropZone(targetGroupId, edge) {
+    const tabId = dragTabId
+    dragTabId = null
+    if (!tabId || !paneRoot) return
+    const source = PaneTree.groupOfTab(paneRoot, tabId)
+    if (!source) return
+
+    if (edge === 'center') {
+      if (source.id === targetGroupId) {
+        void focusTabInGroup(targetGroupId, tabId)
+        return
+      }
+      let next = PaneTree.removeTab(paneRoot, tabId)
+      next = PaneTree.addTabToGroup(next, targetGroupId, tabId)
+      paneRoot = PaneTree.prune(next) ?? next
+      void focusTabInGroup(targetGroupId, tabId)
+      return
+    }
+
+    // Splitting the source into itself with only one tab is a no-op.
+    if (source.id === targetGroupId && source.tabIds.length <= 1) return
+    const newGroup = PaneTree.makeGroup([tabId], tabId)
+    let next = PaneTree.removeTab(paneRoot, tabId)
+    next = PaneTree.splitGroup(next, targetGroupId, edge, newGroup)
+    paneRoot = PaneTree.prune(next) ?? next
+    activeGroupId = newGroup.id
+    void activateTab(tabId)
   }
 
   /**
@@ -3772,21 +3985,62 @@ let rowSearch = $state('')
         <!-- AI mode: tabs + content hidden above via always-mounted block -->
       {:else}
 
-      {#if tabBarVisible}
-      <TabBar
-        tabs={tabs.filter((t) => t.kind !== 'ai')}
-        {activeTabId}
-        onselect={(id) => activateTab(id)}
-        onclose={closeTab}
-        oncloseothers={closeOtherTabs}
-        oncloseall={closeAllTabs}
-        onpintoggle={toggleTabPin}
-        onnew={openWelcomeTab}
-        {recentTabs}
-        onrecentselect={(schema, table) => { if (aiMode) exitAiMode(); void openTableTab(schema, table) }}
-      />
+      <!-- Split-pane workspace. A single group renders exactly like the classic
+           single-tab layout (the sole focused leaf renders `sharedContent`);
+           splitting adds sibling panes. -->
+      {#if paneRoot}
+        <PaneLayout
+          node={paneRoot}
+          focusedGroupId={activeGroupId}
+          dragActive={dragTabId != null}
+          renderGroup={groupPane}
+          onresize={handlePaneResize}
+          ondropzone={handleDropZone}
+          onfocusgroup={(gid) => void focusGroup(gid)}
+        />
+      {:else}
+        {#if tabBarVisible}
+          <TabBar
+            tabs={tabs.filter((t) => t.kind !== 'ai')}
+            {activeTabId}
+            onselect={(id) => activateTab(id)}
+            onclose={closeTab}
+            oncloseothers={closeOtherTabs}
+            oncloseall={closeAllTabs}
+            onpintoggle={toggleTabPin}
+            onnew={openWelcomeTab}
+            {recentTabs}
+            onrecentselect={(schema, table) => { if (aiMode) exitAiMode(); void openTableTab(schema, table) }}
+          />
+        {/if}
+        {@render sharedContent()}
       {/if}
 
+      {#snippet groupPane(/** @type {import('$lib/pane-layout.js').GroupNode} */ group, /** @type {boolean} */ isFocused)}
+        {#if tabBarVisible}
+          <TabBar
+            tabs={group.tabIds.map((id) => tabsById.get(id)).filter(Boolean)}
+            activeTabId={group.activeTabId}
+            onselect={(id) => void focusTabInGroup(group.id, id)}
+            onclose={(id) => void closeTabInGroup(group.id, id)}
+            oncloseothers={closeOtherTabs}
+            oncloseall={closeAllTabs}
+            onpintoggle={toggleTabPin}
+            onnew={() => { void focusGroup(group.id); openWelcomeTab() }}
+            {recentTabs}
+            onrecentselect={(schema, table) => { if (aiMode) exitAiMode(); void focusGroup(group.id).then(() => openTableTab(schema, table)) }}
+            ondragtabstart={(id) => { dragTabId = id }}
+            ondragtabend={() => { dragTabId = null }}
+          />
+        {/if}
+        {#if isFocused}
+          {@render sharedContent()}
+        {:else}
+          <PaneSnapshot tab={tabsById.get(group.activeTabId ?? '') ?? null} />
+        {/if}
+      {/snippet}
+
+      {#snippet sharedContent()}
       {#if activeTab?.kind === 'ai'}
         <!-- AI is handled via AI mode toggle -->
       {:else if activeTab?.kind === 'schema'}
@@ -4044,7 +4298,7 @@ let rowSearch = $state('')
             onrun={(d) => void runOrm(d)}
             onmodi={() => { if (connection) toggleAiSidebar() }}
             onmodb={() => { sidebarOpen = !sidebarOpen }}
-            onmodw={() => { if (activeTabId) closeTab(activeTabId) }}
+            onmodw={() => closeActiveTab()}
             onmodn={() => { if (connection) openWelcomeTab() }}
             onmodm={() => cycleTheme()}
             onmodt={() => { if (connection) { commandPage = 'tables'; commandOpen = true } }}
@@ -4085,7 +4339,7 @@ let rowSearch = $state('')
             onmods={() => saveActiveTabState()}
             onmodi={() => { if (connection) toggleAiSidebar() }}
             onmodb={() => { sidebarOpen = !sidebarOpen }}
-            onmodw={() => { if (activeTabId) closeTab(activeTabId) }}
+            onmodw={() => closeActiveTab()}
             onmodn={() => { if (connection) openWelcomeTab() }}
             onmodm={() => cycleTheme()}
             onmodt={() => { if (connection) { commandPage = 'tables'; commandOpen = true } }}
@@ -4494,6 +4748,7 @@ let rowSearch = $state('')
           </div>
         </div>
       {/if}
+      {/snippet}
       {/if}
     {/if}
   </main>
