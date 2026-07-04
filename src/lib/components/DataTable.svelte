@@ -1900,6 +1900,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (pendingEdits.size) pendingEdits = new Map()
       if (pendingDeletes.size) pendingDeletes = new Set()
       clearPendingChanges(columnWidthsKey ?? '')
+      // A fresh row set also invalidates the row-index-keyed cell range.
+      if (selAnchor !== null) selAnchor = null
     })
   })
 
@@ -2391,10 +2393,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       void copyColSelection();
       return;
     }
-    // Ctrl+C: copy the rectangular cell range as TSV.
-    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "c" || e.key === "C") && cellRange && !editingCell) {
+    // Ctrl+C: copy the rectangular cell range as TSV, or the single focused cell.
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "c" || e.key === "C") && !editingCell && (cellRange || (focusedRow !== null && focusedCol !== null))) {
       e.preventDefault();
-      void copyCellRange();
+      if (cellRange) void copyCellRange();
+      else {
+        const ai = visToActualColIdx(/** @type {number} */ (focusedCol));
+        if (ai >= 0) void copyCellValue(/** @type {number} */ (focusedRow), ai);
+      }
       return;
     }
     // Undo / redo — active even while the cell input has focus
@@ -2944,7 +2950,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       }
       if (isDirty) { ctx.fillStyle = withAlpha(c.AMBER, 0.15); ctx.fillRect(cellX, ry, w, rh) }
       else if (activeFk) { ctx.fillStyle = withAlpha(c.cAccent, 0.15); ctx.fillRect(cellX, ry, w, rh) }
-      else if (isFocusedCell) { ctx.fillStyle = withAlpha(c.cPrimary, 0.08); ctx.fillRect(cellX, ry, w, rh) }
+      // The lone-focused-cell tint is skipped while a range is active so every
+      // in-range cell (including the drag-end corner) shares one uniform block tint.
+      else if (isFocusedCell && !c.rangeColNames) { ctx.fillStyle = withAlpha(c.cPrimary, 0.08); ctx.fillRect(cellX, ry, w, rh) }
       else if (dir?.bgTint) { ctx.fillStyle = dir.bgTint; ctx.fillRect(cellX, ry, w, rh) }
 
       // Rectangular range selection — tint every in-range cell + stroke the outer border.
@@ -3092,7 +3100,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Focused-cell outline — primary border, fully inset (no bleed to neighbours).
     // +1.5 offset keeps the 2px stroke's outer edge 0.5px inside the cell boundary
     // on all four sides, so left=top=right=bottom are visually symmetric.
-    if (isFocusedCell) {
+    // Suppressed while a rectangular range is active — the range's own outline is
+    // the selection indicator, and a per-cell ring on the drag-end cell reads as a
+    // stray highlight inside the block.
+    if (isFocusedCell && !c.rangeColNames) {
       ctx.strokeStyle = withAlpha(c.cPrimary, 0.9)
       ctx.lineWidth = 2
       ctx.strokeRect(cellX + 1.5, ry + 1.5, w - 3, rh - 3)
