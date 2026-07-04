@@ -103,10 +103,6 @@
     settings = updateSettings({ previewDmlBeforeApply: !settings.previewDmlBeforeApply });
   }
 
-  function toggleReduceMotion() {
-    settings = updateSettings({ reduceMotion: !settings.reduceMotion });
-  }
-
   /** @type {boolean | null} */
   let launchAtLogin = $state(null);
 
@@ -338,7 +334,6 @@
           {@render toggleRow('Launch at login', 'Start Stroke when you sign in', launchAtLogin ?? false, toggleLaunchAtLogin)}
           {@render toggleRow('Auto reconnect on startup', 'Reconnect to the last database on launch', settings.autoReconnectOnStartup, toggleAutoReconnect)}
           {@render toggleRow('Preview SQL before applying', 'Review the DML before edits, inserts, and deletes run', settings.previewDmlBeforeApply, togglePreviewDml)}
-          {@render toggleRow('Reduce motion', 'Turn off subtle animations and transitions', settings.reduceMotion, toggleReduceMotion)}
           {@render toggleRow('MCP auto-start', 'Start the MCP server on database connect', settings.mcpAutoStart, toggleMcpAutoStart)}
         </div>
       </section>

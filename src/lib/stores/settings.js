@@ -13,7 +13,7 @@ const STORAGE_KEY = 'stroke:settings'
 /** @typedef {import('$lib/themes/registry.js').ThemeId} ThemeId */
 /** @typedef {'geist' | 'serif' | 'apple'} FontId */
 /** @typedef {'regular' | 'light' | 'bold'} IconStyleId */
-/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean, reduceMotion: boolean }} AppSettings */
+/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean }} AppSettings */
 
 /** UI zoom scale (font + layout). 1 = 100%. */
 export const ZOOM_STEPS = [0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.25, 1.5]
@@ -80,7 +80,6 @@ export const DEFAULT_SETTINGS = {
   launchAtLogin: false,
   autoReconnectOnStartup: true,
   previewDmlBeforeApply: true,
-  reduceMotion: false,
 }
 
 /** Reactive app font id (synced by applySettings). */
@@ -158,10 +157,9 @@ export function loadSettings() {
     const launchAtLogin = parsed.launchAtLogin === true
     const autoReconnectOnStartup = parsed.autoReconnectOnStartup !== false
     const previewDmlBeforeApply = parsed.previewDmlBeforeApply !== false
-    const reduceMotion = parsed.reduceMotion === true
     const font = normalizeFont(parsed.font)
     const iconStyle = normalizeIconStyle(parsed.iconStyle)
-    return { theme, zoom, font, iconStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply, reduceMotion }
+    return { theme, zoom, font, iconStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply }
   } catch {
     return { ...DEFAULT_SETTINGS }
   }
@@ -219,10 +217,6 @@ export function applySettings(settings) {
 
   // Grid-write DML preview toggle — DataTable subscribes to gate its confirm dialog.
   appPreviewDml.set(settings.previewDmlBeforeApply !== false)
-
-  // Reduce motion — a single [data-reduce-motion] attribute drives a global CSS
-  // rule that neutralizes transitions/animations (app.css). No per-component code.
-  root.toggleAttribute('data-reduce-motion', settings.reduceMotion === true)
 
   // Keep the canvas-table zoom in lockstep with the app zoom so Cmd +/-/0 (and
   // the zoom buttons) scale the grid alongside the rest of the UI. The canvas
