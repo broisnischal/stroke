@@ -11,23 +11,18 @@
     node,
     /** @type {string | null} */
     focusedGroupId = null,
-    /** Whether a tab drag is currently in progress (shows drop targets). */
-    dragActive = false,
+    /** Current pointer-drag drop target (group + edge), or null. Drives the hint. */
+    dropTarget = /** @type {{ groupId: string, edge: DropEdge } | null} */ (null),
     /** @type {import('svelte').Snippet<[GroupNode, boolean]>} */
     renderGroup,
     /** @type {(splitId: string, sizes: [number, number]) => void} */
     onresize = () => {},
-    /** @type {(groupId: string, edge: DropEdge) => void} */
-    ondropzone = () => {},
     /** @type {(groupId: string) => void} */
     onfocusgroup = () => {},
   } = $props()
 
   /** @type {HTMLElement | null} */
   let splitEl = $state(null)
-
-  /** @type {DropEdge | null} */
-  let hoverEdge = $state(null)
 
   /** @param {PointerEvent} e */
   function startResize(e) {
@@ -57,27 +52,14 @@
     window.addEventListener('pointerup', up)
   }
 
-  /** @param {DragEvent} e @param {string} groupId @param {DropEdge} edge */
-  function onDrop(e, groupId, edge) {
-    e.preventDefault()
-    e.stopPropagation()
-    hoverEdge = null
-    ondropzone(groupId, edge)
-  }
-
-  /** @param {DragEvent} e */
-  function allowDrop(e) {
-    e.preventDefault()
-    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
-  }
-
-  const zones = /** @type {{ edge: DropEdge, cls: string }[]} */ ([
-    { edge: 'left', cls: 'left-0 top-0 h-full w-1/4' },
-    { edge: 'right', cls: 'right-0 top-0 h-full w-1/4' },
-    { edge: 'top', cls: 'left-1/4 top-0 h-1/3 w-1/2' },
-    { edge: 'bottom', cls: 'bottom-0 left-1/4 h-1/3 w-1/2' },
-    { edge: 'center', cls: 'left-1/4 top-1/3 h-1/3 w-1/2' },
-  ])
+  /** Position/size of the drop-hint overlay for a given edge (translucent preview). */
+  const HINT_CLASS = /** @type {Record<DropEdge, string>} */ ({
+    left: 'left-0 top-0 h-full w-1/2',
+    right: 'right-0 top-0 h-full w-1/2',
+    top: 'left-0 top-0 w-full h-1/2',
+    bottom: 'left-0 bottom-0 w-full h-1/2',
+    center: 'inset-0',
+  })
 </script>
 
 {#if node.type === 'split'}
@@ -86,15 +68,7 @@
     class={cn('flex min-h-0 min-w-0 flex-1', node.dir === 'row' ? 'flex-row' : 'flex-col')}
   >
     <div class="flex min-h-0 min-w-0 flex-col" style="flex: 0 0 {node.sizes[0]}%">
-      <Self
-        node={node.children[0]}
-        {focusedGroupId}
-        {dragActive}
-        {renderGroup}
-        {onresize}
-        {ondropzone}
-        {onfocusgroup}
-      />
+      <Self node={node.children[0]} {focusedGroupId} {dropTarget} {renderGroup} {onresize} {onfocusgroup} />
     </div>
 
     <!-- Splitter -->
@@ -118,47 +92,31 @@
     </div>
 
     <div class="flex min-h-0 min-w-0 flex-col" style="flex: 0 0 {node.sizes[1]}%">
-      <Self
-        node={node.children[1]}
-        {focusedGroupId}
-        {dragActive}
-        {renderGroup}
-        {onresize}
-        {ondropzone}
-        {onfocusgroup}
-      />
+      <Self node={node.children[1]} {focusedGroupId} {dropTarget} {renderGroup} {onresize} {onfocusgroup} />
     </div>
   </div>
 {:else}
   {@const isFocused = node.id === focusedGroupId}
+  {@const hintEdge = dropTarget && dropTarget.groupId === node.id ? dropTarget.edge : null}
+  <!-- data-pane-group lets the drag orchestrator hit-test which group + edge the
+       pointer is over via elementFromPoint. -->
   <div
-    class={cn(
-      'relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden',
-      isFocused ? '' : 'opacity-[0.98]',
-    )}
+    class="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+    data-pane-group={node.id}
     role="group"
     onpointerdowncapture={() => onfocusgroup(node.id)}
   >
     {@render renderGroup(node, isFocused)}
 
-    {#if dragActive}
+    <!-- Drop hint: translucent preview of where the dragged tab will land. -->
+    {#if hintEdge}
       <div class="pointer-events-none absolute inset-0 z-40">
-        {#each zones as z (z.edge)}
-          <div
-            class={cn(
-              'pointer-events-auto absolute transition-colors',
-              z.cls,
-              hoverEdge === z.edge ? 'bg-primary/25 ring-1 ring-inset ring-primary/60' : '',
-            )}
-            role="button"
-            tabindex="-1"
-            aria-label="Drop to {z.edge === 'center' ? 'move here' : 'split ' + z.edge}"
-            ondragover={allowDrop}
-            ondragenter={() => (hoverEdge = z.edge)}
-            ondragleave={() => { if (hoverEdge === z.edge) hoverEdge = null }}
-            ondrop={(e) => onDrop(e, node.id, z.edge)}
-          ></div>
-        {/each}
+        <div
+          class={cn(
+            'absolute rounded-md bg-primary/20 ring-2 ring-inset ring-primary/70 transition-all duration-75',
+            HINT_CLASS[hintEdge],
+          )}
+        ></div>
       </div>
     {/if}
   </div>
