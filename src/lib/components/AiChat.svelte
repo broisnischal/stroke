@@ -1295,6 +1295,8 @@
 
   /** IDs of chart items the user has already saved this session */
   let savedChartIds = $state(/** @type {Set<string>} */ (new Set()));
+  /** IDs of diagram items the user has explicitly saved this session */
+  let savedDiagramIds = $state(/** @type {Set<string>} */ (new Set()));
 
   /** Blocks collapsed by user (in set = collapsed; default open for both code and SQL) */
   let collapsed = $state(/** @type {Set<string>} */ (new Set()));
@@ -1931,7 +1933,6 @@
           if (execIdx >= 0) items.splice(execIdx, 1);
           toolResult = JSON.stringify({ error: "No diagram code provided." });
         } else {
-          saveDiagram(title, code);
           const diagId = uid();
           const execIdx = items.findIndex((i) => i.id === execId);
           const diagItem = /** @type {ChatItem} */ ({
@@ -1947,7 +1948,7 @@
             success: true,
             title,
             diagramType,
-            message: "Diagram rendered and saved to Diagrams library.",
+            message: "Diagram rendered. The user can save it to the Diagrams library.",
           });
         }
       } else if (call.function.name === "list_tables") {
@@ -3287,9 +3288,23 @@
                       >
                       <button
                         type="button"
-                        class="inline-flex size-5 items-center justify-center rounded text-emerald-500/70"
-                        title="Saved to Diagrams library"
-                        ><Check class="size-3" strokeWidth={2.5} /></button
+                        class={savedDiagramIds.has(item.id)
+                          ? "inline-flex size-5 items-center justify-center rounded text-emerald-500/70"
+                          : "inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"}
+                        title={savedDiagramIds.has(item.id) ? "Saved to Diagrams library" : "Save to Diagrams library"}
+                        disabled={savedDiagramIds.has(item.id)}
+                        onclick={() => {
+                          if (savedDiagramIds.has(item.id)) return;
+                          saveDiagram(item.title || "Diagram", item.code);
+                          savedDiagramIds = new Set([...savedDiagramIds, item.id]);
+                          toast.success("Diagram saved", {
+                            description: "View it in the Diagrams page",
+                            action: onopendiagramspage
+                              ? { label: "Open", onClick: onopendiagramspage }
+                              : undefined,
+                          });
+                        }}
+                        >{#if savedDiagramIds.has(item.id)}<Check class="size-3" strokeWidth={2.5} />{:else}<Save class="size-3" />Save{/if}</button
                       >
                     </div>
                   </div>

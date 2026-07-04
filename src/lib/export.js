@@ -5,15 +5,43 @@
  * @param {unknown[][]} rows
  * @returns {string}
  */
+const csvEscape = (/** @type {unknown} */ v) => {
+  if (v === null || v === undefined) return ''
+  const s = typeof v === 'object' ? JSON.stringify(v) : String(v)
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+}
+
 export function rowsToCsv(columns, rows) {
-  const escape = (/** @type {unknown} */ v) => {
-    if (v === null || v === undefined) return ''
-    const s = typeof v === 'object' ? JSON.stringify(v) : String(v)
-    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
-  }
-  const header = columns.map((c) => escape(c.name)).join(',')
-  const body = rows.map((row) => row.map(escape).join(',')).join('\n')
+  const header = columns.map((c) => csvEscape(c.name)).join(',')
+  const body = rows.map((row) => row.map(csvEscape).join(',')).join('\n')
   return header + '\n' + body
+}
+
+/** A macrotask yield so the UI can paint between chunks of a big export. */
+const yieldToUi = () => new Promise((res) => setTimeout(res, 0))
+
+/**
+ * Chunked, cooperative CSV builder for large exports — yields to the event loop
+ * every `chunkSize` rows so the main thread stays responsive and a progress
+ * indicator can animate instead of the app appearing frozen.
+ * @param {Array<{ name: string }>} columns
+ * @param {unknown[][]} rows
+ * @param {{ chunkSize?: number, onProgress?: (done: number, total: number) => void }} [opts]
+ * @returns {Promise<string>}
+ */
+export async function rowsToCsvAsync(columns, rows, opts = {}) {
+  const { chunkSize = 5000, onProgress } = opts
+  const total = rows.length
+  const blocks = [columns.map((c) => csvEscape(c.name)).join(',')]
+  for (let i = 0; i < total; i += chunkSize) {
+    const end = Math.min(i + chunkSize, total)
+    let block = ''
+    for (let r = i; r < end; r++) block += (r === i ? '' : '\n') + rows[r].map(csvEscape).join(',')
+    blocks.push(block)
+    onProgress?.(end, total)
+    await yieldToUi()
+  }
+  return blocks.join('\n')
 }
 
 /**
@@ -30,6 +58,35 @@ export function rowsToJson(columns, rows) {
     return obj
   })
   return JSON.stringify(records, null, 2)
+}
+
+/**
+ * Chunked, cooperative JSON builder for large exports (see rowsToCsvAsync).
+ * @param {Array<{ name: string }>} columns
+ * @param {unknown[][]} rows
+ * @param {{ chunkSize?: number, onProgress?: (done: number, total: number) => void }} [opts]
+ * @returns {Promise<string>}
+ */
+export async function rowsToJsonAsync(columns, rows, opts = {}) {
+  const { chunkSize = 5000, onProgress } = opts
+  const total = rows.length
+  if (total === 0) return '[]'
+  const parts = ['[']
+  for (let i = 0; i < total; i += chunkSize) {
+    const end = Math.min(i + chunkSize, total)
+    let block = ''
+    for (let r = i; r < end; r++) {
+      /** @type {Record<string, unknown>} */
+      const obj = {}
+      columns.forEach((col, ci) => { obj[col.name] = rows[r][ci] ?? null })
+      block += (r === 0 ? '' : ',') + '\n  ' + JSON.stringify(obj)
+    }
+    parts.push(block)
+    onProgress?.(end, total)
+    await yieldToUi()
+  }
+  parts.push('\n]')
+  return parts.join('')
 }
 
 /**

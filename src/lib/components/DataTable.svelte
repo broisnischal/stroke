@@ -82,6 +82,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     buildInsertStatements,
   } from "$lib/dml-preview.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import ShikiBlock from "./ShikiBlock.svelte";
+  import {
+    savePendingChanges,
+    loadPendingChanges,
+    clearPendingChanges,
+  } from "$lib/stores/pending-table-edits.js";
   import { formatCellValue, transformsFor, enabledGenerators, linkifyValue, statsNeeded, annotatorEnabled, anyDisplayExtEnabled } from "$lib/plugins/registry.js";
   import { pluginState } from "$lib/stores/plugins.js";
   import Wand2 from "@lucide/svelte/icons/wand-2";
@@ -180,6 +186,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
      *  table to the top / bottom. */
     scrollToTop = $bindable(/** @type {() => void} */ (() => {})),
     scrollToBottom = $bindable(/** @type {() => void} */ (() => {})),
+    /** Assigned by this component; the parent (StatusBar) calls these to jump the
+     *  table to the far left / right when it scrolls horizontally. */
+    scrollToLeft = $bindable(/** @type {() => void} */ (() => {})),
+    scrollToRight = $bindable(/** @type {() => void} */ (() => {})),
+    /** Bindable: true when the grid content is wider than the viewport (so the
+     *  parent can show the horizontal go-to-edge controls). */
+    canScrollHorizontally = $bindable(false),
     /** Assigned by this component; the parent (toolbar "Jump to column" menu)
      *  calls focusColumn(name) to scroll a column into view and briefly
      *  highlight it. */
@@ -209,6 +222,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     insertSaving = false,
     /** Assigned by this component so the parent can trigger beginInsertRow(). */
     beginInsertRow = $bindable(/** @type {() => void} */ (() => {})),
+    /** Assigned by this component so the parent (⌘⌫ / toolbar) can stage the
+     *  selected rows for deletion instead of deleting them immediately. */
+    stageDeleteSelected = $bindable(/** @type {() => void} */ (() => {})),
     /** When true all write operations (edit, delete, insert) are disabled. */
     readonly = false,
     /** Bindable: controls whether the virtual columns management panel is open. */
@@ -235,11 +251,32 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * The cell shows the staged value (marked dirty) until the user clicks Apply.
    * @type {Map<string, { rowIdx: number, colIdx: number, value: unknown, original: unknown }>}
    */
-  let pendingEdits = $state(new Map());
+  // Restore any changes staged for this table before the component last unmounted
+  // (switching to a SQL/AI tab, or another table tab, tears DataTable down).
+  const _restoredPending = untrack(() => loadPendingChanges(columnWidthsKey ?? ''));
+
+  // Stable table key for persistence. `columnWidthsKey` derives from the parent's
+  // `activeTable`, which is nulled during teardown when switching to a SQL/AI tab —
+  // so reading it in onDestroy would lose the key. Track the last non-empty value.
+  let _persistKey = untrack(() => columnWidthsKey ?? '');
+  $effect(() => { if (columnWidthsKey) _persistKey = columnWidthsKey; });
+
+  let pendingEdits = $state(_restoredPending.edits);
   /** Cheap gate so per-cell staged-edit lookups are skipped entirely when there
    *  are no unsaved edits (the common case) — avoids a string alloc + Map.get
    *  on every cell of large tables. */
   const hasPendingEdits = $derived(pendingEdits.size > 0);
+
+  /**
+   * Row indices staged for deletion — shown with a red diff marker until Apply.
+   * Kept separate from `pendingEdits` so a row can be edited then deleted, and
+   * so the gutter/row rendering can distinguish the two.
+   * @type {Set<number>}
+   */
+  let pendingDeletes = $state(_restoredPending.deletes);
+  const hasPendingDeletes = $derived(pendingDeletes.size > 0);
+  /** Any unsaved change (edit or delete) — drives the tab/close guards. */
+  const hasPendingChanges = $derived(pendingEdits.size > 0 || pendingDeletes.size > 0);
 
   /**
    * DML preview / confirm dialog. Non-null while open. Every write path (apply
@@ -273,17 +310,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       dmlPreview = null;
     } finally {
       dmlPreviewRunning = false;
-    }
-  }
-
-  /** Copy the previewed statements to the clipboard. */
-  async function copyDmlPreview() {
-    if (!dmlPreview) return;
-    try {
-      await navigator.clipboard.writeText(dmlPreview.statements.join("\n"));
-      toast.success("SQL copied");
-    } catch (err) {
-      toast.error("Could not copy", { description: String(err) });
     }
   }
 
@@ -969,27 +995,35 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
   }
 
-  /** Open the DML preview for the staged edits; the user confirms to flush them. */
+  /** Open the DML preview for all staged changes (edits + deletes); confirm flushes them. */
   function applyPendingEdits() {
-    if (pendingEdits.size === 0 || saving) return;
-    const entries = [...pendingEdits.values()];
-    const statements = buildUpdateStatements(entries, rows, dmlContext);
-    const n = entries.length;
+    if (!hasPendingChanges || saving) return;
+    // A row staged for deletion doesn't need its cell updates written first.
+    const editEntries = [...pendingEdits.values()].filter((e) => !pendingDeletes.has(e.rowIdx));
+    const deleteIndices = [...pendingDeletes].sort((a, b) => a - b);
+    const statements = [
+      ...buildUpdateStatements(editEntries, rows, dmlContext),
+      ...(deleteIndices.length ? buildDeleteStatements(deleteIndices, rows, dmlContext) : []),
+    ];
+    const parts = [];
+    if (editEntries.length) parts.push(`${editEntries.length} cell${editEntries.length === 1 ? "" : "s"} updated`);
+    if (deleteIndices.length) parts.push(`${deleteIndices.length} row${deleteIndices.length === 1 ? "" : "s"} deleted`);
     requestWrite({
-      kind: "update",
+      kind: deleteIndices.length ? "delete" : "update",
       title: "Review changes",
-      description: `${n} cell${n === 1 ? "" : "s"} will be updated.`,
+      description: `${parts.join(", ")}.${deleteIndices.length ? " Deletions cannot be undone." : ""}`,
       statements,
-      confirmLabel: `Apply ${n} change${n === 1 ? "" : "s"}`,
-      destructive: false,
-      run: executePendingEdits,
+      confirmLabel: "Apply changes",
+      destructive: deleteIndices.length > 0,
+      run: executePendingChanges,
     });
   }
 
-  /** Flush all staged edits to the database. */
-  async function executePendingEdits() {
-    if (pendingEdits.size === 0 || saving) return;
-    const entries = [...pendingEdits.values()];
+  /** Flush all staged edits and deletes to the database. */
+  async function executePendingChanges() {
+    if (!hasPendingChanges || saving) return;
+    // Edits first (skipping rows about to be deleted), then the deletes.
+    const entries = [...pendingEdits.values()].filter((e) => !pendingDeletes.has(e.rowIdx));
     /** @type {typeof entries} */
     const failed = [];
     let okCount = 0;
@@ -1002,23 +1036,47 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         toast.error("Could not save", { description: String(err) });
       }
     }
-    // Keep only the edits that failed so the user can retry / reset them.
+
+    let deletedCount = 0;
+    const deleteIndices = [...pendingDeletes].sort((a, b) => a - b);
+    if (deleteIndices.length) {
+      try {
+        await ondelete({ rowIndices: deleteIndices });
+        deletedCount = deleteIndices.length;
+        pendingDeletes = new Set();
+      } catch (err) {
+        toast.error("Could not delete", { description: String(err) });
+      }
+    }
+
+    // Keep only the edits that failed so the user can retry / reset them — unless
+    // deletes ran, which splice `rows` and invalidate the failed edits' row indices;
+    // in that case drop them so a retry can't target the wrong row.
     const next = new Map();
-    for (const edit of failed) next.set(editKey(edit.rowIdx, edit.colIdx), edit);
+    if (deletedCount === 0) {
+      for (const edit of failed) next.set(editKey(edit.rowIdx, edit.colIdx), edit);
+    }
     pendingEdits = next;
     pastEdits = [];
     futureEdits = [];
-    if (okCount > 0) {
-      toast.success("Changes applied", { description: `${okCount} cell${okCount === 1 ? "" : "s"} updated` });
+    // Sync the cross-unmount cache to the post-apply state (clears it when empty).
+    savePendingChanges(_persistKey, pendingEdits, pendingDeletes);
+    if (okCount > 0 || deletedCount > 0) {
+      const parts = [];
+      if (okCount > 0) parts.push(`${okCount} cell${okCount === 1 ? "" : "s"} updated`);
+      if (deletedCount > 0) parts.push(`${deletedCount} row${deletedCount === 1 ? "" : "s"} deleted`);
+      toast.success("Changes applied", { description: parts.join(", ") });
     }
   }
 
-  /** Discard all staged edits. */
+  /** Discard all staged edits and deletes. */
   function resetPendingEdits() {
-    if (pendingEdits.size === 0) return;
+    if (!hasPendingChanges) return;
     pendingEdits = new Map();
+    pendingDeletes = new Set();
     pastEdits = [];
     futureEdits = [];
+    clearPendingChanges(columnWidthsKey ?? '');
   }
 
   // Surface staged-edit state to the parent (→ StatusBar Apply/Reset buttons).
@@ -1026,12 +1084,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     applyEdits = applyPendingEdits;
     resetEdits = resetPendingEdits;
   });
-  $effect(() => { pendingEditCount = pendingEdits.size; });
+  $effect(() => { pendingEditCount = pendingEdits.size + pendingDeletes.size; });
 
   // Surface scroll-to-top / scroll-to-bottom to the parent (→ StatusBar buttons).
   $effect(() => {
     scrollToTop = () => tableContainer?.scrollTo({ top: 0 });
     scrollToBottom = () => { if (tableContainer) tableContainer.scrollTo({ top: tableContainer.scrollHeight }); };
+    scrollToLeft = () => tableContainer?.scrollTo({ left: 0 });
+    scrollToRight = () => { if (tableContainer) tableContainer.scrollTo({ left: tableContainer.scrollWidth }); };
     focusColumn = focusColumnByName;
     getScroll = () => ({ left: _scrollLeft, top: _scrollTop });
     applyScroll = (pos) => {
@@ -1067,6 +1127,21 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       newRowFocusCol = first?.name ?? columns[0]?.name ?? null
       // Scroll to top so the draft row is visible
       tableContainer?.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+  })
+
+  // Surface staged-delete-of-selection to the parent (⌘⌫ / toolbar delete).
+  $effect(() => {
+    stageDeleteSelected = () => {
+      if (readonly || selected.size === 0) return;
+      if (!primaryKey.length) {
+        toast.error("Cannot delete", { description: "This table has no primary key." });
+        return;
+      }
+      const next = new Set(pendingDeletes);
+      for (const ri of selected) next.add(ri);
+      pendingDeletes = next;
+      scheduleDraw();
     }
   })
 
@@ -1334,7 +1409,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     return [rowIdx];
   }
 
-  /** @param {number} rowIdx */
+  /**
+   * Stage the row(s) for deletion — shown with a red diff marker until Apply.
+   * Deletes are batched with edits and flushed together from the Apply button.
+   * @param {number} rowIdx
+   */
   function deleteRow(rowIdx) {
     if (readonly) return;
     if (!primaryKey.length) {
@@ -1344,29 +1423,19 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       return;
     }
     const rowIndices = rowIndicesToDelete(rowIdx);
-    const n = rowIndices.length;
-    requestWrite({
-      kind: "delete",
-      title: n === 1 ? "Review delete" : "Review deletes",
-      description: `${n === 1 ? "1 row" : `${formatCompactCount(n)} rows`} will be permanently deleted. This cannot be undone.`,
-      statements: buildDeleteStatements(rowIndices, rows, dmlContext),
-      confirmLabel: n === 1 ? "Delete row" : `Delete ${formatCompactCount(n)} rows`,
-      destructive: true,
-      run: () => executeDeleteRows(rowIndices),
-    });
+    const next = new Set(pendingDeletes);
+    for (const ri of rowIndices) next.add(ri);
+    pendingDeletes = next;
+    scheduleDraw();
   }
 
-  /** @param {number[]} rowIndices */
-  async function executeDeleteRows(rowIndices) {
-    try {
-      await ondelete({ rowIndices });
-      const n = rowIndices.length;
-      toast.success(
-        n === 1 ? "Row deleted" : `${formatCompactCount(n)} rows deleted`,
-      );
-    } catch (err) {
-      toast.error("Could not delete", { description: String(err) });
-    }
+  /** Unstage a row previously marked for deletion. @param {number} rowIdx */
+  function undoDeleteRow(rowIdx) {
+    if (!pendingDeletes.has(rowIdx)) return;
+    const next = new Set(pendingDeletes);
+    next.delete(rowIdx);
+    pendingDeletes = next;
+    scheduleDraw();
   }
 
   /** @param {number} rowIdx */
@@ -1646,6 +1715,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   // Total scrollable width includes virtual expr cols + virtual rel columns
   const totalContentWidth = $derived(geom.totalWidth + vexprTotalW + virtualRelCols.length * VIRTUAL_COL_W)
+  // Surface whether the grid overflows horizontally so the parent can show the
+  // go-to-left / go-to-right controls only when they'd actually do something.
+  $effect(() => {
+    canScrollHorizontally = totalContentWidth > _viewportWidth + 1
+  })
   // Insert row spans ALL columns (including hidden) so every field can be filled.
   const insertRowTotalWidth = $derived(
     gutterWidth + columns.reduce((acc, c) => acc + widthForColumn(c.name, c.dataType ?? c.data_type ?? ''), 0)
@@ -1762,7 +1836,19 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       _scrollTop = 0
       if (tableContainer && tableContainer.scrollTop !== 0) tableContainer.scrollTop = 0
       fkSubview = null
+      // A fresh page of rows (page/filter/sort/search) invalidates row-index-keyed
+      // staged changes — drop them and their cache entry so a later Apply can't
+      // target the wrong rows.
+      if (pendingEdits.size) pendingEdits = new Map()
+      if (pendingDeletes.size) pendingDeletes = new Set()
+      clearPendingChanges(columnWidthsKey ?? '')
     })
+  })
+
+  // Persist staged changes when the component tears down (switching to a SQL/AI
+  // tab unmounts DataTable) so they survive until the user returns to the table.
+  onDestroy(() => {
+    savePendingChanges(_persistKey, pendingEdits, pendingDeletes)
   })
 
   const allSelected = $derived(
@@ -2027,11 +2113,17 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           expandedRows: new Set(expandedRows),
           fkSubview: fkSubview,
         })
+        // Preserve unsaved edits/deletes for the table we're leaving so they're
+        // restored when the user returns instead of being silently discarded.
+        savePendingChanges(_lastTabKey, pendingEdits, pendingDeletes)
       }
       // Restore state for the tab we're entering (fresh Set/null if first visit)
       const saved = _tabExpandCache.get(newKey)
       expandedRows = saved ? new Set(saved.expandedRows) : new Set()
       fkSubview = saved?.fkSubview ?? null
+      const restored = loadPendingChanges(newKey)
+      pendingEdits = restored.edits
+      pendingDeletes = restored.deletes
       // Always reset non-content states
       focusedRow = null
       focusedCol = null
@@ -2041,15 +2133,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       _lastHeaderClickedCol = null
       _lastTabKey = newKey
     })
-  });
-
-  // Drop staged edits when the table changes or rows are reordered (sort),
-  // since edits are keyed by row index — applying them afterwards could target
-  // the wrong rows.
-  $effect(() => {
-    void columnWidthsKey;
-    void (rowSort ? `${rowSort.column}:${rowSort.direction}` : "");
-    untrack(() => { if (pendingEdits.size) pendingEdits = new Map(); });
   });
 
   // Document-level capture so undo/redo fires even during the brief window between
@@ -2495,6 +2578,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const AMBER = 'rgb(245, 158, 11)'
     const AMBER_FG = 'rgba(251, 191, 36, 0.85)'
     const BLUE_FG = 'rgba(96, 165, 250, 0.8)'
+    // Staged-delete diff marker (red — matches the destructive accent).
+    const RED = 'rgb(239, 68, 68)'
 
     ctx.imageSmoothingEnabled = false
     ctx.clearRect(0, 0, W, H)
@@ -2524,7 +2609,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         if (ry + ROW_HEIGHT <= HEADER_H) continue
         drawBodyRow(ctx, i, ry, {
           cFg, cText, cMuted, cGrid, cMutedBg, cRing, cAccent, cPanel, usedW, navName,
-          AMBER, BLUE_FG, cPrimary, frozenW,
+          AMBER, BLUE_FG, RED, cPrimary, frozenW,
         })
       }
     }
@@ -2544,7 +2629,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const rh = ROW_HEIGHT
     // Row background — selected uses primary tint, others use muted.
     const isSel = selected.has(idx)
-    if (isSel) {
+    const isPendingDelete = hasPendingDeletes && pendingDeletes.has(idx)
+    if (isPendingDelete) {
+      // Red diff tint for rows staged for deletion.
+      ctx.fillStyle = withAlpha(c.RED, hoveredRow === idx ? 0.2 : 0.14)
+      ctx.fillRect(0, ry, c.usedW, rh)
+    } else if (isSel) {
       ctx.fillStyle = withAlpha(c.cPrimary, hoveredRow === idx ? 0.18 : 0.13)
       ctx.fillRect(0, ry, c.usedW, rh)
     } else if (focusedRow === idx) {
@@ -2574,6 +2664,19 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
 
     drawRowGutters(ctx, idx, -_scrollLeft, ry, rh, c)
+
+    // Staged-delete decoration: a left red bar + a strikethrough across the row.
+    if (isPendingDelete) {
+      ctx.fillStyle = c.RED
+      ctx.fillRect(0, ry, 2, rh)
+      ctx.strokeStyle = withAlpha(c.RED, 0.7)
+      ctx.lineWidth = 1
+      const sy = Math.round(ry + rh / 2) + 0.5
+      ctx.beginPath()
+      ctx.moveTo(0, sy)
+      ctx.lineTo(c.usedW, sy)
+      ctx.stroke()
+    }
 
     // Row ring when focused + selected.
     if (focusedRow === idx && isSel) {
@@ -2882,16 +2985,35 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   /** @param {CanvasRenderingContext2D} ctx @param {number} offsetX scroll-adjusted left offset */
   function drawRowGutters(ctx, idx, offsetX, ry, rh, c) {
     if (gutterWidth <= 0) return
+    const isPendingDelete = hasPendingDeletes && pendingDeletes.has(idx)
     ctx.fillStyle = c.cPanel
     ctx.fillRect(offsetX, ry, gutterWidth, rh)
+    if (isPendingDelete) {
+      // Red diff tint over the gutter so the marker reads on the same band.
+      ctx.fillStyle = withAlpha(c.RED, hoveredRow === idx ? 0.2 : 0.14)
+      ctx.fillRect(offsetX, ry, gutterWidth, rh)
+    }
     let gx = offsetX
     if (showRowExpand) {
-      const expanded = expandedRows.has(idx) || fkSubview?.rowIdx === idx
-      const hov = hoveredRow === idx
-      if (expanded || hov) {
-        drawIcon(ctx, expanded ? 'chevron-down' : 'chevron-right',
-          gx + (GUTTER_EXPAND_W - 14) / 2, ry + (rh - 14) / 2, 14,
-          expanded ? c.cFg : c.cMuted, 2)
+      if (isPendingDelete) {
+        // A red minus in place of the expand chevron marks the staged deletion.
+        ctx.strokeStyle = c.RED
+        ctx.lineWidth = 2
+        ctx.lineCap = 'round'
+        const cx = gx + GUTTER_EXPAND_W / 2
+        const cy = Math.round(ry + rh / 2) + 0.5
+        ctx.beginPath()
+        ctx.moveTo(cx - 5, cy)
+        ctx.lineTo(cx + 5, cy)
+        ctx.stroke()
+      } else {
+        const expanded = expandedRows.has(idx) || fkSubview?.rowIdx === idx
+        const hov = hoveredRow === idx
+        if (expanded || hov) {
+          drawIcon(ctx, expanded ? 'chevron-down' : 'chevron-right',
+            gx + (GUTTER_EXPAND_W - 14) / 2, ry + (rh - 14) / 2, 14,
+            expanded ? c.cFg : c.cMuted, 2)
+        }
       }
       gx += GUTTER_EXPAND_W
     }
@@ -3230,10 +3352,21 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (!el) return
     const onShiftWheel = (/** @type {WheelEvent} */ e) => {
       if (!e.shiftKey) return
-      if (e.deltaY || e.deltaX) {
+      const delta = e.deltaY || e.deltaX
+      if (!delta) return
+      // If the pointer is over a nested horizontally-scrollable panel (the FK
+      // sub-view), scroll that instead of the main grid — otherwise shift+scroll
+      // over the sub-view would move the table underneath it.
+      const inner = e.target instanceof Element
+        ? e.target.closest('[data-fk-subview-scroll]')
+        : null
+      if (inner && inner !== el && inner.scrollWidth > inner.clientWidth) {
         e.preventDefault()
-        el.scrollLeft += e.deltaY || e.deltaX
+        inner.scrollLeft += delta
+        return
       }
+      e.preventDefault()
+      el.scrollLeft += delta
     }
     el.addEventListener('wheel', onShiftWheel, { passive: false })
     return () => el.removeEventListener('wheel', onShiftWheel)
@@ -3243,7 +3376,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   $effect(() => {
     void rows; void columns; void columnWidths
     void pinnedColumns; void hiddenColumns; void selected; void focusedRow
-    void focusedCol; void editingCell; void pendingEdits; void expandedRows
+    void focusedCol; void editingCell; void pendingEdits; void pendingDeletes; void expandedRows
     void rowSort; void _viewportWidth
     // NOTE: _scrollTop / _scrollLeft are intentionally NOT tracked here — scrolling
     // repaints via scheduleDraw() inside onContainerScroll, so this effect (which
@@ -4312,18 +4445,29 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           Duplicate row
         </ContextMenu.Item>
         <ContextMenu.Separator />
-        <ContextMenu.Item
-          variant="destructive"
-          disabled={!hasPrimaryKey || saving || readonly}
-          class="whitespace-nowrap"
-          onSelect={() => runMenuAction(() => deleteRow(contextRowIdx))}
-        >
-          <Trash2 />
-          {selected.size > 1 && selected.has(contextRowIdx)
-            ? `Delete ${formatCompactCount(selected.size)} rows`
-            : "Delete row"}
-          <ContextMenu.Shortcut>⌘⌫</ContextMenu.Shortcut>
-        </ContextMenu.Item>
+        {#if pendingDeletes.has(contextRowIdx)}
+          <ContextMenu.Item
+            disabled={readonly}
+            class="whitespace-nowrap"
+            onSelect={() => runMenuAction(() => undoDeleteRow(contextRowIdx))}
+          >
+            <RotateCcw />
+            Undo delete
+          </ContextMenu.Item>
+        {:else}
+          <ContextMenu.Item
+            variant="destructive"
+            disabled={!hasPrimaryKey || saving || readonly}
+            class="whitespace-nowrap"
+            onSelect={() => runMenuAction(() => deleteRow(contextRowIdx))}
+          >
+            <Trash2 />
+            {selected.size > 1 && selected.has(contextRowIdx)
+              ? `Delete ${formatCompactCount(selected.size)} rows`
+              : "Delete row"}
+            <ContextMenu.Shortcut>⌘⌫</ContextMenu.Shortcut>
+          </ContextMenu.Item>
+        {/if}
         {/if}
       {/if}
     </ContextMenu.Content>
@@ -4397,18 +4541,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         <span class="text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/50">
           SQL to run{dmlPreview.statements.length > 1 ? ` · ${dmlPreview.statements.length} statements` : ''}
         </span>
-        <button
-          type="button"
-          onclick={copyDmlPreview}
-          class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-ui-2xs text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          <Copy class="size-3" />
-          Copy
-        </button>
       </div>
 
-      <div class="max-h-[45vh] overflow-auto rounded-lg border border-border/50 bg-muted/20">
-        <pre class="whitespace-pre px-3 py-2.5 font-mono text-ui-xs leading-relaxed text-foreground [font-feature-settings:'liga'_0,'calt'_0] [font-variant-ligatures:none]">{dmlPreview.statements.join('\n')}</pre>
+      <!-- Syntax-highlighted, wrapping, scrollable SQL preview (hover to copy). -->
+      <div class="flex max-h-[45vh] min-h-0 flex-col overflow-hidden rounded-lg border border-border/50">
+        <ShikiBlock code={dmlPreview.statements.join('\n')} lang="sql" />
       </div>
 
       <Dialog.Footer class="gap-2 sm:justify-end">
