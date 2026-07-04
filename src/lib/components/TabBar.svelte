@@ -55,6 +55,9 @@
     /** @type {import('$lib/stores/recent-tabs.js').RecentTab[]} */
     recentTabs = [],
     onrecentselect = /** @type {(schema: string, table: string) => void} */ (() => {}),
+    /** Fired when a tab drag begins — enables split-pane drop targets. */
+    ondragtabstart = /** @param {string} _id */ (_id) => {},
+    ondragtabend = () => {},
   } = $props()
 
   /** @type {HTMLElement | null} */
@@ -111,6 +114,15 @@
           {#snippet child({ props: ctxProps })}
             <div
               {...ctxProps}
+              draggable="true"
+              ondragstart={(e) => {
+                if (e.dataTransfer) {
+                  e.dataTransfer.effectAllowed = 'move'
+                  e.dataTransfer.setData('text/plain', tab.id)
+                }
+                ondragtabstart(tab.id)
+              }}
+              ondragend={() => ondragtabend()}
               class={cn(
                 'group/tab relative flex min-w-0 max-w-[200px] shrink-0 items-stretch transition-colors duration-100',
                 active ? 'bg-panel' : 'hover:bg-muted/20',
