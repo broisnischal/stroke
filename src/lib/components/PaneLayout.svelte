@@ -11,6 +11,8 @@
     node,
     /** @type {string | null} */
     focusedGroupId = null,
+    /** True when >1 pane exists — enables the focused-pane accent (noise when single). */
+    multiPane = false,
     /** Current pointer-drag drop target (group + edge), or null. Drives the hint. */
     dropTarget = /** @type {{ groupId: string, edge: DropEdge } | null} */ (null),
     /** @type {import('svelte').Snippet<[GroupNode, boolean]>} */
@@ -68,31 +70,46 @@
     class={cn('flex min-h-0 min-w-0 flex-1', node.dir === 'row' ? 'flex-row' : 'flex-col')}
   >
     <div class="flex min-h-0 min-w-0 flex-col" style="flex: 0 0 {node.sizes[0]}%">
-      <Self node={node.children[0]} {focusedGroupId} {dropTarget} {renderGroup} {onresize} {onfocusgroup} />
+      <Self node={node.children[0]} {focusedGroupId} {multiPane} {dropTarget} {renderGroup} {onresize} {onfocusgroup} />
     </div>
 
-    <!-- Splitter -->
+    <!-- Splitter: a slim track with an always-visible hairline, a hover-revealed
+         grip, and a widened invisible hit area for easy grabbing. -->
     <div
       class={cn(
-        'group/split relative shrink-0 bg-border/40 transition-colors hover:bg-primary/40',
-        node.dir === 'row' ? 'w-px cursor-col-resize' : 'h-px cursor-row-resize',
+        'group/split relative z-10 shrink-0',
+        node.dir === 'row' ? 'w-1 cursor-col-resize' : 'h-1 cursor-row-resize',
       )}
       onpointerdown={startResize}
       role="separator"
       aria-orientation={node.dir === 'row' ? 'vertical' : 'horizontal'}
       tabindex="-1"
     >
+      <!-- hairline (always visible), brightens on hover/drag -->
+      <div
+        class={cn(
+          'absolute bg-border/60 transition-colors group-hover/split:bg-primary/70 group-active/split:bg-primary',
+          node.dir === 'row' ? 'inset-y-0 left-1/2 w-px -translate-x-1/2' : 'inset-x-0 top-1/2 h-px -translate-y-1/2',
+        )}
+      ></div>
+      <!-- grip bar, revealed on hover -->
+      <div
+        class={cn(
+          'absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary/80 opacity-0 transition-opacity group-hover/split:opacity-100',
+          node.dir === 'row' ? 'h-8 w-0.5' : 'h-0.5 w-8',
+        )}
+      ></div>
       <!-- widened invisible hit area -->
       <div
         class={cn(
           'absolute',
-          node.dir === 'row' ? '-left-1 -right-1 top-0 h-full' : '-top-1 -bottom-1 left-0 w-full',
+          node.dir === 'row' ? '-left-1.5 -right-1.5 inset-y-0' : '-top-1.5 -bottom-1.5 inset-x-0',
         )}
       ></div>
     </div>
 
     <div class="flex min-h-0 min-w-0 flex-col" style="flex: 0 0 {node.sizes[1]}%">
-      <Self node={node.children[1]} {focusedGroupId} {dropTarget} {renderGroup} {onresize} {onfocusgroup} />
+      <Self node={node.children[1]} {focusedGroupId} {multiPane} {dropTarget} {renderGroup} {onresize} {onfocusgroup} />
     </div>
   </div>
 {:else}
@@ -106,6 +123,10 @@
     role="group"
     onpointerdowncapture={() => onfocusgroup(node.id)}
   >
+    <!-- Focused-pane accent — only when split, so a lone pane isn't decorated. -->
+    {#if multiPane && isFocused}
+      <div class="pointer-events-none absolute inset-x-0 top-0 z-30 h-0.5 bg-primary/60"></div>
+    {/if}
     {@render renderGroup(node, isFocused)}
 
     <!-- Drop hint: translucent preview of where the dragged tab will land. -->

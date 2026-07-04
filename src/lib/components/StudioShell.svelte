@@ -319,6 +319,8 @@
   let activeGroupId = $state(/** @type {string | null} */ (null))
   /** Tab id currently being dragged (drives the split drop targets). */
   let dragTabId = $state(/** @type {string | null} */ (null))
+  /** Number of panes (groups) in the layout — drives the focused-pane accent. */
+  const paneCount = $derived(paneRoot ? PaneTree.allGroups(paneRoot).length : 0)
   /** Floating drag preview position + label (follows the cursor). */
   let dragGhost = $state(/** @type {{ x: number, y: number, title: string } | null} */ (null))
   /** Current drop target under the cursor: which pane + which edge. */
@@ -4035,6 +4037,7 @@ let rowSearch = $state('')
         <PaneLayout
           node={paneRoot}
           focusedGroupId={activeGroupId}
+          multiPane={paneCount > 1}
           {dropTarget}
           renderGroup={groupPane}
           onresize={handlePaneResize}
