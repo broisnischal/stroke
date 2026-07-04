@@ -1107,6 +1107,27 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (selAnchor !== null) selAnchor = null;
   }
 
+  /** Write text to the clipboard, falling back to execCommand when the async
+   *  Clipboard API is unavailable/blocked (some Tauri webview configs). */
+  async function writeClipboard(/** @type {string} */ text) {
+    try {
+      if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true; }
+    } catch { /* fall through to execCommand */ }
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.top = '-1000px';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch { return false; }
+  }
+
   /** Plain-text value of a cell for range copy (TSV). */
   function cellCopyText(/** @type {number} */ rowIdx, /** @type {number} */ actualIdx) {
     const v = effectiveCellValue(rowIdx, actualIdx);
@@ -1126,15 +1147,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     for (let r = range.r0; r <= range.r1; r++) {
       lines.push(actualIdxs.map((ai) => cellCopyText(r, ai).replace(/\t/g, ' ').replace(/\r?\n/g, ' ')).join('\t'));
     }
-    try {
-      await navigator.clipboard.writeText(lines.join('\n'));
-      const nCells = (range.r1 - range.r0 + 1) * (range.c1 - range.c0 + 1);
-      toast.success(`Copied ${nCells} cells`);
+    const nCells = (range.r1 - range.r0 + 1) * (range.c1 - range.c0 + 1);
+    if (await writeClipboard(lines.join('\n'))) {
+      toast.success(`Copied ${nCells} cell${nCells === 1 ? '' : 's'}`);
       return true;
-    } catch (err) {
-      toast.error('Could not copy', { description: String(err) });
-      return false;
     }
+    toast.error('Could not copy');
+    return false;
   }
 
   // Surface staged-edit state to the parent (→ StatusBar Apply/Reset buttons).
@@ -2207,6 +2226,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       } else if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "y" || e.key === "Y")) {
         e.preventDefault();
         void redoEdit();
+      } else if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "c" || e.key === "C")) {
+        // Copy the block selection as TSV. Handled at document capture so it fires
+        // regardless of which element inside the grid holds focus.
+        if (cellRange) { e.preventDefault(); void copyCellRange(); }
+        else if (selectedCols.size) { e.preventDefault(); void copyColSelection(); }
+        else if (focusedRow !== null && focusedCol !== null) {
+          const ai = visToActualColIdx(focusedCol);
+          if (ai >= 0) { e.preventDefault(); void copyCellValue(focusedRow, ai); }
+        }
       }
     }
     window.addEventListener("keydown", onCapture, true);
@@ -2387,22 +2415,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       return;
     }
 
-    // Ctrl+C: copy selected columns (all rows, or row-selection intersection)
-    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "c" || e.key === "C") && selectedCols.size && !editingCell) {
-      e.preventDefault();
-      void copyColSelection();
-      return;
-    }
-    // Ctrl+C: copy the rectangular cell range as TSV, or the single focused cell.
-    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "c" || e.key === "C") && !editingCell && (cellRange || (focusedRow !== null && focusedCol !== null))) {
-      e.preventDefault();
-      if (cellRange) void copyCellRange();
-      else {
-        const ai = visToActualColIdx(/** @type {number} */ (focusedCol));
-        if (ai >= 0) void copyCellValue(/** @type {number} */ (focusedRow), ai);
-      }
-      return;
-    }
+    // Ctrl+C (copy selection/range/cell) is handled by the document-capture
+    // listener above so it works regardless of which grid element holds focus.
+
     // Undo / redo — active even while the cell input has focus
     if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "z" || e.key === "Z")) {
       if (!editingCell) {
