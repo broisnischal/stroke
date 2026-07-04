@@ -319,6 +319,49 @@
   let activeGroupId = $state(/** @type {string | null} */ (null))
   /** Tab id currently being dragged (drives the split drop targets). */
   let dragTabId = $state(/** @type {string | null} */ (null))
+  /** Floating drag preview position + label (follows the cursor). */
+  let dragGhost = $state(/** @type {{ x: number, y: number, title: string } | null} */ (null))
+  /** Current drop target under the cursor: which pane + which edge. */
+  let dropTarget = $state(/** @type {{ groupId: string, edge: import('$lib/pane-layout.js').DropEdge } | null} */ (null))
+
+  /** Which edge of a pane the cursor is over (drives the split direction / hint). */
+  function edgeFromPoint(/** @type {number} */ x, /** @type {number} */ y, /** @type {DOMRect} */ r) {
+    const fx = (x - r.left) / r.width
+    const fy = (y - r.top) / r.height
+    const E = 0.25
+    if (fx < E) return /** @type {const} */ ('left')
+    if (fx > 1 - E) return /** @type {const} */ ('right')
+    if (fy < E) return /** @type {const} */ ('top')
+    if (fy > 1 - E) return /** @type {const} */ ('bottom')
+    return /** @type {const} */ ('center')
+  }
+
+  /** @param {string} id */
+  function beginTabDrag(id) {
+    dragTabId = id
+    const t = tabs.find((tab) => tab.id === id)
+    dragGhost = { x: 0, y: 0, title: t?.title ?? 'Tab' }
+    dropTarget = null
+  }
+  /** @param {number} x @param {number} y */
+  function moveTabDrag(x, y) {
+    if (!dragTabId) return
+    dragGhost = { x, y, title: dragGhost?.title ?? '' }
+    const el = /** @type {Element | null} */ (document.elementFromPoint(x, y))
+    const group = el?.closest('[data-pane-group]') ?? null
+    if (!group) { dropTarget = null; return }
+    const groupId = group.getAttribute('data-pane-group')
+    if (!groupId) { dropTarget = null; return }
+    dropTarget = { groupId, edge: edgeFromPoint(x, y, group.getBoundingClientRect()) }
+  }
+  function endTabDrag() {
+    const target = dropTarget
+    // handleDropZone reads dragTabId, so call it before clearing.
+    if (target && dragTabId) handleDropZone(target.groupId, target.edge)
+    dragTabId = null
+    dragGhost = null
+    dropTarget = null
+  }
 
   // ── Tab navigation history (back/forward) ────────────────────────────────
   /** @type {string[]} */
@@ -3992,10 +4035,9 @@ let rowSearch = $state('')
         <PaneLayout
           node={paneRoot}
           focusedGroupId={activeGroupId}
-          dragActive={dragTabId != null}
+          {dropTarget}
           renderGroup={groupPane}
           onresize={handlePaneResize}
-          ondropzone={handleDropZone}
           onfocusgroup={(gid) => void focusGroup(gid)}
         />
       {:else}
@@ -4029,8 +4071,9 @@ let rowSearch = $state('')
             onnew={() => { void focusGroup(group.id); openWelcomeTab() }}
             {recentTabs}
             onrecentselect={(schema, table) => { if (aiMode) exitAiMode(); void focusGroup(group.id).then(() => openTableTab(schema, table)) }}
-            ondragtabstart={(id) => { dragTabId = id }}
-            ondragtabend={() => { dragTabId = null }}
+            ondragtabstart={(id) => beginTabDrag(id)}
+            ondragtabmove={(x, y) => moveTabDrag(x, y)}
+            ondragtabend={() => endTabDrag()}
           />
         {/if}
         {#if isFocused}
@@ -4883,6 +4926,16 @@ let rowSearch = $state('')
     toast.success(`Database "${name}" created`)
   }}
 />
+{/if}
+
+<!-- Floating tab drag preview (follows the cursor during a split-pane drag) -->
+{#if dragGhost}
+  <div
+    class="pointer-events-none fixed z-[200] -translate-x-1/2 -translate-y-1/2 rounded-md border border-border/60 bg-panel px-3 py-1.5 text-xs font-medium text-foreground opacity-90 shadow-lg"
+    style="left:{dragGhost.x}px; top:{dragGhost.y}px"
+  >
+    {dragGhost.title}
+  </div>
 {/if}
 
 <!-- In-app confirm (window.confirm is blocked in the Tauri webview) -->
