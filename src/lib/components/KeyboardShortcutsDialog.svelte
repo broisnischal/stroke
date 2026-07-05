@@ -50,6 +50,7 @@
         { keys: [mod, "⇧", "D"], desc: "Data view" },
         { keys: [mod, "⇧", "S"], desc: "SQL editor" },
         { keys: [mod, "⇧", "O"], desc: "ORM Runner" },
+        { keys: [mod, "⇧", "X"], desc: "Extensions" },
         { keys: [mod, "⇧", "E"], desc: "Toggle AI panel" },
         { keys: [mod, "I"], desc: "Toggle AI sidebar" },
         { keys: [mod, "⇧", "L"], desc: "Activity log" },

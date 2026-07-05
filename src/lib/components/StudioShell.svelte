@@ -1186,6 +1186,14 @@ let rowSearch = $state('')
     openSearchTab()
   })
 
+  createHotkey('Mod+Shift+X', (e) => {
+    if (!connection) return
+    e.preventDefault()
+    commandOpen = false
+    if (aiMode) exitAiMode()
+    openExtensionsTab()
+  })
+
   createHotkey('Mod+Enter', (e) => {
     if (activeTab?.kind !== 'sql' || !connection) return
     e.preventDefault()
