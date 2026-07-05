@@ -659,11 +659,11 @@
         <p class="min-w-0 flex-1 font-mono text-ui-xs text-muted-foreground/70">Cannot reach database — check your connection and try again.</p>
       </div>
     {:else}
-      <!-- SQL / application error strip -->
-      <div class="shrink-0 border-b border-destructive/20 bg-destructive/5">
-        <div class="flex items-start gap-2 px-3 py-2">
-          <span class="mt-px shrink-0 font-mono text-ui-2xs font-bold uppercase tracking-wide text-destructive/70">error</span>
-          <pre class="max-h-24 min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-all font-mono text-ui-xs leading-relaxed text-destructive">{error}</pre>
+      <!-- SQL / application error strip. Header row (label + action) sits above the
+           message so the text gets full width and the button never crowds it. -->
+      <div class="shrink-0 border-b border-destructive/20 bg-destructive/5 px-3 py-2">
+        <div class="flex items-center justify-between gap-2">
+          <span class="shrink-0 font-mono text-ui-2xs font-bold uppercase tracking-wide text-destructive/70">error</span>
           {#if onfixwithai}
             <button
               type="button"
@@ -675,6 +675,17 @@
             </button>
           {/if}
         </div>
+        <!-- overflow-wrap:anywhere wraps at word boundaries first and only breaks
+             inside a token when it can't fit — unlike break-all, which chopped
+             ordinary words mid-character ("can/celing", "sta/tement"). -->
+        <pre class="mt-1.5 max-h-24 overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-ui-xs leading-relaxed text-destructive">{error}</pre>
+        {#if /statement timeout|canceling statement due to/i.test(error)}
+          <p class="mt-1.5 text-ui-2xs leading-relaxed text-muted-foreground/70">
+            The query timed out. If this table has large JSON/text columns, select just the
+            columns you need instead of <code class="text-foreground/70">*</code>, or add a smaller
+            <code class="text-foreground/70">LIMIT</code>.
+          </p>
+        {/if}
       </div>
     {/if}
   {/if}
