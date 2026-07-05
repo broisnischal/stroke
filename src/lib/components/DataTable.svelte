@@ -81,6 +81,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     buildDeleteStatements,
     buildInsertStatements,
   } from "$lib/dml-preview.js";
+  import { formatSql } from "$lib/format-sql.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import ShikiBlock from "./ShikiBlock.svelte";
   import {
@@ -218,6 +219,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     onfetchrelatedrows = /** @type {(detail: any) => Promise<{ columns: any[], rows: any[], error?: string }>} */ (async () => ({ columns: [], rows: [] })),
     /** Called when the user confirms the new row draft. Receives the validated values. */
     oninsertrow = /** @type {(values: Record<string, unknown>) => Promise<void>} */ (async () => {}),
+    /**
+     * Execute raw SQL the user hand-edited in the DML preview, then refetch. Only
+     * invoked when the previewed SQL was actually changed — the unedited path still
+     * runs through the structured per-cell writes (`onsave`/`ondelete`/`oninsertrow`).
+     * @type {(sql: string) => Promise<void>}
+     */
+    onexecutesql = /** @type {(sql: string) => Promise<void>} */ (async () => {}),
     /** True while the insert is in flight — disables the draft row inputs. */
     insertSaving = false,
     /** Assigned by this component so the parent can trigger beginInsertRow(). */
@@ -287,6 +295,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let dmlPreview = $state(null);
   /** True while the confirmed write is in flight. */
   let dmlPreviewRunning = $state(false);
+  /** Prettified SQL shown in the (editable) preview editor. Bound to the editor. */
+  let dmlEditedSql = $state("");
+  /** The pristine prettified SQL, to detect whether the user edited it. */
+  let dmlOriginalSql = $state("");
+  /** True once the user has changed the previewed SQL — switches Apply to raw exec. */
+  const dmlWasEdited = $derived(dmlEditedSql.trim() !== dmlOriginalSql.trim());
 
   /** @type {import('$lib/dml-preview.js').DmlContext} */
   const dmlContext = $derived({ dialect, schema, table: tableName, columns, primaryKey });
@@ -297,8 +311,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * @param {NonNullable<typeof dmlPreview>} config
    */
   function requestWrite(config) {
-    if ($appPreviewDml) dmlPreview = config;
-    else void config.run();
+    if ($appPreviewDml) {
+      dmlPreview = config;
+      // Prettify the generated statements for a readable, editable preview.
+      dmlOriginalSql = formatSql(config.statements.join("\n"));
+      dmlEditedSql = dmlOriginalSql;
+    } else {
+      void config.run();
+    }
   }
 
   /** Run the previewed write, then close the dialog. */
@@ -306,7 +326,20 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (!dmlPreview || dmlPreviewRunning) return;
     dmlPreviewRunning = true;
     try {
-      await dmlPreview.run();
+      if (dmlWasEdited) {
+        // The user hand-edited the SQL — run it verbatim (as raw statements) and
+        // refetch. Arbitrary edits can't be mapped back to the staged per-cell
+        // model, so drop all staged edits/deletes and the inline insert draft.
+        await onexecutesql(dmlEditedSql.trim());
+        pendingEdits = new Map();
+        pendingDeletes = new Set();
+        pastEdits = [];
+        futureEdits = [];
+        savePendingChanges(_persistKey, pendingEdits, pendingDeletes);
+        cancelNewRow();
+      } else {
+        await dmlPreview.run();
+      }
       dmlPreview = null;
     } finally {
       dmlPreviewRunning = false;
@@ -1025,21 +1058,41 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
   }
 
-  /** Open the DML preview for all staged changes (edits + deletes); confirm flushes them. */
+  /**
+   * Validated values for the inline new-row draft, if the user has typed anything
+   * into it and it passes validation; otherwise null. Lets the combined "Review
+   * changes" flow include the pending INSERT instead of silently dropping it.
+   * @returns {Record<string, unknown> | null}
+   */
+  function pendingInsertValues() {
+    if (!newRowDrafts) return null;
+    const hasAny = Object.values(newRowDrafts).some((v) => v !== "" && v != null);
+    if (!hasAny) return null;
+    const editableCols = columns.filter((c) => isEditableType(c.dataType ?? c.data_type ?? ""));
+    const built = buildInsertPayload(editableCols, primaryKey, newRowDrafts);
+    return built.ok ? /** @type {Record<string, unknown>} */ (built.values) : null;
+  }
+
+  /** Open the DML preview for all staged changes (edits + deletes + a pending insert). */
   function applyPendingEdits() {
-    if (!hasPendingChanges || saving) return;
+    const insertValues = pendingInsertValues();
+    if ((!hasPendingChanges && !insertValues) || saving) return;
     // A row staged for deletion doesn't need its cell updates written first.
     const editEntries = [...pendingEdits.values()].filter((e) => !pendingDeletes.has(e.rowIdx));
     const deleteIndices = [...pendingDeletes].sort((a, b) => a - b);
+    // Order: updates, deletes, then the insert. Inserting last keeps the existing
+    // row indices (which the updates/deletes address) stable during execution.
     const statements = [
       ...buildUpdateStatements(editEntries, rows, dmlContext),
       ...(deleteIndices.length ? buildDeleteStatements(deleteIndices, rows, dmlContext) : []),
+      ...(insertValues ? buildInsertStatements(insertValues, dmlContext) : []),
     ];
     const parts = [];
     if (editEntries.length) parts.push(`${editEntries.length} cell${editEntries.length === 1 ? "" : "s"} updated`);
     if (deleteIndices.length) parts.push(`${deleteIndices.length} row${deleteIndices.length === 1 ? "" : "s"} deleted`);
+    if (insertValues) parts.push("1 row inserted");
     requestWrite({
-      kind: deleteIndices.length ? "delete" : "update",
+      kind: deleteIndices.length ? "delete" : insertValues && !editEntries.length ? "insert" : "update",
       title: "Review changes",
       description: `${parts.join(", ")}.${deleteIndices.length ? " Deletions cannot be undone." : ""}`,
       statements,
@@ -1049,9 +1102,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     });
   }
 
-  /** Flush all staged edits and deletes to the database. */
+  /** Flush all staged edits and deletes (and a pending insert) to the database. */
   async function executePendingChanges() {
-    if (!hasPendingChanges || saving) return;
+    const insertValues = pendingInsertValues();
+    if ((!hasPendingChanges && !insertValues) || saving) return;
     // Edits first (skipping rows about to be deleted), then the deletes.
     const entries = [...pendingEdits.values()].filter((e) => !pendingDeletes.has(e.rowIdx));
     /** @type {typeof entries} */
@@ -1076,6 +1130,17 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         pendingDeletes = new Set();
       } catch (err) {
         toast.error("Could not delete", { description: String(err) });
+      }
+    }
+
+    // Insert last so the row indices addressed by the updates/deletes above stay
+    // valid throughout. oninsertrow surfaces its own toast + refetch.
+    if (insertValues) {
+      try {
+        await oninsertrow(insertValues);
+        cancelNewRow();
+      } catch {
+        // error toast already shown by oninsertrow
       }
     }
 
@@ -4787,16 +4852,40 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         </Dialog.Description>
       </Dialog.Header>
 
-      <div class="flex items-center justify-between">
+      <div class="flex items-center justify-between gap-2">
         <span class="text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/50">
           SQL to run{dmlPreview.statements.length > 1 ? ` · ${dmlPreview.statements.length} statements` : ''}
         </span>
+        {#if dmlWasEdited}
+          <button
+            type="button"
+            onclick={() => { dmlEditedSql = dmlOriginalSql }}
+            disabled={dmlPreviewRunning}
+            class="inline-flex items-center gap-1 text-ui-2xs text-muted-foreground/60 hover:text-foreground disabled:opacity-50"
+            title="Discard your edits and restore the generated SQL"
+          >
+            <RotateCcw class="size-3" />
+            Reset SQL
+          </button>
+        {/if}
       </div>
 
-      <!-- Syntax-highlighted, wrapping, scrollable SQL preview (hover to copy). -->
-      <div class="flex max-h-[45vh] min-h-0 flex-col overflow-hidden rounded-lg border border-border/50">
-        <ShikiBlock code={dmlPreview.statements.join('\n')} lang="sql" />
+      <!-- Editable, prettified SQL. Monaco loads lazily (kept out of the plain
+           table-browsing bundle); Shiki renders an instant highlighted preview
+           while it mounts. Editing the SQL switches Apply to run it verbatim. -->
+      <div class="flex h-[min(46vh,380px)] min-h-[160px] flex-col overflow-hidden rounded-lg border border-border/50 bg-background/40">
+        {#await import('./SqlEditor.svelte')}
+          <ShikiBlock code={dmlEditedSql} lang="sql" />
+        {:then { default: SqlEditor }}
+          <SqlEditor bind:value={dmlEditedSql} onmodenter={confirmDmlPreview} class="rounded-lg" />
+        {/await}
       </div>
+
+      {#if dmlWasEdited}
+        <p class="text-ui-2xs text-amber-500/80">
+          You edited the SQL — Apply will run it exactly as written.
+        </p>
+      {/if}
 
       <Dialog.Footer class="gap-2 sm:justify-end">
         <button
