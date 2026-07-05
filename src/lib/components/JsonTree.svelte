@@ -39,19 +39,46 @@
   )
   const isContainer = $derived(isArray || isObject)
 
-  /** @type {[string, unknown][]} */
-  const entries = $derived.by(() => {
-    if (isArray) return /** @type {unknown[]} */ (value).map((v, i) => /** @type {[string, unknown]} */ ([String(i), v]))
-    if (isObject) return Object.entries(/** @type {Record<string, unknown>} */ (value))
-    return []
-  })
-
   let expanded = $state(depth < defaultDepth)
   let childLimit = $state(CHILD_PAGE)
 
+  // Total child count — cheap for arrays (.length). Avoids materializing a tuple
+  // for every element of a huge array/object just to show a count.
+  const totalCount = $derived(
+    isArray ? /** @type {unknown[]} */ (value).length
+    : isObject ? Object.keys(/** @type {Record<string, unknown>} */ (value)).length
+    : 0,
+  )
+
+  // Only the currently-visible children (up to childLimit) are materialized, so
+  // expanding a 100k-element array never builds 100k tuples at once.
+  /** @type {[string, unknown][]} */
+  const visibleEntries = $derived.by(() => {
+    if (isArray) {
+      const arr = /** @type {unknown[]} */ (value)
+      const n = Math.min(arr.length, childLimit)
+      /** @type {[string, unknown][]} */
+      const out = []
+      for (let i = 0; i < n; i++) out.push([String(i), arr[i]])
+      return out
+    }
+    if (isObject) {
+      /** @type {[string, unknown][]} */
+      const out = []
+      let i = 0
+      for (const k in /** @type {Record<string, unknown>} */ (value)) {
+        if (i >= childLimit) break
+        out.push([k, /** @type {Record<string, unknown>} */ (value)[k]])
+        i++
+      }
+      return out
+    }
+    return []
+  })
+
   const summary = $derived.by(() => {
-    if (isArray) return entries.length === 1 ? '1 item' : `${entries.length} items`
-    if (isObject) return entries.length === 1 ? '1 key' : `${entries.length} keys`
+    if (isArray) return totalCount === 1 ? '1 item' : `${totalCount} items`
+    if (isObject) return totalCount === 1 ? '1 key' : `${totalCount} keys`
     return ''
   })
 
@@ -152,7 +179,7 @@
 
       {#if isContainer && expanded}
         <div class="border-l border-border/30">
-          {#each entries.slice(0, childLimit) as [k, v] (k)}
+          {#each visibleEntries as [k, v] (k)}
             <JsonTree
               value={v}
               label={k}
@@ -162,13 +189,13 @@
               {onopen}
             />
           {/each}
-          {#if entries.length > childLimit}
+          {#if totalCount > childLimit}
             <button
               type="button"
               class="ml-5 my-0.5 rounded bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
               onclick={() => (childLimit += CHILD_PAGE)}
             >
-              Show {Math.min(CHILD_PAGE, entries.length - childLimit)} more ({entries.length - childLimit} hidden)
+              Show {Math.min(CHILD_PAGE, totalCount - childLimit)} more ({totalCount - childLimit} hidden)
             </button>
           {/if}
         </div>
