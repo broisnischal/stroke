@@ -16,6 +16,11 @@
   } from '$lib/json-inspector.js'
 
   const TRUNCATE_LIMIT = 200
+  // Max array items / object keys kept in the raw-text preview. Bounds the
+  // stringified size for wide values (e.g. a Buffer's `data` byte array with
+  // thousands of numbers) so the preview never balloons. Copy JSON still copies
+  // the full, untruncated value.
+  const PREVIEW_CHILD_LIMIT = 200
   const HIGHLIGHT_LIMIT = 12000
 
   let {
@@ -60,43 +65,52 @@
   /** @type {{ x: number, y: number, value: string | null } | null} */
   let contextMenu = $state(null)
 
-  const displayText = $derived(formatJsonValue(truncateDeep(record, TRUNCATE_LIMIT)))
+  // Bounded preview of the record: strings truncated to TRUNCATE_LIMIT and
+  // arrays/objects capped to PREVIEW_CHILD_LIMIT children. `truncated` records
+  // whether anything was cut, which drives whether we highlight at all.
+  const displayInfo = $derived.by(() => {
+    let truncated = false
+    /** @param {unknown} v */
+    const walk = (v) => {
+      if (typeof v === 'string') {
+        if (v.length > TRUNCATE_LIMIT) { truncated = true; return v.slice(0, TRUNCATE_LIMIT) + '…' }
+        return v
+      }
+      if (Array.isArray(v)) {
+        const head = v.slice(0, PREVIEW_CHILD_LIMIT).map(walk)
+        if (v.length > PREVIEW_CHILD_LIMIT) { truncated = true; head.push(`… ${v.length - PREVIEW_CHILD_LIMIT} more items`) }
+        return head
+      }
+      if (v !== null && typeof v === 'object') {
+        /** @type {Record<string, unknown>} */
+        const out = {}
+        let i = 0
+        for (const k in v) {
+          if (i >= PREVIEW_CHILD_LIMIT) { truncated = true; break }
+          out[k] = walk(/** @type {Record<string, unknown>} */ (v)[k])
+          i++
+        }
+        return out
+      }
+      return v
+    }
+    return { text: formatJsonValue(walk(record)), truncated }
+  })
+  const displayText = $derived(displayInfo.text)
 
   function fullJsonText() {
     return formatJsonValue(record)
-  }
-
-  /**
-   * @param {unknown} value
-   * @param {number} limit
-   * @returns {unknown}
-   */
-  function truncateDeep(value, limit) {
-    if (typeof value === 'string') {
-      return value.length > limit ? value.slice(0, limit) + '…' : value
-    }
-    if (Array.isArray(value)) {
-      return value.map((v) => truncateDeep(v, limit))
-    }
-    if (value !== null && typeof value === 'object') {
-      return Object.fromEntries(
-        Object.entries(/** @type {Record<string, unknown>} */ (value)).map(([k, v]) => [
-          k,
-          truncateDeep(v, limit),
-        ])
-      )
-    }
-    return value
   }
 
   $effect(() => {
     // Tree mode never touches the stringified text — skip the format +
     // highlight work entirely until the raw view is actually shown.
     if (viewMode !== 'raw') return
-    const source = displayText
-    // Above the limit, skip per-token spans entirely — plain escaped text keeps
-    // very large values cheap to render.
-    html = source.length > HIGHLIGHT_LIMIT
+    const { text: source, truncated } = displayInfo
+    // Skip per-token highlighting for large values (anything we had to truncate,
+    // or a still-long preview) — the span-per-token HTML is the memory hog. Plain
+    // escaped text stays cheap to build and render.
+    html = truncated || source.length > HIGHLIGHT_LIMIT
       ? `<pre class="m-0 p-0 font-mono text-sm leading-relaxed whitespace-pre text-foreground">${escapeHtml(source)}</pre>`
       : highlightJson(source)
   })
@@ -107,7 +121,8 @@
   $effect(() => {
     if (!html || !rootEl) return
     const source = displayText
-    if (source.length > HIGHLIGHT_LIMIT) return
+    // Plain (non-highlighted) render for large values — skip the link scan too.
+    if (displayInfo.truncated || source.length > HIGHLIGHT_LIMIT) return
     void tick().then(() => {
       const pre = rootEl?.querySelector('pre')
       if (pre instanceof HTMLElement) linkifyJsonInElement(pre, source)
