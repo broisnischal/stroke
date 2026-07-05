@@ -4,6 +4,12 @@ All notable changes to Stroke are listed here, newest first.
 
 ---
 
+## [1.5.0] - 2026-07-05
+
+### Changes
+- Data-table, SQL editor, JSON viewer & extensions improvements (minor release) (#36)
+
+
 ## [1.4.0] - 2026-07-04
 
 ### Changes
