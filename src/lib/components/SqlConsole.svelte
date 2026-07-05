@@ -873,6 +873,10 @@
         placeholder="Query name"
         onkeydown={(e) => {
           if (e.key === 'Enter') void confirmSaveQuery()
+          // Explicit Escape close: this dialog is opened programmatically from
+          // Monaco (⌘S), and bits-ui's default escape-to-close doesn't fire
+          // reliably through that focus path in the WebKit/Tauri webview.
+          else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); saveDialogOpen = false }
         }}
       />
     </div>
