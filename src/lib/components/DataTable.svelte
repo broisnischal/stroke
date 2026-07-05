@@ -83,6 +83,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   } from "$lib/dml-preview.js";
   import { formatSql } from "$lib/format-sql.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
   import ShikiBlock from "./ShikiBlock.svelte";
   import {
     savePendingChanges,
@@ -446,6 +447,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let tableContainer = $state(/** @type {HTMLDivElement | null} */ (null));
   /** Whether to select-all text when the edit input is focused. */
   let selectOnEditFocus = $state(true);
+  /** Whether the enum cell-editor dropdown is open (auto-opens on edit). */
+  let enumEditorOpen = $state(false);
   /** Raw cell value before the current edit started (for undo tracking). */
   let lastEditOriginalValue = $state(/** @type {unknown} */ (undefined));
   /**
@@ -869,11 +872,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       draft: initialChar !== undefined ? initialChar : original,
       original,
     };
+    // Enum columns edit via a dropdown — open it immediately so a single
+    // interaction (double-click / Enter) reveals the choices.
+    enumEditorOpen = !!getColumnEnumValues(col);
   }
 
   function cancelEdit() {
     if (!editingCell) return;
     editingCell = null;
+    enumEditorOpen = false;
     tick().then(() => tableContainer?.focus({ preventScroll: true }));
   }
 
@@ -4287,30 +4294,50 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                       {#if isAuto}
                         <span class="select-none font-mono text-ui-sm text-muted-foreground/35 italic">auto</span>
                       {:else if enumValues}
-                        <select
-                          data-new-row-input={col.name}
-                          disabled={insertSaving}
-                          class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none disabled:opacity-50"
+                        <Select.Root
+                          type="single"
                           value={newRowDrafts[col.name] ?? ''}
-                          onchange={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
-                          onfocus={() => (newRowFocusCol = col.name)}
+                          onValueChange={(v) => setNewRowDraft(col.name, v ?? '')}
                         >
-                          <option value="">{col.nullable ? 'NULL / default' : 'Select…'}</option>
-                          {#each enumValues as opt (opt)}<option value={opt}>{opt}</option>{/each}
-                        </select>
+                          <Select.Trigger
+                            data-new-row-input={col.name}
+                            disabled={insertSaving}
+                            onfocus={() => (newRowFocusCol = col.name)}
+                            class="h-7 w-full min-w-0 rounded-md border-0 bg-transparent px-1 py-0 font-mono text-ui-sm text-foreground shadow-none focus-visible:ring-0 disabled:opacity-50"
+                          >
+                            <span data-slot="select-value" class={cn('truncate', !newRowDrafts[col.name] && 'text-muted-foreground/50')}>
+                              {newRowDrafts[col.name] || (col.nullable ? 'NULL / default' : 'Select…')}
+                            </span>
+                          </Select.Trigger>
+                          <Select.Content align="start" sideOffset={4} class="max-h-64 p-1">
+                            <Select.Item value="" label={col.nullable ? 'NULL / default' : 'Select…'} class="py-1.5 pl-2.5 pr-8 font-mono text-ui-sm text-muted-foreground">{col.nullable ? 'NULL / default' : 'Select…'}</Select.Item>
+                            {#each enumValues as opt (opt)}
+                              <Select.Item value={opt} label={opt} class="py-1.5 pl-2.5 pr-8 font-mono text-ui-sm">{opt}</Select.Item>
+                            {/each}
+                          </Select.Content>
+                        </Select.Root>
                       {:else if isBoolean}
-                        <select
-                          data-new-row-input={col.name}
-                          disabled={insertSaving}
-                          class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none disabled:opacity-50"
+                        <Select.Root
+                          type="single"
                           value={newRowDrafts[col.name] ?? ''}
-                          onchange={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
-                          onfocus={() => (newRowFocusCol = col.name)}
+                          onValueChange={(v) => setNewRowDraft(col.name, v ?? '')}
                         >
-                          <option value="">{col.nullable ? 'NULL / default' : 'Default'}</option>
-                          <option value="true">true</option>
-                          <option value="false">false</option>
-                        </select>
+                          <Select.Trigger
+                            data-new-row-input={col.name}
+                            disabled={insertSaving}
+                            onfocus={() => (newRowFocusCol = col.name)}
+                            class="h-7 w-full min-w-0 rounded-md border-0 bg-transparent px-1 py-0 font-mono text-ui-sm text-foreground shadow-none focus-visible:ring-0 disabled:opacity-50"
+                          >
+                            <span data-slot="select-value" class={cn('truncate', !newRowDrafts[col.name] && 'text-muted-foreground/50')}>
+                              {newRowDrafts[col.name] || (col.nullable ? 'NULL / default' : 'Default')}
+                            </span>
+                          </Select.Trigger>
+                          <Select.Content align="start" sideOffset={4} class="min-w-[8rem] p-1">
+                            <Select.Item value="" label={col.nullable ? 'NULL / default' : 'Default'} class="py-1.5 pl-2.5 pr-8 font-mono text-ui-sm text-muted-foreground">{col.nullable ? 'NULL / default' : 'Default'}</Select.Item>
+                            <Select.Item value="true" label="true" class="py-1.5 pl-2.5 pr-8 font-mono text-ui-sm">true</Select.Item>
+                            <Select.Item value="false" label="false" class="py-1.5 pl-2.5 pr-8 font-mono text-ui-sm">false</Select.Item>
+                          </Select.Content>
+                        </Select.Root>
                       {:else if isDateTime}
                         <DateTimePicker
                           colName={col.name}
@@ -4433,22 +4460,45 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                   style="top:{editOverlay.top}px; left:{editOverlay.left}px; width:{editOverlay.width}px; height:{editOverlay.height}px"
                 >
                   {#if eEnum}
-                    <select
-                      bind:this={editInput}
-                      bind:value={editingCell.draft}
-                      disabled={saving}
-                      aria-label="Edit {ecol?.name ?? 'cell'}"
-                      class="box-border block h-full w-full min-w-0 max-w-full cursor-pointer appearance-none border-0 bg-transparent px-3 font-mono text-ui-sm text-foreground outline-none"
-                      onclick={(e) => e.stopPropagation()}
-                      onkeydown={handleEditKeydown}
-                      onchange={() => void commitEdit()}
+                    <!-- Themed, portaled dropdown (bits-ui) — replaces the native
+                         <select>, whose OS popup was unstyled and broke on Linux/
+                         WebKitGTK. Auto-opens on edit; picking a value commits. -->
+                    <Select.Root
+                      type="single"
+                      value={editingCell.draft}
+                      open={enumEditorOpen}
+                      onOpenChange={(o) => {
+                        enumEditorOpen = o;
+                        // Closed without a pick (Escape / click-away) → cancel edit.
+                        if (!o && editingCell) cancelEdit();
+                      }}
+                      onValueChange={(v) => {
+                        if (!editingCell) return;
+                        editingCell.draft = v ?? '';
+                        void commitEdit();
+                      }}
                     >
-                      {#if eNullable}<option value="">NULL</option>{/if}
-                      {#if editingCell.original && !eEnum.includes(editingCell.original)}
-                        <option value={editingCell.original}>{editingCell.original}</option>
-                      {/if}
-                      {#each eEnum as option (option)}<option value={option}>{option}</option>{/each}
-                    </select>
+                      <Select.Trigger
+                        bind:ref={editInput}
+                        aria-label="Edit {ecol?.name ?? 'cell'}"
+                        class="box-border h-full w-full min-w-0 max-w-full rounded-none border-0 bg-transparent px-3 py-0 font-mono text-ui-sm text-foreground shadow-none focus-visible:ring-0"
+                      >
+                        <span data-slot="select-value" class="truncate">
+                          {editingCell.draft || (eNullable ? 'NULL' : 'Select…')}
+                        </span>
+                      </Select.Trigger>
+                      <Select.Content align="start" sideOffset={2} class="max-h-64 min-w-[var(--bits-select-anchor-width)] p-1">
+                        {#if eNullable}
+                          <Select.Item value="" label="NULL" class="py-1.5 pl-2.5 pr-8 font-mono text-ui-sm text-muted-foreground">NULL</Select.Item>
+                        {/if}
+                        {#if editingCell.original && !eEnum.includes(editingCell.original)}
+                          <Select.Item value={editingCell.original} label={editingCell.original} class="py-1.5 pl-2.5 pr-8 font-mono text-ui-sm">{editingCell.original}</Select.Item>
+                        {/if}
+                        {#each eEnum as option (option)}
+                          <Select.Item value={option} label={option} class="py-1.5 pl-2.5 pr-8 font-mono text-ui-sm">{option}</Select.Item>
+                        {/each}
+                      </Select.Content>
+                    </Select.Root>
                   {:else if isBooleanType(eType)}
                     {@const isOn = editingCell.draft === "true"}
                     {@const isNull = eNullable && editingCell.draft !== "true" && editingCell.draft !== "false"}
