@@ -174,11 +174,19 @@
   <!-- Sidebar -->
   <aside class="flex w-[16.5rem] shrink-0 flex-col border-r border-border/50">
     <div class="flex items-center justify-between gap-2 px-4 pb-3 pt-4">
-      <div class="flex items-center gap-2 min-w-0">
-        <Blocks class="size-4 text-muted-foreground" />
+      <div class="flex items-center gap-2.5 min-w-0">
+        <span class="grid size-6 shrink-0 place-items-center rounded-md border border-border/60 bg-muted/40 text-muted-foreground">
+          <Blocks class="size-3.5" />
+        </span>
         <h1 class="text-[13px] font-semibold tracking-tight text-foreground">Extensions</h1>
       </div>
-      <span class="shrink-0 text-[11px] tabular-nums text-muted-foreground/50">{enabledCount} on</span>
+      <span
+        class={cn(
+          "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums transition-colors",
+          enabledCount > 0 ? "bg-emerald-500/12 text-emerald-500" : "text-muted-foreground/45",
+        )}
+        title="{enabledCount} of {EXTENSIONS.length} extensions enabled"
+      >{enabledCount} on</span>
     </div>
 
     <div class="app-scroll min-h-0 flex-1 overflow-y-auto px-2 pb-3">
@@ -193,13 +201,17 @@
             type="button"
             onclick={() => (selectedId = ext.id)}
             class={cn(
-              "group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors",
+              "group relative flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors",
               active ? "bg-muted/70 text-foreground" : "text-foreground/70 hover:bg-muted/40 hover:text-foreground",
             )}
           >
+            {#if active}<span class="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-primary" aria-hidden="true"></span>{/if}
             {#if Icon}<Icon class={cn("size-3.5 shrink-0", active ? "text-foreground/80" : "text-muted-foreground/60")} />{/if}
             <span class="min-w-0 flex-1 truncate text-[13px]">{ext.name}</span>
-            <span class={cn("size-1.5 shrink-0 rounded-full transition-colors", on ? "bg-emerald-500" : "bg-transparent")}></span>
+            <span
+              class={cn("size-1.5 shrink-0 rounded-full transition-all", on ? "bg-emerald-500 ring-2 ring-emerald-500/20" : "bg-transparent")}
+              title={on ? "Enabled" : undefined}
+            ></span>
           </button>
         {/each}
       {/each}
@@ -212,10 +224,21 @@
       {@const Icon = ICONS[selected.id]}
       {@const on = isOn(selected.id)}
       <div class="mx-auto w-full max-w-[36rem] px-8 py-9">
-        <!-- Header card — accent-tinted icon reads correctly in every theme -->
-        <div class="rounded-xl border border-border/60 bg-card/40 p-4">
+        <!-- Header card — enabled extensions pick up a subtle emerald accent so
+             the on/off state reads at a glance; disabled stay neutral. -->
+        <div
+          class={cn(
+            "rounded-xl border p-4 transition-colors",
+            on ? "border-emerald-500/25 bg-emerald-500/[0.04]" : "border-border/60 bg-card/40",
+          )}
+        >
           <div class="flex items-start gap-3.5">
-            <span class="grid size-10 shrink-0 place-items-center rounded-lg border border-primary/20 bg-primary/10 text-primary">
+            <span
+              class={cn(
+                "grid size-10 shrink-0 place-items-center rounded-lg border transition-colors",
+                on ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-500" : "border-primary/20 bg-primary/10 text-primary",
+              )}
+            >
               {#if Icon}<Icon class="size-5" />{/if}
             </span>
             <div class="min-w-0 flex-1 pt-0.5">
@@ -223,7 +246,12 @@
               <p class="mt-0.5 text-[11.5px] text-muted-foreground">{KIND_LABEL[selected.kind] ?? "Extension"}</p>
             </div>
             <label class="flex shrink-0 cursor-pointer items-center gap-2 pt-0.5">
-              <span class={cn("text-[11px] font-medium", on ? "text-emerald-500" : "text-muted-foreground/60")}>{on ? "On" : "Off"}</span>
+              <span
+                class={cn(
+                  "rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide transition-colors",
+                  on ? "bg-emerald-500/12 text-emerald-500" : "text-muted-foreground/55",
+                )}
+              >{on ? "On" : "Off"}</span>
               {@render toggle(on, () => setPluginEnabled(selected.id, !on), `Toggle ${selected.name}`)}
             </label>
           </div>
