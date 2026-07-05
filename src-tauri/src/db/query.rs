@@ -1731,8 +1731,9 @@ pub async fn execute_sql_on_conn(
 
 /// Hard row cap for ad-hoc SQL execution. Prevents OOM on tables with millions of rows.
 const EXECUTE_SQL_MAX_ROWS: usize = 1_000_000_000;
-/// Statement timeout for ad-hoc queries (milliseconds).
-const EXECUTE_SQL_TIMEOUT_MS: i64 = 30_000;
+/// Statement timeout for ad-hoc queries (milliseconds). Generous enough for
+/// heavier scans (e.g. tables with large TOASTed JSON columns) to finish.
+const EXECUTE_SQL_TIMEOUT_MS: i64 = 60_000;
 
 async fn execute_sql_pg(
     pool: &sqlx::PgPool,
