@@ -111,11 +111,13 @@
 }} />
 
 {#if visible}
-  <aside class="flex w-56 shrink-0 flex-col border-r border-border bg-panel">
+  <aside class="flex w-64 shrink-0 flex-col border-r border-border bg-panel">
 
-    <!-- Header row: segmented tabs + hide-panel toggle -->
+    <!-- Header row: segmented tabs + hide-panel toggle. overflow-hidden on the tab
+         group keeps the tabs from spilling over the editor toolbar if they ever
+         exceed the panel width. -->
     <div class="flex h-9 shrink-0 items-center justify-between gap-1 border-b border-border pl-1 pr-1.5">
-      <div class="flex h-full min-w-0 items-stretch">
+      <div class="flex h-full min-w-0 items-stretch overflow-hidden">
         {#each panelTabs as t (t.id)}
           {@const Icon = t.icon}
           {@const active = tab === t.id}
@@ -125,7 +127,7 @@
             aria-current={active ? 'page' : undefined}
             onclick={() => (tab = t.id)}
             class={cn(
-              'group/pt relative flex h-full shrink-0 items-center gap-1.5 px-2.5 text-[11px] transition-colors',
+              'group/pt relative flex h-full shrink-0 items-center gap-1 px-2 text-[11px] transition-colors',
               active
                 ? 'font-medium text-foreground'
                 : 'font-normal text-muted-foreground/55 hover:text-foreground',
