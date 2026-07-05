@@ -283,9 +283,8 @@
     }, 200);
   }
 
-  // Release the pending scroll frame and filter timer when the sidebar unmounts.
+  // Release the pending filter timer when the sidebar unmounts.
   $effect(() => () => {
-    if (scrollRaf != null) cancelAnimationFrame(scrollRaf);
     if (filterDebounce) clearTimeout(filterDebounce);
   });
 
@@ -398,7 +397,7 @@
   }
   // ── Virtual list (tables only) ───────────────────────────────────────────
   const VIRT_THRESHOLD = 40   // kick in early — 40+ tables already benefits from virtualization
-  const ROW_H = 28            // px — fixed row stride (row height + gap-0.5); drives spacer math
+  const ROW_H = 27            // px — fixed row stride: 25px row (13px text + py-1.5) + 2px gap-0.5; drives spacer math
   const VIRT_BUFFER = 12      // extra rows rendered above and below the viewport
   // The window shifts one row at a time: `virtStart` is floored to ROW_H, so the
   // derived already short-circuits (returns the same value) for every scroll event
@@ -411,15 +410,13 @@
   let tableListEl = $state(null)
   let sidebarScrollTop = $state(0)
   let sidebarHeight = $state(0)
-  /** RAF handle so scroll events update the virtual-window state at most once per
-   *  frame instead of on every (60–120Hz) scroll event. @type {number | null} */
-  let scrollRaf = null
+  // Update the virtual window synchronously on scroll. Reading scrollTop here is a
+  // cheap cached read (layout is already up to date inside a scroll handler) and
+  // Svelte coalesces the resulting re-renders into a single flush per frame. A RAF
+  // hop would only push the rendered window one frame *behind* the scrollbar thumb,
+  // which reads as lag while dragging.
   function onSidebarScroll() {
-    if (scrollRaf != null) return
-    scrollRaf = requestAnimationFrame(() => {
-      scrollRaf = null
-      if (scrollContainerEl) sidebarScrollTop = scrollContainerEl.scrollTop
-    })
+    if (scrollContainerEl) sidebarScrollTop = scrollContainerEl.scrollTop
   }
   /** Offset of the tables <ul> from the top of the scroll container. Re-measured
    *  whenever sections above it open/close (recent, pinned) or refs change. */
@@ -721,7 +718,7 @@
         <div
           bind:this={scrollContainerEl}
           bind:clientHeight={sidebarHeight}
-          class="app-scroll min-h-0 w-full flex-1 overflow-y-auto"
+          class="app-scroll min-h-0 w-full flex-1 overflow-y-auto [will-change:scroll-position]"
           role="none"
           onscroll={onSidebarScroll}
           onclick={(e) => {
