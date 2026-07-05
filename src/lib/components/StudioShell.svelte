@@ -3574,6 +3574,26 @@ let rowSearch = $state('')
     }
   }
 
+  /**
+   * Run raw DML that the user hand-edited in the "Review changes" preview, then
+   * refetch the current page so the grid reflects it.
+   * @param {string} sql
+   */
+  async function handleExecuteRawDml(sql) {
+    if (!sql.trim()) return
+    const _start = Date.now()
+    try {
+      await executeSqlMulti(sql)
+      recordActivity({ type: 'row_save', title: `Applied edited SQL${activeTable ? ` on ${activeTable}` : ''}`, schema: activeSchema, table: activeTable ?? '', durationMs: Date.now() - _start, success: true })
+      await loadRows()
+      toast.success('Changes applied')
+    } catch (err) {
+      recordActivity({ type: 'row_save', title: `Failed edited SQL${activeTable ? ` on ${activeTable}` : ''}`, schema: activeSchema, table: activeTable ?? '', success: false, error: String(err) })
+      toast.error('Could not apply changes', { description: String(err) })
+      throw err
+    }
+  }
+
   /** @param {{ rowIdx: number, colIdx: number, value: unknown }} detail */
   async function handleSaveCell(detail) {
     if (!activeTable || !primaryKey.length) return
@@ -4633,6 +4653,7 @@ let rowSearch = $state('')
                 ondelete={handleDeleteRow}
                 onfollowforeignkey={(d) => void handleFollowForeignKey(d)}
                 oninsertrow={handleInsertRow}
+                onexecutesql={handleExecuteRawDml}
                 insertSaving={insertingRow}
                 bind:beginInsertRow={dtBeginInsertRow}
                 bind:stageDeleteSelected={stageDeleteSelectedRows}
