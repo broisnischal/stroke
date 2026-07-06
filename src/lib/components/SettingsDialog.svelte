@@ -397,11 +397,11 @@
       <section class="flex flex-col gap-1.5">
         <h3 class="px-0.5 text-ui-2xs font-medium uppercase tracking-wider text-muted-foreground/70">More</h3>
         <div class="divide-y divide-border/50 rounded-lg border border-border/70 bg-card/40">
-          {@render navRow(Blocks, 'Extensions', () => { open = false; onopenextensions(); })}
-          {@render navRow(Server, 'MCP configuration', () => { open = false; onopenmcp(); })}
-          {@render navRow(Sparkles, 'AI models', openModelConfiguration)}
-          {@render navRow(KeyRound, 'License', () => { open = false; onopenlicense(); }, planBadge)}
-          {@render navRow(Info, 'About Stroke', () => { open = false; onopenabout(); })}
+          {@render navRow('blocks', 'Extensions', () => { open = false; onopenextensions(); })}
+          {@render navRow('server', 'MCP configuration', () => { open = false; onopenmcp(); })}
+          {@render navRow('sparkles', 'AI models', openModelConfiguration)}
+          {@render navRow('key-round', 'License', () => { open = false; onopenlicense(); }, planBadge)}
+          {@render navRow('info', 'About Stroke', () => { open = false; onopenabout(); })}
         </div>
       </section>
     </div>
@@ -443,18 +443,18 @@
   </div>
 {/snippet}
 
-{#snippet navRow(/** @type {any} */ Icon, /** @type {string} */ label, /** @type {() => void} */ onselect, /** @type {{ label: string, class: string } | null} */ badge = null)}
+{#snippet navRow(/** @type {string} */ iconName, /** @type {string} */ label, /** @type {() => void} */ onselect, /** @type {{ label: string, class: string } | null} */ badge = null)}
   <button
     type="button"
     class="flex h-10 w-full items-center gap-2.5 px-3 text-left transition-colors hover:bg-muted/40"
     onclick={onselect}
   >
-    <Icon class="size-3.5 shrink-0 text-muted-foreground/70" />
+    <Icon name={iconName} class="size-3.5 shrink-0 text-muted-foreground/70" />
     <span class="min-w-0 flex-1 truncate text-ui-xs font-medium text-foreground">{label}</span>
     {#if badge}
       <span class="shrink-0 rounded-full border px-1.5 py-px text-[10px] font-medium leading-4 {badge.class}">{badge.label}</span>
     {/if}
-    <ChevronRight class="size-3.5 shrink-0 text-muted-foreground/50" />
+    <Icon name="chevron-right" class="size-3.5 shrink-0 text-muted-foreground/50" />
   </button>
 {/snippet}
 
