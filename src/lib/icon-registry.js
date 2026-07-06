@@ -132,7 +132,7 @@ import ArrowUpAZ from '@lucide/svelte/icons/arrow-up-a-z'
 import {
   Cancel01Icon, Tick01Icon, CheckmarkCircle02Icon, ArrowDown01Icon, ArrowUp01Icon,
   ArrowRight01Icon, ArrowLeft01Icon, Add01Icon, MinusSignIcon, Search01Icon,
-  Delete02Icon, Table01Icon, Table02Icon, RefreshIcon, Copy01Icon, Loading03Icon, Key01Icon,
+  Delete02Icon, Table01Icon, GridTableIcon, RefreshIcon, Copy01Icon, Loading03Icon, Key01Icon,
   LinkSquare01Icon, Database01Icon, SourceCodeIcon, TerminalIcon, ChartLineData02Icon,
   SparklesIcon, GitBranchIcon, Download04Icon, PlayIcon, ViewIcon, ViewOffSlashIcon,
   AiBrain01Icon, Alert02Icon, AlertCircleIcon, Shield01Icon, PencilEdit01Icon,
@@ -165,7 +165,7 @@ export const ICON_MAP = {
   'minus':          { lucide: Minus,         huge: MinusSignIcon },
   'search':         { lucide: Search,        huge: Search01Icon },
   'trash-2':        { lucide: Trash2,        huge: Delete02Icon },
-  'table-2':        { lucide: Table2,        huge: Table02Icon },
+  'table-2':        { lucide: Table2,        huge: GridTableIcon },
   'refresh-cw':     { lucide: RefreshCw,     huge: RefreshIcon },
   'copy':           { lucide: Copy,          huge: Copy01Icon },
   'loader-2':       { lucide: Loader2,       huge: Loading03Icon },
