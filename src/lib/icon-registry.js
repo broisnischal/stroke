@@ -88,6 +88,7 @@ import Blocks from '@lucide/svelte/icons/blocks'
 import Plug from '@lucide/svelte/icons/plug'
 import NotebookPen from '@lucide/svelte/icons/notebook-pen'
 import BarChart3 from '@lucide/svelte/icons/bar-chart-3'
+import Info from '@lucide/svelte/icons/info'
 
 // ── Hugeicons data ───────────────────────────────────────────────────────────
 import {
@@ -105,6 +106,7 @@ import {
   ServerStack01Icon, Settings02Icon, Sun03Icon, ArrowTurnBackwardIcon, Unlink01Icon,
   WifiConnected01Icon, WifiDisconnected01Icon, TestTubeIcon, WorkflowSquare02Icon,
   Share08Icon, GitCompareIcon, PuzzleIcon, PlugSocketIcon, NoteEditIcon, ChartBarLineIcon,
+  InformationCircleIcon,
 } from '@hugeicons/core-free-icons'
 
 /** @type {Record<string, { lucide: any, huge?: any }>} */
@@ -183,4 +185,5 @@ export const ICON_MAP = {
   'plug':           { lucide: Plug,          huge: PlugSocketIcon },
   'notebook-pen':   { lucide: NotebookPen,   huge: NoteEditIcon },
   'bar-chart-3':    { lucide: BarChart3,     huge: ChartBarLineIcon },
+  'info':           { lucide: Info,          huge: InformationCircleIcon },
 }
