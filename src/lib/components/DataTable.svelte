@@ -2487,10 +2487,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (e.key === '0')                  { e.preventDefault(); resetZoom(); return }
     }
 
-    // Ctrl+A: select all rows
+    // Ctrl+A: select all rows — but while editing a cell, let the input handle
+    // its native "select all text" (don't preventDefault, or it's swallowed).
     if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "a" || e.key === "A")) {
-      e.preventDefault();
-      if (!editingCell) selected = new Set(rows.map((_, i) => i));
+      if (!editingCell) {
+        e.preventDefault();
+        selected = new Set(rows.map((_, i) => i));
+      }
       return;
     }
 
@@ -4426,7 +4429,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                 >
                 <div
                   style="position:sticky; left:0; width:{_viewportWidth}px"
-                  onwheel={(e) => { if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) e.stopPropagation() }}
                 >
                   <FkSubviewPanel
                     data={fkSubview.data}
