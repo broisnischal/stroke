@@ -229,6 +229,38 @@ pub fn trial_days_remaining(data_dir: &Path) -> i64 {
     TRIAL_DAYS - elapsed_days
 }
 
+/// The earliest trial start recorded across local mirrors, without writing.
+/// `None` if no local trial file exists yet (e.g. a fresh install).
+fn local_trial_start(data_dir: &Path) -> Option<u64> {
+    let mut earliest: Option<u64> = None;
+    for p in trial_paths(data_dir) {
+        if let Ok(bytes) = std::fs::read(&p) {
+            if let Ok(arr) = <[u8; 8]>::try_from(bytes.as_slice()) {
+                let t = u64::from_le_bytes(arr);
+                earliest = Some(earliest.map_or(t, |e| e.min(t)));
+            }
+        }
+    }
+    earliest
+}
+
+/// Phone home to sync the trial clock with the server (earliest-wins). The
+/// server records the start the first time it sees this device and always
+/// returns the earliest known start — so a reinstall or disk wipe can't hand
+/// out a fresh trial. On success the authoritative start is written to every
+/// local mirror so the next local check reflects it. No-op when offline.
+pub async fn reconcile_trial(data_dir: &Path) {
+    let local = local_trial_start(data_dir);
+    if let Some(server_start) = api_trial(&device_id(), local).await {
+        for p in trial_paths(data_dir) {
+            if let Some(dir) = p.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            let _ = std::fs::write(&p, server_start.to_le_bytes());
+        }
+    }
+}
+
 /// DEBUG ONLY — write a trial start timestamp N days in the past so the UI
 /// shows "N days elapsed" without waiting for real time to pass.
 #[cfg(debug_assertions)]
@@ -437,6 +469,24 @@ pub async fn api_check(key: &str, device_id: &str) -> Option<bool> {
         .ok()?;
     let json: serde_json::Value = resp.json().await.ok()?;
     Some(json.get("valid").and_then(|v| v.as_bool()).unwrap_or(false))
+}
+
+/// POST /api/license/trial — register/sync this device's trial start.
+/// Sends the local start (if any) so the server can keep the earliest; returns
+/// the server's authoritative start (unix seconds), or None on network error.
+pub async fn api_trial(device_id: &str, local_started_at: Option<u64>) -> Option<u64> {
+    let mut body = serde_json::json!({ "device_id": device_id, "hostname": hostname() });
+    if let Some(s) = local_started_at {
+        body["started_at"] = serde_json::json!(s);
+    }
+    let resp = http_client()
+        .post(format!("{STROKE_API}/trial"))
+        .json(&body)
+        .send()
+        .await
+        .ok()?;
+    let json: serde_json::Value = resp.json().await.ok()?;
+    json.get("started_at").and_then(|v| v.as_u64())
 }
 
 /// POST /api/license/deactivate — releases the seat on the server.
