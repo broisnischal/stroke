@@ -4,6 +4,7 @@
   // expanded children mount, arrays/objects render at most CHILD_PAGE children
   // until "Show more" is clicked, and string leaves are display-truncated.
   // The full (untruncated) value is always available via copy / open actions.
+  import { untrack } from 'svelte'
   import JsonTree from './JsonTree.svelte'
   import ChevronRight from '@lucide/svelte/icons/chevron-right'
   import Copy from '@lucide/svelte/icons/copy'
@@ -39,7 +40,9 @@
   )
   const isContainer = $derived(isArray || isObject)
 
-  let expanded = $state(depth < defaultDepth)
+  // Initial expansion depends on the node's fixed depth props — capture only
+  // the initial value (untrack) since a node's depth never changes at runtime.
+  let expanded = $state(untrack(() => depth < defaultDepth))
   let childLimit = $state(CHILD_PAGE)
 
   // Total child count — cheap for arrays (.length). Avoids materializing a tuple

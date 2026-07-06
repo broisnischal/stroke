@@ -10,6 +10,7 @@
   import Loader2         from '@lucide/svelte/icons/loader-2'
   import Sparkles        from '@lucide/svelte/icons/sparkles'
   import ScrollText      from '@lucide/svelte/icons/scroll-text'
+  import ExternalLink    from '@lucide/svelte/icons/external-link'
   import ReleaseNotesPage from './ReleaseNotesPage.svelte'
 
   let {
@@ -176,6 +177,16 @@
   async function restart() {
     await invoke('restart_app')
   }
+
+  /** Open the online changelog in the user's browser. */
+  async function openChangelog() {
+    try {
+      const { openUrl } = await import('@tauri-apps/plugin-opener')
+      await openUrl('https://stroke.click/changelog')
+    } catch {
+      window.open('https://stroke.click/changelog', '_blank', 'noopener,noreferrer')
+    }
+  }
 </script>
 
 <!-- ── Release Notes full-page overlay ──────────────────────────── -->
@@ -317,6 +328,16 @@
         <p class="text-muted-foreground">
           {checking ? 'Checking GitHub for a newer release…' : "You're on the latest version."}
         </p>
+        {#if !checking}
+          <button
+            type="button"
+            onclick={openChangelog}
+            class="mt-2 inline-flex items-center gap-1 text-xs text-primary/80 transition-colors hover:text-primary hover:underline underline-offset-2"
+          >
+            View changelog
+            <ExternalLink class="size-3" />
+          </button>
+        {/if}
       {/if}
 
     </div>
