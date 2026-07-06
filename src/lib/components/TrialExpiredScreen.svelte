@@ -33,9 +33,9 @@
       </p>
     </div>
 
-    <!-- Activation — the only way forward -->
-    <div class="w-full rounded-2xl border border-border/50 bg-card/30 p-2">
-      <LicenseActivation compact />
+    <!-- Activation — the only way forward. No card; just the field + button. -->
+    <div class="w-full">
+      <LicenseActivation naked />
     </div>
 
     <div class="flex items-center gap-4 text-[12px]">
