@@ -1,46 +1,11 @@
 <script>
-  import Database     from '@lucide/svelte/icons/database'
-  import HardDrive    from '@lucide/svelte/icons/hard-drive'
-  import Wifi         from '@lucide/svelte/icons/wifi'
-  import WifiOff      from '@lucide/svelte/icons/wifi-off'
-  import Server       from '@lucide/svelte/icons/server'
-  import Bot          from '@lucide/svelte/icons/bot'
-  import ArrowUpCircle from '@lucide/svelte/icons/arrow-up-circle'
-  import Settings2    from '@lucide/svelte/icons/settings-2'
-  import ChevronDown  from '@lucide/svelte/icons/chevron-down'
-  import RefreshCw    from '@lucide/svelte/icons/refresh-cw'
-  import Radio        from '@lucide/svelte/icons/radio'
-  import Check        from '@lucide/svelte/icons/check'
-  import Table2       from '@lucide/svelte/icons/table-2'
-  import Terminal     from '@lucide/svelte/icons/terminal'
-  import LayoutTemplate from '@lucide/svelte/icons/layout-template'
-  import History      from '@lucide/svelte/icons/history'
-  import Archive      from '@lucide/svelte/icons/archive'
-  import BarChart2    from '@lucide/svelte/icons/bar-chart-2'
-  import LayoutDashboard from '@lucide/svelte/icons/layout-dashboard'
-  import ShieldCheck  from '@lucide/svelte/icons/shield-check'
-  import Code2        from '@lucide/svelte/icons/code-2'
-  import Settings     from '@lucide/svelte/icons/settings'
-  import Unplug       from '@lucide/svelte/icons/unplug'
-  import Command      from '@lucide/svelte/icons/command'
-  import Cloud        from '@lucide/svelte/icons/cloud'
-  import Undo2        from '@lucide/svelte/icons/undo-2'
-  import ChevronsUp   from '@lucide/svelte/icons/chevrons-up'
-  import ChevronsDown from '@lucide/svelte/icons/chevrons-down'
-  import ChevronsLeft  from '@lucide/svelte/icons/chevrons-left'
-  import ChevronsRight from '@lucide/svelte/icons/chevrons-right'
-  import Plus         from '@lucide/svelte/icons/plus'
-  import MoreHorizontal from '@lucide/svelte/icons/more-horizontal'
-  import GitBranch     from '@lucide/svelte/icons/git-branch'
-  import Sun          from '@lucide/svelte/icons/sun'
-  import Moon         from '@lucide/svelte/icons/moon'
-  import Lock         from '@lucide/svelte/icons/lock'
-  import LockOpen     from '@lucide/svelte/icons/lock-open'
+  import Icon         from './Icon.svelte'
   import { tick }     from 'svelte'
   import { cn }       from '$lib/utils.js'
   import { aiProfiles, activeProfileId, setActiveProfile } from '$lib/stores/ai-settings.js'
   import { toggleLightDark, isCurrentThemeDark } from '$lib/stores/settings.js'
   import { executeSql, cloudflareListD1Databases } from '$lib/api.js'
+  import { providerListDatabases } from '$lib/providers.js'
   import { engineFamily } from '$lib/stores/connections.js'
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js'
   import AppearanceMenu from './AppearanceMenu.svelte'
@@ -59,6 +24,7 @@
     onconnect = /** @type {() => void} */ (() => {}),
     onswitchtodb = /** @type {(db: string) => void} */ ((_db) => {}),
     onswitchd1database = /** @type {(db: { databaseId: string, name: string }) => void} */ ((_db) => {}),
+    onswitchproviderdb = /** @type {(db: { provider: string, dbRef: string, name: string }) => void} */ ((_db) => {}),
     onswitchconnection = /** @type {(conn: import('$lib/stores/connections.js').SavedConnection) => void} */ ((_c) => {}),
     oncheckupdate = /** @type {() => void} */ (() => {}),
     onopenmodelsettings = /** @type {() => void} */ (() => {}),
@@ -229,10 +195,18 @@
   )
   const isPostgres = $derived(engineFamily(connection?.type) === 'postgres' || engineFamily(connection?.type) === 'mysql')
   const isD1 = $derived(connection?.type === 'd1')
+  /** Connection that originated from a provider sign-in (Neon/Supabase/…). */
+  const isProvider = $derived(!!connection?.provider)
   /** Whether this connection supports switching databases in-place. */
-  const canSwitchDb = $derived(isPostgres || isD1)
-  /** Label shown in the trigger for the active db (D1 has no `database` field, so fall back to the connection name). */
-  const currentDbLabel = $derived(isD1 ? (connection?.database || connection?.name || '') : currentDb)
+  const canSwitchDb = $derived(isPostgres || isD1 || isProvider)
+  /** Label shown in the trigger for the active db. Provider connections all use
+   * the db name "postgres", so show the project name instead (from the connection
+   * name, e.g. "Prisma · stroke-testing" → "stroke-testing"). */
+  const currentDbLabel = $derived(
+    isProvider ? ((connection?.name?.split(' · ').pop()) || connection?.name || currentDb)
+    : isD1 ? (connection?.database || connection?.name || '')
+    : currentDb,
+  )
   /** Key of the active db, used to mark the current row. */
   const currentDbKey = $derived(isD1 ? (connection?.databaseId ?? '') : currentDb)
 
@@ -243,6 +217,20 @@
   )
 
   async function fetchDatabases() {
+    // Provider connections list the account's other databases/projects via the
+    // provider API (checked first — a Supabase/Neon connection is also postgres).
+    if (isProvider && connection?.provider) {
+      dbLoading = true
+      try {
+        const dbs = await providerListDatabases(connection.provider)
+        dbList = (dbs ?? []).map((/** @type {{ db_ref: string, name: string }} */ d) => ({ key: d.db_ref, label: d.name }))
+      } catch {
+        dbList = []
+      } finally {
+        dbLoading = false
+      }
+      return
+    }
     if (isPostgres) {
       dbLoading = true
       try {
@@ -278,7 +266,9 @@
   }
 
   function switchDb(/** @type {{ key: string, label: string }} */ db) {
-    if (db.key !== currentDbKey) {
+    if (isProvider && connection?.provider) {
+      onswitchproviderdb({ provider: connection.provider, dbRef: db.key, name: db.label })
+    } else if (db.key !== currentDbKey) {
       if (isD1) onswitchd1database({ databaseId: db.key, name: db.label })
       else onswitchtodb(db.label)
     }
@@ -308,10 +298,10 @@
 
   /** @param {import('$lib/stores/connections.js').SavedConnection} c */
   function connIcon(c) {
-    if (c.type === 'sqlite') return HardDrive
-    if (c.type === 'd1') return Cloud
-    if (c.type === 'libsql') return Wifi
-    return Database
+    if (c.type === 'sqlite') return 'hard-drive'
+    if (c.type === 'd1') return 'cloud'
+    if (c.type === 'libsql') return 'wifi'
+    return 'database'
   }
 
   /** Shared icon-only button classes */
@@ -322,16 +312,16 @@
   // Tools menu — built from one list so every row renders identically.
   const toolItems = $derived.by(() => {
     const t = connection?.type ?? 'postgres'
-    /** @type {{ label: string, icon: any, onclick: () => void }[]} */
+    /** @type {{ label: string, icon: string, onclick: () => void }[]} */
     const items = []
-    if (t === 'postgres' || t === 'mysql') items.push({ label: 'Schema Explorer', icon: LayoutTemplate, onclick: onopenSchema })
-    items.push({ label: 'Activity Log', icon: History, onclick: onopenlogs })
-    if (t === 'postgres') items.push({ label: 'Security', icon: ShieldCheck, onclick: onopensecurity })
-    items.push({ label: 'ORM Runner', icon: Code2, onclick: onopenorm })
-    items.push({ label: 'Backup & Restore', icon: Archive, onclick: onopenbackup })
-    items.push({ label: 'Charts', icon: BarChart2, onclick: onopenchartspage })
-    items.push({ label: 'Dashboard', icon: LayoutDashboard, onclick: onopendashboard })
-    items.push({ label: 'Diagrams', icon: GitBranch, onclick: onopendiagrams })
+    if (t === 'postgres' || t === 'mysql') items.push({ label: 'Schema Explorer', icon: 'layout-template', onclick: onopenSchema })
+    items.push({ label: 'Activity Log', icon: 'history', onclick: onopenlogs })
+    if (t === 'postgres') items.push({ label: 'Security', icon: 'shield-check', onclick: onopensecurity })
+    items.push({ label: 'ORM Runner', icon: 'code-2', onclick: onopenorm })
+    items.push({ label: 'Backup & Restore', icon: 'archive', onclick: onopenbackup })
+    items.push({ label: 'Charts', icon: 'bar-chart-2', onclick: onopenchartspage })
+    items.push({ label: 'Dashboard', icon: 'layout-dashboard', onclick: onopendashboard })
+    items.push({ label: 'Diagrams', icon: 'git-branch', onclick: onopendiagrams })
     return items
   })
 </script>
@@ -363,9 +353,9 @@
           title="Switch connection (⇧⌘C)"
         >
           {#if connectionLost}
-            <WifiOff class="size-3 shrink-0 text-red-500" />
+            <Icon name="wifi-off" class="size-3 shrink-0 text-red-500" />
           {:else}
-            <Wifi class="size-3 shrink-0 text-emerald-500" />
+            <Icon name="wifi" class="size-3 shrink-0 text-emerald-500" />
           {/if}
           <span class={cn('max-w-[7rem] truncate font-medium', connectionLost && 'text-red-500/70')}>{connType}</span>
           {#if connLabel}
@@ -375,7 +365,7 @@
             <span class="size-1.5 shrink-0 rounded-full bg-muted-foreground/35" title={connection.environment}></span>
           {/if}
           {#if savedConnections.length > 1}
-            <ChevronDown class={cn('size-3 shrink-0 opacity-40 transition-transform', connOpen && 'rotate-180')} />
+            <Icon name="chevron-down" class={cn('size-3 shrink-0 opacity-40 transition-transform', connOpen && 'rotate-180')} />
           {/if}
         </DropdownMenu.Trigger>
 
@@ -384,7 +374,7 @@
             <DropdownMenu.Label>Connections</DropdownMenu.Label>
             {#each savedConnections as conn (conn.id)}
               {@const isCurrent = conn.id === activeConnectionId}
-              {@const Icon = connIcon(conn)}
+              {@const iconName = connIcon(conn)}
               {@const subtitle = conn.database && conn.database !== (conn.name ?? conn.host) ? conn.database : (conn.host ?? '')}
               <DropdownMenu.Item
                 class="cursor-pointer items-start gap-2.5 py-1.5"
@@ -394,7 +384,7 @@
                   'mt-px flex size-5 shrink-0 items-center justify-center rounded-md',
                   isCurrent ? 'bg-emerald-500/12 text-emerald-500' : 'bg-muted/50 text-muted-foreground/55',
                 )}>
-                  <Icon class="size-3.5" />
+                  <Icon name={iconName} class="size-3.5" />
                 </span>
                 <div class="min-w-0 flex-1">
                   <div class="flex items-center gap-1.5">
@@ -409,7 +399,7 @@
                     <div class="mt-0.5 truncate font-mono text-[10px] leading-tight text-muted-foreground/45">{subtitle}</div>
                   {/if}
                 </div>
-                {#if isCurrent}<Check class="ml-auto mt-0.5 size-3.5 shrink-0 text-emerald-500" />{/if}
+                {#if isCurrent}<Icon name="check" class="ml-auto mt-0.5 size-3.5 shrink-0 text-emerald-500" />{/if}
               </DropdownMenu.Item>
             {/each}
 
@@ -417,7 +407,7 @@
 
             <DropdownMenu.Item class="cursor-pointer gap-2.5" onclick={() => { connOpen = false; onconnect() }}>
               <span class="flex size-5 shrink-0 items-center justify-center rounded-md bg-muted/50 text-muted-foreground/55">
-                <WifiOff class="size-3.5" />
+                <Icon name="wifi-off" class="size-3.5" />
               </span>
               Manage connections…
             </DropdownMenu.Item>
@@ -438,15 +428,15 @@
             title="Switch database (⌘D)"
           >
             {#if connection?.type === 'sqlite'}
-              <HardDrive class="size-3 shrink-0" />
+              <Icon name="hard-drive" class="size-3 shrink-0" />
             {:else if isD1}
-              <Cloud class="size-3 shrink-0" />
+              <Icon name="cloud" class="size-3 shrink-0" />
             {:else}
-              <Database class="size-3 shrink-0" />
+              <Icon name="database" class="size-3 shrink-0" />
             {/if}
             <span class="max-w-[8rem] truncate font-mono">{currentDbLabel || 'No database'}</span>
             {#if canSwitchDb}
-              <ChevronDown class={cn('size-3 shrink-0 opacity-40 transition-transform', dbOpen && 'rotate-180')} />
+              <Icon name="chevron-down" class={cn('size-3 shrink-0 opacity-40 transition-transform', dbOpen && 'rotate-180')} />
             {/if}
           </DropdownMenu.Trigger>
 
@@ -473,7 +463,7 @@
             <div bind:this={dbListEl} class="db-list-scroll max-h-[200px] overflow-y-auto p-1 [contain:layout_paint]">
               {#if dbLoading}
                 <div class="flex items-center justify-center gap-2 py-4 text-muted-foreground/50">
-                  <RefreshCw class="size-3 animate-spin" />
+                  <Icon name="refresh-cw" class="size-3 animate-spin" />
                   <span class="text-[11px]">Loading…</span>
                 </div>
               {:else if dbFiltered.length === 0}
@@ -498,12 +488,12 @@
                     onpointerenter={() => (dbHl = i)}
                   >
                     {#if isD1}
-                      <Cloud class={cn('size-3.5 shrink-0', isCurrent ? 'text-amber-500' : 'text-muted-foreground/35')} />
+                      <Icon name="cloud" class={cn('size-3.5 shrink-0', isCurrent ? 'text-amber-500' : 'text-muted-foreground/35')} />
                     {:else}
-                      <Database class={cn('size-3.5 shrink-0', isCurrent ? 'text-foreground' : 'text-muted-foreground/35')} />
+                      <Icon name="database" class={cn('size-3.5 shrink-0', isCurrent ? 'text-foreground' : 'text-muted-foreground/35')} />
                     {/if}
                     <span class="min-w-0 flex-1 truncate">{db.label}</span>
-                    {#if isCurrent}<Check class="ml-auto size-3 shrink-0 text-emerald-500" />{/if}
+                    {#if isCurrent}<Icon name="check" class="ml-auto size-3 shrink-0 text-emerald-500" />{/if}
                   </button>
                 {/each}
               {/if}
@@ -521,7 +511,7 @@
                     onclick={fetchDatabases}
                     title="Refresh"
                   >
-                    <RefreshCw class={cn('size-3', dbLoading && 'animate-spin')} />
+                    <Icon name="refresh-cw" class={cn('size-3', dbLoading && 'animate-spin')} />
                   </button>
                   {#if isPostgres}
                     <button
@@ -530,7 +520,7 @@
                       onclick={() => { dbOpen = false; createDbOpen = true }}
                       title="Create database"
                     >
-                      <Plus class="size-3" />
+                      <Icon name="plus" class="size-3" />
                     </button>
                   {/if}
                 </div>
@@ -547,7 +537,7 @@
             title="Create new database"
             aria-label="Create new database"
           >
-            <Plus class="size-3" />
+            <Icon name="plus" class="size-3" />
           </button>
         {/if}
       </div>
@@ -567,7 +557,7 @@
           onclick={() => onviewchange('table')}
           title="Data view (⌘⇧D)"
         >
-          <Table2 class="size-3 shrink-0" />
+          <Icon name="table-2" class="size-3 shrink-0" />
           <span class={activeView === 'table' ? 'font-medium' : ''}>Data</span>
         </button>
         <button
@@ -581,7 +571,7 @@
           onclick={() => onviewchange('sql')}
           title="Query Editor (⌘⇧S)"
         >
-          <Terminal class="size-3 shrink-0" />
+          <Icon name="terminal" class="size-3 shrink-0" />
           <span class={activeView === 'sql' ? 'font-medium' : ''}>Query</span>
         </button>
       </div>
@@ -591,17 +581,17 @@
         {@render sep()}
         <div class="flex items-center gap-px">
           <button type="button" class={iconBtn} onclick={onscrolltabletop} title="Go to top (⌘↑)" aria-label="Scroll to top">
-            <ChevronsUp class="size-3.5" />
+            <Icon name="chevrons-up" class="size-3.5" />
           </button>
           <button type="button" class={iconBtn} onclick={onscrolltablebottom} title="Go to bottom (⌘↓)" aria-label="Scroll to bottom">
-            <ChevronsDown class="size-3.5" />
+            <Icon name="chevrons-down" class="size-3.5" />
           </button>
           {#if canScrollTableHorizontally}
             <button type="button" class={iconBtn} onclick={onscrolltableleft} title="Go to first column (⌘⌥←)" aria-label="Scroll to leftmost column">
-              <ChevronsLeft class="size-3.5" />
+              <Icon name="chevrons-left" class="size-3.5" />
             </button>
             <button type="button" class={iconBtn} onclick={onscrolltableright} title="Go to last column (⌘⌥→)" aria-label="Scroll to rightmost column">
-              <ChevronsRight class="size-3.5" />
+              <Icon name="chevrons-right" class="size-3.5" />
             </button>
           {/if}
         </div>
@@ -629,7 +619,7 @@
             </span>
             <span class="text-ui-2xs font-semibold uppercase tracking-wide">Live</span>
           {:else}
-            <Radio class="size-3 shrink-0" />
+            <Icon name="radio" class="size-3 shrink-0" />
             <span>Live</span>
           {/if}
         </button>
@@ -643,7 +633,7 @@
         onclick={onconnect}
         title="No connection — click to connect"
       >
-        <WifiOff class="size-3 shrink-0" />
+        <Icon name="wifi-off" class="size-3 shrink-0" />
         <span class="font-medium">Not connected</span>
       </button>
     {/if}
@@ -660,7 +650,7 @@
         onclick={onapplyedits}
         title="Apply {pendingEditCount} unsaved change{pendingEditCount === 1 ? '' : 's'}"
       >
-        <Check class="size-2.5 shrink-0" />
+        <Icon name="check" class="size-2.5 shrink-0" />
         Apply {pendingEditCount}
       </button>
       <button
@@ -669,7 +659,7 @@
         onclick={onresetedits}
         title="Discard unsaved changes"
       >
-        <Undo2 class="size-2.5 shrink-0" />
+        <Icon name="undo-2" class="size-2.5 shrink-0" />
         Reset
       </button>
       {@render sep()}
@@ -679,14 +669,14 @@
     {#if connection}
       <DropdownMenu.Root>
         <DropdownMenu.Trigger class={iconBtn} title="Tools">
-          <MoreHorizontal class="size-3.5" />
+          <Icon name="more-horizontal" class="size-3.5" />
         </DropdownMenu.Trigger>
         <DropdownMenu.Content side="top" align="end" class="w-52">
           <DropdownMenu.Label>Tools</DropdownMenu.Label>
           {#each toolItems as item (item.label)}
-            {@const Icon = item.icon}
+            {@const iconName = item.icon}
             <DropdownMenu.Item class="cursor-pointer" onclick={item.onclick}>
-              <Icon class="size-3.5 shrink-0 text-muted-foreground/45" />
+              <Icon name={iconName} class="size-3.5 shrink-0 text-muted-foreground/45" />
               <span class="truncate">{item.label}</span>
               {#if !hasPro}{@render proBadge()}{/if}
             </DropdownMenu.Item>
@@ -703,12 +693,12 @@
       onclick={onopenaimode}
       title={aiMode ? 'Close AI (⌘⇧E)' : 'Open AI (⌘⇧E)'}
     >
-      <Bot class="size-3.5" />
+      <Icon name="bot" class="size-3.5" />
     </button>
 
     <!-- Command palette -->
     <button type="button" class={iconBtn} onclick={onopencommand} title="Command menu (⌘K)">
-      <Command class="size-3.5" />
+      <Icon name="command" class="size-3.5" />
     </button>
 
     <!-- Read-only toggle -->
@@ -720,9 +710,9 @@
       onclick={() => (readonly = !readonly)}
     >
       {#if readonly}
-        <Lock class="size-3.5" />
+        <Icon name="lock" class="size-3.5" />
       {:else}
-        <LockOpen class="size-3.5" />
+        <Icon name="lock-open" class="size-3.5" />
       {/if}
     </button>
 
@@ -734,9 +724,9 @@
       onclick={() => toggleLightDark()}
     >
       {#if $isCurrentThemeDark}
-        <Sun class="size-3.5" />
+        <Icon name="sun" class="size-3.5" />
       {:else}
-        <Moon class="size-3.5" />
+        <Icon name="moon" class="size-3.5" />
       {/if}
     </button>
 
@@ -754,7 +744,7 @@
 
     <!-- Settings -->
     <button type="button" class={iconBtn} onclick={onopensettings} title="Settings (⌘,)">
-      <Settings class="size-3.5" />
+      <Icon name="settings" class="size-3.5" />
     </button>
 
     <!-- Disconnect -->
@@ -765,7 +755,7 @@
         onclick={ondisconnect}
         title="Disconnect"
       >
-        <Unplug class="size-3.5" />
+        <Icon name="unplug" class="size-3.5" />
       </button>
     {/if}
 
@@ -779,7 +769,7 @@
         onclick={oncheckupdate}
         title="Update available"
       >
-        <ArrowUpCircle class="size-3 shrink-0" />
+        <Icon name="arrow-up-circle" class="size-3 shrink-0" />
         Update
       </button>
       {@render sep()}
@@ -807,9 +797,9 @@
         class={cn(labelBtn, 'text-muted-foreground/70')}
         title="Switch AI model"
       >
-        <Bot class="size-3 shrink-0 opacity-60" />
+        <Icon name="bot" class="size-3 shrink-0 opacity-60" />
         <span class="max-w-[9rem] truncate font-medium">{modelName}</span>
-        <ChevronDown class="size-3 shrink-0 opacity-35 transition-transform data-[state=open]:rotate-180" />
+        <Icon name="chevron-down" class="size-3 shrink-0 opacity-35 transition-transform data-[state=open]:rotate-180" />
       </DropdownMenu.Trigger>
 
       <DropdownMenu.Content side="top" align="end" class="w-56">
@@ -827,7 +817,7 @@
         <DropdownMenu.Separator />
 
         <DropdownMenu.Item class="cursor-pointer" onclick={onopenmodelsettings}>
-          <Settings2 class="size-3.5 shrink-0 text-muted-foreground/50" />
+          <Icon name="settings-2" class="size-3.5 shrink-0 text-muted-foreground/50" />
           Manage models…
         </DropdownMenu.Item>
       </DropdownMenu.Content>

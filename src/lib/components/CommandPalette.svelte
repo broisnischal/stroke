@@ -1,35 +1,5 @@
 <script>
-  import Table2         from '@lucide/svelte/icons/table-2'
-  import Terminal       from '@lucide/svelte/icons/terminal'
-  import Code2          from '@lucide/svelte/icons/code-2'
-  import LayoutTemplate from '@lucide/svelte/icons/layout-template'
-  import Settings       from '@lucide/svelte/icons/settings'
-  import Unplug         from '@lucide/svelte/icons/unplug'
-  import Database       from '@lucide/svelte/icons/database'
-  import HardDrive      from '@lucide/svelte/icons/hard-drive'
-  import Cloud          from '@lucide/svelte/icons/cloud'
-  import RefreshCw      from '@lucide/svelte/icons/refresh-cw'
-  import Bot            from '@lucide/svelte/icons/bot'
-  import Sparkles       from '@lucide/svelte/icons/sparkles'
-  import Keyboard       from '@lucide/svelte/icons/keyboard'
-  import ArrowLeftRight from '@lucide/svelte/icons/arrow-left-right'
-  import ArrowDownToLine from '@lucide/svelte/icons/arrow-down-to-line'
-  import Info           from '@lucide/svelte/icons/info'
-  import Bug            from '@lucide/svelte/icons/bug'
-  import History        from '@lucide/svelte/icons/history'
-  import Bookmark       from '@lucide/svelte/icons/bookmark'
-  import ShieldCheck    from '@lucide/svelte/icons/shield-check'
-  import Package        from '@lucide/svelte/icons/package'
-  import Braces         from '@lucide/svelte/icons/braces'
-  import Blocks         from '@lucide/svelte/icons/blocks'
-  import ChevronRight   from '@lucide/svelte/icons/chevron-right'
-  import ChevronLeft    from '@lucide/svelte/icons/chevron-left'
-  import Eye            from '@lucide/svelte/icons/eye'
-  import Network        from '@lucide/svelte/icons/network'
-import Search         from '@lucide/svelte/icons/search'
-  import FileText       from '@lucide/svelte/icons/file-text'
-  import GitCompare     from '@lucide/svelte/icons/git-compare'
-  import GitBranch      from '@lucide/svelte/icons/git-branch'
+  import Icon from './Icon.svelte'
   import * as Command from '$lib/components/ui/command/index.js'
   import { formatTableRowCount } from '$lib/table-list.js'
 
@@ -255,9 +225,9 @@ import Search         from '@lucide/svelte/icons/search'
 
   /** @param {'postgres'|'sqlite'|'d1'} type */
   function driverIcon(type) {
-    if (type === 'sqlite') return HardDrive
-    if (type === 'd1')     return Cloud
-    return Database
+    if (type === 'sqlite') return 'hard-drive'
+    if (type === 'd1')     return 'cloud'
+    return 'database'
   }
 
   /** @param {import('$lib/stores/connections.js').SavedConnection} conn */
@@ -305,7 +275,7 @@ import Search         from '@lucide/svelte/icons/search'
             class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground focus-visible:outline-none"
             onclick={goBack}
           >
-            <ChevronLeft class="size-3" />
+            <Icon name="chevron-left" class="size-3" />
             Back
           </button>
           <span class="text-muted-foreground/25 text-[11px]">/</span>
@@ -322,67 +292,67 @@ import Search         from '@lucide/svelte/icons/search'
           {#if connected}
             <Command.Group heading="Views">
               <Command.Item value="open table data browser" onSelect={() => run(onopentable)}>
-                <Table2 class="size-4 shrink-0 opacity-60" />
+                <Icon name="table-2" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">Table data</span>
                 <Command.Shortcut keys="⌘⇧D" />
               </Command.Item>
               <Command.Item value="find search rows data across all tables global database" onSelect={() => run(onglobalsearch)}>
-                <Search class="size-4 shrink-0 opacity-60" />
+                <Icon name="search" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">Find in database</span>
                 <Command.Shortcut keys="⌘⇧G" />
               </Command.Item>
               <Command.Item value="open sql editor query console" onSelect={() => run(onopensql)}>
-                <Terminal class="size-4 shrink-0 opacity-60" />
+                <Icon name="terminal" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">SQL editor</span>
                 <Command.Shortcut keys="⌘⇧S" />
               </Command.Item>
               <Command.Item value="open orm runner drizzle prisma query builder" onSelect={() => run(onopenorm)}>
-                <Code2 class="size-4 shrink-0 opacity-60" />
+                <Icon name="code-2" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">ORM Runner</span>
                 <Command.Shortcut keys="⌘⇧O" />
               </Command.Item>
               <Command.Item value="open er diagram entity relationship foreign key pk fk graph" onSelect={() => run(onopenerd)}>
-                <Network class="size-4 shrink-0 opacity-60" />
+                <Icon name="network" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">ER Diagram</span>
               </Command.Item>
               {#if hasSchemaExplorer}
                 <Command.Item value="open schema explorer indexes enums views materialized" onSelect={() => run(onopenSchema)}>
-                  <LayoutTemplate class="size-4 shrink-0 opacity-60" />
+                  <Icon name="layout-template" class="size-4 shrink-0 opacity-60" />
                   <span data-slot="command-label" class="truncate">Schema Explorer</span>
                 </Command.Item>
               {/if}
               {#if hasSecurity}
                 <Command.Item value="open security roles users policies rls row level" onSelect={() => run(onopensecurity)}>
-                  <ShieldCheck class="size-4 shrink-0 opacity-60" />
+                  <Icon name="shield-check" class="size-4 shrink-0 opacity-60" />
                   <span data-slot="command-label" class="truncate">Security</span>
                 </Command.Item>
               {/if}
               <Command.Item value="open activity log events history operations" onSelect={() => run(onopenlogs)}>
-                <History class="size-4 shrink-0 opacity-60" />
+                <Icon name="history" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">Activity Log</span>
               </Command.Item>
               <Command.Item value="open extensions plugins formatters generators transforms better time uuid" onSelect={() => run(onopenextensions)}>
-                <Blocks class="size-4 shrink-0 opacity-60" />
+                <Icon name="blocks" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">Extensions</span>
               </Command.Item>
               <Command.Item value="open json viewer explorer jsonpath tool" onSelect={() => run(onopenJsonViewer)}>
-                <Braces class="size-4 shrink-0 opacity-60" />
+                <Icon name="braces" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">JSON Viewer</span>
               </Command.Item>
               <Command.Item value="new sql notebook jupyter cells sql markdown" onSelect={() => run(onopennotebook)}>
-                <FileText class="size-4 shrink-0 opacity-60" />
+                <Icon name="file-text" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">New Notebook</span>
               </Command.Item>
               <Command.Item value="open notebook file sqlnb" onSelect={() => run(onopennotebookfile)}>
-                <FileText class="size-4 shrink-0 opacity-60" />
+                <Icon name="file-text" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">Open Notebook…</span>
               </Command.Item>
               <Command.Item value="schema timeline drift detection history changes diff" onSelect={() => run(openschematimeline)}>
-                <GitBranch class="size-4 shrink-0 opacity-60" />
+                <Icon name="git-branch" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">Schema Timeline</span>
               </Command.Item>
               <Command.Item value="data diff compare tables rows changes" onSelect={() => run(opendatadiff)}>
-                <GitCompare class="size-4 shrink-0 opacity-60" />
+                <Icon name="git-compare" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">Data Diff</span>
               </Command.Item>
             </Command.Group>
@@ -391,7 +361,7 @@ import Search         from '@lucide/svelte/icons/search'
               <Command.Group heading="Schemas">
                 {#each schemas as schema (schema)}
                   <Command.Item value="schema {schema}" onSelect={() => run(() => onschemachange(schema))}>
-                    <Database class="size-4 shrink-0 opacity-60" />
+                    <Icon name="database" class="size-4 shrink-0 opacity-60" />
                     <span data-slot="command-label" class="truncate font-mono">{schema}</span>
                     {#if schema === activeSchema}
                       <span data-slot="command-trailing" class="shrink-0 text-ui-xs text-muted-foreground">current</span>
@@ -405,23 +375,23 @@ import Search         from '@lucide/svelte/icons/search'
               <Command.Group heading="Tables">
                 {#each regularTables.slice(0, 8) as table (table.name)}
                   <Command.Item value="table {activeSchema} {table.name}" onSelect={() => run(() => ontableselect(table.name))}>
-                    <Table2 class="size-4 shrink-0 opacity-60" />
+                    <Icon name="table-2" class="size-4 shrink-0 opacity-60" />
                     <span data-slot="command-label" class="truncate font-mono">{table.name}</span>
                     <span data-slot="command-trailing" class="shrink-0 font-mono text-ui-xs tabular-nums text-muted-foreground">{formatTableRowCount(table.rowCount)}</span>
                   </Command.Item>
                 {/each}
                 {#each viewTables.slice(0, 4) as table (table.name)}
                   <Command.Item value="view {activeSchema} {table.name}" onSelect={() => run(() => ontableselect(table.name))}>
-                    <Eye class="size-4 shrink-0 opacity-60" />
+                    <Icon name="eye" class="size-4 shrink-0 opacity-60" />
                     <span data-slot="command-label" class="truncate font-mono">{table.name}</span>
                     <span data-slot="command-trailing" class="shrink-0 text-ui-xs text-muted-foreground">view</span>
                   </Command.Item>
                 {/each}
                 {#if tables.length > 12}
                   <Command.Item value="browse all tables views search" onSelect={() => navigate('tables')}>
-                    <Table2 class="size-4 shrink-0 opacity-40" />
+                    <Icon name="table-2" class="size-4 shrink-0 opacity-40" />
                     <span data-slot="command-label" class="truncate text-muted-foreground">All {tables.length} tables & views…</span>
-                    <ChevronRight class="size-3.5 shrink-0 text-muted-foreground/40" />
+                    <Icon name="chevron-right" class="size-3.5 shrink-0 text-muted-foreground/40" />
                   </Command.Item>
                 {/if}
               </Command.Group>
@@ -429,12 +399,12 @@ import Search         from '@lucide/svelte/icons/search'
 
             <Command.Group heading="AI">
               <Command.Item value="ask ai assistant chat query" onSelect={() => run(onopenai)}>
-                <Bot class="size-4 shrink-0 opacity-60" />
+                <Icon name="bot" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">Ask AI</span>
                 <Command.Shortcut keys="⌘⇧E" />
               </Command.Item>
               <Command.Item value="toggle ai sidebar inline assistant context" onSelect={() => run(onopenaisidebar)}>
-                <Sparkles class="size-4 shrink-0 opacity-60" />
+                <Icon name="sparkles" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">AI sidebar</span>
                 <Command.Shortcut keys="⌘I" />
               </Command.Item>
@@ -442,14 +412,14 @@ import Search         from '@lucide/svelte/icons/search'
                 value={aiMode ? "close ai panel hide assistant" : "open ai panel show assistant chat"}
                 onSelect={() => run(ontoggleaimode)}
               >
-                <ArrowLeftRight class="size-4 shrink-0 opacity-60" />
+                <Icon name="arrow-left-right" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">{aiMode ? 'Close AI panel' : 'Open AI panel'}</span>
               </Command.Item>
             </Command.Group>
 
             <Command.Group heading="Queries">
               <Command.Item value="open query history sql statements" onSelect={() => run(onopenqueryhistory)}>
-                <History class="size-4 shrink-0 opacity-60" />
+                <Icon name="history" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">Query history</span>
               </Command.Item>
             </Command.Group>
@@ -458,7 +428,7 @@ import Search         from '@lucide/svelte/icons/search'
               <Command.Group heading="Saved queries">
                 {#each savedQueries as entry (entry.id)}
                   <Command.Item value="saved query {entry.name} {entry.sql}" onSelect={() => run(() => onqueryselect(entry.sql))}>
-                    <Bookmark class="size-4 shrink-0 opacity-60" />
+                    <Icon name="bookmark" class="size-4 shrink-0 opacity-60" />
                     <span data-slot="command-label" class="min-w-0 truncate font-mono text-ui-xs">{entry.name}</span>
                   </Command.Item>
                 {/each}
@@ -469,7 +439,7 @@ import Search         from '@lucide/svelte/icons/search'
               <Command.Group heading="Recent queries">
                 {#each queryHistory.slice(0, 20) as entry (entry.id)}
                   <Command.Item value="recent query {entry.title} {entry.sql}" onSelect={() => run(() => onqueryselect(entry.sql))}>
-                    <History class="size-4 shrink-0 opacity-60" />
+                    <Icon name="history" class="size-4 shrink-0 opacity-60" />
                     <span data-slot="command-label" class="min-w-0 truncate font-mono text-ui-xs">{entry.title}</span>
                   </Command.Item>
                 {/each}
@@ -478,32 +448,32 @@ import Search         from '@lucide/svelte/icons/search'
 
             <Command.Group heading="Actions">
               <Command.Item value="refresh schema tables" onSelect={() => run(onrefresh)}>
-                <RefreshCw class="size-4 shrink-0 opacity-60" />
+                <Icon name="refresh-cw" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">Refresh tables</span>
               </Command.Item>
               <Command.Item value="open settings preferences" onSelect={() => run(onopensettings)}>
-                <Settings class="size-4 shrink-0 opacity-60" />
+                <Icon name="settings" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">Settings</span>
               </Command.Item>
               <Command.Item value="keyboard shortcuts keybindings hotkeys help" onSelect={() => run(onopenshortcuts)}>
-                <Keyboard class="size-4 shrink-0 opacity-60" />
+                <Icon name="keyboard" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">Keyboard shortcuts</span>
                 <Command.Shortcut keys="?" />
               </Command.Item>
               <Command.Item value="about license version info app" onSelect={() => run(onopenabout)}>
-                <Info class="size-4 shrink-0 opacity-60" />
+                <Icon name="info" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">About Stroke</span>
               </Command.Item>
               <Command.Item value="report issue bug crash problem feedback github" onSelect={() => run(onopenreport)}>
-                <Bug class="size-4 shrink-0 opacity-60" />
+                <Icon name="bug" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">Report an issue</span>
               </Command.Item>
               <Command.Item value="check for updates upgrade version" onSelect={() => run(oncheckupdate)}>
-                <ArrowDownToLine class="size-4 shrink-0 opacity-60" />
+                <Icon name="arrow-down-to-line" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">Check for updates</span>
               </Command.Item>
               <Command.Item value="disconnect database" onSelect={() => run(ondisconnect)}>
-                <Unplug class="size-4 shrink-0 opacity-60" />
+                <Icon name="unplug" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">Disconnect</span>
               </Command.Item>
             </Command.Group>
@@ -515,21 +485,21 @@ import Search         from '@lucide/svelte/icons/search'
               value="connections switch database connect postgres mysql sqlite saved {savedConnections.map(c => c.name).join(' ')}"
               onSelect={() => navigate('connections')}
             >
-              <Database class="size-4 shrink-0 opacity-60" />
+              <Icon name="database" class="size-4 shrink-0 opacity-60" />
               <span data-slot="command-label" class="truncate">Connections</span>
               {#if savedConnections.length > 0}
                 <span class="shrink-0 font-mono text-ui-xs text-muted-foreground">{savedConnections.length}</span>
               {/if}
-              <ChevronRight class="size-3.5 shrink-0 text-muted-foreground/40" />
+              <Icon name="chevron-right" class="size-3.5 shrink-0 text-muted-foreground/40" />
             </Command.Item>
           </Command.Group>
 
           <!-- ── Drill-in: Docker ───────────────────────────────────── -->
           <Command.Group heading="Launch">
             <Command.Item value="docker containers postgresql mysql launch run" onSelect={() => navigate('docker')}>
-              <Package class="size-4 shrink-0 opacity-60" />
+              <Icon name="package" class="size-4 shrink-0 opacity-60" />
               <span data-slot="command-label" class="truncate">Docker</span>
-              <ChevronRight class="size-3.5 shrink-0 text-muted-foreground/40" />
+              <Icon name="chevron-right" class="size-3.5 shrink-0 text-muted-foreground/40" />
             </Command.Item>
           </Command.Group>
 
@@ -539,7 +509,7 @@ import Search         from '@lucide/svelte/icons/search'
             <Command.Group heading="Tables">
               {#each tablesPageRegular.items as table (table.name)}
                 <Command.Item value="table {activeSchema} {table.name} {table.name}" onSelect={() => run(() => ontableselect(table.name))}>
-                  <Table2 class="size-4 shrink-0 opacity-60" />
+                  <Icon name="table-2" class="size-4 shrink-0 opacity-60" />
                   <span data-slot="command-label" class="truncate font-mono">{table.name}</span>
                   <span
                     data-slot="command-trailing"
@@ -559,7 +529,7 @@ import Search         from '@lucide/svelte/icons/search'
             <Command.Group heading="Views">
               {#each tablesPageViews.items as table (table.name)}
                 <Command.Item value="view {activeSchema} {table.name} {table.name}" onSelect={() => run(() => ontableselect(table.name))}>
-                  <Eye class="size-4 shrink-0 opacity-60" />
+                  <Icon name="eye" class="size-4 shrink-0 opacity-60" />
                   <span data-slot="command-label" class="truncate font-mono">{table.name}</span>
                 </Command.Item>
               {/each}
@@ -574,7 +544,7 @@ import Search         from '@lucide/svelte/icons/search'
             <Command.Group heading="Materialized views">
               {#each tablesPageMatViews.items as table (table.name)}
                 <Command.Item value="materialized view {activeSchema} {table.name} {table.name}" onSelect={() => run(() => ontableselect(table.name))}>
-                  <Eye class="size-4 shrink-0 opacity-60" />
+                  <Icon name="eye" class="size-4 shrink-0 opacity-60" />
                   <span data-slot="command-label" class="truncate font-mono">{table.name}</span>
                   <span
                     data-slot="command-trailing"
@@ -597,7 +567,7 @@ import Search         from '@lucide/svelte/icons/search'
               value="launch postgresql postgres container pull run 5433"
               onSelect={() => run(() => ondockerlaunch('postgres'))}
             >
-              <Package class="size-4 shrink-0 opacity-60" />
+              <Icon name="package" class="size-4 shrink-0 opacity-60" />
               <span data-slot="command-label" class="truncate">PostgreSQL container</span>
               <span data-slot="command-trailing" class="shrink-0 font-mono text-ui-2xs text-muted-foreground">:5433</span>
             </Command.Item>
@@ -605,7 +575,7 @@ import Search         from '@lucide/svelte/icons/search'
               value="launch mysql container pull run 3307"
               onSelect={() => run(() => ondockerlaunch('mysql'))}
             >
-              <Package class="size-4 shrink-0 opacity-60" />
+              <Icon name="package" class="size-4 shrink-0 opacity-60" />
               <span data-slot="command-label" class="truncate">MySQL container</span>
               <span data-slot="command-trailing" class="shrink-0 font-mono text-ui-2xs text-muted-foreground">:3307</span>
             </Command.Item>
@@ -616,14 +586,14 @@ import Search         from '@lucide/svelte/icons/search'
           {#if savedConnections.length > 0}
             <Command.Group heading="Saved connections">
               {#each savedConnections as conn (conn.id)}
-                {@const Icon = driverIcon(conn.type ?? 'postgres')}
+                {@const driverIconName = driverIcon(conn.type ?? 'postgres')}
                 {@const isActive = conn.id === activeConnectionId}
                 <Command.Item
                   value="connection {conn.name} {connSubtitle(conn)} {conn.type}"
                   onSelect={() => run(() => onswitchdatabase(conn))}
                   disabled={isActive}
                 >
-                  <Icon class="size-4 shrink-0 opacity-60" />
+                  <Icon name={driverIconName} class="size-4 shrink-0 opacity-60" />
                   <div data-slot="command-label" class="flex min-w-0 flex-1 flex-col">
                     <span class="truncate">{conn.name}</span>
                     <span class="truncate font-mono text-[11px] text-muted-foreground">{connSubtitle(conn)}</span>
@@ -637,7 +607,7 @@ import Search         from '@lucide/svelte/icons/search'
           {/if}
           <Command.Group heading="Add">
             <Command.Item value="new connection add connect database" onSelect={() => run(onopenconnection)}>
-              <Database class="size-4 shrink-0 opacity-60" />
+              <Icon name="database" class="size-4 shrink-0 opacity-60" />
               <span data-slot="command-label" class="truncate">New connection…</span>
             </Command.Item>
           </Command.Group>

@@ -78,9 +78,17 @@
          >10 rows: cap height and add vertical scroll.
          No overscroll-contain so scroll chains naturally to the main table at limits. -->
     {@const needsScroll = rowCount > 10}
+    <!--
+      overflow-x: auto would implicitly make overflow-y compute to `auto` too,
+      turning this into a vertical scroll container that traps the wheel even
+      when every row fits — so vertical scroll never chains to the main grid.
+      Set overflow-y explicitly: `auto` (bounded) only when we truly need it,
+      otherwise `hidden` so vertical wheel passes straight through to the grid.
+    -->
     <div
       class="overflow-x-auto"
       class:overflow-y-auto={needsScroll}
+      class:overflow-y-hidden={!needsScroll}
       style={needsScroll ? 'max-height: 280px' : ''}
       data-fk-subview-scroll
     >

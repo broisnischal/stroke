@@ -13,7 +13,8 @@ const STORAGE_KEY = 'stroke:settings'
 /** @typedef {import('$lib/themes/registry.js').ThemeId} ThemeId */
 /** @typedef {'geist' | 'serif' | 'apple'} FontId */
 /** @typedef {'regular' | 'light' | 'bold'} IconStyleId */
-/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean }} AppSettings */
+/** @typedef {'lucide' | 'hugeicons'} IconSetId */
+/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean }} AppSettings */
 
 /** UI zoom scale (font + layout). 1 = 100%. */
 export const ZOOM_STEPS = [0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.25, 1.5]
@@ -70,12 +71,31 @@ function normalizeIconStyle(/** @type {unknown} */ id) {
   return ICON_STYLES[/** @type {IconStyleId} */ (id)] ? /** @type {IconStyleId} */ (id) : DEFAULT_ICON_STYLE
 }
 
+/**
+ * Selectable icon families. `lucide` is the built-in stroke set (also honors the
+ * icon-weight setting above). `hugeicons` swaps in the Hugeicons stroke set wherever
+ * a component renders through the shared `Icon` wrapper; unmapped glyphs fall back
+ * to Lucide, so coverage can grow without ever breaking the UI.
+ * @type {Record<IconSetId, { label: string, description: string }>}
+ */
+export const ICON_SETS = {
+  lucide:    { label: 'Lucide',    description: 'Crisp, minimal built-in set' },
+  hugeicons: { label: 'Hugeicons', description: 'Rounded, expressive premium set' },
+}
+/** @type {IconSetId} */
+export const DEFAULT_ICON_SET = 'lucide'
+/** @returns {IconSetId} */
+function normalizeIconSet(/** @type {unknown} */ id) {
+  return ICON_SETS[/** @type {IconSetId} */ (id)] ? /** @type {IconSetId} */ (id) : DEFAULT_ICON_SET
+}
+
 /** @type {AppSettings} */
 export const DEFAULT_SETTINGS = {
   theme: DEFAULT_THEME_ID,
   zoom: DEFAULT_ZOOM,
   font: DEFAULT_FONT,
   iconStyle: DEFAULT_ICON_STYLE,
+  iconSet: DEFAULT_ICON_SET,
   mcpAutoStart: false,
   launchAtLogin: false,
   autoReconnectOnStartup: true,
@@ -87,6 +107,9 @@ export const appFont = writable(/** @type {FontId} */ (DEFAULT_FONT))
 
 /** Reactive app icon style (synced by applySettings). */
 export const appIconStyle = writable(/** @type {IconStyleId} */ (DEFAULT_ICON_STYLE))
+
+/** Reactive app icon set / family (synced by applySettings). */
+export const appIconSet = writable(/** @type {IconSetId} */ (DEFAULT_ICON_SET))
 
 /** Reactive app zoom scale (synced by applySettings). Monaco editors subscribe
  *  to this to rescale their font/line-height in lockstep with the rest of the UI. */
@@ -159,7 +182,8 @@ export function loadSettings() {
     const previewDmlBeforeApply = parsed.previewDmlBeforeApply !== false
     const font = normalizeFont(parsed.font)
     const iconStyle = normalizeIconStyle(parsed.iconStyle)
-    return { theme, zoom, font, iconStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply }
+    const iconSet = normalizeIconSet(parsed.iconSet)
+    return { theme, zoom, font, iconStyle, iconSet, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply }
   } catch {
     return { ...DEFAULT_SETTINGS }
   }
@@ -214,6 +238,12 @@ export function applySettings(settings) {
   const iconStyle = normalizeIconStyle(settings.iconStyle)
   root.setAttribute('data-icon-style', iconStyle)
   appIconStyle.set(iconStyle)
+
+  // Icon family — the shared <Icon> wrapper subscribes to appIconSet and swaps
+  // between Lucide and Hugeicons. data-icon-set is exposed for any CSS hooks.
+  const iconSet = normalizeIconSet(settings.iconSet)
+  root.setAttribute('data-icon-set', iconSet)
+  appIconSet.set(iconSet)
 
   // Grid-write DML preview toggle — DataTable subscribes to gate its confirm dialog.
   appPreviewDml.set(settings.previewDmlBeforeApply !== false)

@@ -685,6 +685,13 @@
             columns you need instead of <code class="text-foreground/70">*</code>, or add a smaller
             <code class="text-foreground/70">LIMIT</code>.
           </p>
+        {:else if /relation "[^"]*" does not exist|column "[^"]*" does not exist/i.test(error)}
+          <p class="mt-1.5 text-ui-2xs leading-relaxed text-muted-foreground/70">
+            PostgreSQL folds unquoted names to lowercase, so a table like
+            <code class="text-foreground/70">Products</code> only matches when quoted —
+            <code class="text-foreground/70">SELECT * FROM "Products"</code>. Pick the table from
+            autocomplete and it inserts the quoted form for you.
+          </p>
         {/if}
       </div>
     {/if}
