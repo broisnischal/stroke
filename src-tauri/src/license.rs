@@ -6,8 +6,13 @@
 /// After first activation the decoded data is written to:
 ///   <app_data_dir>/license.json
 ///
-/// Trial is tracked in:
-///   <app_data_dir>/.trial   (8 LE bytes = u64 unix timestamp of first launch)
+/// Trial is tracked in TWO locations (8 LE bytes = u64 unix timestamp of first launch):
+///   <app_data_dir>/.trial        — removed on a full uninstall
+///   <home>/.stroke/trial         — survives uninstall, so reinstalling does NOT
+///                                  grant a fresh trial. The earliest timestamp
+///                                  across both wins, and both are repaired on read.
+///   (For tamper-proof enforcement across full disk wipes, register the trial
+///    start server-side keyed by device_id — the API scaffolding already exists.)
 ///
 /// -------------------------------------------------------------------
 /// SETUP: run  `node scripts/license-tool.mjs keygen`  once.
@@ -27,7 +32,7 @@ const STROKE_API: &str = "https://stroke.click/api/license";
 pub const PUBLIC_KEY_HEX: &str =
     "b5f14fed4694302a767e32c4e6a50ba0074c4e50f5198ad781de00d0e8ba8771";
 
-pub const TRIAL_DAYS: i64 = 5;
+pub const TRIAL_DAYS: i64 = 17;
 const LICENSE_FILE: &str = "license.json";
 const TRIAL_FILE: &str = ".trial";
 
@@ -90,6 +95,23 @@ pub fn license_path(data_dir: &Path) -> PathBuf {
 
 pub fn trial_path(data_dir: &Path) -> PathBuf {
     data_dir.join(TRIAL_FILE)
+}
+
+/// The user's home directory, cross-platform (HOME on unix/macOS, USERPROFILE on Windows).
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+}
+
+/// All locations the trial start is mirrored to. The app-data copy is wiped on
+/// uninstall; the home-dir copy survives, so a reinstall can't reset the trial.
+fn trial_paths(data_dir: &Path) -> Vec<PathBuf> {
+    let mut paths = vec![trial_path(data_dir)];
+    if let Some(home) = home_dir() {
+        paths.push(home.join(".stroke").join("trial"));
+    }
+    paths
 }
 
 // ── Device fingerprint ────────────────────────────────────────────────────────
@@ -174,23 +196,34 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
-/// Reads trial start, creating the file on first call.
-/// Returns `days_remaining` (negative = expired).
+/// Reads the trial start across all mirror locations and returns `days_remaining`
+/// (negative = expired). The EARLIEST timestamp found wins — so deleting one copy
+/// (e.g. uninstalling, which wipes app-data) can't grant a fresh trial while the
+/// home-dir copy survives. Every location is (re)written with the winning start so
+/// a missing/newer copy is repaired on each launch.
 pub fn trial_days_remaining(data_dir: &Path) -> i64 {
-    let path = trial_path(data_dir);
-    let start_secs = if path.exists() {
-        std::fs::read(&path)
-            .ok()
-            .and_then(|b| b.try_into().ok())
-            .map(u64::from_le_bytes)
-            .unwrap_or_else(now_secs)
-    } else {
-        // First launch — record now
-        let _ = std::fs::create_dir_all(data_dir);
-        let now = now_secs();
-        let _ = std::fs::write(&path, now.to_le_bytes());
-        now
-    };
+    let paths = trial_paths(data_dir);
+
+    let mut earliest: Option<u64> = None;
+    for p in &paths {
+        if let Ok(bytes) = std::fs::read(p) {
+            if let Ok(arr) = <[u8; 8]>::try_from(bytes.as_slice()) {
+                let t = u64::from_le_bytes(arr);
+                earliest = Some(earliest.map_or(t, |e| e.min(t)));
+            }
+        }
+    }
+
+    // First launch on this device (or every copy was removed) — start now.
+    let start_secs = earliest.unwrap_or_else(now_secs);
+
+    // Propagate/repair the winning start to every location.
+    for p in &paths {
+        if let Some(dir) = p.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(p, start_secs.to_le_bytes());
+    }
 
     let elapsed_days = (now_secs().saturating_sub(start_secs) / 86_400) as i64;
     TRIAL_DAYS - elapsed_days
@@ -200,17 +233,23 @@ pub fn trial_days_remaining(data_dir: &Path) -> i64 {
 /// shows "N days elapsed" without waiting for real time to pass.
 #[cfg(debug_assertions)]
 pub fn debug_set_trial_days_ago(data_dir: &Path, days_ago: u64) -> Result<(), String> {
-    std::fs::create_dir_all(data_dir).map_err(|e| e.to_string())?;
     let fake_start = now_secs().saturating_sub(days_ago * 86_400);
-    std::fs::write(trial_path(data_dir), fake_start.to_le_bytes()).map_err(|e| e.to_string())
+    for p in trial_paths(data_dir) {
+        if let Some(dir) = p.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(&p, fake_start.to_le_bytes()).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
-/// DEBUG ONLY — delete the trial file so the next check starts a fresh trial.
+/// DEBUG ONLY — delete every trial mirror so the next check starts a fresh trial.
 #[cfg(debug_assertions)]
 pub fn debug_reset_trial(data_dir: &Path) -> Result<(), String> {
-    let p = trial_path(data_dir);
-    if p.exists() {
-        std::fs::remove_file(p).map_err(|e| e.to_string())?;
+    for p in trial_paths(data_dir) {
+        if p.exists() {
+            std::fs::remove_file(&p).map_err(|e| e.to_string())?;
+        }
     }
     Ok(())
 }
