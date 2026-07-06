@@ -1,18 +1,6 @@
 <script>
   import { untrack } from 'svelte'
-  import X            from '@lucide/svelte/icons/x'
-  import Clock        from '@lucide/svelte/icons/clock'
-  import Loader2      from '@lucide/svelte/icons/loader-2'
-  import Plus         from '@lucide/svelte/icons/plus'
-  import Play         from '@lucide/svelte/icons/play'
-  import CheckCircle2 from '@lucide/svelte/icons/check-circle-2'
-  import AlertCircle  from '@lucide/svelte/icons/alert-circle'
-  import Trash2       from '@lucide/svelte/icons/trash-2'
-  import FolderOpen   from '@lucide/svelte/icons/folder-open'
-  import Terminal     from '@lucide/svelte/icons/terminal'
-  import Lock         from '@lucide/svelte/icons/lock'
-  import ChevronDown  from '@lucide/svelte/icons/chevron-down'
-  import Check        from '@lucide/svelte/icons/check'
+  import Icon from './Icon.svelte'
   import CloudflareLogin from './CloudflareLogin.svelte'
   import ProviderConnect from './ProviderConnect.svelte'
   import SearchableMenu from './SearchableMenu.svelte'
@@ -472,7 +460,7 @@
     <label class="flex cursor-pointer select-none items-center gap-2">
       <Checkbox id="cn-ssh-enabled" checked={sshEnabled} onCheckedChange={(v) => (sshEnabled = v === true)} />
       <span class="flex items-center gap-1.5 text-[12px] text-muted-foreground/65">
-        <Terminal class="size-3 shrink-0" />
+        <Icon name="terminal" class="size-3 shrink-0" />
         Connect via SSH tunnel
       </span>
     </label>
@@ -542,7 +530,7 @@
                 : 'border-transparent text-muted-foreground/60 hover:bg-muted/25 hover:text-foreground'
             )}
           >
-            <Plus class="size-3.5 shrink-0" />
+            <Icon name="plus" class="size-3.5 shrink-0" />
             New connection
           </button>
         </div>
@@ -576,13 +564,13 @@
                     >
                       <span class="absolute inset-0 flex items-center justify-center transition-opacity duration-150 group-hover:opacity-0">
                         {#if busy2}
-                          <Loader2 class="size-4 animate-spin" />
+                          <Icon name="loader-2" class="size-4 animate-spin" />
                         {:else}
                           <DbIcon id={cid} class={cn('size-4', isSel ? 'text-foreground' : 'text-muted-foreground/60')} />
                         {/if}
                       </span>
                       <span class="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-150 group-hover:opacity-100">
-                        <Play class="size-3.5" />
+                        <Icon name="play" class="size-3.5" />
                       </span>
                     </button>
 
@@ -600,7 +588,7 @@
                     <button type="button"
                       class="shrink-0 rounded p-0.5 text-muted-foreground/25 opacity-0 transition-opacity duration-150 hover:text-destructive group-hover:opacity-100"
                       onclick={(e) => { e.stopPropagation(); handleDelete(conn.id) }}
-                    ><Trash2 class="size-3" /></button>
+                    ><Icon name="trash-2" class="size-3" /></button>
                   </div>
                 {/each}
               </div>
@@ -652,7 +640,7 @@
                             <DbIcon id={activeDriver.id} class="size-4 text-muted-foreground" />
                             <span class="min-w-0 truncate">{activeDriver.label}</span>
                           </span>
-                          <ChevronDown class="size-3.5 shrink-0 text-muted-foreground/50" />
+                          <Icon name="chevron-down" class="size-3.5 shrink-0 text-muted-foreground/50" />
                         </button>
                       {/snippet}
                       {#snippet item(it)}
@@ -661,7 +649,7 @@
                         {#if it.disabled}
                           <span class="shrink-0 text-ui-3xs text-muted-foreground/45">soon</span>
                         {:else if it.value === dbType}
-                          <Check class="size-3.5 shrink-0 text-primary" />
+                          <Icon name="check" class="size-3.5 shrink-0 text-primary" />
                         {/if}
                       {/snippet}
                     </SearchableMenu>
@@ -700,9 +688,9 @@
                   <p class={cn('mt-1 flex items-center gap-1 text-[10px]',
                     uriHint.includes('Could') || uriHint.includes('Expected') ? 'text-destructive' : 'text-emerald-500')}>
                     {#if uriHint.includes('Could') || uriHint.includes('Expected')}
-                      <AlertCircle class="size-2.5" />
+                      <Icon name="alert-circle" class="size-2.5" />
                     {:else}
-                      <CheckCircle2 class="size-2.5" />
+                      <Icon name="check-circle-2" class="size-2.5" />
                     {/if}
                     {uriHint}
                   </p>
@@ -791,7 +779,7 @@
                     class={cn(inp, 'font-mono text-[11px]')} />
                   <button type="button" onclick={pickSqliteFile}
                     class="inline-flex h-9 shrink-0 items-center gap-1 rounded-lg border border-border/25 px-2.5 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground">
-                    <FolderOpen class="size-3" />
+                    <Icon name="folder-open" class="size-3" />
                     Browse
                   </button>
                 </div>
@@ -907,7 +895,7 @@
                     class={cn(inp, 'font-mono text-[11px]')} />
                   <button type="button" onclick={pickDuckdbFile}
                     class="inline-flex h-9 shrink-0 items-center gap-1 rounded-lg border border-border/25 px-2.5 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground">
-                    <FolderOpen class="size-3" />
+                    <Icon name="folder-open" class="size-3" />
                     Browse
                   </button>
                 </div>
@@ -977,7 +965,7 @@
                 <label class="mt-1 flex cursor-pointer select-none items-center gap-2 border-t border-border/15 pt-3.5">
                   <Checkbox id="cn-readonly" checked={readOnly} onCheckedChange={(v) => (readOnly = v === true)} />
                   <span class="flex items-center gap-1.5 text-[12px] text-muted-foreground/75">
-                    <Lock class="size-3 shrink-0" />
+                    <Icon name="lock" class="size-3 shrink-0" />
                     Open in read-only mode
                   </span>
                 </label>
@@ -996,11 +984,11 @@
           <div class="mb-2.5 flex min-h-[18px] items-center">
             {#if error}
               <p class="flex items-start gap-1 text-[11px] leading-snug text-destructive">
-                <AlertCircle class="mt-px size-2.5 shrink-0" />{error}
+                <Icon name="alert-circle" class="mt-px size-2.5 shrink-0" />{error}
               </p>
             {:else if testOk}
               <p class="flex items-center gap-1 text-[11px] text-emerald-500">
-                <CheckCircle2 class="size-2.5 shrink-0" />Connected successfully
+                <Icon name="check-circle-2" class="size-2.5 shrink-0" />Connected successfully
               </p>
             {/if}
           </div>
@@ -1017,7 +1005,7 @@
                   class="inline-flex h-8 max-w-[200px] items-center gap-1.5 rounded-lg border border-border/25 px-3 text-[12px] text-muted-foreground/55 transition-colors hover:bg-muted/30 hover:text-foreground disabled:opacity-25"
                 >
                   {#if connecting === lastConn.id}
-                    <Loader2 class="size-3 animate-spin" />Resuming…
+                    <Icon name="loader-2" class="size-3 animate-spin" />Resuming…
                   {:else}
                     Resume <span class="min-w-0 truncate text-foreground/70">{lastConn.name}</span>
                   {/if}
@@ -1029,19 +1017,19 @@
               {#if isBusy}
                 <button type="button" onclick={stopOp}
                   class="inline-flex h-8 items-center gap-1 rounded-lg border border-destructive/30 px-3 text-[12px] font-medium text-destructive transition-colors hover:bg-destructive/10">
-                  <X class="size-3" />Stop
+                  <Icon name="x" class="size-3" />Stop
                 </button>
               {/if}
               {#if canTest}
                 <button type="button" onclick={handleTest} disabled={isBusy}
                   class="inline-flex h-8 items-center gap-1 rounded-lg border border-border/30 px-3.5 text-[12px] text-muted-foreground/70 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-25">
-                  {#if testing}<Loader2 class="size-3 animate-spin" />Testing…{:else}Test{/if}
+                  {#if testing}<Icon name="loader-2" class="size-3 animate-spin" />Testing…{:else}Test{/if}
                 </button>
               {/if}
               <button type="button" onclick={handleConnect} disabled={isBusy || dbType === 'bigquery'}
                 class="inline-flex h-8 items-center gap-1 rounded-lg bg-foreground px-5 text-[12px] font-semibold text-background transition-colors hover:bg-foreground/85 disabled:opacity-40">
                 {#if connecting === (editingId ?? '__new__')}
-                  <Loader2 class="size-3 animate-spin" />Connecting…
+                  <Icon name="loader-2" class="size-3 animate-spin" />Connecting…
                 {:else}
                   {editingId ? 'Save & connect' : 'Connect'}
                 {/if}
@@ -1058,7 +1046,7 @@
     <DialogPrimitive.Close
       class="absolute right-4 top-4 inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
     >
-      <X class="size-4" />
+      <Icon name="x" class="size-4" />
       <span class="sr-only">Close</span>
     </DialogPrimitive.Close>
     </DialogPrimitive.Content>
