@@ -7,8 +7,8 @@
   import Loader2 from '@lucide/svelte/icons/loader-2'
   import LogOut from '@lucide/svelte/icons/log-out'
   import AlertTriangle from '@lucide/svelte/icons/alert-triangle'
-  import Database from '@lucide/svelte/icons/database'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
+  import DbIcon from './DbIcon.svelte'
   import Search from '@lucide/svelte/icons/search'
   import KeyRound from '@lucide/svelte/icons/key-round'
   import Eye from '@lucide/svelte/icons/eye'
@@ -172,17 +172,17 @@
 <div class="flex flex-col gap-3">
   {#if phase === 'idle'}
     <!-- Not connected -->
-    <div class="flex flex-col items-center gap-3 rounded-xl border border-primary/20 bg-primary/[0.04] px-4 py-6 text-center">
-      <div class="flex size-10 items-center justify-center rounded-xl border border-primary/25 bg-primary/10">
-        <Database class="size-5 text-primary" />
+    <div class="flex flex-col items-center gap-4 rounded-xl border border-border/40 bg-muted/[0.03] px-6 py-8 text-center">
+      <div class="flex size-14 items-center justify-center rounded-2xl border border-border/50 bg-background shadow-sm">
+        <DbIcon id={provider} class="size-7 text-foreground" />
       </div>
-      <div>
-        <p class="text-sm font-medium text-foreground">Connect with {meta?.name}</p>
-        <p class="mt-0.5 text-[11px] text-muted-foreground">{meta?.blurb}</p>
+      <div class="space-y-1">
+        <p class="text-[15px] font-semibold text-foreground">Connect with {meta?.name}</p>
+        <p class="mx-auto max-w-[300px] text-[12px] leading-relaxed text-muted-foreground">{meta?.blurb}</p>
       </div>
 
       {#if meta?.mode === 'token'}
-        <div class="flex w-full flex-col gap-2">
+        <div class="flex w-full max-w-[340px] flex-col gap-2">
           <input
             type="text"
             bind:value={tokenInput}
@@ -192,7 +192,7 @@
           />
           <button
             type="button"
-            class="flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-[12px] font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+            class="flex h-9 items-center justify-center gap-2 rounded-lg bg-foreground px-4 text-[12px] font-semibold text-background transition-colors hover:bg-foreground/85 disabled:opacity-40"
             disabled={!tokenInput.trim()}
             onclick={saveToken}
           >
@@ -202,12 +202,13 @@
       {:else}
         <button
           type="button"
-          class="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-[12px] font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+          class="inline-flex h-9 items-center gap-2 rounded-lg bg-foreground px-5 text-[12px] font-semibold text-background transition-colors hover:bg-foreground/85"
           onclick={startAuth}
         >
+          <DbIcon id={provider} class="size-4" />
           Sign in with {meta?.name}
         </button>
-        <p class="text-[10px] text-muted-foreground/40">Opens your browser to authorize (secure PKCE flow)</p>
+        <p class="text-[10px] text-muted-foreground/45">Opens your browser to authorize · secure PKCE flow</p>
       {/if}
     </div>
 
@@ -235,12 +236,16 @@
 
   {:else if phase === 'selecting' || phase === 'building' || phase === 'password'}
     <!-- Connected header -->
-    <div class="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/[0.06] px-3 py-2.5">
-      <div class="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/20">
-        <Check class="size-3.5 text-primary" />
+    <div class="flex items-center gap-2.5 rounded-lg border border-border/40 bg-muted/[0.04] px-3 py-2.5">
+      <div class="flex size-7 shrink-0 items-center justify-center rounded-lg border border-border/40 bg-background">
+        <DbIcon id={provider} class="size-4 text-foreground" />
       </div>
       <div class="min-w-0 flex-1">
-        <p class="text-[12px] font-medium text-foreground">Connected to {meta?.name}</p>
+        <p class="flex items-center gap-1.5 text-[12px] font-medium text-foreground">
+          {meta?.name}
+          <span class="inline-flex items-center gap-1 text-[10px] font-normal text-emerald-500"><Check class="size-3" />Connected</span>
+        </p>
+        <p class="text-[10px] text-muted-foreground/50">Pick a database to connect</p>
       </div>
       <button
         type="button"
@@ -328,7 +333,7 @@
               )}
               onclick={() => pick(db.db_ref)}
             >
-              <Database class={cn('size-3.5 shrink-0', active ? 'text-primary' : 'text-muted-foreground/45')} />
+              <DbIcon id={provider} class={cn('size-3.5', active ? 'text-foreground' : 'text-muted-foreground/45')} />
               <span class="min-w-0 flex-1 truncate font-mono text-[12px] font-medium leading-snug {active ? 'text-foreground' : 'text-foreground/85'}">{db.name}</span>
               {#if db.region}<span class="shrink-0 text-[10px] text-muted-foreground/40">{db.region}</span>{/if}
               {#if active && phase === 'building'}<Loader2 class="size-3.5 shrink-0 animate-spin text-primary" />{:else if active}<Check class="size-3.5 shrink-0 text-primary" />{/if}
@@ -341,7 +346,7 @@
       </div>
     {:else}
       <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border/50 px-4 py-5 text-center">
-        <Database class="size-5 text-muted-foreground/25" />
+        <DbIcon id={provider} class="size-5 text-muted-foreground/25" />
         <p class="text-[11px] text-muted-foreground/50">No databases found on this account.</p>
         <button type="button" class="flex items-center gap-1 text-[10px] text-muted-foreground/40 hover:text-muted-foreground" onclick={loadDatabases}>
           <RefreshCw class="size-3" /> Retry
