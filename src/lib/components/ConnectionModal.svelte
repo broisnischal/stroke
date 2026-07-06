@@ -604,15 +604,14 @@
       <!-- ── Form panel ──────────────────────────────────────────── -->
       <div class="flex min-h-0 min-w-0 flex-col">
 
-        <!-- ── Scrollable form body — a centered card keeps the form
-             balanced in the full-window canvas instead of floating ── -->
+        <!-- ── Scrollable form body — left-aligned form, no card ── -->
         <ScrollArea class="min-h-0 flex-1 scroll-smooth">
-          <div class="flex min-h-full flex-col items-center justify-center px-8 py-10">
-            <div class="w-full max-w-[540px]">
-              <div class="overflow-hidden rounded-2xl border border-border/40 bg-card/[0.35] shadow-sm shadow-black/20">
+          <div class="px-10 py-10 lg:px-16 lg:py-12">
+            <div class="max-w-[560px]">
+              <div class="contents">
 
-                <!-- Card header: connection name + driver type -->
-                <div class="grid grid-cols-[1fr_11.5rem] items-end gap-3 border-b border-border/25 bg-muted/[0.015] px-6 py-5">
+                <!-- Header: connection name + driver type -->
+                <div class="grid grid-cols-[1fr_12rem] items-end gap-3.5 border-b border-border/40 pb-6">
                   <!-- Connection name -->
                   <div>
                     <label for="cn-name" class={lbl}>Name</label>
@@ -656,8 +655,8 @@
                   </div>
                 </div>
 
-                <!-- Card body: driver-specific fields -->
-                <div class="flex flex-col gap-3.5 px-6 py-6">
+                <!-- Driver-specific fields -->
+                <div class="mt-6 flex flex-col gap-4">
 
             <!-- ── Hosting provider sign-in (Neon / Supabase / PlanetScale / Prisma) ── -->
             {#if dbType === 'neon' || dbType === 'supabase' || dbType === 'planetscale' || dbType === 'prisma'}
@@ -977,8 +976,8 @@
 
         <!-- ── Footer — feedback + actions only, so it stays compact and
              the action buttons are always visible regardless of window height ── -->
-        <div class="shrink-0 border-t border-border/15 px-8 py-4">
-          <div class="mx-auto w-full max-w-[540px]">
+        <div class="shrink-0 border-t border-border/15 px-10 py-4 lg:px-16">
+          <div class="w-full">
 
           <!-- Feedback slot — always occupies height, shows message when needed -->
           <div class="mb-2.5 flex min-h-[18px] items-center">

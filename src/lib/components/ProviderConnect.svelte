@@ -171,58 +171,65 @@
 
 <div class="flex flex-col gap-3">
   {#if phase === 'idle'}
-    <!-- Not connected -->
-    <div class="flex flex-col items-center gap-4 rounded-xl border border-border/40 bg-muted/[0.03] px-6 py-8 text-center">
-      <div class="flex size-14 items-center justify-center rounded-2xl border border-border/50 bg-background shadow-sm">
-        <DbIcon id={provider} class="size-7 text-foreground" />
-      </div>
-      <div class="space-y-1">
-        <p class="text-[15px] font-semibold text-foreground">Connect with {meta?.name}</p>
-        <p class="mx-auto max-w-[300px] text-[12px] leading-relaxed text-muted-foreground">{meta?.blurb}</p>
+    <!-- Not connected — left-aligned, no card -->
+    <div class="flex flex-col gap-5 py-1">
+      <div class="flex items-center gap-3.5">
+        <div class="flex size-12 shrink-0 items-center justify-center rounded-xl border border-border/50 bg-muted/25">
+          <DbIcon id={provider} class="size-6 text-foreground" />
+        </div>
+        <div class="min-w-0">
+          <p class="text-[15px] font-semibold text-foreground">Connect with {meta?.name}</p>
+          <p class="mt-0.5 text-[12.5px] leading-relaxed text-muted-foreground">{meta?.blurb}</p>
+        </div>
       </div>
 
       {#if meta?.mode === 'token'}
-        <div class="flex w-full max-w-[340px] flex-col gap-2">
+        <div class="flex flex-col gap-2">
           <input
             type="text"
             bind:value={tokenInput}
             placeholder="postgres://…"
-            class="h-9 w-full rounded-lg border border-border bg-muted/30 px-3 font-mono text-[11px] outline-none focus:border-ring focus:ring-1 focus:ring-ring/30"
+            class="h-9 w-full rounded-lg border border-border/60 bg-muted/25 px-3 font-mono text-[11px] outline-none transition-[border-color,box-shadow] focus:border-ring focus:ring-2 focus:ring-ring/20"
             onkeydown={(e) => { if (e.key === 'Enter') saveToken() }}
           />
           <button
             type="button"
-            class="flex h-9 items-center justify-center gap-2 rounded-lg bg-foreground px-4 text-[12px] font-semibold text-background transition-colors hover:bg-foreground/85 disabled:opacity-40"
+            class="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-foreground px-4 text-[13px] font-semibold text-background transition-colors hover:bg-foreground/85 disabled:opacity-40"
             disabled={!tokenInput.trim()}
             onclick={saveToken}
           >
-            <KeyRound class="size-3.5" /> Continue
+            <KeyRound class="size-4" /> Continue
           </button>
         </div>
       {:else}
-        <button
-          type="button"
-          class="inline-flex h-9 items-center gap-2 rounded-lg bg-foreground px-5 text-[12px] font-semibold text-background transition-colors hover:bg-foreground/85"
-          onclick={startAuth}
-        >
-          <DbIcon id={provider} class="size-4" />
-          Sign in with {meta?.name}
-        </button>
-        <p class="text-[10px] text-muted-foreground/45">Opens your browser to authorize · secure PKCE flow</p>
+        <div class="flex flex-col gap-2.5">
+          <button
+            type="button"
+            class="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-foreground px-5 text-[13px] font-semibold text-background transition-colors hover:bg-foreground/85"
+            onclick={startAuth}
+          >
+            <DbIcon id={provider} class="size-4" />
+            Sign in with {meta?.name}
+          </button>
+          <p class="text-[11px] text-muted-foreground/45">Opens your browser to authorize · secure PKCE flow</p>
+        </div>
       {/if}
     </div>
 
   {:else if phase === 'authorizing'}
-    <div class="flex flex-col items-center gap-3 rounded-xl border border-primary/20 bg-primary/[0.04] px-4 py-6 text-center">
-      <Loader2 class="size-6 animate-spin text-primary" />
-      <div>
-        <p class="text-sm font-medium text-foreground">Browser opened</p>
-        <p class="mt-0.5 text-[11px] text-muted-foreground">Authorize Stroke in the {meta?.name} page, then return here.</p>
+    <div class="flex flex-col gap-4 py-2">
+      <div class="flex items-center gap-3.5">
+        <div class="flex size-12 shrink-0 items-center justify-center rounded-xl border border-border/50 bg-muted/25">
+          <Loader2 class="size-5 animate-spin text-foreground" />
+        </div>
+        <div class="min-w-0">
+          <p class="text-[14px] font-semibold text-foreground">Waiting for {meta?.name}…</p>
+          <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Authorize Stroke in the browser tab, then return here. Times out in 5 min.</p>
+        </div>
       </div>
-      <p class="text-[10px] text-muted-foreground/40">Waiting… (5 min timeout)</p>
       <button
         type="button"
-        class="rounded-lg border border-border px-3 py-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        class="h-9 w-full rounded-lg border border-border/60 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
         onclick={cancelAuth}
       >
         Cancel
@@ -230,8 +237,8 @@
     </div>
 
   {:else if phase === 'fetching'}
-    <div class="flex items-center justify-center gap-2 rounded-xl border border-border/50 bg-muted/20 py-6 text-[11px] text-muted-foreground">
-      <Loader2 class="size-3.5 animate-spin" /> Loading your databases…
+    <div class="flex items-center gap-2.5 py-2 text-[12.5px] text-muted-foreground">
+      <Loader2 class="size-4 animate-spin" /> Loading your databases…
     </div>
 
   {:else if phase === 'selecting' || phase === 'building' || phase === 'password'}
