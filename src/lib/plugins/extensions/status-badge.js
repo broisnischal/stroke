@@ -19,13 +19,31 @@ const MAP = {
   new: 'blue', created: 'blue', info: 'blue', running: 'blue', started: 'blue', medium: 'blue', normal: 'blue',
 }
 
-const PALETTE = {
+import { isCurrentThemeDark } from '$lib/stores/settings.js'
+
+// Dark mode: light-400 text on a translucent tint (glows on a dark grid).
+const DARK = {
   green: { bg: 'rgba(34,197,94,0.16)', fg: 'rgb(74,222,128)' },
   red: { bg: 'rgba(239,68,68,0.16)', fg: 'rgb(248,113,113)' },
   amber: { bg: 'rgba(245,158,11,0.17)', fg: 'rgb(251,191,36)' },
   blue: { bg: 'rgba(59,130,246,0.16)', fg: 'rgb(96,165,250)' },
   gray: { bg: 'rgba(148,163,184,0.16)', fg: 'rgb(148,163,184)' },
 }
+// Light mode: saturated ~700-shade text on a pale tint — dark-on-light pills
+// that stay legible on a cream background (the old palette used the dark-mode
+// light-400 text, which washed out to near-invisible in light mode).
+const LIGHT = {
+  green: { bg: 'rgba(34,197,94,0.15)', fg: 'rgb(21,128,61)' },
+  red: { bg: 'rgba(239,68,68,0.13)', fg: 'rgb(185,28,28)' },
+  amber: { bg: 'rgba(245,158,11,0.18)', fg: 'rgb(180,83,9)' },
+  blue: { bg: 'rgba(59,130,246,0.13)', fg: 'rgb(29,78,216)' },
+  gray: { bg: 'rgba(100,116,139,0.16)', fg: 'rgb(51,65,85)' },
+}
+
+// One long-lived subscription keeps a plain boolean in sync, so format() — a
+// per-cell hot path — never touches the store on each call.
+let _dark = true
+isCurrentThemeDark.subscribe((v) => { _dark = v })
 
 export const statusBadge = {
   id: 'status-badge',
@@ -42,7 +60,7 @@ export const statusBadge = {
   format(value) {
     if (typeof value !== 'string' || !value.trim()) return null
     const key = value.trim().toLowerCase().replace(/[\s-]+/g, '_')
-    const palette = PALETTE[MAP[key] ?? 'gray']
+    const palette = (_dark ? DARK : LIGHT)[MAP[key] ?? 'gray']
     return { display: value, badge: palette }
   },
 }
