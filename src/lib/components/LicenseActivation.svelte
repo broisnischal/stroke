@@ -91,7 +91,7 @@
     onclick={() => void submit()}
     class={cn(
       'inline-flex w-full items-center justify-center gap-2 rounded-lg font-semibold transition-colors',
-      naked ? 'h-9 text-[12px]' : 'h-11 text-sm',
+      naked ? 'h-11 text-[13px]' : 'h-11 text-sm',
       ready
         ? 'bg-foreground text-background hover:bg-foreground/85'
         : success
