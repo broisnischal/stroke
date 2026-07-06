@@ -59,6 +59,26 @@ import Filter from '@lucide/svelte/icons/filter'
 import MoreHorizontal from '@lucide/svelte/icons/more-horizontal'
 import Menu from '@lucide/svelte/icons/menu'
 import FolderOpen from '@lucide/svelte/icons/folder-open'
+import Archive from '@lucide/svelte/icons/archive'
+import ArrowUpCircle from '@lucide/svelte/icons/arrow-up-circle'
+import ChevronsDown from '@lucide/svelte/icons/chevrons-down'
+import ChevronsLeft from '@lucide/svelte/icons/chevrons-left'
+import ChevronsRight from '@lucide/svelte/icons/chevrons-right'
+import ChevronsUp from '@lucide/svelte/icons/chevrons-up'
+import Cloud from '@lucide/svelte/icons/cloud'
+import Command from '@lucide/svelte/icons/command'
+import HardDrive from '@lucide/svelte/icons/hard-drive'
+import LayoutDashboard from '@lucide/svelte/icons/layout-dashboard'
+import LockOpen from '@lucide/svelte/icons/lock-open'
+import Moon from '@lucide/svelte/icons/moon'
+import Radio from '@lucide/svelte/icons/radio'
+import Server from '@lucide/svelte/icons/server'
+import Settings2 from '@lucide/svelte/icons/settings-2'
+import Sun from '@lucide/svelte/icons/sun'
+import Undo2 from '@lucide/svelte/icons/undo-2'
+import Unplug from '@lucide/svelte/icons/unplug'
+import Wifi from '@lucide/svelte/icons/wifi'
+import WifiOff from '@lucide/svelte/icons/wifi-off'
 
 // ── Hugeicons data ───────────────────────────────────────────────────────────
 import {
@@ -70,7 +90,11 @@ import {
   AiBrain01Icon, Alert02Icon, AlertCircleIcon, Shield01Icon, PencilEdit01Icon,
   BracketsIcon, SquareLock01Icon, DashboardSquare01Icon, HistoryIcon, Clock01Icon,
   FlashIcon, Settings01Icon, Maximize01Icon, FilterIcon, MoreHorizontalIcon,
-  Menu01Icon, FolderOpenIcon,
+  Menu01Icon, FolderOpenIcon, Archive01Icon, CircleArrowUp01Icon, ArrowDownDoubleIcon,
+  ArrowLeftDoubleIcon, ArrowRightDoubleIcon, ArrowUpDoubleIcon, CloudIcon, CommandIcon,
+  HardDriveIcon, DashboardSquare02Icon, SquareUnlock01Icon, Moon02Icon, RadioIcon,
+  ServerStack01Icon, Settings02Icon, Sun03Icon, ArrowTurnBackwardIcon, Unlink01Icon,
+  WifiConnected01Icon, WifiDisconnected01Icon,
 } from '@hugeicons/core-free-icons'
 
 /** @type {Record<string, { lucide: any, huge?: any }>} */
@@ -120,4 +144,24 @@ export const ICON_MAP = {
   'more-horizontal':{ lucide: MoreHorizontal,huge: MoreHorizontalIcon },
   'menu':           { lucide: Menu,          huge: Menu01Icon },
   'folder-open':    { lucide: FolderOpen,    huge: FolderOpenIcon },
+  'archive':        { lucide: Archive,       huge: Archive01Icon },
+  'arrow-up-circle':{ lucide: ArrowUpCircle, huge: CircleArrowUp01Icon },
+  'chevrons-down':  { lucide: ChevronsDown,  huge: ArrowDownDoubleIcon },
+  'chevrons-left':  { lucide: ChevronsLeft,  huge: ArrowLeftDoubleIcon },
+  'chevrons-right': { lucide: ChevronsRight, huge: ArrowRightDoubleIcon },
+  'chevrons-up':    { lucide: ChevronsUp,    huge: ArrowUpDoubleIcon },
+  'cloud':          { lucide: Cloud,         huge: CloudIcon },
+  'command':        { lucide: Command,       huge: CommandIcon },
+  'hard-drive':     { lucide: HardDrive,     huge: HardDriveIcon },
+  'layout-dashboard':{ lucide: LayoutDashboard, huge: DashboardSquare02Icon },
+  'lock-open':      { lucide: LockOpen,      huge: SquareUnlock01Icon },
+  'moon':           { lucide: Moon,          huge: Moon02Icon },
+  'radio':          { lucide: Radio,         huge: RadioIcon },
+  'server':         { lucide: Server,        huge: ServerStack01Icon },
+  'settings-2':     { lucide: Settings2,     huge: Settings02Icon },
+  'sun':            { lucide: Sun,           huge: Sun03Icon },
+  'undo-2':         { lucide: Undo2,         huge: ArrowTurnBackwardIcon },
+  'unplug':         { lucide: Unplug,        huge: Unlink01Icon },
+  'wifi':           { lucide: Wifi,          huge: WifiConnected01Icon },
+  'wifi-off':       { lucide: WifiOff,       huge: WifiDisconnected01Icon },
 }
