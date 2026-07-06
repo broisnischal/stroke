@@ -43,6 +43,7 @@
   // the AI panel is opened — see the {#await import()} blocks below.
   import AiSettingsDialog from './AiSettingsDialog.svelte'
   import ConnectionModal from './ConnectionModal.svelte'
+  import DbIcon from './DbIcon.svelte'
   import DockerLaunchModal from './DockerLaunchModal.svelte'
   import CreateTableDialog from './CreateTableDialog.svelte'
   import CreateSchemaDialog from './CreateSchemaDialog.svelte'
@@ -4010,11 +4011,12 @@ let rowSearch = $state('')
           </p>
         </div>
 
-        <!-- Supported engines -->
+        <!-- Supported engines — real brand marks -->
         <div class="relative flex flex-wrap items-center justify-center gap-2">
-          {#each ['PostgreSQL', 'MySQL', 'SQLite', 'Cloudflare D1'] as engine}
-            <span class="rounded-full border border-border/50 bg-muted/20 px-3 py-1.5 text-ui-xs font-medium text-muted-foreground/80">
-              {engine}
+          {#each [['postgres','PostgreSQL'],['mysql','MySQL'],['sqlite','SQLite'],['clickhouse','ClickHouse'],['d1','Cloudflare D1']] as [id, label]}
+            <span class="inline-flex items-center gap-2 rounded-full border border-border/50 bg-muted/20 py-1.5 pl-2.5 pr-3.5 text-ui-xs font-medium text-muted-foreground/85 transition-colors hover:border-border hover:text-foreground">
+              <DbIcon {id} class="size-4 text-muted-foreground/70" />
+              {label}
             </span>
           {/each}
         </div>
@@ -4022,7 +4024,7 @@ let rowSearch = $state('')
         <div class="relative flex flex-col items-center gap-4 pt-1">
           <Button
             type="button"
-            class="h-10 rounded-xl px-5 text-sm font-semibold shadow-sm"
+            class="h-11 rounded-xl px-6 text-sm font-semibold shadow-sm"
             onclick={() => (showConnectionModal = true)}
           >
             <Plus class="size-4" />

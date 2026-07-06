@@ -9,7 +9,6 @@
   let { open = $bindable(false), onconnect = () => {}, onsample = () => {} } = $props()
 
   let step = $state(1)
-  let activeFeature = $state(0)
   const TOTAL = 4
   const LICENSE_STEP = 3
   const KEY = 'stroke:onboarded'
@@ -58,7 +57,6 @@
   ]
 
   const heading = $derived(HEADINGS[step - 1])
-  const previewType = $derived(FEATURES[activeFeature].preview)
 
   function next() { step = Math.min(step + 1, TOTAL) }
   function back() { step = Math.max(step - 1, 1) }
@@ -68,15 +66,6 @@
   function headerSkip() {
     if (step === LICENSE_STEP) next()
     else done(false)
-  }
-
-  function selectFeature(i) {
-    activeFeature = Math.max(0, Math.min(i, FEATURES.length - 1))
-  }
-
-  function onFeatureKeydown(e) {
-    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') { e.preventDefault(); selectFeature(activeFeature + 1) }
-    else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') { e.preventDefault(); selectFeature(activeFeature - 1) }
   }
 
   function done(connect = false) {
@@ -180,108 +169,23 @@
 
             <!-- ── Step 1: Feature carousel ── -->
             {#if step === 1}
-              <div class="grid w-full grid-cols-1 gap-5 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.08fr)]">
-                <!-- Feature list -->
-                <div class="flex flex-col gap-1.5" role="tablist" aria-label="Features" tabindex="0" onkeydown={onFeatureKeydown}>
-                  {#each FEATURES as f, i}
-                    {@const active = i === activeFeature}
-                    <button
-                      type="button" role="tab" aria-selected={active}
-                      class={
-                        'group flex items-start gap-3 rounded-xl border px-3.5 py-3 text-left transition-all duration-200 ' +
-                        (active ? 'border-primary/25 bg-primary/[0.06] shadow-sm' : 'border-transparent hover:border-border/60 hover:bg-muted/40')
-                      }
-                      onclick={() => selectFeature(i)}
-                    >
-                      <span class={
-                        'grid size-9 shrink-0 place-items-center rounded-lg border transition-colors ' +
-                        (active ? 'border-primary/25 bg-primary/12 text-primary' : 'border-border/60 bg-muted/50 text-muted-foreground group-hover:text-foreground')
-                      }>
-                        <Icon name={f.icon} class="size-[18px]" />
-                      </span>
-                      <span class="min-w-0 flex-1">
-                        <span class="block text-[13.5px] font-semibold text-foreground">{f.title}</span>
-                        <span class="mt-0.5 block text-xs leading-relaxed text-muted-foreground">{f.desc}</span>
-                      </span>
-                    </button>
-                  {/each}
-                </div>
-
-                <!-- Preview — a little app window -->
-                <div class="relative hidden overflow-hidden rounded-xl border border-border/60 bg-muted/20 sm:block">
-                  <div class="flex items-center gap-1.5 border-b border-border/50 bg-card/40 px-3 py-2">
-                    <span class="size-2 rounded-full bg-muted-foreground/25"></span>
-                    <span class="size-2 rounded-full bg-muted-foreground/25"></span>
-                    <span class="size-2 rounded-full bg-muted-foreground/25"></span>
-                    <span class="ml-1.5 flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground/70">
-                      <Icon name={FEATURES[activeFeature].icon} class="size-3" />
-                      {FEATURES[activeFeature].title}
+              <!-- Clean feature grid — no preview clutter -->
+              <div class="grid w-full max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2">
+                {#each FEATURES as f}
+                  <div class="flex items-start gap-3.5 rounded-2xl border border-border/40 bg-card/20 p-4 transition-colors hover:border-border/70 hover:bg-card/40">
+                    <span class="grid size-10 shrink-0 place-items-center rounded-xl border border-border/50 bg-muted/40 text-muted-foreground">
+                      <Icon name={f.icon} class="size-5" />
                     </span>
+                    <div class="min-w-0">
+                      <p class="text-[13.5px] font-semibold text-foreground">{f.title}</p>
+                      <p class="mt-1 text-[12px] leading-relaxed text-muted-foreground">{f.desc}</p>
+                    </div>
                   </div>
-                  <div class="relative h-[236px]">
-                    {#key activeFeature}
-                      <div class="absolute inset-0 flex items-center p-4" in:fade={{ duration: 180 }}>
-                        {#if previewType === 'connect'}
-                          <div class="flex w-full flex-col gap-2">
-                            {#each [['postgres', 'PostgreSQL', true], ['mysql', 'MySQL', false], ['sqlite', 'SQLite', false], ['d1', 'Cloudflare D1', false]] as [id, name, on]}
-                              <div class="flex items-center gap-2.5 rounded-lg border border-border/60 bg-card/60 px-3 py-2">
-                                <DbIcon {id} class="size-4 text-muted-foreground" />
-                                <span class="text-xs font-medium text-foreground">{name}</span>
-                                {#if on}
-                                  <span class="ml-auto flex items-center gap-1 text-[10px] font-medium text-emerald-500">
-                                    <span class="size-1.5 rounded-full bg-emerald-500"></span>Connected
-                                  </span>
-                                {:else}
-                                  <span class="ml-auto text-[10px] text-muted-foreground/40">Connect</span>
-                                {/if}
-                              </div>
-                            {/each}
-                          </div>
-
-                        {:else if previewType === 'table'}
-                          <div class="flex w-full flex-col overflow-hidden rounded-lg border border-border/60">
-                            <div class="grid grid-cols-3 border-b border-border/60 bg-muted/60 text-[10px] font-medium text-muted-foreground">
-                              {#each ['id', 'name', 'status'] as h}<div class="border-r border-border/60 px-2.5 py-1.5 last:border-r-0">{h}</div>{/each}
-                            </div>
-                            {#each [['1', 'Ada Lovelace', 'active'], ['2', 'Alan Turing', 'active'], ['3', 'Grace Hopper', 'idle'], ['4', 'Edsger D.', 'active']] as row, ri}
-                              <div class="grid grid-cols-3 text-[10px] text-foreground {ri % 2 ? 'bg-card/40' : ''}">
-                                {#each row as cell}<div class="truncate border-r border-border/60 px-2.5 py-1.5 last:border-r-0">{cell}</div>{/each}
-                              </div>
-                            {/each}
-                          </div>
-
-                        {:else if previewType === 'sql'}
-                          <div class="flex w-full flex-col overflow-hidden rounded-lg border border-border/60 bg-card/60 font-mono text-[10px] leading-relaxed">
-                            <div class="flex-1 space-y-1 p-3.5">
-                              <div><span class="text-primary">SELECT</span> <span class="text-foreground">id, name, email</span></div>
-                              <div><span class="text-primary">FROM</span> <span class="text-foreground">users</span></div>
-                              <div><span class="text-primary">WHERE</span> <span class="text-foreground">status =</span> <span class="text-emerald-500">'active'</span></div>
-                              <div><span class="text-primary">ORDER BY</span> <span class="text-foreground">created_at</span> <span class="text-primary">DESC</span></div>
-                              <div><span class="text-primary">LIMIT</span> <span class="text-foreground">50</span><span class="text-muted-foreground">;</span></div>
-                            </div>
-                          </div>
-
-                        {:else}
-                          <div class="flex w-full flex-col justify-center gap-2.5">
-                            <div class="ml-auto max-w-[80%] rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-[10px] font-medium text-primary-foreground">
-                              Show me the 10 newest signups
-                            </div>
-                            <div class="mr-auto max-w-[88%] rounded-2xl rounded-bl-sm border border-border/60 bg-card/60 px-3 py-2 text-[10px] text-foreground">
-                              <div class="mb-1.5 flex items-center gap-1.5 text-muted-foreground">
-                                <Icon name="sparkles" class="size-3 text-primary" /> Generated SQL
-                              </div>
-                              <code class="font-mono text-[9px] text-foreground">SELECT * FROM users ORDER BY created_at DESC LIMIT 10;</code>
-                            </div>
-                          </div>
-                        {/if}
-                      </div>
-                    {/key}
-                  </div>
-                </div>
+                {/each}
               </div>
 
               <!-- Supported brands strip -->
-              <div class="flex flex-col items-center gap-2.5">
+              <div class="flex flex-col items-center gap-3">
                 <span class="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground/45">Works with</span>
                 <div class="flex flex-wrap items-center justify-center gap-x-5 gap-y-2.5">
                   {#each BRANDS as id}
