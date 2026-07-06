@@ -4915,6 +4915,34 @@ let rowSearch = $state('')
     if (!connection) return
     void handleSwitchDatabase({ ...connection, databaseId, database: name, name })
   }}
+  onswitchproviderdb={async ({ provider, dbRef, name }) => {
+    if (!connection) return
+    try {
+      const { providerBuildConnection } = await import('$lib/providers.js')
+      const built = await providerBuildConnection(provider, dbRef)
+      if (built.needs_password) {
+        // Supabase needs a per-project password — can't switch silently, so
+        // send the user to the connect dialog to finish it.
+        toast.message(`${name} needs its database password — opening the connection dialog.`)
+        showConnectionModal = true
+        return
+      }
+      void handleSwitchDatabase({
+        ...connection,
+        type: built.db_type === 'mysql' ? 'mysql' : 'postgres',
+        host: built.host,
+        port: built.port,
+        user: built.username,
+        password: built.password,
+        database: built.database,
+        ssl: built.ssl,
+        name: built.name,
+        provider,
+      })
+    } catch (e) {
+      toast.error('Could not switch database', { description: String(e) })
+    }
+  }}
   oncheckupdate={() => updateDialog?.checkNow()}
   onopenmodelsettings={() => (showAiModelSettings = true)}
   sidebarVisible={sidebarOpen}

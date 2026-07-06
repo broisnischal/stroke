@@ -41,6 +41,7 @@
   import { aiProfiles, activeProfileId, setActiveProfile } from '$lib/stores/ai-settings.js'
   import { toggleLightDark, isCurrentThemeDark } from '$lib/stores/settings.js'
   import { executeSql, cloudflareListD1Databases } from '$lib/api.js'
+  import { providerListDatabases } from '$lib/providers.js'
   import { engineFamily } from '$lib/stores/connections.js'
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js'
   import AppearanceMenu from './AppearanceMenu.svelte'
@@ -59,6 +60,7 @@
     onconnect = /** @type {() => void} */ (() => {}),
     onswitchtodb = /** @type {(db: string) => void} */ ((_db) => {}),
     onswitchd1database = /** @type {(db: { databaseId: string, name: string }) => void} */ ((_db) => {}),
+    onswitchproviderdb = /** @type {(db: { provider: string, dbRef: string, name: string }) => void} */ ((_db) => {}),
     onswitchconnection = /** @type {(conn: import('$lib/stores/connections.js').SavedConnection) => void} */ ((_c) => {}),
     oncheckupdate = /** @type {() => void} */ (() => {}),
     onopenmodelsettings = /** @type {() => void} */ (() => {}),
@@ -229,10 +231,18 @@
   )
   const isPostgres = $derived(engineFamily(connection?.type) === 'postgres' || engineFamily(connection?.type) === 'mysql')
   const isD1 = $derived(connection?.type === 'd1')
+  /** Connection that originated from a provider sign-in (Neon/Supabase/…). */
+  const isProvider = $derived(!!connection?.provider)
   /** Whether this connection supports switching databases in-place. */
-  const canSwitchDb = $derived(isPostgres || isD1)
-  /** Label shown in the trigger for the active db (D1 has no `database` field, so fall back to the connection name). */
-  const currentDbLabel = $derived(isD1 ? (connection?.database || connection?.name || '') : currentDb)
+  const canSwitchDb = $derived(isPostgres || isD1 || isProvider)
+  /** Label shown in the trigger for the active db. Provider connections all use
+   * the db name "postgres", so show the project name instead (from the connection
+   * name, e.g. "Prisma · stroke-testing" → "stroke-testing"). */
+  const currentDbLabel = $derived(
+    isProvider ? ((connection?.name?.split(' · ').pop()) || connection?.name || currentDb)
+    : isD1 ? (connection?.database || connection?.name || '')
+    : currentDb,
+  )
   /** Key of the active db, used to mark the current row. */
   const currentDbKey = $derived(isD1 ? (connection?.databaseId ?? '') : currentDb)
 
@@ -243,6 +253,20 @@
   )
 
   async function fetchDatabases() {
+    // Provider connections list the account's other databases/projects via the
+    // provider API (checked first — a Supabase/Neon connection is also postgres).
+    if (isProvider && connection?.provider) {
+      dbLoading = true
+      try {
+        const dbs = await providerListDatabases(connection.provider)
+        dbList = (dbs ?? []).map((/** @type {{ db_ref: string, name: string }} */ d) => ({ key: d.db_ref, label: d.name }))
+      } catch {
+        dbList = []
+      } finally {
+        dbLoading = false
+      }
+      return
+    }
     if (isPostgres) {
       dbLoading = true
       try {
@@ -278,7 +302,9 @@
   }
 
   function switchDb(/** @type {{ key: string, label: string }} */ db) {
-    if (db.key !== currentDbKey) {
+    if (isProvider && connection?.provider) {
+      onswitchproviderdb({ provider: connection.provider, dbRef: db.key, name: db.label })
+    } else if (db.key !== currentDbKey) {
       if (isD1) onswitchd1database({ databaseId: db.key, name: db.label })
       else onswitchtodb(db.label)
     }
