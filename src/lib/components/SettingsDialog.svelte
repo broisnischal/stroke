@@ -1,12 +1,6 @@
 <script>
   import Minus from "@lucide/svelte/icons/minus";
   import Plus from "@lucide/svelte/icons/plus";
-  import ChevronRight from "@lucide/svelte/icons/chevron-right";
-  import Blocks from "@lucide/svelte/icons/blocks";
-  import Server from "@lucide/svelte/icons/server";
-  import Sparkles from "@lucide/svelte/icons/sparkles";
-  import KeyRound from "@lucide/svelte/icons/key-round";
-  import Info from "@lucide/svelte/icons/info";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
@@ -50,6 +44,22 @@
 
   let settings = $state(loadSettings());
 
+  // ── Category navigation + search ─────────────────────────────────────────
+  const CATEGORIES = [
+    { id: 'general',      label: 'General',      icon: 'sliders-horizontal' },
+    { id: 'appearance',   label: 'Appearance',   icon: 'sparkles' },
+    { id: 'integrations', label: 'Integrations', icon: 'blocks' },
+    { id: 'about',        label: 'About',        icon: 'info' },
+  ];
+  let category = $state('general');
+  let query = $state('');
+  const q = $derived(query.trim().toLowerCase());
+  const searching = $derived(q.length > 0);
+  /** Row visibility under the current search query. */
+  const show = (/** @type {string} */ title, /** @type {string} */ desc = '') =>
+    !q || `${title} ${desc}`.toLowerCase().includes(q);
+  const activeCategory = $derived(CATEGORIES.find((c) => c.id === category) ?? CATEGORIES[0]);
+
   const themeGroups = $derived(themesByGroup());
   /** Kept in sync with applySettings / ⌘M via appThemeId store */
   const activeTheme = $derived(getThemeDefinition($appThemeId));
@@ -62,7 +72,8 @@
   });
 
   const themeSelectTrigger =
-    "h-7 w-[11.5rem] justify-between gap-2 border-border/80 bg-background px-2 text-ui-xs font-normal shadow-none";
+    "h-8 w-56 justify-between gap-2 border-border/70 bg-background px-2.5 text-ui-xs font-normal shadow-none";
+  const rowCls = "flex items-center justify-between gap-6 border-t border-border/25 py-3.5 first:border-t-0";
 
   function refreshSettings() {
     settings = loadSettings();
@@ -70,7 +81,7 @@
 
   /** @param {boolean} next */
   function handleOpenChange(next) {
-    if (next) refreshSettings();
+    if (next) { refreshSettings(); category = 'general'; query = ''; }
   }
 
   /** @param {import('$lib/themes/registry.js').ThemeId} themeId */
@@ -157,309 +168,341 @@
 </script>
 
 <Dialog.Root bind:open onOpenChange={handleOpenChange}>
-  <Dialog.Content class="flex max-h-[min(40rem,85vh)] flex-col gap-0 overflow-hidden p-0 sm:max-w-[24rem]">
-    <Dialog.Header class="shrink-0 space-y-0.5 border-b border-border/60 px-5 pb-3.5 pt-4">
-      <Dialog.Title class="text-sm font-semibold tracking-tight">Settings</Dialog.Title>
-      <Dialog.Description class="text-ui-xs text-muted-foreground">
-        Appearance, behavior, and integrations
-      </Dialog.Description>
-    </Dialog.Header>
+  <Dialog.Content class="flex h-[min(40rem,88vh)] flex-col gap-0 overflow-hidden p-0 sm:max-w-[56rem]">
+    <Dialog.Title class="sr-only">Settings</Dialog.Title>
+    <Dialog.Description class="sr-only">Appearance, behavior, and integrations</Dialog.Description>
 
-    <div class="app-scroll flex min-h-0 flex-col gap-4 overflow-y-auto px-5 py-4">
-      <!-- ── Appearance ─────────────────────────────────────────────── -->
-      <section class="flex flex-col gap-1.5">
-        <h3 class="px-0.5 text-ui-2xs font-medium uppercase tracking-wider text-muted-foreground/70">Appearance</h3>
-        <div class="divide-y divide-border/50 rounded-lg border border-border/70 bg-card/40">
-          <div class="flex h-11 items-center justify-between gap-3 px-3">
-            <span class="text-ui-xs font-medium text-foreground">Theme</span>
-            <Select.Root
-              type="single"
-              value={$appThemeId}
-              onValueChange={(v) => {
-                if (v) setTheme(/** @type {import('$lib/themes/registry.js').ThemeId} */ (v));
-              }}
-            >
-              <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Color theme">
-                <span class="flex min-w-0 items-center gap-2">
-                  <ThemeSwatch bg={activeTheme.preview.bg} accent={activeTheme.preview.accent} />
-                  <span class="truncate font-medium">{activeTheme.name}</span>
-                </span>
-              </Select.Trigger>
-              <Select.Content
-                class="z-[100] max-h-[min(24rem,70vh)] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1"
-                sideOffset={6}
-              >
-                {#each themeGroups as group, i (group.id)}
-                  {#if i > 0}
-                    <Select.Separator class="my-1" />
-                  {/if}
-                  <Select.Group>
-                    <Select.GroupHeading
-                      class="px-2 py-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase"
-                    >
-                      {group.label}
-                    </Select.GroupHeading>
-                    {#each group.themes as theme (theme.id)}
-                      <Select.Item value={theme.id} label={theme.name} class="rounded-md py-1.5 pr-8 pl-2">
-                        {#snippet children()}
-                          <span class="flex min-w-0 items-center gap-2">
-                            <ThemeSwatch bg={theme.preview.bg} accent={theme.preview.accent} />
-                            <span class="min-w-0">
-                              <span class="block truncate text-xs font-medium">{theme.name}</span>
-                              <span class="block truncate text-[10px] text-muted-foreground">
-                                {theme.description}
-                              </span>
-                            </span>
-                          </span>
-                        {/snippet}
-                      </Select.Item>
-                    {/each}
-                  </Select.Group>
-                {/each}
-              </Select.Content>
-            </Select.Root>
-          </div>
-
-          <div class="flex h-11 items-center justify-between gap-3 px-3">
-            <span class="text-ui-xs font-medium text-foreground">Font</span>
-            <Select.Root
-              type="single"
-              value={settings.font}
-              onValueChange={(v) => { if (v) setFont(/** @type {import('$lib/stores/settings.js').FontId} */ (v)); }}
-            >
-              <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Font family">
-                <span class="flex min-w-0 items-center gap-2">
-                  <span
-                    class="shrink-0 text-[11px] font-semibold text-muted-foreground/70"
-                    style="font-family: {FONT_PRESETS[settings.font]?.sans}"
-                    aria-hidden="true"
-                  >Aa</span>
-                  <span class="truncate font-medium">{FONT_PRESETS[settings.font]?.label ?? "Geist"}</span>
-                </span>
-              </Select.Trigger>
-              <Select.Content
-                class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1"
-                sideOffset={6}
-              >
-                {#each fontEntries as [id, preset] (id)}
-                  <Select.Item value={id} label={preset.label} class="rounded-md py-1.5 pr-8 pl-2">
-                    {#snippet children()}
-                      <span class="flex min-w-0 items-center gap-2.5">
-                        <span
-                          class="flex size-8 shrink-0 items-center justify-center rounded border border-border/40 bg-muted/30 text-[14px] font-semibold text-foreground/70"
-                          style="font-family: {preset.sans}"
-                          aria-hidden="true"
-                        >Aa</span>
-                        <span class="min-w-0">
-                          <span class="block text-xs font-medium leading-snug">{preset.label}</span>
-                          <span class="block text-[10px] leading-snug text-muted-foreground/65">{preset.description}</span>
-                        </span>
-                      </span>
-                    {/snippet}
-                  </Select.Item>
-                {/each}
-              </Select.Content>
-            </Select.Root>
-          </div>
-
-          <div class="flex h-11 items-center justify-between gap-3 px-3">
-            <span class="text-ui-xs font-medium text-foreground">Icons</span>
-            <Select.Root
-              type="single"
-              value={settings.iconStyle}
-              onValueChange={(v) => { if (v) setIconStyle(/** @type {import('$lib/stores/settings.js').IconStyleId} */ (v)); }}
-            >
-              <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Icon style">
-                <span class="flex min-w-0 items-center gap-2">
-                  <PenTool
-                    class="size-3.5 shrink-0 text-muted-foreground"
-                    style="stroke-width: {ICON_STYLES[settings.iconStyle]?.strokeWidth ?? 2}px"
-                    aria-hidden="true"
-                  />
-                  <span class="truncate font-medium">{ICON_STYLES[settings.iconStyle]?.label ?? "Regular"}</span>
-                </span>
-              </Select.Trigger>
-              <Select.Content
-                class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1"
-                sideOffset={6}
-              >
-                {#each iconStyleEntries as [id, preset] (id)}
-                  <Select.Item value={id} label={preset.label} class="rounded-md py-1.5 pr-8 pl-2">
-                    {#snippet children()}
-                      <span class="flex min-w-0 items-center gap-2.5">
-                        <span class="flex size-8 shrink-0 items-center justify-center rounded border border-border/40 bg-muted/30">
-                          <PenTool class="size-4 text-foreground/70" style="stroke-width: {preset.strokeWidth}px" aria-hidden="true" />
-                        </span>
-                        <span class="min-w-0">
-                          <span class="block text-xs font-medium leading-snug">{preset.label}</span>
-                          <span class="block text-[10px] leading-snug text-muted-foreground/65">{preset.description}</span>
-                        </span>
-                      </span>
-                    {/snippet}
-                  </Select.Item>
-                {/each}
-              </Select.Content>
-            </Select.Root>
-          </div>
-
-          <div class="flex h-11 items-center justify-between gap-3 px-3">
-            <span class="text-ui-xs font-medium text-foreground">Icon set</span>
-            <Select.Root
-              type="single"
-              value={settings.iconSet}
-              onValueChange={(v) => { if (v) setIconSet(/** @type {import('$lib/stores/settings.js').IconSetId} */ (v)); }}
-            >
-              <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Icon set">
-                <span class="flex min-w-0 items-center gap-2">
-                  <Icon name="sparkles" class="size-3.5 shrink-0 text-muted-foreground" />
-                  <span class="truncate font-medium">{ICON_SETS[settings.iconSet]?.label ?? "Lucide"}</span>
-                </span>
-              </Select.Trigger>
-              <Select.Content
-                class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[14rem] p-1"
-                sideOffset={6}
-              >
-                {#each iconSetEntries as [id, preset] (id)}
-                  <Select.Item value={id} label={preset.label} class="rounded-md py-1.5 pr-8 pl-2">
-                    {#snippet children()}
-                      <span class="flex min-w-0 items-center gap-2.5">
-                        <span class="flex size-8 shrink-0 items-center justify-center gap-1 rounded border border-border/40 bg-muted/30 text-foreground/70">
-                          {#if id === "hugeicons"}
-                            <HugeiconsIcon icon={Search01Icon} class="size-3.5" strokeWidth={1.8} />
-                            <HugeiconsIcon icon={SparklesIcon} class="size-3.5" strokeWidth={1.8} />
-                          {:else}
-                            <LucideSearch class="size-3.5" />
-                            <LucideSparkles class="size-3.5" />
-                          {/if}
-                        </span>
-                        <span class="min-w-0">
-                          <span class="block text-xs font-medium leading-snug">{preset.label}</span>
-                          <span class="block text-[10px] leading-snug text-muted-foreground/65">{preset.description}</span>
-                        </span>
-                      </span>
-                    {/snippet}
-                  </Select.Item>
-                {/each}
-              </Select.Content>
-            </Select.Root>
-          </div>
-
-          <div class="flex h-11 items-center justify-between gap-3 px-3">
-            <span class="text-ui-xs font-medium text-foreground">Zoom</span>
-            <div class="flex items-center gap-1">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                class="size-7"
-                aria-label="Zoom out"
-                disabled={!canDecreaseZoom(settings.zoom)}
-                onclick={() => bumpZoom(-1)}
-              >
-                <Minus class="size-3.5" />
-              </Button>
-              <button
-                type="button"
-                class="min-w-12 rounded-md px-2 py-1 font-mono text-xs tabular-nums text-foreground hover:bg-muted"
-                onclick={() => (settings = resetZoom())}
-                title="Reset to 100%"
-              >
-                {zoomLabel}
-              </button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                class="size-7"
-                aria-label="Zoom in"
-                disabled={!canIncreaseZoom(settings.zoom)}
-                onclick={() => bumpZoom(1)}
-              >
-                <Plus class="size-3.5" />
-              </Button>
-            </div>
-          </div>
+    <div class="grid min-h-0 flex-1 grid-cols-[13rem_minmax(0,1fr)] overflow-hidden">
+      <!-- ── Left: search + category nav ─────────────────────────── -->
+      <aside class="flex min-h-0 flex-col gap-3 border-r border-border/40 bg-muted/[0.015] p-3">
+        <div class="relative">
+          <Icon name="search" class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/45" />
+          <input
+            bind:value={query}
+            placeholder="Search settings…"
+            class="h-8 w-full rounded-lg border border-border/60 bg-background pl-8 pr-2.5 text-ui-xs text-foreground outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground/40 focus:border-ring focus:ring-2 focus:ring-ring/20"
+          />
         </div>
-      </section>
+        <nav class="flex flex-col gap-0.5">
+          {#each CATEGORIES as c (c.id)}
+            <button
+              type="button"
+              onclick={() => { category = c.id; query = ''; }}
+              class={cn(
+                'flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors',
+                !searching && category === c.id
+                  ? 'bg-muted/60 font-medium text-foreground'
+                  : 'text-muted-foreground hover:bg-muted/30 hover:text-foreground',
+              )}
+            >
+              <Icon name={c.icon} class="size-4 shrink-0" />
+              {c.label}
+            </button>
+          {/each}
+        </nav>
+      </aside>
 
-      <!-- ── Behavior ───────────────────────────────────────────────── -->
-      <section class="flex flex-col gap-1.5">
-        <h3 class="px-0.5 text-ui-2xs font-medium uppercase tracking-wider text-muted-foreground/70">Behavior</h3>
-        <div class="divide-y divide-border/50 rounded-lg border border-border/70 bg-card/40">
-          {@render toggleRow('Launch at login', 'Start Stroke when you sign in', launchAtLogin ?? false, toggleLaunchAtLogin)}
-          {@render toggleRow('Auto reconnect on startup', 'Reconnect to the last database on launch', settings.autoReconnectOnStartup, toggleAutoReconnect)}
-          {@render toggleRow('Preview SQL before applying', 'Review the DML before edits, inserts, and deletes run', settings.previewDmlBeforeApply, togglePreviewDml)}
-          {@render toggleRow('MCP auto-start', 'Start the MCP server on database connect', settings.mcpAutoStart, toggleMcpAutoStart)}
-        </div>
-      </section>
+      <!-- ── Right: content ──────────────────────────────────────── -->
+      <div class="app-scroll min-h-0 overflow-y-auto">
+        <div class="mx-auto max-w-[42rem] px-8 py-7">
+          <h2 class="mb-6 text-[15px] font-semibold tracking-tight text-foreground">
+            {searching ? 'Search results' : activeCategory.label}
+          </h2>
 
-      <!-- ── More ───────────────────────────────────────────────────── -->
-      <section class="flex flex-col gap-1.5">
-        <h3 class="px-0.5 text-ui-2xs font-medium uppercase tracking-wider text-muted-foreground/70">More</h3>
-        <div class="divide-y divide-border/50 rounded-lg border border-border/70 bg-card/40">
-          {@render navRow('blocks', 'Extensions', () => { open = false; onopenextensions(); })}
-          {@render navRow('server', 'MCP configuration', () => { open = false; onopenmcp(); })}
-          {@render navRow('sparkles', 'AI models', openModelConfiguration)}
-          {@render navRow('key-round', 'License', () => { open = false; onopenlicense(); }, planBadge)}
-          {@render navRow('info', 'About Stroke', () => { open = false; onopenabout(); })}
+          {#if searching}
+            {@render generalContent()}
+            {@render appearanceContent()}
+            {@render integrationsContent()}
+            {@render aboutContent()}
+          {:else if category === 'general'}
+            {@render generalContent()}
+          {:else if category === 'appearance'}
+            {@render appearanceContent()}
+          {:else if category === 'integrations'}
+            {@render integrationsContent()}
+          {:else}
+            {@render aboutContent()}
+          {/if}
         </div>
-      </section>
+      </div>
     </div>
+  </Dialog.Content>
+</Dialog.Root>
 
-    <!-- Shortcuts -->
-    <div class="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border/60 px-5 py-3">
+<!-- ── Content snippets ──────────────────────────────────────────── -->
+{#snippet secLabel(/** @type {string} */ text)}
+  {#if !searching}
+    <p class="mt-8 mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/45 first:mt-0">{text}</p>
+    <div class="mb-1 border-b border-border/40"></div>
+  {/if}
+{/snippet}
+
+{#snippet switchRow(/** @type {string} */ label, /** @type {string} */ desc, /** @type {boolean} */ checked, /** @type {() => void} */ ontoggle)}
+  <div class={rowCls}>
+    <div class="min-w-0">
+      <p class="text-[13px] font-medium text-foreground">{label}</p>
+      <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{desc}</p>
+    </div>
+    <button
+      type="button" role="switch" aria-checked={checked} aria-label={label}
+      onclick={ontoggle}
+      class={cn(
+        'relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors',
+        checked ? 'bg-primary' : 'bg-muted',
+      )}
+    >
+      <span class={cn('pointer-events-none block size-4 rounded-full bg-background shadow-sm transition-transform', checked ? 'translate-x-4' : 'translate-x-0.5')}></span>
+    </button>
+  </div>
+{/snippet}
+
+{#snippet actionRow(/** @type {string} */ label, /** @type {string} */ desc, /** @type {string} */ btn, /** @type {() => void} */ onclick, /** @type {{label:string,class:string}|null} */ badge = null)}
+  <div class={rowCls}>
+    <div class="min-w-0">
+      <p class="flex items-center gap-2 text-[13px] font-medium text-foreground">
+        {label}
+        {#if badge}<span class="rounded-full border px-1.5 py-px text-[10px] font-medium leading-4 {badge.class}">{badge.label}</span>{/if}
+      </p>
+      <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{desc}</p>
+    </div>
+    <Button type="button" variant="outline" size="sm" class="shrink-0" {onclick}>{btn}</Button>
+  </div>
+{/snippet}
+
+{#snippet generalContent()}
+  {@render secLabel('Startup & behavior')}
+  {#if show('Launch at login', 'Start Stroke when you sign in')}
+    {@render switchRow('Launch at login', 'Start Stroke when you sign in', launchAtLogin ?? false, toggleLaunchAtLogin)}
+  {/if}
+  {#if show('Auto reconnect on startup', 'Reconnect to the last database on launch')}
+    {@render switchRow('Auto reconnect on startup', 'Reconnect to the last database on launch', settings.autoReconnectOnStartup, toggleAutoReconnect)}
+  {/if}
+  {#if show('Preview SQL before applying', 'Review the DML before edits, inserts, and deletes run')}
+    {@render switchRow('Preview SQL before applying', 'Review the DML before edits, inserts, and deletes run', settings.previewDmlBeforeApply, togglePreviewDml)}
+  {/if}
+  {#if show('MCP auto-start', 'Start the MCP server on database connect')}
+    {@render switchRow('MCP auto-start', 'Start the MCP server on database connect', settings.mcpAutoStart, toggleMcpAutoStart)}
+  {/if}
+{/snippet}
+
+{#snippet appearanceContent()}
+  {@render secLabel('Theme & typeface')}
+
+  {#if show('Theme', 'Color theme for the whole app')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-[13px] font-medium text-foreground">Theme</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Color theme for the whole app.</p>
+      </div>
+      <Select.Root type="single" value={$appThemeId} onValueChange={(v) => { if (v) setTheme(/** @type {import('$lib/themes/registry.js').ThemeId} */ (v)); }}>
+        <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Color theme">
+          <span class="flex min-w-0 items-center gap-2">
+            <ThemeSwatch bg={activeTheme.preview.bg} accent={activeTheme.preview.accent} />
+            <span class="truncate font-medium">{activeTheme.name}</span>
+          </span>
+        </Select.Trigger>
+        <Select.Content class="z-[100] max-h-[min(24rem,70vh)] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
+          {#each themeGroups as group, i (group.id)}
+            {#if i > 0}<Select.Separator class="my-1" />{/if}
+            <Select.Group>
+              <Select.GroupHeading class="px-2 py-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">{group.label}</Select.GroupHeading>
+              {#each group.themes as theme (theme.id)}
+                <Select.Item value={theme.id} label={theme.name} class="rounded-md py-1.5 pr-8 pl-2">
+                  {#snippet children()}
+                    <span class="flex min-w-0 items-center gap-2">
+                      <ThemeSwatch bg={theme.preview.bg} accent={theme.preview.accent} />
+                      <span class="min-w-0">
+                        <span class="block truncate text-xs font-medium">{theme.name}</span>
+                        <span class="block truncate text-[10px] text-muted-foreground">{theme.description}</span>
+                      </span>
+                    </span>
+                  {/snippet}
+                </Select.Item>
+              {/each}
+            </Select.Group>
+          {/each}
+        </Select.Content>
+      </Select.Root>
+    </div>
+  {/if}
+
+  {#if show('Font', 'UI and editor typeface')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-[13px] font-medium text-foreground">Font</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">UI and editor typeface.</p>
+      </div>
+      <Select.Root type="single" value={settings.font} onValueChange={(v) => { if (v) setFont(/** @type {import('$lib/stores/settings.js').FontId} */ (v)); }}>
+        <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Font family">
+          <span class="flex min-w-0 items-center gap-2">
+            <span class="shrink-0 text-[11px] font-semibold text-muted-foreground/70" style="font-family: {FONT_PRESETS[settings.font]?.sans}" aria-hidden="true">Aa</span>
+            <span class="truncate font-medium">{FONT_PRESETS[settings.font]?.label ?? "Geist"}</span>
+          </span>
+        </Select.Trigger>
+        <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
+          {#each fontEntries as [id, preset] (id)}
+            <Select.Item value={id} label={preset.label} class="rounded-md py-1.5 pr-8 pl-2">
+              {#snippet children()}
+                <span class="flex min-w-0 items-center gap-2.5">
+                  <span class="flex size-8 shrink-0 items-center justify-center rounded border border-border/40 bg-muted/30 text-[14px] font-semibold text-foreground/70" style="font-family: {preset.sans}" aria-hidden="true">Aa</span>
+                  <span class="min-w-0">
+                    <span class="block text-xs font-medium leading-snug">{preset.label}</span>
+                    <span class="block text-[10px] leading-snug text-muted-foreground/65">{preset.description}</span>
+                  </span>
+                </span>
+              {/snippet}
+            </Select.Item>
+          {/each}
+        </Select.Content>
+      </Select.Root>
+    </div>
+  {/if}
+
+  {@render secLabel('Icons')}
+
+  {#if show('Icon weight', 'Stroke thickness of Lucide icons')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-[13px] font-medium text-foreground">Icon weight</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Stroke thickness of the icon set.</p>
+      </div>
+      <Select.Root type="single" value={settings.iconStyle} onValueChange={(v) => { if (v) setIconStyle(/** @type {import('$lib/stores/settings.js').IconStyleId} */ (v)); }}>
+        <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Icon style">
+          <span class="flex min-w-0 items-center gap-2">
+            <PenTool class="size-3.5 shrink-0 text-muted-foreground" style="stroke-width: {ICON_STYLES[settings.iconStyle]?.strokeWidth ?? 2}px" aria-hidden="true" />
+            <span class="truncate font-medium">{ICON_STYLES[settings.iconStyle]?.label ?? "Regular"}</span>
+          </span>
+        </Select.Trigger>
+        <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
+          {#each iconStyleEntries as [id, preset] (id)}
+            <Select.Item value={id} label={preset.label} class="rounded-md py-1.5 pr-8 pl-2">
+              {#snippet children()}
+                <span class="flex min-w-0 items-center gap-2.5">
+                  <span class="flex size-8 shrink-0 items-center justify-center rounded border border-border/40 bg-muted/30">
+                    <PenTool class="size-4 text-foreground/70" style="stroke-width: {preset.strokeWidth}px" aria-hidden="true" />
+                  </span>
+                  <span class="min-w-0">
+                    <span class="block text-xs font-medium leading-snug">{preset.label}</span>
+                    <span class="block text-[10px] leading-snug text-muted-foreground/65">{preset.description}</span>
+                  </span>
+                </span>
+              {/snippet}
+            </Select.Item>
+          {/each}
+        </Select.Content>
+      </Select.Root>
+    </div>
+  {/if}
+
+  {#if show('Icon set', 'Icon family used across the app')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-[13px] font-medium text-foreground">Icon set</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Icon family used across the app.</p>
+      </div>
+      <Select.Root type="single" value={settings.iconSet} onValueChange={(v) => { if (v) setIconSet(/** @type {import('$lib/stores/settings.js').IconSetId} */ (v)); }}>
+        <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Icon set">
+          <span class="flex min-w-0 items-center gap-2">
+            <Icon name="sparkles" class="size-3.5 shrink-0 text-muted-foreground" />
+            <span class="truncate font-medium">{ICON_SETS[settings.iconSet]?.label ?? "Lucide"}</span>
+          </span>
+        </Select.Trigger>
+        <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[14rem] p-1" sideOffset={6}>
+          {#each iconSetEntries as [id, preset] (id)}
+            <Select.Item value={id} label={preset.label} class="rounded-md py-1.5 pr-8 pl-2">
+              {#snippet children()}
+                <span class="flex min-w-0 items-center gap-2.5">
+                  <span class="flex size-8 shrink-0 items-center justify-center gap-1 rounded border border-border/40 bg-muted/30 text-foreground/70">
+                    {#if id === "hugeicons"}
+                      <HugeiconsIcon icon={Search01Icon} class="size-3.5" strokeWidth={1.8} />
+                      <HugeiconsIcon icon={SparklesIcon} class="size-3.5" strokeWidth={1.8} />
+                    {:else}
+                      <LucideSearch class="size-3.5" />
+                      <LucideSparkles class="size-3.5" />
+                    {/if}
+                  </span>
+                  <span class="min-w-0">
+                    <span class="block text-xs font-medium leading-snug">{preset.label}</span>
+                    <span class="block text-[10px] leading-snug text-muted-foreground/65">{preset.description}</span>
+                  </span>
+                </span>
+              {/snippet}
+            </Select.Item>
+          {/each}
+        </Select.Content>
+      </Select.Root>
+    </div>
+  {/if}
+
+  {@render secLabel('Display')}
+  {#if show('Zoom', 'Scale the whole interface')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-[13px] font-medium text-foreground">Zoom</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Scale the whole interface.</p>
+      </div>
+      <div class="flex items-center gap-1">
+        <Button type="button" variant="ghost" size="icon" class="size-7" aria-label="Zoom out" disabled={!canDecreaseZoom(settings.zoom)} onclick={() => bumpZoom(-1)}>
+          <Minus class="size-3.5" />
+        </Button>
+        <button type="button" class="min-w-12 rounded-md px-2 py-1 font-mono text-xs tabular-nums text-foreground hover:bg-muted" onclick={() => (settings = resetZoom())} title="Reset to 100%">{zoomLabel}</button>
+        <Button type="button" variant="ghost" size="icon" class="size-7" aria-label="Zoom in" disabled={!canIncreaseZoom(settings.zoom)} onclick={() => bumpZoom(1)}>
+          <Plus class="size-3.5" />
+        </Button>
+      </div>
+    </div>
+  {/if}
+{/snippet}
+
+{#snippet integrationsContent()}
+  {@render secLabel('Tools')}
+  {#if show('Extensions', 'Cell formatters, ID generators & transforms')}
+    {@render actionRow('Extensions', 'Cell formatters, ID generators & transforms.', 'Open', () => { open = false; onopenextensions(); })}
+  {/if}
+  {#if show('MCP configuration', 'Expose your database to external AI tools')}
+    {@render actionRow('MCP configuration', 'Expose your database to external AI tools.', 'Open', () => { open = false; onopenmcp(); })}
+  {/if}
+  {#if show('AI models', 'Configure AI providers and API keys')}
+    {@render actionRow('AI models', 'Configure AI providers and API keys.', 'Configure', openModelConfiguration)}
+  {/if}
+
+  {@render secLabel('Account')}
+  {#if show('License', 'Activate or manage your Stroke license')}
+    {@render actionRow('License', 'Activate or manage your Stroke license.', 'Manage', () => { open = false; onopenlicense(); }, planBadge)}
+  {/if}
+{/snippet}
+
+{#snippet aboutContent()}
+  {@render secLabel('About')}
+  {#if show('About Stroke', 'Version, credits, and release notes')}
+    {@render actionRow('About Stroke', 'Version, credits, and release notes.', 'View', () => { open = false; onopenabout(); })}
+  {/if}
+  {#if show('Website', 'stroke.click — docs, licensing, and support')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-[13px] font-medium text-foreground">Website</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Docs, licensing, and support.</p>
+      </div>
+      <a href="https://stroke.click" target="_blank" rel="noopener noreferrer" class="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border/60 bg-background px-3 text-ui-xs font-medium text-foreground transition-colors hover:bg-muted">
+        stroke.click <Icon name="external-link" class="size-3.5" />
+      </a>
+    </div>
+  {/if}
+
+  {#if !searching}
+    <p class="mt-8 mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/45">Keyboard</p>
+    <div class="mb-3 border-b border-border/40"></div>
+    <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
       {@render shortcut('⌘M', 'cycle theme')}
       {@render shortcut('⌘⇧M', 'previous theme')}
       {@render shortcut('⌘+ / ⌘−', 'zoom')}
       {@render shortcut('⌘0', 'reset zoom')}
     </div>
-  </Dialog.Content>
-</Dialog.Root>
-
-{#snippet toggleRow(/** @type {string} */ label, /** @type {string} */ description, /** @type {boolean} */ checked, /** @type {() => void} */ ontoggle)}
-  <div class="flex min-h-11 items-center justify-between gap-3 px-3 py-2">
-    <div class="min-w-0">
-      <p class="text-ui-xs font-medium text-foreground">{label}</p>
-      <p class="text-[10px] text-muted-foreground">{description}</p>
-    </div>
-    <button
-      type="button"
-      role="switch"
-      aria-label="Toggle {label}"
-      aria-checked={checked}
-      class={cn(
-        "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors",
-        checked ? "bg-foreground" : "bg-muted",
-      )}
-      onclick={ontoggle}
-    >
-      <span
-        class={cn(
-          "pointer-events-none block size-4 rounded-full bg-background shadow-sm transition-transform",
-          checked ? "translate-x-4" : "translate-x-0.5",
-        )}
-      ></span>
-    </button>
-  </div>
-{/snippet}
-
-{#snippet navRow(/** @type {string} */ iconName, /** @type {string} */ label, /** @type {() => void} */ onselect, /** @type {{ label: string, class: string } | null} */ badge = null)}
-  <button
-    type="button"
-    class="flex h-10 w-full items-center gap-2.5 px-3 text-left transition-colors hover:bg-muted/40"
-    onclick={onselect}
-  >
-    <Icon name={iconName} class="size-3.5 shrink-0 text-muted-foreground/70" />
-    <span class="min-w-0 flex-1 truncate text-ui-xs font-medium text-foreground">{label}</span>
-    {#if badge}
-      <span class="shrink-0 rounded-full border px-1.5 py-px text-[10px] font-medium leading-4 {badge.class}">{badge.label}</span>
-    {/if}
-    <Icon name="chevron-right" class="size-3.5 shrink-0 text-muted-foreground/50" />
-  </button>
+  {/if}
 {/snippet}
 
 {#snippet shortcut(/** @type {string} */ keys, /** @type {string} */ action)}
-  <span class="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+  <span class="flex items-center gap-1.5 text-[11px] text-muted-foreground">
     <kbd class="rounded border border-border/60 bg-muted/40 px-1 py-px font-mono text-[9px] leading-4 text-foreground/70">{keys}</kbd>
     {action}
   </span>
