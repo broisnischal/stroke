@@ -488,10 +488,8 @@
     <!-- Traffic lights moved to TitleBar (full-width) -->
     <div class="flex min-h-0 flex-1 flex-col">
 
-      <div
-        class="flex shrink-0 flex-col gap-1.5 border-b border-sidebar-border px-2 py-2"
-      >
-        <div class="flex min-w-0 items-center gap-1">
+      <div class="flex shrink-0 flex-col">
+        <div class="flex h-9 min-w-0 items-center gap-1 border-b border-sidebar-border px-2">
           <div class="min-w-0 flex-1">
             {#if schemas.length === 0}
               <span
@@ -686,7 +684,8 @@
           {/if}
         </div>
 
-        <div class="relative min-w-0 w-full">
+        <div class="flex h-9 items-center border-b border-sidebar-border px-2">
+          <div class="relative min-w-0 w-full">
           <Search
             class="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
           />
@@ -711,6 +710,7 @@
             aria-label="Filter tables"
             data-sidebar-filter
           />
+          </div>
         </div>
       </div>
 
