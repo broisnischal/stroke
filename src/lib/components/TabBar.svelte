@@ -1,23 +1,6 @@
 <script>
   import { onMount } from 'svelte'
-  import Table2 from '@lucide/svelte/icons/table-2'
-  import Terminal from '@lucide/svelte/icons/terminal'
-  import FileText from '@lucide/svelte/icons/file-text'
-  import Bot from '@lucide/svelte/icons/bot'
-  import LayoutTemplate from '@lucide/svelte/icons/layout-template'
-  import Code2 from '@lucide/svelte/icons/code-2'
-  import ShieldCheck from '@lucide/svelte/icons/shield-check'
-  import Eye from '@lucide/svelte/icons/eye'
-  import Layers from '@lucide/svelte/icons/layers'
-  import Search from '@lucide/svelte/icons/search'
-  import Blocks from '@lucide/svelte/icons/blocks'
-  import KeyRound from '@lucide/svelte/icons/key-round'
-  import X from '@lucide/svelte/icons/x'
-  import Plus from '@lucide/svelte/icons/plus'
-  import Pin from '@lucide/svelte/icons/pin'
-  import PinOff from '@lucide/svelte/icons/pin-off'
-  import Clock from '@lucide/svelte/icons/clock'
-  import ChevronDown from '@lucide/svelte/icons/chevron-down'
+  import Icon from './Icon.svelte'
   import { cn } from '$lib/utils.js'
   import { tabDisplayTitle } from '$lib/studio-tabs.js'
   import * as ContextMenu from '$lib/components/ui/context-menu/index.js'
@@ -105,20 +88,20 @@
 
   /** @param {StudioTab} tab */
   function tabIcon(tab) {
-    if (tab.kind === 'sql') return Terminal
+    if (tab.kind === 'sql') return 'terminal'
     if (tab.kind === 'table') {
       const entityKind = /** @type {any} */ (tab.state)?.tableKind
-      if (entityKind === 'view' || entityKind === 'materialized_view') return Eye
-      return Table2
+      if (entityKind === 'view' || entityKind === 'materialized_view') return 'eye'
+      return 'table-2'
     }
-    if (tab.kind === 'ai') return Bot
-    if (tab.kind === 'schema') return LayoutTemplate
-    if (tab.kind === 'orm') return Code2
-    if (tab.kind === 'security') return ShieldCheck
-    if (tab.kind === 'extensions') return Blocks
-    if (tab.kind === 'search') return Search
-    if (tab.kind === 'license') return KeyRound
-    return FileText
+    if (tab.kind === 'ai') return 'bot'
+    if (tab.kind === 'schema') return 'layout-template'
+    if (tab.kind === 'orm') return 'code-2'
+    if (tab.kind === 'security') return 'shield-check'
+    if (tab.kind === 'extensions') return 'blocks'
+    if (tab.kind === 'search') return 'search'
+    if (tab.kind === 'license') return 'key-round'
+    return 'file-text'
   }
 </script>
 
@@ -136,7 +119,7 @@
     class="app-scroll flex min-w-0 flex-1 items-stretch overflow-x-auto"
   >
     {#each tabs as tab, i (tab.id)}
-      {@const Icon = tabIcon(tab)}
+      {@const tabIconName = tabIcon(tab)}
       {@const active = tab.id === activeTabId}
       {@const nextActive = i + 1 < tabs.length && tabs[i + 1].id === activeTabId}
 
@@ -166,7 +149,7 @@
                 )}
                 onclick={() => { if (_suppressTabClick) { _suppressTabClick = false; return } onselect(tab.id) }}
               >
-                <Icon class={cn('size-3 shrink-0', active ? 'opacity-70' : 'opacity-35')} />
+                <Icon name={tabIconName} class={cn('size-3 shrink-0', active ? 'opacity-70' : 'opacity-35')} />
                 <span class="truncate">{tabDisplayTitle(tab)}</span>
               </button>
 
@@ -183,7 +166,7 @@
                   aria-label="Unpin tab"
                   onclick={(e) => { e.stopPropagation(); onpintoggle(tab.id) }}
                 >
-                  <Pin class="size-2.5 rotate-45" />
+                  <Icon name="pin" class="size-2.5 rotate-45" />
                 </button>
               {:else}
                 <!-- Close button -->
@@ -200,7 +183,7 @@
                   aria-label="Close tab"
                   onclick={(e) => { e.stopPropagation(); onclose(tab.id) }}
                 >
-                  <X class="size-2.5" />
+                  <Icon name="x" class="size-2.5" />
                 </button>
               {/if}
 
@@ -215,10 +198,10 @@
         <ContextMenu.Content class="w-44">
           <ContextMenu.Item onSelect={() => onpintoggle(tab.id)}>
             {#if tab.pinned}
-              <PinOff class="size-3.5" />
+              <Icon name="pin-off" class="size-3.5" />
               Unpin Tab
             {:else}
-              <Pin class="size-3.5" />
+              <Icon name="pin" class="size-3.5" />
               Pin Tab
             {/if}
           </ContextMenu.Item>
@@ -242,8 +225,8 @@
           class="inline-flex h-6 items-center gap-0.5 rounded-md px-1.5 text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-foreground"
           title="Recent tables"
         >
-          <Clock class="size-3" />
-          <ChevronDown class="size-2.5" />
+          <Icon name="clock" class="size-3" />
+          <Icon name="chevron-down" class="size-2.5" />
         </DropdownMenu.Trigger>
         <DropdownMenu.Content align="end" class="w-52 p-1 text-ui-xs">
           <DropdownMenu.Label class="px-2 py-1 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/50">
@@ -255,11 +238,11 @@
               onSelect={() => onrecentselect(item.schema, item.table)}
             >
               {#if item.tableKind === 'view'}
-                <Eye class="size-3 shrink-0 text-muted-foreground/60" />
+                <Icon name="eye" class="size-3 shrink-0 text-muted-foreground/60" />
               {:else if item.tableKind === 'materialized_view'}
-                <Layers class="size-3 shrink-0 text-muted-foreground/60" />
+                <Icon name="layers" class="size-3 shrink-0 text-muted-foreground/60" />
               {:else}
-                <Table2 class="size-3 shrink-0 text-muted-foreground/60" />
+                <Icon name="table-2" class="size-3 shrink-0 text-muted-foreground/60" />
               {/if}
               <span class="truncate">{item.table}</span>
               {#if item.schema && item.schema !== 'public'}
@@ -281,7 +264,7 @@
       aria-label="New tab"
       onclick={onnew}
     >
-      <Plus class="size-3.5" />
+      <Icon name="plus" class="size-3.5" />
     </button>
   </div>
 </header>
