@@ -571,10 +571,11 @@
           <button
             {...props}
             class={cn(iconBtn, "shrink-0 @max-[460px]/tb:hidden", hiddenCount > 0 ? "gap-1 w-auto px-2" : "", (hiddenCount > 0 || columnsMenuOpen) && "bg-accent text-foreground")}
-            title="Toggle columns"
+            title="Show / hide columns"
+            aria-label="Show or hide columns"
             disabled={loading || columns.length === 0}
           >
-            <Icon name="columns-3" class="size-3.5" />
+            <Icon name={hiddenCount > 0 ? "eye-off" : "eye"} class="size-3.5" />
             {#if hiddenCount > 0}
               <span class="tabular-nums text-[11px] font-medium text-primary" aria-hidden="true">{hiddenCount}</span>
             {/if}
