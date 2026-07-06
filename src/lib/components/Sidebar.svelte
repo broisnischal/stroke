@@ -456,7 +456,7 @@
     <div class="flex min-h-0 flex-1 flex-col">
 
       <div class="flex shrink-0 flex-col">
-        <div class="flex h-9 min-w-0 items-center gap-1 border-b border-sidebar-border px-2">
+        <div class="flex h-9 min-w-0 items-center gap-1 px-2">
           <div class="min-w-0 flex-1">
             {#if schemas.length === 0}
               <span
