@@ -1,27 +1,10 @@
 <script>
   import { untrack } from 'svelte'
-  import X            from '@lucide/svelte/icons/x'
-  import Clock        from '@lucide/svelte/icons/clock'
-  import Loader2      from '@lucide/svelte/icons/loader-2'
-  import Plus         from '@lucide/svelte/icons/plus'
-  import Play         from '@lucide/svelte/icons/play'
-  import CheckCircle2 from '@lucide/svelte/icons/check-circle-2'
-  import AlertCircle  from '@lucide/svelte/icons/alert-circle'
-  import Trash2       from '@lucide/svelte/icons/trash-2'
-  import Database     from '@lucide/svelte/icons/database'
-  import HardDrive    from '@lucide/svelte/icons/hard-drive'
-  import Zap          from '@lucide/svelte/icons/zap'
-  import Globe        from '@lucide/svelte/icons/globe'
-  import Cloud        from '@lucide/svelte/icons/cloud'
-  import BarChart2    from '@lucide/svelte/icons/bar-chart-2'
-  import Server       from '@lucide/svelte/icons/server'
-  import FolderOpen   from '@lucide/svelte/icons/folder-open'
-  import Terminal     from '@lucide/svelte/icons/terminal'
-  import Lock         from '@lucide/svelte/icons/lock'
-  import ChevronDown  from '@lucide/svelte/icons/chevron-down'
-  import Check        from '@lucide/svelte/icons/check'
+  import Icon from './Icon.svelte'
   import CloudflareLogin from './CloudflareLogin.svelte'
+  import ProviderConnect from './ProviderConnect.svelte'
   import SearchableMenu from './SearchableMenu.svelte'
+  import DbIcon from './DbIcon.svelte'
   import {
     testPostgresConnection, connectPostgres,
     testSqliteConnection,   connectSqlite,
@@ -40,7 +23,7 @@
   import { Input }      from '$lib/components/ui/input/index.js'
   import { Checkbox }   from '$lib/components/ui/checkbox/index.js'
   import { ScrollArea } from '$lib/components/ui/scroll-area/index.js'
-  import * as Dialog    from '$lib/components/ui/dialog/index.js'
+  import { Dialog as DialogPrimitive } from 'bits-ui'
   import { cn }         from '$lib/utils.js'
   import { parseConnectionUri } from '$lib/connection-uri.js'
 
@@ -84,6 +67,15 @@
         { id: 'bigquery', label: 'BigQuery',       desc: 'Google analytics warehouse', soon: true },
       ],
     },
+    {
+      label: 'Hosting providers',
+      drivers: [
+        { id: 'neon',        label: 'Neon',            desc: 'Serverless Postgres — sign in & pick a database' },
+        { id: 'supabase',    label: 'Supabase',        desc: 'Postgres platform — sign in & pick a project' },
+        { id: 'planetscale', label: 'PlanetScale',     desc: 'Serverless MySQL — sign in & pick a database' },
+        { id: 'prisma',      label: 'Prisma Postgres', desc: 'Paste a Prisma Postgres connection string' },
+      ],
+    },
   ]
 
   const ALL_DRIVERS = CATEGORIES.flatMap(c => c.drivers)
@@ -93,7 +85,8 @@
   // PostgreSQL → SQLite → MySQL pinned to the top, then the rest.
   const DRIVER_ORDER = [
     'postgres', 'sqlite', 'mysql', 'mariadb', 'cockroachdb', 'mssql',
-    'clickhouse', 'duckdb', 'sqlite-memory', 'duckdb-memory', 'libsql', 'd1', 'bigquery',
+    'clickhouse', 'duckdb', 'sqlite-memory', 'duckdb-memory', 'libsql',
+    'neon', 'supabase', 'planetscale', 'prisma', 'd1', 'bigquery',
   ]
   const driverItems = DRIVER_ORDER
     .map((id) => ALL_DRIVERS.find((d) => d.id === id))
@@ -232,6 +225,38 @@
     }
     error = ''; testOk = false; connectionUri = ''; uriHint = ''
     d1Reset()
+  }
+
+  /**
+   * A provider adapter resolved a database (with a password if it needed one):
+   * build a SavedConnection and connect immediately via connectWith — no detour
+   * through the manual form, so picking a project just connects. Runs the same
+   * connect/save/close path as any other connection.
+   * @param {import('$lib/providers.js').ProviderConnection} conn
+   */
+  async function connectProviderConnection(conn) {
+    error = ''
+    // dbType is the provider id while the provider flow is showing — tag the
+    // connection with it so the status bar can offer switching to the account's
+    // other databases later.
+    const providerId = ['neon', 'supabase', 'planetscale', 'prisma'].includes(dbType) ? dbType : undefined
+    const type = conn.db_type === 'mysql' ? 'mysql' : 'postgres'
+    // Reuse an existing saved entry for this exact database (host + user) instead
+    // of piling up duplicates — connectWith upserts it, keeping the saved password.
+    const existing = saved.find((s) => s.host === conn.host && s.user === conn.username && s.type === type)
+    await connectWith({
+      id: existing?.id ?? newConnectionId(),
+      type,
+      name: conn.name,
+      host: conn.host,
+      port: conn.port,
+      database: conn.database,
+      user: conn.username,
+      password: conn.password,
+      ssl: conn.ssl,
+      provider: providerId,
+      readOnly: readOnly || undefined,
+    })
   }
 
   function switchDriver(id) {
@@ -396,41 +421,9 @@
     d1Databases = []; d1SelectedAccountId = ''; d1DbLoadPhase = 'idle'
   }
 
-  const lbl = 'mb-1.5 block text-[11px] font-medium uppercase tracking-wide text-muted-foreground/65'
-  const inp = 'h-[34px] w-full rounded-md border border-border/50 bg-muted/20 px-3 text-[13px] text-foreground placeholder:text-muted-foreground/40 placeholder:font-normal transition-colors focus-visible:border-ring/60 focus-visible:ring-1 focus-visible:ring-ring/20 focus-visible:outline-none'
+  const lbl = 'mb-1.5 block text-[10.5px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/55'
+  const inp = 'h-9 w-full rounded-lg border border-border/60 bg-muted/25 px-3 text-[13px] text-foreground placeholder:text-muted-foreground/35 placeholder:font-normal transition-[color,border-color,box-shadow] hover:border-border focus-visible:border-ring focus-visible:bg-muted/15 focus-visible:ring-2 focus-visible:ring-ring/20 focus-visible:outline-none'
   const inpNum = inp + ' [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
-
-  /** Color class for a driver id */
-  function driverColor(id) {
-    if (id === 'postgres')        return 'text-blue-400'
-    if (id === 'mysql')           return 'text-amber-400'
-    if (id === 'mariadb')         return 'text-amber-500'
-    if (id === 'cockroachdb')     return 'text-indigo-400'
-    if (id === 'sqlite')          return 'text-emerald-400'
-    if (id === 'sqlite-memory')   return 'text-violet-400'
-    if (id === 'libsql')          return 'text-sky-400'
-    if (id === 'd1')              return 'text-orange-400'
-    if (id === 'clickhouse')      return 'text-yellow-400'
-    if (id === 'duckdb')          return 'text-yellow-500'
-    if (id === 'duckdb-memory')   return 'text-amber-300'
-    if (id === 'mssql')           return 'text-red-400'
-    return 'text-muted-foreground'
-  }
-  function driverBg(id) {
-    if (id === 'postgres')        return 'bg-blue-500/10'
-    if (id === 'mysql')           return 'bg-amber-500/10'
-    if (id === 'mariadb')         return 'bg-amber-500/10'
-    if (id === 'cockroachdb')     return 'bg-indigo-500/10'
-    if (id === 'sqlite')          return 'bg-emerald-500/10'
-    if (id === 'sqlite-memory')   return 'bg-violet-500/10'
-    if (id === 'libsql')          return 'bg-sky-500/10'
-    if (id === 'd1')              return 'bg-orange-500/10'
-    if (id === 'clickhouse')      return 'bg-yellow-500/10'
-    if (id === 'duckdb')          return 'bg-yellow-500/10'
-    if (id === 'duckdb-memory')   return 'bg-amber-500/10'
-    if (id === 'mssql')           return 'bg-red-500/10'
-    return 'bg-muted/40'
-  }
 
   async function pickSqliteFile() {
     try {
@@ -467,7 +460,7 @@
     <label class="flex cursor-pointer select-none items-center gap-2">
       <Checkbox id="cn-ssh-enabled" checked={sshEnabled} onCheckedChange={(v) => (sshEnabled = v === true)} />
       <span class="flex items-center gap-1.5 text-[12px] text-muted-foreground/65">
-        <Terminal class="size-3 shrink-0" />
+        <Icon name="terminal" class="size-3 shrink-0" />
         Connect via SSH tunnel
       </span>
     </label>
@@ -503,54 +496,44 @@
   </div>
 {/snippet}
 
-<!-- Driver icon -->
-{#snippet dicon(id, cls = 'size-4', colored = false)}
-  {@const c = colored ? driverColor(id) : 'text-muted-foreground'}
-  {#if id === 'postgres'}           <Database  class="{cls} shrink-0 {c}" />
-  {:else if id === 'mysql'}         <Database  class="{cls} shrink-0 {c}" />
-  {:else if id === 'mariadb'}       <Database  class="{cls} shrink-0 {c}" />
-  {:else if id === 'cockroachdb'}   <Database  class="{cls} shrink-0 {c}" />
-  {:else if id === 'sqlite'}        <HardDrive class="{cls} shrink-0 {c}" />
-  {:else if id === 'sqlite-memory'} <Zap       class="{cls} shrink-0 {c}" />
-  {:else if id === 'libsql'}        <Globe     class="{cls} shrink-0 {c}" />
-  {:else if id === 'd1'}            <Cloud     class="{cls} shrink-0 {c}" />
-  {:else if id === 'clickhouse'}    <BarChart2 class="{cls} shrink-0 {c}" />
-  {:else if id === 'duckdb'}        <HardDrive class="{cls} shrink-0 {c}" />
-  {:else if id === 'duckdb-memory'} <Zap       class="{cls} shrink-0 {c}" />
-  {:else if id === 'mssql'}         <Server    class="{cls} shrink-0 {c}" />
-  {:else}                           <BarChart2 class="{cls} shrink-0 {c}" />{/if}
-{/snippet}
-
-<Dialog.Root bind:open>
-  <Dialog.Content
-    showCloseButton={false}
-    class="flex h-[min(90vh,660px)] w-[min(880px,calc(100vw-2rem))] max-w-none sm:max-w-none flex-col gap-0 overflow-hidden rounded-xl border border-border/25 bg-background p-0 shadow-2xl shadow-black/50"
-  >
-    <div class="grid min-h-0 flex-1 grid-cols-[240px_minmax(0,1fr)] overflow-hidden">
+<DialogPrimitive.Root bind:open>
+  <DialogPrimitive.Portal>
+    <DialogPrimitive.Overlay
+      class="fixed inset-0 z-50 bg-black/50 data-open:animate-in data-closed:animate-out data-open:fade-in-0 data-closed:fade-out-0 duration-100"
+    />
+    <DialogPrimitive.Content
+      class="fixed inset-0 z-50 flex bg-background text-foreground outline-none data-open:animate-in data-closed:animate-out data-open:fade-in-0 data-closed:fade-out-0 duration-100"
+    >
+    <DialogPrimitive.Title class="sr-only">Connections</DialogPrimitive.Title>
+    <div class="grid h-full w-full min-h-0 grid-cols-[minmax(240px,280px)_minmax(0,1fr)] overflow-hidden">
 
       <!-- ── Sidebar ─────────────────────────────────────────────── -->
-      <aside class="flex min-h-0 flex-col border-r border-border/15">
+      <aside class="flex min-h-0 flex-col border-r border-border/15 bg-muted/[0.015]">
+
+        <!-- Title -->
+        <div class="flex h-[52px] shrink-0 items-center px-4">
+          <h2 class="text-[13px] font-semibold text-foreground">Connections</h2>
+          {#if saved.length > 0}
+            <span class="ml-2 rounded-full bg-muted/60 px-1.5 py-px text-[10px] font-medium tabular-nums text-muted-foreground/70">{saved.length}</span>
+          {/if}
+        </div>
 
         <!-- New connection button -->
-        <div class="shrink-0 px-3 pt-3 pb-2.5">
+        <div class="shrink-0 px-2.5 pb-2">
           <button
             type="button"
             onclick={() => resetForm(null)}
             class={cn(
-              'flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-[12px] transition-colors',
+              'flex w-full items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-[12px] transition-colors',
               !editingId
-                ? 'font-medium text-foreground'
-                : 'text-muted-foreground/50 hover:text-foreground'
+                ? 'border-border/40 bg-muted/40 font-medium text-foreground'
+                : 'border-transparent text-muted-foreground/60 hover:bg-muted/25 hover:text-foreground'
             )}
           >
-            <Plus class="size-3.5 shrink-0" />
+            <Icon name="plus" class="size-3.5 shrink-0" />
             New connection
           </button>
         </div>
-
-        {#if saved.length > 0}
-          <div class="mx-3 border-t border-border/10"></div>
-        {/if}
 
         <div class="min-h-0 flex-1">
           {#if saved.length > 0}
@@ -574,20 +557,20 @@
                     <!-- Icon: fades to Play on hover — clicking it connects directly -->
                     <button
                       type="button"
-                      class="relative size-3.5 shrink-0 disabled:opacity-30"
+                      class="relative size-4 shrink-0 disabled:opacity-30"
                       title="Connect"
                       disabled={!!connecting}
                       onclick={(e) => { e.stopPropagation(); void connectWith(conn) }}
                     >
                       <span class="absolute inset-0 flex items-center justify-center transition-opacity duration-150 group-hover:opacity-0">
                         {#if busy2}
-                          <Loader2 class="size-3.5 animate-spin" />
+                          <Icon name="loader-2" class="size-4 animate-spin" />
                         {:else}
-                          {@render dicon(cid, 'size-3.5', isSel)}
+                          <DbIcon id={cid} class={cn('size-4', isSel ? 'text-foreground' : 'text-muted-foreground/60')} />
                         {/if}
                       </span>
                       <span class="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-150 group-hover:opacity-100">
-                        <Play class="size-3" />
+                        <Icon name="play" class="size-3.5" />
                       </span>
                     </button>
 
@@ -605,7 +588,7 @@
                     <button type="button"
                       class="shrink-0 rounded p-0.5 text-muted-foreground/25 opacity-0 transition-opacity duration-150 hover:text-destructive group-hover:opacity-100"
                       onclick={(e) => { e.stopPropagation(); handleDelete(conn.id) }}
-                    ><Trash2 class="size-3" /></button>
+                    ><Icon name="trash-2" class="size-3" /></button>
                   </div>
                 {/each}
               </div>
@@ -621,56 +604,70 @@
       <!-- ── Form panel ──────────────────────────────────────────── -->
       <div class="flex min-h-0 min-w-0 flex-col">
 
-        <!-- ── Header: connection name + driver type ──────────── -->
-        <div class="shrink-0 border-b border-border/15 px-5 pt-4 pb-4">
-
-          <div class="grid grid-cols-[1fr_11rem] items-end gap-3">
-            <!-- Connection name -->
-            <div>
-              <label for="cn-name" class={lbl}>Name</label>
-              <Input id="cn-name" bind:value={name} class={inp} placeholder="e.g. Production DB" />
-            </div>
-
-            <!-- Driver type — searchable dropdown -->
-            <div>
-              <span class={lbl}>Type</span>
-              <SearchableMenu
-                bind:open={driverMenuOpen}
-                items={driverItems}
-                placeholder="Search databases…"
-                contentClass="w-56"
-                align="end"
-                onselect={(it) => switchDriver(it.value)}
-              >
-                {#snippet trigger(props)}
-                  <button
-                    {...props}
-                    type="button"
-                    class={cn(inp, 'flex items-center justify-between gap-2 text-left', driverMenuOpen && 'border-ring/60 ring-1 ring-ring/20')}
-                  >
-                    <span class="min-w-0 truncate">{activeDriver.label}</span>
-                    <ChevronDown class="size-3.5 shrink-0 text-muted-foreground/50" />
-                  </button>
-                {/snippet}
-                {#snippet item(it)}
-                  <span class="min-w-0 flex-1 truncate">{it.label}</span>
-                  {#if it.disabled}
-                    <span class="shrink-0 text-ui-3xs text-muted-foreground/45">soon</span>
-                  {:else if it.value === dbType}
-                    <Check class="size-3.5 shrink-0 text-primary" />
-                  {/if}
-                {/snippet}
-              </SearchableMenu>
-            </div>
-          </div>
-        </div>
-
-        <!-- ── Scrollable form body ─────────────────────────────── -->
+        <!-- ── Scrollable form body — left-aligned form, no card ── -->
         <ScrollArea class="min-h-0 flex-1 scroll-smooth">
-          <div class="flex flex-col gap-3 px-5 py-5">
+          <div class="px-10 py-10 lg:px-16 lg:py-12">
+            <div class="max-w-[560px]">
+              <div class="contents">
+
+                <!-- Header: connection name + driver type -->
+                <div class="grid grid-cols-[1fr_12rem] items-end gap-3.5 border-b border-border/40 pb-6">
+                  <!-- Connection name -->
+                  <div>
+                    <label for="cn-name" class={lbl}>Name</label>
+                    <Input id="cn-name" bind:value={name} class={inp} placeholder="e.g. Production DB" />
+                  </div>
+
+                  <!-- Driver type — searchable dropdown -->
+                  <div>
+                    <span class={lbl}>Type</span>
+                    <SearchableMenu
+                      bind:open={driverMenuOpen}
+                      items={driverItems}
+                      placeholder="Search databases…"
+                      contentClass="w-64"
+                      align="end"
+                      onselect={(it) => switchDriver(it.value)}
+                    >
+                      {#snippet trigger(props)}
+                        <button
+                          {...props}
+                          type="button"
+                          class={cn(inp, 'flex items-center justify-between gap-2 text-left', driverMenuOpen && 'border-ring/60 ring-1 ring-ring/20')}
+                        >
+                          <span class="flex min-w-0 items-center gap-2">
+                            <DbIcon id={activeDriver.id} class="size-4 text-muted-foreground" />
+                            <span class="min-w-0 truncate">{activeDriver.label}</span>
+                          </span>
+                          <Icon name="chevron-down" class="size-3.5 shrink-0 text-muted-foreground/50" />
+                        </button>
+                      {/snippet}
+                      {#snippet item(it)}
+                        <DbIcon id={it.value} class={cn('size-4', it.value === dbType ? 'text-foreground' : 'text-muted-foreground/70')} />
+                        <span class="min-w-0 flex-1 truncate">{it.label}</span>
+                        {#if it.disabled}
+                          <span class="shrink-0 text-ui-3xs text-muted-foreground/45">soon</span>
+                        {:else if it.value === dbType}
+                          <Icon name="check" class="size-3.5 shrink-0 text-primary" />
+                        {/if}
+                      {/snippet}
+                    </SearchableMenu>
+                  </div>
+                </div>
+
+                <!-- Driver-specific fields -->
+                <div class="mt-6 flex flex-col gap-4">
+
+            <!-- ── Hosting provider sign-in (Neon / Supabase / PlanetScale / Prisma) ── -->
+            {#if dbType === 'neon' || dbType === 'supabase' || dbType === 'planetscale' || dbType === 'prisma'}
+              <ProviderConnect
+                provider={dbType}
+                resolvePassword={(host, user) => saved.find((s) => s.host === host && s.user === user && s.password)?.password}
+                onselect={(conn) => connectProviderConnection(conn)}
+              />
 
             <!-- ── PostgreSQL / CockroachDB ────────────────── -->
-            {#if dbType === 'postgres' || dbType === 'cockroachdb'}
+            {:else if dbType === 'postgres' || dbType === 'cockroachdb'}
 
               <div>
                 <label for="cn-uri" class={lbl}>Connection string</label>
@@ -682,7 +679,7 @@
                     onkeydown={(e) => e.key === 'Enter' && (e.preventDefault(), applyConnectionUri())}
                   />
                   <button type="button" onclick={applyConnectionUri} disabled={!connectionUri.trim()}
-                    class="h-[30px] shrink-0 rounded-md border border-border/25 px-2.5 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-25">
+                    class="h-9 shrink-0 rounded-lg border border-border/25 px-2.5 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-25">
                     Parse
                   </button>
                 </div>
@@ -690,9 +687,9 @@
                   <p class={cn('mt-1 flex items-center gap-1 text-[10px]',
                     uriHint.includes('Could') || uriHint.includes('Expected') ? 'text-destructive' : 'text-emerald-500')}>
                     {#if uriHint.includes('Could') || uriHint.includes('Expected')}
-                      <AlertCircle class="size-2.5" />
+                      <Icon name="alert-circle" class="size-2.5" />
                     {:else}
-                      <CheckCircle2 class="size-2.5" />
+                      <Icon name="check-circle-2" class="size-2.5" />
                     {/if}
                     {uriHint}
                   </p>
@@ -780,8 +777,8 @@
                     placeholder="/path/to/database.db"
                     class={cn(inp, 'font-mono text-[11px]')} />
                   <button type="button" onclick={pickSqliteFile}
-                    class="inline-flex h-[30px] shrink-0 items-center gap-1 rounded-md border border-border/25 px-2.5 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground">
-                    <FolderOpen class="size-3" />
+                    class="inline-flex h-9 shrink-0 items-center gap-1 rounded-lg border border-border/25 px-2.5 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground">
+                    <Icon name="folder-open" class="size-3" />
                     Browse
                   </button>
                 </div>
@@ -896,8 +893,8 @@
                     placeholder="/path/to/database.duckdb"
                     class={cn(inp, 'font-mono text-[11px]')} />
                   <button type="button" onclick={pickDuckdbFile}
-                    class="inline-flex h-[30px] shrink-0 items-center gap-1 rounded-md border border-border/25 px-2.5 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground">
-                    <FolderOpen class="size-3" />
+                    class="inline-flex h-9 shrink-0 items-center gap-1 rounded-lg border border-border/25 px-2.5 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground">
+                    <Icon name="folder-open" class="size-3" />
                     Browse
                   </button>
                 </div>
@@ -944,44 +941,53 @@
                 </div>
               </div>
 
-              <div class="flex flex-col gap-2 pt-0.5">
-                <label class="flex cursor-pointer select-none items-center gap-2">
-                  <Checkbox id="cn-mssql-encrypt" checked={encrypt} onCheckedChange={(v) => (encrypt = v === true)} />
-                  <span class="text-[12px] text-muted-foreground/65">Encrypt connection (TLS)</span>
+              <div class="flex flex-col gap-3 pt-0.5">
+                <label class="flex cursor-pointer select-none items-start gap-2">
+                  <Checkbox id="cn-mssql-encrypt" checked={encrypt} onCheckedChange={(v) => (encrypt = v === true)} class="mt-px" />
+                  <span class="flex flex-col">
+                    <span class="text-[12px] text-muted-foreground/75">Encrypt connection (TLS)</span>
+                    <span class="text-[11px] leading-snug text-muted-foreground/40">Encrypts traffic between Stroke and the server.</span>
+                  </span>
                 </label>
-                <label class="flex cursor-pointer select-none items-center gap-2">
-                  <Checkbox id="cn-mssql-trust" checked={trustCert} onCheckedChange={(v) => (trustCert = v === true)} />
-                  <span class="text-[12px] text-muted-foreground/65">Trust server certificate</span>
+                <label class={cn('flex select-none items-start gap-2', encrypt ? 'cursor-pointer' : 'cursor-not-allowed opacity-45')}>
+                  <Checkbox id="cn-mssql-trust" checked={trustCert} disabled={!encrypt} onCheckedChange={(v) => (trustCert = v === true)} class="mt-px" />
+                  <span class="flex flex-col">
+                    <span class="text-[12px] text-muted-foreground/75">Trust server certificate</span>
+                    <span class="text-[11px] leading-snug text-muted-foreground/40">Accept self-signed or otherwise untrusted certificates. Needed for many local / dev servers.</span>
+                  </span>
                 </label>
               </div>
 
             {/if}
 
-            <!-- Read-only mode — generic option for every driver -->
-            <label class="mt-1 flex cursor-pointer select-none items-center gap-2 border-t border-border/15 pt-3.5">
-              <Checkbox id="cn-readonly" checked={readOnly} onCheckedChange={(v) => (readOnly = v === true)} />
-              <span class="flex items-center gap-1.5 text-[12px] text-muted-foreground/75">
-                <Lock class="size-3 shrink-0" />
-                Open in read-only mode
-              </span>
-            </label>
+                <!-- Read-only mode — generic option for every driver -->
+                <label class="mt-1 flex cursor-pointer select-none items-center gap-2 border-t border-border/15 pt-3.5">
+                  <Checkbox id="cn-readonly" checked={readOnly} onCheckedChange={(v) => (readOnly = v === true)} />
+                  <span class="flex items-center gap-1.5 text-[12px] text-muted-foreground/75">
+                    <Icon name="lock" class="size-3 shrink-0" />
+                    Open in read-only mode
+                  </span>
+                </label>
 
+              </div>
+            </div>
           </div>
         </ScrollArea>
 
         <!-- ── Footer — feedback + actions only, so it stays compact and
              the action buttons are always visible regardless of window height ── -->
-        <div class="shrink-0 border-t border-border/15 px-5 pb-3 pt-3">
+        <div class="shrink-0 border-t border-border/15 px-10 py-4 lg:px-16">
+          <div class="w-full">
 
           <!-- Feedback slot — always occupies height, shows message when needed -->
-          <div class="mb-2 flex min-h-[18px] items-center">
+          <div class="mb-2.5 flex min-h-[18px] items-center">
             {#if error}
               <p class="flex items-start gap-1 text-[11px] leading-snug text-destructive">
-                <AlertCircle class="mt-px size-2.5 shrink-0" />{error}
+                <Icon name="alert-circle" class="mt-px size-2.5 shrink-0" />{error}
               </p>
             {:else if testOk}
               <p class="flex items-center gap-1 text-[11px] text-emerald-500">
-                <CheckCircle2 class="size-2.5 shrink-0" />Connected successfully
+                <Icon name="check-circle-2" class="size-2.5 shrink-0" />Connected successfully
               </p>
             {/if}
           </div>
@@ -995,10 +1001,10 @@
                 <button type="button"
                   onclick={() => connectWith(lastConn)}
                   disabled={isBusy}
-                  class="inline-flex h-[30px] max-w-[180px] items-center gap-1.5 rounded-md border border-border/25 px-3 text-[12px] text-muted-foreground/55 transition-colors hover:bg-muted/30 hover:text-foreground disabled:opacity-25"
+                  class="inline-flex h-8 max-w-[200px] items-center gap-1.5 rounded-lg border border-border/25 px-3 text-[12px] text-muted-foreground/55 transition-colors hover:bg-muted/30 hover:text-foreground disabled:opacity-25"
                 >
                   {#if connecting === lastConn.id}
-                    <Loader2 class="size-3 animate-spin" />Resuming…
+                    <Icon name="loader-2" class="size-3 animate-spin" />Resuming…
                   {:else}
                     Resume <span class="min-w-0 truncate text-foreground/70">{lastConn.name}</span>
                   {/if}
@@ -1006,28 +1012,29 @@
               {/if}
             </div>
             <!-- Test + Connect -->
-            <div class="flex shrink-0 items-center gap-1.5">
+            <div class="flex shrink-0 items-center gap-2">
               {#if isBusy}
                 <button type="button" onclick={stopOp}
-                  class="inline-flex h-[30px] items-center gap-1 rounded-md border border-destructive/30 px-3 text-[12px] font-medium text-destructive transition-colors hover:bg-destructive/10">
-                  <X class="size-3" />Stop
+                  class="inline-flex h-8 items-center gap-1 rounded-lg border border-destructive/30 px-3 text-[12px] font-medium text-destructive transition-colors hover:bg-destructive/10">
+                  <Icon name="x" class="size-3" />Stop
                 </button>
               {/if}
               {#if canTest}
                 <button type="button" onclick={handleTest} disabled={isBusy}
-                  class="inline-flex h-[30px] items-center gap-1 rounded-md border border-border/30 px-3 text-[12px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-25">
-                  {#if testing}<Loader2 class="size-3 animate-spin" />Testing…{:else}Test{/if}
+                  class="inline-flex h-8 items-center gap-1 rounded-lg border border-border/30 px-3.5 text-[12px] text-muted-foreground/70 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-25">
+                  {#if testing}<Icon name="loader-2" class="size-3 animate-spin" />Testing…{:else}Test{/if}
                 </button>
               {/if}
               <button type="button" onclick={handleConnect} disabled={isBusy || dbType === 'bigquery'}
-                class="inline-flex h-[30px] items-center gap-1 rounded-md bg-foreground px-4 text-[12px] font-semibold text-background transition-colors hover:bg-foreground/85 disabled:opacity-40">
+                class="inline-flex h-8 items-center gap-1 rounded-lg bg-foreground px-5 text-[12px] font-semibold text-background transition-colors hover:bg-foreground/85 disabled:opacity-40">
                 {#if connecting === (editingId ?? '__new__')}
-                  <Loader2 class="size-3 animate-spin" />Connecting…
+                  <Icon name="loader-2" class="size-3 animate-spin" />Connecting…
                 {:else}
                   {editingId ? 'Save & connect' : 'Connect'}
                 {/if}
               </button>
             </div>
+          </div>
           </div>
         </div>
       </div>
@@ -1035,8 +1042,12 @@
     </div>
 
     <!-- Close button -->
-    <Dialog.Close class="absolute right-3 top-3 inline-flex size-5 items-center justify-center rounded text-muted-foreground/20 transition-colors hover:bg-muted/60 hover:text-muted-foreground focus-visible:outline-none">
-      <X class="size-3" />
-    </Dialog.Close>
-  </Dialog.Content>
-</Dialog.Root>
+    <DialogPrimitive.Close
+      class="absolute right-4 top-4 inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+    >
+      <Icon name="x" class="size-4" />
+      <span class="sr-only">Close</span>
+    </DialogPrimitive.Close>
+    </DialogPrimitive.Content>
+  </DialogPrimitive.Portal>
+</DialogPrimitive.Root>

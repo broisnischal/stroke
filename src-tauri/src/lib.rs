@@ -6,6 +6,7 @@ mod docker;
 mod license;
 mod mcp;
 mod metrics;
+mod providers;
 mod secrets;
 
 use db::{ActiveConnection, DbState, TunnelState};
@@ -146,6 +147,15 @@ pub fn run() {
                     view.setMagnification(1.0);
                     view.setPageZoom(1.0);
                 });
+
+                // The window is frameless (decorations = false), so no application
+                // menu is created automatically. On macOS, WKWebView text fields
+                // rely on the app menu's Edit items for the standard editing
+                // shortcuts — ⌘Z undo, ⌘⇧Z redo, ⌘X/⌘C/⌘V, ⌘A select-all, and
+                // ⌥⌫ / ⌘⌫ word/line delete. Install the standard menu so native
+                // text editing works everywhere (inputs, textareas, cell editors).
+                let menu = tauri::menu::Menu::default(app.handle())?;
+                app.set_menu(menu)?;
             }
 
             if cfg!(debug_assertions) {
@@ -296,6 +306,13 @@ pub fn run() {
             cloudflare::cloudflare_logout,
             cloudflare::cloudflare_list_accounts,
             cloudflare::cloudflare_list_d1_databases,
+            providers::provider_start_oauth,
+            providers::provider_cancel_oauth,
+            providers::provider_store_token,
+            providers::provider_oauth_status,
+            providers::provider_logout,
+            providers::provider_list_databases,
+            providers::provider_build_connection,
             db::backup::backup_export,
             db::backup::backup_import,
             commands::check_license_status,

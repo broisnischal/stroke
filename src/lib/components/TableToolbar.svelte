@@ -1,28 +1,5 @@
 <script>
-  import LayoutList from "@lucide/svelte/icons/layout-list";
-  import ChevronLeft from "@lucide/svelte/icons/chevron-left";
-  import ChevronRight from "@lucide/svelte/icons/chevron-right";
-  import ChevronDown from "@lucide/svelte/icons/chevron-down";
-  import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
-  import ListFilter from "@lucide/svelte/icons/list-filter";
-  import ArrowUpDown from "@lucide/svelte/icons/arrow-up-down";
-  import ArrowUp from "@lucide/svelte/icons/arrow-up";
-  import ArrowDown from "@lucide/svelte/icons/arrow-down";
-  import Plus from "@lucide/svelte/icons/plus";
-  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
-  import Infinity from "@lucide/svelte/icons/infinity";
-  import MoreHorizontal from "@lucide/svelte/icons/more-horizontal";
-  import Trash2 from "@lucide/svelte/icons/trash-2";
-  import FileDown from "@lucide/svelte/icons/file-down";
-  import Columns3 from "@lucide/svelte/icons/columns-3";
-  import Terminal from "@lucide/svelte/icons/terminal";
-  import Crosshair from "@lucide/svelte/icons/crosshair";
-  import FunctionSquare from "@lucide/svelte/icons/function-square";
-  import Eye from "@lucide/svelte/icons/eye";
-  import EyeOff from "@lucide/svelte/icons/eye-off";
-  import Link2 from "@lucide/svelte/icons/link-2";
-  import Search from "@lucide/svelte/icons/search";
-  import X from "@lucide/svelte/icons/x";
+  import Icon from "./Icon.svelte";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
@@ -470,7 +447,7 @@
   >
     <!-- Search — far left, expands on focus -->
     <div class="relative flex h-7 w-32 shrink-0 items-center transition-[width] duration-200 focus-within:w-44">
-      <Search class="pointer-events-none absolute left-2 size-3.5 text-muted-foreground" />
+      <Icon name="search" class="pointer-events-none absolute left-2 size-3.5 text-muted-foreground" />
       {#if tableViewMode === "structure"}
         <input
           bind:this={structureSearchEl}
@@ -510,7 +487,7 @@
         tabindex={localSearch ? 0 : -1}
         onclick={clearSearch}
       >
-        <X class="size-3" />
+        <Icon name="x" class="size-3" />
       </button>
     </div>
 
@@ -538,7 +515,7 @@
           }
         }}
       >
-        <ListFilter class="size-3.5" />
+        <Icon name="list-filter" class="size-3.5" />
         {#if filterCount > 0}
           <span class="tabular-nums text-[11px] font-medium text-primary" aria-hidden="true">{formatCompactCount(filterCount)}</span>
         {/if}
@@ -559,7 +536,7 @@
             title={sortLabel}
             disabled={loading || columns.length === 0}
           >
-            <ArrowUpDown class="size-3.5" />
+            <Icon name="arrow-up-down" class="size-3.5" />
           </button>
         {/snippet}
         {#snippet header()}
@@ -569,12 +546,12 @@
               class="flex w-full items-center gap-1.5 border-b border-border/40 px-3 py-1.5 text-left text-ui-xs text-muted-foreground transition-colors hover:text-foreground"
               onclick={() => { clearSort(); sortMenuOpen = false; }}
             >
-              <X class="size-3.5" /> Clear sort
+              <Icon name="x" class="size-3.5" /> Clear sort
             </button>
           {/if}
         {/snippet}
         {#snippet item(it)}
-          {#if it.dir === "asc"}<ArrowUp class="size-3.5 text-muted-foreground" />{:else}<ArrowDown class="size-3.5 text-muted-foreground" />{/if}
+          {#if it.dir === "asc"}<Icon name="arrow-up" class="size-3.5 text-muted-foreground" />{:else}<Icon name="arrow-down" class="size-3.5 text-muted-foreground" />{/if}
           <span class="min-w-0 flex-1 truncate">{it.label}</span>
           <span class="shrink-0 text-ui-3xs text-muted-foreground/60">{it.dir === "asc" ? "Asc" : "Desc"}</span>
           {#if it.active}<span class="shrink-0 text-primary">✓</span>{/if}
@@ -594,10 +571,11 @@
           <button
             {...props}
             class={cn(iconBtn, "shrink-0 @max-[460px]/tb:hidden", hiddenCount > 0 ? "gap-1 w-auto px-2" : "", (hiddenCount > 0 || columnsMenuOpen) && "bg-accent text-foreground")}
-            title="Toggle columns"
+            title="Show / hide columns"
+            aria-label="Show or hide columns"
             disabled={loading || columns.length === 0}
           >
-            <Columns3 class="size-3.5" />
+            <Icon name={hiddenCount > 0 ? "eye-off" : "eye"} class="size-3.5" />
             {#if hiddenCount > 0}
               <span class="tabular-nums text-[11px] font-medium text-primary" aria-hidden="true">{hiddenCount}</span>
             {/if}
@@ -617,13 +595,13 @@
         {/snippet}
         {#snippet item(it)}
           {#if it.hidden}
-            <EyeOff class="size-3.5 text-muted-foreground" />
+            <Icon name="eye-off" class="size-3.5 text-muted-foreground" />
           {:else if it.kind === "vrel"}
-            <Link2 class="size-3.5 text-primary/60" />
+            <Icon name="link-2" class="size-3.5 text-primary/60" />
           {:else if it.kind === "vexpr"}
-            <Eye class="size-3.5 text-primary/60" />
+            <Icon name="eye" class="size-3.5 text-primary/60" />
           {:else}
-            <Eye class="size-3.5" />
+            <Icon name="eye" class="size-3.5" />
           {/if}
           <span class={cn("min-w-0 flex-1 truncate", it.hidden && "text-muted-foreground")}>{it.label}</span>
           {#if it.kind === "vrel"}<span class="shrink-0 text-ui-3xs text-muted-foreground/40">rel</span>{/if}
@@ -646,7 +624,7 @@
             title="Jump to column"
             disabled={loading || columns.length === 0}
           >
-            <Crosshair class="size-3.5" />
+            <Icon name="crosshair" class="size-3.5" />
           </button>
         {/snippet}
         {#snippet header()}
@@ -655,7 +633,7 @@
           </div>
         {/snippet}
         {#snippet item(it)}
-          <Crosshair class="size-3.5 text-muted-foreground" />
+          <Icon name="crosshair" class="size-3.5 text-muted-foreground" />
           <span class="min-w-0 flex-1 truncate">{it.label}</span>
         {/snippet}
       </SearchableMenu>
@@ -671,7 +649,7 @@
         disabled={loading || columns.length === 0}
         onclick={onopenvirtualcols}
       >
-        <FunctionSquare class="size-3.5 shrink-0" />
+        <Icon name="function-square" class="size-3.5 shrink-0" />
         {#if virtualColCount > 0}
           <span class="tabular-nums text-[11px] font-medium text-primary">{virtualColCount}</span>
         {/if}
@@ -685,7 +663,7 @@
         disabled={loading || columns.length === 0}
         onclick={onopeninsql}
       >
-        <Terminal class="size-3.5 shrink-0" />
+        <Icon name="terminal" class="size-3.5 shrink-0" />
       </button>
 
       </div><!-- /action group -->
@@ -700,7 +678,7 @@
         title={readonly ? "Read-only mode" : "Insert row (Add)"}
         onclick={onaddrow}
       >
-        <Plus class="size-3.5 shrink-0" />
+        <Icon name="plus" class="size-3.5 shrink-0" />
         <span class="@max-[440px]/tb:hidden">Add</span>
       </button>
     {/if}
@@ -783,7 +761,7 @@
           onclick={onprev}
           aria-label="Previous page"
         >
-          <ChevronLeft class="size-3.5" />
+          <Icon name="chevron-left" class="size-3.5" />
         </button>
         <button
           type="button"
@@ -792,7 +770,7 @@
           onclick={onnext}
           aria-label="Next page"
         >
-          <ChevronRight class="size-3.5" />
+          <Icon name="chevron-right" class="size-3.5" />
         </button>
         </div>
       {/if}
@@ -807,7 +785,7 @@
       title="Refresh data (⌘R)"
       aria-label="Refresh data"
     >
-      <RefreshCw class={cn("size-3.5", loading && "animate-spin")} />
+      <Icon name="refresh-cw" class={cn("size-3.5", loading && "animate-spin")} />
     </button>
 
     <!-- Custom limit / offset -->
@@ -825,7 +803,7 @@
         aria-label="Custom limit & offset"
         disabled={loading || tableViewMode === "structure" || total === 0}
       >
-        <SlidersHorizontal class="size-3.5" />
+        <Icon name="sliders-horizontal" class="size-3.5" />
       </DropdownMenu.Trigger>
       <DropdownMenu.Content align="end" class="w-52 p-0 text-ui-sm">
         <div class="border-b border-border px-3 py-2.5">
@@ -914,12 +892,12 @@
         title="More actions"
         disabled={loading || deleting}
       >
-        <MoreHorizontal class="size-3.5" />
+        <Icon name="more-horizontal" class="size-3.5" />
       </DropdownMenu.Trigger>
       <DropdownMenu.Content align="end" class="w-52 text-ui-sm">
         {#if structureAllowed}
           <DropdownMenu.Item onSelect={ontogglestructure}>
-            <LayoutList class="size-3.5" />
+            <Icon name="layout-list" class="size-3.5" />
             {tableViewMode === "structure" ? "View Data" : "View Structure"}
           </DropdownMenu.Item>
           {#if tableViewMode !== "structure"}
@@ -928,7 +906,7 @@
         {/if}
         {#if tableViewMode !== "structure"}
           <DropdownMenu.Item onSelect={oninfinitescrolltoggle}>
-            <Infinity class="size-3.5" />
+            <Icon name="infinity" class="size-3.5" />
             Infinite scroll
             {#if infiniteScroll}
               <span class="ml-auto text-[10px] text-primary">✓</span>
@@ -941,11 +919,11 @@
             </DropdownMenu.Label>
           {/if}
           <DropdownMenu.Item disabled={total === 0} onSelect={() => onexport("csv")}>
-            <FileDown />
+            <Icon name="file-down" />
             Export as CSV
           </DropdownMenu.Item>
           <DropdownMenu.Item disabled={total === 0} onSelect={() => onexport("json")}>
-            <FileDown />
+            <Icon name="file-down" />
             Export as JSON
           </DropdownMenu.Item>
           <DropdownMenu.Separator />
@@ -969,7 +947,7 @@
               }
             }}
           >
-            <Trash2 />
+            <Icon name="trash-2" />
             {deleteConfirmPending ? "Click again to confirm" : deleteLabel}
             <DropdownMenu.Shortcut>⌘⌫</DropdownMenu.Shortcut>
           </DropdownMenu.Item>
@@ -993,7 +971,7 @@
             aria-label="Remove filter"
             onclick={() => removeFilter(filter.id)}
           >
-            <X class="size-3" />
+            <Icon name="x" class="size-3" />
           </button>
           {#if i === 0}
             <span
@@ -1032,7 +1010,7 @@
                 <span class="min-w-0 flex-1 truncate text-left">
                   {filter.column === ANY_COLUMN ? "Any column" : filter.column || "Column"}
                 </span>
-                <ChevronDown class="size-3 shrink-0 opacity-50" />
+                <Icon name="chevron-down" class="size-3 shrink-0 opacity-50" />
               </button>
             {/snippet}
             {#snippet item(it)}
@@ -1129,7 +1107,7 @@
           class="inline-flex h-7 items-center gap-1 rounded-md px-2 text-ui-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           onclick={addFilter}
         >
-          <Plus class="size-3.5" />
+          <Icon name="plus" class="size-3.5" />
           Add filter
         </button>
         <div class="flex-1"></div>

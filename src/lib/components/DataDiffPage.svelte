@@ -677,22 +677,24 @@
       class:cursor-col-resize={resizingCol >= 0}
       onscroll={handleTableScroll}
     >
-      <table class="border-collapse text-xs" style="table-layout:fixed;width:{totalWidth}px">
+      <table class="w-full border-collapse text-xs" style="table-layout:fixed;min-width:{totalWidth}px">
         <colgroup>
-          <col style="width:24px" />
+          <col style="width:26px" />
           {#each colWidths as w}<col style="width:{w}px" />{/each}
+          <!-- Flexible filler so the grid always fills the pane (no empty "hole") -->
+          <col />
         </colgroup>
-        <thead class="sticky top-0 z-10">
-          <tr class="bg-background">
-            <th class="border-b border-border/15 select-none"></th>
+        <thead class="sticky top-0 z-20">
+          <tr>
+            <th class="border-b border-border/25 bg-background select-none"></th>
             {#each columns as col, ci}
               <th
-                class="group relative border-b border-border/15 p-0 text-left select-none overflow-hidden"
+                class="group relative border-b border-border/25 bg-background p-0 text-left select-none overflow-hidden"
                 style="width:{colWidths[ci]}px;min-width:{colWidths[ci]}px;max-width:{colWidths[ci]}px"
               >
-                <div class="flex min-w-0 items-baseline gap-1 px-3 py-2 pr-5">
-                  <span class="truncate font-medium text-foreground/65 text-[11px]">{col.name}</span>
-                  {#if col.dataType}<span class="shrink-0 font-normal text-muted-foreground/35 text-[10px]">{col.dataType}</span>{/if}
+                <div class="flex min-w-0 items-baseline gap-1.5 px-3 py-2 pr-5">
+                  <span class="truncate font-semibold text-foreground/75 text-[11px]">{col.name}</span>
+                  {#if col.dataType && col.dataType.toLowerCase() !== 'null'}<span class="shrink-0 font-normal text-muted-foreground/35 text-[10px]">{col.dataType}</span>{/if}
                 </div>
                 <!-- Resize handle -->
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -704,10 +706,11 @@
                 </div>
               </th>
             {/each}
+            <th class="border-b border-border/25 bg-background select-none"></th>
           </tr>
         </thead>
         <tbody>
-          {#if topPad > 0}<tr style="height:{topPad}px"><td colspan={columns.length + 1}></td></tr>{/if}
+          {#if topPad > 0}<tr style="height:{topPad}px"><td colspan={columns.length + 2}></td></tr>{/if}
           {#each displayRows.slice(vStart, vEnd) as row}
             {@const isAdded    = row.status === 'added'}
             {@const isRemoved  = row.status === 'removed'}
@@ -727,7 +730,7 @@
               isAdded   ? 'bg-emerald-500/35' :
               isRemoved ? 'bg-red-500/35' :
               isModified? 'bg-amber-500/25' : ''}
-            <tr class="{rowBg} border-b border-border/8" style="height:{ROW_HEIGHT}px">
+            <tr class="{rowBg || 'hover:bg-foreground/[0.025]'} border-b border-border/8 transition-colors" style="height:{ROW_HEIGHT}px">
               <td class="relative select-none px-2 text-center font-mono text-[10px] font-bold {statusColor}">
                 {#if accentColor}<span class="absolute inset-y-0 left-0 w-[2px] {accentColor}"></span>{/if}
                 {statusGlyph}
@@ -766,9 +769,10 @@
                   {/if}
                 </td>
               {/each}
+              <td class="border-b border-border/8"></td>
             </tr>
           {/each}
-          {#if bottomPad > 0}<tr style="height:{bottomPad}px"><td colspan={columns.length + 1}></td></tr>{/if}
+          {#if bottomPad > 0}<tr style="height:{bottomPad}px"><td colspan={columns.length + 2}></td></tr>{/if}
         </tbody>
       </table>
     </div>

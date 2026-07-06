@@ -12,6 +12,21 @@
     applySettings(loadSettings())
     installZoomShortcuts()
 
+    // Dev-only console helpers (window.__TAURI__ isn't exposed without
+    // withGlobalTauri, which we keep off in production). Debug trial commands
+    // only exist in debug builds, so these are dev-only too.
+    if (import.meta.env.DEV) {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const { refreshLicenseStatus } = await import('$lib/stores/license.js')
+      // @ts-expect-error — dev-only debug surface
+      window.__stroke = {
+        status: () => invoke('check_license_status'),
+        resetTrial: async () => { await invoke('debug_reset_trial'); return refreshLicenseStatus() },
+        expireTrial: async (daysAgo = 20) => { await invoke('debug_set_trial_days_ago', { daysAgo }); return refreshLicenseStatus() },
+      }
+      console.info('[stroke] dev helpers → window.__stroke.status() / .expireTrial(20) / .resetTrial()')
+    }
+
     // Suppress Tauri's internal "Couldn't find callback id" warning.
     // This is harmless noise that fires when Rust resolves a promise after a
     // hot-reload or fast navigation has already torn down the JS callback.
