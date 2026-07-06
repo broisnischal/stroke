@@ -79,6 +79,15 @@ import Undo2 from '@lucide/svelte/icons/undo-2'
 import Unplug from '@lucide/svelte/icons/unplug'
 import Wifi from '@lucide/svelte/icons/wifi'
 import WifiOff from '@lucide/svelte/icons/wifi-off'
+import ArrowLeft from '@lucide/svelte/icons/arrow-left'
+import FlaskConical from '@lucide/svelte/icons/flask-conical'
+import Workflow from '@lucide/svelte/icons/workflow'
+import Share2 from '@lucide/svelte/icons/share-2'
+import GitCompare from '@lucide/svelte/icons/git-compare'
+import Blocks from '@lucide/svelte/icons/blocks'
+import Plug from '@lucide/svelte/icons/plug'
+import NotebookPen from '@lucide/svelte/icons/notebook-pen'
+import BarChart3 from '@lucide/svelte/icons/bar-chart-3'
 
 // ── Hugeicons data ───────────────────────────────────────────────────────────
 import {
@@ -94,7 +103,8 @@ import {
   ArrowLeftDoubleIcon, ArrowRightDoubleIcon, ArrowUpDoubleIcon, CloudIcon, CommandIcon,
   HardDriveIcon, DashboardSquare02Icon, SquareUnlock01Icon, Moon02Icon, RadioIcon,
   ServerStack01Icon, Settings02Icon, Sun03Icon, ArrowTurnBackwardIcon, Unlink01Icon,
-  WifiConnected01Icon, WifiDisconnected01Icon,
+  WifiConnected01Icon, WifiDisconnected01Icon, TestTubeIcon, WorkflowSquare02Icon,
+  Share08Icon, GitCompareIcon, PuzzleIcon, PlugSocketIcon, NoteEditIcon, ChartBarLineIcon,
 } from '@hugeicons/core-free-icons'
 
 /** @type {Record<string, { lucide: any, huge?: any }>} */
@@ -164,4 +174,13 @@ export const ICON_MAP = {
   'unplug':         { lucide: Unplug,        huge: Unlink01Icon },
   'wifi':           { lucide: Wifi,          huge: WifiConnected01Icon },
   'wifi-off':       { lucide: WifiOff,       huge: WifiDisconnected01Icon },
+  'arrow-left':     { lucide: ArrowLeft,     huge: ArrowLeft01Icon },
+  'flask-conical':  { lucide: FlaskConical,  huge: TestTubeIcon },
+  'workflow':       { lucide: Workflow,      huge: WorkflowSquare02Icon },
+  'share-2':        { lucide: Share2,        huge: Share08Icon },
+  'git-compare':    { lucide: GitCompare,    huge: GitCompareIcon },
+  'blocks':         { lucide: Blocks,        huge: PuzzleIcon },
+  'plug':           { lucide: Plug,          huge: PlugSocketIcon },
+  'notebook-pen':   { lucide: NotebookPen,   huge: NoteEditIcon },
+  'bar-chart-3':    { lucide: BarChart3,     huge: ChartBarLineIcon },
 }
