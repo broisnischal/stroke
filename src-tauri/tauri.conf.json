@@ -21,6 +21,9 @@
       "endpoints": [
         "https://github.com/broisnischal/stroke/releases/latest/download/latest.json"
       ],
+      "windows": {
+        "installMode": "passive"
+      },
       "dialog": false
     }
   },
