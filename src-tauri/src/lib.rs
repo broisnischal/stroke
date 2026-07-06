@@ -6,6 +6,7 @@ mod docker;
 mod license;
 mod mcp;
 mod metrics;
+mod providers;
 mod secrets;
 
 use db::{ActiveConnection, DbState, TunnelState};
@@ -296,6 +297,13 @@ pub fn run() {
             cloudflare::cloudflare_logout,
             cloudflare::cloudflare_list_accounts,
             cloudflare::cloudflare_list_d1_databases,
+            providers::provider_start_oauth,
+            providers::provider_cancel_oauth,
+            providers::provider_store_token,
+            providers::provider_oauth_status,
+            providers::provider_logout,
+            providers::provider_list_databases,
+            providers::provider_build_connection,
             db::backup::backup_export,
             db::backup::backup_import,
             commands::check_license_status,

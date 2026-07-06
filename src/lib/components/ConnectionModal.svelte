@@ -21,6 +21,7 @@
   import ChevronDown  from '@lucide/svelte/icons/chevron-down'
   import Check        from '@lucide/svelte/icons/check'
   import CloudflareLogin from './CloudflareLogin.svelte'
+  import ProviderConnect from './ProviderConnect.svelte'
   import SearchableMenu from './SearchableMenu.svelte'
   import {
     testPostgresConnection, connectPostgres,
@@ -84,6 +85,15 @@
         { id: 'bigquery', label: 'BigQuery',       desc: 'Google analytics warehouse', soon: true },
       ],
     },
+    {
+      label: 'Hosting providers',
+      drivers: [
+        { id: 'neon',        label: 'Neon',            desc: 'Serverless Postgres — sign in & pick a database' },
+        { id: 'supabase',    label: 'Supabase',        desc: 'Postgres platform — sign in & pick a project' },
+        { id: 'planetscale', label: 'PlanetScale',     desc: 'Serverless MySQL — sign in & pick a database' },
+        { id: 'prisma',      label: 'Prisma Postgres', desc: 'Paste a Prisma Postgres connection string' },
+      ],
+    },
   ]
 
   const ALL_DRIVERS = CATEGORIES.flatMap(c => c.drivers)
@@ -93,7 +103,8 @@
   // PostgreSQL → SQLite → MySQL pinned to the top, then the rest.
   const DRIVER_ORDER = [
     'postgres', 'sqlite', 'mysql', 'mariadb', 'cockroachdb', 'mssql',
-    'clickhouse', 'duckdb', 'sqlite-memory', 'duckdb-memory', 'libsql', 'd1', 'bigquery',
+    'clickhouse', 'duckdb', 'sqlite-memory', 'duckdb-memory', 'libsql',
+    'neon', 'supabase', 'planetscale', 'prisma', 'd1', 'bigquery',
   ]
   const driverItems = DRIVER_ORDER
     .map((id) => ALL_DRIVERS.find((d) => d.id === id))
@@ -232,6 +243,38 @@
     }
     error = ''; testOk = false; connectionUri = ''; uriHint = ''
     d1Reset()
+  }
+
+  /**
+   * A provider adapter resolved a database (with a password if it needed one):
+   * build a SavedConnection and connect immediately via connectWith — no detour
+   * through the manual form, so picking a project just connects. Runs the same
+   * connect/save/close path as any other connection.
+   * @param {import('$lib/providers.js').ProviderConnection} conn
+   */
+  async function connectProviderConnection(conn) {
+    error = ''
+    // dbType is the provider id while the provider flow is showing — tag the
+    // connection with it so the status bar can offer switching to the account's
+    // other databases later.
+    const providerId = ['neon', 'supabase', 'planetscale', 'prisma'].includes(dbType) ? dbType : undefined
+    const type = conn.db_type === 'mysql' ? 'mysql' : 'postgres'
+    // Reuse an existing saved entry for this exact database (host + user) instead
+    // of piling up duplicates — connectWith upserts it, keeping the saved password.
+    const existing = saved.find((s) => s.host === conn.host && s.user === conn.username && s.type === type)
+    await connectWith({
+      id: existing?.id ?? newConnectionId(),
+      type,
+      name: conn.name,
+      host: conn.host,
+      port: conn.port,
+      database: conn.database,
+      user: conn.username,
+      password: conn.password,
+      ssl: conn.ssl,
+      provider: providerId,
+      readOnly: readOnly || undefined,
+    })
   }
 
   function switchDriver(id) {
@@ -414,6 +457,10 @@
     if (id === 'duckdb')          return 'text-yellow-500'
     if (id === 'duckdb-memory')   return 'text-amber-300'
     if (id === 'mssql')           return 'text-red-400'
+    if (id === 'neon')            return 'text-emerald-400'
+    if (id === 'supabase')        return 'text-green-400'
+    if (id === 'planetscale')     return 'text-purple-400'
+    if (id === 'prisma')          return 'text-indigo-300'
     return 'text-muted-foreground'
   }
   function driverBg(id) {
@@ -429,6 +476,10 @@
     if (id === 'duckdb')          return 'bg-yellow-500/10'
     if (id === 'duckdb-memory')   return 'bg-amber-500/10'
     if (id === 'mssql')           return 'bg-red-500/10'
+    if (id === 'neon')            return 'bg-emerald-500/10'
+    if (id === 'supabase')        return 'bg-green-500/10'
+    if (id === 'planetscale')     return 'bg-purple-500/10'
+    if (id === 'prisma')          return 'bg-indigo-500/10'
     return 'bg-muted/40'
   }
 
@@ -518,6 +569,7 @@
   {:else if id === 'duckdb'}        <HardDrive class="{cls} shrink-0 {c}" />
   {:else if id === 'duckdb-memory'} <Zap       class="{cls} shrink-0 {c}" />
   {:else if id === 'mssql'}         <Server    class="{cls} shrink-0 {c}" />
+  {:else if id === 'neon' || id === 'supabase' || id === 'planetscale' || id === 'prisma'} <Cloud class="{cls} shrink-0 {c}" />
   {:else}                           <BarChart2 class="{cls} shrink-0 {c}" />{/if}
 {/snippet}
 
@@ -669,8 +721,16 @@
         <ScrollArea class="min-h-0 flex-1 scroll-smooth">
           <div class="flex flex-col gap-3 px-5 py-5">
 
+            <!-- ── Hosting provider sign-in (Neon / Supabase / PlanetScale / Prisma) ── -->
+            {#if dbType === 'neon' || dbType === 'supabase' || dbType === 'planetscale' || dbType === 'prisma'}
+              <ProviderConnect
+                provider={dbType}
+                resolvePassword={(host, user) => saved.find((s) => s.host === host && s.user === user && s.password)?.password}
+                onselect={(conn) => connectProviderConnection(conn)}
+              />
+
             <!-- ── PostgreSQL / CockroachDB ────────────────── -->
-            {#if dbType === 'postgres' || dbType === 'cockroachdb'}
+            {:else if dbType === 'postgres' || dbType === 'cockroachdb'}
 
               <div>
                 <label for="cn-uri" class={lbl}>Connection string</label>
