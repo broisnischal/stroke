@@ -669,6 +669,13 @@ pub async fn run_license_check(
         }
     }
 
+    // No valid paid license → reconcile the trial clock with the server so a
+    // reinstall/disk-wipe can't grant a fresh trial (server keeps the earliest
+    // start per device). Silent no-op when offline.
+    if crate::license::load_license(&dir).is_none() {
+        crate::license::reconcile_trial(&dir).await;
+    }
+
     crate::license::check_status(&dir)
 }
 
