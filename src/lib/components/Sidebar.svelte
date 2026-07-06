@@ -1,41 +1,8 @@
 <script>
   import { untrack } from "svelte";
   import { createHotkey } from "@tanstack/svelte-hotkeys";
-  import Search from "@lucide/svelte/icons/search";
-  import Pin from "@lucide/svelte/icons/pin";
-  import PinOff from "@lucide/svelte/icons/pin-off";
-  import Table2 from "@lucide/svelte/icons/table-2";
-  import Eye from "@lucide/svelte/icons/eye";
-  import Layers from "@lucide/svelte/icons/layers";
-  import ChevronDown from "@lucide/svelte/icons/chevron-down";
-  import Columns3 from "@lucide/svelte/icons/columns-3";
-  import ListFilter from "@lucide/svelte/icons/list-filter";
-  import Lock from "@lucide/svelte/icons/lock";
-  import Square from "@lucide/svelte/icons/square";
-  import SquareCheck from "@lucide/svelte/icons/square-check";
-  import Trash2 from "@lucide/svelte/icons/trash-2";
-  import Eraser from "@lucide/svelte/icons/eraser";
-  import Code2 from "@lucide/svelte/icons/code-2";
-  import FileDown from "@lucide/svelte/icons/file-down";
-  import Download from "@lucide/svelte/icons/download";
-  import ClipboardCopy from "@lucide/svelte/icons/clipboard-copy";
+  import Icon from "./Icon.svelte";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
-  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
-  import Plus from "@lucide/svelte/icons/plus";
-  import Box from "@lucide/svelte/icons/box";
-  import Clock from "@lucide/svelte/icons/clock";
-  import X from "@lucide/svelte/icons/x";
-  import ExternalLink from "@lucide/svelte/icons/external-link";
-  import ArrowDownAZ from "@lucide/svelte/icons/arrow-down-a-z";
-  import ArrowUpAZ from "@lucide/svelte/icons/arrow-up-a-z";
-  import ArrowDown01 from "@lucide/svelte/icons/arrow-down-0-1";
-  import ArrowUp01 from "@lucide/svelte/icons/arrow-up-0-1";
-  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
-  import ChevronsDownUp from "@lucide/svelte/icons/chevrons-down-up";
-  import ChevronsUpDown from "@lucide/svelte/icons/chevrons-up-down";
-  import Hash from "@lucide/svelte/icons/hash";
-  import CircleSlash from "@lucide/svelte/icons/circle-slash";
-  import Cog from "@lucide/svelte/icons/cog";
   import DangerousActionDialog from "./DangerousActionDialog.svelte";
   import * as Select from "$lib/components/ui/select/index.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
@@ -540,7 +507,7 @@
               title="Display options"
               disabled={!connectionName}
             >
-              <ListFilter class="size-3.5" />
+              <Icon name="list-filter" class="size-3.5" />
             </DropdownMenu.Trigger>
             <DropdownMenu.Content
               align="start"
@@ -562,41 +529,41 @@
               <DropdownMenu.CheckboxItem
                 checked={showRecent}
                 onCheckedChange={(v) => (showRecent = v)}
-              ><Clock class="text-muted-foreground" />Recent</DropdownMenu.CheckboxItem>
+              ><Icon name="clock" class="text-muted-foreground" />Recent</DropdownMenu.CheckboxItem>
               <DropdownMenu.CheckboxItem
                 checked={showTables}
                 onCheckedChange={(v) => (showTables = v)}
-              ><Table2 class="text-muted-foreground" />Tables</DropdownMenu.CheckboxItem>
+              ><Icon name="table-2" class="text-muted-foreground" />Tables</DropdownMenu.CheckboxItem>
               <DropdownMenu.CheckboxItem
                 checked={showViews}
                 onCheckedChange={(v) => (showViews = v)}
-              ><Eye class="text-muted-foreground" />Views</DropdownMenu.CheckboxItem>
+              ><Icon name="eye" class="text-muted-foreground" />Views</DropdownMenu.CheckboxItem>
               <DropdownMenu.CheckboxItem
                 checked={showMatViews}
                 onCheckedChange={(v) => (showMatViews = v)}
-              ><Layers class="text-muted-foreground" />Materialized Views</DropdownMenu.CheckboxItem>
+              ><Icon name="layers" class="text-muted-foreground" />Materialized Views</DropdownMenu.CheckboxItem>
               <DropdownMenu.CheckboxItem
                 checked={showPins}
                 onCheckedChange={(v) => (showPins = v)}
-              ><Pin class="text-muted-foreground" />Pins</DropdownMenu.CheckboxItem>
+              ><Icon name="pin" class="text-muted-foreground" />Pins</DropdownMenu.CheckboxItem>
               <DropdownMenu.Separator />
               <DropdownMenu.CheckboxItem
                 checked={showRowCount}
                 onCheckedChange={(v) => (showRowCount = v)}
-              ><Hash class="text-muted-foreground" />Row counts</DropdownMenu.CheckboxItem>
+              ><Icon name="hash" class="text-muted-foreground" />Row counts</DropdownMenu.CheckboxItem>
               <DropdownMenu.CheckboxItem
                 checked={hideEmpty}
                 onCheckedChange={(v) => (hideEmpty = v)}
-              ><CircleSlash class="text-muted-foreground" />Hide empty tables</DropdownMenu.CheckboxItem>
+              ><Icon name="circle-slash" class="text-muted-foreground" />Hide empty tables</DropdownMenu.CheckboxItem>
               <DropdownMenu.CheckboxItem
                 checked={hideSystem}
                 onCheckedChange={(v) => (hideSystem = v)}
-              ><Cog class="text-muted-foreground" />Hide system tables</DropdownMenu.CheckboxItem>
+              ><Icon name="cog" class="text-muted-foreground" />Hide system tables</DropdownMenu.CheckboxItem>
               <DropdownMenu.Separator />
               <DropdownMenu.Label class="px-2 py-1 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Sort by</DropdownMenu.Label>
               <DropdownMenu.RadioGroup value={sortBy} onValueChange={(v) => { if (v === 'name' || v === 'rowCount') sortBy = v }}>
-                <DropdownMenu.RadioItem value="name"><ArrowDownAZ class="text-muted-foreground" />Name</DropdownMenu.RadioItem>
-                <DropdownMenu.RadioItem value="rowCount"><Hash class="text-muted-foreground" />Row count</DropdownMenu.RadioItem>
+                <DropdownMenu.RadioItem value="name"><Icon name="arrow-down-a-z" class="text-muted-foreground" />Name</DropdownMenu.RadioItem>
+                <DropdownMenu.RadioItem value="rowCount"><Icon name="hash" class="text-muted-foreground" />Row count</DropdownMenu.RadioItem>
               </DropdownMenu.RadioGroup>
               <DropdownMenu.Separator />
               <DropdownMenu.Label class="px-2 py-1 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Direction</DropdownMenu.Label>
@@ -606,18 +573,18 @@
               >
                 {#if sortBy === 'name'}
                   {#if sortDir === 'asc'}
-                    <ArrowDownAZ class="size-3.5 shrink-0 text-muted-foreground" />
+                    <Icon name="arrow-down-a-z" class="size-3.5 shrink-0 text-muted-foreground" />
                     A → Z
                   {:else}
-                    <ArrowUpAZ class="size-3.5 shrink-0 text-muted-foreground" />
+                    <Icon name="arrow-up-a-z" class="size-3.5 shrink-0 text-muted-foreground" />
                     Z → A
                   {/if}
                 {:else}
                   {#if sortDir === 'desc'}
-                    <ArrowDown01 class="size-3.5 shrink-0 text-muted-foreground" />
+                    <Icon name="arrow-down-0-1" class="size-3.5 shrink-0 text-muted-foreground" />
                     High → Low
                   {:else}
-                    <ArrowUp01 class="size-3.5 shrink-0 text-muted-foreground" />
+                    <Icon name="arrow-up-0-1" class="size-3.5 shrink-0 text-muted-foreground" />
                     Low → High
                   {/if}
                 {/if}
@@ -626,16 +593,16 @@
               <DropdownMenu.Separator />
               <DropdownMenu.Label class="px-2 py-1 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Sections</DropdownMenu.Label>
               <DropdownMenu.Item onSelect={() => setAllSections(true)} closeOnSelect={false} class="gap-2">
-                <ChevronsUpDown class="size-3.5 shrink-0 text-muted-foreground" />
+                <Icon name="chevrons-up-down" class="size-3.5 shrink-0 text-muted-foreground" />
                 Expand all
               </DropdownMenu.Item>
               <DropdownMenu.Item onSelect={() => setAllSections(false)} closeOnSelect={false} class="gap-2">
-                <ChevronsDownUp class="size-3.5 shrink-0 text-muted-foreground" />
+                <Icon name="chevrons-down-up" class="size-3.5 shrink-0 text-muted-foreground" />
                 Collapse all
               </DropdownMenu.Item>
               <DropdownMenu.Separator />
               <DropdownMenu.Item onSelect={resetFilters} disabled={!filtersActive} class="gap-2">
-                <RotateCcw class="size-3.5 shrink-0 text-muted-foreground" />
+                <Icon name="rotate-ccw" class="size-3.5 shrink-0 text-muted-foreground" />
                 Reset filters &amp; sort
               </DropdownMenu.Item>
             </DropdownMenu.Content>
@@ -647,7 +614,7 @@
             disabled={loadingTables || !connectionName}
             onclick={onrefresh}
           >
-            <RefreshCw
+            <Icon name="refresh-cw"
               class={cn("size-3.5", loadingTables && "animate-spin")}
             />
           </button>
@@ -658,15 +625,15 @@
                 title="Create new…"
                 disabled={!connectionName}
               >
-                <Plus class="size-3.5" />
+                <Icon name="plus" class="size-3.5" />
               </DropdownMenu.Trigger>
               <DropdownMenu.Content align="end" class="w-44 p-1 text-ui-sm">
                 <DropdownMenu.Item onSelect={onnewtable} class="gap-2">
-                  <Table2 class="size-3.5 shrink-0 text-muted-foreground" />
+                  <Icon name="table-2" class="size-3.5 shrink-0 text-muted-foreground" />
                   New table
                 </DropdownMenu.Item>
                 <DropdownMenu.Item onSelect={onnewschema} class="gap-2">
-                  <Box class="size-3.5 shrink-0 text-muted-foreground" />
+                  <Icon name="box" class="size-3.5 shrink-0 text-muted-foreground" />
                   New schema
                 </DropdownMenu.Item>
               </DropdownMenu.Content>
@@ -679,14 +646,14 @@
               disabled={!connectionName}
               onclick={onnewtable}
             >
-              <Plus class="size-3.5" />
+              <Icon name="plus" class="size-3.5" />
             </button>
           {/if}
         </div>
 
         <div class="flex h-9 items-center border-b border-sidebar-border px-2">
           <div class="relative min-w-0 w-full">
-          <Search
+          <Icon name="search"
             class="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
           />
           <input
@@ -760,13 +727,13 @@
                   class="flex min-w-0 flex-1 items-center gap-1 text-left"
                   onclick={() => (recentOpen = !recentOpen)}
                 >
-                  <ChevronDown
+                  <Icon name="chevron-down"
                     class={cn(
                       "size-3 shrink-0 text-muted-foreground/60 transition-transform duration-150",
                       !recentOpen && "-rotate-90",
                     )}
                   />
-                  <Clock class="size-3 shrink-0 text-muted-foreground/60" />
+                  <Icon name="clock" class="size-3 shrink-0 text-muted-foreground/60" />
                   <span class="text-ui-2xs font-medium tracking-wide text-muted-foreground uppercase">Recent</span>
                   <span class="ml-1 font-mono text-ui-2xs text-muted-foreground/60">{Math.min(recentTabs.length, 5)}</span>
                 </button>
@@ -794,11 +761,11 @@
                         onkeydown={(e) => e.key === 'Enter' && onrecentselect(item.schema, item.table)}
                       >
                         {#if item.tableKind === 'view'}
-                          <Eye class="size-3 shrink-0 opacity-50" />
+                          <Icon name="eye" class="size-3 shrink-0 opacity-50" />
                         {:else if item.tableKind === 'materialized_view'}
-                          <Layers class="size-3 shrink-0 opacity-50" />
+                          <Icon name="layers" class="size-3 shrink-0 opacity-50" />
                         {:else}
-                          <Table2 class="size-3 shrink-0 opacity-50" />
+                          <Icon name="table-2" class="size-3 shrink-0 opacity-50" />
                         {/if}
                         <span class="min-w-0 truncate font-mono text-ui-sm leading-none">{item.table}</span>
                         <button
@@ -807,7 +774,7 @@
                           class="invisible inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:text-foreground group-hover/recent:inline-flex"
                           onclick={(e) => { e.stopPropagation(); onrecentremove(item.schema, item.table) }}
                         >
-                          <X class="size-3" />
+                          <Icon name="x" class="size-3" />
                         </button>
                       </div>
                     </li>
@@ -819,7 +786,7 @@
             <!-- ── Pinned ─────────────────────────────────────────── -->
             {#if showPins && visiblePinnedTables.length > 0 && connectionName}
               <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
-                <Pin class="size-3 shrink-0 text-primary/60" />
+                <Icon name="pin" class="size-3 shrink-0 text-primary/60" />
                 <span class="text-ui-2xs font-medium tracking-wide text-muted-foreground uppercase">Pinned</span>
                 <span class="ml-1 font-mono text-ui-2xs text-muted-foreground/60">{visiblePinnedTables.length}</span>
                 {#if pinnedTables.length > 5}
@@ -862,10 +829,10 @@
                             tabindex="-1"
                           >
                             {#if isSelected}
-                              <SquareCheck class="size-3 text-primary" />
+                              <Icon name="square-check" class="size-3 text-primary" />
                             {:else}
-                              <Pin class="size-3 text-primary/50 group-hover:hidden" />
-                              <Square class="size-3 hidden opacity-40 group-hover:block" />
+                              <Icon name="pin" class="size-3 text-primary/50 group-hover:hidden" />
+                              <Icon name="square" class="size-3 hidden opacity-40 group-hover:block" />
                             {/if}
                           </span>
                           <span class="min-w-0 truncate font-mono text-ui-sm leading-none">{tableName}</span>
@@ -880,64 +847,64 @@
                         {#if isSelected && selectedItems.size > 1}
                           <!-- Multi-select: actions apply to all selected tables -->
                           <ContextMenu.Item onSelect={openSelected}>
-                            <ExternalLink />
+                            <Icon name="external-link" />
                             Open {selectedItems.size} tables
                           </ContextMenu.Item>
                           {#if [...selectedItems].some((n) => openTableSet.has(n))}
                             <ContextMenu.Item onSelect={closeSelectedTabs}>
-                              <X />
+                              <Icon name="x" />
                               Close open tabs
                             </ContextMenu.Item>
                           {/if}
                           <ContextMenu.Separator />
                           <ContextMenu.Item onSelect={copySelectedNames}>
-                            <ClipboardCopy />
+                            <Icon name="clipboard-copy" />
                             Copy {selectedItems.size} names
                           </ContextMenu.Item>
                           <ContextMenu.Item onSelect={() => (allSelectedPinned ? unpinSelected() : pinSelected())}>
                             {#if allSelectedPinned}
-                              <PinOff />
+                              <Icon name="pin-off" />
                               Unpin {selectedItems.size} tables
                             {:else}
-                              <Pin />
+                              <Icon name="pin" />
                               Pin {selectedItems.size} tables
                             {/if}
                           </ContextMenu.Item>
                           <ContextMenu.Separator />
                           <ContextMenu.Item onSelect={clearSelection}>
-                            <Square />
+                            <Icon name="square" />
                             Deselect all
                           </ContextMenu.Item>
                         {:else}
                         <ContextMenu.Item onSelect={() => { navigator.clipboard.writeText(tableName) }}>
-                          <ClipboardCopy />
+                          <Icon name="clipboard-copy" />
                           Copy name
                         </ContextMenu.Item>
                         {#if openTableSet.has(tableName)}
                           <ContextMenu.Item onSelect={() => onclosetable(tableName)}>
-                            <X />
+                            <Icon name="x" />
                             Close tab
                           </ContextMenu.Item>
                         {/if}
                         <ContextMenu.Item onSelect={() => togglePin(tableName)}>
-                          <PinOff />
+                          <Icon name="pin-off" />
                           Unpin table
                         </ContextMenu.Item>
                         <ContextMenu.Separator />
                         <ContextMenu.Item onSelect={() => onviewstructure(tableName)}>
-                          <Columns3 />
+                          <Icon name="columns-3" />
                           View structure
                         </ContextMenu.Item>
                         <ContextMenu.Item onSelect={() => onviewddl(tableName)}>
-                          <Code2 />
+                          <Icon name="code-2" />
                           View DDL
                         </ContextMenu.Item>
                         <ContextMenu.Item onSelect={() => onexportsql(tableName)}>
-                          <FileDown />
+                          <Icon name="file-down" />
                           Export as SQL
                         </ContextMenu.Item>
                         <ContextMenu.Item onSelect={() => onexportdata(tableName)}>
-                          <Download />
+                          <Icon name="download" />
                           Export data
                         </ContextMenu.Item>
                         {/if}
@@ -957,7 +924,7 @@
                 tablesOpen = !tablesOpen;
               }}
             >
-              <ChevronDown
+              <Icon name="chevron-down"
                 class={cn(
                   "size-3 shrink-0 text-muted-foreground/60 transition-transform duration-150",
                   !tablesOpen && "-rotate-90",
@@ -993,7 +960,7 @@
                   <li
                     class="flex w-full flex-col items-center gap-2 px-4 py-8 text-center"
                   >
-                    <Table2 class="size-7 text-muted-foreground/25" />
+                    <Icon name="table-2" class="size-7 text-muted-foreground/25" />
                     <p class="text-ui-sm text-muted-foreground">
                       No tables in {activeSchema || "schema"}
                     </p>
@@ -1036,16 +1003,16 @@
                               tabindex="-1"
                             >
                               {#if isSelected}
-                                <SquareCheck class="size-3 text-primary" />
+                                <Icon name="square-check" class="size-3 text-primary" />
                               {:else}
-                                <Table2 class="size-3 opacity-50 group-hover:hidden" />
-                                <Square class="size-3 hidden opacity-40 group-hover:block" />
+                                <Icon name="table-2" class="size-3 opacity-50 group-hover:hidden" />
+                                <Icon name="square" class="size-3 hidden opacity-40 group-hover:block" />
                               {/if}
                             </span>
                             <span class="flex min-w-0 items-center gap-1.5">
                               <span class="min-w-0 truncate font-mono text-ui-sm leading-none">{table.name}</span>
                               {#if table.rlsEnabled}
-                                <Lock class="size-2.5 shrink-0 text-muted-foreground/50" title="Row-level security enabled" />
+                                <Icon name="lock" class="size-2.5 shrink-0 text-muted-foreground/50" title="Row-level security enabled" />
                               {/if}
                             </span>
                             {#if showRowCount}
@@ -1062,87 +1029,87 @@
                           {#if isSelected && selectedItems.size > 1}
                             <!-- Multi-select: actions apply to all selected tables -->
                             <ContextMenu.Item onSelect={openSelected}>
-                              <ExternalLink />
+                              <Icon name="external-link" />
                               Open {selectedItems.size} tables
                             </ContextMenu.Item>
                             {#if [...selectedItems].some((n) => openTableSet.has(n))}
                               <ContextMenu.Item onSelect={closeSelectedTabs}>
-                                <X />
+                                <Icon name="x" />
                                 Close open tabs
                               </ContextMenu.Item>
                             {/if}
                             <ContextMenu.Separator />
                             <ContextMenu.Item onSelect={copySelectedNames}>
-                              <ClipboardCopy />
+                              <Icon name="clipboard-copy" />
                               Copy {selectedItems.size} names
                             </ContextMenu.Item>
                             <ContextMenu.Item onSelect={() => (allSelectedPinned ? unpinSelected() : pinSelected())}>
                               {#if allSelectedPinned}
-                                <PinOff />
+                                <Icon name="pin-off" />
                                 Unpin {selectedItems.size} tables
                               {:else}
-                                <Pin />
+                                <Icon name="pin" />
                                 Pin {selectedItems.size} tables
                               {/if}
                             </ContextMenu.Item>
                             <ContextMenu.Separator />
                             <ContextMenu.Item onSelect={clearSelection}>
-                              <Square />
+                              <Icon name="square" />
                               Deselect all
                             </ContextMenu.Item>
                           {:else}
                           <ContextMenu.Item onSelect={() => { navigator.clipboard.writeText(table.name) }}>
-                            <ClipboardCopy />
+                            <Icon name="clipboard-copy" />
                             Copy name
                           </ContextMenu.Item>
                           {#if openTableSet.has(table.name)}
                             <ContextMenu.Item onSelect={() => onclosetable(table.name)}>
-                              <X />
+                              <Icon name="x" />
                               Close tab
                             </ContextMenu.Item>
                           {/if}
                           <ContextMenu.Item onSelect={() => togglePin(table.name)}>
                             {#if pinnedTables.includes(table.name)}
-                              <PinOff />
+                              <Icon name="pin-off" />
                               Unpin table
                             {:else}
-                              <Pin />
+                              <Icon name="pin" />
                               Pin table
                             {/if}
                           </ContextMenu.Item>
                           <ContextMenu.Item onSelect={() => toggleSelect(table.name)}>
                             {#if isSelected}
-                              <Square />
+                              <Icon name="square" />
                               Deselect
                             {:else}
-                              <SquareCheck />
+                              <Icon name="square-check" />
                               Select
                             {/if}
                           </ContextMenu.Item>
                           <ContextMenu.Separator />
                           <ContextMenu.Item onSelect={() => onviewstructure(table.name)}>
-                            <Columns3 />
+                            <Icon name="columns-3" />
                             View structure
                           </ContextMenu.Item>
                           <ContextMenu.Item onSelect={() => onviewddl(table.name)}>
-                            <Code2 />
+                            <Icon name="code-2" />
                             View DDL
                           </ContextMenu.Item>
                           <ContextMenu.Item onSelect={() => onexportsql(table.name)}>
-                            <FileDown />
+                            <Icon name="file-down" />
                             Export as SQL
                           </ContextMenu.Item>
                           <ContextMenu.Item onSelect={() => onexportdata(table.name)}>
-                            <Download />
+                            <Icon name="download" />
                             Export data
                           </ContextMenu.Item>
                           <ContextMenu.Separator />
                           <ContextMenu.Item onSelect={() => openDangerDialog('truncate', table.name)}>
-                            <Eraser />
+                            <Icon name="eraser" />
                             Truncate table
                           </ContextMenu.Item>
                           <ContextMenu.Item variant="destructive" onSelect={() => openDangerDialog('drop', table.name)}>
-                            <Trash2 />
+                            <Icon name="trash-2" />
                             Drop table
                           </ContextMenu.Item>
                           {/if}
@@ -1166,7 +1133,7 @@
                   viewsOpen = !viewsOpen;
                 }}
               >
-                <ChevronDown
+                <Icon name="chevron-down"
                   class={cn(
                     "size-3 shrink-0 text-muted-foreground/60 transition-transform duration-150",
                     !viewsOpen && "-rotate-90",
@@ -1215,10 +1182,10 @@
                                 tabindex="-1"
                               >
                                 {#if isSelected}
-                                  <SquareCheck class="size-3 text-primary" />
+                                  <Icon name="square-check" class="size-3 text-primary" />
                                 {:else}
-                                  <Eye class="size-3 opacity-50 group-hover:hidden" />
-                                  <Square class="size-3 hidden opacity-40 group-hover:block" />
+                                  <Icon name="eye" class="size-3 opacity-50 group-hover:hidden" />
+                                  <Icon name="square" class="size-3 hidden opacity-40 group-hover:block" />
                                 {/if}
                               </span>
                               <span class="min-w-0 truncate font-mono text-ui-sm leading-none">{view.name}</span>
@@ -1227,16 +1194,16 @@
                           <ContextMenu.Content class="w-44 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
                             <ContextMenu.Item onSelect={() => toggleSelect(view.name)}>
                               {#if isSelected}
-                                <Square />
+                                <Icon name="square" />
                                 Deselect
                               {:else}
-                                <SquareCheck />
+                                <Icon name="square-check" />
                                 Select
                               {/if}
                             </ContextMenu.Item>
                             <ContextMenu.Separator />
                             <ContextMenu.Item variant="destructive" onSelect={() => openDangerDialog('drop', view.name)}>
-                              <Trash2 />
+                              <Icon name="trash-2" />
                               Drop view
                             </ContextMenu.Item>
                           </ContextMenu.Content>
@@ -1260,7 +1227,7 @@
             {#if !loadingTables && connectionName && tables.length === 0}
               <div class="flex flex-1 flex-col items-center justify-center gap-3 px-4 py-16 text-center">
                 <div class="flex size-10 items-center justify-center rounded-xl border border-border/50 bg-muted/30">
-                  <Table2 class="size-5 text-muted-foreground/30" />
+                  <Icon name="table-2" class="size-5 text-muted-foreground/30" />
                 </div>
                 <div>
                   <p class="text-ui-xs font-medium text-muted-foreground">No tables found</p>
@@ -1271,7 +1238,7 @@
                   class="inline-flex items-center gap-1.5 rounded-md border border-border/50 bg-background/60 px-3 py-1.5 font-mono text-ui-2xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                   onclick={onrefresh}
                 >
-                  <RefreshCw class="size-3" />
+                  <Icon name="refresh-cw" class="size-3" />
                   Retry
                 </button>
               </div>
@@ -1286,7 +1253,7 @@
                   matViewsOpen = !matViewsOpen;
                 }}
               >
-                <ChevronDown
+                <Icon name="chevron-down"
                   class={cn(
                     "size-3 shrink-0 text-muted-foreground/60 transition-transform duration-150",
                     !matViewsOpen && "-rotate-90",
@@ -1335,10 +1302,10 @@
                                 tabindex="-1"
                               >
                                 {#if isSelected}
-                                  <SquareCheck class="size-3 text-primary" />
+                                  <Icon name="square-check" class="size-3 text-primary" />
                                 {:else}
-                                  <Layers class="size-3 opacity-50 group-hover:hidden" />
-                                  <Square class="size-3 hidden opacity-40 group-hover:block" />
+                                  <Icon name="layers" class="size-3 opacity-50 group-hover:hidden" />
+                                  <Icon name="square" class="size-3 hidden opacity-40 group-hover:block" />
                                 {/if}
                               </span>
                               <span class="min-w-0 truncate font-mono text-ui-sm leading-none">{mv.name}</span>
@@ -1352,16 +1319,16 @@
                           <ContextMenu.Content class="w-44 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
                             <ContextMenu.Item onSelect={() => toggleSelect(mv.name)}>
                               {#if isSelected}
-                                <Square />
+                                <Icon name="square" />
                                 Deselect
                               {:else}
-                                <SquareCheck />
+                                <Icon name="square-check" />
                                 Select
                               {/if}
                             </ContextMenu.Item>
                             <ContextMenu.Separator />
                             <ContextMenu.Item variant="destructive" onSelect={() => openDangerDialog('drop', mv.name)}>
-                              <Trash2 />
+                              <Icon name="trash-2" />
                               Drop view
                             </ContextMenu.Item>
                           </ContextMenu.Content>

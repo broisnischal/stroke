@@ -89,6 +89,44 @@ import Plug from '@lucide/svelte/icons/plug'
 import NotebookPen from '@lucide/svelte/icons/notebook-pen'
 import BarChart3 from '@lucide/svelte/icons/bar-chart-3'
 import Info from '@lucide/svelte/icons/info'
+import ArrowDown from '@lucide/svelte/icons/arrow-down'
+import ArrowUp from '@lucide/svelte/icons/arrow-up'
+import ArrowUpDown from '@lucide/svelte/icons/arrow-up-down'
+import ArrowLeftRight from '@lucide/svelte/icons/arrow-left-right'
+import ArrowDownToLine from '@lucide/svelte/icons/arrow-down-to-line'
+import Bookmark from '@lucide/svelte/icons/bookmark'
+import Box from '@lucide/svelte/icons/box'
+import Bug from '@lucide/svelte/icons/bug'
+import CircleSlash from '@lucide/svelte/icons/circle-slash'
+import ClipboardCopy from '@lucide/svelte/icons/clipboard-copy'
+import Cog from '@lucide/svelte/icons/cog'
+import Columns3 from '@lucide/svelte/icons/columns-3'
+import Crosshair from '@lucide/svelte/icons/crosshair'
+import Eraser from '@lucide/svelte/icons/eraser'
+import FileDown from '@lucide/svelte/icons/file-down'
+import FileText from '@lucide/svelte/icons/file-text'
+import FunctionSquare from '@lucide/svelte/icons/function-square'
+import Hash from '@lucide/svelte/icons/hash'
+import Infinity from '@lucide/svelte/icons/infinity'
+import Keyboard from '@lucide/svelte/icons/keyboard'
+import Layers from '@lucide/svelte/icons/layers'
+import LayoutList from '@lucide/svelte/icons/layout-list'
+import Link2 from '@lucide/svelte/icons/link-2'
+import ListFilter from '@lucide/svelte/icons/list-filter'
+import Network from '@lucide/svelte/icons/network'
+import Package from '@lucide/svelte/icons/package'
+import Pin from '@lucide/svelte/icons/pin'
+import PinOff from '@lucide/svelte/icons/pin-off'
+import RotateCcw from '@lucide/svelte/icons/rotate-ccw'
+import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal'
+import Square from '@lucide/svelte/icons/square'
+import SquareCheck from '@lucide/svelte/icons/square-check'
+import ChevronsUpDown from '@lucide/svelte/icons/chevrons-up-down'
+import ChevronsDownUp from '@lucide/svelte/icons/chevrons-down-up'
+import ArrowDown01 from '@lucide/svelte/icons/arrow-down-0-1'
+import ArrowDownAZ from '@lucide/svelte/icons/arrow-down-a-z'
+import ArrowUp01 from '@lucide/svelte/icons/arrow-up-0-1'
+import ArrowUpAZ from '@lucide/svelte/icons/arrow-up-a-z'
 
 // ── Hugeicons data ───────────────────────────────────────────────────────────
 import {
@@ -106,7 +144,12 @@ import {
   ServerStack01Icon, Settings02Icon, Sun03Icon, ArrowTurnBackwardIcon, Unlink01Icon,
   WifiConnected01Icon, WifiDisconnected01Icon, TestTubeIcon, WorkflowSquare02Icon,
   Share08Icon, GitCompareIcon, PuzzleIcon, PlugSocketIcon, NoteEditIcon, ChartBarLineIcon,
-  InformationCircleIcon,
+  InformationCircleIcon, ArrowUpDownIcon, ArrowLeftRightIcon, Bookmark01Icon, BugIcon,
+  UnavailableIcon, Target01Icon, EraserIcon, FileDownloadIcon, File01Icon, FunctionSquareIcon,
+  HashIcon, InfinityIcon, KeyboardIcon, Layers01Icon, LeftToRightListBulletIcon, Link01Icon,
+  WorkflowSquare01Icon, PackageIcon, PinLocation01Icon, PinOffIcon, FilterHorizontalIcon,
+  SquareIcon, CheckmarkSquare01Icon, UnfoldMoreIcon, UnfoldLessIcon, SortingDownIcon,
+  SortByDown01Icon, SortingUpIcon, SortByUp01Icon,
 } from '@hugeicons/core-free-icons'
 
 /** @type {Record<string, { lucide: any, huge?: any }>} */
@@ -186,4 +229,42 @@ export const ICON_MAP = {
   'notebook-pen':   { lucide: NotebookPen,   huge: NoteEditIcon },
   'bar-chart-3':    { lucide: BarChart3,     huge: ChartBarLineIcon },
   'info':           { lucide: Info,          huge: InformationCircleIcon },
+  'arrow-down':     { lucide: ArrowDown,      huge: ArrowDown01Icon },
+  'arrow-up':       { lucide: ArrowUp,        huge: ArrowUp01Icon },
+  'arrow-up-down':  { lucide: ArrowUpDown,    huge: ArrowUpDownIcon },
+  'arrow-left-right':{ lucide: ArrowLeftRight,huge: ArrowLeftRightIcon },
+  'arrow-down-to-line':{ lucide: ArrowDownToLine, huge: Download04Icon },
+  'bookmark':       { lucide: Bookmark,       huge: Bookmark01Icon },
+  'box':            { lucide: Box,            huge: PackageIcon },
+  'bug':            { lucide: Bug,            huge: BugIcon },
+  'circle-slash':   { lucide: CircleSlash,    huge: UnavailableIcon },
+  'clipboard-copy': { lucide: ClipboardCopy,  huge: Copy01Icon },
+  'cog':            { lucide: Cog,            huge: Settings01Icon },
+  'columns-3':      { lucide: Columns3,       huge: Table01Icon },
+  'crosshair':      { lucide: Crosshair,      huge: Target01Icon },
+  'eraser':         { lucide: Eraser,         huge: EraserIcon },
+  'file-down':      { lucide: FileDown,       huge: FileDownloadIcon },
+  'file-text':      { lucide: FileText,       huge: File01Icon },
+  'function-square':{ lucide: FunctionSquare, huge: FunctionSquareIcon },
+  'hash':           { lucide: Hash,           huge: HashIcon },
+  'infinity':       { lucide: Infinity,       huge: InfinityIcon },
+  'keyboard':       { lucide: Keyboard,       huge: KeyboardIcon },
+  'layers':         { lucide: Layers,         huge: Layers01Icon },
+  'layout-list':    { lucide: LayoutList,     huge: LeftToRightListBulletIcon },
+  'link-2':         { lucide: Link2,          huge: Link01Icon },
+  'list-filter':    { lucide: ListFilter,     huge: FilterIcon },
+  'network':        { lucide: Network,        huge: WorkflowSquare01Icon },
+  'package':        { lucide: Package,        huge: PackageIcon },
+  'pin':            { lucide: Pin,            huge: PinLocation01Icon },
+  'pin-off':        { lucide: PinOff,         huge: PinOffIcon },
+  'rotate-ccw':     { lucide: RotateCcw,      huge: ArrowTurnBackwardIcon },
+  'sliders-horizontal':{ lucide: SlidersHorizontal, huge: FilterHorizontalIcon },
+  'square':         { lucide: Square,         huge: SquareIcon },
+  'square-check':   { lucide: SquareCheck,    huge: CheckmarkSquare01Icon },
+  'chevrons-up-down':{ lucide: ChevronsUpDown,huge: UnfoldMoreIcon },
+  'chevrons-down-up':{ lucide: ChevronsDownUp,huge: UnfoldLessIcon },
+  'arrow-down-0-1': { lucide: ArrowDown01,    huge: SortingDownIcon },
+  'arrow-down-a-z': { lucide: ArrowDownAZ,    huge: SortByDown01Icon },
+  'arrow-up-0-1':   { lucide: ArrowUp01,      huge: SortingUpIcon },
+  'arrow-up-a-z':   { lucide: ArrowUpAZ,      huge: SortByUp01Icon },
 }
