@@ -433,8 +433,8 @@
     d1Databases = []; d1SelectedAccountId = ''; d1DbLoadPhase = 'idle'
   }
 
-  const lbl = 'mb-1.5 block text-[11px] font-medium uppercase tracking-wide text-muted-foreground/65'
-  const inp = 'h-[34px] w-full rounded-md border border-border/50 bg-muted/20 px-3 text-[13px] text-foreground placeholder:text-muted-foreground/40 placeholder:font-normal transition-colors focus-visible:border-ring/60 focus-visible:ring-1 focus-visible:ring-ring/20 focus-visible:outline-none'
+  const lbl = 'mb-1.5 block text-[10.5px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/55'
+  const inp = 'h-9 w-full rounded-lg border border-border/60 bg-muted/25 px-3 text-[13px] text-foreground placeholder:text-muted-foreground/35 placeholder:font-normal transition-[color,border-color,box-shadow] hover:border-border focus-visible:border-ring focus-visible:bg-muted/15 focus-visible:ring-2 focus-visible:ring-ring/20 focus-visible:outline-none'
   const inpNum = inp + ' [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
 
   async function pickSqliteFile() {
@@ -616,56 +616,60 @@
       <!-- ── Form panel ──────────────────────────────────────────── -->
       <div class="flex min-h-0 min-w-0 flex-col">
 
-        <!-- ── Header: connection name + driver type ──────────── -->
-        <div class="shrink-0 border-b border-border/15 px-8 pt-5 pb-5">
-          <div class="mx-auto grid w-full max-w-[640px] grid-cols-[1fr_13rem] items-end gap-3">
-            <!-- Connection name -->
-            <div>
-              <label for="cn-name" class={lbl}>Name</label>
-              <Input id="cn-name" bind:value={name} class={inp} placeholder="e.g. Production DB" />
-            </div>
-
-            <!-- Driver type — searchable dropdown -->
-            <div>
-              <span class={lbl}>Type</span>
-              <SearchableMenu
-                bind:open={driverMenuOpen}
-                items={driverItems}
-                placeholder="Search databases…"
-                contentClass="w-64"
-                align="end"
-                onselect={(it) => switchDriver(it.value)}
-              >
-                {#snippet trigger(props)}
-                  <button
-                    {...props}
-                    type="button"
-                    class={cn(inp, 'flex items-center justify-between gap-2 text-left', driverMenuOpen && 'border-ring/60 ring-1 ring-ring/20')}
-                  >
-                    <span class="flex min-w-0 items-center gap-2">
-                      <DbIcon id={activeDriver.id} class="size-4 text-muted-foreground" />
-                      <span class="min-w-0 truncate">{activeDriver.label}</span>
-                    </span>
-                    <ChevronDown class="size-3.5 shrink-0 text-muted-foreground/50" />
-                  </button>
-                {/snippet}
-                {#snippet item(it)}
-                  <DbIcon id={it.value} class={cn('size-4', it.value === dbType ? 'text-foreground' : 'text-muted-foreground/70')} />
-                  <span class="min-w-0 flex-1 truncate">{it.label}</span>
-                  {#if it.disabled}
-                    <span class="shrink-0 text-ui-3xs text-muted-foreground/45">soon</span>
-                  {:else if it.value === dbType}
-                    <Check class="size-3.5 shrink-0 text-primary" />
-                  {/if}
-                {/snippet}
-              </SearchableMenu>
-            </div>
-          </div>
-        </div>
-
-        <!-- ── Scrollable form body ─────────────────────────────── -->
+        <!-- ── Scrollable form body — a centered card keeps the form
+             balanced in the full-window canvas instead of floating ── -->
         <ScrollArea class="min-h-0 flex-1 scroll-smooth">
-          <div class="mx-auto flex w-full max-w-[640px] flex-col gap-3 px-8 py-7">
+          <div class="flex min-h-full flex-col items-center justify-center px-8 py-10">
+            <div class="w-full max-w-[540px]">
+              <div class="overflow-hidden rounded-2xl border border-border/40 bg-card/[0.35] shadow-sm shadow-black/20">
+
+                <!-- Card header: connection name + driver type -->
+                <div class="grid grid-cols-[1fr_11.5rem] items-end gap-3 border-b border-border/25 bg-muted/[0.015] px-6 py-5">
+                  <!-- Connection name -->
+                  <div>
+                    <label for="cn-name" class={lbl}>Name</label>
+                    <Input id="cn-name" bind:value={name} class={inp} placeholder="e.g. Production DB" />
+                  </div>
+
+                  <!-- Driver type — searchable dropdown -->
+                  <div>
+                    <span class={lbl}>Type</span>
+                    <SearchableMenu
+                      bind:open={driverMenuOpen}
+                      items={driverItems}
+                      placeholder="Search databases…"
+                      contentClass="w-64"
+                      align="end"
+                      onselect={(it) => switchDriver(it.value)}
+                    >
+                      {#snippet trigger(props)}
+                        <button
+                          {...props}
+                          type="button"
+                          class={cn(inp, 'flex items-center justify-between gap-2 text-left', driverMenuOpen && 'border-ring/60 ring-1 ring-ring/20')}
+                        >
+                          <span class="flex min-w-0 items-center gap-2">
+                            <DbIcon id={activeDriver.id} class="size-4 text-muted-foreground" />
+                            <span class="min-w-0 truncate">{activeDriver.label}</span>
+                          </span>
+                          <ChevronDown class="size-3.5 shrink-0 text-muted-foreground/50" />
+                        </button>
+                      {/snippet}
+                      {#snippet item(it)}
+                        <DbIcon id={it.value} class={cn('size-4', it.value === dbType ? 'text-foreground' : 'text-muted-foreground/70')} />
+                        <span class="min-w-0 flex-1 truncate">{it.label}</span>
+                        {#if it.disabled}
+                          <span class="shrink-0 text-ui-3xs text-muted-foreground/45">soon</span>
+                        {:else if it.value === dbType}
+                          <Check class="size-3.5 shrink-0 text-primary" />
+                        {/if}
+                      {/snippet}
+                    </SearchableMenu>
+                  </div>
+                </div>
+
+                <!-- Card body: driver-specific fields -->
+                <div class="flex flex-col gap-3.5 px-6 py-6">
 
             <!-- ── Hosting provider sign-in (Neon / Supabase / PlanetScale / Prisma) ── -->
             {#if dbType === 'neon' || dbType === 'supabase' || dbType === 'planetscale' || dbType === 'prisma'}
@@ -688,7 +692,7 @@
                     onkeydown={(e) => e.key === 'Enter' && (e.preventDefault(), applyConnectionUri())}
                   />
                   <button type="button" onclick={applyConnectionUri} disabled={!connectionUri.trim()}
-                    class="h-[30px] shrink-0 rounded-md border border-border/25 px-2.5 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-25">
+                    class="h-9 shrink-0 rounded-lg border border-border/25 px-2.5 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-25">
                     Parse
                   </button>
                 </div>
@@ -786,7 +790,7 @@
                     placeholder="/path/to/database.db"
                     class={cn(inp, 'font-mono text-[11px]')} />
                   <button type="button" onclick={pickSqliteFile}
-                    class="inline-flex h-[30px] shrink-0 items-center gap-1 rounded-md border border-border/25 px-2.5 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground">
+                    class="inline-flex h-9 shrink-0 items-center gap-1 rounded-lg border border-border/25 px-2.5 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground">
                     <FolderOpen class="size-3" />
                     Browse
                   </button>
@@ -902,7 +906,7 @@
                     placeholder="/path/to/database.duckdb"
                     class={cn(inp, 'font-mono text-[11px]')} />
                   <button type="button" onclick={pickDuckdbFile}
-                    class="inline-flex h-[30px] shrink-0 items-center gap-1 rounded-md border border-border/25 px-2.5 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground">
+                    class="inline-flex h-9 shrink-0 items-center gap-1 rounded-lg border border-border/25 px-2.5 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground">
                     <FolderOpen class="size-3" />
                     Browse
                   </button>
@@ -969,22 +973,24 @@
 
             {/if}
 
-            <!-- Read-only mode — generic option for every driver -->
-            <label class="mt-1 flex cursor-pointer select-none items-center gap-2 border-t border-border/15 pt-3.5">
-              <Checkbox id="cn-readonly" checked={readOnly} onCheckedChange={(v) => (readOnly = v === true)} />
-              <span class="flex items-center gap-1.5 text-[12px] text-muted-foreground/75">
-                <Lock class="size-3 shrink-0" />
-                Open in read-only mode
-              </span>
-            </label>
+                <!-- Read-only mode — generic option for every driver -->
+                <label class="mt-1 flex cursor-pointer select-none items-center gap-2 border-t border-border/15 pt-3.5">
+                  <Checkbox id="cn-readonly" checked={readOnly} onCheckedChange={(v) => (readOnly = v === true)} />
+                  <span class="flex items-center gap-1.5 text-[12px] text-muted-foreground/75">
+                    <Lock class="size-3 shrink-0" />
+                    Open in read-only mode
+                  </span>
+                </label>
 
+              </div>
+            </div>
           </div>
         </ScrollArea>
 
         <!-- ── Footer — feedback + actions only, so it stays compact and
              the action buttons are always visible regardless of window height ── -->
         <div class="shrink-0 border-t border-border/15 px-8 py-4">
-          <div class="mx-auto w-full max-w-[640px]">
+          <div class="mx-auto w-full max-w-[540px]">
 
           <!-- Feedback slot — always occupies height, shows message when needed -->
           <div class="mb-2.5 flex min-h-[18px] items-center">
