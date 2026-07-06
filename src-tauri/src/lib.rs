@@ -147,6 +147,15 @@ pub fn run() {
                     view.setMagnification(1.0);
                     view.setPageZoom(1.0);
                 });
+
+                // The window is frameless (decorations = false), so no application
+                // menu is created automatically. On macOS, WKWebView text fields
+                // rely on the app menu's Edit items for the standard editing
+                // shortcuts — ⌘Z undo, ⌘⇧Z redo, ⌘X/⌘C/⌘V, ⌘A select-all, and
+                // ⌥⌫ / ⌘⌫ word/line delete. Install the standard menu so native
+                // text editing works everywhere (inputs, textareas, cell editors).
+                let menu = tauri::menu::Menu::default(app.handle())?;
+                app.set_menu(menu)?;
             }
 
             if cfg!(debug_assertions) {
