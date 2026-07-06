@@ -4528,7 +4528,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                       bind:value={editingCell.draft}
                       disabled={saving}
                       aria-label="Edit {ecol?.name ?? 'cell'}"
-                      class="box-border block h-full w-full min-w-0 max-w-full overflow-x-auto border-0 bg-transparent px-3 font-mono text-ui-xs leading-none text-foreground outline-none [field-sizing:fixed] selection:bg-primary/20"
+                      class="box-border block h-full w-full min-w-0 max-w-full overflow-x-auto border-0 bg-transparent px-3 font-mono text-ui-xs text-foreground outline-none [field-sizing:fixed] selection:bg-primary/20"
                       onclick={(e) => e.stopPropagation()}
                       onkeydown={handleEditKeydown}
                     />
