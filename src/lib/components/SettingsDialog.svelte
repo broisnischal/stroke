@@ -24,8 +24,14 @@
     canDecreaseZoom,
     FONT_PRESETS,
     ICON_STYLES,
+    ICON_SETS,
   } from "$lib/stores/settings.js";
   import PenTool from "@lucide/svelte/icons/pen-tool";
+  import LucideSearch from "@lucide/svelte/icons/search";
+  import LucideSparkles from "@lucide/svelte/icons/sparkles";
+  import { HugeiconsIcon } from "@hugeicons/svelte";
+  import { Search01Icon, SparklesIcon } from "@hugeicons/core-free-icons";
+  import Icon from "./Icon.svelte";
   import { cn } from "$lib/utils.js";
   import {
     enableAutostart,
@@ -84,11 +90,18 @@
   }
   const fontEntries = Object.entries(FONT_PRESETS);
   const iconStyleEntries = Object.entries(ICON_STYLES);
+  const iconSetEntries = Object.entries(ICON_SETS);
 
   /** @param {import('$lib/stores/settings.js').IconStyleId} iconStyle */
   function setIconStyle(iconStyle) {
     if (iconStyle === settings.iconStyle) return;
     settings = updateSettings({ iconStyle });
+  }
+
+  /** @param {import('$lib/stores/settings.js').IconSetId} iconSet */
+  function setIconSet(iconSet) {
+    if (iconSet === settings.iconSet) return;
+    settings = updateSettings({ iconSet });
   }
 
   function toggleMcpAutoStart() {
@@ -276,6 +289,48 @@
                       <span class="flex min-w-0 items-center gap-2.5">
                         <span class="flex size-8 shrink-0 items-center justify-center rounded border border-border/40 bg-muted/30">
                           <PenTool class="size-4 text-foreground/70" style="stroke-width: {preset.strokeWidth}px" aria-hidden="true" />
+                        </span>
+                        <span class="min-w-0">
+                          <span class="block text-xs font-medium leading-snug">{preset.label}</span>
+                          <span class="block text-[10px] leading-snug text-muted-foreground/65">{preset.description}</span>
+                        </span>
+                      </span>
+                    {/snippet}
+                  </Select.Item>
+                {/each}
+              </Select.Content>
+            </Select.Root>
+          </div>
+
+          <div class="flex h-11 items-center justify-between gap-3 px-3">
+            <span class="text-ui-xs font-medium text-foreground">Icon set</span>
+            <Select.Root
+              type="single"
+              value={settings.iconSet}
+              onValueChange={(v) => { if (v) setIconSet(/** @type {import('$lib/stores/settings.js').IconSetId} */ (v)); }}
+            >
+              <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Icon set">
+                <span class="flex min-w-0 items-center gap-2">
+                  <Icon name="sparkles" class="size-3.5 shrink-0 text-muted-foreground" />
+                  <span class="truncate font-medium">{ICON_SETS[settings.iconSet]?.label ?? "Lucide"}</span>
+                </span>
+              </Select.Trigger>
+              <Select.Content
+                class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[14rem] p-1"
+                sideOffset={6}
+              >
+                {#each iconSetEntries as [id, preset] (id)}
+                  <Select.Item value={id} label={preset.label} class="rounded-md py-1.5 pr-8 pl-2">
+                    {#snippet children()}
+                      <span class="flex min-w-0 items-center gap-2.5">
+                        <span class="flex size-8 shrink-0 items-center justify-center gap-1 rounded border border-border/40 bg-muted/30 text-foreground/70">
+                          {#if id === "hugeicons"}
+                            <HugeiconsIcon icon={Search01Icon} class="size-3.5" strokeWidth={1.8} />
+                            <HugeiconsIcon icon={SparklesIcon} class="size-3.5" strokeWidth={1.8} />
+                          {:else}
+                            <LucideSearch class="size-3.5" />
+                            <LucideSparkles class="size-3.5" />
+                          {/if}
                         </span>
                         <span class="min-w-0">
                           <span class="block text-xs font-medium leading-snug">{preset.label}</span>
