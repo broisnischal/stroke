@@ -23,9 +23,11 @@
   import { Input }      from '$lib/components/ui/input/index.js'
   import { Checkbox }   from '$lib/components/ui/checkbox/index.js'
   import { ScrollArea } from '$lib/components/ui/scroll-area/index.js'
+  import { Alert, AlertDescription, AlertTitle } from '$lib/components/ui/alert/index.js'
   import { Dialog as DialogPrimitive } from 'bits-ui'
   import { cn }         from '$lib/utils.js'
   import { parseConnectionUri } from '$lib/connection-uri.js'
+  import { PROVIDERS } from '$lib/providers.js'
 
   let {
     open = $bindable(false),
@@ -93,6 +95,33 @@
     .filter(Boolean)
     .map((d) => ({ value: d.id, label: d.label, keywords: [d.label, d.desc], disabled: !!d.soon }))
 
+  // Provider (sign-in) ids are surfaced as cards on their own tab, so keep them
+  // out of the manual Type dropdown.
+  const PROVIDER_IDS = ['neon', 'supabase', 'planetscale', 'prisma']
+  const manualDriverItems = driverItems.filter((d) => !PROVIDER_IDS.includes(d.value))
+
+  // Subtle per-engine icon tint (color-500/600), theme-aware via Tailwind tokens.
+  const ENGINE_TINT = {
+    postgres:        'text-sky-500/80',
+    cockroachdb:     'text-teal-500/80',
+    mysql:           'text-amber-500/80',
+    mariadb:         'text-orange-500/80',
+    sqlite:          'text-blue-500/80',
+    'sqlite-memory': 'text-blue-500/80',
+    mssql:           'text-red-500/80',
+    clickhouse:      'text-yellow-500/80',
+    duckdb:          'text-yellow-500/80',
+    'duckdb-memory': 'text-yellow-500/80',
+    d1:              'text-orange-500/80',
+    libsql:          'text-emerald-500/80',
+    neon:            'text-emerald-500/80',
+    supabase:        'text-emerald-500/80',
+    planetscale:     'text-foreground/70',
+    prisma:          'text-indigo-500/80',
+    bigquery:        'text-blue-500/80',
+  }
+  function engineTint(id) { return ENGINE_TINT[id] ?? 'text-muted-foreground/60' }
+
   let saved      = $state(loadSavedConnections().sort((a, b) => (b.lastConnectedAt ?? 0) - (a.lastConnectedAt ?? 0)))
   let lastId     = $state(getLastConnectionId())
   let editingId  = $state(/** @type {string|null} */ (null))
@@ -114,6 +143,10 @@
 
   let dbType        = $state('postgres')
   let driverMenuOpen = $state(false)
+  // Top-level entry mode: connect manually vs sign in with a hosting provider.
+  let entryMode     = $state(/** @type {'manual'|'provider'} */ ('manual'))
+  // Advanced (SSL / SSH / read-only) disclosure — collapsed by default.
+  let advancedOpen  = $state(false)
   let name        = $state('')
   let host        = $state('127.0.0.1')
   let port        = $state('5432')
@@ -132,6 +165,9 @@
   let libsqlToken = $state('')
   let connectionUri = $state('')
   let uriHint       = $state('')
+  // Manual-form input mode for URI-capable engines: paste a connection string
+  // vs. fill individual fields. UI-only — not tracked as a dirty change.
+  let fieldMode     = $state(/** @type {'string'|'fields'} */ ('fields'))
 
   // ── Connection options ───────────────────────────────────────────────────────
   let readOnly        = $state(false)
@@ -166,6 +202,28 @@
   }
 
   const activeDriver = $derived(ALL_DRIVERS.find(d => d.id === dbType) ?? ALL_DRIVERS[0])
+  const isProvider   = $derived(PROVIDER_IDS.includes(dbType))
+
+  // Engines that expose the "Connection string | Manual fields" toggle.
+  const URI_TOGGLE_ENGINES = ['postgres', 'cockroachdb', 'mysql', 'mariadb']
+  const hasFieldToggle = $derived(URI_TOGGLE_ENGINES.includes(dbType))
+
+  // Briefly ring-highlight the fields a parsed connection string just filled in.
+  let flashedFields = $state(/** @type {Set<string>} */ (new Set()))
+  let flashTimer
+  const flashCls = 'ring-2 ring-emerald-500/40'
+  function flashFields(keys) {
+    flashedFields = new Set(keys)
+    clearTimeout(flashTimer)
+    flashTimer = setTimeout(() => { flashedFields = new Set() }, 1000)
+  }
+
+  /** Switch the manual/provider tab. Leaving provider mode drops back to Postgres. */
+  function setEntryMode(mode) {
+    if (entryMode === mode) return
+    entryMode = mode
+    if (mode === 'manual' && isProvider) switchDriver('postgres')
+  }
 
   function sshPayload() {
     if (!sshEnabled || !sshHost.trim() || !sshUsername.trim()) return undefined
@@ -223,8 +281,13 @@
       sshEnabled = false; sshHost = ''; sshPort = '22'; sshUsername = ''; sshKeyPath = ''
       readOnly = false
     }
+    entryMode = PROVIDER_IDS.includes(dbType) ? 'provider' : 'manual'
+    fieldMode = 'fields'
+    advancedOpen = false
+    flashedFields = new Set()
     error = ''; testOk = false; connectionUri = ''; uriHint = ''
     d1Reset()
+    baseline = snapshot()
   }
 
   /**
@@ -274,17 +337,31 @@
 
   function applyConnectionUri() {
     uriHint = ''
-    const parsed = parseConnectionUri(dbType === 'sqlite' || dbType === 'sqlite-memory' ? 'sqlite' : 'postgres', connectionUri)
-    if (!parsed) return
-    if ('error' in parsed) { uriHint = parsed.error; return }
+    const uriType =
+      dbType === 'sqlite' || dbType === 'sqlite-memory' ? 'sqlite'
+      : dbType === 'mysql' || dbType === 'mariadb' ? 'mysql'
+      : dbType === 'mssql' ? 'mssql'
+      : dbType === 'clickhouse' ? 'clickhouse'
+      : 'postgres'
+    const parsed = parseConnectionUri(uriType, connectionUri)
+    if (!parsed) return false
+    if ('error' in parsed) { uriHint = parsed.error; return false }
     if ((dbType === 'sqlite' || dbType === 'sqlite-memory') && 'filePath' in parsed) {
-      filePath = parsed.filePath; uriHint = 'Fields updated from URI'; return
+      filePath = parsed.filePath; flashFields(['filePath']); uriHint = 'Fields updated from URI'; return true
     }
     if ('host' in parsed) {
       host = parsed.host; port = parsed.port; database = parsed.database
-      user = parsed.user; password = parsed.password; ssl = parsed.ssl
+      user = parsed.user; password = parsed.password
+      const changed = ['host', 'port', 'database', 'user', 'password']
+      // Each engine carries its own TLS shape; apply whichever the parser returned.
+      if ('encrypt' in parsed) { encrypt = parsed.encrypt; trustCert = parsed.trustCert; changed.push('encrypt', 'trustCert') }
+      else if ('secure' in parsed) { secure = parsed.secure; changed.push('secure') }
+      else { ssl = parsed.ssl; changed.push('ssl') }
+      flashFields(changed)
       uriHint = 'Fields updated from URI'
+      return true
     }
+    return false
   }
 
   function connDetail(conn) {
@@ -344,6 +421,12 @@
     const myOp = ++opId
     testing = true; error = ''; testOk = false
     try {
+      // In connection-string mode the payload is built from the individual
+      // fields, so parse the URI into them first (finally clears `testing`).
+      if (fieldMode === 'string' && URI_TOGGLE_ENGINES.includes(dbType) && !applyConnectionUri()) {
+        error = uriHint || 'Enter a valid connection string'
+        return
+      }
       const p = formPayload()
       if (p.type === 'sqlite') await testSqliteConnection(p)
       else if (p.type === 'd1') await testD1Connection(p)
@@ -367,6 +450,12 @@
     const myOp = ++opId
     connecting = editingId ?? '__new__'; error = ''
     try {
+      // In connection-string mode the payload is built from the individual
+      // fields, so parse the URI into them first (finally clears `connecting`).
+      if (fieldMode === 'string' && URI_TOGGLE_ENGINES.includes(dbType) && !applyConnectionUri()) {
+        error = uriHint || 'Enter a valid connection string'
+        return
+      }
       const payload = formPayload()
       if (payload.type === 'sqlite') await connectSqlite(payload)
       else if (payload.type === 'd1') await connectD1(payload)
@@ -398,6 +487,40 @@
   const canTest = $derived(dbType !== 'bigquery')
   const isBusy  = $derived(testing || !!connecting)
 
+  // ── Dirty tracking + close guard ─────────────────────────────────────────────
+  // A snapshot of every editable field; `baseline` is re-stamped each time a form
+  // loads (resetForm), so isDirty flips true the moment the user changes anything.
+  let baseline = $state('')
+  let confirmDiscardOpen = $state(false)
+  function snapshot() {
+    return JSON.stringify([
+      dbType, name, host, port, database, user, password, ssl, secure, encrypt, trustCert,
+      filePath, accountId, databaseId, apiToken, libsqlUrl, libsqlToken, readOnly,
+      sshEnabled, sshHost, sshPort, sshUsername, sshKeyPath,
+    ])
+  }
+  const isDirty = $derived(snapshot() !== baseline)
+
+  /** Full-width status-bar target for the current form. */
+  const statusTarget = $derived.by(() => {
+    if (['sqlite', 'sqlite-memory', 'duckdb', 'duckdb-memory'].includes(dbType)) return filePath || ':memory:'
+    if (dbType === 'libsql') return libsqlUrl || '—'
+    if (dbType === 'd1') return databaseId ? `${databaseId.slice(0, 8)}…` : '—'
+    return `${host || '—'}:${port || '—'}/${database || ''}`
+  })
+
+  /** Attempt to close the dialog — guard against discarding unsaved edits. */
+  function requestClose() {
+    if (isBusy) return
+    if (isDirty) { confirmDiscardOpen = true; return }
+    open = false
+  }
+  function discardAndClose() {
+    confirmDiscardOpen = false
+    baseline = snapshot() // stop isDirty re-firing during the close animation
+    open = false
+  }
+
   async function d1Discover() {
     if (!apiToken.trim()) { d1DiscoverError = 'Enter your API token first.'; return }
     d1DiscoverPhase = 'loading'; d1DiscoverError = ''
@@ -421,8 +544,12 @@
     d1Databases = []; d1SelectedAccountId = ''; d1DbLoadPhase = 'idle'
   }
 
-  const lbl = 'mb-1.5 block text-[10.5px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/55'
-  const inp = 'h-9 w-full rounded-lg border border-border/60 bg-muted/25 px-3 text-[13px] text-foreground placeholder:text-muted-foreground/35 placeholder:font-normal transition-[color,border-color,box-shadow] hover:border-border focus-visible:border-ring focus-visible:bg-muted/15 focus-visible:ring-2 focus-visible:ring-ring/20 focus-visible:outline-none'
+  const lbl = 'mb-1.5 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground/50'
+  // Segmented pill switch (entry-mode + field-mode) — shared base for consistency.
+  const segBtn = 'inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-[12px] font-medium transition-[color,background-color,box-shadow,transform] duration-150 ease-out active:scale-[0.97]'
+  const segOn  = 'bg-muted/70 text-foreground shadow-sm'
+  const segOff = 'text-muted-foreground/60 hover:text-foreground'
+  const inp = 'h-9 w-full rounded-lg border border-input bg-muted/25 px-3 text-[12.5px] text-foreground placeholder:text-muted-foreground/35 placeholder:font-normal outline-none transition-[color,border-color,box-shadow] hover:border-ring/40 focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring'
   const inpNum = inp + ' [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
 
   async function pickSqliteFile() {
@@ -496,16 +623,77 @@
   </div>
 {/snippet}
 
+<!-- Advanced disclosure — SSL / SSH / encrypt / read-only, collapsed by default -->
+{#snippet advancedSection()}
+  <div class="border-t border-border/40 pt-4">
+    <button
+      type="button"
+      onclick={() => (advancedOpen = !advancedOpen)}
+      aria-expanded={advancedOpen}
+      class="flex w-full items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/50 transition-colors hover:text-foreground"
+    >
+      <Icon name="chevron-right" class={cn('size-3.5 shrink-0 transition-transform', advancedOpen && 'rotate-90')} />
+      Advanced
+    </button>
+
+    {#if advancedOpen}
+      <div class="mt-4 flex flex-col gap-4">
+        {#if dbType === 'postgres' || dbType === 'cockroachdb' || dbType === 'mysql' || dbType === 'mariadb'}
+          <label class="flex cursor-pointer select-none items-center gap-2">
+            <Checkbox id="cn-ssl" checked={ssl} onCheckedChange={(v) => (ssl = v === true)} />
+            <span class="text-[12px] text-muted-foreground/65">Use SSL / TLS</span>
+          </label>
+          {@render sshSection(dbType)}
+        {:else if dbType === 'clickhouse'}
+          <label class="flex cursor-pointer select-none items-center gap-2">
+            <Checkbox id="cn-ch-secure" checked={secure} onCheckedChange={(v) => { secure = v === true; if (secure && port === '8123') port = '8443'; else if (!secure && port === '8443') port = '8123' }} />
+            <span class="text-[12px] text-muted-foreground/65">Use HTTPS (TLS)</span>
+          </label>
+        {:else if dbType === 'mssql'}
+          <div class="flex flex-col gap-3">
+            <label class="flex cursor-pointer select-none items-start gap-2">
+              <Checkbox id="cn-mssql-encrypt" checked={encrypt} onCheckedChange={(v) => (encrypt = v === true)} class="mt-px" />
+              <span class="flex flex-col">
+                <span class="text-[12px] text-muted-foreground/75">Encrypt connection (TLS)</span>
+                <span class="text-[11px] leading-snug text-muted-foreground/40">Encrypts traffic between Stroke and the server.</span>
+              </span>
+            </label>
+            <label class={cn('flex select-none items-start gap-2', encrypt ? 'cursor-pointer' : 'cursor-not-allowed opacity-45')}>
+              <Checkbox id="cn-mssql-trust" checked={trustCert} disabled={!encrypt} onCheckedChange={(v) => (trustCert = v === true)} class="mt-px" />
+              <span class="flex flex-col">
+                <span class="text-[12px] text-muted-foreground/75">Trust server certificate</span>
+                <span class="text-[11px] leading-snug text-muted-foreground/40">Accept self-signed or otherwise untrusted certificates. Needed for many local / dev servers.</span>
+              </span>
+            </label>
+          </div>
+        {/if}
+
+        <!-- Read-only mode — generic option for every driver -->
+        <label class="flex cursor-pointer select-none items-center gap-2">
+          <Checkbox id="cn-readonly" checked={readOnly} onCheckedChange={(v) => (readOnly = v === true)} />
+          <span class="flex items-center gap-1.5 text-[12px] text-muted-foreground/75">
+            <Icon name="lock" class="size-3 shrink-0" />
+            Open in read-only mode
+          </span>
+        </label>
+      </div>
+    {/if}
+  </div>
+{/snippet}
+
 <DialogPrimitive.Root bind:open>
   <DialogPrimitive.Portal>
     <DialogPrimitive.Overlay
-      class="fixed inset-0 z-50 bg-black/50 data-open:animate-in data-closed:animate-out data-open:fade-in-0 data-closed:fade-out-0 duration-100"
+      class="fixed inset-0 z-50 bg-black/50 data-open:animate-in data-closed:animate-out data-open:fade-in-0 data-closed:fade-out-0 ease-out duration-150"
     />
     <DialogPrimitive.Content
-      class="fixed inset-0 z-50 flex bg-background text-foreground outline-none data-open:animate-in data-closed:animate-out data-open:fade-in-0 data-closed:fade-out-0 duration-100"
+      data-connection-modal
+      class="fixed inset-0 z-50 flex bg-background text-foreground outline-none data-open:animate-in data-closed:animate-out data-open:fade-in-0 data-closed:fade-out-0 data-open:zoom-in-[0.98] data-closed:zoom-out-[0.98] ease-out duration-200"
+      onEscapeKeydown={(e) => { if (isDirty && !isBusy) { e.preventDefault(); confirmDiscardOpen = true } }}
+      onInteractOutside={(e) => { if (isDirty && !isBusy) { e.preventDefault(); confirmDiscardOpen = true } }}
     >
     <DialogPrimitive.Title class="sr-only">Connections</DialogPrimitive.Title>
-    <div class="grid h-full w-full min-h-0 grid-cols-[minmax(240px,280px)_minmax(0,1fr)] overflow-hidden">
+    <div class="grid h-full w-full min-h-0 grid-cols-[minmax(300px,340px)_minmax(0,1fr)] overflow-hidden">
 
       <!-- ── Sidebar ─────────────────────────────────────────────── -->
       <aside class="flex min-h-0 flex-col border-r border-border/15 bg-muted/[0.015]">
@@ -518,13 +706,66 @@
           {/if}
         </div>
 
+        <!-- Entry mode + driver type — the "what am I creating" controls -->
+        <div class="shrink-0 border-b border-border/15 px-3 pb-3.5">
+          <div class="flex gap-1 rounded-lg border border-border/40 bg-muted/[0.03] p-1">
+            <button type="button" onclick={() => setEntryMode('manual')}
+              class={cn(segBtn, entryMode === 'manual' ? segOn : segOff)}>
+              <Icon name="database" class="size-3.5 shrink-0" />
+              Manual
+            </button>
+            <button type="button" onclick={() => setEntryMode('provider')}
+              class={cn(segBtn, entryMode === 'provider' ? segOn : segOff)}>
+              <Icon name="cloud" class="size-3.5 shrink-0" />
+              Provider
+            </button>
+          </div>
+
+          {#if entryMode === 'manual'}
+            <div class="mt-3">
+              <span class={lbl}>Type</span>
+              <SearchableMenu
+                bind:open={driverMenuOpen}
+                items={manualDriverItems}
+                placeholder="Search databases…"
+                contentClass="w-60"
+                align="start"
+                onselect={(it) => switchDriver(it.value)}
+              >
+                {#snippet trigger(props)}
+                  <button
+                    {...props}
+                    type="button"
+                    class={cn(inp, 'flex items-center justify-between gap-2 text-left', driverMenuOpen && 'border-ring ring-1 ring-ring')}
+                  >
+                    <span class="flex min-w-0 items-center gap-2">
+                      <DbIcon id={activeDriver.id} class="size-4 text-muted-foreground" />
+                      <span class="min-w-0 truncate">{activeDriver.label}</span>
+                    </span>
+                    <Icon name="chevron-down" class="size-3.5 shrink-0 text-muted-foreground/50" />
+                  </button>
+                {/snippet}
+                {#snippet item(it)}
+                  <DbIcon id={it.value} class={cn('size-4', it.value === dbType ? 'text-foreground' : 'text-muted-foreground/70')} />
+                  <span class="min-w-0 flex-1 truncate">{it.label}</span>
+                  {#if it.disabled}
+                    <span class="shrink-0 text-ui-3xs text-muted-foreground/45">soon</span>
+                  {:else if it.value === dbType}
+                    <Icon name="check" class="size-3.5 shrink-0 text-primary" />
+                  {/if}
+                {/snippet}
+              </SearchableMenu>
+            </div>
+          {/if}
+        </div>
+
         <!-- New connection button -->
-        <div class="shrink-0 px-2.5 pb-2">
+        <div class="shrink-0 px-2 pb-2 pt-2">
           <button
             type="button"
             onclick={() => resetForm(null)}
             class={cn(
-              'flex w-full items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-[12px] transition-colors',
+              'flex w-full items-center gap-2 rounded-lg border px-2 py-2 text-left text-[12px] transition-[color,background-color,border-color,transform] duration-150 ease-out active:scale-[0.98]',
               !editingId
                 ? 'border-border/40 bg-muted/40 font-medium text-foreground'
                 : 'border-transparent text-muted-foreground/60 hover:bg-muted/25 hover:text-foreground'
@@ -538,26 +779,30 @@
         <div class="min-h-0 flex-1">
           {#if saved.length > 0}
             <ScrollArea class="h-full scroll-smooth">
-              <div class="px-2 py-2 flex flex-col gap-0.5">
-                {#each saved as conn (conn.id)}
+              <div class="px-2 py-1 flex flex-col gap-0.5">
+                {#each saved as conn, i (conn.id)}
                   {@const isSel = conn.id === editingId}
                   {@const busy2 = connecting === conn.id}
                   {@const cid   = conn.filePath === ':memory:' && (conn.type === 'sqlite' || conn.type === 'duckdb') ? `${conn.type}-memory` : conn.type}
                   <div
                     class={cn(
-                      'group flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 transition-colors',
+                      'cn-stagger-in group relative flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 transition-[color,background-color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] active:scale-[0.98]',
                       isSel
                         ? 'bg-muted/50 text-foreground'
-                        : 'text-muted-foreground/55 hover:bg-muted/30 hover:text-foreground'
+                        : 'text-muted-foreground/60 hover:bg-muted/30 hover:text-foreground'
                     )}
+                    style="animation-delay: {Math.min(i, 12) * 40}ms"
                     role="button" tabindex="0"
                     onclick={() => resetForm(conn)}
                     onkeydown={(e) => e.key === 'Enter' && resetForm(conn)}
                   >
-                    <!-- Icon: fades to Play on hover — clicking it connects directly -->
+                    {#if isSel}
+                      <span class="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-foreground/70"></span>
+                    {/if}
+                    <!-- Fixed-size icon slot keeps every row's text left-edge aligned. Fades to Play on hover. -->
                     <button
                       type="button"
-                      class="relative size-4 shrink-0 disabled:opacity-30"
+                      class="relative flex size-7 shrink-0 items-center justify-center rounded-md disabled:opacity-30"
                       title="Connect"
                       disabled={!!connecting}
                       onclick={(e) => { e.stopPropagation(); void connectWith(conn) }}
@@ -566,7 +811,7 @@
                         {#if busy2}
                           <Icon name="loader-2" class="size-4 animate-spin" />
                         {:else}
-                          <DbIcon id={cid} class={cn('size-4', isSel ? 'text-foreground' : 'text-muted-foreground/60')} />
+                          <DbIcon id={cid} class={cn('size-4', engineTint(cid))} />
                         {/if}
                       </span>
                       <span class="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-150 group-hover:opacity-100">
@@ -574,14 +819,14 @@
                       </span>
                     </button>
 
-                    <!-- Name + detail when selected -->
+                    <!-- Name + engine · detail subtitle -->
                     <div class="min-w-0 flex-1">
-                      <p class="truncate text-[12px] {isSel ? 'font-medium' : ''} leading-tight">
+                      <p class="truncate text-[12.5px] font-medium leading-tight text-foreground/90">
                         {conn.name || 'Unnamed'}
                       </p>
-                      {#if isSel}
-                        <p class="mt-0.5 truncate text-[10px] leading-tight text-muted-foreground/40">{connDetail(conn)}</p>
-                      {/if}
+                      <p class="mt-0.5 truncate text-[11px] leading-tight text-muted-foreground/55">
+                        {driverById(cid).label} · {connDetail(conn)}
+                      </p>
                     </div>
 
                     <!-- Trash: hidden until hover -->
@@ -604,168 +849,142 @@
       <!-- ── Form panel ──────────────────────────────────────────── -->
       <div class="flex min-h-0 min-w-0 flex-col">
 
-        <!-- ── Scrollable form body — left-aligned form, no card ── -->
+        <!-- ── Form body — details for the current selection ── -->
         <ScrollArea class="min-h-0 flex-1 scroll-smooth">
-          <div class="px-10 py-10 lg:px-16 lg:py-12">
+          <div class="px-8 py-7">
             <div class="max-w-[560px]">
-              <div class="contents">
 
-                <!-- Header: connection name + driver type -->
-                <div class="grid grid-cols-[1fr_12rem] items-end gap-3.5 border-b border-border/40 pb-6">
-                  <!-- Connection name -->
-                  <div>
-                    <label for="cn-name" class={lbl}>Name</label>
-                    <Input id="cn-name" bind:value={name} class={inp} placeholder="e.g. Production DB" />
-                  </div>
+              {#if entryMode === 'manual'}
 
-                  <!-- Driver type — searchable dropdown -->
-                  <div>
-                    <span class={lbl}>Type</span>
-                    <SearchableMenu
-                      bind:open={driverMenuOpen}
-                      items={driverItems}
-                      placeholder="Search databases…"
-                      contentClass="w-64"
-                      align="end"
-                      onselect={(it) => switchDriver(it.value)}
-                    >
-                      {#snippet trigger(props)}
-                        <button
-                          {...props}
-                          type="button"
-                          class={cn(inp, 'flex items-center justify-between gap-2 text-left', driverMenuOpen && 'border-ring/60 ring-1 ring-ring/20')}
-                        >
-                          <span class="flex min-w-0 items-center gap-2">
-                            <DbIcon id={activeDriver.id} class="size-4 text-muted-foreground" />
-                            <span class="min-w-0 truncate">{activeDriver.label}</span>
-                          </span>
-                          <Icon name="chevron-down" class="size-3.5 shrink-0 text-muted-foreground/50" />
-                        </button>
-                      {/snippet}
-                      {#snippet item(it)}
-                        <DbIcon id={it.value} class={cn('size-4', it.value === dbType ? 'text-foreground' : 'text-muted-foreground/70')} />
-                        <span class="min-w-0 flex-1 truncate">{it.label}</span>
-                        {#if it.disabled}
-                          <span class="shrink-0 text-ui-3xs text-muted-foreground/45">soon</span>
-                        {:else if it.value === dbType}
-                          <Icon name="check" class="size-3.5 shrink-0 text-primary" />
-                        {/if}
-                      {/snippet}
-                    </SearchableMenu>
-                  </div>
+                <!-- Connection name -->
+                <div class="border-b border-border/40 pb-6">
+                  <label for="cn-name" class={lbl}>Name</label>
+                  <Input id="cn-name" bind:value={name} class={inp} placeholder="e.g. Production DB" />
                 </div>
 
                 <!-- Driver-specific fields -->
+                {#key dbType}
                 <div class="mt-6 flex flex-col gap-4">
 
-            <!-- ── Hosting provider sign-in (Neon / Supabase / PlanetScale / Prisma) ── -->
-            {#if dbType === 'neon' || dbType === 'supabase' || dbType === 'planetscale' || dbType === 'prisma'}
-              <ProviderConnect
-                provider={dbType}
-                resolvePassword={(host, user) => saved.find((s) => s.host === host && s.user === user && s.password)?.password}
-                onselect={(conn) => connectProviderConnection(conn)}
-              />
+            <!-- Input mode — connection string vs. individual fields -->
+            {#if hasFieldToggle}
+              <div class="flex gap-1 rounded-lg border border-border/40 bg-muted/[0.03] p-1">
+                <button type="button" onclick={() => (fieldMode = 'string')}
+                  class={cn(segBtn, fieldMode === 'string' ? segOn : segOff)}>
+                  Connection string
+                </button>
+                <button type="button" onclick={() => (fieldMode = 'fields')}
+                  class={cn(segBtn, fieldMode === 'fields' ? segOn : segOff)}>
+                  Manual fields
+                </button>
+              </div>
+            {/if}
 
             <!-- ── PostgreSQL / CockroachDB ────────────────── -->
-            {:else if dbType === 'postgres' || dbType === 'cockroachdb'}
+            {#if dbType === 'postgres' || dbType === 'cockroachdb'}
 
-              <div>
-                <label for="cn-uri" class={lbl}>Connection string</label>
-                <div class="flex gap-1.5">
+              {#if fieldMode === 'string'}
+                <div>
+                  <label for="cn-uri" class={lbl}>Connection string</label>
                   <Input id="cn-uri" bind:value={connectionUri}
                     placeholder="postgresql://user:pass@host:5432/db"
                     class={cn(inp, 'font-mono text-[11px]')}
                     onpaste={() => requestAnimationFrame(applyConnectionUri)}
                     onkeydown={(e) => e.key === 'Enter' && (e.preventDefault(), applyConnectionUri())}
                   />
-                  <button type="button" onclick={applyConnectionUri} disabled={!connectionUri.trim()}
-                    class="h-9 shrink-0 rounded-lg border border-border/25 px-2.5 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-25">
-                    Parse
-                  </button>
+                  {#if uriHint}
+                    <p class={cn('mt-1 flex items-center gap-1 text-[10px]',
+                      uriHint.includes('Could') || uriHint.includes('Expected') ? 'text-destructive' : 'text-emerald-500')}>
+                      {#if uriHint.includes('Could') || uriHint.includes('Expected')}
+                        <Icon name="alert-circle" class="size-2.5" />
+                      {:else}
+                        <Icon name="check-circle-2" class="size-2.5" />
+                      {/if}
+                      {uriHint}
+                    </p>
+                  {/if}
                 </div>
-                {#if uriHint}
-                  <p class={cn('mt-1 flex items-center gap-1 text-[10px]',
-                    uriHint.includes('Could') || uriHint.includes('Expected') ? 'text-destructive' : 'text-emerald-500')}>
-                    {#if uriHint.includes('Could') || uriHint.includes('Expected')}
-                      <Icon name="alert-circle" class="size-2.5" />
-                    {:else}
-                      <Icon name="check-circle-2" class="size-2.5" />
-                    {/if}
-                    {uriHint}
-                  </p>
-                {/if}
-              </div>
+              {:else}
+                <div class="grid grid-cols-[1fr_110px] gap-2">
+                  <div>
+                    <label for="cn-host" class={lbl}>Host</label>
+                    <Input id="cn-host" bind:value={host} class={cn(inp, flashedFields.has('host') && flashCls)} />
+                  </div>
+                  <div>
+                    <label for="cn-port" class={lbl}>Port</label>
+                    <Input id="cn-port" bind:value={port} type="text" inputmode="numeric" class={cn(inpNum, flashedFields.has('port') && flashCls)} />
+                  </div>
+                </div>
 
-              <div class="grid grid-cols-[1fr_80px] gap-2">
                 <div>
-                  <label for="cn-host" class={lbl}>Host</label>
-                  <Input id="cn-host" bind:value={host} class={inp} />
+                  <label for="cn-db" class={lbl}>Database</label>
+                  <Input id="cn-db" bind:value={database} class={cn(inp, flashedFields.has('database') && flashCls)} />
                 </div>
-                <div>
-                  <label for="cn-port" class={lbl}>Port</label>
-                  <Input id="cn-port" bind:value={port} type="text" inputmode="numeric" class={inpNum} />
+
+                <div class="grid grid-cols-2 gap-2">
+                  <div>
+                    <label for="cn-user" class={lbl}>Username</label>
+                    <Input id="cn-user" bind:value={user} autocomplete="username" class={cn(inp, flashedFields.has('user') && flashCls)} />
+                  </div>
+                  <div>
+                    <label for="cn-pass" class={lbl}>Password</label>
+                    <Input id="cn-pass" bind:value={password} type="password" autocomplete="current-password" class={cn(inp, flashedFields.has('password') && flashCls)} />
+                  </div>
                 </div>
-              </div>
-
-              <div>
-                <label for="cn-db" class={lbl}>Database</label>
-                <Input id="cn-db" bind:value={database} class={inp} />
-              </div>
-
-              <div class="grid grid-cols-2 gap-2">
-                <div>
-                  <label for="cn-user" class={lbl}>Username</label>
-                  <Input id="cn-user" bind:value={user} autocomplete="username" class={inp} />
-                </div>
-                <div>
-                  <label for="cn-pass" class={lbl}>Password</label>
-                  <Input id="cn-pass" bind:value={password} type="password" autocomplete="current-password" class={inp} />
-                </div>
-              </div>
-
-              <label class="flex cursor-pointer select-none items-center gap-2 pt-0.5">
-                <Checkbox id="cn-ssl" checked={ssl} onCheckedChange={(v) => (ssl = v === true)} />
-                <span class="text-[12px] text-muted-foreground/65">Use SSL / TLS</span>
-              </label>
-
-              {@render sshSection('pg')}
+              {/if}
 
             <!-- ── MySQL / MariaDB ──────────────────────── -->
             {:else if dbType === 'mysql' || dbType === 'mariadb'}
 
-              <div class="grid grid-cols-[1fr_80px] gap-2">
+              {#if fieldMode === 'string'}
                 <div>
-                  <label for="cn-mysql-host" class={lbl}>Host</label>
-                  <Input id="cn-mysql-host" bind:value={host} class={inp} />
+                  <label for="cn-mysql-uri" class={lbl}>Connection string</label>
+                  <Input id="cn-mysql-uri" bind:value={connectionUri}
+                    placeholder="mysql://user:pass@host:3306/db"
+                    class={cn(inp, 'font-mono text-[11px]')}
+                    onpaste={() => requestAnimationFrame(applyConnectionUri)}
+                    onkeydown={(e) => e.key === 'Enter' && (e.preventDefault(), applyConnectionUri())}
+                  />
+                  {#if uriHint}
+                    <p class={cn('mt-1 flex items-center gap-1 text-[10px]',
+                      uriHint.includes('Could') || uriHint.includes('Expected') ? 'text-destructive' : 'text-emerald-500')}>
+                      {#if uriHint.includes('Could') || uriHint.includes('Expected')}
+                        <Icon name="alert-circle" class="size-2.5" />
+                      {:else}
+                        <Icon name="check-circle-2" class="size-2.5" />
+                      {/if}
+                      {uriHint}
+                    </p>
+                  {/if}
                 </div>
+              {:else}
+                <div class="grid grid-cols-[1fr_110px] gap-2">
+                  <div>
+                    <label for="cn-mysql-host" class={lbl}>Host</label>
+                    <Input id="cn-mysql-host" bind:value={host} class={cn(inp, flashedFields.has('host') && flashCls)} />
+                  </div>
+                  <div>
+                    <label for="cn-mysql-port" class={lbl}>Port</label>
+                    <Input id="cn-mysql-port" bind:value={port} type="text" inputmode="numeric" class={cn(inpNum, flashedFields.has('port') && flashCls)} />
+                  </div>
+                </div>
+
                 <div>
-                  <label for="cn-mysql-port" class={lbl}>Port</label>
-                  <Input id="cn-mysql-port" bind:value={port} type="text" inputmode="numeric" class={inpNum} />
+                  <label for="cn-mysql-db" class={lbl}>Database</label>
+                  <Input id="cn-mysql-db" bind:value={database} class={cn(inp, flashedFields.has('database') && flashCls)} />
                 </div>
-              </div>
 
-              <div>
-                <label for="cn-mysql-db" class={lbl}>Database</label>
-                <Input id="cn-mysql-db" bind:value={database} class={inp} />
-              </div>
-
-              <div class="grid grid-cols-2 gap-2">
-                <div>
-                  <label for="cn-mysql-user" class={lbl}>Username</label>
-                  <Input id="cn-mysql-user" bind:value={user} autocomplete="username" class={inp} />
+                <div class="grid grid-cols-2 gap-2">
+                  <div>
+                    <label for="cn-mysql-user" class={lbl}>Username</label>
+                    <Input id="cn-mysql-user" bind:value={user} autocomplete="username" class={cn(inp, flashedFields.has('user') && flashCls)} />
+                  </div>
+                  <div>
+                    <label for="cn-mysql-pass" class={lbl}>Password</label>
+                    <Input id="cn-mysql-pass" bind:value={password} type="password" autocomplete="current-password" class={cn(inp, flashedFields.has('password') && flashCls)} />
+                  </div>
                 </div>
-                <div>
-                  <label for="cn-mysql-pass" class={lbl}>Password</label>
-                  <Input id="cn-mysql-pass" bind:value={password} type="password" autocomplete="current-password" class={inp} />
-                </div>
-              </div>
-
-              <label class="flex cursor-pointer select-none items-center gap-2 pt-0.5">
-                <Checkbox id="cn-mysql-ssl" checked={ssl} onCheckedChange={(v) => (ssl = v === true)} />
-                <span class="text-[12px] text-muted-foreground/65">Use SSL / TLS</span>
-              </label>
-
-              {@render sshSection('mysql')}
+              {/if}
 
             <!-- ── SQLite ────────────────────────────────── -->
             {:else if dbType === 'sqlite'}
@@ -777,7 +996,7 @@
                     placeholder="/path/to/database.db"
                     class={cn(inp, 'font-mono text-[11px]')} />
                   <button type="button" onclick={pickSqliteFile}
-                    class="inline-flex h-9 shrink-0 items-center gap-1 rounded-lg border border-border/25 px-2.5 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground">
+                    class="inline-flex h-9 shrink-0 items-center gap-1 rounded-lg border border-border/25 px-2.5 text-[11px] text-muted-foreground/60 transition-[color,background-color,border-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.97]">
                     <Icon name="folder-open" class="size-3" />
                     Browse
                   </button>
@@ -851,37 +1070,59 @@
             <!-- ── ClickHouse ─────────────────────────────── -->
             {:else if dbType === 'clickhouse'}
 
-              <div class="grid grid-cols-[1fr_80px] gap-2">
+              <div>
+                <label for="cn-ch-uri" class={lbl}>Connection string</label>
+                <div class="flex gap-1.5">
+                  <Input id="cn-ch-uri" bind:value={connectionUri}
+                    placeholder="clickhouse://user:pass@host:8123/db"
+                    class={cn(inp, 'font-mono text-[11px]')}
+                    onpaste={() => requestAnimationFrame(applyConnectionUri)}
+                    onkeydown={(e) => e.key === 'Enter' && (e.preventDefault(), applyConnectionUri())}
+                  />
+                  <button type="button" onclick={applyConnectionUri} disabled={!connectionUri.trim()}
+                    class="h-9 shrink-0 rounded-lg border border-border/25 px-2.5 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-25">
+                    Parse
+                  </button>
+                </div>
+                {#if uriHint}
+                  <p class={cn('mt-1 flex items-center gap-1 text-[10px]',
+                    uriHint.includes('Could') || uriHint.includes('Expected') ? 'text-destructive' : 'text-emerald-500')}>
+                    {#if uriHint.includes('Could') || uriHint.includes('Expected')}
+                      <Icon name="alert-circle" class="size-2.5" />
+                    {:else}
+                      <Icon name="check-circle-2" class="size-2.5" />
+                    {/if}
+                    {uriHint}
+                  </p>
+                {/if}
+              </div>
+
+              <div class="grid grid-cols-[1fr_110px] gap-2">
                 <div>
                   <label for="cn-ch-host" class={lbl}>Host</label>
-                  <Input id="cn-ch-host" bind:value={host} class={inp} />
+                  <Input id="cn-ch-host" bind:value={host} class={cn(inp, flashedFields.has('host') && flashCls)} />
                 </div>
                 <div>
                   <label for="cn-ch-port" class={lbl}>Port</label>
-                  <Input id="cn-ch-port" bind:value={port} type="text" inputmode="numeric" class={inpNum} />
+                  <Input id="cn-ch-port" bind:value={port} type="text" inputmode="numeric" class={cn(inpNum, flashedFields.has('port') && flashCls)} />
                 </div>
               </div>
 
               <div>
                 <label for="cn-ch-db" class={lbl}>Database</label>
-                <Input id="cn-ch-db" bind:value={database} class={inp} />
+                <Input id="cn-ch-db" bind:value={database} class={cn(inp, flashedFields.has('database') && flashCls)} />
               </div>
 
               <div class="grid grid-cols-2 gap-2">
                 <div>
                   <label for="cn-ch-user" class={lbl}>Username</label>
-                  <Input id="cn-ch-user" bind:value={user} autocomplete="username" class={inp} />
+                  <Input id="cn-ch-user" bind:value={user} autocomplete="username" class={cn(inp, flashedFields.has('user') && flashCls)} />
                 </div>
                 <div>
                   <label for="cn-ch-pass" class={lbl}>Password</label>
-                  <Input id="cn-ch-pass" bind:value={password} type="password" autocomplete="current-password" class={inp} />
+                  <Input id="cn-ch-pass" bind:value={password} type="password" autocomplete="current-password" class={cn(inp, flashedFields.has('password') && flashCls)} />
                 </div>
               </div>
-
-              <label class="flex cursor-pointer select-none items-center gap-2 pt-0.5">
-                <Checkbox id="cn-ch-secure" checked={secure} onCheckedChange={(v) => { secure = v === true; if (secure && port === '8123') port = '8443'; else if (!secure && port === '8443') port = '8123' }} />
-                <span class="text-[12px] text-muted-foreground/65">Use HTTPS (TLS)</span>
-              </label>
 
             <!-- ── DuckDB (file) ──────────────────────────── -->
             {:else if dbType === 'duckdb'}
@@ -914,140 +1155,270 @@
             <!-- ── MS SQL Server ──────────────────────────── -->
             {:else if dbType === 'mssql'}
 
-              <div class="grid grid-cols-[1fr_80px] gap-2">
+              <div>
+                <label for="cn-mssql-uri" class={lbl}>Connection string</label>
+                <div class="flex gap-1.5">
+                  <Input id="cn-mssql-uri" bind:value={connectionUri}
+                    placeholder="sqlserver://sa:pass@host:1433/db"
+                    class={cn(inp, 'font-mono text-[11px]')}
+                    onpaste={() => requestAnimationFrame(applyConnectionUri)}
+                    onkeydown={(e) => e.key === 'Enter' && (e.preventDefault(), applyConnectionUri())}
+                  />
+                  <button type="button" onclick={applyConnectionUri} disabled={!connectionUri.trim()}
+                    class="h-9 shrink-0 rounded-lg border border-border/25 px-2.5 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-25">
+                    Parse
+                  </button>
+                </div>
+                {#if uriHint}
+                  <p class={cn('mt-1 flex items-center gap-1 text-[10px]',
+                    uriHint.includes('Could') || uriHint.includes('Expected') ? 'text-destructive' : 'text-emerald-500')}>
+                    {#if uriHint.includes('Could') || uriHint.includes('Expected')}
+                      <Icon name="alert-circle" class="size-2.5" />
+                    {:else}
+                      <Icon name="check-circle-2" class="size-2.5" />
+                    {/if}
+                    {uriHint}
+                  </p>
+                {/if}
+              </div>
+
+              <div class="grid grid-cols-[1fr_110px] gap-2">
                 <div>
                   <label for="cn-mssql-host" class={lbl}>Host</label>
-                  <Input id="cn-mssql-host" bind:value={host} class={inp} />
+                  <Input id="cn-mssql-host" bind:value={host} class={cn(inp, flashedFields.has('host') && flashCls)} />
                 </div>
                 <div>
                   <label for="cn-mssql-port" class={lbl}>Port</label>
-                  <Input id="cn-mssql-port" bind:value={port} type="text" inputmode="numeric" class={inpNum} />
+                  <Input id="cn-mssql-port" bind:value={port} type="text" inputmode="numeric" class={cn(inpNum, flashedFields.has('port') && flashCls)} />
                 </div>
               </div>
 
               <div>
                 <label for="cn-mssql-db" class={lbl}>Database</label>
-                <Input id="cn-mssql-db" bind:value={database} class={inp} />
+                <Input id="cn-mssql-db" bind:value={database} class={cn(inp, flashedFields.has('database') && flashCls)} />
               </div>
 
               <div class="grid grid-cols-2 gap-2">
                 <div>
                   <label for="cn-mssql-user" class={lbl}>Username</label>
-                  <Input id="cn-mssql-user" bind:value={user} autocomplete="username" class={inp} />
+                  <Input id="cn-mssql-user" bind:value={user} autocomplete="username" class={cn(inp, flashedFields.has('user') && flashCls)} />
                 </div>
                 <div>
                   <label for="cn-mssql-pass" class={lbl}>Password</label>
-                  <Input id="cn-mssql-pass" bind:value={password} type="password" autocomplete="current-password" class={inp} />
+                  <Input id="cn-mssql-pass" bind:value={password} type="password" autocomplete="current-password" class={cn(inp, flashedFields.has('password') && flashCls)} />
                 </div>
-              </div>
-
-              <div class="flex flex-col gap-3 pt-0.5">
-                <label class="flex cursor-pointer select-none items-start gap-2">
-                  <Checkbox id="cn-mssql-encrypt" checked={encrypt} onCheckedChange={(v) => (encrypt = v === true)} class="mt-px" />
-                  <span class="flex flex-col">
-                    <span class="text-[12px] text-muted-foreground/75">Encrypt connection (TLS)</span>
-                    <span class="text-[11px] leading-snug text-muted-foreground/40">Encrypts traffic between Stroke and the server.</span>
-                  </span>
-                </label>
-                <label class={cn('flex select-none items-start gap-2', encrypt ? 'cursor-pointer' : 'cursor-not-allowed opacity-45')}>
-                  <Checkbox id="cn-mssql-trust" checked={trustCert} disabled={!encrypt} onCheckedChange={(v) => (trustCert = v === true)} class="mt-px" />
-                  <span class="flex flex-col">
-                    <span class="text-[12px] text-muted-foreground/75">Trust server certificate</span>
-                    <span class="text-[11px] leading-snug text-muted-foreground/40">Accept self-signed or otherwise untrusted certificates. Needed for many local / dev servers.</span>
-                  </span>
-                </label>
               </div>
 
             {/if}
 
-                <!-- Read-only mode — generic option for every driver -->
-                <label class="mt-1 flex cursor-pointer select-none items-center gap-2 border-t border-border/15 pt-3.5">
-                  <Checkbox id="cn-readonly" checked={readOnly} onCheckedChange={(v) => (readOnly = v === true)} />
-                  <span class="flex items-center gap-1.5 text-[12px] text-muted-foreground/75">
-                    <Icon name="lock" class="size-3 shrink-0" />
-                    Open in read-only mode
-                  </span>
-                </label>
+                  {@render advancedSection()}
 
-              </div>
+                </div>
+                {/key}
+
+              {:else}
+
+                <!-- ── Sign in with a hosting provider — one grouped, calm settings list ── -->
+                <div class="divide-y divide-border/25 overflow-hidden rounded-xl border border-border/40 bg-muted/[0.02]">
+                  {#each PROVIDERS as p, i (p.id)}
+                    {@const active = dbType === p.id}
+                    <button
+                      type="button"
+                      onclick={() => switchDriver(p.id)}
+                      style="animation-delay: {i * 45}ms"
+                      class={cn(
+                        'cn-stagger-in flex w-full items-center gap-3 px-3.5 py-3 text-left transition-[background-color] duration-150 ease-out',
+                        active ? 'bg-muted/50' : 'hover:bg-muted/25 active:bg-muted/40'
+                      )}
+                    >
+                      <div class="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border/40 bg-background">
+                        <DbIcon id={p.id} class={cn('size-4', engineTint(p.id))} />
+                      </div>
+                      <div class="min-w-0 flex-1">
+                        <p class="truncate text-sm font-medium text-foreground">{p.name}</p>
+                        <p class="truncate text-xs text-muted-foreground">{p.blurb}</p>
+                      </div>
+                      {#if active}
+                        <Icon name="check" class="size-4 shrink-0 text-primary" />
+                      {/if}
+                    </button>
+                  {/each}
+                </div>
+
+                {#if isProvider}
+                  <div class="mt-6 flex flex-col gap-4">
+                    <ProviderConnect
+                      provider={dbType}
+                      resolvePassword={(host, user) => saved.find((s) => s.host === host && s.user === user && s.password)?.password}
+                      onselect={(conn) => connectProviderConnection(conn)}
+                    />
+                    {@render advancedSection()}
+                  </div>
+                {/if}
+
+              {/if}
+
             </div>
           </div>
         </ScrollArea>
 
-        <!-- ── Footer — feedback + actions only, so it stays compact and
-             the action buttons are always visible regardless of window height ── -->
-        <div class="shrink-0 border-t border-border/15 px-10 py-4 lg:px-16">
-          <div class="w-full">
+        <!-- ── Footer — inline error alert, status chip, then actions ── -->
+        <div class="shrink-0 border-t border-border/15 px-8 py-4">
+          <div class="mx-auto max-w-none">
 
-          <!-- Feedback slot — always occupies height, shows message when needed -->
-          <div class="mb-2.5 flex min-h-[18px] items-center">
+            <!-- Connection error — calm inline alert, aligned to the form column -->
             {#if error}
-              <p class="flex items-start gap-1 text-[11px] leading-snug text-destructive">
-                <Icon name="alert-circle" class="mt-px size-2.5 shrink-0" />{error}
-              </p>
-            {:else if testOk}
-              <p class="flex items-center gap-1 text-[11px] text-emerald-500">
-                <Icon name="check-circle-2" class="size-2.5 shrink-0" />Connected successfully
-              </p>
+              <div class="mb-3.5 max-w-[560px]">
+                <Alert variant="destructive" class="items-start gap-x-2.5 rounded-lg border-destructive/30 bg-destructive/10 p-3.5">
+                  <Icon name="alert-circle" class="size-4" />
+                  <AlertTitle class="text-sm font-medium">Couldn't connect</AlertTitle>
+                  <AlertDescription class="mt-1 break-words text-[13px] leading-snug text-destructive/80">{error}</AlertDescription>
+                </Alert>
+              </div>
             {/if}
-          </div>
 
-          <!-- Button row -->
-          <div class="flex items-center justify-between gap-1.5">
-            <!-- Resume last -->
-            <div class="min-w-0">
-              {#if lastId && saved.find(c => c.id === lastId)}
-                {@const lastConn = saved.find(c => c.id === lastId)}
-                <button type="button"
-                  onclick={() => connectWith(lastConn)}
-                  disabled={isBusy}
-                  class="inline-flex h-8 max-w-[200px] items-center gap-1.5 rounded-lg border border-border/25 px-3 text-[12px] text-muted-foreground/55 transition-colors hover:bg-muted/30 hover:text-foreground disabled:opacity-25"
-                >
-                  {#if connecting === lastConn.id}
-                    <Icon name="loader-2" class="size-3 animate-spin" />Resuming…
+            <div class="flex items-center gap-3">
+              <!-- Status chip + subtle target preview -->
+              <div class="flex min-w-0 flex-1 items-center gap-2 text-[11px]">
+                {#if connecting}
+                  <span class="flex shrink-0 items-center gap-1.5 font-medium text-muted-foreground/70"><Icon name="loader-2" class="size-3 animate-spin" />Connecting…</span>
+                {:else if testing}
+                  <span class="flex shrink-0 items-center gap-1.5 font-medium text-muted-foreground/70"><Icon name="loader-2" class="size-3 animate-spin" />Testing…</span>
+                {:else if error}
+                  <span class="flex shrink-0 items-center gap-1.5 font-medium text-destructive"><span class="size-1.5 rounded-full bg-destructive"></span>Failed</span>
+                {:else if testOk}
+                  <span class="flex shrink-0 items-center gap-1.5 font-medium text-emerald-500"><span class="size-1.5 rounded-full bg-emerald-500"></span>Connection OK</span>
+                {:else if isDirty}
+                  <span class="flex shrink-0 items-center gap-1.5 font-medium text-amber-500/90"><span class="size-1.5 rounded-full bg-amber-500"></span>Unsaved</span>
+                {:else}
+                  <span class="flex shrink-0 items-center gap-1.5 text-muted-foreground/50"><span class="size-1.5 rounded-full bg-muted-foreground/30"></span>Ready</span>
+                {/if}
+                <span class="min-w-0 truncate font-mono text-[10.5px] text-muted-foreground/40" title={statusTarget}>{statusTarget}</span>
+              </div>
+
+              <!-- Actions — Resume (ghost) · Test (outline) · Connect (filled) -->
+              <div class="ml-auto flex shrink-0 items-center gap-2.5">
+                {#if lastId && saved.find(c => c.id === lastId)}
+                  {@const lastConn = saved.find(c => c.id === lastId)}
+                  <button type="button"
+                    onclick={() => connectWith(lastConn)}
+                    disabled={isBusy}
+                    class="inline-flex h-8 max-w-[160px] items-center gap-1.5 rounded-lg px-3 text-[12px] text-muted-foreground/55 transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted/30 hover:text-foreground active:scale-[0.97] disabled:opacity-25"
+                  >
+                    {#if connecting === lastConn.id}
+                      <Icon name="loader-2" class="size-3 animate-spin" />Resuming…
+                    {:else}
+                      Resume <span class="min-w-0 truncate text-foreground/70">{lastConn.name}</span>
+                    {/if}
+                  </button>
+                {/if}
+                {#if isBusy}
+                  <button type="button" onclick={stopOp}
+                    class="inline-flex h-8 items-center gap-1 rounded-lg border border-destructive/30 px-3 text-[12px] font-medium text-destructive transition-[color,background-color,border-color,transform] duration-150 ease-out hover:bg-destructive/10 active:scale-[0.97]">
+                    <Icon name="x" class="size-3" />Stop
+                  </button>
+                {/if}
+                {#if canTest}
+                  <button type="button" onclick={handleTest} disabled={isBusy}
+                    class="inline-flex h-8 items-center gap-1 rounded-lg border border-border/40 px-3.5 text-[12px] text-muted-foreground/70 transition-[color,background-color,border-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.97] disabled:opacity-25">
+                    {#if testing}<Icon name="loader-2" class="size-3 animate-spin" />Testing…{:else}Test{/if}
+                  </button>
+                {/if}
+                <button type="button" onclick={handleConnect} disabled={isBusy || dbType === 'bigquery'}
+                  class="inline-flex h-8 items-center gap-1 rounded-lg bg-foreground px-5 text-[12px] font-semibold text-background shadow-sm transition-[color,background-color,transform,box-shadow] duration-150 ease-out hover:bg-foreground/85 active:scale-[0.97] disabled:opacity-40 disabled:shadow-none">
+                  {#if connecting === (editingId ?? '__new__')}
+                    <Icon name="loader-2" class="size-3 animate-spin" />Connecting…
                   {:else}
-                    Resume <span class="min-w-0 truncate text-foreground/70">{lastConn.name}</span>
+                    {editingId ? 'Save & connect' : 'Connect'}
                   {/if}
                 </button>
-              {/if}
+              </div>
             </div>
-            <!-- Test + Connect -->
-            <div class="flex shrink-0 items-center gap-2">
-              {#if isBusy}
-                <button type="button" onclick={stopOp}
-                  class="inline-flex h-8 items-center gap-1 rounded-lg border border-destructive/30 px-3 text-[12px] font-medium text-destructive transition-colors hover:bg-destructive/10">
-                  <Icon name="x" class="size-3" />Stop
-                </button>
-              {/if}
-              {#if canTest}
-                <button type="button" onclick={handleTest} disabled={isBusy}
-                  class="inline-flex h-8 items-center gap-1 rounded-lg border border-border/30 px-3.5 text-[12px] text-muted-foreground/70 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-25">
-                  {#if testing}<Icon name="loader-2" class="size-3 animate-spin" />Testing…{:else}Test{/if}
-                </button>
-              {/if}
-              <button type="button" onclick={handleConnect} disabled={isBusy || dbType === 'bigquery'}
-                class="inline-flex h-8 items-center gap-1 rounded-lg bg-foreground px-5 text-[12px] font-semibold text-background transition-colors hover:bg-foreground/85 disabled:opacity-40">
-                {#if connecting === (editingId ?? '__new__')}
-                  <Icon name="loader-2" class="size-3 animate-spin" />Connecting…
-                {:else}
-                  {editingId ? 'Save & connect' : 'Connect'}
-                {/if}
-              </button>
-            </div>
-          </div>
           </div>
         </div>
       </div>
 
     </div>
 
-    <!-- Close button -->
-    <DialogPrimitive.Close
-      class="absolute right-4 top-4 inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+    <!-- Close button — routes through the unsaved-changes guard -->
+    <button
+      type="button"
+      onclick={requestClose}
+      class="absolute right-4 top-4 inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground/40 transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted/60 hover:text-foreground active:scale-[0.92] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
     >
       <Icon name="x" class="size-4" />
       <span class="sr-only">Close</span>
-    </DialogPrimitive.Close>
+    </button>
+
+    <!-- Discard-changes confirmation (styled, blocks close until answered) -->
+    {#if confirmDiscardOpen}
+      <div class="absolute inset-0 z-[60] flex items-center justify-center bg-black/50 p-6">
+        <div class="w-full max-w-sm rounded-xl border border-border/40 bg-background p-5 shadow-2xl">
+          <div class="flex items-start gap-3">
+            <div class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-500">
+              <Icon name="alert-circle" class="size-4" />
+            </div>
+            <div class="min-w-0">
+              <h3 class="text-[13px] font-semibold text-foreground">Discard unsaved changes?</h3>
+              <p class="mt-1 text-[12px] leading-relaxed text-muted-foreground/70">
+                You have unsaved edits in this connection. Closing now will lose them.
+              </p>
+            </div>
+          </div>
+          <div class="mt-4 flex justify-end gap-2">
+            <button type="button" onclick={() => (confirmDiscardOpen = false)}
+              class="inline-flex h-8 items-center rounded-lg border border-border/40 px-3.5 text-[12px] text-muted-foreground/80 transition-[color,background-color,border-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.97]">
+              Keep editing
+            </button>
+            <button type="button" onclick={discardAndClose}
+              class="inline-flex h-8 items-center rounded-lg bg-destructive px-3.5 text-[12px] font-semibold text-white transition-[opacity,transform] duration-150 ease-out hover:opacity-90 active:scale-[0.97]">
+              Discard
+            </button>
+          </div>
+        </div>
+      </div>
+    {/if}
     </DialogPrimitive.Content>
   </DialogPrimitive.Portal>
 </DialogPrimitive.Root>
+
+<style>
+  /* The modal is portalled to <body>, outside #app, so it never inherits the
+     app-wide `user-select: none`. Re-establish it here so chrome (labels, titles,
+     rows, buttons, status) can't be drag-selected — while real field VALUES stay
+     selectable. Scoped to this modal only via the data attribute. */
+  :global([data-connection-modal]),
+  :global([data-connection-modal] *) {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  :global([data-connection-modal] input),
+  :global([data-connection-modal] textarea) {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+  /* Pointer cursor on every interactive control in the modal (toggles, Type
+     picker, rows, disclosure, footer buttons); disabled ones fall back. */
+  :global([data-connection-modal] button:not(:disabled)),
+  :global([data-connection-modal] [role='button']),
+  :global([data-connection-modal] summary) {
+    cursor: pointer;
+  }
+
+  /* Decorative entrance for saved / provider rows — fades + rises in.
+     Never blocks clicks (runs on the interactive element itself). */
+  @keyframes -global-cn-rise-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  :global(.cn-stagger-in) {
+    opacity: 0;
+    animation: cn-rise-in 250ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    :global(.cn-stagger-in) {
+      animation: none;
+      opacity: 1;
+    }
+  }
+</style>
