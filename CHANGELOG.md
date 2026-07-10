@@ -4,6 +4,30 @@ All notable changes to Stroke are listed here, newest first.
 
 ---
 
+## [Unreleased]
+
+### Changes
+
+#### Connect experience (redesigned)
+- Rebuilt the connection screen as a **two-pane layout** — choose your connection type, driver, and saved connections in a left rail while editing details in a focused right pane, so the fields are reachable without scrolling.
+- **Pick one input method** — a segmented switch toggles between pasting a **connection string** and filling **manual fields**, instead of showing both at once. Pasting a string auto-fills the fields and validates on connect.
+- **Cleaner provider picker** — Neon, Supabase, PlanetScale, and Prisma Postgres now appear as a single calm list with a clear selected state and a compact sign-in action, replacing the bulky cards.
+- Redesigned the **connection error** as a readable inline alert and gave the footer a clear status chip (Ready / Unsaved / Connection OK / Failed) alongside unambiguous Test and Connect actions.
+- Inputs now use a **crisp outline and a single accent focus ring**, consistent across the app.
+- Widened the connections rail and stopped the connection screen from flickering when switching between saved connections or drivers.
+
+#### Interface polish
+- Added **press feedback** to buttons and gave menus, selects, popovers, tooltips, and dialogs consistent, snappier open/close motion; menus now scale from the control that opened them.
+- The app now respects the system **"reduce motion"** setting — movement is minimized while feedback is preserved.
+- **Sidebar** table rows: names and row counts sit on a shared baseline, resting contrast is higher for easier scanning, and section headers are refined.
+- Tightened **Settings** spacing and control feedback.
+
+### Bug Fixes
+- Fixed **"Limit must be at least 1"** when opening a table after choosing "All" rows — the page size now falls back to a valid default (50) instead of erroring.
+- The data grid no longer offers **Set NULL** on NOT NULL columns; it shows a clear message instead of attempting a write that would fail.
+- Text on the connection screen is no longer accidentally selectable, and the cursor now shows a pointer on every clickable control.
+
+
 ## [1.7.0] - 2026-07-06
 
 ### New Features
