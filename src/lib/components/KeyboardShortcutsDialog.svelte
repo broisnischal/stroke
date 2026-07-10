@@ -116,6 +116,9 @@
       label: "Appearance",
       icon: Palette,
       shortcuts: [
+        { keys: [mod, "B"], desc: "Toggle sidebar" },
+        { keys: [mod, "⇧", "T"], desc: "Toggle tab bar" },
+        { keys: [mod, "⇧", "B"], desc: "Toggle status bar" },
         { keys: [mod, "M"], desc: "Cycle theme" },
         { keys: [mod, "⇧", "M"], desc: "Previous theme" },
         { keys: [mod, "+"], desc: "Zoom in" },
@@ -127,6 +130,7 @@
       label: "General",
       icon: Settings,
       shortcuts: [
+        { keys: [mod, "?"], desc: "Keyboard shortcuts" },
         { keys: ["?"], desc: "Keyboard shortcuts" },
         { keys: [mod, ","], desc: "Settings" },
         { keys: ["Esc"], desc: "Dismiss / close" },
