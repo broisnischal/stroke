@@ -22,7 +22,7 @@
 		{preventScroll}
 		data-slot="select-content"
 		class={cn(
-			"bg-popover text-popover-foreground data-open:animate-in data-closed:animate-out data-closed:fade-out-0 data-open:fade-in-0 data-[side=bottom]:slide-in-from-top-1 data-[side=left]:slide-in-from-right-1 data-[side=right]:slide-in-from-left-1 data-[side=top]:slide-in-from-bottom-1 border border-border/60 min-w-36 rounded-lg shadow-sm duration-100 data-[side=inline-start]:slide-in-from-right-1 data-[side=inline-end]:slide-in-from-left-1 relative isolate z-50 overflow-x-hidden overflow-y-auto",
+			"bg-popover text-popover-foreground data-open:animate-in data-closed:animate-out data-closed:fade-out-0 data-open:fade-in-0 data-open:zoom-in-[0.96] data-closed:zoom-out-[0.96] [transform-origin:var(--bits-floating-transform-origin)] ease-out duration-150 border border-border/60 min-w-36 rounded-lg shadow-sm relative isolate z-50 overflow-x-hidden overflow-y-auto",
 			className
 		)}
 		{...restProps}
