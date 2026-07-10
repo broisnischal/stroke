@@ -4,6 +4,12 @@ All notable changes to Stroke are listed here, newest first.
 
 ---
 
+## [1.8.0] - 2026-07-10
+
+### Changes
+- Redesign connection screen and polish app interface (#40)
+
+
 ## [Unreleased]
 
 ### Changes
