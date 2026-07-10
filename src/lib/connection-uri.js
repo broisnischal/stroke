@@ -43,6 +43,124 @@ export function parsePostgresUri(uri) {
 }
 
 /**
+ * MySQL / MariaDB connection URI, e.g. `mysql://user:pass@host:3306/db`.
+ * @param {string} uri
+ * @returns {ParsedPostgresUri | { error: string } | null}
+ */
+export function parseMysqlUri(uri) {
+  const trimmed = uri.trim()
+  if (!trimmed) return null
+
+  let normalized = trimmed
+  if (/^(mysql|mariadb):\/\//i.test(normalized)) {
+    // Normalize any recognized scheme to mysql:// so the URL parser is happy.
+    normalized = `mysql://${normalized.replace(/^[a-z]+:\/\//i, '')}`
+  } else if (trimmed.includes('@') || /^[^/]+:\d+\//.test(trimmed)) {
+    normalized = `mysql://${trimmed}`
+  } else {
+    return { error: 'Expected a mysql:// connection URI' }
+  }
+
+  try {
+    const url = new URL(normalized)
+    const sslMode = url.searchParams.get('ssl-mode')?.toLowerCase()
+    const ssl =
+      sslMode === 'required' ||
+      sslMode === 'verify_ca' ||
+      sslMode === 'verify_identity' ||
+      url.searchParams.get('ssl') === 'true'
+
+    return {
+      host: url.hostname || '127.0.0.1',
+      port: url.port || '3306',
+      database: decodeURIComponent(url.pathname.replace(/^\//, '')),
+      user: decodeURIComponent(url.username),
+      password: decodeURIComponent(url.password),
+      ssl,
+    }
+  } catch {
+    return { error: 'Could not parse connection URI' }
+  }
+}
+
+/**
+ * SQL Server URI, e.g. `sqlserver://sa:pass@host:1433/db?encrypt=true`.
+ * @param {string} uri
+ * @returns {{ host: string, port: string, database: string, user: string, password: string, encrypt: boolean, trustCert: boolean } | { error: string } | null}
+ */
+export function parseMssqlUri(uri) {
+  const trimmed = uri.trim()
+  if (!trimmed) return null
+
+  let normalized = trimmed
+  if (/^(sqlserver|mssql):\/\//i.test(normalized)) {
+    normalized = `mssql://${normalized.replace(/^[a-z]+:\/\//i, '')}`
+  } else if (trimmed.includes('@') || /^[^/]+:\d+\//.test(trimmed)) {
+    normalized = `mssql://${trimmed}`
+  } else {
+    return { error: 'Expected a sqlserver:// connection URI' }
+  }
+
+  const truthy = (v) => v === 'true' || v === '1' || v === 'yes'
+  try {
+    const url = new URL(normalized)
+    const trust = url.searchParams.get('trustservercertificate')?.toLowerCase()
+    return {
+      host: url.hostname || '127.0.0.1',
+      port: url.port || '1433',
+      database: decodeURIComponent(url.pathname.replace(/^\//, '')),
+      user: decodeURIComponent(url.username),
+      password: decodeURIComponent(url.password),
+      encrypt: truthy(url.searchParams.get('encrypt')?.toLowerCase() ?? ''),
+      // Default to trusting the cert (matches the form default; most local/dev
+      // SQL Servers use a self-signed cert), unless the URI explicitly says false.
+      trustCert: trust == null ? true : truthy(trust),
+    }
+  } catch {
+    return { error: 'Could not parse connection URI' }
+  }
+}
+
+/**
+ * ClickHouse URI: `clickhouse://user:pass@host:8123/db` or an http(s):// URL.
+ * @param {string} uri
+ * @returns {{ host: string, port: string, database: string, user: string, password: string, secure: boolean } | { error: string } | null}
+ */
+export function parseClickhouseUri(uri) {
+  const trimmed = uri.trim()
+  if (!trimmed) return null
+
+  const m = trimmed.match(/^(clickhouse|https?):\/\//i)
+  const scheme = m?.[1]?.toLowerCase() ?? null
+  let normalized
+  if (scheme === 'clickhouse') {
+    normalized = `http://${trimmed.replace(/^clickhouse:\/\//i, '')}`
+  } else if (scheme) {
+    normalized = trimmed
+  } else if (trimmed.includes('@') || /^[^/]+:\d+\//.test(trimmed)) {
+    normalized = `http://${trimmed}`
+  } else {
+    return { error: 'Expected a clickhouse:// or http(s):// URI' }
+  }
+
+  try {
+    const url = new URL(normalized)
+    const secure = scheme === 'https' || url.port === '8443'
+    return {
+      host: url.hostname || '127.0.0.1',
+      port: url.port || (secure ? '8443' : '8123'),
+      database:
+        decodeURIComponent(url.pathname.replace(/^\//, '')) || url.searchParams.get('database') || '',
+      user: decodeURIComponent(url.username) || url.searchParams.get('user') || '',
+      password: decodeURIComponent(url.password) || url.searchParams.get('password') || '',
+      secure,
+    }
+  } catch {
+    return { error: 'Could not parse connection URI' }
+  }
+}
+
+/**
  * @param {string} uri
  * @returns {ParsedSqliteUri | { error: string } | null}
  */
@@ -66,10 +184,14 @@ export function parseSqliteUri(uri) {
 }
 
 /**
- * @param {'postgres'|'sqlite'} type
+ * @param {'postgres'|'sqlite'|'mysql'|'mssql'|'clickhouse'} type
  * @param {string} uri
  * @returns {ParsedPostgresUri | ParsedSqliteUri | { error: string } | null}
  */
 export function parseConnectionUri(type, uri) {
-  return type === 'sqlite' ? parseSqliteUri(uri) : parsePostgresUri(uri)
+  if (type === 'sqlite') return parseSqliteUri(uri)
+  if (type === 'mysql') return parseMysqlUri(uri)
+  if (type === 'mssql') return parseMssqlUri(uri)
+  if (type === 'clickhouse') return parseClickhouseUri(uri)
+  return parsePostgresUri(uri)
 }

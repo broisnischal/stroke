@@ -8,6 +8,7 @@
   import LogOut from '@lucide/svelte/icons/log-out'
   import AlertTriangle from '@lucide/svelte/icons/alert-triangle'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
+  import ArrowRight from '@lucide/svelte/icons/arrow-right'
   import DbIcon from './DbIcon.svelte'
   import Search from '@lucide/svelte/icons/search'
   import KeyRound from '@lucide/svelte/icons/key-round'
@@ -171,50 +172,40 @@
 
 <div class="flex flex-col gap-3">
   {#if phase === 'idle'}
-    <!-- Not connected — left-aligned, no card -->
-    <div class="flex flex-col gap-5 py-1">
-      <div class="flex items-center gap-3.5">
-        <div class="flex size-12 shrink-0 items-center justify-center rounded-xl border border-border/50 bg-muted/25">
-          <DbIcon id={provider} class="size-6 text-foreground" />
-        </div>
-        <div class="min-w-0">
-          <p class="text-[15px] font-semibold text-foreground">Connect with {meta?.name}</p>
-          <p class="mt-0.5 text-[12.5px] leading-relaxed text-muted-foreground">{meta?.blurb}</p>
-        </div>
+    <!-- Not connected — compact CTA (the selected provider row above already
+         carries the icon + name + blurb, so no redundant hero here). -->
+    {#if meta?.mode === 'token'}
+      <div class="flex flex-col gap-2">
+        <input
+          type="text"
+          bind:value={tokenInput}
+          placeholder="postgres://…"
+          class="h-9 w-full rounded-lg border border-border/60 bg-muted/25 px-3 font-mono text-[11px] outline-none transition-[border-color,box-shadow] focus:border-ring focus:ring-2 focus:ring-ring/20"
+          onkeydown={(e) => { if (e.key === 'Enter') saveToken() }}
+        />
+        <button
+          type="button"
+          class="flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-foreground px-4 text-[13px] font-semibold text-background shadow-sm transition-[background-color,transform] duration-150 ease-out hover:bg-foreground/85 active:scale-[0.98] disabled:opacity-40 disabled:shadow-none"
+          disabled={!tokenInput.trim()}
+          onclick={saveToken}
+        >
+          <KeyRound class="size-4" /> Continue
+        </button>
+        <p class="text-xs text-muted-foreground">Paste your {meta?.name} connection string to continue.</p>
       </div>
-
-      {#if meta?.mode === 'token'}
-        <div class="flex flex-col gap-2">
-          <input
-            type="text"
-            bind:value={tokenInput}
-            placeholder="postgres://…"
-            class="h-9 w-full rounded-lg border border-border/60 bg-muted/25 px-3 font-mono text-[11px] outline-none transition-[border-color,box-shadow] focus:border-ring focus:ring-2 focus:ring-ring/20"
-            onkeydown={(e) => { if (e.key === 'Enter') saveToken() }}
-          />
-          <button
-            type="button"
-            class="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-foreground px-4 text-[13px] font-semibold text-background transition-colors hover:bg-foreground/85 disabled:opacity-40"
-            disabled={!tokenInput.trim()}
-            onclick={saveToken}
-          >
-            <KeyRound class="size-4" /> Continue
-          </button>
-        </div>
-      {:else}
-        <div class="flex flex-col gap-2.5">
-          <button
-            type="button"
-            class="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-foreground px-5 text-[13px] font-semibold text-background transition-colors hover:bg-foreground/85"
-            onclick={startAuth}
-          >
-            <DbIcon id={provider} class="size-4" />
-            Sign in with {meta?.name}
-          </button>
-          <p class="text-[11px] text-muted-foreground/45">Opens your browser to authorize · secure PKCE flow</p>
-        </div>
-      {/if}
-    </div>
+    {:else}
+      <div class="flex flex-col gap-2">
+        <button
+          type="button"
+          class="group flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-foreground px-5 text-[13px] font-semibold text-background shadow-sm transition-[background-color,transform] duration-150 ease-out hover:bg-foreground/85 active:scale-[0.98]"
+          onclick={startAuth}
+        >
+          Sign in with {meta?.name}
+          <ArrowRight class="size-4 transition-transform duration-150 ease-out group-hover:translate-x-0.5" />
+        </button>
+        <p class="text-xs text-muted-foreground">Opens your browser to authorize · secure PKCE flow</p>
+      </div>
+    {/if}
 
   {:else if phase === 'authorizing'}
     <div class="flex flex-col gap-4 py-2">

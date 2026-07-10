@@ -1,12 +1,8 @@
 <script>
   import { tick, untrack } from 'svelte'
-  import { SvelteFlow, Background, Controls, MiniMap, Panel } from '@xyflow/svelte'
-  import '@xyflow/svelte/dist/style.css'
   import dagre from '@dagrejs/dagre'
   import { listTables, getTableColumnStructure, listIndexes } from '$lib/api.js'
-  import ErdTableNode from './ErdTableNode.svelte'
-  import ErdRelationEdge from './ErdRelationEdge.svelte'
-  import ErdFocusController from './ErdFocusController.svelte'
+  import ErdCanvas from './ErdCanvas.svelte'
   import Loader from '@lucide/svelte/icons/loader'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
   import Search from '@lucide/svelte/icons/search'
@@ -42,8 +38,10 @@
   const BATCH     = 16
   const WARN_MANY = 60
 
-  const nodeTypes = { tableNode: ErdTableNode }
-  const edgeTypes = { relation: ErdRelationEdge }
+  const cfg = { NODE_W, ROW_H, HDR_H, PAD_B }
+
+  /** @type {ErdCanvas|null} */
+  let erd = $state(null)
 
   // ── State ─────────────────────────────────────────────────────────────────
   let loading       = $state(false)
@@ -91,17 +89,48 @@
 
     if (conn.length) {
       const g = new dagre.graphlib.Graph()
-      g.setGraph({ rankdir: 'LR', ranksep: 200, nodesep: 72, marginx: 64, marginy: 64 })
+      g.setGraph({ rankdir: 'LR', ranksep: 220, nodesep: 48, marginx: 60, marginy: 60 })
       g.setDefaultEdgeLabel(() => ({}))
       for (const n of conn) {
         g.setNode(n.id, { width: NODE_W, height: n.data ? nodeH(n.data) : HDR_H })
       }
       for (const e of es) g.setEdge(e.source, e.target)
       dagre.layout(g)
-      laidConn = conn.map(n => {
+
+      // Dagre lays each rank as a single vertical line — for a hub referenced by
+      // dozens of tables that becomes an unreadable tall smear. Re-flow each rank
+      // (nodes share an x in LR mode) into multiple sub-columns capped at a target
+      // height, so a big fan spreads into a readable grid. Generous gaps keep the
+      // cards from crowding and give the edges room to fan without overlapping.
+      const COL_GAP = 96, ROW_GAP = 52, RANK_GAP = 260, TARGET_H = 3200
+      /** @type {Map<number, {n:any,y:number,h:number}[]>} */
+      const ranks = new Map()
+      for (const n of conn) {
         const p = g.node(n.id)
+        const key = Math.round(p.x)
+        if (!ranks.has(key)) ranks.set(key, [])
+        ranks.get(key)?.push({ n, y: p.y, h: n.data ? nodeH(n.data) : HDR_H })
+      }
+      /** @type {Map<string, {x:number,y:number}>} */
+      const placed = new Map()
+      let cursorX = 40
+      for (const key of [...ranks.keys()].sort((a, b) => a - b)) {
+        const items = (ranks.get(key) ?? []).sort((a, b) => a.y - b.y)
+        const maxH = items.reduce((m, it) => Math.max(m, it.h), HDR_H)
+        const rows = Math.max(1, Math.floor(TARGET_H / (maxH + ROW_GAP)))
+        const cols = Math.ceil(items.length / rows)
+        const colY = new Array(cols).fill(40) // per sub-column running Y (packs tight)
+        for (let i = 0; i < items.length; i++) {
+          const col = Math.floor(i / rows)
+          placed.set(items[i].n.id, { x: cursorX + col * (NODE_W + COL_GAP), y: colY[col] })
+          colY[col] += items[i].h + ROW_GAP
+        }
+        cursorX += cols * (NODE_W + COL_GAP) + RANK_GAP
+      }
+
+      laidConn = conn.map(n => {
         const h = n.data ? nodeH(n.data) : HDR_H
-        const pos = { x: p.x - NODE_W / 2, y: p.y - h / 2 }
+        const pos = placed.get(n.id) ?? { x: 0, y: 0 }
         bottomY = Math.max(bottomY, pos.y + h)
         return { ...n, position: pos }
       })
@@ -134,13 +163,14 @@
         if (!col.foreignKey) continue
         const parts    = col.foreignKey.split('.')
         const refTable = parts.length >= 3 ? parts[1] : parts[0]
+        const refCol   = parts.length >= 3 ? parts[2] : parts[1]
         if (!tableMeta.has(refTable)) continue
         rawEdges.push({
           id:           `${t.name}__${col.name}__${refTable}`,
           source:       t.name,
           target:       refTable,
           sourceHandle: `src-${col.name}`,
-          targetHandle: 'tgt',
+          targetHandle: refCol ? `tgt-${refCol}` : 'tgt',
           type:         'relation',
         })
         connected.add(t.name)
@@ -208,6 +238,13 @@
   function reLayout() {
     _posCache.clear()
     buildGraph(true)
+    tick().then(() => erd?.fit())
+  }
+
+  /** Persist a dragged node's new position so rebuilds and exports keep it. */
+  function onNodeMoved(/** @type {string} */ id, /** @type {number} */ x, /** @type {number} */ y) {
+    _posCache.set(id, { x, y })
+    nodes = nodes.map((n) => (n.id === id ? { ...n, position: { x, y } } : n))
   }
 
   // ── Load ──────────────────────────────────────────────────────────────────
@@ -309,6 +346,11 @@
     if (exact) return exact
     const hits = names.filter(n => n.toLowerCase().includes(q))
     return hits.length === 1 ? hits[0] : null
+  })
+
+  $effect(() => {
+    const id = focusNodeId
+    if (id) untrack(() => erd?.focus(id))
   })
 
   const selMeta = $derived(selectedTable ? (tableMeta.get(selectedTable) ?? null) : null)
@@ -681,40 +723,35 @@
       </div>
 
     {:else}
-      <SvelteFlow
-        bind:nodes
-        bind:edges
-        {nodeTypes}
-        {edgeTypes}
-        fitView
-        fitViewOptions={{ padding: 0.12 }}
-        minZoom={0.04}
-        maxZoom={2.5}
-        nodesDraggable={true}
-        nodesConnectable={false}
-        elementsSelectable={true}
-        onlyRenderVisibleElements={nodes.length > 40}
-        class="erd-canvas"
-        style="background: hsl(var(--background))"
-        onpaneclick={() => (selectedTable = null)}
-      >
-        <Background variant="dots" gap={22} size={1} class="opacity-[0.12]" />
-        <Controls showInteractive={false} />
-        <MiniMap
-          nodeColor={() => 'hsl(var(--muted))'}
-          maskColor="hsl(var(--background)/0.75)"
-          style="background:hsl(var(--panel)); border:1px solid hsl(var(--border)/0.5); border-radius:8px; right:16px; bottom:16px;"
-        />
-        <ErdFocusController {focusNodeId} />
+      <ErdCanvas
+        bind:this={erd}
+        {nodes}
+        {edges}
+        {cfg}
+        selectedId={selectedTable}
+        onselect={(id) => (selectedTable = id)}
+        onopen={(name) => onopentable?.(activeSchema, name)}
+        onnodemoved={onNodeMoved}
+      />
 
-        {#if tableMeta.size === 0 && !loading}
-          <Panel position="top-center">
-            <div class="mt-4 rounded-lg border border-border/50 bg-panel px-4 py-3 font-mono text-ui-xs text-muted-foreground/60">
-              No tables found in <span class="text-foreground/70">{activeSchema}</span>
-            </div>
-          </Panel>
-        {/if}
-      </SvelteFlow>
+      {#if tableMeta.size === 0 && !loading}
+        <div class="pointer-events-none absolute inset-x-0 top-4 flex justify-center">
+          <div class="rounded-lg border border-border/50 bg-panel px-4 py-3 font-mono text-ui-xs text-muted-foreground/60">
+            No tables found in <span class="text-foreground/70">{activeSchema}</span>
+          </div>
+        </div>
+      {/if}
+
+      <!-- ── Legend ───────────────────────────────────────────────────────── -->
+      {#if tableMeta.size > 0}
+        <div class="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center">
+          <div class="flex items-center gap-4 rounded-full border border-border/50 bg-panel/90 px-4 py-1.5 font-mono text-ui-2xs text-muted-foreground/70 shadow-lg backdrop-blur">
+            <span class="flex items-center gap-1.5"><span class="inline-block size-2 rounded-sm" style="background:hsl(38 92% 55%)"></span>Primary key</span>
+            <span class="flex items-center gap-1.5"><span class="inline-block size-2 rounded-sm" style="background:hsl(217 91% 65%)"></span>Foreign key</span>
+            <span class="flex items-center gap-1.5"><span class="inline-block h-px w-4" style="background:hsl(var(--border))"></span>Relationship</span>
+          </div>
+        </div>
+      {/if}
 
       <!-- ── Detail panel ───────────────────────────────────────────────── -->
       {#if selMeta}
@@ -788,45 +825,3 @@
     {/if}
   </div>
 </div>
-
-<style>
-  :global(.erd-canvas .svelte-flow__node) {
-    background: transparent !important;
-    border: none !important;
-    padding: 0 !important;
-    border-radius: 0 !important;
-    box-shadow: none !important;
-  }
-  :global(.erd-canvas .svelte-flow__node.selected) {
-    box-shadow: none !important;
-  }
-  :global(.erd-canvas .svelte-flow__edge-path) {
-    stroke-width: 1.5;
-  }
-  :global(.erd-canvas .svelte-flow__controls) {
-    background: hsl(var(--panel));
-    border: 1px solid hsl(var(--border)/0.5);
-    border-radius: 8px;
-    overflow: hidden;
-    gap: 0;
-  }
-  :global(.erd-canvas .svelte-flow__controls-button) {
-    background: hsl(var(--panel));
-    border-bottom: 1px solid hsl(var(--border)/0.4);
-    color: hsl(var(--muted-foreground));
-    padding: 7px;
-  }
-  :global(.erd-canvas .svelte-flow__controls-button:hover) {
-    background: hsl(var(--accent));
-    color: hsl(var(--foreground));
-  }
-  :global(.erd-canvas .svelte-flow__controls-button svg) {
-    fill: currentColor;
-  }
-  :global(.erd-canvas .svelte-flow__handle) {
-    pointer-events: none;
-  }
-  :global(.erd-canvas .svelte-flow__attribution) {
-    display: none;
-  }
-</style>
