@@ -1578,6 +1578,29 @@ fn bind_typed_value<'a>(
     let t = normalize_pg_type(data_type);
 
     if value.is_null() {
+        // Bind a NULL whose parameter type matches the column family. The base
+        // SET clause is `"col" = $1` with no cast, so a text-typed NULL against a
+        // non-text column (e.g. int4) fails assignment-cast checking with
+        // "column is of type integer but expression is of type text".
+        if t.contains("int") || t == "serial" || t.ends_with("serial") || t == "oid" {
+            return Ok(q.bind(None::<i64>));
+        }
+        if t == "bool" || t == "boolean" {
+            return Ok(q.bind(None::<bool>));
+        }
+        if t == "uuid" {
+            return Ok(q.bind(None::<Uuid>));
+        }
+        if t.contains("numeric")
+            || t.contains("decimal")
+            || t.contains("real")
+            || t.contains("double")
+            || t.contains("float")
+        {
+            return Ok(q.bind(None::<f64>));
+        }
+        // text/varchar/char, plus json/jsonb and datetime types whose SET clause
+        // already carries an explicit `$1::type` cast that absorbs a text NULL.
         return Ok(q.bind(None::<String>));
     }
 
