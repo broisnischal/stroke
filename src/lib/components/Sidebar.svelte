@@ -419,7 +419,7 @@
 
   /** Shared field chrome for schema select + table filter (aligned in sidebar grid) */
   const sidebarFieldClass =
-    "h-7 w-full min-w-0 rounded-md border border-border bg-background/40 text-ui-sm text-foreground shadow-none transition-colors hover:bg-background/55 focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/30";
+    "h-7 w-full min-w-0 rounded-md border border-border bg-background/40 text-ui-sm text-foreground shadow-none transition-colors hover:bg-background/55 focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring";
 </script>
 
 <svelte:window onkeydown={(e) => {
@@ -734,7 +734,7 @@
                     )}
                   />
                   <Icon name="clock" class="size-3 shrink-0 text-muted-foreground/60" />
-                  <span class="text-ui-2xs font-medium tracking-wide text-muted-foreground uppercase">Recent</span>
+                  <span class="text-ui-2xs font-medium tracking-wider text-muted-foreground/55 uppercase">Recent</span>
                   <span class="ml-1 font-mono text-ui-2xs text-muted-foreground/60">{Math.min(recentTabs.length, 5)}</span>
                 </button>
                 <button
@@ -753,7 +753,7 @@
                           "grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 transition-colors cursor-pointer",
                           activeTable === item.table
                             ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                            : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
+                            : "text-foreground/70 hover:bg-sidebar-accent/50 hover:text-foreground",
                         )}
                         role="button"
                         tabindex="0"
@@ -767,7 +767,7 @@
                         {:else}
                           <Icon name="table-2" class="size-3 shrink-0 opacity-50" />
                         {/if}
-                        <span class="min-w-0 truncate font-mono text-ui-sm leading-none">{item.table}</span>
+                        <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{item.table}</span>
                         <button
                           type="button"
                           title="Remove from recent"
@@ -787,7 +787,7 @@
             {#if showPins && visiblePinnedTables.length > 0 && connectionName}
               <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
                 <Icon name="pin" class="size-3 shrink-0 text-primary/60" />
-                <span class="text-ui-2xs font-medium tracking-wide text-muted-foreground uppercase">Pinned</span>
+                <span class="text-ui-2xs font-medium tracking-wider text-muted-foreground/55 uppercase">Pinned</span>
                 <span class="ml-1 font-mono text-ui-2xs text-muted-foreground/60">{visiblePinnedTables.length}</span>
                 {#if pinnedTables.length > 5}
                   <button
@@ -812,7 +812,7 @@
                               ? "bg-primary/10 text-foreground"
                               : activeTable === tableName
                                 ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                                : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
+                                : "text-foreground/70 hover:bg-sidebar-accent/50 hover:text-foreground",
                           )}
                           onclick={(e) => {
                             if (e.shiftKey) { e.preventDefault(); selectItem(tableName, true) }
@@ -835,9 +835,9 @@
                               <Icon name="square" class="size-3 hidden opacity-40 group-hover:block" />
                             {/if}
                           </span>
-                          <span class="min-w-0 truncate font-mono text-ui-sm leading-none">{tableName}</span>
+                          <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{tableName}</span>
                           {#if showRowCount}
-                          <span class="shrink-0 text-right font-mono text-ui-xs leading-none tabular-nums text-muted-foreground/85">
+                          <span class="shrink-0 text-right font-mono text-ui-xs leading-4 tabular-nums text-muted-foreground/85">
                             {formatTableRowCount(tables.find((t) => t.name === tableName)?.rowCount)}
                           </span>
                           {/if}
@@ -931,7 +931,7 @@
                 )}
               />
               <span
-                class="text-ui-2xs font-medium tracking-wide text-muted-foreground uppercase"
+                class="text-ui-2xs font-medium tracking-wider text-muted-foreground/55 uppercase"
                 >Tables</span
               >
               {#if regularTablesUnpinned.length > 0}
@@ -986,7 +986,7 @@
                                 ? "bg-primary/10 text-foreground"
                                 : activeTable === table.name
                                   ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                                  : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
+                                  : "text-foreground/70 hover:bg-sidebar-accent/50 hover:text-foreground",
                             )}
                             onclick={(e) => {
                               if (e.shiftKey) { e.preventDefault(); selectItem(table.name, true) }
@@ -1010,7 +1010,7 @@
                               {/if}
                             </span>
                             <span class="flex min-w-0 items-center gap-1.5">
-                              <span class="min-w-0 truncate font-mono text-ui-sm leading-none">{table.name}</span>
+                              <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{table.name}</span>
                               {#if table.rlsEnabled}
                                 <Icon name="lock" class="size-2.5 shrink-0 text-muted-foreground/50" title="Row-level security enabled" />
                               {/if}
@@ -1019,7 +1019,7 @@
                             <!-- Fixed min-width so the column doesn't grow (shifting
                                  every row) when lazy counts resolve from '…' to numbers. -->
                             <span
-                              class="min-w-[4ch] shrink-0 text-right font-mono text-ui-xs leading-none tabular-nums text-muted-foreground"
+                              class="min-w-[4ch] shrink-0 text-right font-mono text-ui-xs leading-4 tabular-nums text-muted-foreground"
                               title={table.rowCount != null ? Number(table.rowCount).toLocaleString("en-US") : undefined}
                             >{formatTableRowCount(table.rowCount)}</span>
                             {/if}
@@ -1140,7 +1140,7 @@
                   )}
                 />
                 <span
-                  class="text-ui-2xs font-medium tracking-wide text-muted-foreground uppercase"
+                  class="text-ui-2xs font-medium tracking-wider text-muted-foreground/55 uppercase"
                   >Views</span
                 >
                 {#if views.length > 0}
@@ -1169,7 +1169,7 @@
                                   ? "bg-primary/10 text-foreground"
                                   : activeTable === view.name
                                     ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                                    : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
+                                    : "text-foreground/70 hover:bg-sidebar-accent/50 hover:text-foreground",
                               )}
                               onclick={() => ontableselect(view.name)}
                             >
@@ -1188,7 +1188,7 @@
                                   <Icon name="square" class="size-3 hidden opacity-40 group-hover:block" />
                                 {/if}
                               </span>
-                              <span class="min-w-0 truncate font-mono text-ui-sm leading-none">{view.name}</span>
+                              <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{view.name}</span>
                             </button>
                           </ContextMenu.Trigger>
                           <ContextMenu.Content class="w-44 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
@@ -1260,7 +1260,7 @@
                   )}
                 />
                 <span
-                  class="text-ui-2xs font-medium tracking-wide text-muted-foreground uppercase"
+                  class="text-ui-2xs font-medium tracking-wider text-muted-foreground/55 uppercase"
                   >Materialized Views</span
                 >
                 {#if matViews.length > 0}
@@ -1289,7 +1289,7 @@
                                   ? "bg-primary/10 text-foreground"
                                   : activeTable === mv.name
                                     ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                                    : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
+                                    : "text-foreground/70 hover:bg-sidebar-accent/50 hover:text-foreground",
                               )}
                               onclick={() => ontableselect(mv.name)}
                             >
@@ -1308,9 +1308,9 @@
                                   <Icon name="square" class="size-3 hidden opacity-40 group-hover:block" />
                                 {/if}
                               </span>
-                              <span class="min-w-0 truncate font-mono text-ui-sm leading-none">{mv.name}</span>
+                              <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{mv.name}</span>
                               {#if showRowCount}
-                              <span class="shrink-0 text-right font-mono text-ui-xs leading-none tabular-nums text-muted-foreground">
+                              <span class="shrink-0 text-right font-mono text-ui-xs leading-4 tabular-nums text-muted-foreground">
                                 {formatTableRowCount(mv.rowCount)}
                               </span>
                               {/if}
