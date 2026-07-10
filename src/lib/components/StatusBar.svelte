@@ -8,6 +8,7 @@
   import { providerListDatabases } from '$lib/providers.js'
   import { engineFamily } from '$lib/stores/connections.js'
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js'
+  import * as Dialog from '$lib/components/ui/dialog/index.js'
   import AppearanceMenu from './AppearanceMenu.svelte'
   import CreateDatabaseDialog from './CreateDatabaseDialog.svelte'
 
@@ -309,19 +310,21 @@
   /** Shared label+icon button */
   const labelBtn = 'flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors hover:bg-muted/50 hover:text-foreground data-[state=open]:bg-muted/50 data-[state=open]:text-foreground'
 
-  // Tools menu — built from one list so every row renders identically.
+  let toolsOpen = $state(false)
+
+  // Tools launcher — built from one list so every card renders identically.
   const toolItems = $derived.by(() => {
     const t = connection?.type ?? 'postgres'
-    /** @type {{ label: string, icon: string, onclick: () => void }[]} */
+    /** @type {{ label: string, desc: string, icon: string, onclick: () => void }[]} */
     const items = []
-    if (t === 'postgres' || t === 'mysql') items.push({ label: 'Schema Explorer', icon: 'layout-template', onclick: onopenSchema })
-    items.push({ label: 'Activity Log', icon: 'history', onclick: onopenlogs })
-    if (t === 'postgres') items.push({ label: 'Security', icon: 'shield-check', onclick: onopensecurity })
-    items.push({ label: 'ORM Runner', icon: 'code-2', onclick: onopenorm })
-    items.push({ label: 'Backup & Restore', icon: 'archive', onclick: onopenbackup })
-    items.push({ label: 'Charts', icon: 'bar-chart-2', onclick: onopenchartspage })
-    items.push({ label: 'Dashboard', icon: 'layout-dashboard', onclick: onopendashboard })
-    items.push({ label: 'Diagrams', icon: 'git-branch', onclick: onopendiagrams })
+    if (t === 'postgres' || t === 'mysql') items.push({ label: 'Schema Explorer', desc: 'Tables, columns & types', icon: 'layout-template', onclick: onopenSchema })
+    items.push({ label: 'Activity Log', desc: 'Recent queries & events', icon: 'history', onclick: onopenlogs })
+    if (t === 'postgres') items.push({ label: 'Security', desc: 'Roles, policies & RLS', icon: 'shield-check', onclick: onopensecurity })
+    items.push({ label: 'ORM Runner', desc: 'Run typed ORM queries', icon: 'code-2', onclick: onopenorm })
+    items.push({ label: 'Backup & Restore', desc: 'Export & import data', icon: 'archive', onclick: onopenbackup })
+    items.push({ label: 'Charts', desc: 'Visualize query results', icon: 'bar-chart-2', onclick: onopenchartspage })
+    items.push({ label: 'Dashboard', desc: 'Saved metrics at a glance', icon: 'layout-dashboard', onclick: onopendashboard })
+    items.push({ label: 'Diagrams', desc: 'Entity-relationship map', icon: 'git-branch', onclick: onopendiagrams })
     return items
   })
 </script>
@@ -665,24 +668,43 @@
       {@render sep()}
     {/if}
 
-    <!-- Tools overflow (all navigation tools in one dropdown) -->
+    <!-- Tools launcher (all navigation tools in one panel) -->
     {#if connection}
-      <DropdownMenu.Root>
-        <DropdownMenu.Trigger class={iconBtn} title="Tools">
-          <Icon name="more-horizontal" class="size-3.5" />
-        </DropdownMenu.Trigger>
-        <DropdownMenu.Content side="top" align="end" class="w-52">
-          <DropdownMenu.Label>Tools</DropdownMenu.Label>
-          {#each toolItems as item (item.label)}
-            {@const iconName = item.icon}
-            <DropdownMenu.Item class="cursor-pointer" onclick={item.onclick}>
-              <Icon name={iconName} class="size-3.5 shrink-0 text-muted-foreground/45" />
-              <span class="truncate">{item.label}</span>
-              {#if !hasPro}{@render proBadge()}{/if}
-            </DropdownMenu.Item>
-          {/each}
-        </DropdownMenu.Content>
-      </DropdownMenu.Root>
+      <Dialog.Root bind:open={toolsOpen}>
+        <Dialog.Trigger class={cn(iconBtn, toolsOpen && 'bg-muted/50 text-foreground')} title="Tools">
+          <Icon name="layout-list" class="size-3.5" />
+        </Dialog.Trigger>
+        <Dialog.Content showCloseButton={false} class="gap-0 overflow-hidden p-0 sm:max-w-lg">
+          <div class="flex items-center justify-between border-b border-border/50 px-4 py-3">
+            <div class="flex items-center gap-2">
+              <Icon name="layout-list" class="size-4 text-muted-foreground/50" />
+              <Dialog.Title class="text-ui-sm font-semibold tracking-tight">Tools</Dialog.Title>
+            </div>
+            <span class="font-mono text-ui-2xs text-muted-foreground/40">{toolItems.length} features</span>
+          </div>
+          <div class="grid grid-cols-2 gap-1.5 p-3">
+            {#each toolItems as item (item.label)}
+              {@const iconName = item.icon}
+              <button
+                type="button"
+                class="group/tool flex items-center gap-3 rounded-lg border border-transparent p-2.5 text-left transition-colors hover:border-border/60 hover:bg-accent focus-visible:border-border/60 focus-visible:bg-accent focus-visible:outline-none"
+                onclick={() => { toolsOpen = false; item.onclick() }}
+              >
+                <span class="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-muted/40 text-muted-foreground/70 transition-colors group-hover/tool:border-border group-hover/tool:bg-muted group-hover/tool:text-foreground">
+                  <Icon name={iconName} class="size-4" />
+                </span>
+                <span class="flex min-w-0 flex-1 flex-col">
+                  <span class="flex items-center gap-1.5">
+                    <span class="truncate text-ui-xs font-medium text-foreground">{item.label}</span>
+                    {#if !hasPro}{@render proBadge()}{/if}
+                  </span>
+                  <span class="truncate text-ui-2xs text-muted-foreground/50">{item.desc}</span>
+                </span>
+              </button>
+            {/each}
+          </div>
+        </Dialog.Content>
+      </Dialog.Root>
       {@render sep()}
     {/if}
 
