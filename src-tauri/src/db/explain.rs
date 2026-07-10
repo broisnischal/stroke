@@ -37,16 +37,23 @@ fn strip_sql(sql: &str) -> &str {
 }
 
 pub async fn explain_pg(pool: &sqlx::PgPool, sql: &str) -> Result<ExplainResult, String> {
-    let sql = strip_sql(sql);
-    let q = format!("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {sql}");
-
-    let row: (serde_json::Value,) = sqlx::query_as(&q)
-        .fetch_one(pool)
-        .await
-        .map_err(|e| format!("EXPLAIN failed: {e}"))?;
+    let stripped = strip_sql(sql);
+    let q = format!("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {stripped}");
 
     // PG returns [{Plan: {...}, "Planning Time": x, "Execution Time": y}]
-    let arr = row.0;
+    let arr = match sqlx::query_as::<_, (serde_json::Value,)>(&q).fetch_one(pool).await {
+        Ok(row) => row.0,
+        // CockroachDB speaks the PG wire protocol but rejects PG's EXPLAIN option
+        // syntax (`at or near "analyze"`). Fall back to its indented text plan; if
+        // that also fails, surface the original error — it's the meaningful one for
+        // a genuine query fault on real PostgreSQL.
+        Err(e) => {
+            return match explain_cockroach(pool, sql).await {
+                Ok(res) => Ok(res),
+                Err(_) => Err(format!("EXPLAIN failed: {e}")),
+            };
+        }
+    };
     let entry = arr
         .as_array()
         .and_then(|a| a.first())
@@ -63,6 +70,118 @@ pub async fn explain_pg(pool: &sqlx::PgPool, sql: &str) -> Result<ExplainResult,
         execution_time,
         driver: "postgres".into(),
     })
+}
+
+/// CockroachDB has no JSON plan format, so parse its indented `• node` text tree
+/// into the same `{ "Node Type", "Plans" }` shape the PG/SQLite renderer draws.
+/// Uses plain `EXPLAIN` (not `ANALYZE`) so the query is never executed.
+pub async fn explain_cockroach(pool: &sqlx::PgPool, sql: &str) -> Result<ExplainResult, String> {
+    let sql = strip_sql(sql);
+    let q = format!("EXPLAIN {sql}");
+
+    let rows = sqlx::query(&q)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| format!("EXPLAIN failed: {e}"))?;
+
+    let lines: Vec<String> = rows
+        .iter()
+        .filter_map(|r| r.try_get::<String, _>(0).ok())
+        .collect();
+
+    let plan = parse_cockroach_plan(&lines).ok_or_else(|| "Empty EXPLAIN result".to_string())?;
+
+    Ok(ExplainResult {
+        plan,
+        planning_time: 0.0,
+        execution_time: 0.0,
+        driver: "cockroach".into(),
+    })
+}
+
+/// Turn Cockroach's `EXPLAIN` text (one plan line per row) into a nested plan
+/// tree. Node lines carry a `•` bullet whose indentation encodes depth; the
+/// `key: value` lines that follow describe the node just above them.
+fn parse_cockroach_plan(lines: &[String]) -> Option<serde_json::Value> {
+    use serde_json::{json, Map, Value};
+
+    struct Frame {
+        depth: usize,
+        node: Map<String, Value>,
+        children: Vec<Value>,
+    }
+    fn finalize(mut f: Frame) -> Value {
+        if !f.children.is_empty() {
+            f.node.insert("Plans".into(), Value::Array(f.children));
+        }
+        Value::Object(f.node)
+    }
+    // Attach a finished frame to its parent (or the root list if there is none).
+    fn attach(stack: &mut Vec<Frame>, roots: &mut Vec<Value>, done: Value) {
+        match stack.last_mut() {
+            Some(p) => p.children.push(done),
+            None => roots.push(done),
+        }
+    }
+
+    let mut stack: Vec<Frame> = Vec::new();
+    let mut roots: Vec<Value> = Vec::new();
+
+    for line in lines {
+        if let Some((prefix, rest)) = line.split_once('•') {
+            let depth = prefix.chars().count();
+            let name = rest.trim();
+            if name.is_empty() {
+                continue;
+            }
+            while stack.last().is_some_and(|f| f.depth >= depth) {
+                let done = finalize(stack.pop().unwrap());
+                attach(&mut stack, &mut roots, done);
+            }
+            let mut node = Map::new();
+            node.insert("Node Type".into(), json!(name));
+            node.insert("Total Cost".into(), json!(0.0));
+            node.insert("Startup Cost".into(), json!(0.0));
+            node.insert("Plan Rows".into(), json!(0));
+            stack.push(Frame { depth, node, children: Vec::new() });
+        } else if let Some((k, v)) = line.split_once(':') {
+            // A detail line for the current node (header lines like
+            // "distribution: full" arrive before any bullet and are ignored).
+            if let Some(f) = stack.last_mut() {
+                let key = k.trim_matches(|c: char| "│└├─ \t".contains(c)).to_ascii_lowercase();
+                let val = v.trim();
+                match key.as_str() {
+                    "table" => {
+                        f.node.insert("Relation Name".into(), json!(val.split('@').next().unwrap_or(val)));
+                    }
+                    "estimated row count" => {
+                        let digits: String =
+                            val.chars().take_while(|c| c.is_ascii_digit() || *c == ',').filter(|c| *c != ',').collect();
+                        if let Ok(n) = digits.parse::<i64>() {
+                            f.node.insert("Plan Rows".into(), json!(n));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    while let Some(f) = stack.pop() {
+        let done = finalize(f);
+        attach(&mut stack, &mut roots, done);
+    }
+
+    match roots.len() {
+        0 => None,
+        1 => roots.into_iter().next(),
+        _ => Some(json!({
+            "Node Type": "Query Plan",
+            "Total Cost": 0.0,
+            "Startup Cost": 0.0,
+            "Plan Rows": 0,
+            "Plans": roots,
+        })),
+    }
 }
 
 pub async fn explain_mysql(pool: &sqlx::MySqlPool, sql: &str) -> Result<ExplainResult, String> {
