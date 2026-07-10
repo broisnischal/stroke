@@ -189,7 +189,7 @@
               type="button"
               onclick={() => { category = c.id; query = ''; }}
               class={cn(
-                'flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors',
+                'flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-[background-color,color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] active:scale-[0.98]',
                 !searching && category === c.id
                   ? 'bg-muted/60 font-medium text-foreground'
                   : 'text-muted-foreground hover:bg-muted/30 hover:text-foreground',
@@ -205,24 +205,28 @@
       <!-- ── Right: content ──────────────────────────────────────── -->
       <div class="app-scroll min-h-0 overflow-y-auto">
         <div class="mx-auto max-w-[42rem] px-8 py-7">
-          <h2 class="mb-6 text-[15px] font-semibold tracking-tight text-foreground">
-            {searching ? 'Search results' : activeCategory.label}
-          </h2>
+          {#key searching ? '__search__' : category}
+            <div class="settings-pane">
+              <h2 class="mb-6 text-[15px] font-semibold tracking-tight text-foreground">
+                {searching ? 'Search results' : activeCategory.label}
+              </h2>
 
-          {#if searching}
-            {@render generalContent()}
-            {@render appearanceContent()}
-            {@render integrationsContent()}
-            {@render aboutContent()}
-          {:else if category === 'general'}
-            {@render generalContent()}
-          {:else if category === 'appearance'}
-            {@render appearanceContent()}
-          {:else if category === 'integrations'}
-            {@render integrationsContent()}
-          {:else}
-            {@render aboutContent()}
-          {/if}
+              {#if searching}
+                {@render generalContent()}
+                {@render appearanceContent()}
+                {@render integrationsContent()}
+                {@render aboutContent()}
+              {:else if category === 'general'}
+                {@render generalContent()}
+              {:else if category === 'appearance'}
+                {@render appearanceContent()}
+              {:else if category === 'integrations'}
+                {@render integrationsContent()}
+              {:else}
+                {@render aboutContent()}
+              {/if}
+            </div>
+          {/key}
         </div>
       </div>
     </div>
@@ -247,11 +251,11 @@
       type="button" role="switch" aria-checked={checked} aria-label={label}
       onclick={ontoggle}
       class={cn(
-        'relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors',
+        'relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-[background-color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] active:scale-[0.98]',
         checked ? 'bg-primary' : 'bg-muted',
       )}
     >
-      <span class={cn('pointer-events-none block size-4 rounded-full bg-background shadow-sm transition-transform', checked ? 'translate-x-4' : 'translate-x-0.5')}></span>
+      <span class={cn('pointer-events-none block size-4 rounded-full bg-background shadow-sm transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)]', checked ? 'translate-x-4' : 'translate-x-0.5')}></span>
     </button>
   </div>
 {/snippet}
@@ -445,7 +449,7 @@
         <Button type="button" variant="ghost" size="icon" class="size-7" aria-label="Zoom out" disabled={!canDecreaseZoom(settings.zoom)} onclick={() => bumpZoom(-1)}>
           <Minus class="size-3.5" />
         </Button>
-        <button type="button" class="min-w-12 rounded-md px-2 py-1 font-mono text-xs tabular-nums text-foreground hover:bg-muted" onclick={() => (settings = resetZoom())} title="Reset to 100%">{zoomLabel}</button>
+        <button type="button" class="min-w-12 rounded-md px-2 py-1 font-mono text-xs tabular-nums text-foreground transition-[background-color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:bg-muted active:scale-[0.98]" onclick={() => (settings = resetZoom())} title="Reset to 100%">{zoomLabel}</button>
         <Button type="button" variant="ghost" size="icon" class="size-7" aria-label="Zoom in" disabled={!canIncreaseZoom(settings.zoom)} onclick={() => bumpZoom(1)}>
           <Plus class="size-3.5" />
         </Button>
@@ -483,7 +487,7 @@
         <p class="text-[13px] font-medium text-foreground">Website</p>
         <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Docs, licensing, and support.</p>
       </div>
-      <a href="https://stroke.click" target="_blank" rel="noopener noreferrer" class="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border/60 bg-background px-3 text-ui-xs font-medium text-foreground transition-colors hover:bg-muted">
+      <a href="https://stroke.click" target="_blank" rel="noopener noreferrer" class="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border/60 bg-background px-3 text-ui-xs font-medium text-foreground transition-[background-color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:bg-muted active:scale-[0.98]">
         stroke.click <Icon name="external-link" class="size-3.5" />
       </a>
     </div>
@@ -507,3 +511,27 @@
     {action}
   </span>
 {/snippet}
+
+<style>
+  /* Section/search switch: opacity + subtle lift, ease-out, <250ms */
+  .settings-pane {
+    animation: settings-pane-in 200ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  }
+
+  @keyframes settings-pane-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .settings-pane {
+      animation: none;
+    }
+  }
+</style>
