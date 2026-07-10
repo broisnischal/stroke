@@ -39,6 +39,24 @@ const SUPPORT = {
 }
 
 /**
+ * Saved-connection type aliases → the backend driver the capabilities map keys
+ * on. MariaDB is driven by the MySQL backend, and CockroachDB by the Postgres
+ * one, but the frontend keeps their distinct type so the UI can label them —
+ * so map them back here before any capability lookup.
+ * @type {Record<string, string>}
+ */
+const ENGINE_ALIAS = {
+  mariadb: 'mysql',
+  cockroachdb: 'postgres',
+}
+
+/** @param {string | null | undefined} engine */
+export function normalizeEngine(engine) {
+  if (!engine) return engine
+  return ENGINE_ALIAS[engine] ?? engine
+}
+
+/**
  * Is `feature` available on the given engine?
  * Unknown/missing engine → false (fail closed, so we never call an unsupported command).
  * @param {string} feature
@@ -46,8 +64,9 @@ const SUPPORT = {
  * @returns {boolean}
  */
 export function engineSupports(feature, engine) {
-  if (!engine) return false
-  return SUPPORT[feature]?.has(engine) ?? false
+  const e = normalizeEngine(engine)
+  if (!e) return false
+  return SUPPORT[feature]?.has(e) ?? false
 }
 
 /** Human-friendly engine name for messages. */
@@ -60,6 +79,8 @@ const ENGINE_LABEL = /** @type {Record<string, string>} */ ({
   clickhouse: 'ClickHouse',
   duckdb: 'DuckDB',
   mssql: 'SQL Server',
+  mariadb: 'MariaDB',
+  cockroachdb: 'CockroachDB',
 })
 
 /** @param {string | null | undefined} engine */
