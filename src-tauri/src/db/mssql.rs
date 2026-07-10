@@ -491,9 +491,20 @@ pub async fn insert_table_row(
     let val_list = cols.iter().map(|c| sql_literal(&values[c])).collect::<Vec<_>>().join(", ");
     let tq = format!("{}.{}", quote_ident(schema), quote_ident(table));
     // OUTPUT INSERTED.* returns the full new row (including server-generated columns).
+    // This INSERT yields a result set, so it must go through simple_query — not
+    // execute_sql, whose DML branch uses execute() and discards returned rows
+    // (which left the grid showing an all-NULL row after insert).
     let sql = format!("INSERT INTO {tq} ({col_list}) OUTPUT INSERTED.* VALUES ({val_list})");
-    let res = execute_sql(handle, &sql).await?;
-    Ok(res.rows.into_iter().next().unwrap_or_default())
+    let mut client = handle.lock().await;
+    let results = client
+        .simple_query(&sql)
+        .await
+        .map_err(|e| format!("MS SQL error: {e}"))?
+        .into_results()
+        .await
+        .map_err(|e| format!("MS SQL error: {e}"))?;
+    let rows = results.into_iter().next().unwrap_or_default();
+    Ok(rows_to_result(&rows, 0).rows.into_iter().next().unwrap_or_default())
 }
 
 pub async fn delete_table_rows(
