@@ -237,10 +237,12 @@ pub async fn get_table_rows(
     };
 
     let table_ref = format!("{}.{}", bt(schema), bt(table));
-    let count_sql = format!("SELECT COUNT(*) FROM {table_ref}{}", where_clause.sql);
-    // MySQL returns COUNT(*) as BIGINT UNSIGNED (u64). Decoding as i64 causes a
-    // type-mismatch error; fetch as u64 then cast.
-    let mut count_q = sqlx::query_scalar::<_, u64>(&count_sql);
+    // MySQL types COUNT(*) as BIGINT UNSIGNED, but MariaDB types it as signed
+    // BIGINT — decoding the wrong signedness is a hard type-mismatch in sqlx.
+    // CAST(... AS SIGNED) normalizes both to i64, which comfortably holds any
+    // real row count.
+    let count_sql = format!("SELECT CAST(COUNT(*) AS SIGNED) FROM {table_ref}{}", where_clause.sql);
+    let mut count_q = sqlx::query_scalar::<_, i64>(&count_sql);
     for b in &where_clause.binds {
         count_q = count_q.bind(b.as_str());
     }
@@ -264,7 +266,7 @@ pub async fn get_table_rows(
         data_q.fetch_all(pool),
         meta_q.fetch_all(pool),
     );
-    let total: i64 = total_res.map_err(|e| format!("Failed to count rows: {e}"))? as i64;
+    let total: i64 = total_res.map_err(|e| format!("Failed to count rows: {e}"))?;
     let rows = rows_res.map_err(|e| format!("Failed to fetch rows: {e}"))?;
     let meta_rows = meta_res.unwrap_or_default();
 
