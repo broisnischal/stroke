@@ -39,6 +39,20 @@
   // svelte-ignore state_referenced_locally
   const _init = activeSchema
 
+  // System/catalog schemas that sort ahead of the user's real schema (e.g.
+  // Cockroach's crdb_internal, PG's pg_catalog) — picking schemas[0] would land
+  // on one of these and every table lookup fails ("relation X does not exist").
+  const SYSTEM_SCHEMAS = new Set([
+    'crdb_internal', 'information_schema', 'pg_catalog', 'pg_toast', 'pg_extension',
+    'sys', 'mysql', 'performance_schema', 'sys_catalog',
+  ])
+  /** Best default schema: prefer `public`, then any non-system schema, else the first. */
+  function pickDefaultSchema(/** @type {string[]} */ list) {
+    if (!list.length) return ''
+    if (list.includes('public')) return 'public'
+    return list.find((s) => !SYSTEM_SCHEMAS.has(s.toLowerCase())) ?? list[0]
+  }
+
   /** @param {string} connId @param {string} database @param {string} schema @returns {SourceState} */
   function makeSource(connId, database, schema) {
     return { connId, database, databases: [], loadingDbs: false, schema, schemas: [], loadingSchemas: false, table: '', tables: [], loadingTables: false, mode: 'table', sql: '' }
@@ -256,14 +270,14 @@
   async function loadSchemas(/** @type {SourceState} */ src, /** @type {SavedConnection} */ cfg, /** @type {(s:SourceState)=>void} */ set) {
     if (!cfg) return
     if (isCurrent(src.connId) && cfg.database === connById(src.connId)?.database) {
-      const schema = schemas[0] ?? ''
+      const schema = pickDefaultSchema(schemas)
       const next = { ...src, schemas, schema, tables: [], table: '', loadingSchemas: false }
       set(next); await loadTables(next, cfg, set); return
     }
     set({ ...src, loadingSchemas: true, schemas: [], schema: '', tables: [], table: '' })
     try {
       const s = await listSchemasOnConnection(cfg)
-      const schema = s[0] ?? ''
+      const schema = pickDefaultSchema(s)
       const next = { ...src, loadingSchemas: false, schemas: s, schema, tables: [], table: '' }
       set(next)
       if (schema) await loadTables(next, cfg, set)
