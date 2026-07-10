@@ -1,5 +1,7 @@
 <script>
   import { tick, onDestroy, untrack } from "svelte";
+  import { fade } from "svelte/transition";
+  import { cubicOut } from "svelte/easing";
   import { zoomState } from '$lib/stores/canvas-zoom.svelte.js'
   // Zoom is driven through the app-level settings so the canvas scales together
   // with the rest of the UI (applySettings mirrors the app zoom into zoomState).
@@ -840,7 +842,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
     if (!primaryKey.length) {
       toast.error("Cannot edit", {
-        description: "This table has no primary key.",
+        // ClickHouse is OLAP: rows aren't primary-key addressable, so the backend
+        // reports no PK on purpose. Say why and point to the supported path rather
+        // than the misleading generic "no primary key" message.
+        description: dialect === "clickhouse"
+          ? "ClickHouse tables are browse-only here — modify data with ALTER TABLE … UPDATE in the SQL console."
+          : "This table has no primary key.",
       });
       return;
     }
@@ -1523,6 +1530,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   function setCellNull(rowIdx, colIdx) {
     const col = columns[colIdx];
     if (!col || !canEditColumn(colIdx)) return;
+    // A NOT NULL column can't hold NULL — reject up front with a clear message
+    // instead of staging an edit that the database will refuse on apply. Matches
+    // the inline editor, which hides the NULL option for non-nullable columns.
+    if (col.nullable === false) {
+      toast.error("Cannot set NULL", { description: `"${col.name}" is NOT NULL.` });
+      return;
+    }
     if (effectiveCellValue(rowIdx, colIdx) === null) {
       toast.message("Already NULL");
       return;
@@ -4458,6 +4472,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                 {@const eType = ecached?.colType ?? ''}
                 {@const eNullable = ecol?.nullable ?? true}
                 <div
+                  in:fade={{ duration: 100, easing: cubicOut }}
                   class="absolute z-30 box-border bg-background ring-2 ring-inset ring-primary"
                   style="top:{editOverlay.top}px; left:{editOverlay.left}px; width:{editOverlay.width}px; height:{editOverlay.height}px"
                 >
@@ -4913,7 +4928,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             type="button"
             onclick={() => { dmlEditedSql = dmlOriginalSql }}
             disabled={dmlPreviewRunning}
-            class="inline-flex items-center gap-1 text-ui-2xs text-muted-foreground/60 hover:text-foreground disabled:opacity-50"
+            class="inline-flex items-center gap-1 text-ui-2xs text-muted-foreground/60 transition-transform duration-100 ease-out hover:text-foreground active:scale-[0.97] disabled:opacity-50"
             title="Discard your edits and restore the generated SQL"
           >
             <RotateCcw class="size-3" />
@@ -4944,7 +4959,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           type="button"
           onclick={() => { if (!dmlPreviewRunning) dmlPreview = null }}
           disabled={dmlPreviewRunning}
-          class="inline-flex h-8 items-center rounded-md px-3 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+          class="inline-flex h-8 items-center rounded-md px-3 text-ui-xs text-muted-foreground transition-transform duration-100 ease-out hover:bg-accent hover:text-foreground active:scale-[0.97] disabled:opacity-50"
         >
           Cancel
         </button>
@@ -4953,7 +4968,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           onclick={confirmDmlPreview}
           disabled={dmlPreviewRunning}
           class={cn(
-            "inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-ui-xs font-medium disabled:opacity-60",
+            "inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-ui-xs font-medium transition-transform duration-100 ease-out active:scale-[0.97] disabled:opacity-60",
             dmlPreview.destructive
               ? "bg-destructive text-destructive-foreground hover:opacity-90"
               : "bg-primary text-primary-foreground hover:opacity-90"

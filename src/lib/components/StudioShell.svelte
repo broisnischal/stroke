@@ -155,6 +155,7 @@
   import {
     MAX_PAGE_SIZE,
     PAGE_SIZE_ALL,
+    DEFAULT_PAGE_SIZE,
     saveDefaultPageSize,
     loadDefaultPageSize,
     activeFilters,
@@ -1487,6 +1488,14 @@ let rowSearch = $state('')
     showShortcutsModal = true
   })
 
+  // Same panel via a modifier chord (Ctrl/⌘+?), which works even while a text
+  // field is focused, unlike the bare "?".
+  createHotkey('Mod+?', (e) => {
+    if (commandOpen || showConnectionModal || showSettingsModal || showShortcutsModal) return
+    e.preventDefault()
+    showShortcutsModal = true
+  })
+
   createHotkey('Mod+,', (e) => {
     if (commandOpen || showConnectionModal || showShortcutsModal) return
     e.preventDefault()
@@ -2791,9 +2800,15 @@ let rowSearch = $state('')
     if (tabId === activeTabId) { loadingRows = true; error = '' }
 
     try {
-      const offset = (s.page - 1) * s.pageSize
+      // Resolve the "All" sentinel — and guard a corrupt/unset value — into a
+      // real fetch limit; the backend rejects limit < 1. Mirrors effectivePageSize.
+      const limit =
+        s.pageSize === PAGE_SIZE_ALL
+          ? (s.total > 0 ? s.total : MAX_PAGE_SIZE)
+          : (Number.isFinite(s.pageSize) && s.pageSize > 0 ? s.pageSize : DEFAULT_PAGE_SIZE)
+      const offset = s.pageSize === PAGE_SIZE_ALL ? 0 : (s.page - 1) * limit
       const { sortColumn, sortDirection } = sortForApi(s.rowSort)
-      const data = await getTableRows(s.schema, s.table, s.pageSize, offset, {
+      const data = await getTableRows(s.schema, s.table, limit, offset, {
         search: s.rowSearch,
         sortColumn,
         sortDirection,
