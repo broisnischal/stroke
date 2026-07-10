@@ -42,7 +42,7 @@
 		data-slot="dialog-content"
 		onCloseAutoFocus={handleCloseAutoFocus}
 		class={cn(
-			"bg-background text-foreground data-open:animate-in data-closed:animate-out data-closed:fade-out-0 data-open:fade-in-0 data-closed:zoom-out-[0.98] data-open:zoom-in-[0.98] flex flex-col gap-4 rounded-xl border border-border/60 p-5 text-sm shadow-lg duration-100 w-full max-w-[calc(100%-2rem)] fixed top-1/2 left-1/2 z-50 -translate-x-1/2 -translate-y-1/2 outline-none",
+			"bg-background text-foreground data-open:animate-in data-closed:animate-out data-closed:fade-out-0 data-open:fade-in-0 data-closed:zoom-out-[0.95] data-open:zoom-in-[0.95] ease-out duration-200 flex flex-col gap-4 rounded-xl border border-border/60 p-5 text-sm shadow-lg w-full max-w-[calc(100%-2rem)] fixed top-1/2 left-1/2 z-50 -translate-x-1/2 -translate-y-1/2 outline-none",
 			className
 		)}
 		{...restProps}
