@@ -1948,9 +1948,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // FK sub-view is a zero-cost overlay — it does NOT push rows down and is NOT
   // included in rowTops. This eliminates the fkSubviewHeight→_mergedHeights→rowTops
   // reactive chain that caused lag every time the panel opened or changed height.
+  // null when no row is expanded (the common case) → rowDocTop/rowIndexAtY use
+  // O(1) `idx * ROW_HEIGHT` math and no per-page Float64Array is allocated.
   const rowTops = $derived(computeRowTops(rows.length, expandedRows, 280, ROW_HEIGHT, expandedRowHeights))
   /** Total scrollable content height incl. header + insert slot + body + 2-row bottom margin. */
-  const contentHeight = $derived(HEADER_H + insertRowOffset + (rowTops[rows.length] ?? 0) + ROW_HEIGHT * 2)
+  const contentHeight = $derived(HEADER_H + insertRowOffset + (rowTops ? rowTops[rows.length] : rows.length * ROW_HEIGHT) + ROW_HEIGHT * 2)
 
   /** Viewport-visible column resize handles (DOM overlay — not on the canvas). */
   const resizeHandles = $derived.by(() => {
@@ -1981,7 +1983,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   /** Document-space y of a body row's top (0 = top of the sizer). */
   function rowDocTop(/** @type {number} */ idx) {
-    return HEADER_H + insertRowOffset + (rowTops[idx] ?? idx * ROW_HEIGHT)
+    return HEADER_H + insertRowOffset + (rowTops ? (rowTops[idx] ?? idx * ROW_HEIGHT) : idx * ROW_HEIGHT)
   }
   /** Viewport y of a body row's top. */
   function rowViewportY(/** @type {number} */ idx) {
@@ -2273,6 +2275,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // restores exactly what the user had open in each table.
   /** @type {Map<string, { expandedRows: Set<number>, fkSubview: typeof fkSubview }>} */
   const _tabExpandCache = new Map()
+  // Cap the per-tab cache: each entry can retain a whole FK sub-view's fetched
+  // rows, so an unbounded map would accumulate row data for every table visited
+  // in a session. LRU-evict the oldest once over the cap (Map keeps insertion
+  // order; re-inserting on save moves an entry to the most-recent position).
+  const TAB_EXPAND_CACHE_MAX = 12
   let _lastTabKey = $state(untrack(() => columnWidthsKey ?? ''))
 
   $effect(() => {
@@ -2281,10 +2288,17 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     untrack(() => {
       // Save state for the tab we're leaving
       if (_lastTabKey !== undefined && _lastTabKey !== '') {
+        _tabExpandCache.delete(_lastTabKey) // re-insert at MRU position
         _tabExpandCache.set(_lastTabKey, {
           expandedRows: new Set(expandedRows),
           fkSubview: fkSubview,
         })
+        // Evict least-recently-used entries (oldest insertion order) over the cap.
+        while (_tabExpandCache.size > TAB_EXPAND_CACHE_MAX) {
+          const oldest = _tabExpandCache.keys().next().value
+          if (oldest === undefined) break
+          _tabExpandCache.delete(oldest)
+        }
         // Preserve unsaved edits/deletes for the table we're leaving so they're
         // restored when the user returns instead of being silently discarded.
         savePendingChanges(_lastTabKey, pendingEdits, pendingDeletes)
@@ -2791,9 +2805,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const usedW = Math.max(0, Math.min(W, geom.totalWidth - _scrollLeft))
     const navName = focusedCol !== null ? navigableColumns[focusedCol]?.name : null
 
-    // Frozen left region. Pinned cols only (gutters scroll with content).
-    let frozenW = 0
-    for (const col of geom.cols) if (col.pinned) frozenW += col.w
+    // Frozen left region (pinned cols only) — already summed by geometry.
+    const frozenW = geom.frozenWidth
 
     // ── Body ─────────────────────────────────────────────────────────────
     ctx.save()
@@ -2819,18 +2832,23 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       rangeR0 = range.r0; rangeR1 = range.r1
     }
 
+    // Frame-constant draw context — built ONCE per frame and shared by every
+    // visible row, instead of a fresh ~20-field literal per row (that churned
+    // thousands of short-lived objects/sec during scroll → GC jank).
+    const bodyC = {
+      cFg, cText, cMuted, cGrid, cMutedBg, cRing, cAccent, cPanel, usedW, navName,
+      AMBER, BLUE_FG, RED, cPrimary, frozenW,
+      rangeColNames, rangeFirstCol, rangeLastCol, rangeR0, rangeR1,
+    }
+
     const bodyTopY = Math.max(0, _scrollTop - HEADER_H - insertRowOffset)
     if (visibleColumns.length > 0) {
-      let i = rowIndexAtY(rowTops, n, bodyTopY)
+      let i = rowIndexAtY(rowTops, n, bodyTopY, ROW_HEIGHT)
       for (; i < n; i++) {
         const ry = rowViewportY(i)
         if (ry >= H) break
         if (ry + ROW_HEIGHT <= HEADER_H) continue
-        drawBodyRow(ctx, i, ry, {
-          cFg, cText, cMuted, cGrid, cMutedBg, cRing, cAccent, cPanel, usedW, navName,
-          AMBER, BLUE_FG, RED, cPrimary, frozenW,
-          rangeColNames, rangeFirstCol, rangeLastCol, rangeR0, rangeR1,
-        })
+        drawBodyRow(ctx, i, ry, bodyC)
       }
     }
     ctx.restore()
@@ -3506,14 +3524,22 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   /** Size the canvas backing store (DPR-aware). Always sync CSS px size so macOS
    *  WebKit can't display a stale CSS box over a mismatched bitmap (blurry zoom). */
+  let _lastCssW = -1, _lastCssH = -1, _lastDpr = -1
   function syncCanvasSurface() {
     const canvas = canvasEl
     const probe = colorProbe
     if (!canvas || !probe) return false
     if (!_readColor) _readColor = createColorReader(probe)
+    if (!_ctx) _ctx = canvas.getContext('2d')
     const cssW = Math.max(1, Math.round(_viewportWidth))
     const cssH = Math.max(1, Math.round(_viewportHeight))
     const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    // Nothing changed → skip all DOM writes. This effect also fires on selection/
+    // focus/edit ticks (they schedule a repaint via the same effect graph); doing
+    // the style-write + setTransform every time was pure overhead on those.
+    if (cssW === _lastCssW && cssH === _lastCssH && dpr === _lastDpr) {
+      return { ok: !!_ctx, resized: false }
+    }
     const bw = Math.max(1, Math.round(cssW * dpr))
     const bh = Math.max(1, Math.round(cssH * dpr))
     canvas.style.width = cssW + 'px'
@@ -3526,8 +3552,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       canvas.height = bh
       resized = true
     }
-    _ctx = canvas.getContext('2d')
+    // canvas.width/height assignment resets the transform, so (re)apply it after.
     if (_ctx) _ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    _lastCssW = cssW; _lastCssH = cssH; _lastDpr = dpr
     return { ok: !!_ctx, resized }
   }
 
@@ -3637,18 +3664,23 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     return () => el.removeEventListener('wheel', onShiftWheel)
   })
 
-  // Layout / sizing effect — resize the backing store when geometry or viewport changes.
+  // Layout / sizing effect — resize the backing store when geometry or viewport
+  // changes. Tracks ONLY dependencies that can change the canvas dimensions,
+  // geometry, or the full set of drawn data. Interaction state (selection, focus,
+  // edit, hover, staged edits) is intentionally NOT tracked here — it can never
+  // change canvas dimensions, so it lives in the lightweight repaint effect below.
+  // Keeping it out means arrow-key nav and drag-select don't re-run the resurface
+  // dependency graph or touch the backing store on every tick.
   $effect(() => {
     void rows; void columns; void columnWidths
-    void pinnedColumns; void hiddenColumns; void selected; void focusedRow
-    void focusedCol; void editingCell; void pendingEdits; void pendingDeletes; void expandedRows; void selAnchor
+    void pinnedColumns; void hiddenColumns
     void rowSort; void _viewportWidth
     // NOTE: _scrollTop / _scrollLeft are intentionally NOT tracked here — scrolling
     // repaints via scheduleDraw() inside onContainerScroll, so this effect (which
     // also re-syncs the canvas backing store) doesn't run on every scroll frame.
-    void _viewportHeight; void newRowDrafts; void insertSaving; void colMeta
+    void _viewportHeight; void newRowDrafts; void colMeta
     void geom; void rowTops; void _redrawToken; void foreignKeys; void indexes
-    void _colCache; void expandedRowHeights; void fkSubview; void virtualRelCols; void VIRTUAL_COL_W
+    void _colCache; void expandedRows; void expandedRowHeights; void virtualRelCols; void VIRTUAL_COL_W
     void vexprTotalW; void _vcolFns
     void zoomState.value; void canvasZoom
     const { ok, resized } = syncCanvasSurface()
@@ -3661,9 +3693,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
   })
 
-  // Hover / affordance repaint — pointer moves must not re-touch canvas dimensions.
+  // Repaint effect — interaction/visual state that changes what's drawn but never
+  // the canvas dimensions. A plain scheduleDraw() (rAF-coalesced) with no backing-
+  // store work, so hover/selection/focus/edit stay cheap even during drag-select.
   $effect(() => {
     void hoveredRow; void hoveredColName; void _resizeHoverCol; void resizingColName
+    void selected; void focusedRow; void focusedCol; void selAnchor; void editingCell
+    void pendingEdits; void pendingDeletes; void insertSaving; void fkSubview
     if (_ctx) scheduleDraw()
   })
 
@@ -4129,7 +4165,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (!editingCell) return null
     const col = geom.cols.find((c) => _nameToActualIdx.get(c.name) === editingCell.colIdx)
     if (!col) return null
-    const top = HEADER_H + insertRowOffset + (rowTops[editingCell.rowIdx] ?? 0)
+    const top = HEADER_H + insertRowOffset + (rowTops ? (rowTops[editingCell.rowIdx] ?? 0) : editingCell.rowIdx * ROW_HEIGHT)
     // Pinned columns rest at their frozen x (content-space = scrollLeft + fixed).
     const left = col.pinned
       ? Math.max(col.contentX, _scrollLeft + (geom.pinnedFixedX.get(col.name) ?? 0))

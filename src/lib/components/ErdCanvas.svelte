@@ -268,10 +268,10 @@
 
     ctx.textBaseline = 'middle'
     if (zoom >= LOD_NAME) {
-      ctx.font = `600 13px ${FONT_SANS}`
+      ctx.font = `600 13.5px ${FONT_SANS}`
       ctx.fillStyle = c('fg', 1)
       ctx.textAlign = 'left'
-      fillClipped(d.name ?? '', p.x + 12, p.y + HDR_H / 2, NODE_W - 24, 13)
+      fillClipped(d.name ?? '', p.x + 16, p.y + HDR_H / 2, NODE_W - 32, 13.5)
     }
 
     if (zoom < LOD_ROWS) { ctx.globalAlpha = 1; return }
@@ -291,27 +291,27 @@
       }
       const midY = cy + ROW_H / 2
       const badge = isPk ? 'pk' : isFk ? 'fk' : ''
-      const typeRight = p.x + NODE_W - (badge ? 42 : 12)
+      const typeRight = p.x + NODE_W - (badge ? 52 : 16)
 
       // Column name.
-      ctx.font = `${isPk ? '600 ' : ''}11px ${FONT_SANS}`
+      ctx.font = `${isPk ? '600 ' : ''}12px ${FONT_SANS}`
       ctx.fillStyle = isPk ? `rgba(${PK},0.95)` : isFk ? `rgba(${FK},0.95)` : c('fg', 0.82)
       ctx.textAlign = 'left'
-      fillClipped(col.name ?? '', p.x + 12, midY, typeRight - (p.x + 16), 11)
+      fillClipped(col.name ?? '', p.x + 16, midY, typeRight - (p.x + 20), 12)
 
       // Data type.
-      ctx.font = `10px ${FONT_MONO}`
+      ctx.font = `11px ${FONT_MONO}`
       ctx.fillStyle = c('mfg', 0.6)
       ctx.textAlign = 'right'
-      fillClipped(String(col.dataType ?? ''), typeRight, midY, 64, 10, true)
+      fillClipped(String(col.dataType ?? ''), typeRight, midY, 72, 11, true)
 
       // PK / FK badge.
       if (badge) {
-        const bx = p.x + NODE_W - 34, bw = 22
-        roundRect(bx, cy + 5, bw, ROW_H - 10, 3)
+        const bw = 26, bx = p.x + NODE_W - bw - 12
+        roundRect(bx, cy + 6, bw, ROW_H - 12, 3)
         ctx.fillStyle = isPk ? `rgba(${PK},0.16)` : `rgba(${FK},0.14)`
         ctx.fill()
-        ctx.font = `700 8px ${FONT_MONO}`
+        ctx.font = `700 9px ${FONT_MONO}`
         ctx.fillStyle = isPk ? `rgba(${PK},1)` : `rgba(${FK},1)`
         ctx.textAlign = 'center'
         ctx.fillText(badge, bx + bw / 2, midY + 0.5)

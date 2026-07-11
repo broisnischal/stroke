@@ -31,10 +31,10 @@
    */
 
   // ── Config ────────────────────────────────────────────────────────────────
-  const NODE_W    = 230
-  const ROW_H     = 22
-  const HDR_H     = 34
-  const PAD_B     = 4
+  const NODE_W    = 268
+  const ROW_H     = 28
+  const HDR_H     = 42
+  const PAD_B     = 10
   const BATCH     = 16
   const WARN_MANY = 60
 
@@ -89,7 +89,7 @@
 
     if (conn.length) {
       const g = new dagre.graphlib.Graph()
-      g.setGraph({ rankdir: 'LR', ranksep: 220, nodesep: 48, marginx: 60, marginy: 60 })
+      g.setGraph({ rankdir: 'LR', ranksep: 340, nodesep: 84, marginx: 80, marginy: 80 })
       g.setDefaultEdgeLabel(() => ({}))
       for (const n of conn) {
         g.setNode(n.id, { width: NODE_W, height: n.data ? nodeH(n.data) : HDR_H })
@@ -102,7 +102,7 @@
       // (nodes share an x in LR mode) into multiple sub-columns capped at a target
       // height, so a big fan spreads into a readable grid. Generous gaps keep the
       // cards from crowding and give the edges room to fan without overlapping.
-      const COL_GAP = 96, ROW_GAP = 52, RANK_GAP = 260, TARGET_H = 3200
+      const COL_GAP = 150, ROW_GAP = 84, RANK_GAP = 400, TARGET_H = 3200
       /** @type {Map<number, {n:any,y:number,h:number}[]>} */
       const ranks = new Map()
       for (const n of conn) {
@@ -137,14 +137,14 @@
     }
 
     // Orphans in a responsive grid below the connected graph
-    const orphanY = laidConn.length ? bottomY + 80 : 0
+    const orphanY = laidConn.length ? bottomY + 120 : 0
     const maxH = orphans.reduce((m, n) => Math.max(m, n.data ? nodeH(n.data) : HDR_H), HDR_H)
     const GCOLS = Math.max(3, Math.min(6, Math.ceil(Math.sqrt(orphans.length * 1.8))))
     const laidOrphans = orphans.map((n, i) => ({
       ...n,
       position: {
-        x: (i % GCOLS) * (NODE_W + 32),
-        y: orphanY + Math.floor(i / GCOLS) * (maxH + 48),
+        x: (i % GCOLS) * (NODE_W + 56),
+        y: orphanY + Math.floor(i / GCOLS) * (maxH + 72),
       },
     }))
 
