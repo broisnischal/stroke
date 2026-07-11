@@ -17,11 +17,23 @@
 // once per draw via a hidden probe element. Values are cached by expression for
 // the lifetime of the reader (call `createColorReader` again after a theme flip
 // — the component recreates it on a theme-change tick).
+//
+// IMPORTANT: each colour is resolved on a FRESH element rather than by mutating
+// one shared probe's `style.color`. macOS WKWebView (Tauri's engine) returns a
+// STALE `getComputedStyle(el).color` when `el.style.color` is reassigned to a
+// different `var(--…)` between synchronous reads — every lookup after the first
+// froze at the first colour's value, so the grid painted every token the same
+// colour (text/grid lines vanished, only rgba-literal badges survived). Reading
+// each token off a throwaway node sidesteps the stale-recompute bug entirely.
 
 /** @param {HTMLElement} probe A 0×0 element living inside the table container. */
 export function createColorReader(probe) {
   /** @type {Map<string, string>} */
   const cache = new Map();
+  // Resolve on nodes appended to the probe's parent so they inherit the same
+  // themed context (data-theme lives on <html>, but keeping them adjacent also
+  // matches font/context). Falls back to <body> if the probe is detached.
+  const host = probe.parentNode ?? document.body;
   // A scratch 2D context normalises whatever the engine serialises (oklch /
   // oklab / rgb / hex) into a canvas-native string (#rrggbb or rgba(...)), so
   // downstream alpha math is always reliable.
@@ -29,9 +41,15 @@ export function createColorReader(probe) {
   return (/** @type {string} */ expr) => {
     const hit = cache.get(expr);
     if (hit !== undefined) return hit;
-    probe.style.color = expr;
+    const el = document.createElement("span");
+    el.setAttribute("aria-hidden", "true");
+    el.className = probe.className;
+    el.style.cssText = "position:absolute;top:0;left:0;width:0;height:0;overflow:hidden;pointer-events:none";
+    el.style.color = expr;
+    host.appendChild(el);
     // getComputedStyle resolves var()/oklch/hsl to a concrete computed colour.
-    let resolved = getComputedStyle(probe).color || "rgb(0,0,0)";
+    let resolved = getComputedStyle(el).color || "rgb(0,0,0)";
+    el.remove();
     if (scratch) {
       try {
         scratch.fillStyle = "#010203"; // sentinel
