@@ -21,13 +21,6 @@
      "editor font" and everything else. JetBrains Mono is a true code typeface:
      heavier, even rhythm, designed ligatures. */
   --editor-font-family: "JetBrains Mono Variable", "Geist Mono Variable", ui-monospace, monospace;
-  /* Motion tokens — stronger-than-default curves (Emil Kowalski). These override
-     Tailwind's built-in --ease-out / --ease-in-out so the `ease-out` / `ease-in-out`
-     utilities (and tw-animate-css enter/exit keyframes, which read --tw-ease) all
-     inherit the punchier curves. Only transform/opacity should ride these. */
-  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
-  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
-  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 /* JSON colorizer tokens (highlightJson) — dark-friendly defaults, light override
@@ -105,28 +98,6 @@ html[data-os="linux"]   { --window-radius: 8px; }
 @layer base {
   * {
     @apply border-border outline-ring/50;
-  }
-
-  /* Reduced motion — reduced, not zero (Emil / WCAG). Keep opacity + colour
-     fades that aid comprehension; strip movement. Neutralising tw-animate-css's
-     enter/exit transform vars makes overlays fade in place instead of
-     sliding/zooming, and clamping durations keeps any remaining transition brief. */
-  @media (prefers-reduced-motion: reduce) {
-    *,
-    *::before,
-    *::after {
-      --tw-enter-translate-x: 0 !important;
-      --tw-enter-translate-y: 0 !important;
-      --tw-exit-translate-x: 0 !important;
-      --tw-exit-translate-y: 0 !important;
-      --tw-enter-scale: 1 !important;
-      --tw-exit-scale: 1 !important;
-      --tw-enter-rotate: 0 !important;
-      --tw-exit-rotate: 0 !important;
-      animation-duration: 0.12s !important;
-      transition-duration: 0.12s !important;
-      scroll-behavior: auto !important;
-    }
   }
 
   /* Disable OS word suggestions, autocorrect, and spellcheck on all inputs. */
