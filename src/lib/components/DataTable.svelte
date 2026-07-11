@@ -3534,7 +3534,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const probe = colorProbe
     if (!canvas || !probe) return false
     if (!_readColor) _readColor = createColorReader(probe)
-    if (!_ctx) _ctx = canvas.getContext('2d')
+    // ALWAYS (re)fetch the context for the CURRENT canvas element. getContext is
+    // idempotent per element (returns the same object), so this is cheap — but if
+    // Svelte recreated the <canvas> (it does across tab switches while this
+    // instance persists), a cached _ctx would keep painting the OLD, detached
+    // canvas and the visible one would stay black. Binding to canvasEl every call
+    // keeps _ctx and the on-screen canvas in lockstep.
+    _ctx = canvas.getContext('2d')
     const cssW = Math.max(1, Math.round(_viewportWidth))
     const cssH = Math.max(1, Math.round(_viewportHeight))
     const dpr = Math.min(window.devicePixelRatio || 1, 2)
@@ -3659,6 +3665,19 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
     el.addEventListener('wheel', onShiftWheel, { passive: false })
     return () => el.removeEventListener('wheel', onShiftWheel)
+  })
+
+  // Canvas element binding — Svelte can recreate the <canvas> across tab switches
+  // while this component instance (and its cached _ctx) persist. When the element
+  // identity changes, immediately re-bind the context, re-apply size + transform,
+  // and repaint the NEW element — otherwise draws keep hitting the old, detached
+  // canvas and the visible grid stays black. Tracks canvasEl only.
+  $effect(() => {
+    const el = canvasEl
+    if (!el) { _ctx = null; return }
+    if (_ctx?.canvas === el) return // already bound to this element
+    const { ok } = syncCanvasSurface()
+    if (ok) draw()
   })
 
   // Layout / sizing effect — resize the backing store when geometry or viewport
