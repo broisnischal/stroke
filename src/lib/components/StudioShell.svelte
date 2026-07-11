@@ -816,37 +816,57 @@ let rowSearch = $state('')
   })
 
   // ── Connection health monitor ─────────────────────────────────────────────────
-  // Pings the active DB every 30 seconds. On failure, shows a persistent toast
-  // with a Reconnect button. Clears automatically when the connection recovers.
+  // Pings the active DB periodically. On failure it flags the connection as lost
+  // (a subtle red dot in the StatusBar) and silently reconnects in place — NO
+  // popup. Pings every 30s when healthy; every 6s while lost so recovery is
+  // detected fast. Clears itself the moment the connection is back.
   $effect(() => {
     if (!connection) {
       connectionLost = false
       return
     }
-    const conn = connection
-    const id = setInterval(async () => {
+    let stopped = false
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
+    let timer
+    const schedule = () => {
+      if (stopped) return
+      timer = setTimeout(run, connectionLost ? 6_000 : 30_000)
+    }
+    const run = async () => {
+      if (stopped) return
       // Skip the round-trip while the window is hidden (backgrounded/minimized):
       // there's no UI to update, and idle pings only risk waking a sleeping
       // remote connection. The next tick after the window is shown will ping.
-      if (typeof document !== 'undefined' && document.hidden) return
+      if (typeof document !== 'undefined' && document.hidden) { schedule(); return }
       try {
         await pingConnection()
-        if (connectionLost) connectionLost = false
+        if (connectionLost) { connectionLost = false; error = '' }
       } catch {
-        if (!connectionLost) {
-          connectionLost = true
-          toast.error('Connection lost', {
-            description: 'The database connection was interrupted.',
-            duration: Infinity,
-            action: {
-              label: 'Reconnect',
-              onClick: () => handleSwitchDatabase(conn),
-            },
-          })
-        }
+        if (!connectionLost) connectionLost = true
+        // Heal in place instead of showing a Reconnect popup.
+        void silentReconnect()
       }
-    }, 30_000)
-    return () => clearInterval(id)
+      schedule()
+    }
+    schedule()
+    return () => { stopped = true; if (timer) clearTimeout(timer) }
+  })
+
+  // Reconnect the instant the OS reports the network is back, or when the user
+  // returns to a backgrounded window — the two moments a dropped remote DB most
+  // likely became reachable again. Both are no-ops unless the connection is lost.
+  $effect(() => {
+    if (typeof window === 'undefined') return
+    const kick = () => { if (connection && connectionLost) void silentReconnect() }
+    const onVis = () => { if (typeof document !== 'undefined' && !document.hidden) kick() }
+    window.addEventListener('online', kick)
+    window.addEventListener('focus', kick)
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      window.removeEventListener('online', kick)
+      window.removeEventListener('focus', kick)
+      document.removeEventListener('visibilitychange', onVis)
+    }
   })
 
   const sqlSchemaHints = $derived.by(() => {
@@ -2844,7 +2864,7 @@ let rowSearch = $state('')
       }
     } catch (e) {
       const errStr = String(e)
-      if (isNetworkError(errStr)) connectionLost = true
+      if (isNetworkError(errStr)) { connectionLost = true; void silentReconnect() }
       patchTab({ loadingRows: false, error: errStr, columns: [], rows: [], total: 0 })
       if (tabId === activeTabId) {
         loadingRows = false
@@ -2925,7 +2945,7 @@ let rowSearch = $state('')
     } catch (e) {
       if (seq !== _loadSeq) return
       const errStr = String(e)
-      if (isNetworkError(errStr)) connectionLost = true
+      if (isNetworkError(errStr)) { connectionLost = true; void silentReconnect() }
       error = errStr
       columns = []
       primaryKey = []
@@ -3069,7 +3089,7 @@ let rowSearch = $state('')
     } catch (e) {
       sqlError = String(e)
       sqlMultiResults = []
-      if (isNetworkError(sqlError)) connectionLost = true
+      if (isNetworkError(sqlError)) { connectionLost = true; void silentReconnect() }
     } finally {
       sqlLoading = false
       recordActivity({ type: 'sql_exec', title: sqlRan.trim().slice(0, 80) + (sqlRan.trim().length > 80 ? '…' : ''), detail: sqlRan, durationMs: sqlQueryMs, rowCount: sqlRows.length || undefined, success: !sqlError, error: sqlError || undefined })
@@ -3236,6 +3256,7 @@ let rowSearch = $state('')
 
   async function handleSchemaChange(schema) {
     if (!schema || schema === activeSchema) return
+    if (connectionLost) await reconnectPool()
     activeSchema = schema
     activeTable = null
     page = 1
@@ -3254,6 +3275,8 @@ let rowSearch = $state('')
   }
 
   async function handleTableSelect(name) {
+    // Switching tables should transparently heal a dropped connection.
+    if (connectionLost) await reconnectPool()
     recordActivity({ type: 'table_open', title: `Opened ${name}`, schema: activeSchema, table: name, success: true })
     await openTableTab(activeSchema, name)
   }
@@ -3357,6 +3380,23 @@ let rowSearch = $state('')
     }
   }
 
+  /**
+   * Re-establish the backend pool for a saved connection, dispatched by engine.
+   * Shared by the explicit switch flow and the silent auto-reconnect path.
+   * @param {import('$lib/stores/connections.js').SavedConnection} conn
+   */
+  async function connectByType(conn) {
+    const { connectPostgres, connectSqlite, connectD1, connectLibSql, connectMysql, connectClickhouse, connectDuckdb, connectMssql } = await import('$lib/api.js')
+    if (conn.type === 'sqlite') await connectSqlite(conn)
+    else if (conn.type === 'd1') await connectD1(conn)
+    else if (conn.type === 'libsql') await connectLibSql(conn)
+    else if (conn.type === 'mysql' || conn.type === 'mariadb') await connectMysql(conn)
+    else if (conn.type === 'clickhouse') await connectClickhouse(conn)
+    else if (conn.type === 'duckdb') await connectDuckdb(conn)
+    else if (conn.type === 'mssql') await connectMssql(conn)
+    else await connectPostgres(conn)
+  }
+
   /** @param {import('$lib/stores/connections.js').SavedConnection} conn */
   async function handleSwitchDatabase(conn) {
     // Disconnect current before connecting to the new one to avoid the race
@@ -3367,15 +3407,7 @@ let rowSearch = $state('')
     // Connect to the chosen saved connection
     autoConnecting = true
     try {
-      const { connectPostgres, connectSqlite, connectD1, connectLibSql, connectMysql, connectClickhouse, connectDuckdb, connectMssql } = await import('$lib/api.js')
-      if (conn.type === 'sqlite') await connectSqlite(conn)
-      else if (conn.type === 'd1') await connectD1(conn)
-      else if (conn.type === 'libsql') await connectLibSql(conn)
-      else if (conn.type === 'mysql' || conn.type === 'mariadb') await connectMysql(conn)
-      else if (conn.type === 'clickhouse') await connectClickhouse(conn)
-      else if (conn.type === 'duckdb') await connectDuckdb(conn)
-      else if (conn.type === 'mssql') await connectMssql(conn)
-      else await connectPostgres(conn)
+      await connectByType(conn)
       await onConnected(conn, conn.id)
     } catch (e) {
       error = String(e)
@@ -3385,7 +3417,49 @@ let rowSearch = $state('')
     }
   }
 
+  // ── Silent auto-reconnect ──────────────────────────────────────────────────
+  // Heals a dropped connection IN PLACE — rebuilds the backend pool for the
+  // CURRENT connection config, with no UI teardown, no full-screen overlay, and
+  // no toast. The health monitor, an `online` event, a table switch, a refresh,
+  // or a failed query can all trigger this, so the app recovers by itself instead
+  // of nagging the user with a "Connection lost / Reconnect" popup.
+  let _reconnecting = false
+  let _lastReconnectAt = 0
+  /** Rebuild the pool for the active connection. Returns true on success. */
+  async function reconnectPool() {
+    const conn = connection
+    if (!conn) return false
+    try {
+      await connectByType(conn)
+      connectionLost = false
+      return true
+    } catch {
+      return false
+    }
+  }
+  /** Rate-limited silent reconnect + quiet refetch, for background triggers. */
+  async function silentReconnect() {
+    if (_reconnecting || !connection) return
+    // Coalesce bursts of triggers (online + visibilitychange + ping fire together)
+    // and stop a still-unreachable host from hammering connect_* in a tight loop.
+    const now = Date.now()
+    if (now - _lastReconnectAt < 3000) return
+    _lastReconnectAt = now
+    _reconnecting = true
+    try {
+      if (await reconnectPool()) {
+        error = ''
+        if (activeTab?.kind === 'table' && activeTable) await loadRows().catch(() => {})
+        else await loadTables().catch(() => {})
+      }
+    } finally {
+      _reconnecting = false
+    }
+  }
+
   async function handleRefresh() {
+    // A manual refresh should also recover a dropped connection.
+    if (connectionLost) await reconnectPool()
     await loadSchemas()
     await loadTables({ force: true })
     if (activeTab?.kind === 'table' && activeTable) {
