@@ -3523,8 +3523,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   }
 
   /** Size the canvas backing store (DPR-aware). Always sync CSS px size so macOS
-   *  WebKit can't display a stale CSS box over a mismatched bitmap (blurry zoom). */
-  let _lastCssW = -1, _lastCssH = -1, _lastDpr = -1
+   *  WebKit can't display a stale CSS box over a mismatched bitmap (blurry zoom).
+   *  Called only from the (low-frequency) layout effect — interaction repaints go
+   *  through the separate repaint effect — so it always re-applies the transform
+   *  rather than short-circuiting on unchanged dimensions. That guarantees the
+   *  visible canvas is transformed + painted on every mount / tab switch (a
+   *  short-circuit here risked leaving a fresh canvas untransformed → blank). */
   function syncCanvasSurface() {
     const canvas = canvasEl
     const probe = colorProbe
@@ -3534,12 +3538,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const cssW = Math.max(1, Math.round(_viewportWidth))
     const cssH = Math.max(1, Math.round(_viewportHeight))
     const dpr = Math.min(window.devicePixelRatio || 1, 2)
-    // Nothing changed → skip all DOM writes. This effect also fires on selection/
-    // focus/edit ticks (they schedule a repaint via the same effect graph); doing
-    // the style-write + setTransform every time was pure overhead on those.
-    if (cssW === _lastCssW && cssH === _lastCssH && dpr === _lastDpr) {
-      return { ok: !!_ctx, resized: false }
-    }
     const bw = Math.max(1, Math.round(cssW * dpr))
     const bh = Math.max(1, Math.round(cssH * dpr))
     canvas.style.width = cssW + 'px'
@@ -3552,9 +3550,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       canvas.height = bh
       resized = true
     }
-    // canvas.width/height assignment resets the transform, so (re)apply it after.
+    // canvas.width/height assignment resets the transform, so always (re)apply it.
     if (_ctx) _ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    _lastCssW = cssW; _lastCssH = cssH; _lastDpr = dpr
     return { ok: !!_ctx, resized }
   }
 
@@ -3683,12 +3680,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     void _colCache; void expandedRows; void expandedRowHeights; void virtualRelCols; void VIRTUAL_COL_W
     void vexprTotalW; void _vcolFns
     void zoomState.value; void canvasZoom
-    const { ok, resized } = syncCanvasSurface()
+    const { ok } = syncCanvasSurface()
     if (ok) {
-      // When the backing store was cleared by a dimension change, draw immediately
-      // (synchronously in this microtask) so the browser never composites a black
-      // canvas. scheduleDraw() still queues a RAF for any concurrent state updates.
-      if (resized) draw()
+      // Always paint synchronously in this microtask (not only when the backing
+      // store was resized) so a fresh mount / tab switch never composites an
+      // untransformed, unpainted canvas (which would show the dark app background
+      // as a "black" grid). scheduleDraw() still coalesces concurrent updates.
+      draw()
       scheduleDraw()
     }
   })
