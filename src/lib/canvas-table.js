@@ -26,14 +26,19 @@
 // colour (text/grid lines vanished, only rgba-literal badges survived). Reading
 // each token off a throwaway node sidesteps the stale-recompute bug entirely.
 
+// Neutral mid-grey fallback. Deliberately NOT black: this value can fill the
+// entire canvas (the --panel background), so on the rare frame where a token
+// fails to resolve, a grey flash is recoverable whereas opaque black is not.
+const COLOR_FALLBACK = "rgb(128, 128, 128)";
+
 /** @param {HTMLElement} probe A 0×0 element living inside the table container. */
 export function createColorReader(probe) {
   /** @type {Map<string, string>} */
   const cache = new Map();
-  // Resolve on nodes appended to the probe's parent so they inherit the same
-  // themed context (data-theme lives on <html>, but keeping them adjacent also
-  // matches font/context). Falls back to <body> if the probe is detached.
-  const host = probe.parentNode ?? document.body;
+  // Last successfully-resolved colour, reused if a later read comes back empty
+  // (e.g. a getComputedStyle against a momentarily-detached subtree) so we never
+  // paint an unresolved fallback when we already know a good value.
+  let lastGood = "";
   // A scratch 2D context normalises whatever the engine serialises (oklch /
   // oklab / rgb / hex) into a canvas-native string (#rrggbb or rgba(...)), so
   // downstream alpha math is always reliable.
@@ -41,6 +46,10 @@ export function createColorReader(probe) {
   return (/** @type {string} */ expr) => {
     const hit = cache.get(expr);
     if (hit !== undefined) return hit;
+    // Append the throwaway node to a GUARANTEED-connected host — a detached node
+    // yields an empty computed colour in WebKit, which would poison the fill.
+    // Theme tokens live on <html>, so <body> inherits them just as the probe does.
+    const host = probe.isConnected ? (probe.parentNode ?? document.body) : document.body;
     const el = document.createElement("span");
     el.setAttribute("aria-hidden", "true");
     el.className = probe.className;
@@ -48,8 +57,11 @@ export function createColorReader(probe) {
     el.style.color = expr;
     host.appendChild(el);
     // getComputedStyle resolves var()/oklch/hsl to a concrete computed colour.
-    let resolved = getComputedStyle(el).color || "rgb(0,0,0)";
+    let resolved = getComputedStyle(el).color;
     el.remove();
+    // Unresolved (empty) → reuse the last good colour, else a neutral grey. Do
+    // NOT cache this: a later read (once the DOM settles) should resolve properly.
+    if (!resolved) return lastGood || COLOR_FALLBACK;
     if (scratch) {
       try {
         scratch.fillStyle = "#010203"; // sentinel
@@ -60,6 +72,7 @@ export function createColorReader(probe) {
         /* keep the computed string */
       }
     }
+    lastGood = resolved;
     cache.set(expr, resolved);
     return resolved;
   };
