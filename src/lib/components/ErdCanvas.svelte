@@ -118,13 +118,38 @@
   // Auto-fit the first time nodes populate (they load async, after mount), then
   // never again until the graph empties — so search/rebuild doesn't reset the view.
   let _fitted = false
+  // Zoom below which cards stop being legible — a big/deep schema whose whole
+  // bounding box would fit only under this is NOT fit-to-view (that produces an
+  // unreadable sliver). Instead we land at READABLE_ZOOM anchored at the graph's
+  // top-left so real cards are visible and the user pans to explore.
+  const READABLE_ZOOM = 0.62
   function ensureFit() {
     if (_fitted || !cssW || !nodes.length) return
     _fitted = true
-    fit()
-    // A huge/star schema fits down to an unreadable sliver — instead land the
-    // user at a readable zoom centred on the graph so they can pan around.
-    if (cam.zoom < 0.4) zoomBy(0.55 / cam.zoom, cssW / 2, cssH / 2)
+    // Graph bounding box (world coords).
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+    for (const n of nodes) {
+      const p = posOf(n), h = nodeH(n.data)
+      x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y)
+      x1 = Math.max(x1, p.x + NODE_W); y1 = Math.max(y1, p.y + h)
+    }
+    const bw = x1 - x0 || 1, bh = y1 - y0 || 1
+    const zFit = Math.min(cssW / bw, cssH / bh) * (1 - 0.12)
+    if (zFit >= READABLE_ZOOM) {
+      // Small enough to show entirely at a legible size — fit-and-centre.
+      fit()
+      return
+    }
+    // Too large to fit legibly: land readable at the top-left of the graph so the
+    // first ranks are visible; the user pans right/down through the rest.
+    const M = 56 // screen-px margin from the viewport's top-left
+    cam.zoom = READABLE_ZOOM
+    cam.panX = M - x0 * READABLE_ZOOM
+    // Centre vertically when the graph is shorter than the viewport, else top-anchor.
+    cam.panY = bh * READABLE_ZOOM < cssH - M
+      ? (cssH - bh * READABLE_ZOOM) / 2 - y0 * READABLE_ZOOM
+      : M - y0 * READABLE_ZOOM
+    markDirty()
   }
   $effect(() => {
     byId = new Map(nodes.map((n) => [n.id, n]))
@@ -268,10 +293,10 @@
 
     ctx.textBaseline = 'middle'
     if (zoom >= LOD_NAME) {
-      ctx.font = `600 13px ${FONT_SANS}`
+      ctx.font = `600 13.5px ${FONT_SANS}`
       ctx.fillStyle = c('fg', 1)
       ctx.textAlign = 'left'
-      fillClipped(d.name ?? '', p.x + 12, p.y + HDR_H / 2, NODE_W - 24, 13)
+      fillClipped(d.name ?? '', p.x + 16, p.y + HDR_H / 2, NODE_W - 32, 13.5)
     }
 
     if (zoom < LOD_ROWS) { ctx.globalAlpha = 1; return }
@@ -291,27 +316,27 @@
       }
       const midY = cy + ROW_H / 2
       const badge = isPk ? 'pk' : isFk ? 'fk' : ''
-      const typeRight = p.x + NODE_W - (badge ? 42 : 12)
+      const typeRight = p.x + NODE_W - (badge ? 52 : 16)
 
       // Column name.
-      ctx.font = `${isPk ? '600 ' : ''}11px ${FONT_SANS}`
+      ctx.font = `${isPk ? '600 ' : ''}12px ${FONT_SANS}`
       ctx.fillStyle = isPk ? `rgba(${PK},0.95)` : isFk ? `rgba(${FK},0.95)` : c('fg', 0.82)
       ctx.textAlign = 'left'
-      fillClipped(col.name ?? '', p.x + 12, midY, typeRight - (p.x + 16), 11)
+      fillClipped(col.name ?? '', p.x + 16, midY, typeRight - (p.x + 20), 12)
 
       // Data type.
-      ctx.font = `10px ${FONT_MONO}`
+      ctx.font = `11px ${FONT_MONO}`
       ctx.fillStyle = c('mfg', 0.6)
       ctx.textAlign = 'right'
-      fillClipped(String(col.dataType ?? ''), typeRight, midY, 64, 10, true)
+      fillClipped(String(col.dataType ?? ''), typeRight, midY, 72, 11, true)
 
       // PK / FK badge.
       if (badge) {
-        const bx = p.x + NODE_W - 34, bw = 22
-        roundRect(bx, cy + 5, bw, ROW_H - 10, 3)
+        const bw = 26, bx = p.x + NODE_W - bw - 12
+        roundRect(bx, cy + 6, bw, ROW_H - 12, 3)
         ctx.fillStyle = isPk ? `rgba(${PK},0.16)` : `rgba(${FK},0.14)`
         ctx.fill()
-        ctx.font = `700 8px ${FONT_MONO}`
+        ctx.font = `700 9px ${FONT_MONO}`
         ctx.fillStyle = isPk ? `rgba(${PK},1)` : `rgba(${FK},1)`
         ctx.textAlign = 'center'
         ctx.fillText(badge, bx + bw / 2, midY + 0.5)
