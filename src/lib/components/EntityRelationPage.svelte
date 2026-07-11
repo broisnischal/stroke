@@ -89,7 +89,7 @@
 
     if (conn.length) {
       const g = new dagre.graphlib.Graph()
-      g.setGraph({ rankdir: 'LR', ranksep: 340, nodesep: 84, marginx: 80, marginy: 80 })
+      g.setGraph({ rankdir: 'LR', ranksep: 240, nodesep: 56, marginx: 80, marginy: 80 })
       g.setDefaultEdgeLabel(() => ({}))
       for (const n of conn) {
         g.setNode(n.id, { width: NODE_W, height: n.data ? nodeH(n.data) : HDR_H })
@@ -102,7 +102,12 @@
       // (nodes share an x in LR mode) into multiple sub-columns capped at a target
       // height, so a big fan spreads into a readable grid. Generous gaps keep the
       // cards from crowding and give the edges room to fan without overlapping.
-      const COL_GAP = 150, ROW_GAP = 84, RANK_GAP = 400, TARGET_H = 3200
+      // Vertical gaps stay generous (breathing room within a readable view);
+      // horizontal RANK_GAP is kept modest so a deep LR graph doesn't stretch into
+      // an unreadable 8:1 sliver that fit-to-view then shrinks to nothing. A higher
+      // TARGET_H stacks each rank (esp. a hub referenced by many tables) into more
+      // vertical rows and fewer sub-columns → a squarer, narrower overall block.
+      const COL_GAP = 110, ROW_GAP = 72, RANK_GAP = 200, TARGET_H = 2600
       /** @type {Map<number, {n:any,y:number,h:number}[]>} */
       const ranks = new Map()
       for (const n of conn) {
