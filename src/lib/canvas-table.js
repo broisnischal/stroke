@@ -17,11 +17,28 @@
 // once per draw via a hidden probe element. Values are cached by expression for
 // the lifetime of the reader (call `createColorReader` again after a theme flip
 // — the component recreates it on a theme-change tick).
+//
+// IMPORTANT: each colour is resolved on a FRESH element rather than by mutating
+// one shared probe's `style.color`. macOS WKWebView (Tauri's engine) returns a
+// STALE `getComputedStyle(el).color` when `el.style.color` is reassigned to a
+// different `var(--…)` between synchronous reads — every lookup after the first
+// froze at the first colour's value, so the grid painted every token the same
+// colour (text/grid lines vanished, only rgba-literal badges survived). Reading
+// each token off a throwaway node sidesteps the stale-recompute bug entirely.
+
+// Neutral mid-grey fallback. Deliberately NOT black: this value can fill the
+// entire canvas (the --panel background), so on the rare frame where a token
+// fails to resolve, a grey flash is recoverable whereas opaque black is not.
+const COLOR_FALLBACK = "rgb(128, 128, 128)";
 
 /** @param {HTMLElement} probe A 0×0 element living inside the table container. */
 export function createColorReader(probe) {
   /** @type {Map<string, string>} */
   const cache = new Map();
+  // Last successfully-resolved colour, reused if a later read comes back empty
+  // (e.g. a getComputedStyle against a momentarily-detached subtree) so we never
+  // paint an unresolved fallback when we already know a good value.
+  let lastGood = "";
   // A scratch 2D context normalises whatever the engine serialises (oklch /
   // oklab / rgb / hex) into a canvas-native string (#rrggbb or rgba(...)), so
   // downstream alpha math is always reliable.
@@ -29,9 +46,22 @@ export function createColorReader(probe) {
   return (/** @type {string} */ expr) => {
     const hit = cache.get(expr);
     if (hit !== undefined) return hit;
-    probe.style.color = expr;
+    // Append the throwaway node to a GUARANTEED-connected host — a detached node
+    // yields an empty computed colour in WebKit, which would poison the fill.
+    // Theme tokens live on <html>, so <body> inherits them just as the probe does.
+    const host = probe.isConnected ? (probe.parentNode ?? document.body) : document.body;
+    const el = document.createElement("span");
+    el.setAttribute("aria-hidden", "true");
+    el.className = probe.className;
+    el.style.cssText = "position:absolute;top:0;left:0;width:0;height:0;overflow:hidden;pointer-events:none";
+    el.style.color = expr;
+    host.appendChild(el);
     // getComputedStyle resolves var()/oklch/hsl to a concrete computed colour.
-    let resolved = getComputedStyle(probe).color || "rgb(0,0,0)";
+    let resolved = getComputedStyle(el).color;
+    el.remove();
+    // Unresolved (empty) → reuse the last good colour, else a neutral grey. Do
+    // NOT cache this: a later read (once the DOM settles) should resolve properly.
+    if (!resolved) return lastGood || COLOR_FALLBACK;
     if (scratch) {
       try {
         scratch.fillStyle = "#010203"; // sentinel
@@ -42,6 +72,7 @@ export function createColorReader(probe) {
         /* keep the computed string */
       }
     }
+    lastGood = resolved;
     cache.set(expr, resolved);
     return resolved;
   };
@@ -350,11 +381,19 @@ export function resizeColAtX(x, geom, scrollLeft, slop = 5, frozenLeft = geom.gu
  * Cumulative top offset of every row. Fixed `rowHeight` rows, plus expand height
  * for each expanded row. Per-row measured heights are used when available;
  * `defaultExpandHeight` is the fallback before measurement.
+ *
+ * Returns `null` in the common case where NO row is expanded — every row top is
+ * then exactly `idx * rowHeight`, so the O(1) linear path in the consumers
+ * (rowDocTop / rowIndexAtY / rowAtContentY) applies and we skip allocating a
+ * Float64Array over all rows. On a 1M-row result set that array is ~8 MB and was
+ * being reallocated on every infinite-scroll page append — this avoids it
+ * entirely unless the user actually expands a row.
  * @param {Set<number>} expandedSet
  * @param {Map<number,number> | null} expandHeights Per-row measured heights (optional).
- * @returns {Float64Array} length rowCount+1; [rowCount] is the total height.
+ * @returns {Float64Array | null} length rowCount+1 ([rowCount] = total height), or null when unexpanded.
  */
 export function computeRowTops(rowCount, expandedSet, defaultExpandHeight, rowHeight, expandHeights = null) {
+  if (expandedSet.size === 0) return null;
   const tops = new Float64Array(rowCount + 1);
   let y = 0;
   for (let i = 0; i < rowCount; i++) {
@@ -365,9 +404,14 @@ export function computeRowTops(rowCount, expandedSet, defaultExpandHeight, rowHe
   return tops;
 }
 
-/** Largest row index with top ≤ y (binary search). */
-export function rowIndexAtY(tops, rowCount, y) {
+/** Largest row index with top ≤ y (binary search; O(1) linear when `tops` is null). */
+export function rowIndexAtY(tops, rowCount, y, rowHeight = 0) {
   if (rowCount === 0 || y < 0) return 0;
+  if (tops === null) {
+    // Uniform rows: top(idx) = idx * rowHeight.
+    if (rowHeight <= 0) return 0;
+    return Math.min(rowCount - 1, Math.max(0, Math.floor(y / rowHeight)));
+  }
   let lo = 0, hi = rowCount - 1, idx = 0;
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
@@ -382,7 +426,14 @@ export function rowIndexAtY(tops, rowCount, y) {
  * @returns {{ idx: number, inRowBody: boolean } | null}
  */
 export function rowAtContentY(tops, rowCount, rowHeight, y) {
-  if (rowCount === 0 || y < 0 || y >= tops[rowCount]) return null;
+  if (rowCount === 0 || y < 0) return null;
+  if (tops === null) {
+    // Uniform rows: total height = rowCount * rowHeight, top(idx) = idx*rowHeight.
+    if (y >= rowCount * rowHeight) return null;
+    const idx = Math.min(rowCount - 1, Math.floor(y / rowHeight));
+    return { idx, inRowBody: y < idx * rowHeight + rowHeight };
+  }
+  if (y >= tops[rowCount]) return null;
   const idx = rowIndexAtY(tops, rowCount, y);
   return { idx, inRowBody: y < tops[idx] + rowHeight };
 }

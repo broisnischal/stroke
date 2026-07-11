@@ -154,11 +154,20 @@ function recordThemeBeforeChange(theme) {
   if (themeHistoryStack.length > 32) themeHistoryStack.shift()
 }
 
+// In-memory cache of the normalized settings. All reads go through loadSettings
+// and all writes through saveSettings, so this stays authoritative for the app's
+// (single) window and lets the zoom/pinch hot path skip a localStorage getItem +
+// JSON.parse (× the two loadSettings calls each updateSettings made) per step.
+/** @type {AppSettings | null} */
+let _settingsCache = null
+
 /** @returns {AppSettings} */
 export function loadSettings() {
+  if (_settingsCache) return { ..._settingsCache }
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) {
+      _settingsCache = { ...DEFAULT_SETTINGS }
       return { ...DEFAULT_SETTINGS }
     }
     const parsed = JSON.parse(raw)
@@ -183,7 +192,8 @@ export function loadSettings() {
     const font = normalizeFont(parsed.font)
     const iconStyle = normalizeIconStyle(parsed.iconStyle)
     const iconSet = normalizeIconSet(parsed.iconSet)
-    return { theme, zoom, font, iconStyle, iconSet, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply }
+    _settingsCache = { theme, zoom, font, iconStyle, iconSet, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply }
+    return { ..._settingsCache }
   } catch {
     return { ...DEFAULT_SETTINGS }
   }
@@ -191,6 +201,9 @@ export function loadSettings() {
 
 /** @param {AppSettings} settings */
 export function saveSettings(settings) {
+  // Keep the in-memory cache authoritative even if the localStorage write throws
+  // (quota/private-mode) — the running app should still reflect the new settings.
+  _settingsCache = { ...settings }
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
   } catch (err) {

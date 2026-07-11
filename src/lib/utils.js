@@ -21,6 +21,20 @@ const NETWORK_ERROR_PATTERNS = [
   'os error 111',  // ECONNREFUSED Linux
   'os error 110',  // ETIMEDOUT
   'os error 113',  // EHOSTUNREACH
+  'os error 51',   // ENETUNREACH macOS (Wi‑Fi dropped)
+  'os error 65',   // EHOSTUNREACH macOS
+  'cannot reach',            // our own preflight message
+  'pool timed out',          // sqlx pool acquire timeout (idle/dead peer)
+  'pool has been closed',
+  'poolclosed',
+  'connection closed',
+  'connection was closed',
+  'server closed the connection',
+  'terminating connection',  // Postgres idle-timeout / admin close
+  'connection is closed',
+  // NB: deliberately NOT matching bare 'timed out' / 'i/o error' — those also fire
+  // on a statement/lock timeout (a slow query, not a dropped connection), which
+  // would spuriously flag connectionLost and churn the pool on every subsequent tap.
 ]
 
 /**
