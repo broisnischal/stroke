@@ -32,8 +32,9 @@ const NETWORK_ERROR_PATTERNS = [
   'server closed the connection',
   'terminating connection',  // Postgres idle-timeout / admin close
   'connection is closed',
-  'i/o error',
-  'timed out',
+  // NB: deliberately NOT matching bare 'timed out' / 'i/o error' — those also fire
+  // on a statement/lock timeout (a slow query, not a dropped connection), which
+  // would spuriously flag connectionLost and churn the pool on every subsequent tap.
 ]
 
 /**
