@@ -368,11 +368,19 @@ export function resizeColAtX(x, geom, scrollLeft, slop = 5, frozenLeft = geom.gu
  * Cumulative top offset of every row. Fixed `rowHeight` rows, plus expand height
  * for each expanded row. Per-row measured heights are used when available;
  * `defaultExpandHeight` is the fallback before measurement.
+ *
+ * Returns `null` in the common case where NO row is expanded — every row top is
+ * then exactly `idx * rowHeight`, so the O(1) linear path in the consumers
+ * (rowDocTop / rowIndexAtY / rowAtContentY) applies and we skip allocating a
+ * Float64Array over all rows. On a 1M-row result set that array is ~8 MB and was
+ * being reallocated on every infinite-scroll page append — this avoids it
+ * entirely unless the user actually expands a row.
  * @param {Set<number>} expandedSet
  * @param {Map<number,number> | null} expandHeights Per-row measured heights (optional).
- * @returns {Float64Array} length rowCount+1; [rowCount] is the total height.
+ * @returns {Float64Array | null} length rowCount+1 ([rowCount] = total height), or null when unexpanded.
  */
 export function computeRowTops(rowCount, expandedSet, defaultExpandHeight, rowHeight, expandHeights = null) {
+  if (expandedSet.size === 0) return null;
   const tops = new Float64Array(rowCount + 1);
   let y = 0;
   for (let i = 0; i < rowCount; i++) {
@@ -383,9 +391,14 @@ export function computeRowTops(rowCount, expandedSet, defaultExpandHeight, rowHe
   return tops;
 }
 
-/** Largest row index with top ≤ y (binary search). */
-export function rowIndexAtY(tops, rowCount, y) {
+/** Largest row index with top ≤ y (binary search; O(1) linear when `tops` is null). */
+export function rowIndexAtY(tops, rowCount, y, rowHeight = 0) {
   if (rowCount === 0 || y < 0) return 0;
+  if (tops === null) {
+    // Uniform rows: top(idx) = idx * rowHeight.
+    if (rowHeight <= 0) return 0;
+    return Math.min(rowCount - 1, Math.max(0, Math.floor(y / rowHeight)));
+  }
   let lo = 0, hi = rowCount - 1, idx = 0;
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
@@ -400,7 +413,14 @@ export function rowIndexAtY(tops, rowCount, y) {
  * @returns {{ idx: number, inRowBody: boolean } | null}
  */
 export function rowAtContentY(tops, rowCount, rowHeight, y) {
-  if (rowCount === 0 || y < 0 || y >= tops[rowCount]) return null;
+  if (rowCount === 0 || y < 0) return null;
+  if (tops === null) {
+    // Uniform rows: total height = rowCount * rowHeight, top(idx) = idx*rowHeight.
+    if (y >= rowCount * rowHeight) return null;
+    const idx = Math.min(rowCount - 1, Math.floor(y / rowHeight));
+    return { idx, inRowBody: y < idx * rowHeight + rowHeight };
+  }
+  if (y >= tops[rowCount]) return null;
   const idx = rowIndexAtY(tops, rowCount, y);
   return { idx, inRowBody: y < tops[idx] + rowHeight };
 }
