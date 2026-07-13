@@ -23,7 +23,7 @@ pub use explain::{explain_pg, explain_mysql, explain_sqlite, ExplainResult};
 pub use ssh_tunnel::TunnelState;
 pub use query::{
     delete_table_row, delete_table_rows, execute_ddl, execute_sql, execute_sql_multi, execute_sql_on_conn,
-    get_column_stats, get_table_rows, insert_table_row, update_table_cell, ping_connection,
+    get_column_stats, get_table_rows, count_table_rows, insert_table_row, update_table_cell, ping_connection,
     ColumnStats, InsertRowResult, RowFilter, SqlResult, TableRows,
 };
 pub use schema::{

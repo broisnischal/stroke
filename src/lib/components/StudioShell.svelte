@@ -84,6 +84,7 @@
     listTables,
     getTableRowCounts,
     getTableRows,
+    countTableRows,
     liveStart,
     liveStop,
     getTableColumnStructure,
@@ -1469,7 +1470,7 @@ let rowSearch = $state('')
           e.preventDefault()
           void handlePageChange(page - 1)
         } else {
-          if (page * effectivePageSize >= total) return
+          if (total >= 0 && page * effectivePageSize >= total) return
           e.preventDefault()
           void handlePageChange(page + 1)
         }
@@ -2833,6 +2834,9 @@ let rowSearch = $state('')
         sortColumn,
         sortDirection,
         filters: filtersForApi(s.rowFilters),
+        // Paint rows now; the total (readRowsResponse -> -1 on Postgres) fills
+        // in via the background count below.
+        includeCount: false,
       })
 
       const result = {
@@ -2862,6 +2866,22 @@ let rowSearch = $state('')
         loadingRows = false
         error = ''
       }
+
+      // Background count — keeps the tab's row fetch non-blocking. Patches the
+      // tab (and global total if still active) when it resolves; -1 (non-PG /
+      // failure) leaves the total readRowsResponse already set.
+      void (async () => {
+        try {
+          const n = await countTableRows(s.schema, s.table, {
+            search: s.rowSearch,
+            filters: filtersForApi(s.rowFilters),
+          })
+          if (typeof n === 'number' && n >= 0) {
+            patchTab({ total: n })
+            if (tabId === activeTabId) total = n
+          }
+        } catch { /* best-effort */ }
+      })()
     } catch (e) {
       const errStr = String(e)
       if (isNetworkError(errStr)) { connectionLost = true; void silentReconnect() }
@@ -2918,6 +2938,8 @@ let rowSearch = $state('')
         sortDirection,
         filters: filtersForApi(rowFilters, columns),
         includeMeta,
+        // Don't wait on COUNT(*) — paint rows now, count streams in below.
+        includeCount: false,
       })
       if (seq !== _loadSeq) return
       const nextColumns = data.columns ?? []
@@ -2935,13 +2957,20 @@ let rowSearch = $state('')
       const fetched = data.rows ?? []
       rows = fetched
       _infiniteRows = fetched
+      // total = -1 means "counting" (Postgres, non-blocking). Other engines
+      // return a real total here; refreshRowCount() then no-ops for them.
       total = Number(data.total ?? 0)
       queryMs = Number(data.queryMs ?? data.query_ms ?? 0)
       // Live refresh updates in place — only reset scroll for user-driven loads
       // (page/filter/sort/search), where jumping to the top is expected.
       if (!keepScroll) reloadToken++
-      const maxPage = Math.max(1, Math.ceil(total / effectivePageSize) || 1)
-      if (page > maxPage) page = maxPage
+      if (total >= 0) {
+        const maxPage = Math.max(1, Math.ceil(total / effectivePageSize) || 1)
+        if (page > maxPage) page = maxPage
+      }
+      // Fire-and-forget: fill the total in the background so the count never
+      // delays the rows. Guarded by the same _loadSeq token to drop stale results.
+      void refreshRowCount(seq)
     } catch (e) {
       if (seq !== _loadSeq) return
       const errStr = String(e)
@@ -2959,9 +2988,33 @@ let rowSearch = $state('')
     }
   }
 
+  /**
+   * Background row-count pass for the main grid. Runs after loadRows() has
+   * already painted the rows, so COUNT(*) never blocks the initial view. The
+   * _loadSeq token drops results from a superseded load (fast tab/filter
+   * switches). Returns -1 on non-Postgres engines / failure — in which case the
+   * total set by loadRows() is kept untouched.
+   * @param {number} seq
+   */
+  async function refreshRowCount(seq) {
+    if (!activeTable) return
+    try {
+      const n = await countTableRows(activeSchema, activeTable, {
+        search: rowSearch,
+        filters: filtersForApi(rowFilters, columns),
+      })
+      if (seq !== _loadSeq) return
+      if (typeof n === 'number' && n >= 0) {
+        total = n
+        const maxPage = Math.max(1, Math.ceil(total / effectivePageSize) || 1)
+        if (page > maxPage) page = maxPage
+      }
+    } catch { /* count is best-effort — leave the current total as-is */ }
+  }
+
   async function handleLoadMore() {
     if (!infiniteScroll || !activeTable || loadingRows || loadingMore) return
-    if (_infiniteRows.length >= total) return
+    if (total >= 0 && _infiniteRows.length >= total) return
     loadingMore = true
     try {
       const offset = _infiniteRows.length
@@ -4676,7 +4729,7 @@ let rowSearch = $state('')
               await handlePageChange(page - 1)
             }}
             onnext={async () => {
-              if (page * effectivePageSize >= total) return
+              if (total >= 0 && page * effectivePageSize >= total) return
               await handlePageChange(page + 1)
             }}
           />

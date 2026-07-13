@@ -901,6 +901,11 @@ pub async fn get_table_rows(
     // (pagination, sort, filter, live refresh) where that metadata is unchanged
     // and the frontend already holds it — cutting several round-trips per fetch.
     include_meta: bool,
+    // When false, skip the row count entirely and return total = -1 (unknown).
+    // The frontend then fetches the count in the background via `count_table_rows`
+    // so opening a table / changing filters paints rows immediately instead of
+    // waiting on COUNT(*). Postgres-only; other engines ignore it and always count.
+    include_count: bool,
 ) -> Result<TableRows, String> {
     if limit > MAX_PAGE_LIMIT {
         return Err(format!("Limit {limit} exceeds the maximum of {MAX_PAGE_LIMIT} rows per page"));
@@ -1000,7 +1005,16 @@ pub async fn get_table_rows(
     const ESTIMATE_THRESHOLD: i64 = 100_000;
     let rows;
     let total: i64;
-    if where_clause.sql.is_empty() {
+    if !include_count {
+        // Non-blocking mode: fetch only the page of rows and defer the count.
+        // total = -1 signals "unknown / counting" to the UI (same sentinel the
+        // sidebar already uses); the frontend fills it in via count_table_rows.
+        rows = data_query
+            .fetch_all(&pool)
+            .await
+            .map_err(|e| format!("Failed to fetch rows: {e}"))?;
+        total = -1;
+    } else if where_clause.sql.is_empty() {
         // Estimate and data fetch are independent — run them together so the
         // planner estimate adds no extra round-trip in series.
         let estimate_query = sqlx::query_scalar::<_, i64>(
@@ -1100,6 +1114,66 @@ pub async fn get_table_rows(
         primary_key,
         foreign_keys,
     })
+}
+
+/// Row count for the main grid, fetched separately so `get_table_rows` can
+/// return rows immediately (include_count = false) while the UI fills the total
+/// in asynchronously. Mirrors the count logic in `get_table_rows`: planner
+/// estimate for a large *unfiltered* table (instant), exact `COUNT(*)` otherwise
+/// (the WHERE clause bounds the scan). Non-Postgres engines return -1 — their
+/// `get_table_rows` already carries a real total, so the UI keeps that.
+pub async fn count_table_rows(
+    state: State<'_, DbState>,
+    schema: String,
+    table: String,
+    search: Option<String>,
+    search_is_regex: bool,
+    filters: Option<Vec<RowFilter>>,
+) -> Result<i64, String> {
+    match require_conn(&state)? {
+        ActiveConnection::Postgres(_) => {}
+        _ => return Ok(-1),
+    }
+    let pool = require_pool(&state)?;
+    validate_ident(&schema)?;
+    validate_ident(&table)?;
+    let filters = filters.unwrap_or_default();
+
+    let has_search = search.as_deref().map(str::trim).is_some_and(|s| !s.is_empty());
+    let table_columns = if has_search || !filters.is_empty() {
+        fetch_table_column_names(&pool, &schema, &table).await?
+    } else {
+        vec![]
+    };
+    let where_clause = build_where(&table_columns, search.as_deref(), search_is_regex, &filters)?;
+    let table_ref = format!(r#""{schema}"."{table}""#);
+
+    const ESTIMATE_THRESHOLD: i64 = 100_000;
+    if where_clause.sql.is_empty() {
+        let estimate = sqlx::query_scalar::<_, i64>(
+            "SELECT reltuples::bigint FROM pg_class WHERE oid = $1::regclass",
+        )
+        .bind(&table_ref)
+        .fetch_optional(&pool)
+        .await
+        .ok()
+        .flatten();
+        if let Some(est) = estimate {
+            if est >= ESTIMATE_THRESHOLD {
+                return Ok(est);
+            }
+        }
+    }
+
+    let count_sql = format!("SELECT COUNT(*)::bigint FROM {table_ref}{}", where_clause.sql);
+    let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql);
+    for value in &where_clause.binds {
+        count_query = count_query.bind(value.as_str());
+    }
+    count_query
+        .fetch_one(&pool)
+        .await
+        .map_err(|e| format!("Failed to count rows: {e}"))
 }
 
 pub async fn update_table_cell(
