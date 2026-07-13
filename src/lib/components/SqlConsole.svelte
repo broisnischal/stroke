@@ -4,6 +4,9 @@
   import Braces from "@lucide/svelte/icons/braces";
   import Wand2 from "@lucide/svelte/icons/wand-2";
   import CheckCheck from "@lucide/svelte/icons/check-check";
+  import Copy from "@lucide/svelte/icons/copy";
+  import Check from "@lucide/svelte/icons/check";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import Loader2 from "@lucide/svelte/icons/loader-2";
   import History from "@lucide/svelte/icons/history";
   import Bookmark from "@lucide/svelte/icons/bookmark";
@@ -344,6 +347,19 @@
     onfixwithai?.({ error, sql: sql.trim() })
   }
 
+  let errorCopied = $state(false)
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let errorCopyTimer = null
+  async function copyError() {
+    if (!error) return
+    try {
+      await navigator.clipboard.writeText(error)
+      errorCopied = true
+      if (errorCopyTimer) clearTimeout(errorCopyTimer)
+      errorCopyTimer = setTimeout(() => { errorCopied = false }, 1600)
+    } catch { /* clipboard unavailable — no-op */ }
+  }
+
   const isMac =
     typeof navigator !== "undefined" &&
     navigator.platform.toUpperCase().includes("MAC");
@@ -659,37 +675,56 @@
         <p class="min-w-0 flex-1 font-mono text-ui-xs text-muted-foreground/70">Cannot reach database — check your connection and try again.</p>
       </div>
     {:else}
-      <!-- SQL / application error strip. Header row (label + action) sits above the
-           message so the text gets full width and the button never crowds it. -->
-      <div class="shrink-0 border-b border-destructive/20 bg-destructive/5 px-3 py-2">
-        <div class="flex items-center justify-between gap-2">
-          <span class="shrink-0 font-mono text-ui-2xs font-bold uppercase tracking-wide text-destructive/70">error</span>
-          {#if onfixwithai}
+      <!-- SQL / application error — styled like a real terminal error: a red
+           gutter accent, monospace message, and a fully SELECTABLE body so the
+           text can be copied (the app is select-none by default; the
+           data-studio-selectable hook re-enables selection here). -->
+      <div
+        data-studio-selectable="text"
+        class="group/err shrink-0 border-b border-destructive/20 border-l-2 border-l-destructive/70 bg-destructive/[0.055] py-2.5 pl-3 pr-3"
+      >
+        <div class="flex items-center justify-between gap-2 select-none">
+          <span class="flex shrink-0 items-center gap-1.5 font-mono text-ui-2xs font-bold uppercase tracking-wider text-destructive/80">
+            <CircleAlert class="size-3 shrink-0" />
+            Error
+          </span>
+          <div class="flex shrink-0 items-center gap-1">
             <button
               type="button"
-              onclick={fixWithAi}
-              class="inline-flex shrink-0 items-center gap-1 rounded border border-destructive/25 bg-destructive/8 px-2 py-0.5 font-mono text-ui-2xs text-destructive transition-colors hover:bg-destructive/15"
+              onclick={copyError}
+              title="Copy error"
+              aria-label="Copy error"
+              class="inline-flex size-6 items-center justify-center rounded-md text-destructive/60 transition-colors hover:bg-destructive/10 hover:text-destructive"
             >
-              <Wand2 class="size-2.5 shrink-0" />
-              Fix with AI
+              {#if errorCopied}<Check class="size-3 shrink-0" />{:else}<Copy class="size-3 shrink-0" />{/if}
             </button>
-          {/if}
+            {#if onfixwithai}
+              <button
+                type="button"
+                onclick={fixWithAi}
+                class="inline-flex shrink-0 items-center gap-1 rounded-md border border-destructive/25 bg-destructive/10 px-2 py-1 font-mono text-ui-2xs font-medium text-destructive transition-[background-color,transform] duration-150 hover:bg-destructive/20 active:scale-[0.97]"
+              >
+                <Wand2 class="size-2.5 shrink-0" />
+                Fix with AI
+              </button>
+            {/if}
+          </div>
         </div>
         <!-- overflow-wrap:anywhere wraps at word boundaries first and only breaks
              inside a token when it can't fit — unlike break-all, which chopped
              ordinary words mid-character ("can/celing", "sta/tement"). -->
-        <pre class="mt-1.5 max-h-24 overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-ui-xs leading-relaxed text-destructive">{error}</pre>
+        <pre class="mt-1.5 max-h-28 select-text overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-ui-xs leading-relaxed text-destructive">{error}</pre>
         {#if /statement timeout|canceling statement due to/i.test(error)}
-          <p class="mt-1.5 text-ui-2xs leading-relaxed text-muted-foreground/70">
+          <p class="mt-2 text-ui-2xs leading-relaxed text-muted-foreground/70">
             The query timed out. If this table has large JSON/text columns, select just the
-            columns you need instead of <code class="text-foreground/70">*</code>, or add a smaller
-            <code class="text-foreground/70">LIMIT</code>.
+            columns you need instead of <code class="rounded bg-muted/60 px-1 py-px font-mono text-foreground/70">*</code>, or add a smaller
+            <code class="rounded bg-muted/60 px-1 py-px font-mono text-foreground/70">LIMIT</code>.
           </p>
         {:else if /relation "[^"]*" does not exist|column "[^"]*" does not exist/i.test(error)}
-          <p class="mt-1.5 text-ui-2xs leading-relaxed text-muted-foreground/70">
+          <p class="mt-2 text-ui-2xs leading-relaxed text-muted-foreground/70">
             PostgreSQL folds unquoted names to lowercase, so a table like
-            <code class="text-foreground/70">Products</code> only matches when quoted —
-            <code class="text-foreground/70">SELECT * FROM "Products"</code>. Pick the table from
+            <code class="rounded bg-muted/60 px-1 py-px font-mono text-foreground/70">Products</code> only matches when quoted —
+            <code class="rounded bg-muted/60 px-1 py-px font-mono text-foreground/70">SELECT * FROM "Products"</code>. Pick the table from
             autocomplete and it inserts the quoted form for you.
           </p>
         {/if}

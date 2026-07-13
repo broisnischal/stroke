@@ -264,9 +264,9 @@
           {#each STEPS as label, i}
             <div class="flex items-center gap-1.5">
               <span class={cn(
-                "flex size-[18px] items-center justify-center rounded-full text-[9px] font-semibold transition-all",
-                i < step  ? "bg-foreground text-background"
-                : i === step ? "bg-transparent text-foreground ring-1 ring-foreground/60"
+                "flex size-[18px] items-center justify-center rounded-full text-[9px] font-semibold tabular-nums transition-all",
+                i < step  ? "bg-primary text-primary-foreground"
+                : i === step ? "bg-primary/10 text-primary ring-1 ring-primary/50"
                 : "bg-transparent text-muted-foreground/35 ring-1 ring-border/40",
               )}>
                 {#if i < step}<Check class="size-2" />{:else}{i + 1}{/if}
@@ -276,7 +276,7 @@
               </span>
             </div>
             {#if i < STEPS.length - 1}
-              <div class={cn("h-px w-4 shrink-0 rounded-full transition-colors", i < step ? "bg-foreground/25" : "bg-border/30")}></div>
+              <div class={cn("h-px w-4 shrink-0 rounded-full transition-colors", i < step ? "bg-primary/30" : "bg-border/30")}></div>
             {/if}
           {/each}
         </div>
@@ -294,12 +294,12 @@
                 type="button"
                 class={cn(
                   "flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left transition-colors",
-                  selected ? "bg-muted/50" : "hover:bg-muted/30",
+                  selected ? "bg-primary/10 ring-1 ring-inset ring-primary/20" : "hover:bg-muted/40",
                 )}
                 onclick={() => selectProvider(p.id)}
               >
-                <span class="text-[13px] font-medium text-foreground">{p.label}</span>
-                {#if selected}<Check class="size-3 shrink-0 text-foreground/70" />{/if}
+                <span class={cn("text-[13px] font-medium", selected ? "text-foreground" : "text-foreground/90")}>{p.label}</span>
+                {#if selected}<Check class="size-3.5 shrink-0 text-primary" />{/if}
               </button>
             {/each}
           </div>
@@ -468,14 +468,14 @@
 
         {#if step < STEPS.length - 1}
           <button type="button"
-            class="inline-flex h-7 items-center gap-1 rounded-lg bg-foreground px-3 text-[12px] font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-40"
+            class="inline-flex h-7 items-center gap-1 rounded-lg bg-primary px-3 text-[12px] font-medium text-primary-foreground elevate-1 transition-[background-color,transform] duration-150 hover:bg-primary/90 active:scale-[0.97] disabled:opacity-40"
             disabled={!stepCanProceed}
             onclick={nextStep}>
             Continue <ChevronRight class="size-3" />
           </button>
         {:else}
           <button type="button"
-            class="inline-flex h-7 items-center gap-1.5 rounded-lg bg-foreground px-3 text-[12px] font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-40"
+            class="inline-flex h-7 items-center gap-1.5 rounded-lg bg-primary px-3 text-[12px] font-medium text-primary-foreground elevate-1 transition-[background-color,transform] duration-150 hover:bg-primary/90 active:scale-[0.97] disabled:opacity-40"
             disabled={saving || !formModel.trim()}
             onclick={() => void save()}>
             {#if saving}<Loader2 class="size-3 animate-spin" />{/if}
