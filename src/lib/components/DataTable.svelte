@@ -2672,10 +2672,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       }
       case "Escape": {
         e.preventDefault();
-        // Priority: close FK sub-view → collapse cell range → clear col selection → clear cell focus
+        // Priority: close FK sub-view → collapse cell range → clear col selection
+        // → close the most-recently-expanded row → clear cell focus.
         if (fkSubview !== null) { fkSubview = null; break; }
         if (computeCellRange()) { clearCellRange(); scheduleDraw(); break; }
         if (selectedCols.size) { selectedCols = new Set(); _lastHeaderClickedCol = null; scheduleDraw(); break; }
+        if (expandedRows.size > 0) { toggleRowExpand(/** @type {number} */ ([...expandedRows].pop())); break; }
         focusedRow = null; focusedCol = null;
         break;
       }
@@ -4524,6 +4526,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                     <RowExpandViewer
                       record={rowToRecord(columns, rows[exIdx])}
                       rowLabel={"row " + (exIdx + 1)}
+                      onclose={() => toggleRowExpand(exIdx)}
                       onopenjson={(value, label) => {
                         void prefetchJsonLightbox()
                         jsonLightbox = { value, colName: label }
