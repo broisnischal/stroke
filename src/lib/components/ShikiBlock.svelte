@@ -154,10 +154,15 @@
   {:else}
     <div
       class={cn(
-        'shiki-block contents [&_pre]:m-0 [&_pre]:bg-transparent! [&_pre]:font-mono [&_pre]:leading-relaxed [&_.json-inspector-url]:cursor-pointer [&_.json-inspector-url]:text-link [&_.json-inspector-url]:underline [&_.json-inspector-url]:underline-offset-2 [&_.json-inspector-url]:decoration-link/45 hover:[&_.json-inspector-url]:text-link-hover hover:[&_.json-inspector-url]:decoration-link',
+        'shiki-block contents [&_pre]:m-0 [&_pre]:bg-transparent! [&_pre]:font-mono [&_.json-inspector-url]:cursor-pointer [&_.json-inspector-url]:text-link [&_.json-inspector-url]:underline [&_.json-inspector-url]:underline-offset-2 [&_.json-inspector-url]:decoration-link/45 hover:[&_.json-inspector-url]:text-link-hover hover:[&_.json-inspector-url]:decoration-link',
+        // The row-inspector JSON view (jsonInteractive) reads denser than a
+        // marketing code block — smaller text + normal leading.
+        isJsonInteractive ? '[&_pre]:leading-normal' : '[&_pre]:leading-relaxed',
         embedded
           ? '[&_pre]:p-3 [&_pre]:text-ui-xs [&_pre]:whitespace-pre'
-          : '[&_pre]:p-3 [&_pre]:text-ui-sm [&_pre]:whitespace-pre-wrap [&_pre]:break-all',
+          : isJsonInteractive
+            ? '[&_pre]:p-3 [&_pre]:text-ui-xs [&_pre]:whitespace-pre-wrap [&_pre]:break-all'
+            : '[&_pre]:p-3 [&_pre]:text-ui-sm [&_pre]:whitespace-pre-wrap [&_pre]:break-all',
       )}
     >
       {@html html}
