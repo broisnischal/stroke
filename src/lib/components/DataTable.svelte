@@ -179,8 +179,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     pinnedColumns = $bindable(/** @type {Set<string>} */ (new Set())),
     /** Active sort. null = unsorted. */
     rowSort = /** @type {{ column: string, direction: 'asc' | 'desc' } | null} */ (null),
-    /** Called when user clicks a column header to sort. */
-    onsortchange = /** @type {(sort: { column: string, direction: 'asc' | 'desc' } | null) => void} */ (() => {}),
+    /** Secondary sort keys (multi-column sort); primary is rowSort. @type {{ column: string, direction: 'asc' | 'desc' }[]} */
+    rowSortMore = [],
+    /** Called on header sort. Emits the full ordered key list ([] clears). */
+    onsortchange = /** @type {(sorts: { column: string, direction: 'asc' | 'desc' }[]) => void} */ (() => {}),
     /** Number of staged (unsaved) cell edits. Bindable so the StatusBar can show Apply/Reset. */
     pendingEditCount = $bindable(0),
     /** Assigned by this component; the parent calls these to flush / discard staged edits. */
@@ -2226,23 +2228,50 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   }
 
   /** Cycle sort: none → asc → desc → none */
-  function handleHeaderSort(colName) {
-    // Staged edits are keyed by row index; sorting would reorder rows and
-    // desync them. Ask the user to apply or reset first instead of silently
-    // dropping their changes.
+  /** Current sort keys in priority order: primary (rowSort) then secondary. */
+  function currentSortList() {
+    return (rowSort ? [rowSort] : []).concat(rowSortMore ?? [])
+  }
+
+  /** colName → { direction, index, total } for header sort arrows + rank badges. */
+  const _sortLookup = $derived.by(() => {
+    const m = new Map()
+    const list = (rowSort ? [rowSort] : []).concat(rowSortMore ?? [])
+    list.forEach((s, i) => { if (s?.column) m.set(s.column, { direction: s.direction, index: i, total: list.length }) })
+    return m
+  })
+
+  /** True while there are unsaved edits (sorting would reorder rows and desync
+   *  the row-index-keyed staged changes). Warns the user. */
+  function blockedBySort() {
     if (pendingEdits.size > 0) {
-      toast.error("Unsaved changes", {
-        description: "Apply or reset your edits before sorting.",
-      })
+      toast.error("Unsaved changes", { description: "Apply or reset your edits before sorting." })
+      return true
+    }
+    return false
+  }
+
+  /**
+   * @param {string} colName
+   * @param {boolean} [additive] shift-click: add/toggle this as a SECONDARY key
+   *   instead of replacing the sort — enables multi-column sort.
+   */
+  function handleHeaderSort(colName, additive = false) {
+    if (blockedBySort()) return
+    if (additive) {
+      const cur = currentSortList()
+      const idx = cur.findIndex((s) => s.column === colName)
+      let next
+      if (idx === -1) next = [...cur, { column: colName, direction: 'asc' }]
+      else if (cur[idx].direction === 'asc') next = cur.map((s, i) => i === idx ? { ...s, direction: 'desc' } : s)
+      else next = cur.filter((_, i) => i !== idx) // asc → desc → remove
+      onsortchange(next)
       return
     }
-    if (rowSort?.column !== colName) {
-      onsortchange({ column: colName, direction: 'desc' })
-    } else if (rowSort.direction === 'desc') {
-      onsortchange({ column: colName, direction: 'asc' })
-    } else {
-      onsortchange(null)
-    }
+    // Plain click: single-key cycle none → desc → asc → none.
+    if (rowSort?.column !== colName) onsortchange([{ column: colName, direction: 'desc' }])
+    else if (rowSort.direction === 'desc') onsortchange([{ column: colName, direction: 'asc' }])
+    else onsortchange([])
   }
 
   /** Toggle pinning a column to the left. */
@@ -2255,11 +2284,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   /** Sort by a column with an explicit direction, guarding against pending edits. */
   function headerSortDirect(colName, /** @type {'asc' | 'desc'} */ dir) {
-    if (pendingEdits.size > 0) {
-      toast.error('Unsaved changes', { description: 'Apply or reset your edits before sorting.' })
-      return
-    }
-    onsortchange({ column: colName, direction: dir })
+    if (blockedBySort()) return
+    onsortchange([{ column: colName, direction: dir }])
   }
 
   /** Reset a column's width to its default. */
@@ -3416,7 +3442,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   function drawHeaderCell(ctx, col, x, c) {
     const w = col.w
 
-    const sorted = rowSort?.column === col.name
+    const sortInfo = _sortLookup.get(col.name)
+    const sorted = !!sortInfo
 
     // Pinned headers are painted on top of scrolled columns — give them an opaque
     // backing so the columns sliding underneath don't bleed through.
@@ -3495,8 +3522,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const sortX = x + w - SORT_ICON - SORT_MARGIN_R
     const sortY = cy - SORT_ICON / 2
     if (sorted) {
-      const iconName = rowSort?.direction === 'asc' ? 'arrow-up' : 'arrow-down'
+      const iconName = sortInfo.direction === 'asc' ? 'arrow-up' : 'arrow-down'
       drawIcon(ctx, iconName, sortX, sortY, SORT_ICON, withAlpha(c.cPrimary, 0.95), 1.7)
+      // Multi-column sort: show this key's priority (1,2,3…) left of the arrow.
+      if (sortInfo.total > 1) {
+        ctx.font = `600 ${Math.round(9 * canvasZoom)}px ${_fonts.family}`
+        ctx.textAlign = 'right'
+        ctx.fillStyle = withAlpha(c.cPrimary, 0.95)
+        ctx.fillText(String(sortInfo.index + 1), sortX - Math.round(1.5 * canvasZoom), cy + 0.5)
+        ctx.textAlign = 'left'
+      }
     } else if (_resizeHoverCol !== col.name && hoveredColName === col.name && hoveredRow === null) {
       drawIcon(ctx, 'chevrons-up-down', sortX, sortY, SORT_ICON, withAlpha(c.cMuted, 0.55), 1.6)
     }
@@ -3846,14 +3881,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       case 'header-expand-all': collapseAllRows(); return
       case 'header-select-all': toggleAll(!allSelected); return
       case 'header': {
-        if (e.shiftKey && _lastHeaderClickedCol) {
-          // Shift+click with anchor: range-select.
-          extendColSelection(t.col.name)
+        if (e.shiftKey) {
+          // Shift+click adds/toggles this column as a SECONDARY sort key
+          // (multi-column sort), the standard data-grid gesture.
+          handleHeaderSort(t.col.name, true)
         } else {
-          // Plain click (or first shift+click with no anchor): set anchor + sort.
           selectedCols = new Set([t.col.name])
           _lastHeaderClickedCol = t.col.name
-          if (!e.shiftKey) handleHeaderSort(t.col.name)
+          handleHeaderSort(t.col.name, false)
         }
         scheduleDraw()
         return
@@ -4699,9 +4734,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         </ContextMenu.Item>
       {:else if contextIsHeader}
         {@const hcol = contextHeaderCol}
-        {@const hSorted = rowSort?.column === hcol}
-        {@const hAsc = hSorted && rowSort?.direction === 'asc'}
-        {@const hDesc = hSorted && rowSort?.direction === 'desc'}
+        {@const hSortInfo = _sortLookup.get(hcol)}
+        {@const hSorted = !!hSortInfo}
+        {@const hAsc = hSortInfo?.direction === 'asc'}
+        {@const hDesc = hSortInfo?.direction === 'desc'}
         {@const hPinned = pinnedColumns.has(hcol)}
         <ContextMenu.Item onSelect={() => runMenuAction(() => headerSortDirect(hcol, 'asc'))}>
           <ArrowUp />
@@ -4714,7 +4750,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           {#if hDesc}<span class="ml-auto text-[10px] text-primary">✓</span>{/if}
         </ContextMenu.Item>
         {#if hSorted}
-          <ContextMenu.Item onSelect={() => runMenuAction(() => { if (pendingEdits.size > 0) { toast.error('Unsaved changes', { description: 'Apply or reset your edits before sorting.' }); return } onsortchange(null) })}>
+          <ContextMenu.Item onSelect={() => runMenuAction(() => { if (pendingEdits.size > 0) { toast.error('Unsaved changes', { description: 'Apply or reset your edits before sorting.' }); return } onsortchange([]) })}>
             <ArrowUpDown />
             Clear sort
           </ContextMenu.Item>

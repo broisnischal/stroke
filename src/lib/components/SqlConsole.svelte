@@ -230,8 +230,10 @@
   })
 
   /** @param {{ column: string, direction: 'asc' | 'desc' } | null} sort */
-  function handleResultSort(sort) {
-    resultSort = sort
+  function handleResultSort(sorts) {
+    // DataTable now emits the full ordered key list; SQL result sorting is
+    // single-column (client-side), so take the primary key.
+    resultSort = Array.isArray(sorts) ? (sorts[0] ?? null) : sorts
     // Row indices change with the order — selection would point at the wrong rows.
     selected = new Set()
   }

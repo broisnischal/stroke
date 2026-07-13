@@ -465,6 +465,9 @@ export async function getTableRows(schema, table, limit, offset, query = {}) {
       searchIsRegex: query.searchIsRegex ?? false,
       sortColumn: query.sortColumn || null,
       sortDirection: query.sortDirection || null,
+      // Multi-column sort keys (Postgres). Primary key stays in sortColumn above
+      // so other engines still sort by it when they ignore `sorts`.
+      sorts: query.sorts?.length ? query.sorts : null,
       filters: query.filters?.length ? query.filters : null,
       includeMeta: query.includeMeta !== false,
       // Default true. Pass false to skip COUNT(*) (returns total = -1) and paint
