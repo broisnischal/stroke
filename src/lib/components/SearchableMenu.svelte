@@ -16,6 +16,8 @@
     empty = "No results",
     closeOnSelect = true,
     align = "start",
+    /** Popover side — use "top" for triggers anchored to the bottom (status bar). */
+    side = "bottom",
     contentClass = "w-56",
     /** @type {(item: any) => void} */
     onselect = () => {},
@@ -25,6 +27,8 @@
     item,
     /** optional snippet() rendered above the list (e.g. a header bar) */
     header,
+    /** optional snippet() rendered below the list (e.g. a footer action) */
+    footer,
   } = $props();
 
   let search = $state("");
@@ -97,10 +101,11 @@
   <Popover.Portal>
     <Popover.Content
       {align}
+      {side}
       sideOffset={6}
       onOpenAutoFocus={(e) => { e.preventDefault(); inputEl?.focus(); }}
       class={cn(
-        "z-[100] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-lg outline-none",
+        "z-[100] overflow-hidden rounded-xl border border-border/60 bg-popover text-popover-foreground elevate-2-rim outline-none",
         contentClass,
       )}
     >
@@ -140,6 +145,7 @@
             </Command.Item>
           {/each}
         </Command.List>
+        {@render footer?.()}
       </Command.Root>
     </Popover.Content>
   </Popover.Portal>
