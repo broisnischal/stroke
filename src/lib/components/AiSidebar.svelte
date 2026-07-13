@@ -927,25 +927,29 @@
     <!-- @ mention popup -->
     {#if mentionOpen && mentionItems.length > 0}
       <div bind:this={mentionEl}
-        class="absolute bottom-full left-2.5 right-2.5 z-50 mb-1 overflow-hidden rounded-xl border border-border/60 bg-popover shadow-xl">
-        <div class="flex items-center gap-2 border-b border-border/40 px-3 py-2">
-          <Database class="size-3 text-muted-foreground/50" />
-          <span class="text-ui-2xs font-medium text-muted-foreground/60">Tables · {schemaContext.activeSchema}</span>
+        class="absolute bottom-full left-2.5 right-2.5 z-50 mb-1.5 overflow-hidden rounded-xl border border-border/60 bg-popover elevate-2-rim">
+        <div class="flex items-center gap-1.5 border-b border-border/40 px-3 py-2">
+          <Database class="size-3.5 shrink-0 text-muted-foreground/45" />
+          <span class="text-ui-2xs font-medium text-foreground/70">Tables</span>
+          <span class="text-ui-2xs text-muted-foreground/40">· {schemaContext.activeSchema}</span>
         </div>
-        <div class="app-scroll max-h-44 overflow-y-auto p-1">
+        <div class="app-scroll max-h-52 overflow-y-auto p-1">
           {#each mentionItems as item, idx (item.insert)}
+            {@const active = idx === mentionIdx}
             <button type="button"
-              class={cn('flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left transition-colors', idx === mentionIdx ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/50')}
+              class={cn('flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors', active ? 'bg-accent text-foreground' : 'hover:bg-accent/50')}
               onmousedown={(e) => { e.preventDefault(); insertMention(item.insert) }}
             >
-              <Table2 class="size-3 shrink-0 text-muted-foreground/50" />
-              <span class="min-w-0 flex-1 truncate font-mono text-ui-xs">{item.label}</span>
-              <span class="shrink-0 text-ui-2xs text-muted-foreground/40">{item.sub}</span>
+              <Table2 class={cn('size-3.5 shrink-0', active ? 'text-primary' : 'text-muted-foreground/45')} />
+              <span class={cn('min-w-0 flex-1 truncate font-mono text-ui-xs', active ? 'text-foreground' : 'text-foreground/75')}>{item.label}</span>
+              {#if item.sub && item.sub !== schemaContext.activeSchema}
+                <span class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground/50">{item.sub}</span>
+              {/if}
             </button>
           {/each}
         </div>
         <div class="border-t border-border/30 px-3 py-1.5">
-          <span class="text-ui-2xs text-muted-foreground/40">↑↓ navigate · ↵ select · Esc dismiss</span>
+          <span class="text-ui-2xs text-muted-foreground/40">↑↓ navigate · ↵ select · esc dismiss</span>
         </div>
       </div>
     {/if}

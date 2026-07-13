@@ -606,21 +606,18 @@
         <button
           type="button"
           class={cn(
-            'flex items-center gap-1.5 px-2 py-1 transition-[background-color,color] duration-150',
+            'flex items-center gap-1.5 rounded-md px-2 py-1 transition-[background-color,color] duration-150',
             live
-              ? 'rounded-full py-0.5 font-medium text-emerald-600 ring-1 ring-inset ring-emerald-500/25 bg-emerald-500/12 hover:bg-emerald-500/18 dark:text-emerald-400'
-              : 'rounded-md text-muted-foreground/50 hover:bg-muted/50 hover:text-foreground',
+              ? 'font-medium text-emerald-600 bg-emerald-500/10 hover:bg-emerald-500/16 dark:text-emerald-400'
+              : 'text-muted-foreground/50 hover:bg-muted/50 hover:text-foreground',
           )}
           onclick={ontogglelive}
           aria-pressed={live}
           title={live ? 'Live: on — auto-refreshes when this table changes' : 'Live: off — click to auto-refresh on changes'}
         >
           {#if live}
-            <span class="relative flex size-2.5 items-center justify-center">
-              <span class="absolute inline-flex size-2.5 animate-ping rounded-full bg-emerald-500/50 motion-reduce:hidden"></span>
-              <span class="relative inline-flex size-1.5 rounded-full bg-emerald-500"></span>
-            </span>
-            <span class="text-ui-2xs font-semibold uppercase tracking-wider">Live</span>
+            <span class="size-1.5 shrink-0 rounded-full bg-emerald-500 motion-safe:animate-pulse"></span>
+            <span>Live</span>
           {:else}
             <Icon name="radio" class="size-3 shrink-0" />
             <span>Live</span>
