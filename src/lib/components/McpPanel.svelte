@@ -88,7 +88,7 @@
 </script>
 
 <Dialog.Root bind:open>
-  <Dialog.Content class="w-full max-w-xl gap-0 overflow-hidden rounded-2xl border-border/60 p-0 shadow-2xl sm:max-w-xl">
+  <Dialog.Content class="w-full max-w-xl gap-0 overflow-hidden rounded-2xl border-border/60 p-0 sm:max-w-xl">
 
     <!-- ── Header ── -->
     <div class="flex items-start justify-between border-b border-border/40 px-6 py-5">
@@ -227,8 +227,8 @@
           <div class="flex flex-col gap-2.5">
             <!-- Claude Desktop -->
             <div class="flex items-center gap-4 rounded-xl border border-border/40 bg-muted/[0.07] px-4 py-3.5 transition-colors hover:bg-muted/15">
-              <div class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-orange-500/10 ring-1 ring-orange-500/20">
-                <Bot class="size-4 text-orange-500" />
+              <div class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/50 ring-1 ring-border/30">
+                <Bot class="size-4 text-foreground/70" />
               </div>
               <div class="min-w-0 flex-1">
                 <p class="text-[13px] font-medium text-foreground">Claude Desktop</p>
@@ -251,8 +251,8 @@
 
             <!-- Cursor -->
             <div class="flex items-center gap-4 rounded-xl border border-border/40 bg-muted/[0.07] px-4 py-3.5 transition-colors hover:bg-muted/15">
-              <div class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 ring-1 ring-blue-500/20">
-                <Wand2 class="size-4 text-blue-500" />
+              <div class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/50 ring-1 ring-border/30">
+                <Wand2 class="size-4 text-foreground/70" />
               </div>
               <div class="min-w-0 flex-1">
                 <p class="text-[13px] font-medium text-foreground">Cursor</p>
@@ -283,8 +283,8 @@
 
             <!-- VS Code -->
             <div class="flex items-center gap-4 rounded-xl border border-border/40 bg-muted/[0.07] px-4 py-3.5 transition-colors hover:bg-muted/15">
-              <div class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 ring-1 ring-sky-500/20">
-                <Code2 class="size-4 text-sky-500" />
+              <div class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/50 ring-1 ring-border/30">
+                <Code2 class="size-4 text-foreground/70" />
               </div>
               <div class="min-w-0 flex-1">
                 <p class="text-[13px] font-medium text-foreground">VS Code</p>

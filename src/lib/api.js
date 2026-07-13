@@ -465,9 +465,40 @@ export async function getTableRows(schema, table, limit, offset, query = {}) {
       searchIsRegex: query.searchIsRegex ?? false,
       sortColumn: query.sortColumn || null,
       sortDirection: query.sortDirection || null,
+      // Multi-column sort keys (Postgres). Primary key stays in sortColumn above
+      // so other engines still sort by it when they ignore `sorts`.
+      sorts: query.sorts?.length ? query.sorts : null,
       filters: query.filters?.length ? query.filters : null,
       includeMeta: query.includeMeta !== false,
+      // Default true. Pass false to skip COUNT(*) (returns total = -1) and paint
+      // rows immediately; fetch the total separately with countTableRows().
+      includeCount: query.includeCount !== false,
     })
+  } catch (err) {
+    throw new Error(formatInvokeError(err))
+  }
+}
+
+/**
+ * Exact (or planner-estimated) row count for a table, respecting the same
+ * search/filters as getTableRows. Fetched in the background after rows land so
+ * the total ("… of N") never blocks the initial paint. Returns -1 when the
+ * count is unavailable (non-Postgres engine); callers keep their current total.
+ * @param {string} schema
+ * @param {string} table
+ * @param {{ search?: string, searchIsRegex?: boolean, filters?: { column: string, op: string, value?: string }[] }} [query]
+ * @returns {Promise<number>}
+ */
+export async function countTableRows(schema, table, query = {}) {
+  try {
+    const n = await invoke('pg_count_table_rows', {
+      schema,
+      table,
+      search: query.search?.trim() || null,
+      searchIsRegex: query.searchIsRegex ?? false,
+      filters: query.filters?.length ? query.filters : null,
+    })
+    return Number(n)
   } catch (err) {
     throw new Error(formatInvokeError(err))
   }

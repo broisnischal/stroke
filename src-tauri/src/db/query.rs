@@ -649,6 +649,20 @@ fn pg_param_cast(data_type: Option<&str>) -> &'static str {
     }
 }
 
+/// True for a bare `YYYY-MM-DD` value (no time-of-day). Such a value applied to
+/// a timestamp column must match the whole calendar day `[date, date+1)` rather
+/// than the midnight instant — otherwise `= '2026-07-06'` compiles to
+/// `= '2026-07-06 00:00:00'` and never matches a real timestamp (the filter bug).
+fn is_date_only(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 10
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && b[..4].iter().all(u8::is_ascii_digit)
+        && b[5..7].iter().all(u8::is_ascii_digit)
+        && b[8..10].iter().all(u8::is_ascii_digit)
+}
+
 fn build_filter_condition(
     builder: &mut QueryBuilder,
     column: &str,
@@ -659,6 +673,10 @@ fn build_filter_condition(
 ) -> Result<(), String> {
     let col = quoted_column(column)?;
     let cast = pg_param_cast(data_type);
+    // A bare date on a timestamp column means "the whole day", handled per-op
+    // below (half-open [date, date+1) ranges). Pure `date`/`time` columns and
+    // values that carry a time-of-day keep exact comparison.
+    let ts = cast == "::timestamptz";
     // When the column type is known we can cast the *parameter* and leave the
     // column uncast, making the condition SARGable (index-eligible).
     // For unknown types we fall back to casting the column to text.
@@ -671,20 +689,30 @@ fn build_filter_condition(
             builder.push_condition(format!("{col} IS NOT NULL"), conjunct);
         }
         "eq" => {
-            let p = builder.push_bind(value.unwrap_or("").to_string());
-            let cond = if typed { format!("{col} = {p}{cast}") }
+            let v = value.unwrap_or("");
+            let day = ts && is_date_only(v);
+            let p = builder.push_bind(v.to_string());
+            let cond = if day { format!("({col} >= {p}{cast} AND {col} < {p}{cast} + interval '1 day')") }
+                       else if typed { format!("{col} = {p}{cast}") }
                        else    { format!("{col}::text = {p}") };
             builder.push_condition(cond, conjunct);
         }
         "neq" => {
-            let p = builder.push_bind(value.unwrap_or("").to_string());
-            let cond = if typed { format!("{col} IS DISTINCT FROM {p}{cast}") }
+            let v = value.unwrap_or("");
+            let day = ts && is_date_only(v);
+            let p = builder.push_bind(v.to_string());
+            let cond = if day { format!("({col} < {p}{cast} OR {col} >= {p}{cast} + interval '1 day')") }
+                       else if typed { format!("{col} IS DISTINCT FROM {p}{cast}") }
                        else    { format!("{col}::text IS DISTINCT FROM {p}") };
             builder.push_condition(cond, conjunct);
         }
         "gt" => {
-            let p = builder.push_bind(value.unwrap_or("").to_string());
-            let cond = if typed { format!("{col} > {p}{cast}") }
+            let v = value.unwrap_or("");
+            let day = ts && is_date_only(v);
+            let p = builder.push_bind(v.to_string());
+            // "after 2026-07-06" (whole day) means at/after the start of the next day.
+            let cond = if day { format!("{col} >= {p}{cast} + interval '1 day'") }
+                       else if typed { format!("{col} > {p}{cast}") }
                        else    { format!("{col}::text > {p}") };
             builder.push_condition(cond, conjunct);
         }
@@ -701,8 +729,12 @@ fn build_filter_condition(
             builder.push_condition(cond, conjunct);
         }
         "lte" => {
-            let p = builder.push_bind(value.unwrap_or("").to_string());
-            let cond = if typed { format!("{col} <= {p}{cast}") }
+            let v = value.unwrap_or("");
+            let day = ts && is_date_only(v);
+            let p = builder.push_bind(v.to_string());
+            // "on or before 2026-07-06" (whole day) means before the next day starts.
+            let cond = if day { format!("{col} < {p}{cast} + interval '1 day'") }
+                       else if typed { format!("{col} <= {p}{cast}") }
                        else    { format!("{col}::text <= {p}") };
             builder.push_condition(cond, conjunct);
         }
@@ -742,16 +774,23 @@ fn build_filter_condition(
                 }
                 (true, false) => {
                     // only upper bound set
+                    let to_day = ts && is_date_only(&to);
                     let p2 = builder.push_bind(to);
-                    let cond = if typed { format!("{col} <= {p2}{cast}") }
+                    let cond = if to_day { format!("{col} < {p2}{cast} + interval '1 day'") }
+                               else if typed { format!("{col} <= {p2}{cast}") }
                                else    { format!("{col}::text <= {p2}") };
                     builder.push_condition(cond, conjunct);
                 }
                 (false, false) => {
+                    // Lower bound is a start-of-day, which is already correct; the
+                    // upper bound must include the whole end day when it's a bare date.
+                    let to_day = ts && is_date_only(&to);
                     let p1 = builder.push_bind(from);
                     let p2 = builder.push_bind(to);
                     let cond = if typed {
-                        format!("({col} >= {p1}{cast} AND {col} <= {p2}{cast})")
+                        let upper = if to_day { format!("{col} < {p2}{cast} + interval '1 day'") }
+                                    else { format!("{col} <= {p2}{cast}") };
+                        format!("({col} >= {p1}{cast} AND {upper})")
                     } else {
                         format!("({col}::text >= {p1} AND {col}::text <= {p2})")
                     };
@@ -865,11 +904,45 @@ fn build_where(
     Ok(builder.build())
 }
 
+/// One key of a multi-column sort. Serialized camelCase from the frontend.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SortSpec {
+    pub column: String,
+    pub direction: Option<String>,
+}
+
 fn build_order_by(
     columns: &[String],
     sort_column: Option<&str>,
     sort_direction: Option<&str>,
+    sorts: &[SortSpec],
 ) -> Result<String, String> {
+    // Multi-column sort (shift-click headers) takes precedence when present;
+    // each key becomes an ORDER BY term in priority order.
+    if !sorts.is_empty() {
+        let mut parts = Vec::with_capacity(sorts.len());
+        for s in sorts {
+            let column = s.column.trim();
+            if column.is_empty() {
+                continue;
+            }
+            ensure_column(column, columns)?;
+            let col = quoted_column(column)?;
+            let dir = match s.direction.as_deref().unwrap_or("asc").to_ascii_lowercase().as_str() {
+                "desc" => "DESC",
+                "asc" => "ASC",
+                other => return Err(format!("Invalid sort direction: {other}")),
+            };
+            parts.push(format!("{col} {dir} NULLS LAST"));
+        }
+        return Ok(if parts.is_empty() {
+            String::new()
+        } else {
+            format!(" ORDER BY {}", parts.join(", "))
+        });
+    }
+
     let Some(column) = sort_column.map(str::trim).filter(|s| !s.is_empty()) else {
         return Ok(String::new());
     };
@@ -901,6 +974,15 @@ pub async fn get_table_rows(
     // (pagination, sort, filter, live refresh) where that metadata is unchanged
     // and the frontend already holds it — cutting several round-trips per fetch.
     include_meta: bool,
+    // When false, skip the row count entirely and return total = -1 (unknown).
+    // The frontend then fetches the count in the background via `count_table_rows`
+    // so opening a table / changing filters paints rows immediately instead of
+    // waiting on COUNT(*). Postgres-only; other engines ignore it and always count.
+    include_count: bool,
+    // Multi-column sort keys (Postgres). When non-empty they override
+    // sort_column/sort_direction; other engines ignore this and use the single
+    // sort_column (the primary key), so multi-sort degrades gracefully.
+    sorts: Vec<SortSpec>,
 ) -> Result<TableRows, String> {
     if limit > MAX_PAGE_LIMIT {
         return Err(format!("Limit {limit} exceeds the maximum of {MAX_PAGE_LIMIT} rows per page"));
@@ -954,7 +1036,7 @@ pub async fn get_table_rows(
     let filters = filters.unwrap_or_default();
 
     let has_search = search.as_deref().map(str::trim).is_some_and(|s| !s.is_empty());
-    let has_sort = sort_column.as_deref().map(str::trim).is_some_and(|s| !s.is_empty());
+    let has_sort = sort_column.as_deref().map(str::trim).is_some_and(|s| !s.is_empty()) || !sorts.is_empty();
     let table_columns = if has_search || has_sort || !filters.is_empty() {
         fetch_table_column_names(&pool, &schema, &table).await?
     } else {
@@ -965,6 +1047,7 @@ pub async fn get_table_rows(
         &table_columns,
         sort_column.as_deref(),
         sort_direction.as_deref(),
+        &sorts,
     )?;
     let table_ref = format!(r#""{schema}"."{table}""#);
 
@@ -1000,7 +1083,16 @@ pub async fn get_table_rows(
     const ESTIMATE_THRESHOLD: i64 = 100_000;
     let rows;
     let total: i64;
-    if where_clause.sql.is_empty() {
+    if !include_count {
+        // Non-blocking mode: fetch only the page of rows and defer the count.
+        // total = -1 signals "unknown / counting" to the UI (same sentinel the
+        // sidebar already uses); the frontend fills it in via count_table_rows.
+        rows = data_query
+            .fetch_all(&pool)
+            .await
+            .map_err(|e| format!("Failed to fetch rows: {e}"))?;
+        total = -1;
+    } else if where_clause.sql.is_empty() {
         // Estimate and data fetch are independent — run them together so the
         // planner estimate adds no extra round-trip in series.
         let estimate_query = sqlx::query_scalar::<_, i64>(
@@ -1100,6 +1192,66 @@ pub async fn get_table_rows(
         primary_key,
         foreign_keys,
     })
+}
+
+/// Row count for the main grid, fetched separately so `get_table_rows` can
+/// return rows immediately (include_count = false) while the UI fills the total
+/// in asynchronously. Mirrors the count logic in `get_table_rows`: planner
+/// estimate for a large *unfiltered* table (instant), exact `COUNT(*)` otherwise
+/// (the WHERE clause bounds the scan). Non-Postgres engines return -1 — their
+/// `get_table_rows` already carries a real total, so the UI keeps that.
+pub async fn count_table_rows(
+    state: State<'_, DbState>,
+    schema: String,
+    table: String,
+    search: Option<String>,
+    search_is_regex: bool,
+    filters: Option<Vec<RowFilter>>,
+) -> Result<i64, String> {
+    match require_conn(&state)? {
+        ActiveConnection::Postgres(_) => {}
+        _ => return Ok(-1),
+    }
+    let pool = require_pool(&state)?;
+    validate_ident(&schema)?;
+    validate_ident(&table)?;
+    let filters = filters.unwrap_or_default();
+
+    let has_search = search.as_deref().map(str::trim).is_some_and(|s| !s.is_empty());
+    let table_columns = if has_search || !filters.is_empty() {
+        fetch_table_column_names(&pool, &schema, &table).await?
+    } else {
+        vec![]
+    };
+    let where_clause = build_where(&table_columns, search.as_deref(), search_is_regex, &filters)?;
+    let table_ref = format!(r#""{schema}"."{table}""#);
+
+    const ESTIMATE_THRESHOLD: i64 = 100_000;
+    if where_clause.sql.is_empty() {
+        let estimate = sqlx::query_scalar::<_, i64>(
+            "SELECT reltuples::bigint FROM pg_class WHERE oid = $1::regclass",
+        )
+        .bind(&table_ref)
+        .fetch_optional(&pool)
+        .await
+        .ok()
+        .flatten();
+        if let Some(est) = estimate {
+            if est >= ESTIMATE_THRESHOLD {
+                return Ok(est);
+            }
+        }
+    }
+
+    let count_sql = format!("SELECT COUNT(*)::bigint FROM {table_ref}{}", where_clause.sql);
+    let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql);
+    for value in &where_clause.binds {
+        count_query = count_query.bind(value.as_str());
+    }
+    count_query
+        .fetch_one(&pool)
+        .await
+        .map_err(|e| format!("Failed to count rows: {e}"))
 }
 
 pub async fn update_table_cell(

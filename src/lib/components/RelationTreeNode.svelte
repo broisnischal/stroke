@@ -6,6 +6,8 @@
   import ArrowUpRight from '@lucide/svelte/icons/arrow-up-right'
   import ArrowDownRight from '@lucide/svelte/icons/arrow-down-right'
   import ExternalLink from '@lucide/svelte/icons/external-link'
+  import Rows3 from '@lucide/svelte/icons/rows-3'
+  import { formatTableRowCount } from '$lib/table-list.js'
 
   /**
    * @typedef {{ name: string, dataType: string, isNullable: boolean,
@@ -31,6 +33,8 @@
     expanded  = new Set(),
     /** @type {Set<string>} */
     showCols  = new Set(),
+    /** @type {Map<string, number>} Background-filled exact row counts, keyed by table name. */
+    rowCounts = new Map(),
     toggleExpand = /** @type {(k:string)=>void} */ (() => {}),
     toggleCols   = /** @type {(k:string)=>void} */ (() => {}),
     onfocustable = /** @type {(name:string)=>void} */ (() => {}),
@@ -38,7 +42,8 @@
     activeSchema = 'public',
   } = $props()
 
-  const meta    = $derived(tableMeta.get(tableName))
+  const meta     = $derived(tableMeta.get(tableName))
+  const rowCount = $derived(rowCounts.get(tableName))
   const nodeOut = $derived(outbound.get(tableName) ?? [])
   const nodeIn  = $derived(inbound.get(tableName) ?? [])
   const hasMore = $derived(depth < 5 && (nodeOut.length > 0 || nodeIn.length > 0))
@@ -53,9 +58,9 @@
   const visited = $derived(new Set(path.split(/[><:]/g).filter(Boolean)))
 </script>
 
-<div class="overflow-hidden rounded-lg border {isOut ? 'border-blue-500/20 bg-blue-500/3' : 'border-green-500/20 bg-green-500/3'}">
+<div class="overflow-hidden rounded-lg border transition-colors {isOut ? 'border-blue-500/20 bg-blue-500/[0.04] hover:border-blue-500/35' : 'border-green-500/20 bg-green-500/[0.04] hover:border-green-500/35'}">
   <!-- Header row -->
-  <div class="flex items-center gap-2 px-3 py-2">
+  <div class="flex items-center gap-2.5 px-3 py-2">
     <!-- Direction + relation label -->
     <div class="flex shrink-0 items-center gap-1.5">
       {#if isOut}
@@ -76,6 +81,16 @@
     >{tableName}</button>
 
     <div class="flex shrink-0 items-center gap-1">
+      <!-- Row count — filled in asynchronously; absent until the background pass resolves -->
+      {#if rowCount !== undefined}
+        <span
+          class="inline-flex h-5 items-center gap-1 rounded px-1.5 font-mono text-[9px] tabular-nums text-muted-foreground/45"
+          title="{rowCount.toLocaleString()} row{rowCount === 1 ? '' : 's'}"
+        >
+          <Rows3 class="size-2.5 opacity-70" />{formatTableRowCount(rowCount)}
+        </span>
+      {/if}
+
       <!-- Toggle columns -->
       {#if meta}
         <button
@@ -128,7 +143,7 @@
 
   <!-- Expanded children (recursive) -->
   {#if isOpen && hasMore}
-    {@const shared = { tableMeta, outbound, inbound, expanded, showCols, toggleExpand, toggleCols, onfocustable, onopentable, activeSchema }}
+    {@const shared = { tableMeta, outbound, inbound, expanded, showCols, rowCounts, toggleExpand, toggleCols, onfocustable, onopentable, activeSchema }}
     <div class="border-t border-border/20 bg-background/30 p-2">
 
       {#if nodeOut.length > 0}
@@ -140,7 +155,7 @@
               <svelte:self tableName={rel.refTable} fromCol={rel.col} toCol={rel.refCol}
                 direction="out" depth={depth + 1} path={childPath} {...shared} />
             {:else}
-              <div class="flex items-center gap-2 rounded border border-border/20 px-3 py-1 font-mono text-[9px] text-muted-foreground/40">
+              <div class="flex items-center gap-2 rounded-md border border-border/20 px-3 py-1.5 font-mono text-[9px] text-muted-foreground/40">
                 <Link class="size-2.5" />{rel.refTable} (circular)
               </div>
             {/if}
@@ -158,7 +173,7 @@
               <svelte:self tableName={rel.fromTable} fromCol={rel.fromCol} toCol={rel.refCol}
                 direction="in" depth={depth + 1} path={childPath} {...shared} />
             {:else}
-              <div class="flex items-center gap-2 rounded border border-border/20 px-3 py-1 font-mono text-[9px] text-muted-foreground/40">
+              <div class="flex items-center gap-2 rounded-md border border-border/20 px-3 py-1.5 font-mono text-[9px] text-muted-foreground/40">
                 <Link class="size-2.5" />{rel.fromTable} (circular)
               </div>
             {/if}

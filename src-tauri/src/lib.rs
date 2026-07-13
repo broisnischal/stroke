@@ -274,6 +274,7 @@ pub fn run() {
             commands::get_table_ddl,
             commands::get_table_ddl_on_connection,
             commands::pg_get_table_rows,
+            commands::pg_count_table_rows,
             commands::pg_get_column_stats,
             commands::pg_execute_sql,
             commands::pg_execute_sql_multi,

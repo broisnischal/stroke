@@ -416,18 +416,16 @@
             <Select.Item value={id} label={preset.label} class="rounded-md py-1.5 pr-8 pl-2">
               {#snippet children()}
                 <span class="flex min-w-0 items-center gap-2.5">
-                  <span class="flex size-8 shrink-0 items-center justify-center gap-1 rounded border border-border/40 bg-muted/30 text-foreground/70">
+                  <span class="flex size-8 shrink-0 items-center justify-center rounded-md border border-border/40 bg-muted/30 text-foreground/70">
                     {#if id === "hugeicons"}
-                      <HugeiconsIcon icon={Search01Icon} class="size-3.5" strokeWidth={1.8} />
-                      <HugeiconsIcon icon={SparklesIcon} class="size-3.5" strokeWidth={1.8} />
+                      <HugeiconsIcon icon={SparklesIcon} class="size-4" strokeWidth={1.8} />
                     {:else}
-                      <LucideSearch class="size-3.5" />
-                      <LucideSparkles class="size-3.5" />
+                      <LucideSparkles class="size-4" />
                     {/if}
                   </span>
                   <span class="min-w-0">
                     <span class="block text-xs font-medium leading-snug">{preset.label}</span>
-                    <span class="block text-[10px] leading-snug text-muted-foreground/65">{preset.description}</span>
+                    <span class="block text-[11px] leading-snug text-muted-foreground/65">{preset.description}</span>
                   </span>
                 </span>
               {/snippet}

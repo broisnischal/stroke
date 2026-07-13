@@ -21,6 +21,28 @@
      "editor font" and everything else. JetBrains Mono is a true code typeface:
      heavier, even rhythm, designed ligatures. */
   --editor-font-family: "JetBrains Mono Variable", "Geist Mono Variable", ui-monospace, monospace;
+
+  /* ── Elevation system ──────────────────────────────────────────────────────
+     Layered shadows for raised surfaces (menus, popovers, dialogs, cards).
+     Depth reads better as several soft, offset layers than one hard drop —
+     see better-ui "Shadows Over Borders". These are the LIGHT defaults; the
+     `.dark` block below (toggled for every dark theme via classList) swaps in
+     stronger black + a dim rim, since a light drop-shadow is nearly invisible
+     on a dark surface and depth there comes from the rim highlight instead. */
+  --elevate-1: 0 1px 2px oklch(0 0 0 / 0.05), 0 1px 1px oklch(0 0 0 / 0.04);
+  --elevate-2: 0 2px 5px -1px oklch(0 0 0 / 0.07), 0 6px 16px -3px oklch(0 0 0 / 0.09);
+  --elevate-3: 0 10px 22px -6px oklch(0 0 0 / 0.11), 0 22px 52px -12px oklch(0 0 0 / 0.16);
+  /* Top rim highlight — a 1px inner catch-light that gives raised surfaces a
+     crisp physical edge. Pure white/black at low alpha only (never a tinted
+     neutral, which reads as dirt). */
+  --rim: inset 0 1px 0 0 oklch(1 0 0 / 0.65);
+}
+
+.dark {
+  --elevate-1: 0 1px 2px oklch(0 0 0 / 0.4), 0 1px 3px oklch(0 0 0 / 0.3);
+  --elevate-2: 0 2px 5px -1px oklch(0 0 0 / 0.45), 0 8px 20px -4px oklch(0 0 0 / 0.5);
+  --elevate-3: 0 12px 28px -8px oklch(0 0 0 / 0.55), 0 28px 60px -16px oklch(0 0 0 / 0.62);
+  --rim: inset 0 1px 0 0 oklch(1 0 0 / 0.055);
 }
 
 /* JSON colorizer tokens (highlightJson) — dark-friendly defaults, light override
@@ -98,6 +120,13 @@ html[data-os="linux"]   { --window-radius: 8px; }
 @layer base {
   * {
     @apply border-border outline-ring/50;
+  }
+
+  /* Brand-tinted text selection — a subtle signature that stays legible on
+     any surface (better-typography principle 18). Alpha kept low so it never
+     fights syntax highlighting in the editor or data cells. */
+  ::selection {
+    background-color: color-mix(in oklch, var(--primary) 26%, transparent);
   }
 
   /* Disable OS word suggestions, autocorrect, and spellcheck on all inputs. */
@@ -462,6 +491,32 @@ html[data-os="linux"]   { --window-radius: 8px; }
   .studio-chrome {
     user-select: none;
     -webkit-user-select: none;
+  }
+
+  /* ── Elevation utilities ───────────────────────────────────────────────────
+     Prefer these over raw `shadow-sm/lg` on raised surfaces so depth stays
+     consistent and theme-aware. `-rim` variants add the catch-light edge and
+     suit floating surfaces (menus, dialogs). */
+  .elevate-1 { box-shadow: var(--elevate-1); }
+  .elevate-2 { box-shadow: var(--elevate-2); }
+  .elevate-3 { box-shadow: var(--elevate-3); }
+  .elevate-2-rim { box-shadow: var(--rim), var(--elevate-2); }
+  .elevate-3-rim { box-shadow: var(--rim), var(--elevate-3); }
+
+  /* ── Heading treatment ─────────────────────────────────────────────────────
+     Large UI type reads better with slightly negative tracking (better-typography
+     principle 7). `text-display` is for hero/page titles; `text-heading` for
+     section headers and dialog titles. Optical sizing sharpens stroke contrast. */
+  .text-display {
+    font-weight: 620;
+    letter-spacing: -0.021em;
+    font-optical-sizing: auto;
+    text-wrap: balance;
+  }
+  .text-heading {
+    font-weight: 600;
+    letter-spacing: -0.012em;
+    font-optical-sizing: auto;
   }
 
   /* UI type scale (1rem = --app-font-size = 14px).

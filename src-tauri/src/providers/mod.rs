@@ -483,29 +483,44 @@ async fn valid_token(app: &tauri::AppHandle, p: Provider) -> Result<String, Stri
         return Ok(access);
     }
 
+    // Missing expiry => assume the token is long-lived and valid, mirroring the
+    // Cloudflare flow (`unwrap_or(u64::MAX)`). A `0` default treated every such
+    // token as already expired and forced a needless re-login on every call —
+    // the main cause of "it asks me to sign in again each day".
     let expires = map
         .get(&format!("__{k}_expires__"))
         .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(0);
+        .unwrap_or(u64::MAX);
     if now_secs() < expires {
         return Ok(access);
     }
 
-    let refresh = map
-        .get(&format!("__{k}_refresh__"))
-        .cloned()
-        .ok_or("Session expired — please sign in again")?;
+    // Past the stored expiry: try to renew silently with the refresh token. If we
+    // can't — no refresh token, or the refresh call fails (e.g. a transient proxy
+    // hiccup) — fall back to the existing access token instead of forcing a
+    // re-login. The downstream API call is the real arbiter: a genuinely dead
+    // token surfaces a clear auth error there (and the UI offers reconnect), while
+    // a still-valid or barely-past-buffer token keeps working. This favours long
+    // session persistence over eager sign-out.
+    let refresh = match map.get(&format!("__{k}_refresh__")).cloned() {
+        Some(r) => r,
+        None => return Ok(access),
+    };
     let cfg = p.oauth();
-    let t = refresh_token(&cfg, p.key(), p.is_public_client(), &refresh).await?;
-    store_tokens(
-        app,
-        p,
-        &t.access_token,
-        t.refresh_token.as_deref().or(Some(&refresh)),
-        t.expires_in,
-        None,
-    )?;
-    Ok(t.access_token)
+    match refresh_token(&cfg, p.key(), p.is_public_client(), &refresh).await {
+        Ok(t) => {
+            store_tokens(
+                app,
+                p,
+                &t.access_token,
+                t.refresh_token.as_deref().or(Some(&refresh)),
+                t.expires_in,
+                None,
+            )?;
+            Ok(t.access_token)
+        }
+        Err(_) => Ok(access),
+    }
 }
 
 // ── Tauri commands ───────────────────────────────────────────────────────────────

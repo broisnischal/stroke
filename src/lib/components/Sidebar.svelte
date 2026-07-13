@@ -190,6 +190,7 @@
     for (const n of selectedItems) set.add(n)
     _allPinned = { ..._allPinned, [_connKey]: [...set] }
     savePinnedAll(_allPinned)
+    clearSelection()
   }
 
   /** Unpin every selected table. */
@@ -197,10 +198,12 @@
     const next = (_allPinned[_connKey] ?? []).filter((n) => !selectedItems.has(n))
     _allPinned = { ..._allPinned, [_connKey]: next }
     savePinnedAll(_allPinned)
+    clearSelection()
   }
 
   function copySelectedNames() {
     navigator.clipboard.writeText([...selectedItems].join('\n'))
+    clearSelection()
   }
 
   function clearSelection() {
@@ -322,11 +325,13 @@
   /** Open every selected table in its own tab. */
   function openSelected() {
     for (const n of selectableOrder) if (selectedItems.has(n)) ontableselect(n)
+    clearSelection()
   }
 
   /** Close the tabs of every selected table that's currently open. */
   function closeSelectedTabs() {
     for (const n of selectedItems) if (openTableSet.has(n)) onclosetable(n)
+    clearSelection()
   }
   const filteredViews = $derived(
     applySortBy(views.filter((t) => t.name.toLowerCase().includes(lf))),
