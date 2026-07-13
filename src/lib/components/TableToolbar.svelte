@@ -119,11 +119,15 @@
     pageSize === PAGE_SIZE_ALL ? (total > 0 ? total : 1) : pageSize,
   );
 
+  // total = -1 means the count is still being fetched in the background (the
+  // row data has already loaded). Show "…" for the unknown total and keep Next
+  // enabled so navigation isn't blocked during the brief counting window.
+  const counting = $derived(total < 0);
   const from = $derived(total === 0 ? 0 : offset + 1);
-  const to = $derived(Math.min(offset + _effectivePageSize, total));
+  const to = $derived(counting ? offset + _effectivePageSize : Math.min(offset + _effectivePageSize, total));
   const pageCount = $derived(Math.max(1, Math.ceil(total / _effectivePageSize) || 1));
   const canPrev = $derived(page > 1);
-  const canNext = $derived(page * _effectivePageSize < total);
+  const canNext = $derived(counting || page * _effectivePageSize < total);
 
   const filterCount = $derived(activeFilters(rowFilters).length);
   const sortLabel = $derived(
@@ -688,26 +692,26 @@
 
     {#if tableViewMode !== "structure"}
       {#if infiniteScroll}
-        {#if total > 0}
+        {#if total > 0 || counting}
           <span
             class="flex shrink-0 items-center gap-1 font-mono text-ui-xs tabular-nums @max-[600px]/tb:hidden"
-            title="{to.toLocaleString('en-US')} of {total.toLocaleString('en-US')} rows loaded{queryMs > 0 ? ` · ${queryMs}ms` : ''}"
+            title="{to.toLocaleString('en-US')} of {counting ? 'counting…' : total.toLocaleString('en-US') + ' rows'} loaded{queryMs > 0 ? ` · ${queryMs}ms` : ''}"
           >
             <span class="text-foreground/65">{to.toLocaleString("en-US")}</span>
-            <span class="text-muted-foreground/40">of {total.toLocaleString("en-US")} loaded</span>
+            <span class="text-muted-foreground/40">of {counting ? "…" : total.toLocaleString("en-US")} loaded</span>
           </span>
         {/if}
       {:else}
-        {#if total > 0}
+        {#if total > 0 || counting}
           <span
             class="flex shrink-0 items-center gap-1 font-mono text-ui-xs tabular-nums @max-[600px]/tb:hidden"
-            title="{from.toLocaleString('en-US')}–{to.toLocaleString('en-US')} of {total.toLocaleString('en-US')} rows{queryMs > 0 ? ` · ${queryMs}ms` : ''}"
+            title="{from.toLocaleString('en-US')}–{to.toLocaleString('en-US')} of {counting ? 'counting…' : total.toLocaleString('en-US') + ' rows'}{queryMs > 0 ? ` · ${queryMs}ms` : ''}"
           >
             <span class="text-foreground/65">{from.toLocaleString("en-US")}–{to.toLocaleString("en-US")}</span>
-            {#if live}
+            {#if live && !counting}
               <span class="text-muted-foreground/40">of <span class="inline-block tabular-nums" use:slotRoll={total.toLocaleString("en-US")}></span></span>
             {:else}
-              <span class="text-muted-foreground/40">of {total.toLocaleString("en-US")}</span>
+              <span class="text-muted-foreground/40">of {counting ? "…" : total.toLocaleString("en-US")}</span>
             {/if}
           </span>
         {/if}
@@ -751,8 +755,8 @@
 
         <span
           class="shrink-0 text-ui-xs text-muted-foreground/50 tabular-nums @max-[500px]/tb:hidden"
-          title={pageCount.toLocaleString("en-US")}
-        >of {formatCompactCount(pageCount)}</span>
+          title={counting ? "counting…" : pageCount.toLocaleString("en-US")}
+        >of {counting ? "…" : formatCompactCount(pageCount)}</span>
 
         <button
           type="button"

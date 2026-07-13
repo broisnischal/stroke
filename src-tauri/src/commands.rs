@@ -121,7 +121,7 @@ pub fn toggle_devtools(window: tauri::WebviewWindow) {
 
 use crate::db::{
     connect, connect_clickhouse, connect_d1, connect_duckdb, connect_libsql, connect_mssql, connect_mysql, connect_sqlite, disconnect,
-    delete_table_row, delete_table_rows, execute_ddl, execute_sql, execute_sql_multi, get_table_rows, insert_table_row,
+    delete_table_row, delete_table_rows, execute_ddl, execute_sql, execute_sql_multi, get_table_rows, count_table_rows, insert_table_row,
     list_schemas, list_tables, list_indexes, list_enums, list_functions, list_triggers, list_sequences, ping_connection, table_row_counts,
     truncate_table, drop_table, get_table_column_structure, get_incoming_foreign_keys, get_table_ddl as db_get_table_ddl,
     test_clickhouse_connection, test_connection, test_d1_connection, test_duckdb_connection, test_libsql_connection, test_mssql_connection, test_mysql_connection, test_sqlite_connection,
@@ -435,6 +435,9 @@ pub async fn pg_get_table_rows(
     filters: Option<Vec<crate::db::RowFilter>>,
     // Optional — defaults to true (full metadata). Repeat fetches pass false.
     include_meta: Option<bool>,
+    // Optional — defaults to true. When false, the count is skipped (total = -1)
+    // and fetched separately via `pg_count_table_rows` so rows paint immediately.
+    include_count: Option<bool>,
 ) -> Result<TableRows, String> {
     get_table_rows(
         state,
@@ -448,6 +451,30 @@ pub async fn pg_get_table_rows(
         sort_direction,
         filters,
         include_meta.unwrap_or(true),
+        include_count.unwrap_or(true),
+    )
+    .await
+}
+
+/// Background row count for the main grid (see `count_table_rows`). Called
+/// after `pg_get_table_rows` returns rows with `include_count: false`, so the
+/// total streams in without blocking the initial paint.
+#[tauri::command]
+pub async fn pg_count_table_rows(
+    state: State<'_, DbState>,
+    schema: String,
+    table: String,
+    search: Option<String>,
+    search_is_regex: Option<bool>,
+    filters: Option<Vec<crate::db::RowFilter>>,
+) -> Result<i64, String> {
+    count_table_rows(
+        state,
+        schema,
+        table,
+        search,
+        search_is_regex.unwrap_or(false),
+        filters,
     )
     .await
 }
