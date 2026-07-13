@@ -4,8 +4,8 @@
   import * as Select from "$lib/components/ui/select/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import SearchableMenu from "./SearchableMenu.svelte";
-  import DateFilterPicker from "./DateFilterPicker.svelte";
-  import DateRangePicker from "./DateRangePicker.svelte";
+  import DateFilterControl from "./DateFilterControl.svelte";
+  import { getColumnEnumValues } from "$lib/cell-value.js";
   import { slotRoll } from "$lib/actions/slot-text.js";
   import { cn } from "$lib/utils.js";
   import {
@@ -119,11 +119,15 @@
     pageSize === PAGE_SIZE_ALL ? (total > 0 ? total : 1) : pageSize,
   );
 
+  // total = -1 means the count is still being fetched in the background (the
+  // row data has already loaded). Show "…" for the unknown total and keep Next
+  // enabled so navigation isn't blocked during the brief counting window.
+  const counting = $derived(total < 0);
   const from = $derived(total === 0 ? 0 : offset + 1);
-  const to = $derived(Math.min(offset + _effectivePageSize, total));
+  const to = $derived(counting ? offset + _effectivePageSize : Math.min(offset + _effectivePageSize, total));
   const pageCount = $derived(Math.max(1, Math.ceil(total / _effectivePageSize) || 1));
   const canPrev = $derived(page > 1);
-  const canNext = $derived(page * _effectivePageSize < total);
+  const canNext = $derived(counting || page * _effectivePageSize < total);
 
   const filterCount = $derived(activeFilters(rowFilters).length);
   const sortLabel = $derived(
@@ -323,9 +327,24 @@
     ["contains", "starts_with", "ends_with", "eq"].includes(o.value),
   );
 
+  // Enum columns are a fixed set of values — free-text ops (contains/starts…)
+  // don't make sense; offer equality + null checks and drive the value with a
+  // dropdown of the actual enum members.
+  const ENUM_FILTER_OPS = FILTER_OPS.filter((o) =>
+    ["eq", "neq", "is_null", "is_not_null"].includes(o.value),
+  );
+
+  /** Enum members for a column, or null when it isn't an enum. @param {string} colName */
+  function enumOptionsFor(colName) {
+    if (colName === ANY_COLUMN) return null;
+    const col = columns.find((c) => c.name === colName);
+    return col ? getColumnEnumValues(col) : null;
+  }
+
   /** @param {string} colName */
   function opsForCol(colName) {
     if (colName === ANY_COLUMN) return ANY_COLUMN_OPS;
+    if (enumOptionsFor(colName)) return ENUM_FILTER_OPS;
     const kind = getColKind(colName);
     if (kind === "boolean") return BOOL_FILTER_OPS;
     if (kind === "date") return DATE_FILTER_OPS;
@@ -337,6 +356,7 @@
   /** @param {string} colName @returns {import('$lib/table-query.js').FilterOp} */
   function defaultOpForCol(colName) {
     if (colName === ANY_COLUMN) return "contains";
+    if (enumOptionsFor(colName)) return "eq";
     const kind = getColKind(colName);
     if (kind === "boolean") return "eq";
     if (kind === "date") return "gte";
@@ -688,26 +708,26 @@
 
     {#if tableViewMode !== "structure"}
       {#if infiniteScroll}
-        {#if total > 0}
+        {#if total > 0 || counting}
           <span
             class="flex shrink-0 items-center gap-1 font-mono text-ui-xs tabular-nums @max-[600px]/tb:hidden"
-            title="{to.toLocaleString('en-US')} of {total.toLocaleString('en-US')} rows loaded{queryMs > 0 ? ` · ${queryMs}ms` : ''}"
+            title="{to.toLocaleString('en-US')} of {counting ? 'counting…' : total.toLocaleString('en-US') + ' rows'} loaded{queryMs > 0 ? ` · ${queryMs}ms` : ''}"
           >
             <span class="text-foreground/65">{to.toLocaleString("en-US")}</span>
-            <span class="text-muted-foreground/40">of {total.toLocaleString("en-US")} loaded</span>
+            <span class="text-muted-foreground/40">of {counting ? "…" : total.toLocaleString("en-US")} loaded</span>
           </span>
         {/if}
       {:else}
-        {#if total > 0}
+        {#if total > 0 || counting}
           <span
             class="flex shrink-0 items-center gap-1 font-mono text-ui-xs tabular-nums @max-[600px]/tb:hidden"
-            title="{from.toLocaleString('en-US')}–{to.toLocaleString('en-US')} of {total.toLocaleString('en-US')} rows{queryMs > 0 ? ` · ${queryMs}ms` : ''}"
+            title="{from.toLocaleString('en-US')}–{to.toLocaleString('en-US')} of {counting ? 'counting…' : total.toLocaleString('en-US') + ' rows'}{queryMs > 0 ? ` · ${queryMs}ms` : ''}"
           >
             <span class="text-foreground/65">{from.toLocaleString("en-US")}–{to.toLocaleString("en-US")}</span>
-            {#if live}
+            {#if live && !counting}
               <span class="text-muted-foreground/40">of <span class="inline-block tabular-nums" use:slotRoll={total.toLocaleString("en-US")}></span></span>
             {:else}
-              <span class="text-muted-foreground/40">of {total.toLocaleString("en-US")}</span>
+              <span class="text-muted-foreground/40">of {counting ? "…" : total.toLocaleString("en-US")}</span>
             {/if}
           </span>
         {/if}
@@ -751,8 +771,8 @@
 
         <span
           class="shrink-0 text-ui-xs text-muted-foreground/50 tabular-nums @max-[500px]/tb:hidden"
-          title={pageCount.toLocaleString("en-US")}
-        >of {formatCompactCount(pageCount)}</span>
+          title={counting ? "counting…" : pageCount.toLocaleString("en-US")}
+        >of {counting ? "…" : formatCompactCount(pageCount)}</span>
 
         <button
           type="button"
@@ -962,6 +982,7 @@
       {#each rowFilters as filter, i (filter.id)}
         {@const colKind = getColKind(filter.column)}
         {@const colOps = opsForCol(filter.column)}
+        {@const enumOpts = enumOptionsFor(filter.column)}
         <div
           class="flex items-center gap-2 border-b border-border/30 px-3 py-1.5 last:border-b-0"
         >
@@ -1018,30 +1039,28 @@
               {#if filter.column === it.value}<span class="shrink-0 text-primary">✓</span>{/if}
             {/snippet}
           </SearchableMenu>
-          <Select.Root
-            type="single"
-            value={filter.op}
-            onValueChange={(v) => {
-              if (v)
-                patchFilter(filter.id, {
-                  op: /** @type {FilterOp} */ (v),
-                  value: "",
-                });
-            }}
+          <SearchableMenu
+            items={colOps}
+            placeholder="Search conditions…"
+            contentClass="w-52"
+            onselect={(it) => patchFilter(filter.id, { op: /** @type {FilterOp} */ (it.value), value: "" })}
           >
-            <Select.Trigger
-              size="sm"
-              class="h-7 w-28 shrink-0 gap-1 px-2 text-ui-sm font-normal shadow-none"
-              title="Condition"
-            >
-              <span class="truncate">{filterOpLabel(filter.op)}</span>
-            </Select.Trigger>
-            <Select.Content class="max-h-56">
-              {#each colOps as op (op.value)}
-                <Select.Item value={op.value} label={op.label} />
-              {/each}
-            </Select.Content>
-          </Select.Root>
+            {#snippet trigger(props)}
+              <button
+                {...props}
+                type="button"
+                class="inline-flex h-7 w-28 shrink-0 items-center gap-1 rounded-md border border-border/60 bg-transparent px-2 text-ui-sm font-normal text-foreground shadow-none transition-colors hover:bg-accent"
+                title="Condition"
+              >
+                <span class="min-w-0 flex-1 truncate text-left">{filterOpLabel(filter.op)}</span>
+                <Icon name="chevron-down" class="size-3 shrink-0 opacity-50" />
+              </button>
+            {/snippet}
+            {#snippet item(it)}
+              <span class="min-w-0 flex-1 truncate">{it.label}</span>
+              {#if filter.op === it.value}<Icon name="check" class="size-3.5 shrink-0 text-primary" />{/if}
+            {/snippet}
+          </SearchableMenu>
           {#if filterNeedsValue(filter.id)}
             {#if colKind === "boolean"}
               <div class="flex gap-1">
@@ -1060,18 +1079,11 @@
                 {/each}
               </div>
             {:else if colKind === "date"}
-              {#if filter.op === "between"}
-                <DateRangePicker
-                  from={betweenFrom(filter.value)}
-                  to={betweenTo(filter.value)}
-                  onchange={(f, t) => patchFilter(filter.id, { value: betweenJoin(f, t) })}
-                />
-              {:else}
-                <DateFilterPicker
-                  value={filter.value}
-                  onchange={(v) => patchFilter(filter.id, { value: v })}
-                />
-              {/if}
+              <DateFilterControl
+                op={filter.op}
+                value={filter.value}
+                onchange={(d) => patchFilter(filter.id, { op: /** @type {FilterOp} */ (d.op), value: d.value })}
+              />
             {:else if colKind === "number"}
               <Input
                 type="text"
@@ -1086,6 +1098,31 @@
                   patchFilter(filter.id, { value: raw })
                 }}
               />
+            {:else if enumOpts}
+              <SearchableMenu
+                items={enumOpts.map((v) => ({ value: v, label: v }))}
+                placeholder="Search values…"
+                contentClass="w-56"
+                onselect={(it) => patchFilter(filter.id, { value: it.value })}
+              >
+                {#snippet trigger(props)}
+                  <button
+                    {...props}
+                    type="button"
+                    class="inline-flex h-7 min-w-[8rem] flex-1 items-center gap-1 rounded-md border border-border/60 bg-input/30 px-2 text-ui-sm font-normal shadow-none transition-colors hover:bg-accent"
+                    title="Value"
+                  >
+                    <span class={cn("min-w-0 flex-1 truncate text-left font-mono", !filter.value && "font-sans text-muted-foreground")}>
+                      {filter.value || "Select value…"}
+                    </span>
+                    <Icon name="chevron-down" class="size-3 shrink-0 opacity-50" />
+                  </button>
+                {/snippet}
+                {#snippet item(it)}
+                  <span class="min-w-0 flex-1 truncate font-mono">{it.label}</span>
+                  {#if filter.value === it.value}<Icon name="check" class="size-3.5 shrink-0 text-primary" />{/if}
+                {/snippet}
+              </SearchableMenu>
             {:else}
               <Input
                 data-filter-value

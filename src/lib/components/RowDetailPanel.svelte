@@ -434,7 +434,7 @@
               <div class="flex-1 overflow-y-auto px-2.5 pb-3">
                 {#key target.rowIdx}
                   {#each filteredFields as field (field.colIdx)}
-                    <div class={`group/field mb-2.5${fields.length > 100 ? ' [content-visibility:auto] [contain-intrinsic-size:auto_56px]' : ''}`}>
+                    <div class={`group/field mb-2${fields.length > 100 ? ' [content-visibility:auto] [contain-intrinsic-size:auto_56px]' : ''}`}>
                       <!-- Label row: name + type + hover actions -->
                       <div class="mb-0.5 flex h-5 items-center gap-1">
                         <span class="min-w-0 flex-1 truncate font-mono text-ui-2xs text-muted-foreground">{field.name}</span>

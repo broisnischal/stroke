@@ -4,16 +4,19 @@
    LIGHT THEMES
    ───────────────────────────────────────────────────────────────────────────── */
 
-/* ── Studio Light — clean neutral white, monochrome primary ── */
+/* ── Studio Light — clean neutral white, signature indigo primary ── */
 html[data-theme="light"] {
-  --background:               oklch(0.985 0 0);
+  --background:               oklch(0.975 0 0);
   --foreground:               oklch(0.13 0 0);
-  --card:                     oklch(0.980 0 0);
+  /* Raised surfaces read LIGHTER than the canvas in light mode (elevation =
+     more light), so cards/popovers sit above the background instead of below
+     it — the drop shadow + rim highlight then agree with the colour. */
+  --card:                     oklch(0.995 0 0);
   --card-foreground:          oklch(0.13 0 0);
-  --popover:                  oklch(0.992 0 0);
+  --popover:                  oklch(0.998 0 0);
   --popover-foreground:       oklch(0.13 0 0);
-  --primary:                  oklch(0.14 0 0);
-  --primary-foreground:       oklch(0.985 0 0);
+  --primary:                  oklch(0.500 0.214 266);
+  --primary-foreground:       oklch(0.99 0 0);
   --secondary:                oklch(0.956 0 0);
   --secondary-foreground:     oklch(0.20 0 0);
   --muted:                    oklch(0.956 0 0);
@@ -23,7 +26,7 @@ html[data-theme="light"] {
   --destructive:              oklch(0.55 0.22 25);
   --border:                   oklch(0.878 0 0);
   --input:                    oklch(0.878 0 0);
-  --ring:                     oklch(0.50 0 0);
+  --ring:                     oklch(0.520 0.200 266);
   --sidebar:                  oklch(0.970 0 0);
   --sidebar-foreground:       oklch(0.17 0 0);
   --sidebar-accent:           oklch(0.944 0 0);
@@ -107,7 +110,7 @@ html[data-theme="ice"] {
    DARK THEMES
    ───────────────────────────────────────────────────────────────────────────── */
 
-/* ── Studio — neutral near-black, white primary (default) ── */
+/* ── Studio — neutral near-black, signature indigo primary (default) ── */
 html[data-theme="dark"] {
   --background:               oklch(0.132 0 0);
   --foreground:               oklch(0.940 0 0);
@@ -115,8 +118,8 @@ html[data-theme="dark"] {
   --card-foreground:          oklch(0.940 0 0);
   --popover:                  oklch(0.168 0 0);
   --popover-foreground:       oklch(0.940 0 0);
-  --primary:                  oklch(0.940 0 0);
-  --primary-foreground:       oklch(0.132 0 0);
+  --primary:                  oklch(0.55 0.19 266);
+  --primary-foreground:       oklch(0.985 0 0);
   --secondary:                oklch(0.220 0 0);
   --secondary-foreground:     oklch(0.880 0 0);
   --muted:                    oklch(0.220 0 0);
@@ -126,7 +129,7 @@ html[data-theme="dark"] {
   --destructive:              oklch(0.65 0.20 25);
   --border:                   oklch(0.262 0 0);
   --input:                    oklch(0.280 0 0);
-  --ring:                     oklch(0.700 0 0);
+  --ring:                     oklch(0.55 0.19 266);
   --sidebar:                  oklch(0.100 0 0);
   --sidebar-foreground:       oklch(0.880 0 0);
   --sidebar-accent:           oklch(0.210 0 0);
@@ -455,7 +458,7 @@ html[data-theme="graphite"] {
   --card-foreground:          #dfe1e5;
   --popover:                  #26282c;
   --popover-foreground:       #dfe1e5;
-  --primary:                  #3574f0;
+  --primary:                  #2f6ae8;
   --primary-foreground:       #ffffff;
   --secondary:                #2b2d31;
   --secondary-foreground:     #d3d5da;
@@ -466,7 +469,7 @@ html[data-theme="graphite"] {
   --destructive:              #e5534b;
   --border:                   #37393e;
   --input:                    #3c3e44;
-  --ring:                     #3574f0;
+  --ring:                     #2f6ae8;
   --sidebar:                  #1b1c1f;
   --sidebar-foreground:       #d3d5da;
   --sidebar-accent:           #2b2d31;

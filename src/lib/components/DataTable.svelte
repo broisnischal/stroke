@@ -179,8 +179,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     pinnedColumns = $bindable(/** @type {Set<string>} */ (new Set())),
     /** Active sort. null = unsorted. */
     rowSort = /** @type {{ column: string, direction: 'asc' | 'desc' } | null} */ (null),
-    /** Called when user clicks a column header to sort. */
-    onsortchange = /** @type {(sort: { column: string, direction: 'asc' | 'desc' } | null) => void} */ (() => {}),
+    /** Secondary sort keys (multi-column sort); primary is rowSort. @type {{ column: string, direction: 'asc' | 'desc' }[]} */
+    rowSortMore = [],
+    /** Called on header sort. Emits the full ordered key list ([] clears). */
+    onsortchange = /** @type {(sorts: { column: string, direction: 'asc' | 'desc' }[]) => void} */ (() => {}),
     /** Number of staged (unsaved) cell edits. Bindable so the StatusBar can show Apply/Reset. */
     pendingEditCount = $bindable(0),
     /** Assigned by this component; the parent calls these to flush / discard staged edits. */
@@ -2226,23 +2228,50 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   }
 
   /** Cycle sort: none → asc → desc → none */
-  function handleHeaderSort(colName) {
-    // Staged edits are keyed by row index; sorting would reorder rows and
-    // desync them. Ask the user to apply or reset first instead of silently
-    // dropping their changes.
+  /** Current sort keys in priority order: primary (rowSort) then secondary. */
+  function currentSortList() {
+    return (rowSort ? [rowSort] : []).concat(rowSortMore ?? [])
+  }
+
+  /** colName → { direction, index, total } for header sort arrows + rank badges. */
+  const _sortLookup = $derived.by(() => {
+    const m = new Map()
+    const list = (rowSort ? [rowSort] : []).concat(rowSortMore ?? [])
+    list.forEach((s, i) => { if (s?.column) m.set(s.column, { direction: s.direction, index: i, total: list.length }) })
+    return m
+  })
+
+  /** True while there are unsaved edits (sorting would reorder rows and desync
+   *  the row-index-keyed staged changes). Warns the user. */
+  function blockedBySort() {
     if (pendingEdits.size > 0) {
-      toast.error("Unsaved changes", {
-        description: "Apply or reset your edits before sorting.",
-      })
+      toast.error("Unsaved changes", { description: "Apply or reset your edits before sorting." })
+      return true
+    }
+    return false
+  }
+
+  /**
+   * @param {string} colName
+   * @param {boolean} [additive] shift-click: add/toggle this as a SECONDARY key
+   *   instead of replacing the sort — enables multi-column sort.
+   */
+  function handleHeaderSort(colName, additive = false) {
+    if (blockedBySort()) return
+    if (additive) {
+      const cur = currentSortList()
+      const idx = cur.findIndex((s) => s.column === colName)
+      let next
+      if (idx === -1) next = [...cur, { column: colName, direction: 'asc' }]
+      else if (cur[idx].direction === 'asc') next = cur.map((s, i) => i === idx ? { ...s, direction: 'desc' } : s)
+      else next = cur.filter((_, i) => i !== idx) // asc → desc → remove
+      onsortchange(next)
       return
     }
-    if (rowSort?.column !== colName) {
-      onsortchange({ column: colName, direction: 'desc' })
-    } else if (rowSort.direction === 'desc') {
-      onsortchange({ column: colName, direction: 'asc' })
-    } else {
-      onsortchange(null)
-    }
+    // Plain click: single-key cycle none → desc → asc → none.
+    if (rowSort?.column !== colName) onsortchange([{ column: colName, direction: 'desc' }])
+    else if (rowSort.direction === 'desc') onsortchange([{ column: colName, direction: 'asc' }])
+    else onsortchange([])
   }
 
   /** Toggle pinning a column to the left. */
@@ -2255,11 +2284,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   /** Sort by a column with an explicit direction, guarding against pending edits. */
   function headerSortDirect(colName, /** @type {'asc' | 'desc'} */ dir) {
-    if (pendingEdits.size > 0) {
-      toast.error('Unsaved changes', { description: 'Apply or reset your edits before sorting.' })
-      return
-    }
-    onsortchange({ column: colName, direction: dir })
+    if (blockedBySort()) return
+    onsortchange([{ column: colName, direction: dir }])
   }
 
   /** Reset a column's width to its default. */
@@ -2564,6 +2590,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (editingCell) return;
     if (newRowDrafts) return;
 
+    // Cmd/Ctrl+Arrow is table-level navigation (scroll to top/bottom, first/last
+    // column, paginate) owned by the app-level handler in StudioShell. Let it
+    // bubble instead of moving the cell cursor here — the old double-handling
+    // (cursor jumped one cell AND the grid scrolled) made the shortcut feel
+    // broken.
+    if (
+      (e.ctrlKey || e.metaKey) &&
+      (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "ArrowRight" || e.key === "ArrowLeft")
+    ) {
+      return;
+    }
+
     const visLen = navigableColumns.length;
     const rowLen = rows.length;
     if (!rowLen || !visLen) return;
@@ -2571,17 +2609,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const curRow = focusedRow ?? 0;
     const curCol = focusedCol ?? 0;
 
-    // Shift+Arrow extends a rectangular range from the anchor; a plain arrow (or
-    // Tab) collapses it back to the single focused cell.
-    if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "ArrowRight" || e.key === "ArrowLeft") {
-      if (e.shiftKey) {
-        if (selAnchor === null && focusedRow !== null && focusedCol !== null) {
-          selAnchor = { row: focusedRow, col: focusedCol };
-        }
-      } else {
-        clearCellRange();
-      }
-    } else if (e.key === "Tab") {
+    // Range selection is disabled — a plain arrow / Tab just collapses any stray
+    // range back to the single focused cell. (Shift+Arrow no longer extends a
+    // rectangular range; see the commented range sources below.)
+    if (
+      e.key === "ArrowDown" || e.key === "ArrowUp" ||
+      e.key === "ArrowRight" || e.key === "ArrowLeft" || e.key === "Tab"
+    ) {
       clearCellRange();
     }
 
@@ -2638,10 +2672,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       }
       case "Escape": {
         e.preventDefault();
-        // Priority: close FK sub-view → collapse cell range → clear col selection → clear cell focus
+        // Priority: close FK sub-view → collapse cell range → clear col selection
+        // → close the most-recently-expanded row → clear cell focus.
         if (fkSubview !== null) { fkSubview = null; break; }
         if (computeCellRange()) { clearCellRange(); scheduleDraw(); break; }
         if (selectedCols.size) { selectedCols = new Set(); _lastHeaderClickedCol = null; scheduleDraw(); break; }
+        if (expandedRows.size > 0) { toggleRowExpand(/** @type {number} */ ([...expandedRows].pop())); break; }
         focusedRow = null; focusedCol = null;
         break;
       }
@@ -3211,19 +3247,26 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       rx -= 20
     }
 
-    // 3. JSON pill — scale with canvasZoom so it stays proportional to the grid.
+    // 3. JSON pill — braces icon + "JSON" label laid out left-to-right with a
+    //    real gap, pill width measured from the label so the two never collide
+    //    (the old fixed 30px pill overlapped the icon and the text).
     if (isJson) {
-      const pillW = Math.round(30 * canvasZoom), pillH = Math.round(13 * canvasZoom)
-      const px = rx - 2 - pillW
-      const py = ry + (rh - pillH) / 2
+      const pillH = Math.round(15 * canvasZoom)
+      const padX = Math.round(5 * canvasZoom)
+      const gap = Math.round(3 * canvasZoom)
+      const iconSz = Math.round(10 * canvasZoom)
       const pillFontPx = Math.max(8, Math.round(9 * canvasZoom))
-      ctx.fillStyle = withAlpha(c.cMutedBg, 0.5)
-      roundRect(ctx, px, py, pillW, pillH, 2.5 * canvasZoom); ctx.fill()
-      ctx.fillStyle = c.cMuted
       ctx.font = `600 ${pillFontPx}px ${_fonts.family}`
       ctx.textAlign = 'left'
-      ctx.fillText('JSON', px + Math.round(8 * canvasZoom), py + pillH / 2 + 0.5)
-      drawIcon(ctx, 'braces', px + 1.5 * canvasZoom, py + 2.5 * canvasZoom, Math.round(8 * canvasZoom), c.cMuted, 2.2)
+      const labelW = textWidth(ctx, 'JSON')
+      const pillW = padX + iconSz + gap + labelW + padX
+      const px = rx - 2 - pillW
+      const py = ry + (rh - pillH) / 2
+      ctx.fillStyle = withAlpha(c.cMutedBg, 0.6)
+      roundRect(ctx, px, py, pillW, pillH, Math.round(4 * canvasZoom)); ctx.fill()
+      drawIcon(ctx, 'braces', px + padX, cy - iconSz / 2, iconSz, withAlpha(c.cMuted, 0.85), 2)
+      ctx.fillStyle = c.cMuted
+      ctx.fillText('JSON', px + padX + iconSz + gap, cy + 0.5)
     }
 
     // Focused-cell outline — primary border, fully inset (no bleed to neighbours).
@@ -3401,7 +3444,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   function drawHeaderCell(ctx, col, x, c) {
     const w = col.w
 
-    const sorted = rowSort?.column === col.name
+    const sortInfo = _sortLookup.get(col.name)
+    const sorted = !!sortInfo
 
     // Pinned headers are painted on top of scrolled columns — give them an opaque
     // backing so the columns sliding underneath don't bleed through.
@@ -3480,8 +3524,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const sortX = x + w - SORT_ICON - SORT_MARGIN_R
     const sortY = cy - SORT_ICON / 2
     if (sorted) {
-      const iconName = rowSort?.direction === 'asc' ? 'arrow-up' : 'arrow-down'
+      const iconName = sortInfo.direction === 'asc' ? 'arrow-up' : 'arrow-down'
       drawIcon(ctx, iconName, sortX, sortY, SORT_ICON, withAlpha(c.cPrimary, 0.95), 1.7)
+      // Multi-column sort: show this key's priority (1,2,3…) left of the arrow.
+      if (sortInfo.total > 1) {
+        ctx.font = `600 ${Math.round(9 * canvasZoom)}px ${_fonts.family}`
+        ctx.textAlign = 'right'
+        ctx.fillStyle = withAlpha(c.cPrimary, 0.95)
+        ctx.fillText(String(sortInfo.index + 1), sortX - Math.round(1.5 * canvasZoom), cy + 0.5)
+        ctx.textAlign = 'left'
+      }
     } else if (_resizeHoverCol !== col.name && hoveredColName === col.name && hoveredRow === null) {
       drawIcon(ctx, 'chevrons-up-down', sortX, sortY, SORT_ICON, withAlpha(c.cMuted, 0.55), 1.6)
     }
@@ -3831,14 +3883,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       case 'header-expand-all': collapseAllRows(); return
       case 'header-select-all': toggleAll(!allSelected); return
       case 'header': {
-        if (e.shiftKey && _lastHeaderClickedCol) {
-          // Shift+click with anchor: range-select.
-          extendColSelection(t.col.name)
+        if (e.shiftKey) {
+          // Shift+click adds/toggles this column as a SECONDARY sort key
+          // (multi-column sort), the standard data-grid gesture.
+          handleHeaderSort(t.col.name, true)
         } else {
-          // Plain click (or first shift+click with no anchor): set anchor + sort.
           selectedCols = new Set([t.col.name])
           _lastHeaderClickedCol = t.col.name
-          if (!e.shiftKey) handleHeaderSort(t.col.name)
+          handleHeaderSort(t.col.name, false)
         }
         scheduleDraw()
         return
@@ -3862,9 +3914,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         }
         if (editingCell) cancelEdit()
 
-        // Shift+Click extends a rectangular range from the anchor to the clicked
-        // cell (spreadsheet-style). The anchor is the previously-focused cell.
-        if (e.shiftKey) {
+        // Shift+Click range selection is DISABLED (no current use). The `false &&`
+        // keeps the block intact for easy re-enable; shift+click now falls through
+        // to plain single-cell focus below.
+        if (false && e.shiftKey) {
           const vi2 = actualToVisColIdx(actualIdx)
           if (vi2 >= 0) {
             if (selAnchor === null) {
@@ -4038,9 +4091,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const { x, y } = canvasXY(e)
     if (resizingColName) return
 
-    // Drag-select a rectangular cell range. Begins once the pointer leaves a small
-    // threshold from the mousedown cell, so a plain click is never treated as a drag.
-    if (_rangeDownCell && (e.buttons & 1)) {
+    // Drag-select of a rectangular cell range is DISABLED (no current use). The
+    // `false &&` keeps the block for easy re-enable; drag now does nothing here
+    // and falls through to the hover logic below.
+    if (false && _rangeDownCell && (e.buttons & 1)) {
       if (!_rangeDragging) {
         if (Math.abs(x - _rangeDownCell.x) > 4 || Math.abs(y - _rangeDownCell.y) > 4) {
           _rangeDragging = true
@@ -4472,6 +4526,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                     <RowExpandViewer
                       record={rowToRecord(columns, rows[exIdx])}
                       rowLabel={"row " + (exIdx + 1)}
+                      onclose={() => toggleRowExpand(exIdx)}
                       onopenjson={(value, label) => {
                         void prefetchJsonLightbox()
                         jsonLightbox = { value, colName: label }
@@ -4631,7 +4686,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               aria-label="Loading more rows"
             >
               <div class="flex items-center justify-center py-2">
-                <div class="flex items-center gap-1.5 rounded-full border border-border/20 bg-background px-3 py-1 shadow-md">
+                <div class="flex items-center gap-1.5 rounded-full border border-border/20 bg-background px-3 py-1 elevate-2-rim">
                   <Loader class="size-3 animate-spin text-muted-foreground/50" />
                   <span class="text-[11px] text-muted-foreground/50">Loading more…</span>
                 </div>
@@ -4682,9 +4737,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         </ContextMenu.Item>
       {:else if contextIsHeader}
         {@const hcol = contextHeaderCol}
-        {@const hSorted = rowSort?.column === hcol}
-        {@const hAsc = hSorted && rowSort?.direction === 'asc'}
-        {@const hDesc = hSorted && rowSort?.direction === 'desc'}
+        {@const hSortInfo = _sortLookup.get(hcol)}
+        {@const hSorted = !!hSortInfo}
+        {@const hAsc = hSortInfo?.direction === 'asc'}
+        {@const hDesc = hSortInfo?.direction === 'desc'}
         {@const hPinned = pinnedColumns.has(hcol)}
         <ContextMenu.Item onSelect={() => runMenuAction(() => headerSortDirect(hcol, 'asc'))}>
           <ArrowUp />
@@ -4697,7 +4753,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           {#if hDesc}<span class="ml-auto text-[10px] text-primary">✓</span>{/if}
         </ContextMenu.Item>
         {#if hSorted}
-          <ContextMenu.Item onSelect={() => runMenuAction(() => { if (pendingEdits.size > 0) { toast.error('Unsaved changes', { description: 'Apply or reset your edits before sorting.' }); return } onsortchange(null) })}>
+          <ContextMenu.Item onSelect={() => runMenuAction(() => { if (pendingEdits.size > 0) { toast.error('Unsaved changes', { description: 'Apply or reset your edits before sorting.' }); return } onsortchange([]) })}>
             <ArrowUpDown />
             Clear sort
           </ContextMenu.Item>

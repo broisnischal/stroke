@@ -5,6 +5,7 @@
   import WrapText from '@lucide/svelte/icons/wrap-text'
   import ListTree from '@lucide/svelte/icons/list-tree'
   import Braces from '@lucide/svelte/icons/braces'
+  import X from '@lucide/svelte/icons/x'
   import JsonTree from './JsonTree.svelte'
   import { formatJsonValue } from '$lib/row-inspector.js'
   import {
@@ -28,6 +29,8 @@
     rowLabel = '',
     /** Open a value in the Monaco JSON lightbox. @type {((value: unknown, label: string) => void) | null} */
     onopenjson = null,
+    /** Collapse this expanded row. @type {(() => void) | null} */
+    onclose = null,
   } = $props()
 
   let html = $state('')
@@ -308,6 +311,19 @@
         <span>Raw</span>
       </button>
     </div>
+
+    <!-- Close (collapse this row) — also bound to Esc in the grid. -->
+    {#if onclose}
+      <button
+        type="button"
+        title="Close (Esc)"
+        aria-label="Close expanded row"
+        class="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-accent/50 hover:text-foreground"
+        onclick={onclose}
+      >
+        <X class="size-3.5" />
+      </button>
+    {/if}
   </div>
 
   <!-- JSON content -->

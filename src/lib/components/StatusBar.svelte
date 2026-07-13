@@ -11,6 +11,7 @@
   import * as Dialog from '$lib/components/ui/dialog/index.js'
   import AppearanceMenu from './AppearanceMenu.svelte'
   import CreateDatabaseDialog from './CreateDatabaseDialog.svelte'
+  import SearchableMenu from './SearchableMenu.svelte'
 
   let {
     /** @type {import('$lib/stores/connections.js').SavedConnection | null} */
@@ -311,6 +312,7 @@
   const labelBtn = 'flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors hover:bg-muted/50 hover:text-foreground data-[state=open]:bg-muted/50 data-[state=open]:text-foreground'
 
   let toolsOpen = $state(false)
+  let aiModelMenuOpen = $state(false)
 
   // Tools launcher — built from one list so every card renders identically.
   const toolItems = $derived.by(() => {
@@ -606,9 +608,9 @@
         <button
           type="button"
           class={cn(
-            'flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors',
+            'flex items-center gap-1.5 rounded-md px-2 py-1 transition-[background-color,color] duration-150',
             live
-              ? 'bg-emerald-500/10 font-medium text-emerald-500 ring-1 ring-inset ring-emerald-500/30 hover:bg-emerald-500/15'
+              ? 'font-medium text-emerald-600 bg-emerald-500/10 hover:bg-emerald-500/16 dark:text-emerald-400'
               : 'text-muted-foreground/50 hover:bg-muted/50 hover:text-foreground',
           )}
           onclick={ontogglelive}
@@ -616,11 +618,8 @@
           title={live ? 'Live: on — auto-refreshes when this table changes' : 'Live: off — click to auto-refresh on changes'}
         >
           {#if live}
-            <span class="relative flex size-3 items-center justify-center">
-              <span class="absolute inline-flex size-2.5 animate-ping rounded-full bg-emerald-500/50"></span>
-              <span class="relative inline-flex size-1.5 rounded-full bg-emerald-500"></span>
-            </span>
-            <span class="text-ui-2xs font-semibold uppercase tracking-wide">Live</span>
+            <span class="size-1.5 shrink-0 rounded-full bg-emerald-500 motion-safe:animate-pulse"></span>
+            <span>Live</span>
           {:else}
             <Icon name="radio" class="size-3 shrink-0" />
             <span>Live</span>
@@ -814,36 +813,43 @@
     {@render sep()}
 
     <!-- AI model picker -->
-    <DropdownMenu.Root>
-      <DropdownMenu.Trigger
-        class={cn(labelBtn, 'text-muted-foreground/70')}
-        title="Switch AI model"
-      >
-        <Icon name="bot" class="size-3 shrink-0 opacity-60" />
-        <span class="max-w-[9rem] truncate font-medium">{modelName}</span>
-        <Icon name="chevron-down" class="size-3 shrink-0 opacity-35 transition-transform data-[state=open]:rotate-180" />
-      </DropdownMenu.Trigger>
-
-      <DropdownMenu.Content side="top" align="end" class="w-56">
-        <DropdownMenu.RadioGroup value={$activeProfileId} onValueChange={(v) => setActiveProfile(v)}>
-          {#each $aiProfiles as profile (profile.id)}
-            <DropdownMenu.RadioItem value={profile.id} class="cursor-pointer py-1.5">
-              <div class="flex min-w-0 flex-col gap-0.5">
-                <span class="truncate text-[13px] font-medium leading-tight">{profile.name}</span>
-                <span class="truncate font-mono text-[10px] leading-tight text-muted-foreground/50">{profile.model}</span>
-              </div>
-            </DropdownMenu.RadioItem>
-          {/each}
-        </DropdownMenu.RadioGroup>
-
-        <DropdownMenu.Separator />
-
-        <DropdownMenu.Item class="cursor-pointer" onclick={onopenmodelsettings}>
-          <Icon name="settings-2" class="size-3.5 shrink-0 text-muted-foreground/50" />
-          Manage models…
-        </DropdownMenu.Item>
-      </DropdownMenu.Content>
-    </DropdownMenu.Root>
+    <SearchableMenu
+      bind:open={aiModelMenuOpen}
+      side="top"
+      align="end"
+      contentClass="w-64"
+      placeholder="Search models…"
+      items={$aiProfiles.map((p) => ({ value: p.id, label: p.name, keywords: [p.model] }))}
+      onselect={(it) => setActiveProfile(it.value)}
+    >
+      {#snippet trigger(props)}
+        <button {...props} type="button" class={cn(labelBtn, 'text-muted-foreground/70')} title="Switch AI model">
+          <Icon name="bot" class="size-3 shrink-0 opacity-60" />
+          <span class="max-w-[9rem] truncate font-medium">{modelName}</span>
+          <Icon name="chevron-down" class="size-3 shrink-0 opacity-35" />
+        </button>
+      {/snippet}
+      {#snippet item(it)}
+        {@const profile = $aiProfiles.find((p) => p.id === it.value)}
+        <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span class="truncate text-ui-sm font-medium leading-tight">{profile?.name ?? it.label}</span>
+          <span class="truncate font-mono text-[10px] leading-tight text-muted-foreground/50">{profile?.model}</span>
+        </div>
+        {#if $activeProfileId === it.value}<Icon name="check" class="size-3.5 shrink-0 self-center text-primary" />{/if}
+      {/snippet}
+      {#snippet footer()}
+        <div class="border-t border-border/40 p-1">
+          <button
+            type="button"
+            class="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            onclick={() => { aiModelMenuOpen = false; onopenmodelsettings() }}
+          >
+            <Icon name="settings-2" class="size-3.5 shrink-0 text-muted-foreground/50" />
+            Manage models…
+          </button>
+        </div>
+      {/snippet}
+    </SearchableMenu>
 
   </div>
 </div>
