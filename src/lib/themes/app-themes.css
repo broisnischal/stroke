@@ -458,7 +458,7 @@ html[data-theme="graphite"] {
   --card-foreground:          #dfe1e5;
   --popover:                  #26282c;
   --popover-foreground:       #dfe1e5;
-  --primary:                  #3574f0;
+  --primary:                  #2f6ae8;
   --primary-foreground:       #ffffff;
   --secondary:                #2b2d31;
   --secondary-foreground:     #d3d5da;
@@ -469,7 +469,7 @@ html[data-theme="graphite"] {
   --destructive:              #e5534b;
   --border:                   #37393e;
   --input:                    #3c3e44;
-  --ring:                     #3574f0;
+  --ring:                     #2f6ae8;
   --sidebar:                  #1b1c1f;
   --sidebar-foreground:       #d3d5da;
   --sidebar-accent:           #2b2d31;
