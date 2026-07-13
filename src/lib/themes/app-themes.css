@@ -6,11 +6,14 @@
 
 /* ── Studio Light — clean neutral white, signature indigo primary ── */
 html[data-theme="light"] {
-  --background:               oklch(0.985 0 0);
+  --background:               oklch(0.975 0 0);
   --foreground:               oklch(0.13 0 0);
-  --card:                     oklch(0.980 0 0);
+  /* Raised surfaces read LIGHTER than the canvas in light mode (elevation =
+     more light), so cards/popovers sit above the background instead of below
+     it — the drop shadow + rim highlight then agree with the colour. */
+  --card:                     oklch(0.995 0 0);
   --card-foreground:          oklch(0.13 0 0);
-  --popover:                  oklch(0.992 0 0);
+  --popover:                  oklch(0.998 0 0);
   --popover-foreground:       oklch(0.13 0 0);
   --primary:                  oklch(0.500 0.214 266);
   --primary-foreground:       oklch(0.99 0 0);

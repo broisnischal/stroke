@@ -3211,19 +3211,26 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       rx -= 20
     }
 
-    // 3. JSON pill — scale with canvasZoom so it stays proportional to the grid.
+    // 3. JSON pill — braces icon + "JSON" label laid out left-to-right with a
+    //    real gap, pill width measured from the label so the two never collide
+    //    (the old fixed 30px pill overlapped the icon and the text).
     if (isJson) {
-      const pillW = Math.round(30 * canvasZoom), pillH = Math.round(13 * canvasZoom)
-      const px = rx - 2 - pillW
-      const py = ry + (rh - pillH) / 2
+      const pillH = Math.round(15 * canvasZoom)
+      const padX = Math.round(5 * canvasZoom)
+      const gap = Math.round(3 * canvasZoom)
+      const iconSz = Math.round(10 * canvasZoom)
       const pillFontPx = Math.max(8, Math.round(9 * canvasZoom))
-      ctx.fillStyle = withAlpha(c.cMutedBg, 0.5)
-      roundRect(ctx, px, py, pillW, pillH, 2.5 * canvasZoom); ctx.fill()
-      ctx.fillStyle = c.cMuted
       ctx.font = `600 ${pillFontPx}px ${_fonts.family}`
       ctx.textAlign = 'left'
-      ctx.fillText('JSON', px + Math.round(8 * canvasZoom), py + pillH / 2 + 0.5)
-      drawIcon(ctx, 'braces', px + 1.5 * canvasZoom, py + 2.5 * canvasZoom, Math.round(8 * canvasZoom), c.cMuted, 2.2)
+      const labelW = textWidth(ctx, 'JSON')
+      const pillW = padX + iconSz + gap + labelW + padX
+      const px = rx - 2 - pillW
+      const py = ry + (rh - pillH) / 2
+      ctx.fillStyle = withAlpha(c.cMutedBg, 0.6)
+      roundRect(ctx, px, py, pillW, pillH, Math.round(4 * canvasZoom)); ctx.fill()
+      drawIcon(ctx, 'braces', px + padX, cy - iconSz / 2, iconSz, withAlpha(c.cMuted, 0.85), 2)
+      ctx.fillStyle = c.cMuted
+      ctx.fillText('JSON', px + padX + iconSz + gap, cy + 0.5)
     }
 
     // Focused-cell outline — primary border, fully inset (no bleed to neighbours).
