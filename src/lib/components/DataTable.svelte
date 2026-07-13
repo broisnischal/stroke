@@ -4631,7 +4631,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               aria-label="Loading more rows"
             >
               <div class="flex items-center justify-center py-2">
-                <div class="flex items-center gap-1.5 rounded-full border border-border/20 bg-background px-3 py-1 shadow-md">
+                <div class="flex items-center gap-1.5 rounded-full border border-border/20 bg-background px-3 py-1 elevate-2-rim">
                   <Loader class="size-3 animate-spin text-muted-foreground/50" />
                   <span class="text-[11px] text-muted-foreground/50">Loading more…</span>
                 </div>

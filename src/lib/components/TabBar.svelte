@@ -134,7 +134,7 @@
                 active ? 'bg-panel' : 'hover:bg-muted/20',
               )}
               style={active
-                ? 'box-shadow: 0 1px 0 0 var(--color-panel), inset 0 -2px 0 0 color-mix(in oklch, var(--foreground) 55%, transparent)'
+                ? 'box-shadow: 0 1px 0 0 var(--color-panel), inset 0 -2px 0 0 var(--primary)'
                 : ''}
             >
               <!-- Tab button — font-medium on ALL states to prevent layout shift on activation -->

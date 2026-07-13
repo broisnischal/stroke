@@ -76,9 +76,9 @@
   async function winToggleFullscreen() { try { await getCurrentWindow().setFullscreen(!fullscreen) } catch {} }
   async function winToggleMaximize()   { try { await getCurrentWindow().toggleMaximize()           } catch {} }
 
-  const iconBtn = 'inline-flex size-[24px] items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-white/[0.07] hover:text-muted-foreground'
+  const iconBtn = 'inline-flex size-[24px] items-center justify-center rounded-md text-muted-foreground/50 transition-[background-color,color] duration-150 hover:bg-foreground/[0.06] hover:text-foreground'
   // Windows / Linux native-style caption buttons: full-height, square, flush right.
-  const winCtl = 'pointer-events-auto inline-flex h-full w-[46px] items-center justify-center text-muted-foreground/55 transition-colors hover:bg-white/[0.08] hover:text-foreground'
+  const winCtl = 'pointer-events-auto inline-flex h-full w-[46px] items-center justify-center text-muted-foreground/55 transition-[background-color,color] duration-150 hover:bg-foreground/[0.07] hover:text-foreground'
 </script>
 
 {#if isTauri && !fullscreen}
@@ -141,7 +141,7 @@
         class={cn(
           'pointer-events-auto shrink-0',
           iconBtn,
-          !connected ? 'opacity-25 !pointer-events-none' : !sidebarOpen && 'bg-white/[0.05] text-foreground/50',
+          !connected ? 'opacity-25 !pointer-events-none' : !sidebarOpen && 'bg-foreground/[0.05] text-foreground/60',
         )}
         onclick={ontogglesidebar}
         disabled={!connected}
@@ -207,8 +207,8 @@
           class={cn(
             'flex h-[22px] items-center gap-1 rounded px-2 text-[11px] font-medium transition-colors',
             aiMode
-              ? 'bg-primary/15 text-primary hover:bg-primary/20'
-              : 'text-muted-foreground/50 hover:bg-white/[0.07] hover:text-muted-foreground',
+              ? 'bg-primary/15 text-primary ring-1 ring-inset ring-primary/25 hover:bg-primary/20'
+              : 'text-muted-foreground/50 hover:bg-foreground/[0.06] hover:text-foreground',
           )}
           onclick={ontoggleaimode}
           title={aiMode ? `Exit agent mode (${mod}⇧E)` : `Enter agent mode (${mod}⇧E)`}
@@ -220,7 +220,7 @@
         <!-- Chat sidebar -->
         <button
           type="button"
-          class={cn(iconBtn, aiSidebarOpen && 'bg-white/[0.05] text-foreground/60')}
+          class={cn(iconBtn, aiSidebarOpen && 'bg-foreground/[0.05] text-foreground/70')}
           onclick={ontoggleaisidebar}
           title={aiSidebarOpen ? `Close chat (${mod}I)` : `Open chat (${mod}I)`}
         >
