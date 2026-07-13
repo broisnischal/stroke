@@ -4,6 +4,72 @@ All notable changes to Stroke are listed here, newest first.
 
 ---
 
+## [1.10.0] - 2026-07-13
+
+### New Features
+
+#### Interface
+- **Signature accent** — the default Studio light & dark themes gain a refined indigo primary, focus ring, and text selection (verified AA).
+- **Display headings** — titles use a tighter, optically-sized heading treatment for a more premium feel.
+- **Elevation system** — dialogs, menus, popovers and cards use layered, theme-aware shadows with a catch-light rim instead of flat borders.
+- **Searchable dropdowns** — the filter condition/value pickers and the status-bar AI model picker gain a search box with a checkmark on the selected item.
+
+#### Data Table
+- **Date filter presets** — a relative-range menu (Today, Last 7 / 30 / 90 days, This month, Year to date, and "In the last N hours/days/weeks/months") beside the calendar.
+- **Enum value dropdown** — enum columns filter by picking from a searchable list of their values instead of typing free text.
+- **Instant rows, count later** — opening a table paints rows immediately and fills in the total ("… of N") in the background instead of waiting on COUNT(*).
+- **Multi-column sort** — shift-click column headers to add secondary sort keys; sorted headers show their priority number.
+- **Dismiss an expanded row** — press Esc (closes the most recent) or the new close button to collapse an inline expanded-row JSON panel.
+
+#### Security
+- **OS keychain storage** — AI keys and provider OAuth tokens now live in the OS keychain (Keychain / Credential Manager / Secret Service), migrated automatically from the old plaintext file.
+
+#### Relation Tree
+- **Row counts stream in** — each related table's row count now loads in the background without blocking the relation tree.
+
+### Bug Fixes
+
+#### AI
+- **Add-model dialog** — stepper, buttons and provider selection use the app accent consistently.
+- **AI empty state** — "Configure a model" is a clear primary action rather than an alarming amber warning.
+- **@-mention picker** — decluttered (proper elevation, no redundant per-row schema labels).
+
+#### Data Table
+- **Table navigation shortcuts** — Cmd/Ctrl+Arrow now scrolls/paginates cleanly instead of also jumping the cell cursor.
+- **Date filters match** — "equals" and "is between" on timestamp columns now match the whole day instead of returning no rows.
+- **JSON cell badge** — the braces icon no longer overlaps the "JSON" label; the pill is sized to fit.
+- **LIVE indicator** — a calm pill (no neon ring/ping), theme-correct and reduced-motion aware.
+- **Row inspector density** — the expanded-row JSON view uses smaller, right-sized text.
+- **Image previews** — cell URLs are percent-encoded before preview/open, fixing images that failed to load.
+
+#### Interface
+- **Graphite contrast** — button labels on the Graphite theme now meet WCAG AA.
+- **Icon-set picker** — preview no longer crams two glyphs together; the description text is legible.
+- **Studio Light depth** — cards and menus no longer read as sunken; raised surfaces now sit above the canvas.
+- **MCP panel** — client tiles use one consistent neutral style instead of mismatched colors.
+- **Title-bar hovers** — control hovers are visible on light themes (were near-invisible white overlays).
+
+#### Connection
+- **Provider sessions persist** — connections via Neon/Supabase/etc. no longer prompt for re-login roughly every day.
+
+#### Sidebar
+- **Auto-deselect** — multi-select table actions (Open/Close/Copy/Pin) clear the selection when finished.
+
+#### SQL Editor
+- **SQL error panel** — errors are now selectable/copyable with a copy button and a terminal-style red gutter.
+
+### Changes
+
+#### Interface
+- **Dialog surfaces** — dialogs adopt the elevation system (rounded, layered shadow) in place of flat hairline borders.
+- **Button feedback** — primary buttons gain subtle elevation and a press (scale) response.
+- **Cleaner tab bar** — removed the recent-tables and new-tab buttons from the tab strip (new tabs open via ⌘T / the command palette).
+- **Text selection** — selection colour is brand-tinted from the theme's primary, kept legible over editor and cell content.
+
+#### Data Table
+- **Range selection removed** — drag/shift row & cell range selection is disabled (unused); single-cell focus, editing and copy are unchanged.
+
+
 ## [1.9.0] - 2026-07-11
 
 ### New Features
