@@ -2564,6 +2564,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (editingCell) return;
     if (newRowDrafts) return;
 
+    // Cmd/Ctrl+Arrow is table-level navigation (scroll to top/bottom, first/last
+    // column, paginate) owned by the app-level handler in StudioShell. Let it
+    // bubble instead of moving the cell cursor here — the old double-handling
+    // (cursor jumped one cell AND the grid scrolled) made the shortcut feel
+    // broken.
+    if (
+      (e.ctrlKey || e.metaKey) &&
+      (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "ArrowRight" || e.key === "ArrowLeft")
+    ) {
+      return;
+    }
+
     const visLen = navigableColumns.length;
     const rowLen = rows.length;
     if (!rowLen || !visLen) return;
@@ -2571,17 +2583,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const curRow = focusedRow ?? 0;
     const curCol = focusedCol ?? 0;
 
-    // Shift+Arrow extends a rectangular range from the anchor; a plain arrow (or
-    // Tab) collapses it back to the single focused cell.
-    if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "ArrowRight" || e.key === "ArrowLeft") {
-      if (e.shiftKey) {
-        if (selAnchor === null && focusedRow !== null && focusedCol !== null) {
-          selAnchor = { row: focusedRow, col: focusedCol };
-        }
-      } else {
-        clearCellRange();
-      }
-    } else if (e.key === "Tab") {
+    // Range selection is disabled — a plain arrow / Tab just collapses any stray
+    // range back to the single focused cell. (Shift+Arrow no longer extends a
+    // rectangular range; see the commented range sources below.)
+    if (
+      e.key === "ArrowDown" || e.key === "ArrowUp" ||
+      e.key === "ArrowRight" || e.key === "ArrowLeft" || e.key === "Tab"
+    ) {
       clearCellRange();
     }
 
@@ -3869,9 +3877,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         }
         if (editingCell) cancelEdit()
 
-        // Shift+Click extends a rectangular range from the anchor to the clicked
-        // cell (spreadsheet-style). The anchor is the previously-focused cell.
-        if (e.shiftKey) {
+        // Shift+Click range selection is DISABLED (no current use). The `false &&`
+        // keeps the block intact for easy re-enable; shift+click now falls through
+        // to plain single-cell focus below.
+        if (false && e.shiftKey) {
           const vi2 = actualToVisColIdx(actualIdx)
           if (vi2 >= 0) {
             if (selAnchor === null) {
@@ -4045,9 +4054,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const { x, y } = canvasXY(e)
     if (resizingColName) return
 
-    // Drag-select a rectangular cell range. Begins once the pointer leaves a small
-    // threshold from the mousedown cell, so a plain click is never treated as a drag.
-    if (_rangeDownCell && (e.buttons & 1)) {
+    // Drag-select of a rectangular cell range is DISABLED (no current use). The
+    // `false &&` keeps the block for easy re-enable; drag now does nothing here
+    // and falls through to the hover logic below.
+    if (false && _rangeDownCell && (e.buttons & 1)) {
       if (!_rangeDragging) {
         if (Math.abs(x - _rangeDownCell.x) > 4 || Math.abs(y - _rangeDownCell.y) > 4) {
           _rangeDragging = true
