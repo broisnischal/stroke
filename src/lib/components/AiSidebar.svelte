@@ -705,8 +705,12 @@
         </div>
 
         {#if !configured}
-          <button type="button" class="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/8 px-3 py-2 text-ui-xs text-amber-600 dark:text-amber-400 transition-colors hover:bg-amber-500/12" onclick={onopensettings}>
-            <AlertTriangle class="size-3.5" />Configure a model to start
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-ui-xs font-medium text-primary-foreground elevate-1 transition-[background-color,transform] duration-150 hover:bg-primary/90 active:scale-[0.97]"
+            onclick={onopensettings}
+          >
+            <Sparkles class="size-3.5" />Configure a model
           </button>
         {:else}
           <div class="w-full overflow-hidden rounded-xl border border-border/35">
