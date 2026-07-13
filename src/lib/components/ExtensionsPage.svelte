@@ -181,12 +181,12 @@
         <h1 class="text-[13px] font-semibold tracking-tight text-foreground">Extensions</h1>
       </div>
       <span
-        class={cn(
-          "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums transition-colors",
-          enabledCount > 0 ? "bg-emerald-500/12 text-emerald-500" : "text-muted-foreground/45",
-        )}
+        class="flex shrink-0 items-center gap-1.5 rounded-full bg-muted/60 px-2 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground"
         title="{enabledCount} of {EXTENSIONS.length} extensions enabled"
-      >{enabledCount} on</span>
+      >
+        {#if enabledCount > 0}<span class="size-1.5 rounded-full bg-emerald-500"></span>{/if}
+        {enabledCount} on
+      </span>
     </div>
 
     <div class="app-scroll min-h-0 flex-1 overflow-y-auto px-2 pb-3">
@@ -209,7 +209,7 @@
             {#if Icon}<Icon class={cn("size-3.5 shrink-0", active ? "text-foreground/80" : "text-muted-foreground/60")} />{/if}
             <span class="min-w-0 flex-1 truncate text-[13px]">{ext.name}</span>
             <span
-              class={cn("size-1.5 shrink-0 rounded-full transition-all", on ? "bg-emerald-500 ring-2 ring-emerald-500/20" : "bg-transparent")}
+              class={cn("size-1.5 shrink-0 rounded-full transition-colors", on ? "bg-emerald-500" : "bg-transparent")}
               title={on ? "Enabled" : undefined}
             ></span>
           </button>
@@ -223,20 +223,15 @@
     {#key selected.id}
       {@const Icon = ICONS[selected.id]}
       {@const on = isOn(selected.id)}
-      <div class="mx-auto w-full max-w-[36rem] px-8 py-9">
-        <!-- Header card — enabled extensions pick up a subtle emerald accent so
-             the on/off state reads at a glance; disabled stay neutral. -->
-        <div
-          class={cn(
-            "rounded-xl border p-4 transition-colors",
-            on ? "border-emerald-500/25 bg-emerald-500/[0.04]" : "border-border/60 bg-card/40",
-          )}
-        >
+      <div class="w-full max-w-[42rem] px-8 py-8">
+        <!-- Header card — the icon tile carries the on/off state (emerald when
+             enabled), so the card and toggle stay quiet. One signal, not four. -->
+        <div class="rounded-xl border border-border/60 bg-card/40 p-4">
           <div class="flex items-start gap-3.5">
             <span
               class={cn(
                 "grid size-10 shrink-0 place-items-center rounded-lg border transition-colors",
-                on ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-500" : "border-primary/20 bg-primary/10 text-primary",
+                on ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500" : "border-border/60 bg-muted/40 text-muted-foreground",
               )}
             >
               {#if Icon}<Icon class="size-5" />{/if}
@@ -245,15 +240,7 @@
               <h2 class="text-[15px] font-semibold tracking-tight text-foreground">{selected.name}</h2>
               <p class="mt-0.5 text-[11.5px] text-muted-foreground">{KIND_LABEL[selected.kind] ?? "Extension"}</p>
             </div>
-            <label class="flex shrink-0 cursor-pointer items-center gap-2 pt-0.5">
-              <span
-                class={cn(
-                  "rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide transition-colors",
-                  on ? "bg-emerald-500/12 text-emerald-500" : "text-muted-foreground/55",
-                )}
-              >{on ? "On" : "Off"}</span>
-              {@render toggle(on, () => setPluginEnabled(selected.id, !on), `Toggle ${selected.name}`)}
-            </label>
+            {@render toggle(on, () => setPluginEnabled(selected.id, !on), `Toggle ${selected.name}`)}
           </div>
           <p class="mt-3 text-[13px] leading-relaxed text-muted-foreground">{selected.description}</p>
         </div>
