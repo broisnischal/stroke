@@ -649,6 +649,20 @@ fn pg_param_cast(data_type: Option<&str>) -> &'static str {
     }
 }
 
+/// True for a bare `YYYY-MM-DD` value (no time-of-day). Such a value applied to
+/// a timestamp column must match the whole calendar day `[date, date+1)` rather
+/// than the midnight instant — otherwise `= '2026-07-06'` compiles to
+/// `= '2026-07-06 00:00:00'` and never matches a real timestamp (the filter bug).
+fn is_date_only(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 10
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && b[..4].iter().all(u8::is_ascii_digit)
+        && b[5..7].iter().all(u8::is_ascii_digit)
+        && b[8..10].iter().all(u8::is_ascii_digit)
+}
+
 fn build_filter_condition(
     builder: &mut QueryBuilder,
     column: &str,
@@ -659,6 +673,10 @@ fn build_filter_condition(
 ) -> Result<(), String> {
     let col = quoted_column(column)?;
     let cast = pg_param_cast(data_type);
+    // A bare date on a timestamp column means "the whole day", handled per-op
+    // below (half-open [date, date+1) ranges). Pure `date`/`time` columns and
+    // values that carry a time-of-day keep exact comparison.
+    let ts = cast == "::timestamptz";
     // When the column type is known we can cast the *parameter* and leave the
     // column uncast, making the condition SARGable (index-eligible).
     // For unknown types we fall back to casting the column to text.
@@ -671,20 +689,30 @@ fn build_filter_condition(
             builder.push_condition(format!("{col} IS NOT NULL"), conjunct);
         }
         "eq" => {
-            let p = builder.push_bind(value.unwrap_or("").to_string());
-            let cond = if typed { format!("{col} = {p}{cast}") }
+            let v = value.unwrap_or("");
+            let day = ts && is_date_only(v);
+            let p = builder.push_bind(v.to_string());
+            let cond = if day { format!("({col} >= {p}{cast} AND {col} < {p}{cast} + interval '1 day')") }
+                       else if typed { format!("{col} = {p}{cast}") }
                        else    { format!("{col}::text = {p}") };
             builder.push_condition(cond, conjunct);
         }
         "neq" => {
-            let p = builder.push_bind(value.unwrap_or("").to_string());
-            let cond = if typed { format!("{col} IS DISTINCT FROM {p}{cast}") }
+            let v = value.unwrap_or("");
+            let day = ts && is_date_only(v);
+            let p = builder.push_bind(v.to_string());
+            let cond = if day { format!("({col} < {p}{cast} OR {col} >= {p}{cast} + interval '1 day')") }
+                       else if typed { format!("{col} IS DISTINCT FROM {p}{cast}") }
                        else    { format!("{col}::text IS DISTINCT FROM {p}") };
             builder.push_condition(cond, conjunct);
         }
         "gt" => {
-            let p = builder.push_bind(value.unwrap_or("").to_string());
-            let cond = if typed { format!("{col} > {p}{cast}") }
+            let v = value.unwrap_or("");
+            let day = ts && is_date_only(v);
+            let p = builder.push_bind(v.to_string());
+            // "after 2026-07-06" (whole day) means at/after the start of the next day.
+            let cond = if day { format!("{col} >= {p}{cast} + interval '1 day'") }
+                       else if typed { format!("{col} > {p}{cast}") }
                        else    { format!("{col}::text > {p}") };
             builder.push_condition(cond, conjunct);
         }
@@ -701,8 +729,12 @@ fn build_filter_condition(
             builder.push_condition(cond, conjunct);
         }
         "lte" => {
-            let p = builder.push_bind(value.unwrap_or("").to_string());
-            let cond = if typed { format!("{col} <= {p}{cast}") }
+            let v = value.unwrap_or("");
+            let day = ts && is_date_only(v);
+            let p = builder.push_bind(v.to_string());
+            // "on or before 2026-07-06" (whole day) means before the next day starts.
+            let cond = if day { format!("{col} < {p}{cast} + interval '1 day'") }
+                       else if typed { format!("{col} <= {p}{cast}") }
                        else    { format!("{col}::text <= {p}") };
             builder.push_condition(cond, conjunct);
         }
@@ -742,16 +774,23 @@ fn build_filter_condition(
                 }
                 (true, false) => {
                     // only upper bound set
+                    let to_day = ts && is_date_only(&to);
                     let p2 = builder.push_bind(to);
-                    let cond = if typed { format!("{col} <= {p2}{cast}") }
+                    let cond = if to_day { format!("{col} < {p2}{cast} + interval '1 day'") }
+                               else if typed { format!("{col} <= {p2}{cast}") }
                                else    { format!("{col}::text <= {p2}") };
                     builder.push_condition(cond, conjunct);
                 }
                 (false, false) => {
+                    // Lower bound is a start-of-day, which is already correct; the
+                    // upper bound must include the whole end day when it's a bare date.
+                    let to_day = ts && is_date_only(&to);
                     let p1 = builder.push_bind(from);
                     let p2 = builder.push_bind(to);
                     let cond = if typed {
-                        format!("({col} >= {p1}{cast} AND {col} <= {p2}{cast})")
+                        let upper = if to_day { format!("{col} < {p2}{cast} + interval '1 day'") }
+                                    else { format!("{col} <= {p2}{cast}") };
+                        format!("({col} >= {p1}{cast} AND {upper})")
                     } else {
                         format!("({col}::text >= {p1} AND {col}::text <= {p2})")
                     };

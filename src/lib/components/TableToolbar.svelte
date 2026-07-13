@@ -4,8 +4,7 @@
   import * as Select from "$lib/components/ui/select/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import SearchableMenu from "./SearchableMenu.svelte";
-  import DateFilterPicker from "./DateFilterPicker.svelte";
-  import DateRangePicker from "./DateRangePicker.svelte";
+  import DateFilterControl from "./DateFilterControl.svelte";
   import { slotRoll } from "$lib/actions/slot-text.js";
   import { cn } from "$lib/utils.js";
   import {
@@ -1064,18 +1063,11 @@
                 {/each}
               </div>
             {:else if colKind === "date"}
-              {#if filter.op === "between"}
-                <DateRangePicker
-                  from={betweenFrom(filter.value)}
-                  to={betweenTo(filter.value)}
-                  onchange={(f, t) => patchFilter(filter.id, { value: betweenJoin(f, t) })}
-                />
-              {:else}
-                <DateFilterPicker
-                  value={filter.value}
-                  onchange={(v) => patchFilter(filter.id, { value: v })}
-                />
-              {/if}
+              <DateFilterControl
+                op={filter.op}
+                value={filter.value}
+                onchange={(d) => patchFilter(filter.id, { op: /** @type {FilterOp} */ (d.op), value: d.value })}
+              />
             {:else if colKind === "number"}
               <Input
                 type="text"
