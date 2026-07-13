@@ -1039,30 +1039,28 @@
               {#if filter.column === it.value}<span class="shrink-0 text-primary">✓</span>{/if}
             {/snippet}
           </SearchableMenu>
-          <Select.Root
-            type="single"
-            value={filter.op}
-            onValueChange={(v) => {
-              if (v)
-                patchFilter(filter.id, {
-                  op: /** @type {FilterOp} */ (v),
-                  value: "",
-                });
-            }}
+          <SearchableMenu
+            items={colOps}
+            placeholder="Search conditions…"
+            contentClass="w-52"
+            onselect={(it) => patchFilter(filter.id, { op: /** @type {FilterOp} */ (it.value), value: "" })}
           >
-            <Select.Trigger
-              size="sm"
-              class="h-7 w-28 shrink-0 gap-1 px-2 text-ui-sm font-normal shadow-none"
-              title="Condition"
-            >
-              <span class="truncate">{filterOpLabel(filter.op)}</span>
-            </Select.Trigger>
-            <Select.Content class="max-h-56">
-              {#each colOps as op (op.value)}
-                <Select.Item value={op.value} label={op.label} />
-              {/each}
-            </Select.Content>
-          </Select.Root>
+            {#snippet trigger(props)}
+              <button
+                {...props}
+                type="button"
+                class="inline-flex h-7 w-28 shrink-0 items-center gap-1 rounded-md border border-border/60 bg-transparent px-2 text-ui-sm font-normal text-foreground shadow-none transition-colors hover:bg-accent"
+                title="Condition"
+              >
+                <span class="min-w-0 flex-1 truncate text-left">{filterOpLabel(filter.op)}</span>
+                <Icon name="chevron-down" class="size-3 shrink-0 opacity-50" />
+              </button>
+            {/snippet}
+            {#snippet item(it)}
+              <span class="min-w-0 flex-1 truncate">{it.label}</span>
+              {#if filter.op === it.value}<Icon name="check" class="size-3.5 shrink-0 text-primary" />{/if}
+            {/snippet}
+          </SearchableMenu>
           {#if filterNeedsValue(filter.id)}
             {#if colKind === "boolean"}
               <div class="flex gap-1">
@@ -1101,26 +1099,30 @@
                 }}
               />
             {:else if enumOpts}
-              <Select.Root
-                type="single"
-                value={filter.value}
-                onValueChange={(v) => patchFilter(filter.id, { value: v ?? "" })}
+              <SearchableMenu
+                items={enumOpts.map((v) => ({ value: v, label: v }))}
+                placeholder="Search values…"
+                contentClass="w-56"
+                onselect={(it) => patchFilter(filter.id, { value: it.value })}
               >
-                <Select.Trigger
-                  size="sm"
-                  class="h-7 min-w-[8rem] flex-1 gap-1 px-2 text-ui-sm font-normal shadow-none"
-                  title="Value"
-                >
-                  <span class={cn("truncate", !filter.value && "text-muted-foreground")}>
-                    {filter.value || "Select value…"}
-                  </span>
-                </Select.Trigger>
-                <Select.Content class="max-h-56">
-                  {#each enumOpts as opt (opt)}
-                    <Select.Item value={opt} label={opt} class="font-mono text-ui-sm" />
-                  {/each}
-                </Select.Content>
-              </Select.Root>
+                {#snippet trigger(props)}
+                  <button
+                    {...props}
+                    type="button"
+                    class="inline-flex h-7 min-w-[8rem] flex-1 items-center gap-1 rounded-md border border-border/60 bg-input/30 px-2 text-ui-sm font-normal shadow-none transition-colors hover:bg-accent"
+                    title="Value"
+                  >
+                    <span class={cn("min-w-0 flex-1 truncate text-left font-mono", !filter.value && "font-sans text-muted-foreground")}>
+                      {filter.value || "Select value…"}
+                    </span>
+                    <Icon name="chevron-down" class="size-3 shrink-0 opacity-50" />
+                  </button>
+                {/snippet}
+                {#snippet item(it)}
+                  <span class="min-w-0 flex-1 truncate font-mono">{it.label}</span>
+                  {#if filter.value === it.value}<Icon name="check" class="size-3.5 shrink-0 text-primary" />{/if}
+                {/snippet}
+              </SearchableMenu>
             {:else}
               <Input
                 data-filter-value
