@@ -5,6 +5,7 @@
   import { Input } from "$lib/components/ui/input/index.js";
   import SearchableMenu from "./SearchableMenu.svelte";
   import DateFilterControl from "./DateFilterControl.svelte";
+  import { getColumnEnumValues } from "$lib/cell-value.js";
   import { slotRoll } from "$lib/actions/slot-text.js";
   import { cn } from "$lib/utils.js";
   import {
@@ -326,9 +327,24 @@
     ["contains", "starts_with", "ends_with", "eq"].includes(o.value),
   );
 
+  // Enum columns are a fixed set of values — free-text ops (contains/starts…)
+  // don't make sense; offer equality + null checks and drive the value with a
+  // dropdown of the actual enum members.
+  const ENUM_FILTER_OPS = FILTER_OPS.filter((o) =>
+    ["eq", "neq", "is_null", "is_not_null"].includes(o.value),
+  );
+
+  /** Enum members for a column, or null when it isn't an enum. @param {string} colName */
+  function enumOptionsFor(colName) {
+    if (colName === ANY_COLUMN) return null;
+    const col = columns.find((c) => c.name === colName);
+    return col ? getColumnEnumValues(col) : null;
+  }
+
   /** @param {string} colName */
   function opsForCol(colName) {
     if (colName === ANY_COLUMN) return ANY_COLUMN_OPS;
+    if (enumOptionsFor(colName)) return ENUM_FILTER_OPS;
     const kind = getColKind(colName);
     if (kind === "boolean") return BOOL_FILTER_OPS;
     if (kind === "date") return DATE_FILTER_OPS;
@@ -340,6 +356,7 @@
   /** @param {string} colName @returns {import('$lib/table-query.js').FilterOp} */
   function defaultOpForCol(colName) {
     if (colName === ANY_COLUMN) return "contains";
+    if (enumOptionsFor(colName)) return "eq";
     const kind = getColKind(colName);
     if (kind === "boolean") return "eq";
     if (kind === "date") return "gte";
@@ -965,6 +982,7 @@
       {#each rowFilters as filter, i (filter.id)}
         {@const colKind = getColKind(filter.column)}
         {@const colOps = opsForCol(filter.column)}
+        {@const enumOpts = enumOptionsFor(filter.column)}
         <div
           class="flex items-center gap-2 border-b border-border/30 px-3 py-1.5 last:border-b-0"
         >
@@ -1082,6 +1100,27 @@
                   patchFilter(filter.id, { value: raw })
                 }}
               />
+            {:else if enumOpts}
+              <Select.Root
+                type="single"
+                value={filter.value}
+                onValueChange={(v) => patchFilter(filter.id, { value: v ?? "" })}
+              >
+                <Select.Trigger
+                  size="sm"
+                  class="h-7 min-w-[8rem] flex-1 gap-1 px-2 text-ui-sm font-normal shadow-none"
+                  title="Value"
+                >
+                  <span class={cn("truncate", !filter.value && "text-muted-foreground")}>
+                    {filter.value || "Select value…"}
+                  </span>
+                </Select.Trigger>
+                <Select.Content class="max-h-56">
+                  {#each enumOpts as opt (opt)}
+                    <Select.Item value={opt} label={opt} class="font-mono text-ui-sm" />
+                  {/each}
+                </Select.Content>
+              </Select.Root>
             {:else}
               <Input
                 data-filter-value
