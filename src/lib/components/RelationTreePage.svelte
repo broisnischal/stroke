@@ -1,6 +1,7 @@
 <script>
   import { tick, untrack } from 'svelte'
-  import { listTables, getTableColumnStructure, listIndexes } from '$lib/api.js'
+  import { listTables, getTableColumnStructure, listIndexes, getTableRowCounts } from '$lib/api.js'
+  import { formatTableRowCount } from '$lib/table-list.js'
   import RelationTreeNode from './RelationTreeNode.svelte'
   import Loader from '@lucide/svelte/icons/loader'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
@@ -43,6 +44,15 @@
 
   /** @type {Map<string, TableMeta>} */
   let tableMeta = $state(new Map())
+
+  /**
+   * Per-table exact row counts, filled in a BACKGROUND pass after the tree has
+   * already rendered — the schema/column load (`load()`) never waits on these,
+   * so opening the relation view and running the main queries stays instant.
+   * Counts patch in optimistically as `pg_table_row_counts` resolves.
+   * @type {Map<string, number>}
+   */
+  let rowCounts = $state(new Map())
 
   // ── Expand / column-show tracking ────────────────────────────────────────
   /** @type {Set<string>} */
@@ -105,8 +115,29 @@
   // ── Load — batched ────────────────────────────────────────────────────────
   const BATCH = 8
 
+  /**
+   * Background, non-blocking row-count pass. Fired (not awaited) once the tree
+   * is built so it never delays schema loading or the main query path. Only
+   * Postgres/MySQL return counts — other engines resolve to `[]` and this is a
+   * silent no-op. Best-effort: failures are swallowed, the tree stays usable.
+   */
+  async function loadRowCounts() {
+    const names = [...tableMeta.keys()]
+    if (names.length === 0) return
+    try {
+      const counts = /** @type {{ name: string, rowCount: number }[]} */ (
+        await getTableRowCounts(activeSchema, names)
+      )
+      const next = new Map(rowCounts)
+      for (const { name, rowCount } of counts) {
+        if (typeof rowCount === 'number' && rowCount >= 0) next.set(name, rowCount)
+      }
+      rowCounts = next
+    } catch { /* counts are best-effort — never block or surface an error */ }
+  }
+
   async function load() {
-    loading = true; loadedCount = 0; error = ''; tableMeta = new Map()
+    loading = true; loadedCount = 0; error = ''; tableMeta = new Map(); rowCounts = new Map()
     try {
       const tableList = /** @type {{ name: string }[]} */ (await listTables(activeSchema))
       totalCount = tableList.length
@@ -148,6 +179,8 @@
         )
         focusedTable = first?.name ?? (tableMeta.size > 0 ? [...tableMeta.keys()][0] : null)
       }
+      // Fire-and-forget: counts stream in after the tree is already interactive.
+      void loadRowCounts()
     } catch (e) {
       error = String(e)
     } finally {
@@ -246,9 +279,10 @@
       {@const rootMeta = tableMeta.get(focusedTable)}
       {@const rootOut  = outbound.get(focusedTable) ?? []}
       {@const rootIn   = inbound.get(focusedTable) ?? []}
-      {@const shared   = { tableMeta, outbound, inbound, expanded, showCols, toggleExpand, toggleCols, activeSchema, onopentable, onfocustable: (name) => (focusedTable = name) }}
+      {@const shared   = { tableMeta, outbound, inbound, expanded, showCols, rowCounts, toggleExpand, toggleCols, activeSchema, onopentable, onfocustable: (name) => (focusedTable = name) }}
+      {@const rootCount = rowCounts.get(focusedTable)}
 
-      <div class="mx-auto max-w-3xl">
+      <div class="mx-auto max-w-4xl">
         <!-- Root card -->
         <div class="mb-6 overflow-hidden rounded-xl border border-primary/30 bg-primary/5 shadow-sm">
           <div class="flex items-center gap-3 border-b border-primary/20 px-4 py-3">
@@ -260,7 +294,7 @@
               <p class="font-mono text-ui-2xs text-muted-foreground/60">
                 {rootMeta?.columns.length ?? 0} columns ·
                 {rootOut.length} outgoing FK ·
-                {rootIn.length} incoming FK
+                {rootIn.length} incoming FK{#if rootCount !== undefined} · <span class="tabular-nums text-foreground/70">{formatTableRowCount(rootCount)}</span> rows{/if}
               </p>
             </div>
             <button
