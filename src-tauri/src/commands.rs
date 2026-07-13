@@ -438,6 +438,8 @@ pub async fn pg_get_table_rows(
     // Optional — defaults to true. When false, the count is skipped (total = -1)
     // and fetched separately via `pg_count_table_rows` so rows paint immediately.
     include_count: Option<bool>,
+    // Multi-column sort keys (Postgres); overrides sort_column when non-empty.
+    sorts: Option<Vec<crate::db::SortSpec>>,
 ) -> Result<TableRows, String> {
     get_table_rows(
         state,
@@ -452,6 +454,7 @@ pub async fn pg_get_table_rows(
         filters,
         include_meta.unwrap_or(true),
         include_count.unwrap_or(true),
+        sorts.unwrap_or_default(),
     )
     .await
 }

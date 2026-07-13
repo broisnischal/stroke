@@ -150,10 +150,21 @@ export function filtersApiSignature(filters) {
   return JSON.stringify(filtersForApi(filters))
 }
 
-/** @param {TableSort | null} sort */
-export function sortForApi(sort) {
-  if (!sort?.column) return { sortColumn: undefined, sortDirection: undefined }
-  return { sortColumn: sort.column, sortDirection: sort.direction }
+/**
+ * @param {TableSort | null} sort primary sort key
+ * @param {TableSort[]} [more] additional sort keys (multi-column sort)
+ * The primary key is always sent as sortColumn/sortDirection (so engines that
+ * don't support multi-sort still order by it); the full ordered list is sent as
+ * `sorts` only when there's more than one key.
+ */
+export function sortForApi(sort, more = []) {
+  const all = [sort, ...(more ?? [])].filter((s) => s?.column)
+  if (all.length === 0) return { sortColumn: undefined, sortDirection: undefined, sorts: undefined }
+  return {
+    sortColumn: all[0].column,
+    sortDirection: all[0].direction,
+    sorts: all.length > 1 ? all.map((s) => ({ column: s.column, direction: s.direction })) : undefined,
+  }
 }
 
 /** @param {string} search @param {TableFilter[]} filters @param {TableSort | null} sort */

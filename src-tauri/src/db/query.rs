@@ -904,11 +904,45 @@ fn build_where(
     Ok(builder.build())
 }
 
+/// One key of a multi-column sort. Serialized camelCase from the frontend.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SortSpec {
+    pub column: String,
+    pub direction: Option<String>,
+}
+
 fn build_order_by(
     columns: &[String],
     sort_column: Option<&str>,
     sort_direction: Option<&str>,
+    sorts: &[SortSpec],
 ) -> Result<String, String> {
+    // Multi-column sort (shift-click headers) takes precedence when present;
+    // each key becomes an ORDER BY term in priority order.
+    if !sorts.is_empty() {
+        let mut parts = Vec::with_capacity(sorts.len());
+        for s in sorts {
+            let column = s.column.trim();
+            if column.is_empty() {
+                continue;
+            }
+            ensure_column(column, columns)?;
+            let col = quoted_column(column)?;
+            let dir = match s.direction.as_deref().unwrap_or("asc").to_ascii_lowercase().as_str() {
+                "desc" => "DESC",
+                "asc" => "ASC",
+                other => return Err(format!("Invalid sort direction: {other}")),
+            };
+            parts.push(format!("{col} {dir} NULLS LAST"));
+        }
+        return Ok(if parts.is_empty() {
+            String::new()
+        } else {
+            format!(" ORDER BY {}", parts.join(", "))
+        });
+    }
+
     let Some(column) = sort_column.map(str::trim).filter(|s| !s.is_empty()) else {
         return Ok(String::new());
     };
@@ -945,6 +979,10 @@ pub async fn get_table_rows(
     // so opening a table / changing filters paints rows immediately instead of
     // waiting on COUNT(*). Postgres-only; other engines ignore it and always count.
     include_count: bool,
+    // Multi-column sort keys (Postgres). When non-empty they override
+    // sort_column/sort_direction; other engines ignore this and use the single
+    // sort_column (the primary key), so multi-sort degrades gracefully.
+    sorts: Vec<SortSpec>,
 ) -> Result<TableRows, String> {
     if limit > MAX_PAGE_LIMIT {
         return Err(format!("Limit {limit} exceeds the maximum of {MAX_PAGE_LIMIT} rows per page"));
@@ -998,7 +1036,7 @@ pub async fn get_table_rows(
     let filters = filters.unwrap_or_default();
 
     let has_search = search.as_deref().map(str::trim).is_some_and(|s| !s.is_empty());
-    let has_sort = sort_column.as_deref().map(str::trim).is_some_and(|s| !s.is_empty());
+    let has_sort = sort_column.as_deref().map(str::trim).is_some_and(|s| !s.is_empty()) || !sorts.is_empty();
     let table_columns = if has_search || has_sort || !filters.is_empty() {
         fetch_table_column_names(&pool, &schema, &table).await?
     } else {
@@ -1009,6 +1047,7 @@ pub async fn get_table_rows(
         &table_columns,
         sort_column.as_deref(),
         sort_direction.as_deref(),
+        &sorts,
     )?;
     let table_ref = format!(r#""{schema}"."{table}""#);
 

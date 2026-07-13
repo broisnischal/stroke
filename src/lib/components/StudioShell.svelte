@@ -709,6 +709,8 @@
   let infiniteScroll = $state(loadInfiniteScroll())
 let rowSearch = $state('')
   let rowSort = $state(/** @type {TableSort | null} */ (null))
+  /** Secondary sort keys for multi-column sort (primary is rowSort). @type {TableSort[]} */
+  let rowSortMore = $state(/** @type {TableSort[]} */ ([]))
   let rowFilters = $state(/** @type {TableFilter[]} */ ([]))
   let filterBarOpen = $state(false)
   let vcolPanelOpen = $state(false)
@@ -1032,6 +1034,7 @@ let rowSearch = $state('')
       pageSize,
       rowSearch,
       rowSort: rowSort ? { ...rowSort } : null,
+      rowSortMore: rowSortMore.map((s) => ({ ...s })),
       rowFilters: rowFilters.map((f) => ({ ...f })),
       columns,
       primaryKey,
@@ -1058,6 +1061,7 @@ let rowSearch = $state('')
     pageSize = s.pageSize ?? loadDefaultPageSize()
     rowSearch = s.rowSearch ?? ''
     rowSort = s.rowSort ? { ...s.rowSort } : null
+    rowSortMore = (s.rowSortMore ?? []).map((x) => ({ ...x }))
     rowFilters = (s.rowFilters ?? []).map((f) => ({ ...f }))
     columns = s.columns
     primaryKey = s.primaryKey
@@ -1114,6 +1118,7 @@ let rowSearch = $state('')
     pageSize = loadDefaultPageSize()
     rowSearch = ''
     rowSort = null
+    rowSortMore = []
     rowFilters = []
     columns = []
     primaryKey = []
@@ -2236,7 +2241,7 @@ let rowSearch = $state('')
       if (filters || search !== null) {
         if (resetQuery) {
           rowSearch = ''
-          rowSort = null
+          rowSort = null; rowSortMore = []
         }
         if (search !== null) rowSearch = search
         if (filters) {
@@ -2273,6 +2278,7 @@ let rowSearch = $state('')
     pageSize = loadDefaultPageSize()
     rowSearch = search ?? ''
     rowSort = null
+    rowSortMore = []
     rowFilters = filters ? filters.map((f) => ({ ...f })) : []
     filterBarOpen = filters ? filters.length > 0 : false
     columns = []
@@ -2738,9 +2744,11 @@ let rowSearch = $state('')
     }, SEARCH_DEBOUNCE_MS)
   }
 
-  /** @param {TableSort | null} sort */
-  async function handleRowSortChange(sort) {
-    rowSort = sort
+  /** @param {TableSort[]} sorts full ordered sort-key list ([] clears; [primary, …secondary]) */
+  async function handleRowSortChange(sorts) {
+    const list = Array.isArray(sorts) ? sorts.filter((s) => s?.column) : (sorts ? [sorts] : [])
+    rowSort = list[0] ?? null
+    rowSortMore = list.slice(1)
     await reloadTableFromQuery(true)
   }
 
@@ -2828,11 +2836,12 @@ let rowSearch = $state('')
           ? (s.total > 0 ? s.total : MAX_PAGE_SIZE)
           : (Number.isFinite(s.pageSize) && s.pageSize > 0 ? s.pageSize : DEFAULT_PAGE_SIZE)
       const offset = s.pageSize === PAGE_SIZE_ALL ? 0 : (s.page - 1) * limit
-      const { sortColumn, sortDirection } = sortForApi(s.rowSort)
+      const { sortColumn, sortDirection, sorts } = sortForApi(s.rowSort, s.rowSortMore)
       const data = await getTableRows(s.schema, s.table, limit, offset, {
         search: s.rowSearch,
         sortColumn,
         sortDirection,
+        sorts,
         filters: filtersForApi(s.rowFilters),
         // Paint rows now; the total (readRowsResponse -> -1 on Postgres) fills
         // in via the background count below.
@@ -2926,7 +2935,7 @@ let rowSearch = $state('')
     error = ''
     try {
       const offset = currentOffset
-      const { sortColumn, sortDirection } = sortForApi(rowSort)
+      const { sortColumn, sortDirection, sorts } = sortForApi(rowSort, rowSortMore)
       // Catalog metadata (pk/fk/enums/nullable) only changes when the table's
       // structure does, so request it only on the first load of a table; repeat
       // fetches (pagination, sort, filter, live) reuse what we already hold,
@@ -2936,6 +2945,7 @@ let rowSearch = $state('')
         search: rowSearch,
         sortColumn,
         sortDirection,
+        sorts,
         filters: filtersForApi(rowFilters, columns),
         includeMeta,
         // Don't wait on COUNT(*) — paint rows now, count streams in below.
@@ -3018,11 +3028,12 @@ let rowSearch = $state('')
     loadingMore = true
     try {
       const offset = _infiniteRows.length
-      const { sortColumn, sortDirection } = sortForApi(rowSort)
+      const { sortColumn, sortDirection, sorts } = sortForApi(rowSort, rowSortMore)
       const data = await getTableRows(activeSchema, activeTable, effectivePageSize, offset, {
         search: rowSearch,
         sortColumn,
         sortDirection,
+        sorts,
         filters: filtersForApi(rowFilters, columns),
       })
       const fetched = data.rows ?? []
@@ -4689,6 +4700,7 @@ let rowSearch = $state('')
             {columns}
             {rowSearch}
             {rowSort}
+            {rowSortMore}
             {rowFilters}
             loading={loadingRows}
             selectedCount={selected.size}
@@ -4774,6 +4786,7 @@ let rowSearch = $state('')
                 bind:applyScroll={tableApplyScroll}
                 bind:vcolPanelOpen
                 {rowSort}
+                {rowSortMore}
                 searchQuery={rowSearch}
                 onsortchange={(s) => void handleRowSortChange(s)}
                 onhidecolumn={(colName) => {
