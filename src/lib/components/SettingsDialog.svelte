@@ -19,6 +19,7 @@
     FONT_PRESETS,
     ICON_STYLES,
     ICON_SETS,
+    TABLE_STYLES,
   } from "$lib/stores/settings.js";
   import PenTool from "@lucide/svelte/icons/pen-tool";
   import LucideSearch from "@lucide/svelte/icons/search";
@@ -102,6 +103,22 @@
   const fontEntries = Object.entries(FONT_PRESETS);
   const iconStyleEntries = Object.entries(ICON_STYLES);
   const iconSetEntries = Object.entries(ICON_SETS);
+  const tableStyleEntries = Object.entries(TABLE_STYLES);
+  // Theme-aware CSS previews (mirror how each preset renders on the canvas grid).
+  const tableStylePreview = {
+    lines:   "background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);background-size:7px 7px;",
+    bordered:"background-image:linear-gradient(var(--muted-foreground) 1px,transparent 1px),linear-gradient(90deg,var(--muted-foreground) 1px,transparent 1px);background-size:7px 7px;",
+    striped: "background-image:repeating-linear-gradient(var(--muted) 0 7px,transparent 7px 14px);",
+    dotted:  "background-image:radial-gradient(color-mix(in oklab,var(--border) 90%,transparent) 0.7px,transparent 0.8px);background-size:4px 4px;",
+    dots:    "background-image:radial-gradient(var(--muted-foreground) 1.1px,transparent 1.3px);background-size:9px 9px;background-position:center;",
+    minimal: "background-image:linear-gradient(var(--border) 1px,transparent 1px);background-size:100% 7px;",
+  };
+
+  /** @param {import('$lib/stores/settings.js').TableStyleId} tableStyle */
+  function setTableStyle(tableStyle) {
+    if (tableStyle === settings.tableStyle) return;
+    settings = updateSettings({ tableStyle });
+  }
 
   /** @param {import('$lib/stores/settings.js').IconStyleId} iconStyle */
   function setIconStyle(iconStyle) {
@@ -423,6 +440,38 @@
                       <LucideSparkles class="size-4" />
                     {/if}
                   </span>
+                  <span class="min-w-0">
+                    <span class="block text-xs font-medium leading-snug">{preset.label}</span>
+                    <span class="block text-[11px] leading-snug text-muted-foreground/65">{preset.description}</span>
+                  </span>
+                </span>
+              {/snippet}
+            </Select.Item>
+          {/each}
+        </Select.Content>
+      </Select.Root>
+    </div>
+  {/if}
+
+  {#if show('Table style', 'Grid style for the data table')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-[13px] font-medium text-foreground">Table style</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Grid style for the data table — lines, dotted, or connection dots.</p>
+      </div>
+      <Select.Root type="single" value={settings.tableStyle} onValueChange={(v) => { if (v) setTableStyle(/** @type {import('$lib/stores/settings.js').TableStyleId} */ (v)); }}>
+        <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Table style">
+          <span class="flex min-w-0 items-center gap-2">
+            <span class="size-3.5 shrink-0 rounded-[3px] border border-border/50 bg-background" style={tableStylePreview[settings.tableStyle] ?? ''} aria-hidden="true"></span>
+            <span class="truncate font-medium">{TABLE_STYLES[settings.tableStyle]?.label ?? "Lines"}</span>
+          </span>
+        </Select.Trigger>
+        <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[16rem] p-1" sideOffset={6}>
+          {#each tableStyleEntries as [id, preset] (id)}
+            <Select.Item value={id} label={preset.label} class="rounded-md py-1.5 pr-8 pl-2">
+              {#snippet children()}
+                <span class="flex min-w-0 items-center gap-2.5">
+                  <span class="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border/40 bg-background" style={tableStylePreview[id] ?? ''} aria-hidden="true"></span>
                   <span class="min-w-0">
                     <span class="block text-xs font-medium leading-snug">{preset.label}</span>
                     <span class="block text-[11px] leading-snug text-muted-foreground/65">{preset.description}</span>

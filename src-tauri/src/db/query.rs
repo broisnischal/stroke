@@ -225,6 +225,60 @@ fn cell_to_json(row: &sqlx::postgres::PgRow, idx: usize) -> Value {
         }
     }
 
+    // Array types (varchar[]/text[]/int[]/…). Without this they fall through to the
+    // raw-bytes branch below, which reinterprets Postgres's *binary array wire format*
+    // (dimension/length header + element data) as lossy UTF-8 → garbage □ boxes.
+    // Decode into a Vec and return a JSON array; the frontend renders it {a,b}-style.
+    // sqlx validates the element PgType on each try_get, so only the matching arm
+    // returns — numeric arms are tried before the String arm so text[] isn't misread.
+    if type_name.ends_with("[]") {
+        macro_rules! try_arr {
+            ($t:ty) => {
+                if let Ok(v) = row.try_get::<Option<Vec<Option<$t>>>, _>(idx) {
+                    return match v {
+                        Some(a) => json!(a),
+                        None => Value::Null,
+                    };
+                }
+            };
+        }
+        // Types that JSON can't hold natively (Decimal/dates/Uuid) → stringify each
+        // element so it matches the scalar `to_string()` formatting above.
+        macro_rules! try_arr_str {
+            ($t:ty) => {
+                if let Ok(v) = row.try_get::<Option<Vec<Option<$t>>>, _>(idx) {
+                    return match v {
+                        Some(a) => json!(a
+                            .into_iter()
+                            .map(|x| x.map(|y| y.to_string()))
+                            .collect::<Vec<_>>()),
+                        None => Value::Null,
+                    };
+                }
+            };
+        }
+        try_arr!(bool);
+        try_arr!(i16);
+        try_arr!(i32);
+        try_arr!(i64);
+        try_arr!(f32);
+        try_arr!(f64);
+        try_arr_str!(Decimal);
+        try_arr_str!(DateTime<Utc>);
+        try_arr_str!(NaiveDateTime);
+        try_arr_str!(NaiveDate);
+        try_arr_str!(NaiveTime);
+        try_arr_str!(Uuid);
+        // Text-like arrays (varchar/text/char/name), tried last.
+        if let Ok(v) = row.try_get::<Option<Vec<Option<String>>>, _>(idx) {
+            return match v {
+                Some(a) => json!(a),
+                None => Value::Null,
+            };
+        }
+        // Unknown element type (e.g. enum[]) — fall through to the raw branch.
+    }
+
     // Use raw wire-protocol bytes for all remaining types (TEXT, VARCHAR, enums, domains…).
     // Skipping try_get::<String>() avoids sqlx's runtime pg_catalog introspection for
     // custom/enum types, which would fire a `SELECT enumlabel FROM pg_enum WHERE …` query
@@ -404,6 +458,28 @@ struct PgColumnMeta {
 }
 
 impl PgColumnMeta {
+    /// If this column is a Postgres array, return the quoted array type to cast a
+    /// literal to (e.g. `"pg_catalog"."_varchar"`), else None. Array types are
+    /// named with a leading underscore in pg_type; information_schema reports the
+    /// data_type as the literal "ARRAY" with the array name in udt_name.
+    fn array_cast_ref(&self) -> Result<Option<String>, String> {
+        let is_array = self.data_type.starts_with('_') || self.data_type.eq_ignore_ascii_case("ARRAY");
+        if !is_array {
+            return Ok(None);
+        }
+        // Prefer udt_name when it's a real array name; fall back to data_type.
+        let arr_name = self
+            .udt_name
+            .as_deref()
+            .filter(|n| n.starts_with('_'))
+            .unwrap_or(self.data_type.as_str());
+        if !arr_name.starts_with('_') {
+            return Ok(None); // couldn't resolve the concrete array type
+        }
+        let udt_schema = self.udt_schema.as_deref().unwrap_or("pg_catalog");
+        Ok(Some(pg_cast_type_ref(udt_schema, arr_name)?))
+    }
+
     fn set_assignment_sql(&self, column: &str) -> Result<String, String> {
         validate_ident(column)?;
         if self.data_type.eq_ignore_ascii_case("USER-DEFINED") {
@@ -414,6 +490,14 @@ impl PgColumnMeta {
             let udt_schema = self.udt_schema.as_deref().unwrap_or("public");
             let type_ref = pg_cast_type_ref(udt_schema, udt_name)?;
             return Ok(format!(r#""{column}" = $1::{type_ref}"#));
+        }
+        // Array columns. PostgreSQL names every array type with a leading
+        // underscore (_varchar, _int4, _text, …) — that's what pg_type.typname
+        // returns here; information_schema instead reports the literal "ARRAY".
+        // The editor sends a Postgres array literal ({"a","b"}); cast it to the
+        // real array type so PostgreSQL parses it instead of rejecting it as text.
+        if let Some(arr) = self.array_cast_ref()? {
+            return Ok(format!(r#""{column}" = $1::{arr}"#));
         }
         // json/jsonb bindings arrive as text strings; an explicit cast tells
         // PostgreSQL to interpret the parameter as json/jsonb instead of text.
@@ -436,6 +520,10 @@ impl PgColumnMeta {
             let udt_schema = self.udt_schema.as_deref().unwrap_or("public");
             let type_ref = pg_cast_type_ref(udt_schema, udt_name)?;
             return Ok(format!("${bind_idx}::{type_ref}"));
+        }
+        // Array columns — cast the array-literal string to the real array type.
+        if let Some(arr) = self.array_cast_ref()? {
+            return Ok(format!("${bind_idx}::{arr}"));
         }
         let norm = normalize_pg_type(&self.data_type);
         if norm == "json" || norm == "jsonb" {

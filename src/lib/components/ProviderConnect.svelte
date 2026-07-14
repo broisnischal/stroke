@@ -9,6 +9,7 @@
   import AlertTriangle from '@lucide/svelte/icons/alert-triangle'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
+  import X from '@lucide/svelte/icons/x'
   import DbIcon from './DbIcon.svelte'
   import Search from '@lucide/svelte/icons/search'
   import KeyRound from '@lucide/svelte/icons/key-round'
@@ -64,6 +65,26 @@
       ? databases.filter((d) => d.name.toLowerCase().includes(search.toLowerCase()))
       : databases,
   )
+
+  /** Turn a raw backend error into a calm title + one-line explanation. */
+  function friendlyError(msg) {
+    const m = String(msg ?? '')
+    const name = meta?.name ?? 'the provider'
+    if (/not signed in/i.test(m))
+      return { title: 'Session expired', detail: `Your ${name} sign-in is no longer valid. Sign in again to continue.` }
+    if (/timed out/i.test(m))
+      return { title: 'Authorization timed out', detail: 'The browser sign-in took too long. Start again when you are ready.' }
+    if (/cancel/i.test(m))
+      return { title: 'Sign-in cancelled', detail: 'The browser closed before authorizing. Try again to connect.' }
+    if (/denied/i.test(m))
+      return { title: 'Authorization denied', detail: `${name} declined the request. Try again and approve access.` }
+    if (/port .*in use|bind any callback/i.test(m))
+      return { title: 'Callback port in use', detail: m }
+    if (/non-JSON|proxy|token exchange/i.test(m))
+      return { title: 'Sign-in service unavailable', detail: 'Could not reach the sign-in service. Check your network and try again.' }
+    return { title: 'Something went wrong', detail: m || 'Please try again.' }
+  }
+  const shownError = $derived(friendlyError(errorMsg))
 
   onMount(async () => {
     try {
@@ -209,23 +230,34 @@
     {/if}
 
   {:else if phase === 'authorizing'}
-    <div class="flex flex-col gap-4 py-2">
+    <div class="flex flex-col gap-3.5 rounded-xl border border-border/40 bg-muted/[0.03] p-4">
       <div class="flex items-center gap-3.5">
-        <div class="flex size-12 shrink-0 items-center justify-center rounded-xl border border-border/50 bg-muted/25">
-          <Loader2 class="size-5 animate-spin text-foreground" />
+        <!-- Provider mark with a live pulse ring — reads as "waiting on this one". -->
+        <div class="relative flex size-11 shrink-0 items-center justify-center rounded-xl border border-border/50 bg-background">
+          <span class="pulse-ring pointer-events-none absolute inset-0 rounded-xl ring-1 ring-primary/40"></span>
+          <DbIcon id={provider} class="size-5 text-foreground" />
         </div>
         <div class="min-w-0">
-          <p class="text-[14px] font-semibold text-foreground">Waiting for {meta?.name}…</p>
-          <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Authorize Stroke in the browser tab, then return here. Times out in 5 min.</p>
+          <p class="text-sm font-semibold leading-tight text-foreground">Waiting for {meta?.name}…</p>
+          <p class="mt-1 text-xs leading-relaxed text-pretty text-muted-foreground">
+            Finish authorizing in the browser tab, then come back here.
+          </p>
         </div>
       </div>
-      <button
-        type="button"
-        class="h-9 w-full rounded-lg border border-border/60 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
-        onclick={cancelAuth}
-      >
-        Cancel
-      </button>
+      <!-- Indeterminate progress — quiet proof the flow is still alive. -->
+      <div class="h-1 overflow-hidden rounded-full bg-muted/60">
+        <span class="progress-slide block h-full w-1/3 rounded-full bg-primary/70"></span>
+      </div>
+      <div class="flex items-center justify-between gap-3">
+        <span class="text-[11px] tabular-nums text-muted-foreground/50">Times out in 5 min</span>
+        <button
+          type="button"
+          class="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/50 px-2.5 text-[11px] font-medium text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted/50 hover:text-foreground active:scale-[0.96]"
+          onclick={cancelAuth}
+        >
+          <X class="size-3" /> Cancel
+        </button>
+      </div>
     </div>
 
   {:else if phase === 'fetching'}
@@ -354,16 +386,44 @@
     {/if}
 
   {:else if phase === 'error'}
-    <div class="flex flex-col gap-2 rounded-xl border border-destructive/30 bg-destructive/[0.06] px-3 py-3">
-      <div class="flex items-start gap-2 text-[11px] text-destructive">
-        <AlertTriangle class="mt-0.5 size-3.5 shrink-0" />
-        <span class="break-words">{errorMsg || 'Something went wrong.'}</span>
+    <div class="flex flex-col gap-3 rounded-xl border border-destructive/25 bg-destructive/[0.07] p-3.5">
+      <div class="flex items-start gap-3">
+        <div class="flex size-7 shrink-0 items-center justify-center rounded-lg bg-destructive/12 text-destructive">
+          <AlertTriangle class="size-4" />
+        </div>
+        <div class="min-w-0 flex-1">
+          <p class="text-[13px] font-semibold leading-tight text-destructive">{shownError.title}</p>
+          <p class="mt-1 text-xs leading-relaxed text-pretty break-words text-destructive/75">{shownError.detail}</p>
+        </div>
       </div>
       <button
         type="button"
-        class="self-start text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+        class="inline-flex h-8 items-center justify-center gap-1.5 self-start rounded-lg border border-destructive/30 bg-destructive/5 px-3 text-xs font-medium text-destructive transition-[color,background-color,transform] duration-150 ease-out hover:bg-destructive/12 active:scale-[0.96]"
         onclick={() => (phase = 'idle')}
-      >Try again</button>
+      >
+        <RefreshCw class="size-3.5" /> Try again
+      </button>
     </div>
   {/if}
 </div>
+
+<style>
+  /* Expanding pulse ring on the provider mark while awaiting the browser. */
+  @keyframes pulse-ring {
+    0%   { opacity: 0.55; transform: scale(1); }
+    100% { opacity: 0;    transform: scale(1.35); }
+  }
+  .pulse-ring { animation: pulse-ring 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+
+  /* Indeterminate bar sweeping left→right. */
+  @keyframes progress-slide {
+    0%   { transform: translateX(-120%); }
+    100% { transform: translateX(320%); }
+  }
+  .progress-slide { animation: progress-slide 1.3s ease-in-out infinite; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pulse-ring { animation: none; opacity: 0.4; }
+    .progress-slide { animation: none; width: 100%; opacity: 0.5; }
+  }
+</style>

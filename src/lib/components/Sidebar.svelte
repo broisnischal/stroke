@@ -690,7 +690,7 @@
         <div
           bind:this={scrollContainerEl}
           bind:clientHeight={sidebarHeight}
-          class="app-scroll min-h-0 w-full flex-1 overflow-y-auto [will-change:scroll-position]"
+          class="app-scroll min-h-0 w-full flex-1 overflow-y-auto overscroll-y-contain [will-change:scroll-position]"
           role="none"
           onscroll={onSidebarScroll}
           onclick={(e) => {

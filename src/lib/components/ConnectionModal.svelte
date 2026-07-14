@@ -98,7 +98,15 @@
   // Provider (sign-in) ids are surfaced as cards on their own tab, so keep them
   // out of the manual Type dropdown.
   const PROVIDER_IDS = ['neon', 'supabase', 'planetscale', 'prisma']
-  const manualDriverItems = driverItems.filter((d) => !PROVIDER_IDS.includes(d.value))
+  // Cloudflare D1 signs in like a hosting provider (OAuth), so it belongs on the
+  // Provider tab too — but it drives the CloudflareLogin flow, not ProviderConnect.
+  const PROVIDER_CARDS = [
+    ...PROVIDERS,
+    { id: 'd1', name: 'Cloudflare D1', engine: 'sqlite', blurb: 'Edge SQLite — sign in with Cloudflare' },
+  ]
+  // Every sign-in provider (incl. D1) is reached from the Provider tab, so keep
+  // them all out of the manual Type dropdown.
+  const manualDriverItems = driverItems.filter((d) => ![...PROVIDER_IDS, 'd1'].includes(d.value))
 
   // Subtle per-engine icon tint (color-500/600), theme-aware via Tailwind tokens.
   const ENGINE_TINT = {
@@ -203,6 +211,8 @@
 
   const activeDriver = $derived(ALL_DRIVERS.find(d => d.id === dbType) ?? ALL_DRIVERS[0])
   const isProvider   = $derived(PROVIDER_IDS.includes(dbType))
+  // D1 shares the Provider tab (via CloudflareLogin) but is not a ProviderConnect id.
+  const isProviderTab = $derived(isProvider || dbType === 'd1')
 
   // Engines that expose the "Connection string | Manual fields" toggle.
   const URI_TOGGLE_ENGINES = ['postgres', 'cockroachdb', 'mysql', 'mariadb']
@@ -222,7 +232,7 @@
   function setEntryMode(mode) {
     if (entryMode === mode) return
     entryMode = mode
-    if (mode === 'manual' && isProvider) switchDriver('postgres')
+    if (mode === 'manual' && isProviderTab) switchDriver('postgres')
   }
 
   function sshPayload() {
@@ -281,7 +291,7 @@
       sshEnabled = false; sshHost = ''; sshPort = '22'; sshUsername = ''; sshKeyPath = ''
       readOnly = false
     }
-    entryMode = PROVIDER_IDS.includes(dbType) ? 'provider' : 'manual'
+    entryMode = (PROVIDER_IDS.includes(dbType) || dbType === 'd1') ? 'provider' : 'manual'
     fieldMode = 'fields'
     advancedOpen = false
     flashedFields = new Set()
@@ -318,6 +328,31 @@
       password: conn.password,
       ssl: conn.ssl,
       provider: providerId,
+      readOnly: readOnly || undefined,
+    })
+  }
+
+  /**
+   * Cloudflare D1 picked from the Provider tab: fill the D1 fields and connect
+   * immediately, mirroring the one-click flow of the other hosting providers.
+   * @param {{accountId: string, databaseId: string, databaseName: string, token: string}} info
+   */
+  async function connectD1Selection(info) {
+    error = ''
+    accountId = info.accountId
+    databaseId = info.databaseId
+    apiToken = info.token
+    if (!name || name === 'Cloudflare D1') name = info.databaseName
+    // Reuse an existing saved entry for this exact D1 database instead of piling
+    // up duplicates — connectWith upserts it.
+    const existing = saved.find((s) => s.type === 'd1' && s.databaseId === info.databaseId)
+    await connectWith({
+      id: existing?.id ?? newConnectionId(),
+      type: 'd1',
+      name: info.databaseName,
+      accountId: info.accountId,
+      databaseId: info.databaseId,
+      apiToken: info.token,
       readOnly: readOnly || undefined,
     })
   }
@@ -1031,42 +1066,6 @@
                   class={cn(inp, 'font-mono text-[11px]')} />
               </div>
 
-            <!-- ── Cloudflare D1 ──────────────────────────── -->
-            {:else if dbType === 'd1'}
-
-              <CloudflareLogin
-                onselect={(info) => {
-                  accountId  = info.accountId
-                  databaseId = info.databaseId
-                  apiToken   = info.token
-                  if (!name || name === 'Cloudflare D1') name = info.databaseName
-                }}
-                ondisconnect={() => { accountId = ''; databaseId = ''; apiToken = '' }}
-              />
-
-              <details class="group">
-                <summary class="cursor-pointer list-none select-none text-[10px] text-muted-foreground/30 hover:text-muted-foreground">
-                  <span class="group-open:hidden">↓ Manual setup</span>
-                  <span class="hidden group-open:inline">↑ Manual setup</span>
-                </summary>
-                <div class="mt-2.5 flex flex-col gap-2.5">
-                  <div class="grid grid-cols-2 gap-2">
-                    <div>
-                      <label for="cn-d1-account" class={lbl}>Account ID</label>
-                      <Input id="cn-d1-account" bind:value={accountId} placeholder="abcdef…" class={cn(inp, 'font-mono text-[11px]')} />
-                    </div>
-                    <div>
-                      <label for="cn-d1-dbid" class={lbl}>Database ID</label>
-                      <Input id="cn-d1-dbid" bind:value={databaseId} placeholder="xxxxxxxx-…" class={cn(inp, 'font-mono text-[11px]')} />
-                    </div>
-                  </div>
-                  <div>
-                    <label for="cn-d1-token" class={lbl}>API token</label>
-                    <Input id="cn-d1-token" bind:value={apiToken} type="password" class={inp} />
-                  </div>
-                </div>
-              </details>
-
             <!-- ── ClickHouse ─────────────────────────────── -->
             {:else if dbType === 'clickhouse'}
 
@@ -1220,7 +1219,7 @@
 
                 <!-- ── Sign in with a hosting provider — one grouped, calm settings list ── -->
                 <div class="divide-y divide-border/25 overflow-hidden rounded-xl border border-border/40 bg-muted/[0.02]">
-                  {#each PROVIDERS as p, i (p.id)}
+                  {#each PROVIDER_CARDS as p, i (p.id)}
                     {@const active = dbType === p.id}
                     <button
                       type="button"
@@ -1247,11 +1246,49 @@
 
                 {#if isProvider}
                   <div class="mt-6 flex flex-col gap-4">
-                    <ProviderConnect
-                      provider={dbType}
-                      resolvePassword={(host, user) => saved.find((s) => s.host === host && s.user === user && s.password)?.password}
-                      onselect={(conn) => connectProviderConnection(conn)}
-                    />
+                    <!-- Keyed on the provider so switching fully remounts the flow:
+                         re-checks sign-in status and clears the previous provider's
+                         database list (otherwise a stale pick hits the wrong account). -->
+                    {#key dbType}
+                      <ProviderConnect
+                        provider={dbType}
+                        resolvePassword={(host, user) => saved.find((s) => s.host === host && s.user === user && s.password)?.password}
+                        onselect={(conn) => connectProviderConnection(conn)}
+                      />
+                    {/key}
+                    {@render advancedSection()}
+                  </div>
+                {:else if dbType === 'd1'}
+                  <div class="mt-6 flex flex-col gap-4">
+                    {#key dbType}
+                      <CloudflareLogin
+                        onselect={connectD1Selection}
+                        ondisconnect={() => { accountId = ''; databaseId = ''; apiToken = '' }}
+                      />
+                    {/key}
+
+                    <details class="group">
+                      <summary class="flex cursor-pointer list-none select-none items-center gap-1 text-[11px] text-muted-foreground/45 transition-colors hover:text-muted-foreground">
+                        <Icon name="chevron-right" class="size-3 transition-transform duration-150 group-open:rotate-90" />
+                        Enter account &amp; token manually
+                      </summary>
+                      <div class="mt-3 flex flex-col gap-2.5">
+                        <div class="grid grid-cols-2 gap-2">
+                          <div>
+                            <label for="cn-d1-account" class={lbl}>Account ID</label>
+                            <Input id="cn-d1-account" bind:value={accountId} placeholder="abcdef…" class={cn(inp, 'font-mono text-[11px]')} />
+                          </div>
+                          <div>
+                            <label for="cn-d1-dbid" class={lbl}>Database ID</label>
+                            <Input id="cn-d1-dbid" bind:value={databaseId} placeholder="xxxxxxxx-…" class={cn(inp, 'font-mono text-[11px]')} />
+                          </div>
+                        </div>
+                        <div>
+                          <label for="cn-d1-token" class={lbl}>API token</label>
+                          <Input id="cn-d1-token" bind:value={apiToken} type="password" class={inp} />
+                        </div>
+                      </div>
+                    </details>
                     {@render advancedSection()}
                   </div>
                 {/if}
