@@ -747,6 +747,15 @@ export async function backupImport(sql) {
 }
 
 /**
+ * Request cancellation of the running backup/restore. The backend stops at the
+ * next table/statement boundary and returns the work completed so far.
+ * @returns {Promise<void>}
+ */
+export async function backupCancel() {
+  return inv('backup_cancel')
+}
+
+/**
  * @typedef {{ pid: number, rssBytes: number, virtualBytes: number, cpuPercent: number, processName: string }} AppMetrics
  */
 
