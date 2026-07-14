@@ -178,13 +178,16 @@
     await invoke('restart_app')
   }
 
-  /** Open the online changelog in the user's browser. */
+  // Tagged so web analytics can attribute changelog views to the desktop app.
+  const CHANGELOG_URL = 'https://stroke.click/changelog?utm_source=stroke-app&utm_medium=update-dialog&utm_campaign=changelog'
+
+  /** Open the online changelog in the user's browser (never the in-app tab). */
   async function openChangelog() {
     try {
       const { openUrl } = await import('@tauri-apps/plugin-opener')
-      await openUrl('https://stroke.click/changelog')
+      await openUrl(CHANGELOG_URL)
     } catch {
-      window.open('https://stroke.click/changelog', '_blank', 'noopener,noreferrer')
+      window.open(CHANGELOG_URL, '_blank', 'noopener,noreferrer')
     }
   }
 </script>
@@ -325,17 +328,18 @@
         <p class="font-mono text-ui-xs text-destructive">{errorMsg}</p>
 
       {:else if status === 'up-to-date' || checking}
-        <p class="text-muted-foreground">
+        <p class="text-xs leading-relaxed text-muted-foreground">
           {checking ? 'Checking GitHub for a newer release…' : "You're on the latest version."}
         </p>
         {#if !checking}
           <button
             type="button"
             onclick={openChangelog}
-            class="mt-2 inline-flex items-center gap-1 text-xs text-primary/80 transition-colors hover:text-primary hover:underline underline-offset-2"
+            class="mt-3 inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted hover:text-foreground active:scale-[0.96]"
           >
+            <ScrollText class="size-3.5" />
             View changelog
-            <ExternalLink class="size-3" />
+            <ExternalLink class="ml-0.5 size-3 text-muted-foreground/60" />
           </button>
         {/if}
       {/if}

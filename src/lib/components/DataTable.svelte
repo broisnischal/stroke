@@ -5,7 +5,7 @@
   import { zoomState } from '$lib/stores/canvas-zoom.svelte.js'
   // Zoom is driven through the app-level settings so the canvas scales together
   // with the rest of the UI (applySettings mirrors the app zoom into zoomState).
-  import { increaseZoom, decreaseZoom, resetZoom, appPreviewDml } from '$lib/stores/settings.js'
+  import { increaseZoom, decreaseZoom, resetZoom, appPreviewDml, appTableStyle, TABLE_STYLES, normalizeTableStyle } from '$lib/stores/settings.js'
   import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
@@ -98,6 +98,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import Sparkles from "@lucide/svelte/icons/sparkles";
   import MediaLightbox from "./MediaLightbox.svelte";
   import RowExpandViewer from "./RowExpandViewer.svelte";
+  import ArrayCellEditor from "./ArrayCellEditor.svelte";
   import FkSubviewPanel from "./FkSubviewPanel.svelte";
   // JsonCellLightbox (Monaco-based) is imported lazily at its render site below.
   import CellQuickLook from "./CellQuickLook.svelte";
@@ -380,6 +381,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let contextRowIdx = $state(0);
   let contextColIdx = $state(0);
   let contextMenuOpen = $state(false);
+
+  // Array cell editor (Prisma-style add/remove for SQL array columns).
+  let arrayEditorOpen = $state(false);
+  let arrayEditorRow = $state(0);
+  let arrayEditorCol = $state(0);
+  let arrayEditorColName = $state("");
+  let arrayEditorType = $state("");
+  let arrayEditorValue = $state(/** @type {any[]} */ ([]));
   let pendingContextMenu = $state(false);
   /** Block item activation from the right-click pointerup that opened the menu */
   let suppressMenuSelect = $state(false);
@@ -624,6 +633,21 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   );
   // Truncated cells only hold a preview — filtering on it would build wrong SQL.
   const menuCellOversize = $derived(!!oversizeCellInfo(rows[contextRowIdx]?.[contextColIdx]));
+  // SQL array column? (value already decoded to a JS array, or type ends with []).
+  const menuColType = $derived(
+    String(columns[contextColIdx]?.dataType ?? columns[contextColIdx]?.data_type ?? _colCache[contextColIdx]?.colType ?? ""),
+  );
+  // The dedicated array editor writes a Postgres array literal ({a,b}) cast to the
+  // real array type — that's native to PostgreSQL & CockroachDB (Neon/Supabase/
+  // Prisma all speak the pg wire protocol, so they route through the same path).
+  // Other engines either have no native arrays (MySQL/SQLite/MSSQL) or use a
+  // different literal (ClickHouse/DuckDB [..]), so restrict the editor to pg-family
+  // to avoid producing a write the backend can't apply.
+  const isPgArrayDialect = $derived(dialect === "postgres" || dialect === "cockroachdb");
+  const menuCellIsArray = $derived(
+    isPgArrayDialect &&
+      (Array.isArray(rows[contextRowIdx]?.[contextColIdx]) || /\[\]\s*$/.test(menuColType)),
+  );
   // Extension-provided transforms applicable to the right-clicked cell.
   const menuTransforms = $derived.by(() => {
     void $pluginState;
@@ -652,11 +676,49 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       // Oversize sentinels carry a preview instead of the real (multi-MB)
       // value — render the truncation marker + head, not the sentinel wrapper.
       const over = oversizeCellInfo(value);
+      // JSON/JSONB objects and arrays render as JSON here. SQL *array columns* get
+      // the pgAdmin {a,b} form instead, but that decision needs the column type, so
+      // it lives in drawCell (arrayDisplay) — a jsonb array must stay ["a","b"].
       const s = over ? oversizeCellText(over) : JSON.stringify(value);
       _formatCache.set(value, s);
       return s;
     }
     return String(value);
+  }
+
+  // Render a JS array as a Postgres array literal for display: {a,b}, {} for
+  // empty, NULL for null elements. Elements are quoted only when they contain a
+  // delimiter/quote/brace/whitespace or would be ambiguous — matching pgAdmin.
+  function pgArrayElem(el) {
+    if (el === null || el === undefined) return "NULL";
+    // Nested arrays (multi-dim) recurse; objects (e.g. json[]) fall back to JSON.
+    if (Array.isArray(el)) return pgArrayText(el);
+    if (typeof el === "object") return JSON.stringify(el);
+    const s = String(el);
+    if (s === "" || /[",{}\\\s]/.test(s) || /^null$/i.test(s)) {
+      return '"' + s.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
+    }
+    return s;
+  }
+  function pgArrayText(arr) {
+    return "{" + arr.map(pgArrayElem).join(",") + "}";
+  }
+  // Cached pgAdmin-style display for SQL *array columns* only (drawCell passes the
+  // value after confirming the column type ends with []). Cached per value object
+  // so the scroll hot path never rebuilds the string. jsonb arrays never reach
+  // this — they render as ["a","b"] via formatCell.
+  /** @type {WeakMap<object, string>} */
+  const _arrayDisplayCache = new WeakMap();
+  function arrayDisplay(arr) {
+    const hit = _arrayDisplayCache.get(arr);
+    if (hit !== undefined) return hit;
+    const s = pgArrayText(arr);
+    _arrayDisplayCache.set(arr, s);
+    return s;
+  }
+  /** True when a column's SQL type is an array (ends with []). */
+  function isSqlArrayType(colType) {
+    return /\[\]\s*$/.test(colType ?? "");
   }
 
   /** Truncated version for DOM rendering — keeps long values out of the render tree */
@@ -672,6 +734,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // Repaint when extension settings or column stats change — both affect drawn
   // cell text, badges, tints, and the header annotator strip.
   $effect(() => { void $pluginState; void _colStats; scheduleDraw(); });
+
+  // Resolved canvas-grid style preset (Settings → Appearance). Read once per frame
+  // by draw() and passed into the row context, so it never adds per-cell reactivity.
+  const _tableStyle = $derived(TABLE_STYLES[normalizeTableStyle($appTableStyle)]);
+  // Repaint the grid the moment the user switches preset.
+  $effect(() => { void $appTableStyle; scheduleDraw(); });
 
   // ── Search-match highlighting ──────────────────────────────────────────────
   // The toolbar search filters rows server-side (ILIKE, case-insensitive);
@@ -1549,6 +1617,30 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     futureEdits = [];
   }
 
+  /** Open the dedicated array editor for a cell (from the context menu). */
+  function openArrayEditor(rowIdx, colIdx) {
+    const col = columns[colIdx];
+    if (!col) return;
+    const v = effectiveCellValue(rowIdx, colIdx);
+    arrayEditorRow = rowIdx;
+    arrayEditorCol = colIdx;
+    arrayEditorColName = col.name ?? "array";
+    arrayEditorType = String(col.dataType ?? col.data_type ?? _colCache[colIdx]?.colType ?? "").replace(/\[\]\s*$/, "");
+    arrayEditorValue = Array.isArray(v) ? v : [];
+    arrayEditorOpen = true;
+  }
+
+  /** Save the edited array — stage a Postgres array literal (backend casts it). */
+  function commitArrayEditor(next) {
+    const rowIdx = arrayEditorRow, colIdx = arrayEditorCol;
+    if (!canEditColumn(colIdx)) return;
+    const prevValue = effectiveCellValue(rowIdx, colIdx);
+    const literal = pgArrayText(next); // {a,b} — quoting/escaping handled
+    stageEdit(rowIdx, colIdx, literal);
+    pastEdits = [...pastEdits.slice(-49), { rowIdx, colIdx, oldValue: prevValue, newValue: literal }];
+    futureEdits = [];
+  }
+
   /** Run an extension transform on a cell and copy the result to the clipboard. */
   async function runCellTransform(rowIdx, colIdx, transform) {
     const value = effectiveCellValue(rowIdx, colIdx);
@@ -1834,9 +1926,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // Width adapts to the longest label (7px/char estimate + padding), clamped 110–180px
   const VIRTUAL_COL_W = $derived.by(() => {
     if (virtualColWidthOverride !== null) return Math.round(virtualColWidthOverride * canvasZoom)
-    if (!virtualRelCols.length) return Math.round(300 * canvasZoom)
+    if (!virtualRelCols.length) return Math.round(200 * canvasZoom)
+    // Fit the badge with comfortable side gaps instead of a fixed ~300px slab, so
+    // the centered pill reads as intentional rather than floating in dead space.
     const maxChars = Math.max(...virtualRelCols.map(v => v.label.length))
-    const base = Math.min(380, Math.max(300, maxChars * 10 + 60))
+    const base = Math.min(260, Math.max(150, maxChars * 8 + 44))
     return Math.round(base * canvasZoom)
   })
   const virtualRelCols = $derived.by(() => {
@@ -2407,10 +2501,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // scroll event to cover momentum/inertia, then stops to save GPU time.
   let _scrollLoopId = 0
   let _scrollLoopDeadline = 0
+  // Last position the loop actually painted — lets it skip identical frames during
+  // the momentum tail / step scrolling instead of re-running a full redraw for a
+  // frame where nothing moved. Content changes (hover/edits) go through
+  // scheduleDraw(), not this loop, so skipping unchanged-position frames is safe.
+  let _loopLastTop = -1
+  let _loopLastLeft = -1
 
   function startScrollLoop() {
     _scrollLoopDeadline = performance.now() + 200
     if (_scrollLoopId) return
+    _loopLastTop = -1
+    _loopLastLeft = -1
     function loop() {
       const el = tableContainer
       if (!el || !_ctx || _fatalError || performance.now() > _scrollLoopDeadline) {
@@ -2421,14 +2523,20 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       // integer left edge, so drawing content at a fractional scrollLeft puts text
       // and gridlines on sub-pixel x — WebKit then re-antialiases them every frame,
       // which reads as horizontal "vibration". Integer offsets render stably.
-      _scrollTop = Math.round(el.scrollTop)
-      _scrollLeft = Math.round(el.scrollLeft)
-      try {
-        draw()
-      } catch (err) {
-        reportFatal(err)
-        _scrollLoopId = 0
-        return
+      const st = Math.round(el.scrollTop)
+      const sl = Math.round(el.scrollLeft)
+      if (st !== _loopLastTop || sl !== _loopLastLeft) {
+        _scrollTop = st
+        _scrollLeft = sl
+        _loopLastTop = st
+        _loopLastLeft = sl
+        try {
+          draw()
+        } catch (err) {
+          reportFatal(err)
+          _scrollLoopId = 0
+          return
+        }
       }
       _scrollLoopId = requestAnimationFrame(loop)
     }
@@ -2461,6 +2569,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // ping-pong between separate effects.
   /** @type {CanvasRenderingContext2D | null} */
   let _ctx = null
+  // Reused scratch buffer for per-frame vertical grid separators (see draw()) — a
+  // module-lifetime array so the scroll hot path does zero allocation for it.
+  const _vSepsBuf = /** @type {number[]} */ ([])
   /** @type {ReturnType<typeof createColorReader> | null} */
   let _readColor = null
   /** Canvas font strings measured from the DOM so they exactly match the app's
@@ -2871,9 +2982,46 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Frame-constant draw context — built ONCE per frame and shared by every
     // visible row, instead of a fresh ~20-field literal per row (that churned
     // thousands of short-lived objects/sec during scroll → GC jank).
+    // Grid style preset + its dot size (integer, DPR-agnostic — canvas is already
+    // scaled by canvasZoom), resolved once per frame.
+    const tableStyle = _tableStyle
+    const dotSize = Math.max(2, Math.round(2 * canvasZoom))
+
+    // Vertical separator x-positions are identical for every row (they depend only
+    // on columns + scroll, not the row), so collect them ONCE per frame here rather
+    // than re-deriving them inside every drawBodyRow. Keeps the per-row grid pass to
+    // a single loop over this array — flat regardless of how many million rows exist.
+    // Reuse one buffer across frames so the scroll hot path allocates nothing here.
+    const vSeps = _vSepsBuf
+    vSeps.length = 0
+    for (const col of geom.cols) {
+      if (col.pinned) continue
+      const dx = col.contentX - _scrollLeft
+      if (dx >= W) break
+      if (dx + col.w <= 0) continue
+      const ex = dx + col.w - 0.5
+      if (ex <= frozenW) continue
+      vSeps.push(ex)
+    }
+    for (let vi = 0; vi < virtualRelCols.length; vi++) {
+      const ex = geom.totalWidth + vexprTotalW + vi * VIRTUAL_COL_W - _scrollLeft + VIRTUAL_COL_W - 0.5
+      if (ex <= frozenW || ex >= W) continue
+      vSeps.push(ex)
+    }
+    for (const col of geom.cols) {
+      if (!col.pinned) continue
+      const ex = colDrawnX(col, geom, _scrollLeft) + col.w - 0.5
+      if (ex <= 0 || ex >= W) continue
+      vSeps.push(ex)
+    }
+    if (gutterWidth > 0) {
+      const gex = (gutterWidth - _scrollLeft) - 0.5
+      if (gex > 0 && gex < W) vSeps.push(gex)
+    }
+
     const bodyC = {
-      cFg, cText, cMuted, cGrid, cMutedBg, cRing, cAccent, cPanel, usedW, navName,
-      AMBER, BLUE_FG, RED, cPrimary, frozenW,
+      cFg, cText, cMuted, cGrid, cBorder, cMutedBg, cRing, cAccent, cPanel, usedW, navName,
+      AMBER, BLUE_FG, RED, cPrimary, frozenW, tableStyle, dotSize, vSeps,
       rangeColNames, rangeFirstCol, rangeLastCol, rangeR0, rangeR1,
     }
 
@@ -2916,6 +3064,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ctx.fillRect(0, ry, c.usedW, rh)
     } else if (hoveredRow === idx) {
       ctx.fillStyle = withAlpha(c.cMutedBg, 0.18)
+      ctx.fillRect(0, ry, c.usedW, rh)
+    } else if (c.tableStyle.zebra && (idx & 1)) {
+      // Zebra striping — a soft tint on odd rows. Below every interactive state
+      // above so selection/hover/focus always win; O(1), no per-row allocation.
+      ctx.fillStyle = withAlpha(c.cMutedBg, 0.07)
       ctx.fillRect(0, ry, c.usedW, rh)
     }
 
@@ -2998,17 +3151,19 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       const isVHov = hoveredRow === idx && hoveredColName === `__vrel__${vi}`
       if (!_fonts) return
 
-      // Badge: compact tag style — no border at rest, border on hover/active
+      // Badge: compact tag style — no border at rest, border on hover/active.
       const badgeFontPx = Math.max(10, _fonts.cellPx - 1)
-      const bPadX = 8
-      const bH = Math.round(badgeFontPx * 1.55)
-      const bR = 3
+      const bPadX = 10
+      const bH = Math.round(badgeFontPx * 1.7)
+      const bR = Math.round(bH / 2) // pill — fully rounded, reads as a chip
       ctx.font = `500 ${badgeFontPx}px ${_fonts.family}`
 
-      const maxLabelW = VIRTUAL_COL_W - 24
+      // Consistent side gutters so the pill is centered with breathing room.
+      const gutter = Math.round(14 * canvasZoom)
+      const maxLabelW = VIRTUAL_COL_W - gutter * 2 - bPadX * 2
       const labelTxt = truncText(ctx, vc.label, maxLabelW)
       const textW = textWidth(ctx, labelTxt)
-      const bW = Math.min(textW + bPadX * 2, VIRTUAL_COL_W - 16)
+      const bW = Math.min(textW + bPadX * 2, VIRTUAL_COL_W - gutter * 2)
       const bX = cellX + (VIRTUAL_COL_W - bW) / 2
       const bY = ry + (rh - bH) / 2
 
@@ -3016,16 +3171,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
       ctx.fillStyle = isActive
         ? withAlpha(c.cPrimary, 0.15)
-        : isVHov ? withAlpha(c.cMutedBg, 0.55) : withAlpha(c.cMutedBg, 0.2)
+        : isVHov ? withAlpha(c.cMutedBg, 0.6) : withAlpha(c.cMutedBg, 0.3)
       roundRect(ctx, bX, bY, bW, bH, bR); ctx.fill()
 
       if (isActive || isVHov) {
-        ctx.strokeStyle = isActive ? withAlpha(c.cPrimary, 0.45) : withAlpha(c.cMuted, 0.22)
+        ctx.strokeStyle = isActive ? withAlpha(c.cPrimary, 0.45) : withAlpha(c.cMuted, 0.25)
         ctx.lineWidth = 1
         roundRect(ctx, bX + 0.5, bY + 0.5, bW - 1, bH - 1, bR); ctx.stroke()
       }
 
-      ctx.fillStyle = isActive ? c.cPrimary : withAlpha(c.cFg, 0.6)
+      ctx.fillStyle = isActive ? c.cPrimary : withAlpha(c.cFg, 0.72)
       ctx.textBaseline = 'middle'; ctx.textAlign = 'center'
       ctx.fillText(labelTxt, bX + bW / 2, ry + rh / 2 + 0.5)
     }
@@ -3036,42 +3191,37 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // per cell. This collapses ~(cols+3) draw-call flushes per row down to one,
     // the single biggest scroll-perf win alongside O(1) text measurement.
     const vw = _viewportWidth
-    const frozenW = c.frozenW ?? gutterWidth
-    ctx.strokeStyle = c.cGrid
-    ctx.lineWidth = 1
-    ctx.beginPath()
-    // Non-pinned column separators (skip ones hidden behind the frozen region).
-    // Same ascending-contentX ordering → break past the right edge.
-    for (const col of geom.cols) {
-      if (col.pinned) continue
-      const dx = col.contentX - _scrollLeft
-      if (dx >= vw) break
-      if (dx + col.w <= 0) continue
-      const ex = dx + col.w - 0.5
-      if (ex <= frozenW) continue
-      ctx.moveTo(ex, ry); ctx.lineTo(ex, ry + rh)
+    // Vertical separators were collected once for the frame; the row only chooses
+    // how to render them per the active grid-style preset. All branches stay a
+    // single batched path/fill, so this is O(visible cols) no matter the row count.
+    const ts = c.tableStyle
+    const seps = c.vSeps
+    // "Bordered" preset draws with the stronger border token for a high-contrast grid.
+    const gridColor = ts.strong ? c.cBorder : c.cGrid
+
+    if (ts.dots) {
+      // "Connection dot" grid — a small square at each cell join (column separator
+      // × the row's bottom edge) instead of full lines. One batched fill per row.
+      const ds = c.dotSize
+      const dy = ry + rh - ds
+      const half = (ds / 2) | 0
+      ctx.fillStyle = gridColor
+      ctx.beginPath()
+      ctx.rect(0, dy, ds, ds) // left edge join
+      for (let k = 0; k < seps.length; k++) ctx.rect((seps[k] - half) | 0, dy, ds, ds)
+      ctx.fill()
+    } else {
+      ctx.strokeStyle = gridColor
+      ctx.lineWidth = 1
+      if (ts.dash) ctx.setLineDash(ts.dash)
+      ctx.beginPath()
+      if (ts.cols) {
+        for (let k = 0; k < seps.length; k++) { ctx.moveTo(seps[k], ry); ctx.lineTo(seps[k], ry + rh) }
+      }
+      if (ts.rows) { ctx.moveTo(0, ry + rh - 0.5); ctx.lineTo(vw, ry + rh - 0.5) }
+      ctx.stroke()
+      if (ts.dash) ctx.setLineDash([]) // reset so other strokes stay solid
     }
-    // Virtual relationship column separators.
-    for (let vi = 0; vi < virtualRelCols.length; vi++) {
-      const ex = geom.totalWidth + vexprTotalW + vi * VIRTUAL_COL_W - _scrollLeft + VIRTUAL_COL_W - 0.5
-      if (ex <= frozenW || ex >= vw) continue
-      ctx.moveTo(ex, ry); ctx.lineTo(ex, ry + rh)
-    }
-    // Pinned column separators (frozen, drawn on top of their fills).
-    for (const col of geom.cols) {
-      if (!col.pinned) continue
-      const ex = colDrawnX(col, geom, _scrollLeft) + col.w - 0.5
-      if (ex <= 0 || ex >= vw) continue
-      ctx.moveTo(ex, ry); ctx.lineTo(ex, ry + rh)
-    }
-    // Gutter separator.
-    if (gutterWidth > 0) {
-      const gex = (gutterWidth - _scrollLeft) - 0.5
-      if (gex > 0 && gex < vw) { ctx.moveTo(gex, ry); ctx.lineTo(gex, ry + rh) }
-    }
-    // Bottom row line.
-    ctx.moveTo(0, ry + rh - 0.5); ctx.lineTo(vw, ry + rh - 0.5)
-    ctx.stroke()
   }
 
   /** @param {CanvasRenderingContext2D} ctx */
@@ -3156,9 +3306,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
     // Cell text — directive display wins; masked cells reveal on hover.
     const revealed = dir?.mask && isHover
+    // SQL array columns render pgAdmin-style ({a,b}); jsonb arrays stay JSON.
+    const isArrayCol = Array.isArray(value) && isSqlArrayType(cached?.colType)
     const text = dir
       ? String(revealed ? (dir.reveal ?? dir.display) : (dir.display ?? displayCell(value)))
-      : displayCell(value)
+      : isArrayCol
+        ? arrayDisplay(value)
+        : displayCell(value)
 
     // Text color — directive link/fg may override (but never over a stronger
     // dirty/fk/focused state highlight).
@@ -4823,6 +4977,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             <ContextMenu.Shortcut>Enter</ContextMenu.Shortcut>
           </ContextMenu.Item>
         {/if}
+        {#if menuCellIsArray && menuEditable && !readonly}
+          <ContextMenu.Item onSelect={() => runMenuAction(() => openArrayEditor(contextRowIdx, contextColIdx))}>
+            <Braces />
+            Edit array…
+          </ContextMenu.Item>
+        {/if}
         <ContextMenu.Item onSelect={() => runMenuAction(() => copyCellValue(contextRowIdx, contextColIdx))}>
           <Copy />
           Copy
@@ -5006,6 +5166,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     />
   {/await}
 {/if}
+
+<ArrayCellEditor
+  bind:open={arrayEditorOpen}
+  column={arrayEditorColName}
+  elementType={arrayEditorType}
+  value={arrayEditorValue}
+  onsave={commitArrayEditor}
+/>
 
 <CellQuickLook
   bind:cell={quickLookCell}
