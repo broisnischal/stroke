@@ -6,6 +6,7 @@
   import AlertTriangle from '@lucide/svelte/icons/alert-triangle'
   import ChevronDown from '@lucide/svelte/icons/chevron-down'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
+  import ArrowRight from '@lucide/svelte/icons/arrow-right'
   import Search from '@lucide/svelte/icons/search'
   import DbIcon from './DbIcon.svelte'
   import { cfStartOAuth, cfOAuthStatus, cfLogout } from '$lib/cloudflare.js'
@@ -42,6 +43,21 @@
       ? databases.filter((d) => d.name.toLowerCase().includes(dbSearch.toLowerCase()))
       : databases,
   )
+
+  /** Turn a raw backend error into a calm title + one-line explanation. */
+  function friendlyError(msg) {
+    const m = String(msg ?? '')
+    if (/not signed in|no.*token|unauthor/i.test(m))
+      return { title: 'Session expired', detail: 'Your Cloudflare sign-in is no longer valid. Sign in again to continue.' }
+    if (/timed out/i.test(m))
+      return { title: 'Authorization timed out', detail: 'The browser sign-in took too long. Start again when you are ready.' }
+    if (/cancel|denied/i.test(m))
+      return { title: 'Authorization not completed', detail: 'The browser closed before authorizing. Try again to connect.' }
+    if (/port .*in use|bind any callback/i.test(m))
+      return { title: 'Callback port in use', detail: m }
+    return { title: 'Something went wrong', detail: m || 'Please try again.' }
+  }
+  const shownError = $derived(friendlyError(errorMsg))
 
   onMount(async () => {
     const status = await cfOAuthStatus()
@@ -131,39 +147,36 @@
 <div class="flex flex-col gap-3">
 
   {#if phase === 'idle'}
-    <!-- ── Not connected — left-aligned, no card ── -->
-    <div class="flex flex-col gap-5 py-1">
-      <div class="flex items-center gap-3.5">
-        <div class="flex size-12 shrink-0 items-center justify-center rounded-xl border border-border/50 bg-muted/25">
-          <DbIcon id="d1" class="size-6 text-foreground" />
-        </div>
-        <div class="min-w-0">
-          <p class="text-[15px] font-semibold text-foreground">Connect with Cloudflare</p>
-          <p class="mt-0.5 text-[12.5px] leading-relaxed text-muted-foreground">Authorize Stroke to browse your D1 databases.</p>
-        </div>
-      </div>
-      <div class="flex flex-col gap-2.5">
-        <button
-          type="button"
-          class="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-foreground px-5 text-[13px] font-semibold text-background transition-colors hover:bg-foreground/85"
-          onclick={startAuth}
-        >
-          <DbIcon id="d1" class="size-4" />
-          Authorize with Cloudflare
-        </button>
-        <p class="text-[11px] text-muted-foreground/45">Same OAuth flow as the Wrangler CLI · secure PKCE.</p>
-      </div>
+    <!-- Not connected — compact CTA (the provider row above already names it). -->
+    <div class="flex flex-col gap-2">
+      <button
+        type="button"
+        class="group flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-foreground px-5 text-[13px] font-semibold text-background shadow-sm transition-[background-color,transform] duration-150 ease-out hover:bg-foreground/85 active:scale-[0.98]"
+        onclick={startAuth}
+      >
+        Sign in with Cloudflare
+        <ArrowRight class="size-4 transition-transform duration-150 ease-out group-hover:translate-x-0.5" />
+      </button>
+      <p class="text-xs text-muted-foreground">Opens your browser to authorize · same PKCE flow as Wrangler</p>
     </div>
 
   {:else if phase === 'authorizing'}
     <!-- ── Waiting for browser ── -->
-    <div class="flex items-center gap-3.5 py-2">
-      <div class="flex size-12 shrink-0 items-center justify-center rounded-xl border border-border/50 bg-muted/25">
-        <Loader2 class="size-5 animate-spin text-foreground" />
+    <div class="flex flex-col gap-3.5 rounded-xl border border-border/40 bg-muted/[0.03] p-4">
+      <div class="flex items-center gap-3.5">
+        <div class="relative flex size-11 shrink-0 items-center justify-center rounded-xl border border-border/50 bg-background">
+          <span class="pulse-ring pointer-events-none absolute inset-0 rounded-xl ring-1 ring-primary/40"></span>
+          <DbIcon id="d1" class="size-5 text-foreground" />
+        </div>
+        <div class="min-w-0">
+          <p class="text-sm font-semibold leading-tight text-foreground">Waiting for Cloudflare…</p>
+          <p class="mt-1 text-xs leading-relaxed text-pretty text-muted-foreground">
+            Finish authorizing in the browser tab, then come back here.
+          </p>
+        </div>
       </div>
-      <div class="min-w-0">
-        <p class="text-[14px] font-semibold text-foreground">Waiting for Cloudflare…</p>
-        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Authorize Stroke in the browser tab, then return here.</p>
+      <div class="h-1 overflow-hidden rounded-full bg-muted/60">
+        <span class="progress-slide block h-full w-1/3 rounded-full bg-primary/70"></span>
       </div>
     </div>
 
@@ -284,17 +297,45 @@
     {/if}
 
   {:else if phase === 'error'}
-    <div class="flex flex-col gap-2 rounded-xl border border-destructive/30 bg-destructive/[0.06] px-3 py-3">
-      <div class="flex items-start gap-2 text-[11px] text-destructive">
-        <AlertTriangle class="mt-0.5 size-3.5 shrink-0" />
-        <span class="break-words">{errorMsg || 'Authorization failed.'}</span>
+    <div class="flex flex-col gap-3 rounded-xl border border-destructive/25 bg-destructive/[0.07] p-3.5">
+      <div class="flex items-start gap-3">
+        <div class="flex size-7 shrink-0 items-center justify-center rounded-lg bg-destructive/12 text-destructive">
+          <AlertTriangle class="size-4" />
+        </div>
+        <div class="min-w-0 flex-1">
+          <p class="text-[13px] font-semibold leading-tight text-destructive">{shownError.title}</p>
+          <p class="mt-1 text-xs leading-relaxed text-pretty break-words text-destructive/75">{shownError.detail}</p>
+        </div>
       </div>
       <button
         type="button"
-        class="self-start text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+        class="inline-flex h-8 items-center justify-center gap-1.5 self-start rounded-lg border border-destructive/30 bg-destructive/5 px-3 text-xs font-medium text-destructive transition-[color,background-color,transform] duration-150 ease-out hover:bg-destructive/12 active:scale-[0.96]"
         onclick={startAuth}
-      >Try again</button>
+      >
+        <RefreshCw class="size-3.5" /> Try again
+      </button>
     </div>
   {/if}
 
 </div>
+
+<style>
+  /* Expanding pulse ring on the Cloudflare mark while awaiting the browser. */
+  @keyframes pulse-ring {
+    0%   { opacity: 0.55; transform: scale(1); }
+    100% { opacity: 0;    transform: scale(1.35); }
+  }
+  .pulse-ring { animation: pulse-ring 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+
+  /* Indeterminate bar sweeping left→right. */
+  @keyframes progress-slide {
+    0%   { transform: translateX(-120%); }
+    100% { transform: translateX(320%); }
+  }
+  .progress-slide { animation: progress-slide 1.3s ease-in-out infinite; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pulse-ring { animation: none; opacity: 0.4; }
+    .progress-slide { animation: none; width: 100%; opacity: 0.5; }
+  }
+</style>
