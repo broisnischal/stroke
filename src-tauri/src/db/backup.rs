@@ -917,6 +917,13 @@ async fn import_mysql(app: &AppHandle, pool: &sqlx::MySqlPool, sql: &str) -> Res
 
 // ── D1 export ─────────────────────────────────────────────────────────────────
 
+/// Cloudflare D1 rejects access to its internal tables (prefixed `_cf_`) with a
+/// `SQLITE_AUTH` error, and SQLite's own `sqlite_*` tables aren't user data.
+/// Skip both so a backup doesn't abort on e.g. `SELECT * FROM "_cf_KV"`.
+fn is_d1_internal_table(name: &str) -> bool {
+    name.starts_with("_cf_") || name.starts_with("sqlite_")
+}
+
 async fn export_d1(
     app: &AppHandle,
     cfg: &super::connection::D1Config,
@@ -944,6 +951,7 @@ async fn export_d1(
         let ddl_sql  = row.get(sql_idx).and_then(|v| v.as_str()).unwrap_or("");
 
         if obj_type == "table" {
+            if is_d1_internal_table(name) { continue; }
             all_tables.push(name.to_string());
             if opts.include_schema && filter.map_or(true, |f| f.iter().any(|t| t == name)) {
                 out.push_str(ddl_sql.trim()); out.push_str(";\n");
@@ -966,8 +974,16 @@ async fn export_d1(
         emit_log(app, "backup-log", "info", format!("Exporting {} table(s)…", tables_to_dump.len()));
         for table in &tables_to_dump {
             emit_log(app, "backup-log", "info", format!("  → {table}"));
-            let data_result = super::d1::query(cfg,
-                &format!("SELECT * FROM \"{}\"", table.replace('"', "\"\"")), vec![]).await?;
+            let data_result = match super::d1::query(cfg,
+                &format!("SELECT * FROM \"{}\"", table.replace('"', "\"\"")), vec![]).await {
+                Ok(r) => r,
+                Err(e) => {
+                    // A single unreadable/prohibited table shouldn't abort the whole backup.
+                    out.push_str(&format!("-- ERROR exporting {table}: {e}\n"));
+                    emit_log(app, "backup-log", "error", format!("  ✗ {table}: {e}"));
+                    continue;
+                }
+            };
             let n = data_result.rows.len();
             if !data_result.rows.is_empty() {
                 let col_names: Vec<String> = data_result.columns.iter()
