@@ -126,14 +126,14 @@
               type="button"
               onclick={() => (issueType = t.id)}
               class={cn(
-                "inline-flex h-[28px] flex-1 items-center justify-center gap-1.5 rounded-md border text-[11px] font-medium transition-colors",
+                "inline-flex h-[28px] min-w-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border px-1 text-[11px] font-medium transition-colors",
                 issueType === t.id
                   ? "border-border/50 bg-muted/60 text-foreground"
                   : "border-border/20 text-muted-foreground/35 hover:border-border/30 hover:bg-muted/20 hover:text-muted-foreground/70",
               )}
             >
               <t.Icon class="size-3 shrink-0" />
-              {t.label}
+              <span class="truncate">{t.label}</span>
             </button>
           {/each}
         </div>
@@ -182,12 +182,12 @@
 
     <!-- Footer -->
     <div
-      class="flex items-center justify-between border-t border-border/15 px-5 py-3"
+      class="flex flex-wrap items-center justify-between gap-2 border-t border-border/15 px-5 py-3"
     >
       <button
         type="button"
         onclick={copyReport}
-        class="inline-flex h-[28px] items-center gap-1.5 rounded-md px-2.5 text-[11px] text-muted-foreground/40 transition-colors hover:bg-muted/30 hover:text-foreground"
+        class="inline-flex h-[28px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-[11px] text-muted-foreground/40 transition-colors hover:bg-muted/30 hover:text-foreground"
       >
         {#if copied}
           <Check class="size-3 text-emerald-500" />
@@ -198,7 +198,7 @@
         {/if}
       </button>
 
-      <div class="flex items-center gap-1.5">
+      <div class="flex shrink-0 items-center gap-1.5">
         <button
           type="button"
           onclick={async () => {
@@ -209,7 +209,7 @@
               window.open(`https://github.com/${GITHUB_REPO}/issues`, "_blank");
             }
           }}
-          class="inline-flex h-[28px] items-center gap-1.5 rounded-md border border-border/25 px-3 text-[11px] text-muted-foreground/50 transition-colors hover:bg-muted/30 hover:text-foreground"
+          class="inline-flex h-[28px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-border/25 px-3 text-[11px] text-muted-foreground/50 transition-colors hover:bg-muted/30 hover:text-foreground"
         >
           <svg
             class="size-3 shrink-0"
@@ -225,7 +225,7 @@
         <button
           type="button"
           onclick={openOnGithub}
-          class="inline-flex h-[28px] items-center gap-1.5 rounded-md bg-foreground px-3.5 text-[12px] text-background transition-colors hover:bg-foreground/85"
+          class="inline-flex h-[28px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-foreground px-3.5 text-[12px] font-medium text-background transition-colors hover:bg-foreground/85"
         >
           <ExternalLink class="size-3 shrink-0" />
           Open on GitHub

@@ -1,5 +1,16 @@
 use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use tauri::Manager;
+
+// Session cache: once loaded (or written) it is authoritative for the process,
+// so a value is always readable immediately after it is stored — even if the OS
+// keychain read-back is flaky, unavailable, or (mis)configured as the mock store.
+// Durable persistence still goes to the keychain/file below; this only guarantees
+// read-after-write within a run.
+static CACHE: OnceLock<Mutex<Option<HashMap<String, String>>>> = OnceLock::new();
+fn cache() -> &'static Mutex<Option<HashMap<String, String>>> {
+    CACHE.get_or_init(|| Mutex::new(None))
+}
 
 // All secrets (AI keys, provider OAuth tokens, Cloudflare tokens) live in a
 // single JSON blob stored in the OS keychain — macOS Keychain, Windows
@@ -31,37 +42,65 @@ fn write_keychain(map: &HashMap<String, String>) -> Result<(), String> {
     entry.set_password(&json).map_err(|e| e.to_string())
 }
 
-pub(crate) fn read_all(app: &tauri::AppHandle) -> HashMap<String, String> {
-    // 1) Preferred: the OS keychain (encrypted at rest).
+/// Read the keychain back and confirm it holds exactly what we intended to store.
+/// This is what makes a silently-non-persisting backend (e.g. keyring's mock
+/// store) detectable: a write can "succeed" yet not round-trip, in which case we
+/// must keep the plaintext file rather than delete it and lose the data.
+fn keychain_holds(expected: &HashMap<String, String>) -> bool {
+    keychain_entry()
+        .and_then(|e| e.get_password().ok())
+        .map(|json| parse_map(&json) == *expected)
+        .unwrap_or(false)
+}
+
+/// Load the durable store: keychain first (encrypted at rest), then the legacy
+/// plaintext file, migrating the file into the keychain when that round-trips.
+fn load_durable(app: &tauri::AppHandle) -> HashMap<String, String> {
     if let Some(entry) = keychain_entry() {
-        match entry.get_password() {
-            Ok(json) => return parse_map(&json),
-            // No keychain entry yet → fall through to migrate any legacy file.
-            Err(keyring::Error::NoEntry) => {}
-            // Keychain unavailable this session → fall through to the file store.
-            Err(_) => {}
+        if let Ok(json) = entry.get_password() {
+            let map = parse_map(&json);
+            if !map.is_empty() {
+                return map;
+            }
         }
     }
-    // 2) Legacy plaintext file: read it, migrate into the keychain, remove the
-    //    plaintext copy. Also the fallback store when the keychain is absent.
+    // Legacy plaintext file: the fallback store, and the pre-keychain format.
     let path = legacy_path(app);
     let map = std::fs::read_to_string(&path)
         .ok()
         .map(|s| parse_map(&s))
         .unwrap_or_default();
-    if !map.is_empty() && write_keychain(&map).is_ok() {
+    // Migrate into the keychain only if it verifiably persisted; otherwise leave
+    // the file exactly where it is.
+    if !map.is_empty() && write_keychain(&map).is_ok() && keychain_holds(&map) {
         let _ = std::fs::remove_file(&path);
     }
     map
 }
 
+pub(crate) fn read_all(app: &tauri::AppHandle) -> HashMap<String, String> {
+    let mut guard = cache().lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(map) = guard.as_ref() {
+        return map.clone();
+    }
+    let map = load_durable(app);
+    *guard = Some(map.clone());
+    map
+}
+
 pub(crate) fn write_all(app: &tauri::AppHandle, map: &HashMap<String, String>) -> Result<(), String> {
-    // Prefer the keychain; on success make sure no plaintext copy lingers.
-    if write_keychain(map).is_ok() {
+    // Session cache is authoritative first, so reads right after this always see
+    // the new value regardless of what the durable backend does.
+    *cache().lock().unwrap_or_else(|e| e.into_inner()) = Some(map.clone());
+
+    // Prefer the keychain, but only trust it — and drop the plaintext copy — once
+    // a read-back proves the data actually persisted.
+    if write_keychain(map).is_ok() && keychain_holds(map) {
         let _ = std::fs::remove_file(legacy_path(app));
         return Ok(());
     }
-    // Keychain unavailable — fall back to the file so secrets aren't lost.
+    // Keychain missing, mock, or not round-tripping — persist to the file so
+    // secrets survive a restart.
     let path = legacy_path(app);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
