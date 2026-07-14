@@ -14,7 +14,7 @@ const STORAGE_KEY = 'stroke:settings'
 /** @typedef {'geist' | 'serif' | 'apple'} FontId */
 /** @typedef {'regular' | 'light' | 'bold'} IconStyleId */
 /** @typedef {'lucide' | 'hugeicons'} IconSetId */
-/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean }} AppSettings */
+/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean }} AppSettings */
 
 /** UI zoom scale (font + layout). 1 = 100%. */
 export const ZOOM_STEPS = [0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.25, 1.5]
@@ -89,6 +89,36 @@ function normalizeIconSet(/** @type {unknown} */ id) {
   return ICON_SETS[/** @type {IconSetId} */ (id)] ? /** @type {IconSetId} */ (id) : DEFAULT_ICON_SET
 }
 
+/**
+ * @typedef {'lines'|'dotted'|'dots'|'minimal'|'bordered'|'striped'} TableStyleId
+ * @typedef {{ label: string, description: string,
+ *   rows: boolean, cols: boolean, dash: number[]|null, dots: boolean, strong?: boolean, zebra?: boolean }} TableStyleDef
+ */
+
+/**
+ * Data-grid style presets for the canvas table. Each preset only changes how the
+ * per-row grid pass draws separators — it's applied in DataTable's virtualized
+ * draw(), so it costs O(visible cells) and never scales with total row count.
+ *   - rows/cols: draw horizontal / vertical separators
+ *   - dash:      canvas setLineDash pattern (null = solid)
+ *   - dots:      draw a small dot at each cell join instead of lines
+ * @type {Record<TableStyleId, TableStyleDef>}
+ */
+export const TABLE_STYLES = {
+  lines:    { label: 'Lines',    description: 'Solid grid lines (classic)',        rows: true,  cols: true,  dash: null,   dots: false },
+  bordered: { label: 'Bordered', description: 'Bold high-contrast grid lines',     rows: true,  cols: true,  dash: null,   dots: false, strong: true },
+  striped:  { label: 'Striped',  description: 'Alternating even/odd row shading',  rows: true,  cols: false, dash: null,   dots: false, zebra: true },
+  dotted:   { label: 'Dotted',   description: 'Fine dotted grid, softer feel',     rows: true,  cols: true,  dash: [1, 3], dots: false },
+  dots:     { label: 'Dots',     description: 'Corner dots + soft row shading',    rows: false, cols: false, dash: null,   dots: true,  zebra: true },
+  minimal:  { label: 'Minimal',  description: 'Row separators only, no columns',   rows: true,  cols: false, dash: null,   dots: false },
+}
+/** @type {TableStyleId} */
+export const DEFAULT_TABLE_STYLE = 'lines'
+/** @returns {TableStyleId} */
+export function normalizeTableStyle(/** @type {unknown} */ id) {
+  return TABLE_STYLES[/** @type {TableStyleId} */ (id)] ? /** @type {TableStyleId} */ (id) : DEFAULT_TABLE_STYLE
+}
+
 /** @type {AppSettings} */
 export const DEFAULT_SETTINGS = {
   theme: DEFAULT_THEME_ID,
@@ -96,6 +126,7 @@ export const DEFAULT_SETTINGS = {
   font: DEFAULT_FONT,
   iconStyle: DEFAULT_ICON_STYLE,
   iconSet: DEFAULT_ICON_SET,
+  tableStyle: DEFAULT_TABLE_STYLE,
   mcpAutoStart: false,
   launchAtLogin: false,
   autoReconnectOnStartup: true,
@@ -120,6 +151,10 @@ export const appThemeId = writable(/** @type {ThemeId} */ (DEFAULT_THEME_ID))
 
 /** Reactive: show a SQL preview/confirm before applying grid writes (synced by applySettings). */
 export const appPreviewDml = writable(true)
+
+/** Reactive canvas-table grid style preset (synced by applySettings). DataTable
+ *  subscribes to repaint when it changes. */
+export const appTableStyle = writable(/** @type {TableStyleId} */ (DEFAULT_TABLE_STYLE))
 
 const LAST_DARK_KEY  = 'stroke:last-dark-theme'
 const LAST_LIGHT_KEY = 'stroke:last-light-theme'
@@ -192,7 +227,8 @@ export function loadSettings() {
     const font = normalizeFont(parsed.font)
     const iconStyle = normalizeIconStyle(parsed.iconStyle)
     const iconSet = normalizeIconSet(parsed.iconSet)
-    _settingsCache = { theme, zoom, font, iconStyle, iconSet, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply }
+    const tableStyle = normalizeTableStyle(parsed.tableStyle)
+    _settingsCache = { theme, zoom, font, iconStyle, iconSet, tableStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply }
     return { ..._settingsCache }
   } catch {
     return { ...DEFAULT_SETTINGS }
@@ -260,6 +296,12 @@ export function applySettings(settings) {
 
   // Grid-write DML preview toggle — DataTable subscribes to gate its confirm dialog.
   appPreviewDml.set(settings.previewDmlBeforeApply !== false)
+
+  // Canvas table grid style — data attribute for any CSS hooks; DataTable reads
+  // the store and repaints the virtualized grid pass.
+  const tableStyle = normalizeTableStyle(settings.tableStyle)
+  root.setAttribute('data-table-style', tableStyle)
+  appTableStyle.set(tableStyle)
 
   // Keep the canvas-table zoom in lockstep with the app zoom so Cmd +/-/0 (and
   // the zoom buttons) scale the grid alongside the rest of the UI. The canvas
