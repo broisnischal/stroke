@@ -310,6 +310,10 @@
 
   /** @type {StudioTab[]} */
   let tabs = $state([])
+  // Recently-closed tabs (most-recent last), for Reopen Closed Tab (Ctrl/⌘+Shift+T).
+  // Stores lightweight descriptors, not live tab objects; capped so it can't grow.
+  let closedTabStack = $state(/** @type {any[]} */ ([]))
+  const CLOSED_TAB_STACK_MAX = 20
   let activeTabId = $state(/** @type {string | null} */ (null))
 
   // ── Split-pane / editor-group layout ─────────────────────────────────────
@@ -1283,10 +1287,43 @@ let rowSearch = $state('')
     toggleStatusBar()
   })
 
+  // Reopen the most recently closed tab (browser-style).
   createHotkey('Mod+Shift+T', (e) => {
+    if (!connection) return
+    e.preventDefault()
+    reopenLastClosedTab()
+  })
+
+  // Tab-bar visibility toggle moved here so Mod+Shift+T can reopen closed tabs.
+  createHotkey('Alt+Shift+T', (e) => {
     e.preventDefault()
     toggleTabBar()
   })
+
+  // Disconnect the current connection (opens the confirm dialog).
+  createHotkey('Mod+Alt+D', (e) => {
+    if (!connection) return
+    e.preventDefault()
+    showDisconnectDialog = true
+  })
+
+  // Open the keyboard-shortcuts reference (Ctrl/⌘+/ — same key as Mod+? without shift).
+  createHotkey('Mod+/', (e) => {
+    if (commandOpen || showConnectionModal || showSettingsModal || showShortcutsModal) return
+    e.preventDefault()
+    showShortcutsModal = true
+  })
+
+  // Jump straight to tab N (Ctrl/⌘+1..8); 9 always jumps to the last tab —
+  // the same convention as browsers and editors.
+  for (let n = 1; n <= 9; n++) {
+    createHotkey(`Mod+${n}`, (e) => {
+      if (!connection || tabs.length === 0) return
+      e.preventDefault()
+      const idx = n === 9 ? tabs.length - 1 : Math.min(n - 1, tabs.length - 1)
+      void activateTab(tabs[idx].id)
+    })
+  }
 
   createHotkey('Mod+Shift+L', (e) => {
     e.preventDefault()
@@ -1977,6 +2014,7 @@ let rowSearch = $state('')
       const key = tabTableKey(closing)
       if (key) clearPendingChanges(key)
     }
+    rememberClosedTab(closing)
     const nextTabs = tabs.filter((t) => t.id !== id)
     if (nextTabs.length === 0) {
       tabs = [createWelcomeTab()]
@@ -1989,6 +2027,28 @@ let rowSearch = $state('')
       const nextIdx = Math.min(idx, nextTabs.length - 1)
       await activateTab(nextTabs[nextIdx].id)
     }
+  }
+
+  /** Push a closed tab onto the reopen stack (welcome tabs aren't worth restoring). */
+  function rememberClosedTab(tab) {
+    if (!tab || tab.kind === 'welcome') return
+    // Snapshot with a shallow state clone so later edits to the live tree can't
+    // mutate what we'll restore. `id`/`pinned` are dropped — reopen mints fresh.
+    const { id: _id, pinned: _pinned, ...rest } = tab
+    const snapshot = { ...rest, state: tab.state ? { ...tab.state } : tab.state }
+    closedTabStack = [...closedTabStack, snapshot].slice(-CLOSED_TAB_STACK_MAX)
+  }
+
+  /** Ctrl/⌘+Shift+T — reopen the most recently closed tab. */
+  function reopenLastClosedTab() {
+    const entry = closedTabStack[closedTabStack.length - 1]
+    if (!entry) return
+    closedTabStack = closedTabStack.slice(0, -1)
+    saveActiveTabState()
+    dropWelcomeTabs()
+    const tab = { ...entry, id: crypto.randomUUID(), pinned: false, state: entry.state ? { ...entry.state } : entry.state }
+    tabs = [...tabs, tab]
+    void activateTab(tab.id)
   }
 
   /** @param {string} id — keep this tab (and pinned tabs), close everything else */
