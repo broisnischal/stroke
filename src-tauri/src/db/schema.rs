@@ -380,6 +380,11 @@ async fn list_tables_d1(cfg: &super::connection::D1Config) -> Result<Vec<TableIn
         .iter()
         .filter_map(|r| {
             let name = r.get(name_idx)?.as_str()?.to_string();
+            // Cloudflare D1 blocks access to its internal `_cf_*` tables with a
+            // SQLITE_AUTH error, so hide them (can't be browsed or backed up).
+            if name.starts_with("_cf_") {
+                return None;
+            }
             let ty = r.get(type_idx).and_then(|v| v.as_str()).unwrap_or("table");
             let kind = if ty == "view" { "view".to_string() } else { "table".to_string() };
             Some(TableInfo { name, kind, row_count: -1, rls_enabled: None })
