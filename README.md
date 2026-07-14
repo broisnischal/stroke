@@ -72,6 +72,7 @@ Connect directly or through an **SSH tunnel** for databases behind a bastion hos
 - Multi-column sort — shift-click headers to add secondary keys
 - Full-text search and a visual filter builder, with relative date-range presets and enum value pickers
 - Click any foreign-key value to jump to the referenced row
+- Choose from six grid styles (Lines, Bordered, Striped, Dotted, Dots, Minimal) in **Settings → Appearance**
 
 **Cell right-click menu**
 
@@ -84,8 +85,10 @@ Sort ascending · Sort descending · Filter by this column · Pin column · Hide
 
 ### Inline editing
 
-Edit text, numbers, booleans, enums, dates, UUIDs, arrays, and JSON in place.
+Edit text, numbers, booleans, enums, dates, UUIDs, and JSON in place.
 Insert rows with smart defaults, delete rows, and set any cell to NULL in one action.
+Postgres array columns (`text[]`, `int[]`, …) get a dedicated add / remove / reorder editor.
+Optionally preview the generated SQL for any change before it's applied.
 
 ### Row inspector
 
