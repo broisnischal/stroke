@@ -1,0 +1,6 @@
+{"session":"57dbb05f-3b13-43f4-ba2a-573b2240678d","model":"claude-opus-4-8","turns":27,"out":17375,"in_new":32487,"cache_read":974399,"cache_write":75281,"secs":128,"end":"2026-07-10T03:41:31.141Z"}
+{"session":"d84687bf-ca69-4d70-b969-9635bf97874e","model":"claude-opus-4-8","turns":303,"out":343155,"in_new":64088,"cache_read":46641777,"cache_write":812505,"secs":6221,"end":"2026-07-10T06:25:55.194Z"}
+{"session":"bed9704a-8f36-489f-abfe-1972a0cc2d2e","model":"claude-opus-4-8","turns":2,"out":908,"in_new":4,"cache_read":39216,"cache_write":32378,"secs":6,"end":"2026-07-13T05:12:45.958Z"}
+{"session":"118b36e4-7e3b-4b26-a8cd-da414d375e9e","model":"claude-opus-4-8","turns":17,"out":16398,"in_new":34,"cache_read":636898,"cache_write":42470,"secs":2109,"end":"2026-07-13T05:15:49.850Z"}
+{"session":"a23be28e-c2ea-48e3-917e-4b8641c9d474","model":"claude-opus-4-8","turns":20,"out":14522,"in_new":40,"cache_read":764404,"cache_write":41562,"secs":1898,"end":"2026-07-14T07:11:31.116Z"}
+{"session":"935c4d31-2111-4749-8ee0-548c4b1652c9","model":"claude-opus-4-8","turns":587,"out":665098,"in_new":1093,"cache_read":170476333,"cache_write":1046100,"secs":6323,"end":"2026-07-14T12:20:27.886Z"}
