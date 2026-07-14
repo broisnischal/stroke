@@ -12,7 +12,7 @@
   import Square from "@lucide/svelte/icons/square";
   import X from "@lucide/svelte/icons/x";
   import StopCircle from "@lucide/svelte/icons/stop-circle";
-  import { backupExport, backupImport } from "$lib/api.js";
+  import { backupExport, backupImport, backupCancel } from "$lib/api.js";
   import { cn } from "$lib/utils.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
 
@@ -69,13 +69,18 @@
   let optIncludeTriggers = $state(true);
   let optIncludeViews = $state(true);
 
-  // Table selection
+  // Table selection. Reset to "all selected" only when the table list itself
+  // changes (new connection/schema) — not on every user toggle. The previous
+  // version also read selectedTables inside the effect, so any deselection
+  // re-triggered it and was instantly reverted to all.
   /** @type {Set<string>} */
   let selectedTables = $state(new Set());
+  let lastTableSig = $state("");
   $effect(() => {
-    const names = tables.map((t) => t.name);
-    if (names.length !== selectedTables.size || names.some((n) => !selectedTables.has(n))) {
-      selectedTables = new Set(names);
+    const sig = tables.map((t) => t.name).join("\u0000");
+    if (sig !== lastTableSig) {
+      lastTableSig = sig;
+      selectedTables = new Set(tables.map((t) => t.name));
     }
   });
 
@@ -190,6 +195,7 @@
 
   function stopExport() {
     exportCancelled = true;
+    backupCancel().catch(() => {}); // signal the backend to stop mid-run
     stopExportLog();
     exportPhase = "idle";
     exportLogs = [];
@@ -293,6 +299,7 @@
 
   function stopImport() {
     importCancelled = true;
+    backupCancel().catch(() => {}); // signal the backend to stop mid-run
     stopRestoreLog();
     importPhase = "idle";
     toast.info("Restore stopped");

@@ -316,6 +316,7 @@ pub fn run() {
             providers::provider_build_connection,
             db::backup::backup_export,
             db::backup::backup_import,
+            db::backup::backup_cancel,
             commands::check_license_status,
             commands::activate_license,
             commands::deactivate_license,
