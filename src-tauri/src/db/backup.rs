@@ -6,12 +6,29 @@ Options control which object types are included (schema DDL, data, sequences,
 enums, functions, triggers, views).
 */
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use sqlx::{Column, Decode, Row, TypeInfo, ValueRef};
 use tauri::{AppHandle, Emitter, State};
 
 use super::connection::{require_conn, ActiveConnection, DbState};
+
+/// Cooperative cancel flag for the in-flight backup/restore. The frontend sets
+/// it via `backup_cancel`; the export/import loops poll it and stop early.
+/// Only one backup/restore runs at a time in the UI, so a single flag suffices.
+static BACKUP_CANCELLED: AtomicBool = AtomicBool::new(false);
+
+fn reset_cancel() { BACKUP_CANCELLED.store(false, Ordering::SeqCst); }
+fn is_cancelled() -> bool { BACKUP_CANCELLED.load(Ordering::SeqCst) }
+
+/// Request cancellation of the running backup/restore. The loops stop at the
+/// next table/statement boundary and return the work completed so far.
+#[tauri::command]
+pub fn backup_cancel() {
+    BACKUP_CANCELLED.store(true, Ordering::SeqCst);
+}
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -87,6 +104,7 @@ pub async fn backup_export(
     options: Option<ExportOptions>,
 ) -> Result<ExportResult, String> {
     let opts = options.unwrap_or_default();
+    reset_cancel();
     match require_conn(&state)? {
         ActiveConnection::Sqlite(pool) => export_sqlite(&app, &pool, tables.as_deref(), &opts).await,
         ActiveConnection::Postgres(pool) => export_postgres(&app, &pool, schema.as_deref(), tables.as_deref(), &opts).await,
@@ -105,6 +123,7 @@ pub async fn backup_import(
     state: State<'_, DbState>,
     sql: String,
 ) -> Result<ImportResult, String> {
+    reset_cancel();
     match require_conn(&state)? {
         ActiveConnection::Sqlite(pool) => import_sqlite(&app, &pool, &sql).await,
         ActiveConnection::Postgres(pool) => import_postgres(&app, &pool, &sql).await,
@@ -126,39 +145,145 @@ fn backup_header(engine: &str, schema: Option<&str>) -> String {
     )
 }
 
-fn split_statements(sql: &str) -> Vec<String> {
-    let mut stmts: Vec<String> = Vec::new();
-    // Pre-size to a reasonable statement buffer; avoids repeated reallocs for long INSERTs.
-    let mut current = String::with_capacity(512);
-    let mut in_single = false;
-    let mut chars = sql.chars().peekable();
+/// Truncate a string to at most `max` characters on a UTF-8 boundary.
+/// (Byte-index slicing panics when a boundary lands mid-character.)
+fn truncate_chars(s: &str, max: usize) -> &str {
+    match s.char_indices().nth(max) {
+        Some((idx, _)) => &s[..idx],
+        None => s,
+    }
+}
 
-    while let Some(ch) = chars.next() {
-        match ch {
-            '\'' if !in_single => { in_single = true; current.push(ch); }
-            '\'' if in_single => {
-                current.push(ch);
-                if chars.peek() == Some(&'\'') {
-                    current.push(chars.next().unwrap());
+/// True when byte offset `i` sits at the start of a line (only whitespace since
+/// the previous newline). Used to recognise line-level directives like `DELIMITER`.
+fn at_line_start(chars: &[char], i: usize) -> bool {
+    chars[..i].iter().rev().take_while(|c| **c != '\n').all(|c| c.is_whitespace())
+}
+
+/// Split a SQL script into individual statements.
+///
+/// Beyond simple `;` splitting this understands the constructs our exporters
+/// emit, so bodies containing embedded semicolons survive a round-trip:
+///   - single-quoted strings (`'…''…'`)
+///   - double-quoted (`"…"`) and backtick (`` `…` ``) identifiers
+///   - PostgreSQL dollar-quoted strings (`$$ … $$`, `$tag$ … $tag$`) — used by
+///     `pg_get_functiondef`, trigger defs, and enum `DO $$ … $$` blocks
+///   - line comments (`-- …`, stripped)
+///   - MySQL `DELIMITER` directives (change the active terminator, e.g. `//`),
+///     so routine/trigger bodies aren't split at their internal `;`
+fn split_statements(sql: &str) -> Vec<String> {
+    let chars: Vec<char> = sql.chars().collect();
+    let n = chars.len();
+    let mut stmts: Vec<String> = Vec::new();
+    let mut current = String::with_capacity(512);
+    let mut i = 0usize;
+    // Active statement terminator; MySQL `DELIMITER` swaps this out.
+    let mut delimiter: Vec<char> = vec![';'];
+
+    let flush = |current: &mut String, stmts: &mut Vec<String>| {
+        let s = current.trim().to_string();
+        if !s.is_empty() { stmts.push(s); }
+        current.clear();
+    };
+
+    while i < n {
+        let ch = chars[i];
+
+        // ── MySQL DELIMITER directive (line-level, not inside a body) ──
+        if (ch == 'D' || ch == 'd')
+            && at_line_start(&chars, i)
+            && i + 9 <= n
+            && chars[i..i + 9].iter().collect::<String>().eq_ignore_ascii_case("DELIMITER")
+            && chars.get(i + 9).is_some_and(|c| c.is_whitespace())
+        {
+            i += 9;
+            let mut delim: Vec<char> = Vec::new();
+            while i < n && chars[i] != '\n' {
+                if chars[i].is_whitespace() {
+                    if !delim.is_empty() { break; }
                 } else {
-                    in_single = false;
+                    delim.push(chars[i]);
+                }
+                i += 1;
+            }
+            while i < n && chars[i] != '\n' { i += 1; } // skip rest of line
+            if i < n { i += 1; }                        // consume newline
+            if !delim.is_empty() { delimiter = delim; }
+            continue;
+        }
+
+        // ── Statement terminator (the active delimiter) ──
+        if i + delimiter.len() <= n && chars[i..i + delimiter.len()] == delimiter[..] {
+            flush(&mut current, &mut stmts);
+            i += delimiter.len();
+            continue;
+        }
+
+        match ch {
+            // Single-quoted string literal ('' escapes an embedded quote).
+            '\'' => {
+                current.push(ch); i += 1;
+                while i < n {
+                    current.push(chars[i]);
+                    if chars[i] == '\'' {
+                        if chars.get(i + 1) == Some(&'\'') { current.push('\''); i += 2; continue; }
+                        i += 1; break;
+                    }
+                    i += 1;
                 }
             }
-            '-' if !in_single && chars.peek() == Some(&'-') => {
-                while let Some(c) = chars.next() { if c == '\n' { break; } }
+            // Double-quoted identifier ("" escapes an embedded quote).
+            '"' => {
+                current.push(ch); i += 1;
+                while i < n {
+                    current.push(chars[i]);
+                    if chars[i] == '"' {
+                        if chars.get(i + 1) == Some(&'"') { current.push('"'); i += 2; continue; }
+                        i += 1; break;
+                    }
+                    i += 1;
+                }
+            }
+            // Backtick identifier (MySQL).
+            '`' => {
+                current.push(ch); i += 1;
+                while i < n {
+                    current.push(chars[i]);
+                    if chars[i] == '`' { i += 1; break; }
+                    i += 1;
+                }
+            }
+            // Dollar-quoted string ($tag$ … $tag$). Only a real tag opens one;
+            // a bare `$` (or `$1` param) is treated as an ordinary character.
+            '$' => {
+                let mut j = i + 1;
+                while j < n && (chars[j].is_alphanumeric() || chars[j] == '_') { j += 1; }
+                if j < n && chars[j] == '$' {
+                    let tag: Vec<char> = chars[i..=j].to_vec();
+                    current.extend(tag.iter());
+                    i = j + 1;
+                    while i < n {
+                        if i + tag.len() <= n && chars[i..i + tag.len()] == tag[..] {
+                            current.extend(tag.iter());
+                            i += tag.len();
+                            break;
+                        }
+                        current.push(chars[i]);
+                        i += 1;
+                    }
+                } else {
+                    current.push(ch); i += 1;
+                }
+            }
+            // Line comment — stripped (replaced by a newline separator).
+            '-' if chars.get(i + 1) == Some(&'-') => {
+                while i < n && chars[i] != '\n' { i += 1; }
                 current.push('\n');
             }
-            ';' if !in_single => {
-                let s = current.trim().to_string();
-                if !s.is_empty() { stmts.push(s); }
-                // Keep capacity to avoid realloc for the next statement.
-                current.clear();
-            }
-            _ => current.push(ch),
+            _ => { current.push(ch); i += 1; }
         }
     }
-    let s = current.trim().to_string();
-    if !s.is_empty() && !s.starts_with("--") { stmts.push(s); }
+    flush(&mut current, &mut stmts);
     stmts
 }
 
@@ -175,33 +300,46 @@ async fn export_sqlite(
     out.push_str("PRAGMA foreign_keys=OFF;\nBEGIN TRANSACTION;\n\n");
 
     let ddl_rows = sqlx::query(
-        "SELECT type, name, sql FROM sqlite_master \
+        "SELECT type, name, tbl_name, sql FROM sqlite_master \
          WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' \
          ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 WHEN 'view' THEN 2 ELSE 3 END, name"
     )
     .fetch_all(pool).await.map_err(|e| e.to_string())?;
 
+    // A trigger/index belongs to `tbl_name`; only emit it when that table is in
+    // the selection, or the restore would reference a table that was never created.
+    let in_filter = |t: &str| filter.map_or(true, |f| f.iter().any(|x| x == t));
+
     let mut all_tables: Vec<String> = Vec::new();
     for row in &ddl_rows {
         let obj_type: String = row.try_get(0).unwrap_or_default();
         let name: String = row.try_get(1).unwrap_or_default();
-        let sql: String = row.try_get(2).unwrap_or_default();
+        let tbl_name: String = row.try_get(2).unwrap_or_default();
+        let sql: String = row.try_get(3).unwrap_or_default();
 
-        if obj_type == "table" {
-            all_tables.push(name.clone());
-            if opts.include_schema && filter.map_or(true, |f| f.iter().any(|t| t == &name)) {
-                out.push_str(sql.trim()); out.push_str(";\n");
+        match obj_type.as_str() {
+            "table" => {
+                all_tables.push(name.clone());
+                if opts.include_schema && in_filter(&name) {
+                    out.push_str(sql.trim()); out.push_str(";\n");
+                }
             }
-        } else if obj_type == "view" {
-            if opts.include_views {
-                out.push_str(sql.trim()); out.push_str(";\n");
+            "view" => {
+                if opts.include_views {
+                    out.push_str(sql.trim()); out.push_str(";\n");
+                }
             }
-        } else if obj_type == "trigger" {
-            if opts.include_triggers {
-                out.push_str(sql.trim()); out.push_str(";\n");
+            "trigger" => {
+                if opts.include_triggers && in_filter(&tbl_name) {
+                    out.push_str(sql.trim()); out.push_str(";\n");
+                }
             }
-        } else {
-            out.push_str(sql.trim()); out.push_str(";\n");
+            // index (and any other table-bound object): gated by schema + filter
+            _ => {
+                if opts.include_schema && in_filter(&tbl_name) {
+                    out.push_str(sql.trim()); out.push_str(";\n");
+                }
+            }
         }
     }
 
@@ -213,6 +351,7 @@ async fn export_sqlite(
         emit_log(app, "backup-log", "info", format!("Exporting {} table(s)…", tables_to_dump.len()));
         let mut total_rows = 0usize;
         for table in &tables_to_dump {
+            if is_cancelled() { break; }
             emit_log(app, "backup-log", "info", format!("  → {table}"));
             let q = format!("SELECT * FROM \"{}\"", table.replace('"', "\"\""));
             // Stream rows one at a time — avoids loading the entire table into memory.
@@ -253,7 +392,8 @@ fn sqlite_val(row: &sqlx::sqlite::SqliteRow, idx: usize) -> String {
         return v.map_or_else(|| "NULL".into(), |n| n.to_string());
     }
     if let Ok(v) = row.try_get::<Option<f64>, _>(idx) {
-        return v.map_or_else(|| "NULL".into(), |n| n.to_string());
+        // SQLite has no literal for NaN/Infinity (they read back as NULL anyway).
+        return v.map_or_else(|| "NULL".into(), |n| if n.is_finite() { n.to_string() } else { "NULL".into() });
     }
     if let Ok(v) = row.try_get::<Option<String>, _>(idx) {
         return v.map_or_else(|| "NULL".into(), |s| format!("'{}'", s.replace('\'', "''")));
@@ -274,11 +414,12 @@ async fn import_sqlite(app: &AppHandle, pool: &sqlx::SqlitePool, sql: &str) -> R
     let mut errors: Vec<String> = Vec::new();
 
     for stmt in &stmts {
+        if is_cancelled() { break; }
         let low = stmt.trim_start().to_lowercase();
         if low.starts_with("pragma foreign_keys") { ok += 1; continue; }
         match sqlx::query(stmt).execute(pool).await {
             Ok(_) => { ok += 1; }
-            Err(e) => errors.push(format!("{e} — near: {}…", &stmt[..stmt.len().min(60)])),
+            Err(e) => errors.push(format!("{e} — near: {}…", truncate_chars(stmt, 60))),
         }
     }
 
@@ -398,6 +539,7 @@ async fn export_postgres(
                 emit_log(app, "backup-log", "info", format!("  Schema {schema}: {} table(s)", tables_to_export.len()));
 
                 for table in &tables_to_export {
+                    if is_cancelled() { break; }
                     emit_log(app, "backup-log", "info", format!("  → {schema}.{table}"));
                     match pg_dump_table(pool, schema, table, opts.include_data).await {
                         Ok((ddl, rows)) => {
@@ -630,6 +772,15 @@ async fn pg_dump_table(
     Ok((out, row_count))
 }
 
+/// Format a float for SQL output. Non-finite values have no bare literal form,
+/// so emit the quoted spellings PostgreSQL accepts (`'NaN'`, `'Infinity'`).
+fn fmt_pg_float(finite_str: String, is_finite: bool, is_nan: bool, is_sign_positive: bool) -> String {
+    if is_finite { finite_str }
+    else if is_nan { "'NaN'".into() }
+    else if is_sign_positive { "'Infinity'".into() }
+    else { "'-Infinity'".into() }
+}
+
 fn pg_val(row: &sqlx::postgres::PgRow, idx: usize) -> String {
     let col = row.column(idx);
     let type_name = col.type_info().name();
@@ -644,10 +795,27 @@ fn pg_val(row: &sqlx::postgres::PgRow, idx: usize) -> String {
         "BOOL" => return row.try_get::<bool, _>(idx)
             .map(|b| if b { "TRUE" } else { "FALSE" }.into())
             .unwrap_or_else(|_| "NULL".into()),
-        "INT2" | "INT4" | "INT8" | "OID" => return row.try_get::<i64, _>(idx)
+        // sqlx decoders are width-strict: an INT2 column won't decode as i64,
+        // so each integer width must be requested explicitly (otherwise the
+        // value silently exported as NULL).
+        "INT2" => return row.try_get::<i16, _>(idx)
             .map(|n| n.to_string()).unwrap_or_else(|_| "NULL".into()),
-        "FLOAT4" | "FLOAT8" | "NUMERIC" | "MONEY" => return row.try_get::<f64, _>(idx)
+        "INT4" => return row.try_get::<i32, _>(idx)
             .map(|n| n.to_string()).unwrap_or_else(|_| "NULL".into()),
+        "INT8" | "OID" => return row.try_get::<i64, _>(idx)
+            .map(|n| n.to_string()).unwrap_or_else(|_| "NULL".into()),
+        "FLOAT4" => return row.try_get::<f32, _>(idx)
+            .map(|n| fmt_pg_float(n.to_string(), n.is_finite(), n.is_nan(), n.is_sign_positive()))
+            .unwrap_or_else(|_| "NULL".into()),
+        "FLOAT8" => return row.try_get::<f64, _>(idx)
+            .map(|n| fmt_pg_float(n.to_string(), n.is_finite(), n.is_nan(), n.is_sign_positive()))
+            .unwrap_or_else(|_| "NULL".into()),
+        // Decode NUMERIC as an exact decimal to preserve precision/scale (f64
+        // would round high-scale values). NaN numerics fall through to NULL.
+        "NUMERIC" => return row.try_get::<sqlx::types::Decimal, _>(idx)
+            .map(|d| d.to_string()).unwrap_or_else(|_| "NULL".into()),
+        "MONEY" => return row.try_get::<sqlx::postgres::types::PgMoney, _>(idx)
+            .map(|m| m.to_decimal(2).to_string()).unwrap_or_else(|_| "NULL".into()),
         "JSON" | "JSONB" => return row.try_get::<serde_json::Value, _>(idx)
             .map(|v| format!("'{}'", v.to_string().replace('\'', "''")))
             .unwrap_or_else(|_| "NULL".into()),
@@ -680,19 +848,30 @@ async fn import_postgres(app: &AppHandle, pool: &sqlx::PgPool, sql: &str) -> Res
     sqlx::query("SET session_replication_role = replica").execute(&mut *tx).await.ok();
 
     for (i, stmt) in stmts.iter().enumerate() {
+        if is_cancelled() { break; }
         let low = stmt.trim_start().to_lowercase();
         if low.starts_with("set session_replication_role") { ok += 1; continue; }
         if low.starts_with("set client_encoding") || low.starts_with("set standard_conforming") { ok += 1; continue; }
 
+        // Wrap each statement in a savepoint. In Postgres the first error aborts
+        // the whole transaction, so without this a single bad statement would
+        // make every later one fail and the final COMMIT roll everything back.
+        // Rolling back to the savepoint on error keeps prior successes and lets
+        // the restore continue (partial-apply, matching the SQLite/MySQL paths).
+        sqlx::query("SAVEPOINT stroke_sp").execute(&mut *tx).await.ok();
         match sqlx::query(stmt).execute(&mut *tx).await {
             Ok(_) => {
+                sqlx::query("RELEASE SAVEPOINT stroke_sp").execute(&mut *tx).await.ok();
                 ok += 1;
                 // Emit progress every 50 statements
                 if (i + 1) % 50 == 0 {
                     emit_log(app, "restore-log", "info", format!("  {}/{} statements…", i + 1, total));
                 }
             }
-            Err(e) => errors.push(format!("{e} — near: {}…", &stmt[..stmt.len().min(80)])),
+            Err(e) => {
+                sqlx::query("ROLLBACK TO SAVEPOINT stroke_sp").execute(&mut *tx).await.ok();
+                errors.push(format!("{e} — near: {}…", truncate_chars(stmt, 80)));
+            }
         }
     }
 
@@ -756,6 +935,7 @@ async fn export_mysql(
                 emit_log(app, "backup-log", "info", format!("Schema {schema}: {} table(s)", tables_to_export.len()));
 
                 for table in &tables_to_export {
+                    if is_cancelled() { break; }
                     emit_log(app, "backup-log", "info", format!("  → {schema}.{table}"));
                     let create_row = sqlx::query(&format!("SHOW CREATE TABLE `{schema}`.`{table}`"))
                         .fetch_one(pool).await
@@ -868,7 +1048,8 @@ fn mysql_val(row: &sqlx::mysql::MySqlRow, idx: usize) -> String {
         return v.map_or_else(|| "NULL".into(), |n| n.to_string());
     }
     if let Ok(v) = row.try_get::<Option<f64>, _>(idx) {
-        return v.map_or_else(|| "NULL".into(), |n| n.to_string());
+        // MySQL rejects NaN/Infinity literals on insert, so store them as NULL.
+        return v.map_or_else(|| "NULL".into(), |n| if n.is_finite() { n.to_string() } else { "NULL".into() });
     }
     if let Ok(v) = row.try_get::<Option<bool>, _>(idx) {
         return v.map_or_else(|| "NULL".into(), |b| if b { "1" } else { "0" }.into());
@@ -895,6 +1076,7 @@ async fn import_mysql(app: &AppHandle, pool: &sqlx::MySqlPool, sql: &str) -> Res
     let mut errors: Vec<String> = Vec::new();
 
     for (i, stmt) in stmts.iter().enumerate() {
+        if is_cancelled() { break; }
         match sqlx::query(stmt).execute(pool).await {
             Ok(_) => {
                 ok += 1;
@@ -902,7 +1084,7 @@ async fn import_mysql(app: &AppHandle, pool: &sqlx::MySqlPool, sql: &str) -> Res
                     emit_log(app, "restore-log", "info", format!("  {}/{} statements…", i + 1, total));
                 }
             }
-            Err(e) => errors.push(format!("{e} — near: {}…", &stmt[..stmt.len().min(80)])),
+            Err(e) => errors.push(format!("{e} — near: {}…", truncate_chars(stmt, 80))),
         }
     }
 
@@ -917,6 +1099,13 @@ async fn import_mysql(app: &AppHandle, pool: &sqlx::MySqlPool, sql: &str) -> Res
 
 // ── D1 export ─────────────────────────────────────────────────────────────────
 
+/// Cloudflare D1 rejects access to its internal tables (prefixed `_cf_`) with a
+/// `SQLITE_AUTH` error, and SQLite's own `sqlite_*` tables aren't user data.
+/// Skip both so a backup doesn't abort on e.g. `SELECT * FROM "_cf_KV"`.
+fn is_d1_internal_table(name: &str) -> bool {
+    name.starts_with("_cf_") || name.starts_with("sqlite_")
+}
+
 async fn export_d1(
     app: &AppHandle,
     cfg: &super::connection::D1Config,
@@ -929,31 +1118,45 @@ async fn export_d1(
 
     let ddl_result = super::d1::query(
         cfg,
-        "SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 WHEN 'view' THEN 2 ELSE 3 END, name",
+        "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 WHEN 'view' THEN 2 ELSE 3 END, name",
         vec![],
     ).await?;
 
     let type_idx = ddl_result.columns.iter().position(|c| c.name == "type").unwrap_or(0);
     let name_idx = ddl_result.columns.iter().position(|c| c.name == "name").unwrap_or(1);
-    let sql_idx  = ddl_result.columns.iter().position(|c| c.name == "sql").unwrap_or(2);
+    let tbl_idx  = ddl_result.columns.iter().position(|c| c.name == "tbl_name").unwrap_or(2);
+    let sql_idx  = ddl_result.columns.iter().position(|c| c.name == "sql").unwrap_or(3);
+
+    // A trigger/index belongs to `tbl_name`; only emit it when that table is in
+    // the selection, or the restore would reference a table that was never created.
+    let in_filter = |t: &str| filter.map_or(true, |f| f.iter().any(|x| x == t));
 
     let mut all_tables: Vec<String> = Vec::new();
     for row in &ddl_result.rows {
         let obj_type = row.get(type_idx).and_then(|v| v.as_str()).unwrap_or("");
         let name     = row.get(name_idx).and_then(|v| v.as_str()).unwrap_or("");
+        let tbl_name = row.get(tbl_idx).and_then(|v| v.as_str()).unwrap_or("");
         let ddl_sql  = row.get(sql_idx).and_then(|v| v.as_str()).unwrap_or("");
 
-        if obj_type == "table" {
-            all_tables.push(name.to_string());
-            if opts.include_schema && filter.map_or(true, |f| f.iter().any(|t| t == name)) {
-                out.push_str(ddl_sql.trim()); out.push_str(";\n");
+        match obj_type {
+            "table" => {
+                // Skip Cloudflare D1 internal tables (e.g. _cf_KV): D1 rejects
+                // SELECT against them with SQLITE_AUTH.
+                if is_d1_internal_table(name) { continue; }
+                all_tables.push(name.to_string());
+                if opts.include_schema && in_filter(name) {
+                    out.push_str(ddl_sql.trim()); out.push_str(";\n");
+                }
             }
-        } else if obj_type == "view" {
-            if opts.include_views { out.push_str(ddl_sql.trim()); out.push_str(";\n"); }
-        } else if obj_type == "trigger" {
-            if opts.include_triggers { out.push_str(ddl_sql.trim()); out.push_str(";\n"); }
-        } else {
-            out.push_str(ddl_sql.trim()); out.push_str(";\n");
+            "view" => {
+                if opts.include_views { out.push_str(ddl_sql.trim()); out.push_str(";\n"); }
+            }
+            "trigger" => {
+                if opts.include_triggers && in_filter(tbl_name) { out.push_str(ddl_sql.trim()); out.push_str(";\n"); }
+            }
+            _ => {
+                if opts.include_schema && in_filter(tbl_name) { out.push_str(ddl_sql.trim()); out.push_str(";\n"); }
+            }
         }
     }
 
@@ -965,9 +1168,18 @@ async fn export_d1(
     if opts.include_data {
         emit_log(app, "backup-log", "info", format!("Exporting {} table(s)…", tables_to_dump.len()));
         for table in &tables_to_dump {
+            if is_cancelled() { break; }
             emit_log(app, "backup-log", "info", format!("  → {table}"));
-            let data_result = super::d1::query(cfg,
-                &format!("SELECT * FROM \"{}\"", table.replace('"', "\"\"")), vec![]).await?;
+            let data_result = match super::d1::query(cfg,
+                &format!("SELECT * FROM \"{}\"", table.replace('"', "\"\"")), vec![]).await {
+                Ok(r) => r,
+                Err(e) => {
+                    // A single unreadable/prohibited table shouldn't abort the whole backup.
+                    out.push_str(&format!("-- ERROR exporting {table}: {e}\n"));
+                    emit_log(app, "backup-log", "error", format!("  ✗ {table}: {e}"));
+                    continue;
+                }
+            };
             let n = data_result.rows.len();
             if !data_result.rows.is_empty() {
                 let col_names: Vec<String> = data_result.columns.iter()
@@ -999,6 +1211,18 @@ fn json_to_sql_val(v: &serde_json::Value) -> String {
         serde_json::Value::Bool(b) => if *b { "1" } else { "0" }.into(),
         serde_json::Value::Number(n) => n.to_string(),
         serde_json::Value::String(s) => format!("'{}'", s.replace('\'', "''")),
+        // D1's HTTP API returns BLOB columns as JSON arrays of byte integers.
+        // Emit them as SQLite hex blob literals (X'…') so binary data round-trips
+        // instead of being stored as the literal text "[1,2,3]".
+        serde_json::Value::Array(arr) => {
+            let bytes: Option<Vec<u8>> = arr.iter()
+                .map(|b| b.as_u64().filter(|n| *n <= 255).map(|n| n as u8))
+                .collect();
+            match bytes {
+                Some(b) => format!("X'{}'", hex::encode(b)),
+                None => format!("'{}'", v.to_string().replace('\'', "''")),
+            }
+        }
         other => format!("'{}'", other.to_string().replace('\'', "''")),
     }
 }
@@ -1013,6 +1237,7 @@ async fn import_d1(app: &AppHandle, cfg: &super::connection::D1Config, sql: &str
     let mut errors: Vec<String> = Vec::new();
 
     for (i, stmt) in stmts.iter().enumerate() {
+        if is_cancelled() { break; }
         let low = stmt.trim_start().to_lowercase();
         if low.starts_with("pragma foreign_keys") { ok += 1; continue; }
         match super::d1::query(cfg, stmt, vec![]).await {
@@ -1022,7 +1247,7 @@ async fn import_d1(app: &AppHandle, cfg: &super::connection::D1Config, sql: &str
                     emit_log(app, "restore-log", "info", format!("  {}/{} statements…", i + 1, total));
                 }
             }
-            Err(e) => errors.push(format!("{e} — near: {}…", &stmt[..stmt.len().min(60)])),
+            Err(e) => errors.push(format!("{e} — near: {}…", truncate_chars(stmt, 60))),
         }
     }
 
@@ -1033,4 +1258,67 @@ async fn import_d1(app: &AppHandle, cfg: &super::connection::D1Config, sql: &str
         emit_log(app, "restore-log", "warn", &msg);
     }
     Ok(ImportResult { statements_ok: ok, statements_err: total - ok, errors })
+}
+
+// ── Tests ───────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::{split_statements, truncate_chars};
+
+    #[test]
+    fn splits_basic_statements() {
+        let s = split_statements("SELECT 1; SELECT 2;");
+        assert_eq!(s, vec!["SELECT 1".to_string(), "SELECT 2".to_string()]);
+    }
+
+    #[test]
+    fn ignores_semicolons_inside_strings() {
+        let s = split_statements("INSERT INTO t VALUES ('a;b', 'c''d;e');");
+        assert_eq!(s.len(), 1);
+        assert!(s[0].contains("'a;b'"));
+    }
+
+    #[test]
+    fn keeps_dollar_quoted_body_intact() {
+        // A Postgres enum DO-block: internal semicolons must not split it.
+        let sql = "DO $$ BEGIN\n  CREATE TYPE \"s\" AS ENUM ('a','b');\nEXCEPTION WHEN duplicate_object THEN NULL;\nEND $$;\nSELECT 1;";
+        let s = split_statements(sql);
+        assert_eq!(s.len(), 2, "got: {s:?}");
+        assert!(s[0].starts_with("DO $$"));
+        assert!(s[0].contains("EXCEPTION"));
+        assert_eq!(s[1], "SELECT 1");
+    }
+
+    #[test]
+    fn handles_tagged_dollar_quotes() {
+        let sql = "CREATE FUNCTION f() RETURNS int AS $func$ BEGIN RETURN 1; END; $func$ LANGUAGE plpgsql;";
+        let s = split_statements(sql);
+        assert_eq!(s.len(), 1, "got: {s:?}");
+        assert!(s[0].contains("RETURN 1;"));
+    }
+
+    #[test]
+    fn respects_mysql_delimiter() {
+        let sql = "DELIMITER //\nCREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN INSERT INTO log VALUES (1); UPDATE c SET n=n+1; END//\nDELIMITER ;\nSELECT 1;";
+        let s = split_statements(sql);
+        assert_eq!(s.len(), 2, "got: {s:?}");
+        assert!(s[0].starts_with("CREATE TRIGGER"));
+        assert!(s[0].contains("UPDATE c SET n=n+1"));
+        assert_eq!(s[1], "SELECT 1");
+    }
+
+    #[test]
+    fn strips_line_comments() {
+        let s = split_statements("SELECT 1; -- a trailing note\nSELECT 2;");
+        assert_eq!(s, vec!["SELECT 1".to_string(), "SELECT 2".to_string()]);
+    }
+
+    #[test]
+    fn truncate_chars_is_utf8_safe() {
+        // Would panic with byte slicing when the boundary lands mid-character.
+        let s = "😀😀😀😀";
+        assert_eq!(truncate_chars(s, 2), "😀😀");
+        assert_eq!(truncate_chars(s, 10), s);
+    }
 }

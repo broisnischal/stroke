@@ -197,11 +197,12 @@
       <div class="flex flex-col gap-2">
         <button
           type="button"
-          class="group flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-foreground px-5 text-[13px] font-semibold text-background shadow-sm transition-[background-color,transform] duration-150 ease-out hover:bg-foreground/85 active:scale-[0.98]"
+          class="group flex h-10 w-full items-center justify-center gap-2.5 rounded-lg bg-foreground px-5 text-[13px] font-semibold text-background shadow-sm transition-[background-color,transform,box-shadow] duration-150 ease-out hover:bg-foreground/90 hover:shadow-md active:scale-[0.98]"
           onclick={startAuth}
         >
-          Sign in with {meta?.name}
-          <ArrowRight class="size-4 transition-transform duration-150 ease-out group-hover:translate-x-0.5" />
+          <DbIcon id={provider} class="size-4 shrink-0" />
+          <span>Sign in with {meta?.name}</span>
+          <ArrowRight class="size-4 shrink-0 transition-transform duration-150 ease-out group-hover:translate-x-0.5" />
         </button>
         <p class="text-xs text-muted-foreground">Opens your browser to authorize · secure PKCE flow</p>
       </div>
