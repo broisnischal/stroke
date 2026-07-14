@@ -4,8 +4,8 @@
 
 **A fast, minimal desktop database client.**
 
-Connect to PostgreSQL, MySQL, SQLite, Turso/LibSQL, Cloudflare D1, and more —  
-browse schemas, edit data, write SQL, visualize, and let AI tools talk to your database through a built-in MCP server.
+Connect to PostgreSQL, MySQL, SQLite, Turso/LibSQL, Cloudflare D1, ClickHouse, DuckDB, and SQL Server —
+browse schemas, edit data, write SQL, visualize results, and let AI tools talk to your database through a built-in MCP server.
 
 [Download](#install) · [Features](#features) · [Build from source](#build-from-source) · [Website](https://stroke.click)
 
@@ -21,6 +21,7 @@ Built with **Rust + Svelte** — a native backend paired with a reactive UI — 
 - **Handles millions of rows** without slowing down
 - **Keyboard-first** — every feature is reachable without a mouse
 - **Read-only mode** — safely browse production without risking accidental writes
+- **AI-native** — a built-in assistant and an MCP server your other AI tools can connect to
 - **Extensions** — expand functionality with plugins
 - **Themes** — dark and light, out of the box
 
@@ -28,17 +29,31 @@ Built with **Rust + Svelte** — a native backend paired with a reactive UI — 
 
 ## Supported databases
 
+**Core engines**
+
 | Database | Notes |
 |----------|-------|
 | **PostgreSQL** | Full schema, enums, sequences, triggers, indexes |
 | **MySQL / MariaDB** | Standard host/port connections |
 | **SQLite** | Local file or `:memory:` |
 | **Turso / LibSQL** | Serverless SQLite at the edge |
-| **Cloudflare D1** | OAuth or API token |
-| **CockroachDB** | PostgreSQL-compatible |
+| **Cloudflare D1** | OAuth sign-in or API token |
+| **ClickHouse** | Columnar OLAP over HTTP(S) |
+| **DuckDB** | Embedded analytical database (local file) |
+| **Microsoft SQL Server** | Host/port connections |
+
+**One-click providers**
+
+Sign in and pick a database — no connection string to assemble:
+
+| Provider | Based on |
+|----------|----------|
 | **Neon** | Serverless Postgres |
-| **Supabase** | Postgres-based backend |
+| **Supabase** | Postgres |
+| **Prisma Postgres** | Serverless Postgres |
 | **PlanetScale** | MySQL-compatible serverless |
+
+**CockroachDB** and other PostgreSQL-compatible databases connect through the PostgreSQL option.
 
 Connect directly or through an **SSH tunnel** for databases behind a bastion host or private network.
 
@@ -49,18 +64,18 @@ Connect directly or through an **SSH tunnel** for databases behind a bastion hos
 ### Data grid
 
 - Paginated browsing with configurable page size
+- Rows paint immediately; the total count (`… of N`) fills in the background
 - Resizable columns, saved per table
 - Pin columns to keep them in view while scrolling
-- Show/hide columns
-- Reset column width to default
+- Show/hide columns and reset column width to default
 - Column statistics — min, max, avg, nulls, distinct count
-- Multi-column sort
-- Full-text search and visual filter builder
+- Multi-column sort — shift-click headers to add secondary keys
+- Full-text search and a visual filter builder, with relative date-range presets and enum value pickers
 - Click any foreign-key value to jump to the referenced row
 
 **Cell right-click menu**
 
-Open, Edit, Copy, Filter by value, Exclude this value, Set NULL, Expand, Select row, Delete row  
+Open · Edit · Copy · Filter by value · Exclude this value · Set NULL · Expand · Select row · Delete row
 Copy row as → JSON · CSV · Plain text · Markdown table · INSERT statement
 
 **Column header right-click menu**
@@ -69,29 +84,39 @@ Sort ascending · Sort descending · Filter by this column · Pin column · Hide
 
 ### Inline editing
 
-Edit text, numbers, booleans, enums, dates, UUIDs, and JSON in place.  
-Insert rows with smart defaults. Delete rows. Set any cell to NULL in one action.
+Edit text, numbers, booleans, enums, dates, UUIDs, arrays, and JSON in place.
+Insert rows with smart defaults, delete rows, and set any cell to NULL in one action.
 
 ### Row inspector
 
-View any row in formatted, raw JSON, or preview mode.
+View any row in formatted, raw JSON, or preview mode — with a rich viewer for nested JSON, arrays, and media/URL values.
 
 ### Schema explorer
 
 - Tables, views, materialized views, and foreign tables
 - Live row counts in the sidebar
-- Index browser
-- View DDL for any object
+- Index browser and DDL viewer for any object
+- Create tables, schemas, sequences, triggers, enums, and foreign keys through guided dialogs
+- Manage PostgreSQL enum types
 
-**Table right-click menu**
+### Relation tree
 
-Copy name · Close tab · Pin table · Deselect · View DDL · Export as SQL · Export data · Generate test data · Truncate table · Drop table
+Walk foreign-key relationships as an expandable tree, drilling from a row into everything it references — row counts stream in without blocking navigation.
+
+### Global search
+
+Search across tables and objects to find what you need without hunting through the sidebar.
+
+### Live mode
+
+Watch a table for real-time changes — inserts, updates, and deletes stream into the grid as they happen on the database.
 
 ### SQL console
 
 - Syntax highlighting and schema-aware autocomplete
-- Query formatting and execution time
-- CSV and JSON export
+- Query formatting and execution timing
+- **EXPLAIN plans** — visualize the query planner's execution plan
+- CSV, JSON, and SQL export of results
 - Automatic query history — everything is saved
 - Saved queries — bookmark the ones you keep
 - SQL Notebooks (`.sqlnb`) — multi-cell notebooks for documenting and replaying query sequences
@@ -113,20 +138,21 @@ Open the quick-access screen to jump anywhere in one keystroke:
 | **Diagrams** | Auto-generated ERDs |
 | **Timeline** | Schema drift detection across snapshots |
 | **Data Diff** | Row-level diff between snapshots or queries |
+| **Search** | Global search across the database |
 | **Extensions** | Install and manage plugins |
 | **Connect** | Manage and switch connections |
 
 ### Charts & dashboards
 
-Turn any query result into a chart and pin it to a dashboard.
+Turn any query result into a chart — bar, line, area, pie, and geographic **choropleth** maps (powered by ECharts) — and pin it to a dashboard.
 
 ### Schema diagrams
 
-Auto-generated entity-relationship diagrams (ERDs) built from your live schema.
+Auto-generated entity-relationship diagrams (ERDs) built from your live schema, with an interactive canvas.
 
 ### Schema timeline
 
-Track schema changes over time. See exactly what columns, indexes, or constraints were added or removed between snapshots.
+Track schema changes over time. See exactly which columns, indexes, or constraints were added or removed between snapshots.
 
 ### Data diff
 
@@ -140,17 +166,15 @@ Write ORM-style queries, preview the generated SQL, and run them against the con
 
 Inspect roles, grants, and privileges — see who can read or write what, at a glance.
 
-### Status bar
+### Backup & restore
 
-Active connection, database name, row counts, query execution time, and connection health — always visible at the bottom.
+Export a full **SQL dump** — schema DDL, data, views, triggers, functions, sequences, and enums — with granular include toggles and per-table selection. A live log streams progress, and any export can be stopped mid-run. Restore by executing a `.sql` file, with per-statement results and clear error reporting.
+
+Available for **PostgreSQL, MySQL, SQLite, and Cloudflare D1**.
 
 ### Docker launch
 
-Spin up a local Postgres or MySQL container in one click without leaving the app.
-
-### Backup & restore
-
-Export and import data as SQL dumps or CSV.
+Spin up a local PostgreSQL or MySQL container in one click without leaving the app.
 
 ### Extensions
 
@@ -162,7 +186,7 @@ Lock any connection so writes are blocked entirely — safe for browsing product
 
 ### AI chat
 
-An AI assistant with direct database access that runs queries, explains schemas, generates SQL, and renders diagrams and charts inline.  
+An AI assistant with direct database access that runs queries, explains schemas, generates SQL, and renders diagrams and charts inline.
 Works with any OpenAI-compatible API — configure a base URL, model, and API key in **Settings**.
 
 ### MCP server
@@ -178,6 +202,14 @@ Uses a stable bearer token — configure once and it just works.
 ### Command palette
 
 `Cmd/Ctrl+K` — type anything (table name, feature, shortcut) to jump there instantly.
+
+### Status bar
+
+Active connection, database name, row counts, query execution time, and connection health — always visible at the bottom.
+
+### Security & storage
+
+AI keys and provider OAuth tokens are stored in the **OS keychain** (macOS Keychain, Windows Credential Manager, or the Linux Secret Service), and migrated automatically from any older plaintext store.
 
 ---
 
@@ -238,9 +270,12 @@ chmod +x stroke_*_amd64.AppImage
 Pick a database type and fill in your credentials. Hit **Test connection**, then **Connect**.
 
 - **PostgreSQL / MySQL** — host, port, database, user, password, optional SSL. Paste a full connection string and click **Parse** to fill the form automatically.
-- **SQLite** — point to a `.db`/`.sqlite` file, or use `:memory:`.
+- **SQLite / DuckDB** — point to a database file (`.db`, `.sqlite`, `.duckdb`), or use `:memory:` for SQLite.
 - **Turso / LibSQL** — database URL and optional auth token.
 - **Cloudflare D1** — sign in with Cloudflare, or enter Account ID, Database ID, and an API token.
+- **ClickHouse** — host, port, database, user, password, optional TLS.
+- **SQL Server** — host, port, database, user, password.
+- **Neon / Supabase / Prisma / PlanetScale** — sign in with the provider and pick a database.
 - **SSH tunnel** — any connection type can go through an SSH tunnel for databases in private networks.
 
 Connections are saved locally. Stroke reopens your last connection on launch.
