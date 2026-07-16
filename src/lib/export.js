@@ -5,7 +5,7 @@
  * @param {unknown[][]} rows
  * @returns {string}
  */
-const csvEscape = (/** @type {unknown} */ v) => {
+export const csvEscape = (/** @type {unknown} */ v) => {
   if (v === null || v === undefined) return ''
   const s = typeof v === 'object' ? JSON.stringify(v) : String(v)
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
@@ -45,7 +45,7 @@ export async function rowsToCsvAsync(columns, rows, opts = {}) {
 }
 
 /** Flatten a value to a single line for tab/pipe-delimited formats. */
-const singleLine = (/** @type {unknown} */ v) => {
+export const singleLine = (/** @type {unknown} */ v) => {
   if (v === null || v === undefined) return ''
   const s = typeof v === 'object' ? JSON.stringify(v) : String(v)
   return s.replace(/[\t\r\n]+/g, ' ')
@@ -64,18 +64,46 @@ export function rowsToTsv(columns, rows) {
   return header + '\n' + body
 }
 
-const mdEscape = (/** @type {unknown} */ v) => singleLine(v).replace(/\|/g, '\\|')
+export const mdEscape = (/** @type {unknown} */ v) => singleLine(v).replace(/\|/g, '\\|')
+
+/** Padding cap so one huge cell doesn't blow up every row with spaces. */
+const MD_PAD_MAX = 48
 
 /**
- * Convert columns + rows to a GitHub-flavored Markdown table.
+ * Column widths for a padded (column-aligned) Markdown table, capped at
+ * MD_PAD_MAX. Shared by rowsToMarkdown and the text view's lazy renderer so
+ * what's displayed and what's copied are byte-identical.
  * @param {Array<{ name: string }>} columns
  * @param {unknown[][]} rows
+ * @returns {number[]}
+ */
+export function markdownColumnWidths(columns, rows) {
+  const widths = columns.map((c) => Math.max(3, mdEscape(c.name).length))
+  for (const row of rows) {
+    for (let i = 0; i < widths.length; i++) {
+      if (widths[i] >= MD_PAD_MAX) continue
+      const len = mdEscape(row[i]).length
+      if (len > widths[i]) widths[i] = Math.min(len, MD_PAD_MAX)
+    }
+  }
+  return widths
+}
+
+/** @param {string} s @param {number} w */
+export const mdPad = (s, w) => (s.length >= w ? s : s + ' '.repeat(w - s.length))
+
+/**
+ * Convert columns + rows to a column-aligned GitHub-flavored Markdown table.
+ * Cells longer than the padding cap simply overflow — still valid Markdown.
+ * @param {Array<{ name: string }>} columns
+ * @param {unknown[][]} rows
+ * @param {number[]} [widths] precomputed via markdownColumnWidths
  * @returns {string}
  */
-export function rowsToMarkdown(columns, rows) {
-  const header = `| ${columns.map((c) => mdEscape(c.name)).join(' | ')} |`
-  const sep = `| ${columns.map(() => '---').join(' | ')} |`
-  const body = rows.map((row) => `| ${row.map(mdEscape).join(' | ')} |`).join('\n')
+export function rowsToMarkdown(columns, rows, widths = markdownColumnWidths(columns, rows)) {
+  const header = `| ${columns.map((c, i) => mdPad(mdEscape(c.name), widths[i])).join(' | ')} |`
+  const sep = `| ${widths.map((w) => '-'.repeat(w)).join(' | ')} |`
+  const body = rows.map((row) => `| ${row.map((v, i) => mdPad(mdEscape(v), widths[i])).join(' | ')} |`).join('\n')
   return body ? `${header}\n${sep}\n${body}` : `${header}\n${sep}`
 }
 
