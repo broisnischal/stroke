@@ -525,24 +525,23 @@
         </Tooltip.Content>
       </Tooltip.Root>
     {:else}
-      <!-- Split button: one wrapper owns the radius + shadow so the halves can
-           never show a seam or their own corner rounding. -->
-      <div class="flex shrink-0 items-stretch overflow-hidden rounded-md shadow-sm">
+      <!-- Split button: one wrapper owns the radius + shadow; the halves are
+           plain buttons (the Button component's transparent border,
+           bg-clip-padding and elevate shadow would each paint a seam). -->
+      <div class="flex shrink-0 items-stretch overflow-hidden rounded-md elevate-1">
         <Tooltip.Root>
           <Tooltip.Trigger>
             {#snippet child({ props })}
-              <Button
+              <button
                 {...props}
                 type="button"
-                variant="default"
-                size="sm"
-                class="h-7 shrink-0 gap-2 rounded-none pl-2.5 pr-2 font-medium shadow-none"
+                class="inline-flex h-7 shrink-0 select-none items-center gap-2 bg-primary pl-2.5 pr-2 text-[0.8rem] font-medium text-primary-foreground transition-[background-color,opacity] hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
                 disabled={!sql.trim()}
                 onclick={() => handleRun(undefined)}
               >
-                <Play class="size-3.5 shrink-0" data-icon="inline-start" />
+                <Play class="size-3.5 shrink-0" />
                 Run
-              </Button>
+              </button>
             {/snippet}
           </Tooltip.Trigger>
           <Tooltip.Content>
