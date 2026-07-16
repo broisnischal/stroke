@@ -22,6 +22,7 @@
   } from "$lib/table-query.js";
   import { untrack } from "svelte";
   import { formatCompactCount } from "$lib/table-list.js";
+  import { describeTableView } from "$lib/stores/table-views.js";
 
   /** @typedef {import('$lib/table-query.js').TableSort} TableSort */
   /** @typedef {import('$lib/table-query.js').TableFilter} TableFilter */
@@ -93,7 +94,28 @@
     virtualColCount = 0,
     /** Called when user clicks the virtual columns button. */
     onopenvirtualcols = () => {},
+    // ── Saved views (workflow extension) ────────────────────────────────────
+    /** @type {import('$lib/stores/table-views.js').SavedTableView[]} */
+    savedViews = [],
+    viewsEnabled = false,
+    onapplyview = /** @type {(view: import('$lib/stores/table-views.js').SavedTableView) => void} */ (() => {}),
+    onsaveview = /** @type {(name: string) => void} */ (() => {}),
+    ondeleteview = /** @type {(id: string) => void} */ (() => {}),
+    // ── Find & replace (workflow extension) ─────────────────────────────────
+    findReplaceEnabled = false,
+    onfindreplace = () => {},
   } = $props();
+
+  let viewsMenuOpen = $state(false);
+  let viewNameDraft = $state("");
+
+  function commitSaveView() {
+    const name = viewNameDraft.trim();
+    if (!name) return;
+    onsaveview(name);
+    viewNameDraft = "";
+    viewsMenuOpen = false;
+  }
 
   /** @type {HTMLInputElement | null} */
   let structureSearchEl = $state(null);
@@ -524,8 +546,80 @@
     </div>
 
     {#if tableViewMode !== "structure"}
-      <!-- Action button group: filter / sort / columns / jump / virtual -->
+      <!-- Action button group: views / filter / sort / columns / jump / virtual -->
       <div class="flex items-center gap-0.5">
+
+      <!-- Saved views -->
+      {#if viewsEnabled}
+        <DropdownMenu.Root bind:open={viewsMenuOpen}>
+          <DropdownMenu.Trigger
+            class={cn(
+              iconBtn,
+              "shrink-0",
+              savedViews.length > 0 ? "gap-1 !w-auto px-2" : "",
+              (savedViews.length > 0 || viewsMenuOpen) && "bg-accent text-foreground",
+            )}
+            title="Saved views"
+            disabled={loading || columns.length === 0}
+          >
+            <Icon name="bookmark" class="size-3.5" />
+            {#if savedViews.length > 0}
+              <span class="tabular-nums text-[11px] font-medium text-primary" aria-hidden="true">{savedViews.length}</span>
+            {/if}
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Content align="start" class="w-64 p-0 text-ui-sm">
+            <div class="border-b border-border/50 px-3 py-1.5">
+              <span class="text-ui-2xs font-medium uppercase tracking-[0.08em] text-muted-foreground/55">Saved views</span>
+            </div>
+            {#if savedViews.length === 0}
+              <p class="px-3 py-3 text-center text-ui-xs leading-relaxed text-muted-foreground/50">
+                Set up filters, sort or hidden columns, then save the combination as a view.
+              </p>
+            {:else}
+              <div class="app-scroll max-h-64 overflow-y-auto p-1">
+                {#each savedViews as v (v.id)}
+                  <div class="group/view flex items-center rounded-md transition-colors hover:bg-accent">
+                    <button
+                      type="button"
+                      class="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left"
+                      onclick={() => { onapplyview(v); viewsMenuOpen = false; }}
+                    >
+                      <Icon name="bookmark" class="size-3.5 shrink-0 text-muted-foreground/50" />
+                      <span class="min-w-0 flex-1 truncate text-ui-xs text-foreground/85">{v.name}</span>
+                      <span class="shrink-0 text-ui-3xs text-muted-foreground/45">{describeTableView(v)}</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="invisible mr-1 inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-destructive/15 hover:text-destructive group-hover/view:visible"
+                      title="Delete view"
+                      onclick={() => ondeleteview(v.id)}
+                    >
+                      <Icon name="trash-2" class="size-3" />
+                    </button>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+            <div class="flex items-center gap-1.5 border-t border-border/50 p-1.5">
+              <Input
+                class="h-7 min-w-0 flex-1 text-ui-xs"
+                type="text"
+                placeholder="Save current as…"
+                bind:value={viewNameDraft}
+                onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitSaveView(); } }}
+              />
+              <button
+                type="button"
+                class="inline-flex h-7 shrink-0 items-center rounded-md bg-primary px-2.5 text-ui-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-40"
+                disabled={!viewNameDraft.trim()}
+                onclick={commitSaveView}
+              >
+                Save
+              </button>
+            </div>
+          </DropdownMenu.Content>
+        </DropdownMenu.Root>
+      {/if}
 
       <!-- Filter -->
       <button
@@ -974,6 +1068,13 @@
             {/each}
           </DropdownMenu.RadioGroup>
           <DropdownMenu.Separator />
+          {#if findReplaceEnabled}
+            <DropdownMenu.Item disabled={total === 0 || readonly || !hasPrimaryKey} onSelect={onfindreplace}>
+              <Icon name="replace" class="size-3.5" />
+              Find & replace…
+            </DropdownMenu.Item>
+            <DropdownMenu.Separator />
+          {/if}
           <DropdownMenu.Item onSelect={oninfinitescrolltoggle}>
             <Icon name="infinity" class="size-3.5" />
             Infinite scroll
