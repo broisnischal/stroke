@@ -50,6 +50,8 @@
   import DockerLaunchModal from './DockerLaunchModal.svelte'
   import CreateTableDialog from './CreateTableDialog.svelte'
   import CreateSchemaDialog from './CreateSchemaDialog.svelte'
+  import GenerateSqlDialog from './GenerateSqlDialog.svelte'
+  import { genSelectStar } from '$lib/sql-generate.js'
   import Onboarding from './Onboarding.svelte'
   import SettingsDialog from './SettingsDialog.svelte'
   import KeyboardShortcutsDialog from './KeyboardShortcutsDialog.svelte'
@@ -505,6 +507,45 @@
   let sqlConsoleRef = $state(null)
 
   /** "Open in SQL editor" — generate a SELECT reflecting the current table view and open it in the SQL editor. */
+  // ── Sidebar table actions: console / generate SQL / count / copy columns ──
+  /** @type {string | null} */
+  let generateSqlTable = $state(null)
+  let generateSqlOpen = $state(false)
+
+  /** @param {string} tableName */
+  function handleOpenTableInConsole(tableName) {
+    const sql = genSelectStar({ dialect: dbType, schema: activeSchema, table: tableName, columns: [], primaryKey: [] })
+    if (aiMode) exitAiMode()
+    void openQueryInEditor(sql)
+  }
+
+  /** @param {string} tableName */
+  function handleGenerateSql(tableName) {
+    generateSqlTable = tableName
+    generateSqlOpen = true
+  }
+
+  /** @param {string} tableName */
+  async function handleCountRows(tableName) {
+    try {
+      const n = await countTableRows(activeSchema, tableName)
+      toast.success(tableName, { description: `${n.toLocaleString('en-US')} row${n === 1 ? '' : 's'}` })
+    } catch (e) {
+      toast.error('Count failed', { description: String(e) })
+    }
+  }
+
+  /** @param {string} tableName */
+  async function handleCopyColumns(tableName) {
+    try {
+      const cols = await getTableColumnStructure(activeSchema, tableName)
+      await navigator.clipboard.writeText(cols.map((c) => c.name).join(', '))
+      toast.success(`Copied ${cols.length} column name${cols.length === 1 ? '' : 's'}`)
+    } catch (e) {
+      toast.error('Copy columns failed', { description: String(e) })
+    }
+  }
+
   function openTableInSqlEditor() {
     if (!activeTable) return
     const sql = buildSelectSql({
@@ -4016,6 +4057,13 @@ let rowSearch = $state('')
     await handleSchemaChange(schemaName)
   }}
 />
+<GenerateSqlDialog
+  bind:open={generateSqlOpen}
+  schema={activeSchema}
+  table={generateSqlTable}
+  dialect={dbType}
+  onopeninsql={(sql) => { if (aiMode) exitAiMode(); void openQueryInEditor(sql) }}
+/>
 <DockerLaunchModal
   bind:open={showDockerModal}
   initialDbType={dockerInitialDb}
@@ -4231,6 +4279,10 @@ let rowSearch = $state('')
         onviewstructure={(t) => void openTableStructure(t)}
         onexportsql={(t) => void handleExportSql(t)}
         onexportdata={(t) => void handleExportData(t)}
+        onopeninconsole={handleOpenTableInConsole}
+        ongeneratesql={handleGenerateSql}
+        oncountrows={(t) => void handleCountRows(t)}
+        oncopycolumns={(t) => void handleCopyColumns(t)}
         openTables={tabs.filter((t) => t.kind === 'table' && t.state && /** @type {any} */ (t.state).schema === activeSchema).map((t) => /** @type {any} */ (t.state).table)}
         onclosetable={(name) => {
           const tab = findTableTab(tabs, activeSchema, name)
