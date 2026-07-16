@@ -48,6 +48,8 @@
     readonly = false,
   } = $props()
 
+  // svelte-ignore state_referenced_locally — the initial index deliberately
+  // captures the mount-time rows; later row changes are handled by the effect below.
   let idx = $state(Math.min(Math.max(initialIndex ?? 0, 0), Math.max(rows.length - 1, 0)))
   let fieldSearch = $state('')
   // When navigating to the previous page, land on its last record once rows arrive.
