@@ -98,7 +98,11 @@
     /** @type {import('$lib/stores/table-views.js').SavedTableView[]} */
     savedViews = [],
     viewsEnabled = false,
+    /** @type {string | null} id of the currently applied view */
+    activeViewId = null,
     onapplyview = /** @type {(view: import('$lib/stores/table-views.js').SavedTableView) => void} */ (() => {}),
+    /** Clear the applied view — back to the unfiltered default. */
+    onresetview = () => {},
     onsaveview = /** @type {(name: string) => void} */ (() => {}),
     ondeleteview = /** @type {(id: string) => void} */ (() => {}),
     // ── Find & replace (workflow extension) ─────────────────────────────────
@@ -558,8 +562,9 @@
               "shrink-0",
               savedViews.length > 0 ? "gap-1 !w-auto px-2" : "",
               (savedViews.length > 0 || viewsMenuOpen) && "bg-accent text-foreground",
+              activeViewId && "text-primary",
             )}
-            title="Saved views"
+            title={activeViewId ? "Saved views — one applied" : "Saved views"}
             disabled={loading || columns.length === 0}
           >
             <Icon name="bookmark" class="size-3.5" />
@@ -568,8 +573,16 @@
             {/if}
           </DropdownMenu.Trigger>
           <DropdownMenu.Content align="start" class="w-64 p-0 text-ui-sm">
-            <div class="border-b border-border/50 px-3 py-1.5">
+            <div class="flex items-center border-b border-border/50 px-3 py-1.5">
               <span class="text-ui-2xs font-medium uppercase tracking-[0.08em] text-muted-foreground/55">Saved views</span>
+              <button
+                type="button"
+                class="ml-auto rounded px-1.5 py-0.5 text-ui-2xs text-muted-foreground/60 transition-[background-color,color] hover:bg-accent hover:text-foreground"
+                title="Back to the unfiltered default"
+                onclick={() => { onresetview(); viewsMenuOpen = false; }}
+              >
+                Reset
+              </button>
             </div>
             {#if savedViews.length === 0}
               <p class="px-3 py-3 text-center text-ui-xs leading-relaxed text-muted-foreground/50">
@@ -578,19 +591,33 @@
             {:else}
               <div class="app-scroll max-h-64 overflow-y-auto p-1">
                 {#each savedViews as v (v.id)}
-                  <div class="group/view flex items-center rounded-md transition-colors hover:bg-accent">
+                  {@const active = v.id === activeViewId}
+                  <div
+                    class={cn(
+                      'group/view flex items-center rounded-md transition-colors',
+                      active ? 'bg-accent/70' : 'hover:bg-accent/50',
+                    )}
+                  >
                     <button
                       type="button"
                       class="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left"
-                      onclick={() => { onapplyview(v); viewsMenuOpen = false; }}
+                      title={active ? 'Applied — click to reset to default' : 'Apply view'}
+                      onclick={() => { active ? onresetview() : onapplyview(v); viewsMenuOpen = false; }}
                     >
-                      <Icon name="bookmark" class="size-3.5 shrink-0 text-muted-foreground/50" />
-                      <span class="min-w-0 flex-1 truncate text-ui-xs text-foreground/85">{v.name}</span>
-                      <span class="shrink-0 text-ui-3xs text-muted-foreground/45">{describeTableView(v)}</span>
+                      <Icon name="bookmark" class={cn('size-3.5 shrink-0', active ? 'text-primary' : 'text-muted-foreground/50')} />
+                      <span class="flex min-w-0 flex-1 flex-col">
+                        <span class={cn('truncate text-ui-xs', active ? 'font-medium text-foreground' : 'text-foreground/85')}>{v.name}</span>
+                        {#if describeTableView(v)}
+                          <span class="truncate text-[10px] leading-tight text-muted-foreground/45">{describeTableView(v)}</span>
+                        {/if}
+                      </span>
+                      {#if active}
+                        <Icon name="check" class="size-3.5 shrink-0 text-primary" />
+                      {/if}
                     </button>
                     <button
                       type="button"
-                      class="invisible mr-1 inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-destructive/15 hover:text-destructive group-hover/view:visible"
+                      class="mr-1 inline-flex size-5 shrink-0 items-center justify-center rounded text-transparent transition-colors hover:!text-destructive group-hover/view:text-muted-foreground/50"
                       title="Delete view"
                       onclick={() => ondeleteview(v.id)}
                     >
@@ -601,11 +628,11 @@
               </div>
             {/if}
             <div class="flex items-center gap-1.5 border-t border-border/50 p-1.5">
-              <Input
-                class="h-7 min-w-0 flex-1 text-ui-xs"
+              <input
                 type="text"
                 placeholder="Save current as…"
                 bind:value={viewNameDraft}
+                class="h-7 w-full min-w-0 flex-1 rounded-md border border-transparent bg-input/30 px-2 text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/35 hover:border-border/60 focus:border-input focus:outline-none focus:ring-1 focus:ring-ring"
                 onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitSaveView(); } }}
               />
               <button

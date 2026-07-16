@@ -517,6 +517,8 @@
 
   /** @type {import('$lib/stores/table-views.js').SavedTableView[]} */
   let savedTableViews = $state([])
+  /** @type {string | null} */
+  let activeTableViewId = $state(null)
   let findReplaceOpen = $state(false)
 
   $effect(() => {
@@ -524,6 +526,7 @@
     void activeSchema
     const t = activeTable
     savedTableViews = t ? loadTableViews(persistConnectionId, activeSchema, t) : []
+    activeTableViewId = null
   })
 
   /** @param {string} name */
@@ -553,6 +556,21 @@
     hiddenColumns = new Set(view.hiddenColumns ?? [])
     if (activeTable) saveHiddenCols(persistConnectionId, activeSchema, activeTable, hiddenColumns)
     dataViewMode = view.dataViewMode ?? 'table'
+    activeTableViewId = view.id
+    page = 1
+    void loadRows()
+  }
+
+  /** Toggle back to the unfiltered default (clears the applied view). */
+  function resetTableView() {
+    rowSearch = ''
+    rowFilters = []
+    rowSort = null
+    rowSortMore = []
+    hiddenColumns = new Set()
+    if (activeTable) saveHiddenCols(persistConnectionId, activeSchema, activeTable, hiddenColumns)
+    dataViewMode = 'table'
+    activeTableViewId = null
     page = 1
     void loadRows()
   }
@@ -560,6 +578,7 @@
   /** @param {string} id */
   function deleteSavedView(id) {
     savedTableViews = savedTableViews.filter((v) => v.id !== id)
+    if (activeTableViewId === id) activeTableViewId = null
     if (activeTable) saveTableViews(persistConnectionId, activeSchema, activeTable, savedTableViews)
   }
 
@@ -5005,7 +5024,9 @@ let rowSearch = $state('')
             live={liveEnabled}
             savedViews={savedTableViews}
             viewsEnabled={savedViewsEnabled}
+            activeViewId={activeTableViewId}
             onapplyview={applySavedView}
+            onresetview={resetTableView}
             onsaveview={saveCurrentTableView}
             ondeleteview={deleteSavedView}
             {findReplaceEnabled}
