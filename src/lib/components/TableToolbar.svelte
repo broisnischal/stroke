@@ -260,12 +260,12 @@
   const iconBtn =
     "inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30";
 
-  /** @type {Array<{ id: 'table' | 'json' | 'record' | 'text', icon: string, label: string }>} */
+  /** @type {Array<{ id: 'table' | 'json' | 'record' | 'text', icon: string, label: string, title?: string }>} */
   const DATA_VIEW_MODES = [
     { id: "table", icon: "table-2", label: "Table view" },
     { id: "json", icon: "braces", label: "JSON view" },
     { id: "record", icon: "layout-list", label: "Record view" },
-    { id: "text", icon: "file-text", label: "Text view (CSV / Markdown)" },
+    { id: "text", icon: "file-text", label: "Text view", title: "Text view — CSV / TSV / Markdown / JSON Lines" },
   ];
 
   // ── Searchable-menu item lists ──────────────────────────────────────────
@@ -836,7 +836,7 @@
               "inline-flex h-6 w-7 items-center justify-center rounded-[5px] text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-30",
               dataViewMode === m.id && "bg-background text-foreground shadow-sm",
             )}
-            title={m.label}
+            title={m.title ?? m.label}
             aria-pressed={dataViewMode === m.id}
             disabled={columns.length === 0}
             onclick={() => (dataViewMode = m.id)}
@@ -1072,7 +1072,7 @@
       >
         <Icon name="more-horizontal" class="size-3.5" />
       </DropdownMenu.Trigger>
-      <DropdownMenu.Content align="end" class="w-52 text-ui-sm">
+      <DropdownMenu.Content align="end" class="w-56 text-ui-sm [&_[data-slot=dropdown-menu-item]]:whitespace-nowrap [&_[data-slot=dropdown-menu-radio-item]]:whitespace-nowrap">
         {#if structureAllowed}
           <DropdownMenu.Item onSelect={ontogglestructure}>
             <Icon name="layout-list" class="size-3.5" />
