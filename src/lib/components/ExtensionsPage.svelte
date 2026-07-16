@@ -150,7 +150,9 @@
     {onclick}
     class={cn(
       "relative inline-flex h-[18px] w-8 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
-      on ? "bg-primary" : "bg-muted-foreground/25",
+      // Emerald = the app's "extension enabled" signal (matches the card icon
+      // tint); bg-primary is near-white on Studio themes and swallowed the knob.
+      on ? "bg-emerald-600 dark:bg-emerald-500" : "bg-muted-foreground/25 hover:bg-muted-foreground/35",
     )}
   >
     <span class={cn("pointer-events-none block size-3.5 rounded-full bg-white shadow-sm transition-transform duration-150", on ? "translate-x-[15px]" : "translate-x-0.5")}></span>
