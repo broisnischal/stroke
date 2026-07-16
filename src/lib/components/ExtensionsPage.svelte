@@ -149,13 +149,28 @@
     aria-checked={on}
     {onclick}
     class={cn(
-      "relative inline-flex h-[18px] w-8 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+      // before: expands the hit area beyond the 18px visual without moving neighbors
+      "group/toggle relative inline-flex h-[18px] w-8 shrink-0 cursor-pointer items-center rounded-full before:absolute before:-inset-1 before:content-[''] focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+      "transition-[background-color] duration-150",
+      // Inset rim defines the pill edge on dark surfaces; inner shadow gives the
+      // trough depth so the knob reads as sitting *in* the track, not on it.
+      "shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07),inset_0_1px_2px_rgba(0,0,0,0.2)]",
       // Emerald = the app's "extension enabled" signal (matches the card icon
       // tint); bg-primary is near-white on Studio themes and swallowed the knob.
       on ? "bg-emerald-600 dark:bg-emerald-500" : "bg-muted-foreground/25 hover:bg-muted-foreground/35",
     )}
   >
-    <span class={cn("pointer-events-none block size-3.5 rounded-full bg-white shadow-sm transition-transform duration-150", on ? "translate-x-[15px]" : "translate-x-0.5")}></span>
+    <span
+      class={cn(
+        // iOS-style press feedback: the knob stretches along the travel axis
+        // while staying anchored to its end of the track.
+        "pointer-events-none block h-3.5 w-3.5 rounded-full bg-white",
+        "shadow-[0_1px_2px_rgba(0,0,0,0.28),0_0_1px_rgba(0,0,0,0.16)]",
+        "transition-[translate,width] duration-[180ms] ease-[cubic-bezier(0.23,1,0.32,1)]",
+        "group-active/toggle:w-4",
+        on ? "translate-x-4 group-active/toggle:translate-x-3.5" : "translate-x-0.5",
+      )}
+    ></span>
   </button>
 {/snippet}
 
