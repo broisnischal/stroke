@@ -20,6 +20,9 @@
     jsonInteractive = false,
     /** Compact embed (AI chat SQL blocks) — no full-height panel chrome */
     embedded = false,
+    /** Disable soft wrapping — long lines scroll horizontally instead of
+     *  breaking mid-token (dialog code surfaces like DDL / generated SQL). */
+    nowrap = false,
     class: className = '',
   } = $props()
 
@@ -162,7 +165,9 @@
           ? '[&_pre]:p-3 [&_pre]:text-ui-xs [&_pre]:whitespace-pre'
           : isJsonInteractive
             ? '[&_pre]:p-3 [&_pre]:text-ui-xs [&_pre]:whitespace-pre-wrap [&_pre]:break-all'
-            : '[&_pre]:p-3 [&_pre]:text-ui-sm [&_pre]:whitespace-pre-wrap [&_pre]:break-all',
+            : nowrap
+              ? '[&_pre]:p-4 [&_pre]:text-ui-sm [&_pre]:whitespace-pre'
+              : '[&_pre]:p-3 [&_pre]:text-ui-sm [&_pre]:whitespace-pre-wrap [&_pre]:break-all',
       )}
     >
       {@html html}

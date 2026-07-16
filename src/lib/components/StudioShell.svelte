@@ -4085,7 +4085,12 @@ let rowSearch = $state('')
 
 <KeyboardShortcutsDialog bind:open={showShortcutsModal} />
 
-<DdlDialog bind:open={ddlDialogOpen} tableName={ddlDialogTable} ddl={ddlDialogSql} />
+<DdlDialog
+  bind:open={ddlDialogOpen}
+  tableName={ddlDialogTable}
+  ddl={ddlDialogSql}
+  onopeninsql={(sql) => { if (aiMode) exitAiMode(); void openQueryInEditor(sql) }}
+/>
 
 <InsiderDialog bind:open={showInsiderModal} />
 
