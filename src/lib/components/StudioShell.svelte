@@ -2076,12 +2076,14 @@ let rowSearch = $state('')
   async function closeOtherTabs(id) {
     const keep = tabs.find((t) => t.id === id)
     if (!keep) return
+    for (const t of tabs) if (t.id !== id && !t.pinned) rememberClosedTab(t)
     tabs = tabs.filter((t) => t.id === id || t.pinned)
     await activateTab(keep.id)
   }
 
   async function closeAllTabs() {
     const pinned = tabs.filter((t) => t.pinned)
+    for (const t of tabs) if (!t.pinned) rememberClosedTab(t)
     if (pinned.length === 0) {
       tabs = [createWelcomeTab()]
       activeTabId = tabs[0].id
@@ -2090,6 +2092,57 @@ let rowSearch = $state('')
     }
     tabs = pinned
     if (!pinned.some((t) => t.id === activeTabId)) await activateTab(pinned[0].id)
+  }
+
+  /**
+   * Close a batch of tabs at once ("Close Tabs to Left/Right"). Pinned tabs are
+   * skipped; a single confirm covers all unsaved changes in the batch.
+   * @param {string[]} ids @param {string} anchorId — the tab whose menu was used
+   */
+  async function closeManyTabs(ids, anchorId) {
+    saveActiveTabState()
+    const idSet = new Set(ids)
+    const toClose = tabs.filter((t) => idSet.has(t.id) && !t.pinned)
+    if (toClose.length === 0) return
+    const pending = toClose.reduce((n, t) => n + tabPendingCount(t), 0)
+    if (pending > 0) {
+      const ok = await askConfirm(
+        `Closing these tabs discards ${pending} unsaved change${pending === 1 ? '' : 's'}. Close and discard?`,
+        'Close & discard',
+      )
+      if (!ok) return
+      for (const t of toClose) {
+        const key = tabTableKey(t)
+        if (key) clearPendingChanges(key)
+      }
+    }
+    const closeSet = new Set(toClose.map((t) => t.id))
+    for (const t of toClose) rememberClosedTab(t)
+    const wasActiveClosed = activeTabId !== null && closeSet.has(activeTabId)
+    tabs = tabs.filter((t) => !closeSet.has(t.id))
+    if (wasActiveClosed) await activateTab(anchorId)
+  }
+
+  /**
+   * Duplicate a table/SQL tab — a fresh tab with a deep-enough copy of the
+   * source state, inserted right after the original.
+   * @param {string} id
+   */
+  async function duplicateTab(id) {
+    const src = tabs.find((t) => t.id === id)
+    if (!src || (src.kind !== 'table' && src.kind !== 'sql')) return
+    // Freshen the snapshot first when duplicating the live tab.
+    if (id === activeTabId) saveActiveTabState()
+    const fresh = tabs.find((t) => t.id === id)
+    if (!fresh?.state) return
+    const state =
+      fresh.kind === 'table'
+        ? cloneTableTabState(/** @type {TableTabState} */ (fresh.state))
+        : cloneSqlTabState(/** @type {SqlTabState} */ (fresh.state))
+    const copy = { id: crypto.randomUUID(), kind: fresh.kind, title: fresh.title, state }
+    const idx = tabs.findIndex((t) => t.id === id)
+    tabs = [...tabs.slice(0, idx + 1), copy, ...tabs.slice(idx + 1)]
+    await activateTab(copy.id)
   }
 
   // ── Pane-layout reconciliation & group-aware actions ─────────────────────
@@ -4321,6 +4374,10 @@ let rowSearch = $state('')
             onclose={closeTab}
             oncloseothers={closeOtherTabs}
             oncloseall={closeAllTabs}
+            onclosemany={(ids, anchorId) => void closeManyTabs(ids, anchorId)}
+            onduplicate={(id) => void duplicateTab(id)}
+            onreopenclosed={reopenLastClosedTab}
+            canreopenclosed={closedTabStack.length > 0}
             onpintoggle={toggleTabPin}
             onnew={openWelcomeTab}
             {recentTabs}
@@ -4339,6 +4396,10 @@ let rowSearch = $state('')
             onclose={(id) => void closeTabInGroup(group.id, id)}
             oncloseothers={closeOtherTabs}
             oncloseall={closeAllTabs}
+            onclosemany={(ids, anchorId) => void closeManyTabs(ids, anchorId)}
+            onduplicate={(id) => void duplicateTab(id)}
+            onreopenclosed={reopenLastClosedTab}
+            canreopenclosed={closedTabStack.length > 0}
             onpintoggle={toggleTabPin}
             onnew={() => { void focusGroup(group.id); openWelcomeTab() }}
             {recentTabs}
