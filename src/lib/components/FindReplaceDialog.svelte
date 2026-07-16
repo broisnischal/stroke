@@ -101,7 +101,6 @@
   async function handleApply() {
     if (!matches.length || applying) return
     applying = true
-    applyProgress = 0
     try {
       await onapply(matches.map(({ rowIdx, colIdx: ci, value }) => ({ rowIdx, colIdx: ci, value })))
       open = false
