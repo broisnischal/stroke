@@ -35,7 +35,16 @@
   import ExplainPlan from "./ExplainPlan.svelte";
   import { explainSql, cancelQuery } from "$lib/api.js";
   import Square from "@lucide/svelte/icons/square";
+  import Variable from "@lucide/svelte/icons/variable";
+  import X from "@lucide/svelte/icons/x";
   import { Button } from "$lib/components/ui/button/index.js";
+  import {
+    extractSqlParams,
+    missingSqlParams,
+    substituteSqlParams,
+    loadStoredParamValues,
+    saveStoredParamValues,
+  } from "$lib/sql-params.js";
   import {
     clampSqlEditorHeight,
     loadLayout,
@@ -91,7 +100,7 @@
     onprorequired = /** @type {() => void} */ (() => {}),
   } = $props();
 
-  /** @type {{ focus: () => void, markExecuted: (ranStatement?: string | null) => void } | null} */
+  /** @type {{ focus: () => void, markExecuted: (ranStatement?: string | null) => void, getStatementAtCursor: () => string, getSelectionText: () => string } | null} */
   let sqlEditorRef = $state(null)
 
   /** Focus the SQL editor — called by the parent when this tab becomes active. */
@@ -112,11 +121,55 @@
   /** The statement that ran last (⌘R), or null when the whole buffer ran. */
   let lastRanStatement = /** @type {string | null} */ (null)
 
+  // ── Named parameters (:name) ────────────────────────────────────────────────
+  /** @type {Record<string, import('$lib/sql-params.js').SqlParamValue>} */
+  let paramValues = $state(loadStoredParamValues())
+  let paramsPanelOpen = $state(false)
+  const sqlParams = $derived(extractSqlParams(sql))
+
+  /** @param {string} name @param {import('$lib/sql-params.js').SqlParamValue} next */
+  function setParam(name, next) {
+    paramValues = { ...paramValues, [name]: next }
+    saveStoredParamValues(paramValues)
+  }
+
   /** @param {string | undefined} statementSql */
   function handleRun(statementSql) {
     const single = typeof statementSql === 'string' && statementSql.trim() ? statementSql : undefined
+    const target = single ?? sql
+    if (extractSqlParams(target).length > 0) {
+      // Block the run until every parameter has a usable value, then inline
+      // them as escaped literals — the substituted text is what executes (and
+      // what history records), so runs stay reproducible.
+      if (missingSqlParams(target, paramValues).length > 0) {
+        paramsPanelOpen = true
+        return
+      }
+      lastRanStatement = single ?? null
+      onrun(substituteSqlParams(target, paramValues))
+      return
+    }
     lastRanStatement = single ?? null
     onrun(single)
+  }
+
+  // ── Run split-button dropdown ───────────────────────────────────────────────
+  let runMenuOpen = $state(false)
+  let cursorStmtPreview = $state('')
+  let selectionPreview = $state('')
+
+  /** @param {boolean} open */
+  function captureRunPreviews(open) {
+    runMenuOpen = open
+    if (!open) return
+    cursorStmtPreview = sqlEditorRef?.getStatementAtCursor?.() ?? ''
+    selectionPreview = sqlEditorRef?.getSelectionText?.() ?? ''
+  }
+
+  /** One-line, length-capped preview of a SQL snippet for menu items. */
+  function clipSql(/** @type {string} */ s, max = 64) {
+    const one = s.replace(/\s+/g, ' ').trim()
+    return one.length > max ? one.slice(0, max - 1) + '…' : one
   }
 
   // ── Result view state ───────────────────────────────────────────────────────
@@ -470,29 +523,93 @@
         </Tooltip.Content>
       </Tooltip.Root>
     {:else}
+      <div class="flex shrink-0 items-center">
+        <Tooltip.Root>
+          <Tooltip.Trigger>
+            {#snippet child({ props })}
+              <Button
+                {...props}
+                type="button"
+                variant="default"
+                size="sm"
+                class="h-7 shrink-0 gap-2 rounded-r-none pl-2.5 pr-2 font-medium shadow-sm"
+                disabled={!sql.trim()}
+                onclick={() => handleRun(undefined)}
+              >
+                <Play class="size-3.5 shrink-0" data-icon="inline-start" />
+                Run
+              </Button>
+            {/snippet}
+          </Tooltip.Trigger>
+          <Tooltip.Content>
+            {@render hint(
+              'Run query',
+              `Runs every statement — each gets its own result tab. ${mod}R runs only the statement under the cursor, ${mod}L selects it.`,
+              [mod, '↵'],
+            )}
+          </Tooltip.Content>
+        </Tooltip.Root>
+        <DropdownMenu.Root bind:open={runMenuOpen} onOpenChange={captureRunPreviews}>
+          <DropdownMenu.Trigger
+            class="inline-flex h-7 w-5 shrink-0 items-center justify-center rounded-r-md border-l border-primary-foreground/25 bg-primary text-primary-foreground shadow-sm transition-[opacity,scale] hover:opacity-90 active:scale-[0.96] disabled:pointer-events-none disabled:opacity-50"
+            disabled={!sql.trim()}
+            aria-label="Run options"
+          >
+            <ChevronDown class="size-3" />
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Content align="start" class="w-72 text-ui-sm">
+            <DropdownMenu.Item onSelect={() => handleRun(undefined)}>
+              <Play class="size-3.5" />
+              Run all statements
+              <DropdownMenu.Shortcut>{mod}↵</DropdownMenu.Shortcut>
+            </DropdownMenu.Item>
+            <DropdownMenu.Item disabled={!cursorStmtPreview} onSelect={() => handleRun(cursorStmtPreview)}>
+              <div class="flex min-w-0 flex-col gap-0.5 py-0.5">
+                <span class="flex items-center gap-1.5">
+                  Run statement at cursor
+                  <span class="ml-auto pl-4 text-ui-2xs tracking-widest text-muted-foreground/60">{mod}R</span>
+                </span>
+                {#if cursorStmtPreview}
+                  <span class="truncate font-mono text-ui-2xs text-muted-foreground/70">{clipSql(cursorStmtPreview)}</span>
+                {/if}
+              </div>
+            </DropdownMenu.Item>
+            {#if selectionPreview}
+              <DropdownMenu.Item onSelect={() => handleRun(selectionPreview)}>
+                <div class="flex min-w-0 flex-col gap-0.5 py-0.5">
+                  <span>Run selection</span>
+                  <span class="truncate font-mono text-ui-2xs text-muted-foreground/70">{clipSql(selectionPreview)}</span>
+                </div>
+              </DropdownMenu.Item>
+            {/if}
+          </DropdownMenu.Content>
+        </DropdownMenu.Root>
+      </div>
+    {/if}
+
+    {#if sqlParams.length > 0}
       <Tooltip.Root>
         <Tooltip.Trigger>
           {#snippet child({ props })}
             <Button
               {...props}
               type="button"
-              variant="default"
+              variant="ghost"
               size="sm"
-              class="h-7 shrink-0 gap-2 pl-2.5 pr-2 font-medium shadow-sm"
-              disabled={!sql.trim()}
-              onclick={() => handleRun(undefined)}
+              class={cn(
+                'h-7 shrink-0 gap-1.5 px-2 font-normal',
+                paramsPanelOpen ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground',
+              )}
+              onclick={() => (paramsPanelOpen = !paramsPanelOpen)}
             >
-              <Play class="size-3.5 shrink-0" data-icon="inline-start" />
-              Run
+              <Variable class="size-3.5 shrink-0" />
+              Parameters
+              <span class="rounded bg-muted/70 px-1 font-mono text-ui-3xs tabular-nums text-muted-foreground">{sqlParams.length}</span>
             </Button>
           {/snippet}
         </Tooltip.Trigger>
         <Tooltip.Content>
-          {@render hint(
-            'Run query',
-            `Runs every statement — each gets its own result tab. ${mod}R runs only the statement under the cursor, ${mod}L selects it.`,
-            [mod, '↵'],
-          )}
+          {@render hint('Query parameters', 'Set values for :name placeholders — they are inlined as escaped literals when the query runs.')}
         </Tooltip.Content>
       </Tooltip.Root>
     {/if}
@@ -619,6 +736,52 @@
       </DropdownMenu.Root>
     </div>
   </div>
+
+  {#if paramsPanelOpen && sqlParams.length > 0}
+    <div class="flex shrink-0 flex-col gap-1.5 border-b border-border/60 bg-panel px-3 py-2">
+      <div class="flex items-center justify-between">
+        <span class="select-none text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Parameters</span>
+        <button
+          type="button"
+          class="inline-flex size-5 items-center justify-center rounded text-muted-foreground/60 transition-[background-color,color] hover:bg-accent hover:text-foreground"
+          aria-label="Close parameters"
+          onclick={() => (paramsPanelOpen = false)}
+        >
+          <X class="size-3" />
+        </button>
+      </div>
+      {#each sqlParams as p (p.name)}
+        {@const v = paramValues[p.name] ?? { value: '', mode: 'auto' }}
+        <div class="grid grid-cols-[minmax(5rem,9rem)_5.5rem_minmax(0,1fr)] items-center gap-2">
+          <span class="truncate font-mono text-ui-xs text-primary/85" title=":{p.name}">:{p.name}</span>
+          <select
+            value={v.mode}
+            aria-label="Parameter type for {p.name}"
+            class="h-6.5 rounded-md border border-border/60 bg-background px-1.5 text-ui-2xs text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            onchange={(e) => setParam(p.name, { ...v, mode: /** @type {any} */ (e.currentTarget.value) })}
+          >
+            <option value="auto">Auto</option>
+            <option value="text">Text</option>
+            <option value="raw">Raw SQL</option>
+            <option value="null">NULL</option>
+          </select>
+          <input
+            type="text"
+            value={v.value}
+            disabled={v.mode === 'null'}
+            placeholder={v.mode === 'null' ? 'NULL' : v.mode === 'raw' ? 'now() — inserted verbatim' : 'value'}
+            aria-label="Value for {p.name}"
+            class="h-6.5 w-full min-w-0 rounded-md border border-border/60 bg-background px-2 font-mono text-ui-xs text-foreground placeholder:text-muted-foreground/35 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-40"
+            oninput={(e) => setParam(p.name, { ...v, value: e.currentTarget.value })}
+            onkeydown={(e) => { if (e.key === 'Enter') handleRun(undefined) }}
+          />
+        </div>
+      {/each}
+      <p class="select-none text-ui-3xs text-muted-foreground/45">
+        Auto detects numbers, booleans and NULL — everything else runs as a quoted string. Enter runs the query.
+      </p>
+    </div>
+  {/if}
 
   <div
     class={outputVisible

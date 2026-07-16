@@ -395,6 +395,18 @@
     editor?.focus()
   }
 
+  /** Text of the statement under the cursor ('' when the buffer is empty). */
+  export function getStatementAtCursor() {
+    return (editor && statementAtCursor(editor)?.text) || ''
+  }
+
+  /** Current selection text ('' when nothing is selected). */
+  export function getSelectionText() {
+    const model = editor?.getModel()
+    const sel = editor?.getSelection()
+    return model && sel && !sel.isEmpty() ? model.getValueInRange(sel).trim() : ''
+  }
+
   $effect(() => {
     if (!editor) return
     const current = editor.getValue()
