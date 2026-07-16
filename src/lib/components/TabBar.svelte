@@ -36,6 +36,8 @@
     /** Close a batch of tabs (Close Tabs to Left/Right). anchorId is the tab whose menu was used. */
     onclosemany = /** @type {(ids: string[], anchorId: string) => void} */ (() => {}),
     onduplicate = /** @param {string} _id */ (_id) => {},
+    /** Reset a table tab's view state — search, filters, sort, hidden columns, view mode. */
+    onresettable = /** @param {string} _id */ (_id) => {},
     onreopenclosed = () => {},
     /** Whether the closed-tab stack has anything to reopen. */
     canreopenclosed = false,
@@ -222,6 +224,12 @@
             <ContextMenu.Item onSelect={() => onduplicate(tab.id)}>
               <Icon name="copy" class="size-3.5" />
               Duplicate Tab
+            </ContextMenu.Item>
+          {/if}
+          {#if tab.kind === 'table'}
+            <ContextMenu.Item onSelect={() => onresettable(tab.id)}>
+              <Icon name="rotate-ccw" class="size-3.5" />
+              Reset Table View
             </ContextMenu.Item>
           {/if}
           <ContextMenu.Separator />

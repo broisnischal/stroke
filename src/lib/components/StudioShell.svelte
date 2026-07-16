@@ -56,6 +56,7 @@
   import { qualifiedTable } from '$lib/dml-preview.js'
   import { pluginState, pluginEnabledIn } from '$lib/stores/plugins.js'
   import { loadTableViews, saveTableViews } from '$lib/stores/table-views.js'
+  import { buildBatchUpdateSql } from '$lib/sql-batch-update.js'
   import Onboarding from './Onboarding.svelte'
   import SettingsDialog from './SettingsDialog.svelte'
   import KeyboardShortcutsDialog from './KeyboardShortcutsDialog.svelte'
@@ -583,21 +584,67 @@
   }
 
   /**
-   * Apply find & replace edits through the normal cell-save pipeline —
-   * parameterized per-PK UPDATEs, grid state updated as each lands.
+   * Apply find & replace edits. All edits target one column, so they collapse
+   * into chunked single-statement CASE updates keyed by primary key — one or
+   * two round-trips instead of one per row. ClickHouse (no standard UPDATE)
+   * keeps the per-row pipeline.
    * @param {Array<{ rowIdx: number, colIdx: number, value: string }>} edits
    */
   async function handleFindReplaceApply(edits) {
-    let done = 0
-    try {
-      for (const e of edits) {
-        await handleSaveCell(e)
-        done++
+    if (!activeTable || edits.length === 0) return
+    if (dbType === 'clickhouse') {
+      let done = 0
+      try {
+        for (const e of edits) {
+          await handleSaveCell(e)
+          done++
+        }
+        toast.success(`Replaced ${done.toLocaleString('en-US')} value${done === 1 ? '' : 's'} in ${activeTable}`)
+      } catch (err) {
+        toast.error(`Stopped after ${done} of ${edits.length} replacements`, { description: String(err) })
       }
+      return
+    }
+
+    const CHUNK = 400
+    let done = 0
+    const _start = Date.now()
+    try {
+      for (let i = 0; i < edits.length; i += CHUNK) {
+        const chunk = edits.slice(i, i + CHUNK)
+        const sql = buildBatchUpdateSql({
+          dialect: dbType,
+          schema: activeSchema,
+          table: activeTable,
+          columns,
+          primaryKey,
+          rows,
+          colIdx: chunk[0].colIdx,
+          edits: chunk,
+        })
+        await executeSql(sql)
+        done += chunk.length
+      }
+      recordActivity({ type: 'row_save', title: `Replaced ${done} values in ${activeTable}`, schema: activeSchema, table: activeTable, durationMs: Date.now() - _start, success: true })
       toast.success(`Replaced ${done.toLocaleString('en-US')} value${done === 1 ? '' : 's'} in ${activeTable}`)
     } catch (err) {
-      toast.error(`Stopped after ${done} of ${edits.length} replacements`, { description: String(err) })
+      recordActivity({ type: 'row_save', title: `Find & replace failed in ${activeTable}`, schema: activeSchema, table: activeTable, success: false, error: String(err) })
+      toast.error(done ? `Stopped after ${done.toLocaleString('en-US')} of ${edits.length}` : 'Find & replace failed', { description: String(err) })
     }
+    await loadRows({ keepScroll: true })
+  }
+
+  /**
+   * Reset a table tab to its unfiltered default (tab context menu). Background
+   * tabs are activated first so the reset goes through the live state and the
+   * rows actually refetch.
+   * @param {string} id
+   */
+  async function resetTableTab(id) {
+    const tab = tabs.find((t) => t.id === id)
+    if (!tab || tab.kind !== 'table') return
+    if (id !== activeTabId) await activateTab(id)
+    resetTableView()
   }
 
   // ── Sidebar table actions: console / generate SQL / count / copy columns ──
@@ -4539,6 +4586,7 @@ let rowSearch = $state('')
             oncloseall={closeAllTabs}
             onclosemany={(ids, anchorId) => void closeManyTabs(ids, anchorId)}
             onduplicate={(id) => void duplicateTab(id)}
+            onresettable={(id) => void resetTableTab(id)}
             onreopenclosed={reopenLastClosedTab}
             canreopenclosed={closedTabStack.length > 0}
             onpintoggle={toggleTabPin}
@@ -4561,6 +4609,7 @@ let rowSearch = $state('')
             oncloseall={closeAllTabs}
             onclosemany={(ids, anchorId) => void closeManyTabs(ids, anchorId)}
             onduplicate={(id) => void duplicateTab(id)}
+            onresettable={(id) => void resetTableTab(id)}
             onreopenclosed={reopenLastClosedTab}
             canreopenclosed={closedTabStack.length > 0}
             onpintoggle={toggleTabPin}
