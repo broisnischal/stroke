@@ -37,6 +37,8 @@
   import Square from "@lucide/svelte/icons/square";
   import Variable from "@lucide/svelte/icons/variable";
   import X from "@lucide/svelte/icons/x";
+  import TextCursorInput from "@lucide/svelte/icons/text-cursor-input";
+  import TextSelect from "@lucide/svelte/icons/text-select";
   import { Button } from "$lib/components/ui/button/index.js";
   import {
     extractSqlParams,
@@ -559,26 +561,32 @@
           </DropdownMenu.Trigger>
           <DropdownMenu.Content align="start" class="w-72 text-ui-sm">
             <DropdownMenu.Item onSelect={() => handleRun(undefined)}>
-              <Play class="size-3.5" />
-              Run all statements
+              <Play class="size-3.5 shrink-0 text-muted-foreground/60" />
+              <span class="whitespace-nowrap">Run all statements</span>
               <DropdownMenu.Shortcut>{mod}↵</DropdownMenu.Shortcut>
             </DropdownMenu.Item>
-            <DropdownMenu.Item disabled={!cursorStmtPreview} onSelect={() => handleRun(cursorStmtPreview)}>
-              <div class="flex min-w-0 flex-col gap-0.5 py-0.5">
-                <span class="flex items-center gap-1.5">
+            <DropdownMenu.Item
+              class="items-start"
+              disabled={!cursorStmtPreview}
+              onSelect={() => handleRun(cursorStmtPreview)}
+            >
+              <TextCursorInput class="mt-0.5 size-3.5 shrink-0 text-muted-foreground/60" />
+              <div class="flex w-full min-w-0 flex-col gap-0.5">
+                <span class="flex w-full items-center whitespace-nowrap">
                   Run statement at cursor
-                  <span class="ml-auto pl-4 text-ui-2xs tracking-widest text-muted-foreground/60">{mod}R</span>
+                  <DropdownMenu.Shortcut>{mod}R</DropdownMenu.Shortcut>
                 </span>
                 {#if cursorStmtPreview}
-                  <span class="truncate font-mono text-ui-2xs text-muted-foreground/70">{clipSql(cursorStmtPreview)}</span>
+                  <span class="truncate font-mono text-ui-2xs leading-4 text-muted-foreground/55">{clipSql(cursorStmtPreview)}</span>
                 {/if}
               </div>
             </DropdownMenu.Item>
             {#if selectionPreview}
-              <DropdownMenu.Item onSelect={() => handleRun(selectionPreview)}>
-                <div class="flex min-w-0 flex-col gap-0.5 py-0.5">
-                  <span>Run selection</span>
-                  <span class="truncate font-mono text-ui-2xs text-muted-foreground/70">{clipSql(selectionPreview)}</span>
+              <DropdownMenu.Item class="items-start" onSelect={() => handleRun(selectionPreview)}>
+                <TextSelect class="mt-0.5 size-3.5 shrink-0 text-muted-foreground/60" />
+                <div class="flex w-full min-w-0 flex-col gap-0.5">
+                  <span class="whitespace-nowrap">Run selection</span>
+                  <span class="truncate font-mono text-ui-2xs leading-4 text-muted-foreground/55">{clipSql(selectionPreview)}</span>
                 </div>
               </DropdownMenu.Item>
             {/if}
@@ -723,12 +731,12 @@
           {/if}
           <ChevronDown class="size-3 shrink-0 opacity-50" />
         </DropdownMenu.Trigger>
-        <DropdownMenu.Content align="start" class="min-w-36">
-          <DropdownMenu.Item class="gap-2 font-mono text-xs" onclick={() => copyAsOrm('drizzle')}>
+        <DropdownMenu.Content align="start" class="min-w-44">
+          <DropdownMenu.Item class="gap-2 whitespace-nowrap font-mono text-xs" onclick={() => copyAsOrm('drizzle')}>
             <Code2 class="size-3.5 shrink-0 text-muted-foreground/50" />
             Copy as Drizzle
           </DropdownMenu.Item>
-          <DropdownMenu.Item class="gap-2 font-mono text-xs" onclick={() => copyAsOrm('prisma')}>
+          <DropdownMenu.Item class="gap-2 whitespace-nowrap font-mono text-xs" onclick={() => copyAsOrm('prisma')}>
             <Code2 class="size-3.5 shrink-0 text-muted-foreground/50" />
             Copy as Prisma
           </DropdownMenu.Item>
@@ -738,48 +746,58 @@
   </div>
 
   {#if paramsPanelOpen && sqlParams.length > 0}
-    <div class="flex shrink-0 flex-col gap-1.5 border-b border-border/60 bg-panel px-3 py-2">
-      <div class="flex items-center justify-between">
-        <span class="select-none text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Parameters</span>
+    <div class="shrink-0 border-b border-border/60 bg-panel px-3 py-2">
+      <div class="flex w-full max-w-2xl items-center gap-1.5 pb-1.5">
+        <Variable class="size-3 text-muted-foreground/50" />
+        <span class="select-none text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground/55">Parameters</span>
+        <span
+          class="select-none text-[10px] text-muted-foreground/35"
+          title="Auto detects numbers, booleans and NULL — everything else runs as a quoted string."
+        >· Enter runs</span>
         <button
           type="button"
-          class="inline-flex size-5 items-center justify-center rounded text-muted-foreground/60 transition-[background-color,color] hover:bg-accent hover:text-foreground"
+          class="ml-auto inline-flex size-5 items-center justify-center rounded text-muted-foreground/60 transition-[background-color,color] hover:bg-accent hover:text-foreground"
           aria-label="Close parameters"
           onclick={() => (paramsPanelOpen = false)}
         >
           <X class="size-3" />
         </button>
       </div>
-      {#each sqlParams as p (p.name)}
-        {@const v = paramValues[p.name] ?? { value: '', mode: 'auto' }}
-        <div class="grid grid-cols-[minmax(5rem,9rem)_5.5rem_minmax(0,1fr)] items-center gap-2">
-          <span class="truncate font-mono text-ui-xs text-primary/85" title=":{p.name}">:{p.name}</span>
-          <select
-            value={v.mode}
-            aria-label="Parameter type for {p.name}"
-            class="h-6.5 rounded-md border border-border/60 bg-background px-1.5 text-ui-2xs text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            onchange={(e) => setParam(p.name, { ...v, mode: /** @type {any} */ (e.currentTarget.value) })}
-          >
-            <option value="auto">Auto</option>
-            <option value="text">Text</option>
-            <option value="raw">Raw SQL</option>
-            <option value="null">NULL</option>
-          </select>
-          <input
-            type="text"
-            value={v.value}
-            disabled={v.mode === 'null'}
-            placeholder={v.mode === 'null' ? 'NULL' : v.mode === 'raw' ? 'now() — inserted verbatim' : 'value'}
-            aria-label="Value for {p.name}"
-            class="h-6.5 w-full min-w-0 rounded-md border border-border/60 bg-background px-2 font-mono text-ui-xs text-foreground placeholder:text-muted-foreground/35 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-40"
-            oninput={(e) => setParam(p.name, { ...v, value: e.currentTarget.value })}
-            onkeydown={(e) => { if (e.key === 'Enter') handleRun(undefined) }}
-          />
-        </div>
-      {/each}
-      <p class="select-none text-ui-3xs text-muted-foreground/45">
-        Auto detects numbers, booleans and NULL — everything else runs as a quoted string. Enter runs the query.
-      </p>
+      <div class="flex w-full max-w-2xl flex-col gap-1">
+        {#each sqlParams as p (p.name)}
+          {@const v = paramValues[p.name] ?? { value: '', mode: 'auto' }}
+          <div class="grid grid-cols-[minmax(5rem,8.5rem)_5.25rem_minmax(0,1fr)] items-center gap-1.5">
+            <span
+              class="justify-self-start truncate rounded bg-muted/50 px-1.5 py-0.5 font-mono text-ui-2xs text-foreground/75"
+              title=":{p.name}"
+            ><span class="text-muted-foreground/50">:</span>{p.name}</span>
+            <div class="relative">
+              <select
+                value={v.mode}
+                aria-label="Parameter type for {p.name}"
+                class="h-7 w-full appearance-none rounded-md border border-border/60 bg-input/30 pl-2 pr-6 text-ui-xs text-foreground/80 transition-colors hover:border-border focus:outline-none focus:ring-1 focus:ring-ring"
+                onchange={(e) => setParam(p.name, { ...v, mode: /** @type {any} */ (e.currentTarget.value) })}
+              >
+                <option value="auto">Auto</option>
+                <option value="text">Text</option>
+                <option value="raw">Raw SQL</option>
+                <option value="null">NULL</option>
+              </select>
+              <ChevronDown class="pointer-events-none absolute right-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/50" />
+            </div>
+            <input
+              type="text"
+              value={v.value}
+              disabled={v.mode === 'null'}
+              placeholder={v.mode === 'null' ? 'NULL' : v.mode === 'raw' ? 'now() — inserted verbatim' : 'value'}
+              aria-label="Value for {p.name}"
+              class="h-7 w-full min-w-0 rounded-md border border-transparent bg-input/30 px-2 font-mono text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/30 hover:border-border/60 focus:border-input focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-40"
+              oninput={(e) => setParam(p.name, { ...v, value: e.currentTarget.value })}
+              onkeydown={(e) => { if (e.key === 'Enter') handleRun(undefined) }}
+            />
+          </div>
+        {/each}
+      </div>
     </div>
   {/if}
 
