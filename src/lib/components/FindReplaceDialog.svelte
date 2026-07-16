@@ -143,7 +143,8 @@
     </div>
 
     <!-- Controls -->
-    <div class="flex flex-col gap-2 border-b border-border/60 bg-panel/50 px-4 py-3">
+    <div class="grid grid-cols-[3.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2 border-b border-border/60 bg-panel/50 px-4 py-3">
+      <span class="select-none text-right text-ui-2xs text-muted-foreground/60">Column</span>
       <div class="grid grid-cols-[minmax(0,1fr)_8rem_auto] items-center gap-2">
         <div class="relative">
           <select
@@ -186,35 +187,47 @@
           Aa
         </button>
       </div>
-      <input type="text" class={inputCls} placeholder={mode === 'regex' ? 'find — e.g. ^(\\w+)@' : 'find'} bind:value={findText} />
-      <input type="text" class={inputCls} placeholder={mode === 'regex' ? 'replace — $1 uses capture groups' : 'replace with'} bind:value={replaceText} />
+
+      <label for="fr-find" class="select-none text-right text-ui-2xs text-muted-foreground/60">Find</label>
+      <input id="fr-find" type="text" class={inputCls} placeholder={mode === 'regex' ? '^(\\w+)@ — regular expression' : 'text to find'} bind:value={findText} />
+
+      <label for="fr-replace" class="select-none text-right text-ui-2xs text-muted-foreground/60">Replace</label>
+      <input id="fr-replace" type="text" class={inputCls} placeholder={mode === 'regex' ? '$1 uses capture groups' : 'replacement'} bind:value={replaceText} />
+
       {#if regexError}
+        <span></span>
         <p class="font-mono text-ui-3xs text-destructive">{regexError}</p>
       {/if}
     </div>
 
     <!-- Preview -->
-    <div class="app-scroll h-[240px] min-h-0 overflow-y-auto bg-panel">
+    <div class="flex h-[260px] min-h-0 flex-col bg-panel">
       {#if !findText}
-        <div class="flex h-full items-center justify-center px-6 text-center">
+        <div class="flex flex-1 items-center justify-center px-6 text-center">
           <p class="text-ui-xs text-muted-foreground/45">Type a search to preview replacements on the loaded page.</p>
         </div>
       {:else if matches.length === 0}
-        <div class="flex h-full items-center justify-center px-6 text-center">
+        <div class="flex flex-1 items-center justify-center px-6 text-center">
           <p class="text-ui-xs text-muted-foreground/45">No matching cells on this page.</p>
         </div>
       {:else}
-        <div class="divide-y divide-border/30">
+        <div class="flex shrink-0 items-center gap-1.5 border-b border-border/40 px-4 py-1.5">
+          <span class="size-1.5 rounded-full bg-emerald-500"></span>
+          <span class="text-ui-2xs tabular-nums text-muted-foreground">
+            {matches.length.toLocaleString('en-US')} cell{matches.length === 1 ? '' : 's'} will change
+          </span>
+        </div>
+        <div class="app-scroll min-h-0 flex-1 divide-y divide-border/25 overflow-y-auto">
           {#each matches.slice(0, PREVIEW_CAP) as m (m.rowIdx)}
-            <div class="grid grid-cols-[3rem_minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 px-4 py-1.5">
-              <span class="select-none font-mono text-ui-3xs tabular-nums text-muted-foreground/40">#{m.rowIdx + 1}</span>
-              <span class="truncate font-mono text-ui-xs text-muted-foreground line-through decoration-destructive/50" title={m.old}>{clip(m.old)}</span>
-              <Icon name="arrow-right" class="size-3 shrink-0 text-muted-foreground/40" />
-              <span class="truncate font-mono text-ui-xs text-foreground" title={m.value}>{clip(m.value)}</span>
+            <div class="grid grid-cols-[2.5rem_minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 px-4 py-1">
+              <span class="select-none font-mono text-ui-3xs tabular-nums text-muted-foreground/35">{m.rowIdx + 1}</span>
+              <span class="truncate font-mono text-ui-xs text-muted-foreground/70 line-through decoration-destructive/40" title={m.old}>{clip(m.old)}</span>
+              <Icon name="arrow-right" class="size-3 shrink-0 text-muted-foreground/35" />
+              <span class="truncate font-mono text-ui-xs text-emerald-600 dark:text-emerald-400" title={m.value}>{clip(m.value)}</span>
             </div>
           {/each}
           {#if matches.length > PREVIEW_CAP}
-            <p class="px-4 py-2 text-ui-2xs text-muted-foreground/50">…and {matches.length - PREVIEW_CAP} more</p>
+            <p class="px-4 py-2 text-ui-2xs text-muted-foreground/50">…and {(matches.length - PREVIEW_CAP).toLocaleString('en-US')} more</p>
           {/if}
         </div>
       {/if}
@@ -222,8 +235,8 @@
 
     <!-- Footer -->
     <div class="flex h-13 items-center gap-2 border-t border-border/60 bg-background px-4">
-      <p class="min-w-0 flex-1 truncate text-ui-2xs text-muted-foreground/60">
-        Applies to string cells on the loaded page — each change is a per-row UPDATE.
+      <p class="min-w-0 flex-1 truncate text-ui-2xs text-muted-foreground/60" title="Only string cells on the currently loaded page are affected. Each change is written as its own parameterized per-primary-key UPDATE.">
+        String cells on this page · per-row updates
       </p>
       <Dialog.Close
         class="inline-flex h-8 shrink-0 items-center rounded-md border border-border px-3 text-ui-xs text-muted-foreground transition-[background-color,color,scale] hover:bg-accent hover:text-foreground active:scale-[0.96]"
