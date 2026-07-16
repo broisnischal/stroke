@@ -525,7 +525,9 @@
         </Tooltip.Content>
       </Tooltip.Root>
     {:else}
-      <div class="flex shrink-0 items-center">
+      <!-- Split button: one wrapper owns the radius + shadow so the halves can
+           never show a seam or their own corner rounding. -->
+      <div class="flex shrink-0 items-stretch overflow-hidden rounded-md shadow-sm">
         <Tooltip.Root>
           <Tooltip.Trigger>
             {#snippet child({ props })}
@@ -534,7 +536,7 @@
                 type="button"
                 variant="default"
                 size="sm"
-                class="h-7 shrink-0 gap-2 rounded-r-none pl-2.5 pr-2 font-medium shadow-sm"
+                class="h-7 shrink-0 gap-2 rounded-none pl-2.5 pr-2 font-medium shadow-none"
                 disabled={!sql.trim()}
                 onclick={() => handleRun(undefined)}
               >
@@ -553,7 +555,7 @@
         </Tooltip.Root>
         <DropdownMenu.Root bind:open={runMenuOpen} onOpenChange={captureRunPreviews}>
           <DropdownMenu.Trigger
-            class="inline-flex h-7 w-5 shrink-0 items-center justify-center rounded-r-md border-l border-primary-foreground/25 bg-primary text-primary-foreground shadow-sm transition-[opacity,scale] hover:opacity-90 active:scale-[0.96] disabled:pointer-events-none disabled:opacity-50"
+            class="inline-flex h-7 w-6 shrink-0 items-center justify-center border-l border-primary-foreground/20 bg-primary text-primary-foreground transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-50"
             disabled={!sql.trim()}
             aria-label="Run options"
           >
