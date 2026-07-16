@@ -4,6 +4,7 @@
   import { EXTENSIONS } from "$lib/plugins/registry.js";
   import {
     pluginState,
+    pluginEnabledIn,
     setPluginEnabled,
     setPluginConfig,
   } from "$lib/stores/plugins.js";
@@ -29,6 +30,8 @@
   import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
+  import Bookmark from "@lucide/svelte/icons/bookmark";
+  import Replace from "@lucide/svelte/icons/replace";
 
   const ICONS = {
     "better-time": Clock,
@@ -46,9 +49,12 @@
     "column-annotator": BarChart3,
     "id-generators": Sparkles,
     "cell-transforms": Wand2,
+    "saved-views": Bookmark,
+    "find-replace": Replace,
   };
 
   const SECTIONS = [
+    { title: "Workflow", kinds: ["workflow"] },
     { title: "Formatters", kinds: ["formatter"] },
     { title: "Links & annotations", kinds: ["linkify", "annotator"] },
     { title: "Cell tools", kinds: ["generators", "transforms"] },
@@ -60,6 +66,7 @@
     annotator: "Column annotator",
     generators: "Value generator",
     transforms: "Cell transform",
+    workflow: "Workflow feature",
   };
 
   const CONFIGURABLE = new Set([
@@ -95,14 +102,28 @@
     ],
   };
 
+  // Per-extension usage overrides (workflow features differ too much to share).
+  const USAGE_BY_ID = {
+    "saved-views": [
+      "Open a table and set up filters, sort, search, hidden columns or a view mode.",
+      "Click the bookmark icon in the table toolbar → name it → Save.",
+      "Switch views from the same menu — each table keeps its own list.",
+    ],
+    "find-replace": [
+      "Open a table, then choose Find & replace… from the toolbar's ⋯ menu.",
+      "Pick a column, a match mode (contains / exact / regex) and a replacement.",
+      "Review the full before → after preview, then apply — nothing is written blind.",
+    ],
+  };
+
   /** null → grid overview; an id → drilled into that extension's detail page. */
   let selectedId = $state(/** @type {string | null} */ (null));
   const selected = $derived(selectedId ? (EXTENSIONS.find((e) => e.id === selectedId) ?? null) : null);
-  const enabledCount = $derived(EXTENSIONS.filter((e) => $pluginState.enabled[e.id]).length);
+  const enabledCount = $derived(EXTENSIONS.filter((e) => pluginEnabledIn($pluginState, e.id)).length);
 
   /** @param {string} id */
   function isOn(id) {
-    return $pluginState.enabled[id] === true;
+    return pluginEnabledIn($pluginState, id);
   }
   /** @param {string} id @param {Record<string, unknown>} defaults */
   function cfg(id, defaults) {
@@ -276,11 +297,11 @@
         </div>
 
         <!-- How to use -->
-        {#if USAGE[selected.kind]}
+        {#if USAGE_BY_ID[selected.id] ?? USAGE[selected.kind]}
           <div class="mt-7">
             {@render sectionLabel("How to use")}
             <ol class="space-y-2">
-              {#each USAGE[selected.kind] as step, i (i)}
+              {#each USAGE_BY_ID[selected.id] ?? USAGE[selected.kind] as step, i (i)}
                 <li class="flex items-start gap-2.5">
                   <span class="mt-px grid size-4 shrink-0 place-items-center rounded-full border border-border/60 text-[9px] font-semibold text-muted-foreground/70">{i + 1}</span>
                   <span class="text-[12.5px] leading-relaxed text-foreground/75">{step}</span>

@@ -96,6 +96,7 @@ import ArrowLeftRight from '@lucide/svelte/icons/arrow-left-right'
 import ArrowDownToLine from '@lucide/svelte/icons/arrow-down-to-line'
 import ArrowLeftToLine from '@lucide/svelte/icons/arrow-left-to-line'
 import ArrowRightToLine from '@lucide/svelte/icons/arrow-right-to-line'
+import ReplaceLucide from '@lucide/svelte/icons/replace'
 import Bookmark from '@lucide/svelte/icons/bookmark'
 import Box from '@lucide/svelte/icons/box'
 import Bug from '@lucide/svelte/icons/bug'
@@ -238,6 +239,7 @@ export const ICON_MAP = {
   'arrow-down-to-line':{ lucide: ArrowDownToLine, huge: Download04Icon },
   'arrow-left-to-line':{ lucide: ArrowLeftToLine, huge: ArrowLeftDoubleIcon },
   'arrow-right-to-line':{ lucide: ArrowRightToLine, huge: ArrowRightDoubleIcon },
+  'replace':        { lucide: ReplaceLucide },
   'bookmark':       { lucide: Bookmark,       huge: Bookmark01Icon },
   'box':            { lucide: Box,            huge: PackageIcon },
   'bug':            { lucide: Bug,            huge: BugIcon },

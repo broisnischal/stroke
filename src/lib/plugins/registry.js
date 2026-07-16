@@ -30,6 +30,7 @@ import { linkify } from './extensions/linkify.js'
 import { columnAnnotator } from './extensions/column-annotator.js'
 import { idGenerators } from './extensions/id-generators.js'
 import { cellTransforms } from './extensions/cell-transforms.js'
+import { savedViews, findReplace } from './extensions/workflow.js'
 
 // Display order also = merge precedence for formatters (earlier wins per field).
 export const EXTENSIONS = [
@@ -48,6 +49,8 @@ export const EXTENSIONS = [
   columnAnnotator,
   idGenerators,
   cellTransforms,
+  savedViews,
+  findReplace,
 ]
 
 const FORMATTERS = EXTENSIONS.filter((e) => e.kind === 'formatter')

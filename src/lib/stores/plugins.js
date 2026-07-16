@@ -38,9 +38,25 @@ pluginState.subscribe((v) => {
   } catch {}
 })
 
+/**
+ * Extensions that ship enabled. Workflow features (saved views, find &
+ * replace) are core-adjacent — off-by-default would just hide them; the
+ * Extensions page stays the place to switch them off.
+ */
+const DEFAULT_ON = new Set(['saved-views', 'find-replace'])
+
+/**
+ * Enabled check against an explicit state snapshot (for reactive `$pluginState`
+ * reads in components) — honors DEFAULT_ON when the user never toggled the id.
+ * @param {PluginState} state @param {string} id
+ */
+export function pluginEnabledIn(state, id) {
+  return state.enabled[id] ?? DEFAULT_ON.has(id)
+}
+
 /** @param {string} id */
 export function isPluginEnabled(id) {
-  return _snap.enabled[id] === true
+  return pluginEnabledIn(_snap, id)
 }
 
 /** @param {string} id @returns {Record<string, unknown>} */

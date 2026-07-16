@@ -51,8 +51,11 @@
   import CreateTableDialog from './CreateTableDialog.svelte'
   import CreateSchemaDialog from './CreateSchemaDialog.svelte'
   import GenerateSqlDialog from './GenerateSqlDialog.svelte'
+  import FindReplaceDialog from './FindReplaceDialog.svelte'
   import { genSelectStar } from '$lib/sql-generate.js'
   import { qualifiedTable } from '$lib/dml-preview.js'
+  import { pluginState, pluginEnabledIn } from '$lib/stores/plugins.js'
+  import { loadTableViews, saveTableViews } from '$lib/stores/table-views.js'
   import Onboarding from './Onboarding.svelte'
   import SettingsDialog from './SettingsDialog.svelte'
   import KeyboardShortcutsDialog from './KeyboardShortcutsDialog.svelte'
@@ -508,6 +511,76 @@
   let sqlConsoleRef = $state(null)
 
   /** "Open in SQL editor" — generate a SELECT reflecting the current table view and open it in the SQL editor. */
+  // ── Workflow extensions: saved views + find & replace ─────────────────────
+  const savedViewsEnabled = $derived(pluginEnabledIn($pluginState, 'saved-views'))
+  const findReplaceEnabled = $derived(pluginEnabledIn($pluginState, 'find-replace'))
+
+  /** @type {import('$lib/stores/table-views.js').SavedTableView[]} */
+  let savedTableViews = $state([])
+  let findReplaceOpen = $state(false)
+
+  $effect(() => {
+    void persistConnectionId
+    void activeSchema
+    const t = activeTable
+    savedTableViews = t ? loadTableViews(persistConnectionId, activeSchema, t) : []
+  })
+
+  /** @param {string} name */
+  function saveCurrentTableView(name) {
+    if (!activeTable) return
+    const view = {
+      id: crypto.randomUUID(),
+      name,
+      search: rowSearch,
+      filters: rowFilters.map((f) => ({ ...f })),
+      sort: rowSort ? { ...rowSort } : null,
+      sortMore: rowSortMore.map((s) => ({ ...s })),
+      hiddenColumns: [...hiddenColumns],
+      dataViewMode,
+    }
+    savedTableViews = [...savedTableViews, view]
+    saveTableViews(persistConnectionId, activeSchema, activeTable, savedTableViews)
+    toast.success(`View "${name}" saved`)
+  }
+
+  /** @param {import('$lib/stores/table-views.js').SavedTableView} view */
+  function applySavedView(view) {
+    rowSearch = view.search ?? ''
+    rowFilters = (view.filters ?? []).map((f) => ({ ...f }))
+    rowSort = view.sort ? { ...view.sort } : null
+    rowSortMore = (view.sortMore ?? []).map((s) => ({ ...s }))
+    hiddenColumns = new Set(view.hiddenColumns ?? [])
+    if (activeTable) saveHiddenCols(persistConnectionId, activeSchema, activeTable, hiddenColumns)
+    dataViewMode = view.dataViewMode ?? 'table'
+    page = 1
+    void loadRows()
+  }
+
+  /** @param {string} id */
+  function deleteSavedView(id) {
+    savedTableViews = savedTableViews.filter((v) => v.id !== id)
+    if (activeTable) saveTableViews(persistConnectionId, activeSchema, activeTable, savedTableViews)
+  }
+
+  /**
+   * Apply find & replace edits through the normal cell-save pipeline —
+   * parameterized per-PK UPDATEs, grid state updated as each lands.
+   * @param {Array<{ rowIdx: number, colIdx: number, value: string }>} edits
+   */
+  async function handleFindReplaceApply(edits) {
+    let done = 0
+    try {
+      for (const e of edits) {
+        await handleSaveCell(e)
+        done++
+      }
+      toast.success(`Replaced ${done.toLocaleString('en-US')} value${done === 1 ? '' : 's'} in ${activeTable}`)
+    } catch (err) {
+      toast.error(`Stopped after ${done} of ${edits.length} replacements`, { description: String(err) })
+    }
+  }
+
   // ── Sidebar table actions: console / generate SQL / count / copy columns ──
   /** @type {string | null} */
   let generateSqlTable = $state(null)
@@ -4074,6 +4147,13 @@ let rowSearch = $state('')
   dialect={dbType}
   onopeninsql={(sql) => { if (aiMode) exitAiMode(); void openQueryInEditor(sql) }}
 />
+<FindReplaceDialog
+  bind:open={findReplaceOpen}
+  {columns}
+  {rows}
+  tableName={activeTable}
+  onapply={handleFindReplaceApply}
+/>
 <DockerLaunchModal
   bind:open={showDockerModal}
   initialDbType={dockerInitialDb}
@@ -4923,6 +5003,13 @@ let rowSearch = $state('')
             {infiniteScroll}
             oninfinitescrolltoggle={toggleInfiniteScroll}
             live={liveEnabled}
+            savedViews={savedTableViews}
+            viewsEnabled={savedViewsEnabled}
+            onapplyview={applySavedView}
+            onsaveview={saveCurrentTableView}
+            ondeleteview={deleteSavedView}
+            {findReplaceEnabled}
+            onfindreplace={() => (findReplaceOpen = true)}
             ondeleteselected={() => stageDeleteSelectedRows()}
             onexport={handleExport}
             onaddrow={() => {
