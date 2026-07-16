@@ -38,7 +38,7 @@
   import StructureView from './StructureView.svelte'
   import DataTable from './DataTable.svelte'
   import RowDetailPanel from './RowDetailPanel.svelte'
-  import JsonViewer from './JsonViewer.svelte'
+  import TableJsonView from './TableJsonView.svelte'
   import TableRecordView from './TableRecordView.svelte'
   import TableTextView from './TableTextView.svelte'
   import CommandPalette from './CommandPalette.svelte'
@@ -1040,9 +1040,6 @@ let rowSearch = $state('')
     const idxs = columns.map((_, i) => i).filter((i) => !hiddenColumns.has(columns[i].name))
     return rows.map((r) => idxs.map((i) => r[i]))
   })
-  const dataViewJson = $derived(
-    dataViewMode === 'json' ? rowsToJson(dataViewColumns, dataViewRows) : '[]',
-  )
 
   const activeTabIndex = $derived(
     activeTabId ? tabs.findIndex((t) => t.id === activeTabId) : -1,
@@ -4976,9 +4973,9 @@ let rowSearch = $state('')
               />
               </div>
               {#if dataViewMode === 'json'}
-                <JsonViewer
-                  json={dataViewJson}
-                  rowCount={rows.length}
+                <TableJsonView
+                  columns={dataViewColumns}
+                  rows={dataViewRows}
                   onshowtable={() => (dataViewMode = 'table')}
                   ondownload={() => void handleExport('json')}
                 />
