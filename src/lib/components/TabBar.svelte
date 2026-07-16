@@ -33,6 +33,12 @@
     onclose = () => {},
     oncloseothers = /** @param {string} _id */ (_id) => {},
     oncloseall = () => {},
+    /** Close a batch of tabs (Close Tabs to Left/Right). anchorId is the tab whose menu was used. */
+    onclosemany = /** @type {(ids: string[], anchorId: string) => void} */ (() => {}),
+    onduplicate = /** @param {string} _id */ (_id) => {},
+    onreopenclosed = () => {},
+    /** Whether the closed-tab stack has anything to reopen. */
+    canreopenclosed = false,
     onpintoggle = /** @param {string} _id */ (_id) => {},
     onnew = () => {},
     /** @type {import('$lib/stores/recent-tabs.js').RecentTab[]} */
@@ -129,6 +135,10 @@
             <div
               {...ctxProps}
               onpointerdown={(e) => tabPointerDown(e, tab.id)}
+              onpointerup={(e) => {
+                // Middle-click closes (pinned tabs stay protected, like the ✕ button)
+                if (e.button === 1 && !tab.pinned) { e.preventDefault(); onclose(tab.id) }
+              }}
               class={cn(
                 'group/tab relative flex min-w-0 max-w-[200px] shrink-0 items-stretch transition-colors duration-100',
                 active ? 'bg-panel' : 'hover:bg-muted/20',
@@ -195,7 +205,10 @@
           {/snippet}
         </ContextMenu.Trigger>
 
-        <ContextMenu.Content class="w-44">
+        {@const hasOtherClosable = tabs.some((t) => t.id !== tab.id && !t.pinned)}
+        {@const leftClosable = tabs.slice(0, i).filter((t) => !t.pinned)}
+        {@const rightClosable = tabs.slice(i + 1).filter((t) => !t.pinned)}
+        <ContextMenu.Content class="w-52">
           <ContextMenu.Item onSelect={() => onpintoggle(tab.id)}>
             {#if tab.pinned}
               <Icon name="pin-off" class="size-3.5" />
@@ -205,13 +218,46 @@
               Pin Tab
             {/if}
           </ContextMenu.Item>
+          {#if tab.kind === 'table' || tab.kind === 'sql'}
+            <ContextMenu.Item onSelect={() => onduplicate(tab.id)}>
+              <Icon name="copy" class="size-3.5" />
+              Duplicate Tab
+            </ContextMenu.Item>
+          {/if}
           <ContextMenu.Separator />
-          <ContextMenu.Item onSelect={() => onclose(tab.id)}>Close</ContextMenu.Item>
-          <ContextMenu.Item disabled={tabs.length <= 1} onSelect={() => oncloseothers(tab.id)}>
-            Close Others
+          <ContextMenu.Item onSelect={() => onclose(tab.id)}>
+            <Icon name="x" class="size-3.5" />
+            Close Tab
+          </ContextMenu.Item>
+          <ContextMenu.Item disabled={!hasOtherClosable} onSelect={() => oncloseothers(tab.id)}>
+            <Icon name="circle-slash" class="size-3.5" />
+            Close Other Tabs
+          </ContextMenu.Item>
+          <ContextMenu.Item
+            disabled={leftClosable.length === 0}
+            onSelect={() => onclosemany(leftClosable.map((t) => t.id), tab.id)}
+          >
+            <Icon name="arrow-left-to-line" class="size-3.5" />
+            Close Tabs to Left
+          </ContextMenu.Item>
+          <ContextMenu.Item
+            disabled={rightClosable.length === 0}
+            onSelect={() => onclosemany(rightClosable.map((t) => t.id), tab.id)}
+          >
+            <Icon name="arrow-right-to-line" class="size-3.5" />
+            Close Tabs to Right
           </ContextMenu.Item>
           <ContextMenu.Separator />
-          <ContextMenu.Item onSelect={oncloseall}>Close All</ContextMenu.Item>
+          <ContextMenu.Item disabled={!canreopenclosed} onSelect={onreopenclosed}>
+            <Icon name="history" class="size-3.5" />
+            Reopen Closed Tab
+            <ContextMenu.Shortcut>⌘⇧T</ContextMenu.Shortcut>
+          </ContextMenu.Item>
+          <ContextMenu.Separator />
+          <ContextMenu.Item variant="destructive" onSelect={oncloseall}>
+            <Icon name="trash-2" class="size-3.5" />
+            Close All Tabs
+          </ContextMenu.Item>
         </ContextMenu.Content>
       </ContextMenu.Root>
     {/each}
