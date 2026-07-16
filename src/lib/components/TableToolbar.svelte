@@ -113,6 +113,11 @@
   let viewsMenuOpen = $state(false);
   let viewNameDraft = $state("");
 
+  /** Anything worth resetting: search, filters, sort, hidden columns or a non-table view mode. */
+  const canResetView = $derived(
+    !!(rowSearch.trim() || rowFilters.length || rowSort || hiddenColumns.size || dataViewMode !== "table"),
+  );
+
   function commitSaveView() {
     const name = viewNameDraft.trim();
     if (!name) return;
@@ -818,6 +823,19 @@
       >
         <Icon name="terminal" class="size-3.5 shrink-0" />
       </button>
+
+      <!-- Reset everything — only appears when something is non-default -->
+      {#if canResetView}
+        <button
+          type="button"
+          class={cn(iconBtn, "shrink-0")}
+          title="Reset view — clear search, filters, sort, hidden columns and view mode"
+          disabled={loading}
+          onclick={onresetview}
+        >
+          <Icon name="rotate-ccw" class="size-3.5" />
+        </button>
+      {/if}
 
       </div><!-- /action group -->
 
