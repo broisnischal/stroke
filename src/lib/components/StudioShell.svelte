@@ -38,6 +38,9 @@
   import StructureView from './StructureView.svelte'
   import DataTable from './DataTable.svelte'
   import RowDetailPanel from './RowDetailPanel.svelte'
+  import JsonViewer from './JsonViewer.svelte'
+  import TableRecordView from './TableRecordView.svelte'
+  import TableTextView from './TableTextView.svelte'
   import CommandPalette from './CommandPalette.svelte'
   // AiChat / AiSidebar (large, pull in marked + shiki) are loaded lazily the first time
   // the AI panel is opened — see the {#await import()} blocks below.
@@ -396,6 +399,9 @@
   let sequences = $state([])
   /** @type {'data' | 'structure'} */
   let tableViewMode = $state('data')
+  /** How the data view renders loaded rows — sticky per tab via snapshots. */
+  /** @type {'table' | 'json' | 'record' | 'text'} */
+  let dataViewMode = $state('table')
   /** @type {import('$lib/api.js').ColumnStructureRow[] | null} — loaded on demand when switching to structure view */
   let structureColumns = $state(/** @type {any[]} */ ([]))
   let loadingStructure = $state(false)
@@ -1025,6 +1031,19 @@ let rowSearch = $state('')
     return null
   })
 
+  // Columns/rows narrowed to visible columns for the JSON/text views (the
+  // record view filters internally so it can keep original column indices).
+  const dataViewColumns = $derived(columns.filter((c) => !hiddenColumns.has(c.name)))
+  const dataViewRows = $derived.by(() => {
+    if (dataViewMode !== 'json' && dataViewMode !== 'text') return []
+    if (dataViewColumns.length === columns.length) return rows
+    const idxs = columns.map((_, i) => i).filter((i) => !hiddenColumns.has(columns[i].name))
+    return rows.map((r) => idxs.map((i) => r[i]))
+  })
+  const dataViewJson = $derived(
+    dataViewMode === 'json' ? rowsToJson(dataViewColumns, dataViewRows) : '[]',
+  )
+
   const activeTabIndex = $derived(
     activeTabId ? tabs.findIndex((t) => t.id === activeTabId) : -1,
   )
@@ -1055,6 +1074,7 @@ let rowSearch = $state('')
       savingCell: false,
       hiddenColumns: new Set(hiddenColumns),
       filterBarOpen,
+      dataViewMode,
       ...(() => { const s = tableGetScroll(); return { scrollLeft: s.left, scrollTop: s.top } })(),
     }
   }
@@ -1083,6 +1103,7 @@ let rowSearch = $state('')
     activeTable = s.table
     hiddenColumns = new Set(s.hiddenColumns)
     filterBarOpen = s.filterBarOpen ?? false
+    dataViewMode = s.dataViewMode ?? 'table'
     // Restore the grid scroll position for this tab. Defer one tick so that
     // if DataTable just remounted (switching from a non-table tab), the new
     // applyScroll binding is in place before we call it — otherwise the old
@@ -4748,6 +4769,7 @@ let rowSearch = $state('')
             bind:this={tableToolbar}
             bind:filterBarOpen
             bind:tableViewMode
+            bind:dataViewMode
             structureAllowed={canShowStructure}
             ontogglestructure={() => { tableViewMode = 'structure'; if (!structureColumns.length) void loadStructure() }}
 
@@ -4778,7 +4800,11 @@ let rowSearch = $state('')
             live={liveEnabled}
             ondeleteselected={() => stageDeleteSelectedRows()}
             onexport={handleExport}
-            onaddrow={() => dtBeginInsertRow?.()}
+            onaddrow={() => {
+              // Row insertion happens on the canvas grid — jump back to it first.
+              if (dataViewMode !== 'table') dataViewMode = 'table'
+              void tick().then(() => dtBeginInsertRow?.())
+            }}
             onopeninsql={openTableInSqlEditor}
             readonly={tableReadonly}
             {hiddenColumns}
@@ -4809,6 +4835,9 @@ let rowSearch = $state('')
 
           <div class="flex min-h-0 min-w-0 flex-1">
             <svelte:boundary failed={tabError}>
+              <!-- The grid stays mounted (hidden) in other view modes so staged
+                   edits, selection and scroll position survive mode switches. -->
+              <div class={dataViewMode === 'table' ? 'flex min-h-0 min-w-0 flex-1' : 'hidden'}>
               <DataTable
                 {columns}
                 {rows}
@@ -4884,15 +4913,45 @@ let rowSearch = $state('')
                 bind:stageDeleteSelected={stageDeleteSelectedRows}
                 readonly={tableReadonly}
               />
+              </div>
+              {#if dataViewMode === 'json'}
+                <JsonViewer
+                  json={dataViewJson}
+                  rowCount={rows.length}
+                  onshowtable={() => (dataViewMode = 'table')}
+                  ondownload={() => void handleExport('json')}
+                />
+              {:else if dataViewMode === 'record'}
+                <TableRecordView
+                  {columns}
+                  {rows}
+                  {primaryKey}
+                  {hiddenColumns}
+                  offset={currentOffset}
+                  {total}
+                  readonly={tableReadonly}
+                  initialIndex={focusedRow ?? 0}
+                  onindexchange={(i) => (focusedRow = i)}
+                  hasPrevPage={!infiniteScroll && page > 1}
+                  hasNextPage={!infiniteScroll && (total < 0 || page * effectivePageSize < total)}
+                  onprevpage={() => void handlePageChange(page - 1)}
+                  onnextpage={() => void handlePageChange(page + 1)}
+                  onsave={handleSaveCell}
+                />
+              {:else if dataViewMode === 'text'}
+                <TableTextView columns={dataViewColumns} rows={dataViewRows} tableName={activeTable} />
+              {/if}
             </svelte:boundary>
-            <RowDetailPanel
-              {columns}
-              {rows}
-              {primaryKey}
-              target={inspectorTarget}
-              onclose={closeInspector}
-              onsave={handleSaveCell}
-            />
+            {#if dataViewMode === 'table'}
+              <RowDetailPanel
+                {columns}
+                {rows}
+                {primaryKey}
+                target={inspectorTarget}
+                onclose={closeInspector}
+                onsave={handleSaveCell}
+              />
+            {/if}
           </div>
           {/if}
         {/if}
