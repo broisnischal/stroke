@@ -44,6 +44,58 @@ export async function rowsToCsvAsync(columns, rows, opts = {}) {
   return blocks.join('\n')
 }
 
+/** Flatten a value to a single line for tab/pipe-delimited formats. */
+const singleLine = (/** @type {unknown} */ v) => {
+  if (v === null || v === undefined) return ''
+  const s = typeof v === 'object' ? JSON.stringify(v) : String(v)
+  return s.replace(/[\t\r\n]+/g, ' ')
+}
+
+/**
+ * Convert columns + rows to a TSV string. Tabs/newlines inside values are
+ * collapsed to spaces so each row stays one physical line.
+ * @param {Array<{ name: string }>} columns
+ * @param {unknown[][]} rows
+ * @returns {string}
+ */
+export function rowsToTsv(columns, rows) {
+  const header = columns.map((c) => singleLine(c.name)).join('\t')
+  const body = rows.map((row) => row.map(singleLine).join('\t')).join('\n')
+  return header + '\n' + body
+}
+
+const mdEscape = (/** @type {unknown} */ v) => singleLine(v).replace(/\|/g, '\\|')
+
+/**
+ * Convert columns + rows to a GitHub-flavored Markdown table.
+ * @param {Array<{ name: string }>} columns
+ * @param {unknown[][]} rows
+ * @returns {string}
+ */
+export function rowsToMarkdown(columns, rows) {
+  const header = `| ${columns.map((c) => mdEscape(c.name)).join(' | ')} |`
+  const sep = `| ${columns.map(() => '---').join(' | ')} |`
+  const body = rows.map((row) => `| ${row.map(mdEscape).join(' | ')} |`).join('\n')
+  return body ? `${header}\n${sep}\n${body}` : `${header}\n${sep}`
+}
+
+/**
+ * Convert columns + rows to JSON Lines (one JSON object per line).
+ * @param {Array<{ name: string }>} columns
+ * @param {unknown[][]} rows
+ * @returns {string}
+ */
+export function rowsToJsonl(columns, rows) {
+  return rows
+    .map((row) => {
+      /** @type {Record<string, unknown>} */
+      const obj = {}
+      columns.forEach((col, i) => { obj[col.name] = row[i] ?? null })
+      return JSON.stringify(obj)
+    })
+    .join('\n')
+}
+
 /**
  * Convert columns + rows to a JSON array of objects.
  * @param {Array<{ name: string }>} columns
@@ -92,7 +144,7 @@ export async function rowsToJsonAsync(columns, rows, opts = {}) {
 /**
  * Build a default filename like "users_2025-05-24.csv"
  * @param {string | null} tableName
- * @param {'csv' | 'json'} format
+ * @param {'csv' | 'json' | 'tsv' | 'md' | 'jsonl'} format
  */
 export function buildExportFilename(tableName, format) {
   const base = tableName ?? 'export'
@@ -100,25 +152,35 @@ export function buildExportFilename(tableName, format) {
   return `${base}_${date}.${format}`
 }
 
+/** @type {Record<string, { name: string, mime: string }>} */
+const FORMAT_META = {
+  csv: { name: 'CSV files', mime: 'text/csv;charset=utf-8;' },
+  json: { name: 'JSON files', mime: 'application/json' },
+  sql: { name: 'SQL files', mime: 'text/plain' },
+  tsv: { name: 'TSV files', mime: 'text/tab-separated-values' },
+  md: { name: 'Markdown files', mime: 'text/markdown' },
+  jsonl: { name: 'JSON Lines files', mime: 'application/x-ndjson' },
+}
+
 /**
  * Show a native "Save As" dialog and write content to the chosen path.
  * Falls back to a browser blob download when running outside Tauri.
  * @param {string} content
  * @param {string} defaultFilename  e.g. "users_2025-05-24.csv"
- * @param {'csv' | 'json' | 'sql'} format
+ * @param {'csv' | 'json' | 'sql' | 'tsv' | 'md' | 'jsonl'} format
  * @returns {Promise<boolean>} true if the file was saved, false if cancelled
  */
 export async function saveExportFile(content, defaultFilename, format) {
   const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+  const meta = FORMAT_META[format] ?? { name: 'Files', mime: 'text/plain' }
 
   if (isTauri) {
     const { save } = await import('@tauri-apps/plugin-dialog')
     const { invoke } = await import('@tauri-apps/api/core')
 
-    const filterName = format === 'csv' ? 'CSV files' : format === 'json' ? 'JSON files' : 'SQL files'
     const path = await save({
       defaultPath: defaultFilename,
-      filters: [{ name: filterName, extensions: [format] }],
+      filters: [{ name: meta.name, extensions: [format] }],
     })
 
     if (!path) return false
@@ -127,7 +189,7 @@ export async function saveExportFile(content, defaultFilename, format) {
   }
 
   // Browser fallback
-  const mime = format === 'csv' ? 'text/csv;charset=utf-8;' : format === 'json' ? 'application/json' : 'text/plain'
+  const mime = meta.mime
   const blob = new Blob([content], { type: mime })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')

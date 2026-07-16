@@ -72,6 +72,10 @@
     filterBarOpen = $bindable(false),
     /** @type {'data' | 'structure'} */
     tableViewMode = $bindable("data"),
+    /** How the data view renders the loaded page: canvas grid, JSON document,
+     *  one-record-at-a-time form, or copyable text (CSV/TSV/Markdown). */
+    /** @type {'table' | 'json' | 'record' | 'text'} */
+    dataViewMode = $bindable("table"),
     ontogglestructure = () => {},
     /** Whether the structure view is available for the current object (false for views) */
     structureAllowed = true,
@@ -229,6 +233,14 @@
 
   const iconBtn =
     "inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30";
+
+  /** @type {Array<{ id: 'table' | 'json' | 'record' | 'text', icon: string, label: string }>} */
+  const DATA_VIEW_MODES = [
+    { id: "table", icon: "table-2", label: "Table view" },
+    { id: "json", icon: "braces", label: "JSON view" },
+    { id: "record", icon: "layout-list", label: "Record view" },
+    { id: "text", icon: "file-text", label: "Text view (CSV / Markdown)" },
+  ];
 
   // ── Searchable-menu item lists ──────────────────────────────────────────
   // Sort: two rows per column (ascending / descending), searchable by name.
@@ -690,6 +702,31 @@
 
       <span class="mx-0.5 h-4 w-px shrink-0 bg-border/60"></span>
 
+      <!-- View mode: table / json / record / text -->
+      <div
+        class="flex h-7 shrink-0 items-center gap-px rounded-md bg-accent/40 p-0.5 @max-[620px]/tb:hidden"
+        role="group"
+        aria-label="Data view mode"
+      >
+        {#each DATA_VIEW_MODES as m (m.id)}
+          <button
+            type="button"
+            class={cn(
+              "inline-flex h-6 w-7 items-center justify-center rounded-[5px] text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-30",
+              dataViewMode === m.id && "bg-background text-foreground shadow-sm",
+            )}
+            title={m.label}
+            aria-pressed={dataViewMode === m.id}
+            disabled={columns.length === 0}
+            onclick={() => (dataViewMode = m.id)}
+          >
+            <Icon name={m.icon} class="size-3.5" />
+          </button>
+        {/each}
+      </div>
+
+      <span class="mx-0.5 h-4 w-px shrink-0 bg-border/60 @max-[620px]/tb:hidden"></span>
+
       <!-- Add row -->
       <button
         type="button"
@@ -925,6 +962,18 @@
           {/if}
         {/if}
         {#if tableViewMode !== "structure"}
+          <DropdownMenu.RadioGroup
+            value={dataViewMode}
+            onValueChange={(v) => (dataViewMode = /** @type {'table' | 'json' | 'record' | 'text'} */ (v))}
+          >
+            {#each DATA_VIEW_MODES as m (m.id)}
+              <DropdownMenu.RadioItem value={m.id} disabled={columns.length === 0}>
+                <Icon name={m.icon} class="size-3.5" />
+                {m.label}
+              </DropdownMenu.RadioItem>
+            {/each}
+          </DropdownMenu.RadioGroup>
+          <DropdownMenu.Separator />
           <DropdownMenu.Item onSelect={oninfinitescrolltoggle}>
             <Icon name="infinity" class="size-3.5" />
             Infinite scroll

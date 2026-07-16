@@ -30,6 +30,7 @@ import { loadDefaultPageSize } from '$lib/table-query.js'
  * @property {boolean} savingCell
  * @property {Set<string>} hiddenColumns
  * @property {boolean} filterBarOpen
+ * @property {'table' | 'json' | 'record' | 'text'} [dataViewMode]
  * @property {number} [scrollLeft]
  * @property {number} [scrollTop]
  */
@@ -111,6 +112,7 @@ export function createTableTabState(schema = 'public', table = null, tableKind =
     savingCell: false,
     hiddenColumns: new Set(),
     filterBarOpen: false,
+    dataViewMode: 'table',
     scrollLeft: 0,
     scrollTop: 0,
   }
