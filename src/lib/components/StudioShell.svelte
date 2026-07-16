@@ -52,6 +52,7 @@
   import CreateSchemaDialog from './CreateSchemaDialog.svelte'
   import GenerateSqlDialog from './GenerateSqlDialog.svelte'
   import { genSelectStar } from '$lib/sql-generate.js'
+  import { qualifiedTable } from '$lib/dml-preview.js'
   import Onboarding from './Onboarding.svelte'
   import SettingsDialog from './SettingsDialog.svelte'
   import KeyboardShortcutsDialog from './KeyboardShortcutsDialog.svelte'
@@ -528,7 +529,16 @@
   /** @param {string} tableName */
   async function handleCountRows(tableName) {
     try {
-      const n = await countTableRows(activeSchema, tableName)
+      let n = await countTableRows(activeSchema, tableName)
+      if (n < 0) {
+        // The count command is Postgres-only (other engines return -1) — fall
+        // back to a portable COUNT(*) through the regular SQL path, which every
+        // driver implements. Quoting/qualification follows the grid's rules.
+        const tbl = qualifiedTable({ dialect: dbType, schema: activeSchema, table: tableName })
+        const res = await executeSql(`SELECT COUNT(*) FROM ${tbl}`)
+        n = Number(res?.rows?.[0]?.[0])
+      }
+      if (!Number.isFinite(n) || n < 0) throw new Error('Count not available on this connection')
       toast.success(tableName, { description: `${n.toLocaleString('en-US')} row${n === 1 ? '' : 's'}` })
     } catch (e) {
       toast.error('Count failed', { description: String(e) })

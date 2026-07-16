@@ -894,7 +894,7 @@
                           Copy name
                         </ContextMenu.Item>
                         <ContextMenu.Item onSelect={() => oncopycolumns(tableName)}>
-                          <Icon name="columns-3" />
+                          <Icon name="copy" />
                           Copy columns
                         </ContextMenu.Item>
                         {#if openTableSet.has(tableName)}
@@ -913,7 +913,7 @@
                           Open in SQL console
                         </ContextMenu.Item>
                         <ContextMenu.Item onSelect={() => ongeneratesql(tableName)}>
-                          <Icon name="sparkles" />
+                          <Icon name="zap" />
                           Generate SQL…
                         </ContextMenu.Item>
                         <ContextMenu.Item onSelect={() => oncountrows(tableName)}>
@@ -922,7 +922,7 @@
                         </ContextMenu.Item>
                         <ContextMenu.Separator />
                         <ContextMenu.Item onSelect={() => onviewstructure(tableName)}>
-                          <Icon name="columns-3" />
+                          <Icon name="layout-list" />
                           View structure
                         </ContextMenu.Item>
                         <ContextMenu.Item onSelect={() => onviewddl(tableName)}>
@@ -1093,7 +1093,7 @@
                             Copy name
                           </ContextMenu.Item>
                           <ContextMenu.Item onSelect={() => oncopycolumns(table.name)}>
-                            <Icon name="columns-3" />
+                            <Icon name="copy" />
                             Copy columns
                           </ContextMenu.Item>
                           {#if openTableSet.has(table.name)}
@@ -1126,7 +1126,7 @@
                             Open in SQL console
                           </ContextMenu.Item>
                           <ContextMenu.Item onSelect={() => ongeneratesql(table.name)}>
-                            <Icon name="sparkles" />
+                            <Icon name="zap" />
                             Generate SQL…
                           </ContextMenu.Item>
                           <ContextMenu.Item onSelect={() => oncountrows(table.name)}>
@@ -1135,7 +1135,7 @@
                           </ContextMenu.Item>
                           <ContextMenu.Separator />
                           <ContextMenu.Item onSelect={() => onviewstructure(table.name)}>
-                            <Icon name="columns-3" />
+                            <Icon name="layout-list" />
                             View structure
                           </ContextMenu.Item>
                           <ContextMenu.Item onSelect={() => onviewddl(table.name)}>
