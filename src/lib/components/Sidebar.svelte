@@ -54,6 +54,14 @@
     onclosetable = /** @type {(table: string) => void} */ (() => {}),
     /** Open the table with its structure view active. */
     onviewstructure = /** @type {(table: string) => void} */ (() => {}),
+    /** Open a SELECT for the table in a SQL console tab. */
+    onopeninconsole = /** @type {(table: string) => void} */ (() => {}),
+    /** Open the Generate SQL dialog (statement skeletons) for the table. */
+    ongeneratesql = /** @type {(table: string) => void} */ (() => {}),
+    /** Count the table's rows and toast the result. */
+    oncountrows = /** @type {(table: string) => void} */ (() => {}),
+    /** Copy the table's column names as a comma-separated list. */
+    oncopycolumns = /** @type {(table: string) => void} */ (() => {}),
   } = $props();
 
   const openTableSet = $derived(new Set(openTables))
@@ -885,6 +893,10 @@
                           <Icon name="clipboard-copy" />
                           Copy name
                         </ContextMenu.Item>
+                        <ContextMenu.Item onSelect={() => oncopycolumns(tableName)}>
+                          <Icon name="columns-3" />
+                          Copy columns
+                        </ContextMenu.Item>
                         {#if openTableSet.has(tableName)}
                           <ContextMenu.Item onSelect={() => onclosetable(tableName)}>
                             <Icon name="x" />
@@ -894,6 +906,19 @@
                         <ContextMenu.Item onSelect={() => togglePin(tableName)}>
                           <Icon name="pin-off" />
                           Unpin table
+                        </ContextMenu.Item>
+                        <ContextMenu.Separator />
+                        <ContextMenu.Item onSelect={() => onopeninconsole(tableName)}>
+                          <Icon name="terminal" />
+                          Open in SQL console
+                        </ContextMenu.Item>
+                        <ContextMenu.Item onSelect={() => ongeneratesql(tableName)}>
+                          <Icon name="sparkles" />
+                          Generate SQL…
+                        </ContextMenu.Item>
+                        <ContextMenu.Item onSelect={() => oncountrows(tableName)}>
+                          <Icon name="hash" />
+                          Count rows
                         </ContextMenu.Item>
                         <ContextMenu.Separator />
                         <ContextMenu.Item onSelect={() => onviewstructure(tableName)}>
@@ -1067,6 +1092,10 @@
                             <Icon name="clipboard-copy" />
                             Copy name
                           </ContextMenu.Item>
+                          <ContextMenu.Item onSelect={() => oncopycolumns(table.name)}>
+                            <Icon name="columns-3" />
+                            Copy columns
+                          </ContextMenu.Item>
                           {#if openTableSet.has(table.name)}
                             <ContextMenu.Item onSelect={() => onclosetable(table.name)}>
                               <Icon name="x" />
@@ -1090,6 +1119,19 @@
                               <Icon name="square-check" />
                               Select
                             {/if}
+                          </ContextMenu.Item>
+                          <ContextMenu.Separator />
+                          <ContextMenu.Item onSelect={() => onopeninconsole(table.name)}>
+                            <Icon name="terminal" />
+                            Open in SQL console
+                          </ContextMenu.Item>
+                          <ContextMenu.Item onSelect={() => ongeneratesql(table.name)}>
+                            <Icon name="sparkles" />
+                            Generate SQL…
+                          </ContextMenu.Item>
+                          <ContextMenu.Item onSelect={() => oncountrows(table.name)}>
+                            <Icon name="hash" />
+                            Count rows
                           </ContextMenu.Item>
                           <ContextMenu.Separator />
                           <ContextMenu.Item onSelect={() => onviewstructure(table.name)}>
