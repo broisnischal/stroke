@@ -1,29 +1,23 @@
 <script>
   import Icon from './Icon.svelte'
   import { cn } from '$lib/utils.js'
-  import VirtualCodeView from './VirtualCodeView.svelte'
-  import { escapeHtml, highlightJsonHtml } from '$lib/json-inspector.js'
+  import MonacoTextView from './MonacoTextView.svelte'
+  import { registerDelimitedLanguages, CSV_LANG, TSV_LANG } from '$lib/monaco-delimited.js'
   import {
     rowsToCsv,
     rowsToTsv,
     rowsToMarkdown,
     rowsToJsonl,
-    csvEscape,
-    singleLine,
-    mdEscape,
-    mdPad,
-    markdownColumnWidths,
     buildExportFilename,
     saveExportFile,
   } from '$lib/export.js'
 
   /**
    * Text mode for the data table — CSV / TSV / Markdown / JSON Lines views of
-   * the current page. Rendering is virtualized and lazy: a line's text is only
-   * built (and colorized) when it scrolls into view, and the full document
-   * string is only materialized on Copy / Download. Values are colored by their
-   * real type (we render from row data, not by re-parsing the text), so quoted
-   * delimiters can't confuse the highlighting.
+   * the current page, rendered through the shared read-only Monaco surface
+   * (smooth virtualized scrolling, ⌘F find, full selection). CSV/TSV get
+   * colored values via a tiny Monarch tokenizer; Markdown tables are
+   * column-aligned and copy exactly what's displayed.
    */
   let {
     /** @type {Array<{ name: string }>} */
@@ -34,12 +28,14 @@
     tableName = null,
   } = $props()
 
-  /** @type {Array<{ id: 'csv' | 'tsv' | 'md' | 'jsonl', label: string }>} */
+  registerDelimitedLanguages()
+
+  /** @type {Array<{ id: 'csv' | 'tsv' | 'md' | 'jsonl', label: string, lang: string }>} */
   const FORMATS = [
-    { id: 'csv', label: 'CSV' },
-    { id: 'tsv', label: 'TSV' },
-    { id: 'md', label: 'Markdown' },
-    { id: 'jsonl', label: 'JSON Lines' },
+    { id: 'csv', label: 'CSV', lang: CSV_LANG },
+    { id: 'tsv', label: 'TSV', lang: TSV_LANG },
+    { id: 'md', label: 'Markdown', lang: 'markdown' },
+    { id: 'jsonl', label: 'JSON Lines', lang: 'json' },
   ]
 
   const STORAGE_KEY = 'stroke:text-view-format'
@@ -67,116 +63,22 @@
     }
   }
 
-  const DIM = 'text-muted-foreground/40'
-
-  /** CSS class for a value span based on its runtime type. */
-  function valueCls(/** @type {unknown} */ v) {
-    if (v === null || v === undefined) return 'json-tok-null'
-    if (typeof v === 'number' || typeof v === 'bigint') return 'json-tok-num'
-    if (typeof v === 'boolean') return 'json-tok-bool'
-    return ''
-  }
-
-  /**
-   * One delimited line as colored HTML: escaped cell texts joined by a dimmed
-   * delimiter, each cell tinted by its value's type.
-   * @param {string[]} texts @param {(string | '')[]} classes @param {string} delimHtml
-   */
-  function delimitedLineHtml(texts, classes, delimHtml) {
-    let out = ''
-    for (let i = 0; i < texts.length; i++) {
-      if (i > 0) out += delimHtml
-      const t = escapeHtml(texts[i])
-      out += classes[i] ? `<span class="${classes[i]}">${t}</span>` : t
-    }
-    return out
-  }
-
-  // Markdown column widths — only computed when the format needs them.
-  const mdWidths = $derived(format === 'md' ? markdownColumnWidths(columns, rows) : [])
-
-  const headerCls = $derived(columns.map(() => 'json-tok-key'))
-
-  // Total line count per format (header rows included).
-  const count = $derived.by(() => {
-    if (columns.length === 0) return 0
-    if (format === 'jsonl') return rows.length
-    if (format === 'md') return rows.length + 2
-    return rows.length + 1
-  })
-
-  const lineHtml = $derived((/** @type {number} */ idx) => {
-    if (format === 'jsonl') {
-      const row = rows[idx]
-      if (!row) return ''
-      /** @type {Record<string, unknown>} */
-      const record = {}
-      columns.forEach((col, i) => { record[col.name] = row[i] ?? null })
-      return highlightJsonHtml(JSON.stringify(record))
-    }
-
-    if (format === 'md') {
-      const pipe = `<span class="${DIM}">|</span>`
-      if (idx === 0) {
-        const cells = columns.map((c, i) => mdPad(mdEscape(c.name), mdWidths[i]))
-        return `${pipe} ${delimitedLineHtml(cells, headerCls, ` ${pipe} `)} ${pipe}`
-      }
-      if (idx === 1) {
-        return `<span class="${DIM}">| ${mdWidths.map((w) => '-'.repeat(w)).join(' | ')} |</span>`
-      }
-      const row = rows[idx - 2]
-      if (!row) return ''
-      const cells = row.map((v, i) => mdPad(mdEscape(v), mdWidths[i]))
-      return `${pipe} ${delimitedLineHtml(cells, row.map(valueCls), ` ${pipe} `)} ${pipe}`
-    }
-
-    // csv / tsv
-    const delim = format === 'tsv' ? '\t' : `<span class="${DIM}">,</span>`
-    const esc = format === 'tsv' ? singleLine : csvEscape
-    if (idx === 0) {
-      return delimitedLineHtml(columns.map((c) => esc(c.name)), headerCls, delim)
-    }
-    const row = rows[idx - 1]
-    if (!row) return ''
-    return delimitedLineHtml(row.map(esc), row.map(valueCls), delim)
-  })
-
-  // Horizontal scroll estimate: Markdown is exact; the rest sample early rows.
-  const maxChars = $derived.by(() => {
-    if (columns.length === 0) return 0
-    if (format === 'md') return mdWidths.reduce((a, w) => a + w, 0) + columns.length * 3 + 1
-    const esc = format === 'tsv' ? singleLine : csvEscape
-    let max = columns.reduce((a, c) => a + esc(c.name).length + 1, 0)
-    const sample = Math.min(rows.length, 300)
-    for (let r = 0; r < sample; r++) {
-      const row = rows[r]
-      let len = 0
-      if (format === 'jsonl') {
-        for (let i = 0; i < columns.length; i++) {
-          len += columns[i].name.length + String(row[i] ?? 'null').length + 8
-        }
-      } else {
-        for (const v of row) len += esc(v).length + 1
-      }
-      if (len > max) max = len
-    }
-    return max
-  })
-
-  /** Full document text — built only for Copy / Download. */
-  function buildText() {
+  const text = $derived.by(() => {
+    if (columns.length === 0) return ''
     if (format === 'tsv') return rowsToTsv(columns, rows)
-    if (format === 'md') return rowsToMarkdown(columns, rows, markdownColumnWidths(columns, rows))
+    if (format === 'md') return rowsToMarkdown(columns, rows)
     if (format === 'jsonl') return rowsToJsonl(columns, rows)
     return rowsToCsv(columns, rows)
-  }
+  })
+
+  const language = $derived(FORMATS.find((f) => f.id === format)?.lang ?? 'plaintext')
 
   let copied = $state(false)
   /** @type {ReturnType<typeof setTimeout> | null} */
   let copiedTimer = null
 
   function handleCopy() {
-    navigator.clipboard.writeText(buildText()).then(() => {
+    navigator.clipboard.writeText(text).then(() => {
       copied = true
       if (copiedTimer) clearTimeout(copiedTimer)
       copiedTimer = setTimeout(() => {
@@ -186,7 +88,7 @@
   }
 
   function handleDownload() {
-    void saveExportFile(buildText(), buildExportFilename(tableName, format), format)
+    void saveExportFile(text, buildExportFilename(tableName, format), format)
   }
 </script>
 
@@ -241,12 +143,12 @@
     </div>
   </div>
 
-  <!-- Virtualized text body -->
+  <!-- Monaco text body (⌘F to search) -->
   {#if columns.length === 0}
     <div class="flex min-h-0 flex-1 items-center justify-center bg-panel">
       <p class="font-mono text-ui-sm text-muted-foreground/40">No data to display</p>
     </div>
   {:else}
-    <VirtualCodeView {count} {lineHtml} {maxChars} />
+    <MonacoTextView {text} {language} />
   {/if}
 </div>

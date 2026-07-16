@@ -327,7 +327,7 @@
     <button type="button" class={navBtn} title="Previous record (←)" disabled={!canPrev} onclick={goPrev}>
       <Icon name="chevron-left" class="size-3.5" />
     </button>
-    <span class="min-w-24 select-none px-1 text-center font-mono text-ui-2xs tabular-nums text-muted-foreground">
+    <span class="min-w-28 select-none rounded-full bg-accent/40 px-2.5 py-0.5 text-center font-mono text-ui-2xs tabular-nums text-foreground/80">
       {recordLabel}
     </span>
     <button type="button" class={navBtn} title="Next record (→)" disabled={!canNext} onclick={goNext}>
@@ -374,13 +374,14 @@
         <p class="font-mono text-ui-sm text-muted-foreground/40">No rows on this page</p>
       </div>
     {:else}
-      <div class="mx-auto w-full max-w-3xl px-4 py-3">
+      <div class="mx-auto w-full max-w-2xl px-6 py-5">
+        <div class="divide-y divide-border/30 overflow-hidden rounded-lg border border-border/50 bg-card/40 shadow-sm">
         {#key idx}
           {#each filteredFields as field (field.colIdx)}
             <div
               class={cn(
-                'group/field grid grid-cols-[minmax(9rem,14rem)_minmax(0,1fr)_auto] items-start gap-x-3 border-b border-border/30 py-1.5',
-                fields.length > 100 && '[content-visibility:auto] [contain-intrinsic-size:auto_40px]',
+                'group/field grid grid-cols-[minmax(8.5rem,11rem)_minmax(0,1fr)_auto] items-start gap-x-4 px-4 py-2 transition-colors hover:bg-accent/20',
+                fields.length > 100 && '[content-visibility:auto] [contain-intrinsic-size:auto_44px]',
               )}
             >
               <!-- Label -->
@@ -401,7 +402,7 @@
                 {#if !field.editable}
                   <div
                     class={cn(
-                      'w-full rounded border border-border/40 bg-muted/10 px-2.5 py-1.5 font-mono text-ui-xs',
+                      'w-full rounded-md border border-transparent bg-muted/20 px-2.5 py-1.5 font-mono text-ui-xs',
                       field.isNull || field.isEmpty ? 'italic text-muted-foreground/40' : 'text-foreground',
                       field.isMultiline ? 'whitespace-pre-wrap break-all' : 'truncate',
                     )}
@@ -411,7 +412,7 @@
                   <select
                     value={field.initialEditStr}
                     disabled={savingFields[field.colIdx]}
-                    class="w-full appearance-none rounded border border-border bg-muted/20 px-2.5 py-1.5 pr-7 font-mono text-ui-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+                    class="w-full appearance-none rounded-md border border-border/50 bg-muted/15 px-2.5 py-1.5 pr-7 font-mono text-ui-xs text-foreground transition-colors hover:border-border focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
                     onchange={(e) => void saveField(field.colIdx, /** @type {HTMLSelectElement} */ (e.target).value)}
                   >
                     {#if field.nullable}
@@ -436,8 +437,8 @@
                     disabled={savingFields[field.colIdx]}
                     placeholder={field.isNull ? 'NULL' : ''}
                     class={cn(
-                      'w-full resize-none rounded border bg-muted/20 px-2.5 py-1.5 font-mono text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50',
-                      fieldErrors[field.colIdx] ? 'border-destructive' : 'border-border',
+                      'w-full resize-none rounded-md border bg-muted/15 px-2.5 py-1.5 font-mono text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/40 hover:border-border focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50',
+                      fieldErrors[field.colIdx] ? 'border-destructive' : 'border-border/50',
                     )}
                     oninput={(e) => scheduleFieldSave(field.colIdx, /** @type {HTMLTextAreaElement} */ (e.currentTarget).value)}
                     onblur={(e) => handleFieldBlur(field.colIdx, e)}
@@ -450,8 +451,8 @@
                     disabled={savingFields[field.colIdx]}
                     placeholder={field.isNull ? 'NULL' : ''}
                     class={cn(
-                      'w-full rounded border bg-muted/20 px-2.5 py-1.5 font-mono text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50',
-                      fieldErrors[field.colIdx] ? 'border-destructive' : 'border-border',
+                      'w-full rounded-md border bg-muted/15 px-2.5 py-1.5 font-mono text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/40 hover:border-border focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50',
+                      fieldErrors[field.colIdx] ? 'border-destructive' : 'border-border/50',
                     )}
                     oninput={(e) => scheduleFieldSave(field.colIdx, /** @type {HTMLInputElement} */ (e.currentTarget).value)}
                     onblur={(e) => handleFieldBlur(field.colIdx, e)}
@@ -493,9 +494,13 @@
           {/each}
 
           {#if filteredFields.length === 0 && fieldSearch}
-            <p class="py-6 text-center font-mono text-ui-xs text-muted-foreground/60">No fields match</p>
+            <p class="px-4 py-8 text-center font-mono text-ui-xs text-muted-foreground/60">No fields match "{fieldSearch}"</p>
           {/if}
         {/key}
+        </div>
+        <p class="mt-3 select-none text-center text-ui-3xs text-muted-foreground/40">
+          ← → to navigate records{onsave && !readonly ? ' · Enter saves a field · Esc reverts' : ''}
+        </p>
       </div>
     {/if}
   </div>

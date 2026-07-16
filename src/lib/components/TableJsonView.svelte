@@ -1,15 +1,14 @@
 <script>
   import Icon from './Icon.svelte'
-  import VirtualCodeView from './VirtualCodeView.svelte'
+  import MonacoTextView from './MonacoTextView.svelte'
   import { rowToRecord, formatJsonValue } from '$lib/row-inspector.js'
-  import { highlightJsonHtml } from '$lib/json-inspector.js'
   import { evalJsonPath, getCompletions, applyCompletion, describeResult } from '$lib/jsonpath.js'
 
   /**
-   * JSON mode for the data table. Unlike the Monaco-based JsonViewer this
-   * renders through VirtualCodeView, so huge pages (100k+ rows, ~1M lines)
-   * stay smooth: only visible lines are tokenized/mounted, and JSONPath is
-   * evaluated against the live records — the document is never re-parsed.
+   * JSON mode for the data table — a read-only Monaco surface (smooth
+   * virtualized scrolling, ⌘F find, full selection) with adaptive large-doc
+   * settings, plus a JSONPath bar evaluated against the live records so the
+   * document is never re-parsed.
    */
   let {
     /** @type {Array<{ name: string }>} */
@@ -40,14 +39,6 @@
     if (!pathResult?.ok) return fullJson
     return formatJsonValue(pathResult.value)
   })
-
-  const lines = $derived(displayedJson.split('\n'))
-  const maxChars = $derived.by(() => {
-    let max = 0
-    for (const l of lines) if (l.length > max) max = l.length
-    return max
-  })
-  const lineHtml = $derived((/** @type {number} */ i) => highlightJsonHtml(lines[i] ?? ''))
 
   const completions = $derived.by(() => {
     if (!pathFocused) return []
@@ -193,12 +184,12 @@
     </div>
   </div>
 
-  <!-- Virtualized JSON body -->
+  <!-- Monaco JSON body (⌘F to search) -->
   {#if columns.length === 0}
     <div class="flex min-h-0 flex-1 items-center justify-center bg-panel">
       <p class="font-mono text-ui-sm text-muted-foreground/40">No data to display</p>
     </div>
   {:else}
-    <VirtualCodeView count={lines.length} {lineHtml} {maxChars} />
+    <MonacoTextView text={displayedJson} language="json" />
   {/if}
 </div>
