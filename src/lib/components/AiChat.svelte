@@ -41,6 +41,8 @@
     rowsToCsv,
     rowsToJson,
     rowsToMarkdown,
+    rowsToCsvAsync,
+    rowsToJsonAsync,
     saveExportFile,
     buildExportFilename,
   } from "$lib/export.js";
@@ -1827,6 +1829,57 @@
             ...(hint ? { hint } : {}),
             attempt: existing.count + 1,
           });
+        }
+      } else if (call.function.name === "export_data") {
+        const sql = String(args.sql ?? "").trim();
+        const fmt =
+          args.format === "json"
+            ? "json"
+            : args.format === "markdown" || args.format === "md"
+              ? "md"
+              : "csv";
+        if (!sql) {
+          apiHistory.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify({ error: "Empty SQL provided" }) });
+          return;
+        }
+        if (isDestructiveSql(sql)) {
+          apiHistory.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify({ error: "export_data only runs read-only SELECT/WITH queries." }) });
+          return;
+        }
+        try {
+          // Export the full result (no display cap) so large exports are complete.
+          const data = await executeSql(sql);
+          const cols = data.columns ?? [];
+          const rows = data.rows ?? [];
+          const total = rows.length;
+          if (total === 0) {
+            toolResult = JSON.stringify({ exported: false, message: "Query returned no rows to export." });
+          } else {
+            const LARGE = 20000;
+            let content;
+            /** @type {string | number | undefined} */
+            let toastId;
+            if (total > LARGE && fmt !== "md") {
+              // Large export: keep the UI responsive + show progress, like the table export.
+              toastId = toast.info(`Preparing ${fmt.toUpperCase()} — ${formatCompactCount(total)} rows…`, { description: "This can take a moment for large files", duration: 60 * 60 * 1000 });
+              await new Promise((r) => setTimeout(r, 16));
+              content = fmt === "json" ? await rowsToJsonAsync(cols, rows) : await rowsToCsvAsync(cols, rows);
+            } else {
+              content = fmt === "json" ? rowsToJson(cols, rows) : fmt === "md" ? rowsToMarkdown(cols, rows) : rowsToCsv(cols, rows);
+            }
+            const base = String(args.filename ?? "export").replace(/\.[a-z0-9]+$/i, "").trim() || "export";
+            const filename = buildExportFilename(base, fmt);
+            const saved = await saveExportFile(content, filename, fmt);
+            if (toastId != null) toast.dismiss(toastId);
+            if (saved) {
+              toast.success(`Downloaded ${filename}`, { description: `${formatCompactCount(total)} rows exported` });
+              toolResult = JSON.stringify({ exported: true, filename, format: fmt, row_count: total, message: `Exported ${total} rows to ${filename} — the file has been downloaded.` });
+            } else {
+              toolResult = JSON.stringify({ exported: false, message: "The user cancelled the save dialog." });
+            }
+          }
+        } catch (err) {
+          toolResult = JSON.stringify({ error: String(err) });
         }
       } else if (call.function.name === "describe_table") {
         const schema = String(
