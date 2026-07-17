@@ -691,7 +691,7 @@
       class:cursor-col-resize={resizingCol >= 0}
       onscroll={handleTableScroll}
     >
-      <table class="w-full border-collapse text-xs" style="table-layout:fixed;min-width:{totalWidth}px">
+      <table class="w-full border-separate text-xs" style="table-layout:fixed;min-width:{totalWidth}px;border-spacing:0">
         <colgroup>
           <col style="width:26px" />
           {#each colWidths as w}<col style="width:{w}px" />{/each}
@@ -744,8 +744,8 @@
               isAdded   ? 'bg-emerald-500/35' :
               isRemoved ? 'bg-red-500/35' :
               isModified? 'bg-amber-500/25' : ''}
-            <tr class="{rowBg || 'hover:bg-foreground/[0.025]'} border-b border-border/8 transition-colors" style="height:{ROW_HEIGHT}px">
-              <td class="relative select-none px-2 text-center font-mono text-[10px] font-bold {statusColor}">
+            <tr class="{rowBg || 'hover:bg-foreground/[0.025]'} transition-colors" style="height:{ROW_HEIGHT}px">
+              <td class="relative select-none border-b border-border/8 px-2 text-center font-mono text-[10px] font-bold {statusColor}">
                 {#if accentColor}<span class="absolute inset-y-0 left-0 w-[2px] {accentColor}"></span>{/if}
                 {statusGlyph}
               </td>
@@ -755,7 +755,7 @@
                 {@const newVal    = row.right?.[ci] ?? null}
                 {@const dispVal   = isRemoved ? oldVal : newVal}
                 {@const dispStr   = dispVal === null ? '' : String(dispVal)}
-                <td class="overflow-hidden px-3 font-mono text-[11px]">
+                <td class="overflow-hidden border-b border-border/8 px-3 font-mono text-[11px]">
                   {#if isChanged}
                     <div class="flex min-w-0 items-center gap-1.5">
                       {#if oldVal === null}
