@@ -1,6 +1,7 @@
 <script>
   import Minus from "@lucide/svelte/icons/minus";
   import Plus from "@lucide/svelte/icons/plus";
+  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
@@ -20,12 +21,18 @@
     ICON_STYLES,
     ICON_SETS,
     TABLE_STYLES,
+    DEFAULT_MAX_QUERY_HISTORY,
+    DEFAULT_CONNECT_TIMEOUT_MS,
+    DEFAULT_SOCKET_TIMEOUT_MS,
+    DEFAULT_MAX_ALLOWED_PACKET,
+    DEFAULT_SESSION_TIMEZONE,
   } from "$lib/stores/settings.js";
   import PenTool from "@lucide/svelte/icons/pen-tool";
   import LucideSearch from "@lucide/svelte/icons/search";
   import LucideSparkles from "@lucide/svelte/icons/sparkles";
   import { HugeiconsIcon } from "@hugeicons/svelte";
   import { Search01Icon, SparklesIcon } from "@hugeicons/core-free-icons";
+  import PhosphorSparkle from "phosphor-svelte/lib/Sparkle";
   import Icon from "./Icon.svelte";
   import { cn } from "$lib/utils.js";
   import {
@@ -48,6 +55,7 @@
   // ── Category navigation + search ─────────────────────────────────────────
   const CATEGORIES = [
     { id: 'general',      label: 'General',      icon: 'sliders-horizontal' },
+    { id: 'database',     label: 'Database',     icon: 'database' },
     { id: 'appearance',   label: 'Appearance',   icon: 'sparkles' },
     { id: 'integrations', label: 'Integrations', icon: 'blocks' },
     { id: 'about',        label: 'About',        icon: 'info' },
@@ -112,6 +120,8 @@
     dotted:  "background-image:radial-gradient(color-mix(in oklab,var(--border) 90%,transparent) 0.7px,transparent 0.8px);background-size:4px 4px;",
     dots:    "background-image:radial-gradient(var(--muted-foreground) 1.1px,transparent 1.3px);background-size:9px 9px;background-position:center;",
     minimal: "background-image:linear-gradient(var(--border) 1px,transparent 1px);background-size:100% 7px;",
+    dashed:  "background-image:repeating-linear-gradient(90deg,var(--border) 0 3px,transparent 3px 6px),repeating-linear-gradient(0deg,var(--border) 0 3px,transparent 3px 6px);background-size:100% 7px,7px 100%;background-repeat:repeat;",
+    columns: "background-image:linear-gradient(90deg,var(--border) 1px,transparent 1px);background-size:7px 100%;",
   };
 
   /** @param {import('$lib/stores/settings.js').TableStyleId} tableStyle */
@@ -142,6 +152,38 @@
 
   function togglePreviewDml() {
     settings = updateSettings({ previewDmlBeforeApply: !settings.previewDmlBeforeApply });
+  }
+
+  // ── Database (query & connection) numeric/text settings ──────────────────
+  /** @param {keyof import('$lib/stores/settings.js').AppSettings} key @param {string|number} raw @param {number} def @param {number} min */
+  function setNumber(key, raw, def, min = 0) {
+    let n = Math.round(Number(raw));
+    if (!Number.isFinite(n)) n = def;
+    if (n < min) n = min;
+    settings = updateSettings({ [key]: n });
+  }
+  /** @param {keyof import('$lib/stores/settings.js').AppSettings} key @param {string} raw @param {string} def */
+  function setText(key, raw, def) {
+    settings = updateSettings({ [key]: String(raw).trim() || def });
+  }
+  /** @param {keyof import('$lib/stores/settings.js').AppSettings} key @param {string|number} def */
+  function resetField(key, def) {
+    settings = updateSettings({ [key]: def });
+  }
+
+  const DATA_VIEW_OPTIONS = [
+    { id: 'table',  label: 'Table',  icon: 'table-2' },
+    { id: 'json',   label: 'JSON',   icon: 'braces' },
+    { id: 'record', label: 'Record', icon: 'layout-list' },
+    { id: 'text',   label: 'Text',   icon: 'file-text' },
+    { id: 'chart',  label: 'Chart',  icon: 'bar-chart-2' },
+  ];
+  const defaultViewOption = $derived(
+    DATA_VIEW_OPTIONS.find((o) => o.id === settings.defaultDataView) ?? DATA_VIEW_OPTIONS[0],
+  );
+  /** @param {string} v */
+  function setDefaultDataView(v) {
+    if (v) settings = updateSettings({ defaultDataView: v });
   }
 
   /** @type {boolean | null} */
@@ -197,7 +239,7 @@
           <input
             bind:value={query}
             placeholder="Search settings…"
-            class="h-8 w-full rounded-lg border border-border/60 bg-background pl-8 pr-2.5 text-ui-xs text-foreground outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground/40 focus:border-ring focus:ring-2 focus:ring-ring/20"
+            class="h-8 w-full rounded-lg border border-border/60 bg-background pl-8 pr-2.5 text-ui-xs text-foreground outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring"
           />
         </div>
         <nav class="flex flex-col gap-0.5">
@@ -230,11 +272,14 @@
 
               {#if searching}
                 {@render generalContent()}
+                {@render databaseContent()}
                 {@render appearanceContent()}
                 {@render integrationsContent()}
                 {@render aboutContent()}
               {:else if category === 'general'}
                 {@render generalContent()}
+              {:else if category === 'database'}
+                {@render databaseContent()}
               {:else if category === 'appearance'}
                 {@render appearanceContent()}
               {:else if category === 'integrations'}
@@ -288,6 +333,119 @@
     </div>
     <Button type="button" variant="outline" size="sm" class="shrink-0" {onclick}>{btn}</Button>
   </div>
+{/snippet}
+
+{#snippet resetBtn(/** @type {string} */ key, /** @type {string|number} */ def, /** @type {boolean} */ dirty)}
+  <button
+    type="button"
+    onclick={() => resetField(/** @type {any} */ (key), def)}
+    disabled={!dirty}
+    title="Reset to default"
+    aria-label="Reset to default"
+    class={cn(
+      'inline-flex size-8 shrink-0 items-center justify-center rounded-lg border transition-[background-color,color,border-color,opacity] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] active:scale-[0.96]',
+      dirty
+        ? 'border-border/60 text-muted-foreground hover:bg-muted hover:text-foreground'
+        : 'cursor-default border-transparent text-muted-foreground/20',
+    )}
+  >
+    <RotateCcw class="size-3.5" />
+  </button>
+{/snippet}
+
+{#snippet numberRow(/** @type {string} */ label, /** @type {string} */ desc, /** @type {string} */ key, /** @type {number} */ def, /** @type {string} */ unit, /** @type {number} */ min)}
+  <div class={rowCls}>
+    <div class="min-w-0">
+      <p class="text-[13px] font-medium text-foreground">{label}</p>
+      <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{desc}</p>
+    </div>
+    <div class="flex shrink-0 items-center gap-1.5">
+      <div class="relative">
+        <input
+          type="number" {min}
+          value={settings[key]}
+          aria-label={label}
+          onchange={(e) => setNumber(/** @type {any} */ (key), e.currentTarget.value, def, min)}
+          class={cn(
+            'h-8 w-48 rounded-lg border border-border/60 bg-background pl-2.5 text-right font-mono text-ui-xs tabular-nums text-foreground outline-none transition-[border-color,box-shadow] focus:border-ring',
+            unit ? 'pr-11' : 'pr-2.5',
+          )}
+        />
+        {#if unit}<span class="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground/50">{unit}</span>{/if}
+      </div>
+      {@render resetBtn(key, def, settings[key] !== def)}
+    </div>
+  </div>
+{/snippet}
+
+{#snippet textRow(/** @type {string} */ label, /** @type {string} */ desc, /** @type {string} */ key, /** @type {string} */ def)}
+  <div class={rowCls}>
+    <div class="min-w-0">
+      <p class="text-[13px] font-medium text-foreground">{label}</p>
+      <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{desc}</p>
+    </div>
+    <div class="flex shrink-0 items-center gap-1.5">
+      <input
+        type="text" spellcheck="false" autocapitalize="off" autocomplete="off"
+        value={settings[key]}
+        aria-label={label}
+        onchange={(e) => setText(/** @type {any} */ (key), e.currentTarget.value, def)}
+        class="h-8 w-48 rounded-lg border border-border/60 bg-background px-2.5 font-mono text-ui-xs text-foreground outline-none transition-[border-color,box-shadow] focus:border-ring focus:ring-1 focus:ring-ring"
+      />
+      {@render resetBtn(key, def, settings[key] !== def)}
+    </div>
+  </div>
+{/snippet}
+
+{#snippet databaseContent()}
+  {@render secLabel('Data view')}
+  {#if show('Default view', 'Which view a table opens in')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-[13px] font-medium text-foreground">Default view</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Which view a table opens in — Table, JSON, Record, Text, or Chart.</p>
+      </div>
+      <Select.Root type="single" value={settings.defaultDataView} onValueChange={setDefaultDataView}>
+        <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Default view">
+          <span class="flex min-w-0 items-center gap-2">
+            <Icon name={defaultViewOption.icon} class="size-3.5 shrink-0 text-muted-foreground" />
+            <span class="truncate font-medium">{defaultViewOption.label}</span>
+          </span>
+        </Select.Trigger>
+        <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
+          {#each DATA_VIEW_OPTIONS as o (o.id)}
+            <Select.Item value={o.id} label={o.label} class="rounded-md py-1.5 pr-8 pl-2">
+              {#snippet children()}
+                <span class="flex min-w-0 items-center gap-2.5">
+                  <Icon name={o.icon} class="size-4 shrink-0 text-muted-foreground" />
+                  <span class="text-xs font-medium">{o.label}</span>
+                </span>
+              {/snippet}
+            </Select.Item>
+          {/each}
+        </Select.Content>
+      </Select.Root>
+    </div>
+  {/if}
+
+  {@render secLabel('Query history')}
+  {#if show('Max query history', 'How many executed queries to keep per connection')}
+    {@render numberRow('Max query history', 'How many executed queries to keep per connection.', 'maxQueryHistory', DEFAULT_MAX_QUERY_HISTORY, '', 1)}
+  {/if}
+
+  {@render secLabel('Connection defaults')}
+  {#if show('Max allowed packet', 'Maximum packet size for a single query or result')}
+    {@render numberRow('Max allowed packet', 'Maximum packet size for a single query or result.', 'maxAllowedPacket', DEFAULT_MAX_ALLOWED_PACKET, 'bytes', 1024)}
+  {/if}
+  {#if show('Socket timeout', 'Socket timeout in milliseconds')}
+    {@render numberRow('Socket timeout', 'Socket timeout in milliseconds.', 'socketTimeoutMs', DEFAULT_SOCKET_TIMEOUT_MS, 'ms', 0)}
+  {/if}
+  {#if show('Connect timeout', 'Connection timeout in milliseconds')}
+    {@render numberRow('Connect timeout', 'Connection timeout in milliseconds.', 'connectTimeoutMs', DEFAULT_CONNECT_TIMEOUT_MS, 'ms', 0)}
+  {/if}
+  {#if show('Timezone', 'Session timezone applied after connecting')}
+    {@render textRow('Timezone', 'Session timezone applied after connecting.', 'sessionTimezone', DEFAULT_SESSION_TIMEZONE)}
+  {/if}
 {/snippet}
 
 {#snippet generalContent()}
@@ -436,6 +594,8 @@
                   <span class="flex size-8 shrink-0 items-center justify-center rounded-md border border-border/40 bg-muted/30 text-foreground/70">
                     {#if id === "hugeicons"}
                       <HugeiconsIcon icon={SparklesIcon} class="size-4" strokeWidth={1.8} />
+                    {:else if id === "phosphor"}
+                      <PhosphorSparkle class="size-4" size="100%" />
                     {:else}
                       <LucideSparkles class="size-4" />
                     {/if}
