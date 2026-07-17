@@ -1,5 +1,7 @@
 <script>
   import * as Dialog from '$lib/components/ui/dialog/index.js'
+  import * as Select from '$lib/components/ui/select/index.js'
+  import SearchableMenu from './SearchableMenu.svelte'
   import Icon from './Icon.svelte'
   import { cn } from '$lib/utils.js'
   import { isEditableType } from '$lib/cell-value.js'
@@ -40,6 +42,19 @@
     columns
       .map((c, i) => ({ ...c, idx: i }))
       .filter((c) => isEditableType(c.dataType ?? '')),
+  )
+
+  // Column picker — searchable menu (tables can have dozens of columns).
+  let colMenuOpen = $state(false)
+  const colItems = $derived(
+    editableCols.map((c) => ({
+      value: String(c.idx),
+      label: c.name,
+      keywords: [c.name],
+      idx: c.idx,
+      dataType: c.dataType ?? '',
+      active: c.idx === colIdx,
+    })),
   )
 
   // Reset per open — default to the first editable column.
@@ -112,10 +127,10 @@
   /** @param {string} s */
   const clip = (s, max = 60) => (s.length > max ? s.slice(0, max - 1) + '…' : s)
 
-  const selectCls =
-    'h-7 w-full appearance-none rounded-md border border-border/60 bg-input/30 pl-2 pr-6 text-ui-xs text-foreground/80 transition-colors hover:border-border focus:outline-none focus:ring-1 focus:ring-ring'
+  const selectTriggerCls =
+    'h-7 w-full min-w-0 justify-between gap-1.5 rounded-md border-border/60 bg-input/30 px-2 text-ui-xs font-normal text-foreground/80 shadow-none transition-colors hover:border-border data-[state=open]:border-border'
   const inputCls =
-    'h-7 w-full min-w-0 rounded-md border border-transparent bg-input/30 px-2 font-mono text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/30 hover:border-border/60 focus:border-input focus:outline-none focus:ring-1 focus:ring-ring'
+    'h-7 w-full min-w-0 rounded-md border border-transparent bg-input/30 px-2 font-mono text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/30 hover:border-border/60 focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none'
 </script>
 
 <Dialog.Root bind:open>
@@ -145,32 +160,46 @@
     <div class="grid grid-cols-[3.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2 border-b border-border/60 bg-panel/50 px-4 py-3">
       <span class="select-none text-right text-ui-2xs text-muted-foreground/60">Column</span>
       <div class="grid grid-cols-[minmax(0,1fr)_8rem_auto] items-center gap-2">
-        <div class="relative">
-          <select
-            value={colIdx}
-            aria-label="Column"
-            class={selectCls}
-            onchange={(e) => (colIdx = Number(e.currentTarget.value))}
-          >
-            {#each editableCols as c (c.idx)}
-              <option value={c.idx}>{c.name}</option>
-            {/each}
-          </select>
-          <Icon name="chevron-down" class="pointer-events-none absolute right-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/50" />
-        </div>
-        <div class="relative">
-          <select
-            value={mode}
-            aria-label="Match mode"
-            class={selectCls}
-            onchange={(e) => (mode = /** @type {any} */ (e.currentTarget.value))}
-          >
+        <!-- Themed dropdowns (bits-ui) — the native <select> popup is unstyled
+             OS chrome (broken on Linux/WebKitGTK) and clashed with the app. -->
+        <SearchableMenu
+          bind:open={colMenuOpen}
+          items={colItems}
+          placeholder="Search columns…"
+          contentClass="z-[100] w-64"
+          onselect={(it) => (colIdx = it.idx)}
+        >
+          {#snippet trigger(props)}
+            <button
+              {...props}
+              type="button"
+              aria-label="Column"
+              class={cn('inline-flex w-full min-w-0 items-center border', selectTriggerCls, colMenuOpen && 'border-border')}
+            >
+              <span class="min-w-0 flex-1 truncate text-left font-mono">{editableCols.find((c) => c.idx === colIdx)?.name ?? 'Column…'}</span>
+              <Icon name="chevron-down" class="size-3 shrink-0 text-muted-foreground/50" />
+            </button>
+          {/snippet}
+          {#snippet item(it)}
+            <span class="min-w-0 flex-1 truncate font-mono text-ui-xs">{it.label}</span>
+            {#if it.dataType}<span class="shrink-0 text-[10px] text-muted-foreground/40">{it.dataType}</span>{/if}
+            {#if it.active}<span class="shrink-0 text-primary">✓</span>{/if}
+          {/snippet}
+        </SearchableMenu>
+        <Select.Root
+          type="single"
+          value={mode}
+          onValueChange={(v) => { if (v) mode = /** @type {any} */ (v) }}
+        >
+          <Select.Trigger size="sm" class={selectTriggerCls} aria-label="Match mode">
+            <span class="truncate">{MODES.find((m) => m.id === mode)?.label ?? 'Contains'}</span>
+          </Select.Trigger>
+          <Select.Content class="z-[100] min-w-[8rem] p-1" sideOffset={4}>
             {#each MODES as m (m.id)}
-              <option value={m.id}>{m.label}</option>
+              <Select.Item value={m.id} label={m.label} class="py-1 pl-2 pr-8 text-ui-xs" />
             {/each}
-          </select>
-          <Icon name="chevron-down" class="pointer-events-none absolute right-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/50" />
-        </div>
+          </Select.Content>
+        </Select.Root>
         <button
           type="button"
           class={cn(
