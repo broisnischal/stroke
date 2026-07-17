@@ -23,7 +23,7 @@
   import { Input }      from '$lib/components/ui/input/index.js'
   import { Checkbox }   from '$lib/components/ui/checkbox/index.js'
   import { ScrollArea } from '$lib/components/ui/scroll-area/index.js'
-  import { Alert, AlertDescription, AlertTitle } from '$lib/components/ui/alert/index.js'
+  import { Button } from '$lib/components/ui/button/index.js'
   import { Dialog as DialogPrimitive } from 'bits-ui'
   import { cn }         from '$lib/utils.js'
   import { parseConnectionUri } from '$lib/connection-uri.js'
@@ -1303,14 +1303,15 @@
         <div class="shrink-0 border-t border-border/15 px-8 py-4">
           <div class="mx-auto max-w-none">
 
-            <!-- Connection error — calm inline alert, aligned to the form column -->
+            <!-- Connection error — console style: neutral message text with a thin
+                 destructive rail, never a red-washed card. -->
             {#if error}
-              <div class="mb-3.5 max-w-[560px]">
-                <Alert variant="destructive" class="items-start gap-x-2.5 rounded-lg border-destructive/30 bg-destructive/10 p-3.5">
-                  <Icon name="alert-circle" class="size-4" />
-                  <AlertTitle class="text-sm font-medium">Couldn't connect</AlertTitle>
-                  <AlertDescription class="mt-1 break-words text-[13px] leading-snug text-destructive/80">{error}</AlertDescription>
-                </Alert>
+              <div class="mb-3.5 max-w-[560px] border-l-2 border-destructive/50 py-0.5 pl-3" data-studio-selectable="text">
+                <p class="flex items-center gap-1.5 text-[12px] font-medium text-destructive select-none">
+                  <span class="size-1.5 shrink-0 rounded-full bg-destructive"></span>
+                  Couldn't connect
+                </p>
+                <p class="mt-1 select-text break-words font-mono text-[12px] leading-relaxed text-foreground/75">{error}</p>
               </div>
             {/if}
 
@@ -1333,42 +1334,40 @@
                 <span class="min-w-0 truncate font-mono text-[10.5px] text-muted-foreground/40" title={statusTarget}>{statusTarget}</span>
               </div>
 
-              <!-- Actions — Resume (ghost) · Test (outline) · Connect (filled) -->
-              <div class="ml-auto flex shrink-0 items-center gap-2.5">
+              <!-- Actions — shared Button variants (Resume ghost · Stop soft-destructive
+                   · Test outline · Connect solid primary), one system app-wide. -->
+              <div class="ml-auto flex shrink-0 items-center gap-2">
                 {#if lastId && saved.find(c => c.id === lastId)}
                   {@const lastConn = saved.find(c => c.id === lastId)}
-                  <button type="button"
-                    onclick={() => connectWith(lastConn)}
-                    disabled={isBusy}
-                    class="inline-flex h-8 max-w-[160px] items-center gap-1.5 rounded-lg px-3 text-[12px] text-muted-foreground/55 transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted/30 hover:text-foreground active:scale-[0.97] disabled:opacity-25"
-                  >
+                  <Button variant="ghost" class="max-w-[200px] text-muted-foreground" disabled={isBusy} onclick={() => connectWith(lastConn)}>
                     {#if connecting === lastConn.id}
-                      <Icon name="loader-2" class="size-3 animate-spin" />Resuming…
+                      <Icon name="loader-2" class="size-3.5 animate-spin" />Resuming…
                     {:else}
-                      Resume <span class="min-w-0 truncate text-foreground/70">{lastConn.name}</span>
+                      Resume <span class="min-w-0 truncate text-foreground/80">{lastConn.name}</span>
                     {/if}
-                  </button>
+                  </Button>
                 {/if}
                 {#if isBusy}
-                  <button type="button" onclick={stopOp}
-                    class="inline-flex h-8 items-center gap-1 rounded-lg border border-destructive/30 px-3 text-[12px] font-medium text-destructive transition-[color,background-color,border-color,transform] duration-150 ease-out hover:bg-destructive/10 active:scale-[0.97]">
-                    <Icon name="x" class="size-3" />Stop
-                  </button>
+                  <Button variant="destructive" onclick={stopOp}>
+                    <Icon name="x" class="size-3.5" />Stop
+                  </Button>
                 {/if}
                 {#if canTest}
-                  <button type="button" onclick={handleTest} disabled={isBusy}
-                    class="inline-flex h-8 items-center gap-1 rounded-lg border border-border/40 px-3.5 text-[12px] text-muted-foreground/70 transition-[color,background-color,border-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.97] disabled:opacity-25">
-                    {#if testing}<Icon name="loader-2" class="size-3 animate-spin" />Testing…{:else}Test{/if}
-                  </button>
+                  <Button variant="outline" disabled={isBusy} onclick={handleTest}>
+                    {#if testing}<Icon name="loader-2" class="size-3.5 animate-spin" />Testing…{:else}Test{/if}
+                  </Button>
                 {/if}
-                <button type="button" onclick={handleConnect} disabled={isBusy || dbType === 'bigquery'}
-                  class="inline-flex h-8 items-center gap-1 rounded-lg bg-foreground px-5 text-[12px] font-semibold text-background shadow-sm transition-[color,background-color,transform,box-shadow] duration-150 ease-out hover:bg-foreground/85 active:scale-[0.97] disabled:opacity-40 disabled:shadow-none">
+                <Button
+                  class={cn('px-5', connecting === (editingId ?? '__new__') && 'disabled:opacity-90')}
+                  disabled={isBusy || dbType === 'bigquery'}
+                  onclick={handleConnect}
+                >
                   {#if connecting === (editingId ?? '__new__')}
-                    <Icon name="loader-2" class="size-3 animate-spin" />Connecting…
+                    <Icon name="loader-2" class="size-3.5 animate-spin" />Connecting…
                   {:else}
                     {editingId ? 'Save & connect' : 'Connect'}
                   {/if}
-                </button>
+                </Button>
               </div>
             </div>
           </div>
