@@ -44,6 +44,7 @@
       if (key === _prevKey) return
       pathByTable.set(_prevKey, jsonPath) // stash the outgoing tab's filter
       jsonPath = pathByTable.get(key) ?? '' // restore the incoming tab's
+      evalPath = jsonPath // snap immediately — no debounce lag on tab switch
       _prevKey = key
     })
   })
@@ -57,8 +58,20 @@
   /** @type {HTMLInputElement | null} */
   let pathInput = $state(null)
 
+  // Evaluation is debounced off the input: a full-path eval (recursive descent
+  // can walk every record) plus re-stringifying the result document per
+  // KEYSTROKE would stall typing on large pages. The input stays instant; the
+  // document updates ~160ms after the user pauses.
+  let evalPath = $state(pathByTable.get(tableKey) ?? '')
+  $effect(() => {
+    const p = jsonPath
+    if (p === untrack(() => evalPath)) return
+    const t = setTimeout(() => { evalPath = p }, 160)
+    return () => clearTimeout(t)
+  })
+
   const pathResult = $derived.by(() => {
-    const p = jsonPath.trim()
+    const p = evalPath.trim()
     if (!p || p === '$') return null
     return evalJsonPath(records, p)
   })
