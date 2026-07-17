@@ -24,6 +24,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ChevronsDownUp from "@lucide/svelte/icons/chevrons-down-up";
+  import ChevronLeft from "@lucide/svelte/icons/chevron-left";
+  import ChevronsLeft from "@lucide/svelte/icons/chevrons-left";
+  import ChevronsRight from "@lucide/svelte/icons/chevrons-right";
+  import Palette from "@lucide/svelte/icons/palette";
+  import Tag from "@lucide/svelte/icons/tag";
+  import Ban from "@lucide/svelte/icons/ban";
   import Copy from "@lucide/svelte/icons/copy";
   import CopyPlus from "@lucide/svelte/icons/copy-plus";
   import Pencil from "@lucide/svelte/icons/pencil";
@@ -366,6 +372,34 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * @type {{ rowIdx:number, kind:'forward'|'reverse', label:string, data:{ loading:boolean, columns:any[], rows:any[], error:string|null } } | null}
    */
   let fkSubview = $state(null)
+
+  // ── Related-rows dock (bottom panel) ────────────────────────────────────────
+  // The FK sub-view renders docked below the scroll container — a fixed-height
+  // drawer with its own internal scroll — instead of inline between rows (which
+  // made grid scrolling fight the panel). Height is user-resizable + persisted.
+  const FK_DOCK_MIN = 120, FK_DOCK_MAX = 600
+  let fkDockHeight = $state((() => {
+    try {
+      const n = Number(localStorage.getItem('stroke:fk-dock-height'))
+      if (Number.isFinite(n) && n >= FK_DOCK_MIN && n <= FK_DOCK_MAX) return n
+    } catch {}
+    return 260
+  })())
+  /** @param {PointerEvent} e */
+  function startFkDockResize(e) {
+    e.preventDefault()
+    const startY = e.clientY, startH = fkDockHeight
+    const move = (/** @type {PointerEvent} */ ev) => {
+      fkDockHeight = Math.min(FK_DOCK_MAX, Math.max(FK_DOCK_MIN, startH + (startY - ev.clientY)))
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      try { localStorage.setItem('stroke:fk-dock-height', String(fkDockHeight)) } catch {}
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
 
   /** Column whose quick-stats panel is open, or null. */
   let statsCol = $state(/** @type {string | null} */ (null))
@@ -1914,9 +1948,130 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   const ROW_EXPAND_COL_WIDTH = 40;
   /** Fits 16px checkbox with equal inset; no extra horizontal padding in cells */
   const ROW_SELECT_COL_WIDTH = 40;
-  const visibleColumns = $derived(
-    columns.filter((c) => !hiddenColumns.has(c.name)),
-  );
+  // ── Column reorder (display-only) ──────────────────────────────────────────
+  // Rows are position-indexed arrays and cells resolve by column *name* (see
+  // _nameToActualIdx), so reordering the visible-column list moves NOTHING in the
+  // row data — it's a pure layout change and stays O(visible cols). `columnOrder`
+  // is the display order of column names; names absent from it keep their natural
+  // order after the ordered ones. Persisted per table.
+  let columnOrder = $state(/** @type {string[]} */ ([]));
+  const _colOrderKey = $derived(`stroke:colorder:${schema}\x00${tableName}`);
+  $effect(() => {
+    const key = _colOrderKey;
+    untrack(() => {
+      try {
+        const raw = localStorage.getItem(key);
+        const parsed = raw ? JSON.parse(raw) : [];
+        columnOrder = Array.isArray(parsed) ? parsed : [];
+      } catch { columnOrder = []; }
+    });
+  });
+  function persistColumnOrder() {
+    try { localStorage.setItem(_colOrderKey, JSON.stringify(columnOrder)); } catch {}
+  }
+  /**
+   * Move a column within the visible display order.
+   * @param {string} name @param {'left'|'right'|'first'|'last'} where
+   */
+  function moveColumn(name, where) {
+    const order = visibleColumns.map((c) => c.name);
+    const from = order.indexOf(name);
+    if (from < 0) return;
+    order.splice(from, 1);
+    const to =
+      where === 'first' ? 0 :
+      where === 'last'  ? order.length :
+      where === 'left'  ? Math.max(0, from - 1) :
+      /* right */         Math.min(order.length, from + 1);
+    order.splice(to, 0, name);
+    columnOrder = order;
+    persistColumnOrder();
+  }
+  function resetColumnOrder() {
+    columnOrder = [];
+    persistColumnOrder();
+  }
+
+  const visibleColumns = $derived.by(() => {
+    const vis = columns.filter((c) => !hiddenColumns.has(c.name));
+    if (columnOrder.length === 0) return vis;
+    const pos = new Map(columnOrder.map((n, i) => [n, i]));
+    // Stable: ordered names by their position; unlisted keep original order last.
+    return vis
+      .map((c, i) => ({ c, i, k: pos.has(c.name) ? /** @type {number} */ (pos.get(c.name)) : Infinity }))
+      .sort((a, b) => (a.k === b.k ? a.i - b.i : a.k - b.k))
+      .map((e) => e.c);
+  });
+
+  // ── Column header highlight + tag ────────────────────────────────────────────
+  // A persistent colour band on a column's header bar plus an optional short text
+  // tag. Purely cosmetic, persisted per table, and independent of the transient
+  // click-to-select highlight (selectedCols) above.
+  // Muted, desaturated tones — refined "label" colours that read as intentional
+  // on the dark header rather than saturated neon. (Tailwind-500 looked garish.)
+  const COL_HIGHLIGHTS = /** @type {const} */ ([
+    { id: 'red',    label: 'Red',    hex: '#dd8a8a' },
+    { id: 'amber',  label: 'Amber',  hex: '#cbab7e' },
+    { id: 'green',  label: 'Green',  hex: '#8fc4a3' },
+    { id: 'blue',   label: 'Blue',   hex: '#8bb0d6' },
+    { id: 'purple', label: 'Purple', hex: '#b1a2e0' },
+    { id: 'pink',   label: 'Pink',   hex: '#d3a0c6' },
+  ]);
+  const COL_HL_MAP = new Map(COL_HIGHLIGHTS.map((h) => [h.id, h.hex]));
+  /** @type {Record<string, { color?: string, tag?: string }>} */
+  let colHighlights = $state({});
+  const _colHlKey = $derived(`stroke:colhl:${schema}\x00${tableName}`);
+  $effect(() => {
+    const key = _colHlKey;
+    untrack(() => {
+      try {
+        const raw = localStorage.getItem(key);
+        const parsed = raw ? JSON.parse(raw) : {};
+        colHighlights = parsed && typeof parsed === 'object' ? parsed : {};
+      } catch { colHighlights = {}; }
+    });
+  });
+  function persistColHighlights() {
+    try {
+      if (Object.keys(colHighlights).length) localStorage.setItem(_colHlKey, JSON.stringify(colHighlights));
+      else localStorage.removeItem(_colHlKey);
+    } catch {}
+  }
+  /** @param {string} name @param {string|null} colorId */
+  function setColHighlight(name, colorId) {
+    const next = { ...colHighlights };
+    const entry = { ...(next[name] ?? {}) };
+    if (colorId) entry.color = colorId; else delete entry.color;
+    if (entry.color || entry.tag) next[name] = entry; else delete next[name];
+    colHighlights = next;
+    persistColHighlights();
+    scheduleDraw();
+  }
+  /** @param {string} name @param {string} tag */
+  function setColTag(name, tag) {
+    const next = { ...colHighlights };
+    const entry = { ...(next[name] ?? {}) };
+    const t = (tag ?? '').trim().slice(0, 24);
+    if (t) entry.tag = t; else delete entry.tag;
+    if (entry.color || entry.tag) next[name] = entry; else delete next[name];
+    colHighlights = next;
+    persistColHighlights();
+    scheduleDraw();
+  }
+  // Tag input dialog
+  let tagDialogOpen = $state(false);
+  let tagDialogCol = $state('');
+  let tagDialogValue = $state('');
+  /** @param {string} name */
+  function openTagDialog(name) {
+    tagDialogCol = name;
+    tagDialogValue = colHighlights[name]?.tag ?? '';
+    tagDialogOpen = true;
+  }
+  function confirmTag() {
+    if (tagDialogCol) setColTag(tagDialogCol, tagDialogValue);
+    tagDialogOpen = false;
+  }
 
   // ── Virtual relationship columns (reverse FK / one-to-many) ─────────────────
   // One per unique fromTable, max 8. Shown as badge columns to the right of real data.
@@ -3608,6 +3763,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ctx.fillStyle = withAlpha(c.cMutedBg, 0.38); ctx.fillRect(x, 0, w, HEADER_H)
     }
 
+    // Persistent per-column highlight colour (chosen from the header menu).
+    const _hl = colHighlights[col.name]
+    const _hlHex = _hl?.color ? COL_HL_MAP.get(_hl.color) : undefined
+    if (_hlHex) {
+      ctx.fillStyle = withAlpha(_hlHex, 0.13); ctx.fillRect(x, 0, w, HEADER_H)
+      ctx.fillStyle = withAlpha(_hlHex, 0.85); ctx.fillRect(x, HEADER_H - 2, w, 2)
+    }
+
     // Background tint.
     if (resizingColName === col.name) { ctx.fillStyle = withAlpha(c.cPrimary, 0.08); ctx.fillRect(x, 0, w, HEADER_H) }
     else if (sorted) { ctx.fillStyle = withAlpha(c.cPrimary, 0.05); ctx.fillRect(x, 0, w, HEADER_H) }
@@ -3663,6 +3826,28 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     for (const ind of indicators) {
       drawIcon(ctx, ind.icon, tx, cy - 6.5, 13, ind.color, 1.5)
       tx += 18
+    }
+
+    // Optional column tag — a bordered chip after the name, tinted with the
+    // column's highlight colour (or muted when none). The 1px hue border keeps the
+    // chip crisp even when it sits on a same-hue header band. Only drawn with room.
+    const _tag = _hl?.tag
+    if (_tag) {
+      ctx.font = _fonts.type
+      const _tw = Math.ceil(textWidth(ctx, _tag))
+      const _padX = 9, _pillH = 18, _pillW = _tw + _padX * 2, _r = _pillH / 2
+      if (x + w - sortReserve - tx > _pillW + 8) {
+        const _tagHex = _hlHex ?? c.cMuted
+        const _py = Math.round(cy - _pillH / 2)
+        // Soft filled badge (shadcn "secondary/destructive" style): a solid tinted
+        // fill with hue text and no border — fully rounded.
+        ctx.fillStyle = withAlpha(_tagHex, 0.2)
+        roundRect(ctx, tx, _py, _pillW, _pillH, _r); ctx.fill()
+        ctx.fillStyle = withAlpha(_tagHex, 1)
+        ctx.textAlign = 'left'
+        ctx.fillText(_tag, tx + _padX, cy + 0.5)
+        tx += _pillW + 8
+      }
     }
 
     // Inline datatype — secondary, lower contrast, a touch of breathing room.
@@ -4691,40 +4876,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                 {/if}
               {/each}
 
-              <!-- FK sub-view panel — spans full viewport width (including gutter area).
-                   Outer div is absolute for vertical position; left:0/right:0 gives it
-                   the full scrollable width so the inner sticky child has room to stick.
-                   Inner div uses position:sticky;left:0 to stay at the viewport left
-                   edge on horizontal scroll — no transform or will-change needed,
-                   which avoids the forced compositing layer that caused scroll lag. -->
-              {#if fkSubview !== null && rows[fkSubview.rowIdx] !== undefined}
-                {@const fkIdx = fkSubview.rowIdx}
-                <div
-                  class="absolute z-20 left-0 right-0"
-                  style="top:{rowDocTop(fkIdx) + ROW_HEIGHT}px"
-                >
-                <div
-                  style="position:sticky; left:0; width:{_viewportWidth}px"
-                >
-                  <FkSubviewPanel
-                    data={fkSubview.data}
-                    fkLabel={fkSubview.label}
-                    onclose={() => { fkSubview = null }}
-                    onfullview={() => {
-                      const sv = fkSubview
-                      if (!sv) return
-                      if (sv.kind === 'reverse' && sv.relInfo) {
-                        // Reverse FK: navigate to fromTable with filter
-                        onfollowforeignkey({ rowIdx: fkIdx, colIdx: 0, reverseRel: sv.relInfo, row: rows[fkIdx] })
-                      } else {
-                        // Forward FK: navigate to referenced table via normal FK nav
-                        onfollowforeignkey({ rowIdx: fkIdx, colIdx: sv.colIdx ?? 0 })
-                      }
-                    }}
-                  />
-                </div>
-                </div>
-              {/if}
+              <!-- FK sub-view renders in the docked bottom panel (after the scroll
+                   container) — never inline between rows, so grid scrolling stays
+                   clean and the canvas hot path is untouched. -->
 
               <!-- Active inline cell editor -->
               {#if editingCell && editOverlay}
@@ -4896,6 +5050,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         {@const hAsc = hSortInfo?.direction === 'asc'}
         {@const hDesc = hSortInfo?.direction === 'desc'}
         {@const hPinned = pinnedColumns.has(hcol)}
+        {@const hVisIdx = visibleColumns.findIndex((c) => c.name === hcol)}
+        {@const hIsFirst = hVisIdx <= 0}
+        {@const hIsLast = hVisIdx < 0 || hVisIdx >= visibleColumns.length - 1}
         <ContextMenu.Item onSelect={() => runMenuAction(() => headerSortDirect(hcol, 'asc'))}>
           <ArrowUp />
           Sort ascending
@@ -4928,6 +5085,29 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           Hide column
         </ContextMenu.Item>
         <ContextMenu.Separator />
+        <ContextMenu.Item disabled={hIsFirst} onSelect={() => runMenuAction(() => moveColumn(hcol, 'left'))}>
+          <ChevronLeft />
+          Move left
+        </ContextMenu.Item>
+        <ContextMenu.Item disabled={hIsLast} onSelect={() => runMenuAction(() => moveColumn(hcol, 'right'))}>
+          <ChevronRight />
+          Move right
+        </ContextMenu.Item>
+        <ContextMenu.Item disabled={hIsFirst} onSelect={() => runMenuAction(() => moveColumn(hcol, 'first'))}>
+          <ChevronsLeft />
+          Move to first
+        </ContextMenu.Item>
+        <ContextMenu.Item disabled={hIsLast} onSelect={() => runMenuAction(() => moveColumn(hcol, 'last'))}>
+          <ChevronsRight />
+          Move to last
+        </ContextMenu.Item>
+        {#if columnOrder.length > 0}
+          <ContextMenu.Item onSelect={() => runMenuAction(() => resetColumnOrder())}>
+            <RotateCcw />
+            Reset column order
+          </ContextMenu.Item>
+        {/if}
+        <ContextMenu.Separator />
         <ContextMenu.Item onSelect={() => runMenuAction(() => resetColumnWidth(hcol))}>
           <RotateCcw />
           Reset column width
@@ -4938,6 +5118,40 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             <BarChart2 />
             Column stats
             {#if statsCol === hcol}<span class="ml-auto text-[10px] text-primary">✓</span>{/if}
+          </ContextMenu.Item>
+        {/if}
+        <ContextMenu.Separator />
+        <ContextMenu.Sub>
+          <ContextMenu.SubTrigger>
+            <Palette />
+            Highlight
+            {#if colHighlights[hcol]?.color}<span class="ml-auto size-2.5 rounded-full" style="background:{COL_HL_MAP.get(colHighlights[hcol].color)}"></span>{/if}
+          </ContextMenu.SubTrigger>
+          <ContextMenu.SubContent class="w-40 [&_[data-slot=context-menu-item]]:gap-2 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs">
+            {#each COL_HIGHLIGHTS as h (h.id)}
+              <ContextMenu.Item onSelect={() => runMenuAction(() => setColHighlight(hcol, h.id))}>
+                <span class="size-3.5 shrink-0 rounded-full border border-border/40" style="background:{h.hex}"></span>
+                {h.label}
+                {#if colHighlights[hcol]?.color === h.id}<span class="ml-auto text-[10px] text-primary">✓</span>{/if}
+              </ContextMenu.Item>
+            {/each}
+            {#if colHighlights[hcol]?.color}
+              <ContextMenu.Separator />
+              <ContextMenu.Item onSelect={() => runMenuAction(() => setColHighlight(hcol, null))}>
+                <Ban />
+                No color
+              </ContextMenu.Item>
+            {/if}
+          </ContextMenu.SubContent>
+        </ContextMenu.Sub>
+        <ContextMenu.Item onSelect={() => runMenuAction(() => openTagDialog(hcol))}>
+          <Tag />
+          {colHighlights[hcol]?.tag ? 'Edit tag…' : 'Tag column…'}
+        </ContextMenu.Item>
+        {#if colHighlights[hcol]?.tag}
+          <ContextMenu.Item onSelect={() => runMenuAction(() => setColTag(hcol, ''))}>
+            <Ban />
+            Remove tag
           </ContextMenu.Item>
         {/if}
       {:else}
@@ -5124,6 +5338,42 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     </ContextMenu.Content>
   </ContextMenu.Root>
 {/if}
+
+<!-- Related-rows dock — sits BELOW the scroll container in this flex column, so
+     it never scrolls with the grid and the grid never fights its inner scroll. -->
+{#if fkSubview !== null && rows[fkSubview.rowIdx] !== undefined}
+  {@const fkIdx = fkSubview.rowIdx}
+  <div
+    class="relative z-10 flex shrink-0 flex-col border-t border-border/60 bg-background"
+    style="height:{fkDockHeight}px"
+  >
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <div
+      role="separator"
+      aria-orientation="horizontal"
+      aria-label="Resize related rows panel"
+      class="absolute inset-x-0 -top-1 z-10 h-2 cursor-row-resize"
+      onpointerdown={startFkDockResize}
+    ></div>
+    <FkSubviewPanel
+      data={fkSubview.data}
+      fkLabel={fkSubview.label}
+      sourceHint={`row ${fkIdx + 1}`}
+      onclose={() => { fkSubview = null }}
+      onfullview={() => {
+        const sv = fkSubview
+        if (!sv) return
+        if (sv.kind === 'reverse' && sv.relInfo) {
+          // Reverse FK: navigate to fromTable with filter
+          onfollowforeignkey({ rowIdx: fkIdx, colIdx: 0, reverseRel: sv.relInfo, row: rows[fkIdx] })
+        } else {
+          // Forward FK: navigate to referenced table via normal FK nav
+          onfollowforeignkey({ rowIdx: fkIdx, colIdx: sv.colIdx ?? 0 })
+        }
+      }}
+    />
+  </div>
+{/if}
 </div>
 
 {#if statsCol && hasTableContext}
@@ -5147,6 +5397,29 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   />
 {/if}
 </div>
+
+<Dialog.Root bind:open={tagDialogOpen}>
+  <Dialog.Content class="max-w-sm gap-4">
+    <Dialog.Header>
+      <Dialog.Title class="text-sm font-semibold">Tag column</Dialog.Title>
+      <Dialog.Description class="text-xs text-muted-foreground">
+        A short label shown on the “{tagDialogCol}” header. Leave empty to remove.
+      </Dialog.Description>
+    </Dialog.Header>
+    <input
+      bind:value={tagDialogValue}
+      maxlength="24"
+      spellcheck="false"
+      placeholder="e.g. PII, money, deprecated"
+      class="h-9 w-full rounded-lg border border-border/60 bg-background px-3 text-ui-sm text-foreground outline-none transition-[border-color,box-shadow] focus:border-ring focus:ring-1 focus:ring-ring"
+      onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); confirmTag(); } else if (e.key === 'Escape') { e.preventDefault(); tagDialogOpen = false; } }}
+    />
+    <Dialog.Footer class="gap-2 sm:justify-end">
+      <button type="button" class="inline-flex h-8 items-center rounded-lg border border-border/60 px-3 text-ui-xs font-medium text-foreground transition-colors hover:bg-muted" onclick={() => (tagDialogOpen = false)}>Cancel</button>
+      <button type="button" class="inline-flex h-8 items-center rounded-lg bg-primary px-3 text-ui-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90" onclick={confirmTag}>Save</button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
 
 <MediaLightbox
   url={lightboxUrl}
