@@ -6,6 +6,8 @@
   import DangerousActionDialog from "./DangerousActionDialog.svelte";
   import * as Select from "$lib/components/ui/select/index.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
+  import PanelRight from "@lucide/svelte/icons/panel-right";
+  import PanelLeft from "@lucide/svelte/icons/panel-left";
   import ResizeHandle from "./ResizeHandle.svelte";
   import { cn } from "$lib/utils.js";
   import { formatTableRowCount } from "$lib/table-list.js";
@@ -21,6 +23,10 @@
 
   let {
     connectionName = "",
+    /** Which side the sidebar docks to. @type {'left' | 'right'} */
+    side = "left",
+    /** Ask the shell to dock the sidebar to the given side. @type {(side: 'left' | 'right') => void} */
+    onmoveside = () => {},
     schemas = [],
     tables = [],
     activeSchema = $bindable("public"),
@@ -478,10 +484,12 @@
 {/snippet}
 
 <div
-  class="flex h-full shrink-0"
+  class={cn("flex h-full shrink-0", side === "right" && "flex-row-reverse")}
   style:width="{width}px"
   data-studio-region="sidebar"
 >
+  <ContextMenu.Root>
+  <ContextMenu.Trigger class="flex h-full min-w-0 flex-1">
   <aside
     class="studio-chrome flex h-full min-w-0 flex-1 flex-col bg-sidebar text-sidebar-foreground"
     data-studio-chrome
@@ -1416,8 +1424,19 @@
     </div>
 
   </aside>
+  </ContextMenu.Trigger>
+  <ContextMenu.Content class="w-52 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]_svg]:size-3.5">
+    <ContextMenu.Item onSelect={() => onmoveside(side === "right" ? "left" : "right")}>
+      {#if side === "right"}
+        <PanelLeft /> Move sidebar to the left
+      {:else}
+        <PanelRight /> Move sidebar to the right
+      {/if}
+    </ContextMenu.Item>
+  </ContextMenu.Content>
+  </ContextMenu.Root>
   <ResizeHandle
-    edge="end"
+    edge={side === "right" ? "start" : "end"}
     onresizestart={() => {
       resizeStartWidth = width;
     }}
