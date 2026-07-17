@@ -26,18 +26,20 @@
     rows = [],
     /** Identity of the table shown — scopes the JSONPath filter to this tab. */
     tableKey = '',
+    // Kept in the API for the parent; the view toolbar owns these actions now.
     onshowtable = () => {},
     ondownload = /** @type {(() => void) | undefined} */ (undefined),
   } = $props()
-  // Referenced for API compatibility; the view toolbar owns these actions now.
-  void onshowtable; void ondownload
 
   const records = $derived(rows.map((r) => rowToRecord(columns, r)))
   const fullJson = $derived(formatJsonValue(records))
 
   // ── JSONPath (scoped per table via pathByTable) ───────────────────────────
-  let jsonPath = $state(pathByTable.get(tableKey) ?? '')
-  let _prevKey = tableKey
+  // Initial values deliberately capture the mount-time tableKey (untracked);
+  // later key changes are handled by the restore effect below.
+  const _initKey = untrack(() => tableKey)
+  let jsonPath = $state(pathByTable.get(_initKey) ?? '')
+  let _prevKey = _initKey
   $effect(() => {
     const key = tableKey
     untrack(() => {
@@ -62,7 +64,7 @@
   // can walk every record) plus re-stringifying the result document per
   // KEYSTROKE would stall typing on large pages. The input stays instant; the
   // document updates ~160ms after the user pauses.
-  let evalPath = $state(pathByTable.get(tableKey) ?? '')
+  let evalPath = $state(pathByTable.get(_initKey) ?? '')
   $effect(() => {
     const p = jsonPath
     if (p === untrack(() => evalPath)) return
