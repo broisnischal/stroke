@@ -12,6 +12,7 @@
   import Play from "@lucide/svelte/icons/play";
   import PenLine from "@lucide/svelte/icons/pen-line";
   import Copy from "@lucide/svelte/icons/copy";
+  import Download from "@lucide/svelte/icons/download";
   import AlertTriangle from "@lucide/svelte/icons/alert-triangle";
   import Table2 from "@lucide/svelte/icons/table-2";
   import MessageSquare from "@lucide/svelte/icons/message-square";
@@ -36,6 +37,13 @@
   import { Label } from "$lib/components/ui/label/index.js";
   import { cn } from "$lib/utils.js";
   import { executeSql } from "$lib/api.js";
+  import {
+    rowsToCsv,
+    rowsToJson,
+    rowsToMarkdown,
+    saveExportFile,
+    buildExportFilename,
+  } from "$lib/export.js";
   import DataTable from "$lib/components/DataTable.svelte";
   import AiMarkdown from "$lib/components/AiMarkdown.svelte";
   import AiSqlBlock from "$lib/components/AiSqlBlock.svelte";
@@ -2192,6 +2200,32 @@
     await navigator.clipboard.writeText(text).catch(() => {});
   }
 
+  /**
+   * Export a chat query result to a file as CSV / JSON / Markdown, reusing the
+   * same formatters + native save flow as the table view.
+   * @param {{ columns: any[], rows: any[][] }} item
+   * @param {'csv'|'json'|'md'} format
+   */
+  async function exportResultAs(item, format) {
+    if (!item?.rows?.length) return;
+    const content =
+      format === "csv"
+        ? rowsToCsv(item.columns, item.rows)
+        : format === "md"
+          ? rowsToMarkdown(item.columns, item.rows)
+          : rowsToJson(item.columns, item.rows);
+    const filename = buildExportFilename("query", format);
+    try {
+      const saved = await saveExportFile(content, filename, format);
+      if (saved)
+        toast.success(`Exported ${formatCompactCount(item.rows.length)} rows`, {
+          description: filename,
+        });
+    } catch (e) {
+      toast.error("Export failed", { description: String(e) });
+    }
+  }
+
   function relativeTime(/** @type {number} */ ts) {
     const diff = (Date.now() - ts) / 1000;
     if (diff < 60) return "just now";
@@ -3022,6 +3056,22 @@
                             : ""}
                         </p>
                       {/if}
+                      <!-- Export the result as a downloadable file -->
+                      <div
+                        class="flex items-center gap-1 border-t border-border/20 px-3 py-1.5"
+                      >
+                        <Download
+                          class="mr-1 size-3 shrink-0 text-muted-foreground/35"
+                        />
+                        {#each [["csv", "CSV"], ["json", "JSON"], ["md", "Markdown"]] as [fmt, label]}
+                          <button
+                            type="button"
+                            class="rounded px-1.5 py-0.5 text-ui-3xs text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
+                            onclick={() => exportResultAs(item, fmt)}
+                            title={`Download as ${label}`}>{label}</button
+                          >
+                        {/each}
+                      </div>
                     {/if}
                   {/if}
                 </div>
