@@ -1,6 +1,15 @@
+<script module>
+  // JSONPath filters are per table-tab: keyed by table identity, module-scoped
+  // so a filter survives view switches/remounts but never leaks across tables.
+  /** @type {Map<string, string>} */
+  const pathByTable = new Map()
+</script>
+
 <script>
+  import { untrack } from 'svelte'
   import Icon from './Icon.svelte'
   import MonacoTextView from './MonacoTextView.svelte'
+  import { cn } from '$lib/utils.js'
   import { rowToRecord, formatJsonValue } from '$lib/row-inspector.js'
   import { evalJsonPath, getCompletions, applyCompletion, describeResult } from '$lib/jsonpath.js'
 
@@ -15,15 +24,34 @@
     columns = [],
     /** @type {unknown[][]} */
     rows = [],
+    /** Identity of the table shown — scopes the JSONPath filter to this tab. */
+    tableKey = '',
     onshowtable = () => {},
     ondownload = /** @type {(() => void) | undefined} */ (undefined),
   } = $props()
+  // Referenced for API compatibility; the view toolbar owns these actions now.
+  void onshowtable; void ondownload
 
   const records = $derived(rows.map((r) => rowToRecord(columns, r)))
   const fullJson = $derived(formatJsonValue(records))
 
-  // ── JSONPath ──────────────────────────────────────────────────────────────
-  let jsonPath = $state('')
+  // ── JSONPath (scoped per table via pathByTable) ───────────────────────────
+  let jsonPath = $state(pathByTable.get(tableKey) ?? '')
+  let _prevKey = tableKey
+  $effect(() => {
+    const key = tableKey
+    untrack(() => {
+      if (key === _prevKey) return
+      pathByTable.set(_prevKey, jsonPath) // stash the outgoing tab's filter
+      jsonPath = pathByTable.get(key) ?? '' // restore the incoming tab's
+      _prevKey = key
+    })
+  })
+  // Keep the stash current so a view-switch remount restores the same filter.
+  $effect(() => {
+    const p = jsonPath
+    untrack(() => pathByTable.set(_prevKey, p))
+  })
   let pathFocused = $state(false)
   let activeIdx = $state(-1)
   /** @type {HTMLInputElement | null} */
@@ -75,113 +103,79 @@
     }
   }
 
-  let copied = $state(false)
-  /** @type {ReturnType<typeof setTimeout> | null} */
-  let copiedTimer = null
-
-  function handleCopy() {
-    navigator.clipboard.writeText(displayedJson).then(() => {
-      copied = true
-      if (copiedTimer) clearTimeout(copiedTimer)
-      copiedTimer = setTimeout(() => { copied = false }, 2000)
-    })
-  }
 </script>
 
 <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-  <!-- JSONPath bar -->
-  <div class="studio-chrome relative flex h-8 shrink-0 items-center gap-1.5 border-b border-border bg-panel px-3">
-    <span class="select-none font-mono text-ui-xs text-muted-foreground/60">$</span>
-    <input
-      bind:this={pathInput}
-      type="text"
-      bind:value={jsonPath}
-      placeholder=".field  ·  [0]  ·  .items[*].name  ·  ..key"
-      class="min-w-0 flex-1 bg-transparent font-mono text-ui-xs text-foreground placeholder:text-muted-foreground/35 focus:outline-none"
-      spellcheck="false"
-      autocomplete="off"
-      onfocus={() => { pathFocused = true }}
-      onblur={() => setTimeout(() => { pathFocused = false }, 120)}
-      onkeydown={handlePathKeydown}
-    />
-
-    {#if pathResult && !pathResult.ok}
-      <span class="shrink-0 font-mono text-ui-2xs text-destructive">{pathResult.error}</span>
-    {:else if pathResult?.ok}
-      <span class="shrink-0 font-mono text-ui-2xs text-muted-foreground/50">{describeResult(pathResult.value)}</span>
-    {/if}
-
-    <!-- Autocomplete dropdown -->
-    {#if pathFocused && completions.length > 0}
-      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-      <ul
-        class="absolute left-0 top-full z-50 mt-px min-w-48 overflow-hidden rounded-b-md border border-border bg-popover shadow-lg"
-        onmousedown={(e) => e.preventDefault()}
-      >
-        {#each completions as completion, i (completion)}
-          <li>
-            <button
-              type="button"
-              class="flex w-full items-center gap-2 px-3 py-1.5 text-left font-mono text-ui-xs transition-colors {i === activeIdx ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'}"
-              onclick={() => pickCompletion(completion)}
-            >
-              {#if completion.startsWith('[')}
-                <span class="shrink-0 text-[10px] text-muted-foreground/50">[idx]</span>
-              {:else}
-                <span class="shrink-0 text-[10px] text-muted-foreground/50">.key</span>
-              {/if}
-              <span class="truncate">{completion.startsWith('.') ? completion.slice(1) : completion}</span>
-              <span class="ml-auto shrink-0 text-muted-foreground/40">{completion}</span>
-            </button>
-          </li>
-        {/each}
-      </ul>
-    {/if}
-
-    <!-- toolbar right side -->
-    <div class="ml-auto flex shrink-0 items-center gap-0.5">
-      {#if rows.length > 0}
-        <span class="select-none px-2 font-mono text-ui-2xs text-muted-foreground">{rows.length} rows</span>
-        <div class="h-4 w-px bg-border/60"></div>
-      {/if}
-
-      <button
-        type="button"
-        title="Copy JSON"
-        class="inline-flex items-center gap-1.5 rounded-md px-2 py-1 font-mono text-ui-2xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        onclick={handleCopy}
-      >
-        {#if copied}
-          <Icon name="check" class="size-3 shrink-0 text-green-500" />
-          <span>Copied</span>
-        {:else}
-          <Icon name="copy" class="size-3 shrink-0" />
-          <span>Copy</span>
-        {/if}
-      </button>
-
-      {#if ondownload}
+  <!-- JSONPath filter bar — a quiet filter field (SQL Studio-style): glyph +
+       mono input in a rounded inset, result hint right-aligned. Actions like
+       copy/export/view-switch live in the table toolbar, not here. -->
+  <div class="studio-chrome flex h-8 shrink-0 items-center gap-2 border-b border-border bg-panel px-2">
+    <div
+      class={cn(
+        'relative flex h-6 min-w-0 flex-1 items-center gap-1.5 rounded-md border border-transparent bg-input/30 px-2 transition-colors',
+        pathFocused ? 'border-input' : 'hover:border-border/60',
+      )}
+    >
+      <Icon name="list-filter" class="size-3 shrink-0 text-muted-foreground/50" />
+      <span class="select-none font-mono text-ui-xs text-muted-foreground/60">$</span>
+      <input
+        bind:this={pathInput}
+        type="text"
+        bind:value={jsonPath}
+        aria-label="JSONPath filter"
+        placeholder=".field  ·  [0]  ·  .items[*].name  ·  ..key"
+        class="min-w-0 flex-1 bg-transparent font-mono text-ui-xs text-foreground placeholder:text-muted-foreground/35 focus:outline-none"
+        spellcheck="false"
+        autocomplete="off"
+        onfocus={() => { pathFocused = true }}
+        onblur={() => setTimeout(() => { pathFocused = false }, 120)}
+        onkeydown={handlePathKeydown}
+      />
+      {#if jsonPath}
         <button
           type="button"
-          title="Download JSON"
-          class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          onclick={ondownload}
+          aria-label="Clear filter"
+          class="inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:text-foreground"
+          onmousedown={(e) => e.preventDefault()}
+          onclick={() => { jsonPath = ''; pathInput?.focus() }}
         >
-          <Icon name="download" class="size-3 shrink-0" />
+          <Icon name="x" class="size-3" />
         </button>
       {/if}
 
-      <div class="h-4 w-px bg-border/60"></div>
-
-      <button
-        type="button"
-        class="inline-flex items-center gap-1.5 rounded-md px-2 py-1 font-mono text-ui-2xs font-medium text-foreground transition-colors hover:bg-muted"
-        onclick={onshowtable}
-      >
-        <Icon name="table-2" class="size-3 shrink-0" />
-        Show table
-      </button>
+      <!-- Autocomplete dropdown — anchored under the field -->
+      {#if pathFocused && completions.length > 0}
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+        <ul
+          class="absolute left-0 top-full z-50 mt-1 min-w-48 overflow-hidden rounded-lg border border-border/60 bg-popover p-1 shadow-lg"
+          onmousedown={(e) => e.preventDefault()}
+        >
+          {#each completions as completion, i (completion)}
+            <li>
+              <button
+                type="button"
+                class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-mono text-ui-xs transition-colors {i === activeIdx ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'}"
+                onclick={() => pickCompletion(completion)}
+              >
+                {#if completion.startsWith('[')}
+                  <span class="shrink-0 text-[10px] text-muted-foreground/50">[idx]</span>
+                {:else}
+                  <span class="shrink-0 text-[10px] text-muted-foreground/50">.key</span>
+                {/if}
+                <span class="truncate">{completion.startsWith('.') ? completion.slice(1) : completion}</span>
+                <span class="ml-auto shrink-0 text-muted-foreground/40">{completion}</span>
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
     </div>
+
+    {#if pathResult && !pathResult.ok}
+      <span class="shrink-0 pr-1 font-mono text-ui-2xs text-destructive">{pathResult.error}</span>
+    {:else if pathResult?.ok}
+      <span class="shrink-0 pr-1 font-mono text-ui-2xs tabular-nums text-muted-foreground/50">{describeResult(pathResult.value)}</span>
+    {/if}
   </div>
 
   <!-- Monaco JSON body (⌘F to search) -->
