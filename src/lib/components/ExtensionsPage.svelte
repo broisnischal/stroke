@@ -242,12 +242,12 @@
               <button
                 type="button"
                 onclick={() => (selectedId = ext.id)}
-                class="group relative flex h-full w-full flex-col gap-3 rounded-lg border border-border/60 bg-card p-3 text-left transition-[border-color,background-color] hover:border-border hover:bg-accent/40"
+                class="group relative flex h-full w-full flex-col gap-2.5 rounded-lg border border-border/60 bg-card p-3 text-left transition-[border-color,background-color] hover:border-border hover:bg-accent/40"
               >
                 {#if Icon}
                   <Icon class={cn("size-4 shrink-0 transition-colors", on ? "text-emerald-500" : "text-muted-foreground group-hover:text-foreground")} />
                 {/if}
-                <span class="mt-auto flex min-w-0 flex-col">
+                <span class="flex min-w-0 flex-col">
                   <span class="truncate text-[12.5px] font-medium leading-tight text-foreground/85 transition-colors group-hover:text-foreground">{ext.name}</span>
                   <span class="mt-0.5 truncate text-[10.5px] text-muted-foreground/60">{KIND_LABEL[ext.kind] ?? "Extension"}</span>
                 </span>
