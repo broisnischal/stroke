@@ -761,6 +761,41 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     return s.length > CELL_DISPLAY_LIMIT ? s.slice(0, CELL_DISPLAY_LIMIT) + "…" : s;
   }
 
+  // Per-row display-string cache for the draw hot path. Keyed on the row ARRAY:
+  // every write path replaces the row array immutably (handleSaveCell maps a new
+  // array, batch apply + DML refetch replace the whole page), so stale entries
+  // are impossible and GC reclaims them with the rows. Kills the String(value)
+  // allocation per primitive cell per frame while scrolling. Staged edits bypass
+  // this cache entirely (their value differs from the row's).
+  /** @type {WeakMap<unknown[], string[]>} */
+  const _cellTextCache = new WeakMap();
+  function cellDisplayText(/** @type {unknown[]} */ row, /** @type {number} */ actualIdx, /** @type {unknown} */ value) {
+    let arr = _cellTextCache.get(row);
+    if (!arr) { arr = []; _cellTextCache.set(row, arr); }
+    const hit = arr[actualIdx];
+    if (hit !== undefined) return hit;
+    const s = displayCell(value);
+    arr[actualIdx] = s;
+    return s;
+  }
+
+  // Same idea for virtual expression columns — the bound evaluator runs per cell
+  // per FRAME otherwise (string building on every scroll frame). The entry keeps
+  // the fns identity so a changed expression set invalidates naturally.
+  /** @type {WeakMap<unknown[], { fns: unknown, texts: string[] }>} */
+  const _vexprTextCache = new WeakMap();
+  function vexprText(/** @type {unknown[]} */ row, /** @type {number} */ fnIdx) {
+    let e = _vexprTextCache.get(row);
+    if (!e || e.fns !== _vcolFns) { e = { fns: _vcolFns, texts: [] }; _vexprTextCache.set(row, e); }
+    let s = e.texts[fnIdx];
+    if (s === undefined) {
+      const fn = _vcolFns[fnIdx];
+      s = fn ? fn(row) : '';
+      e.texts[fnIdx] = s;
+    }
+    return s;
+  }
+
   // Whether any formatter/linkifier is enabled — gates the per-cell directive
   // lookup so the scroll hot path does zero extension work in the common case.
   const _extActive = $derived.by(() => { void $pluginState; return anyDisplayExtEnabled(); });
@@ -3313,8 +3348,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         }
         const row = rows[idx]
         if (!row) continue
-        const fn = _vcolFns[vc.fnIdx]
-        const val = fn ? fn(row) : ''
+        const val = vexprText(row, vc.fnIdx)
         const isUrl = looksLikeUrl(val)
         ctx.font = _fonts.cell
         ctx.textAlign = 'left'
@@ -3497,7 +3531,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ? String(revealed ? (dir.reveal ?? dir.display) : (dir.display ?? displayCell(value)))
       : isArrayCol
         ? arrayDisplay(value)
-        : displayCell(value)
+        : staged || !rows[idx]
+          ? displayCell(value)
+          : cellDisplayText(rows[idx], actualIdx, value)
 
     // Text color — directive link/fg may override (but never over a stronger
     // dirty/fk/focused state highlight).
