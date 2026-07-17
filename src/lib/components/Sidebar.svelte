@@ -377,8 +377,29 @@
   }
   // ── Virtual list (tables only) ───────────────────────────────────────────
   const VIRT_THRESHOLD = 40   // kick in early — 40+ tables already benefits from virtualization
-  const ROW_H = 27            // px — fixed row stride: 25px row (13px text + py-1.5) + 2px gap-0.5; drives spacer math
   const VIRT_BUFFER = 12      // extra rows rendered above and below the viewport
+  // Row stride is MEASURED from the DOM, not assumed: row height scales with the
+  // app zoom / font-size (Linux even uses a 15px base), and any drift between an
+  // assumed constant and reality × hundreds of rows = phantom scroll space below
+  // the last table (the "keeps scrolling past the end" gutter). 27px is only the
+  // pre-measure fallback.
+  let rowH = $state(27)
+  $effect(() => {
+    const el = tableListEl
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const measure = () => {
+      // Spacer <li>s are aria-hidden — measure the stride between two real rows.
+      const rows = /** @type {NodeListOf<HTMLElement>} */ (el.querySelectorAll('li:not([aria-hidden])'))
+      if (rows.length >= 2) {
+        const stride = rows[1].offsetTop - rows[0].offsetTop
+        if (stride > 10 && Math.abs(stride - rowH) > 0.5) rowH = stride
+      }
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  })
   // The window shifts one row at a time: `virtStart` is floored to ROW_H, so the
   // derived already short-circuits (returns the same value) for every scroll event
   // within a row — no re-render, no spacer resize until you actually cross a row
@@ -420,15 +441,15 @@
 
   const virtStart = $derived.by(() => {
     if (!shouldVirtualize) return 0
-    return Math.max(0, Math.floor((sidebarScrollTop - tableListOffsetTop) / ROW_H) - VIRT_BUFFER)
+    return Math.max(0, Math.floor((sidebarScrollTop - tableListOffsetTop) / rowH) - VIRT_BUFFER)
   })
   const virtEnd = $derived.by(() => {
     if (!shouldVirtualize) return filteredRegularTables.length
-    const end = Math.ceil((sidebarScrollTop + sidebarHeight - tableListOffsetTop) / ROW_H) + VIRT_BUFFER
+    const end = Math.ceil((sidebarScrollTop + sidebarHeight - tableListOffsetTop) / rowH) + VIRT_BUFFER
     return Math.min(filteredRegularTables.length, end)
   })
-  const virtTopPad  = $derived(shouldVirtualize ? virtStart * ROW_H : 0)
-  const virtBotPad  = $derived(shouldVirtualize ? Math.max(0, (filteredRegularTables.length - virtEnd) * ROW_H) : 0)
+  const virtTopPad  = $derived(shouldVirtualize ? virtStart * rowH : 0)
+  const virtBotPad  = $derived(shouldVirtualize ? Math.max(0, (filteredRegularTables.length - virtEnd) * rowH) : 0)
 
   /** Shared field chrome for schema select + table filter (aligned in sidebar grid) */
   const sidebarFieldClass =
@@ -856,7 +877,7 @@
                           {/if}
                         </button>
                       </ContextMenu.Trigger>
-                      <ContextMenu.Content class="w-48 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                      <ContextMenu.Content class="w-48 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
                         {#if isSelected && selectedItems.size > 1}
                           <!-- Multi-select: actions apply to all selected tables -->
                           <ContextMenu.Item onSelect={openSelected}>
@@ -1055,7 +1076,7 @@
                             {/if}
                           </button>
                         </ContextMenu.Trigger>
-                        <ContextMenu.Content class="w-48 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                        <ContextMenu.Content class="w-48 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
                           {#if isSelected && selectedItems.size > 1}
                             <!-- Multi-select: actions apply to all selected tables -->
                             <ContextMenu.Item onSelect={openSelected}>
@@ -1238,7 +1259,7 @@
                               <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{view.name}</span>
                             </button>
                           </ContextMenu.Trigger>
-                          <ContextMenu.Content class="w-44 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                          <ContextMenu.Content class="w-44 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
                             <ContextMenu.Item onSelect={() => toggleSelect(view.name)}>
                               {#if isSelected}
                                 <Icon name="square" />
@@ -1363,7 +1384,7 @@
                               {/if}
                             </button>
                           </ContextMenu.Trigger>
-                          <ContextMenu.Content class="w-44 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                          <ContextMenu.Content class="w-44 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
                             <ContextMenu.Item onSelect={() => toggleSelect(mv.name)}>
                               {#if isSelected}
                                 <Icon name="square" />
