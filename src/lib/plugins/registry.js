@@ -151,6 +151,20 @@ export function transformsFor(value, type, name) {
   return out
 }
 
+/**
+ * Look up a single transform by id (for per-column transforms, which apply the
+ * same transform to every cell). Returns the raw transform with its 3-arg run.
+ * @param {string} id
+ * @returns {{ id: string, label: string, appliesTo: Function, run: (v: unknown, type: string, name: string) => string } | null}
+ */
+export function transformById(id) {
+  for (const ext of EXTENSIONS) {
+    if (ext.kind !== 'transforms') continue
+    for (const t of ext.transforms) if (t.id === id) return t
+  }
+  return null
+}
+
 /** Generators from all enabled generator extensions. */
 export function enabledGenerators() {
   /** @type {{ id: string, label: string, generate: () => string }[]} */

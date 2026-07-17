@@ -98,7 +98,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     loadPendingChanges,
     clearPendingChanges,
   } from "$lib/stores/pending-table-edits.js";
-  import { formatCellValue, transformsFor, enabledGenerators, linkifyValue, statsNeeded, annotatorEnabled, anyDisplayExtEnabled } from "$lib/plugins/registry.js";
+  import { formatCellValue, transformsFor, transformById, enabledGenerators, linkifyValue, statsNeeded, annotatorEnabled, anyDisplayExtEnabled } from "$lib/plugins/registry.js";
   import { pluginState } from "$lib/stores/plugins.js";
   import Wand2 from "@lucide/svelte/icons/wand-2";
   import Sparkles from "@lucide/svelte/icons/sparkles";
@@ -693,6 +693,22 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   const menuGenerators = $derived.by(() => {
     void $pluginState;
     return enabledGenerators();
+  });
+  // Transforms offered for a whole column (header menu), decided from a sample
+  // of the column's first non-null value.
+  const menuColTransforms = $derived.by(() => {
+    void $pluginState;
+    const name = contextHeaderCol;
+    if (!name) return [];
+    const actualIdx = _nameToActualIdx.get(name) ?? -1;
+    if (actualIdx < 0) return [];
+    let sample = null;
+    for (let i = 0; i < rows.length && i < 200; i++) {
+      const v = rows[i]?.[actualIdx];
+      if (v !== null && v !== undefined) { sample = v; break }
+    }
+    if (sample === null) return [];
+    return transformsFor(sample, _colCache[actualIdx]?.colType ?? "", name);
   });
 
   const CELL_DISPLAY_LIMIT = 400
@@ -1715,14 +1731,22 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     futureEdits = [];
   }
 
-  /** Run an extension transform on a cell and copy the result to the clipboard. */
+  /** Run an extension transform on a cell, copy the result, and show it in a
+   *  readable result card (monospace, pretty-printed, with a Copy action). */
   async function runCellTransform(rowIdx, colIdx, transform) {
     const value = effectiveCellValue(rowIdx, colIdx);
     try {
       const out = transform.run(value);
       await navigator.clipboard.writeText(out);
-      toast.success(`${transform.label} — copied`, {
-        description: out.length > 120 ? out.slice(0, 120) + "…" : out,
+      // Pretty-print JSON output; cap the preview so the toast stays compact.
+      let preview = out;
+      try { preview = JSON.stringify(JSON.parse(out), null, 2); } catch { /* not JSON */ }
+      const capped = preview.length > 1200 ? preview.slice(0, 1200) + "\n…" : preview;
+      toast.success(`${transform.label} · copied`, {
+        description: capped,
+        code: true,
+        duration: 8000,
+        action: { label: "Copy again", onClick: () => navigator.clipboard.writeText(out) },
       });
     } catch (e) {
       toast.error("Could not apply transform", { description: String(e?.message ?? e) });
@@ -2098,6 +2122,67 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     persistColHighlights();
     scheduleDraw();
   }
+  // ── Per-column transform ─────────────────────────────────────────────────────
+  // A cell transform (Decode JWT, Epoch → date, Base64 decode, …) chosen for a
+  // whole column; the transformed value renders live in every cell. Persisted
+  // per table, independent of highlight/tag.
+  /** @type {Record<string, string>} colName → transform id */
+  let colTransforms = $state({});
+  const _colTfKey = $derived(`stroke:coltf:${schema}\x00${tableName}`);
+  $effect(() => {
+    const key = _colTfKey;
+    untrack(() => {
+      try {
+        const raw = localStorage.getItem(key);
+        const parsed = raw ? JSON.parse(raw) : {};
+        colTransforms = parsed && typeof parsed === 'object' ? parsed : {};
+      } catch { colTransforms = {}; }
+    });
+  });
+  function persistColTransforms() {
+    try {
+      if (Object.keys(colTransforms).length) localStorage.setItem(_colTfKey, JSON.stringify(colTransforms));
+      else localStorage.removeItem(_colTfKey);
+    } catch {}
+  }
+  /** @param {string} name @param {string|null} id */
+  function setColTransform(name, id) {
+    const next = { ...colTransforms };
+    if (id) next[name] = id; else delete next[name];
+    colTransforms = next;
+    persistColTransforms();
+    scheduleDraw();
+  }
+  // Active transforms resolved to their run fns (+ bound column type/name).
+  const _colTransformFns = $derived.by(() => {
+    void $pluginState;
+    /** @type {Record<string, { id: string, run: Function, colType: string, name: string }>} */
+    const out = {};
+    for (const [name, id] of Object.entries(colTransforms)) {
+      const t = transformById(id);
+      if (!t) continue;
+      const ai = _nameToActualIdx.get(name) ?? -1;
+      out[name] = { id: t.id, run: t.run, colType: _colCache[ai]?.colType ?? '', name };
+    }
+    return out;
+  });
+  /** Transformed display text for a column-transformed cell, cached per row. */
+  const _colTfCache = new WeakMap();
+  /** @param {unknown[]} row @param {number} actualIdx @param {unknown} value @param {{id:string,run:Function,colType:string,name:string}} tf */
+  function colTransformText(row, actualIdx, value, tf) {
+    if (value === null || value === undefined) return '';
+    let m = _colTfCache.get(row);
+    if (!m) { m = new Map(); _colTfCache.set(row, m); }
+    const k = actualIdx + ':' + tf.id;
+    let cached = m.get(k);
+    if (cached === undefined) {
+      try { cached = displayCell(String(tf.run(value, tf.colType, tf.name))); }
+      catch { cached = displayCell(value); }
+      m.set(k, cached);
+    }
+    return cached;
+  }
+
   // Tag input dialog
   let tagDialogOpen = $state(false);
   let tagDialogCol = $state('');
@@ -3532,13 +3617,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const revealed = dir?.mask && isHover
     // SQL array columns render pgAdmin-style ({a,b}); jsonb arrays stay JSON.
     const isArrayCol = Array.isArray(value) && isSqlArrayType(cached?.colType)
-    const text = dir
-      ? String(revealed ? (dir.reveal ?? dir.display) : (dir.display ?? displayCell(value)))
-      : isArrayCol
-        ? arrayDisplay(value)
-        : staged || !rows[idx]
-          ? displayCell(value)
-          : cellDisplayText(rows[idx], actualIdx, value)
+    // A per-column transform (chosen from the header menu) renders its result
+    // live and wins over formatter directives; skipped for staged/editing cells.
+    const colTf = (!staged && rows[idx]) ? _colTransformFns[col.name] : undefined
+    const text = colTf
+      ? colTransformText(rows[idx], actualIdx, value, colTf)
+      : dir
+        ? String(revealed ? (dir.reveal ?? dir.display) : (dir.display ?? displayCell(value)))
+        : isArrayCol
+          ? arrayDisplay(value)
+          : staged || !rows[idx]
+            ? displayCell(value)
+            : cellDisplayText(rows[idx], actualIdx, value)
 
     // Text color — directive link/fg may override (but never over a stronger
     // dirty/fk/focused state highlight).
@@ -3840,6 +3930,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (_hlHex) {
       ctx.fillStyle = withAlpha(_hlHex, 0.13); ctx.fillRect(x, 0, w, HEADER_H)
       ctx.fillStyle = withAlpha(_hlHex, 0.85); ctx.fillRect(x, HEADER_H - 2, w, 2)
+    }
+
+    // Per-column transform indicator — faint primary wash + accent underline so
+    // it's clear this column's values are being transformed live.
+    if (colTransforms[col.name]) {
+      ctx.fillStyle = withAlpha(c.cPrimary, 0.10); ctx.fillRect(x, 0, w, HEADER_H)
+      ctx.fillStyle = withAlpha(c.cPrimary, 0.7); ctx.fillRect(x, HEADER_H - 2, w, 2)
     }
 
     // Background tint.
@@ -5225,6 +5322,34 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             Remove tag
           </ContextMenu.Item>
         {/if}
+        <ContextMenu.Separator />
+        <ContextMenu.Sub>
+          <ContextMenu.SubTrigger>
+            <Wand2 />
+            Transform column
+            {#if colTransforms[hcol]}<span class="ml-auto text-[10px] text-primary">on</span>{/if}
+          </ContextMenu.SubTrigger>
+          <ContextMenu.SubContent class="w-56 [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+            {#if menuColTransforms.length > 0}
+              {#each menuColTransforms as t (t.id)}
+                <ContextMenu.Item onSelect={() => runMenuAction(() => setColTransform(hcol, t.id))}>
+                  <Wand2 />
+                  {t.label}
+                  {#if colTransforms[hcol] === t.id}<span class="ml-auto text-[10px] text-primary">✓</span>{/if}
+                </ContextMenu.Item>
+              {/each}
+            {:else}
+              <div class="px-2 py-1.5 text-[11px] italic text-muted-foreground/50">No transforms apply to this column</div>
+            {/if}
+            {#if colTransforms[hcol]}
+              <ContextMenu.Separator />
+              <ContextMenu.Item onSelect={() => runMenuAction(() => setColTransform(hcol, null))}>
+                <Ban />
+                Clear transform
+              </ContextMenu.Item>
+            {/if}
+          </ContextMenu.SubContent>
+        </ContextMenu.Sub>
       {:else}
         <ContextMenu.Item onSelect={() => runMenuAction(() => openInInspector(contextRowIdx))}>
           <PanelRight />
