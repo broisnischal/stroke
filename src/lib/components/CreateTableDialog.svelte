@@ -137,8 +137,8 @@
     }
   }
 
-  const inputClass = 'h-7 w-full min-w-0 rounded border border-border bg-background/60 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/40 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring/30'
-  const selectClass = 'h-7 w-full min-w-0 cursor-pointer appearance-none rounded border border-border bg-background/60 px-2 font-mono text-ui-sm text-foreground outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring/30'
+  const inputClass = 'h-7 w-full min-w-0 rounded border border-border bg-background/60 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/40 outline-none transition-colors focus:border-ring'
+  const selectClass = 'h-7 w-full min-w-0 cursor-pointer appearance-none rounded border border-border bg-background/60 px-2 font-mono text-ui-sm text-foreground outline-none transition-colors focus:border-ring'
 </script>
 
 <Dialog.Root bind:open>
