@@ -3492,6 +3492,14 @@ let rowSearch = $state('')
     const exportRows = selected.size > 0
       ? [...selected].sort((a, b) => a - b).map((i) => rows[i]).filter(Boolean)
       : rows
+    // Export only the columns the user has left visible. Rows are positional
+    // arrays, so filter the column list AND project each row's cells by the
+    // original column index (mirrors dataViewRows for the json/text views).
+    const visibleIdxs = columns.map((_, i) => i).filter((i) => !hiddenColumns.has(columns[i].name))
+    const exportColumns = visibleIdxs.map((i) => columns[i])
+    const exportCells = visibleIdxs.length === columns.length
+      ? exportRows
+      : exportRows.map((r) => visibleIdxs.map((i) => r[i]))
     const filename = buildExportFilename(activeTable, format)
     const n = exportRows.length
     // Small exports build instantly; only large ones need the async/progress path.
@@ -3509,10 +3517,10 @@ let rowSearch = $state('')
       let content
       if (n > LARGE) {
         content = format === 'csv'
-          ? await rowsToCsvAsync(columns, exportRows)
-          : await rowsToJsonAsync(columns, exportRows)
+          ? await rowsToCsvAsync(exportColumns, exportCells)
+          : await rowsToJsonAsync(exportColumns, exportCells)
       } else {
-        content = format === 'csv' ? rowsToCsv(columns, exportRows) : rowsToJson(columns, exportRows)
+        content = format === 'csv' ? rowsToCsv(exportColumns, exportCells) : rowsToJson(exportColumns, exportCells)
       }
       const saved = await saveExportFile(content, filename, format)
       toast.dismiss(toastId)
