@@ -57,6 +57,7 @@
   import { pluginState, pluginEnabledIn } from '$lib/stores/plugins.js'
   import { loadTableViews, saveTableViews } from '$lib/stores/table-views.js'
   import { buildBatchUpdateSql } from '$lib/sql-batch-update.js'
+  import { buildSearchQuery, searchOptionsSupported } from '$lib/search-options.js'
   import Onboarding from './Onboarding.svelte'
   import SettingsDialog from './SettingsDialog.svelte'
   import KeyboardShortcutsDialog from './KeyboardShortcutsDialog.svelte'
@@ -512,6 +513,25 @@
   let sqlConsoleRef = $state(null)
 
   /** "Open in SQL editor" — generate a SELECT reflecting the current table view and open it in the SQL editor. */
+  // ── Search options (match case / whole word / regex) ──────────────────────
+  /** @type {import('$lib/search-options.js').SearchOptions} */
+  let searchOptions = $state({ matchCase: false, wholeWord: false, regex: false })
+  const searchOptsSupported = $derived(searchOptionsSupported(dbType))
+
+  /** Translate a search term + the active options into API search params. */
+  function apiSearch(/** @type {string} */ term) {
+    return buildSearchQuery(term, searchOptions, searchOptsSupported)
+  }
+
+  /** @param {import('$lib/search-options.js').SearchOptions} next */
+  function handleSearchOptionsChange(next) {
+    searchOptions = next
+    if (rowSearch.trim()) {
+      page = 1
+      void loadRows()
+    }
+  }
+
   // ── Workflow extensions: saved views + find & replace ─────────────────────
   const savedViewsEnabled = $derived(pluginEnabledIn($pluginState, 'saved-views'))
   const findReplaceEnabled = $derived(pluginEnabledIn($pluginState, 'find-replace'))
@@ -542,6 +562,7 @@
       sortMore: rowSortMore.map((s) => ({ ...s })),
       hiddenColumns: [...hiddenColumns],
       dataViewMode,
+      searchOptions: { ...searchOptions },
     }
     savedTableViews = [...savedTableViews, view]
     saveTableViews(persistConnectionId, activeSchema, activeTable, savedTableViews)
@@ -550,6 +571,7 @@
 
   /** @param {import('$lib/stores/table-views.js').SavedTableView} view */
   function applySavedView(view) {
+    searchOptions = { matchCase: false, wholeWord: false, regex: false, .../** @type {any} */ (view).searchOptions }
     rowSearch = view.search ?? ''
     rowFilters = (view.filters ?? []).map((f) => ({ ...f }))
     rowSort = view.sort ? { ...view.sort } : null
@@ -564,6 +586,7 @@
 
   /** Toggle back to the unfiltered default (clears the applied view). */
   function resetTableView() {
+    searchOptions = { matchCase: false, wholeWord: false, regex: false }
     rowSearch = ''
     rowFilters = []
     rowSort = null
@@ -3159,7 +3182,7 @@ let rowSearch = $state('')
       const offset = s.pageSize === PAGE_SIZE_ALL ? 0 : (s.page - 1) * limit
       const { sortColumn, sortDirection, sorts } = sortForApi(s.rowSort, s.rowSortMore)
       const data = await getTableRows(s.schema, s.table, limit, offset, {
-        search: s.rowSearch,
+        ...apiSearch(s.rowSearch),
         sortColumn,
         sortDirection,
         sorts,
@@ -3203,7 +3226,7 @@ let rowSearch = $state('')
       void (async () => {
         try {
           const n = await countTableRows(s.schema, s.table, {
-            search: s.rowSearch,
+            ...apiSearch(s.rowSearch),
             filters: filtersForApi(s.rowFilters),
           })
           if (typeof n === 'number' && n >= 0) {
@@ -3263,7 +3286,7 @@ let rowSearch = $state('')
       // skipping several round-trips per fetch.
       const includeMeta = columns.length === 0
       const data = await getTableRows(activeSchema, activeTable, effectivePageSize, offset, {
-        search: rowSearch,
+        ...apiSearch(rowSearch),
         sortColumn,
         sortDirection,
         sorts,
@@ -3331,7 +3354,7 @@ let rowSearch = $state('')
     if (!activeTable) return
     try {
       const n = await countTableRows(activeSchema, activeTable, {
-        search: rowSearch,
+        ...apiSearch(rowSearch),
         filters: filtersForApi(rowFilters, columns),
       })
       if (seq !== _loadSeq) return
@@ -3351,7 +3374,7 @@ let rowSearch = $state('')
       const offset = _infiniteRows.length
       const { sortColumn, sortDirection, sorts } = sortForApi(rowSort, rowSortMore)
       const data = await getTableRows(activeSchema, activeTable, effectivePageSize, offset, {
-        search: rowSearch,
+        ...apiSearch(rowSearch),
         sortColumn,
         sortDirection,
         sorts,
@@ -4798,6 +4821,7 @@ let rowSearch = $state('')
             <SearchPage
               {tables}
               schema={activeSchema}
+              dialect={dbType}
               active={activeTab?.kind === 'search'}
               onopentable={(tableName, searchTerm) => {
                 if (aiMode) exitAiMode()
@@ -5071,6 +5095,9 @@ let rowSearch = $state('')
             {infiniteScroll}
             oninfinitescrolltoggle={toggleInfiniteScroll}
             live={liveEnabled}
+            {searchOptions}
+            onsearchoptionschange={handleSearchOptionsChange}
+            searchOptionsSupported={searchOptsSupported}
             savedViews={savedTableViews}
             viewsEnabled={savedViewsEnabled}
             activeViewId={activeTableViewId}

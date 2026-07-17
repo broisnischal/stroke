@@ -1,5 +1,6 @@
 <script>
   import { getTableRows } from '$lib/api.js'
+  import { buildSearchQuery, searchOptionsSupported } from '$lib/search-options.js'
   import Search from '@lucide/svelte/icons/search'
   import Table2 from '@lucide/svelte/icons/table-2'
   import Eye from '@lucide/svelte/icons/eye'
@@ -16,6 +17,7 @@
     /** @type {TableInfo[]} */
     tables = [],
     schema = 'public',
+    dialect = 'postgres',
     active = false,
     /** @param {string} tableName @param {string} searchTerm */
     onopentable = (tableName, searchTerm) => {},
@@ -23,6 +25,9 @@
 
   let query = $state('')
   let useRegex = $state(false)
+  let matchCase = $state(false)
+  let wholeWord = $state(false)
+  const optionsSupported = $derived(searchOptionsSupported(dialect))
   /** @type {SearchHit[]} */
   let results = $state([])
   let searching = $state(false)
@@ -53,11 +58,12 @@
     const q = query.trim()
     if (!q || searching) return
 
-    if (useRegex) {
+    if (useRegex && optionsSupported) {
       const err = validateRegex(q)
       if (err) { regexError = err; return }
     }
     regexError = ''
+    const searchParams = buildSearchQuery(q, { matchCase, wholeWord, regex: useRegex }, optionsSupported)
 
     const gen = ++searchGeneration
     searching = true
@@ -82,8 +88,7 @@
         if (!t) continue
         try {
           const res = await getTableRows(schema, t.name, 1, 0, {
-            search: q,
-            searchIsRegex: useRegex,
+            ...searchParams,
             includeMeta: false,
           })
           if (searchGeneration !== gen) return
@@ -152,7 +157,7 @@
       <input
         bind:this={inputEl}
         type="text"
-        placeholder={useRegex ? 'Regex pattern…' : 'Search across all tables in {schema}…'}
+        placeholder={useRegex ? 'Regex pattern…' : `Search across all tables in ${schema}…`}
         class="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/30"
         bind:value={query}
         onkeydown={handleKeydown}
@@ -160,18 +165,45 @@
         spellcheck="false"
         autocomplete="off"
       />
-      <!-- Regex toggle (like VSCode's .* button) -->
-      <button
-        type="button"
-        title="Use regular expression (Alt+R)"
-        class={cn(
-          'flex size-6 shrink-0 items-center justify-center rounded text-xs font-mono transition-colors',
-          useRegex
-            ? 'bg-primary/15 text-primary ring-1 ring-primary/30'
-            : 'text-muted-foreground/40 hover:bg-muted hover:text-muted-foreground',
-        )}
-        onclick={() => { useRegex = !useRegex; regexError = '' }}
-      >.*</button>
+      <!-- VS Code-style option toggles (Postgres regex path only) -->
+      {#if optionsSupported}
+        <button
+          type="button"
+          title="Match case"
+          aria-pressed={matchCase}
+          class={cn(
+            'flex size-6 shrink-0 items-center justify-center rounded text-xs font-mono transition-colors',
+            matchCase
+              ? 'bg-primary/15 text-primary ring-1 ring-primary/30'
+              : 'text-muted-foreground/40 hover:bg-muted hover:text-muted-foreground',
+          )}
+          onclick={() => (matchCase = !matchCase)}
+        >Aa</button>
+        <button
+          type="button"
+          title="Match whole word"
+          aria-pressed={wholeWord}
+          class={cn(
+            'flex size-6 shrink-0 items-center justify-center rounded text-xs font-mono transition-colors',
+            wholeWord
+              ? 'bg-primary/15 text-primary ring-1 ring-primary/30'
+              : 'text-muted-foreground/40 hover:bg-muted hover:text-muted-foreground',
+          )}
+          onclick={() => (wholeWord = !wholeWord)}
+        ><span class="underline underline-offset-2">ab</span></button>
+        <button
+          type="button"
+          title="Use regular expression"
+          aria-pressed={useRegex}
+          class={cn(
+            'flex size-6 shrink-0 items-center justify-center rounded text-xs font-mono transition-colors',
+            useRegex
+              ? 'bg-primary/15 text-primary ring-1 ring-primary/30'
+              : 'text-muted-foreground/40 hover:bg-muted hover:text-muted-foreground',
+          )}
+          onclick={() => { useRegex = !useRegex; regexError = '' }}
+        >.*</button>
+      {/if}
       {#if searching}
         <Loader class="size-3.5 shrink-0 animate-spin text-muted-foreground/40" />
       {:else}
