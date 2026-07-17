@@ -41,6 +41,7 @@
   import TableJsonView from './TableJsonView.svelte'
   import TableRecordView from './TableRecordView.svelte'
   import TableTextView from './TableTextView.svelte'
+  import ChartView from './ChartView.svelte'
   import CommandPalette from './CommandPalette.svelte'
   // AiChat / AiSidebar (large, pull in marked + shiki) are loaded lazily the first time
   // the AI panel is opened — see the {#await import()} blocks below.
@@ -408,8 +409,8 @@
   /** @type {'data' | 'structure'} */
   let tableViewMode = $state('data')
   /** How the data view renders loaded rows — sticky per tab via snapshots. */
-  /** @type {'table' | 'json' | 'record' | 'text'} */
-  let dataViewMode = $state('table')
+  /** @type {'table' | 'json' | 'record' | 'text' | 'chart'} */
+  let dataViewMode = $state(/** @type {any} */ (loadSettings().defaultDataView))
   /** @type {import('$lib/api.js').ColumnStructureRow[] | null} — loaded on demand when switching to structure view */
   let structureColumns = $state(/** @type {any[]} */ ([]))
   let loadingStructure = $state(false)
@@ -578,7 +579,7 @@
     rowSortMore = (view.sortMore ?? []).map((s) => ({ ...s }))
     hiddenColumns = new Set(view.hiddenColumns ?? [])
     if (activeTable) saveHiddenCols(persistConnectionId, activeSchema, activeTable, hiddenColumns)
-    dataViewMode = view.dataViewMode ?? 'table'
+    dataViewMode = view.dataViewMode ?? /** @type {any} */ (loadSettings().defaultDataView)
     activeTableViewId = view.id
     page = 1
     void loadRows()
@@ -593,7 +594,7 @@
     rowSortMore = []
     hiddenColumns = new Set()
     if (activeTable) saveHiddenCols(persistConnectionId, activeSchema, activeTable, hiddenColumns)
-    dataViewMode = 'table'
+    dataViewMode = /** @type {any} */ (loadSettings().defaultDataView)
     activeTableViewId = null
     page = 1
     void loadRows()
@@ -1248,7 +1249,7 @@ let rowSearch = $state('')
   // record view filters internally so it can keep original column indices).
   const dataViewColumns = $derived(columns.filter((c) => !hiddenColumns.has(c.name)))
   const dataViewRows = $derived.by(() => {
-    if (dataViewMode !== 'json' && dataViewMode !== 'text') return []
+    if (dataViewMode !== 'json' && dataViewMode !== 'text' && dataViewMode !== 'chart') return []
     if (dataViewColumns.length === columns.length) return rows
     const idxs = columns.map((_, i) => i).filter((i) => !hiddenColumns.has(columns[i].name))
     return rows.map((r) => idxs.map((i) => r[i]))
@@ -1313,7 +1314,8 @@ let rowSearch = $state('')
     activeTable = s.table
     hiddenColumns = new Set(s.hiddenColumns)
     filterBarOpen = s.filterBarOpen ?? false
-    dataViewMode = s.dataViewMode ?? 'table'
+    // Fresh tabs have no stored view mode — honor Settings → Database → Default view.
+    dataViewMode = s.dataViewMode ?? /** @type {any} */ (loadSettings().defaultDataView)
     // Restore the grid scroll position for this tab. Defer one tick so that
     // if DataTable just remounted (switching from a non-table tab), the new
     // applyScroll binding is in place before we call it — otherwise the old
@@ -1529,6 +1531,53 @@ let rowSearch = $state('')
   createHotkey('Alt+Shift+T', (e) => {
     e.preventDefault()
     toggleTabBar()
+  })
+
+  // ── Data views / find & replace / database switching ─────────────────────
+
+  const DATA_VIEW_CYCLE = /** @type {const} */ (['table', 'json', 'record', 'text', 'chart'])
+
+  // Cycle through the table data views (Table → JSON → Record → Text → Chart).
+  createHotkey('Mod+Shift+V', (e) => {
+    if (!connection || !activeTable || columns.length === 0) return
+    e.preventDefault()
+    const i = DATA_VIEW_CYCLE.indexOf(/** @type {any} */ (dataViewMode))
+    dataViewMode = /** @type {any} */ (DATA_VIEW_CYCLE[(i + 1) % DATA_VIEW_CYCLE.length])
+  })
+
+  // Jump straight to a data view: Alt+1 Table, Alt+2 JSON, Alt+3 Record,
+  // Alt+4 Text, Alt+5 Chart.
+  for (const [i, view] of DATA_VIEW_CYCLE.entries()) {
+    createHotkey(`Alt+${i + 1}`, (e) => {
+      if (!connection || !activeTable || columns.length === 0) return
+      e.preventDefault()
+      dataViewMode = /** @type {any} */ (view)
+    })
+  }
+
+  // Find & replace in the current table — editor-style Ctrl/⌘+H.
+  createHotkey('Mod+H', (e) => {
+    if (!connection || !activeTable || columns.length === 0 || !findReplaceEnabled) return
+    e.preventDefault()
+    findReplaceOpen = true
+  })
+
+  // Switch to saved database connection N (Mod+Alt+1..9) — plain digits, not
+  // shifted ones, so the binding survives non-US keyboard layouts.
+  for (let n = 1; n <= 9; n++) {
+    createHotkey(`Mod+Alt+${n}`, (e) => {
+      const conn = savedConnections[n - 1]
+      if (!conn) return
+      e.preventDefault()
+      if (conn.id && conn.id === activeConnectionId) return
+      void handleSwitchDatabase(conn)
+    })
+  }
+
+  // Command palette — VS Code muscle-memory alias for Mod+K.
+  createHotkey('Mod+Shift+P', (e) => {
+    e.preventDefault()
+    commandOpen = true
   })
 
   // Disconnect the current connection (opens the confirm dialog).
@@ -2470,6 +2519,8 @@ let rowSearch = $state('')
       const key = tabTableKey(closing)
       if (key) clearPendingChanges(key)
     }
+    // Remember it so Reopen Closed Tab (⌘⇧T) can restore it — mirrors closeTab().
+    rememberClosedTab(closing)
     const nextTabs = tabs.filter((t) => t.id !== id)
     if (nextTabs.length === 0) {
       tabs = [createWelcomeTab()]
@@ -5227,6 +5278,7 @@ let rowSearch = $state('')
                 <TableJsonView
                   columns={dataViewColumns}
                   rows={dataViewRows}
+                  tableKey={`${activeSchema}.${activeTable}`}
                   onshowtable={() => (dataViewMode = 'table')}
                   ondownload={() => void handleExport('json')}
                 />
@@ -5249,6 +5301,8 @@ let rowSearch = $state('')
                 />
               {:else if dataViewMode === 'text'}
                 <TableTextView columns={dataViewColumns} rows={dataViewRows} tableName={activeTable} />
+              {:else if dataViewMode === 'chart'}
+                <ChartView columns={dataViewColumns} rows={dataViewRows} connectionId={persistConnectionId} />
               {/if}
             </svelte:boundary>
             {#if dataViewMode === 'table'}
@@ -5474,6 +5528,7 @@ let rowSearch = $state('')
   {connectionLost}
   {savedConnections}
   {activeConnectionId}
+  {queryMs}
   {pendingEditCount}
   onapplyedits={() => void applyEdits()}
   onresetedits={() => resetEdits()}
