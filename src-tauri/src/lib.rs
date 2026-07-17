@@ -225,6 +225,13 @@ pub fn run() {
                         }
                     }
                 }
+                // If a display was unplugged and left the window spilling
+                // off-screen, pull it back the moment the user focuses it.
+                tauri::WindowEvent::Focused(true) => {
+                    if let Some(w) = app_handle.get_webview_window("main") {
+                        commands::ensure_window_on_screen(&w);
+                    }
+                }
                 _ => {}
             });
 
@@ -239,6 +246,7 @@ pub fn run() {
             commands::read_file,
             commands::restart_app,
             commands::toggle_devtools,
+            commands::reset_window,
             commands::test_postgres_connection,
             commands::connect_postgres,
             commands::disconnect_postgres,
