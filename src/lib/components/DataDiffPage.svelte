@@ -699,7 +699,7 @@
           <!-- Flexible filler so the grid always fills the pane (no empty "hole") -->
           <col />
         </colgroup>
-        <thead class="sticky top-0 z-20">
+        <thead class="sticky top-0 z-20 bg-card">
           <tr>
             <th class="bg-card select-none"></th>
             {#each columns as col, ci}
