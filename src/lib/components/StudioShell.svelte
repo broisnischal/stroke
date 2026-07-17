@@ -310,6 +310,10 @@
   let statusBarHasUpdate = $state(false)
   let sidebarOpen = $state(loadLayout().navSidebarOpen)
   let sidebarEverOpened = $state(loadLayout().navSidebarOpen)
+  /** Which side the navigation sidebar docks to. @type {'left' | 'right'} */
+  let sidebarSide = $state(loadLayout().navSidebarSide)
+  /** @param {'left' | 'right'} s */
+  function moveSidebar(s) { sidebarSide = s; saveLayout({ navSidebarSide: s }) }
   let aiSidebarOpen = $state(loadLayout().aiSidebarOpen)
   let aiSidebarEverOpened = $state(loadLayout().aiSidebarOpen)
   let statusBarVisible = $state(loadLayout().statusBarVisible)
@@ -4478,6 +4482,7 @@ let rowSearch = $state('')
 <div class="flex min-h-0 flex-1 overflow-hidden">
   {#if sidebarEverOpened}
     <div
+      class:order-last={sidebarSide === 'right'}
       style={sidebarOpen && !aiMode && connection ? '' : 'display:none'}
       inert={!sidebarOpen || aiMode || !connection || undefined}
     >
@@ -4495,6 +4500,8 @@ let rowSearch = $state('')
         {/snippet}
       <Sidebar
         connectionName={connection ? (connection.name || connection.database || connection.host || connection.filePath || 'Connected') : ''}
+        side={sidebarSide}
+        onmoveside={moveSidebar}
         {schemas}
         {tables}
         bind:activeSchema
