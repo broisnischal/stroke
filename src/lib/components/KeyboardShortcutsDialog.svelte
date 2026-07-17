@@ -31,6 +31,8 @@
       icon: Navigation,
       shortcuts: [
         { keys: [mod, "K"], desc: "Command menu" },
+        { keys: [mod, "⇧", "P"], desc: "Command menu" },
+        { keys: [mod, opt, "1–9"], desc: "Switch to saved connection" },
         { keys: [mod, "T"], desc: "Search tables" },
         { keys: [mod, "N"], desc: "New tab" },
         { keys: [mod, "W"], desc: "Close tab" },
@@ -60,6 +62,9 @@
         { keys: [mod, "I"], desc: "Toggle AI sidebar" },
         { keys: [mod, "⇧", "L"], desc: "Activity log" },
         { keys: [mod, "R"], desc: "Refresh current view" },
+        { keys: [mod, "⇧", "V"], desc: "Cycle table data view" },
+        { keys: [opt, "1–5"], desc: "Table / JSON / Record / Text / Chart view" },
+        { keys: [mod, "H"], desc: "Find & replace in table" },
       ],
     },
     {
