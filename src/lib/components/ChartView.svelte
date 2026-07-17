@@ -379,12 +379,12 @@
           type="text"
           placeholder="Chart name…"
           bind:value={saveName}
-          class="h-6 w-40 rounded border border-border/50 bg-background/80 px-2 font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring/30"
+          class="h-6 w-40 rounded border border-border/50 bg-background/80 px-2 font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring"
         />
 
         {#if !newGroupMode}
           <div class="relative">
-            <select bind:value={saveGroup} class="h-6 appearance-none rounded border border-border/50 bg-background/60 pl-2 pr-6 font-mono text-ui-xs text-foreground outline-none focus:border-ring">
+            <select bind:value={saveGroup} class="h-6 appearance-none rounded border border-border/50 bg-background/60 pl-2 pr-6 font-mono text-ui-xs text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring">
               {#each $chartGroups as g (g)}<option value={g}>{g}</option>{/each}
             </select>
             <ChevronDown class="pointer-events-none absolute right-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/50" />
@@ -397,7 +397,7 @@
             type="text"
             placeholder="New group name…"
             bind:value={newGroupName}
-            class="h-6 w-36 rounded border border-border/50 bg-background/80 px-2 font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-ring"
+            class="h-6 w-36 rounded border border-border/50 bg-background/80 px-2 font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring"
           />
           <button type="button" class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/40 hover:text-foreground" onclick={() => (newGroupMode = false)}>
             <X class="size-3" />
