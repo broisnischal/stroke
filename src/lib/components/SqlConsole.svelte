@@ -175,7 +175,7 @@
   }
 
   // ── Result view state ───────────────────────────────────────────────────────
-  /** @type {'table' | 'chart' | 'json' | 'explain'} */
+  /** @type {'table' | 'chart' | 'json' | 'explain' | 'error'} */
   let outputView = $state('table')
   let chartType = $state('bar')
   let activeResultIdx = $state(0)
@@ -220,6 +220,23 @@
     untrack(() => {
       if (wasLoading && !l && !err) sqlEditorRef?.markExecuted?.(lastRanStatement)
       wasLoading = l
+    })
+  })
+
+  // Route a failed run into its own "Error" results tab — like a real editor's
+  // problems pane — and open the panel so it's visible. When the next run clears
+  // the error, fall back to the table (the now-empty Error tab drops out too).
+  let hadError = false
+  $effect(() => {
+    const err = error
+    untrack(() => {
+      if (err) {
+        outputView = 'error'
+        if (!outputVisible) outputVisible = true
+      } else if (hadError && outputView === 'error') {
+        outputView = 'table'
+      }
+      hadError = !!err
     })
   })
 
@@ -776,7 +793,7 @@
               <select
                 value={v.mode}
                 aria-label="Parameter type for {p.name}"
-                class="h-7 w-full appearance-none rounded-md border border-border/60 bg-input/30 pl-2 pr-6 text-ui-xs text-foreground/80 transition-colors hover:border-border focus:outline-none focus:ring-1 focus:ring-ring"
+                class="h-7 w-full appearance-none rounded-md border border-border/60 bg-input/30 pl-2 pr-6 text-ui-xs text-foreground/80 transition-colors hover:border-border focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none"
                 onchange={(e) => setParam(p.name, { ...v, mode: /** @type {any} */ (e.currentTarget.value) })}
               >
                 <option value="auto">Auto</option>
@@ -792,7 +809,7 @@
               disabled={v.mode === 'null'}
               placeholder={v.mode === 'null' ? 'NULL' : v.mode === 'raw' ? 'now() — inserted verbatim' : 'value'}
               aria-label="Value for {p.name}"
-              class="h-7 w-full min-w-0 rounded-md border border-transparent bg-input/30 px-2 font-mono text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/30 hover:border-border/60 focus:border-input focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-40"
+              class="h-7 w-full min-w-0 rounded-md border border-transparent bg-input/30 px-2 font-mono text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/30 hover:border-border/60 focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none disabled:opacity-40"
               oninput={(e) => setParam(p.name, { ...v, value: e.currentTarget.value })}
               onkeydown={(e) => { if (e.key === 'Enter') handleRun(undefined) }}
             />
@@ -851,72 +868,8 @@
   />
   {/if}
 
-  {#if error}
-    {#if isNetworkError(error)}
-      <!-- Network / offline error -->
-      <div class="flex shrink-0 items-center gap-2.5 border-b border-border/30 bg-muted/20 px-3 py-2">
-        <WifiOff class="size-3.5 shrink-0 text-muted-foreground/40" />
-        <p class="min-w-0 flex-1 font-mono text-ui-xs text-muted-foreground/70">Cannot reach database — check your connection and try again.</p>
-      </div>
-    {:else}
-      <!-- SQL / application error — styled like a real terminal error: a red
-           gutter accent, monospace message, and a fully SELECTABLE body so the
-           text can be copied (the app is select-none by default; the
-           data-studio-selectable hook re-enables selection here). -->
-      <div
-        data-studio-selectable="text"
-        class="group/err shrink-0 border-b border-destructive/20 border-l-2 border-l-destructive/70 bg-destructive/[0.055] py-2.5 pl-3 pr-3"
-      >
-        <div class="flex items-center justify-between gap-2 select-none">
-          <span class="flex shrink-0 items-center gap-1.5 font-mono text-ui-2xs font-bold uppercase tracking-wider text-destructive/80">
-            <CircleAlert class="size-3 shrink-0" />
-            Error
-          </span>
-          <div class="flex shrink-0 items-center gap-1">
-            <button
-              type="button"
-              onclick={copyError}
-              title="Copy error"
-              aria-label="Copy error"
-              class="inline-flex size-6 items-center justify-center rounded-md text-destructive/60 transition-colors hover:bg-destructive/10 hover:text-destructive"
-            >
-              {#if errorCopied}<Check class="size-3 shrink-0" />{:else}<Copy class="size-3 shrink-0" />{/if}
-            </button>
-            {#if onfixwithai}
-              <button
-                type="button"
-                onclick={fixWithAi}
-                class="inline-flex shrink-0 items-center gap-1 rounded-md border border-destructive/25 bg-destructive/10 px-2 py-1 font-mono text-ui-2xs font-medium text-destructive transition-[background-color,transform] duration-150 hover:bg-destructive/20 active:scale-[0.97]"
-              >
-                <Wand2 class="size-2.5 shrink-0" />
-                Fix with AI
-              </button>
-            {/if}
-          </div>
-        </div>
-        <!-- overflow-wrap:anywhere wraps at word boundaries first and only breaks
-             inside a token when it can't fit — unlike break-all, which chopped
-             ordinary words mid-character ("can/celing", "sta/tement"). -->
-        <pre class="mt-1.5 max-h-28 select-text overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-ui-xs leading-relaxed text-destructive">{error}</pre>
-        {#if /statement timeout|canceling statement due to/i.test(error)}
-          <p class="mt-2 text-ui-2xs leading-relaxed text-muted-foreground/70">
-            The query timed out. If this table has large JSON/text columns, select just the
-            columns you need instead of <code class="rounded bg-muted/60 px-1 py-px font-mono text-foreground/70">*</code>, or add a smaller
-            <code class="rounded bg-muted/60 px-1 py-px font-mono text-foreground/70">LIMIT</code>.
-          </p>
-        {:else if /relation "[^"]*" does not exist|column "[^"]*" does not exist/i.test(error)}
-          <p class="mt-2 text-ui-2xs leading-relaxed text-muted-foreground/70">
-            PostgreSQL folds unquoted names to lowercase, so a table like
-            <code class="rounded bg-muted/60 px-1 py-px font-mono text-foreground/70">Products</code> only matches when quoted —
-            <code class="rounded bg-muted/60 px-1 py-px font-mono text-foreground/70">SELECT * FROM "Products"</code>. Pick the table from
-            autocomplete and it inserts the quoted form for you.
-          </p>
-        {/if}
-      </div>
-    {/if}
-  {/if}
-
-  <!-- Output panel: header always visible, content toggles with Cmd+J -->
+  <!-- Output panel: header always visible, content toggles with Cmd+J
+       (a failed run surfaces in the "Error" view tab below, not a banner). -->
   <div class={outputVisible ? "flex min-h-0 flex-1 flex-col overflow-hidden" : "flex shrink-0 flex-col"}>
     <!-- Output tab bar -->
     <div
@@ -941,29 +894,34 @@
         <div class="mx-1.5 h-3.5 w-px shrink-0 self-center bg-border/60"></div>
       {/if}
 
-      <!-- View tabs (icon-only) -->
+      <!-- View tabs (icon-only). The Error tab appears with a label only after a
+           failed run, tinted destructive so it reads at a glance. -->
       <div class="flex items-center gap-0.5 px-1">
         {#each [
-          { id: 'table',   label: 'Table',   Icon: Table2,    pro: false },
-          { id: 'chart',   label: 'Chart',   Icon: BarChart2, pro: true },
-          { id: 'json',    label: 'JSON',    Icon: Braces,    pro: true },
+          { id: 'table',   label: 'Table',   Icon: Table2,     pro: false },
+          { id: 'chart',   label: 'Chart',   Icon: BarChart2,  pro: true },
+          { id: 'json',    label: 'JSON',    Icon: Braces,     pro: true },
           { id: 'explain', label: 'Explain', Icon: ScanSearch, pro: true },
+          ...(error ? [{ id: 'error', label: 'Error', Icon: CircleAlert, pro: false }] : []),
         ] as tab (tab.id)}
           {@const locked = tab.pro && !$hasPro}
           {@const tabActive = !locked && outputVisible && outputView === tab.id}
+          {@const isError = tab.id === 'error'}
           {@const Icon = tab.Icon}
           <button
             type="button"
             onclick={() => {
               if (locked) { onprorequired(); return }
               if (tab.id === 'explain') { void handleExplain() }
-              else { outputView = /** @type {'table'|'chart'|'json'} */ (tab.id); if (!outputVisible) toggleOutput() }
+              else { outputView = /** @type {'table'|'chart'|'json'|'error'} */ (tab.id); if (!outputVisible) toggleOutput() }
             }}
             class={cn(
               'flex size-7 items-center justify-center rounded transition-colors',
               locked
                 ? 'cursor-not-allowed opacity-40 text-muted-foreground/30'
-                : tabActive ? 'bg-muted/70 text-foreground' : 'text-muted-foreground/50 hover:bg-muted/40 hover:text-muted-foreground',
+                : isError
+                  ? tabActive ? 'bg-muted/70 text-destructive' : 'text-destructive/70 hover:bg-muted/40 hover:text-destructive'
+                  : tabActive ? 'bg-muted/70 text-foreground' : 'text-muted-foreground/50 hover:bg-muted/40 hover:text-muted-foreground',
             )}
             title="{tab.label} view{locked ? ' · Stroke Pro' : ''}"
           >
@@ -1029,7 +987,74 @@
     {#if outputVisible}
       <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-panel">
         {#key `${outputView}:${Math.min(activeResultIdx, Math.max(resultSets.length - 1, 0))}`}
-          {#if outputView === 'explain'}
+          {#if outputView === 'error'}
+            {#if isNetworkError(error)}
+              <div class="flex h-full flex-col items-center justify-center gap-2.5 px-6 text-center">
+                <WifiOff class="size-6 text-muted-foreground/25" />
+                <p class="font-mono text-ui-sm text-muted-foreground/70">Cannot reach database — check your connection and try again.</p>
+              </div>
+            {:else}
+              <!-- SQL error as a console pane (VS Code / Postman feel): neutral
+                   monospace output on the panel surface, colour reserved for a
+                   small severity marker and a thin gutter rail — never a red wash.
+                   Body is fully SELECTABLE (the app is select-none by default;
+                   data-studio-selectable re-enables selection here). -->
+              <div data-studio-selectable="text" class="flex h-full min-h-0 flex-col font-mono">
+                <!-- Console toolbar — neutral chrome, ghost actions -->
+                <div class="flex shrink-0 items-center gap-2 border-b border-border/60 px-3 py-1.5 select-none">
+                  <span class="size-1.5 shrink-0 rounded-full bg-destructive"></span>
+                  <span class="text-ui-2xs font-semibold uppercase tracking-[0.08em] text-destructive/90">Error</span>
+                  {#if currentDisplay.queryMs > 0}
+                    <span class="text-ui-2xs tabular-nums text-muted-foreground/45">· {currentDisplay.queryMs}ms</span>
+                  {/if}
+                  <div class="ml-auto flex shrink-0 items-center gap-1">
+                    <button
+                      type="button"
+                      onclick={copyError}
+                      title="Copy error"
+                      aria-label="Copy error"
+                      class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-muted/60 hover:text-foreground"
+                    >
+                      {#if errorCopied}<Check class="size-3 shrink-0" />{:else}<Copy class="size-3 shrink-0" />{/if}
+                    </button>
+                    {#if onfixwithai}
+                      <button
+                        type="button"
+                        onclick={fixWithAi}
+                        class="inline-flex shrink-0 items-center gap-1 rounded border border-border/70 px-2 py-1 text-ui-2xs font-medium text-muted-foreground transition-[background-color,border-color,color,transform] duration-150 hover:border-border hover:bg-muted/60 hover:text-foreground active:scale-[0.97]"
+                      >
+                        <Wand2 class="size-2.5 shrink-0" />
+                        Fix with AI
+                      </button>
+                    {/if}
+                  </div>
+                </div>
+                <!-- Console output — neutral text, red only in the thin left rail.
+                     overflow-wrap:anywhere wraps at word boundaries first and only
+                     breaks inside a token when it can't fit (unlike break-all,
+                     which chopped ordinary words mid-character). -->
+                <div class="min-h-0 flex-1 overflow-auto px-3 py-3">
+                  <div class="border-l-2 border-destructive/40 pl-3">
+                    <pre class="select-text whitespace-pre-wrap [overflow-wrap:anywhere] text-ui-xs leading-relaxed text-foreground/85">{error}</pre>
+                    {#if /statement timeout|canceling statement due to/i.test(error)}
+                      <p class="mt-3 text-ui-2xs leading-relaxed text-muted-foreground/60">
+                        The query timed out. If this table has large JSON/text columns, select just the
+                        columns you need instead of <code class="rounded bg-muted/60 px-1 py-px text-foreground/70">*</code>, or add a smaller
+                        <code class="rounded bg-muted/60 px-1 py-px text-foreground/70">LIMIT</code>.
+                      </p>
+                    {:else if /relation "[^"]*" does not exist|column "[^"]*" does not exist/i.test(error)}
+                      <p class="mt-3 text-ui-2xs leading-relaxed text-muted-foreground/60">
+                        PostgreSQL folds unquoted names to lowercase, so a table like
+                        <code class="rounded bg-muted/60 px-1 py-px text-foreground/70">Products</code> only matches when quoted —
+                        <code class="rounded bg-muted/60 px-1 py-px text-foreground/70">SELECT * FROM "Products"</code>. Pick the table from
+                        autocomplete and it inserts the quoted form for you.
+                      </p>
+                    {/if}
+                  </div>
+                </div>
+              </div>
+            {/if}
+          {:else if outputView === 'explain'}
             {#if explainLoading}
               <TableLoading />
             {:else if explainError}
