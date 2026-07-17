@@ -2315,7 +2315,20 @@ let rowSearch = $state('')
     // Snapshot with a shallow state clone so later edits to the live tree can't
     // mutate what we'll restore. `id`/`pinned` are dropped — reopen mints fresh.
     const { id: _id, pinned: _pinned, ...rest } = tab
-    const snapshot = { ...rest, state: tab.state ? { ...tab.state } : tab.state }
+    const state = tab.state ? { ...tab.state } : tab.state
+    // Drop the bulky payloads — a closed 1M-row tab must not pin its whole result
+    // set in memory (20 stacked closed tabs could otherwise retain gigabytes).
+    // Reopen restores the query/filters/sort and refetches: applyTabToEditor
+    // already treats columns.length === 0 as "no cached data → fetch".
+    if (state && tab.kind === 'table') {
+      state.rows = []
+      state.columns = []
+      state.selected = new Set()
+    } else if (state && tab.kind === 'sql') {
+      state.sqlRows = []
+      state.sqlColumns = []
+    }
+    const snapshot = { ...rest, state }
     closedTabStack = [...closedTabStack, snapshot].slice(-CLOSED_TAB_STACK_MAX)
   }
 
