@@ -479,6 +479,28 @@
             </Command.Group>
           {/if}
 
+          <!-- ── Switch database — other saved connections, right at root ── -->
+          {@const otherConns = savedConnections.filter((c) => c.id !== activeConnectionId)}
+          {#if otherConns.length > 0}
+            <Command.Group heading="Switch database">
+              {#each otherConns.slice(0, 8) as conn (conn.id)}
+                <Command.Item
+                  value="switch database connection {conn.name} {connSubtitle(conn)} {conn.type}"
+                  onSelect={() => run(() => onswitchdatabase(conn))}
+                >
+                  <Icon name={driverIcon(conn.type ?? 'postgres')} class="size-4 shrink-0 opacity-60" />
+                  <div data-slot="command-label" class="flex min-w-0 flex-1 flex-col">
+                    <span class="truncate">{conn.name}</span>
+                    <span class="truncate font-mono text-[11px] text-muted-foreground">{connSubtitle(conn)}</span>
+                  </div>
+                  {#if savedConnections.indexOf(conn) < 9}
+                    <Command.Shortcut keys="⌘⌥{savedConnections.indexOf(conn) + 1}" />
+                  {/if}
+                </Command.Item>
+              {/each}
+            </Command.Group>
+          {/if}
+
           <!-- ── Drill-in: Connections ───────────────────────────────── -->
           <Command.Group heading="Database">
             <Command.Item
