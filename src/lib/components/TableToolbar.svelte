@@ -75,7 +75,7 @@
     tableViewMode = $bindable("data"),
     /** How the data view renders the loaded page: canvas grid, JSON document,
      *  one-record-at-a-time form, or copyable text (CSV/TSV/Markdown). */
-    /** @type {'table' | 'json' | 'record' | 'text'} */
+    /** @type {'table' | 'json' | 'record' | 'text' | 'chart'} */
     dataViewMode = $bindable("table"),
     ontogglestructure = () => {},
     /** Whether the structure view is available for the current object (false for views) */
@@ -289,12 +289,13 @@
   const iconBtn =
     "inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30";
 
-  /** @type {Array<{ id: 'table' | 'json' | 'record' | 'text', icon: string, label: string, title?: string }>} */
+  /** @type {Array<{ id: 'table' | 'json' | 'record' | 'text' | 'chart', icon: string, label: string, title?: string }>} */
   const DATA_VIEW_MODES = [
     { id: "table", icon: "table-2", label: "Table view" },
     { id: "json", icon: "braces", label: "JSON view" },
     { id: "record", icon: "layout-list", label: "Record view" },
     { id: "text", icon: "file-text", label: "Text view", title: "Text view — CSV / TSV / Markdown / JSON Lines" },
+    { id: "chart", icon: "bar-chart-2", label: "Chart view", title: "Chart view — visualize the loaded rows" },
   ];
 
   // ── Searchable-menu item lists ──────────────────────────────────────────
@@ -552,7 +553,7 @@
           bind:this={structureSearchEl}
           type="text"
           aria-label="Search column"
-          class="h-7 w-full min-w-0 rounded-md border border-input bg-input/30 pl-7 pr-7 font-mono text-ui-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          class="h-7 w-full min-w-0 rounded-md border border-input bg-input/30 pl-7 pr-7 font-mono text-ui-sm focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none"
           placeholder="Search column…"
           value={structureSearch}
           oninput={(e) =>
@@ -567,8 +568,8 @@
           role="searchbox"
           aria-label="Search all columns"
           class={cn(
-            "h-7 w-full min-w-0 border-transparent bg-accent/40 pl-7 text-ui-sm shadow-none transition-colors focus-visible:border-input focus-visible:bg-input/30 focus-visible:ring-2",
-            showSearchOpts ? "pr-[5.5rem]" : "pr-7",
+            "h-7 w-full min-w-0 border-transparent bg-accent/40 pl-7 text-ui-sm shadow-none transition-colors focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring focus-visible:bg-input/30",
+            showSearchOpts ? "pr-24" : "pr-7",
             localSearch.trim() && "border-ring/40 bg-input/30",
           )}
           placeholder="Search…"
@@ -582,7 +583,7 @@
              them never blurs the input (which would hide this cluster). -->
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
-          class="absolute right-6 flex items-center gap-px"
+          class="absolute inset-y-0 right-7 flex items-center gap-0.5"
           onmousedown={(e) => e.preventDefault()}
         >
           {#each SEARCH_OPTS as opt (opt.key)}
@@ -591,14 +592,14 @@
               title={opt.title}
               aria-pressed={searchOptions[opt.key]}
               class={cn(
-                "flex size-5 items-center justify-center rounded font-mono text-[10px] transition-colors",
+                "flex size-5 items-center justify-center rounded font-mono text-[11px] font-medium leading-none transition-colors",
                 searchOptions[opt.key]
-                  ? "bg-primary/15 text-primary ring-1 ring-primary/30"
-                  : "text-muted-foreground/45 hover:bg-muted hover:text-foreground",
+                  ? "bg-primary/15 text-primary ring-1 ring-inset ring-primary/30"
+                  : "text-muted-foreground/50 hover:bg-muted hover:text-foreground",
               )}
               onclick={() => onsearchoptionschange({ ...searchOptions, [opt.key]: !searchOptions[opt.key] })}
             >
-              <span class={opt.underline ? "underline underline-offset-2" : ""}>{opt.label}</span>
+              <span class={opt.underline ? "underline decoration-1 underline-offset-2" : ""}>{opt.label}</span>
             </button>
           {/each}
         </div>
@@ -700,7 +701,7 @@
                 type="text"
                 placeholder="Save current as…"
                 bind:value={viewNameDraft}
-                class="h-7 w-full min-w-0 flex-1 rounded-md border border-transparent bg-input/30 px-2 text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/35 hover:border-border/60 focus:border-input focus:outline-none focus:ring-1 focus:ring-ring"
+                class="h-7 w-full min-w-0 flex-1 rounded-md border border-transparent bg-input/30 px-2 text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/35 hover:border-border/60 focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none"
                 onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitSaveView(); } }}
               />
               <button
@@ -904,31 +905,6 @@
 
       <span class="mx-0.5 h-4 w-px shrink-0 bg-border/60"></span>
 
-      <!-- View mode: table / json / record / text -->
-      <div
-        class="flex h-7 shrink-0 items-center gap-px rounded-md bg-accent/40 p-0.5 @max-[620px]/tb:hidden"
-        role="group"
-        aria-label="Data view mode"
-      >
-        {#each DATA_VIEW_MODES as m (m.id)}
-          <button
-            type="button"
-            class={cn(
-              "inline-flex h-6 w-7 items-center justify-center rounded-[5px] text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-30",
-              dataViewMode === m.id && "bg-background text-foreground shadow-sm",
-            )}
-            title={m.title ?? m.label}
-            aria-pressed={dataViewMode === m.id}
-            disabled={columns.length === 0}
-            onclick={() => (dataViewMode = m.id)}
-          >
-            <Icon name={m.icon} class="size-3.5" />
-          </button>
-        {/each}
-      </div>
-
-      <span class="mx-0.5 h-4 w-px shrink-0 bg-border/60 @max-[620px]/tb:hidden"></span>
-
       <!-- Add row -->
       <button
         type="button"
@@ -992,45 +968,50 @@
           </Select.Content>
         </Select.Root>
 
-        <Select.Root
-          type="single"
-          value={String(page)}
-          onValueChange={(v) => { if (v) onpagechange(Number(v)); }}
-          disabled={loading || total === 0}
-        >
-          <Select.Trigger size="sm" class={pageSelectTrigger} title="Go to page" aria-label="Go to page">
-            {page}
-          </Select.Trigger>
-          <Select.Content align="end" class="max-h-56">
-            {#each pageMenuItems as p (p)}
-              <Select.Item value={String(p)} label={String(p)} />
-            {/each}
-          </Select.Content>
-        </Select.Root>
+        <!-- Page picker + arrows only exist when there is something to paginate
+             (more than one page, or the count is still unknown). A single-page
+             table shows just the range readout and the page-size select. -->
+        {#if counting || pageCount > 1}
+          <Select.Root
+            type="single"
+            value={String(page)}
+            onValueChange={(v) => { if (v) onpagechange(Number(v)); }}
+            disabled={loading || total === 0}
+          >
+            <Select.Trigger size="sm" class={pageSelectTrigger} title="Go to page" aria-label="Go to page">
+              {page}
+            </Select.Trigger>
+            <Select.Content align="end" class="max-h-56">
+              {#each pageMenuItems as p (p)}
+                <Select.Item value={String(p)} label={String(p)} />
+              {/each}
+            </Select.Content>
+          </Select.Root>
 
-        <span
-          class="shrink-0 text-ui-xs text-muted-foreground/50 tabular-nums @max-[500px]/tb:hidden"
-          title={counting ? "counting…" : pageCount.toLocaleString("en-US")}
-        >of {counting ? "…" : formatCompactCount(pageCount)}</span>
+          <span
+            class="shrink-0 text-ui-xs text-muted-foreground/50 tabular-nums @max-[500px]/tb:hidden"
+            title={counting ? "counting…" : pageCount.toLocaleString("en-US")}
+          >of {counting ? "…" : formatCompactCount(pageCount)}</span>
 
-        <button
-          type="button"
-          class={iconBtn}
-          disabled={!canPrev || loading}
-          onclick={onprev}
-          aria-label="Previous page"
-        >
-          <Icon name="chevron-left" class="size-3.5" />
-        </button>
-        <button
-          type="button"
-          class={iconBtn}
-          disabled={!canNext || loading}
-          onclick={onnext}
-          aria-label="Next page"
-        >
-          <Icon name="chevron-right" class="size-3.5" />
-        </button>
+          <button
+            type="button"
+            class={iconBtn}
+            disabled={!canPrev || loading}
+            onclick={onprev}
+            aria-label="Previous page"
+          >
+            <Icon name="chevron-left" class="size-3.5" />
+          </button>
+          <button
+            type="button"
+            class={iconBtn}
+            disabled={!canNext || loading}
+            onclick={onnext}
+            aria-label="Next page"
+          >
+            <Icon name="chevron-right" class="size-3.5" />
+          </button>
+        {/if}
         </div>
       {/if}
 
@@ -1166,7 +1147,7 @@
         {#if tableViewMode !== "structure"}
           <DropdownMenu.RadioGroup
             value={dataViewMode}
-            onValueChange={(v) => (dataViewMode = /** @type {'table' | 'json' | 'record' | 'text'} */ (v))}
+            onValueChange={(v) => (dataViewMode = /** @type {'table' | 'json' | 'record' | 'text' | 'chart'} */ (v))}
           >
             {#each DATA_VIEW_MODES as m (m.id)}
               <DropdownMenu.RadioItem value={m.id} disabled={columns.length === 0}>
