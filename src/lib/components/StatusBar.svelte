@@ -55,6 +55,8 @@
     canScrollTableHorizontally = false,
     onscrolltableleft = /** @type {() => void} */ (() => {}),
     onscrolltableright = /** @type {() => void} */ (() => {}),
+    /** Duration of the last data fetch (table load / refresh / query), in ms. */
+    queryMs = 0,
     /** Live mode (auto-refresh active table) — Postgres/SQLite only. */
     live = false,
     liveSupported = false,
@@ -313,6 +315,11 @@
 
   let toolsOpen = $state(false)
   let aiModelMenuOpen = $state(false)
+
+  /** "132ms" under a second, "1.24s" above — always tabular so it never jitters. */
+  const queryMsLabel = $derived(
+    queryMs >= 1000 ? `${(queryMs / 1000).toFixed(2)}s` : `${Math.round(queryMs)}ms`,
+  )
 
   // Tools launcher — built from one list so every card renders identically.
   const toolItems = $derived.by(() => {
@@ -625,6 +632,15 @@
             <span>Live</span>
           {/if}
         </button>
+      {/if}
+
+      <!-- Last fetch timing — updates on every table load / refresh / query -->
+      {#if queryMs > 0}
+        {@render sep()}
+        <span
+          class="shrink-0 px-1 font-mono text-[11px] tabular-nums text-muted-foreground/55"
+          title="Last data fetch took {queryMs.toLocaleString('en-US')}ms"
+        >{queryMsLabel}</span>
       {/if}
 
     {:else}
