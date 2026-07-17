@@ -91,7 +91,7 @@
     <!-- The dock owns this scroll — both axes contained here, never chained to
          the grid (the panel lives outside the grid's scroll container). -->
     <div class="app-scroll min-h-0 flex-1 overflow-auto overscroll-contain" data-fk-subview-scroll>
-      <table class="w-max min-w-full border-collapse">
+      <table class="w-max min-w-full border-separate" style="border-spacing:0">
         <thead class="sticky top-0 z-10">
           <tr>
             {#each data.columns as col (col.name ?? col)}
@@ -106,12 +106,12 @@
         </thead>
         <tbody>
           {#each data.rows as row, i (i)}
-            <tr class="border-b border-border/15 last:border-0 hover:bg-muted/10">
+            <tr class="hover:bg-muted/10">
               {#each data.columns as col, j (col.name ?? j)}
                 {@const v = Array.isArray(row) ? row[j] : row[col.name ?? col]}
                 {@const isNullVal = v === null || v === undefined}
                 <td
-                  class="whitespace-nowrap px-3 py-1.5 font-mono text-[12px]"
+                  class="whitespace-nowrap px-3 py-1.5 font-mono text-[12px] {i < data.rows.length - 1 ? 'border-b border-border/15' : ''}"
                   class:text-muted-foreground={isNullVal}
                   class:italic={isNullVal}
                 >{fmt(v)}</td>
