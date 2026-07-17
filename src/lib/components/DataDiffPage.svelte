@@ -639,7 +639,8 @@
   {#if diffRows.length > 0}
 
     <!-- Filter + search bar (tab-style, Vercel/Resend inspired) ── -->
-    <div class="flex shrink-0 items-end gap-0 border-b border-border/15 px-5">
+    <!-- No divider here — the elevated header band below provides the separation. -->
+    <div class="flex shrink-0 items-end gap-0 px-5">
 
       {#each [
         { key: 'all',       label: 'All',       count: diffRows.length,                          badge: 'bg-muted/30 text-muted-foreground/50',           active: 'text-foreground' },
@@ -668,7 +669,7 @@
         </button>
       {/each}
 
-      <div class="ml-auto flex items-center gap-2 pb-2 pl-4">
+      <div class="ml-auto flex items-center gap-2 pb-2.5 pl-4">
         <Search class="size-3 shrink-0 text-muted-foreground/50" />
         <input type="text" bind:value={searchQuery} placeholder="Search rows…"
           class="w-36 bg-transparent text-xs outline-none placeholder:text-muted-foreground/40 focus:w-52 transition-all" />
@@ -700,13 +701,13 @@
         </colgroup>
         <thead class="sticky top-0 z-20">
           <tr>
-            <th class="border-b border-border/25 bg-background select-none"></th>
+            <th class="bg-card select-none"></th>
             {#each columns as col, ci}
               <th
-                class="group relative border-b border-border/25 bg-background p-0 text-left select-none overflow-hidden"
+                class="group relative bg-card p-0 text-left select-none overflow-hidden"
                 style="width:{colWidths[ci]}px;min-width:{colWidths[ci]}px;max-width:{colWidths[ci]}px"
               >
-                <div class="flex min-w-0 items-baseline gap-1.5 px-3 py-2 pr-5">
+                <div class="flex min-w-0 items-baseline gap-1.5 px-3 py-2.5 pr-5">
                   <span class="truncate font-semibold text-foreground/75 text-[11px]">{col.name}</span>
                   {#if col.dataType && col.dataType.toLowerCase() !== 'null'}<span class="shrink-0 font-normal text-muted-foreground/35 text-[10px]">{col.dataType}</span>{/if}
                 </div>
@@ -720,7 +721,7 @@
                 </div>
               </th>
             {/each}
-            <th class="border-b border-border/25 bg-background select-none"></th>
+            <th class="bg-card select-none"></th>
           </tr>
         </thead>
         <tbody>
