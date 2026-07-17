@@ -108,6 +108,7 @@
     deleteTableRows,
     insertTableRow,
     toggleDevtools,
+    resetWindow,
     mcpStart,
     mcpStop,
     mcpUpdateConnections,
@@ -1427,6 +1428,8 @@ let rowSearch = $state('')
   // F12 or Ctrl/Cmd+Shift+I → toggle DevTools (no-op in release builds)
   createHotkey('F12', (e) => { e.preventDefault(); void toggleDevtools() })
   createHotkey('Mod+Shift+I', (e) => { e.preventDefault(); void toggleDevtools() })
+  // Recover a window stranded off-screen (e.g. after unplugging a monitor).
+  createHotkey('Mod+Shift+0', (e) => { e.preventDefault(); void resetWindow() })
 
   createHotkey('Mod+K', (e) => {
     e.preventDefault()
@@ -4726,7 +4729,7 @@ let rowSearch = $state('')
         {#if isFocused}
           {@render sharedContent()}
         {:else}
-          <PaneSnapshot tab={tabsById.get(group.activeTabId ?? '') ?? null} />
+          <PaneSnapshot tab={tabsById.get(group.activeTabId ?? '') ?? null} toolbarSpacer={tableToolbarVisible} />
         {/if}
       {/snippet}
 
