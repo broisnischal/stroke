@@ -1543,7 +1543,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   }
 
   async function copyRowJson(rowIdx) {
-    const record = rowToRecord(columns, rows[rowIdx] ?? []);
+    const record = rowToRecord(columns, rows[rowIdx] ?? [], hiddenColumns);
     try {
       await navigator.clipboard.writeText(formatJsonValue(record));
       toast.success("Copied row as JSON");
@@ -1623,17 +1623,23 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   async function copyAs(rowIdx, format) {
     const indices = copyTargetIndices(rowIdx);
-    const colNames = columns.map((c) => c.name);
-    const dataRows = indices.map((i) => rows[i] ?? []);
+    const allRows = indices.map((i) => rows[i] ?? []);
     let text = '';
     const label = indices.length > 1 ? `${indices.length} rows` : '1 row';
+
+    // Human-readable formats mirror the on-screen columns, so they omit hidden
+    // ones; INSERT reconstructs the row and therefore keeps every column.
+    const visIdxs = columns.map((_, i) => i).filter((i) => !hiddenColumns.has(columns[i].name));
+    const cols = visIdxs.map((i) => columns[i]);
+    const colNames = cols.map((c) => c.name);
+    const dataRows = visIdxs.length === columns.length ? allRows : allRows.map((r) => visIdxs.map((i) => r[i]));
 
     if (format === 'csv') {
       const header = colNames.map(csvCell).join(',');
       const body = dataRows.map((r) => r.map(csvCell).join(',')).join('\n');
       text = header + '\n' + body;
     } else if (format === 'json') {
-      const records = dataRows.map((r) => rowToRecord(columns, r));
+      const records = dataRows.map((r) => rowToRecord(cols, r));
       text = formatJsonValue(indices.length === 1 ? records[0] : records);
     } else if (format === 'plain') {
       text = dataRows
@@ -1648,13 +1654,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     } else if (format === 'markdown') {
       const sep = colNames.map(() => '---').join(' | ');
       const header = colNames.map(mdCell).join(' | ');
-      const body = dataRows.map((r) => r.map(mdCell).join(' | ')).join('\n');
       text = `| ${header} |\n| ${sep} |\n${dataRows.map((r) => `| ${r.map(mdCell).join(' | ')} |`).join('\n')}`;
     } else if (format === 'insert') {
       const tbl = schema ? `"${schema}"."${tableName || 'table'}"` : `"${tableName || 'table'}"`;
-      const cols = colNames.map((c) => `"${c}"`).join(', ');
-      text = dataRows
-        .map((r) => `INSERT INTO ${tbl} (${cols}) VALUES (${r.map(sqlLiteral).join(', ')});`)
+      const insertCols = columns.map((c) => `"${c.name}"`).join(', ');
+      text = allRows
+        .map((r) => `INSERT INTO ${tbl} (${insertCols}) VALUES (${r.map(sqlLiteral).join(', ')});`)
         .join('\n');
     }
 
@@ -4929,7 +4934,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                     use:trackExpandHeight={exIdx}
                   >
                     <RowExpandViewer
-                      record={rowToRecord(columns, rows[exIdx])}
+                      record={rowToRecord(columns, rows[exIdx], hiddenColumns)}
                       rowLabel={"row " + (exIdx + 1)}
                       onclose={() => toggleRowExpand(exIdx)}
                       onopenjson={(value, label) => {
