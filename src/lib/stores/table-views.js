@@ -12,6 +12,7 @@
  * @property {import('$lib/table-query.js').TableSort[]} sortMore
  * @property {string[]} hiddenColumns
  * @property {'table' | 'json' | 'record' | 'text'} dataViewMode
+ * @property {import('$lib/search-options.js').SearchOptions} [searchOptions]
  */
 
 /** @param {string} connId @param {string} schema @param {string} table */

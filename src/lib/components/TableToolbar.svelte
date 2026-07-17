@@ -108,7 +108,31 @@
     // ── Find & replace (workflow extension) ─────────────────────────────────
     findReplaceEnabled = false,
     onfindreplace = () => {},
+    // ── Search options (match case / whole word / regex) ────────────────────
+    /** @type {import('$lib/search-options.js').SearchOptions} */
+    searchOptions = { matchCase: false, wholeWord: false, regex: false },
+    onsearchoptionschange = /** @type {(opts: import('$lib/search-options.js').SearchOptions) => void} */ (() => {}),
+    /** Engine supports the option toggles (Postgres regex path). */
+    searchOptionsSupported = false,
   } = $props();
+
+  const SEARCH_OPTS = /** @type {const} */ ([
+    { key: "matchCase", label: "Aa", title: "Match case", underline: false },
+    { key: "wholeWord", label: "ab", title: "Match whole word", underline: true },
+    { key: "regex", label: ".*", title: "Use regular expression", underline: false },
+  ]);
+
+  let searchFocused = $state(false);
+  const searchOptsActive = $derived(
+    !!(searchOptions.matchCase || searchOptions.wholeWord || searchOptions.regex),
+  );
+  // The toggles only materialize while you're working with the search (focus,
+  // text present, or an option already on) so the idle toolbar stays compact.
+  const showSearchOpts = $derived(
+    searchOptionsSupported &&
+      tableViewMode !== "structure" &&
+      (searchFocused || searchOptsActive || !!rowSearch),
+  );
 
   let viewsMenuOpen = $state(false);
   let viewNameDraft = $state("");
@@ -508,8 +532,20 @@
     class="@container/tb studio-chrome studio-table-toolbar flex h-9 shrink-0 items-center gap-1 border-b border-border bg-panel px-2"
     data-studio-chrome
   >
-    <!-- Search — far left, expands on focus -->
-    <div class="relative flex h-7 w-32 shrink-0 items-center transition-[width] duration-200 focus-within:w-44">
+    <!-- Search — far left, expands on focus (wider when option toggles show) -->
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <div
+      class={cn(
+        "relative flex h-7 shrink-0 items-center transition-[width] duration-200",
+        showSearchOpts ? "w-64" : "w-32 focus-within:w-44",
+      )}
+      role="search"
+      onfocusin={() => (searchFocused = true)}
+      onfocusout={(e) => {
+        const next = e.relatedTarget instanceof Node ? e.relatedTarget : null;
+        if (!e.currentTarget.contains(next)) searchFocused = false;
+      }}
+    >
       <Icon name="search" class="pointer-events-none absolute left-2 size-3.5 text-muted-foreground" />
       {#if tableViewMode === "structure"}
         <input
@@ -531,7 +567,8 @@
           role="searchbox"
           aria-label="Search all columns"
           class={cn(
-            "h-7 w-full min-w-0 border-transparent bg-accent/40 pl-7 pr-7 text-ui-sm shadow-none transition-colors focus-visible:border-input focus-visible:bg-input/30 focus-visible:ring-2",
+            "h-7 w-full min-w-0 border-transparent bg-accent/40 pl-7 text-ui-sm shadow-none transition-colors focus-visible:border-input focus-visible:bg-input/30 focus-visible:ring-2",
+            showSearchOpts ? "pr-[5.5rem]" : "pr-7",
             localSearch.trim() && "border-ring/40 bg-input/30",
           )}
           placeholder="Search…"
@@ -539,6 +576,32 @@
           disabled={columns.length === 0}
           oninput={(e) => handleSearchInput(e.currentTarget.value)}
         />
+      {/if}
+      {#if showSearchOpts}
+        <!-- VS Code-style option toggles; mousedown is swallowed so clicking
+             them never blurs the input (which would hide this cluster). -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          class="absolute right-6 flex items-center gap-px"
+          onmousedown={(e) => e.preventDefault()}
+        >
+          {#each SEARCH_OPTS as opt (opt.key)}
+            <button
+              type="button"
+              title={opt.title}
+              aria-pressed={searchOptions[opt.key]}
+              class={cn(
+                "flex size-5 items-center justify-center rounded font-mono text-[10px] transition-colors",
+                searchOptions[opt.key]
+                  ? "bg-primary/15 text-primary ring-1 ring-primary/30"
+                  : "text-muted-foreground/45 hover:bg-muted hover:text-foreground",
+              )}
+              onclick={() => onsearchoptionschange({ ...searchOptions, [opt.key]: !searchOptions[opt.key] })}
+            >
+              <span class={opt.underline ? "underline underline-offset-2" : ""}>{opt.label}</span>
+            </button>
+          {/each}
+        </div>
       {/if}
       <button
         type="button"
