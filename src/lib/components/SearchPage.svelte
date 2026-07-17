@@ -174,8 +174,8 @@
           class={cn(
             'flex size-6 shrink-0 items-center justify-center rounded text-xs font-mono transition-colors',
             matchCase
-              ? 'bg-primary/15 text-primary ring-1 ring-primary/30'
-              : 'text-muted-foreground/40 hover:bg-muted hover:text-muted-foreground',
+              ? 'bg-primary/15 text-primary ring-1 ring-inset ring-primary/30'
+              : 'text-muted-foreground/50 hover:bg-muted hover:text-muted-foreground',
           )}
           onclick={() => (matchCase = !matchCase)}
         >Aa</button>
@@ -186,8 +186,8 @@
           class={cn(
             'flex size-6 shrink-0 items-center justify-center rounded text-xs font-mono transition-colors',
             wholeWord
-              ? 'bg-primary/15 text-primary ring-1 ring-primary/30'
-              : 'text-muted-foreground/40 hover:bg-muted hover:text-muted-foreground',
+              ? 'bg-primary/15 text-primary ring-1 ring-inset ring-primary/30'
+              : 'text-muted-foreground/50 hover:bg-muted hover:text-muted-foreground',
           )}
           onclick={() => (wholeWord = !wholeWord)}
         ><span class="underline underline-offset-2">ab</span></button>
@@ -198,8 +198,8 @@
           class={cn(
             'flex size-6 shrink-0 items-center justify-center rounded text-xs font-mono transition-colors',
             useRegex
-              ? 'bg-primary/15 text-primary ring-1 ring-primary/30'
-              : 'text-muted-foreground/40 hover:bg-muted hover:text-muted-foreground',
+              ? 'bg-primary/15 text-primary ring-1 ring-inset ring-primary/30'
+              : 'text-muted-foreground/50 hover:bg-muted hover:text-muted-foreground',
           )}
           onclick={() => { useRegex = !useRegex; regexError = '' }}
         >.*</button>
