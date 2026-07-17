@@ -350,7 +350,7 @@
           type="text"
           placeholder="Search fields…"
           bind:value={fieldSearch}
-          class="h-6 w-full min-w-0 rounded-md border border-transparent bg-accent/40 pl-6.5 pr-2 font-mono text-ui-2xs placeholder:text-muted-foreground/50 focus:border-input focus:outline-none focus:ring-1 focus:ring-ring"
+          class="h-6 w-full min-w-0 rounded-md border border-transparent bg-accent/40 pl-6.5 pr-2 font-mono text-ui-2xs placeholder:text-muted-foreground/50 focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none"
         />
       </div>
       <div class="mx-1 h-4 w-px bg-border/60"></div>
@@ -412,7 +412,7 @@
                   <select
                     value={field.initialEditStr}
                     disabled={savingFields[field.colIdx]}
-                    class="w-full appearance-none rounded-md border border-border/50 bg-muted/15 px-2.5 py-1.5 pr-7 font-mono text-ui-xs text-foreground transition-colors hover:border-border focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+                    class="w-full appearance-none rounded-md border border-border/50 bg-muted/15 px-2.5 py-1.5 pr-7 font-mono text-ui-xs text-foreground transition-colors hover:border-border focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none disabled:opacity-50"
                     onchange={(e) => void saveField(field.colIdx, /** @type {HTMLSelectElement} */ (e.target).value)}
                   >
                     {#if field.nullable}
@@ -437,7 +437,7 @@
                     disabled={savingFields[field.colIdx]}
                     placeholder={field.isNull ? 'NULL' : ''}
                     class={cn(
-                      'w-full resize-none rounded-md border bg-muted/15 px-2.5 py-1.5 font-mono text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/40 hover:border-border focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50',
+                      'w-full resize-none rounded-md border bg-muted/15 px-2.5 py-1.5 font-mono text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/40 hover:border-border focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none disabled:opacity-50',
                       fieldErrors[field.colIdx] ? 'border-destructive' : 'border-border/50',
                     )}
                     oninput={(e) => scheduleFieldSave(field.colIdx, /** @type {HTMLTextAreaElement} */ (e.currentTarget).value)}
@@ -451,7 +451,7 @@
                     disabled={savingFields[field.colIdx]}
                     placeholder={field.isNull ? 'NULL' : ''}
                     class={cn(
-                      'w-full rounded-md border bg-muted/15 px-2.5 py-1.5 font-mono text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/40 hover:border-border focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50',
+                      'w-full rounded-md border bg-muted/15 px-2.5 py-1.5 font-mono text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/40 hover:border-border focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none disabled:opacity-50',
                       fieldErrors[field.colIdx] ? 'border-destructive' : 'border-border/50',
                     )}
                     oninput={(e) => scheduleFieldSave(field.colIdx, /** @type {HTMLInputElement} */ (e.currentTarget).value)}
