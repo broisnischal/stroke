@@ -2123,11 +2123,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     let x = geom.totalWidth
     return _vcols.map((vc, i) => {
       const w = Math.round((_vexprWidths[vc.id] ?? VEXPR_COL_DEFAULT_W) * canvasZoom)
-      const pos = { id: vc.id, name: vc.name, x, w, fnIdx: i }
+      // hoverKey is precomputed here so the per-row draw loop never builds the
+      // `__vcol__${id}` string per cell per frame (GC churn on the scroll path).
+      const pos = { id: vc.id, name: vc.name, x, w, fnIdx: i, hoverKey: `__vcol__${vc.id}` }
       x += w
       return pos
     })
   })
+  /** Precomputed `__vrel__N` hover keys — same per-frame allocation avoidance. */
+  const _vrelHoverKeys = $derived(virtualRelCols.map((_, i) => `__vrel__${i}`))
   const vexprTotalW = $derived(
     _vexprLayout.length > 0
       ? _vexprLayout[_vexprLayout.length - 1].x + _vexprLayout[_vexprLayout.length - 1].w - geom.totalWidth
@@ -2205,8 +2209,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   /** Total scrollable content height incl. header + insert slot + body + 2-row bottom margin. */
   const contentHeight = $derived(HEADER_H + insertRowOffset + (rowTops ? rowTops[rows.length] : rows.length * ROW_HEIGHT) + ROW_HEIGHT * 2)
 
+  /** True while the scroll rAF loop is live — gates DOM-overlay work that would
+   *  otherwise re-render every scroll frame (resize handles reposition per frame
+   *  via keyed style writes; nobody can grab one mid-scroll anyway). */
+  let _isScrolling = $state(false)
+  const _EMPTY_HANDLES = /** @type {{ name: string, x: number }[]} */ ([])
+
   /** Viewport-visible column resize handles (DOM overlay — not on the canvas). */
   const resizeHandles = $derived.by(() => {
+    if (_isScrolling) return _EMPTY_HANDLES
     /** @type {{ name: string, x: number }[]} */
     const out = []
     // Handles hidden behind the frozen pinned region are dropped — except the
@@ -2668,10 +2679,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (_scrollLoopId) return
     _loopLastTop = -1
     _loopLastLeft = -1
+    _isScrolling = true
     function loop() {
       const el = tableContainer
       if (!el || !_ctx || _fatalError || performance.now() > _scrollLoopDeadline) {
         _scrollLoopId = 0
+        _isScrolling = false
         return
       }
       // Snap to whole CSS pixels. The canvas is sticky-pinned at the viewport's
@@ -2690,6 +2703,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         } catch (err) {
           reportFatal(err)
           _scrollLoopId = 0
+          _isScrolling = false
           return
         }
       }
@@ -3045,6 +3059,22 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // over-count for non-ASCII characters (Arabic, CJK, etc.) that fall back
     // to a narrower font, leaving an apparent gap after the ellipsis.
     if (ctx.measureText(text).width <= maxW) return text
+    // Monospace fast path: the slice length is plain arithmetic, verified with a
+    // couple of real measurements (non-ASCII glyphs fall back to narrower fonts,
+    // so a failed verify drops to the exact binary search below). This replaces
+    // ~10 measureText binary-search probes per truncated cell per frame with 2-3.
+    if (_glyphW > 0) {
+      let k = Math.max(0, Math.min(len - 1, Math.floor(maxW / _glyphW) - 1))
+      if (ctx.measureText(text.slice(0, k) + '…').width <= maxW) {
+        // Grow greedily while it still fits (covers narrow fallback glyphs);
+        // bounded so the worst case stays O(1).
+        for (let step = 0; step < 4 && k < len - 1; step++) {
+          if (ctx.measureText(text.slice(0, k + 1) + '…').width <= maxW) k++
+          else break
+        }
+        return text.slice(0, k) + '…'
+      }
+    }
     let lo = 0, hi = len
     while (lo < hi) {
       const mid = (lo + hi + 1) >> 1
@@ -3275,7 +3305,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         if (cellX + vc.w <= 0 || cellX >= _viewportWidth) continue
         ctx.fillStyle = c.cPanel
         ctx.fillRect(cellX, ry, vc.w, rh)
-        const isVHov = hoveredRow === idx && hoveredColName === `__vcol__${vc.id}`
+        const isVHov = hoveredRow === idx && hoveredColName === vc.hoverKey
         if (isVHov) { ctx.fillStyle = withAlpha(c.cMutedBg, 0.15); ctx.fillRect(cellX, ry, vc.w, rh) }
         if (vi === 0) {
           ctx.strokeStyle = withAlpha(c.cPrimary, 0.18); ctx.lineWidth = 1
@@ -3303,7 +3333,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (cellX + VIRTUAL_COL_W <= 0 || cellX >= _viewportWidth) continue
       ctx.fillStyle = c.cPanel; ctx.fillRect(cellX, ry, VIRTUAL_COL_W, rh)
       const isActive = fkSubview?.rowIdx === idx && fkSubview?.kind === 'reverse' && fkSubview?.label === vc.label
-      const isVHov = hoveredRow === idx && hoveredColName === `__vrel__${vi}`
+      const isVHov = hoveredRow === idx && hoveredColName === _vrelHoverKeys[vi]
       if (!_fonts) return
 
       // Badge: compact tag style — no border at rest, border on hover/active.
