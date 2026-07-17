@@ -92,10 +92,10 @@
          the grid (the panel lives outside the grid's scroll container). -->
     <div class="app-scroll min-h-0 flex-1 overflow-auto overscroll-contain" data-fk-subview-scroll>
       <table class="w-max min-w-full border-collapse">
-        <thead class="sticky top-0 z-10 bg-background">
-          <tr class="border-b border-border/40">
+        <thead class="sticky top-0 z-10">
+          <tr>
             {#each data.columns as col (col.name ?? col)}
-              <th class="whitespace-nowrap px-3 py-1.5 text-left">
+              <th class="whitespace-nowrap border-b border-border/40 bg-background px-3 py-1.5 text-left">
                 <span class="font-mono text-[12px] font-bold text-foreground/75">{col.name ?? col}</span>
                 {#if col.dataType ?? col.data_type}
                   <span class="ml-1 font-mono text-[11px] font-normal text-muted-foreground/30">{col.dataType ?? col.data_type}</span>
