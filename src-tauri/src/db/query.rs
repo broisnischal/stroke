@@ -2806,11 +2806,19 @@ pub async fn get_column_stats(
     table: String,
     column: String,
 ) -> Result<ColumnStats, String> {
-    let pool = require_pool(&state)?;
-
     validate_ident(&schema).map_err(|e| e.to_string())?;
     validate_ident(&table).map_err(|e| e.to_string())?;
     validate_ident(&column).map_err(|e| e.to_string())?;
+
+    // Non-PostgreSQL engines (SQLite, MySQL, D1, LibSQL, ClickHouse, DuckDB,
+    // MSSQL): compute stats with a dialect-agnostic aggregate routed through
+    // execute_sql, which decodes result rows for every driver. The tuned
+    // PostgreSQL path below (array handling, ::numeric AVG) stays unchanged.
+    if !matches!(require_conn(&state)?, ActiveConnection::Postgres(_)) {
+        return column_stats_generic(state, schema, table, column).await;
+    }
+
+    let pool = require_pool(&state)?;
 
     let tq  = format!("\"{}\".\"{}\"", schema.replace('"', "\"\""), table.replace('"', "\"\""));
     let col = format!("\"{}\"", column.replace('"', "\"\""));
@@ -2878,6 +2886,100 @@ pub async fn get_column_stats(
     let max: Option<Value> = row.try_get::<Option<String>, _>("max_val").ok().flatten().map(Value::String);
 
     Ok(ColumnStats { column, count, null_count, distinct_count, min, max, avg })
+}
+
+/// Cross-dialect column statistics for every non-PostgreSQL engine. Builds a
+/// dialect-quoted aggregate and routes it through `execute_sql`, which already
+/// decodes result rows for each driver (sqlx engines + the HTTP engines like D1,
+/// LibSQL and ClickHouse). Falls back to a plain count when the engine rejects
+/// MIN/MAX/DISTINCT on the column type (e.g. JSON/BLOB), so the panel still shows
+/// total + null counts instead of erroring.
+async fn column_stats_generic(
+    state: State<'_, DbState>,
+    schema: String,
+    table: String,
+    column: String,
+) -> Result<ColumnStats, String> {
+    use super::sql_util::{quote_backtick, quote_bracket, quote_double};
+
+    let conn = require_conn(&state)?;
+    let (tref, col) = match &conn {
+        // MySQL treats the schema as the database; ClickHouse likewise. Both
+        // quote with backticks.
+        ActiveConnection::Mysql(_) | ActiveConnection::Clickhouse(_) => {
+            let t = if schema.is_empty() {
+                quote_backtick(&table)
+            } else {
+                format!("{}.{}", quote_backtick(&schema), quote_backtick(&table))
+            };
+            (t, quote_backtick(&column))
+        }
+        ActiveConnection::Mssql(_) => {
+            let t = if schema.is_empty() {
+                quote_bracket(&table)
+            } else {
+                format!("{}.{}", quote_bracket(&schema), quote_bracket(&table))
+            };
+            (t, quote_bracket(&column))
+        }
+        // SQLite, D1, LibSQL, DuckDB — double-quoted, single-namespace (no
+        // PostgreSQL-style schema qualifier).
+        _ => (quote_double(&table), quote_double(&column)),
+    };
+
+    let full = format!(
+        "SELECT COUNT(*) AS total, COUNT({col}) AS non_null, \
+         COUNT(DISTINCT {col}) AS distinct_count, MIN({col}) AS min_val, MAX({col}) AS max_val \
+         FROM {tref}"
+    );
+    let res = match dispatch_stats_sql(&conn, &full).await {
+        Ok(r) => r,
+        Err(_) => {
+            let basic = format!("SELECT COUNT(*) AS total, COUNT({col}) AS non_null FROM {tref}");
+            dispatch_stats_sql(&conn, &basic).await?
+        }
+    };
+
+    let row = res.rows.into_iter().next().unwrap_or_default();
+    let as_i64 = |v: Option<&Value>| -> i64 {
+        match v {
+            Some(Value::Number(n)) => n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)).unwrap_or(0),
+            Some(Value::String(s)) => s.parse().unwrap_or(0),
+            _ => 0,
+        }
+    };
+    let total = as_i64(row.get(0));
+    let non_null = as_i64(row.get(1));
+    let distinct_count = row.get(2).filter(|v| !v.is_null()).map(|v| as_i64(Some(v)));
+    let min = row.get(3).filter(|v| !v.is_null()).cloned();
+    let max = row.get(4).filter(|v| !v.is_null()).cloned();
+
+    Ok(ColumnStats {
+        column,
+        count: total,
+        null_count: total - non_null,
+        distinct_count,
+        min,
+        max,
+        avg: None,
+    })
+}
+
+/// Run a bounded read-only aggregate against a borrowed active connection (any
+/// engine). Mirrors `execute_sql`'s per-driver dispatch minus the cancellation
+/// plumbing — used by `column_stats_generic`, which needs to borrow the
+/// connection (so it can retry with a fallback query) rather than move `State`.
+async fn dispatch_stats_sql(conn: &ActiveConnection, sql: &str) -> Result<SqlResult, String> {
+    match conn {
+        ActiveConnection::Postgres(pool) => execute_sql_pg(pool, sql, None).await,
+        ActiveConnection::Mysql(pool) => super::mysql::execute_sql(pool, sql, None).await,
+        ActiveConnection::Sqlite(pool) => super::sqlite::execute_sql(pool, sql).await,
+        ActiveConnection::D1(cfg) => super::d1::query(cfg, sql, vec![]).await,
+        ActiveConnection::LibSql(cfg) => super::libsql::query(cfg, sql, vec![]).await,
+        ActiveConnection::Clickhouse(cfg) => super::clickhouse::query(cfg, sql).await,
+        ActiveConnection::Duckdb(h) => super::duckdb::execute_sql(h, sql).await,
+        ActiveConnection::Mssql(h) => super::mssql::execute_sql(h, sql).await,
+    }
 }
 
 /// Lightweight connection health check — runs `SELECT 1` against the active
