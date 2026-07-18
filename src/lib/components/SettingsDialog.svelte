@@ -526,7 +526,14 @@
         onselect={(it) => setTheme(/** @type {import('$lib/themes/registry.js').ThemeId} */ (it.value))}
       >
         {#snippet trigger(props)}
-          <button {...props} type="button" class={themeSelectTrigger} aria-label="Color theme">
+          <button
+            {...props}
+            type="button"
+            aria-label="Color theme"
+            class={cn(
+              "flex h-8 w-56 items-center justify-between gap-2 whitespace-nowrap rounded-lg border border-border/70 bg-background px-2.5 text-ui-xs font-normal shadow-none outline-none transition-colors hover:bg-muted/30 focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 data-[state=open]:border-ring",
+            )}
+          >
             <span class="flex min-w-0 items-center gap-2">
               <ThemeSwatch bg={activeTheme.preview.bg} accent={activeTheme.preview.accent} />
               <span class="truncate font-medium">{activeTheme.name}</span>
