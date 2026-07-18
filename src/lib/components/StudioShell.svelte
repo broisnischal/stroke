@@ -20,7 +20,7 @@
   import History from '@lucide/svelte/icons/history'
   import Plus from '@lucide/svelte/icons/plus'
   import { createHotkey, createHotkeySequence } from '@tanstack/svelte-hotkeys'
-  import { cycleTheme, restorePreviousTheme, isCurrentThemeDark, loadSettings, updateSettings } from '$lib/stores/settings.js'
+  import { cycleTheme, restorePreviousTheme, isCurrentThemeDark, loadSettings, updateSettings, appPaginationMode } from '$lib/stores/settings.js'
   import { normalizeColumn, columnType } from '$lib/column.js'
   import {
     loadAiMode, saveAiMode, loadHiddenCols, saveHiddenCols,
@@ -926,6 +926,43 @@
   const currentOffset = $derived(
     pageSize === PAGE_SIZE_ALL ? 0 : (rawOffset ?? (page - 1) * pageSize),
   )
+
+  // ── Keyset / cursor / temporal pagination ────────────────────────────────
+  // Cursor for the NEXT fetch (null = first page / offset-0). Set by next/prev.
+  let _keysetCursor = $state(/** @type {{ value: unknown, after: boolean } | null} */ (null))
+  // Boundary key values of the currently-shown page (for building next/prev cursors).
+  let _pageFirstKey = null
+  let _pageLastKey = null
+  /** Column keyset orders by: single-column PK (cursor/keyset), or a timestamp (temporal). */
+  const _keysetKeyCol = $derived.by(() => {
+    const mode = $appPaginationMode
+    if (mode === 'temporal') {
+      const ts = columns.find((c) => /(_at$|created|updated|inserted|timestamp|date)/i.test(c.name) && /(time|date)/i.test(c.dataType ?? c.data_type ?? ''))
+        ?? columns.find((c) => /(time|date)/i.test(c.dataType ?? c.data_type ?? ''))
+      return ts?.name ?? null
+    }
+    if (mode === 'cursor' || mode === 'keyset') return primaryKey.length === 1 ? primaryKey[0] : null
+    return null
+  })
+  const _keysetKeyType = $derived.by(() => {
+    const col = _keysetKeyCol
+    if (!col) return null
+    const c = columns.find((x) => x.name === col)
+    return c?.dataType ?? c?.data_type ?? null
+  })
+  /** Temporal is newest-first; keyset/cursor honour the sort dir on the key (default asc). */
+  const _keysetDesc = $derived($appPaginationMode === 'temporal' ? true : (rowSort?.column === _keysetKeyCol && rowSort?.direction === 'desc'))
+  /** Whether keyset can drive this table right now (else offset — the safe fallback). */
+  const _keysetActive = $derived.by(() => {
+    if ($appPaginationMode === 'offset') return false
+    if (!_keysetKeyCol || !_keysetKeyType) return false
+    if (pageSize === PAGE_SIZE_ALL) return false
+    if ((connection?.type ?? '') !== 'postgres') return false // keyset is Postgres-only
+    if (rowSortMore.length > 0) return false                   // multi-sort → offset
+    if (rowSort && rowSort.column !== _keysetKeyCol) return false // sorted by a non-key col → offset
+    return true
+  })
+  const _keyColIndex = $derived(_keysetKeyCol ? columns.findIndex((c) => c.name === _keysetKeyCol) : -1)
   // Bumped whenever a fresh page of rows is applied (page/filter/sort/search).
   // The DataTable watches it to jump its scroll + virtual window back to the
   // top, so a reload never leaves the view stranded mid-table.
@@ -3175,7 +3212,7 @@ let rowSearch = $state('')
   }
 
   async function reloadTableFromQuery(resetPage = true) {
-    if (resetPage) { page = 1; rawOffset = null }
+    if (resetPage) { page = 1; rawOffset = null; _keysetCursor = null }
     await loadRows()
   }
 
@@ -3184,6 +3221,7 @@ let rowSearch = $state('')
     rowSearch = value
     page = 1
     rawOffset = null
+    _keysetCursor = null
     if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
     searchDebounceTimer = setTimeout(() => {
       searchDebounceTimer = null
@@ -3199,6 +3237,7 @@ let rowSearch = $state('')
     if (prevSig === nextSig) return
 
     page = 1
+    _keysetCursor = null
     if (filterDebounceTimer) clearTimeout(filterDebounceTimer)
     filterDebounceTimer = setTimeout(() => {
       filterDebounceTimer = null
@@ -3235,6 +3274,22 @@ let rowSearch = $state('')
 
   /** @param {number} nextPage */
   async function handlePageChange(nextPage) {
+    // Keyset/cursor/temporal: navigation is next/prev via the page's boundary
+    // keys, not an offset jump. page 1 ⇔ no cursor (offset-0 first page).
+    if (_keysetActive) {
+      if (nextPage <= 1) {
+        _keysetCursor = null
+        page = 1
+      } else if (nextPage > page) {
+        _keysetCursor = { value: _pageLastKey, after: true }
+        page = nextPage
+      } else {
+        _keysetCursor = { value: _pageFirstKey, after: false }
+        page = nextPage
+      }
+      await loadRows()
+      return
+    }
     rawOffset = null
     page = nextPage
     await loadRows()
@@ -3296,6 +3351,15 @@ let rowSearch = $state('')
     if (s.pageSize === PAGE_SIZE_ALL && (s.total > WINDOW_THRESHOLD || s.total <= 0)) {
       fetchingTabIds.delete(tabId)
       if (tabId === activeTabId) await loadRows()
+      return
+    }
+
+    // Keyset/cursor/temporal: route the active tab's first page through loadRows
+    // so it's ordered by the key column (page 1 and cursor pages share one order).
+    if (tabId === activeTabId && _keysetActive) {
+      fetchingTabIds.delete(tabId)
+      _keysetCursor = null
+      await loadRows()
       return
     }
 
@@ -3488,7 +3552,26 @@ let rowSearch = $state('')
     error = ''
     try {
       const offset = currentOffset
-      const { sortColumn, sortDirection, sorts } = sortForApi(rowSort, rowSortMore)
+      let { sortColumn, sortDirection, sorts } = sortForApi(rowSort, rowSortMore)
+      // Keyset/cursor/temporal: force ordering by the key column (so page 1 and
+      // subsequent cursor pages share one total order) and send the cursor. When
+      // inactive this is all skipped and it's plain OFFSET.
+      const ksActive = _keysetActive
+      let keysetArg = null
+      if (ksActive) {
+        sortColumn = _keysetKeyCol
+        sortDirection = _keysetDesc ? 'desc' : 'asc'
+        sorts = []
+        if (_keysetCursor && _keysetCursor.value != null) {
+          keysetArg = {
+            column: _keysetKeyCol,
+            value: String(_keysetCursor.value),
+            sqlType: _keysetKeyType,
+            after: _keysetCursor.after,
+            desc: _keysetDesc,
+          }
+        }
+      }
       // Catalog metadata (pk/fk/enums/nullable) only changes when the table's
       // structure does, so request it only on the first load of a table; repeat
       // fetches (pagination, sort, filter, live) reuse what we already hold,
@@ -3508,6 +3591,7 @@ let rowSearch = $state('')
           sortDirection,
           sorts,
           filters: filtersForApi(rowFilters, columns),
+          keyset: keysetArg,
           includeMeta,
           // Don't wait on COUNT(*) — paint rows now, count streams in below.
           // Windowed loads need the total immediately to size the sparse array.
@@ -3561,6 +3645,11 @@ let rowSearch = $state('')
         total = Number(data.total ?? 0)
       }
       queryMs = Number(data.queryMs ?? data.query_ms ?? 0)
+      // Record this page's boundary key values so next/prev can build cursors.
+      if (ksActive && _keyColIndex >= 0) {
+        _pageFirstKey = rows.length ? rows[0]?.[_keyColIndex] : null
+        _pageLastKey = rows.length ? rows[rows.length - 1]?.[_keyColIndex] : null
+      }
       // Live refresh updates in place — only reset scroll for user-driven loads
       // (page/filter/sort/search), where jumping to the top is expected.
       if (!keepScroll) reloadToken++
@@ -5371,6 +5460,8 @@ let rowSearch = $state('')
             onsortchange={(s) => void handleRowSortChange(s)}
             onpagesizechange={(s) => void handlePageSizeChange(s)}
             onpagechange={(p) => void handlePageChange(p)}
+            keysetMode={_keysetActive}
+            keysetHasMore={rows.length >= effectivePageSize}
             onlimitoffsetchange={(l, o) => void handleLimitOffsetChange(l, o)}
             {infiniteScroll}
             oninfinitescrolltoggle={toggleInfiniteScroll}
@@ -5416,7 +5507,7 @@ let rowSearch = $state('')
               await handlePageChange(page - 1)
             }}
             onnext={async () => {
-              if (total >= 0 && page * effectivePageSize >= total) return
+              if (!_keysetActive && total >= 0 && page * effectivePageSize >= total) return
               await handlePageChange(page + 1)
             }}
           />

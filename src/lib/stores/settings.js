@@ -14,7 +14,7 @@ const STORAGE_KEY = 'stroke:settings'
 /** @typedef {'geist' | 'serif' | 'apple' | 'inter' | 'mono'} FontId */
 /** @typedef {'regular' | 'light' | 'bold'} IconStyleId */
 /** @typedef {'lucide' | 'hugeicons' | 'phosphor'} IconSetId */
-/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean, defaultDataView: string, maxQueryHistory: number, connectTimeoutMs: number, socketTimeoutMs: number, maxAllowedPacket: number, sessionTimezone: string }} AppSettings */
+/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean, defaultDataView: string, paginationMode: string, maxQueryHistory: number, connectTimeoutMs: number, socketTimeoutMs: number, maxAllowedPacket: number, sessionTimezone: string }} AppSettings */
 
 /** UI zoom scale (font + layout). 1 = 100%. */
 export const ZOOM_STEPS = [0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.25, 1.5]
@@ -143,6 +143,16 @@ export function normalizeTableStyle(/** @type {unknown} */ id) {
 /** Data-view modes for a table tab (kept in sync with TableToolbar's DATA_VIEW_MODES). */
 export const DATA_VIEW_IDS = /** @type {const} */ (['table', 'json', 'record', 'text', 'chart'])
 export const DEFAULT_DATA_VIEW = 'table'
+
+// How the grid pages through rows.
+//  • offset   — LIMIT/OFFSET; random access (jump to any page) but O(offset) deep.
+//  • cursor   — keyset by primary key (opaque cursor); O(1) next/prev, no page jump.
+//  • keyset   — same engine as cursor (keyset on the PK); listed separately for clarity.
+//  • temporal — keyset on a timestamp column (newest-first); great for logs/events.
+// All non-offset modes fall back to offset when their preconditions aren't met
+// (no single-column PK, a multi-column sort, or a jump to an arbitrary page).
+export const PAGINATION_MODE_IDS = /** @type {const} */ (['offset', 'cursor', 'keyset', 'temporal'])
+export const DEFAULT_PAGINATION_MODE = 'offset'
 export const DEFAULT_MAX_QUERY_HISTORY = 100
 export const DEFAULT_CONNECT_TIMEOUT_MS = 60000
 export const DEFAULT_SOCKET_TIMEOUT_MS = 600000
@@ -173,6 +183,7 @@ export const DEFAULT_SETTINGS = {
   autoReconnectOnStartup: true,
   previewDmlBeforeApply: true,
   defaultDataView: DEFAULT_DATA_VIEW,
+  paginationMode: DEFAULT_PAGINATION_MODE,
   maxQueryHistory: DEFAULT_MAX_QUERY_HISTORY,
   connectTimeoutMs: DEFAULT_CONNECT_TIMEOUT_MS,
   socketTimeoutMs: DEFAULT_SOCKET_TIMEOUT_MS,
@@ -198,6 +209,9 @@ export const appThemeId = writable(/** @type {ThemeId} */ (DEFAULT_THEME_ID))
 
 /** Reactive: show a SQL preview/confirm before applying grid writes (synced by applySettings). */
 export const appPreviewDml = writable(true)
+
+/** Reactive pagination strategy (offset | cursor | keyset | temporal), synced by applySettings. */
+export const appPaginationMode = writable(/** @type {string} */ (DEFAULT_PAGINATION_MODE))
 
 /** Reactive canvas-table grid style preset (synced by applySettings). DataTable
  *  subscribes to repaint when it changes. */
@@ -276,6 +290,7 @@ export function loadSettings() {
     const iconSet = normalizeIconSet(parsed.iconSet)
     const tableStyle = normalizeTableStyle(parsed.tableStyle)
     const defaultDataView = DATA_VIEW_IDS.includes(parsed.defaultDataView) ? parsed.defaultDataView : DEFAULT_DATA_VIEW
+    const paginationMode = PAGINATION_MODE_IDS.includes(parsed.paginationMode) ? parsed.paginationMode : DEFAULT_PAGINATION_MODE
     const maxQueryHistory = normalizeInt(parsed.maxQueryHistory, DEFAULT_MAX_QUERY_HISTORY, 1, 100000)
     const connectTimeoutMs = normalizeInt(parsed.connectTimeoutMs, DEFAULT_CONNECT_TIMEOUT_MS, 0)
     const socketTimeoutMs = normalizeInt(parsed.socketTimeoutMs, DEFAULT_SOCKET_TIMEOUT_MS, 0)
@@ -284,7 +299,7 @@ export function loadSettings() {
       typeof parsed.sessionTimezone === 'string' && parsed.sessionTimezone.trim()
         ? parsed.sessionTimezone.trim()
         : DEFAULT_SESSION_TIMEZONE
-    _settingsCache = { theme, zoom, font, iconStyle, iconSet, tableStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply, defaultDataView, maxQueryHistory, connectTimeoutMs, socketTimeoutMs, maxAllowedPacket, sessionTimezone }
+    _settingsCache = { theme, zoom, font, iconStyle, iconSet, tableStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply, defaultDataView, paginationMode, maxQueryHistory, connectTimeoutMs, socketTimeoutMs, maxAllowedPacket, sessionTimezone }
     return { ..._settingsCache }
   } catch {
     return { ...DEFAULT_SETTINGS }
@@ -374,6 +389,7 @@ export function applySettings(settings) {
 
   // Grid-write DML preview toggle — DataTable subscribes to gate its confirm dialog.
   setStore(appPreviewDml, settings.previewDmlBeforeApply !== false)
+  setStore(appPaginationMode, PAGINATION_MODE_IDS.includes(settings.paginationMode) ? settings.paginationMode : DEFAULT_PAGINATION_MODE)
 
   // Canvas table grid style — data attribute for any CSS hooks; DataTable reads
   // the store and repaints the virtualized grid pass.
