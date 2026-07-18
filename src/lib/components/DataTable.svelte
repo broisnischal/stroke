@@ -855,6 +855,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // Whether any formatter/linkifier is enabled — gates the per-cell directive
   // lookup so the scroll hot path does zero extension work in the common case.
   const _extActive = $derived.by(() => { void $pluginState; return anyDisplayExtEnabled(); });
+  // Reused per-cell stats context — formatters read `.stats` synchronously and
+  // don't retain it, so one scratch object avoids an allocation per drawn cell
+  // while a stats-dependent extension (heatmap / annotator) is enabled.
+  const _statsCtx = { stats: /** @type {any} */ (undefined) };
 
   // Repaint when extension settings or column stats change — both affect drawn
   // cell text, badges, tints, and the header annotator strip.
@@ -1996,8 +2000,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
   }
 
+  /** Set of every row index, built without the intermediate array that
+   *  new Set(rows.map(...)) allocates — that doubled the peak spike on huge tables. */
+  function allRowIndexSet() {
+    const s = new Set();
+    for (let i = 0; i < rows.length; i++) s.add(i);
+    return s;
+  }
+
   function toggleAll(checked) {
-    selected = checked ? new Set(rows.map((_, i) => i)) : new Set();
+    selected = checked ? allRowIndexSet() : new Set();
     lastSelectAnchor = null;
   }
 
@@ -3116,7 +3128,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "a" || e.key === "A")) {
       if (!editingCell) {
         e.preventDefault();
-        selected = new Set(rows.map((_, i) => i));
+        selected = allRowIndexSet();
       }
       return;
     }
@@ -3724,8 +3736,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Extension render directive (badges, tints, masks, links, swatches, …).
     // Computed once per cell and merged across enabled formatters; null/JSON
     // cells skip it entirely so the common path allocates nothing.
+    let _ctxArg
+    if (_colStats) { _statsCtx.stats = _colStats.get(actualIdx); _ctxArg = _statsCtx }
     const dir = (_extActive && !isNull && !isJson)
-      ? formatCellValue(value, cached?.colType ?? '', col.name, _colStats ? { stats: _colStats.get(actualIdx) } : undefined)
+      ? formatCellValue(value, cached?.colType ?? '', col.name, _ctxArg)
       : null
 
     // Cell background tints.
