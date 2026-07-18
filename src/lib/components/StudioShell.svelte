@@ -57,6 +57,7 @@
   import { qualifiedTable } from '$lib/dml-preview.js'
   import { pluginState, pluginEnabledIn } from '$lib/stores/plugins.js'
   import { loadTableViews, saveTableViews } from '$lib/stores/table-views.js'
+  import { loadSqlDraft, saveSqlDraft } from '$lib/stores/sql-draft.js'
   import { buildBatchUpdateSql } from '$lib/sql-batch-update.js'
   import { buildSearchQuery, searchOptionsSupported } from '$lib/search-options.js'
   import Onboarding from './Onboarding.svelte'
@@ -1204,6 +1205,20 @@ let rowSearch = $state('')
     void mcpUpdateConnections(savedConnections, activeConnectionId || null)
   })
 
+  // Persist the Query Editor buffer per connection so reopening the tab (or
+  // restarting the app) restores where the user left off. Debounced so fast
+  // typing doesn't hammer localStorage; gated on `sqlEverOpened` so the initial
+  // "SELECT 1;" default can't clobber a real saved draft before the editor is used.
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let _sqlDraftTimer = null
+  $effect(() => {
+    const text = sqlText
+    const cid = persistConnectionId
+    if (!sqlEverOpened) return
+    if (_sqlDraftTimer) clearTimeout(_sqlDraftTimer)
+    _sqlDraftTimer = setTimeout(() => saveSqlDraft(cid, text), 400)
+  })
+
 
   /** @type {import('$lib/stores/query-history.js').QueryHistoryEntry[]} */
   let queryHistory = $state([])
@@ -2110,9 +2125,13 @@ let rowSearch = $state('')
       void activateTab(existing.id)
       return
     }
-    // If SqlConsole is already mounted (keep-alive), seed the new tab with the
-    // current active content so applySqlSnapshot doesn't overwrite Q2/Q3/etc.
-    const tab = createSqlTab(sqlEverOpened ? sqlText : undefined)
+    // Seed a fresh Query Editor tab. If a SQL tab was already opened this session
+    // (keep-alive), reuse the live buffer so we don't clobber Q2/Q3/etc.;
+    // otherwise restore the last saved draft for this connection (survives tab
+    // close and app restart). Falls back to the default when there's no draft.
+    const tab = createSqlTab(
+      sqlEverOpened ? sqlText : (loadSqlDraft(persistConnectionId) ?? undefined),
+    )
     tabs = [...tabs, tab]
     activeTabId = tab.id
     clearTableEditor()
