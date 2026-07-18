@@ -16,6 +16,8 @@
 //   display, title, badge{bg,fg}, swatch, dot, fg, bgTint, mask, reveal, link, warn
 import { isPluginEnabled, getPluginConfig } from '$lib/stores/plugins.js'
 import { betterTime } from './extensions/better-time.js'
+import { freshness } from './extensions/freshness.js'
+import { nullishValues } from './extensions/nullish-values.js'
 import { numberFormat } from './extensions/number-format.js'
 import { moneyFormat } from './extensions/money-format.js'
 import { durationFormat } from './extensions/duration-format.js'
@@ -35,7 +37,9 @@ import { savedViews, findReplace } from './extensions/workflow.js'
 
 // Display order also = merge precedence for formatters (earlier wins per field).
 export const EXTENSIONS = [
+  nullishValues,
   betterTime,
+  freshness,
   moneyFormat,
   numberFormat,
   durationFormat,
