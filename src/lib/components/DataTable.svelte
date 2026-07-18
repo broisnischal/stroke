@@ -290,6 +290,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    *  are no unsaved edits (the common case) — avoids a string alloc + Map.get
    *  on every cell of large tables. */
   const hasPendingEdits = $derived(pendingEdits.size > 0);
+  /** Row indices with a staged edit — lets the draw loop skip the per-cell key
+   *  string for every row that isn't edited (usually all of them). */
+  const _editedRowSet = $derived.by(() => {
+    /** @type {Set<number>} */
+    const s = new Set();
+    for (const e of pendingEdits.values()) s.add(e.rowIdx);
+    return s;
+  });
 
   /**
    * Row indices staged for deletion — shown with a red diff marker until Apply.
@@ -529,7 +537,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // All layout constants scale with canvasZoom so the entire canvas zooms together.
   const ROW_HEIGHT = $derived(Math.round(24 * canvasZoom))
 
+  // `_scrollTop` is the VIRTUAL scroll offset used for all row math (content
+  // space). `_physScrollTop` is the raw DOM scrollTop of the container, which is
+  // bounded by the capped spacer. They're equal until a table is tall enough to
+  // exceed the browser's element-height ceiling (see MAX_SCROLL_PX), at which
+  // point the physical range is compressed and _scrollTop = _physScrollTop×scale.
   let _scrollTop = $state(0)
+  let _physScrollTop = $state(0)
   // Start high so the first paint covers any reasonable screen height before the
   // ResizeObserver fires with the real value.
   let _viewportHeight = $state(1200)
@@ -908,12 +922,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const top = rowDocTop(rowIdx)
     const bottom = top + ROW_HEIGHT
     const ch = tableContainer.clientHeight
-    const st = tableContainer.scrollTop
+    const vst = _scrollTop // current virtual offset
     // Keep the row clear of the pinned header band at the top of the viewport.
-    if (top - HEADER_H < st) {
-      tableContainer.scrollTop = Math.max(0, top - HEADER_H)
-    } else if (bottom > st + ch) {
-      tableContainer.scrollTop = bottom - ch
+    if (top - HEADER_H < vst) {
+      setVirtualScroll(top - HEADER_H)
+    } else if (bottom > vst + ch) {
+      setVirtualScroll(bottom - ch)
     }
   }
 
@@ -1437,7 +1451,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     scrollToLeft = () => tableContainer?.scrollTo({ left: 0 });
     scrollToRight = () => { if (tableContainer) tableContainer.scrollTo({ left: tableContainer.scrollWidth }); };
     focusColumn = focusColumnByName;
-    getScroll = () => ({ left: _scrollLeft, top: _scrollTop });
+    // Save/restore the PHYSICAL scroll position so it round-trips regardless of
+    // whether the scroll range is compressed (same table → same scale).
+    getScroll = () => ({ left: _scrollLeft, top: _physScrollTop });
     applyScroll = (pos) => {
       // Wait for the new tab's columns/rows to lay out (spacer width) before
       // setting scroll — otherwise the container clamps to 0.
@@ -1447,7 +1463,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         el.scrollLeft = Math.max(0, pos.left ?? 0);
         el.scrollTop = Math.max(0, pos.top ?? 0);
         _scrollLeft = el.scrollLeft;
-        _scrollTop = el.scrollTop;
+        _physScrollTop = Math.round(el.scrollTop);
+        _scrollTop = physToVirt(_physScrollTop);
         scheduleDraw();
       }));
     };
@@ -2443,6 +2460,41 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   /** Total scrollable content height incl. header + insert slot + body + 2-row bottom margin. */
   const contentHeight = $derived(HEADER_H + insertRowOffset + totalRowsHeight(rowTops, rows.length, ROW_HEIGHT) + ROW_HEIGHT * 2)
 
+  // Browser engines cap element/scroll height at ~33.5M px, so a naive spacer of
+  // rows×ROW_HEIGHT breaks past ~1.4M rows (rows become unreachable). When the
+  // true content is taller than this, the spacer is capped and the scroll range
+  // is compressed: physical scrollTop 0…(cap−vh) maps onto virtual 0…(natural−vh)
+  // by `_scrollScale`. Below the cap (the overwhelming common case) scale is 1 and
+  // everything behaves exactly as an un-normalized native scroll.
+  const MAX_SCROLL_PX = 24_000_000
+  const spacerHeight = $derived(Math.min(contentHeight, MAX_SCROLL_PX))
+  const _scrollScale = $derived.by(() => {
+    if (contentHeight <= MAX_SCROLL_PX) return 1
+    const physRange = Math.max(1, MAX_SCROLL_PX - _viewportHeight)
+    const virtRange = Math.max(0, contentHeight - _viewportHeight)
+    return virtRange > physRange ? virtRange / physRange : 1
+  })
+  /** Physical DOM scrollTop → virtual content offset (row math). */
+  function physToVirt(/** @type {number} */ phys) {
+    if (_scrollScale === 1) return phys
+    return Math.round(Math.min(Math.max(0, contentHeight - _viewportHeight), phys * _scrollScale))
+  }
+  /** Virtual content offset → physical DOM scrollTop (for programmatic scrolls). */
+  function virtToPhys(/** @type {number} */ virt) {
+    return _scrollScale === 1 ? virt : virt / _scrollScale
+  }
+  /** Scroll the container so virtual offset `virt` sits at the top. */
+  function setVirtualScroll(/** @type {number} */ virt) {
+    if (tableContainer) tableContainer.scrollTop = Math.max(0, virtToPhys(virt))
+  }
+  /** Document-space top for a DOM overlay (insert row, expand panel, edit input).
+   *  Content coordinates when unscaled; when the scroll range is compressed the
+   *  overlay is pinned to the physical spacer position the canvas painted the row
+   *  at, so it tracks the row instead of drifting off the shortened spacer. */
+  function overlayDocTop(/** @type {number} */ idx) {
+    return _scrollScale === 1 ? rowDocTop(idx) : _physScrollTop + (rowDocTop(idx) - _scrollTop)
+  }
+
   /** True while the scroll rAF loop is live — gates DOM-overlay work that would
    *  otherwise re-render every scroll frame (resize handles reposition per frame
    *  via keyed style writes; nobody can grab one mid-scroll anyway). */
@@ -2502,6 +2554,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // stays looking at the same columns after a sort or filter reload.
     untrack(() => {
       _scrollTop = 0
+      _physScrollTop = 0
       if (tableContainer && tableContainer.scrollTop !== 0) tableContainer.scrollTop = 0
       fkSubview = null
       // A fresh page of rows (page/filter/sort/search) invalidates row-index-keyed
@@ -2875,7 +2928,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (!container) return
     _viewportWidth = container.clientWidth
     _viewportHeight = container.clientHeight
-    _scrollTop = Math.round(container.scrollTop)
+    _physScrollTop = Math.round(container.scrollTop)
+    _scrollTop = physToVirt(_physScrollTop)
     _scrollLeft = Math.round(container.scrollLeft)
 
     // Use contentRect directly — it's provided synchronously by the ResizeObserver
@@ -2928,7 +2982,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       const st = Math.round(el.scrollTop)
       const sl = Math.round(el.scrollLeft)
       if (st !== _loopLastTop || sl !== _loopLastLeft) {
-        _scrollTop = st
+        _physScrollTop = st
+        _scrollTop = physToVirt(st)
         _scrollLeft = sl
         _loopLastTop = st
         _loopLastLeft = sl
@@ -2951,7 +3006,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     invalidateCanvasRect()
     // Update state immediately so any synchronous consumers (hit-test etc.) are current.
     // Rounded to whole pixels to avoid sub-pixel shimmer during horizontal scroll.
-    _scrollTop = Math.round(el.scrollTop)
+    _physScrollTop = Math.round(el.scrollTop)
+    _scrollTop = physToVirt(_physScrollTop)
     _scrollLeft = Math.round(el.scrollLeft)
     // Cancel any pending one-shot draw — the loop handles all scroll redraws at
     // the display's native frame rate (120Hz on ProMotion).
@@ -3656,7 +3712,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
 
     const editing = editingCell && editingCell.rowIdx === idx && editingCell.colIdx === actualIdx
-    const staged = hasPendingEdits ? pendingEdits.get(idx + ':' + actualIdx) : undefined
+    const staged = (hasPendingEdits && _editedRowSet.has(idx)) ? pendingEdits.get(idx + ':' + actualIdx) : undefined
     const isDirty = !!staged
     const value = staged ? staged.value : rows[idx]?.[actualIdx]
     const isNull = value === null || value === undefined
@@ -4296,6 +4352,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (_drawRafId) cancelAnimationFrame(_drawRafId)
     if (_resizeRafId) cancelAnimationFrame(_resizeRafId)
     if (_scrollLoopId) cancelAnimationFrame(_scrollLoopId)
+    if (_focusColTimer) { clearTimeout(_focusColTimer); _focusColTimer = null }
   })
 
   // End a drag-select on pointer-up anywhere (the release often lands outside the
@@ -4871,7 +4928,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (!editingCell) return null
     const col = geom.cols.find((c) => _nameToActualIdx.get(c.name) === editingCell.colIdx)
     if (!col) return null
-    const top = HEADER_H + insertRowOffset + rowTopOf(rowTops, editingCell.rowIdx, ROW_HEIGHT)
+    const top = overlayDocTop(editingCell.rowIdx)
     // Pinned columns rest at their frozen x (content-space = scrollLeft + fixed).
     const left = col.pinned
       ? Math.max(col.contentX, _scrollLeft + (geom.pinnedFixedX.get(col.name) ?? 0))
@@ -5005,14 +5062,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                  within it in content coordinates. -->
             <div
               class="relative"
-              style="width:{totalContentWidth}px; height:{contentHeight}px"
+              style="width:{totalContentWidth}px; height:{spacerHeight}px"
             >
               <!-- Inline insert-row form -->
               {#if newRowDrafts}
                 <div
                   role="none"
                   class="absolute left-0 z-20 flex border-b border-border/30 bg-panel ring-1 ring-inset ring-emerald-500/25"
-                  style="top:{HEADER_H + _scrollTop}px; height:{ROW_HEIGHT}px; width:{insertRowTotalWidth}px"
+                  style="top:{HEADER_H + _physScrollTop}px; height:{ROW_HEIGHT}px; width:{insertRowTotalWidth}px"
                   onkeydown={onNewRowKeydown}
                 >
                   {#if showRowExpand}
@@ -5152,7 +5209,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                 {#if rows[exIdx] !== undefined}
                   <div
                     class="absolute z-10 left-0 right-0"
-                    style="top:{rowDocTop(exIdx) + ROW_HEIGHT}px"
+                    style="top:{overlayDocTop(exIdx) + ROW_HEIGHT}px"
                   >
                   <div
                     style="position:sticky; left:0; width:{_viewportWidth}px"
