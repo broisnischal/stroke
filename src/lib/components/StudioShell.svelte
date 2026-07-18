@@ -5567,6 +5567,7 @@ let rowSearch = $state('')
                 onfetchrelatedrows={handleFetchRelatedRows}
                 schema={activeSchema}
                 tableName={activeTable ?? ''}
+                connectionId={persistConnectionId}
                 dialect={dbType}
                 indexes={activeTableIndexes}
                 {hiddenColumns}
@@ -5574,7 +5575,7 @@ let rowSearch = $state('')
                 {dataVersion}
                 {windowed}
                 onvisiblerange={handleVisibleRange}
-                columnWidthsKey={activeTable ? `${activeSchema}.${activeTable}` : undefined}
+                columnWidthsKey={activeTable ? `${persistConnectionId}\x00${activeSchema}.${activeTable}` : undefined}
                 loading={loadingRows}
                 {loadingMore}
                 {infiniteScroll}
@@ -5708,7 +5709,7 @@ let rowSearch = $state('')
             {#if connection}
               <div class="flex items-center gap-2 text-sm font-medium text-foreground/80">
                 <span class="size-1.5 rounded-full bg-emerald-500 shrink-0"></span>
-                <span class="font-mono">{connection.database ?? connection.filePath?.split('/').at(-1) ?? connection.databaseId ?? 'connected'}</span>
+                <span class="font-mono">{connection.database ?? connection.filePath?.split('/').at(-1) ?? connection.name ?? connection.databaseId ?? 'connected'}</span>
                 <span class="text-muted-foreground/50 text-xs">·</span>
                 <span class="capitalize text-muted-foreground/70 text-xs font-normal">{dbType}</span>
                 {#if tables.length > 0}

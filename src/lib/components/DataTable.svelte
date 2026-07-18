@@ -174,6 +174,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     showRowExpand = true,
     /** Persist column widths per table, e.g. "public.users" */
     columnWidthsKey = undefined,
+    /** Active connection id — scopes ALL per-table persistence (widths, staged
+     *  edits, highlights, transforms, virtual columns) so state from one database
+     *  never leaks into another table of the same schema.table name on a different
+     *  connection. */
+    connectionId = '',
     /** Schema + table name used for INSERT statement generation */
     schema = '',
     tableName = '',
@@ -2169,7 +2174,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   const COL_HL_MAP = new Map(COL_HIGHLIGHTS.map((h) => [h.id, h.hex]));
   /** @type {Record<string, { color?: string, tag?: string }>} */
   let colHighlights = $state({});
-  const _colHlKey = $derived(`stroke:colhl:${schema}\x00${tableName}`);
+  const _colHlKey = $derived(`stroke:colhl:${connectionId}\x00${schema}\x00${tableName}`);
   $effect(() => {
     const key = _colHlKey;
     untrack(() => {
@@ -2213,7 +2218,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // per table, independent of highlight/tag.
   /** @type {Record<string, string>} colName → transform id */
   let colTransforms = $state({});
-  const _colTfKey = $derived(`stroke:coltf:${schema}\x00${tableName}`);
+  const _colTfKey = $derived(`stroke:coltf:${connectionId}\x00${schema}\x00${tableName}`);
   $effect(() => {
     const key = _colTfKey;
     untrack(() => {
@@ -2397,7 +2402,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   })
   // ── Virtual expression columns (user-defined templates) ──────────────────────
   const VEXPR_COL_DEFAULT_W = 220
-  const _tableKey = $derived(`${schema}.${tableName}`)
+  const _tableKey = $derived(`${connectionId}\x00${schema}.${tableName}`)
   /** Active (enabled) virtual expr col defs for current table */
   const _vcols = $derived.by(() => {
     const all = $virtualColumnsStore[_tableKey] ?? []
