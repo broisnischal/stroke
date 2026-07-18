@@ -2234,10 +2234,36 @@ let rowSearch = $state('')
   }
 
   /** @param {string} id */
+  // Background table tabs each pin their full result set. Keep the few most
+  // recently viewed ones warm (instant switch) but evict the row arrays of
+  // colder, LARGE tabs so N open million-row tables don't retain N× the memory.
+  // Eviction just clears rows/columns; switching back refetches (applyTabToEditor
+  // treats columns.length === 0 as "no cached data → fetch"). Prefetch only runs
+  // on initial open, so this never fights it. Small tabs are left untouched.
+  const TAB_ROWS_MRU_MAX = 3
+  const TAB_EVICT_ROW_THRESHOLD = 50_000
+  let _tabRowsMru = /** @type {string[]} */ ([])
+  function evictColdTabRows(activeId) {
+    _tabRowsMru = [..._tabRowsMru.filter((x) => x !== activeId), activeId]
+    const keep = new Set(_tabRowsMru.slice(-TAB_ROWS_MRU_MAX))
+    let changed = false
+    const next = tabs.map((t) => {
+      if (t.kind !== 'table' || t.id === activeId || keep.has(t.id)) return t
+      const st = /** @type {TableTabState} */ (t.state)
+      if (st && Array.isArray(st.rows) && st.rows.length > TAB_EVICT_ROW_THRESHOLD) {
+        changed = true
+        return { ...t, state: { ...st, rows: [], columns: [], selected: new Set() } }
+      }
+      return t
+    })
+    if (changed) tabs = next
+  }
+
   async function activateTab(id) {
     if (id === activeTabId) return
     saveActiveTabState()
     activeTabId = id
+    evictColdTabRows(id)
 
     // Push to nav history unless we're mid back/forward jump
     if (!_navigating) {
