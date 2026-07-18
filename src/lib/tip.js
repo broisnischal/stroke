@@ -13,6 +13,10 @@ let host, pill, textEl, arrow
 let showTimer = 0
 let lastHiddenAt = -Infinity
 let visible = false
+/** The trigger we're currently showing or arming a show for. Tracked directly
+ * (not re-queried by selector) because we remove the element's `title` on hover,
+ * so a `[title]` selector would no longer match it on the way out. */
+let armed = /** @type {Element | null} */ (null)
 /** Element whose native `title` we temporarily removed (to suppress the OS tooltip). */
 let titleStashEl = /** @type {Element | null} */ (null)
 let titleStashVal = ''
@@ -71,11 +75,10 @@ function reveal(target, text) {
 
 function hide() {
   clearTimeout(showTimer)
-  if (titleStashEl) { titleStashEl.setAttribute('title', titleStashVal); titleStashEl = null }
-  if (!visible && current === null) return
+  armed = null
   current = null
-  if (visible) { host.dataset.show = 'false'; lastHiddenAt = performance.now() }
-  visible = false
+  if (titleStashEl) { titleStashEl.setAttribute('title', titleStashVal); titleStashEl = null }
+  if (visible) { host.dataset.show = 'false'; lastHiddenAt = performance.now(); visible = false }
 }
 
 /** @param {Element} t @param {boolean} suppressNative @returns {string} */
@@ -94,12 +97,12 @@ function labelFor(t, suppressNative) {
 /** Shared enter path for pointer + keyboard focus.
  * @param {Element} t @param {boolean} instant @param {boolean} suppressNative */
 function enter(t, instant, suppressNative) {
-  if (t === current) return
+  if (t === armed) return
   hide()
   const text = labelFor(t, suppressNative)
   if (!text) return
+  armed = t
   const delay = instant || performance.now() - lastHiddenAt < SKIP_WINDOW ? 0 : OPEN_DELAY
-  clearTimeout(showTimer)
   showTimer = window.setTimeout(() => reveal(t, text), delay)
 }
 
@@ -110,14 +113,17 @@ export function initTooltips() {
 
   const onOver = (/** @type {PointerEvent} */ e) => {
     if (e.pointerType === 'touch') return
+    // Still inside the armed trigger (whose title we've already removed) — do nothing.
+    if (armed && e.target instanceof Node && armed.contains(e.target)) return
     const t = e.target instanceof Element ? e.target.closest('[data-tip],[title]') : null
     if (t) enter(t, false, true)
   }
   const onOut = (/** @type {PointerEvent} */ e) => {
-    const t = e.target instanceof Element ? e.target.closest('[data-tip],[title]') : null
-    if (!t || (t !== current && t !== titleStashEl)) return
-    if (e.relatedTarget instanceof Element && t.contains(e.relatedTarget)) return
-    hide() // restores the stashed title + clears any pending show
+    // Hide the moment the pointer leaves the armed trigger. Checked against the
+    // tracked element (not a selector) because its `title` was removed on enter.
+    if (!armed) return
+    if (e.relatedTarget instanceof Node && armed.contains(e.relatedTarget)) return // moved within it
+    if (e.target instanceof Node && armed.contains(e.target)) hide()
   }
   const onFocus = (/** @type {FocusEvent} */ e) => {
     const t = e.target instanceof Element ? e.target.closest('[data-tip],[title]') : null
