@@ -132,6 +132,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     colDrawnX,
     colAtX,
     computeRowTops,
+    rowTopOf,
+    totalRowsHeight,
     rowAtContentY,
     rowIndexAtY,
   } from "$lib/canvas-table.js";
@@ -781,37 +783,57 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     return s.length > CELL_DISPLAY_LIMIT ? s.slice(0, CELL_DISPLAY_LIMIT) + "…" : s;
   }
 
-  // Per-row display-string cache for the draw hot path. Keyed on the row ARRAY:
-  // every write path replaces the row array immutably (handleSaveCell maps a new
-  // array, batch apply + DML refetch replace the whole page), so stale entries
-  // are impossible and GC reclaims them with the rows. Kills the String(value)
-  // allocation per primitive cell per frame while scrolling. Staged edits bypass
-  // this cache entirely (their value differs from the row's).
-  /** @type {WeakMap<unknown[], string[]>} */
-  const _cellTextCache = new WeakMap();
-  function cellDisplayText(/** @type {unknown[]} */ row, /** @type {number} */ actualIdx, /** @type {unknown} */ value) {
-    let arr = _cellTextCache.get(row);
-    if (!arr) { arr = []; _cellTextCache.set(row, arr); }
+  // Per-row display-string caches for the draw hot path, keyed by ROW INDEX and
+  // tied to the current `rows` identity (syncDisplayCaches drops them whenever the
+  // data changes — every write path replaces `rows`). Capped in size so scrolling
+  // through millions of rows can't retain a string[] for every row ever seen; the
+  // old WeakMap-by-row versions never released because every loaded row stays
+  // alive in the `rows` prop. Staged edits bypass these (their value differs).
+  const _DISP_CACHE_MAX = 8192;
+  /** @type {Map<number, string[]>} */
+  const _cellTextCache = new Map();
+  /** @type {Map<number, string[]>} */
+  const _vexprTextCache = new Map();
+  /** @type {Map<number, Map<string, string>>} */
+  const _colTfCache = new Map();
+  let _dispCacheRows = /** @type {unknown} */ (null);
+  let _dispCacheVFns = /** @type {unknown} */ (null);
+  let _dispCacheTFns = /** @type {unknown} */ (null);
+  /** Invalidate cached cell text when the data or active virtual/transform fns
+   *  change. Called once per frame from draw(); all draw-path callers key by index. */
+  function syncDisplayCaches() {
+    if (_dispCacheRows !== rows) {
+      _dispCacheRows = rows;
+      _cellTextCache.clear(); _vexprTextCache.clear(); _colTfCache.clear();
+    }
+    if (_dispCacheVFns !== _vcolFns) { _dispCacheVFns = _vcolFns; _vexprTextCache.clear(); }
+    if (_dispCacheTFns !== _colTransformFns) { _dispCacheTFns = _colTransformFns; _colTfCache.clear(); }
+  }
+  function cellDisplayText(/** @type {number} */ idx, /** @type {number} */ actualIdx, /** @type {unknown} */ value) {
+    let arr = _cellTextCache.get(idx);
+    if (!arr) {
+      if (_cellTextCache.size >= _DISP_CACHE_MAX) _cellTextCache.clear();
+      arr = []; _cellTextCache.set(idx, arr);
+    }
     const hit = arr[actualIdx];
     if (hit !== undefined) return hit;
     const s = displayCell(value);
     arr[actualIdx] = s;
     return s;
   }
-
-  // Same idea for virtual expression columns — the bound evaluator runs per cell
-  // per FRAME otherwise (string building on every scroll frame). The entry keeps
-  // the fns identity so a changed expression set invalidates naturally.
-  /** @type {WeakMap<unknown[], { fns: unknown, texts: string[] }>} */
-  const _vexprTextCache = new WeakMap();
-  function vexprText(/** @type {unknown[]} */ row, /** @type {number} */ fnIdx) {
-    let e = _vexprTextCache.get(row);
-    if (!e || e.fns !== _vcolFns) { e = { fns: _vcolFns, texts: [] }; _vexprTextCache.set(row, e); }
-    let s = e.texts[fnIdx];
+  // Virtual expression columns — the bound evaluator would otherwise run per cell
+  // per frame (string building on every scroll frame).
+  function vexprText(/** @type {number} */ idx, /** @type {number} */ fnIdx) {
+    let arr = _vexprTextCache.get(idx);
+    if (!arr) {
+      if (_vexprTextCache.size >= _DISP_CACHE_MAX) _vexprTextCache.clear();
+      arr = []; _vexprTextCache.set(idx, arr);
+    }
+    let s = arr[fnIdx];
     if (s === undefined) {
       const fn = _vcolFns[fnIdx];
-      s = fn ? fn(row) : '';
-      e.texts[fnIdx] = s;
+      s = fn ? fn(rows[idx]) : '';
+      arr[fnIdx] = s;
     }
     return s;
   }
@@ -2170,13 +2192,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
     return out;
   });
-  /** Transformed display text for a column-transformed cell, cached per row. */
-  const _colTfCache = new WeakMap();
-  /** @param {unknown[]} row @param {number} actualIdx @param {unknown} value @param {{id:string,run:Function,colType:string,name:string}} tf */
-  function colTransformText(row, actualIdx, value, tf) {
+  /** Transformed display text for a column-transformed cell, cached per row index
+   *  (the cache itself + its invalidation live with the other display caches). */
+  function colTransformText(/** @type {number} */ idx, /** @type {number} */ actualIdx, /** @type {unknown} */ value, /** @type {{id:string,run:Function,colType:string,name:string}} */ tf) {
     if (value === null || value === undefined) return '';
-    let m = _colTfCache.get(row);
-    if (!m) { m = new Map(); _colTfCache.set(row, m); }
+    let m = _colTfCache.get(idx);
+    if (!m) {
+      if (_colTfCache.size >= _DISP_CACHE_MAX) _colTfCache.clear();
+      m = new Map(); _colTfCache.set(idx, m);
+    }
     const k = actualIdx + ':' + tf.id;
     let cached = m.get(k);
     if (cached === undefined) {
@@ -2417,7 +2441,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // O(1) `idx * ROW_HEIGHT` math and no per-page Float64Array is allocated.
   const rowTops = $derived(computeRowTops(rows.length, expandedRows, 280, ROW_HEIGHT, expandedRowHeights))
   /** Total scrollable content height incl. header + insert slot + body + 2-row bottom margin. */
-  const contentHeight = $derived(HEADER_H + insertRowOffset + (rowTops ? rowTops[rows.length] : rows.length * ROW_HEIGHT) + ROW_HEIGHT * 2)
+  const contentHeight = $derived(HEADER_H + insertRowOffset + totalRowsHeight(rowTops, rows.length, ROW_HEIGHT) + ROW_HEIGHT * 2)
 
   /** True while the scroll rAF loop is live — gates DOM-overlay work that would
    *  otherwise re-render every scroll frame (resize handles reposition per frame
@@ -2455,7 +2479,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   /** Document-space y of a body row's top (0 = top of the sizer). */
   function rowDocTop(/** @type {number} */ idx) {
-    return HEADER_H + insertRowOffset + (rowTops ? (rowTops[idx] ?? idx * ROW_HEIGHT) : idx * ROW_HEIGHT)
+    return HEADER_H + insertRowOffset + rowTopOf(rowTops, idx, ROW_HEIGHT)
   }
   /** Viewport y of a body row's top. */
   function rowViewportY(/** @type {number} */ idx) {
@@ -3315,6 +3339,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // so text and geometry stay proportional with the rest of the UI. Do NOT
     // multiply the probe fonts by canvasZoom again — that double-scales them.
     if (!_fonts) _fonts = readFonts(colorProbe)
+    syncDisplayCaches()
 
     const W = _viewportWidth
     const H = _viewportHeight
@@ -3523,7 +3548,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         }
         const row = rows[idx]
         if (!row) continue
-        const val = vexprText(row, vc.fnIdx)
+        const val = vexprText(idx, vc.fnIdx)
         const isUrl = looksLikeUrl(val)
         ctx.font = _fonts.cell
         ctx.textAlign = 'left'
@@ -3712,14 +3737,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // SQL array columns render pgAdmin-style ({a,b}); jsonb arrays stay JSON.
     const isArrayCol = Array.isArray(value) && isSqlArrayType(cached?.colType)
     const text = colTf
-      ? colTransformText(rows[idx], actualIdx, value, colTf)
+      ? colTransformText(idx, actualIdx, value, colTf)
       : dir
         ? String(revealed ? (dir.reveal ?? dir.display) : (dir.display ?? displayCell(value)))
         : isArrayCol
           ? arrayDisplay(value)
           : staged || !rows[idx]
             ? displayCell(value)
-            : cellDisplayText(rows[idx], actualIdx, value)
+            : cellDisplayText(idx, actualIdx, value)
     // NULL glyph when the Empty & NULL Markers plugin is on (formatters skip null).
     const shownText = (isNull && _nullishOn) ? '∅' : text
 
@@ -4846,7 +4871,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (!editingCell) return null
     const col = geom.cols.find((c) => _nameToActualIdx.get(c.name) === editingCell.colIdx)
     if (!col) return null
-    const top = HEADER_H + insertRowOffset + (rowTops ? (rowTops[editingCell.rowIdx] ?? 0) : editingCell.rowIdx * ROW_HEIGHT)
+    const top = HEADER_H + insertRowOffset + rowTopOf(rowTops, editingCell.rowIdx, ROW_HEIGHT)
     // Pinned columns rest at their frozen x (content-space = scrollLeft + fixed).
     const left = col.pinned
       ? Math.max(col.contentX, _scrollLeft + (geom.pinnedFixedX.get(col.name) ?? 0))

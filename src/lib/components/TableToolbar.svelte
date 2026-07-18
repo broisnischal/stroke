@@ -16,6 +16,7 @@
     MAX_PAGE_SIZE,
     PAGE_SIZE_OPTIONS,
     PAGE_SIZE_ALL,
+    pageSizeLabel,
     activeFilters,
     createFilter,
     ANY_COLUMN,
@@ -958,12 +959,11 @@
           disabled={loading}
         >
           <Select.Trigger size="sm" class={pageSelectTrigger} title="Rows per page" aria-label="Rows per page">
-            {pageSize === PAGE_SIZE_ALL ? "All" : pageSize === 1_000_000 ? "1M" : pageSize}
+            {pageSizeLabel(pageSize)}
           </Select.Trigger>
           <Select.Content align="end" class="min-w-0">
             {#each PAGE_SIZE_OPTIONS as size (size)}
-              {@const label = size === PAGE_SIZE_ALL ? "All" : size === 1_000_000 ? "1M" : String(size)}
-              <Select.Item value={String(size)} {label} />
+              <Select.Item value={String(size)} label={pageSizeLabel(size)} />
             {/each}
           </Select.Content>
         </Select.Root>
