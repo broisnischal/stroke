@@ -3183,7 +3183,7 @@ let rowSearch = $state('')
 
   /** Resolve the effective fetch limit for the current pageSize. */
   const effectivePageSize = $derived(
-    pageSize === PAGE_SIZE_ALL ? (total > 0 ? total : MAX_PAGE_SIZE) : pageSize,
+    pageSize === PAGE_SIZE_ALL ? Math.min(total > 0 ? total : MAX_PAGE_SIZE, MAX_PAGE_SIZE) : pageSize,
   )
 
   /** @param {number} nextPage */
@@ -3248,7 +3248,7 @@ let rowSearch = $state('')
       // real fetch limit; the backend rejects limit < 1. Mirrors effectivePageSize.
       const limit =
         s.pageSize === PAGE_SIZE_ALL
-          ? (s.total > 0 ? s.total : MAX_PAGE_SIZE)
+          ? Math.min(s.total > 0 ? s.total : MAX_PAGE_SIZE, MAX_PAGE_SIZE)
           : (Number.isFinite(s.pageSize) && s.pageSize > 0 ? s.pageSize : DEFAULT_PAGE_SIZE)
       const offset = s.pageSize === PAGE_SIZE_ALL ? 0 : (s.page - 1) * limit
       const { sortColumn, sortDirection, sorts } = sortForApi(s.rowSort, s.rowSortMore)
