@@ -2198,18 +2198,49 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   const _IMG_TF = new Set(['avatar', 'image-thumb']);
   /** @type {Map<string, HTMLImageElement | 'error'>} */
   const _imgCache = new Map();
+  /** @type {Map<string, number>} per-url transient-failure retry counter */
+  const _imgRetry = new Map();
   const _IMG_CACHE_MAX = 400;
+  const _IMG_MAX_RETRY = 3;
+  /**
+   * Start (or restart) loading one cell image. Remote avatar CDNs
+   * (lh3.googleusercontent.com, avatars.githubusercontent.com) throttle bursts
+   * of parallel requests and occasionally 403 on the app-origin Referer, so a
+   * single onerror is usually transient — retry with backoff before giving up
+   * rather than freezing the cell as "broken image" permanently.
+   * @param {string} url
+   */
+  function loadCellImage(url) {
+    const img = new Image();
+    // These CDNs reject/deny requests that carry tauri://localhost as Referer;
+    // no-referrer strips it and never causes an otherwise-good load to fail.
+    img.referrerPolicy = 'no-referrer';
+    img.decoding = 'async';
+    img.onload = () => { _imgRetry.delete(url); scheduleDraw(); };
+    img.onerror = () => {
+      const n = (_imgRetry.get(url) || 0) + 1;
+      if (n <= _IMG_MAX_RETRY) {
+        _imgRetry.set(url, n);
+        // Keep this (now-empty) img cached as a "loading…" placeholder during the
+        // backoff so repaints don't spawn duplicate immediate loads; replace it
+        // when the timer fires. Stagger so a whole column doesn't re-fire at once.
+        setTimeout(() => { if (_imgCache.get(url) === img) loadCellImage(url); }, 350 * n);
+        scheduleDraw();
+      } else {
+        _imgCache.set(url, 'error');
+        scheduleDraw();
+      }
+    };
+    img.src = url;
+    _imgCache.set(url, img);
+    return img;
+  }
   /** @param {string} url */
   function getCellImage(url) {
     const hit = _imgCache.get(url);
     if (hit) return hit;
-    if (_imgCache.size > _IMG_CACHE_MAX) _imgCache.clear();
-    const img = new Image();
-    img.onload = () => scheduleDraw();
-    img.onerror = () => { _imgCache.set(url, 'error'); scheduleDraw(); };
-    img.src = url;
-    _imgCache.set(url, img);
-    return img;
+    if (_imgCache.size > _IMG_CACHE_MAX) { _imgCache.clear(); _imgRetry.clear(); }
+    return loadCellImage(url);
   }
   /** Draw an image/avatar thumbnail (center-cropped) with a filename beside it. */
   function drawCellImage(ctx, url, cellX, ry, w, rh, cy, round, c) {
