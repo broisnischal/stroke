@@ -475,6 +475,8 @@ export async function getTableRows(schema, table, limit, offset, query = {}) {
       // so other engines still sort by it when they ignore `sorts`.
       sorts: query.sorts?.length ? query.sorts : null,
       filters: query.filters?.length ? query.filters : null,
+      // Keyset (cursor) pagination anchor — null = classic OFFSET (Postgres only).
+      keyset: query.keyset ?? null,
       includeMeta: query.includeMeta !== false,
       // Default true. Pass false to skip COUNT(*) (returns total = -1) and paint
       // rows immediately; fetch the total separately with countTableRows().

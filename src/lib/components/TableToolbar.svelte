@@ -45,6 +45,10 @@
     onrefresh = () => {},
     onprev = () => {},
     onnext = () => {},
+    /** Keyset/cursor/temporal pagination: next/prev only, no page-jump. */
+    keysetMode = false,
+    /** In keyset mode, whether the current page looks full (so Next is enabled). */
+    keysetHasMore = false,
     offset = 0,
     onpagechange = () => {},
     onpagesizechange = () => {},
@@ -187,7 +191,7 @@
   const to = $derived(counting ? offset + _effectivePageSize : Math.min(offset + _effectivePageSize, total));
   const pageCount = $derived(Math.max(1, Math.ceil(total / _effectivePageSize) || 1));
   const canPrev = $derived(page > 1);
-  const canNext = $derived(counting || page * _effectivePageSize < total);
+  const canNext = $derived(keysetMode ? keysetHasMore : (counting || page * _effectivePageSize < total));
 
   const filterCount = $derived(activeFilters(rowFilters).length);
   const sortLabel = $derived(
@@ -971,7 +975,32 @@
         <!-- Page picker + arrows only exist when there is something to paginate
              (more than one page, or the count is still unknown). A single-page
              table shows just the range readout and the page-size select. -->
-        {#if counting || pageCount > 1}
+        {#if keysetMode}
+          <!-- Cursor pagination: no random page-jump (that's offset's job), just
+               a position readout + prev/next. -->
+          <span class="shrink-0 px-1 font-mono text-ui-xs tabular-nums text-muted-foreground/70" title="Cursor pagination — page {page}">
+            Page {page}
+          </span>
+
+          <button
+            type="button"
+            class={iconBtn}
+            disabled={!canPrev || loading}
+            onclick={onprev}
+            aria-label="Previous page"
+          >
+            <Icon name="chevron-left" class="size-3.5" />
+          </button>
+          <button
+            type="button"
+            class={iconBtn}
+            disabled={!canNext || loading}
+            onclick={onnext}
+            aria-label="Next page"
+          >
+            <Icon name="chevron-right" class="size-3.5" />
+          </button>
+        {:else if counting || pageCount > 1}
           <Select.Root
             type="single"
             value={String(page)}

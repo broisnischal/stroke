@@ -187,6 +187,20 @@
     if (v) settings = updateSettings({ defaultDataView: v });
   }
 
+  const PAGINATION_OPTIONS = [
+    { id: 'offset',   label: 'Offset',   icon: 'list', hint: 'Classic LIMIT/OFFSET — jump to any page' },
+    { id: 'cursor',   label: 'Cursor',   icon: 'chevrons-right', hint: 'Keyset by primary key — fast next/prev, no page jump' },
+    { id: 'keyset',   label: 'Keyset',   icon: 'key-round', hint: 'Same as cursor (keyset on the primary key)' },
+    { id: 'temporal', label: 'Temporal', icon: 'clock', hint: 'Keyset on a timestamp column, newest-first' },
+  ];
+  const paginationOption = $derived(
+    PAGINATION_OPTIONS.find((o) => o.id === settings.paginationMode) ?? PAGINATION_OPTIONS[0],
+  );
+  /** @param {string} v */
+  function setPaginationMode(v) {
+    if (v) settings = updateSettings({ paginationMode: v });
+  }
+
   /** @type {boolean | null} */
   let launchAtLogin = $state(null);
 
@@ -420,6 +434,38 @@
                 <span class="flex min-w-0 items-center gap-2.5">
                   <Icon name={o.icon} class="size-4 shrink-0 text-muted-foreground" />
                   <span class="text-xs font-medium">{o.label}</span>
+                </span>
+              {/snippet}
+            </Select.Item>
+          {/each}
+        </Select.Content>
+      </Select.Root>
+    </div>
+  {/if}
+
+  {#if show($t('settings.pagination'), $t('settings.pagination.desc'))}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-[13px] font-medium text-foreground">{$t('settings.pagination')}</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{$t('settings.pagination.desc')}</p>
+      </div>
+      <Select.Root type="single" value={settings.paginationMode} onValueChange={setPaginationMode}>
+        <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Pagination strategy">
+          <span class="flex min-w-0 items-center gap-2">
+            <Icon name={paginationOption.icon} class="size-3.5 shrink-0 text-muted-foreground" />
+            <span class="truncate font-medium">{paginationOption.label}</span>
+          </span>
+        </Select.Trigger>
+        <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[18rem] p-1" sideOffset={6}>
+          {#each PAGINATION_OPTIONS as o (o.id)}
+            <Select.Item value={o.id} label={o.label} class="rounded-md py-1.5 pr-8 pl-2">
+              {#snippet children()}
+                <span class="flex min-w-0 items-center gap-2.5">
+                  <Icon name={o.icon} class="size-4 shrink-0 text-muted-foreground" />
+                  <span class="min-w-0">
+                    <span class="block text-xs font-medium leading-snug">{o.label}</span>
+                    <span class="block text-[11px] leading-snug text-muted-foreground/65">{o.hint}</span>
+                  </span>
                 </span>
               {/snippet}
             </Select.Item>

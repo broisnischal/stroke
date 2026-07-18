@@ -616,6 +616,26 @@ pub struct RowFilter {
     pub data_type: Option<String>,
 }
 
+/// Keyset (cursor) pagination anchor. When present, the page is fetched with
+/// `WHERE {column} {>|<} $val::{sql_type}` instead of OFFSET, so deep pages don't
+/// scan-and-discard. The value binds as text and is cast to the column's type so
+/// the column stays uncast and its index is usable. Postgres path only.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeysetCursor {
+    /// The ordering column (a single-column primary key, or a timestamp for temporal).
+    pub column: String,
+    /// Last-seen value of `column` on the boundary row, as text.
+    pub value: String,
+    /// SQL type to cast the bound value to (e.g. "bigint", "uuid", "timestamptz", "text").
+    pub sql_type: String,
+    /// true = the page AFTER `value` (forward / next); false = BEFORE it (backward / prev).
+    pub after: bool,
+    /// Display ordering of `column`: false = ASC, true = DESC (temporal is newest-first).
+    #[serde(default)]
+    pub desc: bool,
+}
+
 struct WhereClause {
     sql: String,
     binds: Vec<String>,
@@ -1071,6 +1091,11 @@ pub async fn get_table_rows(
     // sort_column/sort_direction; other engines ignore this and use the single
     // sort_column (the primary key), so multi-sort degrades gracefully.
     sorts: Vec<SortSpec>,
+    // Keyset (cursor) pagination anchor. When Some, the page is fetched with a
+    // keyset predicate instead of OFFSET (Postgres path only; other engines and
+    // absent = classic OFFSET). The caller only sends this when it's safe
+    // (single-column key, ordering by that key), else it falls back to offset.
+    keyset: Option<KeysetCursor>,
 ) -> Result<TableRows, String> {
     if limit > MAX_PAGE_LIMIT {
         return Err(format!("Limit {limit} exceeds the maximum of {MAX_PAGE_LIMIT} rows per page"));
@@ -1148,18 +1173,52 @@ pub async fn get_table_rows(
         count_query = count_query.bind(value.as_str());
     }
 
-    let limit_param = where_clause.binds.len() + 1;
-    let offset_param = where_clause.binds.len() + 2;
-    let data_sql = format!(
-        "SELECT * FROM {table_ref}{}{} LIMIT ${limit_param} OFFSET ${offset_param}",
-        where_clause.sql,
-        order_by
-    );
+    // Keyset (cursor) page when a valid cursor is supplied, otherwise classic
+    // OFFSET. The cursor's cast type is sanitized to a safe token subset so it
+    // can be interpolated (bound params can't carry a type); an unsafe type falls
+    // back to offset. Backward paging fetches in reverse then flips the rows.
+    let keyset_ok = keyset.as_ref().filter(|k| {
+        !k.sql_type.is_empty()
+            && k.sql_type.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ' ')
+    });
+    let keyset_reverse;
+    // Cursor value to bind after the WHERE binds (keyset), or None (offset). The
+    // SQL string is built here in the outer scope so it outlives `data_query`.
+    let keyset_bind: Option<String>;
+    let data_sql: String;
+    if let Some(ks) = keyset_ok {
+        let col = quoted_column(&ks.column)?;
+        let op = if ks.after == !ks.desc { ">" } else { "<" };
+        let fetch_order = if (if ks.after { ks.desc } else { !ks.desc }) { "DESC" } else { "ASC" };
+        keyset_reverse = !ks.after;
+        keyset_bind = Some(ks.value.clone());
+        let ks_param = where_clause.binds.len() + 1;
+        let limit_param = where_clause.binds.len() + 2;
+        let connector = if where_clause.sql.is_empty() { " WHERE" } else { " AND" };
+        data_sql = format!(
+            "SELECT * FROM {table_ref}{where}{connector} {col} {op} ${ks_param}::{cast} ORDER BY {col} {fetch_order} LIMIT ${limit_param}",
+            where = where_clause.sql,
+            cast = ks.sql_type,
+        );
+    } else {
+        keyset_reverse = false;
+        keyset_bind = None;
+        let limit_param = where_clause.binds.len() + 1;
+        let offset_param = where_clause.binds.len() + 2;
+        data_sql = format!(
+            "SELECT * FROM {table_ref}{}{} LIMIT ${limit_param} OFFSET ${offset_param}",
+            where_clause.sql,
+            order_by
+        );
+    }
     let mut data_query = sqlx::query(&data_sql);
     for value in &where_clause.binds {
         data_query = data_query.bind(value.as_str());
     }
-    data_query = data_query.bind(limit).bind(offset);
+    data_query = match &keyset_bind {
+        Some(v) => data_query.bind(v.as_str()).bind(limit),
+        None => data_query.bind(limit).bind(offset),
+    };
 
     // Kick the catalog-metadata queries (enums/nullable/pk/fk) off NOW so they run
     // concurrently with the row + count fetch below, instead of as a second
@@ -1270,10 +1329,15 @@ pub async fn get_table_rows(
     };
 
     // Build row data early so the borrow of `rows` doesn't outlive the join.
-    let data: Vec<Vec<Value>> = rows
+    let mut data: Vec<Vec<Value>> = rows
         .iter()
         .map(|row| (0..row.len()).map(|i| cell_to_json(row, i)).collect())
         .collect();
+    // Backward keyset page was fetched in reverse order — flip it back to the
+    // table's display order.
+    if keyset_reverse {
+        data.reverse();
+    }
 
     // Catalog metadata (enums/nullable/pk/fk) is stable per table, so only fetch
     // it on the first load — repeat fetches (pagination/sort/filter/live) reuse

@@ -526,6 +526,8 @@ pub async fn pg_get_table_rows(
     include_count: Option<bool>,
     // Multi-column sort keys (Postgres); overrides sort_column when non-empty.
     sorts: Option<Vec<crate::db::SortSpec>>,
+    // Keyset (cursor) pagination anchor; absent = classic OFFSET.
+    keyset: Option<crate::db::KeysetCursor>,
 ) -> Result<TableRows, String> {
     get_table_rows(
         state,
@@ -541,6 +543,7 @@ pub async fn pg_get_table_rows(
         include_meta.unwrap_or(true),
         include_count.unwrap_or(true),
         sorts.unwrap_or_default(),
+        keyset,
     )
     .await
 }
