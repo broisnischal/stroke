@@ -105,7 +105,7 @@
       sideOffset={6}
       onOpenAutoFocus={(e) => { e.preventDefault(); inputEl?.focus(); }}
       class={cn(
-        "z-[100] overflow-hidden rounded-xl border border-border/60 bg-popover text-popover-foreground elevate-2-rim outline-none",
+        "z-[100] overflow-hidden rounded-[10px] border border-border/60 bg-popover text-popover-foreground elevate-2-rim outline-none",
         contentClass,
       )}
     >
@@ -135,7 +135,7 @@
               disabled={it.disabled}
               onSelect={() => handleSelect(it)}
               class={cn(
-                "flex w-full min-w-0 cursor-default items-center gap-1.5 rounded-lg px-1.5 py-1.5 text-ui-xs outline-hidden select-none",
+                "flex w-full min-w-0 cursor-default items-center gap-1.5 rounded-md px-1.5 py-1.5 text-ui-xs outline-hidden select-none",
                 "text-foreground/85 hover:bg-accent hover:text-foreground data-selected:bg-accent data-selected:text-foreground",
                 "data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-40",
                 "[&_svg]:pointer-events-none [&_svg]:shrink-0",
