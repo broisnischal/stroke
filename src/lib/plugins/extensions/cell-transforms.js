@@ -103,10 +103,10 @@ function isHexString(v) {
 export function isImageUrl(v) {
   if (typeof v !== 'string') return false
   const s = v.trim()
-  if (/^data:image\//i.test(s)) return true
-  if (!/^https?:\/\//i.test(s)) return false
-  if (/\.(png|jpe?g|gif|webp|avif|svg|bmp|ico)(\?|#|$)/i.test(s)) return true
-  return /(avatar|gravatar|githubusercontent|\/photos?\/|\/images?\/|\/media\/)/i.test(s)
+  // Accept data:image URIs and any http(s) URL — the transform is opt-in per
+  // column, so being lenient means it works for extension-less avatar URLs
+  // (Google/GitHub/CDNs). A non-image URL just shows a broken-image tile.
+  return /^data:image\//i.test(s) || /^https?:\/\/\S+$/i.test(s)
 }
 /** @param {number} bytes */
 function humanBytes(bytes) {
@@ -128,6 +128,10 @@ export const cellTransforms = {
     {
       id: 'avatar',
       label: 'Show as avatar',
+      // Only meaningful applied to a whole column (renders a thumbnail live);
+      // as a one-off cell action it would just copy the URL, so it's hidden
+      // from the per-cell menu.
+      columnOnly: true,
       /** @param {unknown} v */
       appliesTo: (v) => isImageUrl(v),
       /** @param {unknown} v */
@@ -136,6 +140,7 @@ export const cellTransforms = {
     {
       id: 'image-thumb',
       label: 'Show as image',
+      columnOnly: true,
       /** @param {unknown} v */
       appliesTo: (v) => isImageUrl(v),
       /** @param {unknown} v */
