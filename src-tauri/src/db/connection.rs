@@ -25,6 +25,10 @@ pub struct PgConfig {
     pub ssl: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ssh: Option<SshConfig>,
+    /// Session time zone applied on every pooled connection (IANA name, e.g.
+    /// "America/New_York"). `None`/"SYSTEM" leaves the server default in place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timezone: Option<String>,
 }
 
 impl PgConfig {
@@ -69,6 +73,10 @@ pub struct MysqlConfig {
     pub ssl: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ssh: Option<SshConfig>,
+    /// Session time zone applied on connect (`SET time_zone`). `None`/"SYSTEM"
+    /// leaves the server default in place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timezone: Option<String>,
 }
 
 impl MysqlConfig {
@@ -353,9 +361,27 @@ pub(crate) async fn open_pg(config: &PgConfig) -> Result<PgPool, String> {
     // Preferred path: ride statement_timeout in the startup packet (`options=`),
     // which saves one round trip per pooled connection vs an after_connect SET —
     // on a remote host that's a full RTT for every connection the pool opens.
-    let fast_opts = opts
-        .clone()
-        .options([("statement_timeout", "10min")]);
+    // Optional session time zone (Settings → Database). Ride it in the startup
+    // packet next to statement_timeout so the whole pool inherits it with no
+    // extra round trip; "SYSTEM"/empty leaves the server default untouched.
+    let tz: Option<String> = config
+        .timezone
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty() && !t.eq_ignore_ascii_case("SYSTEM"))
+        .map(|t| t.to_string());
+
+    let mut startup: Vec<(&str, String)> = vec![("statement_timeout", "10min".to_string())];
+    if let Some(ref tz) = tz {
+        startup.push(("TimeZone", tz.clone()));
+    }
+    let fast_opts = opts.clone().options(startup);
+
+    // Fallback SET (single-quote-escaped) for poolers that reject the `options`
+    // startup parameter; run per connection in after_connect below.
+    let tz_set: Option<String> = tz
+        .as_ref()
+        .map(|t| format!("SET TIME ZONE '{}'", t.replace('\'', "''")));
 
     let connect = async {
         match pg_pool_builder().connect_with(fast_opts).await {
@@ -365,11 +391,15 @@ pub(crate) async fn open_pg(config: &PgConfig) -> Result<PgPool, String> {
             // slower after_connect SET so those hosts still connect.
             Err(e) if e.to_string().contains("unsupported startup parameter") => {
                 pg_pool_builder()
-                    .after_connect(|conn, _meta| {
+                    .after_connect(move |conn, _meta| {
+                        let tz_set = tz_set.clone();
                         Box::pin(async move {
                             sqlx::query("SET statement_timeout = '10min'")
                                 .execute(&mut *conn)
                                 .await?;
+                            if let Some(stmt) = tz_set {
+                                sqlx::query(&stmt).execute(&mut *conn).await?;
+                            }
                             Ok(())
                         })
                     })
@@ -488,6 +518,15 @@ pub(crate) async fn open_mysql(config: &MysqlConfig) -> Result<MySqlPool, String
         .map_err(|e| format!("Connection failed: {e}"))?;
     let opts = opts.log_slow_statements(LevelFilter::Debug, Duration::from_secs(5));
 
+    // Optional session time zone (Settings → Database), applied per connection
+    // below; "SYSTEM"/empty leaves the server default in place.
+    let tz: Option<String> = config
+        .timezone
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty() && !t.eq_ignore_ascii_case("SYSTEM"))
+        .map(|t| format!("SET time_zone = '{}'", t.replace('\'', "''")));
+
     MySqlPoolOptions::new()
         // Same rationale as PG: 4 is the real-world ceiling for a desktop app.
         .max_connections(4)
@@ -499,12 +538,16 @@ pub(crate) async fn open_mysql(config: &MysqlConfig) -> Result<MySqlPool, String
         // Enable ANSI_QUOTES on every connection so double-quoted identifiers
         // ("col") work the same as backtick identifiers (`col`). This makes
         // standard SQL and AI-generated queries work without rewriting syntax.
-        .after_connect(|conn, _meta| {
+        .after_connect(move |conn, _meta| {
+            let tz = tz.clone();
             Box::pin(async move {
                 sqlx::query("SET sql_mode = CONCAT(@@sql_mode, ',ANSI_QUOTES')")
-                    .execute(conn)
-                    .await
-                    .map(|_| ())
+                    .execute(&mut *conn)
+                    .await?;
+                if let Some(stmt) = tz {
+                    sqlx::query(&stmt).execute(&mut *conn).await?;
+                }
+                Ok(())
             })
         })
         .connect_with(opts)

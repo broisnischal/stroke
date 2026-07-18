@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import { loadSettings } from '$lib/stores/settings.js'
 
 /** @typedef {{ name: string, host: string, port: number, database: string, user: string, password: string, ssl: boolean }} PgConnectionConfig */
 /** @typedef {{ name: string, filePath: string }} SqliteConnectionConfig */
@@ -81,12 +82,27 @@ function withSsh(payload, config) {
   return payload
 }
 
+/**
+ * Attach the session time zone from Settings → Database to a Postgres/MySQL
+ * connect payload. Applied per pooled connection by the backend; "SYSTEM" (or
+ * blank) is treated as "leave the server default" and omitted.
+ */
+function withTimezone(payload) {
+  try {
+    const tz = String(loadSettings().sessionTimezone ?? '').trim()
+    if (tz && tz.toUpperCase() !== 'SYSTEM') return { ...payload, timezone: tz }
+  } catch {
+    // Settings unavailable — connect without a timezone override.
+  }
+  return payload
+}
+
 export async function testPostgresConnection(config) {
-  return inv('test_postgres_connection', { config: withSsh(normalizeConnectionConfig(config), config) })
+  return inv('test_postgres_connection', { config: withSsh(withTimezone(normalizeConnectionConfig(config)), config) })
 }
 
 export async function connectPostgres(config) {
-  return inv('connect_postgres', { config: withSsh(normalizeConnectionConfig(config), config) })
+  return inv('connect_postgres', { config: withSsh(withTimezone(normalizeConnectionConfig(config)), config) })
 }
 
 /** Toggle the WebView DevTools (no-op in release builds). */
@@ -134,7 +150,7 @@ export async function testMysqlConnection(config) {
     password: String(config.password || ''),
     ssl: Boolean(config.ssl),
   }
-  return inv('test_mysql', { config: withSsh(base, config) })
+  return inv('test_mysql', { config: withSsh(withTimezone(base), config) })
 }
 
 /** @param {{ name: string, host: string, port: number, database: string, user: string, password: string, ssl: boolean, ssh?: object }} config */
@@ -148,7 +164,7 @@ export async function connectMysql(config) {
     password: String(config.password || ''),
     ssl: Boolean(config.ssl),
   }
-  return inv('connect_mysql_db', { config: withSsh(base, config) })
+  return inv('connect_mysql_db', { config: withSsh(withTimezone(base), config) })
 }
 
 // ── Cloudflare D1 ─────────────────────────────────────────────────────────────
