@@ -29,6 +29,7 @@ import { validators } from './extensions/validators.js'
 import { linkify } from './extensions/linkify.js'
 import { columnAnnotator } from './extensions/column-annotator.js'
 import { idGenerators } from './extensions/id-generators.js'
+import { dataGen } from './extensions/data-gen.js'
 import { cellTransforms } from './extensions/cell-transforms.js'
 import { savedViews, findReplace } from './extensions/workflow.js'
 
@@ -48,6 +49,7 @@ export const EXTENSIONS = [
   linkify,
   columnAnnotator,
   idGenerators,
+  dataGen,
   cellTransforms,
   savedViews,
   findReplace,
@@ -174,4 +176,26 @@ export function enabledGenerators() {
     out.push(...ext.generators)
   }
   return out
+}
+
+/**
+ * Generators from enabled generator extensions, grouped into sections by each
+ * generator's `group` (falling back to the extension name) — so the menu can
+ * render "IDs", "Time", "Numbers", … as separate labelled sections.
+ * @returns {{ group: string, items: { id: string, label: string, hint?: string, generate: () => string }[] }[]}
+ */
+export function enabledGeneratorGroups() {
+  /** @type {{ group: string, items: any[] }[]} */
+  const groups = []
+  const byGroup = new Map()
+  for (const ext of EXTENSIONS) {
+    if (ext.kind !== 'generators' || !isPluginEnabled(ext.id)) continue
+    for (const g of ext.generators) {
+      const key = g.group || ext.name
+      let bucket = byGroup.get(key)
+      if (!bucket) { bucket = { group: key, items: [] }; byGroup.set(key, bucket); groups.push(bucket) }
+      bucket.items.push(g)
+    }
+  }
+  return groups
 }
