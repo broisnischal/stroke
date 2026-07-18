@@ -351,7 +351,7 @@
 {/snippet}
 
 <div
-  class="flex h-8 shrink-0 items-center border-t border-border/30 bg-background px-2 text-[11px] text-muted-foreground select-none"
+  class="@container/sb flex h-8 shrink-0 items-center border-t border-border/30 bg-background px-2 text-[11px] text-muted-foreground select-none"
   data-studio-region="statusbar"
 >
   <!-- ── Left group ──────────────────────────────────────────────────── -->
@@ -371,7 +371,7 @@
           {/if}
           <span class={cn('max-w-[7rem] truncate font-medium', connectionLost && 'text-red-500/70')}>{connType}</span>
           {#if connLabel}
-            <span class="hidden max-w-[6rem] truncate text-muted-foreground/45 sm:inline">· {connLabel}</span>
+            <span class="hidden max-w-[6rem] truncate text-muted-foreground/45 @min-[900px]/sb:inline">· {connLabel}</span>
           {/if}
           {#if connection?.environment}
             <span class="size-1.5 shrink-0 rounded-full bg-muted-foreground/35" title={connection.environment}></span>
@@ -570,7 +570,7 @@
           title="Data view (⌘⇧D)"
         >
           <Icon name="table-2" class="size-3 shrink-0" />
-          <span class={activeView === 'table' ? 'font-medium' : ''}>Data</span>
+          <span class={cn('@max-[700px]/sb:hidden', activeView === 'table' ? 'font-medium' : '')}>Data</span>
         </button>
         <button
           type="button"
@@ -584,7 +584,7 @@
           title="Query Editor (⌘⇧S)"
         >
           <Icon name="terminal" class="size-3 shrink-0" />
-          <span class={activeView === 'sql' ? 'font-medium' : ''}>Query</span>
+          <span class={cn('@max-[700px]/sb:hidden', activeView === 'sql' ? 'font-medium' : '')}>Query</span>
         </button>
       </div>
 
@@ -678,7 +678,7 @@
         title="Discard unsaved changes"
       >
         <Icon name="undo-2" class="size-2.5 shrink-0" />
-        Reset
+        <span class="@max-[780px]/sb:hidden">Reset</span>
       </button>
       {@render sep()}
     {/if}
@@ -807,7 +807,7 @@
         title="Update available"
       >
         <Icon name="arrow-up-circle" class="size-3 shrink-0" />
-        Update
+        <span class="@max-[840px]/sb:hidden">Update</span>
       </button>
       {@render sep()}
     {/if}
@@ -823,7 +823,7 @@
       title={mcpRunning ? 'MCP running — click to manage' : 'MCP stopped — click to manage'}
     >
       <span class={cn('size-1.5 shrink-0 rounded-full transition-colors', mcpRunning ? 'bg-emerald-500' : 'bg-muted-foreground/25')}></span>
-      <span class="font-medium">MCP</span>
+      <span class="font-medium @max-[900px]/sb:hidden">MCP</span>
     </button>
 
     {@render sep()}
@@ -841,8 +841,8 @@
       {#snippet trigger(props)}
         <button {...props} type="button" class={cn(labelBtn, 'text-muted-foreground/70')} title="Switch AI model">
           <Icon name="bot" class="size-3 shrink-0 opacity-60" />
-          <span class="max-w-[9rem] truncate font-medium">{modelName}</span>
-          <Icon name="chevron-down" class="size-3 shrink-0 opacity-35" />
+          <span class="max-w-[9rem] truncate font-medium @max-[780px]/sb:hidden">{modelName}</span>
+          <Icon name="chevron-down" class="size-3 shrink-0 opacity-35 @max-[780px]/sb:hidden" />
         </button>
       {/snippet}
       {#snippet item(it)}
