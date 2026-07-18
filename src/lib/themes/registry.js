@@ -1,6 +1,6 @@
 /** @typedef {'light' | 'dark'} ThemeGroup */
 
-/** @typedef {'light' | 'parchment' | 'ice' | 'github-light' | 'dark' | 'graphite' | 'midnight' | 'vitesse' | 'slate' | 'forest' | 'mono' | 'rose-pine' | 'catppuccin' | 'solarized'} ThemeId */
+/** @typedef {'light' | 'parchment' | 'ice' | 'github-light' | 'light-high-contrast' | 'dark' | 'graphite' | 'midnight' | 'vitesse' | 'slate' | 'forest' | 'mono' | 'rose-pine' | 'catppuccin' | 'solarized' | 'dark-high-contrast'} ThemeId */
 
 /** @typedef {{ id: ThemeId, name: string, description: string, isDark: boolean, group: ThemeGroup, preview: { bg: string, fg: string, accent: string } }} ThemeDefinition */
 
@@ -130,6 +130,22 @@ export const APP_THEMES = [
     isDark: true,
     group: 'dark',
     preview: { bg: '#002b36', fg: '#93a1a1', accent: '#268bd2' },
+  },
+  {
+    id: 'light-high-contrast',
+    name: 'High Contrast',
+    description: 'Maximum contrast, for low vision',
+    isDark: false,
+    group: 'light',
+    preview: { bg: '#ffffff', fg: '#000000', accent: '#1a3fd0' },
+  },
+  {
+    id: 'dark-high-contrast',
+    name: 'High Contrast',
+    description: 'Maximum contrast, for low vision',
+    isDark: true,
+    group: 'dark',
+    preview: { bg: '#000000', fg: '#ffffff', accent: '#ffe000' },
   },
 ]
 
@@ -285,6 +301,12 @@ export function mermaidThemeFor(id) {
       line: '#0f3d49',
       accent: '#268bd2',
       border: '#0f3d49',
+    },
+    'light-high-contrast': {
+      bg: '#ffffff', fg: '#000000', muted: '#3a3a3a', line: '#5a5a5a', accent: '#1a3fd0', border: '#5a5a5a',
+    },
+    'dark-high-contrast': {
+      bg: '#000000', fg: '#ffffff', muted: '#c8c8c8', line: '#8a8a8a', accent: '#ffe000', border: '#8a8a8a',
     },
   }
   return map[id]
