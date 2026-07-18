@@ -434,7 +434,7 @@
         </Select.Trigger>
         <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
           {#each DATA_VIEW_OPTIONS as o (o.id)}
-            <Select.Item value={o.id} label={o.label} class="rounded-lg py-1.5 pr-8 pl-2">
+            <Select.Item value={o.id} label={o.label} class="py-1.5 pr-8 pl-2">
               {#snippet children()}
                 <span class="flex min-w-0 items-center gap-2.5">
                   <Icon name={o.icon} class="size-4 shrink-0 text-muted-foreground" />
@@ -463,7 +463,7 @@
         </Select.Trigger>
         <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
           {#each PAGINATION_OPTIONS as o (o.id)}
-            <Select.Item value={o.id} label={o.label} class="rounded-lg py-1.5 pr-8 pl-2">
+            <Select.Item value={o.id} label={o.label} class="py-1.5 pr-8 pl-2">
               {#snippet children()}
                 <span class="flex min-w-0 items-center gap-2.5">
                   <Icon name={o.icon} class="size-4 shrink-0 text-muted-foreground" />
@@ -538,7 +538,7 @@
             type="button"
             aria-label="Color theme"
             class={cn(
-              "flex h-8 w-56 items-center justify-between gap-2 whitespace-nowrap rounded-[min(var(--radius-md),10px)] border border-border/70 bg-background px-2.5 text-ui-xs font-normal shadow-none outline-none transition-colors hover:bg-muted/30 focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 data-[state=open]:border-ring",
+              "flex h-8 w-56 items-center justify-between gap-2 whitespace-nowrap rounded-[10px] border border-border/70 bg-background px-2.5 text-ui-xs font-normal shadow-none outline-none transition-colors hover:bg-muted/30 focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 data-[state=open]:border-ring",
             )}
           >
             <span class="flex min-w-0 items-center gap-2">
@@ -574,7 +574,7 @@
         </Select.Trigger>
         <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
           {#each fontEntries as [id, preset] (id)}
-            <Select.Item value={id} label={preset.label} class="rounded-lg py-1.5 pr-8 pl-2">
+            <Select.Item value={id} label={preset.label} class="py-1.5 pr-8 pl-2">
               {#snippet children()}
                 <span class="flex min-w-0 items-center gap-2.5">
                   <span class="flex size-5 shrink-0 items-center justify-center rounded border border-border/40 bg-muted/30 text-[11px] font-semibold text-foreground/70" style="font-family: {preset.sans}" aria-hidden="true">Aa</span>
@@ -600,7 +600,7 @@
         </Select.Trigger>
         <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
           {#each LOCALES as l (l.id)}
-            <Select.Item value={l.id} label={l.native} class="rounded-lg py-1.5 pr-8 pl-2">
+            <Select.Item value={l.id} label={l.native} class="py-1.5 pr-8 pl-2">
               {#snippet children()}
                 <span class="flex min-w-0 items-center justify-between gap-2">
                   <span class="truncate text-xs font-medium">{l.native}</span>
@@ -631,7 +631,7 @@
         </Select.Trigger>
         <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
           {#each iconStyleEntries as [id, preset] (id)}
-            <Select.Item value={id} label={preset.label} class="rounded-lg py-1.5 pr-8 pl-2">
+            <Select.Item value={id} label={preset.label} class="py-1.5 pr-8 pl-2">
               {#snippet children()}
                 <span class="flex min-w-0 items-center gap-2.5">
                   <PenTool class="size-4 shrink-0 text-muted-foreground" style="stroke-width: {preset.strokeWidth}px" aria-hidden="true" />
@@ -660,7 +660,7 @@
         </Select.Trigger>
         <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[14rem] p-1" sideOffset={6}>
           {#each iconSetEntries as [id, preset] (id)}
-            <Select.Item value={id} label={preset.label} class="rounded-lg py-1.5 pr-8 pl-2">
+            <Select.Item value={id} label={preset.label} class="py-1.5 pr-8 pl-2">
               {#snippet children()}
                 <span class="flex min-w-0 items-center gap-2.5">
                   <span class="flex size-4 shrink-0 items-center justify-center text-muted-foreground">
@@ -697,7 +697,7 @@
         </Select.Trigger>
         <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
           {#each tableStyleEntries as [id, preset] (id)}
-            <Select.Item value={id} label={preset.label} class="rounded-lg py-1.5 pr-8 pl-2">
+            <Select.Item value={id} label={preset.label} class="py-1.5 pr-8 pl-2">
               {#snippet children()}
                 <span class="flex min-w-0 items-center gap-2.5">
                   <span class="size-4 shrink-0 overflow-hidden rounded-[3px] border border-border/40 bg-background" style={tableStylePreview[id] ?? ''} aria-hidden="true"></span>
