@@ -16,6 +16,7 @@
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import Plus from "@lucide/svelte/icons/plus";
   import At from "@lucide/svelte/icons/at-sign";
+  import Slash from "@lucide/svelte/icons/slash";
   import Database from "@lucide/svelte/icons/database";
   import { cn } from "$lib/utils.js";
   import { executeSql } from "$lib/api.js";
@@ -168,6 +169,12 @@
   $effect(() => { mentionIdx = 0 })
 
   function handleInputKeydown(/** @type {KeyboardEvent} */ e) {
+    if (slashOpen) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); slashIdx = (slashIdx + 1) % Math.max(1, slashItems.length); return }
+      if (e.key === 'ArrowUp')   { e.preventDefault(); slashIdx = (slashIdx - 1 + Math.max(1, slashItems.length)) % Math.max(1, slashItems.length); return }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); const it = slashItems[slashIdx]; if (it) runSlash(it); else slashOpen = false; return }
+      if (e.key === 'Escape') { slashOpen = false; return }
+    }
     if (mentionOpen) {
       if (e.key === 'ArrowDown') { e.preventDefault(); mentionIdx = (mentionIdx + 1) % Math.max(1, mentionItems.length); return }
       if (e.key === 'ArrowUp')   { e.preventDefault(); mentionIdx = (mentionIdx - 1 + Math.max(1, mentionItems.length)) % Math.max(1, mentionItems.length); return }
@@ -187,6 +194,14 @@
     const el = /** @type {HTMLTextAreaElement} */ (e.target)
     inputText = el.value
     resizeInput()
+    // Slash command menu — only when the input starts with "/" (no space yet).
+    if (inputText.startsWith('/') && !/\s/.test(inputText)) {
+      slashQuery = inputText.slice(1)
+      slashOpen = true
+      mentionOpen = false
+      return
+    }
+    slashOpen = false
     // Detect @ trigger
     const cursor = el.selectionStart ?? 0
     const before = inputText.slice(0, cursor)
@@ -209,6 +224,42 @@
     inputText = before + '@' + text + ' ' + afterAt
     mentionOpen = false
     void tick().then(() => { resizeInput(); inputRef?.focus() })
+  }
+
+  // ── Slash commands (quick prompts) ──────────────────────────────────────────
+  let slashOpen = $state(false)
+  let slashQuery = $state('')
+  let slashIdx = $state(0)
+
+  const SLASH_COMMANDS = [
+    { cmd: 'explain',  label: 'Explain',    desc: 'Explain the current table or SQL',    prompt: 'Explain the currently open table (or the SQL in the editor if one is open): its purpose, key columns, and relationships. Be concise.', send: true },
+    { cmd: 'optimize', label: 'Optimize',   desc: 'Suggest query optimizations',         prompt: 'Review the SQL currently in the editor and suggest concrete optimizations (indexes, rewrites, avoiding scans). Return improved SQL in a ```sql block.', send: true },
+    { cmd: 'fix',      label: 'Fix',        desc: 'Find and fix issues in the SQL',       prompt: 'Find problems in the SQL currently in the editor and return corrected SQL in a ```sql block with a brief explanation.', send: true },
+    { cmd: 'index',    label: 'Indexes',    desc: 'Suggest indexes for the active table', prompt: "Based on the active table's columns, primary key, and foreign keys, suggest useful indexes and give the CREATE INDEX statements in a ```sql block.", send: true },
+    { cmd: 'chart',    label: 'Chart',      desc: 'Visualize data as a chart',           prompt: 'Chart ', send: false },
+    { cmd: 'erd',      label: 'Diagram',    desc: 'Draw an ERD of the schema',           prompt: 'Draw an entity-relationship diagram of this schema as a mermaid erDiagram inside a ```mermaid code block, with the main tables, key columns, and relationships.', send: true },
+    { cmd: 'summary',  label: 'Summary',    desc: 'Summarize the whole schema',          prompt: 'Give a concise overview of this database: the main tables, how they relate, and what the schema is for.', send: true },
+    { cmd: 'count',    label: 'Row counts', desc: 'Count rows across every table',        prompt: 'Show the row count of every table in the current schema, ordered by count descending. Run the query and report the results.', send: true },
+  ]
+
+  const slashItems = $derived.by(() => {
+    const q = slashQuery.toLowerCase()
+    return SLASH_COMMANDS.filter((c) => !q || c.cmd.startsWith(q) || c.label.toLowerCase().includes(q))
+  })
+
+  $effect(() => { void slashItems; slashIdx = 0 })
+
+  /** @param {typeof SLASH_COMMANDS[number]} command */
+  function runSlash(command) {
+    slashOpen = false
+    if (command.send) {
+      inputText = ''
+      resetInputHeight()
+      void send([command.prompt])
+    } else {
+      inputText = command.prompt
+      void tick().then(() => { resizeInput(); inputRef?.focus() })
+    }
   }
 
   // ── Scroll helpers ────────────────────────────────────────────────────────
@@ -954,6 +1005,32 @@
       </div>
     {/if}
 
+    <!-- slash command popup -->
+    {#if slashOpen && slashItems.length > 0}
+      <div class="absolute bottom-full left-2.5 right-2.5 z-50 mb-1.5 overflow-hidden rounded-xl border border-border/60 bg-popover elevate-2-rim">
+        <div class="flex items-center gap-1.5 border-b border-border/40 px-3 py-2">
+          <Slash class="size-3.5 shrink-0 text-muted-foreground/45" />
+          <span class="text-ui-2xs font-medium text-foreground/70">Commands</span>
+        </div>
+        <div class="app-scroll max-h-52 overflow-y-auto p-1">
+          {#each slashItems as item, idx (item.cmd)}
+            {@const active = idx === slashIdx}
+            <button type="button"
+              class={cn('flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors', active ? 'bg-accent text-foreground' : 'hover:bg-accent/50')}
+              onmousedown={(e) => { e.preventDefault(); runSlash(item) }}
+            >
+              <span class={cn('shrink-0 rounded bg-muted/60 px-1.5 py-0.5 font-mono text-ui-3xs', active ? 'text-primary' : 'text-muted-foreground/50')}>/{item.cmd}</span>
+              <span class={cn('shrink-0 text-ui-xs font-medium', active ? 'text-foreground' : 'text-foreground/80')}>{item.label}</span>
+              <span class="min-w-0 flex-1 truncate text-right text-ui-2xs text-muted-foreground/45">{item.desc}</span>
+            </button>
+          {/each}
+        </div>
+        <div class="border-t border-border/30 px-3 py-1.5">
+          <span class="text-ui-2xs text-muted-foreground/40">↑↓ navigate · ↵ select · esc dismiss</span>
+        </div>
+      </div>
+    {/if}
+
     <!-- Input box -->
     <div class="overflow-hidden rounded-xl border border-border/50 bg-muted/10 transition-colors focus-within:border-border/80 focus-within:bg-background">
       <!-- Context bar: show active table/view -->
@@ -978,7 +1055,7 @@
         oninput={handleInputChange}
         onkeydown={handleInputKeydown}
         rows="1"
-        placeholder={configured ? 'Ask anything… type @ for tables' : 'Configure a model first'}
+        placeholder={configured ? 'Ask anything —  @ tables · / commands' : 'Configure a model first'}
         disabled={!configured}
         class="max-h-40 min-h-[2.25rem] w-full resize-none bg-transparent px-3 pt-2 pb-1 text-ui-xs leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/40 disabled:opacity-60"
       ></textarea>
@@ -990,6 +1067,11 @@
           title="Mention a table (@)"
           onclick={() => { inputText += '@'; inputRef?.focus(); void tick().then(resizeInput) }}
         ><At class="size-3.5" /></button>
+        <button type="button"
+          class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-muted-foreground"
+          title="Quick commands (/)"
+          onclick={() => { inputText = '/'; slashQuery = ''; slashIdx = 0; slashOpen = true; inputRef?.focus(); void tick().then(resizeInput) }}
+        ><Slash class="size-3.5" /></button>
         <div class="flex-1"></div>
         {#if loading}
           <button type="button" class="inline-flex size-7 shrink-0 items-center justify-center rounded-lg border border-border/50 bg-background text-foreground/60 shadow-sm transition-colors hover:border-ring/50 hover:text-foreground" onclick={stop} title="Stop">
