@@ -6,11 +6,15 @@
   import AppErrorBoundary from './lib/components/AppErrorBoundary.svelte'
   import { loadSettings, applySettings, installZoomShortcuts } from '$lib/stores/settings.js'
   import { installPlatformClass } from '$lib/platform.js'
+  import { initTooltips } from '$lib/tip.js'
 
   onMount(async () => {
     installPlatformClass()
     applySettings(loadSettings())
     installZoomShortcuts()
+    // Upgrade native `title` tooltips app-wide to the styled pill.
+    const teardownTooltips = initTooltips()
+    void teardownTooltips
 
     // Dev-only console helpers (window.__TAURI__ isn't exposed without
     // withGlobalTauri, which we keep off in production). Debug trial commands
