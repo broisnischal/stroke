@@ -3453,7 +3453,10 @@ let rowSearch = $state('')
       })
       const fetched = data.rows ?? []
       if (!fetched.length) return
-      _infiniteRows = [..._infiniteRows, ...fetched]
+      // Append in place — spreading the whole accumulated array on every page was
+      // O(n) per load (O(n²) over a scroll session). Pages are page-size (small),
+      // so push() is cheap and the proxied $state array still notifies the grid.
+      for (let i = 0; i < fetched.length; i++) _infiniteRows.push(fetched[i])
       rows = _infiniteRows
       total = Number(data.total ?? total)
     } catch (e) {
