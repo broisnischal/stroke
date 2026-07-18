@@ -936,6 +936,24 @@
   // Infinite scroll — accumulated rows across all "load more" fetches.
   let _infiniteRows = $state(/** @type {any[]} */ ([]))
   let infiniteScroll = $state(loadInfiniteScroll())
+
+  // ── Windowed loading (huge result sets) ──────────────────────────────────
+  // For results past WINDOW_THRESHOLD we never hold every row: `rows` becomes a
+  // sparse array of length = total with only the windows near the viewport
+  // loaded, so 5M rows cost ~tens of MB instead of ~GBs. Absolute indexing is
+  // preserved (rows[i] is still row i), so selection / hit-testing / scroll are
+  // untouched — only the *data* is windowed. dataVersion bumps trigger a grid
+  // redraw after a window is spliced in (rows identity is unchanged).
+  const WINDOW_FETCH = 20_000     // rows per window request
+  const WINDOW_THRESHOLD = 200_000 // window only above this total
+  const WINDOW_KEEP = 4           // windows kept resident on each side of the viewport
+  let windowed = $state(false)
+  let dataVersion = $state(0)
+  let _windowSeq = 0
+  /** @type {Set<number>} */
+  let _windowLoaded = new Set()
+  /** @type {Set<number>} */
+  let _windowFetching = new Set()
 let rowSearch = $state('')
   let rowSort = $state(/** @type {TableSort | null} */ (null))
   /** Secondary sort keys for multi-column sort (primary is rowSort). @type {TableSort[]} */
@@ -1266,6 +1284,9 @@ let rowSearch = $state('')
 
   /** @returns {TableTabState} */
   function captureTableSnapshot() {
+    // A windowed result set holds a huge sparse array — never cache it into the
+    // tab. Store empty columns/rows so re-activation takes the refetch path
+    // (fetchRowsForTab → loadRows) and re-establishes windowing cleanly.
     return {
       schema: activeSchema,
       table: activeTable,
@@ -1275,10 +1296,10 @@ let rowSearch = $state('')
       rowSort: rowSort ? { ...rowSort } : null,
       rowSortMore: rowSortMore.map((s) => ({ ...s })),
       rowFilters: rowFilters.map((f) => ({ ...f })),
-      columns,
+      columns: windowed ? [] : columns,
       primaryKey,
       foreignKeys,
-      rows,
+      rows: windowed ? [] : rows,
       total,
       queryMs,
       loadingRows: false,
@@ -3269,6 +3290,15 @@ let rowSearch = $state('')
     patchTab({ loadingRows: true, error: '' })
     if (tabId === activeTabId) { loadingRows = true; error = '' }
 
+    // "All" on a large table would pull the whole set into this tab. Route the
+    // active tab through loadRows (which windows it) and skip prefetch entirely
+    // for large background tabs — they window on activation instead.
+    if (s.pageSize === PAGE_SIZE_ALL && (s.total > WINDOW_THRESHOLD || s.total <= 0)) {
+      fetchingTabIds.delete(tabId)
+      if (tabId === activeTabId) await loadRows()
+      return
+    }
+
     try {
       // Resolve the "All" sentinel — and guard a corrupt/unset value — into a
       // real fetch limit; the backend rejects limit < 1. Mirrors effectivePageSize.
@@ -3350,6 +3380,87 @@ let rowSearch = $state('')
     }
   }
 
+  /** Tear down windowing (switching to a normal / small load). */
+  function resetWindowing() {
+    windowed = false
+    _windowSeq++
+    _windowLoaded = new Set()
+    _windowFetching = new Set()
+  }
+
+  /** Build the shared row-query options for the current view (search/sort/filter). */
+  function currentRowQuery(includeCount = false) {
+    const { sortColumn, sortDirection, sorts } = sortForApi(rowSort, rowSortMore)
+    return { ...apiSearch(rowSearch), sortColumn, sortDirection, sorts, filters: filtersForApi(rowFilters, columns), includeMeta: false, includeCount }
+  }
+
+  /** Fetch one window and splice it into the sparse `rows` array in place. */
+  async function fetchWindow(w) {
+    if (!windowed || w < 0 || _windowLoaded.has(w) || _windowFetching.has(w)) return
+    const offset = w * WINDOW_FETCH
+    if (offset >= total) return
+    const seq = _windowSeq
+    _windowFetching.add(w)
+    try {
+      const data = await getTableRows(activeSchema, activeTable, WINDOW_FETCH, offset, currentRowQuery(false))
+      if (seq !== _windowSeq) return // table / query changed while in flight
+      const fetched = data.rows ?? []
+      for (let i = 0; i < fetched.length; i++) rows[offset + i] = fetched[i]
+      _windowLoaded.add(w)
+      dataVersion++
+    } catch {
+      // leave unloaded — the next visible-range emit retries
+    } finally {
+      _windowFetching.delete(w)
+    }
+  }
+
+  /** Evict resident windows far from the viewport so memory stays bounded. */
+  function evictFarWindows(firstW, lastW) {
+    if (!windowed) return
+    let evicted = false
+    for (const w of _windowLoaded) {
+      if (w < firstW - WINDOW_KEEP || w > lastW + WINDOW_KEEP) {
+        const offset = w * WINDOW_FETCH
+        const endI = Math.min(offset + WINDOW_FETCH, total)
+        for (let i = offset; i < endI; i++) rows[i] = undefined
+        _windowLoaded.delete(w)
+        evicted = true
+      }
+    }
+    if (evicted) dataVersion++
+  }
+
+  let _visRangeTimer = /** @type {ReturnType<typeof setTimeout> | null} */ (null)
+  /** DataTable reports its visible row range → load nearby windows, evict far ones.
+   *  Debounced so fast scrolling doesn't fire a fetch for every window flown past. */
+  function handleVisibleRange(start, end) {
+    if (!windowed) return
+    if (_visRangeTimer) clearTimeout(_visRangeTimer)
+    _visRangeTimer = setTimeout(() => {
+      _visRangeTimer = null
+      if (!windowed) return
+      const firstW = Math.floor(start / WINDOW_FETCH)
+      const lastW = Math.floor(end / WINDOW_FETCH)
+      for (let w = firstW - 1; w <= lastW + 1; w++) void fetchWindow(w)
+      evictFarWindows(firstW, lastW)
+    }, 100)
+  }
+
+  /** Fetch the full ordered result set in chunks (windowed export/copy path). */
+  async function fetchAllRows(onProgress) {
+    /** @type {any[]} */
+    const out = []
+    for (let off = 0; off < total; off += WINDOW_FETCH) {
+      const data = await getTableRows(activeSchema, activeTable, WINDOW_FETCH, off, currentRowQuery(false))
+      const r = data.rows ?? []
+      for (let i = 0; i < r.length; i++) out.push(r[i])
+      onProgress?.(out.length)
+      if (r.length < WINDOW_FETCH) break
+    }
+    return out
+  }
+
   /**
    * @param {{ keepScroll?: boolean }} [opts]
    *   keepScroll — used by live refresh: re-run the *current* query (filters,
@@ -3365,6 +3476,7 @@ let rowSearch = $state('')
       return
     }
     const seq = ++_loadSeq
+    _windowSeq++ // discard any window fetches in flight from a prior query
     loadingRows = true
     _infiniteRows = []
     if (!keepScroll) {
@@ -3382,16 +3494,25 @@ let rowSearch = $state('')
       // fetches (pagination, sort, filter, live) reuse what we already hold,
       // skipping several round-trips per fetch.
       const includeMeta = columns.length === 0
-      const data = await getTableRows(activeSchema, activeTable, effectivePageSize, offset, {
-        ...apiSearch(rowSearch),
-        sortColumn,
-        sortDirection,
-        sorts,
-        filters: filtersForApi(rowFilters, columns),
-        includeMeta,
-        // Don't wait on COUNT(*) — paint rows now, count streams in below.
-        includeCount: false,
-      })
+      // Window only in "All" mode on a large set — fixed page sizes still
+      // paginate exactly as before. When windowing we cap the first fetch to one
+      // window and ask for the count up front (needed to size the sparse array).
+      const wantsWindow = pageSize === PAGE_SIZE_ALL && effectivePageSize > WINDOW_THRESHOLD
+      const data = await getTableRows(
+        activeSchema, activeTable,
+        wantsWindow ? WINDOW_FETCH : effectivePageSize,
+        wantsWindow ? 0 : offset,
+        {
+          ...apiSearch(rowSearch),
+          sortColumn,
+          sortDirection,
+          sorts,
+          filters: filtersForApi(rowFilters, columns),
+          includeMeta,
+          // Don't wait on COUNT(*) — paint rows now, count streams in below.
+          // Windowed loads need the total immediately to size the sparse array.
+          includeCount: wantsWindow,
+        })
       if (seq !== _loadSeq) return
       const nextColumns = data.columns ?? []
       // Update column shape whenever it actually changes (e.g. a column was
@@ -3406,11 +3527,39 @@ let rowSearch = $state('')
         foreignKeys = normalizeForeignKeys(data.foreignKeys ?? data.foreign_keys)
       }
       const fetched = data.rows ?? []
-      rows = fetched
-      _infiniteRows = fetched
-      // total = -1 means "counting" (Postgres, non-blocking). Other engines
-      // return a real total here; refreshRowCount() then no-ops for them.
-      total = Number(data.total ?? 0)
+      const windowTotal = wantsWindow ? Number(data.total ?? 0) : 0
+      if (wantsWindow && windowTotal > WINDOW_THRESHOLD) {
+        // Sparse windowed array: length = total, only window 0 loaded so far.
+        _windowSeq++
+        _windowLoaded = new Set([0])
+        _windowFetching = new Set()
+        windowed = true
+        const arr = new Array(windowTotal)
+        for (let i = 0; i < fetched.length; i++) arr[i] = fetched[i]
+        rows = arr
+        _infiniteRows = []
+        total = windowTotal
+        dataVersion++
+      } else if (wantsWindow) {
+        // Below the windowing bar after counting — load the remainder in full.
+        resetWindowing()
+        if (windowTotal > fetched.length) {
+          const restData = await getTableRows(activeSchema, activeTable, Math.min(windowTotal - fetched.length, MAX_PAGE_SIZE), fetched.length, currentRowQuery(false))
+          if (seq !== _loadSeq) return
+          rows = [...fetched, ...(restData.rows ?? [])]
+        } else {
+          rows = fetched
+        }
+        _infiniteRows = rows
+        total = windowTotal
+      } else {
+        resetWindowing()
+        rows = fetched
+        _infiniteRows = fetched
+        // total = -1 means "counting" (Postgres, non-blocking). Other engines
+        // return a real total here; refreshRowCount() then no-ops for them.
+        total = Number(data.total ?? 0)
+      }
       queryMs = Number(data.queryMs ?? data.query_ms ?? 0)
       // Live refresh updates in place — only reset scroll for user-driven loads
       // (page/filter/sort/search), where jumping to the top is expected.
@@ -3420,13 +3569,14 @@ let rowSearch = $state('')
         if (page > maxPage) page = maxPage
       }
       // Fire-and-forget: fill the total in the background so the count never
-      // delays the rows. Guarded by the same _loadSeq token to drop stale results.
-      void refreshRowCount(seq)
+      // delays the rows. Windowed loads already have a real total from the fetch.
+      if (!windowed) void refreshRowCount(seq)
     } catch (e) {
       if (seq !== _loadSeq) return
       const errStr = String(e)
       if (isNetworkError(errStr)) { connectionLost = true; void silentReconnect() }
       error = errStr
+      resetWindowing()
       columns = []
       primaryKey = []
       foreignKeys = []
@@ -3464,6 +3614,7 @@ let rowSearch = $state('')
   }
 
   async function handleLoadMore() {
+    if (windowed) return // windowed mode loads via handleVisibleRange, not append
     if (!infiniteScroll || !activeTable || loadingRows || loadingMore) return
     if (total >= 0 && _infiniteRows.length >= total) return
     loadingMore = true
@@ -3525,9 +3676,25 @@ let rowSearch = $state('')
 
   async function handleExport(format) {
     if (exportingData) return
-    const exportRows = selected.size > 0
-      ? [...selected].sort((a, b) => a - b).map((i) => rows[i]).filter(Boolean)
-      : rows
+    exportingData = true
+    // Windowed results keep only a few resident windows, so read the full
+    // ordered set from the server for export instead of the sparse client array.
+    let sourceRows = rows
+    if (windowed) {
+      const fetchId = toast.info('Fetching all rows for export…', { duration: 60 * 60 * 1000 })
+      try {
+        sourceRows = await fetchAllRows()
+      } catch (e) {
+        toast.dismiss(fetchId)
+        exportingData = false
+        toast.error('Export failed', { description: String(e) })
+        return
+      }
+      toast.dismiss(fetchId)
+    }
+    const exportRows = (selected.size > 0 && selected.size < sourceRows.length)
+      ? [...selected].sort((a, b) => a - b).map((i) => sourceRows[i]).filter(Boolean)
+      : sourceRows
     // Export only the columns the user has left visible. Rows are positional
     // arrays, so filter the column list AND project each row's cells by the
     // original column index (mirrors dataViewRows for the json/text views).
@@ -5271,6 +5438,9 @@ let rowSearch = $state('')
                 indexes={activeTableIndexes}
                 {hiddenColumns}
                 {reloadToken}
+                {dataVersion}
+                {windowed}
+                onvisiblerange={handleVisibleRange}
                 columnWidthsKey={activeTable ? `${activeSchema}.${activeTable}` : undefined}
                 loading={loadingRows}
                 {loadingMore}

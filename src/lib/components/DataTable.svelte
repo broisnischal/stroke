@@ -257,6 +257,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
      *  (page/filter/sort/search change). On change the table jumps its scroll
      *  and virtual window back to the top. */
     reloadToken = 0,
+    /** Bumped by the parent when window data is spliced into the (sparse) rows
+     *  array without changing its identity — triggers a redraw WITHOUT resetting
+     *  scroll (unlike reloadToken). */
+    dataVersion = 0,
+    /** Windowed mode: `rows` is sparse (length = total, only near-viewport rows
+     *  loaded). Undefined rows render as a loading skeleton and the table reports
+     *  its visible range via onvisiblerange so the parent can fetch/evict. */
+    windowed = false,
+    /** Called (on change) with the currently visible row range in windowed mode. */
+    onvisiblerange = /** @type {(start: number, end: number) => void} */ (() => {}),
     /** Infinite scroll mode — when true the table fires onloadmore near the bottom. */
     infiniteScroll = false,
     /** True while an incremental "load more" fetch is in flight. */
@@ -859,6 +869,21 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // don't retain it, so one scratch object avoids an allocation per drawn cell
   // while a stats-dependent extension (heatmap / annotator) is enabled.
   const _statsCtx = { stats: /** @type {any} */ (undefined) };
+
+  // Windowed mode: repaint when the parent splices in a freshly-loaded window
+  // (dataVersion bumps without a rows-identity change), and report the visible
+  // range so the parent can fetch/evict windows. Emitting only on change keeps
+  // this off the per-frame hot path.
+  $effect(() => { void dataVersion; scheduleDraw(); });
+  let _emittedFirst = -1;
+  let _emittedLast = -1;
+  function emitVisibleRange(first, last) {
+    if (!windowed) return;
+    if (first === _emittedFirst && last === _emittedLast) return;
+    _emittedFirst = first;
+    _emittedLast = last;
+    onvisiblerange(first, last);
+  }
 
   // Repaint when extension settings or column stats change — both affect drawn
   // cell text, badges, tints, and the header annotator strip.
@@ -3516,12 +3541,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const bodyTopY = Math.max(0, _scrollTop - HEADER_H - insertRowOffset)
     if (visibleColumns.length > 0) {
       let i = rowIndexAtY(rowTops, n, bodyTopY, ROW_HEIGHT)
+      const firstVis = i
+      let lastVis = i
       for (; i < n; i++) {
         const ry = rowViewportY(i)
         if (ry >= H) break
         if (ry + ROW_HEIGHT <= HEADER_H) continue
         drawBodyRow(ctx, i, ry, bodyC)
+        lastVis = i
       }
+      if (n > 0) emitVisibleRange(firstVis, Math.min(lastVis, n - 1))
     }
     ctx.restore()
 
@@ -3534,9 +3563,29 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
   }
 
+  /** Skeleton row for a window that hasn't loaded yet (windowed mode only). */
+  function drawLoadingRow(ctx, idx, ry, rh, c) {
+    if (c.tableStyle.zebra && (idx & 1)) {
+      ctx.fillStyle = withAlpha(c.cMutedBg, 0.05)
+      ctx.fillRect(0, ry, c.usedW, rh)
+    }
+    const cy = ry + rh / 2
+    const barH = Math.max(4, Math.round(6 * canvasZoom))
+    const gut = geom.gutterWidth
+    ctx.fillStyle = withAlpha(c.cMutedBg, 0.45)
+    for (const col of geom.cols) {
+      const x = colDrawnX(col, geom, _scrollLeft)
+      if (x + col.w <= gut || x >= _viewportWidth) continue
+      const bx = Math.max(x, gut) + CELL_PAD_X
+      const bw = Math.min(col.w - CELL_PAD_X * 2, Math.round(col.w * 0.5))
+      if (bw > 4) { roundRect(ctx, bx, cy - barH / 2, bw, barH, barH / 2); ctx.fill() }
+    }
+  }
+
   /** @param {CanvasRenderingContext2D} ctx */
   function drawBodyRow(ctx, idx, ry, c) {
     const rh = ROW_HEIGHT
+    if (windowed && rows[idx] === undefined) { drawLoadingRow(ctx, idx, ry, rh, c); return }
     // Row background — selected uses primary tint, others use muted.
     const isSel = selected.has(idx)
     const isPendingDelete = hasPendingDeletes && pendingDeletes.has(idx)
