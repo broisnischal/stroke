@@ -103,7 +103,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import { isImageUrl } from "$lib/plugins/extensions/cell-transforms.js";
   import { t } from "$lib/i18n.js";
   import Wand2 from "@lucide/svelte/icons/wand-2";
-  import Sparkles from "@lucide/svelte/icons/sparkles";
+  import Dices from "@lucide/svelte/icons/dices";
+  import Clock from "@lucide/svelte/icons/clock";
   import MediaLightbox from "./MediaLightbox.svelte";
   import RowExpandViewer from "./RowExpandViewer.svelte";
   import ArrayCellEditor from "./ArrayCellEditor.svelte";
@@ -5452,7 +5453,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     <ContextMenu.Content
       onOpenAutoFocus={(e) => e.preventDefault()}
       class={cn(
-        "min-w-52 p-0.5 text-ui-xs",
+        "min-w-52 p-1 text-ui-xs",
         "[&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs",
         "[&_[data-slot=context-menu-shortcut]]:text-ui-2xs",
         "[&_[data-slot=context-menu-item]_svg]:size-3.5",
@@ -5713,16 +5714,17 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           {#if menuTransforms.length === 0}<ContextMenu.Separator />{/if}
           <ContextMenu.Sub>
             <ContextMenu.SubTrigger>
-              <Sparkles />
-              Insert generated value
+              <Dices />
+              Insert
             </ContextMenu.SubTrigger>
-            <ContextMenu.SubContent class="app-scroll max-h-[60vh] w-48 overflow-y-auto [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+            <ContextMenu.SubContent class="app-scroll max-h-[60vh] w-52 overflow-y-auto [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:whitespace-nowrap [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
               {#each menuGenerators as grp, gi (grp.group)}
                 {#if gi > 0}<ContextMenu.Separator />{/if}
+                {@const GIcon = grp.group === 'IDs' ? KeyRound : grp.group === 'TIME' ? Clock : Dices}
                 <div class="select-none px-2 pb-0.5 pt-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/45">{grp.group}</div>
                 {#each grp.items as g (g.id)}
                   <ContextMenu.Item onSelect={() => runMenuAction(() => insertGeneratedValue(contextRowIdx, contextColIdx, g))}>
-                    <Sparkles />
+                    <GIcon />
                     {g.label}
                   </ContextMenu.Item>
                 {/each}
