@@ -315,12 +315,14 @@ async fn tcp_preflight(host: &str, port: u16) -> Result<(), String> {
 
 fn pg_pool_builder() -> PgPoolOptions {
     PgPoolOptions::new()
-        // Desktop app: at most 2-3 tabs open simultaneously, each running 1-2
-        // queries. 4 connections is the real-world ceiling; monitored logs showed
-        // only 4 connections actually opened even under active use. Keeping 10
-        // was wasting ~25-40 MB of Rust-side recv/send buffers + 8 OS FDs for
-        // sockets that stayed idle 95% of the time.
-        .max_connections(4)
+        // Desktop app: steady-state use only needs ~4 connections. But the FIRST
+        // open of a table bursts 6 concurrent queries — rows + count + the four
+        // catalog-metadata lookups (enums/nullable/pk/fk), which now run in
+        // parallel with the row fetch. Cap at 8 so that burst never queues behind
+        // a 4-connection ceiling (which would serialize metadata after the rows
+        // and stall the first open); the extras stay idle and close after
+        // idle_timeout, so steady state still settles back to ~4.
+        .max_connections(8)
         // No min_connections: keeping idle connections alive causes ping failures
         // after network changes or laptop sleep/wake (os error 60), then a 27 s
         // stall while the pool replaces the dead connection.
