@@ -97,17 +97,12 @@
       for (const e of es) g.setEdge(e.source, e.target)
       dagre.layout(g)
 
-      // Dagre lays each rank as a single vertical line — for a hub referenced by
-      // dozens of tables that becomes an unreadable tall smear. Re-flow each rank
-      // (nodes share an x in LR mode) into multiple sub-columns capped at a target
-      // height, so a big fan spreads into a readable grid. Generous gaps keep the
-      // cards from crowding and give the edges room to fan without overlapping.
-      // Vertical gaps stay generous (breathing room within a readable view);
-      // horizontal RANK_GAP is kept modest so a deep LR graph doesn't stretch into
-      // an unreadable 8:1 sliver that fit-to-view then shrinks to nothing. A higher
-      // TARGET_H stacks each rank (esp. a hub referenced by many tables) into more
-      // vertical rows and fewer sub-columns → a squarer, narrower overall block.
-      const COL_GAP = 110, ROW_GAP = 72, RANK_GAP = 200, TARGET_H = 2600
+      // Dagre already minimises edge crossings — so for a normal schema we trust
+      // its coordinates directly and the graph reads clean (few/no crossings).
+      // The one case it handles poorly is a single rank that fans into a huge
+      // vertical stack (a hub referenced by dozens of tables): there we re-flow
+      // that rank into height-capped sub-columns so it becomes a readable grid
+      // instead of one unreadable tall smear.
       /** @type {Map<number, {n:any,y:number,h:number}[]>} */
       const ranks = new Map()
       for (const n of conn) {
@@ -118,19 +113,48 @@
       }
       /** @type {Map<string, {x:number,y:number}>} */
       const placed = new Map()
-      let cursorX = 40
-      for (const key of [...ranks.keys()].sort((a, b) => a - b)) {
-        const items = (ranks.get(key) ?? []).sort((a, b) => a.y - b.y)
-        const maxH = items.reduce((m, it) => Math.max(m, it.h), HDR_H)
-        const rows = Math.max(1, Math.floor(TARGET_H / (maxH + ROW_GAP)))
-        const cols = Math.ceil(items.length / rows)
-        const colY = new Array(cols).fill(40) // per sub-column running Y (packs tight)
-        for (let i = 0; i < items.length; i++) {
-          const col = Math.floor(i / rows)
-          placed.set(items[i].n.id, { x: cursorX + col * (NODE_W + COL_GAP), y: colY[col] })
-          colY[col] += items[i].h + ROW_GAP
+      const MAX_STACK = 10
+      const oversized = [...ranks.values()].some((items) => items.length > MAX_STACK)
+
+      if (!oversized) {
+        // Honest Dagre layout: convert node centres → top-left and normalise so the
+        // graph begins a little in from the origin. This is what removes the
+        // crossings the sub-column re-pack used to introduce.
+        let minX = Infinity, minY = Infinity
+        for (const n of conn) {
+          const p = g.node(n.id)
+          const h = n.data ? nodeH(n.data) : HDR_H
+          minX = Math.min(minX, p.x - NODE_W / 2)
+          minY = Math.min(minY, p.y - h / 2)
         }
-        cursorX += cols * (NODE_W + COL_GAP) + RANK_GAP
+        for (const n of conn) {
+          const p = g.node(n.id)
+          const h = n.data ? nodeH(n.data) : HDR_H
+          placed.set(n.id, {
+            x: Math.round(p.x - NODE_W / 2 - minX + 40),
+            y: Math.round(p.y - h / 2 - minY + 40),
+          })
+        }
+      } else {
+        // Huge fan: re-flow each rank into sub-columns capped at TARGET_H so a hub
+        // spreads into a grid. Generous gaps keep cards from crowding and give
+        // edges room; RANK_GAP stays modest so a deep graph doesn't stretch into an
+        // unreadable sliver.
+        const COL_GAP = 110, ROW_GAP = 72, RANK_GAP = 200, TARGET_H = 2600
+        let cursorX = 40
+        for (const key of [...ranks.keys()].sort((a, b) => a - b)) {
+          const items = (ranks.get(key) ?? []).sort((a, b) => a.y - b.y)
+          const maxH = items.reduce((m, it) => Math.max(m, it.h), HDR_H)
+          const rows = Math.max(1, Math.floor(TARGET_H / (maxH + ROW_GAP)))
+          const cols = Math.ceil(items.length / rows)
+          const colY = new Array(cols).fill(40) // per sub-column running Y (packs tight)
+          for (let i = 0; i < items.length; i++) {
+            const col = Math.floor(i / rows)
+            placed.set(items[i].n.id, { x: cursorX + col * (NODE_W + COL_GAP), y: colY[col] })
+            colY[col] += items[i].h + ROW_GAP
+          }
+          cursorX += cols * (NODE_W + COL_GAP) + RANK_GAP
+        }
       }
 
       laidConn = conn.map(n => {
