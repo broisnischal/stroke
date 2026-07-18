@@ -42,6 +42,10 @@
     onopenabout = () => {},
     onopenreport = () => {},
     oncheckupdate = () => {},
+    /** Whether the connection is currently read-only (locks edits/inserts/deletes). */
+    readonly = false,
+    /** Toggle read-only mode. */
+    onreadonlytoggle = () => {},
     /** @param {'postgres'|'mysql'} dbType */
     ondockerlaunch = (dbType) => {},
     /** @param {import('$lib/stores/connections.js').SavedConnection} conn */
@@ -450,6 +454,10 @@
               <Command.Item value="refresh schema tables" onSelect={() => run(onrefresh)}>
                 <Icon name="refresh-cw" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">Refresh tables</span>
+              </Command.Item>
+              <Command.Item value="read only read-only lock mode protect prevent edits writes inserts deletes writable" onSelect={() => run(onreadonlytoggle)}>
+                <Icon name={readonly ? 'lock-open' : 'lock'} class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">{readonly ? 'Disable read-only mode' : 'Enable read-only mode'}</span>
               </Command.Item>
               <Command.Item value="open settings preferences" onSelect={() => run(onopensettings)}>
                 <Icon name="settings" class="size-4 shrink-0 opacity-60" />

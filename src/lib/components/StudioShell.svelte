@@ -4602,6 +4602,8 @@ let rowSearch = $state('')
   onopenconnection={() => (showConnectionModal = true)}
   ondisconnect={requestDisconnect}
   onrefresh={handleRefresh}
+  readonly={tableReadonly}
+  onreadonlytoggle={() => { tableReadonly = !tableReadonly }}
   onopenai={() => openAiTab()}
   onopenaisidebar={() => { if (aiMode) exitAiMode(); toggleAiSidebar() }}
   {aiMode}
