@@ -244,6 +244,14 @@
   const askBtn = 'inline-flex items-center gap-1.5 rounded-md border border-border/60 px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground'
   const askBtnPrimary = 'inline-flex items-center gap-1.5 rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground transition-opacity hover:opacity-90'
 
+  // Keep the ask thread pinned to the newest message as it streams / grows.
+  let askBottomEl = $state(/** @type {HTMLElement | null} */ (null))
+  $effect(() => {
+    void askTurns
+    if (page !== 'ask' || !askBottomEl) return
+    requestAnimationFrame(() => askBottomEl?.scrollIntoView({ block: 'end', behavior: 'auto' }))
+  })
+
   /** @param {KeyboardEvent} e */
   function handleKeydown(e) {
     // On the ask page, Enter continues the conversation with a follow-up.
@@ -546,6 +554,7 @@
               {/if}
             </div>
             <div class="ml-[22px] mt-1.5 text-[10px] text-muted-foreground/35">Type below and press ↵ to follow up</div>
+            <div bind:this={askBottomEl} class="h-px"></div>
           </div>
         {/if}
 
