@@ -689,7 +689,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     void $pluginState;
     const v = rows[contextRowIdx]?.[contextColIdx];
     if (v === null || v === undefined) return [];
-    return transformsFor(v, _colCache[contextColIdx]?.colType ?? "", menuColName);
+    // Column-only transforms (avatar / image thumbnail) render live on a whole
+    // column; they're offered in the header menu, not the per-cell menu.
+    return transformsFor(v, _colCache[contextColIdx]?.colType ?? "", menuColName).filter((tf) => !tf.columnOnly);
   });
   // Value generators (UUIDv7, nanoid, …) offered when the cell is editable.
   const menuGenerators = $derived.by(() => {
@@ -3702,7 +3704,17 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const warnW = dir?.warn ? Math.round(14 * canvasZoom) : 0
     const hoverW = isHover ? ICON_HIT + (canExpand ? ICON_HIT : 0) : 0
     const fkW = (activeFk && rowHover) ? 20 : 0
-    const jsonW = isJson ? Math.round(36 * canvasZoom) : 0
+    // Reserve the JSON pill's *true* width (icon + gap + "JSON" + padding) so the
+    // cell text always truncates before it — a fixed 36px was narrower than the
+    // measured pill (~49px), which let text run under the pill.
+    let jsonW = 0
+    if (isJson) {
+      const _pad = Math.round(5 * canvasZoom)
+      const _gap = Math.round(3 * canvasZoom)
+      const _isz = Math.round(10 * canvasZoom)
+      ctx.font = `600 ${Math.max(8, Math.round(9 * canvasZoom))}px ${_fonts.family}`
+      jsonW = _pad + _isz + _gap + textWidth(ctx, 'JSON') + _pad + Math.round(6 * canvasZoom)
+    }
     const rightReserve = 4 + hoverW + fkW + jsonW + warnW  // 4 = right margin
 
     // Left-side decorations (color swatch / boolean dot) push the text right.

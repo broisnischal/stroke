@@ -149,7 +149,7 @@ export function transformsFor(value, type, name) {
     for (const t of ext.transforms) {
       try {
         if (t.appliesTo(value, type, name)) {
-          out.push({ id: t.id, label: t.label, run: (v) => t.run(v, type, name) })
+          out.push({ id: t.id, label: t.label, columnOnly: !!t.columnOnly, run: (v) => t.run(v, type, name) })
         }
       } catch {}
     }
