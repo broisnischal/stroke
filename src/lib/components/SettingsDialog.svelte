@@ -256,7 +256,7 @@
               )}
             >
               <Icon name={c.icon} class="size-4 shrink-0" />
-              {c.label}
+              {$t('settings.nav.' + c.id)}
             </button>
           {/each}
         </nav>
@@ -268,7 +268,7 @@
           {#key searching ? '__search__' : category}
             <div class="settings-pane">
               <h2 class="mb-6 text-[15px] font-semibold tracking-tight text-foreground">
-                {searching ? 'Search results' : activeCategory.label}
+                {searching ? $t('common.search') : $t('settings.nav.' + activeCategory.id)}
               </h2>
 
               {#if searching}
@@ -341,8 +341,8 @@
     type="button"
     onclick={() => resetField(/** @type {any} */ (key), def)}
     disabled={!dirty}
-    title="Reset to default"
-    aria-label="Reset to default"
+    title={$t('settings.resetDefault')}
+    aria-label={$t('settings.resetDefault')}
     class={cn(
       'inline-flex size-8 shrink-0 items-center justify-center rounded-lg border transition-[background-color,color,border-color,opacity] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] active:scale-[0.96]',
       dirty
@@ -399,12 +399,12 @@
 {/snippet}
 
 {#snippet databaseContent()}
-  {@render secLabel('Data view')}
-  {#if show('Default view', 'Which view a table opens in')}
+  {@render secLabel($t('settings.sec.dataView'))}
+  {#if show($t('settings.defaultView'), $t('settings.defaultView.desc'))}
     <div class={rowCls}>
       <div class="min-w-0">
-        <p class="text-[13px] font-medium text-foreground">Default view</p>
-        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Which view a table opens in — Table, JSON, Record, Text, or Chart.</p>
+        <p class="text-[13px] font-medium text-foreground">{$t('settings.defaultView')}</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{$t('settings.defaultView.desc')}</p>
       </div>
       <Select.Root type="single" value={settings.defaultDataView} onValueChange={setDefaultDataView}>
         <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Default view">
@@ -429,50 +429,50 @@
     </div>
   {/if}
 
-  {@render secLabel('Query history')}
-  {#if show('Max query history', 'How many executed queries to keep per connection')}
-    {@render numberRow('Max query history', 'How many executed queries to keep per connection.', 'maxQueryHistory', DEFAULT_MAX_QUERY_HISTORY, '', 1)}
+  {@render secLabel($t('settings.sec.queryHistory'))}
+  {#if show($t('settings.maxQueryHistory'), $t('settings.maxQueryHistory.desc'))}
+    {@render numberRow($t('settings.maxQueryHistory'), $t('settings.maxQueryHistory.desc'), 'maxQueryHistory', DEFAULT_MAX_QUERY_HISTORY, '', 1)}
   {/if}
 
-  {@render secLabel('Connection defaults')}
-  {#if show('Max allowed packet', 'Maximum packet size for a single query or result')}
-    {@render numberRow('Max allowed packet', 'Maximum packet size for a single query or result.', 'maxAllowedPacket', DEFAULT_MAX_ALLOWED_PACKET, 'bytes', 1024)}
+  {@render secLabel($t('settings.sec.connectionDefaults'))}
+  {#if show($t('settings.maxAllowedPacket'), $t('settings.maxAllowedPacket.desc'))}
+    {@render numberRow($t('settings.maxAllowedPacket'), $t('settings.maxAllowedPacket.desc'), 'maxAllowedPacket', DEFAULT_MAX_ALLOWED_PACKET, 'bytes', 1024)}
   {/if}
-  {#if show('Socket timeout', 'Socket timeout in milliseconds')}
-    {@render numberRow('Socket timeout', 'Socket timeout in milliseconds.', 'socketTimeoutMs', DEFAULT_SOCKET_TIMEOUT_MS, 'ms', 0)}
+  {#if show($t('settings.socketTimeout'), $t('settings.socketTimeout.desc'))}
+    {@render numberRow($t('settings.socketTimeout'), $t('settings.socketTimeout.desc'), 'socketTimeoutMs', DEFAULT_SOCKET_TIMEOUT_MS, 'ms', 0)}
   {/if}
-  {#if show('Connect timeout', 'Connection timeout in milliseconds')}
-    {@render numberRow('Connect timeout', 'Connection timeout in milliseconds.', 'connectTimeoutMs', DEFAULT_CONNECT_TIMEOUT_MS, 'ms', 0)}
+  {#if show($t('settings.connectTimeout'), $t('settings.connectTimeout.desc'))}
+    {@render numberRow($t('settings.connectTimeout'), $t('settings.connectTimeout.desc'), 'connectTimeoutMs', DEFAULT_CONNECT_TIMEOUT_MS, 'ms', 0)}
   {/if}
-  {#if show('Timezone', 'Session timezone applied after connecting')}
-    {@render textRow('Timezone', 'Session timezone applied after connecting.', 'sessionTimezone', DEFAULT_SESSION_TIMEZONE)}
+  {#if show($t('settings.timezone'), $t('settings.timezone.desc'))}
+    {@render textRow($t('settings.timezone'), $t('settings.timezone.desc'), 'sessionTimezone', DEFAULT_SESSION_TIMEZONE)}
   {/if}
 {/snippet}
 
 {#snippet generalContent()}
-  {@render secLabel('Startup & behavior')}
-  {#if show('Launch at login', 'Start Stroke when you sign in')}
-    {@render switchRow('Launch at login', 'Start Stroke when you sign in', launchAtLogin ?? false, toggleLaunchAtLogin)}
+  {@render secLabel($t('settings.sec.startup'))}
+  {#if show($t('settings.launchAtLogin'), $t('settings.launchAtLogin.desc'))}
+    {@render switchRow($t('settings.launchAtLogin'), $t('settings.launchAtLogin.desc'), launchAtLogin ?? false, toggleLaunchAtLogin)}
   {/if}
-  {#if show('Auto reconnect on startup', 'Reconnect to the last database on launch')}
-    {@render switchRow('Auto reconnect on startup', 'Reconnect to the last database on launch', settings.autoReconnectOnStartup, toggleAutoReconnect)}
+  {#if show($t('settings.autoReconnect'), $t('settings.autoReconnect.desc'))}
+    {@render switchRow($t('settings.autoReconnect'), $t('settings.autoReconnect.desc'), settings.autoReconnectOnStartup, toggleAutoReconnect)}
   {/if}
-  {#if show('Preview SQL before applying', 'Review the DML before edits, inserts, and deletes run')}
-    {@render switchRow('Preview SQL before applying', 'Review the DML before edits, inserts, and deletes run', settings.previewDmlBeforeApply, togglePreviewDml)}
+  {#if show($t('settings.previewSql'), $t('settings.previewSql.desc'))}
+    {@render switchRow($t('settings.previewSql'), $t('settings.previewSql.desc'), settings.previewDmlBeforeApply, togglePreviewDml)}
   {/if}
-  {#if show('MCP auto-start', 'Start the MCP server on database connect')}
-    {@render switchRow('MCP auto-start', 'Start the MCP server on database connect', settings.mcpAutoStart, toggleMcpAutoStart)}
+  {#if show($t('settings.mcpAutostart'), $t('settings.mcpAutostart.desc'))}
+    {@render switchRow($t('settings.mcpAutostart'), $t('settings.mcpAutostart.desc'), settings.mcpAutoStart, toggleMcpAutoStart)}
   {/if}
 {/snippet}
 
 {#snippet appearanceContent()}
-  {@render secLabel('Theme & typeface')}
+  {@render secLabel($t('settings.sec.themeTypeface'))}
 
-  {#if show('Theme', 'Color theme for the whole app')}
+  {#if show($t('settings.theme'), $t('settings.theme.desc'))}
     <div class={rowCls}>
       <div class="min-w-0">
         <p class="text-[13px] font-medium text-foreground">{$t('settings.theme')}</p>
-        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Color theme for the whole app.</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{$t('settings.theme.desc')}</p>
       </div>
       <Select.Root type="single" value={$appThemeId} onValueChange={(v) => { if (v) setTheme(/** @type {import('$lib/themes/registry.js').ThemeId} */ (v)); }}>
         <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Color theme">
@@ -506,11 +506,11 @@
     </div>
   {/if}
 
-  {#if show('Font', 'UI and editor typeface')}
+  {#if show($t('settings.font'), $t('settings.font.desc'))}
     <div class={rowCls}>
       <div class="min-w-0">
         <p class="text-[13px] font-medium text-foreground">{$t('settings.font')}</p>
-        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">UI and editor typeface.</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{$t('settings.font.desc')}</p>
       </div>
       <Select.Root type="single" value={settings.font} onValueChange={(v) => { if (v) setFont(/** @type {import('$lib/stores/settings.js').FontId} */ (v)); }}>
         <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Font family">
@@ -538,7 +538,7 @@
     </div>
   {/if}
 
-  {#if show('Language', 'Interface language')}
+  {#if show($t('settings.language'), $t('settings.language.desc'))}
     <div class={rowCls}>
       <div class="min-w-0">
         <p class="text-[13px] font-medium text-foreground">{$t('settings.language')}</p>
@@ -564,13 +564,13 @@
     </div>
   {/if}
 
-  {@render secLabel('Icons')}
+  {@render secLabel($t('settings.sec.icons'))}
 
-  {#if show('Icon weight', 'Stroke thickness of Lucide icons')}
+  {#if show($t('settings.iconWeight'), $t('settings.iconWeight.desc'))}
     <div class={rowCls}>
       <div class="min-w-0">
-        <p class="text-[13px] font-medium text-foreground">Icon weight</p>
-        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Stroke thickness of the icon set.</p>
+        <p class="text-[13px] font-medium text-foreground">{$t('settings.iconWeight')}</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{$t('settings.iconWeight.desc')}</p>
       </div>
       <Select.Root type="single" value={settings.iconStyle} onValueChange={(v) => { if (v) setIconStyle(/** @type {import('$lib/stores/settings.js').IconStyleId} */ (v)); }}>
         <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Icon style">
@@ -600,11 +600,11 @@
     </div>
   {/if}
 
-  {#if show('Icon set', 'Icon family used across the app')}
+  {#if show($t('settings.iconSet'), $t('settings.iconSet.desc'))}
     <div class={rowCls}>
       <div class="min-w-0">
-        <p class="text-[13px] font-medium text-foreground">Icon set</p>
-        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Icon family used across the app.</p>
+        <p class="text-[13px] font-medium text-foreground">{$t('settings.iconSet')}</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{$t('settings.iconSet.desc')}</p>
       </div>
       <Select.Root type="single" value={settings.iconSet} onValueChange={(v) => { if (v) setIconSet(/** @type {import('$lib/stores/settings.js').IconSetId} */ (v)); }}>
         <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Icon set">
@@ -640,11 +640,11 @@
     </div>
   {/if}
 
-  {#if show('Table style', 'Grid style for the data table')}
+  {#if show($t('settings.tableStyle'), $t('settings.tableStyle.desc'))}
     <div class={rowCls}>
       <div class="min-w-0">
-        <p class="text-[13px] font-medium text-foreground">Table style</p>
-        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Grid style for the data table — lines, dotted, or connection dots.</p>
+        <p class="text-[13px] font-medium text-foreground">{$t('settings.tableStyle')}</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{$t('settings.tableStyle.desc')}</p>
       </div>
       <Select.Root type="single" value={settings.tableStyle} onValueChange={(v) => { if (v) setTableStyle(/** @type {import('$lib/stores/settings.js').TableStyleId} */ (v)); }}>
         <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Table style">
@@ -672,12 +672,12 @@
     </div>
   {/if}
 
-  {@render secLabel('Display')}
-  {#if show('Zoom', 'Scale the whole interface')}
+  {@render secLabel($t('settings.sec.display'))}
+  {#if show($t('settings.zoom'), $t('settings.zoom.desc'))}
     <div class={rowCls}>
       <div class="min-w-0">
         <p class="text-[13px] font-medium text-foreground">{$t('settings.zoom')}</p>
-        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Scale the whole interface.</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{$t('settings.zoom.desc')}</p>
       </div>
       <div class="flex items-center gap-1">
         <Button type="button" variant="ghost" size="icon" class="size-7" aria-label="Zoom out" disabled={!canDecreaseZoom(settings.zoom)} onclick={() => bumpZoom(-1)}>
@@ -693,33 +693,33 @@
 {/snippet}
 
 {#snippet integrationsContent()}
-  {@render secLabel('Tools')}
-  {#if show('Extensions', 'Cell formatters, ID generators & transforms')}
-    {@render actionRow('Extensions', 'Cell formatters, ID generators & transforms.', 'Open', () => { open = false; onopenextensions(); })}
+  {@render secLabel($t('settings.sec.tools'))}
+  {#if show($t('settings.extensions'), $t('settings.extensions.desc'))}
+    {@render actionRow($t('settings.extensions'), $t('settings.extensions.desc'), $t('settings.btn.open'), () => { open = false; onopenextensions(); })}
   {/if}
-  {#if show('MCP configuration', 'Expose your database to external AI tools')}
-    {@render actionRow('MCP configuration', 'Expose your database to external AI tools.', 'Open', () => { open = false; onopenmcp(); })}
+  {#if show($t('settings.mcpConfig'), $t('settings.mcpConfig.desc'))}
+    {@render actionRow($t('settings.mcpConfig'), $t('settings.mcpConfig.desc'), $t('settings.btn.open'), () => { open = false; onopenmcp(); })}
   {/if}
-  {#if show('AI models', 'Configure AI providers and API keys')}
-    {@render actionRow('AI models', 'Configure AI providers and API keys.', 'Configure', openModelConfiguration)}
+  {#if show($t('settings.aiModels'), $t('settings.aiModels.desc'))}
+    {@render actionRow($t('settings.aiModels'), $t('settings.aiModels.desc'), $t('settings.btn.configure'), openModelConfiguration)}
   {/if}
 
-  {@render secLabel('Account')}
-  {#if show('License', 'Activate or manage your Stroke license')}
-    {@render actionRow('License', 'Activate or manage your Stroke license.', 'Manage', () => { open = false; onopenlicense(); }, planBadge)}
+  {@render secLabel($t('settings.sec.account'))}
+  {#if show($t('settings.license'), $t('settings.license.desc'))}
+    {@render actionRow($t('settings.license'), $t('settings.license.desc'), $t('settings.btn.manage'), () => { open = false; onopenlicense(); }, planBadge)}
   {/if}
 {/snippet}
 
 {#snippet aboutContent()}
-  {@render secLabel('About')}
-  {#if show('About Stroke', 'Version, credits, and release notes')}
-    {@render actionRow('About Stroke', 'Version, credits, and release notes.', 'View', () => { open = false; onopenabout(); })}
+  {@render secLabel($t('settings.sec.about'))}
+  {#if show($t('settings.aboutStroke'), $t('settings.aboutStroke.desc'))}
+    {@render actionRow($t('settings.aboutStroke'), $t('settings.aboutStroke.desc'), $t('settings.btn.view'), () => { open = false; onopenabout(); })}
   {/if}
-  {#if show('Website', 'stroke.click — docs, licensing, and support')}
+  {#if show($t('settings.website'), $t('settings.website.desc'))}
     <div class={rowCls}>
       <div class="min-w-0">
-        <p class="text-[13px] font-medium text-foreground">Website</p>
-        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Docs, licensing, and support.</p>
+        <p class="text-[13px] font-medium text-foreground">{$t('settings.website')}</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{$t('settings.website.desc')}</p>
       </div>
       <a href="https://stroke.click" target="_blank" rel="noopener noreferrer" class="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border/60 bg-background px-3 text-ui-xs font-medium text-foreground transition-[background-color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:bg-muted active:scale-[0.98]">
         stroke.click <Icon name="external-link" class="size-3.5" />
@@ -728,13 +728,13 @@
   {/if}
 
   {#if !searching}
-    <p class="mt-8 mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/45">Keyboard</p>
+    <p class="mt-8 mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/45">{$t('settings.sec.keyboard')}</p>
     <div class="mb-3 border-b border-border/40"></div>
     <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
-      {@render shortcut('⌘M', 'cycle theme')}
-      {@render shortcut('⌘⇧M', 'previous theme')}
-      {@render shortcut('⌘+ / ⌘−', 'zoom')}
-      {@render shortcut('⌘0', 'reset zoom')}
+      {@render shortcut('⌘M', $t('settings.kbd.cycleTheme'))}
+      {@render shortcut('⌘⇧M', $t('settings.kbd.prevTheme'))}
+      {@render shortcut('⌘+ / ⌘−', $t('settings.kbd.zoom'))}
+      {@render shortcut('⌘0', $t('settings.kbd.resetZoom'))}
     </div>
   {/if}
 {/snippet}
