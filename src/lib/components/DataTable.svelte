@@ -616,6 +616,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         expandedRowHeights = new Map(expandedRowHeights).set(rowIdx, h)
       }
     }
+    // Measure synchronously on mount (forces one layout) so rowTops uses the real
+    // panel height on the first paint — the row below never flashes at the 280px
+    // placeholder and then snaps up. The observer below handles later size changes.
+    commit()
     const ro = new ResizeObserver(() => { clearTimeout(timer); timer = setTimeout(commit, 40) })
     ro.observe(node)
     return {
@@ -4133,9 +4137,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ctx.strokeStyle = c.cGrid; ctx.lineWidth = 1
       ctx.beginPath(); ctx.moveTo(x + VIRTUAL_COL_W - 0.5, 0); ctx.lineTo(x + VIRTUAL_COL_W - 0.5, HEADER_H); ctx.stroke()
       if (!_fonts) continue
+      // Centre the header label over the centred cell badge — a left-aligned label
+      // above centred pills reads as a misaligned "gap" in the relation column.
       ctx.font = _fonts.header; ctx.fillStyle = withAlpha(c.cMuted, 0.6)
-      ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
-      ctx.fillText(truncText(ctx, vc.label, VIRTUAL_COL_W - 16), x + 8, HEADER_H / 2 + 0.5)
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      ctx.fillText(truncText(ctx, vc.label, VIRTUAL_COL_W - 24), x + VIRTUAL_COL_W / 2, HEADER_H / 2 + 0.5)
       // Resize edge affordance (matches regular column behaviour)
       if (_resizeHoverCol === vrelKey || resizingColName === vrelKey) {
         ctx.strokeStyle = withAlpha(c.cPrimary, 0.7)
@@ -5120,7 +5126,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                  within it in content coordinates. -->
             <div
               class="relative"
-              style="width:{totalContentWidth}px; height:{spacerHeight}px"
+              style="width:{resizingColName ? Math.max(totalContentWidth, _scrollLeft + _viewportWidth) : totalContentWidth}px; height:{spacerHeight}px"
             >
               <!-- Inline insert-row form -->
               {#if newRowDrafts}
