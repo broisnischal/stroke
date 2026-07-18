@@ -370,6 +370,13 @@
   const filteredMatViews = $derived(
     lf ? sortedMatViewsBase.filter((t) => t.name.toLowerCase().includes(lf)) : sortedMatViewsBase,
   );
+  // The views / materialized-views lists aren't windowed (unlike the tables
+  // list), so a schema with thousands of views would instantiate thousands of
+  // context-menu components. Render at most VIEW_RENDER_CAP and hint to search
+  // for the rest — only pathological schemas ever hit this.
+  const VIEW_RENDER_CAP = 500;
+  const viewsToRender = $derived(filteredViews.length > VIEW_RENDER_CAP ? filteredViews.slice(0, VIEW_RENDER_CAP) : filteredViews);
+  const matViewsToRender = $derived(filteredMatViews.length > VIEW_RENDER_CAP ? filteredMatViews.slice(0, VIEW_RENDER_CAP) : filteredMatViews);
 
   // ── Counts for section badges ──────────────────────────────────────────────
   // The TABLES list draws from regular tables minus pins; use that as the "total"
@@ -1250,7 +1257,7 @@
                       No views match
                     </li>
                   {:else}
-                    {#each filteredViews as view (view.name)}
+                    {#each viewsToRender as view (view.name)}
                       {@const isSelected = selectedItems.has(view.name)}
                       <li class="[content-visibility:auto] [contain-intrinsic-size:auto_28px]">
                         <ContextMenu.Root>
@@ -1304,6 +1311,11 @@
                         </ContextMenu.Root>
                       </li>
                     {/each}
+                    {#if filteredViews.length > VIEW_RENDER_CAP}
+                      <li class="px-3 py-2 text-center text-ui-2xs text-muted-foreground/60">
+                        +{filteredViews.length - VIEW_RENDER_CAP} more — search to narrow
+                      </li>
+                    {/if}
                   {/if}
                 </ul>
               {/if}
@@ -1370,7 +1382,7 @@
                       No materialized views match
                     </li>
                   {:else}
-                    {#each filteredMatViews as mv (mv.name)}
+                    {#each matViewsToRender as mv (mv.name)}
                       {@const isSelected = selectedItems.has(mv.name)}
                       <li class="[content-visibility:auto] [contain-intrinsic-size:auto_28px]">
                         <ContextMenu.Root>
@@ -1429,6 +1441,11 @@
                         </ContextMenu.Root>
                       </li>
                     {/each}
+                    {#if filteredMatViews.length > VIEW_RENDER_CAP}
+                      <li class="px-3 py-2 text-center text-ui-2xs text-muted-foreground/60">
+                        +{filteredMatViews.length - VIEW_RENDER_CAP} more — search to narrow
+                      </li>
+                    {/if}
                   {/if}
                 </ul>
               {/if}
