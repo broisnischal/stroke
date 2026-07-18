@@ -430,18 +430,14 @@
                 <Icon name={connIcon(conn)} class="size-3.5" />
               {/if}
             </span>
-            <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-1.5">
-                <span class={cn('min-w-0 truncate text-[12px] leading-tight', isCurrent ? 'font-semibold text-foreground' : 'font-medium text-foreground/90')}>{title}</span>
-                {#if conn?.environment}
-                  <span class="size-1.5 shrink-0 rounded-full bg-muted-foreground/30" title={conn.environment}></span>
-                {/if}
-              </div>
-              {#if subtitle}
-                <div class="truncate font-mono text-[10px] leading-tight text-muted-foreground/45">{subtitle}</div>
-              {/if}
-            </div>
-            {#if isCurrent}<Icon name="check" class="ml-auto size-3.5 shrink-0 self-center text-emerald-500" />{/if}
+            <span
+              class={cn('min-w-0 flex-1 truncate', isCurrent ? 'font-semibold text-foreground' : 'font-medium text-foreground/90')}
+              title={subtitle ? `${title} · ${subtitle}` : title}
+            >{title}</span>
+            {#if conn?.environment}
+              <span class="size-1.5 shrink-0 rounded-full bg-muted-foreground/30" title={conn.environment}></span>
+            {/if}
+            {#if isCurrent}<Icon name="check" class="size-3.5 shrink-0 text-emerald-500" />{/if}
           {/snippet}
           {#snippet footer()}
             <div class="border-t border-border/50 p-1">
@@ -892,15 +888,12 @@
       {#snippet item(it)}
         {@const profile = $aiProfiles.find((p) => p.id === it.value)}
         {#if profile && hasBrand(profile.provider)}
-          <BrandIcon name={profile.provider} class="size-4 shrink-0 self-center text-muted-foreground/70" />
+          <BrandIcon name={profile.provider} class="size-4 shrink-0 text-muted-foreground/70" />
         {:else}
-          <Icon name="bot" class="size-4 shrink-0 self-center text-muted-foreground/40" />
+          <Icon name="bot" class="size-4 shrink-0 text-muted-foreground/40" />
         {/if}
-        <div class="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span class="truncate text-ui-sm font-medium leading-tight">{profile?.name ?? it.label}</span>
-          <span class="truncate font-mono text-[10px] leading-tight text-muted-foreground/50">{profile?.model}</span>
-        </div>
-        {#if $activeProfileId === it.value}<Icon name="check" class="size-3.5 shrink-0 self-center text-primary" />{/if}
+        <span class="min-w-0 flex-1 truncate text-ui-sm font-medium" title={profile?.model ?? it.label}>{profile?.name ?? it.label}</span>
+        {#if $activeProfileId === it.value}<Icon name="check" class="size-3.5 shrink-0 text-primary" />{/if}
       {/snippet}
       {#snippet footer()}
         <div class="border-t border-border/50 p-1">
