@@ -37,6 +37,38 @@ function darkChrome(c) {
 
 /** @type {Record<ThemeId, { base: 'vs' | 'vs-dark', chrome: object, rules: object[] }>} */
 export const MONACO_THEME_SPECS = {
+  'dark-high-contrast': {
+    base: 'vs-dark',
+    chrome: {
+      background: '#000000', foreground: '#ffffff', lineNumber: '#b0b0b0', lineNumberActive: '#ffffff',
+      lineHighlight: '#1c1c1c', selection: '#3a5a99cc', selectionInactive: '#3a5a9966', cursor: '#ffe000',
+      widgetBg: '#0a0a0a', widgetBorder: '#8a8a8a', indent: '#3a3a3a', indentActive: '#8a8a8a',
+      bracketBg: '#333333', bracketBorder: '#b0b0b0',
+    },
+    rules: [
+      { token: 'comment', foreground: 'b0b0b0', fontStyle: 'italic' },
+      { token: 'string', foreground: '5cff5c' }, { token: 'string.sql', foreground: '5cff5c' },
+      { token: 'number', foreground: '5cd6ff' },
+      { token: 'keyword', foreground: 'ffe000' }, { token: 'keyword.sql', foreground: 'ffe000' },
+      { token: 'operator', foreground: 'ffffff' }, { token: 'identifier', foreground: 'ffffff' },
+    ],
+  },
+  'light-high-contrast': {
+    base: 'vs',
+    chrome: {
+      background: '#ffffff', foreground: '#000000', lineNumber: '#4a4a4a', lineNumberActive: '#000000',
+      lineHighlight: '#eaeaea', selection: '#9ec5ffcc', selectionInactive: '#9ec5ff66', cursor: '#1a3fd0',
+      widgetBg: '#ffffff', widgetBorder: '#5a5a5a', indent: '#c0c0c0', indentActive: '#5a5a5a',
+      bracketBg: '#dddddd', bracketBorder: '#4a4a4a',
+    },
+    rules: [
+      { token: 'comment', foreground: '4a4a4a', fontStyle: 'italic' },
+      { token: 'string', foreground: '006000' }, { token: 'string.sql', foreground: '006000' },
+      { token: 'number', foreground: '00408a' },
+      { token: 'keyword', foreground: '1a3fd0' }, { token: 'keyword.sql', foreground: '1a3fd0' },
+      { token: 'operator', foreground: '000000' }, { token: 'identifier', foreground: '000000' },
+    ],
+  },
   light: {
     base: 'vs',
     chrome: {
