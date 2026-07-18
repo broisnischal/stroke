@@ -11,7 +11,7 @@ import { zoomState, ZOOM_MIN, ZOOM_MAX } from '$lib/stores/canvas-zoom.svelte.js
 const STORAGE_KEY = 'stroke:settings'
 
 /** @typedef {import('$lib/themes/registry.js').ThemeId} ThemeId */
-/** @typedef {'geist' | 'serif' | 'apple' | 'inter' | 'mono'} FontId */
+/** @typedef {'geist' | 'serif' | 'apple' | 'inter' | 'mono' | 'fira' | 'plex' | 'space' | 'source'} FontId */
 /** @typedef {'regular' | 'light' | 'bold'} IconStyleId */
 /** @typedef {'lucide' | 'hugeicons' | 'phosphor'} IconSetId */
 /** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean, defaultDataView: string, paginationMode: string, maxQueryHistory: number, connectTimeoutMs: number, socketTimeoutMs: number, maxAllowedPacket: number, sessionTimezone: string }} AppSettings */
@@ -58,6 +58,31 @@ export const FONT_PRESETS = {
     description: 'All-monospace terminal feel',
     sans: '"JetBrains Mono Variable", ui-monospace, monospace',
     mono: '"JetBrains Mono Variable", ui-monospace, monospace',
+  },
+  // The four below also ship with the app (fontsource imports in app.css).
+  fira: {
+    label: 'Fira Code',
+    description: 'Inter + Fira Code ligatures',
+    sans: '"Inter Variable", ui-sans-serif, system-ui, sans-serif',
+    mono: '"Fira Code Variable", ui-monospace, monospace',
+  },
+  plex: {
+    label: 'IBM Plex',
+    description: 'IBM Plex Sans + Mono',
+    sans: '"IBM Plex Sans", ui-sans-serif, system-ui, sans-serif',
+    mono: '"IBM Plex Mono", ui-monospace, monospace',
+  },
+  space: {
+    label: 'Space Grotesk',
+    description: 'Geometric sans + JetBrains Mono',
+    sans: '"Space Grotesk Variable", ui-sans-serif, system-ui, sans-serif',
+    mono: '"JetBrains Mono Variable", ui-monospace, monospace',
+  },
+  source: {
+    label: 'Source Code Pro',
+    description: 'Inter + Source Code Pro',
+    sans: '"Inter Variable", ui-sans-serif, system-ui, sans-serif',
+    mono: '"Source Code Pro Variable", ui-monospace, monospace',
   },
 }
 /** @type {FontId} */

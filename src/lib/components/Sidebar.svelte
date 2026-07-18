@@ -566,7 +566,7 @@
                     <Select.Item
                       value={schema}
                       label={schema}
-                      class="rounded-sm py-1.5 pr-8 pl-2.5 text-ui-sm"
+                      class="text-ui-sm"
                     />
                   {/each}
                 </Select.Content>
@@ -969,7 +969,7 @@
                         <ContextMenu.Separator />
                         <ContextMenu.Item onSelect={() => onopeninconsole(tableName)}>
                           <Icon name="terminal" />
-                          Open in SQL console
+                          Open Console
                         </ContextMenu.Item>
                         <ContextMenu.Item onSelect={() => ongeneratesql(tableName)}>
                           <Icon name="zap" />
