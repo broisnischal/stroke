@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import Icon from './Icon.svelte'
   import { cn } from '$lib/utils.js'
+  import { t } from '$lib/i18n.js'
   import { tabDisplayTitle } from '$lib/studio-tabs.js'
   import * as ContextMenu from '$lib/components/ui/context-menu/index.js'
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js'
@@ -119,7 +120,7 @@
   data-tauri-drag-region
   role="tablist"
   tabindex="0"
-  aria-label="Open editors"
+  aria-label={$t('tabs.openEditors')}
   ondblclick={handleDragAreaDblClick}
 >
   <div
@@ -174,8 +175,8 @@
                     'text-muted-foreground/60 hover:bg-muted hover:text-foreground',
                     active ? 'opacity-70 hover:opacity-100' : 'opacity-40 group-hover/tab:opacity-70',
                   )}
-                  title="Unpin tab"
-                  aria-label="Unpin tab"
+                  title={$t('tabs.unpin')}
+                  aria-label={$t('tabs.unpin')}
                   onclick={(e) => { e.stopPropagation(); onpintoggle(tab.id) }}
                 >
                   <Icon name="pin" class="size-2.5 rotate-45" />
@@ -191,8 +192,8 @@
                       ? 'opacity-50 hover:opacity-100'
                       : 'opacity-0 group-hover/tab:opacity-50 group-hover/tab:hover:opacity-100',
                   )}
-                  title="Close tab"
-                  aria-label="Close tab"
+                  title={$t('tabs.close')}
+                  aria-label={$t('tabs.close')}
                   onclick={(e) => { e.stopPropagation(); onclose(tab.id) }}
                 >
                   <Icon name="x" class="size-2.5" />
