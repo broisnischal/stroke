@@ -78,6 +78,10 @@
   const supportsSchemas = $derived(connection?.type === "postgres")
 
   let localFilter = $state(untrack(() => tableFilter));
+  // Debounced mirror of localFilter that the expensive list filtering derives
+  // from. localFilter drives the input (instant typing feedback); the O(n) filter
+  // + sort only re-runs once typing settles, not on every keystroke.
+  let debouncedFilter = $state(untrack(() => tableFilter));
   let filterEl = $state(/** @type {HTMLInputElement | null} */ (null));
   let filterDebounce = /** @type {ReturnType<typeof setTimeout> | null} */ (
     null
@@ -129,6 +133,7 @@
 
   // Only show pinned tables that still exist in the current table list
   const _tableNameSet = $derived(new Set(tables.map((t) => t.name)))
+  const _rowCountByName = $derived(new Map(tables.map((t) => [t.name, t.rowCount])))
   const visiblePinnedTables = $derived(pinnedTables.filter((n) => _tableNameSet.has(n)))
 
   function togglePin(tableName) {
@@ -256,6 +261,7 @@
   // Sync from parent when it resets externally (e.g. connection change)
   $effect(() => {
     localFilter = tableFilter;
+    debouncedFilter = tableFilter;
   });
 
   /** @param {string} value */
@@ -264,6 +270,7 @@
     if (filterDebounce) clearTimeout(filterDebounce);
     filterDebounce = setTimeout(() => {
       filterDebounce = null;
+      debouncedFilter = value;
       ontablefilter(value);
     }, 200);
   }
@@ -273,7 +280,8 @@
     if (filterDebounce) clearTimeout(filterDebounce);
   });
 
-  const lf = $derived(localFilter.toLowerCase());
+  const lf = $derived(debouncedFilter.toLowerCase());
+  const pinnedSet = $derived(new Set(pinnedTables));
 
   const regularTables = $derived(
     tables.filter(
@@ -301,8 +309,14 @@
     return result
   }
 
+  // Sorted, hide-filtered, un-pinned base — recomputes only when the data, sort,
+  // hide toggles or pins change (NOT on every keystroke). The search term then
+  // just filters this base, so typing avoids the sort + array clones.
+  const sortedRegularBase = $derived(
+    applySortBy(regularTables.filter((t) => !pinnedSet.has(t.name))),
+  );
   const filteredRegularTables = $derived(
-    applySortBy(regularTables.filter((t) => !pinnedTables.includes(t.name) && t.name.toLowerCase().includes(lf))),
+    lf ? sortedRegularBase.filter((t) => t.name.toLowerCase().includes(lf)) : sortedRegularBase,
   );
 
   // Selectable rows in display order (pinned first, then regular) — drives shift range-select.
@@ -348,17 +362,19 @@
     for (const n of selectedItems) if (openTableSet.has(n)) onclosetable(n)
     clearSelection()
   }
+  const sortedViewsBase = $derived(applySortBy(views));
+  const sortedMatViewsBase = $derived(applySortBy(matViews));
   const filteredViews = $derived(
-    applySortBy(views.filter((t) => t.name.toLowerCase().includes(lf))),
+    lf ? sortedViewsBase.filter((t) => t.name.toLowerCase().includes(lf)) : sortedViewsBase,
   );
   const filteredMatViews = $derived(
-    applySortBy(matViews.filter((t) => t.name.toLowerCase().includes(lf))),
+    lf ? sortedMatViewsBase.filter((t) => t.name.toLowerCase().includes(lf)) : sortedMatViewsBase,
   );
 
   // ── Counts for section badges ──────────────────────────────────────────────
   // The TABLES list draws from regular tables minus pins; use that as the "total"
   // so pinning (which just relocates a row) doesn't read as a hidden/filtered row.
-  const regularTablesUnpinned = $derived(regularTables.filter((t) => !pinnedTables.includes(t.name)));
+  const regularTablesUnpinned = $derived(regularTables.filter((t) => !pinnedSet.has(t.name)));
   /** How many rows the active filters (search / hide-empty / hide-system) are hiding right now. */
   const hiddenCount = $derived(
     Math.max(0, regularTablesUnpinned.length - filteredRegularTables.length) +
@@ -372,6 +388,7 @@
 
   function resetFilters() {
     localFilter = '';
+    debouncedFilter = '';
     if (filterDebounce) { clearTimeout(filterDebounce); filterDebounce = null; }
     ontablefilter('');
     hideEmpty = false;
@@ -881,7 +898,7 @@
                           <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{tableName}</span>
                           {#if showRowCount}
                           <span class="shrink-0 text-right font-mono text-ui-xs leading-4 tabular-nums text-muted-foreground/85">
-                            {formatTableRowCount(tables.find((t) => t.name === tableName)?.rowCount)}
+                            {formatTableRowCount(_rowCountByName.get(tableName))}
                           </span>
                           {/if}
                         </button>
