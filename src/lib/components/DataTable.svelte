@@ -5,7 +5,8 @@
   import { zoomState } from '$lib/stores/canvas-zoom.svelte.js'
   // Zoom is driven through the app-level settings so the canvas scales together
   // with the rest of the UI (applySettings mirrors the app zoom into zoomState).
-  import { increaseZoom, decreaseZoom, resetZoom, appPreviewDml, appTableStyle, TABLE_STYLES, normalizeTableStyle } from '$lib/stores/settings.js'
+  import { increaseZoom, decreaseZoom, resetZoom, appPreviewDml, appTableStyle, TABLE_STYLES, normalizeTableStyle, appVimMode } from '$lib/stores/settings.js'
+  import { setVimSubMode } from '$lib/vim/vim.js'
   import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
@@ -179,6 +180,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
      *  never leaks into another table of the same schema.table name on a different
      *  connection. */
     connectionId = '',
+    /** Vim mode `/` — asks the parent to focus the row-search input (the toolbar
+     *  owns it, not the grid). */
+    onrequestsearch = () => {},
     /** Schema + table name used for INSERT statement generation */
     schema = '',
     tableName = '',
@@ -3143,6 +3147,76 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // which depends on focusedRow/focusedCol and so repaints on focus changes.
 
   /** @param {KeyboardEvent} e */
+  // ── Experimental Vim mode (grid normal-mode navigation) ─────────────────────
+  // Active only while $appVimMode is on and no cell is being edited. Reflects the
+  // grid's mode into the shared status-bar indicator.
+  let _vimPrefix = ''            // '', 'g', 'd', 'y' — awaiting the second key
+  let _vimPrefixTimer = /** @type {ReturnType<typeof setTimeout> | 0} */ (0)
+  let _vimCount = ''             // numeric motion prefix, e.g. "3" in 3j
+  /** @param {string} p */
+  function _setVimPrefix(p) {
+    _vimPrefix = p
+    if (_vimPrefixTimer) clearTimeout(_vimPrefixTimer)
+    if (p) _vimPrefixTimer = setTimeout(() => { _vimPrefix = '' }, 700)
+  }
+  /** Move the cell cursor by (dr, dc), clamped, and keep it in view. */
+  function vimMove(dr, dc) {
+    const rowLen = rows.length, visLen = navigableColumns.length
+    if (!rowLen || !visLen) return
+    focusedRow = Math.min(Math.max((focusedRow ?? 0) + dr, 0), rowLen - 1)
+    focusedCol = Math.min(Math.max((focusedCol ?? 0) + dc, 0), visLen - 1)
+    selAnchor = null
+    scrollRowIntoView(focusedRow)
+    scheduleDraw()
+  }
+  /** Interpret a key as a grid Vim normal-mode command. Returns true if consumed. */
+  function handleVimGridKey(e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return false
+    const k = e.key
+    if (k === 'Escape') {
+      _setVimPrefix(''); _vimCount = ''
+      return false // let the default Escape cascade (clear range / blur) run
+    }
+    // Only single printable characters are Vim commands; arrows, Tab, Enter,
+    // Home/End, Page… keep their normal grid behavior in both modes.
+    if (k.length !== 1) return false
+    e.preventDefault()
+
+    // Resolve a pending g/d/y prefix first.
+    if (_vimPrefix) {
+      const p = _vimPrefix; _setVimPrefix('')
+      if (p === 'g' && k === 'g') { focusedRow = 0; scrollRowIntoView(0); scheduleDraw(); return true }
+      if (p === 'd' && k === 'd') { deleteRow(focusedRow ?? 0); return true }
+      if (p === 'y' && k === 'y') { void copyAs(focusedRow ?? 0, 'plain'); return true }
+      // non-matching second key falls through to be handled fresh below
+    }
+
+    // Numeric count prefix (a lone "0" is the row-start motion, not a count).
+    if ((k >= '1' && k <= '9') || (k === '0' && _vimCount !== '')) { _vimCount += k; return true }
+    const count = Math.max(1, parseInt(_vimCount || '1', 10)); _vimCount = ''
+    const ai = () => visToActualColIdx(focusedCol ?? 0)
+
+    switch (k) {
+      case 'g': case 'd': case 'y': _setVimPrefix(k); return true
+      case 'h': vimMove(0, -count); return true
+      case 'l': vimMove(0, count); return true
+      case 'j': vimMove(count, 0); return true
+      case 'k': vimMove(-count, 0); return true
+      case '0': focusedCol = 0; scheduleDraw(); return true
+      case '$': focusedCol = navigableColumns.length - 1; scheduleDraw(); return true
+      case 'G': { const last = rows.length - 1; if (last >= 0) { focusedRow = last; scrollRowIntoView(last); scheduleDraw() } return true }
+      case 'i': case 'a': case 'c': startEdit(focusedRow ?? 0, ai()); setVimSubMode('insert'); return true
+      case 'x': setCellNull(focusedRow ?? 0, ai()); return true
+      case '/': onrequestsearch(); return true
+      default: return true // unmapped printable char — consume so it can't type-to-edit
+    }
+  }
+  // Mirror the grid's edit state into the shared Vim indicator while focused.
+  $effect(() => {
+    if (!$appVimMode || !isTableFocused) return
+    setVimSubMode(editingCell ? 'insert' : 'normal')
+  })
+
   function handleTableKeydown(e) {
     // Ctrl/Cmd + / - / 0: zoom the whole app (canvas scales in lockstep).
     if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
@@ -3199,6 +3273,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
     if (editingCell) return;
     if (newRowDrafts) return;
+
+    // Experimental Vim normal-mode: intercept plain command keys (hjkl, gg/G,
+    // i/x/dd/yy, …) before the default arrow / type-to-edit handling.
+    if ($appVimMode && handleVimGridKey(e)) return;
 
     // Cmd/Ctrl+Arrow is table-level navigation (scroll to top/bottom, first/last
     // column, paginate) owned by the app-level handler in StudioShell. Let it
