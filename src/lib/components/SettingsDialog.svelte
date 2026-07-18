@@ -6,6 +6,7 @@
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import ThemeSwatch from "$lib/components/ThemeSwatch.svelte";
+  import SearchableMenu from "$lib/components/SearchableMenu.svelte";
   import { getThemeDefinition, themesByGroup } from "$lib/themes/registry.js";
   import { t, locale, LOCALES, setLocale } from "$lib/i18n.js";
   import { licenseStatus } from "$lib/stores/license.js";
@@ -188,7 +189,7 @@
   }
 
   const PAGINATION_OPTIONS = [
-    { id: 'offset',   label: 'Offset',   icon: 'list', hint: 'Classic LIMIT/OFFSET — jump to any page' },
+    { id: 'offset',   label: 'Offset',   icon: 'hash', hint: 'Classic LIMIT/OFFSET — jump to any page' },
     { id: 'cursor',   label: 'Cursor',   icon: 'chevrons-right', hint: 'Keyset by primary key — fast next/prev, no page jump' },
     { id: 'keyset',   label: 'Keyset',   icon: 'key-round', hint: 'Same as cursor (keyset on the primary key)' },
     { id: 'temporal', label: 'Temporal', icon: 'clock', hint: 'Keyset on a timestamp column, newest-first' },
@@ -517,35 +518,30 @@
         <p class="text-[13px] font-medium text-foreground">{$t('settings.theme')}</p>
         <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{$t('settings.theme.desc')}</p>
       </div>
-      <Select.Root type="single" value={$appThemeId} onValueChange={(v) => { if (v) setTheme(/** @type {import('$lib/themes/registry.js').ThemeId} */ (v)); }}>
-        <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Color theme">
-          <span class="flex min-w-0 items-center gap-2">
-            <ThemeSwatch bg={activeTheme.preview.bg} accent={activeTheme.preview.accent} />
-            <span class="truncate font-medium">{activeTheme.name}</span>
+      <SearchableMenu
+        align="end"
+        contentClass="w-64"
+        placeholder="Search themes…"
+        items={themeGroups.flatMap((g) => g.themes.map((t) => ({ value: t.id, label: t.name, keywords: [g.label], bg: t.preview.bg, accent: t.preview.accent })))}
+        onselect={(it) => setTheme(/** @type {import('$lib/themes/registry.js').ThemeId} */ (it.value))}
+      >
+        {#snippet trigger(props)}
+          <button {...props} type="button" class={themeSelectTrigger} aria-label="Color theme">
+            <span class="flex min-w-0 items-center gap-2">
+              <ThemeSwatch bg={activeTheme.preview.bg} accent={activeTheme.preview.accent} />
+              <span class="truncate font-medium">{activeTheme.name}</span>
+            </span>
+            <Icon name="chevron-down" class="size-3.5 shrink-0 opacity-40" />
+          </button>
+        {/snippet}
+        {#snippet item(it)}
+          <span class="flex min-w-0 flex-1 items-center gap-2">
+            <ThemeSwatch bg={it.bg} accent={it.accent} />
+            <span class="truncate text-xs font-medium">{it.label}</span>
           </span>
-        </Select.Trigger>
-        <Select.Content class="z-[100] max-h-[min(24rem,70vh)] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
-          {#each themeGroups as group, i (group.id)}
-            {#if i > 0}<Select.Separator class="my-1" />{/if}
-            <Select.Group>
-              <Select.GroupHeading class="px-2 py-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">{group.label}</Select.GroupHeading>
-              {#each group.themes as theme (theme.id)}
-                <Select.Item value={theme.id} label={theme.name} class="rounded-md py-1.5 pr-8 pl-2">
-                  {#snippet children()}
-                    <span class="flex min-w-0 items-center gap-2">
-                      <ThemeSwatch bg={theme.preview.bg} accent={theme.preview.accent} />
-                      <span class="min-w-0">
-                        <span class="block truncate text-xs font-medium">{theme.name}</span>
-                        <span class="block truncate text-[10px] text-muted-foreground">{theme.description}</span>
-                      </span>
-                    </span>
-                  {/snippet}
-                </Select.Item>
-              {/each}
-            </Select.Group>
-          {/each}
-        </Select.Content>
-      </Select.Root>
+          {#if $appThemeId === it.value}<Icon name="check" class="ml-auto size-3.5 shrink-0 text-primary" />{/if}
+        {/snippet}
+      </SearchableMenu>
     </div>
   {/if}
 
