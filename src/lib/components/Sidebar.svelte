@@ -423,7 +423,12 @@
       const rows = /** @type {NodeListOf<HTMLElement>} */ (el.querySelectorAll('li:not([aria-hidden])'))
       if (rows.length >= 2) {
         const stride = rows[1].offsetTop - rows[0].offsetTop
-        if (stride > 10 && Math.abs(stride - rowH) > 0.5) rowH = stride
+        // Read rowH untracked: this effect must NOT depend on the value it writes,
+        // or setting rowH re-runs it, and a stride that doesn't settle in one pass
+        // spins until Svelte's infinite-loop guard trips. The ResizeObserver still
+        // re-measures on real layout changes.
+        const cur = untrack(() => rowH)
+        if (stride > 10 && Math.abs(stride - cur) > 0.5) rowH = stride
       }
     }
     measure()
