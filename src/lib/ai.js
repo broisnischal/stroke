@@ -1107,7 +1107,13 @@ Use \`render_chart\` after \`execute_sql\`. Match chart type to data shape:
 export function buildSystemPrompt(ctx) {
   const tableList = ctx.tables.length
     ? ctx.tables
-        .map((t) => `  • ${t.name}${t.rowCount != null ? ` — ${formatCompactCount(t.rowCount)} rows` : ''}`)
+        // `tables` may be a list of names (strings) or {name,rowCount} objects
+        // depending on the caller — handle both so names never render as undefined.
+        .map((t) => {
+          const name = typeof t === 'string' ? t : t?.name
+          const rc = t && typeof t === 'object' && t.rowCount != null ? ` — ${formatCompactCount(t.rowCount)} rows` : ''
+          return `  • ${name}${rc}`
+        })
         .join('\n')
     : '  (no tables loaded yet — use describe_table or execute_sql to explore)'
 
