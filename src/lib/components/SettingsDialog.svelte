@@ -509,7 +509,7 @@
   {#if show('Font', 'UI and editor typeface')}
     <div class={rowCls}>
       <div class="min-w-0">
-        <p class="text-[13px] font-medium text-foreground">Font</p>
+        <p class="text-[13px] font-medium text-foreground">{$t('settings.font')}</p>
         <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">UI and editor typeface.</p>
       </div>
       <Select.Root type="single" value={settings.font} onValueChange={(v) => { if (v) setFont(/** @type {import('$lib/stores/settings.js').FontId} */ (v)); }}>
@@ -676,7 +676,7 @@
   {#if show('Zoom', 'Scale the whole interface')}
     <div class={rowCls}>
       <div class="min-w-0">
-        <p class="text-[13px] font-medium text-foreground">Zoom</p>
+        <p class="text-[13px] font-medium text-foreground">{$t('settings.zoom')}</p>
         <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Scale the whole interface.</p>
       </div>
       <div class="flex items-center gap-1">

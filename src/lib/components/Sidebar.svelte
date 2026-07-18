@@ -10,6 +10,7 @@
   import PanelLeft from "@lucide/svelte/icons/panel-left";
   import ResizeHandle from "./ResizeHandle.svelte";
   import { cn } from "$lib/utils.js";
+  import { t } from "$lib/i18n.js";
   import { formatTableRowCount } from "$lib/table-list.js";
   import {
     clampNavSidebarWidth,
@@ -672,11 +673,11 @@
               <DropdownMenu.Content align="end" class="w-44 p-1 text-ui-sm">
                 <DropdownMenu.Item onSelect={onnewtable} class="gap-2">
                   <Icon name="table-2" class="size-3.5 shrink-0 text-muted-foreground" />
-                  New table
+                  {$t('sidebar.newTable')}
                 </DropdownMenu.Item>
                 <DropdownMenu.Item onSelect={onnewschema} class="gap-2">
                   <Icon name="box" class="size-3.5 shrink-0 text-muted-foreground" />
-                  New schema
+                  {$t('sidebar.newSchema')}
                 </DropdownMenu.Item>
               </DropdownMenu.Content>
             </DropdownMenu.Root>
@@ -991,7 +992,7 @@
               />
               <span
                 class="text-ui-2xs font-medium tracking-wider text-muted-foreground/55 uppercase"
-                >Tables</span
+                >{$t('sidebar.tables')}</span
               >
               {#if regularTablesUnpinned.length > 0}
                 {@render countBadge(filteredRegularTables.length, regularTablesUnpinned.length)}
@@ -1217,7 +1218,7 @@
                 />
                 <span
                   class="text-ui-2xs font-medium tracking-wider text-muted-foreground/55 uppercase"
-                  >Views</span
+                  >{$t('sidebar.views')}</span
                 >
                 {#if views.length > 0}
                   {@render countBadge(filteredViews.length, views.length)}
