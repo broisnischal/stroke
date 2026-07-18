@@ -2,6 +2,10 @@
   import Icon from './Icon.svelte'
   import * as Command from '$lib/components/ui/command/index.js'
   import { formatTableRowCount } from '$lib/table-list.js'
+  import { get } from 'svelte/store'
+  import AiMarkdown from './AiMarkdown.svelte'
+  import { chatCompletionStream, buildSystemPrompt } from '$lib/ai.js'
+  import { aiSettings, isAiConfigured } from '$lib/stores/ai-settings.js'
 
   let {
     open = $bindable(false),
@@ -62,19 +66,82 @@
     onopennotebookfile = () => {},
     openschematimeline = () => {},
     opendatadiff = () => {},
+    /** Live AI schema/db context for the inline quick-ask. */
+    schemaContext = null,
+    /** Escalate a quick-ask question into the full AI sidebar/chat. @param {string} q */
+    onaskcontinue = (q) => {},
   } = $props()
 
-  /** @param {'docker' | 'connections' | 'tables'} target */
+  /** @param {'docker' | 'connections' | 'tables' | 'ask'} target */
   function navigate(target) {
     page = target
   }
 
   function goBack() {
+    if (page === 'ask') stopAsk()
     page = 'root'
   }
 
+  // ── Quick-ask: an inline, single-turn AI answer right inside the palette ─────
+  let askQuestion = $state('')
+  let askAnswer = $state('')
+  let askStreaming = $state(false)
+  let askError = $state('')
+  /** @type {AbortController | null} */
+  let askController = null
+  /** First ```sql block in the answer — powers the Insert-into-editor action. */
+  const askSql = $derived((askAnswer.match(/```sql\s*([\s\S]*?)```/i)?.[1] ?? '').trim())
+
+  /** @param {string} question */
+  async function startAsk(question) {
+    const q = (question ?? '').trim()
+    if (!q) return
+    const settings = get(aiSettings)
+    if (!isAiConfigured(settings)) { onopensettings(); open = false; return }
+    askController?.abort()
+    askQuestion = q
+    askAnswer = ''
+    askError = ''
+    askStreaming = true
+    page = 'ask'
+    paletteSearch = ''
+    const ac = new AbortController()
+    askController = ac
+    try {
+      const sys = buildSystemPrompt(schemaContext ?? {}) +
+        '\n\nYou are answering a quick one-shot question from the command palette. Be concise and direct. ' +
+        'If the answer involves data or a schema change, put ONE ready-to-run statement in a ```sql code block.'
+      const messages = [
+        { role: 'system', content: sys },
+        { role: 'user', content: q },
+      ]
+      for await (const chunk of chatCompletionStream(settings, messages, null, ac.signal)) {
+        if (ac.signal.aborted) break
+        if (chunk.textDelta) askAnswer += chunk.textDelta
+      }
+    } catch (e) {
+      if (!ac.signal.aborted) askError = /** @type {any} */ (e)?.message ?? String(e)
+    } finally {
+      if (askController === ac) { askStreaming = false; askController = null }
+    }
+  }
+
+  function stopAsk() {
+    askController?.abort()
+    askStreaming = false
+  }
+
+  const askBtn = 'inline-flex items-center gap-1.5 rounded-md border border-border/60 px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground'
+  const askBtnPrimary = 'inline-flex items-center gap-1.5 rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground transition-opacity hover:opacity-90'
+
   /** @param {KeyboardEvent} e */
   function handleKeydown(e) {
+    // On the ask page, Enter asks a fresh question with the current input text.
+    if (page === 'ask' && e.key === 'Enter' && !e.isComposing) {
+      const q = paletteSearch.trim()
+      if (q) { e.preventDefault(); e.stopPropagation(); void startAsk(q) }
+      return
+    }
     if (page !== 'root' && e.key === 'Backspace') {
       const input = /** @type {HTMLInputElement | null} */ (
         e.currentTarget instanceof Element
@@ -245,6 +312,7 @@
     docker: 'Docker',
     connections: 'Connections',
     tables: 'Tables',
+    ask: 'Ask AI',
   })
 </script>
 
@@ -268,6 +336,7 @@
         placeholder={
           page === 'root' ? 'Search tables, schemas, commands…'
           : page === 'tables' ? 'Search tables and views…'
+          : page === 'ask' ? 'Ask a follow-up…'
           : `Search ${pageLabel[page]}…`
         }
       />
@@ -288,10 +357,62 @@
       {/if}
 
       <Command.List class="max-h-[min(440px,58vh)]">
-        <Command.Empty class="py-8 text-center text-[12px] text-muted-foreground/40">No results.</Command.Empty>
+        {#if page !== 'ask'}
+          <Command.Empty class="py-8 text-center text-[12px] text-muted-foreground/40">No results.</Command.Empty>
+        {/if}
+
+        <!-- ── ASK AI (inline quick-ask) ─────────────────────────────── -->
+        {#if page === 'ask'}
+          <div class="px-4 py-3">
+            <div class="mb-2 flex items-start gap-2">
+              <Icon name="sparkles" class="mt-0.5 size-3.5 shrink-0 text-primary" />
+              <div class="min-w-0 flex-1 text-[13px] font-medium text-foreground">{askQuestion}</div>
+            </div>
+            {#if askError}
+              <div class="rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2 text-[12px] text-destructive">{askError}</div>
+            {:else if askStreaming && !askAnswer}
+              <div class="flex items-center gap-2 py-2 text-[12px] text-muted-foreground/50">
+                <Icon name="sparkles" class="size-3.5 animate-pulse" /> Thinking…
+              </div>
+            {:else}
+              <AiMarkdown content={askAnswer} streaming={askStreaming} debounceMs={120} class="text-ui-xs" />
+            {/if}
+            <div class="mt-3 flex flex-wrap items-center gap-1.5">
+              {#if askStreaming}
+                <button type="button" class={askBtn} onclick={stopAsk}>
+                  <Icon name="square" class="size-3" /> Stop
+                </button>
+              {:else}
+                {#if askSql}
+                  <button type="button" class={askBtnPrimary} onclick={() => { const s = askSql; open = false; onqueryselect(s) }}>
+                    <Icon name="terminal" class="size-3" /> Insert SQL
+                  </button>
+                {/if}
+                <button type="button" class={askBtn} onclick={() => navigator.clipboard?.writeText(askAnswer)}>
+                  <Icon name="copy" class="size-3" /> Copy
+                </button>
+                <button type="button" class={askBtn} onclick={() => { const q = askQuestion; open = false; onaskcontinue(q) }}>
+                  <Icon name="bot" class="size-3" /> Continue in chat
+                </button>
+                <button type="button" class={askBtn} onclick={() => void startAsk(askQuestion)}>
+                  <Icon name="rotate-ccw" class="size-3" /> Retry
+                </button>
+              {/if}
+            </div>
+          </div>
+        {/if}
 
         <!-- ── ROOT PAGE ─────────────────────────────────────────────── -->
         {#if page === 'root'}
+          {#if paletteSearch.trim()}
+            <Command.Group heading="Ask">
+              <Command.Item value={"ask ai " + paletteSearch} onSelect={() => startAsk(paletteSearch)}>
+                <Icon name="sparkles" class="size-4 shrink-0 text-primary" />
+                <span data-slot="command-label" class="truncate">Ask AI: <span class="text-muted-foreground/70">"{paletteSearch}"</span></span>
+                <Command.Shortcut keys="↵" />
+              </Command.Item>
+            </Command.Group>
+          {/if}
 
           {#if connected}
             <Command.Group heading="Views">
