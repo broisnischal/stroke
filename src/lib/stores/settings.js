@@ -14,7 +14,7 @@ const STORAGE_KEY = 'stroke:settings'
 /** @typedef {'geist' | 'serif' | 'apple' | 'inter' | 'mono' | 'fira' | 'plex' | 'space' | 'source'} FontId */
 /** @typedef {'regular' | 'light' | 'bold'} IconStyleId */
 /** @typedef {'lucide' | 'hugeicons' | 'phosphor'} IconSetId */
-/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean, defaultDataView: string, paginationMode: string, maxQueryHistory: number, connectTimeoutMs: number, socketTimeoutMs: number, maxAllowedPacket: number, sessionTimezone: string }} AppSettings */
+/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean, defaultDataView: string, paginationMode: string, maxQueryHistory: number, connectTimeoutMs: number, socketTimeoutMs: number, maxAllowedPacket: number, sessionTimezone: string, vimMode: boolean }} AppSettings */
 
 /** UI zoom scale (font + layout). 1 = 100%. */
 export const ZOOM_STEPS = [0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.25, 1.5]
@@ -214,6 +214,7 @@ export const DEFAULT_SETTINGS = {
   socketTimeoutMs: DEFAULT_SOCKET_TIMEOUT_MS,
   maxAllowedPacket: DEFAULT_MAX_ALLOWED_PACKET,
   sessionTimezone: DEFAULT_SESSION_TIMEZONE,
+  vimMode: false,
 }
 
 /** Reactive app font id (synced by applySettings). */
@@ -234,6 +235,9 @@ export const appThemeId = writable(/** @type {ThemeId} */ (DEFAULT_THEME_ID))
 
 /** Reactive: show a SQL preview/confirm before applying grid writes (synced by applySettings). */
 export const appPreviewDml = writable(true)
+
+/** Reactive: experimental app-wide Vim mode enabled (synced by applySettings). */
+export const appVimMode = writable(false)
 
 /** Reactive pagination strategy (offset | cursor | keyset | temporal), synced by applySettings. */
 export const appPaginationMode = writable(/** @type {string} */ (DEFAULT_PAGINATION_MODE))
@@ -324,7 +328,8 @@ export function loadSettings() {
       typeof parsed.sessionTimezone === 'string' && parsed.sessionTimezone.trim()
         ? parsed.sessionTimezone.trim()
         : DEFAULT_SESSION_TIMEZONE
-    _settingsCache = { theme, zoom, font, iconStyle, iconSet, tableStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply, defaultDataView, paginationMode, maxQueryHistory, connectTimeoutMs, socketTimeoutMs, maxAllowedPacket, sessionTimezone }
+    const vimMode = parsed.vimMode === true
+    _settingsCache = { theme, zoom, font, iconStyle, iconSet, tableStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply, defaultDataView, paginationMode, maxQueryHistory, connectTimeoutMs, socketTimeoutMs, maxAllowedPacket, sessionTimezone, vimMode }
     return { ..._settingsCache }
   } catch {
     return { ...DEFAULT_SETTINGS }
@@ -414,6 +419,7 @@ export function applySettings(settings) {
 
   // Grid-write DML preview toggle — DataTable subscribes to gate its confirm dialog.
   setStore(appPreviewDml, settings.previewDmlBeforeApply !== false)
+  setStore(appVimMode, settings.vimMode === true)
   setStore(appPaginationMode, PAGINATION_MODE_IDS.includes(settings.paginationMode) ? settings.paginationMode : DEFAULT_PAGINATION_MODE)
 
   // Canvas table grid style — data attribute for any CSS hooks; DataTable reads

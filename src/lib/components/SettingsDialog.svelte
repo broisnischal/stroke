@@ -156,6 +156,10 @@
     settings = updateSettings({ previewDmlBeforeApply: !settings.previewDmlBeforeApply });
   }
 
+  function toggleVimMode() {
+    settings = updateSettings({ vimMode: !settings.vimMode });
+  }
+
   // ── Database (query & connection) numeric/text settings ──────────────────
   /** @param {keyof import('$lib/stores/settings.js').AppSettings} key @param {string|number} raw @param {number} def @param {number} min */
   function setNumber(key, raw, def, min = 0) {
@@ -503,6 +507,9 @@
   {/if}
   {#if show($t('settings.previewSql'), $t('settings.previewSql.desc'))}
     {@render switchRow($t('settings.previewSql'), $t('settings.previewSql.desc'), settings.previewDmlBeforeApply, togglePreviewDml)}
+  {/if}
+  {#if show('Vim mode', 'Experimental modal keyboard navigation across the app, the data grid, and the SQL editor')}
+    {@render switchRow('Vim mode', 'Experimental — modal keyboard navigation (hjkl, gg/G, i/Esc) across the grid, the SQL editor, and tabs', settings.vimMode, toggleVimMode)}
   {/if}
   {#if show($t('settings.mcpAutostart'), $t('settings.mcpAutostart.desc'))}
     {@render switchRow($t('settings.mcpAutostart'), $t('settings.mcpAutostart.desc'), settings.mcpAutoStart, toggleMcpAutoStart)}

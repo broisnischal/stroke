@@ -11,6 +11,8 @@
   } from '$lib/monaco-themes.js'
   import { normalizeThemeId } from '$lib/themes/registry.js'
   import { splitSqlStatements, statementAtOffset, lintSql } from '$lib/sql-statements.js'
+  import { appVimMode } from '$lib/stores/settings.js'
+  import { setVimSubMode } from '$lib/vim/vim.js'
   import { cn } from '$lib/utils.js'
 
   /** @typedef {import('$lib/monaco-sql-complete.js').SqlSchemaHints} SqlSchemaHints */
@@ -50,6 +52,11 @@
   let container = $state(null)
   /** @type {monaco.editor.IStandaloneCodeEditor | null} */
   let editor = null
+  /** `editor` is a plain (non-reactive) let, so effects can't see it come alive —
+   *  this flag flips once the editor is created so the Vim effect can attach. */
+  let editorReady = $state(false)
+  /** Host element for the monaco-vim mode status strip. */
+  let vimStatusEl = $state(/** @type {HTMLElement | null} */ (null))
   /** @type {monaco.editor.IEditorDecorationsCollection | null} */
   let execDecorations = null
 
@@ -255,6 +262,7 @@
     setSqlHintsForModel(editor.getModel(), () => schemaHints)
 
     registerAppShortcuts(editor)
+    editorReady = true
 
     // Subtle gutter bar marking the statement the cursor is in — only shown
     // when the buffer holds more than one statement, so single queries stay clean.
@@ -423,12 +431,47 @@
     const { fontSize, lineHeight } = readEditorFontOptions()
     editor.updateOptions({ fontSize, lineHeight })
   })
+
+  // Experimental Vim mode — attach monaco-vim (lazy-loaded) while enabled, and
+  // mirror the editor's mode into the shared status-bar indicator.
+  $effect(() => {
+    const on = $appVimMode
+    const el = vimStatusEl
+    if (!on || !editorReady || !editor || !el) return
+    let disposed = false
+    /** @type {{ dispose: () => void } | null} */
+    let inst = null
+    /** @type {MutationObserver | null} */
+    let obs = null
+    import('monaco-vim')
+      .then(({ initVimMode }) => {
+        if (disposed || !editor) return
+        inst = initVimMode(editor, el)
+        obs = new MutationObserver(() => {
+          const t = el.textContent ?? ''
+          setVimSubMode(/INSERT/i.test(t) ? 'insert' : /VISUAL/i.test(t) ? 'visual' : 'normal')
+        })
+        obs.observe(el, { childList: true, subtree: true, characterData: true })
+        setVimSubMode('normal')
+      })
+      .catch(() => {})
+    return () => {
+      disposed = true
+      obs?.disconnect()
+      inst?.dispose()
+    }
+  })
 </script>
 
-<div
-  bind:this={container}
-  class={cn('sql-editor-host h-full min-h-0 w-full overflow-hidden', className)}
-></div>
+<div class={cn('flex h-full min-h-0 w-full flex-col', className)}>
+  <div bind:this={container} class="sql-editor-host min-h-0 w-full flex-1 overflow-hidden"></div>
+  {#if $appVimMode}
+    <div
+      bind:this={vimStatusEl}
+      class="shrink-0 border-t border-border/40 bg-muted/20 px-3 py-0.5 font-mono text-[11px] leading-5 text-muted-foreground/70"
+    ></div>
+  {/if}
+</div>
 
 <style>
   .sql-editor-host :global(.monaco-editor),

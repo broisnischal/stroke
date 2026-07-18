@@ -8,6 +8,8 @@
     readEditorFontOptions,
   } from "$lib/monaco-themes.js";
   import { normalizeThemeId } from "$lib/themes/registry.js";
+  import { appVimMode } from "$lib/stores/settings.js";
+  import { setVimSubMode } from "$lib/vim/vim.js";
   import Play from "@lucide/svelte/icons/play";
   import Code2 from "@lucide/svelte/icons/code-2";
   import Copy from "@lucide/svelte/icons/copy";
@@ -61,6 +63,10 @@
   let consoleEl = $state(null);
   /** @type {monaco.editor.IStandaloneCodeEditor | null} */
   let editor = null;
+  /** Non-reactive editor come-alive flag for the Vim effect. */
+  let editorReady = $state(false);
+  /** Host element for the monaco-vim mode status strip. */
+  let vimStatusEl = $state(/** @type {HTMLElement | null} */ (null));
 
   const initialLayout = loadLayout();
   let editorHeight = $state(initialLayout.sqlEditorHeight);
@@ -504,6 +510,7 @@
     });
 
     registerShortcuts(editor);
+    editorReady = true;
     const ro = new ResizeObserver(() => editor?.layout());
     ro.observe(container);
     editor.onDidChangeModelContent(() => {
@@ -526,6 +533,35 @@
       // Dispose the Monaco extra-lib — it lives on javascriptDefaults globally.
       if (_extraLibDisposable) { _extraLibDisposable.dispose(); _extraLibDisposable = null; }
       themeObs.disconnect();
+    };
+  });
+
+  // Experimental Vim mode — attach monaco-vim (lazy) while enabled.
+  $effect(() => {
+    const on = $appVimMode;
+    const el = vimStatusEl;
+    if (!on || !editorReady || !editor || !el) return;
+    let disposed = false;
+    /** @type {{ dispose: () => void } | null} */
+    let inst = null;
+    /** @type {MutationObserver | null} */
+    let obs = null;
+    import("monaco-vim")
+      .then(({ initVimMode }) => {
+        if (disposed || !editor) return;
+        inst = initVimMode(editor, el);
+        obs = new MutationObserver(() => {
+          const t = el.textContent ?? "";
+          setVimSubMode(/INSERT/i.test(t) ? "insert" : /VISUAL/i.test(t) ? "visual" : "normal");
+        });
+        obs.observe(el, { childList: true, subtree: true, characterData: true });
+        setVimSubMode("normal");
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      obs?.disconnect();
+      inst?.dispose();
     };
   });
 
@@ -678,6 +714,12 @@
     style="height: {editorHeight}px"
   >
     <div bind:this={container} class="absolute inset-0 h-full w-full overflow-hidden"></div>
+    {#if $appVimMode}
+      <div
+        bind:this={vimStatusEl}
+        class="absolute inset-x-0 bottom-0 z-10 border-t border-border/40 bg-panel/95 px-3 py-0.5 font-mono text-[11px] leading-5 text-muted-foreground/70"
+      ></div>
+    {/if}
   </div>
 
   <!-- Parse error — inline below editor -->

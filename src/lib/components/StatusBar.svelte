@@ -3,7 +3,8 @@
   import { tick }     from 'svelte'
   import { cn }       from '$lib/utils.js'
   import { aiProfiles, activeProfileId, setActiveProfile } from '$lib/stores/ai-settings.js'
-  import { toggleLightDark, isCurrentThemeDark } from '$lib/stores/settings.js'
+  import { toggleLightDark, isCurrentThemeDark, appVimMode } from '$lib/stores/settings.js'
+  import { vimSubMode, VIM_MODE_LABEL } from '$lib/vim/vim.js'
   import { executeSql, cloudflareListD1Databases } from '$lib/api.js'
   import { providerListDatabases } from '$lib/providers.js'
   import { engineFamily } from '$lib/stores/connections.js'
@@ -695,6 +696,20 @@
 
   <!-- ── Right group ─────────────────────────────────────────────────── -->
   <div class="flex shrink-0 items-center gap-0.5">
+
+    <!-- Vim mode indicator (experimental) -->
+    {#if $appVimMode}
+      <span
+        class={cn(
+          'inline-flex h-5 items-center rounded-md px-1.5 font-mono text-[10px] font-semibold uppercase tracking-wider',
+          $vimSubMode === 'insert' && 'bg-emerald-500/15 text-emerald-500',
+          $vimSubMode === 'visual' && 'bg-amber-500/15 text-amber-500',
+          $vimSubMode === 'command' && 'bg-primary/15 text-primary',
+          $vimSubMode === 'normal' && 'bg-muted/40 text-muted-foreground/70',
+        )}
+        title="Vim mode · {VIM_MODE_LABEL[$vimSubMode]} (experimental)"
+      >{VIM_MODE_LABEL[$vimSubMode]}</span>
+    {/if}
 
     <!-- Pending edits -->
     {#if pendingEditCount > 0}

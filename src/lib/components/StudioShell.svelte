@@ -20,7 +20,8 @@
   import History from '@lucide/svelte/icons/history'
   import Plus from '@lucide/svelte/icons/plus'
   import { createHotkey, createHotkeySequence } from '@tanstack/svelte-hotkeys'
-  import { cycleTheme, restorePreviousTheme, isCurrentThemeDark, loadSettings, updateSettings, appPaginationMode } from '$lib/stores/settings.js'
+  import { cycleTheme, restorePreviousTheme, isCurrentThemeDark, loadSettings, updateSettings, appPaginationMode, appVimMode } from '$lib/stores/settings.js'
+  import { isTextEntryTarget, setVimSubMode } from '$lib/vim/vim.js'
   import { normalizeColumn, columnType } from '$lib/column.js'
   import {
     loadAiMode, saveAiMode, loadHiddenCols, saveHiddenCols,
@@ -2105,6 +2106,44 @@ let rowSearch = $state('')
     if (idx < 0) return
     void activateTab(tabs[idx].id)
   }
+
+  // ── Experimental Vim mode — global layer ────────────────────────────────────
+  // `:` opens the command palette (command mode); `gt` / `gT` cycle tabs. Only
+  // fires on "neutral" surfaces — inputs, Monaco editors, and the data grid own
+  // their own Vim handling. A focusin listener keeps the status indicator honest.
+  let _vimGPending = false
+  let _vimGTimer = /** @type {ReturnType<typeof setTimeout> | 0} */ (0)
+  /** @param {KeyboardEvent} e */
+  function handleGlobalVimKey(e) {
+    if (!$appVimMode || e.metaKey || e.ctrlKey || e.altKey) return
+    const el = document.activeElement
+    if (isTextEntryTarget(el) || el?.closest?.('[data-canvas-table]')) return
+    const k = e.key
+    if (_vimGPending) {
+      _vimGPending = false
+      if (_vimGTimer) { clearTimeout(_vimGTimer); _vimGTimer = 0 }
+      if (k === 't') { e.preventDefault(); if (tabs.length > 1) cycleTab(1); return }
+      if (k === 'T') { e.preventDefault(); if (tabs.length > 1) cycleTab(-1); return }
+    }
+    if (k === ':') { e.preventDefault(); commandOpen = true; setVimSubMode('command'); return }
+    if (k === 'g') { _vimGPending = true; e.preventDefault(); _vimGTimer = setTimeout(() => { _vimGPending = false }, 700); return }
+  }
+  function handleVimFocusIn() {
+    if (!$appVimMode) return
+    const el = document.activeElement
+    if (el?.closest?.('.monaco-editor') || el?.closest?.('[data-canvas-table]')) return // owned by their own layers
+    const isInput = el instanceof HTMLElement &&
+      (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)
+    setVimSubMode(isInput ? 'insert' : 'normal')
+  }
+  onMount(() => {
+    document.addEventListener('keydown', handleGlobalVimKey, true)
+    document.addEventListener('focusin', handleVimFocusIn)
+    return () => {
+      document.removeEventListener('keydown', handleGlobalVimKey, true)
+      document.removeEventListener('focusin', handleVimFocusIn)
+    }
+  })
 
   function resetTabs() {
     tabs = []
@@ -5568,6 +5607,7 @@ let rowSearch = $state('')
                 schema={activeSchema}
                 tableName={activeTable ?? ''}
                 connectionId={persistConnectionId}
+                onrequestsearch={() => tableToolbar?.focusRowSearch?.()}
                 dialect={dbType}
                 indexes={activeTableIndexes}
                 {hiddenColumns}
