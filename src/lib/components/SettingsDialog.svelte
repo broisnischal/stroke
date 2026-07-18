@@ -7,6 +7,7 @@
   import * as Select from "$lib/components/ui/select/index.js";
   import ThemeSwatch from "$lib/components/ThemeSwatch.svelte";
   import { getThemeDefinition, themesByGroup } from "$lib/themes/registry.js";
+  import { t, locale, LOCALES, setLocale } from "$lib/i18n.js";
   import { licenseStatus } from "$lib/stores/license.js";
   import {
     appThemeId,
@@ -470,7 +471,7 @@
   {#if show('Theme', 'Color theme for the whole app')}
     <div class={rowCls}>
       <div class="min-w-0">
-        <p class="text-[13px] font-medium text-foreground">Theme</p>
+        <p class="text-[13px] font-medium text-foreground">{$t('settings.theme')}</p>
         <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Color theme for the whole app.</p>
       </div>
       <Select.Root type="single" value={$appThemeId} onValueChange={(v) => { if (v) setTheme(/** @type {import('$lib/themes/registry.js').ThemeId} */ (v)); }}>
@@ -528,6 +529,32 @@
                     <span class="block text-xs font-medium leading-snug">{preset.label}</span>
                     <span class="block text-[10px] leading-snug text-muted-foreground/65">{preset.description}</span>
                   </span>
+                </span>
+              {/snippet}
+            </Select.Item>
+          {/each}
+        </Select.Content>
+      </Select.Root>
+    </div>
+  {/if}
+
+  {#if show('Language', 'Interface language')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-[13px] font-medium text-foreground">{$t('settings.language')}</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{$t('settings.language.desc')}.</p>
+      </div>
+      <Select.Root type="single" value={$locale} onValueChange={(v) => { if (v) setLocale(/** @type {any} */ (v)); }}>
+        <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Language">
+          <span class="truncate font-medium">{LOCALES.find((l) => l.id === $locale)?.native ?? 'English'}</span>
+        </Select.Trigger>
+        <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
+          {#each LOCALES as l (l.id)}
+            <Select.Item value={l.id} label={l.native} class="rounded-md py-1.5 pr-8 pl-2">
+              {#snippet children()}
+                <span class="flex min-w-0 items-center justify-between gap-2">
+                  <span class="truncate text-xs font-medium">{l.native}</span>
+                  <span class="shrink-0 text-[10px] text-muted-foreground/65">{l.label}</span>
                 </span>
               {/snippet}
             </Select.Item>
