@@ -99,6 +99,15 @@ function isHexString(v) {
   const s = v.trim().replace(/^0x/i, '')
   return s.length >= 2 && s.length % 2 === 0 && /^[0-9a-fA-F]+$/.test(s)
 }
+/** @param {unknown} v — looks like an image URL or data URI? */
+export function isImageUrl(v) {
+  if (typeof v !== 'string') return false
+  const s = v.trim()
+  if (/^data:image\//i.test(s)) return true
+  if (!/^https?:\/\//i.test(s)) return false
+  if (/\.(png|jpe?g|gif|webp|avif|svg|bmp|ico)(\?|#|$)/i.test(s)) return true
+  return /(avatar|gravatar|githubusercontent|\/photos?\/|\/images?\/|\/media\/)/i.test(s)
+}
 /** @param {number} bytes */
 function humanBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`
@@ -115,6 +124,24 @@ export const cellTransforms = {
   description: 'Decode JWT/Base64/hex/URL, epoch → date, JSON tools, case & text ops — one-click, and applicable per-column.',
   kind: 'transforms',
   transforms: [
+    // ── Media (rendered as a thumbnail when set on a whole column) ────────────
+    {
+      id: 'avatar',
+      label: 'Show as avatar',
+      /** @param {unknown} v */
+      appliesTo: (v) => isImageUrl(v),
+      /** @param {unknown} v */
+      run: (v) => str(v),
+    },
+    {
+      id: 'image-thumb',
+      label: 'Show as image',
+      /** @param {unknown} v */
+      appliesTo: (v) => isImageUrl(v),
+      /** @param {unknown} v */
+      run: (v) => str(v),
+    },
+
     // ── Timestamps ───────────────────────────────────────────────────────────
     {
       id: 'epoch-to-iso',

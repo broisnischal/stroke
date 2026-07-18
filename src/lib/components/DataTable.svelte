@@ -99,7 +99,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     clearPendingChanges,
   } from "$lib/stores/pending-table-edits.js";
   import { formatCellValue, transformsFor, transformById, enabledGeneratorGroups, linkifyValue, statsNeeded, annotatorEnabled, anyDisplayExtEnabled } from "$lib/plugins/registry.js";
-  import { pluginState } from "$lib/stores/plugins.js";
+  import { pluginState, isPluginEnabled } from "$lib/stores/plugins.js";
+  import { isImageUrl } from "$lib/plugins/extensions/cell-transforms.js";
   import Wand2 from "@lucide/svelte/icons/wand-2";
   import Sparkles from "@lucide/svelte/icons/sparkles";
   import MediaLightbox from "./MediaLightbox.svelte";
@@ -2183,6 +2184,56 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     return cached;
   }
 
+  // NULL / empty / whitespace markers — empty & whitespace are handled by the
+  // formatter; NULL (∅) is drawn here since formatters skip null cells.
+  const _nullishOn = $derived.by(() => { void $pluginState; return isPluginEnabled('nullish-values'); });
+
+  // ── Image / avatar cell thumbnails ───────────────────────────────────────────
+  // When a column's transform is avatar / image-thumb, the cell renders the image
+  // instead of text. Images load async into a bounded cache; a repaint is queued
+  // when each finishes so the thumbnail appears.
+  const _IMG_TF = new Set(['avatar', 'image-thumb']);
+  /** @type {Map<string, HTMLImageElement | 'error'>} */
+  const _imgCache = new Map();
+  const _IMG_CACHE_MAX = 400;
+  /** @param {string} url */
+  function getCellImage(url) {
+    const hit = _imgCache.get(url);
+    if (hit) return hit;
+    if (_imgCache.size > _IMG_CACHE_MAX) _imgCache.clear();
+    const img = new Image();
+    img.onload = () => scheduleDraw();
+    img.onerror = () => { _imgCache.set(url, 'error'); scheduleDraw(); };
+    img.src = url;
+    _imgCache.set(url, img);
+    return img;
+  }
+  /** Draw an image/avatar thumbnail (center-cropped) with a filename beside it. */
+  function drawCellImage(ctx, url, cellX, ry, w, rh, cy, round, c) {
+    const size = Math.min(rh - Math.round(6 * canvasZoom), Math.round(26 * canvasZoom));
+    const ix = cellX + CELL_PAD_X;
+    const iy = Math.round(cy - size / 2);
+    const radius = round ? size / 2 : Math.round(4 * canvasZoom);
+    const img = getCellImage(url);
+    const loaded = img !== 'error' && img.complete && img.naturalWidth > 0;
+    roundRect(ctx, ix, iy, size, size, radius);
+    ctx.fillStyle = withAlpha(c.cMutedBg, 0.5); ctx.fill();
+    if (loaded) {
+      ctx.save();
+      roundRect(ctx, ix, iy, size, size, radius); ctx.clip();
+      const nw = img.naturalWidth, nh = img.naturalHeight, s = Math.min(nw, nh);
+      ctx.drawImage(img, (nw - s) / 2, (nh - s) / 2, s, s, ix, iy, size, size);
+      ctx.restore();
+    }
+    ctx.strokeStyle = withAlpha(c.cBorder, 0.6); ctx.lineWidth = 1;
+    roundRect(ctx, ix, iy, size, size, radius); ctx.stroke();
+    ctx.font = _fonts.cell; ctx.textAlign = 'left';
+    ctx.fillStyle = c.cMuted;
+    const label = img === 'error' ? 'broken image' : loaded ? (url.split('/').pop() || url) : 'loading…';
+    const lx = ix + size + Math.round(8 * canvasZoom);
+    ctx.fillText(truncText(ctx, label, Math.max(0, cellX + w - 4 - lx)), lx, cy + 0.5);
+  }
+
   // Tag input dialog
   let tagDialogOpen = $state(false);
   let tagDialogCol = $state('');
@@ -3613,13 +3664,19 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const canExpand = (cached?.canEdit ?? false) && !cached?.enumValues && !isBooleanType(cached?.colType ?? '')
     const cy = ry + rh / 2
 
+    // A per-column transform (chosen from the header menu) renders live and wins
+    // over formatter directives; skipped for staged/editing cells.
+    const colTf = (!staged && rows[idx]) ? _colTransformFns[col.name] : undefined
+    // Avatar / image thumbnail transform — draw the image itself, not text.
+    if (colTf && _IMG_TF.has(colTf.id) && !isNull && isImageUrl(value)) {
+      drawCellImage(ctx, String(value), cellX, ry, w, rh, cy, colTf.id === 'avatar', c)
+      return
+    }
+
     // Cell text — directive display wins; masked cells reveal on hover.
     const revealed = dir?.mask && isHover
     // SQL array columns render pgAdmin-style ({a,b}); jsonb arrays stay JSON.
     const isArrayCol = Array.isArray(value) && isSqlArrayType(cached?.colType)
-    // A per-column transform (chosen from the header menu) renders its result
-    // live and wins over formatter directives; skipped for staged/editing cells.
-    const colTf = (!staged && rows[idx]) ? _colTransformFns[col.name] : undefined
     const text = colTf
       ? colTransformText(rows[idx], actualIdx, value, colTf)
       : dir
@@ -3629,6 +3686,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           : staged || !rows[idx]
             ? displayCell(value)
             : cellDisplayText(rows[idx], actualIdx, value)
+    // NULL glyph when the Empty & NULL Markers plugin is on (formatters skip null).
+    const shownText = (isNull && _nullishOn) ? '∅' : text
 
     // Text color — directive link/fg may override (but never over a stronger
     // dirty/fk/focused state highlight).
@@ -3669,7 +3728,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (dir?.badge) {
       // Status pill — label inside a rounded, tinted capsule.
       const padX = Math.round(7 * canvasZoom)
-      const label = truncText(ctx, text, Math.max(0, textMaxW - padX * 2))
+      const label = truncText(ctx, shownText, Math.max(0, textMaxW - padX * 2))
       const pillH = Math.min(rh - Math.round(6 * canvasZoom), Math.round(17 * canvasZoom))
       const pillW = Math.min(Math.max(0, textMaxW), textWidth(ctx, label) + padX * 2)
       const py = ry + (rh - pillH) / 2
@@ -3678,7 +3737,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ctx.fillStyle = dir.badge.fg
       ctx.fillText(label, textX + padX, cy + 0.5)
     } else {
-      const drawn = truncText(ctx, text, Math.max(0, textMaxW))
+      const drawn = truncText(ctx, shownText, Math.max(0, textMaxW))
       if (_searchLower && !isNull) drawSearchHighlights(ctx, drawn, textX, ry, rh, c)
       ctx.fillStyle = textColor
       ctx.fillText(drawn, textX, cy + 0.5)
