@@ -739,3 +739,70 @@ input[type='number']::-webkit-inner-spin-button {
 [data-canvas-table]::-webkit-scrollbar-corner {
   background: transparent;
 }
+
+/* ── Global tooltip (see src/lib/tip.js) ─────────────────────────────────────
+   A single shared high-contrast pill that replaces the OS's native title
+   tooltip everywhere. Positioned via JS (transform on the host); the pill layer
+   owns the entrance animation so scale + opacity stay GPU-only. */
+.app-tip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 9999;
+  pointer-events: none;
+  will-change: transform;
+}
+.app-tip__pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  max-width: 22rem;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: var(--foreground);
+  color: var(--background);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  white-space: nowrap;
+  box-shadow:
+    0 8px 24px -6px rgb(0 0 0 / 0.38),
+    0 2px 6px -2px rgb(0 0 0 / 0.3);
+  opacity: 0;
+  transform: scale(0.96);
+  transition:
+    opacity 150ms cubic-bezier(0.23, 1, 0.32, 1),
+    transform 150ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.app-tip[data-show="true"] .app-tip__pill {
+  opacity: 1;
+  transform: scale(1);
+}
+/* Exit faster than the enter — the system responding, not the user deciding. */
+.app-tip[data-show="false"] .app-tip__pill {
+  transition-duration: 110ms;
+}
+/* Moving between adjacent triggers: no delay, no animation. */
+.app-tip[data-instant="true"] .app-tip__pill {
+  transition-duration: 0ms;
+}
+.app-tip__arrow {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: var(--foreground);
+  border-radius: 1.5px;
+  transform: translateX(-50%) rotate(45deg);
+}
+.app-tip[data-side="bottom"] .app-tip__arrow {
+  top: -3px;
+}
+.app-tip[data-side="top"] .app-tip__arrow {
+  bottom: -3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-tip__pill {
+    transform: none !important;
+    transition: opacity 120ms ease;
+  }
+}
