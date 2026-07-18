@@ -21,7 +21,7 @@ let armed = /** @type {Element | null} */ (null)
 let titleStashEl = /** @type {Element | null} */ (null)
 let titleStashVal = ''
 
-const OPEN_DELAY = 350   // first hover
+const OPEN_DELAY = 550   // first hover — deliberate, so it doesn't pop up eagerly
 const SKIP_WINDOW = 300  // reopen instantly if another tip closed within this
 const GAP = 8            // px between trigger and pill
 
@@ -75,6 +75,8 @@ function reveal(target, text) {
 
 function hide() {
   clearTimeout(showTimer)
+  // Detach the leave listener bound to the trigger when it was armed.
+  if (armed) armed.removeEventListener('pointerleave', hide)
   armed = null
   current = null
   if (titleStashEl) { titleStashEl.setAttribute('title', titleStashVal); titleStashEl = null }
@@ -102,6 +104,10 @@ function enter(t, instant, suppressNative) {
   const text = labelFor(t, suppressNative)
   if (!text) return
   armed = t
+  // pointerleave fires exactly once when the pointer leaves the trigger (ignoring
+  // its children) — the reliable "you stopped hovering" signal, unaffected by our
+  // removing the title attribute.
+  t.addEventListener('pointerleave', hide)
   const delay = instant || performance.now() - lastHiddenAt < SKIP_WINDOW ? 0 : OPEN_DELAY
   showTimer = window.setTimeout(() => reveal(t, text), delay)
 }
@@ -118,13 +124,8 @@ export function initTooltips() {
     const t = e.target instanceof Element ? e.target.closest('[data-tip],[title]') : null
     if (t) enter(t, false, true)
   }
-  const onOut = (/** @type {PointerEvent} */ e) => {
-    // Hide the moment the pointer leaves the armed trigger. Checked against the
-    // tracked element (not a selector) because its `title` was removed on enter.
-    if (!armed) return
-    if (e.relatedTarget instanceof Node && armed.contains(e.relatedTarget)) return // moved within it
-    if (e.target instanceof Node && armed.contains(e.target)) hide()
-  }
+  // Leaving the trigger is handled by a pointerleave listener bound to the armed
+  // element in enter() — reliable and unaffected by our title removal.
   const onFocus = (/** @type {FocusEvent} */ e) => {
     const t = e.target instanceof Element ? e.target.closest('[data-tip],[title]') : null
     if (t) enter(t, true, false)
@@ -134,7 +135,6 @@ export function initTooltips() {
   const onKey = (/** @type {KeyboardEvent} */ e) => { if (e.key === 'Escape') hide() }
 
   document.addEventListener('pointerover', onOver, true)
-  document.addEventListener('pointerout', onOut, true)
   document.addEventListener('focusin', onFocus, true)
   document.addEventListener('focusout', onDown, true)
   document.addEventListener('pointerdown', onDown, true)
@@ -143,13 +143,13 @@ export function initTooltips() {
 
   return () => {
     document.removeEventListener('pointerover', onOver, true)
-    document.removeEventListener('pointerout', onOut, true)
     document.removeEventListener('focusin', onFocus, true)
     document.removeEventListener('focusout', onDown, true)
     document.removeEventListener('pointerdown', onDown, true)
     window.removeEventListener('scroll', onScroll, true)
     window.removeEventListener('keydown', onKey, true)
     clearTimeout(showTimer)
+    hide()
     host?.remove(); host = null
   }
 }
