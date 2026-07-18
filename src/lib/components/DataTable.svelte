@@ -98,7 +98,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     loadPendingChanges,
     clearPendingChanges,
   } from "$lib/stores/pending-table-edits.js";
-  import { formatCellValue, transformsFor, transformById, enabledGenerators, linkifyValue, statsNeeded, annotatorEnabled, anyDisplayExtEnabled } from "$lib/plugins/registry.js";
+  import { formatCellValue, transformsFor, transformById, enabledGeneratorGroups, linkifyValue, statsNeeded, annotatorEnabled, anyDisplayExtEnabled } from "$lib/plugins/registry.js";
   import { pluginState } from "$lib/stores/plugins.js";
   import Wand2 from "@lucide/svelte/icons/wand-2";
   import Sparkles from "@lucide/svelte/icons/sparkles";
@@ -692,7 +692,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // Value generators (UUIDv7, nanoid, …) offered when the cell is editable.
   const menuGenerators = $derived.by(() => {
     void $pluginState;
-    return enabledGenerators();
+    return enabledGeneratorGroups();
   });
   // Transforms offered for a whole column (header menu), decided from a sample
   // of the column's first non-null value.
@@ -5451,12 +5451,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               <Sparkles />
               Insert generated value
             </ContextMenu.SubTrigger>
-            <ContextMenu.SubContent class="w-48 [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
-              {#each menuGenerators as g (g.id)}
-                <ContextMenu.Item onSelect={() => runMenuAction(() => insertGeneratedValue(contextRowIdx, contextColIdx, g))}>
-                  <Sparkles />
-                  {g.label}
-                </ContextMenu.Item>
+            <ContextMenu.SubContent class="app-scroll max-h-[60vh] w-48 overflow-y-auto [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+              {#each menuGenerators as grp, gi (grp.group)}
+                {#if gi > 0}<ContextMenu.Separator />{/if}
+                <div class="select-none px-2 pb-0.5 pt-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/45">{grp.group}</div>
+                {#each grp.items as g (g.id)}
+                  <ContextMenu.Item onSelect={() => runMenuAction(() => insertGeneratedValue(contextRowIdx, contextColIdx, g))}>
+                    <Sparkles />
+                    {g.label}
+                  </ContextMenu.Item>
+                {/each}
               {/each}
             </ContextMenu.SubContent>
           </ContextMenu.Sub>
