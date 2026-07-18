@@ -2524,13 +2524,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   function setVirtualScroll(/** @type {number} */ virt) {
     if (tableContainer) tableContainer.scrollTop = Math.max(0, virtToPhys(virt))
   }
-  /** Document-space top for a DOM overlay (insert row, expand panel, edit input).
-   *  Content coordinates when unscaled; when the scroll range is compressed the
-   *  overlay is pinned to the physical spacer position the canvas painted the row
-   *  at, so it tracks the row instead of drifting off the shortened spacer. */
-  function overlayDocTop(/** @type {number} */ idx) {
-    return _scrollScale === 1 ? rowDocTop(idx) : _physScrollTop + (rowDocTop(idx) - _scrollTop)
-  }
 
   /** True while the scroll rAF loop is live — gates DOM-overlay work that would
    *  otherwise re-render every scroll frame (resize handles reposition per frame
@@ -5270,27 +5263,38 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                    lets the compositor hold it at the viewport-left edge during
                    horizontal scroll instead of a reactive transform:translateX() that
                    lags a frame behind the native scroll (the "vibration"). -->
+              {#snippet expandBody(/** @type {number} */ exIdx)}
+                <RowExpandViewer
+                  record={rowToRecord(columns, rows[exIdx], hiddenColumns)}
+                  rowLabel={"row " + (exIdx + 1)}
+                  onclose={() => toggleRowExpand(exIdx)}
+                  onopenjson={(value, label) => {
+                    void prefetchJsonLightbox()
+                    jsonLightbox = { value, colName: label }
+                  }}
+                />
+              {/snippet}
               {#each [...expandedRows] as exIdx (exIdx)}
                 {#if rows[exIdx] !== undefined}
-                  <div
-                    class="absolute z-10 left-0 right-0"
-                    style="top:{overlayDocTop(exIdx) + ROW_HEIGHT}px"
-                  >
-                  <div
-                    style="position:sticky; left:0; width:{_viewportWidth}px"
-                    use:trackExpandHeight={exIdx}
-                  >
-                    <RowExpandViewer
-                      record={rowToRecord(columns, rows[exIdx], hiddenColumns)}
-                      rowLabel={"row " + (exIdx + 1)}
-                      onclose={() => toggleRowExpand(exIdx)}
-                      onopenjson={(value, label) => {
-                        void prefetchJsonLightbox()
-                        jsonLightbox = { value, colName: label }
-                      }}
-                    />
-                  </div>
-                  </div>
+                  {#if _scrollScale === 1}
+                    <!-- Normal table: content-space vertical (native scroll moves it,
+                         no per-frame re-render), sticky-left for the horizontal pin. -->
+                    <div class="absolute z-10 left-0 right-0" style="top:{rowDocTop(exIdx) + ROW_HEIGHT}px">
+                      <div style="position:sticky; left:0; width:{_viewportWidth}px" use:trackExpandHeight={exIdx}>
+                        {@render expandBody(exIdx)}
+                      </div>
+                    </div>
+                  {:else if rowViewportY(exIdx) > -_viewportHeight * 2 && rowViewportY(exIdx) < _viewportHeight + ROW_HEIGHT}
+                    <!-- Huge/scaled table: viewport-sticky layer + viewport y. Content y
+                         would be tens of millions of px (past WebKit's layout range), and
+                         a far-off-screen panel there would also blow out the scroll height,
+                         so only render when the expanded row is near the viewport. -->
+                    <div style="position:sticky;top:0;left:0;width:0;height:0;overflow:visible;z-index:10">
+                      <div class="absolute left-0" style="top:{rowViewportY(exIdx) + ROW_HEIGHT}px; width:{_viewportWidth}px" use:trackExpandHeight={exIdx}>
+                        {@render expandBody(exIdx)}
+                      </div>
+                    </div>
+                  {/if}
                 {/if}
               {/each}
 
