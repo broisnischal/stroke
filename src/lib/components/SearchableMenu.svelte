@@ -110,7 +110,7 @@
       )}
     >
       <Command.Root loop class="flex max-h-72 flex-col">
-        <div class="flex items-center gap-2 border-b border-border/40 px-2.5 py-2">
+        <div class="flex items-center gap-2 border-b border-border/50 px-2.5 py-2">
           <SearchIcon class="size-3.5 shrink-0 text-muted-foreground/45" />
           <Command.Input bind:value={search} {placeholder}>
             {#snippet child({ props })}

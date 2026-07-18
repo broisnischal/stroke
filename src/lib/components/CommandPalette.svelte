@@ -273,7 +273,7 @@
       />
 
       {#if page !== 'root'}
-        <div class="order-first flex items-center gap-1.5 border-b border-border/25 px-4 py-2">
+        <div class="order-first flex items-center gap-1.5 border-b border-border/50 px-4 py-2">
           <button
             type="button"
             class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground focus-visible:outline-none"
