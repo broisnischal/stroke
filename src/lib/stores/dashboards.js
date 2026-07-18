@@ -1,4 +1,5 @@
 import { writable } from 'svelte/store'
+import { debounce } from '$lib/utils.js'
 
 /**
  * @typedef {{
@@ -46,10 +47,18 @@ function loadActiveId(connectionId) {
 export const dashboards = writable(/** @type {Dashboard[]} */ ([]))
 export const activeDashboardId = writable(/** @type {string | null} */ (null))
 
+// Dashboard configs can be large; debounce the serialize so rapid edits (drag,
+// resize, add) don't JSON.stringify + write on every change.
+const persistDashboards = debounce((/** @type {Dashboard[]} */ v, /** @type {string} */ connId) => {
+  try { localStorage.setItem(KEY(connId), JSON.stringify(v)) } catch {}
+}, 300)
 dashboards.subscribe(v => {
   if (!_connId) return
-  try { localStorage.setItem(KEY(_connId), JSON.stringify(v)) } catch {}
+  persistDashboards(v, _connId)
 })
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', () => persistDashboards.flush())
+}
 activeDashboardId.subscribe(v => {
   if (!_connId) return
   try {
