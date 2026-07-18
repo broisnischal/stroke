@@ -4991,11 +4991,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (!editingCell) return null
     const col = geom.cols.find((c) => _nameToActualIdx.get(c.name) === editingCell.colIdx)
     if (!col) return null
-    const top = overlayDocTop(editingCell.rowIdx)
-    // Pinned columns rest at their frozen x (content-space = scrollLeft + fixed).
-    const left = col.pinned
-      ? Math.max(col.contentX, _scrollLeft + (geom.pinnedFixedX.get(col.name) ?? 0))
-      : col.contentX
+    // VIEWPORT coordinates — the editor lives in a sticky viewport layer, not the
+    // scroll sizer. On a huge (windowed / scaled) table the sizer's content-space
+    // y reaches tens of millions of px, past WebKit's layout range, so a DOM
+    // element positioned there silently fails to paint. rowViewportY / colDrawnX
+    // stay in the 0…viewport range and work identically in normal and scaled modes.
+    const top = rowViewportY(editingCell.rowIdx)
+    const left = colDrawnX(col, geom, _scrollLeft)
     return { top, left, width: col.w, height: ROW_HEIGHT }
   })
 
@@ -5296,7 +5298,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                    container) — never inline between rows, so grid scrolling stays
                    clean and the canvas hot path is untouched. -->
 
-              <!-- Active inline cell editor -->
+              <!-- Active inline cell editor. Rendered in a sticky viewport layer
+                   (not the scroll sizer) so its top/left stay in the 0…viewport
+                   range — a DOM node at the sizer's multi-million-px content y
+                   silently fails to paint in WebKit on huge / scaled tables. -->
+              <div style="position:sticky;top:0;left:0;width:0;height:0;overflow:visible;z-index:30">
               {#if editingCell && editOverlay}
                 {@const ecol = columns[editingCell.colIdx]}
                 {@const ecached = _colCache[editingCell.colIdx]}
@@ -5382,6 +5388,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                   {/if}
                 </div>
               {/if}
+              </div>
             </div>
           {/if}
 
