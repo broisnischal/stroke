@@ -1161,6 +1161,28 @@ pub async fn get_table_rows(
     }
     data_query = data_query.bind(limit).bind(offset);
 
+    // Kick the catalog-metadata queries (enums/nullable/pk/fk) off NOW so they run
+    // concurrently with the row + count fetch below, instead of as a second
+    // round-trip *after* it. That serial second batch was the extra latency users
+    // felt on the FIRST open of a table (repeat fetches skip metadata entirely and
+    // are already single-round-trip). Spawned so it progresses while we await the
+    // rows; joined once the columns are built.
+    let meta_task = if include_meta {
+        let pool = pool.clone();
+        let schema = schema.clone();
+        let table = table.clone();
+        Some(tokio::spawn(async move {
+            tokio::join!(
+                fetch_table_column_enums(&pool, &schema, &table),
+                fetch_table_column_nullable(&pool, &schema, &table),
+                fetch_primary_key(&pool, &schema, &table),
+                fetch_foreign_keys(&pool, &schema, &table),
+            )
+        }))
+    } else {
+        None
+    };
+
     // For an unfiltered listing, COUNT(*) on a large table is a full sequential
     // scan that can take seconds — that's the "pause" when opening a big table.
     // Use the planner's row estimate (pg_class.reltuples) instead, which is
@@ -1256,15 +1278,11 @@ pub async fn get_table_rows(
     // Catalog metadata (enums/nullable/pk/fk) is stable per table, so only fetch
     // it on the first load — repeat fetches (pagination/sort/filter/live) reuse
     // what the frontend already holds, saving four round-trips and connections.
-    let (primary_key, foreign_keys) = if include_meta {
-        // All four metadata queries are independent — run them in parallel to halve
-        // the number of sequential round-trips and release connections faster.
-        let (enums_result, nullable_result, pk_result, fk_result) = tokio::join!(
-            fetch_table_column_enums(&pool, &schema, &table),
-            fetch_table_column_nullable(&pool, &schema, &table),
-            fetch_primary_key(&pool, &schema, &table),
-            fetch_foreign_keys(&pool, &schema, &table),
-        );
+    // Metadata was fired off above (concurrent with the row/count fetch); collect
+    // it now that the columns are built so enum/nullable info can be applied.
+    let (primary_key, foreign_keys) = if let Some(task) = meta_task {
+        let (enums_result, nullable_result, pk_result, fk_result) =
+            task.await.map_err(|e| format!("Failed to load table metadata: {e}"))?;
         if let Ok(enums) = enums_result { apply_column_enums(&mut columns, &enums); }
         if let Ok(nullable) = nullable_result { apply_column_nullable(&mut columns, &nullable); }
         (pk_result?, fk_result?)
