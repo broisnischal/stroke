@@ -307,7 +307,7 @@
                 {/if}
 
                 <ul class="flex flex-col">
-                  {#each group.shortcuts as shortcut, i (shortcut.desc)}
+                  {#each group.shortcuts as shortcut, i (group.label + ':' + i)}
                     <li
                       class={cn(
                         "group/row flex items-center justify-between gap-8 px-2 py-2 rounded-md transition-colors hover:bg-accent/30",
