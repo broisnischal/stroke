@@ -456,16 +456,13 @@
             <span class="truncate font-medium">{paginationOption.label}</span>
           </span>
         </Select.Trigger>
-        <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[18rem] p-1" sideOffset={6}>
+        <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
           {#each PAGINATION_OPTIONS as o (o.id)}
             <Select.Item value={o.id} label={o.label} class="rounded-md py-1.5 pr-8 pl-2">
               {#snippet children()}
                 <span class="flex min-w-0 items-center gap-2.5">
                   <Icon name={o.icon} class="size-4 shrink-0 text-muted-foreground" />
-                  <span class="min-w-0">
-                    <span class="block text-xs font-medium leading-snug">{o.label}</span>
-                    <span class="block text-[11px] leading-snug text-muted-foreground/65">{o.hint}</span>
-                  </span>
+                  <span class="text-xs font-medium">{o.label}</span>
                 </span>
               {/snippet}
             </Select.Item>
@@ -570,11 +567,8 @@
             <Select.Item value={id} label={preset.label} class="rounded-md py-1.5 pr-8 pl-2">
               {#snippet children()}
                 <span class="flex min-w-0 items-center gap-2.5">
-                  <span class="flex size-8 shrink-0 items-center justify-center rounded border border-border/40 bg-muted/30 text-[14px] font-semibold text-foreground/70" style="font-family: {preset.sans}" aria-hidden="true">Aa</span>
-                  <span class="min-w-0">
-                    <span class="block text-xs font-medium leading-snug">{preset.label}</span>
-                    <span class="block text-[10px] leading-snug text-muted-foreground/65">{preset.description}</span>
-                  </span>
+                  <span class="flex size-5 shrink-0 items-center justify-center rounded border border-border/40 bg-muted/30 text-[11px] font-semibold text-foreground/70" style="font-family: {preset.sans}" aria-hidden="true">Aa</span>
+                  <span class="truncate text-xs font-medium">{preset.label}</span>
                 </span>
               {/snippet}
             </Select.Item>
@@ -630,13 +624,8 @@
             <Select.Item value={id} label={preset.label} class="rounded-md py-1.5 pr-8 pl-2">
               {#snippet children()}
                 <span class="flex min-w-0 items-center gap-2.5">
-                  <span class="flex size-8 shrink-0 items-center justify-center rounded border border-border/40 bg-muted/30">
-                    <PenTool class="size-4 text-foreground/70" style="stroke-width: {preset.strokeWidth}px" aria-hidden="true" />
-                  </span>
-                  <span class="min-w-0">
-                    <span class="block text-xs font-medium leading-snug">{preset.label}</span>
-                    <span class="block text-[10px] leading-snug text-muted-foreground/65">{preset.description}</span>
-                  </span>
+                  <PenTool class="size-4 shrink-0 text-muted-foreground" style="stroke-width: {preset.strokeWidth}px" aria-hidden="true" />
+                  <span class="truncate text-xs font-medium">{preset.label}</span>
                 </span>
               {/snippet}
             </Select.Item>
@@ -664,7 +653,7 @@
             <Select.Item value={id} label={preset.label} class="rounded-md py-1.5 pr-8 pl-2">
               {#snippet children()}
                 <span class="flex min-w-0 items-center gap-2.5">
-                  <span class="flex size-8 shrink-0 items-center justify-center rounded-md border border-border/40 bg-muted/30 text-foreground/70">
+                  <span class="flex size-4 shrink-0 items-center justify-center text-muted-foreground">
                     {#if id === "hugeicons"}
                       <HugeiconsIcon icon={SparklesIcon} class="size-4" strokeWidth={1.8} />
                     {:else if id === "phosphor"}
@@ -673,10 +662,7 @@
                       <LucideSparkles class="size-4" />
                     {/if}
                   </span>
-                  <span class="min-w-0">
-                    <span class="block text-xs font-medium leading-snug">{preset.label}</span>
-                    <span class="block text-[11px] leading-snug text-muted-foreground/65">{preset.description}</span>
-                  </span>
+                  <span class="truncate text-xs font-medium">{preset.label}</span>
                 </span>
               {/snippet}
             </Select.Item>
@@ -699,16 +685,13 @@
             <span class="truncate font-medium">{TABLE_STYLES[settings.tableStyle]?.label ?? "Lines"}</span>
           </span>
         </Select.Trigger>
-        <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[16rem] p-1" sideOffset={6}>
+        <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
           {#each tableStyleEntries as [id, preset] (id)}
             <Select.Item value={id} label={preset.label} class="rounded-md py-1.5 pr-8 pl-2">
               {#snippet children()}
                 <span class="flex min-w-0 items-center gap-2.5">
-                  <span class="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border/40 bg-background" style={tableStylePreview[id] ?? ''} aria-hidden="true"></span>
-                  <span class="min-w-0">
-                    <span class="block text-xs font-medium leading-snug">{preset.label}</span>
-                    <span class="block text-[11px] leading-snug text-muted-foreground/65">{preset.description}</span>
-                  </span>
+                  <span class="size-4 shrink-0 overflow-hidden rounded-[3px] border border-border/40 bg-background" style={tableStylePreview[id] ?? ''} aria-hidden="true"></span>
+                  <span class="truncate text-xs font-medium">{preset.label}</span>
                 </span>
               {/snippet}
             </Select.Item>
