@@ -2084,6 +2084,18 @@ let rowSearch = $state('')
     whenRefReady(() => aiSidebarRef, (r) => r.sendMessage(msg))
   }
 
+  /** Escalate a command-palette quick-ask into the full sidebar chat. */
+  /** @param {string} q */
+  function handleAskContinue(q) {
+    if (!connection || !q) return
+    if (!aiSidebarOpen) {
+      aiSidebarOpen = true
+      aiSidebarEverOpened = true
+      saveLayout({ aiSidebarOpen: true })
+    }
+    whenRefReady(() => aiSidebarRef, (r) => r.sendMessage(q))
+  }
+
   /** Context-aware Accept from the AI sidebar — routes into the right editor. */
   /** @param {{ kind: 'sql' | 'code', lang?: string, content: string }} detail */
   async function handleAiSidebarAccept(detail) {
@@ -4801,6 +4813,8 @@ let rowSearch = $state('')
   onopennotebookfile={() => { commandOpen = false; void openNotebookFromFile() }}
   openschematimeline={() => { commandOpen = false; openSchemaTimelineTab() }}
   opendatadiff={() => { commandOpen = false; openDataDiffTab() }}
+  schemaContext={aiSchemaContext}
+  onaskcontinue={handleAskContinue}
 />
 
 
