@@ -1642,6 +1642,15 @@ let rowSearch = $state('')
     findReplaceOpen = true
   })
 
+  // Also bind Cmd/Ctrl+Alt+F (VS Code's macOS "replace" shortcut). On macOS the OS
+  // swallows Cmd+H to hide the app, so Mod+H never reaches us there — this is the
+  // reliable cross-platform binding.
+  createHotkey('Mod+Alt+F', (e) => {
+    if (!connection || !activeTable || columns.length === 0 || !findReplaceEnabled) return
+    e.preventDefault()
+    findReplaceOpen = true
+  })
+
   // Switch to saved database connection N (Mod+Alt+1..9) — plain digits, not
   // shifted ones, so the binding survives non-US keyboard layouts.
   for (let n = 1; n <= 9; n++) {
@@ -1765,6 +1774,18 @@ let rowSearch = $state('')
     if (!tableMenuHotkeyGuard(e)) return
     e.preventDefault()
     tableToolbar?.openColumnsMenu?.()
+  })
+
+  // Reset the active table tab to its unfiltered default (clears search, filters,
+  // sort, hidden columns, custom view, and resets the data view + page). Works in
+  // any table view mode, but not while typing in an input.
+  createHotkey('Alt+Shift+R', (e) => {
+    if (activeTab?.kind !== 'table' || !activeTable) return
+    if (commandOpen || showConnectionModal || showSettingsModal) return
+    const el = document.activeElement
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || (el instanceof HTMLElement && el.isContentEditable)) return
+    e.preventDefault()
+    resetTableView()
   })
 
   createHotkey('Escape', (e) => {

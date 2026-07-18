@@ -64,7 +64,7 @@
         { keys: [mod, "R"], desc: "Refresh current view" },
         { keys: [mod, "⇧", "V"], desc: "Cycle table data view" },
         { keys: [opt, "1–5"], desc: "Table / JSON / Record / Text / Chart view" },
-        { keys: [mod, "H"], desc: "Find & replace in table" },
+        { keys: [mod, opt, "F"], desc: "Find & replace in table" },
       ],
     },
     {
@@ -95,6 +95,7 @@
         { keys: [opt, "⇧", "F"], desc: "Open filter menu" },
         { keys: [opt, "⇧", "S"], desc: "Open sort menu" },
         { keys: [opt, "⇧", "C"], desc: "Open columns menu" },
+        { keys: [opt, "⇧", "R"], desc: "Reset table view (clear filters/sort/search)" },
         { keys: ["↵", "F2"], desc: "Edit cell" },
         { keys: ["Esc"], desc: "Cancel edit" },
         { keys: [mod, "↵"], desc: "Navigate to FK row" },
