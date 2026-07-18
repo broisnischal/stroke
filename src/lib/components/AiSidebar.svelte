@@ -147,6 +147,9 @@
   let mentionQuery = $state('')
   let mentionStart = $state(0)
   let mentionIdx = $state(0)
+  /** Tables pinned via @ — shown as removable badges above the input and folded
+   *  into the next message's context. */
+  let contextTables = $state(/** @type {string[]} */ ([]))
 
   /** @type {HTMLDivElement | null} */
   let mentionEl = $state(null)
@@ -218,9 +221,11 @@
   }
 
   function insertMention(/** @type {string} */ text) {
+    // Drop the "@query" from the textarea and pin the table as a badge instead.
     const before = inputText.slice(0, mentionStart)
     const afterAt = inputText.slice(mentionStart + 1 + mentionQuery.length)
-    inputText = before + '@' + text + ' ' + afterAt
+    inputText = (before + afterAt).replace(/^\s+/, '')
+    if (!contextTables.includes(text)) contextTables = [...contextTables, text]
     mentionOpen = false
     void tick().then(() => { resizeInput(); inputRef?.focus() })
   }
@@ -457,9 +462,11 @@
     error = ''; aiStatusHint = ''
     if (!overrideText) { inputText = ''; resetInputHeight() }
 
+    const ctxNote = contextTables.length ? `\n\n(Focus on these tables: ${contextTables.join(', ')})` : ''
     items.push(/** @type {ChatItem} */ ({ id: uid(), kind: 'user', text }))
-    apiHistory.push({ role: 'user', content: text })
-    rawApiHistory.push({ role: 'user', content: text })
+    apiHistory.push({ role: 'user', content: text + ctxNote })
+    rawApiHistory.push({ role: 'user', content: text + ctxNote })
+    if (contextTables.length) contextTables = []
     await scrollBottom()
 
     const thinkingId = uid()
@@ -1015,17 +1022,23 @@
     <!-- Input box -->
     <div class="overflow-hidden rounded-xl border border-border/50 bg-muted/10 transition-colors focus-within:border-border/80 focus-within:bg-background">
       <!-- Context bar: show active table/view -->
-      {#if schemaContext.activeTable || currentView === 'sql'}
-        <div class="flex items-center gap-1.5 border-b border-border/30 px-3 py-1.5">
-          {#if schemaContext.activeTable}
-            <span class="inline-flex items-center gap-1 rounded-md bg-primary/8 px-1.5 py-0.5 font-mono text-[10px] text-primary/70">
-              <Table2 class="size-2.5" />{schemaContext.activeSchema}.{schemaContext.activeTable}
+      {#if contextTables.length || schemaContext.activeTable || (currentView === 'sql' && currentSql.trim())}
+        <div class="flex flex-wrap items-center gap-1 border-b border-border/30 px-2.5 py-1.5">
+          {#each contextTables as t (t)}
+            <span class="inline-flex items-center gap-1 rounded-md bg-primary/10 py-0.5 pl-1.5 pr-1 font-mono text-[10px] text-primary/80">
+              <Table2 class="size-2.5 shrink-0" />{t}
+              <button type="button" class="ml-0.5 flex rounded-sm text-primary/45 transition-colors hover:text-primary" title="Remove" onclick={() => (contextTables = contextTables.filter((x) => x !== t))}>
+                <X class="size-2.5" />
+              </button>
+            </span>
+          {/each}
+          {#if schemaContext.activeTable && !contextTables.includes(`${schemaContext.activeSchema}.${schemaContext.activeTable}`)}
+            <span class="inline-flex items-center gap-1 rounded-md bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/55">
+              <Table2 class="size-2.5 shrink-0" />{schemaContext.activeSchema}.{schemaContext.activeTable}
             </span>
           {/if}
           {#if currentView === 'sql' && currentSql.trim()}
-            <span class="inline-flex items-center gap-1 rounded-md bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/60">
-              SQL editor
-            </span>
+            <span class="inline-flex items-center gap-1 rounded-md bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/55">SQL editor</span>
           {/if}
         </div>
       {/if}
