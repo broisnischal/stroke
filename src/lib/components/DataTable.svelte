@@ -101,6 +101,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import { formatCellValue, transformsFor, transformById, enabledGeneratorGroups, linkifyValue, statsNeeded, annotatorEnabled, anyDisplayExtEnabled } from "$lib/plugins/registry.js";
   import { pluginState, isPluginEnabled } from "$lib/stores/plugins.js";
   import { isImageUrl } from "$lib/plugins/extensions/cell-transforms.js";
+  import { t } from "$lib/i18n.js";
   import Wand2 from "@lucide/svelte/icons/wand-2";
   import Sparkles from "@lucide/svelte/icons/sparkles";
   import MediaLightbox from "./MediaLightbox.svelte";
@@ -5282,25 +5283,25 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         {@const hIsLast = hVisIdx < 0 || hVisIdx >= visibleColumns.length - 1}
         <ContextMenu.Item onSelect={() => runMenuAction(() => headerSortDirect(hcol, 'asc'))}>
           <ArrowUp />
-          Sort ascending
+          {$t('menu.sortAsc')}
           {#if hAsc}<span class="ml-auto text-[10px] text-primary">✓</span>{/if}
         </ContextMenu.Item>
         <ContextMenu.Item onSelect={() => runMenuAction(() => headerSortDirect(hcol, 'desc'))}>
           <ArrowDown />
-          Sort descending
+          {$t('menu.sortDesc')}
           {#if hDesc}<span class="ml-auto text-[10px] text-primary">✓</span>{/if}
         </ContextMenu.Item>
         {#if hSorted}
           <ContextMenu.Item onSelect={() => runMenuAction(() => { if (pendingEdits.size > 0) { toast.error('Unsaved changes', { description: 'Apply or reset your edits before sorting.' }); return } onsortchange([]) })}>
             <ArrowUpDown />
-            Clear sort
+            {$t('menu.clearSort')}
           </ContextMenu.Item>
         {/if}
         {#if hasTableContext}
           <ContextMenu.Separator />
           <ContextMenu.Item onSelect={() => runMenuAction(() => onfiltercolumn(hcol))}>
             <ListFilter />
-            Filter by this column
+            {$t('menu.filterByColumn')}
           </ContextMenu.Item>
         {/if}
         <ContextMenu.Separator />
@@ -5309,41 +5310,41 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         </ContextMenu.Item>
         <ContextMenu.Item onSelect={() => runMenuAction(() => onhidecolumn(hcol))}>
           <EyeOff />
-          Hide column
+          {$t('menu.hideColumn')}
         </ContextMenu.Item>
         <ContextMenu.Separator />
         <ContextMenu.Item disabled={hIsFirst} onSelect={() => runMenuAction(() => moveColumn(hcol, 'left'))}>
           <ChevronLeft />
-          Move left
+          {$t('menu.moveLeft')}
         </ContextMenu.Item>
         <ContextMenu.Item disabled={hIsLast} onSelect={() => runMenuAction(() => moveColumn(hcol, 'right'))}>
           <ChevronRight />
-          Move right
+          {$t('menu.moveRight')}
         </ContextMenu.Item>
         <ContextMenu.Item disabled={hIsFirst} onSelect={() => runMenuAction(() => moveColumn(hcol, 'first'))}>
           <ChevronsLeft />
-          Move to first
+          {$t('menu.moveFirst')}
         </ContextMenu.Item>
         <ContextMenu.Item disabled={hIsLast} onSelect={() => runMenuAction(() => moveColumn(hcol, 'last'))}>
           <ChevronsRight />
-          Move to last
+          {$t('menu.moveLast')}
         </ContextMenu.Item>
         {#if columnOrder.length > 0}
           <ContextMenu.Item onSelect={() => runMenuAction(() => resetColumnOrder())}>
             <RotateCcw />
-            Reset column order
+            {$t('menu.resetOrder')}
           </ContextMenu.Item>
         {/if}
         <ContextMenu.Separator />
         <ContextMenu.Item onSelect={() => runMenuAction(() => resetColumnWidth(hcol))}>
           <RotateCcw />
-          Reset column width
+          {$t('menu.resetWidth')}
         </ContextMenu.Item>
         {#if hasTableContext}
           <ContextMenu.Separator />
           <ContextMenu.Item onSelect={() => runMenuAction(() => { statsCol = statsCol === hcol ? null : hcol })}>
             <BarChart2 />
-            Column stats
+            {$t('menu.columnStats')}
             {#if statsCol === hcol}<span class="ml-auto text-[10px] text-primary">✓</span>{/if}
           </ContextMenu.Item>
         {/if}
@@ -5351,7 +5352,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         <ContextMenu.Sub>
           <ContextMenu.SubTrigger>
             <Palette />
-            Highlight
+            {$t('menu.highlight')}
             {#if colHighlights[hcol]?.color}<span class="ml-auto size-2.5 rounded-full" style="background:{COL_HL_MAP.get(colHighlights[hcol].color)}"></span>{/if}
           </ContextMenu.SubTrigger>
           <ContextMenu.SubContent class="w-40 [&_[data-slot=context-menu-item]]:gap-2 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs">
@@ -5373,7 +5374,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         </ContextMenu.Sub>
         <ContextMenu.Item onSelect={() => runMenuAction(() => openTagDialog(hcol))}>
           <Tag />
-          {colHighlights[hcol]?.tag ? 'Edit tag…' : 'Tag column…'}
+          {colHighlights[hcol]?.tag ? $t('menu.editTag') : $t('menu.tagColumn')}
         </ContextMenu.Item>
         {#if colHighlights[hcol]?.tag}
           <ContextMenu.Item onSelect={() => runMenuAction(() => setColTag(hcol, ''))}>
@@ -5385,7 +5386,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         <ContextMenu.Sub>
           <ContextMenu.SubTrigger>
             <Wand2 />
-            Transform column
+            {$t('menu.transformColumn')}
             {#if colTransforms[hcol]}<span class="ml-auto text-[10px] text-primary">on</span>{/if}
           </ContextMenu.SubTrigger>
           <ContextMenu.SubContent class="w-56 [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
@@ -5404,7 +5405,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               <ContextMenu.Separator />
               <ContextMenu.Item onSelect={() => runMenuAction(() => setColTransform(hcol, null))}>
                 <Ban />
-                Clear transform
+                {$t('menu.clearTransform')}
               </ContextMenu.Item>
             {/if}
           </ContextMenu.SubContent>
