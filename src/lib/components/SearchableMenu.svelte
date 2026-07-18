@@ -135,7 +135,7 @@
               disabled={it.disabled}
               onSelect={() => handleSelect(it)}
               class={cn(
-                "flex w-full min-w-0 cursor-default items-center gap-1.5 rounded-[5px] px-1.5 py-1.5 text-ui-xs outline-hidden select-none",
+                "flex w-full min-w-0 cursor-default items-center gap-1.5 rounded-lg px-1.5 py-1.5 text-ui-xs outline-hidden select-none",
                 "text-foreground/85 hover:bg-accent hover:text-foreground data-selected:bg-accent data-selected:text-foreground",
                 "data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-40",
                 "[&_svg]:pointer-events-none [&_svg]:shrink-0",

@@ -531,7 +531,7 @@
             type="button"
             aria-label="Color theme"
             class={cn(
-              "flex h-8 w-56 items-center justify-between gap-2 whitespace-nowrap rounded-lg border border-border/70 bg-background px-2.5 text-ui-xs font-normal shadow-none outline-none transition-colors hover:bg-muted/30 focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 data-[state=open]:border-ring",
+              "flex h-8 w-56 items-center justify-between gap-2 whitespace-nowrap rounded-[min(var(--radius-md),10px)] border border-border/70 bg-background px-2.5 text-ui-xs font-normal shadow-none outline-none transition-colors hover:bg-muted/30 focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 data-[state=open]:border-ring",
             )}
           >
             <span class="flex min-w-0 items-center gap-2">
