@@ -245,11 +245,32 @@
   const askBtnPrimary = 'inline-flex items-center gap-1.5 rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground transition-opacity hover:opacity-90'
 
   // Keep the ask thread pinned to the newest message as it streams / grows.
+  // Coalesced to one adjustment per frame and gated on "near the bottom" so it
+  // never fights manual scroll and doesn't jitter the view on every token.
   let askBottomEl = $state(/** @type {HTMLElement | null} */ (null))
+  let _askScrollRaf = 0
+  /** @param {HTMLElement | null} el */
+  function _nearestScroller(el) {
+    let n = el?.parentElement
+    while (n) {
+      const oy = getComputedStyle(n).overflowY
+      if ((oy === 'auto' || oy === 'scroll') && n.scrollHeight > n.clientHeight + 1) return n
+      n = n.parentElement
+    }
+    return null
+  }
   $effect(() => {
     void askTurns
     if (page !== 'ask' || !askBottomEl) return
-    requestAnimationFrame(() => askBottomEl?.scrollIntoView({ block: 'end', behavior: 'auto' }))
+    if (_askScrollRaf) return
+    _askScrollRaf = requestAnimationFrame(() => {
+      _askScrollRaf = 0
+      const scroller = _nearestScroller(askBottomEl)
+      if (!scroller) return
+      if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 120) {
+        scroller.scrollTop = scroller.scrollHeight
+      }
+    })
   })
 
   /** @param {KeyboardEvent} e */
@@ -395,7 +416,7 @@
   // On tables page: shouldFilter=false so bits-ui skips its sort/filter pass entirely
   // (no CSS `order` reordering, no keyboard-nav interference). We pre-filter in JS.
   // On root page: bits-ui filters with a plain substring check against item value strings.
-  const shouldFilter = $derived(page !== 'tables')
+  const shouldFilter = $derived(page !== 'tables' && page !== 'ask')
 
   /** @type {(value: string, search: string) => number} */
   const commandFilter = (value, search) => {
@@ -497,25 +518,29 @@
                     <span class="truncate">{turn.label}</span>
                   </div>
                   {#if turn.result && turn.result.columns.length}
-                    <div class="overflow-x-auto rounded-md border border-border/40">
-                      <table class="w-full border-collapse text-[10.5px]">
-                        <thead><tr>
-                          {#each turn.result.columns.slice(0, 5) as c}
-                            <th class="whitespace-nowrap border-b border-border/40 px-2 py-1 text-left font-medium text-muted-foreground/60">{c}</th>
-                          {/each}
-                        </tr></thead>
-                        <tbody>
-                          {#each turn.result.rows as row}
-                            <tr>
-                              {#each row.slice(0, 5) as cell}
-                                <td class="whitespace-nowrap border-b border-border/15 px-2 py-1 font-mono text-foreground/75">{cell === null ? 'NULL' : String(cell)}</td>
+                    <div class="overflow-hidden rounded-lg border border-border/50 bg-card/40">
+                      <div class="overflow-x-auto">
+                        <table class="w-full border-collapse">
+                          <thead>
+                            <tr class="bg-muted/25">
+                              {#each turn.result.columns.slice(0, 5) as c}
+                                <th class="whitespace-nowrap border-b border-border/40 px-2.5 py-1 text-left text-[10px] font-medium uppercase tracking-wide text-muted-foreground/50">{c}</th>
                               {/each}
                             </tr>
-                          {/each}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody>
+                            {#each turn.result.rows as row, ri}
+                              <tr class="transition-colors hover:bg-muted/15">
+                                {#each row.slice(0, 5) as cell}
+                                  <td class="max-w-[220px] truncate {ri < turn.result.rows.length - 1 ? 'border-b border-border/15' : ''} px-2.5 py-1 font-mono text-[11px] {cell === null ? 'italic text-muted-foreground/40' : 'text-foreground/80'}">{cell === null ? 'NULL' : String(cell)}</td>
+                                {/each}
+                              </tr>
+                            {/each}
+                          </tbody>
+                        </table>
+                      </div>
                       {#if turn.result.total > turn.result.rows.length}
-                        <div class="px-2 py-1 text-[10px] text-muted-foreground/40">showing {turn.result.rows.length} of {turn.result.total}</div>
+                        <div class="border-t border-border/30 bg-muted/10 px-2.5 py-1 text-[10px] text-muted-foreground/45">showing {turn.result.rows.length} of {turn.result.total} rows</div>
                       {/if}
                     </div>
                   {/if}

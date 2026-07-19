@@ -767,8 +767,9 @@ input[type='number']::-webkit-inner-spin-button {
   max-width: 22rem;
   padding: 4px 8px;
   border-radius: 8px;
-  background: var(--foreground);
-  color: var(--background);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
   font-size: 12px;
   font-weight: 500;
   line-height: 16px;
@@ -798,7 +799,8 @@ input[type='number']::-webkit-inner-spin-button {
   position: absolute;
   width: 8px;
   height: 8px;
-  background: var(--foreground);
+  background: var(--popover);
+  border: 1px solid var(--border);
   border-radius: 1.5px;
   transform: translateX(-50%) rotate(45deg);
 }
