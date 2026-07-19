@@ -171,7 +171,7 @@ fn pg_type_label(type_name: &str) -> String {
     }
 }
 
-fn cell_to_json(row: &sqlx::postgres::PgRow, idx: usize) -> Value {
+pub(crate) fn cell_to_json(row: &sqlx::postgres::PgRow, idx: usize) -> Value {
     let col = row.column(idx);
     let type_name = col.type_info().name();
 

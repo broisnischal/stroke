@@ -41,6 +41,7 @@
     hasSchemaExplorer = true,
     hasSecurity = true,
     onopenlogs = () => {},
+    onopeninsights = () => {},
     ontogglequerylog = () => {},
     onopenextensions = () => {},
     onopenJsonViewer = () => {},
@@ -634,6 +635,10 @@
                   <span data-slot="command-label" class="truncate">Security</span>
                 </Command.Item>
               {/if}
+              <Command.Item value="open instance insights monitoring dashboard sessions locks replication config pg_settings" onSelect={() => run(onopeninsights)}>
+                <Icon name="database" class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">Instance Insights</span>
+              </Command.Item>
               <Command.Item value="open activity log events history operations" onSelect={() => run(onopenlogs)}>
                 <Icon name="history" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">Activity Log</span>

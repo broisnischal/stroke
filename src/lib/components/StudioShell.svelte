@@ -81,6 +81,7 @@
   import SchemaPage from './SchemaPage.svelte'
   import BackupPage from './BackupPage.svelte'
   import LogsPage from './LogsPage.svelte'
+  import InstanceInsightsPage from './InstanceInsightsPage.svelte'
   // Monaco-backed pages (DataDiffPage, OrmRunner, SecurityPage, JsonViewerPage, SqlConsole)
   // are loaded lazily at their render sites so the Monaco editor stays out of the
   // startup bundle until the user actually opens a SQL / ORM / JSON / diff / security tab.
@@ -125,6 +126,8 @@
     createOrmTab,
     createSecurityTab,
     createLogsTab,
+    createInsightsTab,
+    findInsightsTab,
     createExtensionsTab,
     findExtensionsTab,
     createJsonTab,
@@ -512,6 +515,7 @@
   let ormEverOpened = $state(false)
   let securityEverOpened = $state(false)
   let logsEverOpened = $state(false)
+  let insightsEverOpened = $state(false)
   let extensionsEverOpened = $state(false)
   let jsonEverOpened = $state(false)
   let backupEverOpened = $state(false)
@@ -762,6 +766,7 @@
     if (activeTab?.kind === 'orm') ormEverOpened = true
     if (activeTab?.kind === 'security') securityEverOpened = true
     if (activeTab?.kind === 'logs') logsEverOpened = true
+    if (activeTab?.kind === 'insights') insightsEverOpened = true
     if (activeTab?.kind === 'extensions') extensionsEverOpened = true
     if (activeTab?.kind === 'json') jsonEverOpened = true
     if (activeTab?.kind === 'backup') backupEverOpened = true
@@ -2266,6 +2271,10 @@ let rowSearch = $state('')
 
   function openLogsTab() {
     openSingletonTab({ find: findLogsTab, create: createLogsTab })
+  }
+
+  function openInsightsTab() {
+    openSingletonTab({ find: findInsightsTab, create: createInsightsTab })
   }
 
   function openExtensionsTab() {
@@ -4807,6 +4816,7 @@ let rowSearch = $state('')
   onopenSchema={() => { if (aiMode) exitAiMode(); openSchemaTab() }}
   onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
   onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
+  onopeninsights={() => { if (aiMode) exitAiMode(); openInsightsTab() }}
   ontogglequerylog={() => { commandOpen = false; queryLogOpen = !queryLogOpen }}
   onopenextensions={() => { if (aiMode) exitAiMode(); openExtensionsTab() }}
   {hasSchemaExplorer}
@@ -5182,6 +5192,18 @@ let rowSearch = $state('')
         >
           <svelte:boundary failed={tabError}>
             <LogsPage active={activeTab?.kind === 'logs'} />
+          </svelte:boundary>
+        </div>
+      {/if}
+
+      <!-- Instance Insights tab - mount once, keep alive -->
+      {#if insightsEverOpened}
+        <div
+          class={activeTab?.kind === 'insights' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+          inert={activeTab?.kind !== 'insights' || undefined}
+        >
+          <svelte:boundary failed={tabError}>
+            <InstanceInsightsPage active={activeTab?.kind === 'insights'} connectionName={connection?.name ?? connection?.database ?? ''} {dbType} />
           </svelte:boundary>
         </div>
       {/if}
@@ -5848,6 +5870,11 @@ let rowSearch = $state('')
               <span class={$hasPro ? labelCls : proLabelCls}>Logs</span>
             </button>
 
+            <button onclick={openInsightsTab} class={cell}>
+              <Database class={iconCls} />
+              <span class={labelCls}>Insights</span>
+            </button>
+
             <button onclick={openChartsTab} class={$hasPro ? cell : proCell}>
               {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
               <BarChart2 class={$hasPro ? iconCls : proIconCls} />
@@ -6038,6 +6065,7 @@ let rowSearch = $state('')
   hasPro={$hasPro}
   onopenSchema={openSchemaTab}
   onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
+  onopeninsights={() => { if (aiMode) exitAiMode(); openInsightsTab() }}
   ontogglequerylog={() => { commandOpen = false; queryLogOpen = !queryLogOpen }}
   onopenextensions={() => { if (aiMode) exitAiMode(); openExtensionsTab() }}
   onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
