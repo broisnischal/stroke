@@ -70,6 +70,7 @@
   import ReportIssueDialog from './ReportIssueDialog.svelte'
   import UpdateDialog from './UpdateDialog.svelte'
   import StatusBar from './StatusBar.svelte'
+  import QueryLogConsole from './QueryLogConsole.svelte'
   import DisconnectDialog from './DisconnectDialog.svelte'
   // InsertRowDialog removed — replaced by inline draft row in DataTable
   import McpPanel from './McpPanel.svelte'
@@ -283,6 +284,8 @@
   let showConnectionModal = $state(false)
   let showDockerModal = $state(false)
   let dockerInitialDb = $state(/** @type {string | null} */ (null))
+  /** Bottom query-log console visibility. */
+  let queryLogOpen = $state(false)
   let showCreateTableDialog = $state(false)
   let showCreateSchemaDialog = $state(false)
   let savedConnections = $state(loadSavedConnections())
@@ -1698,6 +1701,12 @@ let rowSearch = $state('')
   createHotkey('Mod+Shift+L', (e) => {
     e.preventDefault()
     openLogsTab()
+  })
+
+  // Toggle the bottom query-log console.
+  createHotkey('Mod+Shift+K', (e) => {
+    e.preventDefault()
+    queryLogOpen = !queryLogOpen
   })
 
   createHotkey('Mod+M', (e) => {
@@ -4794,6 +4803,7 @@ let rowSearch = $state('')
   onopenSchema={() => { if (aiMode) exitAiMode(); openSchemaTab() }}
   onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
   onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
+  ontogglequerylog={() => { commandOpen = false; queryLogOpen = !queryLogOpen }}
   onopenextensions={() => { if (aiMode) exitAiMode(); openExtensionsTab() }}
   {hasSchemaExplorer}
   {hasSecurity}
@@ -5940,6 +5950,10 @@ let rowSearch = $state('')
   {/if}
 </div>
 
+{#if queryLogOpen && connection}
+  <QueryLogConsole {activeSchema} activeTable={activeTable ?? ''} onclose={() => { queryLogOpen = false }} />
+{/if}
+
 {#if statusBarVisible}
 <StatusBar
   {connection}
@@ -6017,6 +6031,7 @@ let rowSearch = $state('')
   hasPro={$hasPro}
   onopenSchema={openSchemaTab}
   onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
+  ontogglequerylog={() => { commandOpen = false; queryLogOpen = !queryLogOpen }}
   onopenextensions={() => { if (aiMode) exitAiMode(); openExtensionsTab() }}
   onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
   onopenorm={openOrmTab}

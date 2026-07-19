@@ -339,6 +339,7 @@ pub async fn get_table_rows(
         query_ms: started.elapsed().as_millis() as u64,
         primary_key: pk,
         foreign_keys: fks,
+        sql: format!("{data_sql}\n{count_sql}"),
     })
 }
 
@@ -471,6 +472,7 @@ pub async fn execute_sql(
                 None
             },
             query_ms: query_ms(),
+            sql: sql.to_string(),
         });
     }
 
@@ -482,6 +484,7 @@ pub async fn execute_sql(
         row_count: Some(affected),
         message: Some(format!("{affected} row(s) affected")),
         query_ms: query_ms(),
+        sql: sql.to_string(),
     })
 }
 

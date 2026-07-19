@@ -189,7 +189,7 @@ pub async fn execute_sql(handle: &DuckdbHandle, sql: &str) -> Result<SqlResult, 
         if read {
             let (columns, rows) = collect_rows(conn, &sql, &[])?;
             let row_count = Some(rows.len() as i64);
-            Ok(SqlResult { columns, rows, row_count, message: None, query_ms: t0.elapsed().as_millis() as u64 })
+            Ok(SqlResult { columns, rows, row_count, message: None, query_ms: t0.elapsed().as_millis() as u64, sql: sql.clone() })
         } else {
             let affected = conn.execute(&sql, []).map_err(|e| format!("DuckDB error: {e}"))?;
             Ok(SqlResult {
@@ -198,6 +198,7 @@ pub async fn execute_sql(handle: &DuckdbHandle, sql: &str) -> Result<SqlResult, 
                 row_count: Some(affected as i64),
                 message: Some(format!("{affected} row(s) affected")),
                 query_ms: t0.elapsed().as_millis() as u64,
+                sql: sql.clone(),
             })
         }
     })
@@ -392,7 +393,8 @@ pub async fn get_table_rows(
 
         let (where_clause, params) = build_where(&cols, search.as_deref(), filters.as_deref());
 
-        let total = collect_rows(conn, &format!("SELECT count(*) FROM {tq}{where_clause}"), &params)?
+        let count_sql = format!("SELECT count(*) FROM {tq}{where_clause}");
+        let total = collect_rows(conn, &count_sql, &params)?
             .1
             .first()
             .and_then(|r| r.first())
@@ -421,6 +423,7 @@ pub async fn get_table_rows(
             query_ms: t0.elapsed().as_millis() as u64,
             primary_key: if include_meta { primary_key(conn, &table) } else { Vec::new() },
             foreign_keys: Vec::<ForeignKeyInfo>::new(),
+            sql: format!("{data_sql}\n{count_sql}"),
         })
     })
     .await

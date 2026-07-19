@@ -163,6 +163,7 @@ pub async fn execute_sql(pool: &SqlitePool, sql: &str) -> Result<SqlResult, Stri
                 None
             },
             query_ms: t0.elapsed().as_millis() as u64,
+            sql: sql.to_string(),
         })
     } else {
         let res = sqlx::query(sql)
@@ -177,6 +178,7 @@ pub async fn execute_sql(pool: &SqlitePool, sql: &str) -> Result<SqlResult, Stri
             row_count: Some(affected),
             message: Some(format!("{affected} row(s) affected")),
             query_ms: t0.elapsed().as_millis() as u64,
+            sql: sql.to_string(),
         })
     }
 }
@@ -374,6 +376,7 @@ pub async fn get_table_rows(
         query_ms: t0.elapsed().as_millis() as u64,
         primary_key,
         foreign_keys,
+        sql: format!("{rows_sql}\n{count_sql}"),
     })
 }
 
