@@ -4938,7 +4938,7 @@ let rowSearch = $state('')
       side={sidebarSide}
       activeKind={activeTab?.kind ?? ''}
       {dbType}
-      ontoggletables={() => { if (aiMode) exitAiMode(); if (navSidebarPanel !== 'tables') { setSidebarPanel('tables') } else { toggleSidebar() } }}
+      ontoggletables={() => { if (aiMode) exitAiMode(); setSidebarPanel('tables') }}
       onopenconnections={() => { if (aiMode) exitAiMode(); setSidebarPanel('connections') }}
       onopensearch={() => { if (aiMode) exitAiMode(); openSearchTab() }}
       onopenschema={() => { if (aiMode) exitAiMode(); openSchemaTab() }}

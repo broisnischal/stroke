@@ -6,6 +6,26 @@
   import { cn } from "$lib/utils.js";
   import { EXTENSIONS } from "$lib/plugins/registry.js";
   import { pluginState, pluginEnabledIn, setPluginEnabled } from "$lib/stores/plugins.js";
+  // Per-extension glyphs — mirror ExtensionsPage's ICONS map so each extension
+  // shows its own icon (not one shared per-kind glyph).
+  import Clock from "@lucide/svelte/icons/clock";
+  import DollarSign from "@lucide/svelte/icons/dollar-sign";
+  import Hash from "@lucide/svelte/icons/hash";
+  import Timer from "@lucide/svelte/icons/timer";
+  import Tag from "@lucide/svelte/icons/tag";
+  import ToggleLeft from "@lucide/svelte/icons/toggle-left";
+  import Palette from "@lucide/svelte/icons/palette";
+  import EyeOff from "@lucide/svelte/icons/eye-off";
+  import Globe from "@lucide/svelte/icons/globe";
+  import Flame from "@lucide/svelte/icons/flame";
+  import ShieldAlert from "@lucide/svelte/icons/shield-alert";
+  import Link2 from "@lucide/svelte/icons/link-2";
+  import BarChart3 from "@lucide/svelte/icons/bar-chart-3";
+  import Sparkles from "@lucide/svelte/icons/sparkles";
+  import Wand2 from "@lucide/svelte/icons/wand-2";
+  import Bookmark from "@lucide/svelte/icons/bookmark";
+  import Replace from "@lucide/svelte/icons/replace";
+  import Blocks from "@lucide/svelte/icons/blocks";
 
   let {
     /** @type {(ext: { id: string, name: string, description?: string, kind: string }) => void} */
@@ -25,20 +45,36 @@
     );
   });
 
-  /** Generic per-kind leading glyph (names verified against icon-registry.js). */
-  const KIND_ICON = /** @type {Record<string, string>} */ ({
-    workflow: "workflow",
-    formatter: "sparkles",
-    linkify: "link-2",
-    annotator: "pin",
-    generators: "zap",
-    transforms: "replace",
+  /** Per-extension icon component, keyed by extension id (mirrors ExtensionsPage). */
+  const EXT_ICONS = /** @type {Record<string, any>} */ ({
+    "better-time": Clock,
+    "money-format": DollarSign,
+    "number-format": Hash,
+    "duration-format": Timer,
+    "status-badge": Tag,
+    "boolean-glyph": ToggleLeft,
+    "color-swatch": Palette,
+    "mask-sensitive": EyeOff,
+    "smart-text": Globe,
+    heatmap: Flame,
+    validators: ShieldAlert,
+    linkify: Link2,
+    "column-annotator": BarChart3,
+    "id-generators": Sparkles,
+    "cell-transforms": Wand2,
+    "saved-views": Bookmark,
+    "find-replace": Replace,
   });
 
-  /** @param {string} kind */
-  function kindIcon(kind) {
-    return KIND_ICON[kind] ?? "blocks";
-  }
+  /** Human-readable kind label (mirrors ExtensionsPage KIND_LABEL). */
+  const KIND_LABEL = /** @type {Record<string, string>} */ ({
+    formatter: "Display formatter",
+    linkify: "Linkifier",
+    annotator: "Column annotator",
+    generators: "Value generator",
+    transforms: "Cell transform",
+    workflow: "Workflow feature",
+  });
 </script>
 
 <div class="flex min-h-0 flex-1 flex-col">
@@ -76,6 +112,7 @@
     {:else}
       {#each filtered as ext (ext.id)}
         {@const on = pluginEnabledIn($pluginState, ext.id)}
+        {@const ExtIcon = EXT_ICONS[ext.id] ?? Blocks}
         <div class="group/ext flex min-w-0 items-center rounded-md transition-colors hover:bg-accent/20">
           <button
             type="button"
@@ -83,10 +120,10 @@
             onclick={() => onopendetail(ext)}
             class="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1.5 text-left"
           >
-            <Icon name={kindIcon(ext.kind)} class="size-4 shrink-0 text-muted-foreground" />
+            <ExtIcon class="size-4 shrink-0 text-muted-foreground" />
             <span class="flex min-w-0 flex-1 flex-col">
               <span class="truncate text-ui-sm font-medium text-sidebar-foreground">{ext.name}</span>
-              <span class="truncate text-ui-2xs capitalize text-muted-foreground">{ext.kind}</span>
+              <span class="truncate text-ui-2xs text-muted-foreground">{KIND_LABEL[ext.kind] ?? "Extension"}</span>
             </span>
           </button>
           <div class="flex shrink-0 items-center pr-1.5">
