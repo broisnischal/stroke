@@ -2288,12 +2288,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // instead of text. Images load async into a bounded cache; a repaint is queued
   // when each finishes so the thumbnail appears.
   const _IMG_TF = new Set(['avatar', 'image-thumb']);
-  /** @type {Map<string, HTMLImageElement | 'error'>} */
+  /** @type {Map<string, HTMLImageElement | ImageBitmap | 'error'>} */
   const _imgCache = new Map();
   /** @type {Map<string, number>} per-url transient-failure retry counter */
   const _imgRetry = new Map();
   const _IMG_CACHE_MAX = 400;
   const _IMG_MAX_RETRY = 3;
+  // Multi-megapixel source images are resampled to a small square thumbnail ONCE
+  // (via createImageBitmap) so the scroll draw blits a ~128px bitmap instead of
+  // resampling the full image every frame — and the full-res decode is released.
+  const _IMG_THUMB = 128;
   /**
    * Start (or restart) loading one cell image. Remote avatar CDNs
    * (lh3.googleusercontent.com, avatars.githubusercontent.com) throttle bursts
@@ -2308,7 +2312,24 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // no-referrer strips it and never causes an otherwise-good load to fail.
     img.referrerPolicy = 'no-referrer';
     img.decoding = 'async';
-    img.onload = () => { _imgRetry.delete(url); scheduleDraw(); };
+    img.onload = () => {
+      _imgRetry.delete(url);
+      // Downscale the center square to a small bitmap once, off the draw path.
+      // The tiny bitmap replaces the full-res Image in the cache, so per-frame
+      // draws are cheap and the multi-MB decode can be garbage-collected.
+      if (typeof createImageBitmap === 'function') {
+        const s = Math.min(img.naturalWidth, img.naturalHeight);
+        if (s > 0) {
+          const sx = Math.floor((img.naturalWidth - s) / 2);
+          const sy = Math.floor((img.naturalHeight - s) / 2);
+          createImageBitmap(img, sx, sy, s, s, { resizeWidth: _IMG_THUMB, resizeHeight: _IMG_THUMB, resizeQuality: 'high' })
+            .then((bmp) => { if (_imgCache.get(url) === img) _imgCache.set(url, bmp); else bmp.close?.(); scheduleDraw(); })
+            .catch(() => scheduleDraw());
+          return;
+        }
+      }
+      scheduleDraw();
+    };
     img.onerror = () => {
       const n = (_imgRetry.get(url) || 0) + 1;
       if (n <= _IMG_MAX_RETRY) {
@@ -2331,7 +2352,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   function getCellImage(url) {
     const hit = _imgCache.get(url);
     if (hit) return hit;
-    if (_imgCache.size > _IMG_CACHE_MAX) { _imgCache.clear(); _imgRetry.clear(); }
+    if (_imgCache.size > _IMG_CACHE_MAX) {
+      for (const v of _imgCache.values()) { if (typeof ImageBitmap !== 'undefined' && v instanceof ImageBitmap) v.close?.(); }
+      _imgCache.clear(); _imgRetry.clear();
+    }
     return loadCellImage(url);
   }
   /** Draw an image/avatar thumbnail (center-cropped) with a filename beside it. */
@@ -2341,14 +2365,20 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const iy = Math.round(cy - size / 2);
     const radius = round ? size / 2 : Math.round(4 * canvasZoom);
     const img = getCellImage(url);
-    const loaded = img !== 'error' && img.complete && img.naturalWidth > 0;
+    const isBitmap = typeof ImageBitmap !== 'undefined' && img instanceof ImageBitmap;
+    const loaded = img !== 'error' && (isBitmap || (img.complete && img.naturalWidth > 0));
     roundRect(ctx, ix, iy, size, size, radius);
     ctx.fillStyle = withAlpha(c.cMutedBg, 0.5); ctx.fill();
     if (loaded) {
       ctx.save();
       roundRect(ctx, ix, iy, size, size, radius); ctx.clip();
-      const nw = img.naturalWidth, nh = img.naturalHeight, s = Math.min(nw, nh);
-      ctx.drawImage(img, (nw - s) / 2, (nh - s) / 2, s, s, ix, iy, size, size);
+      if (isBitmap) {
+        // Already a center-cropped square thumbnail — cheap blit, no per-frame resample.
+        ctx.drawImage(img, ix, iy, size, size);
+      } else {
+        const nw = img.naturalWidth, nh = img.naturalHeight, s = Math.min(nw, nh);
+        ctx.drawImage(img, (nw - s) / 2, (nh - s) / 2, s, s, ix, iy, size, size);
+      }
       ctx.restore();
     }
     ctx.strokeStyle = withAlpha(c.cBorder, 0.6); ctx.lineWidth = 1;
