@@ -15,7 +15,6 @@
   import Download from "@lucide/svelte/icons/download";
   import Table2 from "@lucide/svelte/icons/table-2";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
-  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { cn, isNetworkError } from "$lib/utils.js";
   import { hasPro } from '$lib/stores/license.js'
   import SqlEditor from "./SqlEditor.svelte";
@@ -439,6 +438,12 @@
     navigator.platform.toUpperCase().includes("MAC");
   const mod = isMac ? "⌘" : "Ctrl";
 
+  /** Plain-text tooltip string for GlobalTooltip: "Label (⌘↵)" with an optional description on a second line. */
+  function tipText(/** @type {string} */ label, /** @type {string} */ desc = '', /** @type {string[]} */ keys = []) {
+    const head = keys.length ? `${label} (${keys.join('')})` : label;
+    return desc ? `${head}\n${desc}` : head;
+  }
+
   /** @param {number} height */
   function clampEditorHeight(height) {
     return clampSqlEditorHeight(height, consoleEl?.clientHeight ?? 0);
@@ -484,27 +489,6 @@
   })
 </script>
 
-{#snippet kbd(/** @type {string} */ k)}
-  <kbd class="inline-flex h-[17px] min-w-[17px] items-center justify-center rounded border border-border/70 bg-muted/60 px-1 font-mono text-[10px] font-medium leading-none text-muted-foreground shadow-[inset_0_-1px_0_var(--border)]">{k}</kbd>
-{/snippet}
-
-{#snippet hint(/** @type {string} */ label, /** @type {string} */ desc, /** @type {string[]} */ keys = [])}
-  <div class="flex max-w-[240px] flex-col gap-1">
-    <div class="flex items-center justify-between gap-4">
-      <span class="text-ui-xs font-medium text-foreground">{label}</span>
-      {#if keys.length}
-        <span class="flex shrink-0 items-center gap-0.5">
-          {#each keys as k (k)}{@render kbd(k)}{/each}
-        </span>
-      {/if}
-    </div>
-    {#if desc}
-      <p class="text-ui-2xs leading-relaxed text-muted-foreground">{desc}</p>
-    {/if}
-  </div>
-{/snippet}
-
-<Tooltip.Provider delayDuration={450} disableHoverableContent>
 <div class="flex min-h-0 flex-1 overflow-hidden">
   <QueryHistoryPanel
     bind:visible={queryHistoryVisible}
@@ -521,54 +505,36 @@
     data-studio-chrome
   >
     {#if loading}
-      <Tooltip.Root>
-        <Tooltip.Trigger>
-          {#snippet child({ props })}
-            <Button
-              {...props}
-              type="button"
-              variant="destructive"
-              size="sm"
-              class="h-7 shrink-0 gap-2 pl-2.5 pr-2 font-medium shadow-sm"
-              onclick={() => void cancelQuery()}
-            >
-              <Square class="size-3 shrink-0 fill-current" data-icon="inline-start" />
-              Stop
-            </Button>
-          {/snippet}
-        </Tooltip.Trigger>
-        <Tooltip.Content>
-          {@render hint('Stop', 'Cancel the running query.')}
-        </Tooltip.Content>
-      </Tooltip.Root>
+      <Button
+        type="button"
+        variant="destructive"
+        size="sm"
+        class="h-7 shrink-0 gap-2 pl-2.5 pr-2 font-medium shadow-sm"
+        onclick={() => void cancelQuery()}
+        title={tipText('Stop', 'Cancel the running query.')}
+      >
+        <Square class="size-3 shrink-0 fill-current" data-icon="inline-start" />
+        Stop
+      </Button>
     {:else}
       <!-- Split button: one wrapper owns the radius + shadow; the halves are
            plain buttons (the Button component's transparent border,
            bg-clip-padding and elevate shadow would each paint a seam). -->
       <div class="flex shrink-0 items-stretch overflow-hidden rounded-md elevate-1">
-        <Tooltip.Root>
-          <Tooltip.Trigger>
-            {#snippet child({ props })}
-              <button
-                {...props}
-                type="button"
-                class="inline-flex h-7 shrink-0 select-none items-center gap-2 bg-primary pl-2.5 pr-2 text-[0.8rem] font-medium text-primary-foreground transition-[background-color,opacity] hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
-                disabled={!sql.trim()}
-                onclick={() => handleRun(undefined)}
-              >
-                <Play class="size-3.5 shrink-0" />
-                Run
-              </button>
-            {/snippet}
-          </Tooltip.Trigger>
-          <Tooltip.Content>
-            {@render hint(
-              'Run query',
-              `Runs every statement — each gets its own result tab. ${mod}R runs only the statement under the cursor, ${mod}L selects it.`,
-              [mod, '↵'],
-            )}
-          </Tooltip.Content>
-        </Tooltip.Root>
+        <button
+          type="button"
+          class="inline-flex h-7 shrink-0 select-none items-center gap-2 bg-primary pl-2.5 pr-2 text-[0.8rem] font-medium text-primary-foreground transition-[background-color,opacity] hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+          disabled={!sql.trim()}
+          onclick={() => handleRun(undefined)}
+          title={tipText(
+            'Run query',
+            `Runs every statement — each gets its own result tab. ${mod}R runs only the statement under the cursor, ${mod}L selects it.`,
+            [mod, '↵'],
+          )}
+        >
+          <Play class="size-3.5 shrink-0" />
+          Run
+        </button>
         <DropdownMenu.Root bind:open={runMenuOpen} onOpenChange={captureRunPreviews}>
           <DropdownMenu.Trigger
             class="inline-flex h-7 w-6 shrink-0 items-center justify-center border-l border-primary-foreground/20 bg-primary text-primary-foreground transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-50"
@@ -614,127 +580,82 @@
     {/if}
 
     {#if sqlParams.length > 0}
-      <Tooltip.Root>
-        <Tooltip.Trigger>
-          {#snippet child({ props })}
-            <Button
-              {...props}
-              type="button"
-              variant="ghost"
-              size="sm"
-              class={cn(
-                'h-7 shrink-0 gap-1.5 px-2 font-normal',
-                paramsPanelOpen ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground',
-              )}
-              onclick={() => (paramsPanelOpen = !paramsPanelOpen)}
-            >
-              <Variable class="size-3.5 shrink-0" />
-              Parameters
-              <span class="rounded bg-muted/70 px-1 font-mono text-ui-3xs tabular-nums text-muted-foreground">{sqlParams.length}</span>
-            </Button>
-          {/snippet}
-        </Tooltip.Trigger>
-        <Tooltip.Content>
-          {@render hint('Query parameters', 'Set values for :name placeholders — they are inlined as escaped literals when the query runs.')}
-        </Tooltip.Content>
-      </Tooltip.Root>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        class={cn(
+          'h-7 shrink-0 gap-1.5 px-2 font-normal',
+          paramsPanelOpen ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground',
+        )}
+        onclick={() => (paramsPanelOpen = !paramsPanelOpen)}
+        title={tipText('Query parameters', 'Set values for :name placeholders — they are inlined as escaped literals when the query runs.')}
+      >
+        <Variable class="size-3.5 shrink-0" />
+        Parameters
+        <span class="rounded bg-muted/70 px-1 font-mono text-ui-3xs tabular-nums text-muted-foreground">{sqlParams.length}</span>
+      </Button>
     {/if}
 
     <div class="mx-0.5 h-4 w-px shrink-0 bg-border" aria-hidden="true"></div>
 
     <div class="flex min-w-0 items-center gap-0.5">
-      <Tooltip.Root>
-        <Tooltip.Trigger>
-          {#snippet child({ props })}
-            <Button
-              {...props}
-              type="button"
-              variant="ghost"
-              size="sm"
-              class="size-7 p-0 text-muted-foreground hover:text-foreground"
-              disabled={!sql.trim()}
-              onclick={() => void formatSql?.()}
-            >
-              <Braces class="size-3.5 shrink-0" />
-            </Button>
-          {/snippet}
-        </Tooltip.Trigger>
-        <Tooltip.Content>
-          {@render hint('Format SQL', 'Reformat the whole editor with consistent casing and indentation.')}
-        </Tooltip.Content>
-      </Tooltip.Root>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        class="size-7 p-0 text-muted-foreground hover:text-foreground"
+        disabled={!sql.trim()}
+        onclick={() => void formatSql?.()}
+        title={tipText('Format SQL', 'Reformat the whole editor with consistent casing and indentation.')}
+      >
+        <Braces class="size-3.5 shrink-0" />
+      </Button>
 
-      <Tooltip.Root>
-        <Tooltip.Trigger>
-          {#snippet child({ props })}
-            <Button
-              {...props}
-              type="button"
-              variant="ghost"
-              size="sm"
-              class="size-7 p-0 text-muted-foreground hover:text-foreground"
-              disabled={!sql.trim()}
-              onclick={openSaveDialog}
-            >
-              <Bookmark class="size-3.5 shrink-0" />
-            </Button>
-          {/snippet}
-        </Tooltip.Trigger>
-        <Tooltip.Content>
-          {@render hint('Save query', 'Keep this query for later — saved queries live in History → Saved, per connection.', [mod, 'S'])}
-        </Tooltip.Content>
-      </Tooltip.Root>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        class="size-7 p-0 text-muted-foreground hover:text-foreground"
+        disabled={!sql.trim()}
+        onclick={openSaveDialog}
+        title={tipText('Save query', 'Keep this query for later — saved queries live in History → Saved, per connection.', [mod, 'S'])}
+      >
+        <Bookmark class="size-3.5 shrink-0" />
+      </Button>
 
-      <Tooltip.Root>
-        <Tooltip.Trigger>
-          {#snippet child({ props })}
-            <Button
-              {...props}
-              type="button"
-              variant="ghost"
-              size="sm"
-              class={cn(
-                'size-7 p-0 hover:text-foreground',
-                queryHistoryVisible ? 'text-foreground' : 'text-muted-foreground',
-              )}
-              onclick={() => (queryHistoryVisible = !queryHistoryVisible)}
-            >
-              <History class="size-3.5 shrink-0" />
-            </Button>
-          {/snippet}
-        </Tooltip.Trigger>
-        <Tooltip.Content>
-          {@render hint('Query history', 'Browse and re-run everything you have executed, plus your saved queries.', [mod, '⇧', 'B'])}
-        </Tooltip.Content>
-      </Tooltip.Root>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        class={cn(
+          'size-7 p-0 hover:text-foreground',
+          queryHistoryVisible ? 'text-foreground' : 'text-muted-foreground',
+        )}
+        onclick={() => (queryHistoryVisible = !queryHistoryVisible)}
+        title={tipText('Query history', 'Browse and re-run everything you have executed, plus your saved queries.', [mod, '⇧', 'B'])}
+      >
+        <History class="size-3.5 shrink-0" />
+      </Button>
 
-      <Tooltip.Root>
-        <Tooltip.Trigger>
-          {#snippet child({ props })}
-            <Button
-              {...props}
-              type="button"
-              variant="ghost"
-              size="sm"
-              class={cn(
-                'size-7 p-0 hover:text-foreground',
-                outputView === 'explain' ? 'text-foreground' : 'text-muted-foreground',
-              )}
-              disabled={!sql.trim() || explainLoading}
-              onclick={handleExplain}
-            >
-              {#if explainLoading}
-                <Loader2 class="size-3.5 shrink-0 animate-spin" />
-              {:else}
-                <ScanSearch class="size-3.5 shrink-0" />
-              {/if}
-            </Button>
-          {/snippet}
-        </Tooltip.Trigger>
-        <Tooltip.Content>
-          {@render hint('Explain plan', 'Visualize how the database executes this query — spot slow scans and missing indexes.')}
-        </Tooltip.Content>
-      </Tooltip.Root>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        class={cn(
+          'size-7 p-0 hover:text-foreground',
+          outputView === 'explain' ? 'text-foreground' : 'text-muted-foreground',
+        )}
+        disabled={!sql.trim() || explainLoading}
+        onclick={handleExplain}
+        title={tipText('Explain plan', 'Visualize how the database executes this query — spot slow scans and missing indexes.')}
+      >
+        {#if explainLoading}
+          <Loader2 class="size-3.5 shrink-0 animate-spin" />
+        {:else}
+          <ScanSearch class="size-3.5 shrink-0" />
+        {/if}
+      </Button>
 
       <DropdownMenu.Root>
         <DropdownMenu.Trigger
@@ -964,23 +885,14 @@
           </DropdownMenu.Root>
         {/if}
 
-        <Tooltip.Root>
-          <Tooltip.Trigger>
-            {#snippet child({ props })}
-              <button
-                {...props}
-                type="button"
-                onclick={toggleOutput}
-                class="inline-flex size-5 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-foreground"
-              >
-                <ChevronDown class={cn('size-3.5 transition-transform duration-150', outputVisible ? '' : 'rotate-180')} />
-              </button>
-            {/snippet}
-          </Tooltip.Trigger>
-          <Tooltip.Content side="top" align="end">
-            {@render hint(outputVisible ? 'Hide results' : 'Show results', 'Collapse the results panel to give the editor the full height.', [mod, 'J'])}
-          </Tooltip.Content>
-        </Tooltip.Root>
+        <button
+          type="button"
+          onclick={toggleOutput}
+          class="inline-flex size-5 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-foreground"
+          title={tipText(outputVisible ? 'Hide results' : 'Show results', 'Collapse the results panel to give the editor the full height.', [mod, 'J'])}
+        >
+          <ChevronDown class={cn('size-3.5 transition-transform duration-150', outputVisible ? '' : 'rotate-180')} />
+        </button>
       </div>
     </div>
 
@@ -1105,7 +1017,6 @@
   </div>
   </div>
 </div>
-</Tooltip.Provider>
 
 <Dialog.Root bind:open={saveDialogOpen}>
   <Dialog.Content class="max-w-md gap-4">
