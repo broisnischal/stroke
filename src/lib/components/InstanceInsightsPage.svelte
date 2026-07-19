@@ -279,7 +279,45 @@
           <Search class="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/40" />
           <input bind:value={configSearch} placeholder="Search setting name, category, or description…" class="h-8 w-full rounded-lg border border-border/60 bg-background pl-8 pr-3 text-ui-xs text-foreground outline-none focus:border-ring" />
         </div>
-        {@render grid(configFiltered)}
+        {#if !configFiltered.length}
+          <div class="rounded-lg border border-border/40 bg-card/20 py-8 text-center text-ui-xs text-muted-foreground/40">No settings found</div>
+        {:else}
+          <!-- Fixed-layout + content-visibility keeps scrolling smooth across the ~350 pg_settings rows:
+               fixed layout skips per-cell column measurement; content-visibility skips off-screen row paint. -->
+          <div class="overflow-x-auto rounded-lg border border-border/40">
+            <table class="cfg-table w-full border-collapse text-ui-2xs">
+              <colgroup>
+                <col style="width:3rem" />
+                <col style="width:17rem" />
+                <col style="width:16rem" />
+                <col style="width:9rem" />
+                <col style="width:4rem" />
+                <col style="width:7rem" />
+                <col />
+              </colgroup>
+              <thead>
+                <tr class="bg-muted/25">
+                  {#each ['#','name','category','value','unit','requiresRestart','description'] as h (h)}
+                    <th class="whitespace-nowrap border-b border-border/40 px-2.5 py-1.5 text-left font-medium text-muted-foreground/50">{h}</th>
+                  {/each}
+                </tr>
+              </thead>
+              <tbody>
+                {#each configFiltered as row, i (row.name ?? i)}
+                  <tr class="cfg-row">
+                    <td class="truncate border-b border-border/15 px-2 py-1 text-muted-foreground/40">{i + 1}</td>
+                    <td class="truncate border-b border-border/15 px-2.5 py-1 font-mono text-foreground/80" title={cell(row.name)}>{cell(row.name)}</td>
+                    <td class="truncate border-b border-border/15 px-2.5 py-1 text-foreground/70" title={cell(row.category)}>{cell(row.category)}</td>
+                    <td class="truncate border-b border-border/15 px-2.5 py-1 font-mono text-foreground/80" title={cell(row.value)}>{cell(row.value)}</td>
+                    <td class="truncate border-b border-border/15 px-2.5 py-1 font-mono text-muted-foreground/60">{cell(row.unit)}</td>
+                    <td class="truncate border-b border-border/15 px-2.5 py-1 text-muted-foreground/60">{cell(row.requiresRestart)}</td>
+                    <td class="truncate border-b border-border/15 px-2.5 py-1 text-muted-foreground/60" title={cell(row.description)}>{cell(row.description)}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
 
       <!-- ── REPLICATION ── -->
       {:else if subtab === 'replication'}
@@ -331,3 +369,16 @@
     </div>
   {/if}
 {/snippet}
+
+<style>
+  /* Config table perf: fixed layout avoids O(rows×cols) column re-measurement on every
+     reflow; content-visibility lets the engine skip layout/paint of off-screen rows so
+     scrolling the full ~350-row pg_settings list stays smooth. */
+  .cfg-table {
+    table-layout: fixed;
+  }
+  .cfg-row {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 25px;
+  }
+</style>
