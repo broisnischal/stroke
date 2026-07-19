@@ -21,7 +21,7 @@
     connectionType === 'postgres' || connectionType === 'cockroachdb'
   );
 
-  /** @type {'roles' | 'policies' | 'rls'} */
+  /** @type {'roles' | 'permissions' | 'policies' | 'rls'} */
   let activeTab = $state("roles");
 
   /** @type {Record<string, unknown>[] | null} */
@@ -47,6 +47,17 @@
   /** @type {number | null} */
   let expandedPolicy = $state(null);
 
+  // ── Permissions (master-detail) ──────────────────────────────────────────
+  /** Selected role name for the Permissions view. */
+  let selectedRole = $state("");
+  /** @type {Record<string, unknown>[] | null} pg_auth_members flattened → { member, granted } */
+  let memberships = $state(null);
+  let membershipsLoading = $state(false);
+  /** @type {Record<string, unknown>[] | null} per-database privileges for selectedRole */
+  let dbGrants = $state(null);
+  let dbGrantsLoading = $state(false);
+  let dbGrantsError = $state("");
+
   /** @param {{ columns?: {name:string}[], rows?: unknown[][] } | null} result */
   function toRecords(result) {
     if (!result?.columns || !result?.rows) return [];
@@ -66,7 +77,7 @@
       roles = toRecords(
         await executeSql(`
         SELECT rolname, rolsuper, rolcreaterole, rolcreatedb, rolcanlogin,
-               rolreplication, rolbypassrls, rolconnlimit, rolvaliduntil::text AS rolvaliduntil
+               rolreplication, rolbypassrls, rolinherit, rolconnlimit, rolvaliduntil::text AS rolvaliduntil
         FROM pg_catalog.pg_roles ORDER BY rolcanlogin DESC, rolname
       `),
       );
@@ -75,6 +86,60 @@
     } finally {
       rolesLoading = false;
     }
+  }
+
+  /** SQL single-quoted string literal (escapes embedded quotes). */
+  const sqlLit = (/** @type {unknown} */ v) => `'${String(v).replace(/'/g, "''")}'`;
+
+  async function loadMemberships() {
+    membershipsLoading = true;
+    try {
+      memberships = toRecords(
+        await executeSql(`
+        SELECT r.rolname AS member, g.rolname AS granted
+        FROM pg_catalog.pg_auth_members m
+        JOIN pg_catalog.pg_roles r ON r.oid = m.member
+        JOIN pg_catalog.pg_roles g ON g.oid = m.roleid
+      `),
+      );
+    } catch {
+      memberships = [];
+    } finally {
+      membershipsLoading = false;
+    }
+  }
+
+  /** @param {string} roleName */
+  async function loadDbGrants(roleName) {
+    if (!roleName) return;
+    dbGrantsLoading = true;
+    dbGrantsError = "";
+    try {
+      dbGrants = toRecords(
+        await executeSql(`
+        SELECT datname,
+               has_database_privilege(${sqlLit(roleName)}, datname, 'CONNECT') AS can_connect,
+               has_database_privilege(${sqlLit(roleName)}, datname, 'CREATE') AS can_create,
+               has_database_privilege(${sqlLit(roleName)}, datname, 'TEMP') AS can_temp
+        FROM pg_catalog.pg_database
+        WHERE datistemplate = false
+        ORDER BY datname
+      `),
+      );
+    } catch (e) {
+      dbGrants = [];
+      dbGrantsError = String(e);
+    } finally {
+      dbGrantsLoading = false;
+    }
+  }
+
+  /** @param {string} roleName */
+  function selectRole(roleName) {
+    if (!roleName || roleName === selectedRole) return;
+    selectedRole = roleName;
+    dbGrants = null;
+    void loadDbGrants(roleName);
   }
 
   async function loadPolicies() {
@@ -120,6 +185,15 @@
     if (activeTab === "roles") {
       roles = null;
       void loadRoles();
+    } else if (activeTab === "permissions") {
+      roles = null;
+      memberships = null;
+      void loadRoles();
+      void loadMemberships();
+      if (selectedRole) {
+        dbGrants = null;
+        void loadDbGrants(selectedRole);
+      }
     } else if (activeTab === "policies") {
       policies = null;
       void loadPolicies();
@@ -179,13 +253,67 @@
       loadPolicies();
     else if (activeTab === "rls" && rlsTables === null && !rlsLoading)
       loadRls();
+    else if (activeTab === "permissions") {
+      if (roles === null && !rolesLoading) loadRoles();
+      if (memberships === null && !membershipsLoading) loadMemberships();
+    }
+  });
+
+  // Auto-select the first role once loaded on the Permissions tab.
+  $effect(() => {
+    if (activeTab !== "permissions" || !roles || !roles.length) return;
+    if (!selectedRole || !roles.some((r) => r.rolname === selectedRole)) {
+      selectRole(String(roles[0].rolname));
+    }
   });
 
   const bool = (v) => v === true || v === "t" || v === "true" || v === 1;
 
+  /** @param {Record<string,unknown>} r */
+  const roleKind = (r) =>
+    bool(r.rolsuper) ? "super" : bool(r.rolcanlogin) ? "login" : "group";
+
+  /** Roles grouped for the Permissions tree (empty groups dropped). */
+  const roleGroups = $derived.by(() => {
+    const list = roles ?? [];
+    return [
+      { id: "super", label: "Superusers", items: list.filter((r) => roleKind(r) === "super") },
+      { id: "login", label: "Login roles", items: list.filter((r) => roleKind(r) === "login") },
+      { id: "group", label: "Group roles", items: list.filter((r) => roleKind(r) === "group") },
+    ].filter((g) => g.items.length);
+  });
+
+  const selectedRoleObj = $derived(
+    (roles ?? []).find((r) => r.rolname === selectedRole) ?? null,
+  );
+  /** Roles that selectedRole inherits from (is a member of). */
+  const memberOf = $derived(
+    (memberships ?? [])
+      .filter((m) => m.member === selectedRole)
+      .map((m) => String(m.granted)),
+  );
+  /** Roles that are members of selectedRole. */
+  const membersOfSelected = $derived(
+    (memberships ?? [])
+      .filter((m) => m.granted === selectedRole)
+      .map((m) => String(m.member)),
+  );
+
+  /** Attribute chips shown in the Role Attributes panel. */
+  const ROLE_ATTRS = [
+    { key: "rolcanlogin", label: "Can login" },
+    { key: "rolsuper", label: "Superuser" },
+    { key: "rolcreatedb", label: "Create DB" },
+    { key: "rolcreaterole", label: "Create role" },
+    { key: "rolreplication", label: "Replication" },
+    { key: "rolbypassrls", label: "Bypass RLS" },
+    { key: "rolinherit", label: "Inherit" },
+  ];
+
   const isLoading = $derived(
     supported && (
       (activeTab === "roles" && (rolesLoading || roles === null)) ||
+      (activeTab === "permissions" && (rolesLoading || roles === null || dbGrantsLoading)) ||
       (activeTab === "policies" && (policiesLoading || policies === null)) ||
       (activeTab === "rls" && (rlsLoading || rlsTables === null))
     )
@@ -193,6 +321,7 @@
 
   const TABS = [
     { id: "roles", label: "Roles & Users" },
+    { id: "permissions", label: "Permissions" },
     { id: "policies", label: "Policies" },
     { id: "rls", label: "Row Level Security" },
   ];
@@ -400,6 +529,167 @@
             {/each}
           </tbody>
         </table>
+      {/if}
+
+      <!-- Permissions (master-detail) -->
+    {:else if activeTab === "permissions"}
+      {#if rolesLoading || roles === null}
+        <div class="flex items-center justify-center gap-2 py-16 text-muted-foreground">
+          <RefreshCw class="size-4 animate-spin" /><span class="font-mono text-ui-sm">Loading…</span>
+        </div>
+      {:else if rolesError}
+        <div class="px-4 py-8 text-center">
+          <p class="font-mono text-ui-xs text-destructive">{rolesError}</p>
+          <button onclick={() => { roles = null; loadRoles(); }} class="mt-2 font-mono text-ui-xs text-muted-foreground underline">Retry</button>
+        </div>
+      {:else}
+        <div class="flex h-full min-h-0">
+          <!-- Left: role tree -->
+          <aside class="w-56 shrink-0 overflow-y-auto border-r border-border/40">
+            {#each roleGroups as group (group.id)}
+              <div class="px-3 pt-3 pb-1 font-mono text-ui-3xs uppercase tracking-wider text-muted-foreground/45">
+                {group.label} · {group.items.length}
+              </div>
+              {#each group.items as r (r.rolname)}
+                {@const isSuper = bool(r.rolsuper)}
+                {@const isLogin = bool(r.rolcanlogin)}
+                {@const isSel = selectedRole === r.rolname}
+                <button
+                  type="button"
+                  class={cn(
+                    "flex w-full items-center gap-2 px-3 py-1.5 text-left outline-none transition-colors",
+                    isSel ? "bg-accent/40" : "hover:bg-accent/20",
+                  )}
+                  onclick={() => selectRole(String(r.rolname))}
+                >
+                  <span
+                    class={cn(
+                      "inline-flex size-5 shrink-0 items-center justify-center rounded-full font-mono text-[9px] font-semibold uppercase",
+                      isSuper ? "bg-destructive/10 text-destructive" : isLogin ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground",
+                    )}>{String(r.rolname).slice(0, 2)}</span>
+                  <span class={cn("truncate font-mono text-ui-xs", isSel ? "font-medium text-foreground" : "text-muted-foreground")}>{r.rolname}</span>
+                </button>
+              {/each}
+            {/each}
+          </aside>
+
+          <!-- Right: detail -->
+          <div class="min-w-0 flex-1 overflow-y-auto">
+            {#if !selectedRoleObj}
+              <div class="flex h-full flex-col items-center justify-center gap-3 py-16 text-center">
+                <Users class="size-9 text-muted-foreground/20" />
+                <p class="font-mono text-ui-xs text-muted-foreground">Select a role to inspect its permissions</p>
+              </div>
+            {:else}
+              {@const role = selectedRoleObj}
+              <div class="flex items-center gap-2.5 border-b border-border/40 px-4 py-3">
+                <span
+                  class={cn(
+                    "inline-flex size-7 shrink-0 items-center justify-center rounded-full font-mono text-[11px] font-semibold uppercase",
+                    bool(role.rolsuper) ? "bg-destructive/10 text-destructive" : bool(role.rolcanlogin) ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground",
+                  )}>{String(role.rolname).slice(0, 2)}</span>
+                <div class="min-w-0">
+                  <p class="truncate font-mono text-ui-sm font-medium text-foreground">{role.rolname}</p>
+                  <p class="font-mono text-ui-3xs text-muted-foreground/60">
+                    {bool(role.rolsuper) ? "Superuser" : bool(role.rolcanlogin) ? "Login role" : "Group role"}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  class="ml-auto inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 font-mono text-ui-xs text-muted-foreground transition-colors hover:bg-accent/35 hover:text-foreground"
+                  onclick={() => openRoleModal(role)}
+                ><KeyRound class="size-3.5" />Edit</button>
+              </div>
+
+              <!-- Role attributes -->
+              <section class="border-b border-border/40 px-4 py-3">
+                <p class="mb-2 font-mono text-ui-3xs uppercase tracking-wider text-muted-foreground/50">Role attributes</p>
+                <div class="flex flex-wrap gap-1.5">
+                  {#each ROLE_ATTRS as attr (attr.key)}
+                    {@const on = bool(role[attr.key])}
+                    <span
+                      class={cn(
+                        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-mono text-ui-3xs font-medium",
+                        on ? "bg-primary/10 text-primary" : "bg-muted/60 text-muted-foreground/45",
+                      )}
+                    >
+                      {#if on}<Check class="size-2.5" />{/if}{attr.label}
+                    </span>
+                  {/each}
+                  <span class="inline-flex items-center gap-1 rounded-full bg-muted/60 px-2 py-0.5 font-mono text-ui-3xs text-muted-foreground/70">
+                    Conn limit: {role.rolconnlimit === -1 || role.rolconnlimit == null ? "∞" : role.rolconnlimit}
+                  </span>
+                  {#if role.rolvaliduntil}
+                    <span class="inline-flex items-center gap-1 rounded-full bg-muted/60 px-2 py-0.5 font-mono text-ui-3xs text-muted-foreground/70">Expires: {role.rolvaliduntil}</span>
+                  {/if}
+                </div>
+              </section>
+
+              <!-- Membership -->
+              <section class="border-b border-border/40 px-4 py-3">
+                <p class="mb-2 font-mono text-ui-3xs uppercase tracking-wider text-muted-foreground/50">Inherited from · member of</p>
+                {#if memberOf.length}
+                  <div class="flex flex-wrap gap-1.5">
+                    {#each memberOf as m (m)}
+                      <button type="button" class="rounded-full bg-accent/40 px-2 py-0.5 font-mono text-ui-3xs text-foreground/80 transition-colors hover:bg-accent/60" onclick={() => selectRole(m)}>{m}</button>
+                    {/each}
+                  </div>
+                {:else}
+                  <p class="font-mono text-ui-2xs text-muted-foreground/50">Not a member of any role</p>
+                {/if}
+                {#if membersOfSelected.length}
+                  <p class="mt-3 mb-2 font-mono text-ui-3xs uppercase tracking-wider text-muted-foreground/50">Granted to · members</p>
+                  <div class="flex flex-wrap gap-1.5">
+                    {#each membersOfSelected as m (m)}
+                      <button type="button" class="rounded-full bg-muted/60 px-2 py-0.5 font-mono text-ui-3xs text-muted-foreground/80 transition-colors hover:bg-accent/40" onclick={() => selectRole(m)}>{m}</button>
+                    {/each}
+                  </div>
+                {/if}
+              </section>
+
+              <!-- Database access -->
+              <section class="px-4 py-3">
+                <p class="mb-2 font-mono text-ui-3xs uppercase tracking-wider text-muted-foreground/50">Database access</p>
+                {#if dbGrantsLoading || dbGrants === null}
+                  <div class="flex items-center gap-2 py-6 text-muted-foreground"><RefreshCw class="size-3.5 animate-spin" /><span class="font-mono text-ui-xs">Loading grants…</span></div>
+                {:else if dbGrantsError}
+                  <p class="font-mono text-ui-2xs text-destructive">{dbGrantsError}</p>
+                {:else if dbGrants.length === 0}
+                  <p class="font-mono text-ui-2xs text-muted-foreground/50">No databases</p>
+                {:else}
+                  <div class="overflow-hidden rounded-md border border-border/40">
+                    <table class="w-full text-ui-xs">
+                      <thead class="bg-panel text-left">
+                        <tr class="border-b border-border/50">
+                          <th class="px-3 py-1.5 font-mono font-normal text-muted-foreground">Database</th>
+                          <th class="px-3 py-1.5 text-center font-mono font-normal text-muted-foreground" title="CONNECT">Connect</th>
+                          <th class="px-3 py-1.5 text-center font-mono font-normal text-muted-foreground" title="CREATE">Create</th>
+                          <th class="px-3 py-1.5 text-center font-mono font-normal text-muted-foreground" title="TEMP">Temp</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {#each dbGrants as g (g.datname)}
+                          <tr class="border-b border-border/25 last:border-0 hover:bg-accent/20">
+                            <td class="px-3 py-1.5 font-mono font-medium text-foreground">{g.datname}</td>
+                            {#each ["can_connect", "can_create", "can_temp"] as col (col)}
+                              <td class="px-3 py-1.5 text-center">
+                                {#if bool(g[col])}
+                                  <Check class="mx-auto size-3.5 text-primary" />
+                                {:else}
+                                  <span class="text-muted-foreground/20">—</span>
+                                {/if}
+                              </td>
+                            {/each}
+                          </tr>
+                        {/each}
+                      </tbody>
+                    </table>
+                  </div>
+                {/if}
+              </section>
+            {/if}
+          </div>
+        </div>
       {/if}
 
       <!-- Policies -->
