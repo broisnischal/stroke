@@ -14,7 +14,7 @@ const STORAGE_KEY = 'stroke:settings'
 /** @typedef {'geist' | 'serif' | 'apple' | 'inter' | 'mono' | 'fira' | 'plex' | 'space' | 'source'} FontId */
 /** @typedef {'regular' | 'light' | 'bold'} IconStyleId */
 /** @typedef {'lucide' | 'hugeicons' | 'phosphor'} IconSetId */
-/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean, defaultDataView: string, paginationMode: string, maxQueryHistory: number, connectTimeoutMs: number, socketTimeoutMs: number, maxAllowedPacket: number, sessionTimezone: string, vimMode: boolean }} AppSettings */
+/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean, defaultDataView: string, paginationMode: string, maxQueryHistory: number, connectTimeoutMs: number, socketTimeoutMs: number, maxAllowedPacket: number, sessionTimezone: string, vimMode: boolean, nullSortOrder: string }} AppSettings */
 
 /** UI zoom scale (font + layout). 1 = 100%. */
 export const ZOOM_STEPS = [0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.25, 1.5]
@@ -177,6 +177,9 @@ export const DEFAULT_DATA_VIEW = 'table'
 // All non-offset modes fall back to offset when their preconditions aren't met
 // (no single-column PK, a multi-column sort, or a jump to an arbitrary page).
 export const PAGINATION_MODE_IDS = /** @type {const} */ (['offset', 'cursor', 'keyset', 'temporal'])
+/** Null placement for quick-query ORDER BY (dialects that support it). */
+export const NULL_SORT_IDS = /** @type {const} */ (['unset', 'first', 'last'])
+export const DEFAULT_NULL_SORT = 'unset'
 export const DEFAULT_PAGINATION_MODE = 'offset'
 export const DEFAULT_MAX_QUERY_HISTORY = 100
 export const DEFAULT_CONNECT_TIMEOUT_MS = 60000
@@ -215,6 +218,7 @@ export const DEFAULT_SETTINGS = {
   maxAllowedPacket: DEFAULT_MAX_ALLOWED_PACKET,
   sessionTimezone: DEFAULT_SESSION_TIMEZONE,
   vimMode: false,
+  nullSortOrder: DEFAULT_NULL_SORT,
 }
 
 /** Reactive app font id (synced by applySettings). */
@@ -329,7 +333,8 @@ export function loadSettings() {
         ? parsed.sessionTimezone.trim()
         : DEFAULT_SESSION_TIMEZONE
     const vimMode = parsed.vimMode === true
-    _settingsCache = { theme, zoom, font, iconStyle, iconSet, tableStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply, defaultDataView, paginationMode, maxQueryHistory, connectTimeoutMs, socketTimeoutMs, maxAllowedPacket, sessionTimezone, vimMode }
+    const nullSortOrder = NULL_SORT_IDS.includes(parsed.nullSortOrder) ? parsed.nullSortOrder : DEFAULT_NULL_SORT
+    _settingsCache = { theme, zoom, font, iconStyle, iconSet, tableStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply, defaultDataView, paginationMode, maxQueryHistory, connectTimeoutMs, socketTimeoutMs, maxAllowedPacket, sessionTimezone, vimMode, nullSortOrder }
     return { ..._settingsCache }
   } catch {
     return { ...DEFAULT_SETTINGS }
