@@ -1,4 +1,4 @@
-/** @typedef {'table' | 'sql' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'extensions' | 'backup' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search' | 'notebook' | 'schema-timeline' | 'data-diff' | 'insights' | 'license'} StudioTabKind */
+/** @typedef {'table' | 'sql' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'extensions' | 'backup' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search' | 'notebook' | 'schema-timeline' | 'data-diff' | 'insights' | 'objects' | 'license'} StudioTabKind */
 
 import { loadDefaultPageSize } from '$lib/table-query.js'
 
@@ -220,6 +220,20 @@ export function findInsightsTab(tabs) {
   return tabs.find((t) => t.kind === 'insights') ?? null
 }
 
+export function createObjectsTab() {
+  return /** @type {StudioTab} */ ({
+    id: nextTabId(),
+    kind: 'objects',
+    title: 'Database Objects',
+    state: null,
+  })
+}
+
+/** @param {StudioTab[]} tabs */
+export function findObjectsTab(tabs) {
+  return tabs.find((t) => t.kind === 'objects') ?? null
+}
+
 export function createExtensionsTab() {
   return /** @type {StudioTab} */ ({
     id: nextTabId(),
@@ -396,6 +410,7 @@ export function tabDisplayTitle(tab) {
   if (tab.kind === 'notebook') return tab.title || 'Untitled Notebook'
   if (tab.kind === 'schema-timeline') return 'Schema Timeline'
   if (tab.kind === 'data-diff') return 'Data Diff'
+  if (tab.kind === 'objects') return 'Database Objects'
   if (tab.kind === 'license') return 'Stroke Pro'
   return tab.title
 }

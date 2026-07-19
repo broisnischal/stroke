@@ -3,6 +3,7 @@
   import { fade } from 'svelte/transition'
   import Logo from './Logo.svelte'
   import Database from '@lucide/svelte/icons/database'
+  import Boxes from '@lucide/svelte/icons/boxes'
   import Terminal from '@lucide/svelte/icons/terminal'
   import Table2 from '@lucide/svelte/icons/table-2'
   import Bot from '@lucide/svelte/icons/bot'
@@ -83,6 +84,7 @@
   import BackupPage from './BackupPage.svelte'
   import LogsPage from './LogsPage.svelte'
   import InstanceInsightsPage from './InstanceInsightsPage.svelte'
+  import ObjectsPage from './ObjectsPage.svelte'
   // Monaco-backed pages (DataDiffPage, OrmRunner, SecurityPage, JsonViewerPage, SqlConsole)
   // are loaded lazily at their render sites so the Monaco editor stays out of the
   // startup bundle until the user actually opens a SQL / ORM / JSON / diff / security tab.
@@ -129,6 +131,8 @@
     createLogsTab,
     createInsightsTab,
     findInsightsTab,
+    createObjectsTab,
+    findObjectsTab,
     createExtensionsTab,
     findExtensionsTab,
     createJsonTab,
@@ -517,6 +521,7 @@
   let securityEverOpened = $state(false)
   let logsEverOpened = $state(false)
   let insightsEverOpened = $state(false)
+  let objectsEverOpened = $state(false)
   let extensionsEverOpened = $state(false)
   let jsonEverOpened = $state(false)
   let backupEverOpened = $state(false)
@@ -768,6 +773,7 @@
     if (activeTab?.kind === 'security') securityEverOpened = true
     if (activeTab?.kind === 'logs') logsEverOpened = true
     if (activeTab?.kind === 'insights') insightsEverOpened = true
+    if (activeTab?.kind === 'objects') objectsEverOpened = true
     if (activeTab?.kind === 'extensions') extensionsEverOpened = true
     if (activeTab?.kind === 'json') jsonEverOpened = true
     if (activeTab?.kind === 'backup') backupEverOpened = true
@@ -2276,6 +2282,10 @@ let rowSearch = $state('')
 
   function openInsightsTab() {
     openSingletonTab({ find: findInsightsTab, create: createInsightsTab })
+  }
+
+  function openObjectsTab() {
+    openSingletonTab({ find: findObjectsTab, create: createObjectsTab })
   }
 
   function openExtensionsTab() {
@@ -4818,6 +4828,7 @@ let rowSearch = $state('')
   onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
   onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
   onopeninsights={() => { if (aiMode) exitAiMode(); openInsightsTab() }}
+  onopenobjects={() => { if (aiMode) exitAiMode(); openObjectsTab() }}
   ontogglequerylog={() => { commandOpen = false; queryLogOpen = !queryLogOpen }}
   onopenextensions={() => { if (aiMode) exitAiMode(); openExtensionsTab() }}
   {hasSchemaExplorer}
@@ -5223,6 +5234,18 @@ let rowSearch = $state('')
         >
           <svelte:boundary failed={tabError}>
             <InstanceInsightsPage active={activeTab?.kind === 'insights'} connectionName={connection?.name ?? connection?.database ?? ''} {dbType} />
+          </svelte:boundary>
+        </div>
+      {/if}
+
+      <!-- Database Objects tab - mount once, keep alive -->
+      {#if objectsEverOpened}
+        <div
+          class={activeTab?.kind === 'objects' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+          inert={activeTab?.kind !== 'objects' || undefined}
+        >
+          <svelte:boundary failed={tabError}>
+            <ObjectsPage active={activeTab?.kind === 'objects'} connectionType={connection?.type ?? null} />
           </svelte:boundary>
         </div>
       {/if}
@@ -5904,6 +5927,11 @@ let rowSearch = $state('')
             <button onclick={openInsightsTab} class={cell}>
               <Database class={iconCls} />
               <span class={labelCls}>Insights</span>
+            </button>
+
+            <button onclick={openObjectsTab} class={cell}>
+              <Boxes class={iconCls} />
+              <span class={labelCls}>Objects</span>
             </button>
 
             <button onclick={openChartsTab} class={$hasPro ? cell : proCell}>
