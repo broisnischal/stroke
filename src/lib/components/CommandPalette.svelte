@@ -42,6 +42,7 @@
     hasSecurity = true,
     onopenlogs = () => {},
     onopeninsights = () => {},
+    onopenobjects = () => {},
     ontogglequerylog = () => {},
     onopenextensions = () => {},
     onopenJsonViewer = () => {},
@@ -638,6 +639,10 @@
               <Command.Item value="open instance insights monitoring dashboard sessions locks replication config pg_settings" onSelect={() => run(onopeninsights)}>
                 <Icon name="database" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">Instance Insights</span>
+              </Command.Item>
+              <Command.Item value="open database objects overview tables views functions routines triggers sizes rows stats" onSelect={() => run(onopenobjects)}>
+                <Icon name="table-2" class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">Database Objects</span>
               </Command.Item>
               <Command.Item value="open activity log events history operations" onSelect={() => run(onopenlogs)}>
                 <Icon name="history" class="size-4 shrink-0 opacity-60" />
