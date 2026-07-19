@@ -3,6 +3,7 @@
   // edge that switches primary views. Purely presentational — all navigation is
   // delegated to the shell via callback props.
   import Icon from './Icon.svelte'
+  import * as Tooltip from '$lib/components/ui/tooltip/index.js'
   import { cn } from '$lib/utils.js'
 
   let {
@@ -66,42 +67,62 @@
     side === 'left' ? 'border-r border-border' : 'border-l border-border',
   )}
 >
-  {#each items as item (item.id)}
-    {@const active = activeId === item.id}
-    <div class="relative">
-      {#if active}
-        <span
-          class={cn(
-            'absolute inset-y-1.5 w-0.5 rounded-full bg-primary',
-            side === 'left' ? 'left-0' : 'right-0',
-          )}
-        ></span>
-      {/if}
-      <button
-        type="button"
-        aria-label={item.label}
-        aria-current={active ? 'page' : undefined}
-        title={item.label}
-        onclick={item.on}
-        class={cn(
-          'flex h-11 w-11 items-center justify-center transition-colors',
-          active ? 'text-foreground' : 'text-muted-foreground/60 hover:text-foreground',
-        )}
-      >
-        <Icon name={item.icon} class="size-[18px]" />
-      </button>
-    </div>
-  {/each}
+  <Tooltip.Provider delayDuration={600} skipDelayDuration={0} disableHoverableContent>
+    {#each items as item (item.id)}
+      {@const active = activeId === item.id}
+      <div class="relative">
+        {#if active}
+          <span
+            class={cn(
+              'absolute inset-y-1.5 w-0.5 rounded-full bg-primary',
+              side === 'left' ? 'left-0' : 'right-0',
+            )}
+          ></span>
+        {/if}
+        <Tooltip.Root>
+          <Tooltip.Trigger>
+            {#snippet child({ props })}
+              <button
+                {...props}
+                type="button"
+                aria-label={item.label}
+                aria-current={active ? 'page' : undefined}
+                onclick={item.on}
+                class={cn(
+                  'flex h-11 w-11 items-center justify-center transition-colors',
+                  active ? 'text-foreground' : 'text-muted-foreground/60 hover:text-foreground',
+                )}
+              >
+                <Icon name={item.icon} class="size-[18px]" />
+              </button>
+            {/snippet}
+          </Tooltip.Trigger>
+          <Tooltip.Content side={side === 'left' ? 'right' : 'left'} sideOffset={8}>
+            {item.label}
+          </Tooltip.Content>
+        </Tooltip.Root>
+      </div>
+    {/each}
 
-  <div class="relative mt-auto">
-    <button
-      type="button"
-      aria-label="Settings"
-      title="Settings"
-      onclick={() => onopensettings()}
-      class="flex h-11 w-11 items-center justify-center text-muted-foreground/60 transition-colors hover:text-foreground"
-    >
-      <Icon name="sliders-horizontal" class="size-[18px]" />
-    </button>
-  </div>
+    <div class="relative mt-auto">
+      <Tooltip.Root>
+        <Tooltip.Trigger>
+          {#snippet child({ props })}
+            <button
+              {...props}
+              type="button"
+              aria-label="Settings"
+              onclick={() => onopensettings()}
+              class="flex h-11 w-11 items-center justify-center text-muted-foreground/60 transition-colors hover:text-foreground"
+            >
+              <Icon name="sliders-horizontal" class="size-[18px]" />
+            </button>
+          {/snippet}
+        </Tooltip.Trigger>
+        <Tooltip.Content side={side === 'left' ? 'right' : 'left'} sideOffset={8}>
+          Settings
+        </Tooltip.Content>
+      </Tooltip.Root>
+    </div>
+  </Tooltip.Provider>
 </nav>
