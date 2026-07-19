@@ -21,6 +21,9 @@
     schema = 'public',
     schemas = /** @type {string[]} */ ([]),
     onopentable = /** @type {((schema:string, table:string)=>void)|undefined} */ (undefined),
+    /** When set, the ERD is scoped to this table + the tables directly FK-connected to it. */
+    focusTable = '',
+    onclearfocus = /** @type {() => void} */ (() => {}),
   } = $props()
 
   /**
@@ -214,7 +217,18 @@
   function buildGraph(forceLayout = false) {
     const all = [...tableMeta.values()]
     const { rawEdges, connected } = buildEdgeData(all)
-    const visible = all.filter(t => !connectedOnly || connected.has(t.name))
+    let visible
+    if (focusTable && tableMeta.has(focusTable)) {
+      // Per-table ERD: the focused table + every table directly FK-connected to it.
+      const neighbors = new Set([focusTable])
+      for (const e of rawEdges) {
+        if (e.source === focusTable) neighbors.add(e.target)
+        if (e.target === focusTable) neighbors.add(e.source)
+      }
+      visible = all.filter(t => neighbors.has(t.name))
+    } else {
+      visible = all.filter(t => !connectedOnly || connected.has(t.name))
+    }
     const visibleIds = new Set(visible.map(t => t.name))
     const filteredEdges = rawEdges.filter(e => visibleIds.has(e.source) && visibleIds.has(e.target))
 
@@ -242,6 +256,16 @@
     edges = filteredEdges
     if (search.trim()) _applySearch(search.trim().toLowerCase())
   }
+
+  // Re-scope + re-layout when the focused table changes (e.g. opened from the sidebar).
+  let _prevFocus = untrack(() => focusTable)
+  $effect(() => {
+    if (focusTable === _prevFocus) return
+    _prevFocus = focusTable
+    _posCache.clear()
+    buildGraph(true)
+    void tick().then(() => erd?.fit?.())
+  })
 
   // ── Search ────────────────────────────────────────────────────────────────
   /** @param {string} q */
@@ -752,6 +776,17 @@
       </div>
 
     {:else}
+      {#if focusTable}
+        <div class="pointer-events-none absolute inset-x-0 top-3 z-40 flex justify-center">
+          <div class="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-border/60 bg-popover/95 px-3 py-1 text-ui-xs shadow-lg backdrop-blur">
+            <span class="text-muted-foreground/70">Related to</span>
+            <span class="font-mono font-medium text-foreground">{focusTable}</span>
+            <button type="button" class="ml-0.5 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-muted-foreground/60 transition-colors hover:bg-muted/50 hover:text-foreground" onclick={onclearfocus}>
+              Show all
+            </button>
+          </div>
+        </div>
+      {/if}
       <ErdCanvas
         bind:this={erd}
         {nodes}

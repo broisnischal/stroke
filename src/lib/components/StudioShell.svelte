@@ -286,6 +286,8 @@
   let dockerInitialDb = $state(/** @type {string | null} */ (null))
   /** Bottom query-log console visibility. */
   let queryLogOpen = $state(false)
+  /** When set, the ERD tab is scoped to this table + its FK-connected neighbors. */
+  let erdFocusTable = $state('')
   let showCreateTableDialog = $state(false)
   let showCreateSchemaDialog = $state(false)
   let savedConnections = $state(loadSavedConnections())
@@ -2301,7 +2303,9 @@ let rowSearch = $state('')
     openSingletonTab({ find: findDashboardTab, create: createDashboardTab })
   }
 
-  function openErdTab() {
+  /** @param {string} [focusTable] Scope the ERD to one table + its FK neighbors. */
+  function openErdTab(focusTable = '') {
+    erdFocusTable = typeof focusTable === 'string' ? focusTable : ''
     openSingletonTab({ find: findErdTab, create: createErdTab })
   }
 
@@ -4937,6 +4941,7 @@ let rowSearch = $state('')
         onexportdata={(t) => void handleExportData(t)}
         onopeninconsole={handleOpenTableInConsole}
         ongeneratesql={handleGenerateSql}
+        onopentableerd={(t) => { if (aiMode) exitAiMode(); openErdTab(t) }}
         oncountrows={(t) => void handleCountRows(t)}
         oncopycolumns={(t) => void handleCopyColumns(t)}
         openTables={tabs.filter((t) => t.kind === 'table' && t.state && /** @type {any} */ (t.state).schema === activeSchema).map((t) => /** @type {any} */ (t.state).table)}
@@ -5276,6 +5281,8 @@ let rowSearch = $state('')
               <EntityRelationPage
                 schema={activeSchema}
                 {schemas}
+                focusTable={erdFocusTable}
+                onclearfocus={() => (erdFocusTable = '')}
                 onopentable={(s, t) => void openTableTab(s, t)}
               />
             {/await}

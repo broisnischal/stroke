@@ -65,6 +65,8 @@
     onopeninconsole = /** @type {(table: string) => void} */ (() => {}),
     /** Open the Generate SQL dialog (statement skeletons) for the table. */
     ongeneratesql = /** @type {(table: string) => void} */ (() => {}),
+    /** Open the ERD scoped to a table + its FK-connected neighbors. */
+    onopentableerd = /** @type {(table: string) => void} */ (() => {}),
     /** Count the table's rows and toast the result. */
     oncountrows = /** @type {(table: string) => void} */ (() => {}),
     /** Copy the table's column names as a comma-separated list. */
@@ -983,6 +985,10 @@
                         <ContextMenu.Item onSelect={() => onviewstructure(tableName)}>
                           <Icon name="layout-list" />
                           View structure
+                        </ContextMenu.Item>
+                        <ContextMenu.Item onSelect={() => onopentableerd(tableName)}>
+                          <Icon name="git-branch" />
+                          Open ERD
                         </ContextMenu.Item>
                         <ContextMenu.Item onSelect={() => onviewddl(tableName)}>
                           <Icon name="code-2" />
