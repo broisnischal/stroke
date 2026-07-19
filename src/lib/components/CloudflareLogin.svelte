@@ -219,7 +219,7 @@
         <div class="relative">
           <select
             id="cf-account-select"
-            class="h-9 w-full appearance-none rounded-lg border border-border/60 bg-muted/25 pl-3 pr-8 text-[12px] transition-[border-color,box-shadow] hover:border-border focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/20"
+            class="h-9 w-full appearance-none rounded-lg border border-border/60 bg-muted/25 pl-3 pr-8 text-[12px] transition-[border-color,box-shadow] hover:border-border focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none/20"
             value={selectedAccountId}
             onchange={(e) => selectAccount(e.currentTarget.value)}
           >

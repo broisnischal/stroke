@@ -1,8 +1,14 @@
 import { getStudioDb, STORES } from '$lib/stores/studio-db.js'
+import { loadSettings, DEFAULT_MAX_QUERY_HISTORY } from '$lib/stores/settings.js'
 
 const HISTORY_STORE = STORES.queryHistory
 const SAVED_STORE = STORES.savedQueries
-const MAX_HISTORY_PER_CONNECTION = 100
+
+/** How many history entries to keep per connection — configurable in Settings → Database. */
+function maxHistoryPerConnection() {
+  const n = loadSettings().maxQueryHistory
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_MAX_QUERY_HISTORY
+}
 
 /**
  * @typedef {{
@@ -70,9 +76,10 @@ export async function recordQueryExecution(connectionId, sql, meta = {}) {
   await db.put(HISTORY_STORE, entry)
 
   const merged = [entry, ...existing].sort((a, b) => b.executedAt - a.executedAt)
-  if (merged.length > MAX_HISTORY_PER_CONNECTION) {
+  const cap = maxHistoryPerConnection()
+  if (merged.length > cap) {
     await Promise.all(
-      merged.slice(MAX_HISTORY_PER_CONNECTION).map((stale) => db.delete(HISTORY_STORE, stale.id)),
+      merged.slice(cap).map((stale) => db.delete(HISTORY_STORE, stale.id)),
     )
   }
 }

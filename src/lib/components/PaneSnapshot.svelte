@@ -13,6 +13,10 @@
   let {
     /** @type {StudioTab | null} */
     tab = null,
+    /** Reserve a toolbar-height strip so a background table pane lines up with
+        the focused pane (which renders the table toolbar) — prevents the grid
+        from jumping when focus moves between split panes. */
+    toolbarSpacer = false,
   } = $props()
 
   const tableState = $derived(
@@ -32,6 +36,12 @@
 </script>
 
 {#if tableState}
+  <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+    {#if toolbarSpacer}
+      <!-- Matches the focused pane's TableToolbar (h-9) so the grid doesn't jump
+           vertically when focus moves between split panes. -->
+      <div class="h-9 shrink-0 border-b border-border bg-panel"></div>
+    {/if}
   {#if !tableState.table}
     <div class="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center">
       <Table2 class="size-6 text-muted-foreground/30" />
@@ -64,6 +74,7 @@
       />
     </div>
   {/if}
+  </div>
 {:else if sqlState}
   <!-- SQL / Query Editor snapshot: the query text plus its last results, read-only,
        so a defocused pane still shows its work instead of an empty placeholder. -->

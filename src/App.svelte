@@ -4,13 +4,18 @@
   import StudioShell from './lib/components/StudioShell.svelte'
   import LicenseGate from './lib/components/LicenseGate.svelte'
   import AppErrorBoundary from './lib/components/AppErrorBoundary.svelte'
+  import GlobalTooltip from './lib/components/GlobalTooltip.svelte'
   import { loadSettings, applySettings, installZoomShortcuts } from '$lib/stores/settings.js'
   import { installPlatformClass } from '$lib/platform.js'
+  import { installClipboardBridge } from '$lib/clipboard.js'
 
   onMount(async () => {
     installPlatformClass()
     applySettings(loadSettings())
     installZoomShortcuts()
+    // Route clipboard through Tauri's native plugin so copy works in the WKWebview
+    // (navigator.clipboard is denied there, incl. Monaco's internal copy).
+    void installClipboardBridge()
 
     // Dev-only console helpers (window.__TAURI__ isn't exposed without
     // withGlobalTauri, which we keep off in production). Debug trial commands
@@ -62,3 +67,4 @@
     <StudioShell />
   </LicenseGate>
 </AppErrorBoundary>
+<GlobalTooltip />

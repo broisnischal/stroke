@@ -119,6 +119,92 @@ pub fn toggle_devtools(window: tauri::WebviewWindow) {
     let _ = window;
 }
 
+/// Re-center the window at a sane size on the current (or primary) monitor.
+/// The manual escape hatch when the window is stranded off-screen — e.g. after
+/// an external monitor it was placed on gets disconnected.
+#[tauri::command]
+pub fn reset_window(window: tauri::WebviewWindow) {
+    let monitor = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten())
+        .or_else(|| window.available_monitors().ok().and_then(|m| m.into_iter().next()));
+    let Some(m) = monitor else {
+        let _ = window.center();
+        let _ = window.set_focus();
+        return;
+    };
+    let mp = m.position();
+    let ms = m.size();
+    let (mx, my, mw, mh) = (mp.x, mp.y, ms.width as i32, ms.height as i32);
+    let sf = m.scale_factor();
+    // Cap the app's 1280×800 default (physical) to 90% of the monitor.
+    let cap_w = (1280.0 * sf) as i32;
+    let cap_h = (800.0 * sf) as i32;
+    let w = cap_w.min((mw as f64 * 0.9) as i32).max(400);
+    let h = cap_h.min((mh as f64 * 0.9) as i32).max(300);
+    let x = mx + (mw - w) / 2;
+    let y = my + (mh - h) / 2;
+    let _ = window.unmaximize();
+    let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize { width: w as u32, height: h as u32 }));
+    let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
+    let _ = window.set_focus();
+}
+
+/// Pull the window back onto a visible display if it's spilling off its monitor
+/// (e.g. an external monitor it was sized/placed for was unplugged). Idempotent
+/// and conservative: a window already fully inside a monitor is never touched,
+/// so this is safe to run on every focus.
+pub fn ensure_window_on_screen(window: &tauri::WebviewWindow) {
+    let (Ok(pos), Ok(size), Ok(monitors)) = (
+        window.outer_position(),
+        window.outer_size(),
+        window.available_monitors(),
+    ) else {
+        return;
+    };
+    if monitors.is_empty() {
+        return;
+    }
+    let (wx, wy) = (pos.x, pos.y);
+    let (ww, wh) = (size.width as i32, size.height as i32);
+    // Home monitor = the one the window overlaps most (fallback: first).
+    let mut home_idx = 0usize;
+    let mut best = -1i64;
+    for (i, m) in monitors.iter().enumerate() {
+        let mp = m.position();
+        let ms = m.size();
+        let ix = ((wx + ww).min(mp.x + ms.width as i32) - wx.max(mp.x)).max(0) as i64;
+        let iy = ((wy + wh).min(mp.y + ms.height as i32) - wy.max(mp.y)).max(0) as i64;
+        let ov = ix * iy;
+        if ov > best {
+            best = ov;
+            home_idx = i;
+        }
+    }
+    let m = &monitors[home_idx];
+    let mp = m.position();
+    let ms = m.size();
+    let (mx, my, mw, mh) = (mp.x, mp.y, ms.width as i32, ms.height as i32);
+    // Fit the window to the monitor, then clamp it fully inside.
+    let new_w = ww.min(mw);
+    let new_h = wh.min(mh);
+    let new_x = wx.clamp(mx, mx + mw - new_w);
+    let new_y = wy.clamp(my, my + mh - new_h);
+    const TOL: i32 = 2;
+    let changed = (new_w - ww).abs() > TOL
+        || (new_h - wh).abs() > TOL
+        || (new_x - wx).abs() > TOL
+        || (new_y - wy).abs() > TOL;
+    if !changed {
+        return;
+    }
+    let _ = window.unmaximize();
+    let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize { width: new_w as u32, height: new_h as u32 }));
+    let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: new_x, y: new_y }));
+}
+
 use crate::db::{
     connect, connect_clickhouse, connect_d1, connect_duckdb, connect_libsql, connect_mssql, connect_mysql, connect_sqlite, disconnect,
     delete_table_row, delete_table_rows, execute_ddl, execute_sql, execute_sql_multi, get_table_rows, count_table_rows, insert_table_row,
@@ -440,6 +526,11 @@ pub async fn pg_get_table_rows(
     include_count: Option<bool>,
     // Multi-column sort keys (Postgres); overrides sort_column when non-empty.
     sorts: Option<Vec<crate::db::SortSpec>>,
+    // Keyset (cursor) pagination anchor; absent = classic OFFSET.
+    keyset: Option<crate::db::KeysetCursor>,
+    // Null placement for ORDER BY ("first"/"last"); absent keeps NULLS LAST.
+    // Applied on dialects with explicit null placement (Postgres, SQLite, D1/libSQL).
+    nulls_order: Option<String>,
 ) -> Result<TableRows, String> {
     get_table_rows(
         state,
@@ -455,6 +546,8 @@ pub async fn pg_get_table_rows(
         include_meta.unwrap_or(true),
         include_count.unwrap_or(true),
         sorts.unwrap_or_default(),
+        keyset,
+        nulls_order,
     )
     .await
 }
@@ -490,6 +583,43 @@ pub async fn pg_get_column_stats(
     column: String,
 ) -> Result<crate::db::ColumnStats, String> {
     crate::db::get_column_stats(state, schema, table, column).await
+}
+
+// ── Instance Insights (PostgreSQL + MySQL monitoring dashboard) ────────────────
+
+#[tauri::command]
+pub async fn instance_version(
+    state: State<'_, DbState>,
+) -> Result<crate::db::InstanceVersion, String> {
+    crate::db::instance_version(state).await
+}
+
+#[tauri::command]
+pub async fn instance_activity(
+    state: State<'_, DbState>,
+) -> Result<crate::db::InstanceActivity, String> {
+    crate::db::instance_activity(state).await
+}
+
+#[tauri::command]
+pub async fn instance_state(
+    state: State<'_, DbState>,
+) -> Result<crate::db::InstanceState, String> {
+    crate::db::instance_state(state).await
+}
+
+#[tauri::command]
+pub async fn instance_config(
+    state: State<'_, DbState>,
+) -> Result<Vec<crate::db::ConfigSetting>, String> {
+    crate::db::instance_config(state).await
+}
+
+#[tauri::command]
+pub async fn instance_replication(
+    state: State<'_, DbState>,
+) -> Result<crate::db::InstanceReplication, String> {
+    crate::db::instance_replication(state).await
 }
 
 #[tauri::command]

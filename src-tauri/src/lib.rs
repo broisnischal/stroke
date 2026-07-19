@@ -69,6 +69,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::AppleScript, None))
+        .plugin(tauri_plugin_clipboard_manager::init())
         .manage(db_state)
         .manage(mcp_state)
         .manage(TunnelState::new())
@@ -225,6 +226,13 @@ pub fn run() {
                         }
                     }
                 }
+                // If a display was unplugged and left the window spilling
+                // off-screen, pull it back the moment the user focuses it.
+                tauri::WindowEvent::Focused(true) => {
+                    if let Some(w) = app_handle.get_webview_window("main") {
+                        commands::ensure_window_on_screen(&w);
+                    }
+                }
                 _ => {}
             });
 
@@ -239,6 +247,7 @@ pub fn run() {
             commands::read_file,
             commands::restart_app,
             commands::toggle_devtools,
+            commands::reset_window,
             commands::test_postgres_connection,
             commands::connect_postgres,
             commands::disconnect_postgres,
@@ -276,6 +285,11 @@ pub fn run() {
             commands::pg_get_table_rows,
             commands::pg_count_table_rows,
             commands::pg_get_column_stats,
+            commands::instance_version,
+            commands::instance_activity,
+            commands::instance_state,
+            commands::instance_config,
+            commands::instance_replication,
             commands::pg_execute_sql,
             commands::pg_execute_sql_multi,
             commands::pg_explain_sql,

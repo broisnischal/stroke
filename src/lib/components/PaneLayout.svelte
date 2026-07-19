@@ -33,16 +33,28 @@
     const rect = splitEl.getBoundingClientRect()
     const horizontal = node.dir === 'row'
     const splitId = node.id
+    let raf = 0
+    /** @type {number | null} */
+    let pendingPct = null
+    const flush = () => {
+      raf = 0
+      if (pendingPct != null) onresize(splitId, [pendingPct, 100 - pendingPct])
+    }
     /** @param {PointerEvent} ev */
     const move = (ev) => {
       const total = horizontal ? rect.width : rect.height
       if (total <= 0) return
       const pos = horizontal ? ev.clientX - rect.left : ev.clientY - rect.top
       let pct = (pos / total) * 100
-      pct = Math.min(90, Math.max(10, pct))
-      onresize(splitId, [pct, 100 - pct])
+      pendingPct = Math.min(90, Math.max(10, pct))
+      // Coalesce to one resize per animation frame so a heavy pane (the live
+      // grid) can't stall the drag — the splitter stays glued to the pointer.
+      if (!raf) raf = requestAnimationFrame(flush)
     }
     const up = () => {
+      if (raf) cancelAnimationFrame(raf)
+      raf = 0
+      if (pendingPct != null) onresize(splitId, [pendingPct, 100 - pendingPct])
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
       document.body.style.userSelect = ''
@@ -77,7 +89,7 @@
          grip, and a widened invisible hit area for easy grabbing. -->
     <div
       class={cn(
-        'group/split relative z-10 shrink-0',
+        'group/split relative z-10 shrink-0 touch-none select-none',
         node.dir === 'row' ? 'w-1 cursor-col-resize' : 'h-1 cursor-row-resize',
       )}
       onpointerdown={startResize}
@@ -99,11 +111,11 @@
           node.dir === 'row' ? 'h-8 w-0.5' : 'h-0.5 w-8',
         )}
       ></div>
-      <!-- widened invisible hit area -->
+      <!-- widened invisible hit area — generous target so it's easy to grab -->
       <div
         class={cn(
           'absolute',
-          node.dir === 'row' ? '-left-1.5 -right-1.5 inset-y-0' : '-top-1.5 -bottom-1.5 inset-x-0',
+          node.dir === 'row' ? '-left-2 -right-2 inset-y-0' : '-top-2 -bottom-2 inset-x-0',
         )}
       ></div>
     </div>
@@ -123,11 +135,27 @@
     role="group"
     onpointerdowncapture={() => onfocusgroup(node.id)}
   >
-    <!-- Focused-pane accent — only when split, so a lone pane isn't decorated. -->
-    {#if multiPane && isFocused}
-      <div class="pointer-events-none absolute inset-x-0 top-0 z-30 h-0.5 bg-primary/60"></div>
-    {/if}
     {@render renderGroup(node, isFocused)}
+
+    <!-- Active / inactive treatment (tmux-style) — only when split, so a lone
+         pane is never decorated. The focused pane gets a crisp accent border
+         plus a brighter top rail; the rest are dimmed so the active pane is
+         unmistakable. All overlays are pointer-events-none, so a click still
+         passes straight through to focus the pane underneath. -->
+    {#if multiPane}
+      {#if isFocused}
+        <div
+          class="pointer-events-none absolute inset-0 z-30 ring-1 ring-inset ring-primary/70"
+        ></div>
+        <div
+          class="pointer-events-none absolute inset-x-0 top-0 z-30 h-0.5 bg-primary"
+        ></div>
+      {:else}
+        <div
+          class="pointer-events-none absolute inset-0 z-30 bg-background/45 transition-opacity duration-150"
+        ></div>
+      {/if}
+    {/if}
 
     <!-- Drop hint: translucent preview of where the dragged tab will land. -->
     {#if hintEdge}

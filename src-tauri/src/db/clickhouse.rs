@@ -94,12 +94,13 @@ pub async fn query(config: &ClickhouseConfig, sql: &str) -> Result<SqlResult, St
             row_count: Some(0),
             message: Some("Statement executed".to_string()),
             query_ms: elapsed,
+            sql: sql.to_string(),
         });
     }
 
     let text = res.text().await.map_err(|e| format!("Failed to read ClickHouse response: {e}"))?;
     if text.trim().is_empty() {
-        return Ok(SqlResult { columns: vec![], rows: vec![], row_count: Some(0), message: None, query_ms: elapsed });
+        return Ok(SqlResult { columns: vec![], rows: vec![], row_count: Some(0), message: None, query_ms: elapsed, sql: sql.to_string() });
     }
     let parsed: JsonCompact =
         serde_json::from_str(&text).map_err(|e| format!("Failed to parse ClickHouse response: {e}"))?;
@@ -115,7 +116,7 @@ pub async fn query(config: &ClickhouseConfig, sql: &str) -> Result<SqlResult, St
         .collect();
 
     let row_count = Some(parsed.data.len() as i64);
-    Ok(SqlResult { columns, rows: parsed.data, row_count, message: None, query_ms: elapsed })
+    Ok(SqlResult { columns, rows: parsed.data, row_count, message: None, query_ms: elapsed, sql: sql.to_string() })
 }
 
 /// Trim ClickHouse `Nullable(...)`/`LowCardinality(...)` wrappers for display.
@@ -270,6 +271,7 @@ pub async fn get_table_rows(
         // ClickHouse is OLAP: no primary-key based row editing, so the grid is browse-only.
         primary_key: vec![],
         foreign_keys: Vec::<ForeignKeyInfo>::new(),
+        sql: format!("{data_sql}\n{count_sql}"),
     })
 }
 

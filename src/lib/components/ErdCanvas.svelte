@@ -214,6 +214,14 @@
     ctx.closePath()
   }
 
+  /** Stable non-negative hash of a string — used to fan parallel edges into
+   *  separate lanes without any global bookkeeping. */
+  function hashStr(/** @type {string} */ s) {
+    let h = 0
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0
+    return Math.abs(h)
+  }
+
   /** @param {FlowEdge} e */
   function drawEdge(e, vx0, vy0, vx1, vy1) {
     const s = byId.get(e.source), t = byId.get(e.target)
@@ -244,17 +252,32 @@
     const active = e.source === selectedId || e.target === selectedId
     const dim = s.data?.highlighted === false && t.data?.highlighted === false
 
-    // Smooth horizontal-tangent curve from the FK row to the referenced key row.
-    // Each edge bows on its own control points, so a hub with many FKs fans out
-    // cleanly instead of bundling into overlapping right-angle corridors.
-    const dirS = leftToRight ? 1 : -1
-    const dirT = leftToRight ? -1 : 1
-    const off = Math.max(60, Math.abs(tx - sx) * 0.5)
+    // Orthogonal (right-angle) routing with rounded corners: exit the FK row
+    // horizontally, drop straight down/up a shared mid-column, then run into the
+    // referenced key row. Reads as a structured schema diagram. A per-edge lane
+    // offset on the mid-column fans parallel edges (e.g. several FKs off one
+    // table) so they don't collapse onto a single line.
+    const vGap = ty - sy
+    const lane = (((ci >= 0 ? ci : 0) % 5) - 2) * 12 + ((hashStr(e.id) % 3) - 1) * 6
+    let midX = sx + (tx - sx) * 0.5 + (leftToRight ? lane : -lane)
+    // Keep the elbow in the gap between the two cards, with room for the corners.
+    const loX = Math.min(sx, tx) + 12, hiX = Math.max(sx, tx) - 12
+    midX = loX <= hiX ? Math.max(loX, Math.min(hiX, midX)) : (sx + tx) / 2
     ctx.beginPath()
     ctx.moveTo(sx, sy)
-    ctx.bezierCurveTo(sx + off * dirS, sy, tx + off * dirT, ty, tx, ty)
+    if (Math.abs(vGap) < 1) {
+      // Same row height — a straight horizontal run reads cleaner than a flat jog.
+      ctx.lineTo(tx, ty)
+    } else {
+      const r = Math.min(12, Math.abs(midX - sx), Math.abs(midX - tx), Math.abs(vGap) / 2)
+      ctx.arcTo(midX, sy, midX, ty, r)
+      ctx.arcTo(midX, ty, tx, ty, r)
+      ctx.lineTo(tx, ty)
+    }
     ctx.lineWidth = (active ? 2 : 1.3) / cam.zoom
     ctx.strokeStyle = active ? c('primary', 0.95) : dim ? c('mfg', 0.12) : `rgba(${FK},0.6)`
+    ctx.lineJoin = 'round'
+    ctx.lineCap = 'round'
     ctx.stroke()
 
     // Endpoint nubs on both column rows.

@@ -6,7 +6,8 @@
 		ref = $bindable(null),
 		class: className,
 		side = "bottom",
-		sideOffset = 6,
+		sideOffset = 8,
+		children,
 		...restProps
 	} = $props();
 </script>
@@ -21,5 +22,8 @@
 			className
 		)}
 		{...restProps}
-	/>
+	>
+		{@render children?.()}
+		<TooltipPrimitive.Arrow class="text-popover drop-shadow-sm" />
+	</TooltipPrimitive.Content>
 </TooltipPrimitive.Portal>

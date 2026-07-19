@@ -517,7 +517,7 @@
                 <select
                   id="export-schema-select"
                   bind:value={exportSchema}
-                  class="h-8 w-full appearance-none rounded-md border border-border/60 bg-background pl-3 pr-8 font-mono text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40"
+                  class="h-8 w-full appearance-none rounded-md border border-border/60 bg-background pl-3 pr-8 font-mono text-xs text-foreground focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none/40"
                 >
                   <option value="">All schemas</option>
                   {#each schemas as s (s)}<option value={s}>{s}</option>{/each}

@@ -30,14 +30,21 @@ export function readRowsResponse(data) {
 
 /** @typedef {{ id: string, column: string, op: FilterOp, value: string, conjunct: 'and' | 'or' }} TableFilter */
 
-export const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 1_000_000, -1]
+export const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 1_000, 1_000_000, 5_000_000, -1]
 
 export const DEFAULT_PAGE_SIZE = 50
 
-export const MAX_PAGE_SIZE = 1_000_000
+export const MAX_PAGE_SIZE = 5_000_000
 
 /** Sentinel page size meaning "load all rows" (uses the table's total count). */
 export const PAGE_SIZE_ALL = -1
+
+/** Compact label for a page size: "All", "5M", "1M", or the plain number. */
+export function pageSizeLabel(n) {
+  if (n === PAGE_SIZE_ALL) return 'All'
+  if (n >= 1_000_000 && n % 1_000_000 === 0) return `${n / 1_000_000}M`
+  return String(n)
+}
 
 // ── User-configurable default page size (persisted across sessions) ──────────
 // When the user changes rows-per-page, that value becomes the default for every

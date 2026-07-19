@@ -105,12 +105,12 @@
       sideOffset={6}
       onOpenAutoFocus={(e) => { e.preventDefault(); inputEl?.focus(); }}
       class={cn(
-        "z-[100] overflow-hidden rounded-xl border border-border/60 bg-popover text-popover-foreground elevate-2-rim outline-none",
+        "z-[100] overflow-hidden rounded-[10px] border border-border/60 bg-popover text-popover-foreground elevate-2-rim outline-none",
         contentClass,
       )}
     >
       <Command.Root loop class="flex max-h-72 flex-col">
-        <div class="flex items-center gap-2 border-b border-border/40 px-2.5 py-2">
+        <div class="flex items-center gap-2 border-b border-border/50 px-2.5 py-2">
           <SearchIcon class="size-3.5 shrink-0 text-muted-foreground/45" />
           <Command.Input bind:value={search} {placeholder}>
             {#snippet child({ props })}
@@ -135,7 +135,7 @@
               disabled={it.disabled}
               onSelect={() => handleSelect(it)}
               class={cn(
-                "flex w-full min-w-0 cursor-default items-center gap-1.5 rounded-[5px] px-1.5 py-1.5 text-ui-xs outline-hidden select-none",
+                "flex w-full min-w-0 cursor-default items-center gap-1.5 rounded-md px-1.5 py-1.5 text-ui-xs outline-hidden select-none",
                 "text-foreground/85 hover:bg-accent hover:text-foreground data-selected:bg-accent data-selected:text-foreground",
                 "data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-40",
                 "[&_svg]:pointer-events-none [&_svg]:shrink-0",

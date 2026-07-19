@@ -246,7 +246,7 @@
             type="text"
             placeholder="Group name…"
             bind:value={newGroupInput}
-            class="h-6 rounded border border-border/50 bg-background/80 px-2 font-mono text-ui-xs outline-none placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring/30"
+            class="h-6 rounded border border-border/50 bg-background/80 px-2 font-mono text-ui-xs outline-none placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring"
             style="width:150px"
             onkeydown={(e) => {
               if (e.key === "Enter") commitNewGroup();
@@ -317,7 +317,7 @@
                     <input
                       type="text"
                       bind:value={renameGroupInput}
-                      class="h-5 rounded border border-border/50 bg-background/80 px-1.5 font-mono text-ui-xs outline-none focus:border-ring focus:ring-1 focus:ring-ring/30"
+                      class="h-5 rounded border border-border/50 bg-background/80 px-1.5 font-mono text-ui-xs outline-none focus:border-ring focus:ring-1 focus:ring-ring"
                       style="width:130px"
                       onkeydown={(e) => {
                         if (e.key === "Enter") commitRenameGroup();
@@ -549,7 +549,7 @@
                           <input
                             type="text"
                             bind:value={renameChartInput}
-                            class="h-5 min-w-0 flex-1 rounded border border-border/50 bg-background/80 px-1.5 font-mono text-ui-xs outline-none focus:border-ring focus:ring-1 focus:ring-ring/30"
+                            class="h-5 min-w-0 flex-1 rounded border border-border/50 bg-background/80 px-1.5 font-mono text-ui-xs outline-none focus:border-ring focus:ring-1 focus:ring-ring"
                             onkeydown={(e) => {
                               if (e.key === "Enter") commitRenameChart();
                               if (e.key === "Escape") {

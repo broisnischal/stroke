@@ -14,6 +14,16 @@ fn bt(s: &str) -> String {
 }
 
 pub fn cell_to_json(row: &sqlx::mysql::MySqlRow, idx: usize) -> Value {
+    // DECIMAL/NUMERIC must decode as an exact Decimal *first*. MySQL sends these as
+    // text and the generic integer arms below can otherwise consume the value and
+    // keep only its integer part (e.g. 9.99 → 9, 0.99 → 0), silently corrupting it.
+    // Route by column type before the i64/u64/bool/f64 attempts.
+    let type_name = row.column(idx).type_info().name();
+    if type_name.eq_ignore_ascii_case("DECIMAL") || type_name.eq_ignore_ascii_case("NEWDECIMAL") {
+        if let Ok(v) = row.try_get::<Option<Decimal>, _>(idx) {
+            return v.map(|d| json!(d.to_string())).unwrap_or(Value::Null);
+        }
+    }
     if let Ok(v) = row.try_get::<Option<i64>, _>(idx) {
         return v.map(|n| json!(n)).unwrap_or(Value::Null);
     }
@@ -329,6 +339,7 @@ pub async fn get_table_rows(
         query_ms: started.elapsed().as_millis() as u64,
         primary_key: pk,
         foreign_keys: fks,
+        sql: format!("{data_sql}\n{count_sql}"),
     })
 }
 
@@ -461,6 +472,7 @@ pub async fn execute_sql(
                 None
             },
             query_ms: query_ms(),
+            sql: sql.to_string(),
         });
     }
 
@@ -472,6 +484,7 @@ pub async fn execute_sql(
         row_count: Some(affected),
         message: Some(format!("{affected} row(s) affected")),
         query_ms: query_ms(),
+        sql: sql.to_string(),
     })
 }
 

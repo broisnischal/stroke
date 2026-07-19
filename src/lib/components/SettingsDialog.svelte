@@ -1,11 +1,14 @@
 <script>
   import Minus from "@lucide/svelte/icons/minus";
   import Plus from "@lucide/svelte/icons/plus";
+  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import ThemeSwatch from "$lib/components/ThemeSwatch.svelte";
+  import SearchableMenu from "$lib/components/SearchableMenu.svelte";
   import { getThemeDefinition, themesByGroup } from "$lib/themes/registry.js";
+  import { t, locale, LOCALES, setLocale } from "$lib/i18n.js";
   import { licenseStatus } from "$lib/stores/license.js";
   import {
     appThemeId,
@@ -20,12 +23,21 @@
     ICON_STYLES,
     ICON_SETS,
     TABLE_STYLES,
+    DEFAULT_MAX_QUERY_HISTORY,
+    DEFAULT_CONNECT_TIMEOUT_MS,
+    DEFAULT_SOCKET_TIMEOUT_MS,
+    DEFAULT_MAX_ALLOWED_PACKET,
+    DEFAULT_SESSION_TIMEZONE,
+    AGENT_FONT_SIZES,
+    THINKING_STYLES,
   } from "$lib/stores/settings.js";
+  import { aiProfiles, activeProfileId, setActiveProfile } from "$lib/stores/ai-settings.js";
   import PenTool from "@lucide/svelte/icons/pen-tool";
   import LucideSearch from "@lucide/svelte/icons/search";
   import LucideSparkles from "@lucide/svelte/icons/sparkles";
   import { HugeiconsIcon } from "@hugeicons/svelte";
   import { Search01Icon, SparklesIcon } from "@hugeicons/core-free-icons";
+  import PhosphorSparkle from "phosphor-svelte/lib/Sparkle";
   import Icon from "./Icon.svelte";
   import { cn } from "$lib/utils.js";
   import {
@@ -48,7 +60,9 @@
   // ── Category navigation + search ─────────────────────────────────────────
   const CATEGORIES = [
     { id: 'general',      label: 'General',      icon: 'sliders-horizontal' },
+    { id: 'database',     label: 'Database',     icon: 'database' },
     { id: 'appearance',   label: 'Appearance',   icon: 'sparkles' },
+    { id: 'agent',        label: 'Agent',        icon: 'bot' },
     { id: 'integrations', label: 'Integrations', icon: 'blocks' },
     { id: 'about',        label: 'About',        icon: 'info' },
   ];
@@ -112,6 +126,8 @@
     dotted:  "background-image:radial-gradient(color-mix(in oklab,var(--border) 90%,transparent) 0.7px,transparent 0.8px);background-size:4px 4px;",
     dots:    "background-image:radial-gradient(var(--muted-foreground) 1.1px,transparent 1.3px);background-size:9px 9px;background-position:center;",
     minimal: "background-image:linear-gradient(var(--border) 1px,transparent 1px);background-size:100% 7px;",
+    dashed:  "background-image:repeating-linear-gradient(90deg,var(--border) 0 3px,transparent 3px 6px),repeating-linear-gradient(0deg,var(--border) 0 3px,transparent 3px 6px);background-size:100% 7px,7px 100%;background-repeat:repeat;",
+    columns: "background-image:linear-gradient(90deg,var(--border) 1px,transparent 1px);background-size:7px 100%;",
   };
 
   /** @param {import('$lib/stores/settings.js').TableStyleId} tableStyle */
@@ -142,6 +158,93 @@
 
   function togglePreviewDml() {
     settings = updateSettings({ previewDmlBeforeApply: !settings.previewDmlBeforeApply });
+  }
+
+  function toggleVimMode() {
+    settings = updateSettings({ vimMode: !settings.vimMode });
+  }
+
+  // ── Database (query & connection) numeric/text settings ──────────────────
+  /** @param {keyof import('$lib/stores/settings.js').AppSettings} key @param {string|number} raw @param {number} def @param {number} min */
+  function setNumber(key, raw, def, min = 0) {
+    let n = Math.round(Number(raw));
+    if (!Number.isFinite(n)) n = def;
+    if (n < min) n = min;
+    settings = updateSettings({ [key]: n });
+  }
+  /** @param {keyof import('$lib/stores/settings.js').AppSettings} key @param {string} raw @param {string} def */
+  function setText(key, raw, def) {
+    settings = updateSettings({ [key]: String(raw).trim() || def });
+  }
+  /** @param {keyof import('$lib/stores/settings.js').AppSettings} key @param {string|number} def */
+  function resetField(key, def) {
+    settings = updateSettings({ [key]: def });
+  }
+
+  const DATA_VIEW_OPTIONS = [
+    { id: 'table',  label: 'Table',  icon: 'table-2' },
+    { id: 'json',   label: 'JSON',   icon: 'braces' },
+    { id: 'record', label: 'Record', icon: 'layout-list' },
+    { id: 'text',   label: 'Text',   icon: 'file-text' },
+    { id: 'chart',  label: 'Chart',  icon: 'bar-chart-2' },
+  ];
+  const defaultViewOption = $derived(
+    DATA_VIEW_OPTIONS.find((o) => o.id === settings.defaultDataView) ?? DATA_VIEW_OPTIONS[0],
+  );
+  /** @param {string} v */
+  function setDefaultDataView(v) {
+    if (v) settings = updateSettings({ defaultDataView: v });
+  }
+
+  const PAGINATION_OPTIONS = [
+    { id: 'offset',   label: 'Offset',   icon: 'hash', hint: 'Classic LIMIT/OFFSET — jump to any page' },
+    { id: 'cursor',   label: 'Cursor',   icon: 'chevrons-right', hint: 'Keyset by primary key — fast next/prev, no page jump' },
+    { id: 'keyset',   label: 'Keyset',   icon: 'key-round', hint: 'Same as cursor (keyset on the primary key)' },
+    { id: 'temporal', label: 'Temporal', icon: 'clock', hint: 'Keyset on a timestamp column, newest-first' },
+  ];
+  const paginationOption = $derived(
+    PAGINATION_OPTIONS.find((o) => o.id === settings.paginationMode) ?? PAGINATION_OPTIONS[0],
+  );
+  /** @param {string} v */
+  function setPaginationMode(v) {
+    if (v) settings = updateSettings({ paginationMode: v });
+  }
+
+  const NULL_SORT_OPTIONS = [
+    { id: 'unset', label: 'Unset' },
+    { id: 'first', label: 'Nulls First' },
+    { id: 'last', label: 'Nulls Last' },
+  ];
+  const nullSortOption = $derived(NULL_SORT_OPTIONS.find((o) => o.id === settings.nullSortOrder) ?? NULL_SORT_OPTIONS[0]);
+  /** @param {string} v */
+  function setNullSort(v) {
+    if (v) settings = updateSettings({ nullSortOrder: v });
+  }
+
+  // ── Agent (AI chat) settings ─────────────────────────────────────────────
+  /** @param {string} v */
+  function setAgentChatFont(v) {
+    const n = Number(v);
+    if (Number.isFinite(n)) settings = updateSettings({ agentChatFontSize: n });
+  }
+  /** @param {string} v */
+  function setAgentCodeFont(v) {
+    const n = Number(v);
+    if (Number.isFinite(n)) settings = updateSettings({ agentCodeFontSize: n });
+  }
+  /** @param {string} v */
+  function setAgentThinking(v) {
+    if (v) settings = updateSettings({ agentThinkingStyle: v });
+  }
+  const thinkingStyleOption = $derived(
+    THINKING_STYLES.find((s) => s.id === settings.agentThinkingStyle) ?? THINKING_STYLES[0],
+  );
+  const activeModelProfile = $derived(
+    $aiProfiles.find((p) => p.id === $activeProfileId) ?? $aiProfiles[0],
+  );
+  /** @param {string} v */
+  function setModelProfile(v) {
+    if (v) setActiveProfile(v);
   }
 
   /** @type {boolean | null} */
@@ -197,7 +300,7 @@
           <input
             bind:value={query}
             placeholder="Search settings…"
-            class="h-8 w-full rounded-lg border border-border/60 bg-background pl-8 pr-2.5 text-ui-xs text-foreground outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground/40 focus:border-ring focus:ring-2 focus:ring-ring/20"
+            class="h-8 w-full rounded-lg border border-border/60 bg-background pl-8 pr-2.5 text-ui-xs text-foreground outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring"
           />
         </div>
         <nav class="flex flex-col gap-0.5">
@@ -213,7 +316,7 @@
               )}
             >
               <Icon name={c.icon} class="size-4 shrink-0" />
-              {c.label}
+              {$t('settings.nav.' + c.id)}
             </button>
           {/each}
         </nav>
@@ -225,18 +328,24 @@
           {#key searching ? '__search__' : category}
             <div class="settings-pane">
               <h2 class="mb-6 text-[15px] font-semibold tracking-tight text-foreground">
-                {searching ? 'Search results' : activeCategory.label}
+                {searching ? $t('common.search') : $t('settings.nav.' + activeCategory.id)}
               </h2>
 
               {#if searching}
                 {@render generalContent()}
+                {@render databaseContent()}
                 {@render appearanceContent()}
+                {@render agentContent()}
                 {@render integrationsContent()}
                 {@render aboutContent()}
               {:else if category === 'general'}
                 {@render generalContent()}
+              {:else if category === 'database'}
+                {@render databaseContent()}
               {:else if category === 'appearance'}
                 {@render appearanceContent()}
+              {:else if category === 'agent'}
+                {@render agentContent()}
               {:else if category === 'integrations'}
                 {@render integrationsContent()}
               {:else}
@@ -290,86 +399,90 @@
   </div>
 {/snippet}
 
-{#snippet generalContent()}
-  {@render secLabel('Startup & behavior')}
-  {#if show('Launch at login', 'Start Stroke when you sign in')}
-    {@render switchRow('Launch at login', 'Start Stroke when you sign in', launchAtLogin ?? false, toggleLaunchAtLogin)}
-  {/if}
-  {#if show('Auto reconnect on startup', 'Reconnect to the last database on launch')}
-    {@render switchRow('Auto reconnect on startup', 'Reconnect to the last database on launch', settings.autoReconnectOnStartup, toggleAutoReconnect)}
-  {/if}
-  {#if show('Preview SQL before applying', 'Review the DML before edits, inserts, and deletes run')}
-    {@render switchRow('Preview SQL before applying', 'Review the DML before edits, inserts, and deletes run', settings.previewDmlBeforeApply, togglePreviewDml)}
-  {/if}
-  {#if show('MCP auto-start', 'Start the MCP server on database connect')}
-    {@render switchRow('MCP auto-start', 'Start the MCP server on database connect', settings.mcpAutoStart, toggleMcpAutoStart)}
-  {/if}
+{#snippet resetBtn(/** @type {string} */ key, /** @type {string|number} */ def, /** @type {boolean} */ dirty)}
+  <button
+    type="button"
+    onclick={() => resetField(/** @type {any} */ (key), def)}
+    disabled={!dirty}
+    title={$t('settings.resetDefault')}
+    aria-label={$t('settings.resetDefault')}
+    class={cn(
+      'inline-flex size-8 shrink-0 items-center justify-center rounded-lg border transition-[background-color,color,border-color,opacity] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] active:scale-[0.96]',
+      dirty
+        ? 'border-border/60 text-muted-foreground hover:bg-muted hover:text-foreground'
+        : 'cursor-default border-transparent text-muted-foreground/20',
+    )}
+  >
+    <RotateCcw class="size-3.5" />
+  </button>
 {/snippet}
 
-{#snippet appearanceContent()}
-  {@render secLabel('Theme & typeface')}
-
-  {#if show('Theme', 'Color theme for the whole app')}
-    <div class={rowCls}>
-      <div class="min-w-0">
-        <p class="text-[13px] font-medium text-foreground">Theme</p>
-        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Color theme for the whole app.</p>
-      </div>
-      <Select.Root type="single" value={$appThemeId} onValueChange={(v) => { if (v) setTheme(/** @type {import('$lib/themes/registry.js').ThemeId} */ (v)); }}>
-        <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Color theme">
-          <span class="flex min-w-0 items-center gap-2">
-            <ThemeSwatch bg={activeTheme.preview.bg} accent={activeTheme.preview.accent} />
-            <span class="truncate font-medium">{activeTheme.name}</span>
-          </span>
-        </Select.Trigger>
-        <Select.Content class="z-[100] max-h-[min(24rem,70vh)] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
-          {#each themeGroups as group, i (group.id)}
-            {#if i > 0}<Select.Separator class="my-1" />{/if}
-            <Select.Group>
-              <Select.GroupHeading class="px-2 py-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">{group.label}</Select.GroupHeading>
-              {#each group.themes as theme (theme.id)}
-                <Select.Item value={theme.id} label={theme.name} class="rounded-md py-1.5 pr-8 pl-2">
-                  {#snippet children()}
-                    <span class="flex min-w-0 items-center gap-2">
-                      <ThemeSwatch bg={theme.preview.bg} accent={theme.preview.accent} />
-                      <span class="min-w-0">
-                        <span class="block truncate text-xs font-medium">{theme.name}</span>
-                        <span class="block truncate text-[10px] text-muted-foreground">{theme.description}</span>
-                      </span>
-                    </span>
-                  {/snippet}
-                </Select.Item>
-              {/each}
-            </Select.Group>
-          {/each}
-        </Select.Content>
-      </Select.Root>
+{#snippet numberRow(/** @type {string} */ label, /** @type {string} */ desc, /** @type {string} */ key, /** @type {number} */ def, /** @type {string} */ unit, /** @type {number} */ min)}
+  <div class={rowCls}>
+    <div class="min-w-0">
+      <p class="text-[13px] font-medium text-foreground">{label}</p>
+      <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{desc}</p>
     </div>
-  {/if}
+    <div class="flex shrink-0 items-center gap-1.5">
+      <div class="relative">
+        <input
+          type="number" {min}
+          value={settings[key]}
+          aria-label={label}
+          onchange={(e) => setNumber(/** @type {any} */ (key), e.currentTarget.value, def, min)}
+          class={cn(
+            'h-8 w-48 rounded-lg border border-border/60 bg-background pl-2.5 text-right font-mono text-ui-xs tabular-nums text-foreground outline-none transition-[border-color,box-shadow] focus:border-ring',
+            unit ? 'pr-11' : 'pr-2.5',
+          )}
+        />
+        {#if unit}<span class="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground/50">{unit}</span>{/if}
+      </div>
+      {@render resetBtn(key, def, settings[key] !== def)}
+    </div>
+  </div>
+{/snippet}
 
-  {#if show('Font', 'UI and editor typeface')}
+{#snippet textRow(/** @type {string} */ label, /** @type {string} */ desc, /** @type {string} */ key, /** @type {string} */ def)}
+  <div class={rowCls}>
+    <div class="min-w-0">
+      <p class="text-[13px] font-medium text-foreground">{label}</p>
+      <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{desc}</p>
+    </div>
+    <div class="flex shrink-0 items-center gap-1.5">
+      <input
+        type="text" spellcheck="false" autocapitalize="off" autocomplete="off"
+        value={settings[key]}
+        aria-label={label}
+        onchange={(e) => setText(/** @type {any} */ (key), e.currentTarget.value, def)}
+        class="h-8 w-48 rounded-lg border border-border/60 bg-background px-2.5 font-mono text-ui-xs text-foreground outline-none transition-[border-color,box-shadow] focus:border-ring focus:ring-1 focus:ring-ring"
+      />
+      {@render resetBtn(key, def, settings[key] !== def)}
+    </div>
+  </div>
+{/snippet}
+
+{#snippet databaseContent()}
+  {@render secLabel($t('settings.sec.dataView'))}
+  {#if show($t('settings.defaultView'), $t('settings.defaultView.desc'))}
     <div class={rowCls}>
       <div class="min-w-0">
-        <p class="text-[13px] font-medium text-foreground">Font</p>
-        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">UI and editor typeface.</p>
+        <p class="text-[13px] font-medium text-foreground">{$t('settings.defaultView')}</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{$t('settings.defaultView.desc')}</p>
       </div>
-      <Select.Root type="single" value={settings.font} onValueChange={(v) => { if (v) setFont(/** @type {import('$lib/stores/settings.js').FontId} */ (v)); }}>
-        <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Font family">
+      <Select.Root type="single" value={settings.defaultDataView} onValueChange={setDefaultDataView}>
+        <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Default view">
           <span class="flex min-w-0 items-center gap-2">
-            <span class="shrink-0 text-[11px] font-semibold text-muted-foreground/70" style="font-family: {FONT_PRESETS[settings.font]?.sans}" aria-hidden="true">Aa</span>
-            <span class="truncate font-medium">{FONT_PRESETS[settings.font]?.label ?? "Geist"}</span>
+            <Icon name={defaultViewOption.icon} class="size-3.5 shrink-0 text-muted-foreground" />
+            <span class="truncate font-medium">{defaultViewOption.label}</span>
           </span>
         </Select.Trigger>
         <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
-          {#each fontEntries as [id, preset] (id)}
-            <Select.Item value={id} label={preset.label} class="rounded-md py-1.5 pr-8 pl-2">
+          {#each DATA_VIEW_OPTIONS as o (o.id)}
+            <Select.Item value={o.id} label={o.label} class="py-1.5 pr-8 pl-2">
               {#snippet children()}
                 <span class="flex min-w-0 items-center gap-2.5">
-                  <span class="flex size-8 shrink-0 items-center justify-center rounded border border-border/40 bg-muted/30 text-[14px] font-semibold text-foreground/70" style="font-family: {preset.sans}" aria-hidden="true">Aa</span>
-                  <span class="min-w-0">
-                    <span class="block text-xs font-medium leading-snug">{preset.label}</span>
-                    <span class="block text-[10px] leading-snug text-muted-foreground/65">{preset.description}</span>
-                  </span>
+                  <Icon name={o.icon} class="size-4 shrink-0 text-muted-foreground" />
+                  <span class="text-xs font-medium">{o.label}</span>
                 </span>
               {/snippet}
             </Select.Item>
@@ -379,13 +492,294 @@
     </div>
   {/if}
 
-  {@render secLabel('Icons')}
-
-  {#if show('Icon weight', 'Stroke thickness of Lucide icons')}
+  {#if show($t('settings.pagination'), $t('settings.pagination.desc'))}
     <div class={rowCls}>
       <div class="min-w-0">
-        <p class="text-[13px] font-medium text-foreground">Icon weight</p>
-        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Stroke thickness of the icon set.</p>
+        <p class="text-[13px] font-medium text-foreground">{$t('settings.pagination')}</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{$t('settings.pagination.desc')}</p>
+      </div>
+      <Select.Root type="single" value={settings.paginationMode} onValueChange={setPaginationMode}>
+        <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Pagination strategy">
+          <span class="flex min-w-0 items-center gap-2">
+            <Icon name={paginationOption.icon} class="size-3.5 shrink-0 text-muted-foreground" />
+            <span class="truncate font-medium">{paginationOption.label}</span>
+          </span>
+        </Select.Trigger>
+        <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
+          {#each PAGINATION_OPTIONS as o (o.id)}
+            <Select.Item value={o.id} label={o.label} class="py-1.5 pr-8 pl-2">
+              {#snippet children()}
+                <span class="flex min-w-0 items-center gap-2.5">
+                  <Icon name={o.icon} class="size-4 shrink-0 text-muted-foreground" />
+                  <span class="text-xs font-medium">{o.label}</span>
+                </span>
+              {/snippet}
+            </Select.Item>
+          {/each}
+        </Select.Content>
+      </Select.Root>
+    </div>
+  {/if}
+
+  {@render secLabel('Result Ordering')}
+  {#if show('Null sort order', 'Applied to quick-query ordering on databases that support explicit null placement')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-[13px] font-medium text-foreground">Null sort order</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Applied to quick-query ordering on databases that support explicit null placement.</p>
+      </div>
+      <Select.Root type="single" value={settings.nullSortOrder} onValueChange={setNullSort}>
+        <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Null sort order">
+          <span class="truncate font-medium">{nullSortOption.label}</span>
+        </Select.Trigger>
+        <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
+          {#each NULL_SORT_OPTIONS as o (o.id)}
+            <Select.Item value={o.id} label={o.label} class="py-1.5 pr-8 pl-2">
+              <span class="text-xs font-medium">{o.label}</span>
+            </Select.Item>
+          {/each}
+        </Select.Content>
+      </Select.Root>
+    </div>
+  {/if}
+
+  {@render secLabel($t('settings.sec.queryHistory'))}
+  {#if show($t('settings.maxQueryHistory'), $t('settings.maxQueryHistory.desc'))}
+    {@render numberRow($t('settings.maxQueryHistory'), $t('settings.maxQueryHistory.desc'), 'maxQueryHistory', DEFAULT_MAX_QUERY_HISTORY, '', 1)}
+  {/if}
+
+  {@render secLabel($t('settings.sec.connectionDefaults'))}
+  {#if show($t('settings.maxAllowedPacket'), $t('settings.maxAllowedPacket.desc'))}
+    {@render numberRow($t('settings.maxAllowedPacket'), $t('settings.maxAllowedPacket.desc'), 'maxAllowedPacket', DEFAULT_MAX_ALLOWED_PACKET, 'bytes', 1024)}
+  {/if}
+  {#if show($t('settings.socketTimeout'), $t('settings.socketTimeout.desc'))}
+    {@render numberRow($t('settings.socketTimeout'), $t('settings.socketTimeout.desc'), 'socketTimeoutMs', DEFAULT_SOCKET_TIMEOUT_MS, 'ms', 0)}
+  {/if}
+  {#if show($t('settings.connectTimeout'), $t('settings.connectTimeout.desc'))}
+    {@render numberRow($t('settings.connectTimeout'), $t('settings.connectTimeout.desc'), 'connectTimeoutMs', DEFAULT_CONNECT_TIMEOUT_MS, 'ms', 0)}
+  {/if}
+  {#if show($t('settings.timezone'), $t('settings.timezone.desc'))}
+    {@render textRow($t('settings.timezone'), $t('settings.timezone.desc'), 'sessionTimezone', DEFAULT_SESSION_TIMEZONE)}
+  {/if}
+{/snippet}
+
+{#snippet agentContent()}
+  {@render secLabel('Model')}
+  {#if show('Default model', 'The AI model used for chat, SQL suggestions and agent actions')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-[13px] font-medium text-foreground">Default model</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Used for chat, SQL suggestions and agent actions.</p>
+      </div>
+      {#if $aiProfiles.length}
+        <Select.Root type="single" value={$activeProfileId} onValueChange={setModelProfile}>
+          <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Default model">
+            <span class="truncate font-medium">{activeModelProfile?.name ?? 'Select model'}</span>
+          </Select.Trigger>
+          <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
+            {#each $aiProfiles as p (p.id)}
+              <Select.Item value={p.id} label={p.name} class="py-1.5 pr-8 pl-2">
+                <span class="text-xs font-medium">{p.name}</span>
+              </Select.Item>
+            {/each}
+          </Select.Content>
+        </Select.Root>
+      {:else}
+        <span class="text-[12px] text-muted-foreground">No models configured</span>
+      {/if}
+    </div>
+  {/if}
+  {#if show('Models & API keys', 'Add providers, models and API keys')}
+    {@render actionRow('Models & API keys', 'Add providers, choose models and store API keys for OpenAI, Google Gemini, Anthropic and OpenRouter.', 'Manage', () => { open = false; onopenmodelconfiguration(); })}
+  {/if}
+
+  {@render secLabel('Chat UI')}
+  {#if show('Chat font size', 'Text size for AI chat messages')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-[13px] font-medium text-foreground">Chat font size</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Text size for AI chat messages.</p>
+      </div>
+      <Select.Root type="single" value={String(settings.agentChatFontSize)} onValueChange={setAgentChatFont}>
+        <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Chat font size">
+          <span class="truncate font-medium">{settings.agentChatFontSize}px</span>
+        </Select.Trigger>
+        <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
+          {#each AGENT_FONT_SIZES as s (s)}
+            <Select.Item value={String(s)} label={`${s}px`} class="py-1.5 pr-8 pl-2">
+              <span class="text-xs font-medium">{s}px</span>
+            </Select.Item>
+          {/each}
+        </Select.Content>
+      </Select.Root>
+    </div>
+  {/if}
+  {#if show('Code font size', 'Text size for code blocks in chat')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-[13px] font-medium text-foreground">Code font size</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Text size for code blocks in chat.</p>
+      </div>
+      <Select.Root type="single" value={String(settings.agentCodeFontSize)} onValueChange={setAgentCodeFont}>
+        <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Code font size">
+          <span class="truncate font-medium">{settings.agentCodeFontSize}px</span>
+        </Select.Trigger>
+        <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
+          {#each AGENT_FONT_SIZES as s (s)}
+            <Select.Item value={String(s)} label={`${s}px`} class="py-1.5 pr-8 pl-2">
+              <span class="text-xs font-medium">{s}px</span>
+            </Select.Item>
+          {/each}
+        </Select.Content>
+      </Select.Root>
+    </div>
+  {/if}
+  {#if show('Thinking style', 'How the thinking indicator animates while the model responds')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-[13px] font-medium text-foreground">Thinking style</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">How the thinking indicator animates while the model responds.</p>
+      </div>
+      <Select.Root type="single" value={settings.agentThinkingStyle} onValueChange={setAgentThinking}>
+        <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Thinking style">
+          <span class="truncate font-medium">{thinkingStyleOption.label}</span>
+        </Select.Trigger>
+        <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
+          {#each THINKING_STYLES as o (o.id)}
+            <Select.Item value={o.id} label={o.label} class="py-1.5 pr-8 pl-2">
+              <span class="text-xs font-medium">{o.label}</span>
+            </Select.Item>
+          {/each}
+        </Select.Content>
+      </Select.Root>
+    </div>
+  {/if}
+{/snippet}
+
+{#snippet generalContent()}
+  {@render secLabel($t('settings.sec.startup'))}
+  {#if show($t('settings.launchAtLogin'), $t('settings.launchAtLogin.desc'))}
+    {@render switchRow($t('settings.launchAtLogin'), $t('settings.launchAtLogin.desc'), launchAtLogin ?? false, toggleLaunchAtLogin)}
+  {/if}
+  {#if show($t('settings.autoReconnect'), $t('settings.autoReconnect.desc'))}
+    {@render switchRow($t('settings.autoReconnect'), $t('settings.autoReconnect.desc'), settings.autoReconnectOnStartup, toggleAutoReconnect)}
+  {/if}
+  {#if show($t('settings.previewSql'), $t('settings.previewSql.desc'))}
+    {@render switchRow($t('settings.previewSql'), $t('settings.previewSql.desc'), settings.previewDmlBeforeApply, togglePreviewDml)}
+  {/if}
+  {#if show('Vim mode', 'Experimental modal keyboard navigation across the app, the data grid, and the SQL editor')}
+    {@render switchRow('Vim mode', 'Experimental — modal keyboard navigation (hjkl, gg/G, i/Esc) across the grid, the SQL editor, and tabs', settings.vimMode, toggleVimMode)}
+  {/if}
+  {#if show($t('settings.mcpAutostart'), $t('settings.mcpAutostart.desc'))}
+    {@render switchRow($t('settings.mcpAutostart'), $t('settings.mcpAutostart.desc'), settings.mcpAutoStart, toggleMcpAutoStart)}
+  {/if}
+{/snippet}
+
+{#snippet appearanceContent()}
+  {@render secLabel($t('settings.sec.themeTypeface'))}
+
+  {#if show($t('settings.theme'), $t('settings.theme.desc'))}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-[13px] font-medium text-foreground">{$t('settings.theme')}</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{$t('settings.theme.desc')}</p>
+      </div>
+      <SearchableMenu
+        align="end"
+        contentClass="w-64"
+        placeholder="Search themes…"
+        items={themeGroups.flatMap((g) => g.themes.map((t) => ({ value: t.id, label: t.name, keywords: [g.label], bg: t.preview.bg, accent: t.preview.accent })))}
+        onselect={(it) => setTheme(/** @type {import('$lib/themes/registry.js').ThemeId} */ (it.value))}
+      >
+        {#snippet trigger(props)}
+          <button
+            {...props}
+            type="button"
+            aria-label="Color theme"
+            class={cn(
+              "flex h-8 w-56 items-center justify-between gap-2 whitespace-nowrap rounded-[10px] border border-border/70 bg-background px-2.5 text-ui-xs font-normal shadow-none outline-none transition-colors hover:bg-muted/30 focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 data-[state=open]:border-ring",
+            )}
+          >
+            <span class="flex min-w-0 items-center gap-2">
+              <ThemeSwatch bg={activeTheme.preview.bg} accent={activeTheme.preview.accent} />
+              <span class="truncate font-medium">{activeTheme.name}</span>
+            </span>
+            <Icon name="chevron-down" class="size-3.5 shrink-0 opacity-40" />
+          </button>
+        {/snippet}
+        {#snippet item(it)}
+          <span class="flex min-w-0 flex-1 items-center gap-2">
+            <ThemeSwatch bg={it.bg} accent={it.accent} />
+            <span class="truncate text-xs font-medium">{it.label}</span>
+          </span>
+          {#if $appThemeId === it.value}<Icon name="check" class="ml-auto size-3.5 shrink-0 text-primary" />{/if}
+        {/snippet}
+      </SearchableMenu>
+    </div>
+  {/if}
+
+  {#if show($t('settings.font'), $t('settings.font.desc'))}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-[13px] font-medium text-foreground">{$t('settings.font')}</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{$t('settings.font.desc')}</p>
+      </div>
+      <Select.Root type="single" value={settings.font} onValueChange={(v) => { if (v) setFont(/** @type {import('$lib/stores/settings.js').FontId} */ (v)); }}>
+        <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Font family">
+          <span class="flex min-w-0 items-center gap-2">
+            <span class="flex size-5 shrink-0 items-center justify-center rounded border border-border/40 bg-muted/30 text-[11px] font-semibold text-foreground/70" style="font-family: {FONT_PRESETS[settings.font]?.sans}" aria-hidden="true">Aa</span>
+            <span class="truncate font-medium">{FONT_PRESETS[settings.font]?.label ?? "Geist"}</span>
+          </span>
+        </Select.Trigger>
+        <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
+          {#each fontEntries as [id, preset] (id)}
+            <Select.Item value={id} label={preset.label} class="py-1.5 pr-8 pl-2">
+              {#snippet children()}
+                <span class="flex min-w-0 items-center gap-2.5">
+                  <span class="flex size-5 shrink-0 items-center justify-center rounded border border-border/40 bg-muted/30 text-[11px] font-semibold text-foreground/70" style="font-family: {preset.sans}" aria-hidden="true">Aa</span>
+                  <span class="truncate text-xs font-medium">{preset.label}</span>
+                </span>
+              {/snippet}
+            </Select.Item>
+          {/each}
+        </Select.Content>
+      </Select.Root>
+    </div>
+  {/if}
+
+  {#if show($t('settings.language'), $t('settings.language.desc'))}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-[13px] font-medium text-foreground">{$t('settings.language')}</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{$t('settings.language.desc')}.</p>
+      </div>
+      <Select.Root type="single" value={$locale} onValueChange={(v) => { if (v) setLocale(/** @type {any} */ (v)); }}>
+        <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Language">
+          <span class="truncate font-medium">{LOCALES.find((l) => l.id === $locale)?.native ?? 'English'}</span>
+        </Select.Trigger>
+        <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
+          {#each LOCALES as l (l.id)}
+            <Select.Item value={l.id} label={l.native} class="py-1.5 pr-8 pl-2">
+              {#snippet children()}
+                <span class="flex min-w-0 items-center justify-between gap-2">
+                  <span class="truncate text-xs font-medium">{l.native}</span>
+                  <span class="shrink-0 text-[10px] text-muted-foreground/65">{l.label}</span>
+                </span>
+              {/snippet}
+            </Select.Item>
+          {/each}
+        </Select.Content>
+      </Select.Root>
+    </div>
+  {/if}
+
+  {@render secLabel($t('settings.sec.icons'))}
+
+  {#if show($t('settings.iconWeight'), $t('settings.iconWeight.desc'))}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-[13px] font-medium text-foreground">{$t('settings.iconWeight')}</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{$t('settings.iconWeight.desc')}</p>
       </div>
       <Select.Root type="single" value={settings.iconStyle} onValueChange={(v) => { if (v) setIconStyle(/** @type {import('$lib/stores/settings.js').IconStyleId} */ (v)); }}>
         <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Icon style">
@@ -396,16 +790,11 @@
         </Select.Trigger>
         <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
           {#each iconStyleEntries as [id, preset] (id)}
-            <Select.Item value={id} label={preset.label} class="rounded-md py-1.5 pr-8 pl-2">
+            <Select.Item value={id} label={preset.label} class="py-1.5 pr-8 pl-2">
               {#snippet children()}
                 <span class="flex min-w-0 items-center gap-2.5">
-                  <span class="flex size-8 shrink-0 items-center justify-center rounded border border-border/40 bg-muted/30">
-                    <PenTool class="size-4 text-foreground/70" style="stroke-width: {preset.strokeWidth}px" aria-hidden="true" />
-                  </span>
-                  <span class="min-w-0">
-                    <span class="block text-xs font-medium leading-snug">{preset.label}</span>
-                    <span class="block text-[10px] leading-snug text-muted-foreground/65">{preset.description}</span>
-                  </span>
+                  <PenTool class="size-4 shrink-0 text-muted-foreground" style="stroke-width: {preset.strokeWidth}px" aria-hidden="true" />
+                  <span class="truncate text-xs font-medium">{preset.label}</span>
                 </span>
               {/snippet}
             </Select.Item>
@@ -415,11 +804,11 @@
     </div>
   {/if}
 
-  {#if show('Icon set', 'Icon family used across the app')}
+  {#if show($t('settings.iconSet'), $t('settings.iconSet.desc'))}
     <div class={rowCls}>
       <div class="min-w-0">
-        <p class="text-[13px] font-medium text-foreground">Icon set</p>
-        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Icon family used across the app.</p>
+        <p class="text-[13px] font-medium text-foreground">{$t('settings.iconSet')}</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{$t('settings.iconSet.desc')}</p>
       </div>
       <Select.Root type="single" value={settings.iconSet} onValueChange={(v) => { if (v) setIconSet(/** @type {import('$lib/stores/settings.js').IconSetId} */ (v)); }}>
         <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Icon set">
@@ -430,20 +819,19 @@
         </Select.Trigger>
         <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[14rem] p-1" sideOffset={6}>
           {#each iconSetEntries as [id, preset] (id)}
-            <Select.Item value={id} label={preset.label} class="rounded-md py-1.5 pr-8 pl-2">
+            <Select.Item value={id} label={preset.label} class="py-1.5 pr-8 pl-2">
               {#snippet children()}
                 <span class="flex min-w-0 items-center gap-2.5">
-                  <span class="flex size-8 shrink-0 items-center justify-center rounded-md border border-border/40 bg-muted/30 text-foreground/70">
+                  <span class="flex size-4 shrink-0 items-center justify-center text-muted-foreground">
                     {#if id === "hugeicons"}
                       <HugeiconsIcon icon={SparklesIcon} class="size-4" strokeWidth={1.8} />
+                    {:else if id === "phosphor"}
+                      <PhosphorSparkle class="size-4" size="100%" />
                     {:else}
                       <LucideSparkles class="size-4" />
                     {/if}
                   </span>
-                  <span class="min-w-0">
-                    <span class="block text-xs font-medium leading-snug">{preset.label}</span>
-                    <span class="block text-[11px] leading-snug text-muted-foreground/65">{preset.description}</span>
-                  </span>
+                  <span class="truncate text-xs font-medium">{preset.label}</span>
                 </span>
               {/snippet}
             </Select.Item>
@@ -453,11 +841,11 @@
     </div>
   {/if}
 
-  {#if show('Table style', 'Grid style for the data table')}
+  {#if show($t('settings.tableStyle'), $t('settings.tableStyle.desc'))}
     <div class={rowCls}>
       <div class="min-w-0">
-        <p class="text-[13px] font-medium text-foreground">Table style</p>
-        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Grid style for the data table — lines, dotted, or connection dots.</p>
+        <p class="text-[13px] font-medium text-foreground">{$t('settings.tableStyle')}</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{$t('settings.tableStyle.desc')}</p>
       </div>
       <Select.Root type="single" value={settings.tableStyle} onValueChange={(v) => { if (v) setTableStyle(/** @type {import('$lib/stores/settings.js').TableStyleId} */ (v)); }}>
         <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Table style">
@@ -466,16 +854,13 @@
             <span class="truncate font-medium">{TABLE_STYLES[settings.tableStyle]?.label ?? "Lines"}</span>
           </span>
         </Select.Trigger>
-        <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[16rem] p-1" sideOffset={6}>
+        <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
           {#each tableStyleEntries as [id, preset] (id)}
-            <Select.Item value={id} label={preset.label} class="rounded-md py-1.5 pr-8 pl-2">
+            <Select.Item value={id} label={preset.label} class="py-1.5 pr-8 pl-2">
               {#snippet children()}
                 <span class="flex min-w-0 items-center gap-2.5">
-                  <span class="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border/40 bg-background" style={tableStylePreview[id] ?? ''} aria-hidden="true"></span>
-                  <span class="min-w-0">
-                    <span class="block text-xs font-medium leading-snug">{preset.label}</span>
-                    <span class="block text-[11px] leading-snug text-muted-foreground/65">{preset.description}</span>
-                  </span>
+                  <span class="size-4 shrink-0 overflow-hidden rounded-[3px] border border-border/40 bg-background" style={tableStylePreview[id] ?? ''} aria-hidden="true"></span>
+                  <span class="truncate text-xs font-medium">{preset.label}</span>
                 </span>
               {/snippet}
             </Select.Item>
@@ -485,12 +870,12 @@
     </div>
   {/if}
 
-  {@render secLabel('Display')}
-  {#if show('Zoom', 'Scale the whole interface')}
+  {@render secLabel($t('settings.sec.display'))}
+  {#if show($t('settings.zoom'), $t('settings.zoom.desc'))}
     <div class={rowCls}>
       <div class="min-w-0">
-        <p class="text-[13px] font-medium text-foreground">Zoom</p>
-        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Scale the whole interface.</p>
+        <p class="text-[13px] font-medium text-foreground">{$t('settings.zoom')}</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{$t('settings.zoom.desc')}</p>
       </div>
       <div class="flex items-center gap-1">
         <Button type="button" variant="ghost" size="icon" class="size-7" aria-label="Zoom out" disabled={!canDecreaseZoom(settings.zoom)} onclick={() => bumpZoom(-1)}>
@@ -506,33 +891,33 @@
 {/snippet}
 
 {#snippet integrationsContent()}
-  {@render secLabel('Tools')}
-  {#if show('Extensions', 'Cell formatters, ID generators & transforms')}
-    {@render actionRow('Extensions', 'Cell formatters, ID generators & transforms.', 'Open', () => { open = false; onopenextensions(); })}
+  {@render secLabel($t('settings.sec.tools'))}
+  {#if show($t('settings.extensions'), $t('settings.extensions.desc'))}
+    {@render actionRow($t('settings.extensions'), $t('settings.extensions.desc'), $t('settings.btn.open'), () => { open = false; onopenextensions(); })}
   {/if}
-  {#if show('MCP configuration', 'Expose your database to external AI tools')}
-    {@render actionRow('MCP configuration', 'Expose your database to external AI tools.', 'Open', () => { open = false; onopenmcp(); })}
+  {#if show($t('settings.mcpConfig'), $t('settings.mcpConfig.desc'))}
+    {@render actionRow($t('settings.mcpConfig'), $t('settings.mcpConfig.desc'), $t('settings.btn.open'), () => { open = false; onopenmcp(); })}
   {/if}
-  {#if show('AI models', 'Configure AI providers and API keys')}
-    {@render actionRow('AI models', 'Configure AI providers and API keys.', 'Configure', openModelConfiguration)}
+  {#if show($t('settings.aiModels'), $t('settings.aiModels.desc'))}
+    {@render actionRow($t('settings.aiModels'), $t('settings.aiModels.desc'), $t('settings.btn.configure'), openModelConfiguration)}
   {/if}
 
-  {@render secLabel('Account')}
-  {#if show('License', 'Activate or manage your Stroke license')}
-    {@render actionRow('License', 'Activate or manage your Stroke license.', 'Manage', () => { open = false; onopenlicense(); }, planBadge)}
+  {@render secLabel($t('settings.sec.account'))}
+  {#if show($t('settings.license'), $t('settings.license.desc'))}
+    {@render actionRow($t('settings.license'), $t('settings.license.desc'), $t('settings.btn.manage'), () => { open = false; onopenlicense(); }, planBadge)}
   {/if}
 {/snippet}
 
 {#snippet aboutContent()}
-  {@render secLabel('About')}
-  {#if show('About Stroke', 'Version, credits, and release notes')}
-    {@render actionRow('About Stroke', 'Version, credits, and release notes.', 'View', () => { open = false; onopenabout(); })}
+  {@render secLabel($t('settings.sec.about'))}
+  {#if show($t('settings.aboutStroke'), $t('settings.aboutStroke.desc'))}
+    {@render actionRow($t('settings.aboutStroke'), $t('settings.aboutStroke.desc'), $t('settings.btn.view'), () => { open = false; onopenabout(); })}
   {/if}
-  {#if show('Website', 'stroke.click — docs, licensing, and support')}
+  {#if show($t('settings.website'), $t('settings.website.desc'))}
     <div class={rowCls}>
       <div class="min-w-0">
-        <p class="text-[13px] font-medium text-foreground">Website</p>
-        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Docs, licensing, and support.</p>
+        <p class="text-[13px] font-medium text-foreground">{$t('settings.website')}</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{$t('settings.website.desc')}</p>
       </div>
       <a href="https://stroke.click" target="_blank" rel="noopener noreferrer" class="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border/60 bg-background px-3 text-ui-xs font-medium text-foreground transition-[background-color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:bg-muted active:scale-[0.98]">
         stroke.click <Icon name="external-link" class="size-3.5" />
@@ -541,13 +926,13 @@
   {/if}
 
   {#if !searching}
-    <p class="mt-8 mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/45">Keyboard</p>
+    <p class="mt-8 mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/45">{$t('settings.sec.keyboard')}</p>
     <div class="mb-3 border-b border-border/40"></div>
     <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
-      {@render shortcut('⌘M', 'cycle theme')}
-      {@render shortcut('⌘⇧M', 'previous theme')}
-      {@render shortcut('⌘+ / ⌘−', 'zoom')}
-      {@render shortcut('⌘0', 'reset zoom')}
+      {@render shortcut('⌘M', $t('settings.kbd.cycleTheme'))}
+      {@render shortcut('⌘⇧M', $t('settings.kbd.prevTheme'))}
+      {@render shortcut('⌘+ / ⌘−', $t('settings.kbd.zoom'))}
+      {@render shortcut('⌘0', $t('settings.kbd.resetZoom'))}
     </div>
   {/if}
 {/snippet}

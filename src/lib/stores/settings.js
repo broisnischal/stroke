@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store'
+import { writable, get } from 'svelte/store'
 import { setMode } from 'mode-watcher'
 import {
   DEFAULT_THEME_ID,
@@ -11,10 +11,10 @@ import { zoomState, ZOOM_MIN, ZOOM_MAX } from '$lib/stores/canvas-zoom.svelte.js
 const STORAGE_KEY = 'stroke:settings'
 
 /** @typedef {import('$lib/themes/registry.js').ThemeId} ThemeId */
-/** @typedef {'geist' | 'serif' | 'apple'} FontId */
+/** @typedef {'geist' | 'serif' | 'apple' | 'inter' | 'mono' | 'fira' | 'plex' | 'space' | 'source'} FontId */
 /** @typedef {'regular' | 'light' | 'bold'} IconStyleId */
-/** @typedef {'lucide' | 'hugeicons'} IconSetId */
-/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean }} AppSettings */
+/** @typedef {'lucide' | 'hugeicons' | 'phosphor'} IconSetId */
+/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean, defaultDataView: string, paginationMode: string, maxQueryHistory: number, connectTimeoutMs: number, socketTimeoutMs: number, maxAllowedPacket: number, sessionTimezone: string, vimMode: boolean, nullSortOrder: string, agentChatFontSize: number, agentCodeFontSize: number, agentThinkingStyle: string }} AppSettings */
 
 /** UI zoom scale (font + layout). 1 = 100%. */
 export const ZOOM_STEPS = [0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.25, 1.5]
@@ -44,6 +44,45 @@ export const FONT_PRESETS = {
     description: 'San Francisco + SF Mono',
     sans: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif',
     mono: 'ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Monaco, Consolas, monospace',
+  },
+  // Both faces below ship with the app (fontsource imports in app.css), so
+  // these presets render identically on every platform — no system fallback.
+  inter: {
+    label: 'Inter',
+    description: 'Inter + JetBrains Mono',
+    sans: '"Inter Variable", ui-sans-serif, system-ui, sans-serif',
+    mono: '"JetBrains Mono Variable", ui-monospace, monospace',
+  },
+  mono: {
+    label: 'Mono',
+    description: 'All-monospace terminal feel',
+    sans: '"JetBrains Mono Variable", ui-monospace, monospace',
+    mono: '"JetBrains Mono Variable", ui-monospace, monospace',
+  },
+  // The four below also ship with the app (fontsource imports in app.css).
+  fira: {
+    label: 'Fira Code',
+    description: 'Inter + Fira Code ligatures',
+    sans: '"Inter Variable", ui-sans-serif, system-ui, sans-serif',
+    mono: '"Fira Code Variable", ui-monospace, monospace',
+  },
+  plex: {
+    label: 'IBM Plex',
+    description: 'IBM Plex Sans + Mono',
+    sans: '"IBM Plex Sans", ui-sans-serif, system-ui, sans-serif',
+    mono: '"IBM Plex Mono", ui-monospace, monospace',
+  },
+  space: {
+    label: 'Space Grotesk',
+    description: 'Geometric sans + JetBrains Mono',
+    sans: '"Space Grotesk Variable", ui-sans-serif, system-ui, sans-serif',
+    mono: '"JetBrains Mono Variable", ui-monospace, monospace',
+  },
+  source: {
+    label: 'Source Code Pro',
+    description: 'Inter + Source Code Pro',
+    sans: '"Inter Variable", ui-sans-serif, system-ui, sans-serif',
+    mono: '"Source Code Pro Variable", ui-monospace, monospace',
   },
 }
 /** @type {FontId} */
@@ -81,6 +120,7 @@ function normalizeIconStyle(/** @type {unknown} */ id) {
 export const ICON_SETS = {
   lucide:    { label: 'Lucide',    description: 'Crisp, minimal built-in set' },
   hugeicons: { label: 'Hugeicons', description: 'Rounded, expressive premium set' },
+  phosphor:  { label: 'Phosphor',  description: 'Friendly, geometric open set' },
 }
 /** @type {IconSetId} */
 export const DEFAULT_ICON_SET = 'lucide'
@@ -90,7 +130,7 @@ function normalizeIconSet(/** @type {unknown} */ id) {
 }
 
 /**
- * @typedef {'lines'|'dotted'|'dots'|'minimal'|'bordered'|'striped'} TableStyleId
+ * @typedef {'lines'|'dotted'|'dots'|'minimal'|'bordered'|'striped'|'dashed'|'columns'} TableStyleId
  * @typedef {{ label: string, description: string,
  *   rows: boolean, cols: boolean, dash: number[]|null, dots: boolean, strong?: boolean, zebra?: boolean }} TableStyleDef
  */
@@ -111,12 +151,64 @@ export const TABLE_STYLES = {
   dotted:   { label: 'Dotted',   description: 'Fine dotted grid, softer feel',     rows: true,  cols: true,  dash: [1, 3], dots: false },
   dots:     { label: 'Dots',     description: 'Corner dots + soft row shading',    rows: false, cols: false, dash: null,   dots: true,  zebra: true },
   minimal:  { label: 'Minimal',  description: 'Row separators only, no columns',   rows: true,  cols: false, dash: null,   dots: false },
+  dashed:   { label: 'Dashed',   description: 'Dashed grid, drafting-table feel',  rows: true,  cols: true,  dash: [5, 4], dots: false },
+  columns:  { label: 'Columns',  description: 'Vertical rails only, open rows',    rows: false, cols: true,  dash: null,   dots: false },
 }
 /** @type {TableStyleId} */
 export const DEFAULT_TABLE_STYLE = 'lines'
 /** @returns {TableStyleId} */
 export function normalizeTableStyle(/** @type {unknown} */ id) {
   return TABLE_STYLES[/** @type {TableStyleId} */ (id)] ? /** @type {TableStyleId} */ (id) : DEFAULT_TABLE_STYLE
+}
+
+// ── Query & connection defaults ──────────────────────────────────────────────
+// Numeric/text knobs surfaced under Settings → Database. `maxQueryHistory` is
+// consumed by the query-history store; the connector values (packet/timeouts/
+// timezone) are persisted as MySQL connection defaults.
+/** Data-view modes for a table tab (kept in sync with TableToolbar's DATA_VIEW_MODES). */
+export const DATA_VIEW_IDS = /** @type {const} */ (['table', 'json', 'record', 'text', 'chart'])
+export const DEFAULT_DATA_VIEW = 'table'
+
+// How the grid pages through rows.
+//  • offset   — LIMIT/OFFSET; random access (jump to any page) but O(offset) deep.
+//  • cursor   — keyset by primary key (opaque cursor); O(1) next/prev, no page jump.
+//  • keyset   — same engine as cursor (keyset on the PK); listed separately for clarity.
+//  • temporal — keyset on a timestamp column (newest-first); great for logs/events.
+// All non-offset modes fall back to offset when their preconditions aren't met
+// (no single-column PK, a multi-column sort, or a jump to an arbitrary page).
+export const PAGINATION_MODE_IDS = /** @type {const} */ (['offset', 'cursor', 'keyset', 'temporal'])
+/** Null placement for quick-query ORDER BY (dialects that support it). */
+export const NULL_SORT_IDS = /** @type {const} */ (['unset', 'first', 'last'])
+export const DEFAULT_NULL_SORT = 'unset'
+
+/** Selectable font sizes (px) for the AI/agent chat + code blocks. */
+export const AGENT_FONT_SIZES = /** @type {const} */ ([12, 13, 14, 15, 16])
+export const DEFAULT_AGENT_CHAT_FONT = 14
+export const DEFAULT_AGENT_CODE_FONT = 13
+/** Thinking-indicator visual styles for the agent chat. */
+export const THINKING_STYLES = /** @type {const} */ ([
+  { id: 'shimmer', label: 'Shimmer' },
+  { id: 'pulse', label: 'Pulse' },
+  { id: 'static', label: 'Static' },
+])
+export const THINKING_STYLE_IDS = THINKING_STYLES.map((s) => s.id)
+export const DEFAULT_THINKING_STYLE = 'shimmer'
+export const DEFAULT_PAGINATION_MODE = 'offset'
+export const DEFAULT_MAX_QUERY_HISTORY = 100
+export const DEFAULT_CONNECT_TIMEOUT_MS = 60000
+export const DEFAULT_SOCKET_TIMEOUT_MS = 600000
+export const DEFAULT_MAX_ALLOWED_PACKET = 1073741824
+export const DEFAULT_SESSION_TIMEZONE = 'SYSTEM'
+
+/**
+ * Coerce a persisted value to an integer within [min, max], falling back to
+ * `def` when it isn't a finite number.
+ * @param {unknown} value @param {number} def @param {number} [min] @param {number} [max]
+ */
+function normalizeInt(value, def, min = 0, max = Number.MAX_SAFE_INTEGER) {
+  const n = Math.round(Number(value))
+  if (!Number.isFinite(n)) return def
+  return Math.min(max, Math.max(min, n))
 }
 
 /** @type {AppSettings} */
@@ -131,6 +223,18 @@ export const DEFAULT_SETTINGS = {
   launchAtLogin: false,
   autoReconnectOnStartup: true,
   previewDmlBeforeApply: true,
+  defaultDataView: DEFAULT_DATA_VIEW,
+  paginationMode: DEFAULT_PAGINATION_MODE,
+  maxQueryHistory: DEFAULT_MAX_QUERY_HISTORY,
+  connectTimeoutMs: DEFAULT_CONNECT_TIMEOUT_MS,
+  socketTimeoutMs: DEFAULT_SOCKET_TIMEOUT_MS,
+  maxAllowedPacket: DEFAULT_MAX_ALLOWED_PACKET,
+  sessionTimezone: DEFAULT_SESSION_TIMEZONE,
+  vimMode: false,
+  nullSortOrder: DEFAULT_NULL_SORT,
+  agentChatFontSize: DEFAULT_AGENT_CHAT_FONT,
+  agentCodeFontSize: DEFAULT_AGENT_CODE_FONT,
+  agentThinkingStyle: DEFAULT_THINKING_STYLE,
 }
 
 /** Reactive app font id (synced by applySettings). */
@@ -151,6 +255,12 @@ export const appThemeId = writable(/** @type {ThemeId} */ (DEFAULT_THEME_ID))
 
 /** Reactive: show a SQL preview/confirm before applying grid writes (synced by applySettings). */
 export const appPreviewDml = writable(true)
+
+/** Reactive: experimental app-wide Vim mode enabled (synced by applySettings). */
+export const appVimMode = writable(false)
+
+/** Reactive pagination strategy (offset | cursor | keyset | temporal), synced by applySettings. */
+export const appPaginationMode = writable(/** @type {string} */ (DEFAULT_PAGINATION_MODE))
 
 /** Reactive canvas-table grid style preset (synced by applySettings). DataTable
  *  subscribes to repaint when it changes. */
@@ -228,7 +338,22 @@ export function loadSettings() {
     const iconStyle = normalizeIconStyle(parsed.iconStyle)
     const iconSet = normalizeIconSet(parsed.iconSet)
     const tableStyle = normalizeTableStyle(parsed.tableStyle)
-    _settingsCache = { theme, zoom, font, iconStyle, iconSet, tableStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply }
+    const defaultDataView = DATA_VIEW_IDS.includes(parsed.defaultDataView) ? parsed.defaultDataView : DEFAULT_DATA_VIEW
+    const paginationMode = PAGINATION_MODE_IDS.includes(parsed.paginationMode) ? parsed.paginationMode : DEFAULT_PAGINATION_MODE
+    const maxQueryHistory = normalizeInt(parsed.maxQueryHistory, DEFAULT_MAX_QUERY_HISTORY, 1, 100000)
+    const connectTimeoutMs = normalizeInt(parsed.connectTimeoutMs, DEFAULT_CONNECT_TIMEOUT_MS, 0)
+    const socketTimeoutMs = normalizeInt(parsed.socketTimeoutMs, DEFAULT_SOCKET_TIMEOUT_MS, 0)
+    const maxAllowedPacket = normalizeInt(parsed.maxAllowedPacket, DEFAULT_MAX_ALLOWED_PACKET, 1024)
+    const sessionTimezone =
+      typeof parsed.sessionTimezone === 'string' && parsed.sessionTimezone.trim()
+        ? parsed.sessionTimezone.trim()
+        : DEFAULT_SESSION_TIMEZONE
+    const vimMode = parsed.vimMode === true
+    const nullSortOrder = NULL_SORT_IDS.includes(parsed.nullSortOrder) ? parsed.nullSortOrder : DEFAULT_NULL_SORT
+    const agentChatFontSize = AGENT_FONT_SIZES.includes(parsed.agentChatFontSize) ? parsed.agentChatFontSize : DEFAULT_AGENT_CHAT_FONT
+    const agentCodeFontSize = AGENT_FONT_SIZES.includes(parsed.agentCodeFontSize) ? parsed.agentCodeFontSize : DEFAULT_AGENT_CODE_FONT
+    const agentThinkingStyle = THINKING_STYLE_IDS.includes(parsed.agentThinkingStyle) ? parsed.agentThinkingStyle : DEFAULT_THINKING_STYLE
+    _settingsCache = { theme, zoom, font, iconStyle, iconSet, tableStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply, defaultDataView, paginationMode, maxQueryHistory, connectTimeoutMs, socketTimeoutMs, maxAllowedPacket, sessionTimezone, vimMode, nullSortOrder, agentChatFontSize, agentCodeFontSize, agentThinkingStyle }
     return { ..._settingsCache }
   } catch {
     return { ...DEFAULT_SETTINGS }
@@ -247,6 +372,28 @@ export function saveSettings(settings) {
   }
 }
 
+// ── Change-aware appliers ─────────────────────────────────────────────────────
+// applySettings runs on EVERY updateSettings call (any toggle in the Settings
+// dialog). Unconditional root style/attribute writes fire the canvas table's
+// MutationObserver (colour-reader rebuild + font re-measure + full repaint) and
+// unconditional store.set() re-notifies every subscriber (Monaco updateOptions
+// on all editors) — that was the Settings-page lag. Guard every write so only
+// values that actually changed touch the DOM or notify subscribers.
+/** @param {HTMLElement} el @param {string} prop @param {string} value */
+function setStyleVar(el, prop, value) {
+  if (el.style.getPropertyValue(prop) !== value) el.style.setProperty(prop, value)
+}
+/** @param {HTMLElement} el @param {string} name @param {string} value */
+function setAttr(el, name, value) {
+  if (el.getAttribute(name) !== value) el.setAttribute(name, value)
+}
+/** @param {import('svelte/store').Writable<any>} store @param {any} value */
+function setStore(store, value) {
+  if (get(store) !== value) store.set(value)
+}
+
+let _lastAppliedZoom = /** @type {number | null} */ (null)
+
 /** @param {AppSettings} settings */
 export function applySettings(settings) {
   const root = document.documentElement
@@ -254,54 +401,64 @@ export function applySettings(settings) {
   const zoom = settings.zoom
   const dark = isDarkTheme(theme)
 
-  root.setAttribute('data-theme', theme)
-  root.classList.toggle('dark', dark)
+  setAttr(root, 'data-theme', theme)
+  if (root.classList.contains('dark') !== dark) root.classList.toggle('dark', dark)
   setMode(dark ? 'dark' : 'light')
-  appThemeId.set(theme)
-  isCurrentThemeDark.set(dark)
+  setStore(appThemeId, theme)
+  setStore(isCurrentThemeDark, dark)
   // Linux/WebKitGTK at 1x DPI: 14px strokes are too thin for reliable readability.
   // Bump the base from 14 → 15px so the zoom ladder scales from a legible root.
   // The canvas table reads --app-font-size, so it scales with zoom automatically.
   const basePx = root.dataset.os === 'linux' ? 15 : 14
-  root.style.setProperty('--app-zoom', String(zoom))
-  root.style.setProperty('--app-font-size', `${Math.round(basePx * zoom)}px`)
+  setStyleVar(root, '--app-zoom', String(zoom))
+  setStyleVar(root, '--app-font-size', `${Math.round(basePx * zoom)}px`)
 
   // Monaco editors read --editor-font-size / --editor-line-height directly (Monaco
   // takes pixel values, not CSS units, so it can't inherit --app-font-size). Scale
   // them off the same base + zoom so the editor grows in lockstep with the UI.
   // The appZoom subscription in monaco-env.js pushes these to live editor instances.
-  root.style.setProperty('--editor-font-size', `${Math.round(basePx * zoom)}px`)
-  root.style.setProperty('--editor-line-height', `${Math.round(basePx * 1.5 * zoom)}px`)
-  appZoom.set(zoom)
+  setStyleVar(root, '--editor-font-size', `${Math.round(basePx * zoom)}px`)
+  setStyleVar(root, '--editor-line-height', `${Math.round(basePx * 1.5 * zoom)}px`)
+  setStore(appZoom, zoom)
 
   // Font family — overrides the stylesheet :root defaults inline (inline style
   // wins), so the whole UI + canvas grid pick it up. The canvas re-measures its
   // font metrics via the documentElement style MutationObserver.
   const font = normalizeFont(settings.font)
-  root.style.setProperty('--font-sans', FONT_PRESETS[font].sans)
-  root.style.setProperty('--font-mono', FONT_PRESETS[font].mono)
-  appFont.set(font)
+  setStyleVar(root, '--font-sans', FONT_PRESETS[font].sans)
+  setStyleVar(root, '--font-mono', FONT_PRESETS[font].mono)
+  setStore(appFont, font)
+
+  // AI/agent chat typography — consumed by the chat surfaces (AiMarkdown, code blocks).
+  const chatFont = AGENT_FONT_SIZES.includes(settings.agentChatFontSize) ? settings.agentChatFontSize : DEFAULT_AGENT_CHAT_FONT
+  const codeFont = AGENT_FONT_SIZES.includes(settings.agentCodeFontSize) ? settings.agentCodeFontSize : DEFAULT_AGENT_CODE_FONT
+  setStyleVar(root, '--ai-chat-font-size', `${chatFont}px`)
+  setStyleVar(root, '--ai-code-font-size', `${codeFont}px`)
+  const thinkStyle = THINKING_STYLE_IDS.includes(settings.agentThinkingStyle) ? settings.agentThinkingStyle : DEFAULT_THINKING_STYLE
+  if (root.getAttribute('data-thinking-style') !== thinkStyle) root.setAttribute('data-thinking-style', thinkStyle)
 
   // Icon weight — a single [data-icon-style] attribute drives the global Lucide
   // stroke-width rule in app.css. No per-icon or per-component changes needed.
   const iconStyle = normalizeIconStyle(settings.iconStyle)
-  root.setAttribute('data-icon-style', iconStyle)
-  appIconStyle.set(iconStyle)
+  setAttr(root, 'data-icon-style', iconStyle)
+  setStore(appIconStyle, iconStyle)
 
   // Icon family — the shared <Icon> wrapper subscribes to appIconSet and swaps
-  // between Lucide and Hugeicons. data-icon-set is exposed for any CSS hooks.
+  // between icon families. data-icon-set is exposed for any CSS hooks.
   const iconSet = normalizeIconSet(settings.iconSet)
-  root.setAttribute('data-icon-set', iconSet)
-  appIconSet.set(iconSet)
+  setAttr(root, 'data-icon-set', iconSet)
+  setStore(appIconSet, iconSet)
 
   // Grid-write DML preview toggle — DataTable subscribes to gate its confirm dialog.
-  appPreviewDml.set(settings.previewDmlBeforeApply !== false)
+  setStore(appPreviewDml, settings.previewDmlBeforeApply !== false)
+  setStore(appVimMode, settings.vimMode === true)
+  setStore(appPaginationMode, PAGINATION_MODE_IDS.includes(settings.paginationMode) ? settings.paginationMode : DEFAULT_PAGINATION_MODE)
 
   // Canvas table grid style — data attribute for any CSS hooks; DataTable reads
   // the store and repaints the virtualized grid pass.
   const tableStyle = normalizeTableStyle(settings.tableStyle)
-  root.setAttribute('data-table-style', tableStyle)
-  appTableStyle.set(tableStyle)
+  setAttr(root, 'data-table-style', tableStyle)
+  setStore(appTableStyle, tableStyle)
 
   // Keep the canvas-table zoom in lockstep with the app zoom so Cmd +/-/0 (and
   // the zoom buttons) scale the grid alongside the rest of the UI. The canvas
@@ -311,7 +468,12 @@ export function applySettings(settings) {
   try { localStorage.removeItem('stroke:canvas-zoom') } catch {}
   const canvasZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom))
   if (zoomState.value !== canvasZoom) zoomState.value = canvasZoom
-  resetWebviewZoom()
+  // Webview page-zoom reset is an IPC round-trip — only needed when zoom changed
+  // (or on the first apply, to undo any stale native zoom from a prior session).
+  if (_lastAppliedZoom !== zoom) {
+    _lastAppliedZoom = zoom
+    resetWebviewZoom()
+  }
 }
 
 /** Snap native webview page-zoom back to 1 (macOS pinch / Tauri polyfill leak). */

@@ -4,6 +4,113 @@ All notable changes to Stroke are listed here, newest first.
 
 ---
 
+## [Unreleased]
+
+### New Features
+
+#### Instance Insights
+- **Instance Insights** — a live monitoring dashboard for PostgreSQL and MySQL, opened from the command palette or the welcome screen. Activity / State / Config / Replication sub-tabs surface session, TPS, tuple and block-I/O stat cards, ECharts timelines (per-second rates diffed from cumulative counters), sessions / locks / prepared-transaction tables, a searchable `pg_settings` / server-variables browser, and replication stats & slots. Auto-refreshes, and degrades gracefully when catalogs or permissions are missing.
+
+#### Database Objects
+- **Database Objects overview** — a database-wide catalog of Tables (name, schema, kind, owner, estimated rows, total / data / index size, comment), Views, Functions / Routines and Triggers, per dialect (Postgres/CockroachDB, MySQL/MariaDB, SQLite/D1/libsql, ClickHouse, DuckDB, SQL Server). Open it from the command palette or the welcome screen.
+
+#### Security
+- **Roles & Permissions (RLS)** — a new Permissions view on the Security page: a grouped role tree (superusers / login / group), a role-attributes panel, inherited-from membership, and per-database access grants.
+
+#### AI
+- **Agent settings** — a new Agent tab in Settings for the default model, per-provider API keys (OpenAI / Gemini / Anthropic / OpenRouter), chat & code font sizes, and the thinking-indicator style.
+- **Multi-tab AI chat** — a horizontal conversation tab bar over the multi-conversation / history model.
+- **Command-palette quick-ask** — ask the AI straight from ⌘K as a tool-using, multi-turn chat.
+- **Slash-command quick actions** — slash commands in the AI sidebar for common asks.
+- **Table mentions as badges** — `@`-mentioned tables become removable badges above the chat input.
+- **Downloadable AI results** — an `export_data` tool with JSON / CSV / Markdown downloads (progress + toast), plus an `export_query` MCP tool.
+
+#### Data Table
+- **Data view modes** — a segmented switcher renders the current page as Table, JSON (Monaco-based, with JSONPath filtering), Record (one row at a time, DBeaver-style, with field search and inline editing), Text (CSV / TSV / Markdown / JSON Lines), Chart, or ERD. The grid stays mounted so edits, selection and scroll survive switching, and each tab remembers its mode.
+- **Per-table ERD** — an entity-relationship diagram scoped to one table and its foreign-key neighbours, with a decrossed layout and orthogonal edge routing; also available as an ERD data view in the switcher above.
+- **Saved views** — bookmark the current search + filters + sort + hidden columns + view mode under a name (per connection / schema / table), re-apply with one click, and see a count badge on the toolbar.
+- **Find & Replace** — replace text across an editable column with contains / exact / regex matching (capture groups, live pattern errors, optional case sensitivity) and a full before → after preview; changes route through the parameterized cell-save pipeline. Disabled on tables without a primary key and on read-only connections.
+- **Column reorder, colours & tags** — move columns left / right / first / last from the header menu (display-only, persisted), paint header bands in six muted tones, and add short badge tags to columns.
+- **Docked relation panel** — the foreign-key related-rows sub-view moved into a resizable bottom dock (height persisted) instead of fighting the grid's scroll.
+- **Cell display markers** — tell NULL (∅), empty (`""`) and whitespace-only (·) cells apart at a glance; tint timestamp cells by freshness; and render image / avatar columns as thumbnails.
+- **Pagination strategies** — choose offset (default), cursor, keyset or temporal paging in Database settings; every mode safely falls back to offset when preconditions aren't met.
+- **Configurable NULL sort order** — set where NULLs land in browse queries.
+- **Richer tab bar** — an expanded tab context menu and middle-click to close.
+
+#### SQL Editor
+- **Run split-button + query parameters** — a DataGrip-style Run dropdown (all statements / statement at cursor with preview / selection) plus `:name` parameters detected by a string-, comment- and cast-aware scanner, with an Auto / Text / Raw SQL / NULL mode per parameter; values inline as escaped literals so history stays reproducible.
+- **Generate SQL** — a Generate SQL dialog (with `:name` skeletons), alongside console / count / copy-columns table actions and a redesigned View DDL dialog.
+- **Error tab** — failed SQL runs open in a dedicated, copyable Error tab.
+- **Query draft restore** — the Query Editor restores its unsaved draft on reopen.
+- **Query-log console** — every executed statement logged in a console at the bottom.
+
+#### Interface
+- **VSCode-style activity bar** — a vertical icon rail (Tables, Connections, Search, Schema, ERD, Roles & RLS, Insights, Extensions, AI, Settings) switching primary surfaces; dialect-aware (hides unsupported entries), a single active indicator, docked to the sidebar's side and hidden with it on ⌘B.
+- **Panel-switchable sidebar** — a Connections panel (list / add / switch connections inline) and an Extensions panel (VSCode-style list with Install toggles; clicking an extension opens its detail as a tab) alongside the Tables panel.
+- **Unified tooltips** — a single delegated GlobalTooltip styles every tooltip app-wide with a consistent arrow, 8px offset, 450ms delay, hover-persistence and viewport-aware flipping, replacing native `title` and per-component tooltips.
+- **Status bar** — shows the app version, a searchable connection switcher with provider brand icons, and a last-fetch timing readout; switch database straight from the ⌘K root.
+
+#### Extensions
+- **Extensions gallery** — a launcher-style card grid (responsive 2–4 columns) replaces the master-detail list, each card showing its icon, name, kind and an inline enable toggle; click to drill into detail.
+- **Cell transform library** — a richer set of per-column cell transforms with a result toast.
+- **Data generators** — split into ID Generators (IDs only) and a new Data Gen generator.
+
+#### Themes & Localization
+- **High Contrast themes** — new Dark and Light High Contrast themes for accessibility.
+- **Localization** — a localization foundation and language picker (English, Spanish, French, German) covering the sidebar, tabs, column menu and Settings.
+- **Phosphor icons** — the Phosphor icon family is selectable in the icon wrapper (~80 semantic glyphs mapped).
+- **More fonts** — additional UI and editor fonts.
+
+#### Vim
+- **Experimental Vim mode** — an off-by-default modal keyboard layer (toggled in Settings) with a status-bar mode indicator, `hjkl` / edit / delete / yank / search bindings in the data grid, monaco-vim in the SQL and ORM editors, and `:` / `gt` / `gT` at the app level.
+
+### Performance
+
+#### Data Grids
+- **Non-reactive row storage** — large browse / SQL / ORM row arrays moved to `$state.raw`, removing per-cell Proxy overhead on the canvas draw path and the retained per-index signals when scrolling huge tables; redraws are still driven by explicit signals.
+- **Huge tables** — the row cap is raised to 5M with sparse row-top tracking and normalized scroll height so every row is reachable, plus windowed loading for large "All" result sets.
+- **Fewer redundant paints** — no double-paint on structural changes, and a per-frame allocation during range-select was removed.
+
+#### App
+- **Memory across tabs** — cold background tabs release their result rows at a much lower threshold; the three most-recent tabs stay warm, and closed tabs no longer pin result sets in memory.
+- **Faster first open** — table metadata is fetched concurrently with the first page of rows.
+- **Instance Insights config** — the large `pg_settings` table uses fixed layout + content-visibility for smooth scrolling.
+- **Lighter sidebar & stores** — debounced filtering, memoized sort and capped un-virtualized lists in the sidebar; debounced JSONPath evaluation and localStorage persistence off the keystroke; image thumbnails downscaled once to fix scroll lag.
+
+### Bug Fixes
+
+#### Data Table
+- **Huge / scaled tables** — the inline row-expand panel and the cell editor now paint correctly on very large or zoomed tables.
+- **Avatar / image cells** — transient avatar loads no longer freeze as a "broken image", and avatar transform detection is fixed.
+- **Sticky header seams** — scrolled rows no longer bleed through the sticky header of the data-diff and foreign-key sub-views.
+- **Hidden columns** — expanded-row JSON, row copy and exports now respect hidden columns (exporting only the visible ones).
+- **Resize & toggle glitches** — fixed resize jitter, a relation-header gap and expand-toggle flicker.
+
+#### Data
+- **MySQL DECIMAL** — DECIMAL columns decode exactly instead of through the integer path.
+- **Cross-dialect column stats** — column statistics work across engines, D1 shows the right welcome name, and per-connection table state is kept separate.
+- **Row counts** — the sidebar counts rows on every engine.
+- **Session timezone** — the session timezone setting is actually applied.
+- **Clipboard** — copy routes through Tauri's native clipboard plugin.
+
+#### Interface
+- **Activity bar** — the Tables rail icon opens the table view, only the active icon highlights, dialect-unsupported icons are hidden, and the rail docks to and hides with the sidebar.
+- **Extensions panel** — per-extension icons and kind labels.
+- **Diagram export** — success / error toasts on ERD export.
+- **Off-screen window** — an off-screen app window is recovered, and split-pane layout no longer shifts.
+- **AI chat** — chat font settings apply; fixed undefined table names and quick-ask auto-scroll / flicker.
+
+#### Stability
+- **Crash fixes** — a duplicate keyed-each key and an infinite loop in the sidebar row-height measure no longer crash the app.
+
+### Changes
+
+#### Interface
+- **Move sidebar right** — right-click to dock the sidebar to the right side.
+- **Split panes** — tmux-style active / inactive pane styling and smoother resizing.
+- **Unified input focus** — inputs across the app share a single fused two-tone focus stroke.
+
+
 ## [1.12.0] - 2026-07-14
 
 ### New Features

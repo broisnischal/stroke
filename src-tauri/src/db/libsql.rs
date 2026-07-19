@@ -182,5 +182,5 @@ pub async fn query(config: &LibSqlConfig, sql: &str, params: Vec<Value>) -> Resu
     let row_count = Some(if affected > 0 { affected } else { rows.len() as i64 });
     let message = if affected > 0 { Some(format!("{} row(s) affected", affected)) } else { None };
 
-    Ok(SqlResult { columns, rows, row_count, message, query_ms: elapsed })
+    Ok(SqlResult { columns, rows, row_count, message, query_ms: elapsed, sql: sql.to_string() })
 }

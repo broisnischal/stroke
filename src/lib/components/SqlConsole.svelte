@@ -15,7 +15,6 @@
   import Download from "@lucide/svelte/icons/download";
   import Table2 from "@lucide/svelte/icons/table-2";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
-  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { cn, isNetworkError } from "$lib/utils.js";
   import { hasPro } from '$lib/stores/license.js'
   import SqlEditor from "./SqlEditor.svelte";
@@ -35,7 +34,18 @@
   import ExplainPlan from "./ExplainPlan.svelte";
   import { explainSql, cancelQuery } from "$lib/api.js";
   import Square from "@lucide/svelte/icons/square";
+  import Variable from "@lucide/svelte/icons/variable";
+  import X from "@lucide/svelte/icons/x";
+  import TextCursorInput from "@lucide/svelte/icons/text-cursor-input";
+  import TextSelect from "@lucide/svelte/icons/text-select";
   import { Button } from "$lib/components/ui/button/index.js";
+  import {
+    extractSqlParams,
+    missingSqlParams,
+    substituteSqlParams,
+    loadStoredParamValues,
+    saveStoredParamValues,
+  } from "$lib/sql-params.js";
   import {
     clampSqlEditorHeight,
     loadLayout,
@@ -91,7 +101,7 @@
     onprorequired = /** @type {() => void} */ (() => {}),
   } = $props();
 
-  /** @type {{ focus: () => void, markExecuted: (ranStatement?: string | null) => void } | null} */
+  /** @type {{ focus: () => void, markExecuted: (ranStatement?: string | null) => void, getStatementAtCursor: () => string, getSelectionText: () => string } | null} */
   let sqlEditorRef = $state(null)
 
   /** Focus the SQL editor — called by the parent when this tab becomes active. */
@@ -112,15 +122,59 @@
   /** The statement that ran last (⌘R), or null when the whole buffer ran. */
   let lastRanStatement = /** @type {string | null} */ (null)
 
+  // ── Named parameters (:name) ────────────────────────────────────────────────
+  /** @type {Record<string, import('$lib/sql-params.js').SqlParamValue>} */
+  let paramValues = $state(loadStoredParamValues())
+  let paramsPanelOpen = $state(false)
+  const sqlParams = $derived(extractSqlParams(sql))
+
+  /** @param {string} name @param {import('$lib/sql-params.js').SqlParamValue} next */
+  function setParam(name, next) {
+    paramValues = { ...paramValues, [name]: next }
+    saveStoredParamValues(paramValues)
+  }
+
   /** @param {string | undefined} statementSql */
   function handleRun(statementSql) {
     const single = typeof statementSql === 'string' && statementSql.trim() ? statementSql : undefined
+    const target = single ?? sql
+    if (extractSqlParams(target).length > 0) {
+      // Block the run until every parameter has a usable value, then inline
+      // them as escaped literals — the substituted text is what executes (and
+      // what history records), so runs stay reproducible.
+      if (missingSqlParams(target, paramValues).length > 0) {
+        paramsPanelOpen = true
+        return
+      }
+      lastRanStatement = single ?? null
+      onrun(substituteSqlParams(target, paramValues))
+      return
+    }
     lastRanStatement = single ?? null
     onrun(single)
   }
 
+  // ── Run split-button dropdown ───────────────────────────────────────────────
+  let runMenuOpen = $state(false)
+  let cursorStmtPreview = $state('')
+  let selectionPreview = $state('')
+
+  /** @param {boolean} open */
+  function captureRunPreviews(open) {
+    runMenuOpen = open
+    if (!open) return
+    cursorStmtPreview = sqlEditorRef?.getStatementAtCursor?.() ?? ''
+    selectionPreview = sqlEditorRef?.getSelectionText?.() ?? ''
+  }
+
+  /** One-line, length-capped preview of a SQL snippet for menu items. */
+  function clipSql(/** @type {string} */ s, max = 64) {
+    const one = s.replace(/\s+/g, ' ').trim()
+    return one.length > max ? one.slice(0, max - 1) + '…' : one
+  }
+
   // ── Result view state ───────────────────────────────────────────────────────
-  /** @type {'table' | 'chart' | 'json' | 'explain'} */
+  /** @type {'table' | 'chart' | 'json' | 'explain' | 'error'} */
   let outputView = $state('table')
   let chartType = $state('bar')
   let activeResultIdx = $state(0)
@@ -165,6 +219,23 @@
     untrack(() => {
       if (wasLoading && !l && !err) sqlEditorRef?.markExecuted?.(lastRanStatement)
       wasLoading = l
+    })
+  })
+
+  // Route a failed run into its own "Error" results tab — like a real editor's
+  // problems pane — and open the panel so it's visible. When the next run clears
+  // the error, fall back to the table (the now-empty Error tab drops out too).
+  let hadError = false
+  $effect(() => {
+    const err = error
+    untrack(() => {
+      if (err) {
+        outputView = 'error'
+        if (!outputVisible) outputVisible = true
+      } else if (hadError && outputView === 'error') {
+        outputView = 'table'
+      }
+      hadError = !!err
     })
   })
 
@@ -367,6 +438,12 @@
     navigator.platform.toUpperCase().includes("MAC");
   const mod = isMac ? "⌘" : "Ctrl";
 
+  /** Plain-text tooltip string for GlobalTooltip: "Label (⌘↵)" with an optional description on a second line. */
+  function tipText(/** @type {string} */ label, /** @type {string} */ desc = '', /** @type {string[]} */ keys = []) {
+    const head = keys.length ? `${label} (${keys.join('')})` : label;
+    return desc ? `${head}\n${desc}` : head;
+  }
+
   /** @param {number} height */
   function clampEditorHeight(height) {
     return clampSqlEditorHeight(height, consoleEl?.clientHeight ?? 0);
@@ -412,27 +489,6 @@
   })
 </script>
 
-{#snippet kbd(/** @type {string} */ k)}
-  <kbd class="inline-flex h-[17px] min-w-[17px] items-center justify-center rounded border border-border/70 bg-muted/60 px-1 font-mono text-[10px] font-medium leading-none text-muted-foreground shadow-[inset_0_-1px_0_var(--border)]">{k}</kbd>
-{/snippet}
-
-{#snippet hint(/** @type {string} */ label, /** @type {string} */ desc, /** @type {string[]} */ keys = [])}
-  <div class="flex max-w-[240px] flex-col gap-1">
-    <div class="flex items-center justify-between gap-4">
-      <span class="text-ui-xs font-medium text-foreground">{label}</span>
-      {#if keys.length}
-        <span class="flex shrink-0 items-center gap-0.5">
-          {#each keys as k (k)}{@render kbd(k)}{/each}
-        </span>
-      {/if}
-    </div>
-    {#if desc}
-      <p class="text-ui-2xs leading-relaxed text-muted-foreground">{desc}</p>
-    {/if}
-  </div>
-{/snippet}
-
-<Tooltip.Provider delayDuration={250} disableHoverableContent>
 <div class="flex min-h-0 flex-1 overflow-hidden">
   <QueryHistoryPanel
     bind:visible={queryHistoryVisible}
@@ -449,149 +505,157 @@
     data-studio-chrome
   >
     {#if loading}
-      <Tooltip.Root>
-        <Tooltip.Trigger>
-          {#snippet child({ props })}
-            <Button
-              {...props}
-              type="button"
-              variant="destructive"
-              size="sm"
-              class="h-7 shrink-0 gap-2 pl-2.5 pr-2 font-medium shadow-sm"
-              onclick={() => void cancelQuery()}
-            >
-              <Square class="size-3 shrink-0 fill-current" data-icon="inline-start" />
-              Stop
-            </Button>
-          {/snippet}
-        </Tooltip.Trigger>
-        <Tooltip.Content>
-          {@render hint('Stop', 'Cancel the running query.')}
-        </Tooltip.Content>
-      </Tooltip.Root>
+      <Button
+        type="button"
+        variant="destructive"
+        size="sm"
+        class="h-7 shrink-0 gap-2 pl-2.5 pr-2 font-medium shadow-sm"
+        onclick={() => void cancelQuery()}
+        title={tipText('Stop', 'Cancel the running query.')}
+      >
+        <Square class="size-3 shrink-0 fill-current" data-icon="inline-start" />
+        Stop
+      </Button>
     {:else}
-      <Tooltip.Root>
-        <Tooltip.Trigger>
-          {#snippet child({ props })}
-            <Button
-              {...props}
-              type="button"
-              variant="default"
-              size="sm"
-              class="h-7 shrink-0 gap-2 pl-2.5 pr-2 font-medium shadow-sm"
-              disabled={!sql.trim()}
-              onclick={() => handleRun(undefined)}
-            >
-              <Play class="size-3.5 shrink-0" data-icon="inline-start" />
-              Run
-            </Button>
-          {/snippet}
-        </Tooltip.Trigger>
-        <Tooltip.Content>
-          {@render hint(
+      <!-- Split button: one wrapper owns the radius + shadow; the halves are
+           plain buttons (the Button component's transparent border,
+           bg-clip-padding and elevate shadow would each paint a seam). -->
+      <div class="flex shrink-0 items-stretch overflow-hidden rounded-md elevate-1">
+        <button
+          type="button"
+          class="inline-flex h-7 shrink-0 select-none items-center gap-2 bg-primary pl-2.5 pr-2 text-[0.8rem] font-medium text-primary-foreground transition-[background-color,opacity] hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+          disabled={!sql.trim()}
+          onclick={() => handleRun(undefined)}
+          title={tipText(
             'Run query',
             `Runs every statement — each gets its own result tab. ${mod}R runs only the statement under the cursor, ${mod}L selects it.`,
             [mod, '↵'],
           )}
-        </Tooltip.Content>
-      </Tooltip.Root>
+        >
+          <Play class="size-3.5 shrink-0" />
+          Run
+        </button>
+        <DropdownMenu.Root bind:open={runMenuOpen} onOpenChange={captureRunPreviews}>
+          <DropdownMenu.Trigger
+            class="inline-flex h-7 w-6 shrink-0 items-center justify-center border-l border-primary-foreground/20 bg-primary text-primary-foreground transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-50"
+            disabled={!sql.trim()}
+            aria-label="Run options"
+          >
+            <ChevronDown class="size-3" />
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Content align="start" class="w-72 text-ui-sm">
+            <DropdownMenu.Item onSelect={() => handleRun(undefined)}>
+              <Play class="size-3.5 shrink-0 text-muted-foreground/60" />
+              <span class="whitespace-nowrap">Run all statements</span>
+              <DropdownMenu.Shortcut>{mod}↵</DropdownMenu.Shortcut>
+            </DropdownMenu.Item>
+            <DropdownMenu.Item
+              class="items-start"
+              disabled={!cursorStmtPreview}
+              onSelect={() => handleRun(cursorStmtPreview)}
+            >
+              <TextCursorInput class="mt-0.5 size-3.5 shrink-0 text-muted-foreground/60" />
+              <div class="flex w-full min-w-0 flex-col gap-0.5">
+                <span class="flex w-full items-center whitespace-nowrap">
+                  Run statement at cursor
+                  <DropdownMenu.Shortcut>{mod}R</DropdownMenu.Shortcut>
+                </span>
+                {#if cursorStmtPreview}
+                  <span class="truncate font-mono text-ui-2xs leading-4 text-muted-foreground/55">{clipSql(cursorStmtPreview)}</span>
+                {/if}
+              </div>
+            </DropdownMenu.Item>
+            {#if selectionPreview}
+              <DropdownMenu.Item class="items-start" onSelect={() => handleRun(selectionPreview)}>
+                <TextSelect class="mt-0.5 size-3.5 shrink-0 text-muted-foreground/60" />
+                <div class="flex w-full min-w-0 flex-col gap-0.5">
+                  <span class="whitespace-nowrap">Run selection</span>
+                  <span class="truncate font-mono text-ui-2xs leading-4 text-muted-foreground/55">{clipSql(selectionPreview)}</span>
+                </div>
+              </DropdownMenu.Item>
+            {/if}
+          </DropdownMenu.Content>
+        </DropdownMenu.Root>
+      </div>
+    {/if}
+
+    {#if sqlParams.length > 0}
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        class={cn(
+          'h-7 shrink-0 gap-1.5 px-2 font-normal',
+          paramsPanelOpen ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground',
+        )}
+        onclick={() => (paramsPanelOpen = !paramsPanelOpen)}
+        title={tipText('Query parameters', 'Set values for :name placeholders — they are inlined as escaped literals when the query runs.')}
+      >
+        <Variable class="size-3.5 shrink-0" />
+        Parameters
+        <span class="rounded bg-muted/70 px-1 font-mono text-ui-3xs tabular-nums text-muted-foreground">{sqlParams.length}</span>
+      </Button>
     {/if}
 
     <div class="mx-0.5 h-4 w-px shrink-0 bg-border" aria-hidden="true"></div>
 
     <div class="flex min-w-0 items-center gap-0.5">
-      <Tooltip.Root>
-        <Tooltip.Trigger>
-          {#snippet child({ props })}
-            <Button
-              {...props}
-              type="button"
-              variant="ghost"
-              size="sm"
-              class="size-7 p-0 text-muted-foreground hover:text-foreground"
-              disabled={!sql.trim()}
-              onclick={() => void formatSql?.()}
-            >
-              <Braces class="size-3.5 shrink-0" />
-            </Button>
-          {/snippet}
-        </Tooltip.Trigger>
-        <Tooltip.Content>
-          {@render hint('Format SQL', 'Reformat the whole editor with consistent casing and indentation.')}
-        </Tooltip.Content>
-      </Tooltip.Root>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        class="size-7 p-0 text-muted-foreground hover:text-foreground"
+        disabled={!sql.trim()}
+        onclick={() => void formatSql?.()}
+        title={tipText('Format SQL', 'Reformat the whole editor with consistent casing and indentation.')}
+      >
+        <Braces class="size-3.5 shrink-0" />
+      </Button>
 
-      <Tooltip.Root>
-        <Tooltip.Trigger>
-          {#snippet child({ props })}
-            <Button
-              {...props}
-              type="button"
-              variant="ghost"
-              size="sm"
-              class="size-7 p-0 text-muted-foreground hover:text-foreground"
-              disabled={!sql.trim()}
-              onclick={openSaveDialog}
-            >
-              <Bookmark class="size-3.5 shrink-0" />
-            </Button>
-          {/snippet}
-        </Tooltip.Trigger>
-        <Tooltip.Content>
-          {@render hint('Save query', 'Keep this query for later — saved queries live in History → Saved, per connection.', [mod, 'S'])}
-        </Tooltip.Content>
-      </Tooltip.Root>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        class="size-7 p-0 text-muted-foreground hover:text-foreground"
+        disabled={!sql.trim()}
+        onclick={openSaveDialog}
+        title={tipText('Save query', 'Keep this query for later — saved queries live in History → Saved, per connection.', [mod, 'S'])}
+      >
+        <Bookmark class="size-3.5 shrink-0" />
+      </Button>
 
-      <Tooltip.Root>
-        <Tooltip.Trigger>
-          {#snippet child({ props })}
-            <Button
-              {...props}
-              type="button"
-              variant="ghost"
-              size="sm"
-              class={cn(
-                'size-7 p-0 hover:text-foreground',
-                queryHistoryVisible ? 'text-foreground' : 'text-muted-foreground',
-              )}
-              onclick={() => (queryHistoryVisible = !queryHistoryVisible)}
-            >
-              <History class="size-3.5 shrink-0" />
-            </Button>
-          {/snippet}
-        </Tooltip.Trigger>
-        <Tooltip.Content>
-          {@render hint('Query history', 'Browse and re-run everything you have executed, plus your saved queries.', [mod, '⇧', 'B'])}
-        </Tooltip.Content>
-      </Tooltip.Root>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        class={cn(
+          'size-7 p-0 hover:text-foreground',
+          queryHistoryVisible ? 'text-foreground' : 'text-muted-foreground',
+        )}
+        onclick={() => (queryHistoryVisible = !queryHistoryVisible)}
+        title={tipText('Query history', 'Browse and re-run everything you have executed, plus your saved queries.', [mod, '⇧', 'B'])}
+      >
+        <History class="size-3.5 shrink-0" />
+      </Button>
 
-      <Tooltip.Root>
-        <Tooltip.Trigger>
-          {#snippet child({ props })}
-            <Button
-              {...props}
-              type="button"
-              variant="ghost"
-              size="sm"
-              class={cn(
-                'size-7 p-0 hover:text-foreground',
-                outputView === 'explain' ? 'text-foreground' : 'text-muted-foreground',
-              )}
-              disabled={!sql.trim() || explainLoading}
-              onclick={handleExplain}
-            >
-              {#if explainLoading}
-                <Loader2 class="size-3.5 shrink-0 animate-spin" />
-              {:else}
-                <ScanSearch class="size-3.5 shrink-0" />
-              {/if}
-            </Button>
-          {/snippet}
-        </Tooltip.Trigger>
-        <Tooltip.Content>
-          {@render hint('Explain plan', 'Visualize how the database executes this query — spot slow scans and missing indexes.')}
-        </Tooltip.Content>
-      </Tooltip.Root>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        class={cn(
+          'size-7 p-0 hover:text-foreground',
+          outputView === 'explain' ? 'text-foreground' : 'text-muted-foreground',
+        )}
+        disabled={!sql.trim() || explainLoading}
+        onclick={handleExplain}
+        title={tipText('Explain plan', 'Visualize how the database executes this query — spot slow scans and missing indexes.')}
+      >
+        {#if explainLoading}
+          <Loader2 class="size-3.5 shrink-0 animate-spin" />
+        {:else}
+          <ScanSearch class="size-3.5 shrink-0" />
+        {/if}
+      </Button>
 
       <DropdownMenu.Root>
         <DropdownMenu.Trigger
@@ -606,12 +670,12 @@
           {/if}
           <ChevronDown class="size-3 shrink-0 opacity-50" />
         </DropdownMenu.Trigger>
-        <DropdownMenu.Content align="start" class="min-w-36">
-          <DropdownMenu.Item class="gap-2 font-mono text-xs" onclick={() => copyAsOrm('drizzle')}>
+        <DropdownMenu.Content align="start" class="min-w-44">
+          <DropdownMenu.Item class="gap-2 whitespace-nowrap font-mono text-xs" onclick={() => copyAsOrm('drizzle')}>
             <Code2 class="size-3.5 shrink-0 text-muted-foreground/50" />
             Copy as Drizzle
           </DropdownMenu.Item>
-          <DropdownMenu.Item class="gap-2 font-mono text-xs" onclick={() => copyAsOrm('prisma')}>
+          <DropdownMenu.Item class="gap-2 whitespace-nowrap font-mono text-xs" onclick={() => copyAsOrm('prisma')}>
             <Code2 class="size-3.5 shrink-0 text-muted-foreground/50" />
             Copy as Prisma
           </DropdownMenu.Item>
@@ -619,6 +683,62 @@
       </DropdownMenu.Root>
     </div>
   </div>
+
+  {#if paramsPanelOpen && sqlParams.length > 0}
+    <div class="shrink-0 border-b border-border/60 bg-panel px-3 py-2">
+      <div class="flex w-full max-w-2xl items-center gap-1.5 pb-1.5">
+        <Variable class="size-3 text-muted-foreground/50" />
+        <span class="select-none text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground/55">Parameters</span>
+        <span
+          class="select-none text-[10px] text-muted-foreground/35"
+          title="Auto detects numbers, booleans and NULL — everything else runs as a quoted string."
+        >· Enter runs</span>
+        <button
+          type="button"
+          class="ml-auto inline-flex size-5 items-center justify-center rounded text-muted-foreground/60 transition-[background-color,color] hover:bg-accent hover:text-foreground"
+          aria-label="Close parameters"
+          onclick={() => (paramsPanelOpen = false)}
+        >
+          <X class="size-3" />
+        </button>
+      </div>
+      <div class="flex w-full max-w-2xl flex-col gap-1">
+        {#each sqlParams as p (p.name)}
+          {@const v = paramValues[p.name] ?? { value: '', mode: 'auto' }}
+          <div class="grid grid-cols-[minmax(5rem,8.5rem)_5.25rem_minmax(0,1fr)] items-center gap-1.5">
+            <span
+              class="justify-self-start truncate rounded bg-muted/50 px-1.5 py-0.5 font-mono text-ui-2xs text-foreground/75"
+              title=":{p.name}"
+            ><span class="text-muted-foreground/50">:</span>{p.name}</span>
+            <div class="relative">
+              <select
+                value={v.mode}
+                aria-label="Parameter type for {p.name}"
+                class="h-7 w-full appearance-none rounded-md border border-border/60 bg-input/30 pl-2 pr-6 text-ui-xs text-foreground/80 transition-colors hover:border-border focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none"
+                onchange={(e) => setParam(p.name, { ...v, mode: /** @type {any} */ (e.currentTarget.value) })}
+              >
+                <option value="auto">Auto</option>
+                <option value="text">Text</option>
+                <option value="raw">Raw SQL</option>
+                <option value="null">NULL</option>
+              </select>
+              <ChevronDown class="pointer-events-none absolute right-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/50" />
+            </div>
+            <input
+              type="text"
+              value={v.value}
+              disabled={v.mode === 'null'}
+              placeholder={v.mode === 'null' ? 'NULL' : v.mode === 'raw' ? 'now() — inserted verbatim' : 'value'}
+              aria-label="Value for {p.name}"
+              class="h-7 w-full min-w-0 rounded-md border border-transparent bg-input/30 px-2 font-mono text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/30 hover:border-border/60 focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none disabled:opacity-40"
+              oninput={(e) => setParam(p.name, { ...v, value: e.currentTarget.value })}
+              onkeydown={(e) => { if (e.key === 'Enter') handleRun(undefined) }}
+            />
+          </div>
+        {/each}
+      </div>
+    </div>
+  {/if}
 
   <div
     class={outputVisible
@@ -669,72 +789,8 @@
   />
   {/if}
 
-  {#if error}
-    {#if isNetworkError(error)}
-      <!-- Network / offline error -->
-      <div class="flex shrink-0 items-center gap-2.5 border-b border-border/30 bg-muted/20 px-3 py-2">
-        <WifiOff class="size-3.5 shrink-0 text-muted-foreground/40" />
-        <p class="min-w-0 flex-1 font-mono text-ui-xs text-muted-foreground/70">Cannot reach database — check your connection and try again.</p>
-      </div>
-    {:else}
-      <!-- SQL / application error — styled like a real terminal error: a red
-           gutter accent, monospace message, and a fully SELECTABLE body so the
-           text can be copied (the app is select-none by default; the
-           data-studio-selectable hook re-enables selection here). -->
-      <div
-        data-studio-selectable="text"
-        class="group/err shrink-0 border-b border-destructive/20 border-l-2 border-l-destructive/70 bg-destructive/[0.055] py-2.5 pl-3 pr-3"
-      >
-        <div class="flex items-center justify-between gap-2 select-none">
-          <span class="flex shrink-0 items-center gap-1.5 font-mono text-ui-2xs font-bold uppercase tracking-wider text-destructive/80">
-            <CircleAlert class="size-3 shrink-0" />
-            Error
-          </span>
-          <div class="flex shrink-0 items-center gap-1">
-            <button
-              type="button"
-              onclick={copyError}
-              title="Copy error"
-              aria-label="Copy error"
-              class="inline-flex size-6 items-center justify-center rounded-md text-destructive/60 transition-colors hover:bg-destructive/10 hover:text-destructive"
-            >
-              {#if errorCopied}<Check class="size-3 shrink-0" />{:else}<Copy class="size-3 shrink-0" />{/if}
-            </button>
-            {#if onfixwithai}
-              <button
-                type="button"
-                onclick={fixWithAi}
-                class="inline-flex shrink-0 items-center gap-1 rounded-md border border-destructive/25 bg-destructive/10 px-2 py-1 font-mono text-ui-2xs font-medium text-destructive transition-[background-color,transform] duration-150 hover:bg-destructive/20 active:scale-[0.97]"
-              >
-                <Wand2 class="size-2.5 shrink-0" />
-                Fix with AI
-              </button>
-            {/if}
-          </div>
-        </div>
-        <!-- overflow-wrap:anywhere wraps at word boundaries first and only breaks
-             inside a token when it can't fit — unlike break-all, which chopped
-             ordinary words mid-character ("can/celing", "sta/tement"). -->
-        <pre class="mt-1.5 max-h-28 select-text overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-ui-xs leading-relaxed text-destructive">{error}</pre>
-        {#if /statement timeout|canceling statement due to/i.test(error)}
-          <p class="mt-2 text-ui-2xs leading-relaxed text-muted-foreground/70">
-            The query timed out. If this table has large JSON/text columns, select just the
-            columns you need instead of <code class="rounded bg-muted/60 px-1 py-px font-mono text-foreground/70">*</code>, or add a smaller
-            <code class="rounded bg-muted/60 px-1 py-px font-mono text-foreground/70">LIMIT</code>.
-          </p>
-        {:else if /relation "[^"]*" does not exist|column "[^"]*" does not exist/i.test(error)}
-          <p class="mt-2 text-ui-2xs leading-relaxed text-muted-foreground/70">
-            PostgreSQL folds unquoted names to lowercase, so a table like
-            <code class="rounded bg-muted/60 px-1 py-px font-mono text-foreground/70">Products</code> only matches when quoted —
-            <code class="rounded bg-muted/60 px-1 py-px font-mono text-foreground/70">SELECT * FROM "Products"</code>. Pick the table from
-            autocomplete and it inserts the quoted form for you.
-          </p>
-        {/if}
-      </div>
-    {/if}
-  {/if}
-
-  <!-- Output panel: header always visible, content toggles with Cmd+J -->
+  <!-- Output panel: header always visible, content toggles with Cmd+J
+       (a failed run surfaces in the "Error" view tab below, not a banner). -->
   <div class={outputVisible ? "flex min-h-0 flex-1 flex-col overflow-hidden" : "flex shrink-0 flex-col"}>
     <!-- Output tab bar -->
     <div
@@ -759,29 +815,34 @@
         <div class="mx-1.5 h-3.5 w-px shrink-0 self-center bg-border/60"></div>
       {/if}
 
-      <!-- View tabs (icon-only) -->
+      <!-- View tabs (icon-only). The Error tab appears with a label only after a
+           failed run, tinted destructive so it reads at a glance. -->
       <div class="flex items-center gap-0.5 px-1">
         {#each [
-          { id: 'table',   label: 'Table',   Icon: Table2,    pro: false },
-          { id: 'chart',   label: 'Chart',   Icon: BarChart2, pro: true },
-          { id: 'json',    label: 'JSON',    Icon: Braces,    pro: true },
+          { id: 'table',   label: 'Table',   Icon: Table2,     pro: false },
+          { id: 'chart',   label: 'Chart',   Icon: BarChart2,  pro: true },
+          { id: 'json',    label: 'JSON',    Icon: Braces,     pro: true },
           { id: 'explain', label: 'Explain', Icon: ScanSearch, pro: true },
+          ...(error ? [{ id: 'error', label: 'Error', Icon: CircleAlert, pro: false }] : []),
         ] as tab (tab.id)}
           {@const locked = tab.pro && !$hasPro}
           {@const tabActive = !locked && outputVisible && outputView === tab.id}
+          {@const isError = tab.id === 'error'}
           {@const Icon = tab.Icon}
           <button
             type="button"
             onclick={() => {
               if (locked) { onprorequired(); return }
               if (tab.id === 'explain') { void handleExplain() }
-              else { outputView = /** @type {'table'|'chart'|'json'} */ (tab.id); if (!outputVisible) toggleOutput() }
+              else { outputView = /** @type {'table'|'chart'|'json'|'error'} */ (tab.id); if (!outputVisible) toggleOutput() }
             }}
             class={cn(
               'flex size-7 items-center justify-center rounded transition-colors',
               locked
                 ? 'cursor-not-allowed opacity-40 text-muted-foreground/30'
-                : tabActive ? 'bg-muted/70 text-foreground' : 'text-muted-foreground/50 hover:bg-muted/40 hover:text-muted-foreground',
+                : isError
+                  ? tabActive ? 'bg-muted/70 text-destructive' : 'text-destructive/70 hover:bg-muted/40 hover:text-destructive'
+                  : tabActive ? 'bg-muted/70 text-foreground' : 'text-muted-foreground/50 hover:bg-muted/40 hover:text-muted-foreground',
             )}
             title="{tab.label} view{locked ? ' · Stroke Pro' : ''}"
           >
@@ -824,30 +885,88 @@
           </DropdownMenu.Root>
         {/if}
 
-        <Tooltip.Root>
-          <Tooltip.Trigger>
-            {#snippet child({ props })}
-              <button
-                {...props}
-                type="button"
-                onclick={toggleOutput}
-                class="inline-flex size-5 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-foreground"
-              >
-                <ChevronDown class={cn('size-3.5 transition-transform duration-150', outputVisible ? '' : 'rotate-180')} />
-              </button>
-            {/snippet}
-          </Tooltip.Trigger>
-          <Tooltip.Content side="top" align="end">
-            {@render hint(outputVisible ? 'Hide results' : 'Show results', 'Collapse the results panel to give the editor the full height.', [mod, 'J'])}
-          </Tooltip.Content>
-        </Tooltip.Root>
+        <button
+          type="button"
+          onclick={toggleOutput}
+          class="inline-flex size-5 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-foreground"
+          title={tipText(outputVisible ? 'Hide results' : 'Show results', 'Collapse the results panel to give the editor the full height.', [mod, 'J'])}
+        >
+          <ChevronDown class={cn('size-3.5 transition-transform duration-150', outputVisible ? '' : 'rotate-180')} />
+        </button>
       </div>
     </div>
 
     {#if outputVisible}
       <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-panel">
         {#key `${outputView}:${Math.min(activeResultIdx, Math.max(resultSets.length - 1, 0))}`}
-          {#if outputView === 'explain'}
+          {#if outputView === 'error'}
+            {#if isNetworkError(error)}
+              <div class="flex h-full flex-col items-center justify-center gap-2.5 px-6 text-center">
+                <WifiOff class="size-6 text-muted-foreground/25" />
+                <p class="font-mono text-ui-sm text-muted-foreground/70">Cannot reach database — check your connection and try again.</p>
+              </div>
+            {:else}
+              <!-- SQL error as a console pane (VS Code / Postman feel): neutral
+                   monospace output on the panel surface, colour reserved for a
+                   small severity marker and a thin gutter rail — never a red wash.
+                   Body is fully SELECTABLE (the app is select-none by default;
+                   data-studio-selectable re-enables selection here). -->
+              <div data-studio-selectable="text" class="flex h-full min-h-0 flex-col font-mono">
+                <!-- Console toolbar — neutral chrome, ghost actions -->
+                <div class="flex shrink-0 items-center gap-2 border-b border-border/60 px-3 py-1.5 select-none">
+                  <span class="size-1.5 shrink-0 rounded-full bg-destructive"></span>
+                  <span class="text-ui-2xs font-semibold uppercase tracking-[0.08em] text-destructive/90">Error</span>
+                  {#if currentDisplay.queryMs > 0}
+                    <span class="text-ui-2xs tabular-nums text-muted-foreground/45">· {currentDisplay.queryMs}ms</span>
+                  {/if}
+                  <div class="ml-auto flex shrink-0 items-center gap-1">
+                    <button
+                      type="button"
+                      onclick={copyError}
+                      title="Copy error"
+                      aria-label="Copy error"
+                      class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-muted/60 hover:text-foreground"
+                    >
+                      {#if errorCopied}<Check class="size-3 shrink-0" />{:else}<Copy class="size-3 shrink-0" />{/if}
+                    </button>
+                    {#if onfixwithai}
+                      <button
+                        type="button"
+                        onclick={fixWithAi}
+                        class="inline-flex shrink-0 items-center gap-1 rounded border border-border/70 px-2 py-1 text-ui-2xs font-medium text-muted-foreground transition-[background-color,border-color,color,transform] duration-150 hover:border-border hover:bg-muted/60 hover:text-foreground active:scale-[0.97]"
+                      >
+                        <Wand2 class="size-2.5 shrink-0" />
+                        Fix with AI
+                      </button>
+                    {/if}
+                  </div>
+                </div>
+                <!-- Console output — neutral text, red only in the thin left rail.
+                     overflow-wrap:anywhere wraps at word boundaries first and only
+                     breaks inside a token when it can't fit (unlike break-all,
+                     which chopped ordinary words mid-character). -->
+                <div class="min-h-0 flex-1 overflow-auto px-3 py-3">
+                  <div class="border-l-2 border-destructive/40 pl-3">
+                    <pre class="select-text whitespace-pre-wrap [overflow-wrap:anywhere] text-ui-xs leading-relaxed text-foreground/85">{error}</pre>
+                    {#if /statement timeout|canceling statement due to/i.test(error)}
+                      <p class="mt-3 text-ui-2xs leading-relaxed text-muted-foreground/60">
+                        The query timed out. If this table has large JSON/text columns, select just the
+                        columns you need instead of <code class="rounded bg-muted/60 px-1 py-px text-foreground/70">*</code>, or add a smaller
+                        <code class="rounded bg-muted/60 px-1 py-px text-foreground/70">LIMIT</code>.
+                      </p>
+                    {:else if /relation "[^"]*" does not exist|column "[^"]*" does not exist/i.test(error)}
+                      <p class="mt-3 text-ui-2xs leading-relaxed text-muted-foreground/60">
+                        PostgreSQL folds unquoted names to lowercase, so a table like
+                        <code class="rounded bg-muted/60 px-1 py-px text-foreground/70">Products</code> only matches when quoted —
+                        <code class="rounded bg-muted/60 px-1 py-px text-foreground/70">SELECT * FROM "Products"</code>. Pick the table from
+                        autocomplete and it inserts the quoted form for you.
+                      </p>
+                    {/if}
+                  </div>
+                </div>
+              </div>
+            {/if}
+          {:else if outputView === 'explain'}
             {#if explainLoading}
               <TableLoading />
             {:else if explainError}
@@ -898,7 +1017,6 @@
   </div>
   </div>
 </div>
-</Tooltip.Provider>
 
 <Dialog.Root bind:open={saveDialogOpen}>
   <Dialog.Content class="max-w-md gap-4">

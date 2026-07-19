@@ -142,6 +142,10 @@ pub struct TableRows {
     pub query_ms: u64,
     pub primary_key: Vec<String>,
     pub foreign_keys: Vec<ForeignKeyInfo>,
+    /// Exact SQL executed for this fetch, so the frontend query log can show it.
+    /// When a COUNT(*) is also run, the row SELECT and the COUNT are joined with
+    /// a newline (row SELECT first).
+    pub sql: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -152,6 +156,9 @@ pub struct SqlResult {
     pub row_count: Option<i64>,
     pub message: Option<String>,
     pub query_ms: u64,
+    /// Exact SQL statement that was executed, so the frontend query log can show
+    /// it. Populated by the executing path (or the top-level dispatcher).
+    pub sql: String,
 }
 
 fn pg_type_label(type_name: &str) -> String {
@@ -164,7 +171,7 @@ fn pg_type_label(type_name: &str) -> String {
     }
 }
 
-fn cell_to_json(row: &sqlx::postgres::PgRow, idx: usize) -> Value {
+pub(crate) fn cell_to_json(row: &sqlx::postgres::PgRow, idx: usize) -> Value {
     let col = row.column(idx);
     let type_name = col.type_info().name();
 
@@ -616,6 +623,26 @@ pub struct RowFilter {
     pub data_type: Option<String>,
 }
 
+/// Keyset (cursor) pagination anchor. When present, the page is fetched with
+/// `WHERE {column} {>|<} $val::{sql_type}` instead of OFFSET, so deep pages don't
+/// scan-and-discard. The value binds as text and is cast to the column's type so
+/// the column stays uncast and its index is usable. Postgres path only.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeysetCursor {
+    /// The ordering column (a single-column primary key, or a timestamp for temporal).
+    pub column: String,
+    /// Last-seen value of `column` on the boundary row, as text.
+    pub value: String,
+    /// SQL type to cast the bound value to (e.g. "bigint", "uuid", "timestamptz", "text").
+    pub sql_type: String,
+    /// true = the page AFTER `value` (forward / next); false = BEFORE it (backward / prev).
+    pub after: bool,
+    /// Display ordering of `column`: false = ASC, true = DESC (temporal is newest-first).
+    #[serde(default)]
+    pub desc: bool,
+}
+
 struct WhereClause {
     sql: String,
     binds: Vec<String>,
@@ -1005,7 +1032,15 @@ fn build_order_by(
     sort_column: Option<&str>,
     sort_direction: Option<&str>,
     sorts: &[SortSpec],
+    // Null placement for every ORDER BY term. `Some("first")`/`Some("last")` map
+    // to the explicit clause; anything else (including None/"unset") keeps the
+    // historical NULLS LAST default so existing behavior doesn't regress.
+    nulls_order: Option<&str>,
 ) -> Result<String, String> {
+    let nulls = match nulls_order {
+        Some("first") => "NULLS FIRST",
+        _ => "NULLS LAST",
+    };
     // Multi-column sort (shift-click headers) takes precedence when present;
     // each key becomes an ORDER BY term in priority order.
     if !sorts.is_empty() {
@@ -1022,7 +1057,7 @@ fn build_order_by(
                 "asc" => "ASC",
                 other => return Err(format!("Invalid sort direction: {other}")),
             };
-            parts.push(format!("{col} {dir} NULLS LAST"));
+            parts.push(format!("{col} {dir} {nulls}"));
         }
         return Ok(if parts.is_empty() {
             String::new()
@@ -1041,10 +1076,10 @@ fn build_order_by(
         "asc" => "ASC",
         other => return Err(format!("Invalid sort direction: {other}")),
     };
-    Ok(format!(" ORDER BY {col} {dir} NULLS LAST"))
+    Ok(format!(" ORDER BY {col} {dir} {nulls}"))
 }
 
-const MAX_PAGE_LIMIT: i64 = 1_000_000;
+const MAX_PAGE_LIMIT: i64 = 5_000_000;
 
 pub async fn get_table_rows(
     state: State<'_, DbState>,
@@ -1071,6 +1106,15 @@ pub async fn get_table_rows(
     // sort_column/sort_direction; other engines ignore this and use the single
     // sort_column (the primary key), so multi-sort degrades gracefully.
     sorts: Vec<SortSpec>,
+    // Keyset (cursor) pagination anchor. When Some, the page is fetched with a
+    // keyset predicate instead of OFFSET (Postgres path only; other engines and
+    // absent = classic OFFSET). The caller only sends this when it's safe
+    // (single-column key, ordering by that key), else it falls back to offset.
+    keyset: Option<KeysetCursor>,
+    // Null placement for the ORDER BY ("first"/"last", or None to keep the
+    // NULLS LAST default). Applied on the dialects that support explicit null
+    // placement (Postgres, SQLite, D1/libSQL); ignored by MySQL/ClickHouse/etc.
+    nulls_order: Option<String>,
 ) -> Result<TableRows, String> {
     if limit > MAX_PAGE_LIMIT {
         return Err(format!("Limit {limit} exceeds the maximum of {MAX_PAGE_LIMIT} rows per page"));
@@ -1085,14 +1129,14 @@ pub async fn get_table_rows(
     match require_conn(&state)? {
         ActiveConnection::Sqlite(pool) => {
             return super::sqlite::get_table_rows(
-                &pool, &table, limit, offset, search, sort_column, sort_direction, filters,
+                &pool, &table, limit, offset, search, sort_column, sort_direction, filters, nulls_order,
             ).await;
         }
         ActiveConnection::D1(cfg) => {
-            return get_table_rows_remote(&cfg, &table, limit, offset, search, sort_column, sort_direction, filters).await;
+            return get_table_rows_remote(&cfg, &table, limit, offset, search, sort_column, sort_direction, filters, nulls_order).await;
         }
         ActiveConnection::LibSql(cfg) => {
-            return get_table_rows_remote(&cfg, &table, limit, offset, search, sort_column, sort_direction, filters).await;
+            return get_table_rows_remote(&cfg, &table, limit, offset, search, sort_column, sort_direction, filters, nulls_order).await;
         }
         ActiveConnection::Mysql(pool) => {
             return super::mysql::get_table_rows(
@@ -1136,6 +1180,7 @@ pub async fn get_table_rows(
         sort_column.as_deref(),
         sort_direction.as_deref(),
         &sorts,
+        nulls_order.as_deref(),
     )?;
     let table_ref = format!(r#""{schema}"."{table}""#);
 
@@ -1148,18 +1193,74 @@ pub async fn get_table_rows(
         count_query = count_query.bind(value.as_str());
     }
 
-    let limit_param = where_clause.binds.len() + 1;
-    let offset_param = where_clause.binds.len() + 2;
-    let data_sql = format!(
-        "SELECT * FROM {table_ref}{}{} LIMIT ${limit_param} OFFSET ${offset_param}",
-        where_clause.sql,
-        order_by
-    );
+    // Keyset (cursor) page when a valid cursor is supplied, otherwise classic
+    // OFFSET. The cursor's cast type is sanitized to a safe token subset so it
+    // can be interpolated (bound params can't carry a type); an unsafe type falls
+    // back to offset. Backward paging fetches in reverse then flips the rows.
+    let keyset_ok = keyset.as_ref().filter(|k| {
+        !k.sql_type.is_empty()
+            && k.sql_type.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ' ')
+    });
+    let keyset_reverse;
+    // Cursor value to bind after the WHERE binds (keyset), or None (offset). The
+    // SQL string is built here in the outer scope so it outlives `data_query`.
+    let keyset_bind: Option<String>;
+    let data_sql: String;
+    if let Some(ks) = keyset_ok {
+        let col = quoted_column(&ks.column)?;
+        let op = if ks.after == !ks.desc { ">" } else { "<" };
+        let fetch_order = if (if ks.after { ks.desc } else { !ks.desc }) { "DESC" } else { "ASC" };
+        keyset_reverse = !ks.after;
+        keyset_bind = Some(ks.value.clone());
+        let ks_param = where_clause.binds.len() + 1;
+        let limit_param = where_clause.binds.len() + 2;
+        let connector = if where_clause.sql.is_empty() { " WHERE" } else { " AND" };
+        data_sql = format!(
+            "SELECT * FROM {table_ref}{where}{connector} {col} {op} ${ks_param}::{cast} ORDER BY {col} {fetch_order} LIMIT ${limit_param}",
+            where = where_clause.sql,
+            cast = ks.sql_type,
+        );
+    } else {
+        keyset_reverse = false;
+        keyset_bind = None;
+        let limit_param = where_clause.binds.len() + 1;
+        let offset_param = where_clause.binds.len() + 2;
+        data_sql = format!(
+            "SELECT * FROM {table_ref}{}{} LIMIT ${limit_param} OFFSET ${offset_param}",
+            where_clause.sql,
+            order_by
+        );
+    }
     let mut data_query = sqlx::query(&data_sql);
     for value in &where_clause.binds {
         data_query = data_query.bind(value.as_str());
     }
-    data_query = data_query.bind(limit).bind(offset);
+    data_query = match &keyset_bind {
+        Some(v) => data_query.bind(v.as_str()).bind(limit),
+        None => data_query.bind(limit).bind(offset),
+    };
+
+    // Kick the catalog-metadata queries (enums/nullable/pk/fk) off NOW so they run
+    // concurrently with the row + count fetch below, instead of as a second
+    // round-trip *after* it. That serial second batch was the extra latency users
+    // felt on the FIRST open of a table (repeat fetches skip metadata entirely and
+    // are already single-round-trip). Spawned so it progresses while we await the
+    // rows; joined once the columns are built.
+    let meta_task = if include_meta {
+        let pool = pool.clone();
+        let schema = schema.clone();
+        let table = table.clone();
+        Some(tokio::spawn(async move {
+            tokio::join!(
+                fetch_table_column_enums(&pool, &schema, &table),
+                fetch_table_column_nullable(&pool, &schema, &table),
+                fetch_primary_key(&pool, &schema, &table),
+                fetch_foreign_keys(&pool, &schema, &table),
+            )
+        }))
+    } else {
+        None
+    };
 
     // For an unfiltered listing, COUNT(*) on a large table is a full sequential
     // scan that can take seconds — that's the "pause" when opening a big table.
@@ -1248,28 +1349,37 @@ pub async fn get_table_rows(
     };
 
     // Build row data early so the borrow of `rows` doesn't outlive the join.
-    let data: Vec<Vec<Value>> = rows
+    let mut data: Vec<Vec<Value>> = rows
         .iter()
         .map(|row| (0..row.len()).map(|i| cell_to_json(row, i)).collect())
         .collect();
+    // Backward keyset page was fetched in reverse order — flip it back to the
+    // table's display order.
+    if keyset_reverse {
+        data.reverse();
+    }
 
     // Catalog metadata (enums/nullable/pk/fk) is stable per table, so only fetch
     // it on the first load — repeat fetches (pagination/sort/filter/live) reuse
     // what the frontend already holds, saving four round-trips and connections.
-    let (primary_key, foreign_keys) = if include_meta {
-        // All four metadata queries are independent — run them in parallel to halve
-        // the number of sequential round-trips and release connections faster.
-        let (enums_result, nullable_result, pk_result, fk_result) = tokio::join!(
-            fetch_table_column_enums(&pool, &schema, &table),
-            fetch_table_column_nullable(&pool, &schema, &table),
-            fetch_primary_key(&pool, &schema, &table),
-            fetch_foreign_keys(&pool, &schema, &table),
-        );
+    // Metadata was fired off above (concurrent with the row/count fetch); collect
+    // it now that the columns are built so enum/nullable info can be applied.
+    let (primary_key, foreign_keys) = if let Some(task) = meta_task {
+        let (enums_result, nullable_result, pk_result, fk_result) =
+            task.await.map_err(|e| format!("Failed to load table metadata: {e}"))?;
         if let Ok(enums) = enums_result { apply_column_enums(&mut columns, &enums); }
         if let Ok(nullable) = nullable_result { apply_column_nullable(&mut columns, &nullable); }
         (pk_result?, fk_result?)
     } else {
         (Vec::new(), Vec::new())
+    };
+
+    // Report the exact SQL run: the row SELECT always, plus the COUNT(*) as a
+    // second line whenever a count was computed (include_count).
+    let sql = if include_count {
+        format!("{data_sql}\n{count_sql}")
+    } else {
+        data_sql.clone()
     };
 
     Ok(TableRows {
@@ -1279,6 +1389,7 @@ pub async fn get_table_rows(
         query_ms: started.elapsed().as_millis() as u64,
         primary_key,
         foreign_keys,
+        sql,
     })
 }
 
@@ -1921,7 +2032,11 @@ pub async fn execute_sql(state: State<'_, DbState>, sql: String) -> Result<SqlRe
     let conn = require_conn(&state)?;
     let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
     *state.cancel_tx.lock().map_err(|e| e.to_string())? = Some(cancel_tx);
-    match conn {
+    // Kept for the query log — the per-dialect executor runs `sql_str` (which is
+    // moved into the cancellable branch below), so stamp the executed SQL onto
+    // the result after the match.
+    let sql_out = sql_str.clone();
+    let mut result = match conn {
         // Postgres and MySQL support real server-side cancellation: the engine
         // captures its backend/connection id and cancels the running statement
         // when the receiver fires.
@@ -1944,7 +2059,11 @@ pub async fn execute_sql(state: State<'_, DbState>, sql: String) -> Result<SqlRe
             } => r,
             _ = async { let _ = cancel_rx.await; } => Err("Query cancelled".to_string()),
         },
+    };
+    if let Ok(r) = &mut result {
+        r.sql = sql_out;
     }
+    result
 }
 
 /// Execute a SQL query against an arbitrary saved connection without changing
@@ -1959,7 +2078,7 @@ pub async fn execute_sql_on_conn(
     if sql.is_empty() {
         return Err("Query is empty".into());
     }
-    match config {
+    let mut result = match config {
         AnyConnectionConfig::Postgres(c) => {
             let pool = open_pg(&c).await?;
             let result = execute_sql_pg(&pool, sql, None).await;
@@ -1989,7 +2108,11 @@ pub async fn execute_sql_on_conn(
             let h = super::connection::open_mssql(&c).await?;
             super::mssql::execute_sql(&h, sql).await
         }
+    };
+    if let Ok(r) = &mut result {
+        r.sql = sql.to_string();
     }
+    result
 }
 
 /// Hard row cap for ad-hoc SQL execution. Prevents OOM on tables with millions of rows.
@@ -2109,6 +2232,7 @@ async fn execute_sql_pg(
                     None
                 },
                 query_ms: query_ms(),
+                sql: stmt.to_string(),
             });
         } else {
             let result = sqlx::query(stmt)
@@ -2125,6 +2249,7 @@ async fn execute_sql_pg(
                     row_count: Some(affected),
                     message: Some(format!("{affected} row(s) affected")),
                     query_ms: query_ms(),
+                    sql: stmt.to_string(),
                 });
             }
         }
@@ -2137,6 +2262,7 @@ async fn execute_sql_pg(
         row_count: Some(0),
         message: Some("Done".into()),
         query_ms: query_ms(),
+        sql: sql.to_string(),
     })
 }
 
@@ -2310,6 +2436,7 @@ async fn execute_sql_multi_pg(pool: &sqlx::PgPool, stmts: &[String]) -> Result<V
                     None
                 },
                 query_ms: stmt_ms(),
+                sql: stmt.clone(),
             });
         } else {
             match sqlx::query(stmt).execute(&mut *tx).await {
@@ -2321,6 +2448,7 @@ async fn execute_sql_multi_pg(pool: &sqlx::PgPool, stmts: &[String]) -> Result<V
                         row_count: Some(affected),
                         message: Some(format!("{affected} row(s) affected")),
                         query_ms: stmt_ms(),
+                        sql: stmt.clone(),
                     });
                 }
                 Err(e) => {
@@ -2415,6 +2543,7 @@ async fn get_table_rows_remote<C: RemoteSqlite>(
     sort_column: Option<String>,
     sort_direction: Option<String>,
     filters: Option<Vec<RowFilter>>,
+    nulls_order: Option<String>,
 ) -> Result<TableRows, String> {
     let t0 = std::time::Instant::now();
     let tq = format!("\"{}\"", table.replace('"', "\"\""));
@@ -2527,7 +2656,12 @@ async fn get_table_rows_remote<C: RemoteSqlite>(
 
     let order_clause = if let Some(col) = sort_column {
         let dir = match sort_direction.as_deref() { Some("desc") => "DESC", _ => "ASC" };
-        format!("ORDER BY \"{}\" {dir}", col.replace('"', "\"\""))
+        // D1/libSQL are SQLite, so explicit null placement is honored here too.
+        let nulls = match nulls_order.as_deref() {
+            Some("first") => "NULLS FIRST",
+            _ => "NULLS LAST",
+        };
+        format!("ORDER BY \"{}\" {dir} {nulls}", col.replace('"', "\"\""))
     } else { String::new() };
 
     // ── Phase 2: COUNT + rows — run concurrently ─────────────────────────────
@@ -2553,6 +2687,7 @@ async fn get_table_rows_remote<C: RemoteSqlite>(
         query_ms: t0.elapsed().as_millis() as u64,
         primary_key,
         foreign_keys,
+        sql: format!("{rows_sql}\n{count_sql}"),
     })
 }
 
@@ -2724,11 +2859,19 @@ pub async fn get_column_stats(
     table: String,
     column: String,
 ) -> Result<ColumnStats, String> {
-    let pool = require_pool(&state)?;
-
     validate_ident(&schema).map_err(|e| e.to_string())?;
     validate_ident(&table).map_err(|e| e.to_string())?;
     validate_ident(&column).map_err(|e| e.to_string())?;
+
+    // Non-PostgreSQL engines (SQLite, MySQL, D1, LibSQL, ClickHouse, DuckDB,
+    // MSSQL): compute stats with a dialect-agnostic aggregate routed through
+    // execute_sql, which decodes result rows for every driver. The tuned
+    // PostgreSQL path below (array handling, ::numeric AVG) stays unchanged.
+    if !matches!(require_conn(&state)?, ActiveConnection::Postgres(_)) {
+        return column_stats_generic(state, schema, table, column).await;
+    }
+
+    let pool = require_pool(&state)?;
 
     let tq  = format!("\"{}\".\"{}\"", schema.replace('"', "\"\""), table.replace('"', "\"\""));
     let col = format!("\"{}\"", column.replace('"', "\"\""));
@@ -2796,6 +2939,100 @@ pub async fn get_column_stats(
     let max: Option<Value> = row.try_get::<Option<String>, _>("max_val").ok().flatten().map(Value::String);
 
     Ok(ColumnStats { column, count, null_count, distinct_count, min, max, avg })
+}
+
+/// Cross-dialect column statistics for every non-PostgreSQL engine. Builds a
+/// dialect-quoted aggregate and routes it through `execute_sql`, which already
+/// decodes result rows for each driver (sqlx engines + the HTTP engines like D1,
+/// LibSQL and ClickHouse). Falls back to a plain count when the engine rejects
+/// MIN/MAX/DISTINCT on the column type (e.g. JSON/BLOB), so the panel still shows
+/// total + null counts instead of erroring.
+async fn column_stats_generic(
+    state: State<'_, DbState>,
+    schema: String,
+    table: String,
+    column: String,
+) -> Result<ColumnStats, String> {
+    use super::sql_util::{quote_backtick, quote_bracket, quote_double};
+
+    let conn = require_conn(&state)?;
+    let (tref, col) = match &conn {
+        // MySQL treats the schema as the database; ClickHouse likewise. Both
+        // quote with backticks.
+        ActiveConnection::Mysql(_) | ActiveConnection::Clickhouse(_) => {
+            let t = if schema.is_empty() {
+                quote_backtick(&table)
+            } else {
+                format!("{}.{}", quote_backtick(&schema), quote_backtick(&table))
+            };
+            (t, quote_backtick(&column))
+        }
+        ActiveConnection::Mssql(_) => {
+            let t = if schema.is_empty() {
+                quote_bracket(&table)
+            } else {
+                format!("{}.{}", quote_bracket(&schema), quote_bracket(&table))
+            };
+            (t, quote_bracket(&column))
+        }
+        // SQLite, D1, LibSQL, DuckDB — double-quoted, single-namespace (no
+        // PostgreSQL-style schema qualifier).
+        _ => (quote_double(&table), quote_double(&column)),
+    };
+
+    let full = format!(
+        "SELECT COUNT(*) AS total, COUNT({col}) AS non_null, \
+         COUNT(DISTINCT {col}) AS distinct_count, MIN({col}) AS min_val, MAX({col}) AS max_val \
+         FROM {tref}"
+    );
+    let res = match dispatch_stats_sql(&conn, &full).await {
+        Ok(r) => r,
+        Err(_) => {
+            let basic = format!("SELECT COUNT(*) AS total, COUNT({col}) AS non_null FROM {tref}");
+            dispatch_stats_sql(&conn, &basic).await?
+        }
+    };
+
+    let row = res.rows.into_iter().next().unwrap_or_default();
+    let as_i64 = |v: Option<&Value>| -> i64 {
+        match v {
+            Some(Value::Number(n)) => n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)).unwrap_or(0),
+            Some(Value::String(s)) => s.parse().unwrap_or(0),
+            _ => 0,
+        }
+    };
+    let total = as_i64(row.get(0));
+    let non_null = as_i64(row.get(1));
+    let distinct_count = row.get(2).filter(|v| !v.is_null()).map(|v| as_i64(Some(v)));
+    let min = row.get(3).filter(|v| !v.is_null()).cloned();
+    let max = row.get(4).filter(|v| !v.is_null()).cloned();
+
+    Ok(ColumnStats {
+        column,
+        count: total,
+        null_count: total - non_null,
+        distinct_count,
+        min,
+        max,
+        avg: None,
+    })
+}
+
+/// Run a bounded read-only aggregate against a borrowed active connection (any
+/// engine). Mirrors `execute_sql`'s per-driver dispatch minus the cancellation
+/// plumbing — used by `column_stats_generic`, which needs to borrow the
+/// connection (so it can retry with a fallback query) rather than move `State`.
+async fn dispatch_stats_sql(conn: &ActiveConnection, sql: &str) -> Result<SqlResult, String> {
+    match conn {
+        ActiveConnection::Postgres(pool) => execute_sql_pg(pool, sql, None).await,
+        ActiveConnection::Mysql(pool) => super::mysql::execute_sql(pool, sql, None).await,
+        ActiveConnection::Sqlite(pool) => super::sqlite::execute_sql(pool, sql).await,
+        ActiveConnection::D1(cfg) => super::d1::query(cfg, sql, vec![]).await,
+        ActiveConnection::LibSql(cfg) => super::libsql::query(cfg, sql, vec![]).await,
+        ActiveConnection::Clickhouse(cfg) => super::clickhouse::query(cfg, sql).await,
+        ActiveConnection::Duckdb(h) => super::duckdb::execute_sql(h, sql).await,
+        ActiveConnection::Mssql(h) => super::mssql::execute_sql(h, sql).await,
+    }
 }
 
 /// Lightweight connection health check — runs `SELECT 1` against the active

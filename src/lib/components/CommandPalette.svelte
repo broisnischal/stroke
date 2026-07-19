@@ -2,6 +2,11 @@
   import Icon from './Icon.svelte'
   import * as Command from '$lib/components/ui/command/index.js'
   import { formatTableRowCount } from '$lib/table-list.js'
+  import { get } from 'svelte/store'
+  import AiMarkdown from './AiMarkdown.svelte'
+  import { chatCompletionStream, buildSystemPrompt, AI_TOOLS, isDestructiveSql, classifyDbError } from '$lib/ai.js'
+  import { aiSettings, isAiConfigured } from '$lib/stores/ai-settings.js'
+  import { executeSql } from '$lib/api.js'
 
   let {
     open = $bindable(false),
@@ -36,12 +41,19 @@
     hasSchemaExplorer = true,
     hasSecurity = true,
     onopenlogs = () => {},
+    onopeninsights = () => {},
+    onopenobjects = () => {},
+    ontogglequerylog = () => {},
     onopenextensions = () => {},
     onopenJsonViewer = () => {},
     onopenshortcuts = () => {},
     onopenabout = () => {},
     onopenreport = () => {},
     oncheckupdate = () => {},
+    /** Whether the connection is currently read-only (locks edits/inserts/deletes). */
+    readonly = false,
+    /** Toggle read-only mode. */
+    onreadonlytoggle = () => {},
     /** @param {'postgres'|'mysql'} dbType */
     ondockerlaunch = (dbType) => {},
     /** @param {import('$lib/stores/connections.js').SavedConnection} conn */
@@ -58,19 +70,220 @@
     onopennotebookfile = () => {},
     openschematimeline = () => {},
     opendatadiff = () => {},
+    /** Live AI schema/db context for the inline quick-ask. */
+    schemaContext = null,
+    /** Escalate a quick-ask question into the full AI sidebar/chat. @param {string} q */
+    onaskcontinue = (q) => {},
   } = $props()
 
-  /** @param {'docker' | 'connections' | 'tables'} target */
+  /** @param {'docker' | 'connections' | 'tables' | 'ask'} target */
   function navigate(target) {
     page = target
   }
 
   function goBack() {
+    if (page === 'ask') stopAsk()
     page = 'root'
   }
 
+  // ── Quick-ask: an inline, tool-using mini-chat right inside the palette ──────
+  // Uses the same AI_TOOLS + agentic loop as the sidebar so it can actually run
+  // read-only queries and answer, and follow-ups continue the conversation.
+  let _uidN = 0
+  const uid = () => 'ask_' + (++_uidN)
+  /** @typedef {{ id:string, role:'user'|'assistant'|'tool', text?:string, streaming?:boolean, sqls?:string[], status?:'running'|'done'|'error', label?:string, result?:{columns:string[],rows:any[][],total:number}|null }} AskTurn */
+  let askTurns = $state(/** @type {AskTurn[]} */ ([]))
+  let askStreaming = $state(false)
+  let askError = $state('')
+  /** @type {any[]} — API messages for the conversation (system prompt added per turn). */
+  let askApi = []
+  /** @type {AbortController | null} */
+  let askController = null
+  let askExecuted = new Set()
+  const lastAskQuestion = $derived([...askTurns].reverse().find((t) => t.role === 'user')?.text ?? '')
+
+  const QUICK_ASK_SYS =
+    '\n\nYou are answering inside a command-palette quick-ask. Be concise and direct. ' +
+    'Use the execute_sql tool to actually run read-only queries and answer with real data — do NOT just say you will query. ' +
+    'Destructive statements (INSERT/UPDATE/DELETE/DROP/ALTER/TRUNCATE) are blocked here; if one is needed, put it in a ```sql block and tell the user to run it in the editor. ' +
+    'Keep answers short and put any ready-to-run query in a ```sql block.'
+
+  /** SELECT-guard: cap unbounded reads so quick-ask never streams a giant result. */
+  function guardSql(/** @type {string} */ sql) {
+    const t = sql.trimStart()
+    if (/^(with\b|select\b)/i.test(t) && !/\blimit\s+\d/i.test(t)) return `${sql.replace(/;+\s*$/, '')}\nLIMIT 500`
+    return sql
+  }
+
+  function updateAskTurn(/** @type {string} */ id, /** @type {Partial<AskTurn>} */ patch) {
+    askTurns = askTurns.map((t) => (t.id === id ? { ...t, ...patch } : t))
+  }
+
+  /** Start a fresh quick-ask conversation. @param {string} question */
+  async function startAsk(question) {
+    const q = (question ?? '').trim()
+    if (!q) return
+    if (!isAiConfigured(get(aiSettings))) { onopensettings(); open = false; return }
+    askApi = []; askTurns = []; askError = ''
+    page = 'ask'; paletteSearch = ''
+    await askTurn(q)
+  }
+
+  /** Continue the conversation with a follow-up. @param {string} question */
+  async function askFollowUp(question) {
+    const q = (question ?? '').trim()
+    if (!q || askStreaming) return
+    paletteSearch = ''
+    await askTurn(q)
+  }
+
+  /** @param {string} q */
+  async function askTurn(q) {
+    const settings = get(aiSettings)
+    askError = ''
+    askApi.push({ role: 'user', content: q })
+    askTurns = [...askTurns, { id: uid(), role: 'user', text: q }]
+    askExecuted = new Set()
+    askStreaming = true
+    askController?.abort()
+    const ac = new AbortController(); askController = ac
+    try {
+      await runAskLoop(0, ac, settings)
+    } catch (e) {
+      if (!ac.signal.aborted) askError = /** @type {any} */ (e)?.message ?? String(e)
+    } finally {
+      if (askController === ac) { askStreaming = false; askController = null }
+    }
+  }
+
+  /** @param {number} depth @param {AbortController} ac @param {any} settings */
+  async function runAskLoop(depth, ac, settings) {
+    if (depth > 12 || ac.signal.aborted) return
+    const sys = buildSystemPrompt(schemaContext ?? {}) + QUICK_ASK_SYS
+    const asstId = uid()
+    askTurns = [...askTurns, { id: asstId, role: 'assistant', text: '', streaming: true }]
+    let text = ''
+    /** @type {any[] | null} */
+    let toolCalls = null
+    for await (const chunk of chatCompletionStream(settings, [{ role: 'system', content: sys }, ...askApi], AI_TOOLS, ac.signal)) {
+      if (ac.signal.aborted) return
+      if (chunk.textDelta) { text += chunk.textDelta; updateAskTurn(asstId, { text }) }
+      if (chunk.toolCalls) toolCalls = chunk.toolCalls
+    }
+    askApi.push({ role: 'assistant', content: text || '', ...(toolCalls ? { tool_calls: toolCalls } : {}) })
+    const sqls = [...text.matchAll(/```sql\s*([\s\S]*?)```/gi)].map((m) => m[1].trim()).filter(Boolean)
+    updateAskTurn(asstId, { text, streaming: false, sqls })
+    if (toolCalls?.length && !ac.signal.aborted) {
+      for (const call of toolCalls) {
+        const result = await runAskTool(call, ac)
+        askApi.push({ role: 'tool', tool_call_id: call.id, content: result })
+      }
+      await runAskLoop(depth + 1, ac, settings)
+    }
+  }
+
+  /** Compact, read-only tool dispatch for quick-ask. @returns {Promise<string>} */
+  async function runAskTool(call, ac) {
+    const name = call.function?.name
+    const key = `${name}:${call.function?.arguments}`
+    if (askExecuted.has(key)) return JSON.stringify({ error: 'Duplicate call.' })
+    askExecuted.add(key)
+    let args = {}
+    try { args = JSON.parse(call.function?.arguments || '{}') } catch {}
+    const toolId = uid()
+    askTurns = [...askTurns, { id: toolId, role: 'tool', status: 'running', label: name === 'execute_sql' ? 'Running query' : String(name ?? 'tool').replace(/_/g, ' ') }]
+    try {
+      if (name === 'execute_sql') {
+        const sql = String(args.sql ?? '').trim()
+        if (!sql) { updateAskTurn(toolId, { status: 'error', label: 'Empty query' }); return JSON.stringify({ error: 'Empty SQL' }) }
+        if (isDestructiveSql(sql)) { updateAskTurn(toolId, { status: 'error', label: 'Write blocked here' }); return JSON.stringify({ error: 'Destructive statements are blocked in quick-ask. Put the statement in a ```sql block and tell the user to run it in the editor.' }) }
+        const data = await executeSql(guardSql(sql))
+        const cols = (data.columns ?? []).map((/** @type {any} */ c) => c.name ?? c)
+        const rows = data.rows ?? []
+        const total = data.rowCount ?? rows.length
+        updateAskTurn(toolId, { status: 'done', label: `Ran query · ${total} row${total === 1 ? '' : 's'}`, result: { columns: cols, rows: rows.slice(0, 5), total } })
+        return JSON.stringify({ columns: cols, rows: rows.slice(0, 30), total_rows: total })
+      }
+      if (name === 'list_tables') {
+        updateAskTurn(toolId, { status: 'done', label: 'Listed tables' })
+        return JSON.stringify({ schema: schemaContext?.activeSchema, tables: (schemaContext?.tables ?? []).map((/** @type {any} */ t) => ({ name: t.name, rowCount: t.rowCount })) })
+      }
+      if (name === 'describe_table' || name === 'get_schema') {
+        const cols = schemaContext?.allTableColumns?.[String(args.table ?? '')] ?? null
+        updateAskTurn(toolId, { status: 'done', label: 'Read schema' })
+        return JSON.stringify(cols ? { table: args.table, columns: cols } : { note: 'The full schema is already provided in the system context above.' })
+      }
+      updateAskTurn(toolId, { status: 'done', label: 'Skipped' })
+      return JSON.stringify({ error: `${name} is only available in the full chat. Answer in text and suggest continuing there.` })
+    } catch (e) {
+      const msg = String(e); const hint = classifyDbError(msg)
+      updateAskTurn(toolId, { status: 'error', label: 'Query failed' })
+      return JSON.stringify({ error: msg, ...(hint ? { hint } : {}) })
+    }
+  }
+
+  /** Manually run a ```sql block from an answer, inline, showing a compact result. */
+  async function runAskSql(/** @type {string} */ sql) {
+    if (!sql || askStreaming) return
+    if (isDestructiveSql(sql)) { open = false; onqueryselect(sql); return } // route writes to the editor
+    const toolId = uid()
+    askTurns = [...askTurns, { id: toolId, role: 'tool', status: 'running', label: 'Running query' }]
+    try {
+      const data = await executeSql(guardSql(sql))
+      const cols = (data.columns ?? []).map((/** @type {any} */ c) => c.name ?? c)
+      const rows = data.rows ?? []
+      const total = data.rowCount ?? rows.length
+      updateAskTurn(toolId, { status: 'done', label: `Ran query · ${total} row${total === 1 ? '' : 's'}`, result: { columns: cols, rows: rows.slice(0, 5), total } })
+    } catch (e) {
+      updateAskTurn(toolId, { status: 'error', label: 'Query failed: ' + String(e).slice(0, 80) })
+    }
+  }
+
+  function stopAsk() {
+    askController?.abort()
+    askStreaming = false
+  }
+
+  const askBtn = 'inline-flex items-center gap-1.5 rounded-md border border-border/60 px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground'
+  const askBtnPrimary = 'inline-flex items-center gap-1.5 rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground transition-opacity hover:opacity-90'
+
+  // Keep the ask thread pinned to the newest message as it streams / grows.
+  // Coalesced to one adjustment per frame and gated on "near the bottom" so it
+  // never fights manual scroll and doesn't jitter the view on every token.
+  let askBottomEl = $state(/** @type {HTMLElement | null} */ (null))
+  let _askScrollRaf = 0
+  /** @param {HTMLElement | null} el */
+  function _nearestScroller(el) {
+    let n = el?.parentElement
+    while (n) {
+      const oy = getComputedStyle(n).overflowY
+      if ((oy === 'auto' || oy === 'scroll') && n.scrollHeight > n.clientHeight + 1) return n
+      n = n.parentElement
+    }
+    return null
+  }
+  $effect(() => {
+    void askTurns
+    if (page !== 'ask' || !askBottomEl) return
+    if (_askScrollRaf) return
+    _askScrollRaf = requestAnimationFrame(() => {
+      _askScrollRaf = 0
+      const scroller = _nearestScroller(askBottomEl)
+      if (!scroller) return
+      if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 120) {
+        scroller.scrollTop = scroller.scrollHeight
+      }
+    })
+  })
+
   /** @param {KeyboardEvent} e */
   function handleKeydown(e) {
+    // On the ask page, Enter continues the conversation with a follow-up.
+    if (page === 'ask' && e.key === 'Enter' && !e.isComposing) {
+      const q = paletteSearch.trim()
+      if (q) { e.preventDefault(); e.stopPropagation(); void askFollowUp(q) }
+      return
+    }
     if (page !== 'root' && e.key === 'Backspace') {
       const input = /** @type {HTMLInputElement | null} */ (
         e.currentTarget instanceof Element
@@ -206,7 +419,7 @@
   // On tables page: shouldFilter=false so bits-ui skips its sort/filter pass entirely
   // (no CSS `order` reordering, no keyboard-nav interference). We pre-filter in JS.
   // On root page: bits-ui filters with a plain substring check against item value strings.
-  const shouldFilter = $derived(page !== 'tables')
+  const shouldFilter = $derived(page !== 'tables' && page !== 'ask')
 
   /** @type {(value: string, search: string) => number} */
   const commandFilter = (value, search) => {
@@ -241,6 +454,7 @@
     docker: 'Docker',
     connections: 'Connections',
     tables: 'Tables',
+    ask: 'Ask AI',
   })
 </script>
 
@@ -264,12 +478,13 @@
         placeholder={
           page === 'root' ? 'Search tables, schemas, commands…'
           : page === 'tables' ? 'Search tables and views…'
+          : page === 'ask' ? 'Ask a follow-up…'
           : `Search ${pageLabel[page]}…`
         }
       />
 
       {#if page !== 'root'}
-        <div class="order-first flex items-center gap-1.5 border-b border-border/25 px-4 py-2">
+        <div class="order-first flex items-center gap-1.5 border-b border-border/50 px-4 py-2">
           <button
             type="button"
             class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground focus-visible:outline-none"
@@ -284,10 +499,104 @@
       {/if}
 
       <Command.List class="max-h-[min(440px,58vh)]">
-        <Command.Empty class="py-8 text-center text-[12px] text-muted-foreground/40">No results.</Command.Empty>
+        {#if page !== 'ask'}
+          <Command.Empty class="py-8 text-center text-[12px] text-muted-foreground/40">No results.</Command.Empty>
+        {/if}
+
+        <!-- ── ASK AI (inline quick-ask) ─────────────────────────────── -->
+        {#if page === 'ask'}
+          <div class="px-3 py-2.5">
+            {#each askTurns as turn (turn.id)}
+              {#if turn.role === 'user'}
+                <div class="mb-1.5 flex items-start gap-2">
+                  <Icon name="sparkles" class="mt-0.5 size-3.5 shrink-0 text-primary" />
+                  <div class="min-w-0 flex-1 text-[13px] font-medium text-foreground">{turn.text}</div>
+                </div>
+              {:else if turn.role === 'tool'}
+                <div class="mb-1.5 ml-[22px] flex flex-col gap-1">
+                  <div class="flex items-center gap-1.5 text-[11px] {turn.status === 'error' ? 'text-destructive/80' : 'text-muted-foreground/55'}">
+                    {#if turn.status === 'running'}<Icon name="sparkles" class="size-3 animate-pulse" />
+                    {:else if turn.status === 'error'}<Icon name="x" class="size-3" />
+                    {:else}<Icon name="check" class="size-3 text-emerald-500" />{/if}
+                    <span class="truncate">{turn.label}</span>
+                  </div>
+                  {#if turn.result && turn.result.columns.length}
+                    <div class="overflow-hidden rounded-lg border border-border/50 bg-card/40">
+                      <div class="overflow-x-auto">
+                        <table class="w-full border-collapse">
+                          <thead>
+                            <tr class="bg-muted/25">
+                              {#each turn.result.columns.slice(0, 5) as c}
+                                <th class="whitespace-nowrap border-b border-border/40 px-2.5 py-1 text-left text-[10px] font-medium uppercase tracking-wide text-muted-foreground/50">{c}</th>
+                              {/each}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {#each turn.result.rows as row, ri}
+                              <tr class="transition-colors hover:bg-muted/15">
+                                {#each row.slice(0, 5) as cell}
+                                  <td class="max-w-[220px] truncate {ri < turn.result.rows.length - 1 ? 'border-b border-border/15' : ''} px-2.5 py-1 font-mono text-[11px] {cell === null ? 'italic text-muted-foreground/40' : 'text-foreground/80'}">{cell === null ? 'NULL' : String(cell)}</td>
+                                {/each}
+                              </tr>
+                            {/each}
+                          </tbody>
+                        </table>
+                      </div>
+                      {#if turn.result.total > turn.result.rows.length}
+                        <div class="border-t border-border/30 bg-muted/10 px-2.5 py-1 text-[10px] text-muted-foreground/45">showing {turn.result.rows.length} of {turn.result.total} rows</div>
+                      {/if}
+                    </div>
+                  {/if}
+                </div>
+              {:else}
+                <div class="mb-2 ml-[22px]">
+                  {#if turn.streaming && !turn.text}
+                    <div class="flex items-center gap-2 py-1 text-[12px] text-muted-foreground/50"><Icon name="sparkles" class="size-3.5 animate-pulse" /> Thinking…</div>
+                  {:else}
+                    <AiMarkdown content={turn.text} streaming={turn.streaming} debounceMs={120} class="text-ui-xs" />
+                  {/if}
+                  {#if !turn.streaming && turn.sqls?.length}
+                    <div class="mt-1.5 flex flex-wrap gap-1.5">
+                      {#each turn.sqls as s, i}
+                        <button type="button" class={askBtnPrimary} onclick={() => void runAskSql(s)}>
+                          <Icon name="terminal" class="size-3" /> Run{turn.sqls.length > 1 ? ` #${i + 1}` : ''}
+                        </button>
+                        <button type="button" class={askBtn} onclick={() => { const sql = s; open = false; onqueryselect(sql) }}>
+                          Insert
+                        </button>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
+              {/if}
+            {/each}
+            {#if askError}
+              <div class="ml-[22px] rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2 text-[12px] text-destructive">{askError}</div>
+            {/if}
+            <div class="ml-[22px] mt-2 flex flex-wrap items-center gap-1.5">
+              {#if askStreaming}
+                <button type="button" class={askBtn} onclick={stopAsk}><Icon name="square" class="size-3" /> Stop</button>
+              {:else if askTurns.length}
+                <button type="button" class={askBtn} onclick={() => navigator.clipboard?.writeText([...askTurns].reverse().find((t) => t.role === 'assistant')?.text ?? '')}><Icon name="copy" class="size-3" /> Copy</button>
+                <button type="button" class={askBtn} onclick={() => { const q = lastAskQuestion; open = false; onaskcontinue(q) }}><Icon name="bot" class="size-3" /> Continue in chat</button>
+              {/if}
+            </div>
+            <div class="ml-[22px] mt-1.5 text-[10px] text-muted-foreground/35">Type below and press ↵ to follow up</div>
+            <div bind:this={askBottomEl} class="h-px"></div>
+          </div>
+        {/if}
 
         <!-- ── ROOT PAGE ─────────────────────────────────────────────── -->
         {#if page === 'root'}
+          {#if paletteSearch.trim()}
+            <Command.Group heading="Ask">
+              <Command.Item value={"ask ai " + paletteSearch} onSelect={() => startAsk(paletteSearch)}>
+                <Icon name="sparkles" class="size-4 shrink-0 text-primary" />
+                <span data-slot="command-label" class="truncate">Ask AI: <span class="text-muted-foreground/70">"{paletteSearch}"</span></span>
+                <Command.Shortcut keys="↵" />
+              </Command.Item>
+            </Command.Group>
+          {/if}
 
           {#if connected}
             <Command.Group heading="Views">
@@ -327,9 +636,22 @@
                   <span data-slot="command-label" class="truncate">Security</span>
                 </Command.Item>
               {/if}
+              <Command.Item value="open instance insights monitoring dashboard sessions locks replication config pg_settings" onSelect={() => run(onopeninsights)}>
+                <Icon name="database" class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">Instance Insights</span>
+              </Command.Item>
+              <Command.Item value="open database objects overview tables views functions routines triggers sizes rows stats" onSelect={() => run(onopenobjects)}>
+                <Icon name="table-2" class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">Database Objects</span>
+              </Command.Item>
               <Command.Item value="open activity log events history operations" onSelect={() => run(onopenlogs)}>
                 <Icon name="history" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">Activity Log</span>
+              </Command.Item>
+              <Command.Item value="toggle query log console sql executed statements bottom panel" onSelect={() => run(ontogglequerylog)}>
+                <Icon name="terminal" class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">Query Log console</span>
+                <Command.Shortcut keys="⌘⇧K" />
               </Command.Item>
               <Command.Item value="open extensions plugins formatters generators transforms better time uuid" onSelect={() => run(onopenextensions)}>
                 <Icon name="blocks" class="size-4 shrink-0 opacity-60" />
@@ -451,6 +773,10 @@
                 <Icon name="refresh-cw" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">Refresh tables</span>
               </Command.Item>
+              <Command.Item value="read only read-only lock mode protect prevent edits writes inserts deletes writable" onSelect={() => run(onreadonlytoggle)}>
+                <Icon name={readonly ? 'lock-open' : 'lock'} class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">{readonly ? 'Disable read-only mode' : 'Enable read-only mode'}</span>
+              </Command.Item>
               <Command.Item value="open settings preferences" onSelect={() => run(onopensettings)}>
                 <Icon name="settings" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">Settings</span>
@@ -476,6 +802,28 @@
                 <Icon name="unplug" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">Disconnect</span>
               </Command.Item>
+            </Command.Group>
+          {/if}
+
+          <!-- ── Switch database — other saved connections, right at root ── -->
+          {@const otherConns = savedConnections.filter((c) => c.id !== activeConnectionId)}
+          {#if otherConns.length > 0}
+            <Command.Group heading="Switch database">
+              {#each otherConns.slice(0, 8) as conn (conn.id)}
+                <Command.Item
+                  value="switch database connection {conn.name} {connSubtitle(conn)} {conn.type}"
+                  onSelect={() => run(() => onswitchdatabase(conn))}
+                >
+                  <Icon name={driverIcon(conn.type ?? 'postgres')} class="size-4 shrink-0 opacity-60" />
+                  <div data-slot="command-label" class="flex min-w-0 flex-1 flex-col">
+                    <span class="truncate">{conn.name}</span>
+                    <span class="truncate font-mono text-[11px] text-muted-foreground">{connSubtitle(conn)}</span>
+                  </div>
+                  {#if savedConnections.indexOf(conn) < 9}
+                    <Command.Shortcut keys="⌘⌥{savedConnections.indexOf(conn) + 1}" />
+                  {/if}
+                </Command.Item>
+              {/each}
             </Command.Group>
           {/if}
 
