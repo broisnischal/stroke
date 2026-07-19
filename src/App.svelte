@@ -4,6 +4,7 @@
   import StudioShell from './lib/components/StudioShell.svelte'
   import LicenseGate from './lib/components/LicenseGate.svelte'
   import AppErrorBoundary from './lib/components/AppErrorBoundary.svelte'
+  import GlobalTooltip from './lib/components/GlobalTooltip.svelte'
   import { loadSettings, applySettings, installZoomShortcuts } from '$lib/stores/settings.js'
   import { installPlatformClass } from '$lib/platform.js'
 
@@ -62,3 +63,4 @@
     <StudioShell />
   </LicenseGate>
 </AppErrorBoundary>
+<GlobalTooltip />
