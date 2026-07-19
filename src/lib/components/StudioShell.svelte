@@ -4894,6 +4894,7 @@ let rowSearch = $state('')
       {sidebarOpen}
       side={sidebarSide}
       activeKind={activeTab?.kind ?? ''}
+      {dbType}
       ontoggletables={() => { if (aiMode) exitAiMode(); toggleSidebar() }}
       onopensearch={() => { if (aiMode) exitAiMode(); openSearchTab() }}
       onopenschema={() => { if (aiMode) exitAiMode(); openSchemaTab() }}
