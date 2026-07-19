@@ -19,9 +19,10 @@
 		{side}
 		{sideOffset}
 		class={cn(
-			// High-contrast pill — inverts with the theme (near-white on dark, near-black
-			// on light) so it reads instantly off any surface.
-			"z-50 w-fit max-w-xs rounded-lg bg-foreground px-2.5 py-1.5 text-xs font-medium text-background shadow-lg shadow-black/25 outline-none select-none",
+			// Popover-surface pill — same surface as menus/dropdowns so rich content
+			// (labels, descriptions, ⌘ chips) renders with the normal theme colors and
+			// stays readable. Border + shadow lift it off the background.
+			"z-50 w-fit max-w-xs rounded-lg border border-border/60 bg-popover px-2.5 py-1.5 text-xs font-medium text-popover-foreground shadow-lg shadow-black/30 outline-none select-none",
 			// Origin-aware, snappy entrance from the trigger. Tooltips are seen constantly,
 			// so keep it quick; a strong ease-out curve gives instant feedback and the exit
 			// is faster than the enter (the system responding, not the user deciding).
@@ -32,7 +33,7 @@
 	>
 		{@render children?.()}
 		{#if arrow}
-			<TooltipPrimitive.Arrow class="text-foreground" width={12} height={6} />
+			<TooltipPrimitive.Arrow class="text-popover" width={12} height={6} />
 		{/if}
 	</TooltipPrimitive.Content>
 </TooltipPrimitive.Portal>
