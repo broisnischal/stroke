@@ -1,6 +1,6 @@
 <script>
   import Icon         from './Icon.svelte'
-  import { tick }     from 'svelte'
+  import { tick, onMount } from 'svelte'
   import { cn }       from '$lib/utils.js'
   import { aiProfiles, activeProfileId, setActiveProfile } from '$lib/stores/ai-settings.js'
   import { toggleLightDark, isCurrentThemeDark, appVimMode } from '$lib/stores/settings.js'
@@ -15,6 +15,13 @@
   import SearchableMenu from './SearchableMenu.svelte'
   import BrandIcon from './BrandIcon.svelte'
   import { hasBrand } from '$lib/brand-icons.js'
+
+  // App version — shown in the status bar; resolved from the Tauri app metadata.
+  let appVersion = $state('')
+  onMount(async () => {
+    try { const { getVersion } = await import('@tauri-apps/api/app'); appVersion = await getVersion() }
+    catch { appVersion = '' }
+  })
 
   let {
     /** @type {import('$lib/stores/connections.js').SavedConnection | null} */
@@ -709,6 +716,11 @@
         )}
         title="Vim mode · {VIM_MODE_LABEL[$vimSubMode]} (experimental)"
       >{VIM_MODE_LABEL[$vimSubMode]}</span>
+    {/if}
+
+    <!-- App version -->
+    {#if appVersion}
+      <span class="inline-flex h-5 items-center rounded-md px-1.5 font-mono text-[10px] tabular-nums text-muted-foreground/45" title="Stroke v{appVersion}">v{appVersion}</span>
     {/if}
 
     <!-- Pending edits -->
