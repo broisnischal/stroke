@@ -9,6 +9,8 @@
   import PanelRight from "@lucide/svelte/icons/panel-right";
   import PanelLeft from "@lucide/svelte/icons/panel-left";
   import ResizeHandle from "./ResizeHandle.svelte";
+  import ConnectionsSidebarPanel from "./ConnectionsSidebarPanel.svelte";
+  import ExtensionsSidebarPanel from "./ExtensionsSidebarPanel.svelte";
   import { cn } from "$lib/utils.js";
   import { t } from "$lib/i18n.js";
   import { formatTableRowCount } from "$lib/table-list.js";
@@ -24,6 +26,20 @@
 
   let {
     connectionName = "",
+    /** Which sidebar panel is showing: 'tables' | 'connections' | 'extensions'. */
+    navSidebarPanel = "tables",
+    /** Saved connections list (Connections panel). @type {import('$lib/stores/connections.js').SavedConnection[]} */
+    connections = [],
+    /** id of the currently live connection (Connections panel highlight). */
+    activeConnectionId = "",
+    /** @type {(c: import('$lib/stores/connections.js').SavedConnection) => void} */
+    onswitchconnection = () => {},
+    onaddconnection = () => {},
+    /** @type {(id: string) => void} */
+    onremoveconnection = () => {},
+    ondisconnectconnection = () => {},
+    /** Open an extension's detail tab (Extensions panel). @type {(ext: any) => void} */
+    onopenextensiondetail = () => {},
     /** Which side the sidebar docks to. @type {'left' | 'right'} */
     side = "left",
     /** Ask the shell to dock the sidebar to the given side. @type {(side: 'left' | 'right') => void} */
@@ -527,6 +543,7 @@
     data-studio-chrome
   >
     <!-- Traffic lights moved to TitleBar (full-width) -->
+    {#if navSidebarPanel === "tables"}
     <div class="flex min-h-0 flex-1 flex-col">
 
       <div class="flex shrink-0 flex-col">
@@ -1468,6 +1485,18 @@
         </div>
       </div>
     </div>
+    {:else if navSidebarPanel === "connections"}
+      <ConnectionsSidebarPanel
+        {connections}
+        activeId={activeConnectionId}
+        onswitch={onswitchconnection}
+        onadd={onaddconnection}
+        onremove={onremoveconnection}
+        ondisconnect={ondisconnectconnection}
+      />
+    {:else if navSidebarPanel === "extensions"}
+      <ExtensionsSidebarPanel onopendetail={onopenextensiondetail} />
+    {/if}
 
   </aside>
   </ContextMenu.Trigger>

@@ -1,4 +1,4 @@
-/** @typedef {'table' | 'sql' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'extensions' | 'backup' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search' | 'notebook' | 'schema-timeline' | 'data-diff' | 'insights' | 'objects' | 'license'} StudioTabKind */
+/** @typedef {'table' | 'sql' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'extensions' | 'extension-detail' | 'backup' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search' | 'notebook' | 'schema-timeline' | 'data-diff' | 'insights' | 'objects' | 'license'} StudioTabKind */
 
 import { loadDefaultPageSize } from '$lib/table-query.js'
 
@@ -248,6 +248,21 @@ export function findExtensionsTab(tabs) {
   return tabs.find((t) => t.kind === 'extensions') ?? null
 }
 
+/** @param {string} extensionId @param {string} name */
+export function createExtensionDetailTab(extensionId, name) {
+  return /** @type {StudioTab} */ ({
+    id: nextTabId(),
+    kind: 'extension-detail',
+    title: name,
+    state: { extensionId },
+  })
+}
+
+/** @param {StudioTab[]} tabs @param {string} extensionId */
+export function findExtensionDetailTab(tabs, extensionId) {
+  return tabs.find((t) => t.kind === 'extension-detail' && t.state?.extensionId === extensionId) ?? null
+}
+
 /** @param {StudioTab[]} tabs */
 export function findAiTab(tabs) {
   return tabs.find((t) => t.kind === 'ai') ?? null
@@ -411,6 +426,7 @@ export function tabDisplayTitle(tab) {
   if (tab.kind === 'schema-timeline') return 'Schema Timeline'
   if (tab.kind === 'data-diff') return 'Data Diff'
   if (tab.kind === 'objects') return 'Database Objects'
+  if (tab.kind === 'extension-detail') return tab.title || tab.state?.extensionId || 'Extension'
   if (tab.kind === 'license') return 'Stroke Pro'
   return tab.title
 }

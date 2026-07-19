@@ -8,15 +8,18 @@
   let {
     aiMode = false,
     sidebarOpen = false,
+    activePanel = '',
     activeKind = '',
     dbType = '',
     side = 'left',
     ontoggletables = () => {},
+    onopenconnections = () => {},
     onopensearch = () => {},
     onopenschema = () => {},
     onopenerd = () => {},
     onopensecurity = () => {},
     onopeninsights = () => {},
+    onopenextensions = () => {},
     onopenlogs = () => {},
     onopenaimode = () => {},
     onopensettings = () => {},
@@ -24,11 +27,13 @@
 
   const ALL_ITEMS = [
     { id: 'tables', icon: 'table-2', label: 'Tables', on: () => ontoggletables() },
+    { id: 'connections', icon: 'server', label: 'Connections', on: () => onopenconnections() },
     { id: 'search', icon: 'search', label: 'Search', on: () => onopensearch() },
     { id: 'schema', icon: 'database', label: 'Schema', on: () => onopenschema() },
     { id: 'erd', icon: 'git-branch', label: 'ERD', on: () => onopenerd() },
     { id: 'security', icon: 'shield-check', label: 'Roles & RLS', on: () => onopensecurity() },
     { id: 'insights', icon: 'bar-chart-2', label: 'Insights', on: () => onopeninsights() },
+    { id: 'extensions', icon: 'blocks', label: 'Extensions', on: () => onopenextensions() },
     { id: 'ai', icon: 'sparkles', label: 'AI chat', on: () => onopenaimode() },
   ]
 
@@ -48,7 +53,9 @@
     if (activeKind === 'insights') return 'insights'
     if (activeKind === 'search') return 'search'
     if (activeKind === 'schema') return 'schema'
-    return sidebarOpen ? 'tables' : ''
+    // No rail-mapped surface is the active tab: reflect whichever sidebar panel
+    // is showing (tables / connections / extensions) when the sidebar is open.
+    return sidebarOpen ? activePanel : ''
   })
 </script>
 

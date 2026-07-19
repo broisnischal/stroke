@@ -135,6 +135,8 @@
     findObjectsTab,
     createExtensionsTab,
     findExtensionsTab,
+    createExtensionDetailTab,
+    findExtensionDetailTab,
     createJsonTab,
     createBackupTab,
     createChartsTab,
@@ -200,6 +202,7 @@
   import {
     getLastConnection,
     loadSavedConnections,
+    removeConnection,
     setLastConnectionId,
     upsertConnection,
     engineFamily,
@@ -326,6 +329,14 @@
   let statusBarHasUpdate = $state(false)
   let sidebarOpen = $state(loadLayout().navSidebarOpen)
   let sidebarEverOpened = $state(loadLayout().navSidebarOpen)
+  /** Which switchable sidebar panel is showing: 'tables' | 'connections' | 'extensions'. */
+  let navSidebarPanel = $state(loadLayout().navSidebarPanel ?? 'tables')
+  /** @param {string} p */
+  function setSidebarPanel(p) {
+    navSidebarPanel = p
+    if (!sidebarOpen) sidebarOpen = true
+    saveLayout({ navSidebarPanel: p, navSidebarOpen: true })
+  }
   /** Which side the navigation sidebar docks to. @type {'left' | 'right'} */
   let sidebarSide = $state(loadLayout().navSidebarSide)
   /** @param {'left' | 'right'} s */
@@ -2290,6 +2301,18 @@ let rowSearch = $state('')
 
   function openExtensionsTab() {
     openSingletonTab({ find: findExtensionsTab, create: createExtensionsTab })
+  }
+
+  /** Open (or focus) a per-extension detail tab. Non-singleton: one tab per id. */
+  function openExtensionDetailTab(ext) {
+    const existing = findExtensionDetailTab(tabs, ext.id)
+    if (existing) { void activateTab(existing.id); return }
+    saveActiveTabState()
+    dropWelcomeTabs()
+    const tab = createExtensionDetailTab(ext.id, ext.name)
+    tabs = [...tabs, tab]
+    activeTabId = tab.id
+    clearTableEditor()
   }
 
   /** License activation page. Deliberately NOT via openSingletonTab — that
@@ -4903,15 +4926,18 @@ let rowSearch = $state('')
     <ActivityBar
       {aiMode}
       {sidebarOpen}
+      activePanel={navSidebarPanel}
       side={sidebarSide}
       activeKind={activeTab?.kind ?? ''}
       {dbType}
-      ontoggletables={() => { if (aiMode) exitAiMode(); toggleSidebar() }}
+      ontoggletables={() => { if (aiMode) exitAiMode(); if (navSidebarPanel !== 'tables') { setSidebarPanel('tables') } else { toggleSidebar() } }}
+      onopenconnections={() => { if (aiMode) exitAiMode(); setSidebarPanel('connections') }}
       onopensearch={() => { if (aiMode) exitAiMode(); openSearchTab() }}
       onopenschema={() => { if (aiMode) exitAiMode(); openSchemaTab() }}
       onopenerd={() => { if (aiMode) exitAiMode(); openErdTab() }}
       onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
       onopeninsights={() => { if (aiMode) exitAiMode(); openInsightsTab() }}
+      onopenextensions={() => { if (aiMode) exitAiMode(); setSidebarPanel('extensions') }}
       onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
       onopenaimode={() => (aiMode ? exitAiMode() : enterAiMode())}
       onopensettings={() => (showSettingsModal = true)}
@@ -4937,6 +4963,14 @@ let rowSearch = $state('')
         {/snippet}
       <Sidebar
         connectionName={connection ? (connection.name || connection.database || connection.host || connection.filePath || 'Connected') : ''}
+        {navSidebarPanel}
+        connections={savedConnections}
+        activeConnectionId={connection?.id ?? ''}
+        onswitchconnection={(c) => { if (aiMode) exitAiMode(); void handleSwitchDatabase(c) }}
+        onaddconnection={() => { showConnectionModal = true }}
+        onremoveconnection={(id) => { savedConnections = removeConnection(id) }}
+        ondisconnectconnection={() => handleDisconnect()}
+        onopenextensiondetail={(ext) => openExtensionDetailTab(ext)}
         side={sidebarSide}
         onmoveside={moveSidebar}
         {schemas}
@@ -5262,6 +5296,19 @@ let rowSearch = $state('')
             {/await}
           </svelte:boundary>
         </div>
+      {/if}
+
+      <!-- Extension detail tab — one per extension, rendered on demand -->
+      {#if activeTab?.kind === 'extension-detail'}
+        {#key activeTab.id}
+          <div class="flex min-h-0 flex-1 flex-col">
+            <svelte:boundary failed={tabError}>
+              {#await import('./ExtensionsPage.svelte')}<TabLoading />{:then { default: ExtensionsPage }}
+                <ExtensionsPage initialExtensionId={activeTab.state?.extensionId ?? ''} />
+              {/await}
+            </svelte:boundary>
+          </div>
+        {/key}
       {/if}
 
       <!-- License tab — rarely opened, no keep-alive needed -->
