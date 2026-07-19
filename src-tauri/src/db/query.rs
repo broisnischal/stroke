@@ -142,6 +142,10 @@ pub struct TableRows {
     pub query_ms: u64,
     pub primary_key: Vec<String>,
     pub foreign_keys: Vec<ForeignKeyInfo>,
+    /// Exact SQL executed for this fetch, so the frontend query log can show it.
+    /// When a COUNT(*) is also run, the row SELECT and the COUNT are joined with
+    /// a newline (row SELECT first).
+    pub sql: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -152,6 +156,9 @@ pub struct SqlResult {
     pub row_count: Option<i64>,
     pub message: Option<String>,
     pub query_ms: u64,
+    /// Exact SQL statement that was executed, so the frontend query log can show
+    /// it. Populated by the executing path (or the top-level dispatcher).
+    pub sql: String,
 }
 
 fn pg_type_label(type_name: &str) -> String {
@@ -1354,6 +1361,14 @@ pub async fn get_table_rows(
         (Vec::new(), Vec::new())
     };
 
+    // Report the exact SQL run: the row SELECT always, plus the COUNT(*) as a
+    // second line whenever a count was computed (include_count).
+    let sql = if include_count {
+        format!("{data_sql}\n{count_sql}")
+    } else {
+        data_sql.clone()
+    };
+
     Ok(TableRows {
         columns,
         rows: data,
@@ -1361,6 +1376,7 @@ pub async fn get_table_rows(
         query_ms: started.elapsed().as_millis() as u64,
         primary_key,
         foreign_keys,
+        sql,
     })
 }
 
@@ -2003,7 +2019,11 @@ pub async fn execute_sql(state: State<'_, DbState>, sql: String) -> Result<SqlRe
     let conn = require_conn(&state)?;
     let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
     *state.cancel_tx.lock().map_err(|e| e.to_string())? = Some(cancel_tx);
-    match conn {
+    // Kept for the query log — the per-dialect executor runs `sql_str` (which is
+    // moved into the cancellable branch below), so stamp the executed SQL onto
+    // the result after the match.
+    let sql_out = sql_str.clone();
+    let mut result = match conn {
         // Postgres and MySQL support real server-side cancellation: the engine
         // captures its backend/connection id and cancels the running statement
         // when the receiver fires.
@@ -2026,7 +2046,11 @@ pub async fn execute_sql(state: State<'_, DbState>, sql: String) -> Result<SqlRe
             } => r,
             _ = async { let _ = cancel_rx.await; } => Err("Query cancelled".to_string()),
         },
+    };
+    if let Ok(r) = &mut result {
+        r.sql = sql_out;
     }
+    result
 }
 
 /// Execute a SQL query against an arbitrary saved connection without changing
@@ -2041,7 +2065,7 @@ pub async fn execute_sql_on_conn(
     if sql.is_empty() {
         return Err("Query is empty".into());
     }
-    match config {
+    let mut result = match config {
         AnyConnectionConfig::Postgres(c) => {
             let pool = open_pg(&c).await?;
             let result = execute_sql_pg(&pool, sql, None).await;
@@ -2071,7 +2095,11 @@ pub async fn execute_sql_on_conn(
             let h = super::connection::open_mssql(&c).await?;
             super::mssql::execute_sql(&h, sql).await
         }
+    };
+    if let Ok(r) = &mut result {
+        r.sql = sql.to_string();
     }
+    result
 }
 
 /// Hard row cap for ad-hoc SQL execution. Prevents OOM on tables with millions of rows.
@@ -2191,6 +2219,7 @@ async fn execute_sql_pg(
                     None
                 },
                 query_ms: query_ms(),
+                sql: stmt.to_string(),
             });
         } else {
             let result = sqlx::query(stmt)
@@ -2207,6 +2236,7 @@ async fn execute_sql_pg(
                     row_count: Some(affected),
                     message: Some(format!("{affected} row(s) affected")),
                     query_ms: query_ms(),
+                    sql: stmt.to_string(),
                 });
             }
         }
@@ -2219,6 +2249,7 @@ async fn execute_sql_pg(
         row_count: Some(0),
         message: Some("Done".into()),
         query_ms: query_ms(),
+        sql: sql.to_string(),
     })
 }
 
@@ -2392,6 +2423,7 @@ async fn execute_sql_multi_pg(pool: &sqlx::PgPool, stmts: &[String]) -> Result<V
                     None
                 },
                 query_ms: stmt_ms(),
+                sql: stmt.clone(),
             });
         } else {
             match sqlx::query(stmt).execute(&mut *tx).await {
@@ -2403,6 +2435,7 @@ async fn execute_sql_multi_pg(pool: &sqlx::PgPool, stmts: &[String]) -> Result<V
                         row_count: Some(affected),
                         message: Some(format!("{affected} row(s) affected")),
                         query_ms: stmt_ms(),
+                        sql: stmt.clone(),
                     });
                 }
                 Err(e) => {
@@ -2635,6 +2668,7 @@ async fn get_table_rows_remote<C: RemoteSqlite>(
         query_ms: t0.elapsed().as_millis() as u64,
         primary_key,
         foreign_keys,
+        sql: format!("{rows_sql}\n{count_sql}"),
     })
 }
 

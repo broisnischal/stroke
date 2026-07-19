@@ -41,6 +41,7 @@
     hasSchemaExplorer = true,
     hasSecurity = true,
     onopenlogs = () => {},
+    ontogglequerylog = () => {},
     onopenextensions = () => {},
     onopenJsonViewer = () => {},
     onopenshortcuts = () => {},
@@ -636,6 +637,11 @@
               <Command.Item value="open activity log events history operations" onSelect={() => run(onopenlogs)}>
                 <Icon name="history" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">Activity Log</span>
+              </Command.Item>
+              <Command.Item value="toggle query log console sql executed statements bottom panel" onSelect={() => run(ontogglequerylog)}>
+                <Icon name="terminal" class="size-4 shrink-0 opacity-60" />
+                <span data-slot="command-label" class="truncate">Query Log console</span>
+                <Command.Shortcut keys="⌘⇧K" />
               </Command.Item>
               <Command.Item value="open extensions plugins formatters generators transforms better time uuid" onSelect={() => run(onopenextensions)}>
                 <Icon name="blocks" class="size-4 shrink-0 opacity-60" />

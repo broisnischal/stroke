@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { loadSettings } from '$lib/stores/settings.js'
+import { recordQuery } from '$lib/stores/query-log.js'
 
 /** @typedef {{ name: string, host: string, port: number, database: string, user: string, password: string, ssl: boolean }} PgConnectionConfig */
 /** @typedef {{ name: string, filePath: string }} SqliteConnectionConfig */
@@ -477,8 +478,9 @@ export async function dropTable(schema, table, cascade = false) {
  * the caller keeps the metadata it already has.
  */
 export async function getTableRows(schema, table, limit, offset, query = {}) {
+  const _t0 = performance.now()
   try {
-    return await invoke('pg_get_table_rows', {
+    const r = await invoke('pg_get_table_rows', {
       schema,
       table,
       limit,
@@ -498,6 +500,8 @@ export async function getTableRows(schema, table, limit, offset, query = {}) {
       // rows immediately; fetch the total separately with countTableRows().
       includeCount: query.includeCount !== false,
     })
+    recordQuery({ sql: r?.sql, durationMs: r?.queryMs ?? Math.round(performance.now() - _t0), schema, table, source: 'browse', success: true })
+    return r
   } catch (err) {
     throw new Error(formatInvokeError(err))
   }
@@ -548,9 +552,13 @@ export async function cancelQuery() {
 
 /** @param {string} sql */
 export async function executeSql(sql) {
+  const _t0 = performance.now()
   try {
-    return await invoke('pg_execute_sql', { sql })
+    const r = await invoke('pg_execute_sql', { sql })
+    recordQuery({ sql: r?.sql || sql, durationMs: r?.queryMs ?? Math.round(performance.now() - _t0), source: 'sql', success: true })
+    return r
   } catch (err) {
+    recordQuery({ sql, durationMs: Math.round(performance.now() - _t0), source: 'sql', success: false, error: String(err) })
     throw new Error(formatInvokeError(err))
   }
 }
