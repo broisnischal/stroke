@@ -277,6 +277,85 @@
     convList = await listConversations(connectionId || undefined);
   }
 
+  // ── Open conversation tabs (browser-style, persisted per connection) ───────
+  const AI_TABS_KEY = "stroke:ai-chat-tabs";
+
+  /** @returns {Record<string, string[]>} */
+  function loadTabsMap() {
+    try {
+      const raw = localStorage.getItem(AI_TABS_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * @param {string} connId
+   * @returns {string[]}
+   */
+  function loadOpenTabs(connId) {
+    const all = loadTabsMap();
+    const v = all[connId || "_default"];
+    return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+  }
+
+  /**
+   * @param {string} connId
+   * @param {string[]} ids
+   */
+  function saveOpenTabs(connId, ids) {
+    try {
+      const all = loadTabsMap();
+      const key = connId || "_default";
+      if (ids.length) all[key] = ids;
+      else delete all[key];
+      localStorage.setItem(AI_TABS_KEY, JSON.stringify(all));
+    } catch {
+      // Quota/serialization failure must not throw into the chat flow.
+    }
+  }
+
+  /** IDs of conversations currently shown as open tabs (a subset of convList). */
+  let openTabIds = $state(/** @type {string[]} */ ([]));
+
+  /** Resolve open tab ids to their conversation records, dropping any stale ids. */
+  const openTabs = $derived(
+    openTabIds
+      .map((id) => convList.find((c) => c.id === id))
+      .filter((c) => Boolean(c)),
+  );
+
+  /** Append a conversation id to the open-tab set if it isn't already shown. */
+  function ensureOpenTab(/** @type {string | null} */ id) {
+    if (!id || openTabIds.includes(id)) return;
+    openTabIds = [...openTabIds, id];
+    saveOpenTabs(connectionId, openTabIds);
+  }
+
+  /** Close an open tab; when it was active, fall back to the nearest tab or a fresh draft. */
+  function closeTab(/** @type {string} */ id) {
+    const idx = openTabIds.indexOf(id);
+    if (idx === -1) return;
+    const next = openTabIds.filter((t) => t !== id);
+    openTabIds = next;
+    saveOpenTabs(connectionId, next);
+    if (id === activeConvId) {
+      const fallback = next[idx] ?? next[next.length - 1] ?? null;
+      if (fallback) void selectConversation(fallback);
+      else void newConversation();
+    }
+  }
+
+  // A conversation that becomes active (selected, or a draft saved to a real id)
+  // is surfaced as an open tab. ensureOpenTab is a no-op once the id is present,
+  // so this settles after a single pass and never loops.
+  $effect(() => {
+    if (activeConvId) ensureOpenTab(activeConvId);
+  });
+
   async function selectConversation(/** @type {string} */ id) {
     if (id === activeConvId) return;
     abortCurrentRequest();
@@ -377,6 +456,10 @@
     closeContextMenu();
     await deleteConversation(id);
     convList = convList.filter((c) => c.id !== id);
+    if (openTabIds.includes(id)) {
+      openTabIds = openTabIds.filter((t) => t !== id);
+      saveOpenTabs(connectionId, openTabIds);
+    }
     if (activeConvId === id) {
       activeConvId = null;
       items = [];
@@ -2326,6 +2409,7 @@
     rawApiHistory = [];
     fetchedSchemas = {}; // drop the previous DB's cached schema columns (avoids cross-connection growth)
     error = "";
+    openTabIds = loadOpenTabs(id); // reset + reload the open-tab set for the new connection
     loadConvList();
   });
 
@@ -2583,6 +2667,62 @@
         {/if}
       </div>
     </div>
+
+    <!-- ── Conversation tab bar ───────────────────────────────────────── -->
+    {#if openTabs.length > 0 || !activeConvId}
+      <div
+        class="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border bg-panel px-1.5 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {#if !activeConvId}
+          <!-- Unsaved draft tab: always active, never closeable -->
+          <div
+            class="flex shrink-0 items-center rounded-md bg-accent px-2 py-1 font-mono text-ui-xs text-foreground"
+            title="New chat"
+          >
+            <span class="max-w-[9rem] truncate">New chat</span>
+          </div>
+        {/if}
+        {#each openTabs as tab (tab.id)}
+          {@const isActive = activeConvId === tab.id}
+          <div
+            class={cn(
+              "group/tab flex shrink-0 items-center gap-1 rounded-md py-1 pl-2 pr-1 font-mono text-ui-xs transition-colors",
+              isActive
+                ? "bg-accent text-foreground"
+                : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
+            )}
+          >
+            <button
+              type="button"
+              class="max-w-[9rem] truncate text-left"
+              title={tab.title}
+              onclick={() => void selectConversation(tab.id)}
+            >
+              {tab.title}
+            </button>
+            <button
+              type="button"
+              class="flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 opacity-0 transition-[opacity,color] hover:text-foreground group-hover/tab:opacity-100"
+              title="Close tab"
+              onclick={(e) => {
+                e.stopPropagation();
+                closeTab(tab.id);
+              }}
+            >
+              <X class="size-3" />
+            </button>
+          </div>
+        {/each}
+        <button
+          type="button"
+          class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
+          title="New chat ({newChatShortcut})"
+          onclick={() => void newConversation()}
+        >
+          <Plus class="size-3.5" />
+        </button>
+      </div>
+    {/if}
 
     <!-- Messages -->
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
