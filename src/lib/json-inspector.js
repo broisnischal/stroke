@@ -13,13 +13,11 @@ export function escapeHtml(s) {
 const JSON_TOKEN_RE = /"(?:\\.|[^"\\])*"|\b(?:true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g
 
 /**
- * Lightweight, dependency-free JSON syntax colorizer. Single regex pass, no
- * TextMate grammar / wasm — a fast stand-in for shiki on the JSON viewing path.
- * Returns a `<pre>` whose tokens are wrapped in `.json-tok-*` spans (colored via
- * CSS vars in app.css). Text-node structure stays linkify-compatible.
- * @param {string} source @returns {string}
+ * Colorize a JSON snippet (typically a single line) into `.json-tok-*` spans
+ * without any wrapper element — usable per-line by virtualized viewers.
+ * @param {string} source @returns {string} safe HTML
  */
-export function highlightJson(source) {
+export function highlightJsonHtml(source) {
   const s = String(source ?? '')
   let out = ''
   let last = 0
@@ -44,7 +42,18 @@ export function highlightJson(source) {
     }
   }
   if (last < s.length) out += escapeHtml(s.slice(last))
-  return `<pre>${out}</pre>`
+  return out
+}
+
+/**
+ * Lightweight, dependency-free JSON syntax colorizer. Single regex pass, no
+ * TextMate grammar / wasm — a fast stand-in for shiki on the JSON viewing path.
+ * Returns a `<pre>` whose tokens are wrapped in `.json-tok-*` spans (colored via
+ * CSS vars in app.css). Text-node structure stays linkify-compatible.
+ * @param {string} source @returns {string}
+ */
+export function highlightJson(source) {
+  return `<pre>${highlightJsonHtml(source)}</pre>`
 }
 
 /** @param {string} text @param {number} quoteIndex */

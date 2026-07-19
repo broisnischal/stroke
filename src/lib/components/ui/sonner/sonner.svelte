@@ -124,9 +124,13 @@
           {t.title}
         </div>
         {#if t.description}
-          <div class="mt-0.5 text-[11px] leading-snug text-muted-foreground/80">
-            {t.description}
-          </div>
+          {#if t.code}
+            <pre class="app-scroll mt-1 max-h-52 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/40 bg-muted/30 px-2 py-1.5 font-mono text-[11px] leading-snug text-foreground/85">{t.description}</pre>
+          {:else}
+            <div class="mt-0.5 text-[11px] leading-snug text-muted-foreground/80">
+              {t.description}
+            </div>
+          {/if}
         {/if}
         {#if t.action}
           <button

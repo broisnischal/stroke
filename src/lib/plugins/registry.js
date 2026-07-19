@@ -16,6 +16,8 @@
 //   display, title, badge{bg,fg}, swatch, dot, fg, bgTint, mask, reveal, link, warn
 import { isPluginEnabled, getPluginConfig } from '$lib/stores/plugins.js'
 import { betterTime } from './extensions/better-time.js'
+import { freshness } from './extensions/freshness.js'
+import { nullishValues } from './extensions/nullish-values.js'
 import { numberFormat } from './extensions/number-format.js'
 import { moneyFormat } from './extensions/money-format.js'
 import { durationFormat } from './extensions/duration-format.js'
@@ -29,11 +31,15 @@ import { validators } from './extensions/validators.js'
 import { linkify } from './extensions/linkify.js'
 import { columnAnnotator } from './extensions/column-annotator.js'
 import { idGenerators } from './extensions/id-generators.js'
+import { dataGen } from './extensions/data-gen.js'
 import { cellTransforms } from './extensions/cell-transforms.js'
+import { savedViews, findReplace } from './extensions/workflow.js'
 
 // Display order also = merge precedence for formatters (earlier wins per field).
 export const EXTENSIONS = [
+  nullishValues,
   betterTime,
+  freshness,
   moneyFormat,
   numberFormat,
   durationFormat,
@@ -47,7 +53,10 @@ export const EXTENSIONS = [
   linkify,
   columnAnnotator,
   idGenerators,
+  dataGen,
   cellTransforms,
+  savedViews,
+  findReplace,
 ]
 
 const FORMATTERS = EXTENSIONS.filter((e) => e.kind === 'formatter')
@@ -140,12 +149,26 @@ export function transformsFor(value, type, name) {
     for (const t of ext.transforms) {
       try {
         if (t.appliesTo(value, type, name)) {
-          out.push({ id: t.id, label: t.label, run: (v) => t.run(v, type, name) })
+          out.push({ id: t.id, label: t.label, columnOnly: !!t.columnOnly, run: (v) => t.run(v, type, name) })
         }
       } catch {}
     }
   }
   return out
+}
+
+/**
+ * Look up a single transform by id (for per-column transforms, which apply the
+ * same transform to every cell). Returns the raw transform with its 3-arg run.
+ * @param {string} id
+ * @returns {{ id: string, label: string, appliesTo: Function, run: (v: unknown, type: string, name: string) => string } | null}
+ */
+export function transformById(id) {
+  for (const ext of EXTENSIONS) {
+    if (ext.kind !== 'transforms') continue
+    for (const t of ext.transforms) if (t.id === id) return t
+  }
+  return null
 }
 
 /** Generators from all enabled generator extensions. */
@@ -157,4 +180,26 @@ export function enabledGenerators() {
     out.push(...ext.generators)
   }
   return out
+}
+
+/**
+ * Generators from enabled generator extensions, grouped into sections by each
+ * generator's `group` (falling back to the extension name) — so the menu can
+ * render "IDs", "Time", "Numbers", … as separate labelled sections.
+ * @returns {{ group: string, items: { id: string, label: string, hint?: string, generate: () => string }[] }[]}
+ */
+export function enabledGeneratorGroups() {
+  /** @type {{ group: string, items: any[] }[]} */
+  const groups = []
+  const byGroup = new Map()
+  for (const ext of EXTENSIONS) {
+    if (ext.kind !== 'generators' || !isPluginEnabled(ext.id)) continue
+    for (const g of ext.generators) {
+      const key = g.group || ext.name
+      let bucket = byGroup.get(key)
+      if (!bucket) { bucket = { group: key, items: [] }; byGroup.set(key, bucket); groups.push(bucket) }
+      bucket.items.push(g)
+    }
+  }
+  return groups
 }

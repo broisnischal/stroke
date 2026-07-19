@@ -1,9 +1,10 @@
 <script>
   import Icon         from './Icon.svelte'
-  import { tick }     from 'svelte'
+  import { tick, onMount } from 'svelte'
   import { cn }       from '$lib/utils.js'
   import { aiProfiles, activeProfileId, setActiveProfile } from '$lib/stores/ai-settings.js'
-  import { toggleLightDark, isCurrentThemeDark } from '$lib/stores/settings.js'
+  import { toggleLightDark, isCurrentThemeDark, appVimMode } from '$lib/stores/settings.js'
+  import { vimSubMode, VIM_MODE_LABEL } from '$lib/vim/vim.js'
   import { executeSql, cloudflareListD1Databases } from '$lib/api.js'
   import { providerListDatabases } from '$lib/providers.js'
   import { engineFamily } from '$lib/stores/connections.js'
@@ -12,6 +13,15 @@
   import AppearanceMenu from './AppearanceMenu.svelte'
   import CreateDatabaseDialog from './CreateDatabaseDialog.svelte'
   import SearchableMenu from './SearchableMenu.svelte'
+  import BrandIcon from './BrandIcon.svelte'
+  import { hasBrand } from '$lib/brand-icons.js'
+
+  // App version — shown in the status bar; resolved from the Tauri app metadata.
+  let appVersion = $state('')
+  onMount(async () => {
+    try { const { getVersion } = await import('@tauri-apps/api/app'); appVersion = await getVersion() }
+    catch { appVersion = '' }
+  })
 
   let {
     /** @type {import('$lib/stores/connections.js').SavedConnection | null} */
@@ -55,6 +65,8 @@
     canScrollTableHorizontally = false,
     onscrolltableleft = /** @type {() => void} */ (() => {}),
     onscrolltableright = /** @type {() => void} */ (() => {}),
+    /** Duration of the last data fetch (table load / refresh / query), in ms. */
+    queryMs = 0,
     /** Live mode (auto-refresh active table) — Postgres/SQLite only. */
     live = false,
     liveSupported = false,
@@ -298,6 +310,27 @@
   const connLabel = $derived(connection?.name ?? connection?.host ?? '')
   let connOpen = $state(false)
 
+  /** Searchable list for the connection switcher — keyword-matched on name/host/db/type. */
+  const connItems = $derived(
+    savedConnections.map((c) => ({
+      value: c.id,
+      label: c.name ?? c.host ?? c.filePath ?? 'Connection',
+      keywords: [c.host, c.database, c.name, c.type].filter(Boolean),
+    })),
+  )
+
+  /**
+   * Subtitle for a connection row — the database (or host) shown under the name,
+   * but only when it isn't already part of the title, so host/db-style names
+   * like "1.2.3.4/mydb" don't repeat "mydb" on the line below.
+   * @param {import('$lib/stores/connections.js').SavedConnection} c
+   */
+  function connSubtitle(c) {
+    const title = c.name ?? c.host ?? c.filePath ?? 'Connection'
+    const raw = c.database || c.host || ''
+    return raw && raw !== title && !title.includes(raw) ? raw : ''
+  }
+
   /** @param {import('$lib/stores/connections.js').SavedConnection} c */
   function connIcon(c) {
     if (c.type === 'sqlite') return 'hard-drive'
@@ -313,6 +346,11 @@
 
   let toolsOpen = $state(false)
   let aiModelMenuOpen = $state(false)
+
+  /** "132ms" under a second, "1.24s" above — always tabular so it never jitters. */
+  const queryMsLabel = $derived(
+    queryMs >= 1000 ? `${(queryMs / 1000).toFixed(2)}s` : `${Math.round(queryMs)}ms`,
+  )
 
   // Tools launcher — built from one list so every card renders identically.
   const toolItems = $derived.by(() => {
@@ -344,7 +382,7 @@
 {/snippet}
 
 <div
-  class="flex h-8 shrink-0 items-center border-t border-border/30 bg-background px-2 text-[11px] text-muted-foreground select-none"
+  class="@container/sb flex h-8 shrink-0 items-center border-t border-border/30 bg-background px-2 text-[11px] text-muted-foreground select-none"
   data-studio-region="statusbar"
 >
   <!-- ── Left group ──────────────────────────────────────────────────── -->
@@ -352,73 +390,86 @@
     {#if connection}
 
       <!-- Connection switcher -->
-      <DropdownMenu.Root bind:open={connOpen}>
-        <DropdownMenu.Trigger
-          class={cn(labelBtn, 'text-muted-foreground/80')}
-          title="Switch connection (⇧⌘C)"
-        >
-          {#if connectionLost}
-            <Icon name="wifi-off" class="size-3 shrink-0 text-red-500" />
-          {:else}
-            <Icon name="wifi" class="size-3 shrink-0 text-emerald-500" />
-          {/if}
-          <span class={cn('max-w-[7rem] truncate font-medium', connectionLost && 'text-red-500/70')}>{connType}</span>
-          {#if connLabel}
-            <span class="hidden max-w-[6rem] truncate text-muted-foreground/45 sm:inline">· {connLabel}</span>
-          {/if}
-          {#if connection?.environment}
-            <span class="size-1.5 shrink-0 rounded-full bg-muted-foreground/35" title={connection.environment}></span>
-          {/if}
-          {#if savedConnections.length > 1}
-            <Icon name="chevron-down" class={cn('size-3 shrink-0 opacity-40 transition-transform', connOpen && 'rotate-180')} />
-          {/if}
-        </DropdownMenu.Trigger>
-
-        {#if savedConnections.length > 0}
-          <DropdownMenu.Content side="top" align="start" class="w-64">
-            <DropdownMenu.Label>Connections</DropdownMenu.Label>
-            {#each savedConnections as conn (conn.id)}
-              {@const isCurrent = conn.id === activeConnectionId}
-              {@const iconName = connIcon(conn)}
-              {@const subtitle = conn.database && conn.database !== (conn.name ?? conn.host) ? conn.database : (conn.host ?? '')}
-              <DropdownMenu.Item
-                class="cursor-pointer items-start gap-2.5 py-1.5"
-                onclick={() => { if (!isCurrent) onswitchconnection(conn); connOpen = false }}
-              >
-                <span class={cn(
-                  'mt-px flex size-5 shrink-0 items-center justify-center rounded-md',
-                  isCurrent ? 'bg-emerald-500/12 text-emerald-500' : 'bg-muted/50 text-muted-foreground/55',
-                )}>
-                  <Icon name={iconName} class="size-3.5" />
-                </span>
-                <div class="min-w-0 flex-1">
-                  <div class="flex items-center gap-1.5">
-                    <span class={cn('min-w-0 truncate text-[12px] leading-tight', isCurrent ? 'font-semibold text-foreground' : 'font-medium text-foreground/90')}>
-                      {conn.name ?? conn.host ?? conn.filePath ?? 'Connection'}
-                    </span>
-                    {#if conn.environment}
-                      <span class="size-1.5 shrink-0 rounded-full bg-muted-foreground/30" title={conn.environment}></span>
-                    {/if}
-                  </div>
-                  {#if subtitle}
-                    <div class="mt-0.5 truncate font-mono text-[10px] leading-tight text-muted-foreground/45">{subtitle}</div>
-                  {/if}
-                </div>
-                {#if isCurrent}<Icon name="check" class="ml-auto mt-0.5 size-3.5 shrink-0 text-emerald-500" />{/if}
-              </DropdownMenu.Item>
-            {/each}
-
-            <DropdownMenu.Separator />
-
-            <DropdownMenu.Item class="cursor-pointer gap-2.5" onclick={() => { connOpen = false; onconnect() }}>
-              <span class="flex size-5 shrink-0 items-center justify-center rounded-md bg-muted/50 text-muted-foreground/55">
-                <Icon name="wifi-off" class="size-3.5" />
-              </span>
-              Manage connections…
-            </DropdownMenu.Item>
-          </DropdownMenu.Content>
+      {#snippet connTriggerInner(/** @type {boolean} */ showChevron)}
+        {#if connectionLost}
+          <Icon name="wifi-off" class="size-3 shrink-0 text-red-500" />
+        {:else}
+          <Icon name="wifi" class="size-3 shrink-0 text-emerald-500" />
         {/if}
-      </DropdownMenu.Root>
+        <span class={cn('max-w-[7rem] truncate font-medium', connectionLost && 'text-red-500/70')}>{connType}</span>
+        {#if connLabel}
+          <span class="hidden max-w-[6rem] truncate text-muted-foreground/45 @min-[900px]/sb:inline">· {connLabel}</span>
+        {/if}
+        {#if connection?.environment}
+          <span class="size-1.5 shrink-0 rounded-full bg-muted-foreground/35" title={connection.environment}></span>
+        {/if}
+        {#if showChevron}
+          <Icon name="chevron-down" class={cn('size-3 shrink-0 opacity-40 transition-transform', connOpen && 'rotate-180')} />
+        {/if}
+      {/snippet}
+
+      {#if savedConnections.length > 1}
+        <SearchableMenu
+          bind:open={connOpen}
+          side="top"
+          align="start"
+          contentClass="w-72"
+          placeholder="Search connections…"
+          items={connItems}
+          onselect={(it) => { const c = savedConnections.find((x) => x.id === it.value); if (c && c.id !== activeConnectionId) onswitchconnection(c) }}
+        >
+          {#snippet trigger(props)}
+            <button {...props} type="button" class={cn(labelBtn, 'text-muted-foreground/80')} title="Switch connection (⇧⌘C)">
+              {@render connTriggerInner(true)}
+            </button>
+          {/snippet}
+          {#snippet item(it)}
+            {@const conn = savedConnections.find((c) => c.id === it.value)}
+            {@const isCurrent = conn?.id === activeConnectionId}
+            {@const title = conn?.name ?? conn?.host ?? conn?.filePath ?? 'Connection'}
+            {@const subtitle = conn ? connSubtitle(conn) : ''}
+            <span class={cn(
+              'flex size-5 shrink-0 items-center justify-center rounded-md',
+              isCurrent ? 'bg-emerald-500/12 text-emerald-500' : 'bg-muted/50 text-muted-foreground/55',
+            )}>
+              {#if conn?.provider && hasBrand(conn.provider)}
+                <BrandIcon name={conn.provider} class="size-3.5" />
+              {:else if conn}
+                <Icon name={connIcon(conn)} class="size-3.5" />
+              {/if}
+            </span>
+            <span
+              class={cn('min-w-0 flex-1 truncate', isCurrent ? 'font-semibold text-foreground' : 'font-medium text-foreground/90')}
+              title={subtitle ? `${title} · ${subtitle}` : title}
+            >{title}</span>
+            {#if conn?.environment}
+              <span class="size-1.5 shrink-0 rounded-full bg-muted-foreground/30" title={conn.environment}></span>
+            {/if}
+            {#if isCurrent}<Icon name="check" class="size-3.5 shrink-0 text-emerald-500" />{/if}
+          {/snippet}
+          {#snippet footer()}
+            <div class="border-t border-border/50 p-1">
+              <button
+                type="button"
+                class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                onclick={() => { connOpen = false; onconnect() }}
+              >
+                <Icon name="wifi-off" class="size-3.5 shrink-0 text-muted-foreground/50" />
+                Manage connections…
+              </button>
+            </div>
+          {/snippet}
+        </SearchableMenu>
+      {:else}
+        <button
+          type="button"
+          class={cn(labelBtn, 'text-muted-foreground/80')}
+          title="Manage connections (⇧⌘C)"
+          onclick={onconnect}
+        >
+          {@render connTriggerInner(false)}
+        </button>
+      {/if}
 
       {@render sep()}
 
@@ -454,7 +505,7 @@
             <!-- Always mounted (not gated on list size) so the search box is
                  active the moment the switcher opens and arrows/Tab/Enter work
                  for any number of databases. -->
-            <div class="border-b border-border/25 px-2 py-1.5">
+            <div class="border-b border-border/50 px-2 py-1.5">
               <input
                 bind:this={dbInputEl}
                 type="text"
@@ -485,8 +536,8 @@
                     type="button"
                     data-hl={dbHl === i ? '' : undefined}
                     class={cn(
-                      'flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left font-mono text-xs text-foreground/90 transition-colors',
-                      dbHl === i && 'bg-accent/50 text-foreground',
+                      'flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left font-mono text-xs text-foreground/90 transition-colors',
+                      dbHl === i && 'bg-accent text-foreground',
                       isCurrent && 'font-semibold',
                     )}
                     onclick={() => switchDb(db)}
@@ -505,7 +556,7 @@
             </div>
 
             {#if canSwitchDb}
-              <div class="flex items-center justify-between border-t border-border/25 px-2.5 py-1.5">
+              <div class="flex items-center justify-between border-t border-border/50 px-2.5 py-1.5">
                 <span class="text-[10px] text-muted-foreground/40">
                   {dbList.length} database{dbList.length === 1 ? '' : 's'}
                 </span>
@@ -563,7 +614,7 @@
           title="Data view (⌘⇧D)"
         >
           <Icon name="table-2" class="size-3 shrink-0" />
-          <span class={activeView === 'table' ? 'font-medium' : ''}>Data</span>
+          <span class={cn('@max-[700px]/sb:hidden', activeView === 'table' ? 'font-medium' : '')}>Data</span>
         </button>
         <button
           type="button"
@@ -577,7 +628,7 @@
           title="Query Editor (⌘⇧S)"
         >
           <Icon name="terminal" class="size-3 shrink-0" />
-          <span class={activeView === 'sql' ? 'font-medium' : ''}>Query</span>
+          <span class={cn('@max-[700px]/sb:hidden', activeView === 'sql' ? 'font-medium' : '')}>Query</span>
         </button>
       </div>
 
@@ -627,6 +678,15 @@
         </button>
       {/if}
 
+      <!-- Last fetch timing — updates on every table load / refresh / query -->
+      {#if queryMs > 0}
+        {@render sep()}
+        <span
+          class="shrink-0 px-1 font-mono text-[11px] tabular-nums text-muted-foreground/55"
+          title="Last data fetch took {queryMs.toLocaleString('en-US')}ms"
+        >{queryMsLabel}</span>
+      {/if}
+
     {:else}
       <!-- Not connected -->
       <button
@@ -643,6 +703,25 @@
 
   <!-- ── Right group ─────────────────────────────────────────────────── -->
   <div class="flex shrink-0 items-center gap-0.5">
+
+    <!-- Vim mode indicator (experimental) -->
+    {#if $appVimMode}
+      <span
+        class={cn(
+          'inline-flex h-5 items-center rounded-md px-1.5 font-mono text-[10px] font-semibold uppercase tracking-wider',
+          $vimSubMode === 'insert' && 'bg-emerald-500/15 text-emerald-500',
+          $vimSubMode === 'visual' && 'bg-amber-500/15 text-amber-500',
+          $vimSubMode === 'command' && 'bg-primary/15 text-primary',
+          $vimSubMode === 'normal' && 'bg-muted/40 text-muted-foreground/70',
+        )}
+        title="Vim mode · {VIM_MODE_LABEL[$vimSubMode]} (experimental)"
+      >{VIM_MODE_LABEL[$vimSubMode]}</span>
+    {/if}
+
+    <!-- App version -->
+    {#if appVersion}
+      <span class="inline-flex h-5 items-center rounded-md px-1.5 font-mono text-[10px] tabular-nums text-muted-foreground/45" title="Stroke v{appVersion}">v{appVersion}</span>
+    {/if}
 
     <!-- Pending edits -->
     {#if pendingEditCount > 0}
@@ -662,7 +741,7 @@
         title="Discard unsaved changes"
       >
         <Icon name="undo-2" class="size-2.5 shrink-0" />
-        Reset
+        <span class="@max-[780px]/sb:hidden">Reset</span>
       </button>
       {@render sep()}
     {/if}
@@ -791,7 +870,7 @@
         title="Update available"
       >
         <Icon name="arrow-up-circle" class="size-3 shrink-0" />
-        Update
+        <span class="@max-[840px]/sb:hidden">Update</span>
       </button>
       {@render sep()}
     {/if}
@@ -807,7 +886,7 @@
       title={mcpRunning ? 'MCP running — click to manage' : 'MCP stopped — click to manage'}
     >
       <span class={cn('size-1.5 shrink-0 rounded-full transition-colors', mcpRunning ? 'bg-emerald-500' : 'bg-muted-foreground/25')}></span>
-      <span class="font-medium">MCP</span>
+      <span class="font-medium @max-[900px]/sb:hidden">MCP</span>
     </button>
 
     {@render sep()}
@@ -824,21 +903,27 @@
     >
       {#snippet trigger(props)}
         <button {...props} type="button" class={cn(labelBtn, 'text-muted-foreground/70')} title="Switch AI model">
-          <Icon name="bot" class="size-3 shrink-0 opacity-60" />
-          <span class="max-w-[9rem] truncate font-medium">{modelName}</span>
-          <Icon name="chevron-down" class="size-3 shrink-0 opacity-35" />
+          {#if activeProfile && hasBrand(activeProfile.provider)}
+            <BrandIcon name={activeProfile.provider} class="size-3 shrink-0 opacity-70" />
+          {:else}
+            <Icon name="bot" class="size-3 shrink-0 opacity-60" />
+          {/if}
+          <span class="max-w-[9rem] truncate font-medium @max-[780px]/sb:hidden">{modelName}</span>
+          <Icon name="chevron-down" class="size-3 shrink-0 opacity-35 @max-[780px]/sb:hidden" />
         </button>
       {/snippet}
       {#snippet item(it)}
         {@const profile = $aiProfiles.find((p) => p.id === it.value)}
-        <div class="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span class="truncate text-ui-sm font-medium leading-tight">{profile?.name ?? it.label}</span>
-          <span class="truncate font-mono text-[10px] leading-tight text-muted-foreground/50">{profile?.model}</span>
-        </div>
-        {#if $activeProfileId === it.value}<Icon name="check" class="size-3.5 shrink-0 self-center text-primary" />{/if}
+        {#if profile && hasBrand(profile.provider)}
+          <BrandIcon name={profile.provider} class="size-4 shrink-0 text-muted-foreground/70" />
+        {:else}
+          <Icon name="bot" class="size-4 shrink-0 text-muted-foreground/40" />
+        {/if}
+        <span class="min-w-0 flex-1 truncate text-ui-sm font-medium" title={profile?.model ?? it.label}>{profile?.name ?? it.label}</span>
+        {#if $activeProfileId === it.value}<Icon name="check" class="size-3.5 shrink-0 text-primary" />{/if}
       {/snippet}
       {#snippet footer()}
-        <div class="border-t border-border/40 p-1">
+        <div class="border-t border-border/50 p-1">
           <button
             type="button"
             class="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"

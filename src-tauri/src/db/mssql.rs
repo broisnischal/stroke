@@ -120,7 +120,8 @@ fn rows_to_result(rows: &[Row], elapsed: u64) -> SqlResult {
         .collect();
 
     let row_count = Some(data.len() as i64);
-    SqlResult { columns, rows: data, row_count, message: None, query_ms: elapsed }
+    // `sql` is stamped by the caller, which holds the statement string.
+    SqlResult { columns, rows: data, row_count, message: None, query_ms: elapsed, sql: String::new() }
 }
 
 fn is_read_query(sql: &str) -> bool {
@@ -151,7 +152,9 @@ pub async fn execute_sql(handle: &MssqlHandle, sql: &str) -> Result<SqlResult, S
             .await
             .map_err(|e| format!("MS SQL error: {e}"))?;
         let rows = results.into_iter().next().unwrap_or_default();
-        Ok(rows_to_result(&rows, t0.elapsed().as_millis() as u64))
+        let mut out = rows_to_result(&rows, t0.elapsed().as_millis() as u64);
+        out.sql = sql.to_string();
+        Ok(out)
     } else {
         let res = client
             .execute(sql, &[])
@@ -164,6 +167,7 @@ pub async fn execute_sql(handle: &MssqlHandle, sql: &str) -> Result<SqlResult, S
             row_count: Some(affected as i64),
             message: Some(format!("{affected} row(s) affected")),
             query_ms: t0.elapsed().as_millis() as u64,
+            sql: sql.to_string(),
         })
     }
 }
@@ -363,7 +367,8 @@ pub async fn get_table_rows(
     let tq = format!("{}.{}", quote_ident(schema), quote_ident(table));
     let where_clause = build_where(&col_names, search.as_deref(), filters.as_deref());
 
-    let total = fetch_rows(handle, &format!("SELECT COUNT_BIG(*) FROM {tq}{where_clause}"))
+    let count_sql = format!("SELECT COUNT_BIG(*) FROM {tq}{where_clause}");
+    let total = fetch_rows(handle, &count_sql)
         .await?
         .first()
         .and_then(|r| r.try_get::<i64, _>(0).ok().flatten())
@@ -394,6 +399,7 @@ pub async fn get_table_rows(
         query_ms: t0.elapsed().as_millis() as u64,
         primary_key: if include_meta { primary_key(handle, schema, table).await } else { Vec::new() },
         foreign_keys: Vec::<ForeignKeyInfo>::new(),
+        sql: format!("{data_sql}\n{count_sql}"),
     })
 }
 

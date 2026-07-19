@@ -92,7 +92,8 @@ fn result_to_sql(result: D1QueryResult, elapsed: u64) -> Result<SqlResult, Strin
         None
     };
 
-    Ok(SqlResult { columns, rows, row_count, message, query_ms: elapsed })
+    // `sql` is stamped by `query` (the caller has the statement string).
+    Ok(SqlResult { columns, rows, row_count, message, query_ms: elapsed, sql: String::new() })
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────────
@@ -134,6 +135,8 @@ pub async fn query(config: &D1Config, sql: &str, params: Vec<Value>) -> Result<S
     }
 
     let result = d1.result.into_iter().next().ok_or("Empty D1 result")?;
-    result_to_sql(result, elapsed)
+    let mut out = result_to_sql(result, elapsed)?;
+    out.sql = sql.to_string();
+    Ok(out)
 }
 

@@ -201,7 +201,7 @@
           type="text"
           bind:value={tokenInput}
           placeholder="postgres://…"
-          class="h-9 w-full rounded-lg border border-border/60 bg-muted/25 px-3 font-mono text-[11px] outline-none transition-[border-color,box-shadow] focus:border-ring focus:ring-2 focus:ring-ring/20"
+          class="h-9 w-full rounded-lg border border-border/60 bg-muted/25 px-3 font-mono text-[11px] outline-none transition-[border-color,box-shadow] focus:border-ring focus:ring-1 focus:ring-ring focus:border-ring focus:ring-1 focus:ring-ring"
           onkeydown={(e) => { if (e.key === 'Enter') saveToken() }}
         />
         <button
@@ -306,7 +306,7 @@
             autocomplete="current-password"
             autofocus
             placeholder="Database password"
-            class="h-9 w-full rounded-lg border border-border bg-muted/30 pl-3 pr-9 text-[12px] outline-none focus:border-ring focus:ring-1 focus:ring-ring/30"
+            class="h-9 w-full rounded-lg border border-border bg-muted/30 pl-3 pr-9 text-[12px] outline-none focus:border-ring focus:ring-1 focus:ring-ring"
             onkeydown={(e) => { if (e.key === 'Enter') confirmPassword() }}
           />
           <button

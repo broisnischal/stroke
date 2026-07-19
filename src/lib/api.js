@@ -1,4 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
+import { loadSettings } from '$lib/stores/settings.js'
+import { recordQuery } from '$lib/stores/query-log.js'
 
 /** @typedef {{ name: string, host: string, port: number, database: string, user: string, password: string, ssl: boolean }} PgConnectionConfig */
 /** @typedef {{ name: string, filePath: string }} SqliteConnectionConfig */
@@ -81,17 +83,38 @@ function withSsh(payload, config) {
   return payload
 }
 
+/**
+ * Attach the session time zone from Settings → Database to a Postgres/MySQL
+ * connect payload. Applied per pooled connection by the backend; "SYSTEM" (or
+ * blank) is treated as "leave the server default" and omitted.
+ */
+function withTimezone(payload) {
+  try {
+    const tz = String(loadSettings().sessionTimezone ?? '').trim()
+    if (tz && tz.toUpperCase() !== 'SYSTEM') return { ...payload, timezone: tz }
+  } catch {
+    // Settings unavailable — connect without a timezone override.
+  }
+  return payload
+}
+
 export async function testPostgresConnection(config) {
-  return inv('test_postgres_connection', { config: withSsh(normalizeConnectionConfig(config), config) })
+  return inv('test_postgres_connection', { config: withSsh(withTimezone(normalizeConnectionConfig(config)), config) })
 }
 
 export async function connectPostgres(config) {
-  return inv('connect_postgres', { config: withSsh(normalizeConnectionConfig(config), config) })
+  return inv('connect_postgres', { config: withSsh(withTimezone(normalizeConnectionConfig(config)), config) })
 }
 
 /** Toggle the WebView DevTools (no-op in release builds). */
 export async function toggleDevtools() {
   return inv('toggle_devtools')
+}
+
+/** Re-center + right-size the window on the current monitor. Recovers the
+ *  window when it's stranded off-screen (e.g. after unplugging a monitor). */
+export async function resetWindow() {
+  return inv('reset_window')
 }
 
 // ── SQLite ────────────────────────────────────────────────────────────────────
@@ -128,7 +151,7 @@ export async function testMysqlConnection(config) {
     password: String(config.password || ''),
     ssl: Boolean(config.ssl),
   }
-  return inv('test_mysql', { config: withSsh(base, config) })
+  return inv('test_mysql', { config: withSsh(withTimezone(base), config) })
 }
 
 /** @param {{ name: string, host: string, port: number, database: string, user: string, password: string, ssl: boolean, ssh?: object }} config */
@@ -142,7 +165,7 @@ export async function connectMysql(config) {
     password: String(config.password || ''),
     ssl: Boolean(config.ssl),
   }
-  return inv('connect_mysql_db', { config: withSsh(base, config) })
+  return inv('connect_mysql_db', { config: withSsh(withTimezone(base), config) })
 }
 
 // ── Cloudflare D1 ─────────────────────────────────────────────────────────────
@@ -455,8 +478,9 @@ export async function dropTable(schema, table, cascade = false) {
  * the caller keeps the metadata it already has.
  */
 export async function getTableRows(schema, table, limit, offset, query = {}) {
+  const _t0 = performance.now()
   try {
-    return await invoke('pg_get_table_rows', {
+    const r = await invoke('pg_get_table_rows', {
       schema,
       table,
       limit,
@@ -469,11 +493,17 @@ export async function getTableRows(schema, table, limit, offset, query = {}) {
       // so other engines still sort by it when they ignore `sorts`.
       sorts: query.sorts?.length ? query.sorts : null,
       filters: query.filters?.length ? query.filters : null,
+      // Keyset (cursor) pagination anchor — null = classic OFFSET (Postgres only).
+      keyset: query.keyset ?? null,
       includeMeta: query.includeMeta !== false,
       // Default true. Pass false to skip COUNT(*) (returns total = -1) and paint
       // rows immediately; fetch the total separately with countTableRows().
       includeCount: query.includeCount !== false,
+      // Null placement for the ORDER BY (dialects that support it); unset → default.
+      nullsOrder: (() => { try { const v = loadSettings().nullSortOrder; return v === 'first' || v === 'last' ? v : null } catch { return null } })(),
     })
+    recordQuery({ sql: r?.sql, durationMs: r?.queryMs ?? Math.round(performance.now() - _t0), schema, table, source: 'browse', success: true })
+    return r
   } catch (err) {
     throw new Error(formatInvokeError(err))
   }
@@ -524,9 +554,13 @@ export async function cancelQuery() {
 
 /** @param {string} sql */
 export async function executeSql(sql) {
+  const _t0 = performance.now()
   try {
-    return await invoke('pg_execute_sql', { sql })
+    const r = await invoke('pg_execute_sql', { sql })
+    recordQuery({ sql: r?.sql || sql, durationMs: r?.queryMs ?? Math.round(performance.now() - _t0), source: 'sql', success: true })
+    return r
   } catch (err) {
+    recordQuery({ sql, durationMs: Math.round(performance.now() - _t0), source: 'sql', success: false, error: String(err) })
     throw new Error(formatInvokeError(err))
   }
 }
@@ -535,6 +569,13 @@ export async function executeSql(sql) {
 export async function executeSqlMulti(sql) {
   return await inv('pg_execute_sql_multi', { sql })
 }
+
+// ── Instance Insights (PostgreSQL + MySQL monitoring) ───────────────────────
+export async function instanceVersion() { return await inv('instance_version') }
+export async function instanceActivity() { return await inv('instance_activity') }
+export async function instanceState() { return await inv('instance_state') }
+export async function instanceConfig() { return await inv('instance_config') }
+export async function instanceReplication() { return await inv('instance_replication') }
 
 /**
  * Run EXPLAIN ANALYZE on `sql` and return the parsed plan tree.

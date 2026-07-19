@@ -88,6 +88,20 @@ pub fn tool_list() -> Value {
                     "schema": { "type": "string", "description": "Schema name (default: public)" }
                 }
             }
+        },
+        {
+            "name": "export_query",
+            "description": "Run a read-only SQL query and return its rows formatted as JSON, CSV, or a Markdown table. Compose any filtering/sorting with a SQL WHERE/ORDER BY clause. If an absolute 'path' is given, the formatted result is written to that file and the path is returned (for exporting/downloading data); otherwise the formatted content is returned inline.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "sql": { "type": "string", "description": "Read-only SQL query (SELECT/WITH). Add WHERE/ORDER BY/LIMIT to filter and sort." },
+                    "format": { "type": "string", "enum": ["json", "csv", "markdown"], "description": "Output format (default: json)" },
+                    "path": { "type": "string", "description": "Absolute file path to write the result to. If omitted, the formatted content is returned inline." },
+                    "max_rows": { "type": "number", "description": "Maximum rows to include (default 5000, max 50000)" }
+                },
+                "required": ["sql"]
+            }
         }
     ])
 }
@@ -198,6 +212,16 @@ pub async fn call_tool(
             let schema = args["schema"].as_str().unwrap_or("public");
             get_database_stats(conn, schema).await
         }
+        "export_query" => {
+            let sql = args["sql"].as_str().ok_or("Missing sql argument")?;
+            if !is_read_only_sql(sql) {
+                return Err("export_query only supports read-only queries (SELECT, WITH, …).".to_string());
+            }
+            let format = args["format"].as_str().unwrap_or("json");
+            let path = args["path"].as_str();
+            let max_rows = args["max_rows"].as_u64().unwrap_or(5000).min(50000) as usize;
+            export_query(conn, sql, format, path, max_rows).await
+        }
         _ => Err(format!("Unknown tool: {name}")),
     }
 }
@@ -233,6 +257,134 @@ fn strip_sql_comments(s: &str) -> &str {
     } else {
         s
     }
+}
+
+// ── export_query ────────────────────────────────────────────────────────────
+
+/// Run a read-only query and return its rows formatted as json/csv/markdown,
+/// optionally writing the formatted result to a file. Reuses execute_sql so
+/// every engine (Postgres, SQLite, MySQL, D1, LibSQL, ClickHouse, DuckDB,
+/// MSSQL) is supported without duplicating per-engine logic.
+async fn export_query(
+    conn: &ActiveConnection,
+    sql: &str,
+    format: &str,
+    path: Option<&str>,
+    max_rows: usize,
+) -> Result<String, String> {
+    let raw = execute_sql(conn, sql, max_rows).await?;
+    let parsed: Value =
+        serde_json::from_str(&raw).map_err(|e| format!("Could not parse result: {e}"))?;
+    let columns: Vec<String> = parsed["columns"]
+        .as_array()
+        .map(|a| a.iter().map(|c| c.as_str().unwrap_or("").to_string()).collect())
+        .unwrap_or_default();
+    let empty: Vec<Value> = Vec::new();
+    let rows = parsed["rows"].as_array().unwrap_or(&empty);
+    let row_count = parsed["row_count"].as_u64().unwrap_or(rows.len() as u64);
+    let truncated = parsed["truncated"].as_bool().unwrap_or(false);
+
+    let fmt = format.to_ascii_lowercase();
+    let content = match fmt.as_str() {
+        "csv" => rows_to_csv(&columns, rows),
+        "markdown" | "md" => rows_to_markdown(&columns, rows),
+        "json" => rows_to_json_objects(&columns, rows),
+        other => {
+            return Err(format!("Unknown format '{other}'. Use 'json', 'csv', or 'markdown'."))
+        }
+    };
+
+    if let Some(p) = path {
+        tokio::fs::write(p, &content)
+            .await
+            .map_err(|e| format!("Could not write file '{p}': {e}"))?;
+        Ok(json!({
+            "path": p,
+            "bytes": content.len(),
+            "row_count": row_count,
+            "truncated": truncated,
+            "format": fmt,
+        })
+        .to_string())
+    } else {
+        Ok(json!({
+            "format": fmt,
+            "row_count": row_count,
+            "truncated": truncated,
+            "content": content,
+        })
+        .to_string())
+    }
+}
+
+/// Stringify a single JSON cell for CSV / Markdown output.
+fn cell_to_text(v: &Value) -> String {
+    match v {
+        Value::Null => String::new(),
+        Value::String(s) => s.clone(),
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => n.to_string(),
+        // arrays / objects → compact JSON
+        other => other.to_string(),
+    }
+}
+
+fn csv_escape(s: &str) -> String {
+    if s.contains(|c| c == ',' || c == '"' || c == '\n' || c == '\r') {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
+fn rows_to_csv(columns: &[String], rows: &[Value]) -> String {
+    let mut out = columns.iter().map(|c| csv_escape(c)).collect::<Vec<_>>().join(",");
+    for row in rows {
+        let cells = row.as_array().cloned().unwrap_or_default();
+        let line = (0..columns.len())
+            .map(|i| csv_escape(&cell_to_text(cells.get(i).unwrap_or(&Value::Null))))
+            .collect::<Vec<_>>()
+            .join(",");
+        out.push('\n');
+        out.push_str(&line);
+    }
+    out
+}
+
+fn md_escape(s: &str) -> String {
+    s.replace('|', "\\|").replace(['\n', '\r'], " ")
+}
+
+fn rows_to_markdown(columns: &[String], rows: &[Value]) -> String {
+    let mut out = format!(
+        "| {} |\n| {} |\n",
+        columns.iter().map(|c| md_escape(c)).collect::<Vec<_>>().join(" | "),
+        columns.iter().map(|_| "---").collect::<Vec<_>>().join(" | ")
+    );
+    for row in rows {
+        let cells = row.as_array().cloned().unwrap_or_default();
+        let line = (0..columns.len())
+            .map(|i| md_escape(&cell_to_text(cells.get(i).unwrap_or(&Value::Null))))
+            .collect::<Vec<_>>()
+            .join(" | ");
+        out.push_str(&format!("| {line} |\n"));
+    }
+    out
+}
+
+fn rows_to_json_objects(columns: &[String], rows: &[Value]) -> String {
+    let records: Vec<Value> = rows
+        .iter()
+        .map(|row| {
+            let cells = row.as_array().cloned().unwrap_or_default();
+            let mut obj = serde_json::Map::new();
+            for (i, col) in columns.iter().enumerate() {
+                obj.insert(col.clone(), cells.get(i).cloned().unwrap_or(Value::Null));
+            }
+            Value::Object(obj)
+        })
+        .collect();
+    serde_json::to_string_pretty(&records).unwrap_or_else(|_| "[]".to_string())
 }
 
 // ── execute_sql ───────────────────────────────────────────────────────────────

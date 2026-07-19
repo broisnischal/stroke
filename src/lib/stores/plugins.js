@@ -6,6 +6,7 @@
 //  - `isPluginEnabled()` / `getPluginConfig()` read a plain module-level snapshot
 //    so hot paths (per-cell canvas rendering) never pay store-subscription cost.
 import { writable, get } from 'svelte/store'
+import { debounce } from '$lib/utils.js'
 
 const KEY = 'stroke:plugins'
 
@@ -31,16 +32,38 @@ export const pluginState = writable(load())
 
 /** Plain snapshot kept in sync for synchronous hot-path reads. */
 let _snap = get(pluginState)
+// The snapshot updates synchronously (hot-path reads need it); only the
+// localStorage serialize is debounced so rapid toggles don't thrash storage.
+const persistPlugins = debounce((/** @type {PluginState} */ v) => {
+  try { localStorage.setItem(KEY, JSON.stringify(v)) } catch {}
+}, 300)
 pluginState.subscribe((v) => {
   _snap = v
-  try {
-    localStorage.setItem(KEY, JSON.stringify(v))
-  } catch {}
+  persistPlugins(v)
 })
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', () => persistPlugins.flush())
+}
+
+/**
+ * Extensions that ship enabled. Workflow features (saved views, find &
+ * replace) are core-adjacent — off-by-default would just hide them; the
+ * Extensions page stays the place to switch them off.
+ */
+const DEFAULT_ON = new Set(['saved-views', 'find-replace'])
+
+/**
+ * Enabled check against an explicit state snapshot (for reactive `$pluginState`
+ * reads in components) — honors DEFAULT_ON when the user never toggled the id.
+ * @param {PluginState} state @param {string} id
+ */
+export function pluginEnabledIn(state, id) {
+  return state.enabled[id] ?? DEFAULT_ON.has(id)
+}
 
 /** @param {string} id */
 export function isPluginEnabled(id) {
-  return _snap.enabled[id] === true
+  return pluginEnabledIn(_snap, id)
 }
 
 /** @param {string} id @returns {Record<string, unknown>} */

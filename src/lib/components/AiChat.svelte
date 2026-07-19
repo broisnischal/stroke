@@ -12,6 +12,7 @@
   import Play from "@lucide/svelte/icons/play";
   import PenLine from "@lucide/svelte/icons/pen-line";
   import Copy from "@lucide/svelte/icons/copy";
+  import Download from "@lucide/svelte/icons/download";
   import AlertTriangle from "@lucide/svelte/icons/alert-triangle";
   import Table2 from "@lucide/svelte/icons/table-2";
   import MessageSquare from "@lucide/svelte/icons/message-square";
@@ -36,6 +37,15 @@
   import { Label } from "$lib/components/ui/label/index.js";
   import { cn } from "$lib/utils.js";
   import { executeSql } from "$lib/api.js";
+  import {
+    rowsToCsv,
+    rowsToJson,
+    rowsToMarkdown,
+    rowsToCsvAsync,
+    rowsToJsonAsync,
+    saveExportFile,
+    buildExportFilename,
+  } from "$lib/export.js";
   import DataTable from "$lib/components/DataTable.svelte";
   import AiMarkdown from "$lib/components/AiMarkdown.svelte";
   import AiSqlBlock from "$lib/components/AiSqlBlock.svelte";
@@ -267,6 +277,85 @@
     convList = await listConversations(connectionId || undefined);
   }
 
+  // ── Open conversation tabs (browser-style, persisted per connection) ───────
+  const AI_TABS_KEY = "stroke:ai-chat-tabs";
+
+  /** @returns {Record<string, string[]>} */
+  function loadTabsMap() {
+    try {
+      const raw = localStorage.getItem(AI_TABS_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * @param {string} connId
+   * @returns {string[]}
+   */
+  function loadOpenTabs(connId) {
+    const all = loadTabsMap();
+    const v = all[connId || "_default"];
+    return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+  }
+
+  /**
+   * @param {string} connId
+   * @param {string[]} ids
+   */
+  function saveOpenTabs(connId, ids) {
+    try {
+      const all = loadTabsMap();
+      const key = connId || "_default";
+      if (ids.length) all[key] = ids;
+      else delete all[key];
+      localStorage.setItem(AI_TABS_KEY, JSON.stringify(all));
+    } catch {
+      // Quota/serialization failure must not throw into the chat flow.
+    }
+  }
+
+  /** IDs of conversations currently shown as open tabs (a subset of convList). */
+  let openTabIds = $state(/** @type {string[]} */ ([]));
+
+  /** Resolve open tab ids to their conversation records, dropping any stale ids. */
+  const openTabs = $derived(
+    openTabIds
+      .map((id) => convList.find((c) => c.id === id))
+      .filter((c) => Boolean(c)),
+  );
+
+  /** Append a conversation id to the open-tab set if it isn't already shown. */
+  function ensureOpenTab(/** @type {string | null} */ id) {
+    if (!id || openTabIds.includes(id)) return;
+    openTabIds = [...openTabIds, id];
+    saveOpenTabs(connectionId, openTabIds);
+  }
+
+  /** Close an open tab; when it was active, fall back to the nearest tab or a fresh draft. */
+  function closeTab(/** @type {string} */ id) {
+    const idx = openTabIds.indexOf(id);
+    if (idx === -1) return;
+    const next = openTabIds.filter((t) => t !== id);
+    openTabIds = next;
+    saveOpenTabs(connectionId, next);
+    if (id === activeConvId) {
+      const fallback = next[idx] ?? next[next.length - 1] ?? null;
+      if (fallback) void selectConversation(fallback);
+      else void newConversation();
+    }
+  }
+
+  // A conversation that becomes active (selected, or a draft saved to a real id)
+  // is surfaced as an open tab. ensureOpenTab is a no-op once the id is present,
+  // so this settles after a single pass and never loops.
+  $effect(() => {
+    if (activeConvId) ensureOpenTab(activeConvId);
+  });
+
   async function selectConversation(/** @type {string} */ id) {
     if (id === activeConvId) return;
     abortCurrentRequest();
@@ -367,6 +456,10 @@
     closeContextMenu();
     await deleteConversation(id);
     convList = convList.filter((c) => c.id !== id);
+    if (openTabIds.includes(id)) {
+      openTabIds = openTabIds.filter((t) => t !== id);
+      saveOpenTabs(connectionId, openTabIds);
+    }
     if (activeConvId === id) {
       activeConvId = null;
       items = [];
@@ -1820,6 +1913,57 @@
             attempt: existing.count + 1,
           });
         }
+      } else if (call.function.name === "export_data") {
+        const sql = String(args.sql ?? "").trim();
+        const fmt =
+          args.format === "json"
+            ? "json"
+            : args.format === "markdown" || args.format === "md"
+              ? "md"
+              : "csv";
+        if (!sql) {
+          apiHistory.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify({ error: "Empty SQL provided" }) });
+          return;
+        }
+        if (isDestructiveSql(sql)) {
+          apiHistory.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify({ error: "export_data only runs read-only SELECT/WITH queries." }) });
+          return;
+        }
+        try {
+          // Export the full result (no display cap) so large exports are complete.
+          const data = await executeSql(sql);
+          const cols = data.columns ?? [];
+          const rows = data.rows ?? [];
+          const total = rows.length;
+          if (total === 0) {
+            toolResult = JSON.stringify({ exported: false, message: "Query returned no rows to export." });
+          } else {
+            const LARGE = 20000;
+            let content;
+            /** @type {string | number | undefined} */
+            let toastId;
+            if (total > LARGE && fmt !== "md") {
+              // Large export: keep the UI responsive + show progress, like the table export.
+              toastId = toast.info(`Preparing ${fmt.toUpperCase()} — ${formatCompactCount(total)} rows…`, { description: "This can take a moment for large files", duration: 60 * 60 * 1000 });
+              await new Promise((r) => setTimeout(r, 16));
+              content = fmt === "json" ? await rowsToJsonAsync(cols, rows) : await rowsToCsvAsync(cols, rows);
+            } else {
+              content = fmt === "json" ? rowsToJson(cols, rows) : fmt === "md" ? rowsToMarkdown(cols, rows) : rowsToCsv(cols, rows);
+            }
+            const base = String(args.filename ?? "export").replace(/\.[a-z0-9]+$/i, "").trim() || "export";
+            const filename = buildExportFilename(base, fmt);
+            const saved = await saveExportFile(content, filename, fmt);
+            if (toastId != null) toast.dismiss(toastId);
+            if (saved) {
+              toast.success(`Downloaded ${filename}`, { description: `${formatCompactCount(total)} rows exported` });
+              toolResult = JSON.stringify({ exported: true, filename, format: fmt, row_count: total, message: `Exported ${total} rows to ${filename} — the file has been downloaded.` });
+            } else {
+              toolResult = JSON.stringify({ exported: false, message: "The user cancelled the save dialog." });
+            }
+          }
+        } catch (err) {
+          toolResult = JSON.stringify({ error: String(err) });
+        }
       } else if (call.function.name === "describe_table") {
         const schema = String(
           args.schema ?? schemaContext.activeSchema,
@@ -2192,6 +2336,32 @@
     await navigator.clipboard.writeText(text).catch(() => {});
   }
 
+  /**
+   * Export a chat query result to a file as CSV / JSON / Markdown, reusing the
+   * same formatters + native save flow as the table view.
+   * @param {{ columns: any[], rows: any[][] }} item
+   * @param {'csv'|'json'|'md'} format
+   */
+  async function exportResultAs(item, format) {
+    if (!item?.rows?.length) return;
+    const content =
+      format === "csv"
+        ? rowsToCsv(item.columns, item.rows)
+        : format === "md"
+          ? rowsToMarkdown(item.columns, item.rows)
+          : rowsToJson(item.columns, item.rows);
+    const filename = buildExportFilename("query", format);
+    try {
+      const saved = await saveExportFile(content, filename, format);
+      if (saved)
+        toast.success(`Exported ${formatCompactCount(item.rows.length)} rows`, {
+          description: filename,
+        });
+    } catch (e) {
+      toast.error("Export failed", { description: String(e) });
+    }
+  }
+
   function relativeTime(/** @type {number} */ ts) {
     const diff = (Date.now() - ts) / 1000;
     if (diff < 60) return "just now";
@@ -2239,6 +2409,7 @@
     rawApiHistory = [];
     fetchedSchemas = {}; // drop the previous DB's cached schema columns (avoids cross-connection growth)
     error = "";
+    openTabIds = loadOpenTabs(id); // reset + reload the open-tab set for the new connection
     loadConvList();
   });
 
@@ -2281,7 +2452,7 @@
       <Icon class="size-3 text-primary transition-opacity duration-200 {thinkingVisible ? 'opacity-100' : 'opacity-40'}" />
     </div>
     <span
-      class="text-ui-xs text-muted-foreground/70 transition-opacity duration-200 {thinkingVisible ? 'opacity-100' : 'opacity-0'}"
+      class="agent-think-label text-ui-xs text-muted-foreground/70 transition-opacity duration-200 {thinkingVisible ? 'opacity-100' : 'opacity-0'}"
       >{loadingText}</span
     >
     <span class="flex gap-1" aria-hidden="true">
@@ -2355,7 +2526,7 @@
                   autofocus
                   type="text"
                   bind:value={renamingTitle}
-                  class="min-w-0 flex-1 rounded border border-border/60 bg-background px-1.5 py-0.5 font-mono text-[11px] text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring/30"
+                  class="min-w-0 flex-1 rounded border border-border/60 bg-background px-1.5 py-0.5 font-mono text-[11px] text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring"
                   onkeydown={(e) => {
                     if (e.key === "Enter") void commitRename();
                     if (e.key === "Escape") cancelRename();
@@ -2496,6 +2667,62 @@
         {/if}
       </div>
     </div>
+
+    <!-- ── Conversation tab bar ───────────────────────────────────────── -->
+    {#if openTabs.length > 0 || !activeConvId}
+      <div
+        class="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border bg-panel px-1.5 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {#if !activeConvId}
+          <!-- Unsaved draft tab: always active, never closeable -->
+          <div
+            class="flex shrink-0 items-center rounded-md bg-accent px-2 py-1 font-mono text-ui-xs text-foreground"
+            title="New chat"
+          >
+            <span class="max-w-[9rem] truncate">New chat</span>
+          </div>
+        {/if}
+        {#each openTabs as tab (tab.id)}
+          {@const isActive = activeConvId === tab.id}
+          <div
+            class={cn(
+              "group/tab flex shrink-0 items-center gap-1 rounded-md py-1 pl-2 pr-1 font-mono text-ui-xs transition-colors",
+              isActive
+                ? "bg-accent text-foreground"
+                : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
+            )}
+          >
+            <button
+              type="button"
+              class="max-w-[9rem] truncate text-left"
+              title={tab.title}
+              onclick={() => void selectConversation(tab.id)}
+            >
+              {tab.title}
+            </button>
+            <button
+              type="button"
+              class="flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 opacity-0 transition-[opacity,color] hover:text-foreground group-hover/tab:opacity-100"
+              title="Close tab"
+              onclick={(e) => {
+                e.stopPropagation();
+                closeTab(tab.id);
+              }}
+            >
+              <X class="size-3" />
+            </button>
+          </div>
+        {/each}
+        <button
+          type="button"
+          class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
+          title="New chat ({newChatShortcut})"
+          onclick={() => void newConversation()}
+        >
+          <Plus class="size-3.5" />
+        </button>
+      </div>
+    {/if}
 
     <!-- Messages -->
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -3022,6 +3249,22 @@
                             : ""}
                         </p>
                       {/if}
+                      <!-- Export the result as a downloadable file -->
+                      <div
+                        class="flex items-center gap-1 border-t border-border/20 px-3 py-1.5"
+                      >
+                        <Download
+                          class="mr-1 size-3 shrink-0 text-muted-foreground/35"
+                        />
+                        {#each [["csv", "CSV"], ["json", "JSON"], ["md", "Markdown"]] as [fmt, label]}
+                          <button
+                            type="button"
+                            class="rounded px-1.5 py-0.5 text-ui-3xs text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
+                            onclick={() => exportResultAs(item, fmt)}
+                            title={`Download as ${label}`}>{label}</button
+                          >
+                        {/each}
+                      </div>
                     {/if}
                   {/if}
                 </div>
@@ -3715,7 +3958,7 @@
                   updateChatParams({
                     customInstructions: e.currentTarget.value,
                   })}
-                class="w-full resize-none rounded-lg border border-border/50 bg-background/60 px-2.5 py-2 font-mono text-[11px] text-foreground outline-none placeholder:text-muted-foreground/30 focus:border-ring focus:ring-1 focus:ring-ring/30"
+                class="w-full resize-none rounded-lg border border-border/50 bg-background/60 px-2.5 py-2 font-mono text-[11px] text-foreground outline-none placeholder:text-muted-foreground/30 focus:border-ring focus:ring-1 focus:ring-ring"
               ></textarea>
               <p class="text-[10px] text-muted-foreground/50">
                 Prepended to the system prompt on every turn.
@@ -3830,7 +4073,7 @@
                   >
                   <textarea
                     id="skill-content"
-                    class="min-h-[90px] w-full resize-y rounded-lg border border-border/60 bg-background px-2.5 py-2 font-mono text-ui-xs leading-relaxed text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring/20 placeholder:text-muted-foreground/40"
+                    class="min-h-[90px] w-full resize-y rounded-lg border border-border/60 bg-background px-2.5 py-2 font-mono text-ui-xs leading-relaxed text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring focus:border-ring focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/40"
                     placeholder="# My Skill&#10;&#10;Guidelines in Markdown..."
                     bind:value={newSkillContent}
                   ></textarea>
@@ -4237,6 +4480,39 @@
 {/if}
 
 <style>
+  /* Thinking-indicator style — driven by data-thinking-style on <html> (see settings.js applySettings). */
+  :global([data-thinking-style="shimmer"]) .agent-think-label {
+    background: linear-gradient(
+      90deg,
+      var(--muted-foreground) 0%,
+      var(--muted-foreground) 35%,
+      var(--foreground) 50%,
+      var(--muted-foreground) 65%,
+      var(--muted-foreground) 100%
+    );
+    background-size: 220% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+    animation: agent-think-shimmer 1.8s linear infinite;
+  }
+  :global([data-thinking-style="pulse"]) .agent-think-label {
+    animation: agent-think-pulse 1.4s ease-in-out infinite;
+  }
+  /* static → no animation (default text) */
+  @keyframes agent-think-shimmer {
+    0% { background-position: 220% 0; }
+    100% { background-position: -20% 0; }
+  }
+  @keyframes agent-think-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    :global([data-thinking-style]) .agent-think-label { animation: none; }
+  }
+
   :global(.prose-ai) {
     font-family:
       "Inter Variable",
@@ -4245,7 +4521,7 @@
       BlinkMacSystemFont,
       ui-sans-serif,
       sans-serif;
-    font-size: 0.9375rem;
+    font-size: var(--ai-chat-font-size, 0.9375rem);
     line-height: 1.65;
     color: var(--foreground);
     word-break: break-word;
@@ -4320,7 +4596,7 @@
     background: none;
     border: none;
     padding: 0;
-    font-size: 0.825rem;
+    font-size: var(--ai-code-font-size, 0.825rem);
   }
   :global(.prose-ai pre.shiki) {
     margin: 0.5rem 0;
@@ -4331,7 +4607,7 @@
   }
   :global(.prose-ai pre.shiki code) {
     font-family: ui-monospace, "Geist Mono", monospace;
-    font-size: 0.825rem;
+    font-size: var(--ai-code-font-size, 0.825rem);
     line-height: 1.6;
   }
   :global(.prose-ai-loading pre.shiki) {

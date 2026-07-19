@@ -6,8 +6,13 @@
   import DangerousActionDialog from "./DangerousActionDialog.svelte";
   import * as Select from "$lib/components/ui/select/index.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
+  import PanelRight from "@lucide/svelte/icons/panel-right";
+  import PanelLeft from "@lucide/svelte/icons/panel-left";
   import ResizeHandle from "./ResizeHandle.svelte";
+  import ConnectionsSidebarPanel from "./ConnectionsSidebarPanel.svelte";
+  import ExtensionsSidebarPanel from "./ExtensionsSidebarPanel.svelte";
   import { cn } from "$lib/utils.js";
+  import { t } from "$lib/i18n.js";
   import { formatTableRowCount } from "$lib/table-list.js";
   import {
     clampNavSidebarWidth,
@@ -21,6 +26,24 @@
 
   let {
     connectionName = "",
+    /** Which sidebar panel is showing: 'tables' | 'connections' | 'extensions'. */
+    navSidebarPanel = "tables",
+    /** Saved connections list (Connections panel). @type {import('$lib/stores/connections.js').SavedConnection[]} */
+    connections = [],
+    /** id of the currently live connection (Connections panel highlight). */
+    activeConnectionId = "",
+    /** @type {(c: import('$lib/stores/connections.js').SavedConnection) => void} */
+    onswitchconnection = () => {},
+    onaddconnection = () => {},
+    /** @type {(id: string) => void} */
+    onremoveconnection = () => {},
+    ondisconnectconnection = () => {},
+    /** Open an extension's detail tab (Extensions panel). @type {(ext: any) => void} */
+    onopenextensiondetail = () => {},
+    /** Which side the sidebar docks to. @type {'left' | 'right'} */
+    side = "left",
+    /** Ask the shell to dock the sidebar to the given side. @type {(side: 'left' | 'right') => void} */
+    onmoveside = () => {},
     schemas = [],
     tables = [],
     activeSchema = $bindable("public"),
@@ -54,6 +77,16 @@
     onclosetable = /** @type {(table: string) => void} */ (() => {}),
     /** Open the table with its structure view active. */
     onviewstructure = /** @type {(table: string) => void} */ (() => {}),
+    /** Open a SELECT for the table in a SQL console tab. */
+    onopeninconsole = /** @type {(table: string) => void} */ (() => {}),
+    /** Open the Generate SQL dialog (statement skeletons) for the table. */
+    ongeneratesql = /** @type {(table: string) => void} */ (() => {}),
+    /** Open the ERD scoped to a table + its FK-connected neighbors. */
+    onopentableerd = /** @type {(table: string) => void} */ (() => {}),
+    /** Count the table's rows and toast the result. */
+    oncountrows = /** @type {(table: string) => void} */ (() => {}),
+    /** Copy the table's column names as a comma-separated list. */
+    oncopycolumns = /** @type {(table: string) => void} */ (() => {}),
   } = $props();
 
   const openTableSet = $derived(new Set(openTables))
@@ -63,6 +96,10 @@
   const supportsSchemas = $derived(connection?.type === "postgres")
 
   let localFilter = $state(untrack(() => tableFilter));
+  // Debounced mirror of localFilter that the expensive list filtering derives
+  // from. localFilter drives the input (instant typing feedback); the O(n) filter
+  // + sort only re-runs once typing settles, not on every keystroke.
+  let debouncedFilter = $state(untrack(() => tableFilter));
   let filterEl = $state(/** @type {HTMLInputElement | null} */ (null));
   let filterDebounce = /** @type {ReturnType<typeof setTimeout> | null} */ (
     null
@@ -114,6 +151,7 @@
 
   // Only show pinned tables that still exist in the current table list
   const _tableNameSet = $derived(new Set(tables.map((t) => t.name)))
+  const _rowCountByName = $derived(new Map(tables.map((t) => [t.name, t.rowCount])))
   const visiblePinnedTables = $derived(pinnedTables.filter((n) => _tableNameSet.has(n)))
 
   function togglePin(tableName) {
@@ -241,6 +279,7 @@
   // Sync from parent when it resets externally (e.g. connection change)
   $effect(() => {
     localFilter = tableFilter;
+    debouncedFilter = tableFilter;
   });
 
   /** @param {string} value */
@@ -249,6 +288,7 @@
     if (filterDebounce) clearTimeout(filterDebounce);
     filterDebounce = setTimeout(() => {
       filterDebounce = null;
+      debouncedFilter = value;
       ontablefilter(value);
     }, 200);
   }
@@ -258,7 +298,8 @@
     if (filterDebounce) clearTimeout(filterDebounce);
   });
 
-  const lf = $derived(localFilter.toLowerCase());
+  const lf = $derived(debouncedFilter.toLowerCase());
+  const pinnedSet = $derived(new Set(pinnedTables));
 
   const regularTables = $derived(
     tables.filter(
@@ -286,8 +327,14 @@
     return result
   }
 
+  // Sorted, hide-filtered, un-pinned base — recomputes only when the data, sort,
+  // hide toggles or pins change (NOT on every keystroke). The search term then
+  // just filters this base, so typing avoids the sort + array clones.
+  const sortedRegularBase = $derived(
+    applySortBy(regularTables.filter((t) => !pinnedSet.has(t.name))),
+  );
   const filteredRegularTables = $derived(
-    applySortBy(regularTables.filter((t) => !pinnedTables.includes(t.name) && t.name.toLowerCase().includes(lf))),
+    lf ? sortedRegularBase.filter((t) => t.name.toLowerCase().includes(lf)) : sortedRegularBase,
   );
 
   // Selectable rows in display order (pinned first, then regular) — drives shift range-select.
@@ -333,17 +380,26 @@
     for (const n of selectedItems) if (openTableSet.has(n)) onclosetable(n)
     clearSelection()
   }
+  const sortedViewsBase = $derived(applySortBy(views));
+  const sortedMatViewsBase = $derived(applySortBy(matViews));
   const filteredViews = $derived(
-    applySortBy(views.filter((t) => t.name.toLowerCase().includes(lf))),
+    lf ? sortedViewsBase.filter((t) => t.name.toLowerCase().includes(lf)) : sortedViewsBase,
   );
   const filteredMatViews = $derived(
-    applySortBy(matViews.filter((t) => t.name.toLowerCase().includes(lf))),
+    lf ? sortedMatViewsBase.filter((t) => t.name.toLowerCase().includes(lf)) : sortedMatViewsBase,
   );
+  // The views / materialized-views lists aren't windowed (unlike the tables
+  // list), so a schema with thousands of views would instantiate thousands of
+  // context-menu components. Render at most VIEW_RENDER_CAP and hint to search
+  // for the rest — only pathological schemas ever hit this.
+  const VIEW_RENDER_CAP = 500;
+  const viewsToRender = $derived(filteredViews.length > VIEW_RENDER_CAP ? filteredViews.slice(0, VIEW_RENDER_CAP) : filteredViews);
+  const matViewsToRender = $derived(filteredMatViews.length > VIEW_RENDER_CAP ? filteredMatViews.slice(0, VIEW_RENDER_CAP) : filteredMatViews);
 
   // ── Counts for section badges ──────────────────────────────────────────────
   // The TABLES list draws from regular tables minus pins; use that as the "total"
   // so pinning (which just relocates a row) doesn't read as a hidden/filtered row.
-  const regularTablesUnpinned = $derived(regularTables.filter((t) => !pinnedTables.includes(t.name)));
+  const regularTablesUnpinned = $derived(regularTables.filter((t) => !pinnedSet.has(t.name)));
   /** How many rows the active filters (search / hide-empty / hide-system) are hiding right now. */
   const hiddenCount = $derived(
     Math.max(0, regularTablesUnpinned.length - filteredRegularTables.length) +
@@ -357,6 +413,7 @@
 
   function resetFilters() {
     localFilter = '';
+    debouncedFilter = '';
     if (filterDebounce) { clearTimeout(filterDebounce); filterDebounce = null; }
     ontablefilter('');
     hideEmpty = false;
@@ -369,8 +426,34 @@
   }
   // ── Virtual list (tables only) ───────────────────────────────────────────
   const VIRT_THRESHOLD = 40   // kick in early — 40+ tables already benefits from virtualization
-  const ROW_H = 27            // px — fixed row stride: 25px row (13px text + py-1.5) + 2px gap-0.5; drives spacer math
   const VIRT_BUFFER = 12      // extra rows rendered above and below the viewport
+  // Row stride is MEASURED from the DOM, not assumed: row height scales with the
+  // app zoom / font-size (Linux even uses a 15px base), and any drift between an
+  // assumed constant and reality × hundreds of rows = phantom scroll space below
+  // the last table (the "keeps scrolling past the end" gutter). 27px is only the
+  // pre-measure fallback.
+  let rowH = $state(27)
+  $effect(() => {
+    const el = tableListEl
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const measure = () => {
+      // Spacer <li>s are aria-hidden — measure the stride between two real rows.
+      const rows = /** @type {NodeListOf<HTMLElement>} */ (el.querySelectorAll('li:not([aria-hidden])'))
+      if (rows.length >= 2) {
+        const stride = rows[1].offsetTop - rows[0].offsetTop
+        // Read rowH untracked: this effect must NOT depend on the value it writes,
+        // or setting rowH re-runs it, and a stride that doesn't settle in one pass
+        // spins until Svelte's infinite-loop guard trips. The ResizeObserver still
+        // re-measures on real layout changes.
+        const cur = untrack(() => rowH)
+        if (stride > 10 && Math.abs(stride - cur) > 0.5) rowH = stride
+      }
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  })
   // The window shifts one row at a time: `virtStart` is floored to ROW_H, so the
   // derived already short-circuits (returns the same value) for every scroll event
   // within a row — no re-render, no spacer resize until you actually cross a row
@@ -412,15 +495,15 @@
 
   const virtStart = $derived.by(() => {
     if (!shouldVirtualize) return 0
-    return Math.max(0, Math.floor((sidebarScrollTop - tableListOffsetTop) / ROW_H) - VIRT_BUFFER)
+    return Math.max(0, Math.floor((sidebarScrollTop - tableListOffsetTop) / rowH) - VIRT_BUFFER)
   })
   const virtEnd = $derived.by(() => {
     if (!shouldVirtualize) return filteredRegularTables.length
-    const end = Math.ceil((sidebarScrollTop + sidebarHeight - tableListOffsetTop) / ROW_H) + VIRT_BUFFER
+    const end = Math.ceil((sidebarScrollTop + sidebarHeight - tableListOffsetTop) / rowH) + VIRT_BUFFER
     return Math.min(filteredRegularTables.length, end)
   })
-  const virtTopPad  = $derived(shouldVirtualize ? virtStart * ROW_H : 0)
-  const virtBotPad  = $derived(shouldVirtualize ? Math.max(0, (filteredRegularTables.length - virtEnd) * ROW_H) : 0)
+  const virtTopPad  = $derived(shouldVirtualize ? virtStart * rowH : 0)
+  const virtBotPad  = $derived(shouldVirtualize ? Math.max(0, (filteredRegularTables.length - virtEnd) * rowH) : 0)
 
   /** Shared field chrome for schema select + table filter (aligned in sidebar grid) */
   const sidebarFieldClass =
@@ -449,15 +532,18 @@
 {/snippet}
 
 <div
-  class="flex h-full shrink-0"
+  class={cn("flex h-full shrink-0", side === "right" && "flex-row-reverse")}
   style:width="{width}px"
   data-studio-region="sidebar"
 >
+  <ContextMenu.Root>
+  <ContextMenu.Trigger class="flex h-full min-w-0 flex-1">
   <aside
     class="studio-chrome flex h-full min-w-0 flex-1 flex-col bg-sidebar text-sidebar-foreground"
     data-studio-chrome
   >
     <!-- Traffic lights moved to TitleBar (full-width) -->
+    {#if navSidebarPanel === "tables"}
     <div class="flex min-h-0 flex-1 flex-col">
 
       <div class="flex shrink-0 flex-col">
@@ -499,7 +585,7 @@
                     <Select.Item
                       value={schema}
                       label={schema}
-                      class="rounded-sm py-1.5 pr-8 pl-2.5 text-ui-sm"
+                      class="text-ui-sm"
                     />
                   {/each}
                 </Select.Content>
@@ -635,11 +721,11 @@
               <DropdownMenu.Content align="end" class="w-44 p-1 text-ui-sm">
                 <DropdownMenu.Item onSelect={onnewtable} class="gap-2">
                   <Icon name="table-2" class="size-3.5 shrink-0 text-muted-foreground" />
-                  New table
+                  {$t('sidebar.newTable')}
                 </DropdownMenu.Item>
                 <DropdownMenu.Item onSelect={onnewschema} class="gap-2">
                   <Icon name="box" class="size-3.5 shrink-0 text-muted-foreground" />
-                  New schema
+                  {$t('sidebar.newSchema')}
                 </DropdownMenu.Item>
               </DropdownMenu.Content>
             </DropdownMenu.Root>
@@ -843,12 +929,12 @@
                           <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{tableName}</span>
                           {#if showRowCount}
                           <span class="shrink-0 text-right font-mono text-ui-xs leading-4 tabular-nums text-muted-foreground/85">
-                            {formatTableRowCount(tables.find((t) => t.name === tableName)?.rowCount)}
+                            {formatTableRowCount(_rowCountByName.get(tableName))}
                           </span>
                           {/if}
                         </button>
                       </ContextMenu.Trigger>
-                      <ContextMenu.Content class="w-48 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                      <ContextMenu.Content class="w-48 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
                         {#if isSelected && selectedItems.size > 1}
                           <!-- Multi-select: actions apply to all selected tables -->
                           <ContextMenu.Item onSelect={openSelected}>
@@ -885,6 +971,10 @@
                           <Icon name="clipboard-copy" />
                           Copy name
                         </ContextMenu.Item>
+                        <ContextMenu.Item onSelect={() => oncopycolumns(tableName)}>
+                          <Icon name="copy" />
+                          Copy columns
+                        </ContextMenu.Item>
                         {#if openTableSet.has(tableName)}
                           <ContextMenu.Item onSelect={() => onclosetable(tableName)}>
                             <Icon name="x" />
@@ -896,9 +986,26 @@
                           Unpin table
                         </ContextMenu.Item>
                         <ContextMenu.Separator />
+                        <ContextMenu.Item onSelect={() => onopeninconsole(tableName)}>
+                          <Icon name="terminal" />
+                          Open Console
+                        </ContextMenu.Item>
+                        <ContextMenu.Item onSelect={() => ongeneratesql(tableName)}>
+                          <Icon name="zap" />
+                          Generate SQL…
+                        </ContextMenu.Item>
+                        <ContextMenu.Item onSelect={() => oncountrows(tableName)}>
+                          <Icon name="hash" />
+                          Count rows
+                        </ContextMenu.Item>
+                        <ContextMenu.Separator />
                         <ContextMenu.Item onSelect={() => onviewstructure(tableName)}>
-                          <Icon name="columns-3" />
+                          <Icon name="layout-list" />
                           View structure
+                        </ContextMenu.Item>
+                        <ContextMenu.Item onSelect={() => onopentableerd(tableName)}>
+                          <Icon name="git-branch" />
+                          Open ERD
                         </ContextMenu.Item>
                         <ContextMenu.Item onSelect={() => onviewddl(tableName)}>
                           <Icon name="code-2" />
@@ -937,7 +1044,7 @@
               />
               <span
                 class="text-ui-2xs font-medium tracking-wider text-muted-foreground/55 uppercase"
-                >Tables</span
+                >{$t('sidebar.tables')}</span
               >
               {#if regularTablesUnpinned.length > 0}
                 {@render countBadge(filteredRegularTables.length, regularTablesUnpinned.length)}
@@ -1030,7 +1137,7 @@
                             {/if}
                           </button>
                         </ContextMenu.Trigger>
-                        <ContextMenu.Content class="w-48 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                        <ContextMenu.Content class="w-48 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
                           {#if isSelected && selectedItems.size > 1}
                             <!-- Multi-select: actions apply to all selected tables -->
                             <ContextMenu.Item onSelect={openSelected}>
@@ -1067,6 +1174,10 @@
                             <Icon name="clipboard-copy" />
                             Copy name
                           </ContextMenu.Item>
+                          <ContextMenu.Item onSelect={() => oncopycolumns(table.name)}>
+                            <Icon name="copy" />
+                            Copy columns
+                          </ContextMenu.Item>
                           {#if openTableSet.has(table.name)}
                             <ContextMenu.Item onSelect={() => onclosetable(table.name)}>
                               <Icon name="x" />
@@ -1092,8 +1203,21 @@
                             {/if}
                           </ContextMenu.Item>
                           <ContextMenu.Separator />
+                          <ContextMenu.Item onSelect={() => onopeninconsole(table.name)}>
+                            <Icon name="terminal" />
+                            Open in SQL console
+                          </ContextMenu.Item>
+                          <ContextMenu.Item onSelect={() => ongeneratesql(table.name)}>
+                            <Icon name="zap" />
+                            Generate SQL…
+                          </ContextMenu.Item>
+                          <ContextMenu.Item onSelect={() => oncountrows(table.name)}>
+                            <Icon name="hash" />
+                            Count rows
+                          </ContextMenu.Item>
+                          <ContextMenu.Separator />
                           <ContextMenu.Item onSelect={() => onviewstructure(table.name)}>
-                            <Icon name="columns-3" />
+                            <Icon name="layout-list" />
                             View structure
                           </ContextMenu.Item>
                           <ContextMenu.Item onSelect={() => onviewddl(table.name)}>
@@ -1146,7 +1270,7 @@
                 />
                 <span
                   class="text-ui-2xs font-medium tracking-wider text-muted-foreground/55 uppercase"
-                  >Views</span
+                  >{$t('sidebar.views')}</span
                 >
                 {#if views.length > 0}
                   {@render countBadge(filteredViews.length, views.length)}
@@ -1161,7 +1285,7 @@
                       No views match
                     </li>
                   {:else}
-                    {#each filteredViews as view (view.name)}
+                    {#each viewsToRender as view (view.name)}
                       {@const isSelected = selectedItems.has(view.name)}
                       <li class="[content-visibility:auto] [contain-intrinsic-size:auto_28px]">
                         <ContextMenu.Root>
@@ -1196,7 +1320,7 @@
                               <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{view.name}</span>
                             </button>
                           </ContextMenu.Trigger>
-                          <ContextMenu.Content class="w-44 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                          <ContextMenu.Content class="w-44 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
                             <ContextMenu.Item onSelect={() => toggleSelect(view.name)}>
                               {#if isSelected}
                                 <Icon name="square" />
@@ -1215,6 +1339,11 @@
                         </ContextMenu.Root>
                       </li>
                     {/each}
+                    {#if filteredViews.length > VIEW_RENDER_CAP}
+                      <li class="px-3 py-2 text-center text-ui-2xs text-muted-foreground/60">
+                        +{filteredViews.length - VIEW_RENDER_CAP} more — search to narrow
+                      </li>
+                    {/if}
                   {/if}
                 </ul>
               {/if}
@@ -1281,7 +1410,7 @@
                       No materialized views match
                     </li>
                   {:else}
-                    {#each filteredMatViews as mv (mv.name)}
+                    {#each matViewsToRender as mv (mv.name)}
                       {@const isSelected = selectedItems.has(mv.name)}
                       <li class="[content-visibility:auto] [contain-intrinsic-size:auto_28px]">
                         <ContextMenu.Root>
@@ -1321,7 +1450,7 @@
                               {/if}
                             </button>
                           </ContextMenu.Trigger>
-                          <ContextMenu.Content class="w-44 p-0.5 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                          <ContextMenu.Content class="w-44 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
                             <ContextMenu.Item onSelect={() => toggleSelect(mv.name)}>
                               {#if isSelected}
                                 <Icon name="square" />
@@ -1340,6 +1469,11 @@
                         </ContextMenu.Root>
                       </li>
                     {/each}
+                    {#if filteredMatViews.length > VIEW_RENDER_CAP}
+                      <li class="px-3 py-2 text-center text-ui-2xs text-muted-foreground/60">
+                        +{filteredMatViews.length - VIEW_RENDER_CAP} more — search to narrow
+                      </li>
+                    {/if}
                   {/if}
                 </ul>
               {/if}
@@ -1351,10 +1485,33 @@
         </div>
       </div>
     </div>
+    {:else if navSidebarPanel === "connections"}
+      <ConnectionsSidebarPanel
+        {connections}
+        activeId={activeConnectionId}
+        onswitch={onswitchconnection}
+        onadd={onaddconnection}
+        onremove={onremoveconnection}
+        ondisconnect={ondisconnectconnection}
+      />
+    {:else if navSidebarPanel === "extensions"}
+      <ExtensionsSidebarPanel onopendetail={onopenextensiondetail} />
+    {/if}
 
   </aside>
+  </ContextMenu.Trigger>
+  <ContextMenu.Content class="min-w-52 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:items-center [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:whitespace-nowrap [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]_svg]:size-3.5 [&_[data-slot=context-menu-item]_svg]:shrink-0">
+    <ContextMenu.Item onSelect={() => onmoveside(side === "right" ? "left" : "right")}>
+      {#if side === "right"}
+        <PanelLeft /> Move sidebar to the left
+      {:else}
+        <PanelRight /> Move sidebar to the right
+      {/if}
+    </ContextMenu.Item>
+  </ContextMenu.Content>
+  </ContextMenu.Root>
   <ResizeHandle
-    edge="end"
+    edge={side === "right" ? "start" : "end"}
     onresizestart={() => {
       resizeStartWidth = width;
     }}

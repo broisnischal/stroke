@@ -31,6 +31,8 @@
       icon: Navigation,
       shortcuts: [
         { keys: [mod, "K"], desc: "Command menu" },
+        { keys: [mod, "⇧", "P"], desc: "Command menu" },
+        { keys: [mod, opt, "1–9"], desc: "Switch to saved connection" },
         { keys: [mod, "T"], desc: "Search tables" },
         { keys: [mod, "N"], desc: "New tab" },
         { keys: [mod, "W"], desc: "Close tab" },
@@ -60,6 +62,9 @@
         { keys: [mod, "I"], desc: "Toggle AI sidebar" },
         { keys: [mod, "⇧", "L"], desc: "Activity log" },
         { keys: [mod, "R"], desc: "Refresh current view" },
+        { keys: [mod, "⇧", "V"], desc: "Cycle table data view" },
+        { keys: [opt, "1–5"], desc: "Table / JSON / Record / Text / Chart view" },
+        { keys: [mod, opt, "F"], desc: "Find & replace in table" },
       ],
     },
     {
@@ -90,6 +95,7 @@
         { keys: [opt, "⇧", "F"], desc: "Open filter menu" },
         { keys: [opt, "⇧", "S"], desc: "Open sort menu" },
         { keys: [opt, "⇧", "C"], desc: "Open columns menu" },
+        { keys: [opt, "⇧", "R"], desc: "Reset table view (clear filters/sort/search)" },
         { keys: ["↵", "F2"], desc: "Edit cell" },
         { keys: ["Esc"], desc: "Cancel edit" },
         { keys: [mod, "↵"], desc: "Navigate to FK row" },
@@ -302,7 +308,7 @@
                 {/if}
 
                 <ul class="flex flex-col">
-                  {#each group.shortcuts as shortcut, i (shortcut.desc)}
+                  {#each group.shortcuts as shortcut, i (group.label + ':' + i)}
                     <li
                       class={cn(
                         "group/row flex items-center justify-between gap-8 px-2 py-2 rounded-md transition-colors hover:bg-accent/30",

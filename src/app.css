@@ -4,6 +4,14 @@
 @import "@fontsource-variable/geist-mono";
 @import "@fontsource-variable/jetbrains-mono";
 @import "@fontsource-variable/inter";
+@import "@fontsource-variable/fira-code";
+@import "@fontsource-variable/source-code-pro";
+@import "@fontsource-variable/space-grotesk";
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
 @import "./lib/themes/app-themes.css";
 
 @custom-variant dark (&:is(.dark *));
@@ -360,12 +368,6 @@ html[data-os="linux"]   { --window-radius: 8px; }
     --scale: 1 !important;
   }
 
-  .font-mono,
-  [data-font="mono"] {
-    font-family: var(--font-mono);
-    font-optical-sizing: auto;
-  }
-
   .shiki-block .shiki,
   .shiki-block pre {
     background-color: transparent !important;
@@ -687,3 +689,64 @@ html[data-os="linux"]   { --window-radius: 8px; }
     background-color: color-mix(in oklch, var(--muted-foreground) 48%, transparent) !important;
   }
 }
+
+/* Number inputs render as bare text fields — no native up/down spinner anywhere.
+   Callers keep type="number" for numeric keypad + validation; the stepper UI is
+   suppressed app-wide. */
+input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* ── Runtime font presets ─────────────────────────────────────────────────────
+   Unlayered on purpose: `@theme inline` bakes the build-time font stack into the
+   `font-mono`/`font-sans` utilities (utilities layer), which would beat any
+   @layer rule. Unlayered author CSS wins over ALL layers, so these var()
+   references let Settings → Font swap families at runtime — including the
+   canvas grid, whose probe measures a `font-mono` element. */
+.font-mono,
+[data-font='mono'] {
+  font-family: var(--font-mono);
+  font-optical-sizing: auto;
+}
+.font-sans {
+  font-family: var(--font-sans);
+}
+
+/* ── Data-grid scrollbars ─────────────────────────────────────────────────────
+   The canvas table is the app's largest scroll surface — give it a wider,
+   padded pill thumb (10px lane, ~4px visible pill via content-box clipping)
+   that's easy to grab, fading stronger on hover/drag. Small lists keep the
+   global 4px hairline. */
+[data-canvas-table]::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+[data-canvas-table]::-webkit-scrollbar-track {
+  background: transparent;
+}
+[data-canvas-table]::-webkit-scrollbar-thumb {
+  background-color: color-mix(in oklch, var(--muted-foreground) 30%, transparent);
+  border: 3px solid transparent;
+  border-radius: 9999px;
+  background-clip: content-box;
+  min-height: 40px;
+  min-width: 40px;
+}
+[data-canvas-table]::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in oklch, var(--muted-foreground) 50%, transparent);
+}
+[data-canvas-table]::-webkit-scrollbar-thumb:active {
+  background-color: color-mix(in oklch, var(--muted-foreground) 65%, transparent);
+}
+[data-canvas-table]::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* App-wide tooltips are rendered by the delegated GlobalTooltip component
+   (src/lib/components/GlobalTooltip.svelte). */

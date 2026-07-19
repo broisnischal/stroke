@@ -1,4 +1,4 @@
-/** @typedef {'table' | 'sql' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'extensions' | 'backup' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search' | 'notebook' | 'schema-timeline' | 'data-diff' | 'license'} StudioTabKind */
+/** @typedef {'table' | 'sql' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'extensions' | 'extension-detail' | 'backup' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search' | 'notebook' | 'schema-timeline' | 'data-diff' | 'insights' | 'objects' | 'license'} StudioTabKind */
 
 import { loadDefaultPageSize } from '$lib/table-query.js'
 
@@ -30,6 +30,7 @@ import { loadDefaultPageSize } from '$lib/table-query.js'
  * @property {boolean} savingCell
  * @property {Set<string>} hiddenColumns
  * @property {boolean} filterBarOpen
+ * @property {'table' | 'json' | 'record' | 'text'} [dataViewMode]
  * @property {number} [scrollLeft]
  * @property {number} [scrollTop]
  */
@@ -111,6 +112,7 @@ export function createTableTabState(schema = 'public', table = null, tableKind =
     savingCell: false,
     hiddenColumns: new Set(),
     filterBarOpen: false,
+    dataViewMode: 'table',
     scrollLeft: 0,
     scrollTop: 0,
   }
@@ -204,6 +206,34 @@ export function createLogsTab() {
   })
 }
 
+export function createInsightsTab() {
+  return /** @type {StudioTab} */ ({
+    id: nextTabId(),
+    kind: 'insights',
+    title: 'Instance Insights',
+    state: null,
+  })
+}
+
+/** @param {StudioTab[]} tabs */
+export function findInsightsTab(tabs) {
+  return tabs.find((t) => t.kind === 'insights') ?? null
+}
+
+export function createObjectsTab() {
+  return /** @type {StudioTab} */ ({
+    id: nextTabId(),
+    kind: 'objects',
+    title: 'Database Objects',
+    state: null,
+  })
+}
+
+/** @param {StudioTab[]} tabs */
+export function findObjectsTab(tabs) {
+  return tabs.find((t) => t.kind === 'objects') ?? null
+}
+
 export function createExtensionsTab() {
   return /** @type {StudioTab} */ ({
     id: nextTabId(),
@@ -216,6 +246,21 @@ export function createExtensionsTab() {
 /** @param {StudioTab[]} tabs */
 export function findExtensionsTab(tabs) {
   return tabs.find((t) => t.kind === 'extensions') ?? null
+}
+
+/** @param {string} extensionId @param {string} name */
+export function createExtensionDetailTab(extensionId, name) {
+  return /** @type {StudioTab} */ ({
+    id: nextTabId(),
+    kind: 'extension-detail',
+    title: name,
+    state: { extensionId },
+  })
+}
+
+/** @param {StudioTab[]} tabs @param {string} extensionId */
+export function findExtensionDetailTab(tabs, extensionId) {
+  return tabs.find((t) => t.kind === 'extension-detail' && t.state?.extensionId === extensionId) ?? null
 }
 
 /** @param {StudioTab[]} tabs */
@@ -380,6 +425,8 @@ export function tabDisplayTitle(tab) {
   if (tab.kind === 'notebook') return tab.title || 'Untitled Notebook'
   if (tab.kind === 'schema-timeline') return 'Schema Timeline'
   if (tab.kind === 'data-diff') return 'Data Diff'
+  if (tab.kind === 'objects') return 'Database Objects'
+  if (tab.kind === 'extension-detail') return tab.title || tab.state?.extensionId || 'Extension'
   if (tab.kind === 'license') return 'Stroke Pro'
   return tab.title
 }

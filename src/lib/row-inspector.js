@@ -70,11 +70,13 @@ export function formatNormalRecords(records) {
 /**
  * @param {{ name: string, dataType?: string, data_type?: string }[]} columns
  * @param {unknown[][]} row
+ * @param {Set<string>} [hidden] Column names to omit (e.g. columns hidden in the UI).
  */
-export function rowToRecord(columns, row) {
+export function rowToRecord(columns, row, hidden) {
   /** @type {Record<string, unknown>} */
   const record = {}
   columns.forEach((col, i) => {
+    if (hidden && hidden.has(col.name)) return
     record[col.name] = normalizeCellValue(row[i])
   })
   return record

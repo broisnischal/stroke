@@ -1,9 +1,11 @@
 <script>
+  import { untrack } from "svelte";
   import { cn } from "$lib/utils.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { EXTENSIONS } from "$lib/plugins/registry.js";
   import {
     pluginState,
+    pluginEnabledIn,
     setPluginEnabled,
     setPluginConfig,
   } from "$lib/stores/plugins.js";
@@ -28,6 +30,9 @@
   import BarChart3 from "@lucide/svelte/icons/bar-chart-3";
   import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
+  import ArrowLeft from "@lucide/svelte/icons/arrow-left";
+  import Bookmark from "@lucide/svelte/icons/bookmark";
+  import Replace from "@lucide/svelte/icons/replace";
 
   const ICONS = {
     "better-time": Clock,
@@ -45,9 +50,12 @@
     "column-annotator": BarChart3,
     "id-generators": Sparkles,
     "cell-transforms": Wand2,
+    "saved-views": Bookmark,
+    "find-replace": Replace,
   };
 
   const SECTIONS = [
+    { title: "Workflow", kinds: ["workflow"] },
     { title: "Formatters", kinds: ["formatter"] },
     { title: "Links & annotations", kinds: ["linkify", "annotator"] },
     { title: "Cell tools", kinds: ["generators", "transforms"] },
@@ -59,6 +67,7 @@
     annotator: "Column annotator",
     generators: "Value generator",
     transforms: "Cell transform",
+    workflow: "Workflow feature",
   };
 
   const CONFIGURABLE = new Set([
@@ -94,13 +103,31 @@
     ],
   };
 
-  let selectedId = $state(EXTENSIONS[0].id);
-  const selected = $derived(EXTENSIONS.find((e) => e.id === selectedId) ?? EXTENSIONS[0]);
-  const enabledCount = $derived(EXTENSIONS.filter((e) => $pluginState.enabled[e.id]).length);
+  // Per-extension usage overrides (workflow features differ too much to share).
+  const USAGE_BY_ID = {
+    "saved-views": [
+      "Open a table and set up filters, sort, search, hidden columns or a view mode.",
+      "Click the bookmark icon in the table toolbar → name it → Save.",
+      "Switch views from the same menu — each table keeps its own list.",
+    ],
+    "find-replace": [
+      "Open a table, then choose Find & replace… from the toolbar's ⋯ menu.",
+      "Pick a column, a match mode (contains / exact / regex) and a replacement.",
+      "Review the full before → after preview, then apply — nothing is written blind.",
+    ],
+  };
+
+  let { initialExtensionId = "" } = $props();
+
+  /** null → grid overview; an id → drilled into that extension's detail page.
+   *  Seeded once from the prop (a fresh instance mounts per detail tab). */
+  let selectedId = $state(/** @type {string | null} */ (untrack(() => initialExtensionId) || null));
+  const selected = $derived(selectedId ? (EXTENSIONS.find((e) => e.id === selectedId) ?? null) : null);
+  const enabledCount = $derived(EXTENSIONS.filter((e) => pluginEnabledIn($pluginState, e.id)).length);
 
   /** @param {string} id */
   function isOn(id) {
-    return $pluginState.enabled[id] === true;
+    return pluginEnabledIn($pluginState, id);
   }
   /** @param {string} id @param {Record<string, unknown>} defaults */
   function cfg(id, defaults) {
@@ -147,11 +174,28 @@
     aria-checked={on}
     {onclick}
     class={cn(
-      "relative inline-flex h-[18px] w-8 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
-      on ? "bg-primary" : "bg-muted-foreground/25",
+      // before: expands the hit area beyond the 18px visual without moving neighbors
+      "group/toggle relative inline-flex h-[18px] w-8 shrink-0 cursor-pointer items-center rounded-full before:absolute before:-inset-1 before:content-[''] focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+      "transition-[background-color] duration-150",
+      // Inset rim defines the pill edge on dark surfaces; inner shadow gives the
+      // trough depth so the knob reads as sitting *in* the track, not on it.
+      "shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07),inset_0_1px_2px_rgba(0,0,0,0.2)]",
+      // Emerald = the app's "extension enabled" signal (matches the card icon
+      // tint); bg-primary is near-white on Studio themes and swallowed the knob.
+      on ? "bg-emerald-600 dark:bg-emerald-500" : "bg-muted-foreground/25 hover:bg-muted-foreground/35",
     )}
   >
-    <span class={cn("pointer-events-none block size-3.5 rounded-full bg-white shadow-sm transition-transform duration-150", on ? "translate-x-[15px]" : "translate-x-0.5")}></span>
+    <span
+      class={cn(
+        // iOS-style press feedback: the knob stretches along the travel axis
+        // while staying anchored to its end of the track.
+        "pointer-events-none block h-3.5 w-3.5 rounded-full bg-white",
+        "shadow-[0_1px_2px_rgba(0,0,0,0.28),0_0_1px_rgba(0,0,0,0.16)]",
+        "transition-[translate,width] duration-[180ms] ease-[cubic-bezier(0.23,1,0.32,1)]",
+        "group-active/toggle:w-4",
+        on ? "translate-x-4 group-active/toggle:translate-x-3.5" : "translate-x-0.5",
+      )}
+    ></span>
   </button>
 {/snippet}
 
@@ -170,60 +214,71 @@
   <h3 class="mb-2 px-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground/50">{text}</h3>
 {/snippet}
 
-<div class="flex min-h-0 flex-1 bg-background">
-  <!-- Sidebar -->
-  <aside class="flex w-[16.5rem] shrink-0 flex-col border-r border-border/50">
-    <div class="flex items-center justify-between gap-2 px-4 pb-3 pt-4">
-      <div class="flex items-center gap-2.5 min-w-0">
+<div class="app-scroll min-h-0 flex-1 overflow-y-auto bg-background">
+  {#if !selected}
+    <!-- ── Grid overview ─────────────────────────────────────────────────── -->
+    <div class="mx-auto w-full max-w-[52rem] px-8 py-8">
+      <div class="flex items-center gap-2.5">
         <span class="grid size-6 shrink-0 place-items-center rounded-md border border-border/60 bg-muted/40 text-muted-foreground">
           <Blocks class="size-3.5" />
         </span>
-        <h1 class="text-[13px] font-semibold tracking-tight text-foreground">Extensions</h1>
+        <h1 class="text-[15px] font-semibold tracking-tight text-foreground">Extensions</h1>
+        <span
+          class="ml-auto flex shrink-0 items-center gap-1.5 rounded-full bg-muted/60 px-2 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground"
+          title="{enabledCount} of {EXTENSIONS.length} extensions enabled"
+        >
+          {#if enabledCount > 0}<span class="size-1.5 rounded-full bg-emerald-500"></span>{/if}
+          {enabledCount} on
+        </span>
       </div>
-      <span
-        class="flex shrink-0 items-center gap-1.5 rounded-full bg-muted/60 px-2 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground"
-        title="{enabledCount} of {EXTENSIONS.length} extensions enabled"
-      >
-        {#if enabledCount > 0}<span class="size-1.5 rounded-full bg-emerald-500"></span>{/if}
-        {enabledCount} on
-      </span>
-    </div>
+      <p class="mt-1.5 text-[12.5px] text-muted-foreground">
+        Display formatters, linkifiers and cell tools for the data grid. Click a card to configure it.
+      </p>
 
-    <div class="app-scroll min-h-0 flex-1 overflow-y-auto px-2 pb-3">
       {#each SECTIONS as section (section.title)}
         {@const items = EXTENSIONS.filter((e) => section.kinds.includes(e.kind))}
-        <p class="px-2 pb-1 pt-3 text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground/40">{section.title}</p>
-        {#each items as ext (ext.id)}
-          {@const Icon = ICONS[ext.id]}
-          {@const on = isOn(ext.id)}
-          {@const active = selectedId === ext.id}
-          <button
-            type="button"
-            onclick={() => (selectedId = ext.id)}
-            class={cn(
-              "group relative flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors",
-              active ? "bg-muted/70 text-foreground" : "text-foreground/70 hover:bg-muted/40 hover:text-foreground",
-            )}
-          >
-            {#if active}<span class="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-primary" aria-hidden="true"></span>{/if}
-            {#if Icon}<Icon class={cn("size-3.5 shrink-0", active ? "text-foreground/80" : "text-muted-foreground/60")} />{/if}
-            <span class="min-w-0 flex-1 truncate text-[13px]">{ext.name}</span>
-            <span
-              class={cn("size-1.5 shrink-0 rounded-full transition-colors", on ? "bg-emerald-500" : "bg-transparent")}
-              title={on ? "Enabled" : undefined}
-            ></span>
-          </button>
-        {/each}
+        <h3 class="mb-2.5 mt-7 px-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground/50">{section.title}</h3>
+        <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          {#each items as ext (ext.id)}
+            {@const Icon = ICONS[ext.id]}
+            {@const on = isOn(ext.id)}
+            <div class="relative">
+              <button
+                type="button"
+                onclick={() => (selectedId = ext.id)}
+                class="group relative flex h-full w-full flex-col gap-2.5 rounded-lg border border-border/60 bg-card p-3 text-left transition-[border-color,background-color] hover:border-border hover:bg-accent/40"
+              >
+                {#if Icon}
+                  <Icon class={cn("size-4 shrink-0 transition-colors", on ? "text-emerald-500" : "text-muted-foreground group-hover:text-foreground")} />
+                {/if}
+                <span class="flex min-w-0 flex-col">
+                  <span class="truncate text-[12.5px] font-medium leading-tight text-foreground/85 transition-colors group-hover:text-foreground">{ext.name}</span>
+                  <span class="mt-0.5 truncate text-[10.5px] text-muted-foreground/60">{KIND_LABEL[ext.kind] ?? "Extension"}</span>
+                </span>
+              </button>
+              <!-- Toggle overlays the card so it isn't a nested button -->
+              <div class="absolute right-3 top-3">
+                {@render toggle(on, () => setPluginEnabled(ext.id, !on), `Toggle ${ext.name}`)}
+              </div>
+            </div>
+          {/each}
+        </div>
       {/each}
     </div>
-  </aside>
-
-  <!-- Detail -->
-  <main class="app-scroll min-h-0 flex-1 overflow-y-auto">
+  {:else}
+    <!-- ── Detail (drill-in) ─────────────────────────────────────────────── -->
     {#key selected.id}
       {@const Icon = ICONS[selected.id]}
       {@const on = isOn(selected.id)}
-      <div class="w-full max-w-[42rem] px-8 py-8">
+      <div class="mx-auto w-full max-w-[42rem] px-8 py-6">
+        <button
+          type="button"
+          class="-ml-1.5 mb-4 flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[12px] text-muted-foreground transition-[background-color,color] hover:bg-muted/50 hover:text-foreground"
+          onclick={() => (selectedId = null)}
+        >
+          <ArrowLeft class="size-3.5" />
+          All extensions
+        </button>
         <!-- Header card — the icon tile carries the on/off state (emerald when
              enabled), so the card and toggle stay quiet. One signal, not four. -->
         <div class="rounded-xl border border-border/60 bg-card/40 p-4">
@@ -246,11 +301,11 @@
         </div>
 
         <!-- How to use -->
-        {#if USAGE[selected.kind]}
+        {#if USAGE_BY_ID[selected.id] ?? USAGE[selected.kind]}
           <div class="mt-7">
             {@render sectionLabel("How to use")}
             <ol class="space-y-2">
-              {#each USAGE[selected.kind] as step, i (i)}
+              {#each USAGE_BY_ID[selected.id] ?? USAGE[selected.kind] as step, i (i)}
                 <li class="flex items-start gap-2.5">
                   <span class="mt-px grid size-4 shrink-0 place-items-center rounded-full border border-border/60 text-[9px] font-semibold text-muted-foreground/70">{i + 1}</span>
                   <span class="text-[12.5px] leading-relaxed text-foreground/75">{step}</span>
@@ -369,5 +424,5 @@
         {/if}
       </div>
     {/key}
-  </main>
+  {/if}
 </div>

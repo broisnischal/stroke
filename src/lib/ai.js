@@ -361,6 +361,25 @@ export const AI_TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'export_data',
+      description:
+        'Export the result of a read-only SQL query to a downloadable file (CSV, JSON, or Markdown table). ' +
+        'Use this whenever the user asks to generate, export, download, or save data as a file — it opens a save dialog, handles large results, and shows a "downloaded" toast. ' +
+        'Do NOT write your own markdown download links (e.g. "[Download](...)"); they do not work. Always call this tool to give the user a real file.',
+      parameters: {
+        type: 'object',
+        properties: {
+          sql: { type: 'string', description: 'Read-only SQL (SELECT/WITH). Add WHERE/ORDER BY to filter and sort what gets exported.' },
+          format: { type: 'string', enum: ['csv', 'json', 'markdown'], description: 'File format (default csv).' },
+          filename: { type: 'string', description: 'Optional base filename, without extension (e.g. "users"). A date and extension are added automatically.' },
+        },
+        required: ['sql'],
+      },
+    },
+  },
 ]
 
 export const MAX_AI_RETRIES = 2
@@ -1088,7 +1107,13 @@ Use \`render_chart\` after \`execute_sql\`. Match chart type to data shape:
 export function buildSystemPrompt(ctx) {
   const tableList = ctx.tables.length
     ? ctx.tables
-        .map((t) => `  • ${t.name}${t.rowCount != null ? ` — ${formatCompactCount(t.rowCount)} rows` : ''}`)
+        // `tables` may be a list of names (strings) or {name,rowCount} objects
+        // depending on the caller — handle both so names never render as undefined.
+        .map((t) => {
+          const name = typeof t === 'string' ? t : t?.name
+          const rc = t && typeof t === 'object' && t.rowCount != null ? ` — ${formatCompactCount(t.rowCount)} rows` : ''
+          return `  • ${name}${rc}`
+        })
         .join('\n')
     : '  (no tables loaded yet — use describe_table or execute_sql to explore)'
 

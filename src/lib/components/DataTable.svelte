@@ -5,7 +5,8 @@
   import { zoomState } from '$lib/stores/canvas-zoom.svelte.js'
   // Zoom is driven through the app-level settings so the canvas scales together
   // with the rest of the UI (applySettings mirrors the app zoom into zoomState).
-  import { increaseZoom, decreaseZoom, resetZoom, appPreviewDml, appTableStyle, TABLE_STYLES, normalizeTableStyle } from '$lib/stores/settings.js'
+  import { increaseZoom, decreaseZoom, resetZoom, appPreviewDml, appTableStyle, TABLE_STYLES, normalizeTableStyle, appVimMode } from '$lib/stores/settings.js'
+  import { setVimSubMode } from '$lib/vim/vim.js'
   import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
@@ -24,6 +25,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ChevronsDownUp from "@lucide/svelte/icons/chevrons-down-up";
+  import ChevronLeft from "@lucide/svelte/icons/chevron-left";
+  import ChevronsLeft from "@lucide/svelte/icons/chevrons-left";
+  import ChevronsRight from "@lucide/svelte/icons/chevrons-right";
+  import Palette from "@lucide/svelte/icons/palette";
+  import Tag from "@lucide/svelte/icons/tag";
+  import Ban from "@lucide/svelte/icons/ban";
   import Copy from "@lucide/svelte/icons/copy";
   import CopyPlus from "@lucide/svelte/icons/copy-plus";
   import Pencil from "@lucide/svelte/icons/pencil";
@@ -92,10 +99,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     loadPendingChanges,
     clearPendingChanges,
   } from "$lib/stores/pending-table-edits.js";
-  import { formatCellValue, transformsFor, enabledGenerators, linkifyValue, statsNeeded, annotatorEnabled, anyDisplayExtEnabled } from "$lib/plugins/registry.js";
-  import { pluginState } from "$lib/stores/plugins.js";
+  import { formatCellValue, transformsFor, transformById, enabledGeneratorGroups, linkifyValue, statsNeeded, annotatorEnabled, anyDisplayExtEnabled } from "$lib/plugins/registry.js";
+  import { pluginState, isPluginEnabled } from "$lib/stores/plugins.js";
+  import { isImageUrl } from "$lib/plugins/extensions/cell-transforms.js";
+  import { t } from "$lib/i18n.js";
   import Wand2 from "@lucide/svelte/icons/wand-2";
-  import Sparkles from "@lucide/svelte/icons/sparkles";
+  import Dices from "@lucide/svelte/icons/dices";
+  import Clock from "@lucide/svelte/icons/clock";
   import MediaLightbox from "./MediaLightbox.svelte";
   import RowExpandViewer from "./RowExpandViewer.svelte";
   import ArrayCellEditor from "./ArrayCellEditor.svelte";
@@ -124,6 +134,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     colDrawnX,
     colAtX,
     computeRowTops,
+    rowTopOf,
+    totalRowsHeight,
     rowAtContentY,
     rowIndexAtY,
   } from "$lib/canvas-table.js";
@@ -163,6 +175,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     showRowExpand = true,
     /** Persist column widths per table, e.g. "public.users" */
     columnWidthsKey = undefined,
+    /** Active connection id — scopes ALL per-table persistence (widths, staged
+     *  edits, highlights, transforms, virtual columns) so state from one database
+     *  never leaks into another table of the same schema.table name on a different
+     *  connection. */
+    connectionId = '',
+    /** Vim mode `/` — asks the parent to focus the row-search input (the toolbar
+     *  owns it, not the grid). */
+    onrequestsearch = () => {},
     /** Schema + table name used for INSERT statement generation */
     schema = '',
     tableName = '',
@@ -247,6 +267,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
      *  (page/filter/sort/search change). On change the table jumps its scroll
      *  and virtual window back to the top. */
     reloadToken = 0,
+    /** Bumped by the parent when window data is spliced into the (sparse) rows
+     *  array without changing its identity — triggers a redraw WITHOUT resetting
+     *  scroll (unlike reloadToken). */
+    dataVersion = 0,
+    /** Windowed mode: `rows` is sparse (length = total, only near-viewport rows
+     *  loaded). Undefined rows render as a loading skeleton and the table reports
+     *  its visible range via onvisiblerange so the parent can fetch/evict. */
+    windowed = false,
+    /** Called (on change) with the currently visible row range in windowed mode. */
+    onvisiblerange = /** @type {(start: number, end: number) => void} */ (() => {}),
     /** Infinite scroll mode — when true the table fires onloadmore near the bottom. */
     infiniteScroll = false,
     /** True while an incremental "load more" fetch is in flight. */
@@ -280,6 +310,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    *  are no unsaved edits (the common case) — avoids a string alloc + Map.get
    *  on every cell of large tables. */
   const hasPendingEdits = $derived(pendingEdits.size > 0);
+  /** Row indices with a staged edit — lets the draw loop skip the per-cell key
+   *  string for every row that isn't edited (usually all of them). */
+  const _editedRowSet = $derived.by(() => {
+    /** @type {Set<number>} */
+    const s = new Set();
+    for (const e of pendingEdits.values()) s.add(e.rowIdx);
+    return s;
+  });
 
   /**
    * Row indices staged for deletion — shown with a red diff marker until Apply.
@@ -366,6 +404,34 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * @type {{ rowIdx:number, kind:'forward'|'reverse', label:string, data:{ loading:boolean, columns:any[], rows:any[], error:string|null } } | null}
    */
   let fkSubview = $state(null)
+
+  // ── Related-rows dock (bottom panel) ────────────────────────────────────────
+  // The FK sub-view renders docked below the scroll container — a fixed-height
+  // drawer with its own internal scroll — instead of inline between rows (which
+  // made grid scrolling fight the panel). Height is user-resizable + persisted.
+  const FK_DOCK_MIN = 120, FK_DOCK_MAX = 600
+  let fkDockHeight = $state((() => {
+    try {
+      const n = Number(localStorage.getItem('stroke:fk-dock-height'))
+      if (Number.isFinite(n) && n >= FK_DOCK_MIN && n <= FK_DOCK_MAX) return n
+    } catch {}
+    return 260
+  })())
+  /** @param {PointerEvent} e */
+  function startFkDockResize(e) {
+    e.preventDefault()
+    const startY = e.clientY, startH = fkDockHeight
+    const move = (/** @type {PointerEvent} */ ev) => {
+      fkDockHeight = Math.min(FK_DOCK_MAX, Math.max(FK_DOCK_MIN, startH + (startY - ev.clientY)))
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      try { localStorage.setItem('stroke:fk-dock-height', String(fkDockHeight)) } catch {}
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
 
   /** Column whose quick-stats panel is open, or null. */
   let statsCol = $state(/** @type {string | null} */ (null))
@@ -491,7 +557,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // All layout constants scale with canvasZoom so the entire canvas zooms together.
   const ROW_HEIGHT = $derived(Math.round(24 * canvasZoom))
 
+  // `_scrollTop` is the VIRTUAL scroll offset used for all row math (content
+  // space). `_physScrollTop` is the raw DOM scrollTop of the container, which is
+  // bounded by the capped spacer. They're equal until a table is tall enough to
+  // exceed the browser's element-height ceiling (see MAX_SCROLL_PX), at which
+  // point the physical range is compressed and _scrollTop = _physScrollTop×scale.
   let _scrollTop = $state(0)
+  let _physScrollTop = $state(0)
   // Start high so the first paint covers any reasonable screen height before the
   // ResizeObserver fires with the real value.
   let _viewportHeight = $state(1200)
@@ -554,6 +626,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         expandedRowHeights = new Map(expandedRowHeights).set(rowIdx, h)
       }
     }
+    // Measure synchronously on mount (forces one layout) so rowTops uses the real
+    // panel height on the first paint — the row below never flashes at the 280px
+    // placeholder and then snaps up. The observer below handles later size changes.
+    commit()
     const ro = new ResizeObserver(() => { clearTimeout(timer); timer = setTimeout(commit, 40) })
     ro.observe(node)
     return {
@@ -653,12 +729,30 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     void $pluginState;
     const v = rows[contextRowIdx]?.[contextColIdx];
     if (v === null || v === undefined) return [];
-    return transformsFor(v, _colCache[contextColIdx]?.colType ?? "", menuColName);
+    // Column-only transforms (avatar / image thumbnail) render live on a whole
+    // column; they're offered in the header menu, not the per-cell menu.
+    return transformsFor(v, _colCache[contextColIdx]?.colType ?? "", menuColName).filter((tf) => !tf.columnOnly);
   });
   // Value generators (UUIDv7, nanoid, …) offered when the cell is editable.
   const menuGenerators = $derived.by(() => {
     void $pluginState;
-    return enabledGenerators();
+    return enabledGeneratorGroups();
+  });
+  // Transforms offered for a whole column (header menu), decided from a sample
+  // of the column's first non-null value.
+  const menuColTransforms = $derived.by(() => {
+    void $pluginState;
+    const name = contextHeaderCol;
+    if (!name) return [];
+    const actualIdx = _nameToActualIdx.get(name) ?? -1;
+    if (actualIdx < 0) return [];
+    let sample = null;
+    for (let i = 0; i < rows.length && i < 200; i++) {
+      const v = rows[i]?.[actualIdx];
+      if (v !== null && v !== undefined) { sample = v; break }
+    }
+    if (sample === null) return [];
+    return transformsFor(sample, _colCache[actualIdx]?.colType ?? "", name);
   });
 
   const CELL_DISPLAY_LIMIT = 400
@@ -727,9 +821,83 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     return s.length > CELL_DISPLAY_LIMIT ? s.slice(0, CELL_DISPLAY_LIMIT) + "…" : s;
   }
 
+  // Per-row display-string caches for the draw hot path, keyed by ROW INDEX and
+  // tied to the current `rows` identity (syncDisplayCaches drops them whenever the
+  // data changes — every write path replaces `rows`). Capped in size so scrolling
+  // through millions of rows can't retain a string[] for every row ever seen; the
+  // old WeakMap-by-row versions never released because every loaded row stays
+  // alive in the `rows` prop. Staged edits bypass these (their value differs).
+  const _DISP_CACHE_MAX = 8192;
+  /** @type {Map<number, string[]>} */
+  const _cellTextCache = new Map();
+  /** @type {Map<number, string[]>} */
+  const _vexprTextCache = new Map();
+  /** @type {Map<number, Map<string, string>>} */
+  const _colTfCache = new Map();
+  let _dispCacheRows = /** @type {unknown} */ (null);
+  let _dispCacheVFns = /** @type {unknown} */ (null);
+  let _dispCacheTFns = /** @type {unknown} */ (null);
+  /** Invalidate cached cell text when the data or active virtual/transform fns
+   *  change. Called once per frame from draw(); all draw-path callers key by index. */
+  function syncDisplayCaches() {
+    if (_dispCacheRows !== rows) {
+      _dispCacheRows = rows;
+      _cellTextCache.clear(); _vexprTextCache.clear(); _colTfCache.clear();
+    }
+    if (_dispCacheVFns !== _vcolFns) { _dispCacheVFns = _vcolFns; _vexprTextCache.clear(); }
+    if (_dispCacheTFns !== _colTransformFns) { _dispCacheTFns = _colTransformFns; _colTfCache.clear(); }
+  }
+  function cellDisplayText(/** @type {number} */ idx, /** @type {number} */ actualIdx, /** @type {unknown} */ value) {
+    let arr = _cellTextCache.get(idx);
+    if (!arr) {
+      if (_cellTextCache.size >= _DISP_CACHE_MAX) _cellTextCache.clear();
+      arr = []; _cellTextCache.set(idx, arr);
+    }
+    const hit = arr[actualIdx];
+    if (hit !== undefined) return hit;
+    const s = displayCell(value);
+    arr[actualIdx] = s;
+    return s;
+  }
+  // Virtual expression columns — the bound evaluator would otherwise run per cell
+  // per frame (string building on every scroll frame).
+  function vexprText(/** @type {number} */ idx, /** @type {number} */ fnIdx) {
+    let arr = _vexprTextCache.get(idx);
+    if (!arr) {
+      if (_vexprTextCache.size >= _DISP_CACHE_MAX) _vexprTextCache.clear();
+      arr = []; _vexprTextCache.set(idx, arr);
+    }
+    let s = arr[fnIdx];
+    if (s === undefined) {
+      const fn = _vcolFns[fnIdx];
+      s = fn ? fn(rows[idx]) : '';
+      arr[fnIdx] = s;
+    }
+    return s;
+  }
+
   // Whether any formatter/linkifier is enabled — gates the per-cell directive
   // lookup so the scroll hot path does zero extension work in the common case.
   const _extActive = $derived.by(() => { void $pluginState; return anyDisplayExtEnabled(); });
+  // Reused per-cell stats context — formatters read `.stats` synchronously and
+  // don't retain it, so one scratch object avoids an allocation per drawn cell
+  // while a stats-dependent extension (heatmap / annotator) is enabled.
+  const _statsCtx = { stats: /** @type {any} */ (undefined) };
+
+  // Windowed mode: repaint when the parent splices in a freshly-loaded window
+  // (dataVersion bumps without a rows-identity change), and report the visible
+  // range so the parent can fetch/evict windows. Emitting only on change keeps
+  // this off the per-frame hot path.
+  $effect(() => { void dataVersion; scheduleDraw(); });
+  let _emittedFirst = -1;
+  let _emittedLast = -1;
+  function emitVisibleRange(first, last) {
+    if (!windowed) return;
+    if (first === _emittedFirst && last === _emittedLast) return;
+    _emittedFirst = first;
+    _emittedLast = last;
+    onvisiblerange(first, last);
+  }
 
   // Repaint when extension settings or column stats change — both affect drawn
   // cell text, badges, tints, and the header annotator strip.
@@ -797,12 +965,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const top = rowDocTop(rowIdx)
     const bottom = top + ROW_HEIGHT
     const ch = tableContainer.clientHeight
-    const st = tableContainer.scrollTop
+    const vst = _scrollTop // current virtual offset
     // Keep the row clear of the pinned header band at the top of the viewport.
-    if (top - HEADER_H < st) {
-      tableContainer.scrollTop = Math.max(0, top - HEADER_H)
-    } else if (bottom > st + ch) {
-      tableContainer.scrollTop = bottom - ch
+    if (top - HEADER_H < vst) {
+      setVirtualScroll(top - HEADER_H)
+    } else if (bottom > vst + ch) {
+      setVirtualScroll(bottom - ch)
     }
   }
 
@@ -1326,7 +1494,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     scrollToLeft = () => tableContainer?.scrollTo({ left: 0 });
     scrollToRight = () => { if (tableContainer) tableContainer.scrollTo({ left: tableContainer.scrollWidth }); };
     focusColumn = focusColumnByName;
-    getScroll = () => ({ left: _scrollLeft, top: _scrollTop });
+    // Save/restore the PHYSICAL scroll position so it round-trips regardless of
+    // whether the scroll range is compressed (same table → same scale).
+    getScroll = () => ({ left: _scrollLeft, top: _physScrollTop });
     applyScroll = (pos) => {
       // Wait for the new tab's columns/rows to lay out (spacer width) before
       // setting scroll — otherwise the container clamps to 0.
@@ -1336,7 +1506,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         el.scrollLeft = Math.max(0, pos.left ?? 0);
         el.scrollTop = Math.max(0, pos.top ?? 0);
         _scrollLeft = el.scrollLeft;
-        _scrollTop = el.scrollTop;
+        _physScrollTop = Math.round(el.scrollTop);
+        _scrollTop = physToVirt(_physScrollTop);
         scheduleDraw();
       }));
     };
@@ -1474,7 +1645,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   }
 
   async function copyRowJson(rowIdx) {
-    const record = rowToRecord(columns, rows[rowIdx] ?? []);
+    const record = rowToRecord(columns, rows[rowIdx] ?? [], hiddenColumns);
     try {
       await navigator.clipboard.writeText(formatJsonValue(record));
       toast.success("Copied row as JSON");
@@ -1554,17 +1725,23 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   async function copyAs(rowIdx, format) {
     const indices = copyTargetIndices(rowIdx);
-    const colNames = columns.map((c) => c.name);
-    const dataRows = indices.map((i) => rows[i] ?? []);
+    const allRows = indices.map((i) => rows[i] ?? []);
     let text = '';
     const label = indices.length > 1 ? `${indices.length} rows` : '1 row';
+
+    // Human-readable formats mirror the on-screen columns, so they omit hidden
+    // ones; INSERT reconstructs the row and therefore keeps every column.
+    const visIdxs = columns.map((_, i) => i).filter((i) => !hiddenColumns.has(columns[i].name));
+    const cols = visIdxs.map((i) => columns[i]);
+    const colNames = cols.map((c) => c.name);
+    const dataRows = visIdxs.length === columns.length ? allRows : allRows.map((r) => visIdxs.map((i) => r[i]));
 
     if (format === 'csv') {
       const header = colNames.map(csvCell).join(',');
       const body = dataRows.map((r) => r.map(csvCell).join(',')).join('\n');
       text = header + '\n' + body;
     } else if (format === 'json') {
-      const records = dataRows.map((r) => rowToRecord(columns, r));
+      const records = dataRows.map((r) => rowToRecord(cols, r));
       text = formatJsonValue(indices.length === 1 ? records[0] : records);
     } else if (format === 'plain') {
       text = dataRows
@@ -1579,13 +1756,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     } else if (format === 'markdown') {
       const sep = colNames.map(() => '---').join(' | ');
       const header = colNames.map(mdCell).join(' | ');
-      const body = dataRows.map((r) => r.map(mdCell).join(' | ')).join('\n');
       text = `| ${header} |\n| ${sep} |\n${dataRows.map((r) => `| ${r.map(mdCell).join(' | ')} |`).join('\n')}`;
     } else if (format === 'insert') {
       const tbl = schema ? `"${schema}"."${tableName || 'table'}"` : `"${tableName || 'table'}"`;
-      const cols = colNames.map((c) => `"${c}"`).join(', ');
-      text = dataRows
-        .map((r) => `INSERT INTO ${tbl} (${cols}) VALUES (${r.map(sqlLiteral).join(', ')});`)
+      const insertCols = columns.map((c) => `"${c.name}"`).join(', ');
+      text = allRows
+        .map((r) => `INSERT INTO ${tbl} (${insertCols}) VALUES (${r.map(sqlLiteral).join(', ')});`)
         .join('\n');
     }
 
@@ -1641,14 +1817,22 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     futureEdits = [];
   }
 
-  /** Run an extension transform on a cell and copy the result to the clipboard. */
+  /** Run an extension transform on a cell, copy the result, and show it in a
+   *  readable result card (monospace, pretty-printed, with a Copy action). */
   async function runCellTransform(rowIdx, colIdx, transform) {
     const value = effectiveCellValue(rowIdx, colIdx);
     try {
       const out = transform.run(value);
       await navigator.clipboard.writeText(out);
-      toast.success(`${transform.label} — copied`, {
-        description: out.length > 120 ? out.slice(0, 120) + "…" : out,
+      // Pretty-print JSON output; cap the preview so the toast stays compact.
+      let preview = out;
+      try { preview = JSON.stringify(JSON.parse(out), null, 2); } catch { /* not JSON */ }
+      const capped = preview.length > 1200 ? preview.slice(0, 1200) + "\n…" : preview;
+      toast.success(`${transform.label} · copied`, {
+        description: capped,
+        code: true,
+        duration: 8000,
+        action: { label: "Copy again", onClick: () => navigator.clipboard.writeText(out) },
       });
     } catch (e) {
       toast.error("Could not apply transform", { description: String(e?.message ?? e) });
@@ -1855,8 +2039,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
   }
 
+  /** Set of every row index, built without the intermediate array that
+   *  new Set(rows.map(...)) allocates — that doubled the peak spike on huge tables. */
+  function allRowIndexSet() {
+    const s = new Set();
+    for (let i = 0; i < rows.length; i++) s.add(i);
+    return s;
+  }
+
   function toggleAll(checked) {
-    selected = checked ? new Set(rows.map((_, i) => i)) : new Set();
+    selected = checked ? allRowIndexSet() : new Set();
     lastSelectAnchor = null;
   }
 
@@ -1914,9 +2106,304 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   const ROW_EXPAND_COL_WIDTH = 40;
   /** Fits 16px checkbox with equal inset; no extra horizontal padding in cells */
   const ROW_SELECT_COL_WIDTH = 40;
-  const visibleColumns = $derived(
-    columns.filter((c) => !hiddenColumns.has(c.name)),
-  );
+  // ── Column reorder (display-only) ──────────────────────────────────────────
+  // Rows are position-indexed arrays and cells resolve by column *name* (see
+  // _nameToActualIdx), so reordering the visible-column list moves NOTHING in the
+  // row data — it's a pure layout change and stays O(visible cols). `columnOrder`
+  // is the display order of column names; names absent from it keep their natural
+  // order after the ordered ones. Persisted per table.
+  let columnOrder = $state(/** @type {string[]} */ ([]));
+  const _colOrderKey = $derived(`stroke:colorder:${schema}\x00${tableName}`);
+  $effect(() => {
+    const key = _colOrderKey;
+    untrack(() => {
+      try {
+        const raw = localStorage.getItem(key);
+        const parsed = raw ? JSON.parse(raw) : [];
+        columnOrder = Array.isArray(parsed) ? parsed : [];
+      } catch { columnOrder = []; }
+    });
+  });
+  function persistColumnOrder() {
+    try { localStorage.setItem(_colOrderKey, JSON.stringify(columnOrder)); } catch {}
+  }
+  /**
+   * Move a column within the visible display order.
+   * @param {string} name @param {'left'|'right'|'first'|'last'} where
+   */
+  function moveColumn(name, where) {
+    const order = visibleColumns.map((c) => c.name);
+    const from = order.indexOf(name);
+    if (from < 0) return;
+    order.splice(from, 1);
+    const to =
+      where === 'first' ? 0 :
+      where === 'last'  ? order.length :
+      where === 'left'  ? Math.max(0, from - 1) :
+      /* right */         Math.min(order.length, from + 1);
+    order.splice(to, 0, name);
+    columnOrder = order;
+    persistColumnOrder();
+  }
+  function resetColumnOrder() {
+    columnOrder = [];
+    persistColumnOrder();
+  }
+
+  const visibleColumns = $derived.by(() => {
+    const vis = columns.filter((c) => !hiddenColumns.has(c.name));
+    if (columnOrder.length === 0) return vis;
+    const pos = new Map(columnOrder.map((n, i) => [n, i]));
+    // Stable: ordered names by their position; unlisted keep original order last.
+    return vis
+      .map((c, i) => ({ c, i, k: pos.has(c.name) ? /** @type {number} */ (pos.get(c.name)) : Infinity }))
+      .sort((a, b) => (a.k === b.k ? a.i - b.i : a.k - b.k))
+      .map((e) => e.c);
+  });
+
+  // ── Column header highlight + tag ────────────────────────────────────────────
+  // A persistent colour band on a column's header bar plus an optional short text
+  // tag. Purely cosmetic, persisted per table, and independent of the transient
+  // click-to-select highlight (selectedCols) above.
+  // Muted, desaturated tones — refined "label" colours that read as intentional
+  // on the dark header rather than saturated neon. (Tailwind-500 looked garish.)
+  const COL_HIGHLIGHTS = /** @type {const} */ ([
+    { id: 'red',    label: 'Red',    hex: '#dd8a8a' },
+    { id: 'amber',  label: 'Amber',  hex: '#cbab7e' },
+    { id: 'green',  label: 'Green',  hex: '#8fc4a3' },
+    { id: 'blue',   label: 'Blue',   hex: '#8bb0d6' },
+    { id: 'purple', label: 'Purple', hex: '#b1a2e0' },
+    { id: 'pink',   label: 'Pink',   hex: '#d3a0c6' },
+  ]);
+  const COL_HL_MAP = new Map(COL_HIGHLIGHTS.map((h) => [h.id, h.hex]));
+  /** @type {Record<string, { color?: string, tag?: string }>} */
+  let colHighlights = $state({});
+  const _colHlKey = $derived(`stroke:colhl:${connectionId}\x00${schema}\x00${tableName}`);
+  $effect(() => {
+    const key = _colHlKey;
+    untrack(() => {
+      try {
+        const raw = localStorage.getItem(key);
+        const parsed = raw ? JSON.parse(raw) : {};
+        colHighlights = parsed && typeof parsed === 'object' ? parsed : {};
+      } catch { colHighlights = {}; }
+    });
+  });
+  function persistColHighlights() {
+    try {
+      if (Object.keys(colHighlights).length) localStorage.setItem(_colHlKey, JSON.stringify(colHighlights));
+      else localStorage.removeItem(_colHlKey);
+    } catch {}
+  }
+  /** @param {string} name @param {string|null} colorId */
+  function setColHighlight(name, colorId) {
+    const next = { ...colHighlights };
+    const entry = { ...(next[name] ?? {}) };
+    if (colorId) entry.color = colorId; else delete entry.color;
+    if (entry.color || entry.tag) next[name] = entry; else delete next[name];
+    colHighlights = next;
+    persistColHighlights();
+    scheduleDraw();
+  }
+  /** @param {string} name @param {string} tag */
+  function setColTag(name, tag) {
+    const next = { ...colHighlights };
+    const entry = { ...(next[name] ?? {}) };
+    const t = (tag ?? '').trim().slice(0, 24);
+    if (t) entry.tag = t; else delete entry.tag;
+    if (entry.color || entry.tag) next[name] = entry; else delete next[name];
+    colHighlights = next;
+    persistColHighlights();
+    scheduleDraw();
+  }
+  // ── Per-column transform ─────────────────────────────────────────────────────
+  // A cell transform (Decode JWT, Epoch → date, Base64 decode, …) chosen for a
+  // whole column; the transformed value renders live in every cell. Persisted
+  // per table, independent of highlight/tag.
+  /** @type {Record<string, string>} colName → transform id */
+  let colTransforms = $state({});
+  const _colTfKey = $derived(`stroke:coltf:${connectionId}\x00${schema}\x00${tableName}`);
+  $effect(() => {
+    const key = _colTfKey;
+    untrack(() => {
+      try {
+        const raw = localStorage.getItem(key);
+        const parsed = raw ? JSON.parse(raw) : {};
+        colTransforms = parsed && typeof parsed === 'object' ? parsed : {};
+      } catch { colTransforms = {}; }
+    });
+  });
+  function persistColTransforms() {
+    try {
+      if (Object.keys(colTransforms).length) localStorage.setItem(_colTfKey, JSON.stringify(colTransforms));
+      else localStorage.removeItem(_colTfKey);
+    } catch {}
+  }
+  /** @param {string} name @param {string|null} id */
+  function setColTransform(name, id) {
+    const next = { ...colTransforms };
+    if (id) next[name] = id; else delete next[name];
+    colTransforms = next;
+    persistColTransforms();
+    scheduleDraw();
+  }
+  // Active transforms resolved to their run fns (+ bound column type/name).
+  const _colTransformFns = $derived.by(() => {
+    void $pluginState;
+    /** @type {Record<string, { id: string, run: Function, colType: string, name: string }>} */
+    const out = {};
+    for (const [name, id] of Object.entries(colTransforms)) {
+      const t = transformById(id);
+      if (!t) continue;
+      const ai = _nameToActualIdx.get(name) ?? -1;
+      out[name] = { id: t.id, run: t.run, colType: _colCache[ai]?.colType ?? '', name };
+    }
+    return out;
+  });
+  /** Transformed display text for a column-transformed cell, cached per row index
+   *  (the cache itself + its invalidation live with the other display caches). */
+  function colTransformText(/** @type {number} */ idx, /** @type {number} */ actualIdx, /** @type {unknown} */ value, /** @type {{id:string,run:Function,colType:string,name:string}} */ tf) {
+    if (value === null || value === undefined) return '';
+    let m = _colTfCache.get(idx);
+    if (!m) {
+      if (_colTfCache.size >= _DISP_CACHE_MAX) _colTfCache.clear();
+      m = new Map(); _colTfCache.set(idx, m);
+    }
+    const k = actualIdx + ':' + tf.id;
+    let cached = m.get(k);
+    if (cached === undefined) {
+      try { cached = displayCell(String(tf.run(value, tf.colType, tf.name))); }
+      catch { cached = displayCell(value); }
+      m.set(k, cached);
+    }
+    return cached;
+  }
+
+  // NULL / empty / whitespace markers — empty & whitespace are handled by the
+  // formatter; NULL (∅) is drawn here since formatters skip null cells.
+  const _nullishOn = $derived.by(() => { void $pluginState; return isPluginEnabled('nullish-values'); });
+
+  // ── Image / avatar cell thumbnails ───────────────────────────────────────────
+  // When a column's transform is avatar / image-thumb, the cell renders the image
+  // instead of text. Images load async into a bounded cache; a repaint is queued
+  // when each finishes so the thumbnail appears.
+  const _IMG_TF = new Set(['avatar', 'image-thumb']);
+  /** @type {Map<string, HTMLImageElement | ImageBitmap | 'error'>} */
+  const _imgCache = new Map();
+  /** @type {Map<string, number>} per-url transient-failure retry counter */
+  const _imgRetry = new Map();
+  const _IMG_CACHE_MAX = 400;
+  const _IMG_MAX_RETRY = 3;
+  // Multi-megapixel source images are resampled to a small square thumbnail ONCE
+  // (via createImageBitmap) so the scroll draw blits a ~128px bitmap instead of
+  // resampling the full image every frame — and the full-res decode is released.
+  const _IMG_THUMB = 128;
+  /**
+   * Start (or restart) loading one cell image. Remote avatar CDNs
+   * (lh3.googleusercontent.com, avatars.githubusercontent.com) throttle bursts
+   * of parallel requests and occasionally 403 on the app-origin Referer, so a
+   * single onerror is usually transient — retry with backoff before giving up
+   * rather than freezing the cell as "broken image" permanently.
+   * @param {string} url
+   */
+  function loadCellImage(url) {
+    const img = new Image();
+    // These CDNs reject/deny requests that carry tauri://localhost as Referer;
+    // no-referrer strips it and never causes an otherwise-good load to fail.
+    img.referrerPolicy = 'no-referrer';
+    img.decoding = 'async';
+    img.onload = () => {
+      _imgRetry.delete(url);
+      // Downscale the center square to a small bitmap once, off the draw path.
+      // The tiny bitmap replaces the full-res Image in the cache, so per-frame
+      // draws are cheap and the multi-MB decode can be garbage-collected.
+      if (typeof createImageBitmap === 'function') {
+        const s = Math.min(img.naturalWidth, img.naturalHeight);
+        if (s > 0) {
+          const sx = Math.floor((img.naturalWidth - s) / 2);
+          const sy = Math.floor((img.naturalHeight - s) / 2);
+          createImageBitmap(img, sx, sy, s, s, { resizeWidth: _IMG_THUMB, resizeHeight: _IMG_THUMB, resizeQuality: 'high' })
+            .then((bmp) => { if (_imgCache.get(url) === img) _imgCache.set(url, bmp); else bmp.close?.(); scheduleDraw(); })
+            .catch(() => scheduleDraw());
+          return;
+        }
+      }
+      scheduleDraw();
+    };
+    img.onerror = () => {
+      const n = (_imgRetry.get(url) || 0) + 1;
+      if (n <= _IMG_MAX_RETRY) {
+        _imgRetry.set(url, n);
+        // Keep this (now-empty) img cached as a "loading…" placeholder during the
+        // backoff so repaints don't spawn duplicate immediate loads; replace it
+        // when the timer fires. Stagger so a whole column doesn't re-fire at once.
+        setTimeout(() => { if (_imgCache.get(url) === img) loadCellImage(url); }, 350 * n);
+        scheduleDraw();
+      } else {
+        _imgCache.set(url, 'error');
+        scheduleDraw();
+      }
+    };
+    img.src = url;
+    _imgCache.set(url, img);
+    return img;
+  }
+  /** @param {string} url */
+  function getCellImage(url) {
+    const hit = _imgCache.get(url);
+    if (hit) return hit;
+    if (_imgCache.size > _IMG_CACHE_MAX) {
+      for (const v of _imgCache.values()) { if (typeof ImageBitmap !== 'undefined' && v instanceof ImageBitmap) v.close?.(); }
+      _imgCache.clear(); _imgRetry.clear();
+    }
+    return loadCellImage(url);
+  }
+  /** Draw an image/avatar thumbnail (center-cropped) with a filename beside it. */
+  function drawCellImage(ctx, url, cellX, ry, w, rh, cy, round, c) {
+    const size = Math.min(rh - Math.round(6 * canvasZoom), Math.round(26 * canvasZoom));
+    const ix = cellX + CELL_PAD_X;
+    const iy = Math.round(cy - size / 2);
+    const radius = round ? size / 2 : Math.round(4 * canvasZoom);
+    const img = getCellImage(url);
+    const isBitmap = typeof ImageBitmap !== 'undefined' && img instanceof ImageBitmap;
+    const loaded = img !== 'error' && (isBitmap || (img.complete && img.naturalWidth > 0));
+    roundRect(ctx, ix, iy, size, size, radius);
+    ctx.fillStyle = withAlpha(c.cMutedBg, 0.5); ctx.fill();
+    if (loaded) {
+      ctx.save();
+      roundRect(ctx, ix, iy, size, size, radius); ctx.clip();
+      if (isBitmap) {
+        // Already a center-cropped square thumbnail — cheap blit, no per-frame resample.
+        ctx.drawImage(img, ix, iy, size, size);
+      } else {
+        const nw = img.naturalWidth, nh = img.naturalHeight, s = Math.min(nw, nh);
+        ctx.drawImage(img, (nw - s) / 2, (nh - s) / 2, s, s, ix, iy, size, size);
+      }
+      ctx.restore();
+    }
+    ctx.strokeStyle = withAlpha(c.cBorder, 0.6); ctx.lineWidth = 1;
+    roundRect(ctx, ix, iy, size, size, radius); ctx.stroke();
+    ctx.font = _fonts.cell; ctx.textAlign = 'left';
+    ctx.fillStyle = c.cMuted;
+    const label = img === 'error' ? 'broken image' : loaded ? (url.split('/').pop() || url) : 'loading…';
+    const lx = ix + size + Math.round(8 * canvasZoom);
+    ctx.fillText(truncText(ctx, label, Math.max(0, cellX + w - 4 - lx)), lx, cy + 0.5);
+  }
+
+  // Tag input dialog
+  let tagDialogOpen = $state(false);
+  let tagDialogCol = $state('');
+  let tagDialogValue = $state('');
+  /** @param {string} name */
+  function openTagDialog(name) {
+    tagDialogCol = name;
+    tagDialogValue = colHighlights[name]?.tag ?? '';
+    tagDialogOpen = true;
+  }
+  function confirmTag() {
+    if (tagDialogCol) setColTag(tagDialogCol, tagDialogValue);
+    tagDialogOpen = false;
+  }
 
   // ── Virtual relationship columns (reverse FK / one-to-many) ─────────────────
   // One per unique fromTable, max 8. Shown as badge columns to the right of real data.
@@ -1949,7 +2436,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   })
   // ── Virtual expression columns (user-defined templates) ──────────────────────
   const VEXPR_COL_DEFAULT_W = 220
-  const _tableKey = $derived(`${schema}.${tableName}`)
+  const _tableKey = $derived(`${connectionId}\x00${schema}.${tableName}`)
   /** Active (enabled) virtual expr col defs for current table */
   const _vcols = $derived.by(() => {
     const all = $virtualColumnsStore[_tableKey] ?? []
@@ -1968,11 +2455,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     let x = geom.totalWidth
     return _vcols.map((vc, i) => {
       const w = Math.round((_vexprWidths[vc.id] ?? VEXPR_COL_DEFAULT_W) * canvasZoom)
-      const pos = { id: vc.id, name: vc.name, x, w, fnIdx: i }
+      // hoverKey is precomputed here so the per-row draw loop never builds the
+      // `__vcol__${id}` string per cell per frame (GC churn on the scroll path).
+      const pos = { id: vc.id, name: vc.name, x, w, fnIdx: i, hoverKey: `__vcol__${vc.id}` }
       x += w
       return pos
     })
   })
+  /** Precomputed `__vrel__N` hover keys — same per-frame allocation avoidance. */
+  const _vrelHoverKeys = $derived(virtualRelCols.map((_, i) => `__vrel__${i}`))
   const vexprTotalW = $derived(
     _vexprLayout.length > 0
       ? _vexprLayout[_vexprLayout.length - 1].x + _vexprLayout[_vexprLayout.length - 1].w - geom.totalWidth
@@ -2048,10 +2539,45 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // O(1) `idx * ROW_HEIGHT` math and no per-page Float64Array is allocated.
   const rowTops = $derived(computeRowTops(rows.length, expandedRows, 280, ROW_HEIGHT, expandedRowHeights))
   /** Total scrollable content height incl. header + insert slot + body + 2-row bottom margin. */
-  const contentHeight = $derived(HEADER_H + insertRowOffset + (rowTops ? rowTops[rows.length] : rows.length * ROW_HEIGHT) + ROW_HEIGHT * 2)
+  const contentHeight = $derived(HEADER_H + insertRowOffset + totalRowsHeight(rowTops, rows.length, ROW_HEIGHT) + ROW_HEIGHT * 2)
+
+  // Browser engines cap element/scroll height at ~33.5M px, so a naive spacer of
+  // rows×ROW_HEIGHT breaks past ~1.4M rows (rows become unreachable). When the
+  // true content is taller than this, the spacer is capped and the scroll range
+  // is compressed: physical scrollTop 0…(cap−vh) maps onto virtual 0…(natural−vh)
+  // by `_scrollScale`. Below the cap (the overwhelming common case) scale is 1 and
+  // everything behaves exactly as an un-normalized native scroll.
+  const MAX_SCROLL_PX = 24_000_000
+  const spacerHeight = $derived(Math.min(contentHeight, MAX_SCROLL_PX))
+  const _scrollScale = $derived.by(() => {
+    if (contentHeight <= MAX_SCROLL_PX) return 1
+    const physRange = Math.max(1, MAX_SCROLL_PX - _viewportHeight)
+    const virtRange = Math.max(0, contentHeight - _viewportHeight)
+    return virtRange > physRange ? virtRange / physRange : 1
+  })
+  /** Physical DOM scrollTop → virtual content offset (row math). */
+  function physToVirt(/** @type {number} */ phys) {
+    if (_scrollScale === 1) return phys
+    return Math.round(Math.min(Math.max(0, contentHeight - _viewportHeight), phys * _scrollScale))
+  }
+  /** Virtual content offset → physical DOM scrollTop (for programmatic scrolls). */
+  function virtToPhys(/** @type {number} */ virt) {
+    return _scrollScale === 1 ? virt : virt / _scrollScale
+  }
+  /** Scroll the container so virtual offset `virt` sits at the top. */
+  function setVirtualScroll(/** @type {number} */ virt) {
+    if (tableContainer) tableContainer.scrollTop = Math.max(0, virtToPhys(virt))
+  }
+
+  /** True while the scroll rAF loop is live — gates DOM-overlay work that would
+   *  otherwise re-render every scroll frame (resize handles reposition per frame
+   *  via keyed style writes; nobody can grab one mid-scroll anyway). */
+  let _isScrolling = $state(false)
+  const _EMPTY_HANDLES = /** @type {{ name: string, x: number }[]} */ ([])
 
   /** Viewport-visible column resize handles (DOM overlay — not on the canvas). */
   const resizeHandles = $derived.by(() => {
+    if (_isScrolling) return _EMPTY_HANDLES
     /** @type {{ name: string, x: number }[]} */
     const out = []
     // Handles hidden behind the frozen pinned region are dropped — except the
@@ -2079,7 +2605,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   /** Document-space y of a body row's top (0 = top of the sizer). */
   function rowDocTop(/** @type {number} */ idx) {
-    return HEADER_H + insertRowOffset + (rowTops ? (rowTops[idx] ?? idx * ROW_HEIGHT) : idx * ROW_HEIGHT)
+    return HEADER_H + insertRowOffset + rowTopOf(rowTops, idx, ROW_HEIGHT)
   }
   /** Viewport y of a body row's top. */
   function rowViewportY(/** @type {number} */ idx) {
@@ -2102,6 +2628,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // stays looking at the same columns after a sort or filter reload.
     untrack(() => {
       _scrollTop = 0
+      _physScrollTop = 0
       if (tableContainer && tableContainer.scrollTop !== 0) tableContainer.scrollTop = 0
       fkSubview = null
       // A fresh page of rows (page/filter/sort/search) invalidates row-index-keyed
@@ -2475,7 +3002,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (!container) return
     _viewportWidth = container.clientWidth
     _viewportHeight = container.clientHeight
-    _scrollTop = Math.round(container.scrollTop)
+    _physScrollTop = Math.round(container.scrollTop)
+    _scrollTop = physToVirt(_physScrollTop)
     _scrollLeft = Math.round(container.scrollLeft)
 
     // Use contentRect directly — it's provided synchronously by the ResizeObserver
@@ -2513,10 +3041,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (_scrollLoopId) return
     _loopLastTop = -1
     _loopLastLeft = -1
+    _isScrolling = true
     function loop() {
       const el = tableContainer
       if (!el || !_ctx || _fatalError || performance.now() > _scrollLoopDeadline) {
         _scrollLoopId = 0
+        _isScrolling = false
         return
       }
       // Snap to whole CSS pixels. The canvas is sticky-pinned at the viewport's
@@ -2526,7 +3056,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       const st = Math.round(el.scrollTop)
       const sl = Math.round(el.scrollLeft)
       if (st !== _loopLastTop || sl !== _loopLastLeft) {
-        _scrollTop = st
+        _physScrollTop = st
+        _scrollTop = physToVirt(st)
         _scrollLeft = sl
         _loopLastTop = st
         _loopLastLeft = sl
@@ -2535,6 +3066,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         } catch (err) {
           reportFatal(err)
           _scrollLoopId = 0
+          _isScrolling = false
           return
         }
       }
@@ -2548,7 +3080,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     invalidateCanvasRect()
     // Update state immediately so any synchronous consumers (hit-test etc.) are current.
     // Rounded to whole pixels to avoid sub-pixel shimmer during horizontal scroll.
-    _scrollTop = Math.round(el.scrollTop)
+    _physScrollTop = Math.round(el.scrollTop)
+    _scrollTop = physToVirt(_physScrollTop)
     _scrollLeft = Math.round(el.scrollLeft)
     // Cancel any pending one-shot draw — the loop handles all scroll redraws at
     // the display's native frame rate (120Hz on ProMotion).
@@ -2572,6 +3105,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // Reused scratch buffer for per-frame vertical grid separators (see draw()) — a
   // module-lifetime array so the scroll hot path does zero allocation for it.
   const _vSepsBuf = /** @type {number[]} */ ([])
+  // Memoized rectangular-range column-name set for draw() — rebuilt only when the
+  // range bounds or the navigable-column set change, not every frame during an
+  // active range-select. The Set is read-only downstream (.has / iteration).
+  let _rangeColNamesCache = /** @type {Set<string> | null} */ (null)
+  let _rangeColNamesC0 = -1
+  let _rangeColNamesC1 = -1
+  let _rangeColNamesCols = /** @type {unknown} */ (null)
   /** @type {ReturnType<typeof createColorReader> | null} */
   let _readColor = null
   /** Canvas font strings measured from the DOM so they exactly match the app's
@@ -2644,6 +3184,76 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // which depends on focusedRow/focusedCol and so repaints on focus changes.
 
   /** @param {KeyboardEvent} e */
+  // ── Experimental Vim mode (grid normal-mode navigation) ─────────────────────
+  // Active only while $appVimMode is on and no cell is being edited. Reflects the
+  // grid's mode into the shared status-bar indicator.
+  let _vimPrefix = ''            // '', 'g', 'd', 'y' — awaiting the second key
+  let _vimPrefixTimer = /** @type {ReturnType<typeof setTimeout> | 0} */ (0)
+  let _vimCount = ''             // numeric motion prefix, e.g. "3" in 3j
+  /** @param {string} p */
+  function _setVimPrefix(p) {
+    _vimPrefix = p
+    if (_vimPrefixTimer) clearTimeout(_vimPrefixTimer)
+    if (p) _vimPrefixTimer = setTimeout(() => { _vimPrefix = '' }, 700)
+  }
+  /** Move the cell cursor by (dr, dc), clamped, and keep it in view. */
+  function vimMove(dr, dc) {
+    const rowLen = rows.length, visLen = navigableColumns.length
+    if (!rowLen || !visLen) return
+    focusedRow = Math.min(Math.max((focusedRow ?? 0) + dr, 0), rowLen - 1)
+    focusedCol = Math.min(Math.max((focusedCol ?? 0) + dc, 0), visLen - 1)
+    selAnchor = null
+    scrollRowIntoView(focusedRow)
+    scheduleDraw()
+  }
+  /** Interpret a key as a grid Vim normal-mode command. Returns true if consumed. */
+  function handleVimGridKey(e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return false
+    const k = e.key
+    if (k === 'Escape') {
+      _setVimPrefix(''); _vimCount = ''
+      return false // let the default Escape cascade (clear range / blur) run
+    }
+    // Only single printable characters are Vim commands; arrows, Tab, Enter,
+    // Home/End, Page… keep their normal grid behavior in both modes.
+    if (k.length !== 1) return false
+    e.preventDefault()
+
+    // Resolve a pending g/d/y prefix first.
+    if (_vimPrefix) {
+      const p = _vimPrefix; _setVimPrefix('')
+      if (p === 'g' && k === 'g') { focusedRow = 0; scrollRowIntoView(0); scheduleDraw(); return true }
+      if (p === 'd' && k === 'd') { deleteRow(focusedRow ?? 0); return true }
+      if (p === 'y' && k === 'y') { void copyAs(focusedRow ?? 0, 'plain'); return true }
+      // non-matching second key falls through to be handled fresh below
+    }
+
+    // Numeric count prefix (a lone "0" is the row-start motion, not a count).
+    if ((k >= '1' && k <= '9') || (k === '0' && _vimCount !== '')) { _vimCount += k; return true }
+    const count = Math.max(1, parseInt(_vimCount || '1', 10)); _vimCount = ''
+    const ai = () => visToActualColIdx(focusedCol ?? 0)
+
+    switch (k) {
+      case 'g': case 'd': case 'y': _setVimPrefix(k); return true
+      case 'h': vimMove(0, -count); return true
+      case 'l': vimMove(0, count); return true
+      case 'j': vimMove(count, 0); return true
+      case 'k': vimMove(-count, 0); return true
+      case '0': focusedCol = 0; scheduleDraw(); return true
+      case '$': focusedCol = navigableColumns.length - 1; scheduleDraw(); return true
+      case 'G': { const last = rows.length - 1; if (last >= 0) { focusedRow = last; scrollRowIntoView(last); scheduleDraw() } return true }
+      case 'i': case 'a': case 'c': startEdit(focusedRow ?? 0, ai()); setVimSubMode('insert'); return true
+      case 'x': setCellNull(focusedRow ?? 0, ai()); return true
+      case '/': onrequestsearch(); return true
+      default: return true // unmapped printable char — consume so it can't type-to-edit
+    }
+  }
+  // Mirror the grid's edit state into the shared Vim indicator while focused.
+  $effect(() => {
+    if (!$appVimMode || !isTableFocused) return
+    setVimSubMode(editingCell ? 'insert' : 'normal')
+  })
+
   function handleTableKeydown(e) {
     // Ctrl/Cmd + / - / 0: zoom the whole app (canvas scales in lockstep).
     if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
@@ -2657,7 +3267,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "a" || e.key === "A")) {
       if (!editingCell) {
         e.preventDefault();
-        selected = new Set(rows.map((_, i) => i));
+        selected = allRowIndexSet();
       }
       return;
     }
@@ -2700,6 +3310,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
     if (editingCell) return;
     if (newRowDrafts) return;
+
+    // Experimental Vim normal-mode: intercept plain command keys (hjkl, gg/G,
+    // i/x/dd/yy, …) before the default arrow / type-to-edit handling.
+    if ($appVimMode && handleVimGridKey(e)) return;
 
     // Cmd/Ctrl+Arrow is table-level navigation (scroll to top/bottom, first/last
     // column, paginate) owned by the app-level handler in StudioShell. Let it
@@ -2890,6 +3504,22 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // over-count for non-ASCII characters (Arabic, CJK, etc.) that fall back
     // to a narrower font, leaving an apparent gap after the ellipsis.
     if (ctx.measureText(text).width <= maxW) return text
+    // Monospace fast path: the slice length is plain arithmetic, verified with a
+    // couple of real measurements (non-ASCII glyphs fall back to narrower fonts,
+    // so a failed verify drops to the exact binary search below). This replaces
+    // ~10 measureText binary-search probes per truncated cell per frame with 2-3.
+    if (_glyphW > 0) {
+      let k = Math.max(0, Math.min(len - 1, Math.floor(maxW / _glyphW) - 1))
+      if (ctx.measureText(text.slice(0, k) + '…').width <= maxW) {
+        // Grow greedily while it still fits (covers narrow fallback glyphs);
+        // bounded so the worst case stays O(1).
+        for (let step = 0; step < 4 && k < len - 1; step++) {
+          if (ctx.measureText(text.slice(0, k + 1) + '…').width <= maxW) k++
+          else break
+        }
+        return text.slice(0, k) + '…'
+      }
+    }
     let lo = 0, hi = len
     while (lo < hi) {
       const mid = (lo + hi + 1) >> 1
@@ -2920,6 +3550,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // so text and geometry stay proportional with the rest of the UI. Do NOT
     // multiply the probe fonts by canvasZoom again — that double-scales them.
     if (!_fonts) _fonts = readFonts(colorProbe)
+    syncDisplayCaches()
 
     const W = _viewportWidth
     const H = _viewportHeight
@@ -2969,10 +3600,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     let rangeColNames = null
     let rangeFirstCol = '', rangeLastCol = '', rangeR0 = -1, rangeR1 = -1
     if (range) {
-      rangeColNames = new Set()
-      for (let ci = range.c0; ci <= range.c1; ci++) {
-        const nm = navigableColumns[ci]?.name
-        if (nm) rangeColNames.add(nm)
+      if (_rangeColNamesCache && _rangeColNamesC0 === range.c0 && _rangeColNamesC1 === range.c1 && _rangeColNamesCols === navigableColumns) {
+        rangeColNames = _rangeColNamesCache
+      } else {
+        rangeColNames = new Set()
+        for (let ci = range.c0; ci <= range.c1; ci++) {
+          const nm = navigableColumns[ci]?.name
+          if (nm) rangeColNames.add(nm)
+        }
+        _rangeColNamesCache = rangeColNames
+        _rangeColNamesC0 = range.c0
+        _rangeColNamesC1 = range.c1
+        _rangeColNamesCols = navigableColumns
       }
       rangeFirstCol = navigableColumns[range.c0]?.name ?? ''
       rangeLastCol = navigableColumns[range.c1]?.name ?? ''
@@ -3028,12 +3667,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const bodyTopY = Math.max(0, _scrollTop - HEADER_H - insertRowOffset)
     if (visibleColumns.length > 0) {
       let i = rowIndexAtY(rowTops, n, bodyTopY, ROW_HEIGHT)
+      const firstVis = i
+      let lastVis = i
       for (; i < n; i++) {
         const ry = rowViewportY(i)
         if (ry >= H) break
         if (ry + ROW_HEIGHT <= HEADER_H) continue
         drawBodyRow(ctx, i, ry, bodyC)
+        lastVis = i
       }
+      if (n > 0) emitVisibleRange(firstVis, Math.min(lastVis, n - 1))
     }
     ctx.restore()
 
@@ -3046,9 +3689,29 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
   }
 
+  /** Skeleton row for a window that hasn't loaded yet (windowed mode only). */
+  function drawLoadingRow(ctx, idx, ry, rh, c) {
+    if (c.tableStyle.zebra && (idx & 1)) {
+      ctx.fillStyle = withAlpha(c.cMutedBg, 0.05)
+      ctx.fillRect(0, ry, c.usedW, rh)
+    }
+    const cy = ry + rh / 2
+    const barH = Math.max(4, Math.round(6 * canvasZoom))
+    const gut = geom.gutterWidth
+    ctx.fillStyle = withAlpha(c.cMutedBg, 0.45)
+    for (const col of geom.cols) {
+      const x = colDrawnX(col, geom, _scrollLeft)
+      if (x + col.w <= gut || x >= _viewportWidth) continue
+      const bx = Math.max(x, gut) + CELL_PAD_X
+      const bw = Math.min(col.w - CELL_PAD_X * 2, Math.round(col.w * 0.5))
+      if (bw > 4) { roundRect(ctx, bx, cy - barH / 2, bw, barH, barH / 2); ctx.fill() }
+    }
+  }
+
   /** @param {CanvasRenderingContext2D} ctx */
   function drawBodyRow(ctx, idx, ry, c) {
     const rh = ROW_HEIGHT
+    if (windowed && rows[idx] === undefined) { drawLoadingRow(ctx, idx, ry, rh, c); return }
     // Row background — selected uses primary tint, others use muted.
     const isSel = selected.has(idx)
     const isPendingDelete = hasPendingDeletes && pendingDeletes.has(idx)
@@ -3120,7 +3783,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         if (cellX + vc.w <= 0 || cellX >= _viewportWidth) continue
         ctx.fillStyle = c.cPanel
         ctx.fillRect(cellX, ry, vc.w, rh)
-        const isVHov = hoveredRow === idx && hoveredColName === `__vcol__${vc.id}`
+        const isVHov = hoveredRow === idx && hoveredColName === vc.hoverKey
         if (isVHov) { ctx.fillStyle = withAlpha(c.cMutedBg, 0.15); ctx.fillRect(cellX, ry, vc.w, rh) }
         if (vi === 0) {
           ctx.strokeStyle = withAlpha(c.cPrimary, 0.18); ctx.lineWidth = 1
@@ -3128,8 +3791,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         }
         const row = rows[idx]
         if (!row) continue
-        const fn = _vcolFns[vc.fnIdx]
-        const val = fn ? fn(row) : ''
+        const val = vexprText(idx, vc.fnIdx)
         const isUrl = looksLikeUrl(val)
         ctx.font = _fonts.cell
         ctx.textAlign = 'left'
@@ -3148,7 +3810,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (cellX + VIRTUAL_COL_W <= 0 || cellX >= _viewportWidth) continue
       ctx.fillStyle = c.cPanel; ctx.fillRect(cellX, ry, VIRTUAL_COL_W, rh)
       const isActive = fkSubview?.rowIdx === idx && fkSubview?.kind === 'reverse' && fkSubview?.label === vc.label
-      const isVHov = hoveredRow === idx && hoveredColName === `__vrel__${vi}`
+      const isVHov = hoveredRow === idx && hoveredColName === _vrelHoverKeys[vi]
       if (!_fonts) return
 
       // Badge: compact tag style — no border at rest, border on hover/active.
@@ -3237,7 +3899,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
 
     const editing = editingCell && editingCell.rowIdx === idx && editingCell.colIdx === actualIdx
-    const staged = hasPendingEdits ? pendingEdits.get(idx + ':' + actualIdx) : undefined
+    const staged = (hasPendingEdits && _editedRowSet.has(idx)) ? pendingEdits.get(idx + ':' + actualIdx) : undefined
     const isDirty = !!staged
     const value = staged ? staged.value : rows[idx]?.[actualIdx]
     const isNull = value === null || value === undefined
@@ -3249,8 +3911,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Extension render directive (badges, tints, masks, links, swatches, …).
     // Computed once per cell and merged across enabled formatters; null/JSON
     // cells skip it entirely so the common path allocates nothing.
+    let _ctxArg
+    if (_colStats) { _statsCtx.stats = _colStats.get(actualIdx); _ctxArg = _statsCtx }
     const dir = (_extActive && !isNull && !isJson)
-      ? formatCellValue(value, cached?.colType ?? '', col.name, _colStats ? { stats: _colStats.get(actualIdx) } : undefined)
+      ? formatCellValue(value, cached?.colType ?? '', col.name, _ctxArg)
       : null
 
     // Cell background tints.
@@ -3304,15 +3968,30 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const canExpand = (cached?.canEdit ?? false) && !cached?.enumValues && !isBooleanType(cached?.colType ?? '')
     const cy = ry + rh / 2
 
+    // A per-column transform (chosen from the header menu) renders live and wins
+    // over formatter directives; skipped for staged/editing cells.
+    const colTf = (!staged && rows[idx]) ? _colTransformFns[col.name] : undefined
+    // Avatar / image thumbnail transform — draw the image itself, not text.
+    if (colTf && _IMG_TF.has(colTf.id) && !isNull && isImageUrl(value)) {
+      drawCellImage(ctx, String(value), cellX, ry, w, rh, cy, colTf.id === 'avatar', c)
+      return
+    }
+
     // Cell text — directive display wins; masked cells reveal on hover.
     const revealed = dir?.mask && isHover
     // SQL array columns render pgAdmin-style ({a,b}); jsonb arrays stay JSON.
     const isArrayCol = Array.isArray(value) && isSqlArrayType(cached?.colType)
-    const text = dir
-      ? String(revealed ? (dir.reveal ?? dir.display) : (dir.display ?? displayCell(value)))
-      : isArrayCol
-        ? arrayDisplay(value)
-        : displayCell(value)
+    const text = colTf
+      ? colTransformText(idx, actualIdx, value, colTf)
+      : dir
+        ? String(revealed ? (dir.reveal ?? dir.display) : (dir.display ?? displayCell(value)))
+        : isArrayCol
+          ? arrayDisplay(value)
+          : staged || !rows[idx]
+            ? displayCell(value)
+            : cellDisplayText(idx, actualIdx, value)
+    // NULL glyph when the Empty & NULL Markers plugin is on (formatters skip null).
+    const shownText = (isNull && _nullishOn) ? '∅' : text
 
     // Text color — directive link/fg may override (but never over a stronger
     // dirty/fk/focused state highlight).
@@ -3326,7 +4005,17 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const warnW = dir?.warn ? Math.round(14 * canvasZoom) : 0
     const hoverW = isHover ? ICON_HIT + (canExpand ? ICON_HIT : 0) : 0
     const fkW = (activeFk && rowHover) ? 20 : 0
-    const jsonW = isJson ? Math.round(36 * canvasZoom) : 0
+    // Reserve the JSON pill's *true* width (icon + gap + "JSON" + padding) so the
+    // cell text always truncates before it — a fixed 36px was narrower than the
+    // measured pill (~49px), which let text run under the pill.
+    let jsonW = 0
+    if (isJson) {
+      const _pad = Math.round(5 * canvasZoom)
+      const _gap = Math.round(3 * canvasZoom)
+      const _isz = Math.round(10 * canvasZoom)
+      ctx.font = `600 ${Math.max(8, Math.round(9 * canvasZoom))}px ${_fonts.family}`
+      jsonW = _pad + _isz + _gap + textWidth(ctx, 'JSON') + _pad + Math.round(6 * canvasZoom)
+    }
     const rightReserve = 4 + hoverW + fkW + jsonW + warnW  // 4 = right margin
 
     // Left-side decorations (color swatch / boolean dot) push the text right.
@@ -3353,7 +4042,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (dir?.badge) {
       // Status pill — label inside a rounded, tinted capsule.
       const padX = Math.round(7 * canvasZoom)
-      const label = truncText(ctx, text, Math.max(0, textMaxW - padX * 2))
+      const label = truncText(ctx, shownText, Math.max(0, textMaxW - padX * 2))
       const pillH = Math.min(rh - Math.round(6 * canvasZoom), Math.round(17 * canvasZoom))
       const pillW = Math.min(Math.max(0, textMaxW), textWidth(ctx, label) + padX * 2)
       const py = ry + (rh - pillH) / 2
@@ -3362,7 +4051,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ctx.fillStyle = dir.badge.fg
       ctx.fillText(label, textX + padX, cy + 0.5)
     } else {
-      const drawn = truncText(ctx, text, Math.max(0, textMaxW))
+      const drawn = truncText(ctx, shownText, Math.max(0, textMaxW))
       if (_searchLower && !isNull) drawSearchHighlights(ctx, drawn, textX, ry, rh, c)
       ctx.fillStyle = textColor
       ctx.fillText(drawn, textX, cy + 0.5)
@@ -3577,9 +4266,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ctx.strokeStyle = c.cGrid; ctx.lineWidth = 1
       ctx.beginPath(); ctx.moveTo(x + VIRTUAL_COL_W - 0.5, 0); ctx.lineTo(x + VIRTUAL_COL_W - 0.5, HEADER_H); ctx.stroke()
       if (!_fonts) continue
+      // Centre the header label over the centred cell badge — a left-aligned label
+      // above centred pills reads as a misaligned "gap" in the relation column.
       ctx.font = _fonts.header; ctx.fillStyle = withAlpha(c.cMuted, 0.6)
-      ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
-      ctx.fillText(truncText(ctx, vc.label, VIRTUAL_COL_W - 16), x + 8, HEADER_H / 2 + 0.5)
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      ctx.fillText(truncText(ctx, vc.label, VIRTUAL_COL_W - 24), x + VIRTUAL_COL_W / 2, HEADER_H / 2 + 0.5)
       // Resize edge affordance (matches regular column behaviour)
       if (_resizeHoverCol === vrelKey || resizingColName === vrelKey) {
         ctx.strokeStyle = withAlpha(c.cPrimary, 0.7)
@@ -3606,6 +4297,21 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (col.pinned) {
       ctx.fillStyle = c.cPanel; ctx.fillRect(x, 0, w, HEADER_H)
       ctx.fillStyle = withAlpha(c.cMutedBg, 0.38); ctx.fillRect(x, 0, w, HEADER_H)
+    }
+
+    // Persistent per-column highlight colour (chosen from the header menu).
+    const _hl = colHighlights[col.name]
+    const _hlHex = _hl?.color ? COL_HL_MAP.get(_hl.color) : undefined
+    if (_hlHex) {
+      ctx.fillStyle = withAlpha(_hlHex, 0.13); ctx.fillRect(x, 0, w, HEADER_H)
+      ctx.fillStyle = withAlpha(_hlHex, 0.85); ctx.fillRect(x, HEADER_H - 2, w, 2)
+    }
+
+    // Per-column transform indicator — faint primary wash + accent underline so
+    // it's clear this column's values are being transformed live.
+    if (colTransforms[col.name]) {
+      ctx.fillStyle = withAlpha(c.cPrimary, 0.10); ctx.fillRect(x, 0, w, HEADER_H)
+      ctx.fillStyle = withAlpha(c.cPrimary, 0.7); ctx.fillRect(x, HEADER_H - 2, w, 2)
     }
 
     // Background tint.
@@ -3663,6 +4369,28 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     for (const ind of indicators) {
       drawIcon(ctx, ind.icon, tx, cy - 6.5, 13, ind.color, 1.5)
       tx += 18
+    }
+
+    // Optional column tag — a bordered chip after the name, tinted with the
+    // column's highlight colour (or muted when none). The 1px hue border keeps the
+    // chip crisp even when it sits on a same-hue header band. Only drawn with room.
+    const _tag = _hl?.tag
+    if (_tag) {
+      ctx.font = _fonts.type
+      const _tw = Math.ceil(textWidth(ctx, _tag))
+      const _padX = 9, _pillH = 18, _pillW = _tw + _padX * 2, _r = _pillH / 2
+      if (x + w - sortReserve - tx > _pillW + 8) {
+        const _tagHex = _hlHex ?? c.cMuted
+        const _py = Math.round(cy - _pillH / 2)
+        // Soft filled badge (shadcn "secondary/destructive" style): a solid tinted
+        // fill with hue text and no border — fully rounded.
+        ctx.fillStyle = withAlpha(_tagHex, 0.2)
+        roundRect(ctx, tx, _py, _pillW, _pillH, _r); ctx.fill()
+        ctx.fillStyle = withAlpha(_tagHex, 1)
+        ctx.textAlign = 'left'
+        ctx.fillText(_tag, tx + _padX, cy + 0.5)
+        tx += _pillW + 8
+      }
     }
 
     // Inline datatype — secondary, lower contrast, a touch of breathing room.
@@ -3815,6 +4543,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (_drawRafId) cancelAnimationFrame(_drawRafId)
     if (_resizeRafId) cancelAnimationFrame(_resizeRafId)
     if (_scrollLoopId) cancelAnimationFrame(_scrollLoopId)
+    if (_focusColTimer) { clearTimeout(_focusColTimer); _focusColTimer = null }
   })
 
   // End a drag-select on pointer-up anywhere (the release often lands outside the
@@ -3886,6 +4615,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (ok) draw()
   })
 
+  // First-paint guard for the layout effect below (see there).
+  let _firstPaintDone = false
   // Layout / sizing effect — resize the backing store when geometry or viewport
   // changes. Tracks ONLY dependencies that can change the canvas dimensions,
   // geometry, or the full set of drawn data. Interaction state (selection, focus,
@@ -3905,13 +4636,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     void _colCache; void expandedRows; void expandedRowHeights; void virtualRelCols; void VIRTUAL_COL_W
     void vexprTotalW; void _vcolFns
     void zoomState.value; void canvasZoom
-    const { ok } = syncCanvasSurface()
+    const { ok, resized } = syncCanvasSurface()
     if (ok) {
-      // Always paint synchronously in this microtask (not only when the backing
-      // store was resized) so a fresh mount / tab switch never composites an
-      // untransformed, unpainted canvas (which would show the dark app background
-      // as a "black" grid). scheduleDraw() still coalesces concurrent updates.
-      draw()
+      // Paint synchronously only on the FIRST mount (so a fresh canvas never
+      // composites as an untransformed, unpainted "black" grid) and whenever the
+      // backing store was actually resized (assigning canvas.width/height clears
+      // it — without a sync repaint the grid would blank for a frame). Every other
+      // structural change leaves the last frame's pixels intact, so the
+      // rAF-coalesced scheduleDraw() below is enough and the previously
+      // unconditional synchronous draw() (which double-painted every update) is
+      // skipped.
+      if (!_firstPaintDone || resized) draw()
+      _firstPaintDone = true
       scheduleDraw()
     }
   })
@@ -4390,11 +5126,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (!editingCell) return null
     const col = geom.cols.find((c) => _nameToActualIdx.get(c.name) === editingCell.colIdx)
     if (!col) return null
-    const top = HEADER_H + insertRowOffset + (rowTops ? (rowTops[editingCell.rowIdx] ?? 0) : editingCell.rowIdx * ROW_HEIGHT)
-    // Pinned columns rest at their frozen x (content-space = scrollLeft + fixed).
-    const left = col.pinned
-      ? Math.max(col.contentX, _scrollLeft + (geom.pinnedFixedX.get(col.name) ?? 0))
-      : col.contentX
+    // VIEWPORT coordinates — the editor lives in a sticky viewport layer, not the
+    // scroll sizer. On a huge (windowed / scaled) table the sizer's content-space
+    // y reaches tens of millions of px, past WebKit's layout range, so a DOM
+    // element positioned there silently fails to paint. rowViewportY / colDrawnX
+    // stay in the 0…viewport range and work identically in normal and scaled modes.
+    const top = rowViewportY(editingCell.rowIdx)
+    const left = colDrawnX(col, geom, _scrollLeft)
     return { top, left, width: col.w, height: ROW_HEIGHT }
   })
 
@@ -4524,14 +5262,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                  within it in content coordinates. -->
             <div
               class="relative"
-              style="width:{totalContentWidth}px; height:{contentHeight}px"
+              style="width:{resizingColName ? Math.max(totalContentWidth, _scrollLeft + _viewportWidth) : totalContentWidth}px; height:{spacerHeight}px"
             >
               <!-- Inline insert-row form -->
               {#if newRowDrafts}
                 <div
                   role="none"
                   class="absolute left-0 z-20 flex border-b border-border/30 bg-panel ring-1 ring-inset ring-emerald-500/25"
-                  style="top:{HEADER_H + _scrollTop}px; height:{ROW_HEIGHT}px; width:{insertRowTotalWidth}px"
+                  style="top:{HEADER_H + _physScrollTop}px; height:{ROW_HEIGHT}px; width:{insertRowTotalWidth}px"
                   onkeydown={onNewRowKeydown}
                 >
                   {#if showRowExpand}
@@ -4667,66 +5405,50 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                    lets the compositor hold it at the viewport-left edge during
                    horizontal scroll instead of a reactive transform:translateX() that
                    lags a frame behind the native scroll (the "vibration"). -->
+              {#snippet expandBody(/** @type {number} */ exIdx)}
+                <RowExpandViewer
+                  record={rowToRecord(columns, rows[exIdx], hiddenColumns)}
+                  rowLabel={"row " + (exIdx + 1)}
+                  onclose={() => toggleRowExpand(exIdx)}
+                  onopenjson={(value, label) => {
+                    void prefetchJsonLightbox()
+                    jsonLightbox = { value, colName: label }
+                  }}
+                />
+              {/snippet}
               {#each [...expandedRows] as exIdx (exIdx)}
                 {#if rows[exIdx] !== undefined}
-                  <div
-                    class="absolute z-10 left-0 right-0"
-                    style="top:{rowDocTop(exIdx) + ROW_HEIGHT}px"
-                  >
-                  <div
-                    style="position:sticky; left:0; width:{_viewportWidth}px"
-                    use:trackExpandHeight={exIdx}
-                  >
-                    <RowExpandViewer
-                      record={rowToRecord(columns, rows[exIdx])}
-                      rowLabel={"row " + (exIdx + 1)}
-                      onclose={() => toggleRowExpand(exIdx)}
-                      onopenjson={(value, label) => {
-                        void prefetchJsonLightbox()
-                        jsonLightbox = { value, colName: label }
-                      }}
-                    />
-                  </div>
-                  </div>
+                  {#if _scrollScale === 1}
+                    <!-- Normal table: content-space vertical (native scroll moves it,
+                         no per-frame re-render), sticky-left for the horizontal pin. -->
+                    <div class="absolute z-10 left-0 right-0" style="top:{rowDocTop(exIdx) + ROW_HEIGHT}px">
+                      <div style="position:sticky; left:0; width:{_viewportWidth}px" use:trackExpandHeight={exIdx}>
+                        {@render expandBody(exIdx)}
+                      </div>
+                    </div>
+                  {:else if rowViewportY(exIdx) > -_viewportHeight * 2 && rowViewportY(exIdx) < _viewportHeight + ROW_HEIGHT}
+                    <!-- Huge/scaled table: viewport-sticky layer + viewport y. Content y
+                         would be tens of millions of px (past WebKit's layout range), and
+                         a far-off-screen panel there would also blow out the scroll height,
+                         so only render when the expanded row is near the viewport. -->
+                    <div style="position:sticky;top:0;left:0;width:0;height:0;overflow:visible;z-index:10">
+                      <div class="absolute left-0" style="top:{rowViewportY(exIdx) + ROW_HEIGHT}px; width:{_viewportWidth}px" use:trackExpandHeight={exIdx}>
+                        {@render expandBody(exIdx)}
+                      </div>
+                    </div>
+                  {/if}
                 {/if}
               {/each}
 
-              <!-- FK sub-view panel — spans full viewport width (including gutter area).
-                   Outer div is absolute for vertical position; left:0/right:0 gives it
-                   the full scrollable width so the inner sticky child has room to stick.
-                   Inner div uses position:sticky;left:0 to stay at the viewport left
-                   edge on horizontal scroll — no transform or will-change needed,
-                   which avoids the forced compositing layer that caused scroll lag. -->
-              {#if fkSubview !== null && rows[fkSubview.rowIdx] !== undefined}
-                {@const fkIdx = fkSubview.rowIdx}
-                <div
-                  class="absolute z-20 left-0 right-0"
-                  style="top:{rowDocTop(fkIdx) + ROW_HEIGHT}px"
-                >
-                <div
-                  style="position:sticky; left:0; width:{_viewportWidth}px"
-                >
-                  <FkSubviewPanel
-                    data={fkSubview.data}
-                    fkLabel={fkSubview.label}
-                    onclose={() => { fkSubview = null }}
-                    onfullview={() => {
-                      const sv = fkSubview
-                      if (!sv) return
-                      if (sv.kind === 'reverse' && sv.relInfo) {
-                        // Reverse FK: navigate to fromTable with filter
-                        onfollowforeignkey({ rowIdx: fkIdx, colIdx: 0, reverseRel: sv.relInfo, row: rows[fkIdx] })
-                      } else {
-                        // Forward FK: navigate to referenced table via normal FK nav
-                        onfollowforeignkey({ rowIdx: fkIdx, colIdx: sv.colIdx ?? 0 })
-                      }
-                    }}
-                  />
-                </div>
-                </div>
-              {/if}
+              <!-- FK sub-view renders in the docked bottom panel (after the scroll
+                   container) — never inline between rows, so grid scrolling stays
+                   clean and the canvas hot path is untouched. -->
 
-              <!-- Active inline cell editor -->
+              <!-- Active inline cell editor. Rendered in a sticky viewport layer
+                   (not the scroll sizer) so its top/left stay in the 0…viewport
+                   range — a DOM node at the sizer's multi-million-px content y
+                   silently fails to paint in WebKit on huge / scaled tables. -->
+              <div style="position:sticky;top:0;left:0;width:0;height:0;overflow:visible;z-index:30">
               {#if editingCell && editOverlay}
                 {@const ecol = columns[editingCell.colIdx]}
                 {@const ecached = _colCache[editingCell.colIdx]}
@@ -4812,6 +5534,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                   {/if}
                 </div>
               {/if}
+              </div>
             </div>
           {/if}
 
@@ -4865,7 +5588,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     <ContextMenu.Content
       onOpenAutoFocus={(e) => e.preventDefault()}
       class={cn(
-        "min-w-52 p-0.5 text-ui-xs",
+        "min-w-52 p-1 text-ui-xs",
         "[&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs",
         "[&_[data-slot=context-menu-shortcut]]:text-ui-2xs",
         "[&_[data-slot=context-menu-item]_svg]:size-3.5",
@@ -4896,27 +5619,30 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         {@const hAsc = hSortInfo?.direction === 'asc'}
         {@const hDesc = hSortInfo?.direction === 'desc'}
         {@const hPinned = pinnedColumns.has(hcol)}
+        {@const hVisIdx = visibleColumns.findIndex((c) => c.name === hcol)}
+        {@const hIsFirst = hVisIdx <= 0}
+        {@const hIsLast = hVisIdx < 0 || hVisIdx >= visibleColumns.length - 1}
         <ContextMenu.Item onSelect={() => runMenuAction(() => headerSortDirect(hcol, 'asc'))}>
           <ArrowUp />
-          Sort ascending
+          {$t('menu.sortAsc')}
           {#if hAsc}<span class="ml-auto text-[10px] text-primary">✓</span>{/if}
         </ContextMenu.Item>
         <ContextMenu.Item onSelect={() => runMenuAction(() => headerSortDirect(hcol, 'desc'))}>
           <ArrowDown />
-          Sort descending
+          {$t('menu.sortDesc')}
           {#if hDesc}<span class="ml-auto text-[10px] text-primary">✓</span>{/if}
         </ContextMenu.Item>
         {#if hSorted}
           <ContextMenu.Item onSelect={() => runMenuAction(() => { if (pendingEdits.size > 0) { toast.error('Unsaved changes', { description: 'Apply or reset your edits before sorting.' }); return } onsortchange([]) })}>
             <ArrowUpDown />
-            Clear sort
+            {$t('menu.clearSort')}
           </ContextMenu.Item>
         {/if}
         {#if hasTableContext}
           <ContextMenu.Separator />
           <ContextMenu.Item onSelect={() => runMenuAction(() => onfiltercolumn(hcol))}>
             <ListFilter />
-            Filter by this column
+            {$t('menu.filterByColumn')}
           </ContextMenu.Item>
         {/if}
         <ContextMenu.Separator />
@@ -4925,21 +5651,106 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         </ContextMenu.Item>
         <ContextMenu.Item onSelect={() => runMenuAction(() => onhidecolumn(hcol))}>
           <EyeOff />
-          Hide column
+          {$t('menu.hideColumn')}
         </ContextMenu.Item>
+        <ContextMenu.Separator />
+        <ContextMenu.Item disabled={hIsFirst} onSelect={() => runMenuAction(() => moveColumn(hcol, 'left'))}>
+          <ChevronLeft />
+          {$t('menu.moveLeft')}
+        </ContextMenu.Item>
+        <ContextMenu.Item disabled={hIsLast} onSelect={() => runMenuAction(() => moveColumn(hcol, 'right'))}>
+          <ChevronRight />
+          {$t('menu.moveRight')}
+        </ContextMenu.Item>
+        <ContextMenu.Item disabled={hIsFirst} onSelect={() => runMenuAction(() => moveColumn(hcol, 'first'))}>
+          <ChevronsLeft />
+          {$t('menu.moveFirst')}
+        </ContextMenu.Item>
+        <ContextMenu.Item disabled={hIsLast} onSelect={() => runMenuAction(() => moveColumn(hcol, 'last'))}>
+          <ChevronsRight />
+          {$t('menu.moveLast')}
+        </ContextMenu.Item>
+        {#if columnOrder.length > 0}
+          <ContextMenu.Item onSelect={() => runMenuAction(() => resetColumnOrder())}>
+            <RotateCcw />
+            {$t('menu.resetOrder')}
+          </ContextMenu.Item>
+        {/if}
         <ContextMenu.Separator />
         <ContextMenu.Item onSelect={() => runMenuAction(() => resetColumnWidth(hcol))}>
           <RotateCcw />
-          Reset column width
+          {$t('menu.resetWidth')}
         </ContextMenu.Item>
         {#if hasTableContext}
           <ContextMenu.Separator />
           <ContextMenu.Item onSelect={() => runMenuAction(() => { statsCol = statsCol === hcol ? null : hcol })}>
             <BarChart2 />
-            Column stats
+            {$t('menu.columnStats')}
             {#if statsCol === hcol}<span class="ml-auto text-[10px] text-primary">✓</span>{/if}
           </ContextMenu.Item>
         {/if}
+        <ContextMenu.Separator />
+        <ContextMenu.Sub>
+          <ContextMenu.SubTrigger>
+            <Palette />
+            {$t('menu.highlight')}
+            {#if colHighlights[hcol]?.color}<span class="ml-auto size-2.5 rounded-full" style="background:{COL_HL_MAP.get(colHighlights[hcol].color)}"></span>{/if}
+          </ContextMenu.SubTrigger>
+          <ContextMenu.SubContent class="w-40 [&_[data-slot=context-menu-item]]:gap-2 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs">
+            {#each COL_HIGHLIGHTS as h (h.id)}
+              <ContextMenu.Item onSelect={() => runMenuAction(() => setColHighlight(hcol, h.id))}>
+                <span class="size-3.5 shrink-0 rounded-full border border-border/40" style="background:{h.hex}"></span>
+                {h.label}
+                {#if colHighlights[hcol]?.color === h.id}<span class="ml-auto text-[10px] text-primary">✓</span>{/if}
+              </ContextMenu.Item>
+            {/each}
+            {#if colHighlights[hcol]?.color}
+              <ContextMenu.Separator />
+              <ContextMenu.Item onSelect={() => runMenuAction(() => setColHighlight(hcol, null))}>
+                <Ban />
+                No color
+              </ContextMenu.Item>
+            {/if}
+          </ContextMenu.SubContent>
+        </ContextMenu.Sub>
+        <ContextMenu.Item onSelect={() => runMenuAction(() => openTagDialog(hcol))}>
+          <Tag />
+          {colHighlights[hcol]?.tag ? $t('menu.editTag') : $t('menu.tagColumn')}
+        </ContextMenu.Item>
+        {#if colHighlights[hcol]?.tag}
+          <ContextMenu.Item onSelect={() => runMenuAction(() => setColTag(hcol, ''))}>
+            <Ban />
+            Remove tag
+          </ContextMenu.Item>
+        {/if}
+        <ContextMenu.Separator />
+        <ContextMenu.Sub>
+          <ContextMenu.SubTrigger>
+            <Wand2 />
+            {$t('menu.transformColumn')}
+            {#if colTransforms[hcol]}<span class="ml-auto text-[10px] text-primary">on</span>{/if}
+          </ContextMenu.SubTrigger>
+          <ContextMenu.SubContent class="w-56 [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+            {#if menuColTransforms.length > 0}
+              {#each menuColTransforms as t (t.id)}
+                <ContextMenu.Item onSelect={() => runMenuAction(() => setColTransform(hcol, t.id))}>
+                  <Wand2 />
+                  {t.label}
+                  {#if colTransforms[hcol] === t.id}<span class="ml-auto text-[10px] text-primary">✓</span>{/if}
+                </ContextMenu.Item>
+              {/each}
+            {:else}
+              <div class="px-2 py-1.5 text-[11px] italic text-muted-foreground/50">No transforms apply to this column</div>
+            {/if}
+            {#if colTransforms[hcol]}
+              <ContextMenu.Separator />
+              <ContextMenu.Item onSelect={() => runMenuAction(() => setColTransform(hcol, null))}>
+                <Ban />
+                {$t('menu.clearTransform')}
+              </ContextMenu.Item>
+            {/if}
+          </ContextMenu.SubContent>
+        </ContextMenu.Sub>
       {:else}
         <ContextMenu.Item onSelect={() => runMenuAction(() => openInInspector(contextRowIdx))}>
           <PanelRight />
@@ -5038,15 +5849,20 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           {#if menuTransforms.length === 0}<ContextMenu.Separator />{/if}
           <ContextMenu.Sub>
             <ContextMenu.SubTrigger>
-              <Sparkles />
-              Insert generated value
+              <Dices />
+              Insert
             </ContextMenu.SubTrigger>
-            <ContextMenu.SubContent class="w-48 [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
-              {#each menuGenerators as g (g.id)}
-                <ContextMenu.Item onSelect={() => runMenuAction(() => insertGeneratedValue(contextRowIdx, contextColIdx, g))}>
-                  <Sparkles />
-                  {g.label}
-                </ContextMenu.Item>
+            <ContextMenu.SubContent class="app-scroll max-h-[60vh] w-52 overflow-y-auto [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:whitespace-nowrap [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+              {#each menuGenerators as grp, gi (grp.group)}
+                {#if gi > 0}<ContextMenu.Separator />{/if}
+                {@const GIcon = grp.group === 'IDs' ? KeyRound : grp.group === 'TIME' ? Clock : Dices}
+                <div class="select-none px-2 pb-0.5 pt-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/45">{grp.group}</div>
+                {#each grp.items as g (g.id)}
+                  <ContextMenu.Item onSelect={() => runMenuAction(() => insertGeneratedValue(contextRowIdx, contextColIdx, g))}>
+                    <GIcon />
+                    {g.label}
+                  </ContextMenu.Item>
+                {/each}
               {/each}
             </ContextMenu.SubContent>
           </ContextMenu.Sub>
@@ -5124,6 +5940,42 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     </ContextMenu.Content>
   </ContextMenu.Root>
 {/if}
+
+<!-- Related-rows dock — sits BELOW the scroll container in this flex column, so
+     it never scrolls with the grid and the grid never fights its inner scroll. -->
+{#if fkSubview !== null && rows[fkSubview.rowIdx] !== undefined}
+  {@const fkIdx = fkSubview.rowIdx}
+  <div
+    class="relative z-10 flex shrink-0 flex-col border-t border-border/60 bg-background"
+    style="height:{fkDockHeight}px"
+  >
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <div
+      role="separator"
+      aria-orientation="horizontal"
+      aria-label="Resize related rows panel"
+      class="absolute inset-x-0 -top-1 z-10 h-2 cursor-row-resize"
+      onpointerdown={startFkDockResize}
+    ></div>
+    <FkSubviewPanel
+      data={fkSubview.data}
+      fkLabel={fkSubview.label}
+      sourceHint={`row ${fkIdx + 1}`}
+      onclose={() => { fkSubview = null }}
+      onfullview={() => {
+        const sv = fkSubview
+        if (!sv) return
+        if (sv.kind === 'reverse' && sv.relInfo) {
+          // Reverse FK: navigate to fromTable with filter
+          onfollowforeignkey({ rowIdx: fkIdx, colIdx: 0, reverseRel: sv.relInfo, row: rows[fkIdx] })
+        } else {
+          // Forward FK: navigate to referenced table via normal FK nav
+          onfollowforeignkey({ rowIdx: fkIdx, colIdx: sv.colIdx ?? 0 })
+        }
+      }}
+    />
+  </div>
+{/if}
 </div>
 
 {#if statsCol && hasTableContext}
@@ -5147,6 +5999,29 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   />
 {/if}
 </div>
+
+<Dialog.Root bind:open={tagDialogOpen}>
+  <Dialog.Content class="max-w-sm gap-4">
+    <Dialog.Header>
+      <Dialog.Title class="text-sm font-semibold">Tag column</Dialog.Title>
+      <Dialog.Description class="text-xs text-muted-foreground">
+        A short label shown on the “{tagDialogCol}” header. Leave empty to remove.
+      </Dialog.Description>
+    </Dialog.Header>
+    <input
+      bind:value={tagDialogValue}
+      maxlength="24"
+      spellcheck="false"
+      placeholder="e.g. PII, money, deprecated"
+      class="h-9 w-full rounded-lg border border-border/60 bg-background px-3 text-ui-sm text-foreground outline-none transition-[border-color,box-shadow] focus:border-ring focus:ring-1 focus:ring-ring"
+      onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); confirmTag(); } else if (e.key === 'Escape') { e.preventDefault(); tagDialogOpen = false; } }}
+    />
+    <Dialog.Footer class="gap-2 sm:justify-end">
+      <button type="button" class="inline-flex h-8 items-center rounded-lg border border-border/60 px-3 text-ui-xs font-medium text-foreground transition-colors hover:bg-muted" onclick={() => (tagDialogOpen = false)}>Cancel</button>
+      <button type="button" class="inline-flex h-8 items-center rounded-lg bg-primary px-3 text-ui-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90" onclick={confirmTag}>Save</button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
 
 <MediaLightbox
   url={lightboxUrl}

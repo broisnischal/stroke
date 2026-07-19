@@ -246,7 +246,10 @@
   }
 </script>
 
-<div class="border-t border-border/30 bg-background">
+<!-- Elevated card + left accent rail so the expanded row reads as a distinct,
+     contained section over the grid (bg-background matched the grid and had no
+     bottom edge, so it blended in). -->
+<div class="border-y border-l-2 border-border/40 border-l-primary/45 bg-card">
   <!-- Toolbar -->
   <div class="flex items-center gap-2 border-b border-border/20 bg-muted/20 px-3 py-1">
     {#if rowLabel}

@@ -378,44 +378,62 @@ export function resizeColAtX(x, geom, scrollLeft, slop = 5, frozenLeft = geom.gu
 // ── Row geometry ──────────────────────────────────────────────────────────
 
 /**
- * Cumulative top offset of every row. Fixed `rowHeight` rows, plus expand height
- * for each expanded row. Per-row measured heights are used when available;
- * `defaultExpandHeight` is the fallback before measurement.
+ * @typedef {{ rowHeight: number, idxs: Int32Array, prefix: Float64Array }} RowTops
+ * Sparse row-offset model. Only the (usually few) expanded rows are stored:
+ *   `idxs`   — expanded row indices, ascending
+ *   `prefix` — prefix sums of their expand heights (prefix[k] = Σ heights before k)
+ * so nothing here scales with the total row count. `null` means no row is
+ * expanded, and every row top is exactly `idx * rowHeight`.
  *
- * Returns `null` in the common case where NO row is expanded — every row top is
- * then exactly `idx * rowHeight`, so the O(1) linear path in the consumers
- * (rowDocTop / rowIndexAtY / rowAtContentY) applies and we skip allocating a
- * Float64Array over all rows. On a 1M-row result set that array is ~8 MB and was
- * being reallocated on every infinite-scroll page append — this avoids it
- * entirely unless the user actually expands a row.
+ * This replaces a Float64Array over all rows (~40 MB at 5M) that was rebuilt
+ * every time an expanded panel settled; expanding a row in a huge table now
+ * costs O(expanded), not O(rowCount).
+ *
  * @param {Set<number>} expandedSet
  * @param {Map<number,number> | null} expandHeights Per-row measured heights (optional).
- * @returns {Float64Array | null} length rowCount+1 ([rowCount] = total height), or null when unexpanded.
+ * @returns {RowTops | null}
  */
 export function computeRowTops(rowCount, expandedSet, defaultExpandHeight, rowHeight, expandHeights = null) {
   if (expandedSet.size === 0) return null;
-  const tops = new Float64Array(rowCount + 1);
-  let y = 0;
-  for (let i = 0; i < rowCount; i++) {
-    tops[i] = y;
-    y += rowHeight + (expandedSet.has(i) ? (expandHeights?.get(i) ?? defaultExpandHeight) : 0);
+  const idxs = Int32Array.from(expandedSet).sort(); // typed-array sort is numeric
+  const prefix = new Float64Array(idxs.length + 1);
+  for (let k = 0; k < idxs.length; k++) {
+    prefix[k + 1] = prefix[k] + (expandHeights?.get(idxs[k]) ?? defaultExpandHeight);
   }
-  tops[rowCount] = y;
-  return tops;
+  return { rowHeight, idxs, prefix };
 }
 
-/** Largest row index with top ≤ y (binary search; O(1) linear when `tops` is null). */
+/** Count of expanded rows strictly below `idx` (binary search over the sparse set). */
+function expandedBefore(/** @type {RowTops} */ tops, idx) {
+  const a = tops.idxs;
+  let lo = 0, hi = a.length;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (a[m] < idx) lo = m + 1; else hi = m; }
+  return lo;
+}
+
+/** Document-space top of a row: uniform stride plus the expand heights above it. */
+export function rowTopOf(/** @type {RowTops | null} */ tops, idx, rowHeight) {
+  if (tops === null) return idx * rowHeight;
+  return idx * tops.rowHeight + tops.prefix[expandedBefore(tops, idx)];
+}
+
+/** Total body height (all rows + every expand panel). */
+export function totalRowsHeight(/** @type {RowTops | null} */ tops, rowCount, rowHeight) {
+  if (tops === null) return rowCount * rowHeight;
+  return rowCount * tops.rowHeight + tops.prefix[tops.prefix.length - 1];
+}
+
+/** Largest row index with top ≤ y (O(1) when unexpanded, else binary search). */
 export function rowIndexAtY(tops, rowCount, y, rowHeight = 0) {
   if (rowCount === 0 || y < 0) return 0;
   if (tops === null) {
-    // Uniform rows: top(idx) = idx * rowHeight.
     if (rowHeight <= 0) return 0;
     return Math.min(rowCount - 1, Math.max(0, Math.floor(y / rowHeight)));
   }
   let lo = 0, hi = rowCount - 1, idx = 0;
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
-    if (tops[mid] <= y) { idx = mid; lo = mid + 1; } else { hi = mid - 1; }
+    if (rowTopOf(tops, mid, tops.rowHeight) <= y) { idx = mid; lo = mid + 1; } else { hi = mid - 1; }
   }
   return idx;
 }
@@ -428,12 +446,11 @@ export function rowIndexAtY(tops, rowCount, y, rowHeight = 0) {
 export function rowAtContentY(tops, rowCount, rowHeight, y) {
   if (rowCount === 0 || y < 0) return null;
   if (tops === null) {
-    // Uniform rows: total height = rowCount * rowHeight, top(idx) = idx*rowHeight.
     if (y >= rowCount * rowHeight) return null;
     const idx = Math.min(rowCount - 1, Math.floor(y / rowHeight));
     return { idx, inRowBody: y < idx * rowHeight + rowHeight };
   }
-  if (y >= tops[rowCount]) return null;
+  if (y >= totalRowsHeight(tops, rowCount, rowHeight)) return null;
   const idx = rowIndexAtY(tops, rowCount, y);
-  return { idx, inRowBody: y < tops[idx] + rowHeight };
+  return { idx, inRowBody: y < rowTopOf(tops, idx, rowHeight) + rowHeight };
 }
