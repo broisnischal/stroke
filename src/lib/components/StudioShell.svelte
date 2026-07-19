@@ -30,6 +30,7 @@
   import { pickRandomTip } from '$lib/insider-tips.js'
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import Sidebar from './Sidebar.svelte'
+  import ActivityBar from './ActivityBar.svelte'
   import TabBar from './TabBar.svelte'
   import PaneLayout from './PaneLayout.svelte'
   import PaneSnapshot from './PaneSnapshot.svelte'
@@ -4887,6 +4888,23 @@ let rowSearch = $state('')
   ongoforward={() => void navForward()}
 />
 <div class="flex min-h-0 flex-1 overflow-hidden">
+  {#if connection}
+    <ActivityBar
+      {aiMode}
+      {sidebarOpen}
+      side={sidebarSide}
+      activeKind={activeTab?.kind ?? ''}
+      ontoggletables={() => { if (aiMode) exitAiMode(); toggleSidebar() }}
+      onopensearch={() => { if (aiMode) exitAiMode(); openSearchTab() }}
+      onopenschema={() => { if (aiMode) exitAiMode(); openSchemaTab() }}
+      onopenerd={() => { if (aiMode) exitAiMode(); openErdTab() }}
+      onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
+      onopeninsights={() => { if (aiMode) exitAiMode(); openInsightsTab() }}
+      onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
+      onopenaimode={() => (aiMode ? exitAiMode() : enterAiMode())}
+      onopensettings={() => (showSettingsModal = true)}
+    />
+  {/if}
   {#if sidebarEverOpened}
     <div
       class:order-last={sidebarSide === 'right'}
