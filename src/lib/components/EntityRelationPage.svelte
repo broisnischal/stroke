@@ -16,6 +16,7 @@
   import FileImage from '@lucide/svelte/icons/file-image'
   import FileCode from '@lucide/svelte/icons/file-code'
   import FileText from '@lucide/svelte/icons/file-text'
+  import { toast } from "$lib/components/ui/sonner/toast.svelte.js"
 
   let {
     schema = 'public',
@@ -550,12 +551,23 @@
       lines.push('    }')
     }
     lines.push('```')
-    dlFile(lines.join('\n'), `erd-${activeSchema}.md`, 'text/markdown')
+    try {
+      dlFile(lines.join('\n'), `erd-${activeSchema}.md`, 'text/markdown')
+      toast.success('Exported Mermaid markdown')
+    } catch (e) {
+      toast.error('Export failed', { description: String(e) })
+    }
   }
 
   function exportSVG() {
-    const svg = generateSvg()
-    if (svg) dlFile(svg, `erd-${activeSchema}.svg`, 'image/svg+xml')
+    try {
+      const svg = generateSvg()
+      if (!svg) return
+      dlFile(svg, `erd-${activeSchema}.svg`, 'image/svg+xml')
+      toast.success('Exported diagram as SVG')
+    } catch (e) {
+      toast.error('Export failed', { description: String(e) })
+    }
   }
 
   async function exportPNG() {
@@ -580,13 +592,19 @@
       ctx.scale(scale, scale)
       ctx.drawImage(img, 0, 0, W, H)
       canvas.toBlob(blob => {
-        if (!blob) return
+        if (!blob) {
+          toast.error('Export failed', { description: 'Could not render PNG image' })
+          return
+        }
         const a = document.createElement('a')
         a.href = URL.createObjectURL(blob)
         a.download = `erd-${activeSchema}.png`
         a.click()
         setTimeout(() => URL.revokeObjectURL(a.href), 1500)
+        toast.success('Exported diagram as PNG')
       }, 'image/png')
+    } catch (e) {
+      toast.error('Export failed', { description: String(e) })
     } finally {
       exporting = false
     }
