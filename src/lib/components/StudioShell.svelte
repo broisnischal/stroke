@@ -832,7 +832,12 @@
     return result
   })
   
-  let rows = $state([])
+  // $state.raw (not deep-proxied): the browse grid can hold millions of rows and
+  // the canvas draw() reads rows[idx][col] for every visible cell every frame, so
+  // proxy traps would sit directly on the scroll hot path. In-place window
+  // load/evict (fetchWindow / evictFarWindows) and single-cell save already repaint
+  // via dataVersion++ / the editingCell repaint effect, not via proxy reactivity.
+  let rows = $state.raw([])
   let savingCell = $state(false)
   let deletingRows = $state(false)
   let insertingRow = $state(false)
@@ -1001,6 +1006,10 @@
   // newer one when the user pages rapidly.
   let _loadSeq = 0
   // Infinite scroll — accumulated rows across all "load more" fetches.
+  // Kept as deep $state (not .raw): handleLoadMore appends in place with .push()
+  // (O(1) amortised) and DataTable's rowTops/contentHeight $derived reads rows.length
+  // to grow the scroll extent — it needs the proxy's length signal to fire on the
+  // in-place push. .raw would lose that notify without an O(n²) whole-array copy.
   let _infiniteRows = $state(/** @type {any[]} */ ([]))
   let infiniteScroll = $state(loadInfiniteScroll())
 
@@ -1057,7 +1066,7 @@ let rowSearch = $state('')
 
   let sqlText = $state('SELECT 1;')
   let sqlColumns = $state([])
-  let sqlRows = $state([])
+  let sqlRows = $state.raw([]) // raw: always assigned wholesale, read per-cell in draw()
   let sqlQueryMs = $state(0)
   let sqlMessage = $state('')
   let sqlLoading = $state(false)
@@ -1068,7 +1077,7 @@ let rowSearch = $state('')
   let ormCode = $state('')
   let ormMode = $state(/** @type {'drizzle' | 'prisma'} */ ('drizzle'))
   let ormColumns = $state([])
-  let ormRows = $state([])
+  let ormRows = $state.raw([]) // raw: always assigned wholesale, read per-cell in draw()
   let ormQueryMs = $state(0)
   let ormLoading = $state(false)
   let ormError = $state('')
@@ -2446,7 +2455,7 @@ let rowSearch = $state('')
   // treats columns.length === 0 as "no cached data → fetch"). Prefetch only runs
   // on initial open, so this never fights it. Small tabs are left untouched.
   const TAB_ROWS_MRU_MAX = 3
-  const TAB_EVICT_ROW_THRESHOLD = 50_000
+  const TAB_EVICT_ROW_THRESHOLD = 5_000
   let _tabRowsMru = /** @type {string[]} */ ([])
   function evictColdTabRows(activeId) {
     _tabRowsMru = [..._tabRowsMru.filter((x) => x !== activeId), activeId]

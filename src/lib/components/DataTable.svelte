@@ -3105,6 +3105,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // Reused scratch buffer for per-frame vertical grid separators (see draw()) — a
   // module-lifetime array so the scroll hot path does zero allocation for it.
   const _vSepsBuf = /** @type {number[]} */ ([])
+  // Memoized rectangular-range column-name set for draw() — rebuilt only when the
+  // range bounds or the navigable-column set change, not every frame during an
+  // active range-select. The Set is read-only downstream (.has / iteration).
+  let _rangeColNamesCache = /** @type {Set<string> | null} */ (null)
+  let _rangeColNamesC0 = -1
+  let _rangeColNamesC1 = -1
+  let _rangeColNamesCols = /** @type {unknown} */ (null)
   /** @type {ReturnType<typeof createColorReader> | null} */
   let _readColor = null
   /** Canvas font strings measured from the DOM so they exactly match the app's
@@ -3593,10 +3600,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     let rangeColNames = null
     let rangeFirstCol = '', rangeLastCol = '', rangeR0 = -1, rangeR1 = -1
     if (range) {
-      rangeColNames = new Set()
-      for (let ci = range.c0; ci <= range.c1; ci++) {
-        const nm = navigableColumns[ci]?.name
-        if (nm) rangeColNames.add(nm)
+      if (_rangeColNamesCache && _rangeColNamesC0 === range.c0 && _rangeColNamesC1 === range.c1 && _rangeColNamesCols === navigableColumns) {
+        rangeColNames = _rangeColNamesCache
+      } else {
+        rangeColNames = new Set()
+        for (let ci = range.c0; ci <= range.c1; ci++) {
+          const nm = navigableColumns[ci]?.name
+          if (nm) rangeColNames.add(nm)
+        }
+        _rangeColNamesCache = rangeColNames
+        _rangeColNamesC0 = range.c0
+        _rangeColNamesC1 = range.c1
+        _rangeColNamesCols = navigableColumns
       }
       rangeFirstCol = navigableColumns[range.c0]?.name ?? ''
       rangeLastCol = navigableColumns[range.c1]?.name ?? ''
@@ -4600,6 +4615,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (ok) draw()
   })
 
+  // First-paint guard for the layout effect below (see there).
+  let _firstPaintDone = false
   // Layout / sizing effect — resize the backing store when geometry or viewport
   // changes. Tracks ONLY dependencies that can change the canvas dimensions,
   // geometry, or the full set of drawn data. Interaction state (selection, focus,
@@ -4619,13 +4636,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     void _colCache; void expandedRows; void expandedRowHeights; void virtualRelCols; void VIRTUAL_COL_W
     void vexprTotalW; void _vcolFns
     void zoomState.value; void canvasZoom
-    const { ok } = syncCanvasSurface()
+    const { ok, resized } = syncCanvasSurface()
     if (ok) {
-      // Always paint synchronously in this microtask (not only when the backing
-      // store was resized) so a fresh mount / tab switch never composites an
-      // untransformed, unpainted canvas (which would show the dark app background
-      // as a "black" grid). scheduleDraw() still coalesces concurrent updates.
-      draw()
+      // Paint synchronously only on the FIRST mount (so a fresh canvas never
+      // composites as an untransformed, unpainted "black" grid) and whenever the
+      // backing store was actually resized (assigning canvas.width/height clears
+      // it — without a sync repaint the grid would blank for a frame). Every other
+      // structural change leaves the last frame's pixels intact, so the
+      // rAF-coalesced scheduleDraw() below is enough and the previously
+      // unconditional synchronous draw() (which double-painted every update) is
+      // skipped.
+      if (!_firstPaintDone || resized) draw()
+      _firstPaintDone = true
       scheduleDraw()
     }
   })
