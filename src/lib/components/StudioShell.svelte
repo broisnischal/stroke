@@ -4923,6 +4923,14 @@ let rowSearch = $state('')
 />
 <div class="flex min-h-0 flex-1 overflow-hidden">
   {#if connection}
+    <!-- Activity rail + sidebar behave as one unit: they dock to the same side and
+         hide together on Ctrl+B. The rail stays visible in AI mode so it can be exited. -->
+    <div
+      class="flex min-h-0 shrink-0"
+      class:order-last={sidebarSide === 'right'}
+      class:flex-row-reverse={sidebarSide === 'right'}
+      style={sidebarOpen || aiMode ? '' : 'display:none'}
+    >
     <ActivityBar
       {aiMode}
       {sidebarOpen}
@@ -4942,12 +4950,10 @@ let rowSearch = $state('')
       onopenaimode={() => (aiMode ? exitAiMode() : enterAiMode())}
       onopensettings={() => (showSettingsModal = true)}
     />
-  {/if}
-  {#if sidebarEverOpened}
+    {#if sidebarEverOpened}
     <div
-      class:order-last={sidebarSide === 'right'}
-      style={sidebarOpen && !aiMode && connection ? '' : 'display:none'}
-      inert={!sidebarOpen || aiMode || !connection || undefined}
+      style={sidebarOpen && !aiMode ? '' : 'display:none'}
+      inert={!sidebarOpen || aiMode || undefined}
     >
       <svelte:boundary>
         {#snippet failed(err, reset)}
@@ -5039,6 +5045,8 @@ let rowSearch = $state('')
         }}
       />
       </svelte:boundary>
+    </div>
+    {/if}
     </div>
   {/if}
 
