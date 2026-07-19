@@ -80,7 +80,7 @@
     tableViewMode = $bindable("data"),
     /** How the data view renders the loaded page: canvas grid, JSON document,
      *  one-record-at-a-time form, or copyable text (CSV/TSV/Markdown). */
-    /** @type {'table' | 'json' | 'record' | 'text' | 'chart'} */
+    /** @type {'table' | 'json' | 'record' | 'text' | 'chart' | 'erd'} */
     dataViewMode = $bindable("table"),
     ontogglestructure = () => {},
     /** Whether the structure view is available for the current object (false for views) */
@@ -294,13 +294,14 @@
   const iconBtn =
     "inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30";
 
-  /** @type {Array<{ id: 'table' | 'json' | 'record' | 'text' | 'chart', icon: string, label: string, title?: string }>} */
+  /** @type {Array<{ id: 'table' | 'json' | 'record' | 'text' | 'chart' | 'erd', icon: string, label: string, title?: string }>} */
   const DATA_VIEW_MODES = [
     { id: "table", icon: "table-2", label: "Table view" },
     { id: "json", icon: "braces", label: "JSON view" },
     { id: "record", icon: "layout-list", label: "Record view" },
     { id: "text", icon: "file-text", label: "Text view", title: "Text view — CSV / TSV / Markdown / JSON Lines" },
     { id: "chart", icon: "bar-chart-2", label: "Chart view", title: "Chart view — visualize the loaded rows" },
+    { id: "erd", icon: "git-branch", label: "ERD view", title: "ERD view — this table and its related tables" },
   ];
 
   // ── Searchable-menu item lists ──────────────────────────────────────────
@@ -1176,7 +1177,7 @@
         {#if tableViewMode !== "structure"}
           <DropdownMenu.RadioGroup
             value={dataViewMode}
-            onValueChange={(v) => (dataViewMode = /** @type {'table' | 'json' | 'record' | 'text' | 'chart'} */ (v))}
+            onValueChange={(v) => (dataViewMode = /** @type {'table' | 'json' | 'record' | 'text' | 'chart' | 'erd'} */ (v))}
           >
             {#each DATA_VIEW_MODES as m (m.id)}
               <DropdownMenu.RadioItem value={m.id} disabled={columns.length === 0}>

@@ -425,7 +425,7 @@
   /** @type {'data' | 'structure'} */
   let tableViewMode = $state('data')
   /** How the data view renders loaded rows — sticky per tab via snapshots. */
-  /** @type {'table' | 'json' | 'record' | 'text' | 'chart'} */
+  /** @type {'table' | 'json' | 'record' | 'text' | 'chart' | 'erd'} */
   let dataViewMode = $state(/** @type {any} */ (loadSettings().defaultDataView))
   /** @type {import('$lib/api.js').ColumnStructureRow[] | null} — loaded on demand when switching to structure view */
   let structureColumns = $state(/** @type {any[]} */ ([]))
@@ -5778,6 +5778,18 @@ let rowSearch = $state('')
                 <TableTextView columns={dataViewColumns} rows={dataViewRows} tableName={activeTable} />
               {:else if dataViewMode === 'chart'}
                 <ChartView columns={dataViewColumns} rows={dataViewRows} connectionId={persistConnectionId} />
+              {:else if dataViewMode === 'erd'}
+                <div class="flex min-h-0 min-w-0 flex-1">
+                  {#await import('./EntityRelationPage.svelte')}<TabLoading />{:then { default: EntityRelationPage }}
+                    <EntityRelationPage
+                      schema={activeSchema}
+                      {schemas}
+                      focusTable={activeTable}
+                      onclearfocus={() => openErdTab('')}
+                      onopentable={(s, t) => void openTableTab(s, t)}
+                    />
+                  {/await}
+                </div>
               {/if}
             </svelte:boundary>
             {#if dataViewMode === 'table'}
