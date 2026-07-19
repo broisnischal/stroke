@@ -1,4 +1,5 @@
 <script>
+  import { untrack } from "svelte";
   import { cn } from "$lib/utils.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { EXTENSIONS } from "$lib/plugins/registry.js";
@@ -116,8 +117,11 @@
     ],
   };
 
-  /** null → grid overview; an id → drilled into that extension's detail page. */
-  let selectedId = $state(/** @type {string | null} */ (null));
+  let { initialExtensionId = "" } = $props();
+
+  /** null → grid overview; an id → drilled into that extension's detail page.
+   *  Seeded once from the prop (a fresh instance mounts per detail tab). */
+  let selectedId = $state(/** @type {string | null} */ (untrack(() => initialExtensionId) || null));
   const selected = $derived(selectedId ? (EXTENSIONS.find((e) => e.id === selectedId) ?? null) : null);
   const enabledCount = $derived(EXTENSIONS.filter((e) => pluginEnabledIn($pluginState, e.id)).length);
 
