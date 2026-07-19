@@ -504,7 +504,7 @@
   </div>
 {/snippet}
 
-<Tooltip.Provider delayDuration={250} disableHoverableContent>
+<Tooltip.Provider delayDuration={450} disableHoverableContent>
 <div class="flex min-h-0 flex-1 overflow-hidden">
   <QueryHistoryPanel
     bind:visible={queryHistoryVisible}

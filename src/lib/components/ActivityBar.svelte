@@ -67,7 +67,7 @@
     side === 'left' ? 'border-r border-border' : 'border-l border-border',
   )}
 >
-  <Tooltip.Provider delayDuration={600} skipDelayDuration={0} disableHoverableContent>
+  <Tooltip.Provider delayDuration={450} skipDelayDuration={0} disableHoverableContent>
     {#each items as item (item.id)}
       {@const active = activeId === item.id}
       <div class="relative">
