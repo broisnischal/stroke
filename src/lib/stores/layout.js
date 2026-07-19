@@ -2,12 +2,13 @@ const STORAGE_KEY = 'stroke:layout'
 
 /** @typedef {'normal' | 'json'} InspectorView */
 
-/** @typedef {{ navSidebarWidth: number, navSidebarOpen: boolean, navSidebarSide: 'left' | 'right', inspectorWidth: number, inspectorView: InspectorView, sqlEditorHeight: number, logPanelWidth: number, logPanelOpen: boolean, aiSidebarWidth: number, aiSidebarOpen: boolean, statusBarVisible: boolean, tabBarVisible: boolean, tableToolbarVisible: boolean }} PanelLayout */
+/** @typedef {{ navSidebarWidth: number, navSidebarOpen: boolean, navSidebarSide: 'left' | 'right', navSidebarPanel: string, inspectorWidth: number, inspectorView: InspectorView, sqlEditorHeight: number, logPanelWidth: number, logPanelOpen: boolean, aiSidebarWidth: number, aiSidebarOpen: boolean, statusBarVisible: boolean, tabBarVisible: boolean, tableToolbarVisible: boolean }} PanelLayout */
 
 export const DEFAULT_LAYOUT = {
   navSidebarWidth: 220,
   navSidebarOpen: true,
   navSidebarSide: /** @type {'left' | 'right'} */ ('left'),
+  navSidebarPanel: 'tables',
   inspectorWidth: 300,
   inspectorView: 'normal',
   sqlEditorHeight: 320,
@@ -78,6 +79,7 @@ export function loadLayout() {
     if (!Number.isFinite(aiSidebarWidth)) aiSidebarWidth = DEFAULT_LAYOUT.aiSidebarWidth
     const inspectorView = parsed.inspectorView === 'json' ? 'json' : 'normal'
     const navSidebarSide = parsed.navSidebarSide === 'right' ? 'right' : 'left'
+    const navSidebarPanel = typeof parsed.navSidebarPanel === 'string' ? parsed.navSidebarPanel : 'tables'
     const navSidebarOpen = parsed.navSidebarOpen !== false
     const logPanelOpen = parsed.logPanelOpen === true
     const aiSidebarOpen = parsed.aiSidebarOpen === true
@@ -88,6 +90,7 @@ export function loadLayout() {
       navSidebarWidth: clampNavSidebarWidth(navSidebarWidth),
       navSidebarOpen,
       navSidebarSide,
+      navSidebarPanel,
       inspectorWidth: clampInspectorWidth(inspectorWidth),
       inspectorView,
       sqlEditorHeight: clampSqlEditorHeight(sqlEditorHeight),
