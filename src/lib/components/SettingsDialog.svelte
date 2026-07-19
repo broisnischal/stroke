@@ -727,7 +727,7 @@
       <Select.Root type="single" value={settings.font} onValueChange={(v) => { if (v) setFont(/** @type {import('$lib/stores/settings.js').FontId} */ (v)); }}>
         <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Font family">
           <span class="flex min-w-0 items-center gap-2">
-            <span class="shrink-0 text-[11px] font-semibold text-muted-foreground/70" style="font-family: {FONT_PRESETS[settings.font]?.sans}" aria-hidden="true">Aa</span>
+            <span class="flex size-5 shrink-0 items-center justify-center rounded border border-border/40 bg-muted/30 text-[11px] font-semibold text-foreground/70" style="font-family: {FONT_PRESETS[settings.font]?.sans}" aria-hidden="true">Aa</span>
             <span class="truncate font-medium">{FONT_PRESETS[settings.font]?.label ?? "Geist"}</span>
           </span>
         </Select.Trigger>
