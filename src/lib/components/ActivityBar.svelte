@@ -9,6 +9,7 @@
     aiMode = false,
     sidebarOpen = false,
     activeKind = '',
+    dbType = '',
     side = 'left',
     ontoggletables = () => {},
     onopensearch = () => {},
@@ -21,7 +22,7 @@
     onopensettings = () => {},
   } = $props()
 
-  const ITEMS = [
+  const ALL_ITEMS = [
     { id: 'tables', icon: 'table-2', label: 'Tables', on: () => ontoggletables() },
     { id: 'search', icon: 'search', label: 'Search', on: () => onopensearch() },
     { id: 'schema', icon: 'database', label: 'Schema', on: () => onopenschema() },
@@ -31,14 +32,24 @@
     { id: 'ai', icon: 'sparkles', label: 'AI chat', on: () => onopenaimode() },
   ]
 
-  /** @param {string} id */
-  function isActive(id) {
-    if (id === 'ai') return aiMode
-    if (aiMode) return false
-    if (id === 'tables') return sidebarOpen
-    if (id === 'erd') return activeKind === 'erd' || activeKind === 'reltree'
-    return activeKind === id
-  }
+  // Dialect gating — hide surfaces the engine can't support so we don't offer dead icons.
+  const SUPPORTED = /** @type {Record<string, (t: string) => boolean>} */ ({
+    security: (t) => t === 'postgres' || t === 'cockroachdb',
+    insights: (t) => t === 'postgres' || t === 'mysql' || t === 'mariadb',
+  })
+  const items = $derived(ALL_ITEMS.filter((it) => !SUPPORTED[it.id] || SUPPORTED[it.id](dbType)))
+
+  // Exactly one active item: the active main tab wins; Tables only reflects the
+  // sidebar when no other rail-mapped surface is the active tab.
+  const activeId = $derived.by(() => {
+    if (aiMode) return 'ai'
+    if (activeKind === 'erd' || activeKind === 'reltree') return 'erd'
+    if (activeKind === 'security') return 'security'
+    if (activeKind === 'insights') return 'insights'
+    if (activeKind === 'search') return 'search'
+    if (activeKind === 'schema') return 'schema'
+    return sidebarOpen ? 'tables' : ''
+  })
 </script>
 
 <nav
@@ -48,8 +59,8 @@
     side === 'left' ? 'border-r border-border' : 'border-l border-border',
   )}
 >
-  {#each ITEMS as item (item.id)}
-    {@const active = isActive(item.id)}
+  {#each items as item (item.id)}
+    {@const active = activeId === item.id}
     <div class="relative">
       {#if active}
         <span
