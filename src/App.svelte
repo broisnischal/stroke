@@ -7,11 +7,15 @@
   import { loadSettings, applySettings, installZoomShortcuts } from '$lib/stores/settings.js'
   import { installPlatformClass } from '$lib/platform.js'
   import { initTooltips } from '$lib/tip.js'
+  import { installClipboardBridge } from '$lib/clipboard.js'
 
   onMount(async () => {
     installPlatformClass()
     applySettings(loadSettings())
     installZoomShortcuts()
+    // Route clipboard through Tauri's native plugin so copy works in the WKWebview
+    // (navigator.clipboard is denied there, incl. Monaco's internal copy).
+    void installClipboardBridge()
     // Upgrade native `title` tooltips app-wide to the styled pill.
     const teardownTooltips = initTooltips()
     void teardownTooltips
