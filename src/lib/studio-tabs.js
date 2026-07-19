@@ -1,4 +1,4 @@
-/** @typedef {'table' | 'sql' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'extensions' | 'backup' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search' | 'notebook' | 'schema-timeline' | 'data-diff' | 'license'} StudioTabKind */
+/** @typedef {'table' | 'sql' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'extensions' | 'backup' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search' | 'notebook' | 'schema-timeline' | 'data-diff' | 'insights' | 'license'} StudioTabKind */
 
 import { loadDefaultPageSize } from '$lib/table-query.js'
 
@@ -204,6 +204,20 @@ export function createLogsTab() {
     title: 'Activity Log',
     state: null,
   })
+}
+
+export function createInsightsTab() {
+  return /** @type {StudioTab} */ ({
+    id: nextTabId(),
+    kind: 'insights',
+    title: 'Instance Insights',
+    state: null,
+  })
+}
+
+/** @param {StudioTab[]} tabs */
+export function findInsightsTab(tabs) {
+  return tabs.find((t) => t.kind === 'insights') ?? null
 }
 
 export function createExtensionsTab() {

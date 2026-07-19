@@ -585,6 +585,43 @@ pub async fn pg_get_column_stats(
     crate::db::get_column_stats(state, schema, table, column).await
 }
 
+// ── Instance Insights (PostgreSQL + MySQL monitoring dashboard) ────────────────
+
+#[tauri::command]
+pub async fn instance_version(
+    state: State<'_, DbState>,
+) -> Result<crate::db::InstanceVersion, String> {
+    crate::db::instance_version(state).await
+}
+
+#[tauri::command]
+pub async fn instance_activity(
+    state: State<'_, DbState>,
+) -> Result<crate::db::InstanceActivity, String> {
+    crate::db::instance_activity(state).await
+}
+
+#[tauri::command]
+pub async fn instance_state(
+    state: State<'_, DbState>,
+) -> Result<crate::db::InstanceState, String> {
+    crate::db::instance_state(state).await
+}
+
+#[tauri::command]
+pub async fn instance_config(
+    state: State<'_, DbState>,
+) -> Result<Vec<crate::db::ConfigSetting>, String> {
+    crate::db::instance_config(state).await
+}
+
+#[tauri::command]
+pub async fn instance_replication(
+    state: State<'_, DbState>,
+) -> Result<crate::db::InstanceReplication, String> {
+    crate::db::instance_replication(state).await
+}
+
 #[tauri::command]
 pub async fn pg_execute_sql(state: State<'_, DbState>, sql: String) -> Result<SqlResult, String> {
     execute_sql(state, sql).await

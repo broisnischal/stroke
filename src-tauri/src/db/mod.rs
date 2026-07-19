@@ -5,6 +5,7 @@ pub mod d1;
 pub mod duckdb;
 pub mod mssql;
 pub mod explain;
+pub mod insights;
 pub mod libsql;
 pub mod live;
 pub mod mysql;
@@ -20,6 +21,10 @@ pub use connection::{
     ActiveConnection, AnyConnectionConfig, ConnectionConfig, D1Config, DbState, LibSqlConfig, SqliteConfig,
 };
 pub use explain::{explain_pg, explain_mysql, explain_sqlite, ExplainResult};
+pub use insights::{
+    instance_activity, instance_config, instance_replication, instance_state, instance_version,
+    ConfigSetting, InstanceActivity, InstanceReplication, InstanceState, InstanceVersion,
+};
 pub use ssh_tunnel::TunnelState;
 pub use query::{
     delete_table_row, delete_table_rows, execute_ddl, execute_sql, execute_sql_multi, execute_sql_on_conn,

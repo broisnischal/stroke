@@ -570,6 +570,13 @@ export async function executeSqlMulti(sql) {
   return await inv('pg_execute_sql_multi', { sql })
 }
 
+// ── Instance Insights (PostgreSQL + MySQL monitoring) ───────────────────────
+export async function instanceVersion() { return await inv('instance_version') }
+export async function instanceActivity() { return await inv('instance_activity') }
+export async function instanceState() { return await inv('instance_state') }
+export async function instanceConfig() { return await inv('instance_config') }
+export async function instanceReplication() { return await inv('instance_replication') }
+
 /**
  * Run EXPLAIN ANALYZE on `sql` and return the parsed plan tree.
  * Works for PostgreSQL (JSON plan), MySQL (FORMAT=JSON), and SQLite (QUERY PLAN).
