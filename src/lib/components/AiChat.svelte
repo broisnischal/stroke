@@ -2368,7 +2368,7 @@
       <Icon class="size-3 text-primary transition-opacity duration-200 {thinkingVisible ? 'opacity-100' : 'opacity-40'}" />
     </div>
     <span
-      class="text-ui-xs text-muted-foreground/70 transition-opacity duration-200 {thinkingVisible ? 'opacity-100' : 'opacity-0'}"
+      class="agent-think-label text-ui-xs text-muted-foreground/70 transition-opacity duration-200 {thinkingVisible ? 'opacity-100' : 'opacity-0'}"
       >{loadingText}</span
     >
     <span class="flex gap-1" aria-hidden="true">
@@ -4340,6 +4340,39 @@
 {/if}
 
 <style>
+  /* Thinking-indicator style — driven by data-thinking-style on <html> (see settings.js applySettings). */
+  :global([data-thinking-style="shimmer"]) .agent-think-label {
+    background: linear-gradient(
+      90deg,
+      var(--muted-foreground) 0%,
+      var(--muted-foreground) 35%,
+      var(--foreground) 50%,
+      var(--muted-foreground) 65%,
+      var(--muted-foreground) 100%
+    );
+    background-size: 220% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+    animation: agent-think-shimmer 1.8s linear infinite;
+  }
+  :global([data-thinking-style="pulse"]) .agent-think-label {
+    animation: agent-think-pulse 1.4s ease-in-out infinite;
+  }
+  /* static → no animation (default text) */
+  @keyframes agent-think-shimmer {
+    0% { background-position: 220% 0; }
+    100% { background-position: -20% 0; }
+  }
+  @keyframes agent-think-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    :global([data-thinking-style]) .agent-think-label { animation: none; }
+  }
+
   :global(.prose-ai) {
     font-family:
       "Inter Variable",
@@ -4348,7 +4381,7 @@
       BlinkMacSystemFont,
       ui-sans-serif,
       sans-serif;
-    font-size: 0.9375rem;
+    font-size: var(--ai-chat-font-size, 0.9375rem);
     line-height: 1.65;
     color: var(--foreground);
     word-break: break-word;
@@ -4423,7 +4456,7 @@
     background: none;
     border: none;
     padding: 0;
-    font-size: 0.825rem;
+    font-size: var(--ai-code-font-size, 0.825rem);
   }
   :global(.prose-ai pre.shiki) {
     margin: 0.5rem 0;
@@ -4434,7 +4467,7 @@
   }
   :global(.prose-ai pre.shiki code) {
     font-family: ui-monospace, "Geist Mono", monospace;
-    font-size: 0.825rem;
+    font-size: var(--ai-code-font-size, 0.825rem);
     line-height: 1.6;
   }
   :global(.prose-ai-loading pre.shiki) {
