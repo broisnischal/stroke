@@ -14,7 +14,7 @@ const STORAGE_KEY = 'stroke:settings'
 /** @typedef {'geist' | 'serif' | 'apple' | 'inter' | 'mono' | 'fira' | 'plex' | 'space' | 'source'} FontId */
 /** @typedef {'regular' | 'light' | 'bold'} IconStyleId */
 /** @typedef {'lucide' | 'hugeicons' | 'phosphor'} IconSetId */
-/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean, defaultDataView: string, paginationMode: string, maxQueryHistory: number, connectTimeoutMs: number, socketTimeoutMs: number, maxAllowedPacket: number, sessionTimezone: string, vimMode: boolean, nullSortOrder: string }} AppSettings */
+/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean, defaultDataView: string, paginationMode: string, maxQueryHistory: number, connectTimeoutMs: number, socketTimeoutMs: number, maxAllowedPacket: number, sessionTimezone: string, vimMode: boolean, nullSortOrder: string, agentChatFontSize: number, agentCodeFontSize: number, agentThinkingStyle: string }} AppSettings */
 
 /** UI zoom scale (font + layout). 1 = 100%. */
 export const ZOOM_STEPS = [0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.25, 1.5]
@@ -180,6 +180,19 @@ export const PAGINATION_MODE_IDS = /** @type {const} */ (['offset', 'cursor', 'k
 /** Null placement for quick-query ORDER BY (dialects that support it). */
 export const NULL_SORT_IDS = /** @type {const} */ (['unset', 'first', 'last'])
 export const DEFAULT_NULL_SORT = 'unset'
+
+/** Selectable font sizes (px) for the AI/agent chat + code blocks. */
+export const AGENT_FONT_SIZES = /** @type {const} */ ([12, 13, 14, 15, 16])
+export const DEFAULT_AGENT_CHAT_FONT = 14
+export const DEFAULT_AGENT_CODE_FONT = 13
+/** Thinking-indicator visual styles for the agent chat. */
+export const THINKING_STYLES = /** @type {const} */ ([
+  { id: 'shimmer', label: 'Shimmer' },
+  { id: 'pulse', label: 'Pulse' },
+  { id: 'static', label: 'Static' },
+])
+export const THINKING_STYLE_IDS = THINKING_STYLES.map((s) => s.id)
+export const DEFAULT_THINKING_STYLE = 'shimmer'
 export const DEFAULT_PAGINATION_MODE = 'offset'
 export const DEFAULT_MAX_QUERY_HISTORY = 100
 export const DEFAULT_CONNECT_TIMEOUT_MS = 60000
@@ -219,6 +232,9 @@ export const DEFAULT_SETTINGS = {
   sessionTimezone: DEFAULT_SESSION_TIMEZONE,
   vimMode: false,
   nullSortOrder: DEFAULT_NULL_SORT,
+  agentChatFontSize: DEFAULT_AGENT_CHAT_FONT,
+  agentCodeFontSize: DEFAULT_AGENT_CODE_FONT,
+  agentThinkingStyle: DEFAULT_THINKING_STYLE,
 }
 
 /** Reactive app font id (synced by applySettings). */
@@ -334,7 +350,10 @@ export function loadSettings() {
         : DEFAULT_SESSION_TIMEZONE
     const vimMode = parsed.vimMode === true
     const nullSortOrder = NULL_SORT_IDS.includes(parsed.nullSortOrder) ? parsed.nullSortOrder : DEFAULT_NULL_SORT
-    _settingsCache = { theme, zoom, font, iconStyle, iconSet, tableStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply, defaultDataView, paginationMode, maxQueryHistory, connectTimeoutMs, socketTimeoutMs, maxAllowedPacket, sessionTimezone, vimMode, nullSortOrder }
+    const agentChatFontSize = AGENT_FONT_SIZES.includes(parsed.agentChatFontSize) ? parsed.agentChatFontSize : DEFAULT_AGENT_CHAT_FONT
+    const agentCodeFontSize = AGENT_FONT_SIZES.includes(parsed.agentCodeFontSize) ? parsed.agentCodeFontSize : DEFAULT_AGENT_CODE_FONT
+    const agentThinkingStyle = THINKING_STYLE_IDS.includes(parsed.agentThinkingStyle) ? parsed.agentThinkingStyle : DEFAULT_THINKING_STYLE
+    _settingsCache = { theme, zoom, font, iconStyle, iconSet, tableStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply, defaultDataView, paginationMode, maxQueryHistory, connectTimeoutMs, socketTimeoutMs, maxAllowedPacket, sessionTimezone, vimMode, nullSortOrder, agentChatFontSize, agentCodeFontSize, agentThinkingStyle }
     return { ..._settingsCache }
   } catch {
     return { ...DEFAULT_SETTINGS }
@@ -409,6 +428,14 @@ export function applySettings(settings) {
   setStyleVar(root, '--font-sans', FONT_PRESETS[font].sans)
   setStyleVar(root, '--font-mono', FONT_PRESETS[font].mono)
   setStore(appFont, font)
+
+  // AI/agent chat typography — consumed by the chat surfaces (AiMarkdown, code blocks).
+  const chatFont = AGENT_FONT_SIZES.includes(settings.agentChatFontSize) ? settings.agentChatFontSize : DEFAULT_AGENT_CHAT_FONT
+  const codeFont = AGENT_FONT_SIZES.includes(settings.agentCodeFontSize) ? settings.agentCodeFontSize : DEFAULT_AGENT_CODE_FONT
+  setStyleVar(root, '--ai-chat-font-size', `${chatFont}px`)
+  setStyleVar(root, '--ai-code-font-size', `${codeFont}px`)
+  const thinkStyle = THINKING_STYLE_IDS.includes(settings.agentThinkingStyle) ? settings.agentThinkingStyle : DEFAULT_THINKING_STYLE
+  if (root.getAttribute('data-thinking-style') !== thinkStyle) root.setAttribute('data-thinking-style', thinkStyle)
 
   // Icon weight — a single [data-icon-style] attribute drives the global Lucide
   // stroke-width rule in app.css. No per-icon or per-component changes needed.

@@ -28,7 +28,10 @@
     DEFAULT_SOCKET_TIMEOUT_MS,
     DEFAULT_MAX_ALLOWED_PACKET,
     DEFAULT_SESSION_TIMEZONE,
+    AGENT_FONT_SIZES,
+    THINKING_STYLES,
   } from "$lib/stores/settings.js";
+  import { aiProfiles, activeProfileId, setActiveProfile } from "$lib/stores/ai-settings.js";
   import PenTool from "@lucide/svelte/icons/pen-tool";
   import LucideSearch from "@lucide/svelte/icons/search";
   import LucideSparkles from "@lucide/svelte/icons/sparkles";
@@ -59,6 +62,7 @@
     { id: 'general',      label: 'General',      icon: 'sliders-horizontal' },
     { id: 'database',     label: 'Database',     icon: 'database' },
     { id: 'appearance',   label: 'Appearance',   icon: 'sparkles' },
+    { id: 'agent',        label: 'Agent',        icon: 'bot' },
     { id: 'integrations', label: 'Integrations', icon: 'blocks' },
     { id: 'about',        label: 'About',        icon: 'info' },
   ];
@@ -217,6 +221,32 @@
     if (v) settings = updateSettings({ nullSortOrder: v });
   }
 
+  // ── Agent (AI chat) settings ─────────────────────────────────────────────
+  /** @param {string} v */
+  function setAgentChatFont(v) {
+    const n = Number(v);
+    if (Number.isFinite(n)) settings = updateSettings({ agentChatFontSize: n });
+  }
+  /** @param {string} v */
+  function setAgentCodeFont(v) {
+    const n = Number(v);
+    if (Number.isFinite(n)) settings = updateSettings({ agentCodeFontSize: n });
+  }
+  /** @param {string} v */
+  function setAgentThinking(v) {
+    if (v) settings = updateSettings({ agentThinkingStyle: v });
+  }
+  const thinkingStyleOption = $derived(
+    THINKING_STYLES.find((s) => s.id === settings.agentThinkingStyle) ?? THINKING_STYLES[0],
+  );
+  const activeModelProfile = $derived(
+    $aiProfiles.find((p) => p.id === $activeProfileId) ?? $aiProfiles[0],
+  );
+  /** @param {string} v */
+  function setModelProfile(v) {
+    if (v) setActiveProfile(v);
+  }
+
   /** @type {boolean | null} */
   let launchAtLogin = $state(null);
 
@@ -305,6 +335,7 @@
                 {@render generalContent()}
                 {@render databaseContent()}
                 {@render appearanceContent()}
+                {@render agentContent()}
                 {@render integrationsContent()}
                 {@render aboutContent()}
               {:else if category === 'general'}
@@ -313,6 +344,8 @@
                 {@render databaseContent()}
               {:else if category === 'appearance'}
                 {@render appearanceContent()}
+              {:else if category === 'agent'}
+                {@render agentContent()}
               {:else if category === 'integrations'}
                 {@render integrationsContent()}
               {:else}
@@ -527,6 +560,99 @@
   {/if}
   {#if show($t('settings.timezone'), $t('settings.timezone.desc'))}
     {@render textRow($t('settings.timezone'), $t('settings.timezone.desc'), 'sessionTimezone', DEFAULT_SESSION_TIMEZONE)}
+  {/if}
+{/snippet}
+
+{#snippet agentContent()}
+  {@render secLabel('Model')}
+  {#if show('Default model', 'The AI model used for chat, SQL suggestions and agent actions')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-[13px] font-medium text-foreground">Default model</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Used for chat, SQL suggestions and agent actions.</p>
+      </div>
+      {#if $aiProfiles.length}
+        <Select.Root type="single" value={$activeProfileId} onValueChange={setModelProfile}>
+          <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Default model">
+            <span class="truncate font-medium">{activeModelProfile?.name ?? 'Select model'}</span>
+          </Select.Trigger>
+          <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
+            {#each $aiProfiles as p (p.id)}
+              <Select.Item value={p.id} label={p.name} class="py-1.5 pr-8 pl-2">
+                <span class="text-xs font-medium">{p.name}</span>
+              </Select.Item>
+            {/each}
+          </Select.Content>
+        </Select.Root>
+      {:else}
+        <span class="text-[12px] text-muted-foreground">No models configured</span>
+      {/if}
+    </div>
+  {/if}
+  {#if show('Models & API keys', 'Add providers, models and API keys')}
+    {@render actionRow('Models & API keys', 'Add providers, choose models and store API keys for OpenAI, Google Gemini, Anthropic and OpenRouter.', 'Manage', () => { open = false; onopenmodelconfiguration(); })}
+  {/if}
+
+  {@render secLabel('Chat UI')}
+  {#if show('Chat font size', 'Text size for AI chat messages')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-[13px] font-medium text-foreground">Chat font size</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Text size for AI chat messages.</p>
+      </div>
+      <Select.Root type="single" value={String(settings.agentChatFontSize)} onValueChange={setAgentChatFont}>
+        <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Chat font size">
+          <span class="truncate font-medium">{settings.agentChatFontSize}px</span>
+        </Select.Trigger>
+        <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
+          {#each AGENT_FONT_SIZES as s (s)}
+            <Select.Item value={String(s)} label={`${s}px`} class="py-1.5 pr-8 pl-2">
+              <span class="text-xs font-medium">{s}px</span>
+            </Select.Item>
+          {/each}
+        </Select.Content>
+      </Select.Root>
+    </div>
+  {/if}
+  {#if show('Code font size', 'Text size for code blocks in chat')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-[13px] font-medium text-foreground">Code font size</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Text size for code blocks in chat.</p>
+      </div>
+      <Select.Root type="single" value={String(settings.agentCodeFontSize)} onValueChange={setAgentCodeFont}>
+        <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Code font size">
+          <span class="truncate font-medium">{settings.agentCodeFontSize}px</span>
+        </Select.Trigger>
+        <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
+          {#each AGENT_FONT_SIZES as s (s)}
+            <Select.Item value={String(s)} label={`${s}px`} class="py-1.5 pr-8 pl-2">
+              <span class="text-xs font-medium">{s}px</span>
+            </Select.Item>
+          {/each}
+        </Select.Content>
+      </Select.Root>
+    </div>
+  {/if}
+  {#if show('Thinking style', 'How the thinking indicator animates while the model responds')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-[13px] font-medium text-foreground">Thinking style</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">How the thinking indicator animates while the model responds.</p>
+      </div>
+      <Select.Root type="single" value={settings.agentThinkingStyle} onValueChange={setAgentThinking}>
+        <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Thinking style">
+          <span class="truncate font-medium">{thinkingStyleOption.label}</span>
+        </Select.Trigger>
+        <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
+          {#each THINKING_STYLES as o (o.id)}
+            <Select.Item value={o.id} label={o.label} class="py-1.5 pr-8 pl-2">
+              <span class="text-xs font-medium">{o.label}</span>
+            </Select.Item>
+          {/each}
+        </Select.Content>
+      </Select.Root>
+    </div>
   {/if}
 {/snippet}
 
