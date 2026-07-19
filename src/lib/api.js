@@ -499,6 +499,8 @@ export async function getTableRows(schema, table, limit, offset, query = {}) {
       // Default true. Pass false to skip COUNT(*) (returns total = -1) and paint
       // rows immediately; fetch the total separately with countTableRows().
       includeCount: query.includeCount !== false,
+      // Null placement for the ORDER BY (dialects that support it); unset → default.
+      nullsOrder: (() => { try { const v = loadSettings().nullSortOrder; return v === 'first' || v === 'last' ? v : null } catch { return null } })(),
     })
     recordQuery({ sql: r?.sql, durationMs: r?.queryMs ?? Math.round(performance.now() - _t0), schema, table, source: 'browse', success: true })
     return r

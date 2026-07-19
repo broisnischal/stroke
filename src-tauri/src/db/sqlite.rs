@@ -194,6 +194,8 @@ pub async fn get_table_rows(
     sort_column: Option<String>,
     sort_direction: Option<String>,
     filters: Option<Vec<crate::db::RowFilter>>,
+    // Null placement ("first"/"last"); None keeps the historical NULLS LAST default.
+    nulls_order: Option<String>,
 ) -> Result<TableRows, String> {
     let t0 = Instant::now();
     let tq = format!("\"{}\"", table.replace('"', "\"\""));
@@ -299,11 +301,16 @@ pub async fn get_table_rows(
         out
     };
 
-    // ORDER BY — NULLS LAST ensures consistent ordering when column has NULLs
+    // ORDER BY — an explicit NULLS clause keeps ordering consistent when a column
+    // has NULLs; defaults to NULLS LAST when the caller doesn't specify placement.
     let order_clause = if let Some(col) = sort_column {
         let dir = sort_direction.as_deref().unwrap_or("asc").to_ascii_uppercase();
         let dir = if dir == "DESC" { "DESC" } else { "ASC" };
-        format!("ORDER BY \"{}\" {dir} NULLS LAST", col.replace('"', "\"\""))
+        let nulls = match nulls_order.as_deref() {
+            Some("first") => "NULLS FIRST",
+            _ => "NULLS LAST",
+        };
+        format!("ORDER BY \"{}\" {dir} {nulls}", col.replace('"', "\"\""))
     } else {
         String::new()
     };

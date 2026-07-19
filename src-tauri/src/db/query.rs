@@ -1032,7 +1032,15 @@ fn build_order_by(
     sort_column: Option<&str>,
     sort_direction: Option<&str>,
     sorts: &[SortSpec],
+    // Null placement for every ORDER BY term. `Some("first")`/`Some("last")` map
+    // to the explicit clause; anything else (including None/"unset") keeps the
+    // historical NULLS LAST default so existing behavior doesn't regress.
+    nulls_order: Option<&str>,
 ) -> Result<String, String> {
+    let nulls = match nulls_order {
+        Some("first") => "NULLS FIRST",
+        _ => "NULLS LAST",
+    };
     // Multi-column sort (shift-click headers) takes precedence when present;
     // each key becomes an ORDER BY term in priority order.
     if !sorts.is_empty() {
@@ -1049,7 +1057,7 @@ fn build_order_by(
                 "asc" => "ASC",
                 other => return Err(format!("Invalid sort direction: {other}")),
             };
-            parts.push(format!("{col} {dir} NULLS LAST"));
+            parts.push(format!("{col} {dir} {nulls}"));
         }
         return Ok(if parts.is_empty() {
             String::new()
@@ -1068,7 +1076,7 @@ fn build_order_by(
         "asc" => "ASC",
         other => return Err(format!("Invalid sort direction: {other}")),
     };
-    Ok(format!(" ORDER BY {col} {dir} NULLS LAST"))
+    Ok(format!(" ORDER BY {col} {dir} {nulls}"))
 }
 
 const MAX_PAGE_LIMIT: i64 = 5_000_000;
@@ -1103,6 +1111,10 @@ pub async fn get_table_rows(
     // absent = classic OFFSET). The caller only sends this when it's safe
     // (single-column key, ordering by that key), else it falls back to offset.
     keyset: Option<KeysetCursor>,
+    // Null placement for the ORDER BY ("first"/"last", or None to keep the
+    // NULLS LAST default). Applied on the dialects that support explicit null
+    // placement (Postgres, SQLite, D1/libSQL); ignored by MySQL/ClickHouse/etc.
+    nulls_order: Option<String>,
 ) -> Result<TableRows, String> {
     if limit > MAX_PAGE_LIMIT {
         return Err(format!("Limit {limit} exceeds the maximum of {MAX_PAGE_LIMIT} rows per page"));
@@ -1117,14 +1129,14 @@ pub async fn get_table_rows(
     match require_conn(&state)? {
         ActiveConnection::Sqlite(pool) => {
             return super::sqlite::get_table_rows(
-                &pool, &table, limit, offset, search, sort_column, sort_direction, filters,
+                &pool, &table, limit, offset, search, sort_column, sort_direction, filters, nulls_order,
             ).await;
         }
         ActiveConnection::D1(cfg) => {
-            return get_table_rows_remote(&cfg, &table, limit, offset, search, sort_column, sort_direction, filters).await;
+            return get_table_rows_remote(&cfg, &table, limit, offset, search, sort_column, sort_direction, filters, nulls_order).await;
         }
         ActiveConnection::LibSql(cfg) => {
-            return get_table_rows_remote(&cfg, &table, limit, offset, search, sort_column, sort_direction, filters).await;
+            return get_table_rows_remote(&cfg, &table, limit, offset, search, sort_column, sort_direction, filters, nulls_order).await;
         }
         ActiveConnection::Mysql(pool) => {
             return super::mysql::get_table_rows(
@@ -1168,6 +1180,7 @@ pub async fn get_table_rows(
         sort_column.as_deref(),
         sort_direction.as_deref(),
         &sorts,
+        nulls_order.as_deref(),
     )?;
     let table_ref = format!(r#""{schema}"."{table}""#);
 
@@ -2530,6 +2543,7 @@ async fn get_table_rows_remote<C: RemoteSqlite>(
     sort_column: Option<String>,
     sort_direction: Option<String>,
     filters: Option<Vec<RowFilter>>,
+    nulls_order: Option<String>,
 ) -> Result<TableRows, String> {
     let t0 = std::time::Instant::now();
     let tq = format!("\"{}\"", table.replace('"', "\"\""));
@@ -2642,7 +2656,12 @@ async fn get_table_rows_remote<C: RemoteSqlite>(
 
     let order_clause = if let Some(col) = sort_column {
         let dir = match sort_direction.as_deref() { Some("desc") => "DESC", _ => "ASC" };
-        format!("ORDER BY \"{}\" {dir}", col.replace('"', "\"\""))
+        // D1/libSQL are SQLite, so explicit null placement is honored here too.
+        let nulls = match nulls_order.as_deref() {
+            Some("first") => "NULLS FIRST",
+            _ => "NULLS LAST",
+        };
+        format!("ORDER BY \"{}\" {dir} {nulls}", col.replace('"', "\"\""))
     } else { String::new() };
 
     // ── Phase 2: COUNT + rows — run concurrently ─────────────────────────────

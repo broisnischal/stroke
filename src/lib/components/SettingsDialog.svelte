@@ -206,6 +206,17 @@
     if (v) settings = updateSettings({ paginationMode: v });
   }
 
+  const NULL_SORT_OPTIONS = [
+    { id: 'unset', label: 'Unset' },
+    { id: 'first', label: 'Nulls First' },
+    { id: 'last', label: 'Nulls Last' },
+  ];
+  const nullSortOption = $derived(NULL_SORT_OPTIONS.find((o) => o.id === settings.nullSortOrder) ?? NULL_SORT_OPTIONS[0]);
+  /** @param {string} v */
+  function setNullSort(v) {
+    if (v) settings = updateSettings({ nullSortOrder: v });
+  }
+
   /** @type {boolean | null} */
   let launchAtLogin = $state(null);
 
@@ -470,6 +481,28 @@
                   <span class="text-xs font-medium">{o.label}</span>
                 </span>
               {/snippet}
+            </Select.Item>
+          {/each}
+        </Select.Content>
+      </Select.Root>
+    </div>
+  {/if}
+
+  {@render secLabel('Result Ordering')}
+  {#if show('Null sort order', 'Applied to quick-query ordering on databases that support explicit null placement')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-[13px] font-medium text-foreground">Null sort order</p>
+        <p class="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">Applied to quick-query ordering on databases that support explicit null placement.</p>
+      </div>
+      <Select.Root type="single" value={settings.nullSortOrder} onValueChange={setNullSort}>
+        <Select.Trigger size="sm" class={themeSelectTrigger} aria-label="Null sort order">
+          <span class="truncate font-medium">{nullSortOption.label}</span>
+        </Select.Trigger>
+        <Select.Content class="z-[100] w-[var(--bits-select-anchor-width)] min-w-[13rem] p-1" sideOffset={6}>
+          {#each NULL_SORT_OPTIONS as o (o.id)}
+            <Select.Item value={o.id} label={o.label} class="py-1.5 pr-8 pl-2">
+              <span class="text-xs font-medium">{o.label}</span>
             </Select.Item>
           {/each}
         </Select.Content>

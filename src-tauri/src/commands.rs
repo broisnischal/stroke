@@ -528,6 +528,9 @@ pub async fn pg_get_table_rows(
     sorts: Option<Vec<crate::db::SortSpec>>,
     // Keyset (cursor) pagination anchor; absent = classic OFFSET.
     keyset: Option<crate::db::KeysetCursor>,
+    // Null placement for ORDER BY ("first"/"last"); absent keeps NULLS LAST.
+    // Applied on dialects with explicit null placement (Postgres, SQLite, D1/libSQL).
+    nulls_order: Option<String>,
 ) -> Result<TableRows, String> {
     get_table_rows(
         state,
@@ -544,6 +547,7 @@ pub async fn pg_get_table_rows(
         include_count.unwrap_or(true),
         sorts.unwrap_or_default(),
         keyset,
+        nulls_order,
     )
     .await
 }
