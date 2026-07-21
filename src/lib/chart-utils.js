@@ -211,6 +211,15 @@ function aggDataMap(rows, xi, yi) {
   return map
 }
 
+/** Aggregate rows into {name,value} pairs by x-key (summing y), sorted by value
+ * descending. Used by part-to-whole charts (pie/donut/funnel) so duplicate
+ * categories collapse into one slice instead of rendering repeated slices. */
+function aggPairs(rows, xi, yi) {
+  return Object.entries(aggDataMap(rows, xi, yi))
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value)
+}
+
 /** Detect if an array of strings looks like timestamps */
 /** Exported so chart previews in ChartsPage can re-apply the formatter after JSON round-trip */
 export function isTimestampAxis(xData) {
@@ -285,7 +294,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
 
   // ── Pie ────────────────────────────────────────────────────────────────────
   if (type === 'pie') {
-    const data = rows.map((r) => ({ name: String(r[xi] ?? ''), value: Number(r[yi]) || 0 }))
+    const data = aggPairs(rows, xi, yi)
     return {
       ...base,
       grid: undefined,
@@ -297,7 +306,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
 
   // ── Donut ──────────────────────────────────────────────────────────────────
   if (type === 'donut') {
-    const data = rows.map((r) => ({ name: String(r[xi] ?? ''), value: Number(r[yi]) || 0 }))
+    const data = aggPairs(rows, xi, yi)
     return {
       ...base,
       grid: undefined,
@@ -309,9 +318,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
 
   // ── Funnel ─────────────────────────────────────────────────────────────────
   if (type === 'funnel') {
-    const data = rows
-      .map((r) => ({ name: String(r[xi] ?? ''), value: Number(r[yi]) || 0 }))
-      .sort((a, b) => b.value - a.value)
+    const data = aggPairs(rows, xi, yi)
     return {
       ...base,
       grid: undefined,

@@ -21,6 +21,8 @@
   let ro = null
   /** @type {IntersectionObserver | null} */
   let io = null
+  /** @type {number} rAF handle for coalescing resize bursts */
+  let resizeRaf = 0
 
   $effect(() => {
     const container = el
@@ -65,13 +67,21 @@
     ro = new ResizeObserver((entries) => {
       const { width, height } = entries[0].contentRect
       if (width === 0 || height === 0) return
-      if (!chart) void tryInit()
-      else chart.resize()
+      if (!chart) { void tryInit(); return }
+      // Coalesce resize bursts (pane drags / window resizes fire many events per
+      // frame) into a single chart.resize() per animation frame — a synchronous
+      // resize on every event janks the whole UI.
+      if (resizeRaf) return
+      resizeRaf = requestAnimationFrame(() => {
+        resizeRaf = 0
+        if (!disposed) chart?.resize()
+      })
     })
     ro.observe(container)
 
     return () => {
       disposed = true
+      if (resizeRaf) { cancelAnimationFrame(resizeRaf); resizeRaf = 0 }
       io?.disconnect(); io = null
       ro?.disconnect(); ro = null
       chart?.dispose(); chart = null

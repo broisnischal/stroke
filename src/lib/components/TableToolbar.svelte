@@ -616,14 +616,14 @@
       <button
         type="button"
         class={cn(
-          "absolute right-1 inline-flex size-5 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+          "absolute right-1 inline-flex size-5 items-center justify-center rounded-md text-muted-foreground/50 transition-[background-color,color,opacity] duration-150 ease-out hover:bg-muted/70 hover:text-foreground",
           localSearch ? "opacity-100" : "pointer-events-none opacity-0",
         )}
         aria-label="Clear search"
         tabindex={localSearch ? 0 : -1}
         onclick={clearSearch}
       >
-        <Icon name="x" class="size-3" />
+        <Icon name="x" class="size-3.5" />
       </button>
     </div>
 
