@@ -211,27 +211,42 @@
     'flushdb', 'flushall', 'move', 'copy', 'restore',
   ])
 
+  /** Format a flattened reply the way redis-cli prints it. */
+  function formatReply(/** @type {string[]} */ values) {
+    if (values.length === 0) return ['(nil)']
+    if (values.length === 1) {
+      const v = values[0]
+      if (v === 'OK' || v === 'PONG' || v === 'QUEUED') return [v]
+      if (/^-?\d+$/.test(v)) return [`(integer) ${v}`]
+      return [`"${v}"`]
+    }
+    const width = String(values.length).length
+    return values.map((v, i) => `${String(i + 1).padStart(width)}) "${v}"`)
+  }
+
   async function runCommand() {
     const cmd = consoleInput.trim()
     if (!cmd) return
     history.push(cmd)
     historyIdx = history.length
     consoleInput = ''
-    const entry = /** @type {{ cmd: string, lines: string[], isError: boolean }} */ ({
-      cmd,
-      lines: [],
-      isError: false,
-    })
-    scrollback = [...scrollback, entry]
+    // `clear` clears the console, like a terminal (not sent to Redis).
+    if (/^clear$/i.test(cmd)) { scrollback = []; return }
+    // Push a pending entry, then replace it IMMUTABLY once the reply lands —
+    // mutating the pushed object in place bypasses the $state proxy so the reply
+    // never renders.
+    const idx = scrollback.length
+    scrollback = [...scrollback, { cmd, lines: [], isError: false, pending: true }]
     await scrollConsoleToBottom()
+    let lines /** @type {string[]} */
+    let isError = false
     try {
-      const values = replyValues(await executeSql(cmd))
-      entry.lines = values.length ? values.map((v, i) => `${i + 1}) ${v}`) : ['(nil)']
+      lines = formatReply(replyValues(await executeSql(cmd)))
     } catch (e) {
-      entry.isError = true
-      entry.lines = [String(e)]
+      isError = true
+      lines = [`(error) ${String(e).replace(/^Error:\s*/, '')}`]
     }
-    scrollback = [...scrollback]
+    scrollback = scrollback.map((e, k) => (k === idx ? { cmd: e.cmd, lines, isError, pending: false } : e))
     await scrollConsoleToBottom()
     // A mutating command may have changed the keyspace / current value — refresh.
     const verb = cmd.split(/\s+/)[0]?.toLowerCase() ?? ''
