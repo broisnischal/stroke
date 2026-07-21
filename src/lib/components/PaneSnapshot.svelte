@@ -1,5 +1,6 @@
 <script>
   import DataTable from './DataTable.svelte'
+  import ChartView from './ChartView.svelte'
   import ShikiBlock from './ShikiBlock.svelte'
   import Table2 from '@lucide/svelte/icons/table-2'
   import PanelLeft from '@lucide/svelte/icons/panel-left'
@@ -51,6 +52,13 @@
     <div class="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center">
       <Table2 class="size-6 text-muted-foreground/30" />
       <p class="font-mono text-ui-xs text-muted-foreground/60">Focus this pane to load {tableState.table}</p>
+    </div>
+  {:else if tableState.dataViewMode === 'chart'}
+    <!-- Preserve the chart view when this pane is demoted from focused to a
+         snapshot (mirrors the live guard in StudioShell) — without this the
+         pane reverted to the plain grid. -->
+    <div class="flex min-h-0 min-w-0 flex-1">
+      <ChartView columns={tableState.columns} rows={tableState.rows} />
     </div>
   {:else}
     <div class="flex min-h-0 min-w-0 flex-1">
