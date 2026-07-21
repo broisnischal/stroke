@@ -223,6 +223,59 @@ function aggPairs(rows, xi, yi) {
     .sort((a, b) => b.value - a.value)
 }
 
+/** Max/min over an array WITHOUT spreading — `Math.max(...arr)` throws
+ * `RangeError: Maximum call stack size exceeded` once the array passes ~100k
+ * elements, which is exactly the large-result case we must survive. */
+function arrMax(arr, seed = -Infinity) {
+  let m = seed
+  for (let i = 0; i < arr.length; i++) { const v = arr[i]; if (v > m) m = v }
+  return m
+}
+function arrMin(arr, seed = Infinity) {
+  let m = seed
+  for (let i = 0; i < arr.length; i++) { const v = arr[i]; if (v < m) m = v }
+  return m
+}
+
+/** Build a strict, acyclic hierarchy (array with a single root) for tree /
+ * dendrogram from a name column (xi) and parent column (gi). The old inline
+ * build let one node attach to many parents (shared object refs) and had no
+ * cycle guard, so A→B / B→A crashed ECharts. Here each node is deduped by name,
+ * attached to at most one parent, self/cycle edges are skipped, and the node
+ * count is capped. */
+function buildTreeData(rows, xi, gi) {
+  const MAX_NODES = 2000
+  /** @type {Map<string, { name: string, children: any[] }>} */
+  const nodeMap = new Map()
+  for (const r of rows) {
+    const name = String(r[xi] ?? '')
+    if (!name || nodeMap.has(name)) continue
+    nodeMap.set(name, { name, children: [] })
+    if (nodeMap.size >= MAX_NODES) break
+  }
+  const parentOf = new Map()
+  const attached = new Set()
+  if (gi >= 0) {
+    for (const r of rows) {
+      const name = String(r[xi] ?? '')
+      const parent = String(r[gi] ?? '')
+      if (!name || !parent || parent === name || attached.has(name)) continue
+      if (!nodeMap.has(name) || !nodeMap.has(parent)) continue
+      // Cycle guard: parent must not already be a descendant of `name`.
+      let cur = parent, cyclic = false
+      while (cur !== undefined) { if (cur === name) { cyclic = true; break } cur = parentOf.get(cur) }
+      if (cyclic) continue
+      nodeMap.get(parent).children.push(nodeMap.get(name))
+      parentOf.set(name, parent)
+      attached.add(name)
+    }
+  }
+  const roots = [...nodeMap.values()].filter((n) => !attached.has(n.name))
+  if (roots.length === 0) return [{ name: 'Root', children: [...nodeMap.values()] }]
+  if (roots.length === 1) return roots
+  return [{ name: 'Root', children: roots }]
+}
+
 /** Detect if an array of strings looks like timestamps */
 /** Exported so chart previews in ChartsPage can re-apply the formatter after JSON round-trip */
 export function isTimestampAxis(xData) {
@@ -346,7 +399,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
   // ── Gauge ──────────────────────────────────────────────────────────────────
   if (type === 'gauge') {
     const val = rows.length > 0 ? Number(rows[0][yi]) || 0 : 0
-    const maxVal = Math.max(...rows.map((r) => Number(r[yi]) || 0), 100)
+    const maxVal = Math.max(arrMax(rows.map((r) => Number(r[yi]) || 0)), 100)
     return {
       ...base,
       grid: undefined,
@@ -398,7 +451,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
       Number(r[yi]) || 0,
       zi >= 0 ? Number(r[zi]) || 0 : 10,
     ])
-    const maxZ = Math.max(...data.map((d) => d[2]), 1)
+    const maxZ = Math.max(arrMax(data.map((d) => d[2])), 1)
     return {
       ...base,
       xAxis: { type: 'value', name: xCol, nameLocation: 'middle', nameGap: 28, nameTextStyle: base.textStyle, ...axisStyle(isDark) },
@@ -456,7 +509,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
       },
       xAxis: { type: 'category', data: xVals, splitArea: { show: true }, ...axisStyle(isDark) },
       yAxis: { type: 'category', data: yVals, splitArea: { show: true }, ...axisStyle(isDark) },
-      visualMap: { min: 0, max: Math.max(...data.map((d) => d[2])), calculable: true, orient: 'horizontal', left: 'center', bottom: 4, textStyle: base.textStyle },
+      visualMap: { min: 0, max: arrMax(data.map((d) => d[2])), calculable: true, orient: 'horizontal', left: 'center', bottom: 4, textStyle: base.textStyle },
       series: [{ type: 'heatmap', data, label: { show: data.length < 100 } }],
       grid: { ...base.grid, bottom: 70 },
       splitLine: { lineStyle: { color: lineColor } },
@@ -470,10 +523,10 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
     const numCols = columns.filter((c) => c.name !== xCol && colType(c) === 'number')
     const indicators = numCols.map((c) => ({
       name: c.name,
-      max: Math.max(...rows.map((r) => {
+      max: Math.max(arrMax(rows.map((r) => {
         const i = columns.findIndex((cc) => cc.name === c.name)
         return Number(r[i]) || 0
-      }), 1) * 1.2,
+      })), 1) * 1.2,
     }))
     const seriesData = rows.map((r) => ({
       name: String(r[xi] ?? ''),
@@ -506,8 +559,8 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
     const vals = rows.map((r) => Number(r[yi >= 0 ? yi : xi]) || 0).filter(isFinite)
     const bins = 20
     if (vals.length === 0) return { ...base, series: [] }
-    const min = Math.min(...vals)
-    const max = Math.max(...vals)
+    const min = arrMin(vals)
+    const max = arrMax(vals)
     const step = (max - min) / bins || 1
     const counts = Array(bins).fill(0)
     vals.forEach((v) => {
@@ -559,7 +612,10 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
 
   // ── Word Cloud ─────────────────────────────────────────────────────────────
   if (type === 'word-cloud') {
-    const data = rows.map((r) => ({ name: String(r[xi] ?? ''), value: Number(r[yi]) || 1 }))
+    // Aggregate duplicate words (like pie/donut) and cap to the top 150 by
+    // weight — the layout is a synchronous canvas packer, so thousands of words
+    // would freeze the UI.
+    const data = aggPairs(rows, xi, yi).slice(0, 150).map((d) => ({ name: d.name, value: d.value || 1 }))
     return {
       ...base,
       grid: undefined,
@@ -574,7 +630,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
         rotationRange: [-45, 45],
         rotationStep: 45,
         drawOutOfBound: false,
-        textStyle: { color: PALETTE.concat(PALETTE) },
+        textStyle: { color: (p) => PALETTE[(p?.dataIndex ?? 0) % PALETTE.length] },
         emphasis: { textStyle: { fontWeight: 'bold' } },
         data,
       }],
@@ -622,27 +678,9 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
 
   // ── Tree ───────────────────────────────────────────────────────────────────
   if (type === 'tree') {
-    // Build adjacency list from xCol=name, groupCol=parent
-    /** @type {Map<string, { name: string, children: any[] }>} */
-    const nodeMap = new Map()
-    rows.forEach((r) => {
-      const name = String(r[xi] ?? '')
-      if (!nodeMap.has(name)) nodeMap.set(name, { name, children: [] })
-    })
-    /** @type {any[]} */
-    const roots = []
-    rows.forEach((r) => {
-      const name = String(r[xi] ?? '')
-      const parent = gi >= 0 ? String(r[gi] ?? '') : ''
-      const node = nodeMap.get(name)
-      if (!node) return
-      if (parent && nodeMap.has(parent)) {
-        nodeMap.get(parent)?.children.push(node)
-      } else {
-        roots.push(node)
-      }
-    })
-    const treeData = roots.length > 0 ? roots : [{ name: 'Root', children: [...nodeMap.values()] }]
+    // xCol=name, groupCol=parent. buildTreeData dedups, enforces a single parent
+    // per node, guards cycles, and caps node count.
+    const treeData = buildTreeData(rows, xi, gi)
     return {
       ...base,
       grid: undefined,
@@ -668,27 +706,9 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
 
   // ── Dendrogram ─────────────────────────────────────────────────────────────
   if (type === 'dendrogram') {
-    // Same adjacency-list data as 'tree', rendered as a radial dendrogram
-    /** @type {Map<string, { name: string, children: any[] }>} */
-    const nodeMap = new Map()
-    rows.forEach((r) => {
-      const name = String(r[xi] ?? '')
-      if (!nodeMap.has(name)) nodeMap.set(name, { name, children: [] })
-    })
-    /** @type {any[]} */
-    const roots = []
-    rows.forEach((r) => {
-      const name = String(r[xi] ?? '')
-      const parent = gi >= 0 ? String(r[gi] ?? '') : ''
-      const node = nodeMap.get(name)
-      if (!node) return
-      if (parent && nodeMap.has(parent)) {
-        nodeMap.get(parent)?.children.push(node)
-      } else {
-        roots.push(node)
-      }
-    })
-    const treeData = roots.length > 0 ? roots : [{ name: 'Root', children: [...nodeMap.values()] }]
+    // Same hierarchy as 'tree' (deduped, single-parent, cycle-guarded, capped),
+    // rendered as a radial dendrogram.
+    const treeData = buildTreeData(rows, xi, gi)
     return {
       ...base,
       grid: undefined,
@@ -877,17 +897,35 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
 
   // ── Sankey ─────────────────────────────────────────────────────────────────
   if (type === 'sankey') {
+    // Sankey needs a distinct Target (group) column; without it every link's
+    // target is empty and nothing renders.
+    if (gi < 0) return {}
+    // Aggregate duplicate source→target pairs. The old code emitted one link PER
+    // ROW, so N rows produced N overlapping links (8k rows → 8k links = the
+    // unreadable hairball). Sum values per unique pair instead.
+    const linkMap = new Map()
+    for (const r of rows) {
+      const s = String(r[xi] ?? ''), t = String(r[gi] ?? '')
+      if (!s || !t || s === t) continue
+      const key = s + '␟' + t
+      linkMap.set(key, (linkMap.get(key) ?? 0) + (Number(r[yi]) || 1))
+    }
+    // Strongest links first; drop the reverse edge of any 2-cycle (ECharts sankey
+    // requires a DAG and throws on cycles) and cap the count so it stays legible.
+    const seenPair = new Set()
+    const links = [...linkMap.entries()]
+      .map(([key, value]) => { const [source, target] = key.split('␟'); return { source, target, value } })
+      .sort((a, b) => b.value - a.value)
+      .filter((l) => {
+        if (seenPair.has(l.target + '␟' + l.source)) return false
+        seenPair.add(l.source + '␟' + l.target)
+        return true
+      })
+      .slice(0, 200)
     const nodeSet = new Set()
-    rows.forEach((r) => {
-      nodeSet.add(String(r[xi] ?? ''))
-      if (gi >= 0) nodeSet.add(String(r[gi] ?? ''))
-    })
+    for (const l of links) { nodeSet.add(l.source); nodeSet.add(l.target) }
     const nodes = [...nodeSet].map((name) => ({ name }))
-    const links = rows.map((r) => ({
-      source: String(r[xi] ?? ''),
-      target: gi >= 0 ? String(r[gi] ?? '') : '',
-      value: Number(r[yi]) || 1,
-    })).filter((l) => l.source && l.target && l.source !== l.target)
+    if (nodes.length === 0) return {}
     return {
       ...base,
       grid: undefined,
@@ -1011,7 +1049,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
     const categories = rows.map((r) => String(r[xi] ?? ''))
     const actuals = rows.map((r) => Number(r[yi]) || 0)
     const targets = rows.map((r) => zi >= 0 ? Number(r[zi]) || 0 : 0)
-    const maxVal = Math.max(...actuals, ...targets, 1)
+    const maxVal = Math.max(arrMax(actuals), arrMax(targets), 1)
     return {
       ...base,
       tooltip: { ...base.tooltip, trigger: 'axis', axisPointer: { type: 'shadow' } },
