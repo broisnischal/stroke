@@ -316,8 +316,20 @@ function categoryXAxis(isDark, xData) {
 }
 
 /** @param {boolean} isDark */
+/** Compact axis-tick number: 1_200_000 → "1.2M", 3500 → "3.5k". Keeps long value
+ * axes (counts, sizes) readable instead of printing raw 7-digit numbers. */
+function fmtCompact(v) {
+  if (typeof v !== 'number' || !isFinite(v)) return String(v)
+  const a = Math.abs(v)
+  if (a >= 1e9) return (v / 1e9).toFixed(a % 1e9 === 0 ? 0 : 1) + 'B'
+  if (a >= 1e6) return (v / 1e6).toFixed(a % 1e6 === 0 ? 0 : 1) + 'M'
+  if (a >= 1e3) return (v / 1e3).toFixed(a % 1e3 === 0 ? 0 : 1) + 'k'
+  return String(v)
+}
+
 function valueYAxis(isDark) {
-  return { type: 'value', ...axisStyle(isDark) }
+  const s = axisStyle(isDark)
+  return { type: 'value', ...s, axisLabel: { ...s.axisLabel, formatter: fmtCompact } }
 }
 
 /**
@@ -1082,13 +1094,24 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
   if (type === 'bar-horizontal') {
     const xData = sortedXData(rows, xi)
     const dataMap = aggDataMap(rows, xi, yi)
+    // Categories are on the Y axis; past ~25 they overflow vertically. Add a
+    // vertical scroll/zoom (slider on the right + wheel/drag inside) so many
+    // categories stay usable instead of cramming — the generic dataZoom only
+    // covers the horizontal x-axis and this branch never reaches it.
+    const needsZoom = xData.length > 25
+    const dataZoom = needsZoom ? [
+      { type: 'slider', yAxisIndex: 0, right: 4, width: 12, start: 0, end: (25 / xData.length) * 100,
+        borderColor: 'transparent', fillerColor: 'rgba(127,127,127,0.14)', handleStyle: { color: PALETTE[0] }, textStyle: { color: 'transparent' } },
+      { type: 'inside', yAxisIndex: 0 },
+    ] : []
     return {
       ...base,
       tooltip: { ...base.tooltip, trigger: 'axis', axisPointer: { type: 'shadow' } },
       xAxis: { type: 'value', ...axisStyle(isDark) },
       yAxis: { type: 'category', data: xData, ...axisStyle(isDark) },
       series: [{ type: 'bar', name: yCol, data: xData.map((x) => dataMap[x] ?? null), itemStyle: { color: PALETTE[0], borderRadius: [0, 3, 3, 0] }, barMaxWidth: 32 }],
-      grid: { ...base.grid, left: 16 },
+      grid: { ...base.grid, left: 16, right: needsZoom ? 28 : base.grid.right },
+      ...(needsZoom ? { dataZoom } : {}),
       ...titleOpt(title ?? ''),
     }
   }
@@ -1269,7 +1292,9 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
 
   return {
     ...base,
-    tooltip: { ...base.tooltip, trigger: 'axis' },
+    // Bars get a 'shadow' pointer (highlights the whole hovered category column —
+    // the expected bar-chart hover); line/area keep the thin crosshair line.
+    tooltip: { ...base.tooltip, trigger: 'axis', axisPointer: { type: type === 'bar' ? 'shadow' : 'line' } },
     legend: series.length > 1 ? { textStyle: base.textStyle, top: 4 } : undefined,
     xAxis: categoryXAxis(isDark, xData),
     yAxis: valueYAxis(isDark),
