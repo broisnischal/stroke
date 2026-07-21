@@ -81,7 +81,12 @@ export function createColorReader(probe) {
 // Memoize results — (colour, alpha) combos are few and stable, but this runs in
 // the per-frame draw loop, so caching avoids repeated regex parsing on scroll.
 /** @type {Map<string, string>} */
+// color -> (alpha -> rgba string). Nested so the cache hit path (the common
+// case, called several times per visible cell every frame) does no allocation —
+// the old `color + "@" + a` key minted a throwaway string on every call, which
+// was hundreds of thousands of transient strings per second during scroll.
 const _alphaCache = new Map();
+let _alphaEntries = 0;
 
 /**
  * Apply an alpha to a CSS colour string regardless of notation (rgb/rgba/hsl,
@@ -89,15 +94,18 @@ const _alphaCache = new Map();
  * the canvas understands.
  */
 export function withAlpha(/** @type {string} */ color, /** @type {number} */ a) {
-  const key = color + "@" + a;
-  const cached = _alphaCache.get(key);
-  if (cached !== undefined) return cached;
+  let byAlpha = _alphaCache.get(color);
+  if (byAlpha !== undefined) {
+    const hit = byAlpha.get(a);
+    if (hit !== undefined) return hit;
+  }
   const out = _computeAlpha(color, a);
-  // Theme colors produce a few dozen stable keys, but extension-computed
-  // per-cell tints (heatmap etc.) can mint a distinct alpha per value — cap
-  // the cache so a long session over big result sets can't grow it forever.
-  if (_alphaCache.size >= 4096) _alphaCache.clear();
-  _alphaCache.set(key, out);
+  // Extension-computed per-cell tints (heatmap etc.) can mint a distinct alpha
+  // per value, so cap total entries to bound growth over long sessions.
+  if (_alphaEntries >= 4096) { _alphaCache.clear(); _alphaEntries = 0; byAlpha = undefined; }
+  if (byAlpha === undefined) { byAlpha = new Map(); _alphaCache.set(color, byAlpha); }
+  byAlpha.set(a, out);
+  _alphaEntries++;
   return out;
 }
 
