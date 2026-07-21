@@ -66,7 +66,7 @@
       label: 'Cloud',
       drivers: [
         { id: 'd1',       label: 'Cloudflare D1', desc: 'Edge SQLite via REST API' },
-        { id: 'bigquery', label: 'BigQuery',       desc: 'Google analytics warehouse', soon: true },
+        { id: 'redis',    label: 'Redis',          desc: 'In-memory key-value store', soon: true },
       ],
     },
     {
@@ -88,7 +88,7 @@
   const DRIVER_ORDER = [
     'postgres', 'sqlite', 'mysql', 'mariadb', 'cockroachdb', 'mssql',
     'clickhouse', 'duckdb', 'sqlite-memory', 'duckdb-memory', 'libsql',
-    'neon', 'supabase', 'planetscale', 'prisma', 'd1', 'bigquery',
+    'neon', 'supabase', 'planetscale', 'prisma', 'd1', 'redis',
   ]
   const driverItems = DRIVER_ORDER
     .map((id) => ALL_DRIVERS.find((d) => d.id === id))
@@ -135,7 +135,7 @@
     supabase:        'text-emerald-500/80',
     planetscale:     'text-foreground/70',
     prisma:          'text-indigo-500/80',
-    bigquery:        'text-blue-500/80',
+    redis:           'text-red-500/80',
   }
   function engineTint(id) { return ENGINE_TINT[id] ?? 'text-muted-foreground/60' }
 
@@ -540,7 +540,7 @@
     finally { if (myOp === opId) connecting = null }
   }
 
-  const canTest = $derived(dbType !== 'bigquery')
+  const canTest = $derived(dbType !== 'redis')
   const isBusy  = $derived(testing || !!connecting)
 
   // ── Dirty tracking + close guard ─────────────────────────────────────────────
@@ -1388,7 +1388,7 @@
                 {/if}
                 <Button
                   class={cn('px-5', connecting === (editingId ?? '__new__') && 'disabled:opacity-90')}
-                  disabled={isBusy || dbType === 'bigquery'}
+                  disabled={isBusy || dbType === 'redis'}
                   onclick={handleConnect}
                 >
                   {#if connecting === (editingId ?? '__new__')}

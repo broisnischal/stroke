@@ -3,7 +3,7 @@
   import EChartPanel from './EChartPanel.svelte'
   import {
     buildOption, guessXCol, guessYCol, isChartable,
-    colType, getRequiredAxes, CHART_CATALOG,
+    colType, getRequiredAxes, CHART_CATALOG, resolveChartAccent,
   } from '$lib/chart-utils.js'
   import { isCurrentThemeDark } from '$lib/stores/settings.js'
   import { chartGroups, saveChart, addGroup } from '$lib/stores/saved-charts.js'
@@ -169,25 +169,13 @@
   // the current theme. Reading the CSS var directly yields oklch(), which
   // zrender/ECharts can't parse — painting it onto a probe element lets the
   // browser normalise it to rgb(). Recomputes when the theme (isDark) flips.
+  // Re-resolve the theme accent whenever the theme flips. buildOption also
+  // resolves it internally as a default, so non-ChartView chart paths (AI charts,
+  // previews) stay themed too; passing it here keeps the table/SQL charts
+  // reactive to live theme changes.
   const accent = $derived.by(() => {
     void isDark // dep: re-resolve on theme change
-    if (typeof document === 'undefined') return ''
-    try {
-      const probe = document.createElement('span')
-      probe.style.cssText = 'position:absolute;visibility:hidden;color:var(--primary)'
-      document.body.appendChild(probe)
-      const c = getComputedStyle(probe).color
-      // Guard: if --primary didn't resolve to a real color (unset, or an
-      // unparseable value in this engine), `color` inherits the foreground — which
-      // in the dark theme is white and would paint every bar white. Detect that by
-      // comparing against a control that deliberately inherits, and fall back to
-      // the default palette (return '') when they match.
-      probe.style.color = 'var(--stroke-nonexistent-token)'
-      const fg = getComputedStyle(probe).color
-      probe.remove()
-      if (!c || c === fg) return ''
-      return c
-    } catch { return '' }
+    return resolveChartAccent()
   })
 
   // Canvas renderer is faster for data charts; SVG only for small previews.
