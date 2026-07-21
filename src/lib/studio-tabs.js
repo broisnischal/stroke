@@ -1,4 +1,4 @@
-/** @typedef {'table' | 'sql' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'extensions' | 'extension-detail' | 'backup' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search' | 'notebook' | 'schema-timeline' | 'data-diff' | 'insights' | 'objects' | 'license'} StudioTabKind */
+/** @typedef {'table' | 'sql' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'extensions' | 'extension-detail' | 'backup' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search' | 'notebook' | 'schema-timeline' | 'data-diff' | 'insights' | 'objects' | 'redis' | 'license'} StudioTabKind */
 
 import { loadDefaultPageSize } from '$lib/table-query.js'
 
@@ -234,6 +234,20 @@ export function findObjectsTab(tabs) {
   return tabs.find((t) => t.kind === 'objects') ?? null
 }
 
+export function createRedisTab() {
+  return /** @type {StudioTab} */ ({
+    id: nextTabId(),
+    kind: 'redis',
+    title: 'Redis',
+    state: null,
+  })
+}
+
+/** @param {StudioTab[]} tabs */
+export function findRedisTab(tabs) {
+  return tabs.find((t) => t.kind === 'redis') ?? null
+}
+
 export function createExtensionsTab() {
   return /** @type {StudioTab} */ ({
     id: nextTabId(),
@@ -426,6 +440,7 @@ export function tabDisplayTitle(tab) {
   if (tab.kind === 'schema-timeline') return 'Schema Timeline'
   if (tab.kind === 'data-diff') return 'Data Diff'
   if (tab.kind === 'objects') return 'Database Objects'
+  if (tab.kind === 'redis') return 'Redis'
   if (tab.kind === 'extension-detail') return tab.title || tab.state?.extensionId || 'Extension'
   if (tab.kind === 'license') return 'Stroke Pro'
   return tab.title
