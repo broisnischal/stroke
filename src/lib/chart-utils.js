@@ -108,6 +108,26 @@ const DEFAULT_PALETTE = [
   '#a855f7', '#14b8a6', '#f97316', '#ec4899', '#64748b',
 ]
 
+/** Resolve the app's --primary token to a concrete rgb() string, so every chart
+ * across the app (table view, SQL editor, AI charts, previews) follows the active
+ * theme without each caller wiring it up. Returns '' when --primary can't resolve
+ * to a real color (unset, or unparseable in this engine — in which case the probe
+ * inherits the foreground and would paint bars white); callers then fall back to
+ * DEFAULT_PALETTE. */
+export function resolveChartAccent() {
+  if (typeof document === 'undefined') return ''
+  try {
+    const probe = document.createElement('span')
+    probe.style.cssText = 'position:absolute;visibility:hidden;color:var(--primary)'
+    document.body.appendChild(probe)
+    const c = getComputedStyle(probe).color
+    probe.style.color = 'var(--stroke-nonexistent-token)'
+    const fg = getComputedStyle(probe).color
+    probe.remove()
+    return (!c || c === fg) ? '' : c
+  } catch { return '' }
+}
+
 /**
  * Format a raw value for tooltip display.
  * Timestamps from PostgreSQL arrive as strings like "2025-12-01 00:00:00 UTC"
@@ -353,7 +373,8 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
   // --primary token by the caller) so single-series charts and accents follow
   // the current theme; the rest of the categorical ramp stays fixed. Shadows the
   // module DEFAULT_PALETTE so every PALETTE[...] reference below is themed.
-  const PALETTE = accent ? [accent, ...DEFAULT_PALETTE.slice(1)] : DEFAULT_PALETTE
+  const accentColor = accent || resolveChartAccent()
+  const PALETTE = accentColor ? [accentColor, ...DEFAULT_PALETTE.slice(1)] : DEFAULT_PALETTE
   const n = rows.length
   const base = { ...baseOption(isDark, noTitle), ...animOpts(n) }
   const xi = columns.findIndex((c) => c.name === xCol)
