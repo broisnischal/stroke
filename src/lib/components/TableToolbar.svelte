@@ -623,7 +623,7 @@
         tabindex={localSearch ? 0 : -1}
         onclick={clearSearch}
       >
-        <Icon name="x" class="size-3.5" />
+        <Icon name="x" class="size-3" />
       </button>
     </div>
 
