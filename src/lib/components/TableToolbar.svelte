@@ -25,8 +25,7 @@
     ANY_COLUMN,
   } from "$lib/table-query.js";
   import { untrack } from "svelte";
-  import { fly } from "svelte/transition";
-  import { cubicOut } from "svelte/easing";
+  import { fade } from "svelte/transition";
   import { formatCompactCount } from "$lib/table-list.js";
   import { describeTableView } from "$lib/stores/table-views.js";
 
@@ -596,7 +595,7 @@
         <div
           class="absolute inset-y-0 right-8 flex items-center gap-px"
           onmousedown={(e) => e.preventDefault()}
-          transition:fly={{ x: 8, duration: 160, easing: cubicOut }}
+          transition:fade={{ duration: 120 }}
         >
           {#each SEARCH_OPTS as opt (opt.key)}
             <button
