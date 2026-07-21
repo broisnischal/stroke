@@ -14,6 +14,7 @@
     testClickhouseConnection, connectClickhouse,
     testDuckdbConnection,   connectDuckdb,
     testMssqlConnection,    connectMssql,
+    testRedis,              connectRedis,
     cloudflareListAccounts, cloudflareListD1Databases,
   } from '$lib/api.js'
   import {
@@ -66,7 +67,7 @@
       label: 'Cloud',
       drivers: [
         { id: 'd1',       label: 'Cloudflare D1', desc: 'Edge SQLite via REST API' },
-        { id: 'redis',    label: 'Redis',          desc: 'In-memory key-value store', soon: true },
+        { id: 'redis',    label: 'Redis',          desc: 'In-memory key-value store' },
       ],
     },
     {
@@ -216,6 +217,7 @@
     duckdb:          { name: 'Local DuckDB',      filePath: '' },
     'duckdb-memory': { name: 'In-Memory DuckDB',  filePath: ':memory:' },
     mssql:           { name: 'Local SQL Server',  host: '127.0.0.1', port: '1433', database: 'master', user: 'sa' },
+    redis:           { name: 'Local Redis',       host: '127.0.0.1', port: '6379', database: '0' },
   }
 
   const activeDriver = $derived(ALL_DRIVERS.find(d => d.id === dbType) ?? ALL_DRIVERS[0])
@@ -282,6 +284,8 @@
       return { type: 'duckdb', name, filePath: dbType === 'duckdb-memory' ? ':memory:' : filePath }
     if (dbType === 'mssql')
       return { type: 'mssql', name, host, port, database, user, password, encrypt, trustCert }
+    if (dbType === 'redis')
+      return { type: 'redis', name, host, port, password, db: database, tls: secure }
     return { type: 'postgres', name, host, port, database, user, password, ssl, ...(ssh && { ssh }) }
   }
 
@@ -292,9 +296,12 @@
         ? `${conn.type}-memory`
         : (conn.type ?? 'postgres')
       dbType = t; name = conn.name ?? ''; host = conn.host ?? '127.0.0.1'
-      port = String(conn.port ?? 5432); database = conn.database ?? 'postgres'
+      port = String(conn.port ?? 5432)
+      // Redis persists its logical DB index / TLS under `db` / `tls`; the form
+      // reuses the shared `database` / `secure` fields, so map them back on edit.
+      database = conn.database ?? (conn.db != null ? String(conn.db) : 'postgres')
       user = conn.user ?? 'postgres'; password = conn.password ?? ''; ssl = Boolean(conn.ssl)
-      secure = Boolean(conn.secure)
+      secure = Boolean(conn.secure ?? conn.tls)
       encrypt = Boolean(conn.encrypt); trustCert = conn.trustCert ?? true
       filePath = conn.filePath ?? ''; accountId = conn.accountId ?? ''
       databaseId = conn.databaseId ?? ''; apiToken = conn.apiToken ?? ''
@@ -385,6 +392,7 @@
     if (id === 'cockroachdb') port = '26257'
     if (id === 'clickhouse') port = secure ? '8443' : '8123'
     if (id === 'mssql') port = '1433'
+    if (id === 'redis') port = '6379'
     if (id === 'sqlite-memory' || id === 'duckdb-memory') filePath = ':memory:'
     if (id === 'duckdb') filePath = ''
     error = ''; testOk = false; connectionUri = ''; uriHint = ''
@@ -462,6 +470,7 @@
       else if (conn.type === 'clickhouse') await connectClickhouse(conn)
       else if (conn.type === 'duckdb') await connectDuckdb(conn)
       else if (conn.type === 'mssql') await connectMssql(conn)
+      else if (conn.type === 'redis') await connectRedis(conn)
       else await connectPostgres(conn)
       if (myOp !== opId) return // cancelled by the user
       const updated = { ...conn, lastConnectedAt: Date.now() }
@@ -491,6 +500,7 @@
       else if (p.type === 'clickhouse') await testClickhouseConnection(p)
       else if (p.type === 'duckdb') await testDuckdbConnection(p)
       else if (p.type === 'mssql') await testMssqlConnection(p)
+      else if (p.type === 'redis') await testRedis(p)
       else await testPostgresConnection(p)
       if (myOp !== opId) return // cancelled by the user
       testOk = true
@@ -520,12 +530,13 @@
       else if (payload.type === 'clickhouse') await connectClickhouse(payload)
       else if (payload.type === 'duckdb') await connectDuckdb(payload)
       else if (payload.type === 'mssql') await connectMssql(payload)
+      else if (payload.type === 'redis') await connectRedis(payload)
       else await connectPostgres(payload)
       if (myOp !== opId) return // cancelled by the user
       const existing = editingId ? saved.find(s => s.id === editingId) : null
       const id = existing?.id ?? newConnectionId()
-      const hasHostPort = ['postgres', 'mysql', 'mariadb', 'cockroachdb', 'clickhouse', 'mssql'].includes(payload.type)
-      const defaultPort = { mysql: 3306, mariadb: 3306, cockroachdb: 26257, postgres: 5432, clickhouse: 8123, mssql: 1433 }[payload.type] ?? 5432
+      const hasHostPort = ['postgres', 'mysql', 'mariadb', 'cockroachdb', 'clickhouse', 'mssql', 'redis'].includes(payload.type)
+      const defaultPort = { mysql: 3306, mariadb: 3306, cockroachdb: 26257, postgres: 5432, clickhouse: 8123, mssql: 1433, redis: 6379 }[payload.type] ?? 5432
       const saved_conn = {
         id, ...payload,
         port: hasHostPort ? (Number(payload.port) || defaultPort) : undefined,
@@ -540,7 +551,7 @@
     finally { if (myOp === opId) connecting = null }
   }
 
-  const canTest = $derived(dbType !== 'redis')
+  const canTest = $derived(true)
   const isBusy  = $derived(testing || !!connecting)
 
   // ── Dirty tracking + close guard ─────────────────────────────────────────────
@@ -1269,6 +1280,36 @@
                 </div>
               </div>
 
+            <!-- ── Redis ──────────────────────────────────── -->
+            {:else if dbType === 'redis'}
+
+              <div class="grid grid-cols-[1fr_110px] gap-2">
+                <div>
+                  <label for="cn-redis-host" class={lbl}>Host</label>
+                  <Input id="cn-redis-host" bind:value={host} class={cn(inp, flashedFields.has('host') && flashCls)} />
+                </div>
+                <div>
+                  <label for="cn-redis-port" class={lbl}>Port</label>
+                  <Input id="cn-redis-port" bind:value={port} type="text" inputmode="numeric" class={cn(inpNum, flashedFields.has('port') && flashCls)} />
+                </div>
+              </div>
+
+              <div>
+                <label for="cn-redis-pass" class={lbl}>Password <span class="normal-case font-normal opacity-50">(optional)</span></label>
+                <Input id="cn-redis-pass" bind:value={password} type="password" autocomplete="current-password" class={cn(inp, flashedFields.has('password') && flashCls)} />
+              </div>
+
+              <div>
+                <label for="cn-redis-db" class={lbl}>Database index</label>
+                <Input id="cn-redis-db" bind:value={database} type="text" inputmode="numeric" min="0" max="15" class={inpNum} />
+                <p class="mt-1 text-ui-3xs text-muted-foreground/30">Logical database number (0–15).</p>
+              </div>
+
+              <label class="flex cursor-pointer select-none items-center gap-2">
+                <Checkbox id="cn-redis-tls" checked={secure} onCheckedChange={(v) => (secure = v === true)} />
+                <span class="text-ui-xs text-muted-foreground/70">Use TLS</span>
+              </label>
+
             {/if}
 
                 </div>
@@ -1402,7 +1443,7 @@
                 {/if}
                 <Button
                   class={cn('px-5', connecting === (editingId ?? '__new__') && 'disabled:opacity-90')}
-                  disabled={isBusy || dbType === 'redis'}
+                  disabled={isBusy}
                   onclick={handleConnect}
                 >
                   {#if connecting === (editingId ?? '__new__')}

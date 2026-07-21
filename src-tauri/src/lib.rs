@@ -263,6 +263,8 @@ pub fn run() {
             commands::connect_libsql_db,
             commands::test_clickhouse,
             commands::connect_clickhouse_db,
+            commands::test_redis,
+            commands::connect_redis_db,
             commands::test_duckdb,
             commands::connect_duckdb_db,
             commands::test_mssql,

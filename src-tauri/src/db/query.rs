@@ -1148,6 +1148,11 @@ pub async fn get_table_rows(
                 &cfg, &table, limit, offset, search, sort_column, sort_direction, filters, include_meta,
             ).await;
         }
+        ActiveConnection::Redis(cfg) => {
+            return super::redis::get_table_rows(
+                &cfg, &table, limit, offset, search, sort_column, sort_direction, filters, include_meta,
+            ).await;
+        }
         ActiveConnection::Duckdb(h) => {
             return super::duckdb::get_table_rows(
                 &h, &table, limit, offset, search, sort_column, sort_direction, filters, include_meta,
@@ -1478,6 +1483,9 @@ pub async fn update_table_cell(
         ActiveConnection::Clickhouse(_) => {
             return Err("Inline row editing is not supported for ClickHouse (OLAP). Use ALTER TABLE … UPDATE in the SQL console.".into());
         }
+        ActiveConnection::Redis(_) => {
+            return Err("Editing is not supported on Redis".into());
+        }
         ActiveConnection::Duckdb(h) => {
             return super::duckdb::update_table_cell(&h, &table, primary_key, &column, &value).await;
         }
@@ -1614,6 +1622,9 @@ pub async fn insert_table_row(
         }
         ActiveConnection::Clickhouse(_) => {
             return Err("Row insertion via the grid is not supported for ClickHouse. Use INSERT INTO … in the SQL console.".into());
+        }
+        ActiveConnection::Redis(_) => {
+            return Err("Editing is not supported on Redis".into());
         }
         ActiveConnection::Duckdb(h) => {
             let row = super::duckdb::insert_table_row(&h, &table, values).await?;
@@ -1793,6 +1804,9 @@ pub async fn delete_table_rows(
         }
         ActiveConnection::Clickhouse(_) => {
             return Err("Row deletion via the grid is not supported for ClickHouse. Use ALTER TABLE … DELETE in the SQL console.".into());
+        }
+        ActiveConnection::Redis(_) => {
+            return Err("Editing is not supported on Redis".into());
         }
         ActiveConnection::Duckdb(h) => {
             return super::duckdb::delete_table_rows(&h, &table, primary_keys).await;
@@ -2053,6 +2067,7 @@ pub async fn execute_sql(state: State<'_, DbState>, sql: String) -> Result<SqlRe
                     ActiveConnection::D1(cfg) => super::d1::query(&cfg, &sql_str, vec![]).await,
                     ActiveConnection::LibSql(cfg) => super::libsql::query(&cfg, &sql_str, vec![]).await,
                     ActiveConnection::Clickhouse(cfg) => super::clickhouse::query(&cfg, &sql_str).await,
+                    ActiveConnection::Redis(cfg) => super::redis::query(&cfg, &sql_str).await,
                     ActiveConnection::Duckdb(h) => super::duckdb::execute_sql(&h, &sql_str).await,
                     ActiveConnection::Mssql(h) => super::mssql::execute_sql(&h, &sql_str).await,
                     ActiveConnection::Postgres(_) | ActiveConnection::Mysql(_) => unreachable!(),
@@ -2101,6 +2116,7 @@ pub async fn execute_sql_on_conn(
         }
         AnyConnectionConfig::Libsql(c) => super::libsql::query(&c, sql, vec![]).await,
         AnyConnectionConfig::Clickhouse(c) => super::clickhouse::query(&c, sql).await,
+        AnyConnectionConfig::Redis(c) => super::redis::query(&c, sql).await,
         AnyConnectionConfig::Duckdb(c) => {
             let h = super::connection::open_duckdb(&c).await?;
             super::duckdb::execute_sql(&h, sql).await
@@ -2496,6 +2512,7 @@ pub async fn execute_sql_multi(state: State<'_, DbState>, sql: String) -> Result
                     ActiveConnection::LibSql(cfg) => super::libsql::query(cfg, stmt, vec![]).await,
                     ActiveConnection::Mysql(pool) => super::mysql::execute_sql(pool, stmt, None).await,
                     ActiveConnection::Clickhouse(cfg) => super::clickhouse::query(cfg, stmt).await,
+                    ActiveConnection::Redis(cfg) => super::redis::query(cfg, stmt).await,
                     ActiveConnection::Duckdb(h) => super::duckdb::execute_sql(h, stmt).await,
                     ActiveConnection::Mssql(h) => super::mssql::execute_sql(h, stmt).await,
                 };
@@ -3031,6 +3048,7 @@ async fn dispatch_stats_sql(conn: &ActiveConnection, sql: &str) -> Result<SqlRes
         ActiveConnection::D1(cfg) => super::d1::query(cfg, sql, vec![]).await,
         ActiveConnection::LibSql(cfg) => super::libsql::query(cfg, sql, vec![]).await,
         ActiveConnection::Clickhouse(cfg) => super::clickhouse::query(cfg, sql).await,
+        ActiveConnection::Redis(_) => Err("Column statistics are not supported on Redis".into()),
         ActiveConnection::Duckdb(h) => super::duckdb::execute_sql(h, sql).await,
         ActiveConnection::Mssql(h) => super::mssql::execute_sql(h, sql).await,
     }
@@ -3053,7 +3071,7 @@ pub async fn ping_connection(state: State<'_, DbState>) -> Result<(), String> {
             sqlx::query("SELECT 1").execute(&pool).await.map(|_| ()).map_err(|e| e.to_string())
         }
         // HTTP-based: stateless, no persistent TCP connection to validate
-        ActiveConnection::D1(_) | ActiveConnection::LibSql(_) | ActiveConnection::Clickhouse(_) => Ok(()),
+        ActiveConnection::D1(_) | ActiveConnection::LibSql(_) | ActiveConnection::Clickhouse(_) | ActiveConnection::Redis(_) => Ok(()),
         ActiveConnection::Duckdb(h) => super::duckdb::execute_sql(&h, "SELECT 1").await.map(|_| ()),
         ActiveConnection::Mssql(h) => super::mssql::execute_sql(&h, "SELECT 1").await.map(|_| ()),
     }

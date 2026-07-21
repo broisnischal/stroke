@@ -206,17 +206,17 @@ pub fn ensure_window_on_screen(window: &tauri::WebviewWindow) {
 }
 
 use crate::db::{
-    connect, connect_clickhouse, connect_d1, connect_duckdb, connect_libsql, connect_mssql, connect_mysql, connect_sqlite, disconnect,
+    connect, connect_clickhouse, connect_d1, connect_duckdb, connect_libsql, connect_mssql, connect_mysql, connect_redis, connect_sqlite, disconnect,
     delete_table_row, delete_table_rows, execute_ddl, execute_sql, execute_sql_multi, get_table_rows, count_table_rows, insert_table_row,
     list_schemas, list_tables, list_indexes, list_enums, list_functions, list_triggers, list_sequences, ping_connection, table_row_counts,
     truncate_table, drop_table, get_table_column_structure, get_incoming_foreign_keys, get_table_ddl as db_get_table_ddl,
-    test_clickhouse_connection, test_connection, test_d1_connection, test_duckdb_connection, test_libsql_connection, test_mssql_connection, test_mysql_connection, test_sqlite_connection,
+    test_clickhouse_connection, test_connection, test_d1_connection, test_duckdb_connection, test_libsql_connection, test_mssql_connection, test_mysql_connection, test_redis_connection, test_sqlite_connection,
     update_table_cell, ConnectionConfig, D1Config, DbState, EnumInfo, FunctionInfo, ExplainResult, IndexInfo, LibSqlConfig,
     SqlResult, SqliteConfig, TableInfo, TableRowCount, TableRows, TriggerInfo, SequenceInfo,
     ColumnStructureRow, IncomingForeignKey, InsertRowResult, TunnelState,
     explain_pg, explain_mysql, explain_sqlite,
 };
-use crate::db::connection::{require_conn, ClickhouseConfig, DuckdbConfig, MssqlConfig, MysqlConfig};
+use crate::db::connection::{require_conn, ClickhouseConfig, DuckdbConfig, MssqlConfig, MysqlConfig, RedisConfig};
 use crate::db::ActiveConnection;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -306,6 +306,18 @@ pub async fn test_clickhouse(config: ClickhouseConfig) -> Result<(), String> {
 #[tauri::command]
 pub async fn connect_clickhouse_db(state: State<'_, DbState>, config: ClickhouseConfig) -> Result<(), String> {
     connect_clickhouse(state, config).await
+}
+
+// ── Redis ─────────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn test_redis(config: RedisConfig) -> Result<(), String> {
+    test_redis_connection(config).await
+}
+
+#[tauri::command]
+pub async fn connect_redis_db(state: State<'_, DbState>, config: RedisConfig) -> Result<(), String> {
+    connect_redis(state, config).await
 }
 
 // ── DuckDB ────────────────────────────────────────────────────────────────────
