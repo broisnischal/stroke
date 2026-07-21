@@ -603,14 +603,17 @@
               title={opt.title}
               aria-pressed={searchOptions[opt.key]}
               class={cn(
-                "inline-flex size-5 items-center justify-center rounded-md transition-[background-color,color] duration-150 ease-out",
+                "inline-flex size-[18px] items-center justify-center rounded-md transition-[background-color,color] duration-150 ease-out",
                 searchOptions[opt.key]
                   ? "bg-primary/15 text-primary"
                   : "text-muted-foreground/50 hover:bg-muted/70 hover:text-foreground",
               )}
               onclick={() => onsearchoptionschange({ ...searchOptions, [opt.key]: !searchOptions[opt.key] })}
             >
-              <opt.icon class="size-3.5 shrink-0" />
+              <!-- Integer px (not size-3.5 = 12.25px on the 14px rem base): a
+                   fractional SVG box renders these detailed icons off the pixel
+                   grid and blurry. 14px in an 18px box centres at an integer 2px. -->
+              <opt.icon class="size-[14px] shrink-0" />
             </button>
           {/each}
         </div>
