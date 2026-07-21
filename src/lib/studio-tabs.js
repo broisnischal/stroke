@@ -142,12 +142,12 @@ export function createTableTab(schema = 'public', table = null, tableKind = 'tab
   })
 }
 
-/** @param {string} [sqlText] */
-export function createSqlTab(sqlText) {
+/** @param {string} [sqlText] @param {string} [title] */
+export function createSqlTab(sqlText, title = 'Query Editor') {
   return /** @type {StudioTab} */ ({
     id: nextTabId(),
     kind: 'sql',
-    title: 'Query Editor',
+    title,
     state: createSqlTabState(sqlText),
   })
 }
