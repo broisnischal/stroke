@@ -601,10 +601,10 @@
               title={opt.title}
               aria-pressed={searchOptions[opt.key]}
               class={cn(
-                "flex size-5 items-center justify-center rounded font-mono text-ui-2xs font-medium leading-none transition-[background-color,color] duration-150 ease-out",
+                "flex size-5 items-center justify-center rounded-md font-mono text-ui-2xs font-medium leading-none transition-[background-color,color] duration-150 ease-out",
                 searchOptions[opt.key]
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground/60 hover:bg-muted hover:text-foreground",
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground/50 hover:bg-muted/70 hover:text-foreground",
               )}
               onclick={() => onsearchoptionschange({ ...searchOptions, [opt.key]: !searchOptions[opt.key] })}
             >

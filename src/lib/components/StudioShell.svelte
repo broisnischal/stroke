@@ -2498,6 +2498,10 @@ let rowSearch = $state('')
   function evictColdTabRows(activeId) {
     _tabRowsMru = [..._tabRowsMru.filter((x) => x !== activeId), activeId]
     const keep = new Set(_tabRowsMru.slice(-TAB_ROWS_MRU_MAX))
+    // Never evict a tab that is the active tab of a visible split pane — its rows
+    // are on screen in that pane's snapshot, so blanking them would flip the pane
+    // to the empty "Focus this pane to load" placeholder.
+    if (paneRoot) for (const g of PaneTree.allGroups(paneRoot)) if (g.activeTabId) keep.add(g.activeTabId)
     let changed = false
     const next = tabs.map((t) => {
       if (t.kind !== 'table' || t.id === activeId || keep.has(t.id)) return t
