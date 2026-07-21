@@ -7,6 +7,8 @@
   import SquareFunction from '@lucide/svelte/icons/square-function'
   import GitBranch from '@lucide/svelte/icons/git-branch'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
+  import Search from '@lucide/svelte/icons/search'
+  import X from '@lucide/svelte/icons/x'
 
   /** @type {{ active?: boolean, connectionType?: string | null }} */
   let { active = false, connectionType = null } = $props()
@@ -324,7 +326,15 @@
     return keys.includes('name') ? ['name', ...keys.filter((k) => k !== 'name')] : keys
   })
 
-  const rows = $derived(slots[activeSub].data ?? [])
+  let objQuery = $state('')
+  // Client-side filter across all string columns of the active object list.
+  const rows = $derived.by(() => {
+    const all = slots[activeSub].data ?? []
+    const q = objQuery.trim().toLowerCase()
+    if (!q) return all
+    return all.filter((r) => Object.values(r).some((v) => v != null && String(v).toLowerCase().includes(q)))
+  })
+  const totalCount = $derived(slots[activeSub].data?.length ?? 0)
   const emptyIcon = $derived(TABS.find((t) => t.id === activeSub)?.icon ?? Boxes)
 </script>
 
@@ -345,15 +355,15 @@
       <button
         type="button"
         class={cn(
-          'relative flex h-8 items-center gap-1.5 px-3 font-mono text-ui-xs transition-colors',
-          activeSub === tab.id ? 'text-foreground' : 'text-muted-foreground/50 hover:text-muted-foreground',
+          'relative flex h-8 items-center gap-1.5 px-3 text-ui-xs transition-colors',
+          activeSub === tab.id ? 'font-medium text-foreground' : 'text-muted-foreground/60 hover:text-foreground',
         )}
-        onclick={() => { activeSub = tab.id }}
+        onclick={() => { activeSub = tab.id; objQuery = '' }}
       >
         {#if activeSub === tab.id}
-          <span class="absolute inset-x-0 bottom-0 h-px bg-primary" aria-hidden="true"></span>
+          <span class="absolute inset-x-1 bottom-0 h-0.5 rounded-full bg-primary transition-all" aria-hidden="true"></span>
         {/if}
-        <tab.icon class="size-3.5" />
+        <tab.icon class="size-3.5 shrink-0" />
         {tab.label}
       </button>
     {/each}
@@ -368,18 +378,42 @@
     </button>
   </div>
 
-  <!-- Count strip -->
-  <div class="flex items-center justify-between border-b border-border/40 px-3 py-2">
-    <span class="font-mono text-ui-xs text-muted-foreground">
+  <!-- Count strip + search -->
+  <div class="flex items-center justify-between gap-3 border-b border-border/40 px-3 py-2">
+    <span class="shrink-0 font-mono text-ui-xs text-muted-foreground">
       {#if !currentSupported}
         {engineLabel} · {activeSub}
       {:else if isLoading}
         Loading…
+      {:else if objQuery.trim()}
+        {rows.length} of {totalCount}
+        {activeSub === 'functions' && totalCount === 1 ? 'function' : activeSub}
       {:else}
-        {rows.length}
-        {activeSub === 'functions' && rows.length === 1 ? 'function' : activeSub}
+        {totalCount}
+        {activeSub === 'functions' && totalCount === 1 ? 'function' : activeSub}
       {/if}
     </span>
+    {#if currentSupported && totalCount > 0}
+      <div class="relative flex h-7 w-64 items-center">
+        <Search class="pointer-events-none absolute left-2.5 size-3.5 shrink-0 text-muted-foreground/50" />
+        <input
+          type="text"
+          bind:value={objQuery}
+          placeholder="Search {activeSub}…"
+          class="h-7 w-full rounded-md border border-transparent bg-accent/40 pl-8 pr-7 text-ui-sm text-foreground placeholder:text-muted-foreground/50 transition-colors focus:border-border focus:bg-input/30 focus:outline-none"
+        />
+        {#if objQuery}
+          <button
+            type="button"
+            class="absolute right-1 inline-flex size-5 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-muted/70 hover:text-foreground"
+            aria-label="Clear search"
+            onclick={() => (objQuery = '')}
+          >
+            <X class="size-3.5" />
+          </button>
+        {/if}
+      </div>
+    {/if}
   </div>
 
   <!-- Content -->
