@@ -1013,6 +1013,11 @@
   // to grow the scroll extent — it needs the proxy's length signal to fire on the
   // in-place push. .raw would lose that notify without an O(n²) whole-array copy.
   let _infiniteRows = $state(/** @type {any[]} */ ([]))
+  // Hard ceiling on accumulated infinite-scroll rows. Without it, scrolling a
+  // huge table in infinite mode would keep appending until the entire result set
+  // was resident (and deep-proxied) — unbounded memory. At the cap we stop
+  // auto-loading; the count/"load more" UI reflects that the view is capped.
+  const INFINITE_ROW_CAP = 200_000
   let infiniteScroll = $state(loadInfiniteScroll())
 
   // ── Windowed loading (huge result sets) ──────────────────────────────────
@@ -3922,6 +3927,7 @@ let rowSearch = $state('')
     if (windowed) return // windowed mode loads via handleVisibleRange, not append
     if (!infiniteScroll || !activeTable || loadingRows || loadingMore) return
     if (total >= 0 && _infiniteRows.length >= total) return
+    if (_infiniteRows.length >= INFINITE_ROW_CAP) return
     loadingMore = true
     try {
       const offset = _infiniteRows.length
