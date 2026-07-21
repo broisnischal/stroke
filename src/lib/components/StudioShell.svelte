@@ -5234,7 +5234,7 @@ let rowSearch = $state('')
         {#if isFocused}
           {@render sharedContent()}
         {:else}
-          <PaneSnapshot tab={tabsById.get(group.activeTabId ?? '') ?? null} toolbarSpacer={tableToolbarVisible} />
+          <PaneSnapshot tab={tabsById.get(group.activeTabId ?? '') ?? null} toolbarSpacer={tableToolbarVisible} connectionId={persistConnectionId} {schemas} />
         {/if}
       {/snippet}
 

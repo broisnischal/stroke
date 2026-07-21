@@ -1,10 +1,14 @@
 <script>
   import DataTable from './DataTable.svelte'
   import ChartView from './ChartView.svelte'
+  import TableJsonView from './TableJsonView.svelte'
+  import TableRecordView from './TableRecordView.svelte'
+  import TableTextView from './TableTextView.svelte'
   import ShikiBlock from './ShikiBlock.svelte'
   import Table2 from '@lucide/svelte/icons/table-2'
   import PanelLeft from '@lucide/svelte/icons/panel-left'
   import TerminalSquare from '@lucide/svelte/icons/terminal-square'
+  import TabLoading from './TabLoading.svelte'
   import { tabDisplayTitle } from '$lib/studio-tabs.js'
 
   /** @typedef {import('$lib/studio-tabs.js').StudioTab} StudioTab */
@@ -18,6 +22,10 @@
         the focused pane (which renders the table toolbar) — prevents the grid
         from jumping when focus moves between split panes. */
     toolbarSpacer = false,
+    /** Global connection id — chart save/export needs it; not in tab.state. */
+    connectionId = '',
+    /** Global schema list — the ERD view fetches its own metadata and needs it. */
+    schemas = [],
   } = $props()
 
   const tableState = $derived(
@@ -26,6 +34,19 @@
   const sqlState = $derived(
     tab?.kind === 'sql' && tab.state ? /** @type {SqlTabState} */ (tab.state) : null,
   )
+
+  // Replicate StudioShell's dataViewColumns/dataViewRows (hidden columns dropped)
+  // so the json/text/chart views render the same shape they do when focused.
+  const viewColumns = $derived(
+    tableState ? tableState.columns.filter((c) => !tableState.hiddenColumns?.has?.(c.name)) : [],
+  )
+  const viewRows = $derived.by(() => {
+    if (!tableState) return []
+    const hidden = tableState.hiddenColumns
+    if (!hidden || hidden.size === 0) return tableState.rows
+    const keep = tableState.columns.map((c, i) => (hidden.has(c.name) ? -1 : i)).filter((i) => i >= 0)
+    return tableState.rows.map((r) => keep.map((i) => r[i]))
+  })
 
   // Local, throwaway bindable state so DataTable's editing/selection machinery
   // has somewhere to write. Background panes are read-only, so nothing here is
@@ -54,11 +75,42 @@
       <p class="font-mono text-ui-xs text-muted-foreground/60">Focus this pane to load {tableState.table}</p>
     </div>
   {:else if tableState.dataViewMode === 'chart'}
-    <!-- Preserve the chart view when this pane is demoted from focused to a
-         snapshot (mirrors the live guard in StudioShell) — without this the
-         pane reverted to the plain grid. -->
+    <!-- Preserve the active data-view when this pane is demoted from focused to
+         a snapshot (each branch mirrors the live guard in StudioShell) — without
+         these the pane reverted to the plain grid regardless of view mode. -->
     <div class="flex min-h-0 min-w-0 flex-1">
-      <ChartView columns={tableState.columns} rows={tableState.rows} />
+      <ChartView columns={viewColumns} rows={viewRows} {connectionId} />
+    </div>
+  {:else if tableState.dataViewMode === 'json'}
+    <div class="flex min-h-0 min-w-0 flex-1">
+      <TableJsonView columns={viewColumns} rows={viewRows} tableKey={`${tableState.schema}.${tableState.table}`} />
+    </div>
+  {:else if tableState.dataViewMode === 'record'}
+    <div class="flex min-h-0 min-w-0 flex-1">
+      <TableRecordView
+        columns={tableState.columns}
+        rows={tableState.rows}
+        primaryKey={tableState.primaryKey}
+        hiddenColumns={tableState.hiddenColumns}
+        offset={Math.max(0, ((tableState.page ?? 1) - 1) * (tableState.pageSize ?? 0))}
+        total={tableState.total}
+        readonly={true}
+        initialIndex={tableState.focusedRow ?? 0}
+        hasPrevPage={false}
+        hasNextPage={false}
+      />
+    </div>
+  {:else if tableState.dataViewMode === 'text'}
+    <div class="flex min-h-0 min-w-0 flex-1">
+      <TableTextView columns={viewColumns} rows={viewRows} tableName={tableState.table} />
+    </div>
+  {:else if tableState.dataViewMode === 'erd'}
+    <div class="flex min-h-0 min-w-0 flex-1">
+      {#await import('./EntityRelationPage.svelte')}
+        <TabLoading />
+      {:then { default: EntityRelationPage }}
+        <EntityRelationPage schema={tableState.schema} {schemas} focusTable={tableState.table} />
+      {/await}
     </div>
   {:else}
     <div class="flex min-h-0 min-w-0 flex-1">
