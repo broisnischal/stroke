@@ -162,7 +162,7 @@
   const selTrigger =
     "h-7 w-[12rem] justify-between gap-2 border-border/70 bg-background px-2.5 text-xs font-normal shadow-none";
   const ruleInput =
-    "h-7 min-w-0 rounded-md border border-border/70 bg-background px-2.5 font-mono text-[12px] text-foreground outline-none focus:border-primary/60";
+    "h-7 min-w-0 rounded-md border border-border/70 bg-background px-2.5 font-mono text-ui-xs text-foreground outline-none focus:border-primary/60";
 </script>
 
 <!-- Compact Linear/Resend-style toggle -->
@@ -202,8 +202,8 @@
 {#snippet settingRow(label, hint, control)}
   <div class="flex items-center justify-between gap-4 py-2.5">
     <div class="flex min-w-0 flex-col">
-      <span class="text-[13px] text-foreground">{label}</span>
-      {#if hint}<span class="mt-0.5 text-[11.5px] text-muted-foreground/70">{hint}</span>{/if}
+      <span class="text-ui-sm text-foreground">{label}</span>
+      {#if hint}<span class="mt-0.5 text-ui-2xs text-muted-foreground/70">{hint}</span>{/if}
     </div>
     {@render control()}
   </div>
@@ -211,7 +211,7 @@
 
 <!-- Group label + hairline-bordered list -->
 {#snippet sectionLabel(text)}
-  <h3 class="mb-2 px-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground/50">{text}</h3>
+  <h3 class="mb-2 px-0.5 text-ui-3xs font-medium uppercase tracking-[0.08em] text-muted-foreground/50">{text}</h3>
 {/snippet}
 
 <div class="app-scroll min-h-0 flex-1 overflow-y-auto bg-background">
@@ -222,22 +222,22 @@
         <span class="grid size-6 shrink-0 place-items-center rounded-md border border-border/60 bg-muted/40 text-muted-foreground">
           <Blocks class="size-3.5" />
         </span>
-        <h1 class="text-[15px] font-semibold tracking-tight text-foreground">Extensions</h1>
+        <h1 class="text-ui-lg font-semibold tracking-tight text-foreground">Extensions</h1>
         <span
-          class="ml-auto flex shrink-0 items-center gap-1.5 rounded-full bg-muted/60 px-2 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground"
+          class="ml-auto flex shrink-0 items-center gap-1.5 rounded-full bg-muted/60 px-2 py-0.5 text-ui-3xs font-medium tabular-nums text-muted-foreground"
           title="{enabledCount} of {EXTENSIONS.length} extensions enabled"
         >
           {#if enabledCount > 0}<span class="size-1.5 rounded-full bg-emerald-500"></span>{/if}
           {enabledCount} on
         </span>
       </div>
-      <p class="mt-1.5 text-[12.5px] text-muted-foreground">
+      <p class="mt-1.5 text-ui-xs text-muted-foreground">
         Display formatters, linkifiers and cell tools for the data grid. Click a card to configure it.
       </p>
 
       {#each SECTIONS as section (section.title)}
         {@const items = EXTENSIONS.filter((e) => section.kinds.includes(e.kind))}
-        <h3 class="mb-2.5 mt-7 px-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground/50">{section.title}</h3>
+        <h3 class="mb-2.5 mt-7 px-0.5 text-ui-3xs font-medium uppercase tracking-[0.08em] text-muted-foreground/50">{section.title}</h3>
         <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {#each items as ext (ext.id)}
             {@const Icon = ICONS[ext.id]}
@@ -252,8 +252,8 @@
                   <Icon class={cn("size-4 shrink-0 transition-colors", on ? "text-emerald-500" : "text-muted-foreground group-hover:text-foreground")} />
                 {/if}
                 <span class="flex min-w-0 flex-col">
-                  <span class="truncate text-[12.5px] font-medium leading-tight text-foreground/85 transition-colors group-hover:text-foreground">{ext.name}</span>
-                  <span class="mt-0.5 truncate text-[10.5px] text-muted-foreground/60">{KIND_LABEL[ext.kind] ?? "Extension"}</span>
+                  <span class="truncate text-ui-xs font-medium leading-tight text-foreground/85 transition-colors group-hover:text-foreground">{ext.name}</span>
+                  <span class="mt-0.5 truncate text-ui-3xs text-muted-foreground/60">{KIND_LABEL[ext.kind] ?? "Extension"}</span>
                 </span>
               </button>
               <!-- Toggle overlays the card so it isn't a nested button -->
@@ -273,7 +273,7 @@
       <div class="mx-auto w-full max-w-[42rem] px-8 py-6">
         <button
           type="button"
-          class="-ml-1.5 mb-4 flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[12px] text-muted-foreground transition-[background-color,color] hover:bg-muted/50 hover:text-foreground"
+          class="-ml-1.5 mb-4 flex items-center gap-1.5 rounded-md px-1.5 py-1 text-ui-xs text-muted-foreground transition-[background-color,color] hover:bg-muted/50 hover:text-foreground"
           onclick={() => (selectedId = null)}
         >
           <ArrowLeft class="size-3.5" />
@@ -292,12 +292,12 @@
               {#if Icon}<Icon class="size-5" />{/if}
             </span>
             <div class="min-w-0 flex-1 pt-0.5">
-              <h2 class="text-[15px] font-semibold tracking-tight text-foreground">{selected.name}</h2>
-              <p class="mt-0.5 text-[11.5px] text-muted-foreground">{KIND_LABEL[selected.kind] ?? "Extension"}</p>
+              <h2 class="text-ui-lg font-semibold tracking-tight text-foreground">{selected.name}</h2>
+              <p class="mt-0.5 text-ui-2xs text-muted-foreground">{KIND_LABEL[selected.kind] ?? "Extension"}</p>
             </div>
             {@render toggle(on, () => setPluginEnabled(selected.id, !on), `Toggle ${selected.name}`)}
           </div>
-          <p class="mt-3 text-[13px] leading-relaxed text-muted-foreground">{selected.description}</p>
+          <p class="mt-3 text-ui-sm leading-relaxed text-muted-foreground">{selected.description}</p>
         </div>
 
         <!-- How to use -->
@@ -307,8 +307,8 @@
             <ol class="space-y-2">
               {#each USAGE_BY_ID[selected.id] ?? USAGE[selected.kind] as step, i (i)}
                 <li class="flex items-start gap-2.5">
-                  <span class="mt-px grid size-4 shrink-0 place-items-center rounded-full border border-border/60 text-[9px] font-semibold text-muted-foreground/70">{i + 1}</span>
-                  <span class="text-[12.5px] leading-relaxed text-foreground/75">{step}</span>
+                  <span class="mt-px grid size-4 shrink-0 place-items-center rounded-full border border-border/60 text-ui-3xs font-semibold text-muted-foreground/70">{i + 1}</span>
+                  <span class="text-ui-xs leading-relaxed text-foreground/75">{step}</span>
                 </li>
               {/each}
             </ol>
@@ -323,9 +323,9 @@
             <ul class="overflow-hidden rounded-lg border border-border/50">
               {#each list as it, i (it.id)}
                 <li class="flex items-center gap-3 px-3 py-2 {i > 0 ? 'border-t border-border/40' : ''}">
-                  <span class="min-w-0 shrink-0 text-[13px] text-foreground/85">{it.label}</span>
-                  {#if it.hint}<span class="min-w-0 flex-1 truncate text-[11.5px] text-muted-foreground/55">{it.hint}</span>{:else}<span class="flex-1"></span>{/if}
-                  <span class="shrink-0 rounded border border-border/50 px-1.5 py-0.5 text-[10px] text-muted-foreground/50">{selected.kind === "generators" ? "Insert" : "Copy"}</span>
+                  <span class="min-w-0 shrink-0 text-ui-sm text-foreground/85">{it.label}</span>
+                  {#if it.hint}<span class="min-w-0 flex-1 truncate text-ui-2xs text-muted-foreground/55">{it.hint}</span>{:else}<span class="flex-1"></span>{/if}
+                  <span class="shrink-0 rounded border border-border/50 px-1.5 py-0.5 text-ui-3xs text-muted-foreground/50">{selected.kind === "generators" ? "Insert" : "Copy"}</span>
                 </li>
               {/each}
             </ul>
@@ -399,7 +399,7 @@
                 {@render settingRow("Palette", "Color scale for the value gradient", ctl)}
               {:else if selected.id === "linkify"}
                 <div class="py-3">
-                  <p class="text-[12px] leading-relaxed text-muted-foreground/80">
+                  <p class="text-ui-xs leading-relaxed text-muted-foreground/80">
                     When a cell matches a <span class="font-mono text-foreground/80">pattern</span> (regex), clicking it opens the
                     <span class="font-mono text-foreground/80">template</span>. Use <span class="font-mono text-foreground/80">{"{value}"}</span> for the cell value.
                   </p>
@@ -414,7 +414,7 @@
                       </div>
                     {/each}
                   </div>
-                  <button type="button" class="mt-2.5 flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[12px] text-muted-foreground hover:text-foreground" onclick={addRule}>
+                  <button type="button" class="mt-2.5 flex items-center gap-1.5 rounded-md px-1.5 py-1 text-ui-xs text-muted-foreground hover:text-foreground" onclick={addRule}>
                     <Plus class="size-3.5" /> Add rule
                   </button>
                 </div>

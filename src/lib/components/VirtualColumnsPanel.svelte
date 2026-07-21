@@ -114,7 +114,7 @@
 />
 
 <div
-  class="flex h-full shrink-0 flex-col border-l border-border/40 bg-panel text-[13px]"
+  class="flex h-full shrink-0 flex-col border-l border-border/40 bg-panel text-ui-sm"
   style="width: {panelWidth}px"
   role="none"
   onkeydown={(e) => {
@@ -127,7 +127,7 @@
   <div class="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
     <FunctionSquare class="size-3.5 shrink-0 text-primary/60" />
     <span class="flex-1 text-sm font-semibold tracking-tight">Virtual columns</span>
-    <span class="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground/55">{tableName}</span>
+    <span class="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-ui-2xs text-muted-foreground/55">{tableName}</span>
     <button
       type="button"
       class="flex size-5 items-center justify-center rounded text-muted-foreground/35 hover:bg-muted hover:text-foreground"
@@ -156,7 +156,7 @@
               type="text"
               bind:value={draftName}
               placeholder="full_url"
-              class="w-full rounded border border-border/50 bg-muted/30 px-2.5 py-1.5 font-mono text-[13px] text-foreground outline-none placeholder:text-muted-foreground/35 focus:border-primary/50 focus:bg-background"
+              class="w-full rounded border border-border/50 bg-muted/30 px-2.5 py-1.5 font-mono text-ui-sm text-foreground outline-none placeholder:text-muted-foreground/35 focus:border-primary/50 focus:bg-background"
             />
           </label>
         </div>
@@ -165,7 +165,7 @@
         <div class="border-b border-border/40 px-3 py-3">
           <div class="mb-1.5 flex items-center justify-between">
             <span class="text-xs font-medium text-foreground/60">Expression</span>
-            <span class="rounded bg-muted/50 px-1.5 font-mono text-[11px] text-muted-foreground/60">{'{ col }'}</span>
+            <span class="rounded bg-muted/50 px-1.5 font-mono text-ui-2xs text-muted-foreground/60">{'{ col }'}</span>
           </div>
           <textarea
             bind:this={exprEl}
@@ -173,10 +173,10 @@
             rows={3}
             spellcheck={false}
             placeholder={"https://cdn.com/{file_key}"}
-            class="w-full resize-none rounded border border-border/50 bg-muted/30 px-2.5 py-1.5 font-mono text-[13px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/30 focus:border-primary/50 focus:bg-background"
+            class="w-full resize-none rounded border border-border/50 bg-muted/30 px-2.5 py-1.5 font-mono text-ui-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/30 focus:border-primary/50 focus:bg-background"
           ></textarea>
           {#if badRefs.length > 0}
-            <p class="mt-1.5 text-[11px] text-destructive/80">Unknown: {badRefs.map(r => `{${r}}`).join(', ')}</p>
+            <p class="mt-1.5 text-ui-2xs text-destructive/80">Unknown: {badRefs.map(r => `{${r}}`).join(', ')}</p>
           {/if}
         </div>
 
@@ -204,7 +204,7 @@
             </div>
             <div class="max-h-40 overflow-y-auto rounded border border-border/40 bg-background/60">
               {#if filteredColumns.length === 0}
-                <p class="px-2.5 py-2.5 text-[11px] text-muted-foreground/50">No columns match</p>
+                <p class="px-2.5 py-2.5 text-ui-2xs text-muted-foreground/50">No columns match</p>
               {:else}
                 {#each filteredColumns as col (col.name)}
                   <button
@@ -232,7 +232,7 @@
           <div class="flex flex-col gap-3">
             {#each fnGroups as group}
               <div>
-                <p class="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/55">{group.label}</p>
+                <p class="mb-1.5 text-ui-2xs font-semibold uppercase tracking-wider text-muted-foreground/55">{group.label}</p>
                 <div class="flex flex-wrap gap-1">
                   {#each group.fns as fn}
                     <button
@@ -255,7 +255,7 @@
               {#each previewRows as row, i}
                 {@const val = preview(draftExpr, row)}
                 <div class="flex items-center gap-2.5 px-2.5 py-1.5 {i > 0 ? 'border-t border-border/30' : ''}">
-                  <span class="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground/45">#{i+1}</span>
+                  <span class="shrink-0 font-mono text-ui-2xs tabular-nums text-muted-foreground/45">#{i+1}</span>
                   <span class={cn(
                     "min-w-0 flex-1 truncate font-mono text-xs",
                     val === '(empty)' || val === '—' ? "italic text-muted-foreground/45" : "text-foreground/80"
@@ -300,7 +300,7 @@
               <FunctionSquare class="size-5 text-muted-foreground/35" />
             </div>
             <div>
-              <p class="text-[13px] font-medium text-foreground/55">No virtual columns</p>
+              <p class="text-ui-sm font-medium text-foreground/55">No virtual columns</p>
               <p class="mt-0.5 text-xs text-muted-foreground/45">Compute values from existing columns using templates and functions.</p>
             </div>
           </div>
@@ -327,12 +327,12 @@
                 </button>
                 <div class="min-w-0 flex-1 overflow-hidden">
                   <div class="flex items-baseline gap-1.5">
-                    <span class="shrink-0 font-mono text-[13px] font-medium text-foreground/85">{col.name}</span>
+                    <span class="shrink-0 font-mono text-ui-sm font-medium text-foreground/85">{col.name}</span>
                     {#if firstRowVal && col.enabled && firstRowVal !== '—'}
-                      <span class="min-w-0 truncate font-mono text-[11px] text-muted-foreground/55">{firstRowVal}</span>
+                      <span class="min-w-0 truncate font-mono text-ui-2xs text-muted-foreground/55">{firstRowVal}</span>
                     {/if}
                   </div>
-                  <p class="truncate font-mono text-[11px] text-muted-foreground/45">{col.expression}</p>
+                  <p class="truncate font-mono text-ui-2xs text-muted-foreground/45">{col.expression}</p>
                 </div>
                 <div class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                   <button

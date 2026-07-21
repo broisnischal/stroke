@@ -83,12 +83,12 @@
             {cell.columnName}
           </span>
           {#if cell.dataType}
-            <span class="shrink-0 rounded border border-border/50 bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/70">
+            <span class="shrink-0 rounded border border-border/50 bg-muted/50 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground/70">
               {cell.dataType}
             </span>
           {/if}
           {#if cell.nullable}
-            <span class="shrink-0 rounded border border-border/40 bg-muted/30 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/50">
+            <span class="shrink-0 rounded border border-border/40 bg-muted/30 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground/50">
               nullable
             </span>
           {/if}
@@ -139,7 +139,7 @@
           </button>
         {/if}
 
-        <span class="ml-auto font-mono text-[11px] text-muted-foreground/30 tabular-nums">
+        <span class="ml-auto font-mono text-ui-2xs text-muted-foreground/30 tabular-nums">
           {charCount.toLocaleString()} chars
         </span>
 

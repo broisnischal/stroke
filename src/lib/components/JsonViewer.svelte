@@ -201,9 +201,9 @@
               onclick={() => pickCompletion(completion)}
             >
               {#if completion.startsWith('[')}
-                <span class="shrink-0 text-[10px] text-muted-foreground/50">[idx]</span>
+                <span class="shrink-0 text-ui-3xs text-muted-foreground/50">[idx]</span>
               {:else}
-                <span class="shrink-0 text-[10px] text-muted-foreground/50">.key</span>
+                <span class="shrink-0 text-ui-3xs text-muted-foreground/50">.key</span>
               {/if}
               <span class="truncate">{completion.startsWith('.') ? completion.slice(1) : completion}</span>
               <span class="ml-auto shrink-0 text-muted-foreground/40">{completion}</span>

@@ -172,7 +172,7 @@
   <!-- Controls -->
   <div class="absolute right-3 top-3 z-10 flex items-center gap-2">
     {#if result?.driver === 'postgres' && (result.planningTime > 0 || result.executionTime > 0)}
-      <div class="flex items-center gap-3 rounded-lg border border-border/30 bg-panel/95 px-3 py-1.5 font-mono text-[10px] text-muted-foreground/60 backdrop-blur">
+      <div class="flex items-center gap-3 rounded-lg border border-border/30 bg-panel/95 px-3 py-1.5 font-mono text-ui-3xs text-muted-foreground/60 backdrop-blur">
         {#if result.planningTime > 0}
           <span>Plan <b class="font-semibold text-foreground/70">{result.planningTime.toFixed(2)}ms</b></span>
         {/if}
@@ -196,7 +196,7 @@
       ><Maximize2 class="size-3.5" /></button>
     </div>
     <button
-      class="rounded-lg border border-border/40 bg-panel/95 px-3 py-1.5 font-mono text-[11px] font-semibold text-foreground/80 backdrop-blur transition-colors hover:bg-muted/60"
+      class="rounded-lg border border-border/40 bg-panel/95 px-3 py-1.5 font-mono text-ui-2xs font-semibold text-foreground/80 backdrop-blur transition-colors hover:bg-muted/60"
       onclick={fitView}
     >Expand all</button>
   </div>
@@ -243,14 +243,14 @@
       >
         <!-- Header -->
         <div class="border-b border-border/30 px-3 py-2">
-          <span class="font-mono text-[10.5px] font-semibold leading-snug text-foreground/90">
+          <span class="font-mono text-ui-3xs font-semibold leading-snug text-foreground/90">
             {type}{rel ? ' on ' : ''}<span class="font-normal text-primary/70">{rel}</span>
           </span>
         </div>
 
         <!-- Stats -->
         {#if !isSqlite}
-          <div class="grid grid-cols-[auto_1fr] gap-x-4 px-3 py-2.5 font-mono text-[10px] leading-relaxed">
+          <div class="grid grid-cols-[auto_1fr] gap-x-4 px-3 py-2.5 font-mono text-ui-3xs leading-relaxed">
             {#if withActual && actualRows != null}
               <span class="text-muted-foreground/55">Actual Rows</span>
               <span class="text-right text-foreground/80 tabular-nums">
@@ -282,7 +282,7 @@
     {#if root}
       <div
         style="position: absolute; left: {qrX}px; top: {qrY}px; width: {QR_W}px; height: {QR_H}px"
-        class="flex items-center justify-center rounded-xl border border-border/50 bg-background font-mono text-[10.5px] font-semibold text-foreground/50 shadow-md"
+        class="flex items-center justify-center rounded-xl border border-border/50 bg-background font-mono text-ui-3xs font-semibold text-foreground/50 shadow-md"
       >
         Query Result
       </div>

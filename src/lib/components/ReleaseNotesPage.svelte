@@ -45,7 +45,7 @@
   function renderInline(text) {
     return text
       .replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-foreground/90">$1</strong>')
-      .replace(/`(.*?)`/g, '<code class="rounded bg-muted/50 px-1 py-0.5 font-mono text-[10px]">$1</code>')
+      .replace(/`(.*?)`/g, '<code class="rounded bg-muted/50 px-1 py-0.5 font-mono text-ui-3xs">$1</code>')
   }
 
   const GROUP_META = {
@@ -107,7 +107,7 @@
               <!-- Group heading -->
               <div class="mb-3 flex items-center gap-1.5">
                 <group.meta.Icon class={cn('size-3.5', group.meta.color)} />
-                <span class={cn('text-[11px] font-semibold uppercase tracking-widest', group.meta.color)}>
+                <span class={cn('text-ui-2xs font-semibold uppercase tracking-widest', group.meta.color)}>
                   {group.meta.label}
                 </span>
               </div>
@@ -117,7 +117,7 @@
                 {#each group.sections as section (section.title)}
                   <div class={cn('overflow-hidden rounded-lg border', group.meta.border, group.meta.bg)}>
                     <div class={cn('border-b px-3 py-1.5', group.meta.border)}>
-                      <span class="text-[11px] font-medium text-foreground/65">{section.title}</span>
+                      <span class="text-ui-2xs font-medium text-foreground/65">{section.title}</span>
                     </div>
                     <ul class="divide-y divide-border/10">
                       {#each section.items as item}
@@ -144,7 +144,7 @@
       {:else}
         <div class="rounded-lg border border-border/25 bg-muted/5 py-8 text-center">
           <p class="text-xs text-muted-foreground/50">No release notes available for this version.</p>
-          <p class="mt-1 text-[11px] text-muted-foreground/35">Check the GitHub releases page for details.</p>
+          <p class="mt-1 text-ui-2xs text-muted-foreground/35">Check the GitHub releases page for details.</p>
         </div>
       {/if}
 
@@ -175,7 +175,7 @@
 
     {:else if status === 'downloading'}
       <div class="flex flex-col gap-2">
-        <div class="flex items-center justify-between text-[11px] text-muted-foreground">
+        <div class="flex items-center justify-between text-ui-2xs text-muted-foreground">
           <span class="flex items-center gap-1.5">
             <Loader2 class="size-3 shrink-0 animate-spin" />
             Downloading update…
@@ -202,7 +202,7 @@
     {:else if status === 'error'}
       <div class="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2">
         <AlertCircle class="mt-0.5 size-3.5 shrink-0 text-destructive" />
-        <p class="font-mono text-[11px] text-destructive">{errorMsg || 'Update failed. Please try again.'}</p>
+        <p class="font-mono text-ui-2xs text-destructive">{errorMsg || 'Update failed. Please try again.'}</p>
       </div>
     {/if}
 

@@ -128,11 +128,11 @@
     {#if showTime}
       <div class="border-t border-border/20 px-3 pb-3 pt-2.5">
         <div class="mb-2 flex items-center justify-between">
-          <span class="text-[11px] font-medium text-muted-foreground/70 uppercase tracking-wider">Time</span>
+          <span class="text-ui-2xs font-medium text-muted-foreground/70 uppercase tracking-wider">Time</span>
           <button
             type="button"
             onclick={setNow}
-            class="rounded px-1.5 py-0.5 text-[11px] text-muted-foreground/60 hover:bg-muted hover:text-foreground transition-colors"
+            class="rounded px-1.5 py-0.5 text-ui-2xs text-muted-foreground/60 hover:bg-muted hover:text-foreground transition-colors"
           >Now</button>
         </div>
         <div class="flex items-center gap-1.5">
@@ -143,11 +143,11 @@
               max="23"
               value={hourVal}
               oninput={handleHourChange}
-              class="w-full bg-transparent px-2 py-1.5 text-center font-mono text-[13px] text-foreground outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              class="w-full bg-transparent px-2 py-1.5 text-center font-mono text-ui-sm text-foreground outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
               placeholder="HH"
             />
           </div>
-          <span class="shrink-0 font-mono text-[14px] font-bold text-muted-foreground/50">:</span>
+          <span class="shrink-0 font-mono text-ui font-bold text-muted-foreground/50">:</span>
           <div class="flex flex-1 items-center overflow-hidden rounded-md border border-border/40 bg-muted/20 focus-within:border-primary/50">
             <input
               type="number"
@@ -155,7 +155,7 @@
               max="59"
               value={minVal}
               oninput={handleMinChange}
-              class="w-full bg-transparent px-2 py-1.5 text-center font-mono text-[13px] text-foreground outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              class="w-full bg-transparent px-2 py-1.5 text-center font-mono text-ui-sm text-foreground outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
               placeholder="MM"
             />
           </div>

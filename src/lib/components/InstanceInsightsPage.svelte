@@ -67,6 +67,14 @@
     error = ''
     await Promise.all([loadVersion(), refreshActivity(), refreshState(), refreshConfig(), refreshReplication()])
     lastUpdated = Date.now()
+    // Per-second rates (TPS, tuples, block I/O) are deltas between two samples,
+    // so a single fetch leaves every rate stuck at 0.00 until the 5s auto-refresh
+    // ticks. Take a quick second activity sample on first open so the rate cards
+    // and timelines populate immediately.
+    if (active && samples.length < 2) {
+      await new Promise((r) => setTimeout(r, 1000))
+      if (active) { await refreshActivity(); lastUpdated = Date.now() }
+    }
   }
   async function refreshCurrent() {
     await refreshActivity() // always — keeps the charts flowing regardless of the visible tab
@@ -284,7 +292,7 @@
         {:else}
           <!-- Fixed-layout + content-visibility keeps scrolling smooth across the ~350 pg_settings rows:
                fixed layout skips per-cell column measurement; content-visibility skips off-screen row paint. -->
-          <div class="overflow-x-auto rounded-lg border border-border/40">
+          <div class="overflow-x-auto overflow-y-hidden rounded-lg border border-border/40">
             <table class="cfg-table w-full border-collapse text-ui-2xs">
               <colgroup>
                 <col style="width:3rem" />
@@ -345,7 +353,7 @@
   {#if !rows || rows.length === 0}
     <div class="rounded-lg border border-border/40 bg-card/20 py-8 text-center text-ui-xs text-muted-foreground/40">No data found</div>
   {:else}
-    <div class="overflow-x-auto rounded-lg border border-border/40">
+    <div class="overflow-x-auto overflow-y-hidden rounded-lg border border-border/40">
       <table class="w-full border-collapse text-ui-2xs">
         <thead>
           <tr class="bg-muted/25">

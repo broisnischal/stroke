@@ -64,7 +64,7 @@
       spellcheck="false"
       autocomplete="off"
       disabled={loading || success}
-      class="h-11 w-full rounded-lg border border-border/60 bg-muted/25 pl-10 pr-3 font-mono text-[13px] tracking-wider text-foreground outline-none transition-[border-color,box-shadow] placeholder:font-sans placeholder:tracking-normal placeholder:text-muted-foreground/30 hover:border-border focus:border-ring focus:ring-1 focus:ring-ring focus:bg-muted/10 focus:border-ring focus:ring-1 focus:ring-ring disabled:opacity-50"
+      class="h-11 w-full rounded-lg border border-border/60 bg-muted/25 pl-10 pr-3 font-mono text-ui-sm tracking-wider text-foreground outline-none transition-[border-color,box-shadow] placeholder:font-sans placeholder:tracking-normal placeholder:text-muted-foreground/30 hover:border-border focus:border-ring focus:ring-1 focus:ring-ring focus:bg-muted/10 focus:border-ring focus:ring-1 focus:ring-ring disabled:opacity-50"
     />
   </div>
 
@@ -91,7 +91,7 @@
     onclick={() => void submit()}
     class={cn(
       'inline-flex w-full items-center justify-center gap-2 rounded-lg font-semibold transition-colors',
-      naked ? 'h-11 text-[13px]' : 'h-11 text-sm',
+      naked ? 'h-11 text-ui-sm' : 'h-11 text-sm',
       ready
         ? 'bg-foreground text-background hover:bg-foreground/85'
         : success

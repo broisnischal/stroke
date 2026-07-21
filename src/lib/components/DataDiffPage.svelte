@@ -475,7 +475,7 @@
               <button type="button" onclick={() => { onchange(opt); closeDd() }}
                 class={cn('flex w-full items-center gap-2 px-3 py-1.5 text-xs transition-colors hover:bg-muted/35', value === opt && 'text-primary')}
               >
-                <span class={cn('w-3 shrink-0 text-center text-[10px]', value === opt ? 'text-primary' : 'opacity-0')}>✓</span>
+                <span class={cn('w-3 shrink-0 text-center text-ui-3xs', value === opt ? 'text-primary' : 'opacity-0')}>✓</span>
                 {opt}
               </button>
             {/each}
@@ -520,9 +520,9 @@
               <button type="button" onclick={() => { onchange(conn.id); closeDd() }}
                 class={cn('flex w-full items-center gap-2 px-3 py-2 text-xs transition-colors hover:bg-muted/35', value === conn.id && 'text-primary')}
               >
-                <span class={cn('w-3 shrink-0 text-center text-[10px]', value === conn.id ? 'text-primary' : 'opacity-0')}>✓</span>
+                <span class={cn('w-3 shrink-0 text-center text-ui-3xs', value === conn.id ? 'text-primary' : 'opacity-0')}>✓</span>
                 <span class="flex-1 truncate text-left">{conn.name}</span>
-                {#if conn.id === currentConnectionId}<span class="shrink-0 text-[9px] text-blue-400/60">active</span>{/if}
+                {#if conn.id === currentConnectionId}<span class="shrink-0 text-ui-3xs text-blue-400/60">active</span>{/if}
               </button>
             {/each}
           {/if}
@@ -534,7 +534,7 @@
 
 <!-- ── Mode toggle ────────────────────────────────────────────────────────────── -->
 {#snippet ModeToggle({ mode, onset })}
-  <div class="flex shrink-0 items-center rounded-md border border-border/40 bg-muted/15 p-0.5 text-[11px]">
+  <div class="flex shrink-0 items-center rounded-md border border-border/40 bg-muted/15 p-0.5 text-ui-2xs">
     <button onclick={() => onset('table')}
       class={cn('rounded px-2 py-0.5 font-medium transition-colors', mode === 'table' ? 'bg-muted text-foreground shadow-sm' : 'text-muted-foreground/45 hover:text-muted-foreground/80')}>Table</button>
     <button onclick={() => onset('sql')}
@@ -555,7 +555,7 @@
         <div class="flex items-center gap-2.5 px-5 py-2.5">
           <span class="flex w-[74px] shrink-0 items-center gap-1.5">
             <span class="size-1.5 shrink-0 rounded-full bg-blue-500"></span>
-            <span class="text-[10px] font-semibold uppercase tracking-wider text-blue-500/90">Source</span>
+            <span class="text-ui-3xs font-semibold uppercase tracking-wider text-blue-500/90">Source</span>
           </span>
           {@render ConnSelect({ id: 'L.conn', value: L.connId, onchange: (v) => { L = { ...L, connId: v }; onConnChange('L') } })}
           {#if L.mode === 'table'}
@@ -584,7 +584,7 @@
         <div class="flex items-center gap-2.5 px-5 py-2.5">
           <span class="flex w-[74px] shrink-0 items-center gap-1.5">
             <span class="size-1.5 shrink-0 rounded-full bg-emerald-500"></span>
-            <span class="text-[10px] font-semibold uppercase tracking-wider text-emerald-500/90">Target</span>
+            <span class="text-ui-3xs font-semibold uppercase tracking-wider text-emerald-500/90">Target</span>
           </span>
           {@render ConnSelect({ id: 'R.conn', value: R.connId, onchange: (v) => { R = { ...R, connId: v }; onConnChange('R') } })}
           {#if R.mode === 'table'}
@@ -606,20 +606,20 @@
 
     <!-- Key cols + compare -->
     <div class="flex items-center gap-2.5 border-t border-border/15 px-5 py-2.5">
-      <span class="w-[74px] shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/40" title="Columns used to match rows between source and target">Key cols</span>
+      <span class="w-[74px] shrink-0 text-ui-3xs font-semibold uppercase tracking-wider text-muted-foreground/40" title="Columns used to match rows between source and target">Key cols</span>
       <div class="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
         {#each [...selectedKeyCols] as col}
           <button onclick={() => toggleKeyCol(col)}
-            class="flex items-center gap-1 rounded-full bg-primary/12 px-2.5 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/20"
+            class="flex items-center gap-1 rounded-full bg-primary/12 px-2.5 py-0.5 text-ui-2xs font-medium text-primary transition-colors hover:bg-primary/20"
           >{col}<X class="size-2.5" /></button>
         {/each}
         {#each keyColSuggestions.filter((c) => !selectedKeyCols.has(c)) as col}
           <button onclick={() => toggleKeyCol(col)}
-            class="flex items-center gap-1 rounded-full border border-dashed border-border/40 px-2.5 py-0.5 text-[11px] text-muted-foreground/40 transition-colors hover:border-primary/40 hover:text-primary"
+            class="flex items-center gap-1 rounded-full border border-dashed border-border/40 px-2.5 py-0.5 text-ui-2xs text-muted-foreground/40 transition-colors hover:border-primary/40 hover:text-primary"
           ><Plus class="size-2.5" />{col}</button>
         {/each}
         {#if !keyColSuggestions.length && !selectedKeyCols.size}
-          <span class="text-[11px] italic text-muted-foreground/20">auto — uses first column</span>
+          <span class="text-ui-2xs italic text-muted-foreground/20">auto — uses first column</span>
         {/if}
       </div>
       <button onclick={compare} disabled={comparing}
@@ -662,7 +662,7 @@
           {f.label}
           {#if f.count > 0}
             <span class={cn(
-              'rounded px-1.5 py-0.5 font-mono text-[10px] leading-none transition-colors',
+              'rounded px-1.5 py-0.5 font-mono text-ui-3xs leading-none transition-colors',
               activeFilter === f.key ? f.badge : 'bg-muted/30 text-muted-foreground/45'
             )}>{f.count}</span>
           {/if}
@@ -678,7 +678,7 @@
             <X class="size-3" />
           </button>
         {:else}
-          <span class="text-[11px] text-muted-foreground/40 tabular-nums">
+          <span class="text-ui-2xs text-muted-foreground/40 tabular-nums">
             {displayRows.length}{displayRows.length !== diffRows.length ? `/${diffRows.length}` : ''}
           </span>
         {/if}
@@ -708,8 +708,8 @@
                 style="width:{colWidths[ci]}px;min-width:{colWidths[ci]}px;max-width:{colWidths[ci]}px"
               >
                 <div class="flex min-w-0 items-baseline gap-1.5 px-3 py-2.5 pr-5">
-                  <span class="truncate font-semibold text-foreground/75 text-[11px]">{col.name}</span>
-                  {#if col.dataType && col.dataType.toLowerCase() !== 'null'}<span class="shrink-0 font-normal text-muted-foreground/35 text-[10px]">{col.dataType}</span>{/if}
+                  <span class="truncate font-semibold text-foreground/75 text-ui-2xs">{col.name}</span>
+                  {#if col.dataType && col.dataType.toLowerCase() !== 'null'}<span class="shrink-0 font-normal text-muted-foreground/35 text-ui-3xs">{col.dataType}</span>{/if}
                 </div>
                 <!-- Resize handle -->
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -746,7 +746,7 @@
               isRemoved ? 'bg-red-500/35' :
               isModified? 'bg-amber-500/25' : ''}
             <tr class="{rowBg || 'hover:bg-foreground/[0.025]'} transition-colors" style="height:{ROW_HEIGHT}px">
-              <td class="relative select-none border-b border-border/8 px-2 text-center font-mono text-[10px] font-bold {statusColor}">
+              <td class="relative select-none border-b border-border/8 px-2 text-center font-mono text-ui-3xs font-bold {statusColor}">
                 {#if accentColor}<span class="absolute inset-y-0 left-0 w-[2px] {accentColor}"></span>{/if}
                 {statusGlyph}
               </td>
@@ -756,17 +756,17 @@
                 {@const newVal    = row.right?.[ci] ?? null}
                 {@const dispVal   = isRemoved ? oldVal : newVal}
                 {@const dispStr   = dispVal === null ? '' : String(dispVal)}
-                <td class="overflow-hidden border-b border-border/8 px-3 font-mono text-[11px]">
+                <td class="overflow-hidden border-b border-border/8 px-3 font-mono text-ui-2xs">
                   {#if isChanged}
                     <div class="flex min-w-0 items-center gap-1.5">
                       {#if oldVal === null}
-                        <span class="shrink-0 text-[10px] italic text-red-400/45 line-through">NULL</span>
+                        <span class="shrink-0 text-ui-3xs italic text-red-400/45 line-through">NULL</span>
                       {:else}
-                        <span class="min-w-0 flex-1 truncate text-[10px] text-red-400/55 line-through">{String(oldVal)}</span>
+                        <span class="min-w-0 flex-1 truncate text-ui-3xs text-red-400/55 line-through">{String(oldVal)}</span>
                       {/if}
-                      <span class="shrink-0 font-sans text-[9px] text-muted-foreground/25">→</span>
+                      <span class="shrink-0 font-sans text-ui-3xs text-muted-foreground/25">→</span>
                       {#if newVal === null}
-                        <span class="shrink-0 text-[10px] italic text-emerald-400/70">NULL</span>
+                        <span class="shrink-0 text-ui-3xs italic text-emerald-400/70">NULL</span>
                       {:else}
                         <span class="min-w-0 flex-1 truncate text-emerald-300/90">{String(newVal)}</span>
                       {/if}

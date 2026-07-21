@@ -127,7 +127,7 @@
             aria-current={active ? 'page' : undefined}
             onclick={() => (tab = t.id)}
             class={cn(
-              'group/pt relative flex h-full shrink-0 items-center gap-1 px-2 text-[11px] transition-colors',
+              'group/pt relative flex h-full shrink-0 items-center gap-1 px-2 text-ui-2xs transition-colors',
               active
                 ? 'font-medium text-foreground'
                 : 'font-normal text-muted-foreground/55 hover:text-foreground',
@@ -196,7 +196,7 @@
                 <span class="block truncate font-mono text-ui-2xs leading-snug text-foreground/90">
                   {entry.title}
                 </span>
-                <span class="flex items-center gap-1 text-[10px] leading-tight text-muted-foreground/60">
+                <span class="flex items-center gap-1 text-ui-3xs leading-tight text-muted-foreground/60">
                   <span>{relativeTime(entry.executedAt)}</span>
                   {#if entry.queryMs}
                     <span class="tabular-nums opacity-70">{entry.queryMs}ms</span>
@@ -216,11 +216,11 @@
         {:else}
           <div class="flex flex-col items-center gap-1.5 px-4 py-8 text-center">
             <History class="size-5 text-muted-foreground/20" />
-            <p class="text-[11px] text-muted-foreground/60">
+            <p class="text-ui-2xs text-muted-foreground/60">
               {filter ? 'No matches' : 'No history yet'}
             </p>
             {#if !filter}
-              <p class="text-[10px] text-muted-foreground/40">{modKey}↵ to run</p>
+              <p class="text-ui-3xs text-muted-foreground/40">{modKey}↵ to run</p>
             {/if}
           </div>
         {/each}
@@ -228,7 +228,7 @@
         {#if history.length > 0 && !filter}
           <button
             type="button"
-            class="mx-2 mt-1 rounded px-2 py-1 text-center text-[10px] text-muted-foreground/50 transition-colors hover:bg-muted/60 hover:text-foreground"
+            class="mx-2 mt-1 rounded px-2 py-1 text-center text-ui-3xs text-muted-foreground/50 transition-colors hover:bg-muted/60 hover:text-foreground"
             onclick={() => void clearAllHistory()}
           >
             Clear all
@@ -248,7 +248,7 @@
                 <span class="block truncate text-ui-2xs leading-snug text-foreground/90">
                   {entry.name}
                 </span>
-                <span class="text-[10px] leading-tight text-muted-foreground/60">
+                <span class="text-ui-3xs leading-tight text-muted-foreground/60">
                   {relativeTime(entry.updatedAt)}
                 </span>
               </div>
@@ -265,11 +265,11 @@
         {:else}
           <div class="flex flex-col items-center gap-1.5 px-4 py-8 text-center">
             <Bookmark class="size-5 text-muted-foreground/20" />
-            <p class="text-[11px] text-muted-foreground/60">
+            <p class="text-ui-2xs text-muted-foreground/60">
               {filter ? 'No matches' : 'No saved queries'}
             </p>
             {#if !filter}
-              <p class="text-[10px] text-muted-foreground/40">{modKey}S to save</p>
+              <p class="text-ui-3xs text-muted-foreground/40">{modKey}S to save</p>
             {/if}
           </div>
         {/each}
@@ -286,7 +286,7 @@
                 <span class="block truncate text-ui-2xs leading-snug text-foreground/90">
                   {chart.name}
                 </span>
-                <span class="text-[10px] leading-tight text-muted-foreground/60">
+                <span class="text-ui-3xs leading-tight text-muted-foreground/60">
                   {chart.group}
                 </span>
               </div>
@@ -295,7 +295,7 @@
         {:else}
           <div class="flex flex-col items-center gap-1.5 px-4 py-8 text-center">
             <BarChart2 class="size-5 text-muted-foreground/20" />
-            <p class="text-[11px] text-muted-foreground/60">No saved charts yet</p>
+            <p class="text-ui-2xs text-muted-foreground/60">No saved charts yet</p>
           </div>
         {/each}
       {/if}

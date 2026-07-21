@@ -717,7 +717,7 @@
     {#if $appVimMode}
       <div
         bind:this={vimStatusEl}
-        class="absolute inset-x-0 bottom-0 z-10 border-t border-border/40 bg-panel/95 px-3 py-0.5 font-mono text-[11px] leading-5 text-muted-foreground/70"
+        class="absolute inset-x-0 bottom-0 z-10 border-t border-border/40 bg-panel/95 px-3 py-0.5 font-mono text-ui-2xs leading-5 text-muted-foreground/70"
       ></div>
     {/if}
   </div>

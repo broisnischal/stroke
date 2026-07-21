@@ -420,10 +420,10 @@
 
     <!-- Sidebar header -->
     <div class="flex h-9 shrink-0 items-center gap-1.5 border-b border-border/30 px-3">
-      <span class="flex-1 text-[11px] font-medium text-foreground/65">Snapshots</span>
+      <span class="flex-1 text-ui-2xs font-medium text-foreground/65">Snapshots</span>
 
       {#if snapshots.length > 0}
-        <span class="text-[10px] tabular-nums text-muted-foreground/55">{snapshots.length}</span>
+        <span class="text-ui-3xs tabular-nums text-muted-foreground/55">{snapshots.length}</span>
 
         <!-- More menu -->
         <div class="relative">
@@ -459,7 +459,7 @@
       <button
         onclick={openCaptureModal}
         disabled={capturing}
-        class="flex items-center gap-1 rounded px-1.5 py-1 text-[11px] font-medium text-foreground/65 hover:bg-muted/40 hover:text-foreground/80 disabled:opacity-40"
+        class="flex items-center gap-1 rounded px-1.5 py-1 text-ui-2xs font-medium text-foreground/65 hover:bg-muted/40 hover:text-foreground/80 disabled:opacity-40"
         title="Capture snapshot"
       >
         {#if capturing}
@@ -481,8 +481,8 @@
       {:else if snapshots.length === 0}
         <div class="flex flex-col items-center px-5 py-14 text-center">
           <Camera class="mb-2.5 size-5 text-muted-foreground/40" />
-          <p class="text-[11px] text-foreground/55">No snapshots yet</p>
-          <p class="mt-1 text-[10px] leading-relaxed text-muted-foreground/50">
+          <p class="text-ui-2xs text-foreground/55">No snapshots yet</p>
+          <p class="mt-1 text-ui-3xs leading-relaxed text-muted-foreground/50">
             Capture your schema to track changes over time
           </p>
         </div>
@@ -507,7 +507,7 @@
             <div class="px-3 py-2.5 pl-4">
               <!-- Name + slot markers + delete -->
               <div class="flex min-w-0 items-center gap-1">
-                <span class="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground/70" title={snap.connectionLabel}>
+                <span class="min-w-0 flex-1 truncate text-ui-2xs font-medium text-foreground/70" title={snap.connectionLabel}>
                   {displayName}
                 </span>
 
@@ -515,7 +515,7 @@
                 <button
                   onclick={() => { beforeId = snap.id }}
                   class={cn(
-                    'shrink-0 rounded px-1 py-0.5 text-[10px] leading-none',
+                    'shrink-0 rounded px-1 py-0.5 text-ui-3xs leading-none',
                     isBefore
                       ? 'bg-muted text-foreground/70'
                       : 'text-muted-foreground/40 hover:text-muted-foreground/60',
@@ -527,7 +527,7 @@
                 <button
                   onclick={() => { afterId = snap.id }}
                   class={cn(
-                    'shrink-0 rounded px-1 py-0.5 text-[10px] leading-none',
+                    'shrink-0 rounded px-1 py-0.5 text-ui-3xs leading-none',
                     isAfter
                       ? 'bg-muted text-foreground/70'
                       : 'text-muted-foreground/40 hover:text-muted-foreground/60',
@@ -546,7 +546,7 @@
               </div>
 
               <!-- Meta row -->
-              <div class="mt-0.5 flex items-center gap-1 text-[10px] text-muted-foreground/55">
+              <div class="mt-0.5 flex items-center gap-1 text-ui-3xs text-muted-foreground/55">
                 <span class="flex-1 truncate">{fmtDate(snap.capturedAt)}</span>
                 <span class="shrink-0 tabular-nums">{tableCount} tbl</span>
               </div>
@@ -570,9 +570,9 @@
 
     {:else}
       <!-- Comparison header bar -->
-      <div class="flex h-9 shrink-0 items-center gap-2 overflow-hidden border-b border-border/30 px-4 text-[11px]">
+      <div class="flex h-9 shrink-0 items-center gap-2 overflow-hidden border-b border-border/30 px-4 text-ui-2xs">
         <div class="flex min-w-0 shrink items-center gap-1.5">
-          <span class="shrink-0 text-[10px] text-muted-foreground/40">←</span>
+          <span class="shrink-0 text-ui-3xs text-muted-foreground/40">←</span>
           <span class="min-w-0 truncate text-foreground/55" title={beforeSnap.connectionLabel}>
             {beforeSnap.title || shortName(beforeSnap.connectionLabel)}
           </span>
@@ -588,7 +588,7 @@
         </button>
 
         <div class="flex min-w-0 shrink items-center gap-1.5">
-          <span class="shrink-0 text-[10px] text-muted-foreground/40">→</span>
+          <span class="shrink-0 text-ui-3xs text-muted-foreground/40">→</span>
           <span class="min-w-0 truncate text-foreground/55" title={afterSnap.connectionLabel}>
             {afterSnap.title || shortName(afterSnap.connectionLabel)}
           </span>
@@ -692,7 +692,7 @@
         <!-- Connection list -->
         <div class="border-t border-border/25">
           <div class="flex items-center px-5 py-2">
-            <span class="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/60">Connection</span>
+            <span class="text-ui-3xs font-semibold uppercase tracking-widest text-muted-foreground/60">Connection</span>
           </div>
           <div>
             {#if connectionId}
@@ -711,7 +711,7 @@
                   {#if captureConn === null}<span class="size-1.5 rounded-full bg-primary/80"></span>{/if}
                 </span>
                 <span class="min-w-0 flex-1 truncate font-medium text-foreground/75" title={connectionLabel}>{shortName(connectionLabel)}</span>
-                <span class="shrink-0 rounded bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-medium text-emerald-500/70">active</span>
+                <span class="shrink-0 rounded bg-emerald-500/10 px-1.5 py-0.5 text-ui-3xs font-medium text-emerald-500/70">active</span>
               </button>
             {/if}
             {#each connections.filter((c) => c.id !== connectionId) as conn (conn.id)}
@@ -729,7 +729,7 @@
                   {#if captureConn?.id === conn.id}<span class="size-1.5 rounded-full bg-primary/80"></span>{/if}
                 </span>
                 <span class="min-w-0 flex-1 truncate text-foreground/65" title={conn.name}>{shortName(conn.name)}</span>
-                <span class="shrink-0 text-[9px] uppercase text-muted-foreground/55">{conn.type}</span>
+                <span class="shrink-0 text-ui-3xs uppercase text-muted-foreground/55">{conn.type}</span>
               </button>
             {/each}
             {#if !connectionId && connections.length === 0}
@@ -744,12 +744,12 @@
             <!-- Database -->
             <div class="w-44 shrink-0">
               <div class="flex items-center border-b border-border/20 px-4 py-2">
-                <span class="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/60">Database</span>
+                <span class="text-ui-3xs font-semibold uppercase tracking-widest text-muted-foreground/60">Database</span>
                 {#if captureLoadingDbs}<Loader2 class="ml-auto size-2.5 animate-spin text-muted-foreground/55" />{/if}
               </div>
               <div class="max-h-44 overflow-y-auto py-1">
                 {#if !captureLoadingDbs && captureDatabases.length === 0}
-                  <p class="px-4 py-2 text-[10px] italic text-muted-foreground/50">None found</p>
+                  <p class="px-4 py-2 text-ui-3xs italic text-muted-foreground/50">None found</p>
                 {/if}
                 {#each captureDatabases as db (db)}
                   <button
@@ -766,7 +766,7 @@
                     {:else}
                       <span class="size-1 shrink-0"></span>
                     {/if}
-                    <span class="truncate font-mono text-[11px]">{db}</span>
+                    <span class="truncate font-mono text-ui-2xs">{db}</span>
                   </button>
                 {/each}
               </div>
@@ -775,19 +775,19 @@
             <!-- Schemas -->
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2 border-b border-border/20 px-4 py-2">
-                <span class="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/60">Schemas</span>
+                <span class="text-ui-3xs font-semibold uppercase tracking-widest text-muted-foreground/60">Schemas</span>
                 {#if captureLoadingSchemas}
                   <Loader2 class="ml-auto size-2.5 animate-spin text-muted-foreground/55" />
                 {:else if captureSchemaList.length > 0}
                   <div class="ml-auto flex items-center gap-2">
-                    <button onclick={() => { captureChecked = new Set(captureSchemaList) }} class="text-[9px] text-muted-foreground/55 hover:text-foreground/60">All</button>
-                    <button onclick={() => { captureChecked = new Set() }} class="text-[9px] text-muted-foreground/55 hover:text-foreground/60">None</button>
+                    <button onclick={() => { captureChecked = new Set(captureSchemaList) }} class="text-ui-3xs text-muted-foreground/55 hover:text-foreground/60">All</button>
+                    <button onclick={() => { captureChecked = new Set() }} class="text-ui-3xs text-muted-foreground/55 hover:text-foreground/60">None</button>
                   </div>
                 {/if}
               </div>
               <div class="max-h-44 overflow-y-auto py-1">
                 {#if !captureLoadingSchemas && captureSchemaList.length === 0}
-                  <p class="px-4 py-2 text-[10px] italic text-muted-foreground/50">
+                  <p class="px-4 py-2 text-ui-3xs italic text-muted-foreground/50">
                     {captureDb ? 'No schemas found' : 'Select a database first'}
                   </p>
                 {/if}
@@ -810,7 +810,7 @@
                     )}>
                       {#if captureChecked.has(schema)}<Check class="size-2.5 text-primary/80" />{/if}
                     </span>
-                    <span class="truncate font-mono text-[11px]">{schema}</span>
+                    <span class="truncate font-mono text-ui-2xs">{schema}</span>
                   </button>
                 {/each}
               </div>
@@ -821,7 +821,7 @@
 
       <!-- Footer -->
       <div class="flex shrink-0 items-center justify-between border-t border-border/25 px-5 py-3">
-        <p class="text-[10px] text-muted-foreground/50">
+        <p class="text-ui-3xs text-muted-foreground/50">
           {#if captureChecked.size > 0 && captureSchemaList.length > 0}
             {captureChecked.size} / {captureSchemaList.length} schemas
           {:else if captureSchemaList.length > 0}
@@ -836,7 +836,7 @@
           <button
             onclick={doCapture}
             disabled={captureLoadingSchemas || captureLoadingDbs || (!connectionId && !captureConn)}
-            class="flex items-center gap-1.5 rounded-lg bg-foreground px-4 py-1.5 text-xs font-semibold text-background hover:opacity-85 disabled:opacity-30"
+            class="flex items-center gap-1.5 rounded-lg bg-foreground px-4 py-1.5 text-xs font-medium text-background hover:opacity-85 disabled:opacity-30"
           >
             <Camera class="size-3" />
             Capture
@@ -919,7 +919,7 @@
       {status === 'added' ? '+' : status === 'removed' ? '−' : '~'}
     </span>
     <span class="min-w-0 flex-1 truncate font-mono text-xs font-medium text-foreground/75">{tableKey}</span>
-    <div class="ml-auto flex shrink-0 items-center gap-2 text-[11px]">
+    <div class="ml-auto flex shrink-0 items-center gap-2 text-ui-2xs">
       {#if removeCount > 0}<span class="font-medium text-red-400">−{removeCount}</span>{/if}
       {#if addCount > 0}<span class="font-medium text-emerald-400">+{addCount}</span>{/if}
     </div>
@@ -934,29 +934,29 @@
           {#each selectedDdlDiff as line, i (i)}
             {#if line.type === 'ellipsis'}
               <tr class="bg-muted/10">
-                <td class="w-10 select-none border-r border-border/15 px-2 text-right text-[9px] text-muted-foreground/40"></td>
-                <td class="w-10 select-none border-r border-border/15 px-2 text-right text-[9px] text-muted-foreground/40"></td>
+                <td class="w-10 select-none border-r border-border/15 px-2 text-right text-ui-3xs text-muted-foreground/40"></td>
+                <td class="w-10 select-none border-r border-border/15 px-2 text-right text-ui-3xs text-muted-foreground/40"></td>
                 <td class="w-5 select-none"></td>
-                <td class="px-4 py-0.5 text-[10px] text-muted-foreground/55">··· {line.count} unchanged line{line.count !== 1 ? 's' : ''}</td>
+                <td class="px-4 py-0.5 text-ui-3xs text-muted-foreground/55">··· {line.count} unchanged line{line.count !== 1 ? 's' : ''}</td>
               </tr>
             {:else if line.type === 'add'}
               <tr class="bg-emerald-500/[0.06] hover:bg-emerald-500/[0.1]">
-                <td class="w-10 select-none border-r border-emerald-500/10 px-2 text-right text-[9px] text-muted-foreground/40"></td>
-                <td class="w-10 select-none border-r border-emerald-500/10 px-2 text-right text-[9px] text-emerald-500/40">{line.lineB}</td>
+                <td class="w-10 select-none border-r border-emerald-500/10 px-2 text-right text-ui-3xs text-muted-foreground/40"></td>
+                <td class="w-10 select-none border-r border-emerald-500/10 px-2 text-right text-ui-3xs text-emerald-500/40">{line.lineB}</td>
                 <td class="w-5 select-none text-center text-emerald-500/50">+</td>
                 <td class="px-4 py-px text-emerald-300/80"><span class="whitespace-pre">{line.content}</span></td>
               </tr>
             {:else if line.type === 'remove'}
               <tr class="bg-red-500/[0.06] hover:bg-red-500/[0.1]">
-                <td class="w-10 select-none border-r border-red-500/10 px-2 text-right text-[9px] text-red-500/40">{line.lineA}</td>
-                <td class="w-10 select-none border-r border-red-500/10 px-2 text-right text-[9px] text-muted-foreground/40"></td>
+                <td class="w-10 select-none border-r border-red-500/10 px-2 text-right text-ui-3xs text-red-500/40">{line.lineA}</td>
+                <td class="w-10 select-none border-r border-red-500/10 px-2 text-right text-ui-3xs text-muted-foreground/40"></td>
                 <td class="w-5 select-none text-center text-red-500/50">−</td>
                 <td class="px-4 py-px text-red-300/80"><span class="whitespace-pre">{line.content}</span></td>
               </tr>
             {:else}
               <tr class="hover:bg-muted/8">
-                <td class="w-10 select-none border-r border-border/10 px-2 text-right text-[9px] text-muted-foreground/60">{line.lineA}</td>
-                <td class="w-10 select-none border-r border-border/10 px-2 text-right text-[9px] text-muted-foreground/60">{line.lineB}</td>
+                <td class="w-10 select-none border-r border-border/10 px-2 text-right text-ui-3xs text-muted-foreground/60">{line.lineA}</td>
+                <td class="w-10 select-none border-r border-border/10 px-2 text-right text-ui-3xs text-muted-foreground/60">{line.lineB}</td>
                 <td class="w-5 select-none"></td>
                 <td class="px-4 py-px text-muted-foreground/60"><span class="whitespace-pre">{line.content}</span></td>
               </tr>

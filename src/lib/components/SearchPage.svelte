@@ -264,10 +264,10 @@
                 {#each hit.columns.slice(0, 5) as col, ci (col.name)}
                   {@const val = hit.sampleRow[ci]}
                   <div class="flex min-w-0 items-baseline gap-1">
-                    <span class="shrink-0 text-[10px] text-muted-foreground/35">{col.name}</span>
+                    <span class="shrink-0 text-ui-3xs text-muted-foreground/35">{col.name}</span>
                     <span
                       class={cn(
-                        'max-w-[160px] truncate font-mono text-[11px]',
+                        'max-w-[160px] truncate font-mono text-ui-2xs',
                         val === null || val === undefined
                           ? 'italic text-muted-foreground/25'
                           : 'text-muted-foreground/60',

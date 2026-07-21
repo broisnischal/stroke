@@ -143,7 +143,7 @@
       <span class="inline-flex size-6 shrink-0 items-center justify-center rounded-md bg-primary/12 text-primary">
         <Icon name="replace" class="size-3.5" />
       </span>
-      <Dialog.Title class="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
+      <Dialog.Title class="min-w-0 flex-1 truncate text-ui-sm font-medium text-foreground">
         Find & replace
         <span class="text-muted-foreground/50">·</span>
         <span class="font-mono text-ui-sm">{tableName}</span>
@@ -182,7 +182,7 @@
           {/snippet}
           {#snippet item(it)}
             <span class="min-w-0 flex-1 truncate font-mono text-ui-xs">{it.label}</span>
-            {#if it.dataType}<span class="shrink-0 text-[10px] text-muted-foreground/40">{it.dataType}</span>{/if}
+            {#if it.dataType}<span class="shrink-0 text-ui-3xs text-muted-foreground/40">{it.dataType}</span>{/if}
             {#if it.active}<span class="shrink-0 text-primary">✓</span>{/if}
           {/snippet}
         </SearchableMenu>

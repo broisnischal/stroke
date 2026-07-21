@@ -89,9 +89,9 @@
     setTimeout(() => (copied = false), 2000);
   }
 
-  const lbl = "mb-1.5 block text-[11px] font-medium text-muted-foreground/55";
+  const lbl = "mb-1.5 block text-ui-2xs font-medium text-muted-foreground/55";
   const tinp =
-    "w-full rounded-md border border-border/25 bg-muted/15 px-2.5 py-2 text-[13px] text-foreground placeholder:text-muted-foreground/25 placeholder:font-normal focus-visible:border-border/50 focus-visible:outline-none resize-none transition-colors";
+    "w-full rounded-md border border-border/25 bg-muted/15 px-2.5 py-2 text-ui-sm text-foreground placeholder:text-muted-foreground/25 placeholder:font-normal focus-visible:border-border/50 focus-visible:outline-none resize-none transition-colors";
 </script>
 
 <Dialog.Root bind:open>
@@ -104,8 +104,8 @@
       class="flex items-center justify-between border-b border-border/15 px-5 py-3.5"
     >
       <div class="flex items-center gap-2">
-        <p class="text-[13px] font-semibold text-foreground">Report an issue</p>
-        <span class="font-mono text-[10px] text-muted-foreground/30"
+        <p class="text-ui-sm font-semibold text-foreground">Report an issue</p>
+        <span class="font-mono text-ui-3xs text-muted-foreground/30"
           >v{appVersion}</span
         >
       </div>
@@ -126,7 +126,7 @@
               type="button"
               onclick={() => (issueType = t.id)}
               class={cn(
-                "inline-flex h-[28px] min-w-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border px-1 text-[11px] font-medium transition-colors",
+                "inline-flex h-[28px] min-w-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border px-1 text-ui-2xs font-medium transition-colors",
                 issueType === t.id
                   ? "border-border/50 bg-muted/60 text-foreground"
                   : "border-border/20 text-muted-foreground/35 hover:border-border/30 hover:bg-muted/20 hover:text-muted-foreground/70",
@@ -173,8 +173,8 @@
       <div
         class="flex items-center gap-1.5 rounded-md bg-muted/20 px-2.5 py-1.5"
       >
-        <span class="text-[10px] text-muted-foreground/35">Auto-included:</span>
-        <span class="font-mono text-[10px] text-muted-foreground/45"
+        <span class="text-ui-3xs text-muted-foreground/35">Auto-included:</span>
+        <span class="font-mono text-ui-3xs text-muted-foreground/45"
           >v{appVersion} · {platform || "unknown"}</span
         >
       </div>
@@ -187,7 +187,7 @@
       <button
         type="button"
         onclick={copyReport}
-        class="inline-flex h-[28px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-[11px] text-muted-foreground/40 transition-colors hover:bg-muted/30 hover:text-foreground"
+        class="inline-flex h-[28px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-ui-2xs text-muted-foreground/40 transition-colors hover:bg-muted/30 hover:text-foreground"
       >
         {#if copied}
           <Check class="size-3 text-emerald-500" />
@@ -209,7 +209,7 @@
               window.open(`https://github.com/${GITHUB_REPO}/issues`, "_blank");
             }
           }}
-          class="inline-flex h-[28px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-border/25 px-3 text-[11px] text-muted-foreground/50 transition-colors hover:bg-muted/30 hover:text-foreground"
+          class="inline-flex h-[28px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-border/25 px-3 text-ui-2xs text-muted-foreground/50 transition-colors hover:bg-muted/30 hover:text-foreground"
         >
           <svg
             class="size-3 shrink-0"
@@ -225,7 +225,7 @@
         <button
           type="button"
           onclick={openOnGithub}
-          class="inline-flex h-[28px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-foreground px-3.5 text-[12px] font-medium text-background transition-colors hover:bg-foreground/85"
+          class="inline-flex h-[28px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-foreground px-3.5 text-ui-xs font-medium text-background transition-colors hover:bg-foreground/85"
         >
           <ExternalLink class="size-3 shrink-0" />
           Open on GitHub

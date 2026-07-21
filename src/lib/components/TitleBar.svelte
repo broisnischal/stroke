@@ -4,7 +4,6 @@
   import ChevronLeft   from '@lucide/svelte/icons/chevron-left'
   import ChevronRight  from '@lucide/svelte/icons/chevron-right'
   import PanelLeft     from '@lucide/svelte/icons/panel-left'
-  import Sparkles      from '@lucide/svelte/icons/sparkles'
   import MessageSquare from '@lucide/svelte/icons/message-square'
   import X             from '@lucide/svelte/icons/x'
   import Minus         from '@lucide/svelte/icons/minus'
@@ -26,12 +25,10 @@
     canGoForward = false,
     sidebarOpen = true,
     connected = false,
-    aiMode = false,
     aiSidebarOpen = false,
     ongoback          = () => {},
     ongoforward       = () => {},
     ontogglesidebar   = () => {},
-    ontoggleaimode    = () => {},
     ontoggleaisidebar = () => {},
   } = $props()
 
@@ -172,7 +169,7 @@
 
       <!-- Center title -->
       <div class="pointer-events-none absolute inset-x-0 flex items-center justify-center">
-        <span class="font-mono text-[11px] font-medium tracking-widest text-muted-foreground/30 lowercase select-none">
+        <span class="font-mono text-ui-2xs font-medium tracking-widest text-muted-foreground/30 lowercase select-none">
           {title}
         </span>
       </div>
@@ -189,33 +186,17 @@
             type="button"
             onclick={() => (showActivationDialog = true)}
             class={cn(
-              'flex h-[22px] items-center gap-1.5 rounded px-2.5 text-[10px] font-semibold transition-all',
+              'flex h-[22px] items-center gap-1.5 rounded px-2.5 text-ui-3xs font-semibold transition-[color,background-color,border-color] duration-150',
               trialUrgent
-                ? 'border border-amber-500/40 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20'
+                ? 'border border-warning/40 bg-warning/10 text-warning hover:bg-warning/20'
                 : 'border border-border/50 bg-muted/30 text-muted-foreground hover:bg-muted/60 hover:text-foreground',
             )}
             title="Activate license"
           >
-            <span class={cn('size-1.5 rounded-full', trialUrgent ? 'bg-amber-400' : 'bg-muted-foreground/50')}></span>
+            <span class={cn('size-1.5 rounded-full', trialUrgent ? 'bg-warning' : 'bg-muted-foreground/50')}></span>
             {trialDays}d trial
           </button>
         {/if}
-
-        <!-- Agent mode -->
-        <button
-          type="button"
-          class={cn(
-            'flex h-[22px] items-center gap-1 rounded px-2 text-[11px] font-medium transition-colors',
-            aiMode
-              ? 'bg-primary/15 text-primary ring-1 ring-inset ring-primary/25 hover:bg-primary/20'
-              : 'text-muted-foreground/50 hover:bg-foreground/[0.06] hover:text-foreground',
-          )}
-          onclick={ontoggleaimode}
-          title={aiMode ? `Exit agent mode (${mod}⇧E)` : `Enter agent mode (${mod}⇧E)`}
-        >
-          <Sparkles class="size-[11px]" />
-          <span>Agent</span>
-        </button>
 
         <!-- Chat sidebar -->
         <button
@@ -262,8 +243,8 @@
             <KeyRound class="size-3.5 text-primary" />
           </div>
           <div>
-            <Dialog.Title class="text-sm font-semibold leading-none text-foreground">Activate License</Dialog.Title>
-            <Dialog.Description class="mt-0.5 text-xs text-muted-foreground">Enter your key to unlock all features.</Dialog.Description>
+            <Dialog.Title class="text-ui-sm font-semibold leading-none text-foreground">Activate License</Dialog.Title>
+            <Dialog.Description class="mt-0.5 text-ui-xs text-muted-foreground">Enter your key to unlock all features.</Dialog.Description>
           </div>
         </div>
         <Dialog.Close class="inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
@@ -272,7 +253,7 @@
       </div>
       <LicenseActivation compact onactivated={() => { showActivationDialog = false }} />
       <div class="border-t border-border/60 px-5 py-3">
-        <p class="text-xs text-muted-foreground/50">
+        <p class="text-ui-xs text-muted-foreground/50">
           No license? <a href="https://stroke.click" target="_blank" rel="noopener noreferrer" class="text-primary/70 underline-offset-2 hover:underline">stroke.click →</a>
         </p>
       </div>
