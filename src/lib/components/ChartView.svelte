@@ -132,10 +132,19 @@
   let zCol     = $state('')
   let groupCol = $state('')
 
+  // Seed / repair the axis selections when the available columns change, but
+  // KEEP the user's manual picks as long as they still refer to a real column.
+  // (The old version reset all four on every columns change, silently undoing
+  // whatever axes the user had chosen whenever the derived column list churned.)
   $effect(() => {
-    const gx = guessXCol(effectiveColumns)
-    const gy = guessYCol(effectiveColumns, gx)
-    xCol = gx; yCol = gy; zCol = ''; groupCol = ''
+    const names = new Set(effectiveColumns.map((c) => c.name))
+    untrack(() => {
+      const gx = xCol && names.has(xCol) ? xCol : guessXCol(effectiveColumns)
+      xCol = gx
+      yCol = yCol && names.has(yCol) ? yCol : guessYCol(effectiveColumns, gx)
+      if (zCol && !names.has(zCol)) zCol = ''
+      if (groupCol && !names.has(groupCol)) groupCol = ''
+    })
   })
 
   // ── Chart option ──────────────────────────────────────────────────────────
