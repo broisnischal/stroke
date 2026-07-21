@@ -243,6 +243,7 @@ function categoryXAxis(isDark, xData) {
       ...axisStyle(isDark).axisLabel,
       rotate: !isTs && xData.length > 12 ? 30 : 0,
       overflow: isTs ? 'none' : 'truncate',
+      ellipsis: '…',
       width: isTs ? undefined : 80,
       ...(isTs ? { formatter: fmtAxisLabel } : {}),
     },
@@ -1169,7 +1170,16 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
   }
 
   // ── Bar / Line / Area (with optional group) ────────────────────────────────
-  const xData = sortedXData(rows, xi)
+  let xData = sortedXData(rows, xi)
+
+  // Plain bar charts read far better sorted by magnitude; ECharts otherwise
+  // keeps categorical x in arbitrary first-seen order. Skip for timestamps
+  // (chronological order is meaningful) and for line/area/step (sorting would
+  // scramble the connected path).
+  if (type === 'bar' && !isTimestampAxis(xData)) {
+    const totals = aggDataMap(rows, xi, yi)
+    xData = [...xData].sort((a, b) => (totals[b] ?? 0) - (totals[a] ?? 0))
+  }
 
   /** @type {any[]} */
   let series
