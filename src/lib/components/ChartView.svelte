@@ -150,6 +150,23 @@
   // ── Chart option ──────────────────────────────────────────────────────────
   const isDark = $derived($isCurrentThemeDark)
 
+  // Resolve the app's --primary token to a concrete rgb() string so charts follow
+  // the current theme. Reading the CSS var directly yields oklch(), which
+  // zrender/ECharts can't parse — painting it onto a probe element lets the
+  // browser normalise it to rgb(). Recomputes when the theme (isDark) flips.
+  const accent = $derived.by(() => {
+    void isDark // dep: re-resolve on theme change
+    if (typeof document === 'undefined') return ''
+    try {
+      const probe = document.createElement('span')
+      probe.style.cssText = 'color:var(--primary);position:absolute;visibility:hidden'
+      document.body.appendChild(probe)
+      const c = getComputedStyle(probe).color
+      probe.remove()
+      return c || ''
+    } catch { return '' }
+  })
+
   // Canvas renderer is faster for data charts; SVG only for small previews.
   // Threshold at 500: below that SVG is fine, above that canvas wins noticeably.
   const renderer = $derived(effectiveRows.length > 500 ? 'canvas' : 'svg')
@@ -158,7 +175,7 @@
     if (!xCol || effectiveRows.length === 0) return {}
     const needsY = !['histogram', 'tree'].includes(chartType)
     if (needsY && !yCol) return {}
-    return buildOption({ type: chartType, columns: effectiveColumns, rows: effectiveRows, xCol, yCol: yCol || xCol, zCol: zCol || undefined, groupCol: groupCol || undefined, isDark })
+    return buildOption({ type: chartType, columns: effectiveColumns, rows: effectiveRows, xCol, yCol: yCol || xCol, zCol: zCol || undefined, groupCol: groupCol || undefined, isDark, accent })
   })
 
   const meterSpec = $derived.by(() => {

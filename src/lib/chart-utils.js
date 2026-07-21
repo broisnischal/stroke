@@ -100,7 +100,10 @@ export function getRequiredAxes(chartType) {
   }
 }
 
-const PALETTE = [
+// Default categorical palette. The lead color is used for single-series charts;
+// buildOption replaces it with the live theme accent (see the `accent` param) so
+// charts follow whatever theme/primary color the app is set to.
+const DEFAULT_PALETTE = [
   '#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#3b82f6',
   '#a855f7', '#14b8a6', '#f97316', '#ec4899', '#64748b',
 ]
@@ -280,7 +283,12 @@ function valueYAxis(isDark) {
  * }} cfg
  * @returns {import('echarts').EChartsOption}
  */
-export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, isDark = false, title, noTitle = false }) {
+export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, isDark = false, title, noTitle = false, accent = '' }) {
+  // Theme-aware palette: lead with the live accent (resolved from the app's
+  // --primary token by the caller) so single-series charts and accents follow
+  // the current theme; the rest of the categorical ramp stays fixed. Shadows the
+  // module DEFAULT_PALETTE so every PALETTE[...] reference below is themed.
+  const PALETTE = accent ? [accent, ...DEFAULT_PALETTE.slice(1)] : DEFAULT_PALETTE
   const n = rows.length
   const base = { ...baseOption(isDark, noTitle), ...animOpts(n) }
   const xi = columns.findIndex((c) => c.name === xCol)
