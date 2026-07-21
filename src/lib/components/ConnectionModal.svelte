@@ -1071,6 +1071,14 @@
             <!-- ── SQLite ────────────────────────────────── -->
             {:else if dbType === 'sqlite'}
 
+              <!-- Local file vs remote SQLite (Turso / libSQL). Remote reuses the
+                   dedicated libsql driver + backend by switching dbType. -->
+              <div class="flex gap-0.5 rounded-md border border-border/25 bg-muted/30 p-0.5 text-ui-2xs">
+                <button type="button" class="flex-1 rounded bg-background px-2 py-1 font-medium text-foreground shadow-sm">Local file</button>
+                <button type="button" onclick={() => (dbType = 'libsql')}
+                  class="flex-1 rounded px-2 py-1 text-muted-foreground/60 transition-colors hover:text-foreground">Remote (Turso / libSQL)</button>
+              </div>
+
               <div>
                 <label for="cn-path" class={lbl}>File</label>
                 <div class="flex gap-1.5">
@@ -1097,6 +1105,12 @@
 
             <!-- ── LibSQL / Turso ─────────────────────────── -->
             {:else if dbType === 'libsql'}
+
+              <div class="flex gap-0.5 rounded-md border border-border/25 bg-muted/30 p-0.5 text-ui-2xs">
+                <button type="button" onclick={() => (dbType = 'sqlite')}
+                  class="flex-1 rounded px-2 py-1 text-muted-foreground/60 transition-colors hover:text-foreground">Local file</button>
+                <button type="button" class="flex-1 rounded bg-background px-2 py-1 font-medium text-foreground shadow-sm">Remote (Turso / libSQL)</button>
+              </div>
 
               <div>
                 <label for="cn-libsql-url" class={lbl}>URL</label>
