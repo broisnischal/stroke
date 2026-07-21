@@ -1,5 +1,8 @@
 <script>
   import Icon from "./Icon.svelte";
+  import CaseSensitive from "@lucide/svelte/icons/case-sensitive";
+  import WholeWord from "@lucide/svelte/icons/whole-word";
+  import Regex from "@lucide/svelte/icons/regex";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
@@ -124,9 +127,9 @@
   } = $props();
 
   const SEARCH_OPTS = /** @type {const} */ ([
-    { key: "matchCase", label: "Aa", title: "Match case", underline: false },
-    { key: "wholeWord", label: "ab", title: "Match whole word", underline: true },
-    { key: "regex", label: ".*", title: "Use regular expression", underline: false },
+    { key: "matchCase", icon: CaseSensitive, title: "Match case" },
+    { key: "wholeWord", icon: WholeWord, title: "Match whole word" },
+    { key: "regex", icon: Regex, title: "Use regular expression" },
   ]);
 
   let searchFocused = $state(false);
@@ -601,14 +604,14 @@
               title={opt.title}
               aria-pressed={searchOptions[opt.key]}
               class={cn(
-                "flex size-4 items-center justify-center rounded font-mono text-ui-3xs font-semibold leading-none transition-[background-color,color] duration-150 ease-out",
+                "inline-flex size-5 items-center justify-center rounded-md transition-[background-color,color] duration-150 ease-out",
                 searchOptions[opt.key]
                   ? "bg-primary/15 text-primary"
-                  : "text-muted-foreground/45 hover:bg-muted/70 hover:text-foreground",
+                  : "text-muted-foreground/50 hover:bg-muted/70 hover:text-foreground",
               )}
               onclick={() => onsearchoptionschange({ ...searchOptions, [opt.key]: !searchOptions[opt.key] })}
             >
-              <span class={opt.underline ? "underline decoration-1 underline-offset-2" : ""}>{opt.label}</span>
+              <opt.icon class="size-3.5 shrink-0" />
             </button>
           {/each}
         </div>
