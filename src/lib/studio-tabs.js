@@ -30,7 +30,7 @@ import { loadDefaultPageSize } from '$lib/table-query.js'
  * @property {boolean} savingCell
  * @property {Set<string>} hiddenColumns
  * @property {boolean} filterBarOpen
- * @property {'table' | 'json' | 'record' | 'text'} [dataViewMode]
+ * @property {'table' | 'json' | 'record' | 'text' | 'chart' | 'erd'} [dataViewMode]
  * @property {number} [scrollLeft]
  * @property {number} [scrollTop]
  */

@@ -137,15 +137,8 @@
   >
     {@render renderGroup(node, isFocused)}
 
-    <!-- Active / inactive treatment — only when split. No accent border/rail on
-         the focused pane (too loud); instead the inactive panes are gently dimmed
-         so the active one still reads clearly. Overlay is pointer-events-none, so
-         a click passes straight through to focus the pane underneath. -->
-    {#if multiPane && !isFocused}
-      <div
-        class="pointer-events-none absolute inset-0 z-30 bg-background/45 transition-opacity duration-150"
-      ></div>
-    {/if}
+    <!-- Inactive split panes are intentionally NOT dimmed — every pane renders at
+         full brightness so all views stay readable at once. -->
 
     <!-- Drop hint: translucent preview of where the dragged tab will land. -->
     {#if hintEdge}
