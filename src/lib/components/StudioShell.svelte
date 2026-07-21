@@ -1490,6 +1490,13 @@ let rowSearch = $state('')
     savingCell = false
   }
 
+  // Raw (non-proxied) row arrays keyed by tab id. `tabs` is a deep-proxied
+  // $state, so a rows array stored inside it and read back on re-activation
+  // returns a proxy — which the canvas draw() would then index per cell per
+  // frame (the scroll-lag regression). We keep the raw reference here and hand it
+  // straight back on restore so the live grid always holds a genuine raw array.
+  const _liveRowsByTab = new Map()
+
   function saveActiveTabState() {
     if (!activeTabId) return
     const idx = tabs.findIndex((t) => t.id === activeTabId)
@@ -1500,6 +1507,8 @@ let rowSearch = $state('')
     if (t.kind === 'table') {
       const state = cloneTableTabState(captureTableSnapshot())
       updated = { ...t, state, title: tableTabTitle(state) }
+      if (windowed) _liveRowsByTab.delete(activeTabId)
+      else _liveRowsByTab.set(activeTabId, rows)
     } else if (t.kind === 'sql') {
       updated = { ...t, state: cloneSqlTabState(captureSqlSnapshot()) }
     }
@@ -1532,8 +1541,13 @@ let rowSearch = $state('')
         applyTableSnapshot(raw)
         if (raw.table && !fetchingTabIds.has(tab.id)) void fetchRowsForTab(tab.id)
       } else {
-        // Has cached data — clone Sets so mutations don't bleed between tabs
-        applyTableSnapshot(cloneTableTabState(raw))
+        // Has cached data — clone Sets so mutations don't bleed between tabs, and
+        // restore the RAW rows reference (not the proxied tab.state.rows) so the
+        // grid doesn't index a proxy on the scroll hot path.
+        const snap = cloneTableTabState(raw)
+        const rawRows = _liveRowsByTab.get(tab.id)
+        if (rawRows) snap.rows = rawRows
+        applyTableSnapshot(snap)
       }
     }
   }
@@ -2508,6 +2522,7 @@ let rowSearch = $state('')
       const st = /** @type {TableTabState} */ (t.state)
       if (st && Array.isArray(st.rows) && st.rows.length > TAB_EVICT_ROW_THRESHOLD) {
         changed = true
+        _liveRowsByTab.delete(t.id)
         return { ...t, state: { ...st, rows: [], columns: [], selected: new Set() } }
       }
       return t
@@ -2601,6 +2616,7 @@ let rowSearch = $state('')
   /** Push a closed tab onto the reopen stack (welcome tabs aren't worth restoring). */
   function rememberClosedTab(tab) {
     if (!tab || tab.kind === 'welcome') return
+    _liveRowsByTab.delete(tab.id)
     // Snapshot with a shallow state clone so later edits to the live tree can't
     // mutate what we'll restore. `id`/`pinned` are dropped — reopen mints fresh.
     const { id: _id, pinned: _pinned, ...rest } = tab
