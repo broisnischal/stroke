@@ -174,11 +174,19 @@
     if (typeof document === 'undefined') return ''
     try {
       const probe = document.createElement('span')
-      probe.style.cssText = 'color:var(--primary);position:absolute;visibility:hidden'
+      probe.style.cssText = 'position:absolute;visibility:hidden;color:var(--primary)'
       document.body.appendChild(probe)
       const c = getComputedStyle(probe).color
+      // Guard: if --primary didn't resolve to a real color (unset, or an
+      // unparseable value in this engine), `color` inherits the foreground — which
+      // in the dark theme is white and would paint every bar white. Detect that by
+      // comparing against a control that deliberately inherits, and fall back to
+      // the default palette (return '') when they match.
+      probe.style.color = 'var(--stroke-nonexistent-token)'
+      const fg = getComputedStyle(probe).color
       probe.remove()
-      return c || ''
+      if (!c || c === fg) return ''
+      return c
     } catch { return '' }
   })
 
