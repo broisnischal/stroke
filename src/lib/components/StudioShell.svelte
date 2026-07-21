@@ -2275,6 +2275,22 @@ let rowSearch = $state('')
     applySqlSnapshot(cloneSqlTabState(/** @type {SqlTabState} */ (tab.state)))
   }
 
+  // Always open a brand-new, empty SQL editor tab (multiple allowed), unlike
+  // openSqlTab which focuses the single existing one. Wired to the Cmd-K
+  // "New SQL Editor" command so several query editors can be open at once;
+  // the existing per-tab snapshot swap keeps each tab's buffer/results intact.
+  function openNewSqlTab() {
+    saveActiveTabState()
+    dropWelcomeTabs()
+    const count = tabs.filter((t) => t.kind === 'sql').length
+    const title = count === 0 ? 'Query Editor' : `Query Editor ${count + 1}`
+    const tab = createSqlTab(undefined, title)
+    tabs = [...tabs, tab]
+    activeTabId = tab.id
+    clearTableEditor()
+    applySqlSnapshot(cloneSqlTabState(/** @type {SqlTabState} */ (tab.state)))
+  }
+
   function openAiTab() {
     if (!$hasPro) { showProGate = true; return }
     enterAiMode()
@@ -4856,6 +4872,7 @@ let rowSearch = $state('')
   ontableselect={(name) => { if (aiMode) exitAiMode(); void handleTableSelect(name) }}
   onschemachange={(schema) => { if (aiMode) exitAiMode(); handleSchemaChange(schema) }}
   onopensql={() => { if (aiMode) exitAiMode(); void focusSqlView() }}
+  onnewsql={() => { if (aiMode) exitAiMode(); openNewSqlTab() }}
   onopentable={() => { if (aiMode) exitAiMode(); void focusDataView() }}
   onopensettings={() => (showSettingsModal = true)}
   onopenconnection={() => (showConnectionModal = true)}
