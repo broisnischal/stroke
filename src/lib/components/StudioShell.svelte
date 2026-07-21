@@ -3375,6 +3375,8 @@ let rowSearch = $state('')
           }))
           .filter((t) => t.name)
         _tableListCache.set(key, { tables, at: Date.now() })
+        // Bound growth: one entry per connection:schema visited over a session.
+        if (_tableListCache.size > 64) _tableListCache.delete(_tableListCache.keys().next().value)
         if (activeTable && !tables.find((t) => t.name === activeTable)) {
           activeTable = tables[0]?.name ?? null
         }
