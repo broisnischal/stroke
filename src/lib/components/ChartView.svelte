@@ -95,12 +95,27 @@
 
   // ── Axis selection ────────────────────────────────────────────────────────
 
+  // Cap the rows that reach chart building. Past this, uniform sampling keeps
+  // rendering responsive and prevents the O(n) coercion pass and buildOption's
+  // aggregation/Math ops from freezing or crashing on huge (≈1M-row) results.
+  // Aggregating charts (bar/pie/line) still represent the whole set closely; the
+  // toolbar flags when data was sampled.
+  const MAX_CHART_ROWS = 50_000
+  const sampled = $derived(rows.length > MAX_CHART_ROWS)
+  const chartRows = $derived.by(() => {
+    if (rows.length <= MAX_CHART_ROWS) return rows
+    const step = rows.length / MAX_CHART_ROWS
+    const out = new Array(MAX_CHART_ROWS)
+    for (let i = 0; i < MAX_CHART_ROWS; i++) out[i] = rows[Math.floor(i * step)]
+    return out
+  })
+
   // Sniff row data to detect numeric columns that the DB reported with no/wrong type
   const effectiveColumns = $derived.by(() => {
     if (!rows.length) return columns
     return columns.map((col, i) => {
       if (colType(col) === 'number') return col
-      const samples = rows.slice(0, 20).map(r => /** @type {any} */ (r)[i]).filter(v => v != null && v !== '')
+      const samples = chartRows.slice(0, 20).map(r => /** @type {any} */ (r)[i]).filter(v => v != null && v !== '')
       if (samples.length === 0) return col
       const allNumeric = samples.every(v =>
         typeof v === 'number' || (typeof v === 'string' && !isNaN(Number(v)))
@@ -112,7 +127,7 @@
   // Coerce string-encoded numerics to actual numbers in rows
   const effectiveRows = $derived.by(() => {
     if (!rows.length) return rows
-    return rows.map(row =>
+    return chartRows.map(row =>
       /** @type {any[]} */ (row).map((v, i) => {
         if (effectiveColumns[i] && colType(effectiveColumns[i]) === 'number' && typeof v === 'string') {
           const n = Number(v)
@@ -175,7 +190,14 @@
     if (!xCol || effectiveRows.length === 0) return {}
     const needsY = !['histogram', 'tree'].includes(chartType)
     if (needsY && !yCol) return {}
-    return buildOption({ type: chartType, columns: effectiveColumns, rows: effectiveRows, xCol, yCol: yCol || xCol, zCol: zCol || undefined, groupCol: groupCol || undefined, isDark, accent })
+    // Degrade a bad build to an empty chart instead of throwing into the render
+    // tree (the <svelte:boundary> below is the backstop for render-time throws).
+    try {
+      return buildOption({ type: chartType, columns: effectiveColumns, rows: effectiveRows, xCol, yCol: yCol || xCol, zCol: zCol || undefined, groupCol: groupCol || undefined, isDark, accent })
+    } catch (e) {
+      console.error('chart buildOption failed', e)
+      return {}
+    }
   })
 
   const meterSpec = $derived.by(() => {
@@ -449,15 +471,31 @@
 
     <!-- ── Chart ──────────────────────────────────────────────────────── -->
     <div class="chart-canvas-host relative min-h-0 flex-1">
-      {#if rows.length === 0}
-        <div class="absolute inset-0 flex items-center justify-center">
-          <p class="text-ui-sm text-muted-foreground/40">No data to display</p>
-        </div>
-      {:else if chartType === 'meter' && meterSpec}
-        <CarbonMeterChart spec={meterSpec} />
-      {:else}
-        <EChartPanel {option} {renderer} class="absolute inset-0" />
-      {/if}
+      <!-- Contain any render/ECharts throw to this panel so a bad chart shows an
+           inline message instead of taking down the tab / app. -->
+      <svelte:boundary>
+        {#if rows.length === 0}
+          <div class="absolute inset-0 flex items-center justify-center">
+            <p class="text-ui-sm text-muted-foreground/40">No data to display</p>
+          </div>
+        {:else if chartType === 'meter' && meterSpec}
+          <CarbonMeterChart spec={meterSpec} />
+        {:else}
+          <EChartPanel {option} {renderer} class="absolute inset-0" />
+        {/if}
+        {#if sampled}
+          <div class="pointer-events-none absolute bottom-1 right-2 rounded bg-background/70 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground/70">
+            sampled {MAX_CHART_ROWS.toLocaleString()} of {rows.length.toLocaleString()} rows
+          </div>
+        {/if}
+        {#snippet failed(error, reset)}
+          <div class="absolute inset-0 flex flex-col items-center justify-center gap-2 p-6 text-center">
+            <p class="text-ui-sm font-medium text-foreground/80">This chart couldn't render</p>
+            <p class="max-w-md font-mono text-ui-2xs text-muted-foreground/60">{error instanceof Error ? error.message : String(error)}</p>
+            <button type="button" class="mt-1 rounded-md border border-border px-2 py-1 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground" onclick={reset}>Retry</button>
+          </div>
+        {/snippet}
+      </svelte:boundary>
     </div>
 
   {/if}
