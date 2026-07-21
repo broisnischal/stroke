@@ -2,7 +2,7 @@ const STORAGE_KEY = 'stroke:connections'
 const LAST_ID_KEY  = 'stroke:last-connection-id'
 
 /**
- * @typedef {'postgres' | 'sqlite' | 'd1' | 'mysql' | 'mariadb' | 'cockroachdb' | 'libsql' | 'clickhouse' | 'duckdb' | 'mssql'} DbType
+ * @typedef {'postgres' | 'sqlite' | 'd1' | 'mysql' | 'mariadb' | 'cockroachdb' | 'libsql' | 'clickhouse' | 'duckdb' | 'mssql' | 'redis'} DbType
  *
  * @typedef {{ host: string, port?: number, username: string, privateKeyPath?: string }} SshConfig
  *
@@ -14,6 +14,8 @@ const LAST_ID_KEY  = 'stroke:last-connection-id'
  *   host?: string
  *   port?: number
  *   database?: string
+ *   db?: number
+ *   tls?: boolean
  *   user?: string
  *   password?: string
  *   ssl?: boolean

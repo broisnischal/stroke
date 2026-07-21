@@ -141,6 +141,23 @@ impl ClickhouseConfig {
     }
 }
 
+// ── Redis ─────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RedisConfig {
+    pub name: String,
+    pub host: String,
+    pub port: u16,
+    pub password: Option<String>,
+    /// Logical database index (0–15 by default).
+    #[serde(default)]
+    pub db: u8,
+    /// Use TLS (rediss://) instead of plain TCP (redis://).
+    #[serde(default)]
+    pub tls: bool,
+}
+
 // ── DuckDB ────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -198,6 +215,8 @@ pub enum AnyConnectionConfig {
     Libsql(LibSqlConfig),
     #[serde(rename = "clickhouse")]
     Clickhouse(ClickhouseConfig),
+    #[serde(rename = "redis")]
+    Redis(RedisConfig),
     #[serde(rename = "duckdb")]
     Duckdb(DuckdbConfig),
     #[serde(rename = "mssql")]
@@ -214,6 +233,7 @@ pub enum ActiveConnection {
     D1(D1Config),
     LibSql(LibSqlConfig),
     Clickhouse(ClickhouseConfig),
+    Redis(RedisConfig),
     Duckdb(DuckdbHandle),
     Mssql(MssqlHandle),
 }
@@ -227,6 +247,7 @@ impl ActiveConnection {
             Self::D1(_) => "d1",
             Self::LibSql(_) => "libsql",
             Self::Clickhouse(_) => "clickhouse",
+            Self::Redis(_) => "redis",
             Self::Duckdb(_) => "duckdb",
             Self::Mssql(_) => "mssql",
         }
@@ -634,6 +655,20 @@ pub async fn connect_clickhouse(state: State<'_, DbState>, config: ClickhouseCon
     test_clickhouse_connection(config.clone()).await?;
     close_existing(&state).await;
     set_conn(&state, Some(ActiveConnection::Clickhouse(config)))
+}
+
+// ── Redis connect / test ──────────────────────────────────────────────────────
+
+pub async fn test_redis_connection(config: RedisConfig) -> Result<(), String> {
+    tcp_preflight(&config.host, config.port).await?;
+    crate::db::redis::ping(&config).await
+}
+
+pub async fn connect_redis(state: State<'_, DbState>, config: RedisConfig) -> Result<(), String> {
+    // Validate credentials/reachability before storing.
+    test_redis_connection(config.clone()).await?;
+    close_existing(&state).await;
+    set_conn(&state, Some(ActiveConnection::Redis(config)))
 }
 
 // ── DuckDB connect / test ──────────────────────────────────────────────────────
