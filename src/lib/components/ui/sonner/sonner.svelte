@@ -87,7 +87,7 @@
     <button
       type="button"
       transition:fly={{ y: -8, duration: 160 }}
-      class="studio-toast-clear-all pointer-events-auto ml-auto shrink-0 rounded-lg border border-border/50 bg-popover px-2.5 py-1 text-[11px] font-medium text-muted-foreground shadow-sm transition-colors hover:bg-muted/60 hover:text-foreground dark:border-white/[0.08]"
+      class="studio-toast-clear-all pointer-events-auto ml-auto shrink-0 rounded-lg border border-border/50 bg-popover px-2.5 py-1 text-ui-2xs font-medium text-muted-foreground shadow-sm transition-colors hover:bg-muted/60 hover:text-foreground dark:border-white/[0.08]"
       onclick={clearAll}
     >
       Clear all
@@ -119,15 +119,15 @@
 
       <div class="flex min-w-0 flex-1 flex-col {t.action ? 'pr-2' : 'pr-5'}">
         <div
-          class="text-[12px] font-medium capitalize leading-tight tracking-[-0.01em] text-foreground"
+          class="text-ui-xs font-medium capitalize leading-tight tracking-[-0.01em] text-foreground"
         >
           {t.title}
         </div>
         {#if t.description}
           {#if t.code}
-            <pre class="app-scroll mt-1 max-h-52 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/40 bg-muted/30 px-2 py-1.5 font-mono text-[11px] leading-snug text-foreground/85">{t.description}</pre>
+            <pre class="app-scroll mt-1 max-h-52 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/40 bg-muted/30 px-2 py-1.5 font-mono text-ui-2xs leading-snug text-foreground/85">{t.description}</pre>
           {:else}
-            <div class="mt-0.5 text-[11px] leading-snug text-muted-foreground/80">
+            <div class="mt-0.5 text-ui-2xs leading-snug text-muted-foreground/80">
               {t.description}
             </div>
           {/if}
@@ -135,7 +135,7 @@
         {#if t.action}
           <button
             type="button"
-            class="mt-1.5 self-start rounded-md border border-border/50 bg-background/60 px-2 py-0.5 text-[11px] font-medium text-foreground transition-colors hover:bg-muted/80"
+            class="mt-1.5 self-start rounded-md border border-border/50 bg-background/60 px-2 py-0.5 text-ui-2xs font-medium text-foreground transition-colors hover:bg-muted/80"
             onclick={() => { t.action?.onClick(); toast.dismiss(t.id) }}
           >
             {t.action.label}

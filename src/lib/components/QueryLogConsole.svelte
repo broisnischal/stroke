@@ -109,14 +109,14 @@
     {:else}
       {#each visible as e (e.id)}
         <div class="border-b border-border/15 py-2 last:border-b-0">
-          <div class="mb-1 flex items-center gap-2 font-mono text-[10.5px] text-muted-foreground/45">
+          <div class="mb-1 flex items-center gap-2 font-mono text-ui-3xs text-muted-foreground/45">
             <span>[{fmtTime(e.timestamp)}]</span>
             {#if e.durationMs != null}<span class="tabular-nums">· {e.durationMs.toFixed(2)} ms</span>{/if}
-            {#if e.source}<span class="rounded bg-muted/40 px-1 text-[9px] uppercase tracking-wide text-muted-foreground/40">{e.source}</span>{/if}
+            {#if e.source}<span class="rounded bg-muted/40 px-1 text-ui-3xs uppercase tracking-wide text-muted-foreground/40">{e.source}</span>{/if}
             {#if !e.success}<span class="text-destructive/70">· failed</span>{/if}
           </div>
-          <pre class="ql-sql whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed text-foreground/85">{@html highlight(e.sql)}</pre>
-          {#if e.error}<div class="mt-0.5 font-mono text-[10.5px] text-destructive/70">{e.error}</div>{/if}
+          <pre class="ql-sql whitespace-pre-wrap break-words font-mono text-ui-xs leading-relaxed text-foreground/85">{@html highlight(e.sql)}</pre>
+          {#if e.error}<div class="mt-0.5 font-mono text-ui-3xs text-destructive/70">{e.error}</div>{/if}
         </div>
       {/each}
     {/if}

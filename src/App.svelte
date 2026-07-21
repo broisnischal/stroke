@@ -41,6 +41,23 @@
       _warn.apply(console, args)
     }
 
+    // Swallow the benign "ResizeObserver loop …" error. It fires when an
+    // observer callback changes layout within the same frame (e.g. toggling
+    // the Advanced disclosure or read-only row resizes a ScrollArea in the
+    // connection dialog). It's safe to ignore per the ResizeObserver spec, but
+    // WebKitGTK raises it as an uncaught error and Vite paints its dev overlay.
+    // Silence only this one message, at both the event and console layers.
+    const isResizeObserverLoop = (/** @type {unknown} */ msg) =>
+      typeof msg === 'string' && msg.includes('ResizeObserver loop')
+    window.addEventListener('error', (e) => {
+      if (isResizeObserverLoop(e.message)) { e.stopImmediatePropagation(); e.preventDefault() }
+    }, true)
+    const _error = console.error
+    console.error = (/** @type {unknown} */ ...args) => {
+      if (isResizeObserverLoop(args[0])) return
+      _error.apply(console, args)
+    }
+
     // Block print — no Tauri-level API exists for this, so override at the JS boundary
     window.print = () => {}
     window.addEventListener('beforeprint', (e) => e.preventDefault(), { capture: true })

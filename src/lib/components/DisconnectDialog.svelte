@@ -23,8 +23,8 @@
         <Unplug class="size-3.5 text-muted-foreground/70" />
       </div>
       <div class="min-w-0">
-        <p class="text-[13px] font-semibold text-foreground">Disconnect</p>
-        <p class="mt-0.5 text-[12px] leading-[1.5] text-muted-foreground/70">
+        <p class="text-ui-sm font-semibold text-foreground">Disconnect</p>
+        <p class="mt-0.5 text-ui-xs leading-[1.5] text-muted-foreground/70">
           {#if connectionName}
             Disconnect from <span class="font-medium text-foreground/80">{connectionName}</span>?
           {:else}
@@ -38,12 +38,12 @@
     <div class="flex items-center justify-end gap-2 border-t border-border/25 px-5 py-3">
       <button
         type="button"
-        class="inline-flex h-8 items-center rounded-lg px-3.5 text-[13px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
+        class="inline-flex h-8 items-center rounded-lg px-3.5 text-ui-sm text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
         onclick={() => (open = false)}
       >Cancel</button>
       <button
         type="button"
-        class="inline-flex h-8 items-center rounded-lg bg-foreground px-4 text-[13px] font-medium text-background transition-colors hover:bg-foreground/85"
+        class="inline-flex h-8 items-center rounded-lg bg-foreground px-4 text-ui-sm font-medium text-background transition-colors hover:bg-foreground/85"
         onclick={confirm}
       >Disconnect</button>
     </div>

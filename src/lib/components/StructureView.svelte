@@ -445,12 +445,12 @@
   function focusOnMount(el) { el.focus() }
 
   // shared classes
-  const TH = 'relative select-none overflow-hidden border-b border-r border-border/30 bg-muted/[0.15] px-3 py-2 text-left font-semibold text-muted-foreground/45 text-[10px] uppercase tracking-[0.07em] whitespace-nowrap'
+  const TH = 'relative select-none overflow-hidden border-b border-r border-border/30 bg-muted/[0.15] px-3 py-2 text-left font-semibold text-muted-foreground/45 text-ui-3xs uppercase tracking-[0.07em] whitespace-nowrap'
   const TD = 'border-b border-r border-border/25 p-0 align-middle overflow-hidden'
   const TD_DROP = 'border-b border-r border-border/25 p-0 align-middle overflow-visible'
-  const INP = 'box-border block h-full w-full min-w-0 overflow-x-auto border-0 bg-transparent px-3 py-0 font-mono text-[12px] text-foreground outline-none selection:bg-primary/20'
+  const INP = 'box-border block h-full w-full min-w-0 overflow-x-auto border-0 bg-transparent px-3 py-0 font-mono text-ui-xs text-foreground outline-none selection:bg-primary/20'
   const DROP_PANEL = 'absolute left-0 top-full z-50 mt-0.5 max-h-64 w-48 overflow-y-auto rounded-xl border border-border/35 bg-background p-1.5 shadow-xl shadow-black/30'
-  const DROP_ITEM = 'relative flex w-full cursor-default select-none items-center rounded-lg px-2.5 py-1.5 font-mono text-[12px] text-foreground outline-none hover:bg-muted/60'
+  const DROP_ITEM = 'relative flex w-full cursor-default select-none items-center rounded-lg px-2.5 py-1.5 font-mono text-ui-xs text-foreground outline-none hover:bg-muted/60'
 
   // ── Tab state ─────────────────────────────────────────────────────────────
   /** @type {'columns' | 'indexes' | 'relations' | 'triggers'} */
@@ -477,7 +477,7 @@
 
 <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
   <!-- Title strip -->
-  <div class="studio-chrome flex shrink-0 items-center gap-3 border-b border-border/30 px-4 py-2.5 font-mono text-[11px]" data-studio-chrome>
+  <div class="studio-chrome flex shrink-0 items-center gap-3 border-b border-border/30 px-4 py-2.5 font-mono text-ui-2xs" data-studio-chrome>
     <span class="font-semibold text-foreground">{table}</span>
     {#if primaryKey.length > 0}
       <span class="flex items-center gap-1 rounded-md bg-amber-500/10 px-1.5 py-0.5 text-amber-400/80"><KeyRound class="size-2.5" />{primaryKey.join(', ')}</span>
@@ -503,7 +503,7 @@
       >
         {tab.label}
         {#if tab.count > 0}
-          <span class="rounded-full px-1.5 py-px text-[10px] font-normal
+          <span class="rounded-full px-1.5 py-px text-ui-3xs font-normal
             {activeTab === tab.id ? 'bg-primary/15 text-primary/80' : 'bg-muted/50 text-muted-foreground/50'}">
             {tab.count}
           </span>
@@ -514,7 +514,7 @@
 
   <!-- Read-only notice — engines whose structure DDL we don't generate yet. -->
   {#if !canEdit}
-    <div class="flex shrink-0 items-center gap-2 border-b border-border/30 bg-muted/15 px-4 py-1.5 font-mono text-[11px] text-muted-foreground/70">
+    <div class="flex shrink-0 items-center gap-2 border-b border-border/30 bg-muted/15 px-4 py-1.5 font-mono text-ui-2xs text-muted-foreground/70">
       <Lock class="size-3 shrink-0 text-muted-foreground/40" />
       <span>Read-only structure on {engineLabel(connectionType)} — alter this table from the SQL console.</span>
     </div>
@@ -716,7 +716,7 @@
               <!-- foreign_key -->
               <td class={TD}>
                 {#if col.foreignKey}
-                  <button type="button" class="flex h-full w-full items-center gap-1.5 px-3 font-mono text-[12px] text-blue-400/70 transition-colors hover:bg-muted/40 hover:text-blue-400" onclick={() => openFkDialog(col)}>
+                  <button type="button" class="flex h-full w-full items-center gap-1.5 px-3 font-mono text-ui-xs text-blue-400/70 transition-colors hover:bg-muted/40 hover:text-blue-400" onclick={() => openFkDialog(col)}>
                     <ArrowRight class="size-3 shrink-0" /><span class="truncate">{col.foreignKey}</span>
                   </button>
                 {:else if !isPk}
@@ -820,33 +820,33 @@
     {#if canEdit}
     <div class="flex items-center gap-2 border-t border-border/25 px-3 py-1.5 font-mono">
     {#if newColumn}
-      <span class="text-[10px] text-emerald-500/70">New column — fill in details then save</span>
+      <span class="text-ui-3xs text-emerald-500/70">New column — fill in details then save</span>
       <button type="button" disabled={confirmLoading}
-        class="ml-auto inline-flex h-6 items-center gap-1 rounded-lg bg-foreground px-2.5 text-[11px] font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-40"
+        class="ml-auto inline-flex h-6 items-center gap-1 rounded-lg bg-foreground px-2.5 text-ui-2xs font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-40"
         onclick={saveNewColumn}>
         {#if confirmLoading}<Loader class="mr-0.5 size-2.5 animate-spin" />{/if}
         Save column
       </button>
       <button type="button"
-        class="inline-flex h-6 items-center gap-1 rounded-lg px-2.5 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
+        class="inline-flex h-6 items-center gap-1 rounded-lg px-2.5 text-ui-2xs text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
         onclick={() => (newColumn = null)}>Cancel</button>
     {:else}
       {#if hasPending}
-        <span class="text-[10px] text-amber-400/70">{pendingCount} pending {pendingCount === 1 ? 'change' : 'changes'}</span>
+        <span class="text-ui-3xs text-amber-400/70">{pendingCount} pending {pendingCount === 1 ? 'change' : 'changes'}</span>
         <button type="button" disabled={confirmLoading}
-          class="inline-flex h-6 items-center gap-1 rounded-lg bg-foreground px-2.5 text-[11px] font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-40"
+          class="inline-flex h-6 items-center gap-1 rounded-lg bg-foreground px-2.5 text-ui-2xs font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-40"
           onclick={applyPendingDdl}>
           {#if confirmLoading}<Loader class="size-2.5 animate-spin" />{:else}<Check class="size-2.5" />{/if}
           Apply {pendingCount}
         </button>
         <button type="button"
-          class="inline-flex h-6 items-center gap-1 rounded-lg px-2.5 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
+          class="inline-flex h-6 items-center gap-1 rounded-lg px-2.5 text-ui-2xs text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
           onclick={resetPendingDdl}>
           <Undo2 class="size-2.5" />Reset
         </button>
       {/if}
       <button type="button"
-        class="ml-auto inline-flex h-6 items-center gap-1 rounded-lg px-2.5 text-[11px] text-muted-foreground/50 transition-colors hover:bg-muted/40 hover:text-foreground"
+        class="ml-auto inline-flex h-6 items-center gap-1 rounded-lg px-2.5 text-ui-2xs text-muted-foreground/50 transition-colors hover:bg-muted/40 hover:text-foreground"
         onclick={startNewColumn}>
         <Plus class="size-2.5" />Add column
       </button>
@@ -859,14 +859,14 @@
     {#if activeTab === 'indexes'}
     <div class="font-mono">
       <div class="flex items-center gap-2 border-b border-border/30 bg-muted/[0.08] px-3 py-2">
-        <span class="text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-foreground/40">
+        <span class="text-ui-3xs font-semibold uppercase tracking-[0.07em] text-muted-foreground/40">
           Indexes
           {#if columnSearch && visibleIndexes.length !== tableIndexes.length}
             <span class="ml-1 font-normal text-muted-foreground/40">({visibleIndexes.length}/{tableIndexes.length})</span>
           {/if}
         </span>
         {#if canEdit}
-        <button type="button" class="ml-auto inline-flex h-6 items-center gap-1 rounded-lg px-2.5 text-[10px] text-muted-foreground/50 transition-colors hover:bg-muted/40 hover:text-foreground" onclick={startNewIndex}>
+        <button type="button" class="ml-auto inline-flex h-6 items-center gap-1 rounded-lg px-2.5 text-ui-3xs text-muted-foreground/50 transition-colors hover:bg-muted/40 hover:text-foreground" onclick={startNewIndex}>
           <Plus class="size-2.5" />Add index
         </button>
         {/if}
@@ -920,7 +920,7 @@
                 <div class="flex h-full items-center px-3">
                   <button
                     type="button"
-                    class="rounded-md px-1.5 py-0.5 font-mono text-[10px] font-semibold transition-colors {idx.isUnique ? 'bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20' : 'bg-muted/30 text-muted-foreground/50 hover:bg-muted/60 hover:text-foreground'}"
+                    class="rounded-md px-1.5 py-0.5 font-mono text-ui-3xs font-semibold transition-colors {idx.isUnique ? 'bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20' : 'bg-muted/30 text-muted-foreground/50 hover:bg-muted/60 hover:text-foreground'}"
                     onclick={() => requestIndexRecreate(idx, idx.indexType, !idx.isUnique, idx.columns)}
                     title="Click to toggle uniqueness"
                   >
@@ -1033,7 +1033,7 @@
     {#if activeTab === 'relations'}
     <div class="font-mono">
       <div class="flex items-center gap-2 border-b border-border/30 bg-muted/[0.08] px-3 py-2">
-        <span class="text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-foreground/40">Foreign Key Relations</span>
+        <span class="text-ui-3xs font-semibold uppercase tracking-[0.07em] text-muted-foreground/40">Foreign Key Relations</span>
       </div>
       <table class="border-collapse" style="table-layout: fixed; width: max-content; min-width: 100%">
         <colgroup>
@@ -1058,7 +1058,7 @@
                 </div>
               </td>
               <td class="border-b border-r border-border/40 p-0 overflow-hidden">
-                <button type="button" class="flex h-full w-full items-center gap-1.5 px-3 font-mono text-[12px] text-blue-400/70 transition-colors hover:bg-muted/40 hover:text-blue-400" onclick={() => openFkDialog(col)}>
+                <button type="button" class="flex h-full w-full items-center gap-1.5 px-3 font-mono text-ui-xs text-blue-400/70 transition-colors hover:bg-muted/40 hover:text-blue-400" onclick={() => openFkDialog(col)}>
                   <ArrowRight class="size-3 shrink-0" /><span class="truncate">{col.foreignKey}</span>
                 </button>
               </td>
@@ -1086,13 +1086,13 @@
     <div class="font-mono">
       <div class="flex items-center gap-2 border-b border-border/30 bg-muted/[0.08] px-3 py-2">
         <GitBranch class="size-3 shrink-0 text-muted-foreground/50" />
-        <span class="text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-foreground/40">
+        <span class="text-ui-3xs font-semibold uppercase tracking-[0.07em] text-muted-foreground/40">
           Triggers
           {#if columnSearch && visibleTriggers.length !== tableTriggers.length}
             <span class="ml-1 font-normal text-muted-foreground/40">({visibleTriggers.length}/{tableTriggers.length})</span>
           {/if}
         </span>
-        <button type="button" class="ml-auto inline-flex h-6 items-center gap-1 rounded-lg px-2.5 text-[10px] text-muted-foreground/50 transition-colors hover:bg-muted/40 hover:text-foreground" onclick={() => (createTriggerOpen = true)}>
+        <button type="button" class="ml-auto inline-flex h-6 items-center gap-1 rounded-lg px-2.5 text-ui-3xs text-muted-foreground/50 transition-colors hover:bg-muted/40 hover:text-foreground" onclick={() => (createTriggerOpen = true)}>
           <Plus class="size-2.5" />Add trigger
         </button>
       </div>

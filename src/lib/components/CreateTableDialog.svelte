@@ -255,7 +255,7 @@
       {#if sql}
         <div class="flex flex-col gap-1.5">
           <span class="text-ui-xs font-medium text-muted-foreground/60">SQL preview</span>
-          <pre class="overflow-x-auto rounded-md border border-border bg-muted/40 px-3 py-2.5 font-mono text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap break-all">{sql}</pre>
+          <pre class="overflow-x-auto rounded-md border border-border bg-muted/40 px-3 py-2.5 font-mono text-ui-2xs leading-relaxed text-muted-foreground whitespace-pre-wrap break-all">{sql}</pre>
         </div>
       {/if}
     </div>

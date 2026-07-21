@@ -2,6 +2,7 @@
   import { untrack } from "svelte";
   import { createHotkey } from "@tanstack/svelte-hotkeys";
   import Icon from "./Icon.svelte";
+  import SearchableMenu from "./SearchableMenu.svelte";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import DangerousActionDialog from "./DangerousActionDialog.svelte";
   import * as Select from "$lib/components/ui/select/index.js";
@@ -560,36 +561,30 @@
                 —
               </span>
             {:else}
-              <Select.Root
-                type="single"
-                value={activeSchema}
-                onValueChange={(v) => {
-                  if (v) onschemachange(v);
-                }}
+              <SearchableMenu
+                contentClass="w-[var(--bits-popover-anchor-width)] min-w-[180px]"
+                placeholder="Search schemas…"
+                empty="No schema"
+                items={schemas.map((s) => ({ value: s, label: s }))}
+                onselect={(it) => { if (it.value) onschemachange(it.value); }}
               >
-                <Select.Trigger
-                  id="sidebar-schema"
-                  size="sm"
-                  class={cn(
-                    sidebarFieldClass,
-                    "justify-between gap-2 px-2.5 font-normal focus-visible:ring-1 data-[size=sm]:h-7 [&>svg]:size-3.5 [&>svg]:shrink-0 [&>svg]:text-muted-foreground",
-                  )}
-                >
-                  <span class="truncate">{activeSchema}</span>
-                </Select.Trigger>
-                <Select.Content
-                  sideOffset={6}
-                  class="w-[var(--bits-select-anchor-width)] min-w-[var(--bits-select-anchor-width)] p-1"
-                >
-                  {#each schemas as schema (schema)}
-                    <Select.Item
-                      value={schema}
-                      label={schema}
-                      class="text-ui-sm"
-                    />
-                  {/each}
-                </Select.Content>
-              </Select.Root>
+                {#snippet trigger(props)}
+                  <button
+                    {...props}
+                    id="sidebar-schema"
+                    type="button"
+                    class={cn(sidebarFieldClass, "flex h-7 w-full items-center justify-between gap-2 px-2.5 font-normal")}
+                  >
+                    <span class="truncate">{activeSchema}</span>
+                    <Icon name="chevron-down" class="size-3.5 shrink-0 text-muted-foreground" />
+                  </button>
+                {/snippet}
+                {#snippet item(it)}
+                  <Icon name="box" class="size-3.5 shrink-0 text-muted-foreground/50" />
+                  <span class="min-w-0 flex-1 truncate">{it.label}</span>
+                  {#if it.value === activeSchema}<Icon name="check" class="size-3.5 shrink-0 text-primary" />{/if}
+                {/snippet}
+              </SearchableMenu>
             {/if}
           </div>
           <DropdownMenu.Root>
@@ -603,20 +598,19 @@
             <DropdownMenu.Content
               align="start"
               class={cn(
-                "w-56 p-1",
-                // Readable 13px rows with a leading icon + label, comfortable padding — matches the cell context menu.
-                "[&_[data-slot=dropdown-menu-checkbox-item]]:gap-2 [&_[data-slot=dropdown-menu-checkbox-item]]:rounded-md [&_[data-slot=dropdown-menu-checkbox-item]]:py-1.5 [&_[data-slot=dropdown-menu-checkbox-item]]:pr-8 [&_[data-slot=dropdown-menu-checkbox-item]]:pl-2 [&_[data-slot=dropdown-menu-checkbox-item]]:text-ui-sm",
-                "[&_[data-slot=dropdown-menu-radio-item]]:gap-2 [&_[data-slot=dropdown-menu-radio-item]]:py-1.5 [&_[data-slot=dropdown-menu-radio-item]]:pr-8 [&_[data-slot=dropdown-menu-radio-item]]:pl-2 [&_[data-slot=dropdown-menu-radio-item]]:text-ui-sm",
-                "[&_[data-slot=dropdown-menu-item]]:gap-2 [&_[data-slot=dropdown-menu-item]]:py-1.5 [&_[data-slot=dropdown-menu-item]]:pl-2 [&_[data-slot=dropdown-menu-item]]:text-ui-sm",
+                "w-52 p-1",
+                // Compact rows: leading icon + 12px label, tight padding.
+                "[&_[data-slot=dropdown-menu-checkbox-item]]:gap-2 [&_[data-slot=dropdown-menu-checkbox-item]]:rounded-md [&_[data-slot=dropdown-menu-checkbox-item]]:py-1 [&_[data-slot=dropdown-menu-checkbox-item]]:pr-7 [&_[data-slot=dropdown-menu-checkbox-item]]:pl-2 [&_[data-slot=dropdown-menu-checkbox-item]]:text-ui-xs",
+                "[&_[data-slot=dropdown-menu-item]]:gap-2 [&_[data-slot=dropdown-menu-item]]:rounded-md [&_[data-slot=dropdown-menu-item]]:py-1 [&_[data-slot=dropdown-menu-item]]:pl-2 [&_[data-slot=dropdown-menu-item]]:text-ui-xs",
                 "[&_svg]:size-3.5 [&_svg]:shrink-0",
               )}
             >
               <div class="px-2 pt-1 pb-1.5 text-ui-2xs text-muted-foreground/70 leading-relaxed">
                 <span class="font-mono text-foreground/80">{regularTables.length}</span> tables{#if views.length} · <span class="font-mono text-foreground/80">{views.length}</span> views{/if}{#if matViews.length} · <span class="font-mono text-foreground/80">{matViews.length}</span> mat.{/if}
-                {#if hiddenCount > 0}<br /><span class="text-amber-500/80">{hiddenCount} hidden by filters</span>{/if}
+                {#if hiddenCount > 0}<br /><span class="text-warning">{hiddenCount} hidden by filters</span>{/if}
               </div>
               <DropdownMenu.Separator />
-              <DropdownMenu.Label class="px-2 py-1 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Show</DropdownMenu.Label>
+              <DropdownMenu.Label class="px-2 py-0.5 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Show</DropdownMenu.Label>
               <DropdownMenu.CheckboxItem
                 checked={showRecent}
                 onCheckedChange={(v) => (showRecent = v)}
@@ -651,49 +645,41 @@
                 onCheckedChange={(v) => (hideSystem = v)}
               ><Icon name="cog" class="text-muted-foreground" />Hide system tables</DropdownMenu.CheckboxItem>
               <DropdownMenu.Separator />
-              <DropdownMenu.Label class="px-2 py-1 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Sort by</DropdownMenu.Label>
-              <DropdownMenu.RadioGroup value={sortBy} onValueChange={(v) => { if (v === 'name' || v === 'rowCount') sortBy = v }}>
-                <DropdownMenu.RadioItem value="name"><Icon name="arrow-down-a-z" class="text-muted-foreground" />Name</DropdownMenu.RadioItem>
-                <DropdownMenu.RadioItem value="rowCount"><Icon name="hash" class="text-muted-foreground" />Row count</DropdownMenu.RadioItem>
-              </DropdownMenu.RadioGroup>
-              <DropdownMenu.Separator />
-              <DropdownMenu.Label class="px-2 py-1 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Direction</DropdownMenu.Label>
+              <DropdownMenu.Label class="px-2 py-0.5 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Sort by</DropdownMenu.Label>
+              <!-- Field + direction merged: pick a field, click it again to flip. -->
               <DropdownMenu.Item
-                onSelect={() => (sortDir = sortDir === 'asc' ? 'desc' : 'asc')}
-                class="gap-2"
+                closeOnSelect={false}
+                title="Click to flip direction"
+                onSelect={() => { if (sortBy === 'name') sortDir = sortDir === 'asc' ? 'desc' : 'asc'; else sortBy = 'name' }}
               >
+                <Icon name={sortBy === 'name' && sortDir === 'desc' ? 'arrow-up-a-z' : 'arrow-down-a-z'} class="text-muted-foreground" />
+                Name
                 {#if sortBy === 'name'}
-                  {#if sortDir === 'asc'}
-                    <Icon name="arrow-down-a-z" class="size-3.5 shrink-0 text-muted-foreground" />
-                    A → Z
-                  {:else}
-                    <Icon name="arrow-up-a-z" class="size-3.5 shrink-0 text-muted-foreground" />
-                    Z → A
-                  {/if}
-                {:else}
-                  {#if sortDir === 'desc'}
-                    <Icon name="arrow-down-0-1" class="size-3.5 shrink-0 text-muted-foreground" />
-                    High → Low
-                  {:else}
-                    <Icon name="arrow-up-0-1" class="size-3.5 shrink-0 text-muted-foreground" />
-                    Low → High
-                  {/if}
+                  <span class="ml-auto font-mono text-ui-2xs text-muted-foreground/50">{sortDir === 'asc' ? 'A→Z' : 'Z→A'}</span>
                 {/if}
-                <span class="ml-auto text-muted-foreground/50 text-ui-2xs">click to flip</span>
+              </DropdownMenu.Item>
+              <DropdownMenu.Item
+                closeOnSelect={false}
+                title="Click to flip direction"
+                onSelect={() => { if (sortBy === 'rowCount') sortDir = sortDir === 'asc' ? 'desc' : 'asc'; else sortBy = 'rowCount' }}
+              >
+                <Icon name={sortBy === 'rowCount' && sortDir === 'asc' ? 'arrow-up-0-1' : 'arrow-down-0-1'} class="text-muted-foreground" />
+                Row count
+                {#if sortBy === 'rowCount'}
+                  <span class="ml-auto font-mono text-ui-2xs text-muted-foreground/50">{sortDir === 'desc' ? '9→0' : '0→9'}</span>
+                {/if}
               </DropdownMenu.Item>
               <DropdownMenu.Separator />
-              <DropdownMenu.Label class="px-2 py-1 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Sections</DropdownMenu.Label>
-              <DropdownMenu.Item onSelect={() => setAllSections(true)} closeOnSelect={false} class="gap-2">
-                <Icon name="chevrons-up-down" class="size-3.5 shrink-0 text-muted-foreground" />
+              <DropdownMenu.Item onSelect={() => setAllSections(true)} closeOnSelect={false}>
+                <Icon name="chevrons-up-down" class="text-muted-foreground" />
                 Expand all
               </DropdownMenu.Item>
-              <DropdownMenu.Item onSelect={() => setAllSections(false)} closeOnSelect={false} class="gap-2">
-                <Icon name="chevrons-down-up" class="size-3.5 shrink-0 text-muted-foreground" />
+              <DropdownMenu.Item onSelect={() => setAllSections(false)} closeOnSelect={false}>
+                <Icon name="chevrons-down-up" class="text-muted-foreground" />
                 Collapse all
               </DropdownMenu.Item>
-              <DropdownMenu.Separator />
-              <DropdownMenu.Item onSelect={resetFilters} disabled={!filtersActive} class="gap-2">
-                <Icon name="rotate-ccw" class="size-3.5 shrink-0 text-muted-foreground" />
+              <DropdownMenu.Item onSelect={resetFilters} disabled={!filtersActive}>
+                <Icon name="rotate-ccw" class="text-muted-foreground" />
                 Reset filters &amp; sort
               </DropdownMenu.Item>
             </DropdownMenu.Content>

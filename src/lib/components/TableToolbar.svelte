@@ -22,6 +22,8 @@
     ANY_COLUMN,
   } from "$lib/table-query.js";
   import { untrack } from "svelte";
+  import { fly } from "svelte/transition";
+  import { cubicOut } from "svelte/easing";
   import { formatCompactCount } from "$lib/table-list.js";
   import { describeTableView } from "$lib/stores/table-views.js";
 
@@ -131,12 +133,12 @@
   const searchOptsActive = $derived(
     !!(searchOptions.matchCase || searchOptions.wholeWord || searchOptions.regex),
   );
-  // The toggles only materialize while you're working with the search (focus,
-  // text present, or an option already on) so the idle toolbar stays compact.
+  // The toggles only materialize once there's an actual query (or an option is
+  // already on) — not on bare focus — so an empty search field stays clean.
   const showSearchOpts = $derived(
     searchOptionsSupported &&
       tableViewMode !== "structure" &&
-      (searchFocused || searchOptsActive || !!rowSearch),
+      (localSearch.trim() !== "" || searchOptsActive),
   );
 
   let viewsMenuOpen = $state(false);
@@ -574,7 +576,7 @@
           role="searchbox"
           aria-label="Search all columns"
           class={cn(
-            "h-7 w-full min-w-0 border-transparent bg-accent/40 pl-7 text-ui-sm shadow-none transition-colors focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring focus-visible:bg-input/30",
+            "no-focus-ring h-7 w-full min-w-0 border-transparent bg-accent/40 pl-7 text-ui-sm shadow-none transition-colors focus-visible:border-border focus-visible:bg-input/30",
             showSearchOpts ? "pr-24" : "pr-7",
             localSearch.trim() && "border-ring/40 bg-input/30",
           )}
@@ -589,8 +591,9 @@
              them never blurs the input (which would hide this cluster). -->
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
-          class="absolute inset-y-0 right-7 flex items-center gap-0.5"
+          class="absolute inset-y-0 right-8 flex items-center gap-px"
           onmousedown={(e) => e.preventDefault()}
+          transition:fly={{ x: 8, duration: 160, easing: cubicOut }}
         >
           {#each SEARCH_OPTS as opt (opt.key)}
             <button
@@ -598,10 +601,10 @@
               title={opt.title}
               aria-pressed={searchOptions[opt.key]}
               class={cn(
-                "flex size-5 items-center justify-center rounded font-mono text-[11px] font-medium leading-none transition-colors",
+                "flex size-5 items-center justify-center rounded font-mono text-ui-2xs font-medium leading-none transition-[background-color,color] duration-150 ease-out",
                 searchOptions[opt.key]
-                  ? "bg-primary/15 text-primary ring-1 ring-inset ring-primary/30"
-                  : "text-muted-foreground/50 hover:bg-muted hover:text-foreground",
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground/60 hover:bg-muted hover:text-foreground",
               )}
               onclick={() => onsearchoptionschange({ ...searchOptions, [opt.key]: !searchOptions[opt.key] })}
             >
@@ -644,7 +647,7 @@
           >
             <Icon name="bookmark" class="size-3.5" />
             {#if savedViews.length > 0}
-              <span class="tabular-nums text-[11px] font-medium text-primary" aria-hidden="true">{savedViews.length}</span>
+              <span class="tabular-nums text-ui-2xs font-medium text-primary" aria-hidden="true">{savedViews.length}</span>
             {/if}
           </DropdownMenu.Trigger>
           <DropdownMenu.Content align="start" class="w-64 p-0 text-ui-sm">
@@ -683,7 +686,7 @@
                       <span class="flex min-w-0 flex-1 flex-col">
                         <span class={cn('truncate text-ui-xs', active ? 'font-medium text-foreground' : 'text-foreground/85')}>{v.name}</span>
                         {#if describeTableView(v)}
-                          <span class="truncate text-[10px] leading-tight text-muted-foreground/45">{describeTableView(v)}</span>
+                          <span class="truncate text-ui-3xs leading-tight text-muted-foreground/45">{describeTableView(v)}</span>
                         {/if}
                       </span>
                       {#if active}
@@ -745,7 +748,7 @@
       >
         <Icon name="list-filter" class="size-3.5" />
         {#if filterCount > 0}
-          <span class="tabular-nums text-[11px] font-medium text-primary" aria-hidden="true">{formatCompactCount(filterCount)}</span>
+          <span class="tabular-nums text-ui-2xs font-medium text-primary" aria-hidden="true">{formatCompactCount(filterCount)}</span>
         {/if}
       </button>
 
@@ -805,7 +808,7 @@
           >
             <Icon name={hiddenCount > 0 ? "eye-off" : "eye"} class="size-3.5" />
             {#if hiddenCount > 0}
-              <span class="tabular-nums text-[11px] font-medium text-primary" aria-hidden="true">{hiddenCount}</span>
+              <span class="tabular-nums text-ui-2xs font-medium text-primary" aria-hidden="true">{hiddenCount}</span>
             {/if}
           </button>
         {/snippet}
@@ -879,7 +882,7 @@
       >
         <Icon name="function-square" class="size-3.5 shrink-0" />
         {#if virtualColCount > 0}
-          <span class="tabular-nums text-[11px] font-medium text-primary">{virtualColCount}</span>
+          <span class="tabular-nums text-ui-2xs font-medium text-primary">{virtualColCount}</span>
         {/if}
       </button>
 
@@ -1198,7 +1201,7 @@
             <Icon name="infinity" class="size-3.5" />
             Infinite scroll
             {#if infiniteScroll}
-              <span class="ml-auto text-[10px] text-primary">✓</span>
+              <span class="ml-auto text-ui-3xs text-primary">✓</span>
             {/if}
           </DropdownMenu.Item>
           <DropdownMenu.Separator />

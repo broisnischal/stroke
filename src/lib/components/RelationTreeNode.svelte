@@ -68,7 +68,7 @@
       {:else}
         <ArrowDownRight class="size-3.5 text-green-400/60" />
       {/if}
-      <span class="font-mono text-[9px] text-muted-foreground/50">
+      <span class="font-mono text-ui-3xs text-muted-foreground/50">
         {isOut ? `${fromCol} → ${tableName}.${toCol}` : `${tableName}.${fromCol} → ${toCol}`}
       </span>
     </div>
@@ -84,7 +84,7 @@
       <!-- Row count — filled in asynchronously; absent until the background pass resolves -->
       {#if rowCount !== undefined}
         <span
-          class="inline-flex h-5 items-center gap-1 rounded px-1.5 font-mono text-[9px] tabular-nums text-muted-foreground/45"
+          class="inline-flex h-5 items-center gap-1 rounded px-1.5 font-mono text-ui-3xs tabular-nums text-muted-foreground/45"
           title="{rowCount.toLocaleString()} row{rowCount === 1 ? '' : 's'}"
         >
           <Rows3 class="size-2.5 opacity-70" />{formatTableRowCount(rowCount)}
@@ -95,7 +95,7 @@
       {#if meta}
         <button
           type="button"
-          class="inline-flex h-5 items-center gap-0.5 rounded px-1.5 font-mono text-[9px] text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground"
+          class="inline-flex h-5 items-center gap-0.5 rounded px-1.5 font-mono text-ui-3xs text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground"
           onclick={() => toggleCols(colKey)}
         >{colsOpen ? '−' : '+'}{meta.columns.length}c</button>
       {/if}
@@ -134,8 +134,8 @@
           {#if isPk}<KeyRound class="size-2.5 shrink-0 text-amber-400/70" />
           {:else if isFk}<Link class="size-2.5 shrink-0 text-blue-400/50" />
           {:else}<span class="size-2.5 shrink-0"></span>{/if}
-          <span class="font-mono text-[9px] {isPk ? 'text-amber-300/80' : isFk ? 'text-blue-300/60' : 'text-foreground/55'}">{col.name}</span>
-          <span class="ml-auto font-mono text-[8px] text-muted-foreground/30">{col.dataType}</span>
+          <span class="font-mono text-ui-3xs {isPk ? 'text-amber-300/80' : isFk ? 'text-blue-300/60' : 'text-foreground/55'}">{col.name}</span>
+          <span class="ml-auto font-mono text-ui-3xs text-muted-foreground/30">{col.dataType}</span>
         </div>
       {/each}
     </div>
@@ -147,7 +147,7 @@
     <div class="border-t border-border/20 bg-background/30 p-2">
 
       {#if nodeOut.length > 0}
-        <div class="mb-1 px-1 font-mono text-[9px] uppercase tracking-widest text-muted-foreground/40">References</div>
+        <div class="mb-1 px-1 font-mono text-ui-3xs uppercase tracking-widest text-muted-foreground/40">References</div>
         <div class="flex flex-col gap-1.5 pl-2">
           {#each nodeOut as rel (rel.col)}
             {@const childPath = `${path}>${rel.refTable}:${rel.col}`}
@@ -155,7 +155,7 @@
               <svelte:self tableName={rel.refTable} fromCol={rel.col} toCol={rel.refCol}
                 direction="out" depth={depth + 1} path={childPath} {...shared} />
             {:else}
-              <div class="flex items-center gap-2 rounded-md border border-border/20 px-3 py-1.5 font-mono text-[9px] text-muted-foreground/40">
+              <div class="flex items-center gap-2 rounded-md border border-border/20 px-3 py-1.5 font-mono text-ui-3xs text-muted-foreground/40">
                 <Link class="size-2.5" />{rel.refTable} (circular)
               </div>
             {/if}
@@ -165,7 +165,7 @@
 
       {#if nodeIn.length > 0}
         {#if nodeOut.length > 0}<div class="my-1.5 border-t border-border/20"></div>{/if}
-        <div class="mb-1 px-1 font-mono text-[9px] uppercase tracking-widest text-muted-foreground/40">Referenced by</div>
+        <div class="mb-1 px-1 font-mono text-ui-3xs uppercase tracking-widest text-muted-foreground/40">Referenced by</div>
         <div class="flex flex-col gap-1.5 pl-2">
           {#each nodeIn as rel (`${rel.fromTable}${rel.fromCol}`)}
             {@const childPath = `${path}<${rel.fromTable}:${rel.fromCol}`}
@@ -173,7 +173,7 @@
               <svelte:self tableName={rel.fromTable} fromCol={rel.fromCol} toCol={rel.refCol}
                 direction="in" depth={depth + 1} path={childPath} {...shared} />
             {:else}
-              <div class="flex items-center gap-2 rounded-md border border-border/20 px-3 py-1.5 font-mono text-[9px] text-muted-foreground/40">
+              <div class="flex items-center gap-2 rounded-md border border-border/20 px-3 py-1.5 font-mono text-ui-3xs text-muted-foreground/40">
                 <Link class="size-2.5" />{rel.fromTable} (circular)
               </div>
             {/if}

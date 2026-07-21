@@ -65,7 +65,7 @@
       <div class="flex flex-col gap-0 divide-y divide-border">
         {#each grouped as group (group.cat)}
           <div class="px-5 py-4">
-            <p class="mb-3 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">
+            <p class="mb-3 text-ui-3xs font-semibold tracking-wider text-muted-foreground uppercase">
               {group.cat}
             </p>
             <ul class="flex flex-col gap-3">

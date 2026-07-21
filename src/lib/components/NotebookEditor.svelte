@@ -197,11 +197,11 @@
       spellcheck="false"
     />
     {#if dirty}
-      <span class="mr-3 shrink-0 text-[10px] text-muted-foreground/35">●</span>
+      <span class="mr-3 shrink-0 text-ui-3xs text-muted-foreground/35">●</span>
     {/if}
     {#if filePath}
       <span
-        class="mr-3 max-w-[180px] shrink-0 truncate text-[10px] text-muted-foreground/30"
+        class="mr-3 max-w-[180px] shrink-0 truncate text-ui-3xs text-muted-foreground/30"
         title={filePath}
       >
         {filePath.split(/[/\\]/).pop()}
@@ -341,7 +341,7 @@
     <div class="h-px flex-1 bg-border/30 transition-colors group-hover/adder:bg-border/60"></div>
     <button
       onclick={(e) => openAddMenu(idx, e)}
-      class="mx-2 flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground/50 hover:bg-muted hover:text-foreground"
+      class="mx-2 flex items-center gap-1 rounded px-1.5 py-0.5 text-ui-3xs text-muted-foreground/50 hover:bg-muted hover:text-foreground"
     >
       <Plus class="size-2.5" />
       Add cell
