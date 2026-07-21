@@ -1279,7 +1279,7 @@
                             <button
                               type="button"
                               class={cn(
-                                "group grid w-full grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 rounded-md px-2 py-1.5 text-left transition-colors",
+                                "group grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 text-left transition-colors",
                                 isSelected
                                   ? "bg-primary/10 text-foreground"
                                   : activeTable === view.name
@@ -1304,6 +1304,9 @@
                                 {/if}
                               </span>
                               <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{view.name}</span>
+                              {#if showRowCount}
+                                <span class="shrink-0 text-right font-mono text-ui-xs leading-4 tabular-nums text-muted-foreground">{formatTableRowCount(view.rowCount)}</span>
+                              {/if}
                             </button>
                           </ContextMenu.Trigger>
                           <ContextMenu.Content class="w-44 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
