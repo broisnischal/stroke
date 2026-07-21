@@ -2782,7 +2782,7 @@ let rowSearch = $state('')
 
   $effect(() => {
     // Depend on tab identity/order + the active tab.
-    tabs.map((t) => t.id).join(' ')
+    tabs.map((t) => t.id).join('|')
     void activeTabId
     reconcilePanes()
   })
