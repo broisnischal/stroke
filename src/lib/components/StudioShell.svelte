@@ -238,7 +238,7 @@
     remapNullableRowIndex,
     remapRowIndexSet,
   } from '$lib/table-row-indices.js'
-  import { rowsToCsv, rowsToJson, rowsToCsvAsync, rowsToJsonAsync, saveExportFile, buildExportFilename } from '$lib/export.js'
+  import { rowsToCsv, rowsToJson, rowsToCsvAsync, rowsToJsonAsync, rowsToSql, rowsToTsv, rowsToMarkdown, rowsToJsonl, saveExportFile, buildExportFilename } from '$lib/export.js'
   import {
     recordQueryExecution,
     listQueryHistory,
@@ -4063,12 +4063,20 @@ let rowSearch = $state('')
       await new Promise((res) => setTimeout(res, 16))
       /** @type {string} */
       let content
-      if (n > LARGE) {
+      // Only CSV/JSON have chunked async builders; the other formats (added for
+      // parity with the SQL console) build synchronously even for large sets.
+      if (n > LARGE && (format === 'csv' || format === 'json')) {
         content = format === 'csv'
           ? await rowsToCsvAsync(exportColumns, exportCells)
           : await rowsToJsonAsync(exportColumns, exportCells)
       } else {
-        content = format === 'csv' ? rowsToCsv(exportColumns, exportCells) : rowsToJson(exportColumns, exportCells)
+        content =
+          format === 'csv' ? rowsToCsv(exportColumns, exportCells)
+            : format === 'json' ? rowsToJson(exportColumns, exportCells)
+            : format === 'sql' ? rowsToSql(exportColumns, exportCells, activeTable || 'exported_table')
+            : format === 'tsv' ? rowsToTsv(exportColumns, exportCells)
+            : format === 'md' ? rowsToMarkdown(exportColumns, exportCells)
+            : rowsToJsonl(exportColumns, exportCells)
       }
       const saved = await saveExportFile(content, filename, format)
       toast.dismiss(toastId)

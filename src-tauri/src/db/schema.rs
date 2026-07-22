@@ -807,6 +807,82 @@ async fn list_triggers_pg(pool: &PgPool, schema: &str) -> Result<Vec<TriggerInfo
         .collect())
 }
 
+async fn list_triggers_mysql(pool: &sqlx::MySqlPool, schema: &str) -> Result<Vec<TriggerInfo>, String> {
+    // MySQL triggers are single-event and single-timing; the action body is
+    // inline (no named function) and there is no per-trigger enable flag.
+    let rows = sqlx::query(
+        r#"SELECT TRIGGER_NAME       AS name,
+                  EVENT_OBJECT_TABLE AS table_name,
+                  ACTION_TIMING      AS timing,
+                  EVENT_MANIPULATION AS events
+           FROM information_schema.TRIGGERS
+           WHERE TRIGGER_SCHEMA = ?
+           ORDER BY EVENT_OBJECT_TABLE, TRIGGER_NAME"#,
+    )
+    .bind(schema)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("Failed to list triggers: {e}"))?;
+
+    Ok(rows
+        .iter()
+        .filter_map(|r| {
+            Some(TriggerInfo {
+                name:          r.try_get::<String, _>("name").ok()?,
+                table_name:    r.try_get::<String, _>("table_name").unwrap_or_default(),
+                timing:        r.try_get::<String, _>("timing").unwrap_or_else(|_| "AFTER".to_string()),
+                events:        r.try_get::<String, _>("events").unwrap_or_default(),
+                function_name: String::new(),
+                enabled:       true,
+            })
+        })
+        .collect())
+}
+
+async fn list_triggers_sqlite(pool: &sqlx::SqlitePool) -> Result<Vec<TriggerInfo>, String> {
+    // SQLite keeps triggers in sqlite_master; timing/event aren't broken out into
+    // columns, so parse them out of the stored `CREATE TRIGGER` DDL.
+    let rows = sqlx::query(
+        r#"SELECT name, tbl_name, COALESCE(sql, '') AS sql
+           FROM sqlite_master
+           WHERE type = 'trigger'
+           ORDER BY tbl_name, name"#,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("Failed to list triggers: {e}"))?;
+
+    Ok(rows
+        .iter()
+        .filter_map(|r| {
+            let name: String = r.try_get("name").ok()?;
+            let table_name: String = r.try_get("tbl_name").unwrap_or_default();
+            let ddl: String = r.try_get::<String, _>("sql").unwrap_or_default().to_uppercase();
+            let timing = if ddl.contains("INSTEAD OF") {
+                "INSTEAD OF"
+            } else if ddl.contains("BEFORE") {
+                "BEFORE"
+            } else {
+                "AFTER"
+            };
+            let events = ["INSERT", "UPDATE", "DELETE"]
+                .iter()
+                .filter(|ev| ddl.contains(**ev))
+                .copied()
+                .collect::<Vec<_>>()
+                .join(", ");
+            Some(TriggerInfo {
+                name,
+                table_name,
+                timing: timing.to_string(),
+                events,
+                function_name: String::new(),
+                enabled: true,
+            })
+        })
+        .collect())
+}
+
 async fn list_sequences_pg(pool: &PgPool, schema: &str) -> Result<Vec<SequenceInfo>, String> {
     let rows = sqlx::query(r#"
         SELECT
@@ -1004,6 +1080,11 @@ pub async fn list_triggers(state: State<'_, DbState>, schema: String) -> Result<
             validate_ident(&schema)?;
             list_triggers_pg(&pool, &schema).await
         }
+        ActiveConnection::Mysql(pool) => {
+            validate_ident(&schema)?;
+            list_triggers_mysql(&pool, &schema).await
+        }
+        ActiveConnection::Sqlite(pool) => list_triggers_sqlite(&pool).await,
         _ => Ok(vec![]),
     }
 }
@@ -1014,6 +1095,9 @@ pub async fn list_sequences(state: State<'_, DbState>, schema: String) -> Result
             validate_ident(&schema)?;
             list_sequences_pg(&pool, &schema).await
         }
+        // Sequences are a PostgreSQL concept. MySQL uses AUTO_INCREMENT and SQLite
+        // uses sqlite_sequence rowids — neither exposes first-class sequence objects,
+        // so there is nothing to list for those engines (documented N/A per todo P2.12).
         _ => Ok(vec![]),
     }
 }

@@ -62,7 +62,7 @@
     onsortchange = () => {},
     onfilterschange = () => {},
     ondeleteselected = () => {},
-    /** @type {(format: 'csv' | 'json') => void | Promise<void>} */
+    /** @type {(format: 'csv' | 'json' | 'sql' | 'tsv' | 'md' | 'jsonl') => void | Promise<void>} */
     onexport = () => {},
     onaddrow = () => {},
     onopeninsql = () => {},
@@ -1222,6 +1222,22 @@
           <DropdownMenu.Item disabled={total === 0} onSelect={() => onexport("json")}>
             <Icon name="file-down" />
             Export as JSON
+          </DropdownMenu.Item>
+          <DropdownMenu.Item disabled={total === 0} onSelect={() => onexport("sql")}>
+            <Icon name="file-down" />
+            Export as SQL
+          </DropdownMenu.Item>
+          <DropdownMenu.Item disabled={total === 0} onSelect={() => onexport("tsv")}>
+            <Icon name="file-down" />
+            Export as TSV
+          </DropdownMenu.Item>
+          <DropdownMenu.Item disabled={total === 0} onSelect={() => onexport("md")}>
+            <Icon name="file-down" />
+            Export as Markdown
+          </DropdownMenu.Item>
+          <DropdownMenu.Item disabled={total === 0} onSelect={() => onexport("jsonl")}>
+            <Icon name="file-down" />
+            Export as JSONL
           </DropdownMenu.Item>
           <DropdownMenu.Separator />
           <DropdownMenu.Item
