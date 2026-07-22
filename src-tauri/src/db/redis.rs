@@ -51,15 +51,16 @@ pub async fn query(cfg: &RedisConfig, command: &str) -> Result<SqlResult, String
         return Err("Empty Redis command".into());
     }
 
-    // Phase 1: plain whitespace split (no quote handling yet).
-    let mut parts = trimmed.split_whitespace();
-    let cmd_name = parts.next().ok_or("Empty Redis command")?;
+    // Tokenize with redis-cli-style quoting so values containing spaces work
+    // (e.g. `SET greeting "hello world"`, `HSET u:1 bio 'a b c'`).
+    let tokens = tokenize(trimmed);
+    let cmd_name = tokens.first().ok_or("Empty Redis command")?;
 
     let t0 = Instant::now();
     let mut conn = open(cfg).await?;
-    let mut cmd = ::redis::cmd(cmd_name);
-    for arg in parts {
-        cmd.arg(arg);
+    let mut cmd = ::redis::cmd(cmd_name.as_str());
+    for arg in &tokens[1..] {
+        cmd.arg(arg.as_str());
     }
 
     let reply: ::redis::Value = cmd
@@ -80,6 +81,91 @@ pub async fn query(cfg: &RedisConfig, command: &str) -> Result<SqlResult, String
     })
 }
 
+/// One page of a `SCAN` iteration: the opaque cursor to resume from (`"0"` once
+/// iteration completes) plus the keys found this round.
+#[derive(serde::Serialize)]
+pub struct ScanReply {
+    pub cursor: String,
+    pub keys: Vec<String>,
+}
+
+/// Non-blocking incremental key iteration via `SCAN` — unlike `KEYS *`, which
+/// blocks the whole server on a large keyspace. Binary/control bytes in key
+/// names stay legible via `bytes_to_display`. Pass the returned `cursor` back to
+/// fetch the next page; `"0"` means iteration is complete.
+pub async fn scan(
+    cfg: &RedisConfig,
+    cursor: &str,
+    pattern: Option<String>,
+    count: u32,
+) -> Result<ScanReply, String> {
+    let mut conn = open(cfg).await?;
+    let mut cmd = ::redis::cmd("SCAN");
+    cmd.arg(cursor);
+    if let Some(p) = pattern
+        .as_deref()
+        .map(str::trim)
+        .filter(|p| !p.is_empty() && *p != "*")
+    {
+        cmd.arg("MATCH").arg(p);
+    }
+    cmd.arg("COUNT").arg(count.max(1));
+    let (next, raw): (String, Vec<Vec<u8>>) = cmd
+        .query_async(&mut conn)
+        .await
+        .map_err(|e| format!("Redis SCAN failed: {e}"))?;
+    Ok(ScanReply {
+        cursor: next,
+        keys: raw.iter().map(|b| bytes_to_display(b)).collect(),
+    })
+}
+
+/// Split a command line into tokens, honoring single/double quotes and
+/// backslash escapes inside double quotes (mirrors how redis-cli parses input).
+/// Unquoted runs of whitespace separate tokens; quotes group a value even when
+/// it contains spaces. Empty quoted strings (`""`) yield an empty token.
+fn tokenize(input: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut cur = String::new();
+    let mut has_token = false;
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut chars = input.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' if !in_double => {
+                in_single = !in_single;
+                has_token = true;
+            }
+            '"' if !in_single => {
+                in_double = !in_double;
+                has_token = true;
+            }
+            '\\' if in_double => {
+                if let Some(&next) = chars.peek() {
+                    cur.push(next);
+                    chars.next();
+                }
+            }
+            c if c.is_whitespace() && !in_single && !in_double => {
+                if has_token {
+                    tokens.push(std::mem::take(&mut cur));
+                    has_token = false;
+                }
+            }
+            c => {
+                cur.push(c);
+                has_token = true;
+            }
+        }
+    }
+    if has_token {
+        tokens.push(cur);
+    }
+    tokens
+}
+
 /// Expand a top-level reply into rows for the single "result" column:
 /// `Nil` → no rows; array/set → one row per element; anything else → one row.
 fn value_to_rows(v: &::redis::Value) -> Vec<Vec<JsonValue>> {
@@ -93,12 +179,38 @@ fn value_to_rows(v: &::redis::Value) -> Vec<Vec<JsonValue>> {
     }
 }
 
+/// Render a bulk-string reply so binary / control bytes stay legible instead of
+/// collapsing into tofu boxes (the old `from_utf8_lossy` turned every non-text
+/// byte into U+FFFD). Clean UTF-8 text is returned verbatim; anything with
+/// non-whitespace control bytes or invalid UTF-8 keeps its printable ASCII and
+/// escapes the rest as `\xNN` (redis-cli style), so `celery\x00\x00\x00celery`
+/// reads as exactly that.
+fn bytes_to_display(bytes: &[u8]) -> String {
+    if let Ok(s) = std::str::from_utf8(bytes) {
+        if !s
+            .chars()
+            .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
+        {
+            return s.to_string();
+        }
+    }
+    let mut out = String::with_capacity(bytes.len());
+    for &b in bytes {
+        if b == b'\n' || b == b'\r' || b == b'\t' || (0x20..=0x7e).contains(&b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("\\x{b:02x}"));
+        }
+    }
+    out
+}
+
 /// Stringify a single Redis reply value (recursing into nested containers).
 fn value_to_string(v: &::redis::Value) -> String {
     match v {
         ::redis::Value::Nil => String::new(),
         ::redis::Value::Int(i) => i.to_string(),
-        ::redis::Value::BulkString(bytes) => String::from_utf8_lossy(bytes).into_owned(),
+        ::redis::Value::BulkString(bytes) => bytes_to_display(bytes),
         ::redis::Value::SimpleString(s) => s.clone(),
         ::redis::Value::Okay => "OK".to_string(),
         ::redis::Value::Double(d) => d.to_string(),
