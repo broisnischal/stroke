@@ -262,14 +262,8 @@ All notable changes to Stroke are listed here, newest first.
 ## [1.8.0] - 2026-07-10
 
 ### Changes
-- Redesign connection screen and polish app interface (#40)
 
-
-## [Unreleased]
-
-### Changes
-
-#### Connect experience (redesigned)
+#### Connect experience (redesigned) (#40)
 - Rebuilt the connection screen as a **two-pane layout** — choose your connection type, driver, and saved connections in a left rail while editing details in a focused right pane, so the fields are reachable without scrolling.
 - **Pick one input method** — a segmented switch toggles between pasting a **connection string** and filling **manual fields**, instead of showing both at once. Pasting a string auto-fills the fields and validates on connect.
 - **Cleaner provider picker** — Neon, Supabase, PlanetScale, and Prisma Postgres now appear as a single calm list with a clear selected state and a compact sign-in action, replacing the bulky cards.
