@@ -18,7 +18,11 @@ export function loadSkills() {
 
 /** @param {AiSkill[]} skills */
 export function saveSkills(skills) {
-  localStorage.setItem(SKILLS_KEY, JSON.stringify(skills))
+  try {
+    localStorage.setItem(SKILLS_KEY, JSON.stringify(skills))
+  } catch {
+    /* quota/private-mode — fail soft rather than throw into callers */
+  }
 }
 
 /**

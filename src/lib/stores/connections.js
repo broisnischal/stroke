@@ -58,12 +58,24 @@ export function loadSavedConnections() {
     if (!raw) return []
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
-    return parsed.map((c) => ({
-      ...c,
-      id:   c.id   ?? newConnectionId(),
-      type: c.type ?? 'postgres',
-      port: c.port != null ? Number(c.port) : 5432,
-    }))
+    return parsed.map((c) => {
+      const type = c.type ?? 'postgres'
+      const conn = {
+        ...c,
+        id:   c.id   ?? newConnectionId(),
+        type,
+        port: c.port != null ? Number(c.port) : 5432,
+      }
+      // Redis connections can carry stale Postgres-ish fields from an earlier
+      // edit/clone (a `provider` and a non-numeric `db` like "postgres"), which
+      // made the status bar show `db postgres` and open a Postgres db switcher.
+      // Normalize once on load so the UI and backend agree on a numeric logical DB.
+      if (engineFamily(type) === 'redis') {
+        conn.db = Number(conn.db) || 0
+        delete conn.provider
+      }
+      return conn
+    })
   } catch {
     return []
   }
