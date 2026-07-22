@@ -628,26 +628,27 @@
 
 <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
   <!-- ── Toolbar ──────────────────────────────────────────────────────────── -->
-  <div class="studio-chrome flex h-10 shrink-0 items-center gap-2 border-b border-border bg-panel px-3" data-studio-chrome>
-    <Network class="size-4 shrink-0 text-muted-foreground/50" />
-    <span class="shrink-0 whitespace-nowrap font-mono text-ui-xs font-semibold text-foreground/80">ER Diagram</span>
+  <div class="studio-chrome flex h-9 shrink-0 items-center gap-2 border-b border-border bg-panel px-3" data-studio-chrome>
+    <Network class="size-3.5 shrink-0 text-muted-foreground" />
+    <span class="shrink-0 whitespace-nowrap text-ui-xs font-semibold text-foreground/80">ER Diagram</span>
 
     {#if schemas.length > 1}
       <div class="relative ml-1 shrink-0" data-dropdown>
         <button
           type="button"
-          class="flex h-7 items-center gap-1.5 rounded-md border border-border/50 bg-background/60 px-2.5 font-mono text-ui-xs font-medium transition-colors hover:bg-accent"
+          class="flex h-7 items-center gap-1.5 rounded-md border border-input bg-input/30 px-2.5 text-ui-sm font-medium text-foreground transition-colors hover:bg-accent data-[state=open]:bg-accent"
+          data-state={schemaOpen ? 'open' : 'closed'}
           onclick={() => (schemaOpen = !schemaOpen)}
         >
           {activeSchema}
           <ChevronDown class="size-3 text-muted-foreground/60" />
         </button>
         {#if schemaOpen}
-          <div class="absolute left-0 top-full z-50 mt-1 min-w-[140px] overflow-hidden rounded-lg border border-border bg-popover shadow-lg">
+          <div class="absolute left-0 top-full z-50 mt-1 min-w-[160px] overflow-hidden rounded-[10px] border border-border/60 bg-popover p-1 elevate-2-rim">
             {#each schemas as s (s)}
               <button
                 type="button"
-                class="flex w-full px-3 py-1.5 font-mono text-ui-xs transition-colors hover:bg-accent {s === activeSchema ? 'font-medium text-foreground' : 'text-muted-foreground'}"
+                class="flex w-full rounded-md px-2 py-1.5 text-ui-sm transition-colors hover:bg-accent hover:text-foreground {s === activeSchema ? 'font-medium text-foreground' : 'text-muted-foreground'}"
                 onclick={() => { activeSchema = s; schemaOpen = false }}
               >{s}</button>
             {/each}
@@ -657,13 +658,13 @@
     {/if}
 
     <div class="relative flex min-w-0 shrink items-center">
-      <Search class="pointer-events-none absolute left-2.5 size-3 text-muted-foreground/40" />
+      <Search class="pointer-events-none absolute left-2 size-3.5 text-muted-foreground/50" />
       <input
         type="text"
         bind:this={searchEl}
         bind:value={search}
         placeholder="Search tables…"
-        class="h-7 w-36 min-w-0 rounded-md border border-border/50 bg-background/60 pl-7 pr-6 font-mono text-ui-xs outline-none placeholder:text-muted-foreground/35 focus:border-ring focus:ring-1 focus:ring-ring"
+        class="h-7 w-40 min-w-0 rounded-md border border-input bg-input/30 pl-7 pr-6 text-ui-sm outline-none placeholder:text-muted-foreground/45 focus:border-ring focus:ring-1 focus:ring-ring"
       />
       {#if search}
         <button type="button" onclick={() => (search = '')} class="absolute right-2 text-muted-foreground/50 hover:text-foreground">
@@ -681,7 +682,7 @@
           <span class="font-mono text-ui-2xs text-muted-foreground/50">{loadedCount}/{totalCount}</span>
         </div>
       {:else if tableMeta.size > 0 && !loading}
-        <span class="whitespace-nowrap font-mono text-ui-2xs text-muted-foreground/45">
+        <span class="whitespace-nowrap font-mono text-ui-2xs tabular-nums text-muted-foreground/60">
           {nodes.length}/{tableMeta.size} tables · {edges.length} fk
         </span>
       {/if}
@@ -689,19 +690,19 @@
       {#if tableMeta.size > 0}
         <button
           type="button"
-          class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 font-mono text-ui-xs whitespace-nowrap transition-colors
-            {connectedOnly ? 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/15' : 'border-border/50 text-muted-foreground hover:bg-accent hover:text-foreground'}"
+          class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-ui-xs whitespace-nowrap transition-colors
+            {connectedOnly ? 'border-transparent bg-primary/10 text-foreground ring-1 ring-inset ring-primary/25' : 'border-border/50 text-muted-foreground hover:bg-accent hover:text-foreground'}"
           onclick={() => (connectedOnly = !connectedOnly)}
           title="Only show tables with FK relationships"
         >
-          <Link class="size-3.5 shrink-0" />
+          <Link class="size-3.5 shrink-0 {connectedOnly ? 'text-primary' : ''}" />
           Connected
         </button>
       {/if}
 
       <button
         type="button"
-        class="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border/50 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
         onclick={reLayout}
         title="Re-run automatic layout"
       >
@@ -714,7 +715,8 @@
           <button
             type="button"
             disabled={exporting}
-            class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/50 bg-background/60 px-2.5 font-mono text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+            data-state={downloadOpen ? 'open' : 'closed'}
+            class="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground disabled:pointer-events-none disabled:opacity-40"
             onclick={() => (downloadOpen = !downloadOpen)}
             title="Download diagram"
           >
@@ -727,29 +729,29 @@
             <ChevronDown class="size-3 text-muted-foreground/60" />
           </button>
           {#if downloadOpen}
-            <div class="absolute right-0 top-full z-50 mt-1 w-40 overflow-hidden rounded-lg border border-border bg-popover shadow-lg">
+            <div class="absolute right-0 top-full z-50 mt-1 w-44 overflow-hidden rounded-[10px] border border-border/60 bg-popover p-1 elevate-2-rim">
               <button
                 type="button"
-                class="flex w-full items-center gap-2.5 px-3 py-2 font-mono text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-ui-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                 onclick={exportPNG}
               >
-                <FileImage class="size-3.5 shrink-0 text-sky-400/70" />
+                <FileImage class="size-3.5 shrink-0" />
                 PNG image
               </button>
               <button
                 type="button"
-                class="flex w-full items-center gap-2.5 px-3 py-2 font-mono text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-ui-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                 onclick={exportSVG}
               >
-                <FileCode class="size-3.5 shrink-0 text-orange-400/70" />
+                <FileCode class="size-3.5 shrink-0" />
                 SVG vector
               </button>
               <button
                 type="button"
-                class="flex w-full items-center gap-2.5 px-3 py-2 font-mono text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-ui-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                 onclick={exportMarkdown}
               >
-                <FileText class="size-3.5 shrink-0 text-green-400/70" />
+                <FileText class="size-3.5 shrink-0" />
                 Markdown (Mermaid)
               </button>
             </div>
@@ -760,7 +762,7 @@
       <button
         type="button"
         disabled={loading}
-        class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+        class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
         onclick={() => void load()}
         title="Reload schema"
       >

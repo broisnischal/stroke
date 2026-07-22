@@ -215,10 +215,12 @@ html[data-os="linux"]   { --window-radius: 8px; }
     /* Transparent so the rounded body corners reveal the desktop, not a square
        html background. Body's bg-background would otherwise propagate here. */
     background: transparent;
-    /* macOS/fallback: 'auto' delegates to Core Text which produces good results.
-       Linux overrides this to 'antialiased' below via data-os="linux". */
-    -webkit-font-smoothing: auto;
-    -moz-osx-font-smoothing: auto;
+    /* Grayscale antialiasing on every platform. On macOS the default subpixel
+       ('auto') renders UI text noticeably heavier; 'antialiased' gives the
+       crisp, lighter weight the design system targets and keeps rendering
+       identical to the Windows/Linux overrides below. */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     /* optimizeLegibility: proper kerning + shaping so UI text stays smooth and
        crisp at every zoom level (optimizeSpeed skips shaping and looks rough,
        especially scaled down). The perf-sensitive data grid opts back into

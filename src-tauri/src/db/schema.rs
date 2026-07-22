@@ -852,6 +852,7 @@ pub async fn list_schemas(state: State<'_, DbState>) -> Result<Vec<String>, Stri
         ActiveConnection::Postgres(pool) => list_schemas_pg(&pool).await,
         ActiveConnection::Mysql(pool) => list_schemas_mysql(&pool).await,
         ActiveConnection::Clickhouse(cfg) => Ok(vec![cfg.database.clone()]),
+        ActiveConnection::Redis(_) => Ok(vec![]),
         ActiveConnection::Mssql(h) => super::mssql::list_schemas(&h).await,
         ActiveConnection::Sqlite(_) | ActiveConnection::D1(_) | ActiveConnection::LibSql(_) | ActiveConnection::Duckdb(_) => Ok(vec!["main".to_string()]),
     }
@@ -868,6 +869,7 @@ pub async fn list_tables(state: State<'_, DbState>, schema: String) -> Result<Ve
         ActiveConnection::D1(cfg) => list_tables_d1(&cfg).await,
         ActiveConnection::LibSql(cfg) => list_tables_libsql(&cfg).await,
         ActiveConnection::Clickhouse(cfg) => super::clickhouse::list_tables(&cfg).await,
+        ActiveConnection::Redis(cfg) => super::redis::list_tables(&cfg).await,
         ActiveConnection::Duckdb(h) => super::duckdb::list_tables(&h).await,
         ActiveConnection::Mssql(h) => super::mssql::list_tables(&h, &schema).await,
     }
@@ -884,6 +886,7 @@ pub async fn list_indexes(state: State<'_, DbState>, schema: String) -> Result<V
         ActiveConnection::D1(cfg) => list_indexes_d1(&cfg).await,
         ActiveConnection::LibSql(cfg) => list_indexes_libsql(&cfg).await,
         ActiveConnection::Clickhouse(cfg) => super::clickhouse::list_indexes(&cfg).await,
+        ActiveConnection::Redis(cfg) => super::redis::list_indexes(&cfg).await,
         ActiveConnection::Duckdb(h) => super::duckdb::list_indexes(&h).await,
         ActiveConnection::Mssql(h) => super::mssql::list_indexes(&h, &schema).await,
     }
@@ -1034,6 +1037,9 @@ pub async fn get_table_column_structure(
         }
         ActiveConnection::Clickhouse(cfg) => {
             super::clickhouse::get_column_structure(&cfg, &table).await
+        }
+        ActiveConnection::Redis(cfg) => {
+            super::redis::get_column_structure(&cfg, &table).await
         }
         ActiveConnection::Duckdb(h) => {
             super::duckdb::get_column_structure(&h, &table).await
@@ -1614,6 +1620,7 @@ pub async fn get_table_ddl(
         ActiveConnection::D1(cfg) => get_ddl_d1(&cfg, &table).await,
         ActiveConnection::LibSql(cfg) => get_ddl_libsql(&cfg, &table).await,
         ActiveConnection::Clickhouse(cfg) => super::clickhouse::get_ddl(&cfg, &table).await,
+        ActiveConnection::Redis(cfg) => super::redis::get_ddl(&cfg, &table).await,
         ActiveConnection::Duckdb(h) => super::duckdb::get_ddl(&h, &table).await,
         ActiveConnection::Mssql(h) => super::mssql::get_ddl(&h, &schema, &table).await,
     }
@@ -1671,6 +1678,7 @@ pub async fn list_tables_on_conn(
         AnyConnectionConfig::D1(c) => list_tables_d1(&c).await.map(to_names),
         AnyConnectionConfig::Libsql(c) => list_tables_libsql(&c).await.map(to_names),
         AnyConnectionConfig::Clickhouse(c) => super::clickhouse::list_tables(&c).await.map(to_names),
+        AnyConnectionConfig::Redis(c) => super::redis::list_tables(&c).await.map(to_names),
         AnyConnectionConfig::Duckdb(c) => {
             let h = super::connection::open_duckdb(&c).await?;
             super::duckdb::list_tables(&h).await.map(to_names)
@@ -1713,6 +1721,7 @@ pub async fn get_table_ddl_on_conn(
         AnyConnectionConfig::D1(c) => get_ddl_d1(&c, &table).await,
         AnyConnectionConfig::Libsql(c) => get_ddl_libsql(&c, &table).await,
         AnyConnectionConfig::Clickhouse(c) => super::clickhouse::get_ddl(&c, &table).await,
+        AnyConnectionConfig::Redis(c) => super::redis::get_ddl(&c, &table).await,
         AnyConnectionConfig::Duckdb(c) => {
             let h = super::connection::open_duckdb(&c).await?;
             super::duckdb::get_ddl(&h, &table).await

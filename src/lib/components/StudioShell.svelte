@@ -84,6 +84,7 @@
   import LogsPage from './LogsPage.svelte'
   import InstanceInsightsPage from './InstanceInsightsPage.svelte'
   import ObjectsPage from './ObjectsPage.svelte'
+  import RedisKeyspacePage from './RedisKeyspacePage.svelte'
   // Monaco-backed pages (DataDiffPage, OrmRunner, SecurityPage, JsonViewerPage, SqlConsole)
   // are loaded lazily at their render sites so the Monaco editor stays out of the
   // startup bundle until the user actually opens a SQL / ORM / JSON / diff / security tab.
@@ -132,6 +133,8 @@
     findInsightsTab,
     createObjectsTab,
     findObjectsTab,
+    createRedisTab,
+    findRedisTab,
     createExtensionsTab,
     findExtensionsTab,
     createExtensionDetailTab,
@@ -219,6 +222,7 @@
     connectClickhouse,
     connectDuckdb,
     connectMssql,
+    connectRedis,
     listIndexes,
     listEnums,
     listFunctions,
@@ -322,10 +326,12 @@
   // Normalize wire-compatible aliases (mariadb → mysql, cockroachdb → postgres)
   // so every capability/dialect check below keeps working unchanged.
   const dbType = $derived(engineFamily(connection?.type))
+  /** Key-value engine (Redis) — swaps the whole relational UI for the keyspace page. */
+  const isRedis = $derived(dbType === 'redis')
   /** Schema Explorer is useful for postgres + mysql; sqlite/d1 have no meaningful schema pages. */
-  const hasSchemaExplorer = $derived(dbType === 'postgres' || dbType === 'mysql')
+  const hasSchemaExplorer = $derived((dbType === 'postgres' || dbType === 'mysql') && !isRedis)
   /** Security (RLS, policies, roles) is PostgreSQL-only. */
-  const hasSecurity = $derived(dbType === 'postgres')
+  const hasSecurity = $derived(dbType === 'postgres' && !isRedis)
   /** @type {import('./UpdateDialog.svelte').default | null} */
   let updateDialog = $state(null)
   let statusBarHasUpdate = $state(false)
@@ -535,6 +541,7 @@
   let logsEverOpened = $state(false)
   let insightsEverOpened = $state(false)
   let objectsEverOpened = $state(false)
+  let redisEverOpened = $state(false)
   let extensionsEverOpened = $state(false)
   let jsonEverOpened = $state(false)
   let backupEverOpened = $state(false)
@@ -787,6 +794,7 @@
     if (activeTab?.kind === 'logs') logsEverOpened = true
     if (activeTab?.kind === 'insights') insightsEverOpened = true
     if (activeTab?.kind === 'objects') objectsEverOpened = true
+    if (activeTab?.kind === 'redis') redisEverOpened = true
     if (activeTab?.kind === 'extensions') extensionsEverOpened = true
     if (activeTab?.kind === 'json') jsonEverOpened = true
     if (activeTab?.kind === 'backup') backupEverOpened = true
@@ -1013,6 +1021,11 @@
   // to grow the scroll extent — it needs the proxy's length signal to fire on the
   // in-place push. .raw would lose that notify without an O(n²) whole-array copy.
   let _infiniteRows = $state(/** @type {any[]} */ ([]))
+  // Hard ceiling on accumulated infinite-scroll rows. Without it, scrolling a
+  // huge table in infinite mode would keep appending until the entire result set
+  // was resident (and deep-proxied) — unbounded memory. At the cap we stop
+  // auto-loading; the count/"load more" UI reflects that the view is capped.
+  const INFINITE_ROW_CAP = 200_000
   let infiniteScroll = $state(loadInfiniteScroll())
 
   // ── Windowed loading (huge result sets) ──────────────────────────────────
@@ -1490,6 +1503,13 @@ let rowSearch = $state('')
     savingCell = false
   }
 
+  // Raw (non-proxied) row arrays keyed by tab id. `tabs` is a deep-proxied
+  // $state, so a rows array stored inside it and read back on re-activation
+  // returns a proxy — which the canvas draw() would then index per cell per
+  // frame (the scroll-lag regression). We keep the raw reference here and hand it
+  // straight back on restore so the live grid always holds a genuine raw array.
+  const _liveRowsByTab = new Map()
+
   function saveActiveTabState() {
     if (!activeTabId) return
     const idx = tabs.findIndex((t) => t.id === activeTabId)
@@ -1500,6 +1520,8 @@ let rowSearch = $state('')
     if (t.kind === 'table') {
       const state = cloneTableTabState(captureTableSnapshot())
       updated = { ...t, state, title: tableTabTitle(state) }
+      if (windowed) _liveRowsByTab.delete(activeTabId)
+      else _liveRowsByTab.set(activeTabId, rows)
     } else if (t.kind === 'sql') {
       updated = { ...t, state: cloneSqlTabState(captureSqlSnapshot()) }
     }
@@ -1532,8 +1554,13 @@ let rowSearch = $state('')
         applyTableSnapshot(raw)
         if (raw.table && !fetchingTabIds.has(tab.id)) void fetchRowsForTab(tab.id)
       } else {
-        // Has cached data — clone Sets so mutations don't bleed between tabs
-        applyTableSnapshot(cloneTableTabState(raw))
+        // Has cached data — clone Sets so mutations don't bleed between tabs, and
+        // restore the RAW rows reference (not the proxied tab.state.rows) so the
+        // grid doesn't index a proxy on the scroll hot path.
+        const snap = cloneTableTabState(raw)
+        const rawRows = _liveRowsByTab.get(tab.id)
+        if (rawRows) snap.rows = rawRows
+        applyTableSnapshot(snap)
       }
     }
   }
@@ -2275,6 +2302,22 @@ let rowSearch = $state('')
     applySqlSnapshot(cloneSqlTabState(/** @type {SqlTabState} */ (tab.state)))
   }
 
+  // Always open a brand-new, empty SQL editor tab (multiple allowed), unlike
+  // openSqlTab which focuses the single existing one. Wired to the Cmd-K
+  // "New SQL Editor" command so several query editors can be open at once;
+  // the existing per-tab snapshot swap keeps each tab's buffer/results intact.
+  function openNewSqlTab() {
+    saveActiveTabState()
+    dropWelcomeTabs()
+    const count = tabs.filter((t) => t.kind === 'sql').length
+    const title = count === 0 ? 'Query Editor' : `Query Editor ${count + 1}`
+    const tab = createSqlTab(undefined, title)
+    tabs = [...tabs, tab]
+    activeTabId = tab.id
+    clearTableEditor()
+    applySqlSnapshot(cloneSqlTabState(/** @type {SqlTabState} */ (tab.state)))
+  }
+
   function openAiTab() {
     if (!$hasPro) { showProGate = true; return }
     enterAiMode()
@@ -2328,6 +2371,19 @@ let rowSearch = $state('')
 
   function openObjectsTab() {
     openSingletonTab({ find: findObjectsTab, create: createObjectsTab })
+  }
+
+  /** The Redis keyspace workspace. NOT pro-gated — it's the primary (and only)
+   *  interface for a Redis connection, so it must open on connect for everyone. */
+  function openRedisTab() {
+    const existing = findRedisTab(tabs)
+    if (existing) { void activateTab(existing.id); return }
+    saveActiveTabState()
+    dropWelcomeTabs()
+    const tab = createRedisTab()
+    tabs = [...tabs, tab]
+    activeTabId = tab.id
+    clearTableEditor()
   }
 
   function openExtensionsTab() {
@@ -2482,12 +2538,17 @@ let rowSearch = $state('')
   function evictColdTabRows(activeId) {
     _tabRowsMru = [..._tabRowsMru.filter((x) => x !== activeId), activeId]
     const keep = new Set(_tabRowsMru.slice(-TAB_ROWS_MRU_MAX))
+    // Never evict a tab that is the active tab of a visible split pane — its rows
+    // are on screen in that pane's snapshot, so blanking them would flip the pane
+    // to the empty "Focus this pane to load" placeholder.
+    if (paneRoot) for (const g of PaneTree.allGroups(paneRoot)) if (g.activeTabId) keep.add(g.activeTabId)
     let changed = false
     const next = tabs.map((t) => {
       if (t.kind !== 'table' || t.id === activeId || keep.has(t.id)) return t
       const st = /** @type {TableTabState} */ (t.state)
       if (st && Array.isArray(st.rows) && st.rows.length > TAB_EVICT_ROW_THRESHOLD) {
         changed = true
+        _liveRowsByTab.delete(t.id)
         return { ...t, state: { ...st, rows: [], columns: [], selected: new Set() } }
       }
       return t
@@ -2581,6 +2642,7 @@ let rowSearch = $state('')
   /** Push a closed tab onto the reopen stack (welcome tabs aren't worth restoring). */
   function rememberClosedTab(tab) {
     if (!tab || tab.kind === 'welcome') return
+    _liveRowsByTab.delete(tab.id)
     // Snapshot with a shallow state clone so later edits to the live tree can't
     // mutate what we'll restore. `id`/`pinned` are dropped — reopen mints fresh.
     const { id: _id, pinned: _pinned, ...rest } = tab
@@ -2762,7 +2824,7 @@ let rowSearch = $state('')
 
   $effect(() => {
     // Depend on tab identity/order + the active tab.
-    tabs.map((t) => t.id).join(' ')
+    tabs.map((t) => t.id).join('|')
     void activeTabId
     reconcilePanes()
   })
@@ -3339,6 +3401,8 @@ let rowSearch = $state('')
           }))
           .filter((t) => t.name)
         _tableListCache.set(key, { tables, at: Date.now() })
+        // Bound growth: one entry per connection:schema visited over a session.
+        if (_tableListCache.size > 64) _tableListCache.delete(_tableListCache.keys().next().value)
         if (activeTable && !tables.find((t) => t.name === activeTable)) {
           activeTable = tables[0]?.name ?? null
         }
@@ -3884,6 +3948,7 @@ let rowSearch = $state('')
     if (windowed) return // windowed mode loads via handleVisibleRange, not append
     if (!infiniteScroll || !activeTable || loadingRows || loadingMore) return
     if (total >= 0 && _infiniteRows.length >= total) return
+    if (_infiniteRows.length >= INFINITE_ROW_CAP) return
     loadingMore = true
     try {
       const offset = _infiniteRows.length
@@ -4075,26 +4140,37 @@ let rowSearch = $state('')
     // makes reconnect feel instant — the overlay no longer waits on the
     // schema/table/row-count round trips.
     tabs = []
-    openWelcomeTab()
+    // Redis has no relational catalog: skip schema/table loading entirely and
+    // open the keyspace workspace instead of the welcome tab + tables sidebar.
+    const connIsRedis = engineFamily(conn.type) === 'redis'
+    if (connIsRedis) {
+      openRedisTab()
+    } else {
+      openWelcomeTab()
+    }
     loadingTables = true
     // Query history + saved queries only depend on the connection id, not on the
     // catalog, so kick them off concurrently with the schema/table load instead
     // of waiting behind it. Errors are non-fatal (history is best-effort).
     const storesReady = refreshQueryStores().catch(() => {})
-    // Schema → tables is a genuine dependency (loadTables needs activeSchema), so
-    // this pair stays serial. The retry loop only sleeps when the backend isn't
-    // ready yet (schemas come back empty); the happy path succeeds on attempt 0.
-    for (let attempt = 0; attempt < 3; attempt++) {
-      if (attempt > 0) await new Promise(r => setTimeout(r, attempt * 700))
-      await loadSchemas()
-      if (schemas.length > 0) break
-    }
-    await loadTables({ force: true })
-    // Retry only when the fetch actually failed — an empty database is a valid
-    // result and must not pay a 1 s penalty on every connect.
-    if (tables.length === 0 && schemas.length > 0 && error) {
-      await new Promise(r => setTimeout(r, 1000))
+    if (!connIsRedis) {
+      // Schema → tables is a genuine dependency (loadTables needs activeSchema), so
+      // this pair stays serial. The retry loop only sleeps when the backend isn't
+      // ready yet (schemas come back empty); the happy path succeeds on attempt 0.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (attempt > 0) await new Promise(r => setTimeout(r, attempt * 700))
+        await loadSchemas()
+        if (schemas.length > 0) break
+      }
       await loadTables({ force: true })
+      // Retry only when the fetch actually failed — an empty database is a valid
+      // result and must not pay a 1 s penalty on every connect.
+      if (tables.length === 0 && schemas.length > 0 && error) {
+        await new Promise(r => setTimeout(r, 1000))
+        await loadTables({ force: true })
+      }
+    } else {
+      loadingTables = false
     }
     // MCP autostart is independent of the catalog — don't block first render on it.
     void (async () => {
@@ -4193,6 +4269,7 @@ let rowSearch = $state('')
       else if (last.type === 'clickhouse') await withTimeout(connectClickhouse(last))
       else if (last.type === 'duckdb') await withTimeout(connectDuckdb(last))
       else if (last.type === 'mssql') await withTimeout(connectMssql(last))
+      else if (last.type === 'redis') await withTimeout(connectRedis(last))
       else await withTimeout(connectPostgres(last))
       // onConnected already refreshes the query stores (concurrently with the
       // catalog load) — no second fetch needed here.
@@ -4336,7 +4413,7 @@ let rowSearch = $state('')
    * @param {import('$lib/stores/connections.js').SavedConnection} conn
    */
   async function connectByType(conn) {
-    const { connectPostgres, connectSqlite, connectD1, connectLibSql, connectMysql, connectClickhouse, connectDuckdb, connectMssql } = await import('$lib/api.js')
+    const { connectPostgres, connectSqlite, connectD1, connectLibSql, connectMysql, connectClickhouse, connectDuckdb, connectMssql, connectRedis } = await import('$lib/api.js')
     if (conn.type === 'sqlite') await connectSqlite(conn)
     else if (conn.type === 'd1') await connectD1(conn)
     else if (conn.type === 'libsql') await connectLibSql(conn)
@@ -4344,6 +4421,7 @@ let rowSearch = $state('')
     else if (conn.type === 'clickhouse') await connectClickhouse(conn)
     else if (conn.type === 'duckdb') await connectDuckdb(conn)
     else if (conn.type === 'mssql') await connectMssql(conn)
+    else if (conn.type === 'redis') await connectRedis(conn)
     else await connectPostgres(conn)
   }
 
@@ -4856,6 +4934,7 @@ let rowSearch = $state('')
   ontableselect={(name) => { if (aiMode) exitAiMode(); void handleTableSelect(name) }}
   onschemachange={(schema) => { if (aiMode) exitAiMode(); handleSchemaChange(schema) }}
   onopensql={() => { if (aiMode) exitAiMode(); void focusSqlView() }}
+  onnewsql={() => { if (aiMode) exitAiMode(); openNewSqlTab() }}
   onopentable={() => { if (aiMode) exitAiMode(); void focusDataView() }}
   onopensettings={() => (showSettingsModal = true)}
   onopenconnection={() => (showConnectionModal = true)}
@@ -4880,6 +4959,8 @@ let rowSearch = $state('')
   onopenobjects={() => { if (aiMode) exitAiMode(); openObjectsTab() }}
   ontogglequerylog={() => { commandOpen = false; queryLogOpen = !queryLogOpen }}
   onopenextensions={() => { if (aiMode) exitAiMode(); openExtensionsTab() }}
+  onopenredis={() => { if (aiMode) exitAiMode(); openRedisTab() }}
+  {isRedis}
   {hasSchemaExplorer}
   {hasSecurity}
   onopenJsonViewer={() => { if (aiMode) exitAiMode(); openJsonTab() }}
@@ -4955,13 +5036,13 @@ let rowSearch = $state('')
     <div
       class="flex min-h-0 shrink-0 flex-col"
       class:order-last={sidebarSide === 'right'}
-      style={sidebarOpen && !aiMode ? '' : 'display:none'}
+      style={sidebarOpen && !aiMode && !isRedis ? '' : 'display:none'}
     >
     {#if sidebarEverOpened}
     <div
       class="flex min-h-0 flex-1"
-      style={sidebarOpen && !aiMode ? '' : 'display:none'}
-      inert={!sidebarOpen || aiMode || undefined}
+      style={sidebarOpen && !aiMode && !isRedis ? '' : 'display:none'}
+      inert={!sidebarOpen || aiMode || isRedis || undefined}
     >
       <svelte:boundary>
         {#snippet failed(err, reset)}
@@ -5213,7 +5294,7 @@ let rowSearch = $state('')
         {#if isFocused}
           {@render sharedContent()}
         {:else}
-          <PaneSnapshot tab={tabsById.get(group.activeTabId ?? '') ?? null} toolbarSpacer={tableToolbarVisible} />
+          <PaneSnapshot tab={tabsById.get(group.activeTabId ?? '') ?? null} toolbarSpacer={tableToolbarVisible} connectionId={persistConnectionId} {schemas} />
         {/if}
       {/snippet}
 
@@ -5295,6 +5376,18 @@ let rowSearch = $state('')
         >
           <svelte:boundary failed={tabError}>
             <ObjectsPage active={activeTab?.kind === 'objects'} connectionType={connection?.type ?? null} />
+          </svelte:boundary>
+        </div>
+      {/if}
+
+      <!-- Redis keyspace tab - mount once, keep alive -->
+      {#if redisEverOpened}
+        <div
+          class={activeTab?.kind === 'redis' ? 'flex min-h-0 flex-1' : 'hidden'}
+          inert={activeTab?.kind !== 'redis' || undefined}
+        >
+          <svelte:boundary failed={tabError}>
+            <RedisKeyspacePage active={activeTab?.kind === 'redis'} {connection} />
           </svelte:boundary>
         </div>
       {/if}
@@ -5932,19 +6025,28 @@ let rowSearch = $state('')
           <!-- Action grid — max-w-sm keeps all sections aligned -->
           <div class="grid w-full max-w-sm grid-cols-4 gap-1.5">
 
-            <button onclick={openSqlTab} class={cell}>
-              <Terminal class={iconCls} />
-              <div class="flex items-end justify-between gap-1">
-                <span class={labelCls}>SQL</span>
-                <span class={hotkeyCls}>{mod}T</span>
-              </div>
-            </button>
+            {#if isRedis}
+              <button onclick={openRedisTab} class={cell}>
+                <KeyRound class={iconCls} />
+                <span class={labelCls}>Keyspace</span>
+              </button>
+            {/if}
 
-            <button onclick={openDashboardTab} class={$hasPro ? cell : proCell}>
-              {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
-              <LayoutDashboard class={$hasPro ? iconCls : proIconCls} />
-              <span class={$hasPro ? labelCls : proLabelCls}>Dashboard</span>
-            </button>
+            {#if !isRedis}
+              <button onclick={openSqlTab} class={cell}>
+                <Terminal class={iconCls} />
+                <div class="flex items-end justify-between gap-1">
+                  <span class={labelCls}>SQL</span>
+                  <span class={hotkeyCls}>{mod}T</span>
+                </div>
+              </button>
+
+              <button onclick={openDashboardTab} class={$hasPro ? cell : proCell}>
+                {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
+                <LayoutDashboard class={$hasPro ? iconCls : proIconCls} />
+                <span class={$hasPro ? labelCls : proLabelCls}>Dashboard</span>
+              </button>
+            {/if}
 
             <button onclick={openAiTab} class={$hasPro ? cell : proCell}>
               {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
@@ -5955,14 +6057,16 @@ let rowSearch = $state('')
               </div>
             </button>
 
-            <button onclick={openOrmTab} class={$hasPro ? cell : proCell}>
-              {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
-              <Code2 class={$hasPro ? iconCls : proIconCls} />
-              <div class="flex items-end justify-between gap-1">
-                <span class={$hasPro ? labelCls : proLabelCls}>ORM</span>
-                {#if $hasPro}<span class={hotkeyCls}>{mod}⇧O</span>{/if}
-              </div>
-            </button>
+            {#if !isRedis}
+              <button onclick={openOrmTab} class={$hasPro ? cell : proCell}>
+                {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
+                <Code2 class={$hasPro ? iconCls : proIconCls} />
+                <div class="flex items-end justify-between gap-1">
+                  <span class={$hasPro ? labelCls : proLabelCls}>ORM</span>
+                  {#if $hasPro}<span class={hotkeyCls}>{mod}⇧O</span>{/if}
+                </div>
+              </button>
+            {/if}
 
             {#if hasSchemaExplorer}
               <button onclick={openSchemaTab} class={$hasPro ? cell : proCell}>
@@ -5986,45 +6090,47 @@ let rowSearch = $state('')
               <span class={$hasPro ? labelCls : proLabelCls}>Logs</span>
             </button>
 
-            <button onclick={openInsightsTab} class={cell}>
-              <Database class={iconCls} />
-              <span class={labelCls}>Insights</span>
-            </button>
+            {#if !isRedis}
+              <button onclick={openInsightsTab} class={cell}>
+                <Database class={iconCls} />
+                <span class={labelCls}>Insights</span>
+              </button>
 
-            <button onclick={openObjectsTab} class={cell}>
-              <Boxes class={iconCls} />
-              <span class={labelCls}>Objects</span>
-            </button>
+              <button onclick={openObjectsTab} class={cell}>
+                <Boxes class={iconCls} />
+                <span class={labelCls}>Objects</span>
+              </button>
 
-            <button onclick={openChartsTab} class={$hasPro ? cell : proCell}>
-              {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
-              <BarChart2 class={$hasPro ? iconCls : proIconCls} />
-              <span class={$hasPro ? labelCls : proLabelCls}>Charts</span>
-            </button>
+              <button onclick={openChartsTab} class={$hasPro ? cell : proCell}>
+                {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
+                <BarChart2 class={$hasPro ? iconCls : proIconCls} />
+                <span class={$hasPro ? labelCls : proLabelCls}>Charts</span>
+              </button>
 
-            <button onclick={openDiagramsTab} class={$hasPro ? cell : proCell}>
-              {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
-              <GitBranch class={$hasPro ? iconCls : proIconCls} />
-              <span class={$hasPro ? labelCls : proLabelCls}>Diagrams</span>
-            </button>
+              <button onclick={openDiagramsTab} class={$hasPro ? cell : proCell}>
+                {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
+                <GitBranch class={$hasPro ? iconCls : proIconCls} />
+                <span class={$hasPro ? labelCls : proLabelCls}>Diagrams</span>
+              </button>
 
-            <button onclick={openSchemaTimelineTab} class={$hasPro ? cell : proCell}>
-              {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
-              <History class={$hasPro ? iconCls : proIconCls} />
-              <span class={$hasPro ? labelCls : proLabelCls}>Timeline</span>
-            </button>
+              <button onclick={openSchemaTimelineTab} class={$hasPro ? cell : proCell}>
+                {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
+                <History class={$hasPro ? iconCls : proIconCls} />
+                <span class={$hasPro ? labelCls : proLabelCls}>Timeline</span>
+              </button>
 
-            <button onclick={openDataDiffTab} class={$hasPro ? cell : proCell}>
-              {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
-              <GitCompare class={$hasPro ? iconCls : proIconCls} />
-              <span class={$hasPro ? labelCls : proLabelCls}>Data Diff</span>
-            </button>
+              <button onclick={openDataDiffTab} class={$hasPro ? cell : proCell}>
+                {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
+                <GitCompare class={$hasPro ? iconCls : proIconCls} />
+                <span class={$hasPro ? labelCls : proLabelCls}>Data Diff</span>
+              </button>
 
-            <button onclick={openExtensionsTab} class={$hasPro ? cell : proCell}>
-              {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
-              <Blocks class={$hasPro ? iconCls : proIconCls} />
-              <span class={$hasPro ? labelCls : proLabelCls}>Extensions</span>
-            </button>
+              <button onclick={openExtensionsTab} class={$hasPro ? cell : proCell}>
+                {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
+                <Blocks class={$hasPro ? iconCls : proIconCls} />
+                <span class={$hasPro ? labelCls : proLabelCls}>Extensions</span>
+              </button>
+            {/if}
 
             <button onclick={() => (showConnectionModal = true)} class={cell}>
               <Database class={iconCls} />

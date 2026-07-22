@@ -234,6 +234,31 @@ export async function connectClickhouse(config) {
   return inv('connect_clickhouse_db', { config: normalizeClickhouse(config) })
 }
 
+// ── Redis ─────────────────────────────────────────────────────────────────────
+
+/** @param {{ name: string, host: string, port: number|string, password?: string, db?: number|string, tls?: boolean }} config */
+function normalizeRedis(config) {
+  return {
+    type: 'redis',
+    name: String(config.name || 'Redis'),
+    host: String(config.host || '127.0.0.1'),
+    port: Number(config.port) || 6379,
+    password: config.password || null,
+    db: Number(config.db) || 0,
+    tls: !!config.tls,
+  }
+}
+
+/** @param {{ name: string, host: string, port: number|string, password?: string, db?: number|string, tls?: boolean }} config */
+export async function testRedis(config) {
+  return inv('test_redis', { config: normalizeRedis(config) })
+}
+
+/** @param {{ name: string, host: string, port: number|string, password?: string, db?: number|string, tls?: boolean }} config */
+export async function connectRedis(config) {
+  return inv('connect_redis_db', { config: normalizeRedis(config) })
+}
+
 // ── DuckDB ──────────────────────────────────────────────────────────────────────
 
 /** @param {{ name: string, filePath: string }} config */
