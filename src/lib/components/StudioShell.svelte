@@ -822,6 +822,61 @@
     if (activeTab?.kind === 'data-diff') dataDiffEverOpened = true
   })
 
+  // ── Idle-based teardown of hidden heavy views ─────────────────────────────
+  // Keeping every opened view mounted-but-hidden makes switching instant but
+  // retains its Monaco/ECharts/canvas/observers forever, so memory grows over a
+  // long session. To reclaim it, a teardown-eligible view that has been HIDDEN
+  // (not the active pane) continuously past IDLE_TEARDOWN_MS gets its *EverOpened
+  // flag reset to false, so the {#if} unmounts it and frees its resources.
+  // Reopening re-sets the flag (via the activate effect above) and re-mounts.
+  //
+  // Only purely data-derived views are eligible — they hold no unpersisted user
+  // input, so re-deriving on re-open is lossless. EXCLUDED (kept mounted): sql &
+  // table (kept hot), and orm/json/data-diff/logs/search/redis/objects/extensions
+  // which hold unpersisted user input, editor/undo state, or streaming buffers.
+  const IDLE_TEARDOWN_MS = 3 * 60 * 1000 // 3 min hidden → unmount to reclaim memory
+  /** Teardown-eligible views: tab kind ↔ its keep-alive flag (closures over $state). */
+  const teardownViews = /** @type {const} */ ([
+    { kind: 'security',        get: () => securityEverOpened,       set: (/** @type {boolean} */ v) => (securityEverOpened = v) },
+    { kind: 'backup',          get: () => backupEverOpened,         set: (/** @type {boolean} */ v) => (backupEverOpened = v) },
+    { kind: 'insights',        get: () => insightsEverOpened,       set: (/** @type {boolean} */ v) => (insightsEverOpened = v) },
+    { kind: 'charts',          get: () => chartsEverOpened,         set: (/** @type {boolean} */ v) => (chartsEverOpened = v) },
+    { kind: 'dashboard',       get: () => dashboardEverOpened,      set: (/** @type {boolean} */ v) => (dashboardEverOpened = v) },
+    { kind: 'erd',             get: () => erdEverOpened,            set: (/** @type {boolean} */ v) => (erdEverOpened = v) },
+    { kind: 'diagrams',        get: () => diagramsEverOpened,       set: (/** @type {boolean} */ v) => (diagramsEverOpened = v) },
+    { kind: 'schema-timeline', get: () => schemaTimelineEverOpened, set: (/** @type {boolean} */ v) => (schemaTimelineEverOpened = v) },
+  ])
+  /** kind → Date.now() when it last became hidden; absent while active or unmounted. */
+  let _hiddenSince = /** @type {Record<string, number>} */ ({})
+
+  // Track when each eligible view enters/leaves the hidden state.
+  $effect(() => {
+    const active = activeTab?.kind
+    const now = Date.now()
+    for (const v of teardownViews) {
+      if (v.kind === active) delete _hiddenSince[v.kind]        // active → clear idle clock
+      else if (v.get() && _hiddenSince[v.kind] == null) _hiddenSince[v.kind] = now // just hidden → stamp
+    }
+  })
+
+  // Single sweep (~60s) unmounts views hidden past the idle threshold. Runs even
+  // when backgrounded — freeing memory while hidden is desirable. Cheap scan.
+  $effect(() => {
+    const id = setInterval(() => {
+      const now = Date.now()
+      const active = activeTab?.kind
+      for (const v of teardownViews) {
+        if (v.kind === active || !v.get()) continue            // never the active view; skip already-unmounted
+        const since = _hiddenSince[v.kind]
+        if (since != null && now - since >= IDLE_TEARDOWN_MS) {
+          v.set(false)                                         // {#if} unmounts → disposes Monaco/ECharts/observers
+          delete _hiddenSince[v.kind]
+        }
+      }
+    }, 60 * 1000)
+    return () => clearInterval(id)
+  })
+
   let columns = $state([])
   /** @type {Set<string>} */
   let hiddenColumns = $state(new Set())
