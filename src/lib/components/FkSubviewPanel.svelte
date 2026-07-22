@@ -31,15 +31,15 @@
 
   <!-- Header: label chip + context left, actions right (Postman/DBeaver style) -->
   <div class="flex shrink-0 items-center gap-2 border-b border-border/30 bg-muted/10 px-2.5 py-1.5">
-    <span class="shrink-0 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50">Related</span>
-    <span class="shrink-0 rounded border border-border/50 bg-muted/30 px-2 py-0.5 font-mono text-[12px] font-medium text-foreground/75">
+    <span class="shrink-0 text-ui-3xs font-semibold uppercase tracking-[0.08em] text-muted-foreground/50">Related</span>
+    <span class="shrink-0 rounded border border-border/50 bg-muted/30 px-2 py-0.5 font-mono text-ui-xs font-medium text-foreground/75">
       {fkLabel}
     </span>
     {#if sourceHint}
-      <span class="shrink-0 font-mono text-[11px] text-muted-foreground/40">({sourceHint})</span>
+      <span class="shrink-0 font-mono text-ui-2xs text-muted-foreground/40">({sourceHint})</span>
     {/if}
     {#if !data?.loading && !data?.error}
-      <span class="shrink-0 font-mono text-[11px] text-muted-foreground/40">
+      <span class="shrink-0 font-mono text-ui-2xs text-muted-foreground/40">
         {rowCount}{rowCount >= 50 ? '+' : ''} row{rowCount !== 1 ? 's' : ''}
       </span>
     {/if}
@@ -47,7 +47,7 @@
     <div class="ml-auto flex shrink-0 items-center gap-0.5">
       <button
         type="button"
-        class="inline-flex items-center gap-1.5 rounded px-2 py-1 font-mono text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
+        class="inline-flex items-center gap-1.5 rounded px-2 py-1 font-mono text-ui-2xs text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
         onclick={onfullview}
         title="Open the related table as a tab with this filter applied"
       >
@@ -69,22 +69,22 @@
   {#if data?.loading}
     <div class="flex flex-1 items-center gap-2 px-3 py-4">
       <Loader class="size-3.5 animate-spin text-muted-foreground/40" />
-      <span class="font-mono text-[12px] text-muted-foreground/50">Loading related rows…</span>
+      <span class="font-mono text-ui-xs text-muted-foreground/50">Loading related rows…</span>
     </div>
 
   {:else if data?.error}
     <div class="flex flex-1 items-start gap-2 px-3 py-3">
       <TriangleAlert class="mt-px size-3.5 shrink-0 text-destructive/70" />
       <div class="min-w-0">
-        <div class="text-[12px] font-medium text-destructive/80">Couldn't load related rows</div>
-        <div class="mt-0.5 font-mono text-[11px] leading-relaxed break-words text-muted-foreground/55">{data.error}</div>
+        <div class="text-ui-xs font-medium text-destructive/80">Couldn't load related rows</div>
+        <div class="mt-0.5 font-mono text-ui-2xs leading-relaxed break-words text-muted-foreground/55">{data.error}</div>
       </div>
     </div>
 
   {:else if !rowCount}
     <div class="flex flex-1 items-center gap-2 px-3 py-3">
       <Inbox class="size-3.5 shrink-0 text-muted-foreground/30" />
-      <span class="text-[12px] italic text-muted-foreground/40">No related rows</span>
+      <span class="text-ui-xs italic text-muted-foreground/40">No related rows</span>
     </div>
 
   {:else}
@@ -96,9 +96,9 @@
           <tr>
             {#each data.columns as col (col.name ?? col)}
               <th class="whitespace-nowrap border-b border-border/40 bg-background px-3 py-1.5 text-left">
-                <span class="font-mono text-[12px] font-bold text-foreground/75">{col.name ?? col}</span>
+                <span class="font-mono text-ui-xs font-bold text-foreground/75">{col.name ?? col}</span>
                 {#if col.dataType ?? col.data_type}
-                  <span class="ml-1 font-mono text-[11px] font-normal text-muted-foreground/30">{col.dataType ?? col.data_type}</span>
+                  <span class="ml-1 font-mono text-ui-2xs font-normal text-muted-foreground/30">{col.dataType ?? col.data_type}</span>
                 {/if}
               </th>
             {/each}
@@ -111,7 +111,7 @@
                 {@const v = Array.isArray(row) ? row[j] : row[col.name ?? col]}
                 {@const isNullVal = v === null || v === undefined}
                 <td
-                  class="whitespace-nowrap px-3 py-1.5 font-mono text-[12px] {i < data.rows.length - 1 ? 'border-b border-border/15' : ''}"
+                  class="whitespace-nowrap px-3 py-1.5 font-mono text-ui-xs {i < data.rows.length - 1 ? 'border-b border-border/15' : ''}"
                   class:text-muted-foreground={isNullVal}
                   class:italic={isNullVal}
                 >{fmt(v)}</td>
@@ -124,7 +124,7 @@
 
     {#if rowCount >= 50}
       <div class="flex shrink-0 items-center border-t border-border/25 bg-muted/5 px-3 py-1">
-        <span class="font-mono text-[11px] text-muted-foreground/30">First 50 rows shown — open in sub view for all</span>
+        <span class="font-mono text-ui-2xs text-muted-foreground/30">First 50 rows shown — open in sub view for all</span>
       </div>
     {/if}
   {/if}
