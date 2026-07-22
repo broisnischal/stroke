@@ -6,11 +6,12 @@
   import AiMarkdown from './AiMarkdown.svelte'
   import { chatCompletionStream, buildSystemPrompt, AI_TOOLS, isDestructiveSql, classifyDbError } from '$lib/ai.js'
   import { aiSettings, isAiConfigured } from '$lib/stores/ai-settings.js'
+  import { appCmdkAi } from '$lib/stores/settings.js'
   import { executeSql } from '$lib/api.js'
 
   let {
     open = $bindable(false),
-    /** @type {'root' | 'docker' | 'connections' | 'tables'} */
+    /** @type {'root' | 'docker' | 'connections' | 'tables' | 'pages'} */
     page = $bindable('root'),
     connected = false,
     schemas = [],
@@ -43,6 +44,10 @@
     onopenlogs = () => {},
     onopeninsights = () => {},
     onopenobjects = () => {},
+    onopendashboard = () => {},
+    onopencharts = () => {},
+    onopendiagrams = () => {},
+    onopenbackup = () => {},
     ontogglequerylog = () => {},
     onopenextensions = () => {},
     onopenJsonViewer = () => {},
@@ -76,10 +81,37 @@
     onaskcontinue = (q) => {},
   } = $props()
 
-  /** @param {'docker' | 'connections' | 'tables' | 'ask'} target */
+  /** @param {'docker' | 'connections' | 'tables' | 'ask' | 'pages'} target */
   function navigate(target) {
     page = target
   }
+
+  // Single source of truth for page destinations — rendered both in the root
+  // "Views" group and in the dedicated "Go to page" navigator (Ctrl/⌘+P). Add a
+  // page once here and it shows up in both. `keys` is an optional shortcut hint.
+  const pageItems = $derived([
+    { icon: 'table-2',         label: 'Table data',       keys: '⌘⇧D', action: onopentable,      show: connected, value: 'open table data browser rows' },
+    { icon: 'search',          label: 'Find in database', keys: '⌘⇧G', action: onglobalsearch,   show: connected, value: 'find search rows data across all tables global database' },
+    { icon: 'terminal',        label: 'SQL editor',       keys: '⌘⇧S', action: onopensql,        show: connected, value: 'open sql editor query console' },
+    { icon: 'code-2',          label: 'ORM Runner',       keys: '⌘⇧O', action: onopenorm,        show: connected, value: 'open orm runner drizzle prisma query builder' },
+    { icon: 'network',         label: 'ER Diagram',                    action: onopenerd,        show: connected, value: 'open er diagram entity relationship foreign key pk fk graph' },
+    { icon: 'layout-template', label: 'Schema Explorer',               action: onopenSchema,     show: connected && hasSchemaExplorer, value: 'open schema explorer indexes enums views materialized' },
+    { icon: 'shield-check',    label: 'Security',                      action: onopensecurity,   show: connected && hasSecurity, value: 'open security roles users policies rls row level' },
+    { icon: 'database',        label: 'Instance Insights',             action: onopeninsights,   show: connected, value: 'open instance insights monitoring sessions locks replication config pg_settings' },
+    { icon: 'layout-dashboard',label: 'Dashboard',                     action: onopendashboard,  show: connected, value: 'open dashboard saved metrics overview widgets' },
+    { icon: 'bar-chart-2',     label: 'Charts',                        action: onopencharts,     show: connected, value: 'open charts visualize query results graphs plots' },
+    { icon: 'git-branch',      label: 'Diagrams',                      action: onopendiagrams,   show: connected, value: 'open diagrams draw erd relationship map' },
+    { icon: 'table-2',         label: 'Database Objects',              action: onopenobjects,    show: connected, value: 'open database objects overview tables views functions routines triggers sizes rows stats' },
+    { icon: 'history',         label: 'Activity Log',                  action: onopenlogs,       show: connected, value: 'open activity log events history operations' },
+    { icon: 'terminal',        label: 'Query Log console', keys: '⌘⇧K', action: ontogglequerylog, show: connected, value: 'toggle query log console sql executed statements bottom panel' },
+    { icon: 'blocks',          label: 'Extensions',                    action: onopenextensions, show: connected, value: 'open extensions plugins formatters generators transforms better time uuid' },
+    { icon: 'archive',         label: 'Backup & Restore',              action: onopenbackup,     show: connected, value: 'backup restore export import dump data' },
+    { icon: 'braces',          label: 'JSON Viewer',                   action: onopenJsonViewer, show: connected, value: 'open json viewer explorer jsonpath tool' },
+    { icon: 'git-branch',      label: 'Schema Timeline',               action: openschematimeline, show: connected, value: 'schema timeline drift detection history changes diff' },
+    { icon: 'git-compare',     label: 'Data Diff',                     action: opendatadiff,     show: connected, value: 'data diff compare tables rows changes' },
+    { icon: 'file-text',       label: 'New Notebook',                  action: onopennotebook,   show: connected, value: 'new sql notebook jupyter cells sql markdown' },
+    { icon: 'file-text',       label: 'Open Notebook…',                action: onopennotebookfile, show: connected, value: 'open notebook file sqlnb' },
+  ].filter((i) => i.show))
 
   function goBack() {
     if (page === 'ask') stopAsk()
@@ -121,6 +153,7 @@
 
   /** Start a fresh quick-ask conversation. @param {string} question */
   async function startAsk(question) {
+    if (!get(appCmdkAi)) return  // experimental ⌘K AI is off
     const q = (question ?? '').trim()
     if (!q) return
     if (!isAiConfigured(get(aiSettings))) { onopensettings(); open = false; return }
@@ -244,8 +277,8 @@
     askStreaming = false
   }
 
-  const askBtn = 'inline-flex items-center gap-1.5 rounded-md border border-border/60 px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground'
-  const askBtnPrimary = 'inline-flex items-center gap-1.5 rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground transition-opacity hover:opacity-90'
+  const askBtn = 'inline-flex items-center gap-1.5 rounded-md border border-border/60 px-2 py-1 text-ui-2xs font-medium text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground'
+  const askBtnPrimary = 'inline-flex items-center gap-1.5 rounded-md bg-primary px-2 py-1 text-ui-2xs font-medium text-primary-foreground transition-opacity hover:opacity-90'
 
   // Keep the ask thread pinned to the newest message as it streams / grows.
   // Coalesced to one adjustment per frame and gated on "near the bottom" so it
@@ -455,6 +488,7 @@
     connections: 'Connections',
     tables: 'Tables',
     ask: 'Ask AI',
+    pages: 'Go to page',
   })
 </script>
 
@@ -479,6 +513,7 @@
           page === 'root' ? 'Search tables, schemas, commands…'
           : page === 'tables' ? 'Search tables and views…'
           : page === 'ask' ? 'Ask a follow-up…'
+          : page === 'pages' ? 'Go to page…'
           : `Search ${pageLabel[page]}…`
         }
       />
@@ -487,21 +522,30 @@
         <div class="order-first flex items-center gap-1.5 border-b border-border/50 px-4 py-2">
           <button
             type="button"
-            class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground focus-visible:outline-none"
+            class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-ui-2xs text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground focus-visible:outline-none"
             onclick={goBack}
           >
             <Icon name="chevron-left" class="size-3" />
             Back
           </button>
-          <span class="text-muted-foreground/25 text-[11px]">/</span>
-          <span class="text-[11px] font-medium text-foreground/80">{pageLabel[page]}</span>
+          <span class="text-muted-foreground/25 text-ui-2xs">/</span>
+          <span class="text-ui-2xs font-medium text-foreground/80">{pageLabel[page]}</span>
         </div>
       {/if}
 
       <Command.List class="max-h-[min(440px,58vh)]">
         {#if page !== 'ask'}
-          <Command.Empty class="py-8 text-center text-[12px] text-muted-foreground/40">No results.</Command.Empty>
+          <Command.Empty class="py-8 text-center text-ui-xs text-muted-foreground/40">No results.</Command.Empty>
         {/if}
+
+        <!-- Shared page-destination row (root "Views" + "Go to page" navigator) -->
+        {#snippet pageRow(/** @type {typeof pageItems[number]} */ it)}
+          <Command.Item value={it.value} onSelect={() => run(it.action)}>
+            <Icon name={it.icon} class="size-4 shrink-0 opacity-60" />
+            <span data-slot="command-label" class="truncate">{it.label}</span>
+            {#if it.keys}<Command.Shortcut keys={it.keys} />{/if}
+          </Command.Item>
+        {/snippet}
 
         <!-- ── ASK AI (inline quick-ask) ─────────────────────────────── -->
         {#if page === 'ask'}
@@ -510,11 +554,11 @@
               {#if turn.role === 'user'}
                 <div class="mb-1.5 flex items-start gap-2">
                   <Icon name="sparkles" class="mt-0.5 size-3.5 shrink-0 text-primary" />
-                  <div class="min-w-0 flex-1 text-[13px] font-medium text-foreground">{turn.text}</div>
+                  <div class="min-w-0 flex-1 text-ui-sm font-medium text-foreground">{turn.text}</div>
                 </div>
               {:else if turn.role === 'tool'}
                 <div class="mb-1.5 ml-[22px] flex flex-col gap-1">
-                  <div class="flex items-center gap-1.5 text-[11px] {turn.status === 'error' ? 'text-destructive/80' : 'text-muted-foreground/55'}">
+                  <div class="flex items-center gap-1.5 text-ui-2xs {turn.status === 'error' ? 'text-destructive/80' : 'text-muted-foreground/55'}">
                     {#if turn.status === 'running'}<Icon name="sparkles" class="size-3 animate-pulse" />
                     {:else if turn.status === 'error'}<Icon name="x" class="size-3" />
                     {:else}<Icon name="check" class="size-3 text-emerald-500" />{/if}
@@ -527,7 +571,7 @@
                           <thead>
                             <tr class="bg-muted/25">
                               {#each turn.result.columns.slice(0, 5) as c}
-                                <th class="whitespace-nowrap border-b border-border/40 px-2.5 py-1 text-left text-[10px] font-medium uppercase tracking-wide text-muted-foreground/50">{c}</th>
+                                <th class="whitespace-nowrap border-b border-border/40 px-2.5 py-1 text-left text-ui-3xs font-medium uppercase tracking-wide text-muted-foreground/50">{c}</th>
                               {/each}
                             </tr>
                           </thead>
@@ -535,7 +579,7 @@
                             {#each turn.result.rows as row, ri}
                               <tr class="transition-colors hover:bg-muted/15">
                                 {#each row.slice(0, 5) as cell}
-                                  <td class="max-w-[220px] truncate {ri < turn.result.rows.length - 1 ? 'border-b border-border/15' : ''} px-2.5 py-1 font-mono text-[11px] {cell === null ? 'italic text-muted-foreground/40' : 'text-foreground/80'}">{cell === null ? 'NULL' : String(cell)}</td>
+                                  <td class="max-w-[220px] truncate {ri < turn.result.rows.length - 1 ? 'border-b border-border/15' : ''} px-2.5 py-1 font-mono text-ui-2xs {cell === null ? 'italic text-muted-foreground/40' : 'text-foreground/80'}">{cell === null ? 'NULL' : String(cell)}</td>
                                 {/each}
                               </tr>
                             {/each}
@@ -543,7 +587,7 @@
                         </table>
                       </div>
                       {#if turn.result.total > turn.result.rows.length}
-                        <div class="border-t border-border/30 bg-muted/10 px-2.5 py-1 text-[10px] text-muted-foreground/45">showing {turn.result.rows.length} of {turn.result.total} rows</div>
+                        <div class="border-t border-border/30 bg-muted/10 px-2.5 py-1 text-ui-3xs text-muted-foreground/45">showing {turn.result.rows.length} of {turn.result.total} rows</div>
                       {/if}
                     </div>
                   {/if}
@@ -551,7 +595,7 @@
               {:else}
                 <div class="mb-2 ml-[22px]">
                   {#if turn.streaming && !turn.text}
-                    <div class="flex items-center gap-2 py-1 text-[12px] text-muted-foreground/50"><Icon name="sparkles" class="size-3.5 animate-pulse" /> Thinking…</div>
+                    <div class="flex items-center gap-2 py-1 text-ui-xs text-muted-foreground/50"><Icon name="sparkles" class="size-3.5 animate-pulse" /> Thinking…</div>
                   {:else}
                     <AiMarkdown content={turn.text} streaming={turn.streaming} debounceMs={120} class="text-ui-xs" />
                   {/if}
@@ -571,7 +615,7 @@
               {/if}
             {/each}
             {#if askError}
-              <div class="ml-[22px] rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2 text-[12px] text-destructive">{askError}</div>
+              <div class="ml-[22px] rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2 text-ui-xs text-destructive">{askError}</div>
             {/if}
             <div class="ml-[22px] mt-2 flex flex-wrap items-center gap-1.5">
               {#if askStreaming}
@@ -581,14 +625,14 @@
                 <button type="button" class={askBtn} onclick={() => { const q = lastAskQuestion; open = false; onaskcontinue(q) }}><Icon name="bot" class="size-3" /> Continue in chat</button>
               {/if}
             </div>
-            <div class="ml-[22px] mt-1.5 text-[10px] text-muted-foreground/35">Type below and press ↵ to follow up</div>
+            <div class="ml-[22px] mt-1.5 text-ui-3xs text-muted-foreground/35">Type below and press ↵ to follow up</div>
             <div bind:this={askBottomEl} class="h-px"></div>
           </div>
         {/if}
 
         <!-- ── ROOT PAGE ─────────────────────────────────────────────── -->
         {#if page === 'root'}
-          {#if paletteSearch.trim()}
+          {#if paletteSearch.trim() && $appCmdkAi}
             <Command.Group heading="Ask">
               <Command.Item value={"ask ai " + paletteSearch} onSelect={() => startAsk(paletteSearch)}>
                 <Icon name="sparkles" class="size-4 shrink-0 text-primary" />
@@ -600,83 +644,9 @@
 
           {#if connected}
             <Command.Group heading="Views">
-              <Command.Item value="open table data browser" onSelect={() => run(onopentable)}>
-                <Icon name="table-2" class="size-4 shrink-0 opacity-60" />
-                <span data-slot="command-label" class="truncate">Table data</span>
-                <Command.Shortcut keys="⌘⇧D" />
-              </Command.Item>
-              <Command.Item value="find search rows data across all tables global database" onSelect={() => run(onglobalsearch)}>
-                <Icon name="search" class="size-4 shrink-0 opacity-60" />
-                <span data-slot="command-label" class="truncate">Find in database</span>
-                <Command.Shortcut keys="⌘⇧G" />
-              </Command.Item>
-              <Command.Item value="open sql editor query console" onSelect={() => run(onopensql)}>
-                <Icon name="terminal" class="size-4 shrink-0 opacity-60" />
-                <span data-slot="command-label" class="truncate">SQL editor</span>
-                <Command.Shortcut keys="⌘⇧S" />
-              </Command.Item>
-              <Command.Item value="open orm runner drizzle prisma query builder" onSelect={() => run(onopenorm)}>
-                <Icon name="code-2" class="size-4 shrink-0 opacity-60" />
-                <span data-slot="command-label" class="truncate">ORM Runner</span>
-                <Command.Shortcut keys="⌘⇧O" />
-              </Command.Item>
-              <Command.Item value="open er diagram entity relationship foreign key pk fk graph" onSelect={() => run(onopenerd)}>
-                <Icon name="network" class="size-4 shrink-0 opacity-60" />
-                <span data-slot="command-label" class="truncate">ER Diagram</span>
-              </Command.Item>
-              {#if hasSchemaExplorer}
-                <Command.Item value="open schema explorer indexes enums views materialized" onSelect={() => run(onopenSchema)}>
-                  <Icon name="layout-template" class="size-4 shrink-0 opacity-60" />
-                  <span data-slot="command-label" class="truncate">Schema Explorer</span>
-                </Command.Item>
-              {/if}
-              {#if hasSecurity}
-                <Command.Item value="open security roles users policies rls row level" onSelect={() => run(onopensecurity)}>
-                  <Icon name="shield-check" class="size-4 shrink-0 opacity-60" />
-                  <span data-slot="command-label" class="truncate">Security</span>
-                </Command.Item>
-              {/if}
-              <Command.Item value="open instance insights monitoring dashboard sessions locks replication config pg_settings" onSelect={() => run(onopeninsights)}>
-                <Icon name="database" class="size-4 shrink-0 opacity-60" />
-                <span data-slot="command-label" class="truncate">Instance Insights</span>
-              </Command.Item>
-              <Command.Item value="open database objects overview tables views functions routines triggers sizes rows stats" onSelect={() => run(onopenobjects)}>
-                <Icon name="table-2" class="size-4 shrink-0 opacity-60" />
-                <span data-slot="command-label" class="truncate">Database Objects</span>
-              </Command.Item>
-              <Command.Item value="open activity log events history operations" onSelect={() => run(onopenlogs)}>
-                <Icon name="history" class="size-4 shrink-0 opacity-60" />
-                <span data-slot="command-label" class="truncate">Activity Log</span>
-              </Command.Item>
-              <Command.Item value="toggle query log console sql executed statements bottom panel" onSelect={() => run(ontogglequerylog)}>
-                <Icon name="terminal" class="size-4 shrink-0 opacity-60" />
-                <span data-slot="command-label" class="truncate">Query Log console</span>
-                <Command.Shortcut keys="⌘⇧K" />
-              </Command.Item>
-              <Command.Item value="open extensions plugins formatters generators transforms better time uuid" onSelect={() => run(onopenextensions)}>
-                <Icon name="blocks" class="size-4 shrink-0 opacity-60" />
-                <span data-slot="command-label" class="truncate">Extensions</span>
-              </Command.Item>
-              <Command.Item value="open json viewer explorer jsonpath tool" onSelect={() => run(onopenJsonViewer)}>
-                <Icon name="braces" class="size-4 shrink-0 opacity-60" />
-                <span data-slot="command-label" class="truncate">JSON Viewer</span>
-              </Command.Item>
-              <Command.Item value="new sql notebook jupyter cells sql markdown" onSelect={() => run(onopennotebook)}>
-                <Icon name="file-text" class="size-4 shrink-0 opacity-60" />
-                <span data-slot="command-label" class="truncate">New Notebook</span>
-              </Command.Item>
-              <Command.Item value="open notebook file sqlnb" onSelect={() => run(onopennotebookfile)}>
-                <Icon name="file-text" class="size-4 shrink-0 opacity-60" />
-                <span data-slot="command-label" class="truncate">Open Notebook…</span>
-              </Command.Item>
-              <Command.Item value="schema timeline drift detection history changes diff" onSelect={() => run(openschematimeline)}>
-                <Icon name="git-branch" class="size-4 shrink-0 opacity-60" />
-                <span data-slot="command-label" class="truncate">Schema Timeline</span>
-              </Command.Item>
-              <Command.Item value="data diff compare tables rows changes" onSelect={() => run(opendatadiff)}>
-                <Icon name="git-compare" class="size-4 shrink-0 opacity-60" />
-                <span data-slot="command-label" class="truncate">Data Diff</span>
-              </Command.Item>
+              {#each pageItems as it (it.label)}
+                {@render pageRow(it)}
+              {/each}
             </Command.Group>
 
             {#if schemas.length > 0}
@@ -817,7 +787,7 @@
                   <Icon name={driverIcon(conn.type ?? 'postgres')} class="size-4 shrink-0 opacity-60" />
                   <div data-slot="command-label" class="flex min-w-0 flex-1 flex-col">
                     <span class="truncate">{conn.name}</span>
-                    <span class="truncate font-mono text-[11px] text-muted-foreground">{connSubtitle(conn)}</span>
+                    <span class="truncate font-mono text-ui-2xs text-muted-foreground">{connSubtitle(conn)}</span>
                   </div>
                   {#if savedConnections.indexOf(conn) < 9}
                     <Command.Shortcut keys="⌘⌥{savedConnections.indexOf(conn) + 1}" />
@@ -867,7 +837,7 @@
                 </Command.Item>
               {/each}
               {#if tablesPageRegular.total > tablesPageRegular.items.length}
-                <div class="px-2.5 py-1.5 text-[11px] text-muted-foreground/40">
+                <div class="px-2.5 py-1.5 text-ui-2xs text-muted-foreground/40">
                   Showing {tablesPageRegular.items.length} of {tablesPageRegular.total} — keep typing to narrow.
                 </div>
               {/if}
@@ -882,7 +852,7 @@
                 </Command.Item>
               {/each}
               {#if tablesPageViews.total > tablesPageViews.items.length}
-                <div class="px-2.5 py-1.5 text-[11px] text-muted-foreground/40">
+                <div class="px-2.5 py-1.5 text-ui-2xs text-muted-foreground/40">
                   Showing {tablesPageViews.items.length} of {tablesPageViews.total} — keep typing to narrow.
                 </div>
               {/if}
@@ -901,7 +871,7 @@
                 </Command.Item>
               {/each}
               {#if tablesPageMatViews.total > tablesPageMatViews.items.length}
-                <div class="px-2.5 py-1.5 text-[11px] text-muted-foreground/40">
+                <div class="px-2.5 py-1.5 text-ui-2xs text-muted-foreground/40">
                   Showing {tablesPageMatViews.items.length} of {tablesPageMatViews.total} — keep typing to narrow.
                 </div>
               {/if}
@@ -944,7 +914,7 @@
                   <Icon name={driverIconName} class="size-4 shrink-0 opacity-60" />
                   <div data-slot="command-label" class="flex min-w-0 flex-1 flex-col">
                     <span class="truncate">{conn.name}</span>
-                    <span class="truncate font-mono text-[11px] text-muted-foreground">{connSubtitle(conn)}</span>
+                    <span class="truncate font-mono text-ui-2xs text-muted-foreground">{connSubtitle(conn)}</span>
                   </div>
                   {#if isActive}
                     <span data-slot="command-trailing" class="shrink-0 text-xs text-muted-foreground">connected</span>
@@ -958,6 +928,14 @@
               <Icon name="database" class="size-4 shrink-0 opacity-60" />
               <span data-slot="command-label" class="truncate">New connection…</span>
             </Command.Item>
+          </Command.Group>
+
+        {:else if page === 'pages'}
+          <!-- Go to page — VSCode-style focused navigator (Ctrl/⌘+P) -->
+          <Command.Group heading="Go to page">
+            {#each pageItems as it (it.label)}
+              {@render pageRow(it)}
+            {/each}
           </Command.Group>
         {/if}
 
