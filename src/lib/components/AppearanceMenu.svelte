@@ -35,32 +35,32 @@
     <LayoutTemplate class="size-3.5" />
   </DropdownMenu.Trigger>
 
-  <DropdownMenu.Content class="z-[200] w-48" align="end" sideOffset={6}>
+  <DropdownMenu.Content class="z-[200] w-64" align="end" sideOffset={6}>
     <DropdownMenu.Label>Appearance</DropdownMenu.Label>
 
     <DropdownMenu.Item onclick={ontoggleSidebar}>
       <PanelLeft class="size-3.5 shrink-0 text-muted-foreground" />
-      <span class="flex-1">Sidebar</span>
-      <span class="ml-auto flex items-center gap-1.5">
-        {#if sidebarVisible}<Check class="size-3 shrink-0 text-muted-foreground/60" />{:else}<span class="size-3 shrink-0"></span>{/if}
+      <span class="min-w-0 flex-1 truncate whitespace-nowrap">Sidebar</span>
+      <span class="ml-auto flex shrink-0 items-center gap-2">
+        {#if sidebarVisible}<Check class="size-3 shrink-0 text-muted-foreground/70" />{:else}<span class="size-3 shrink-0"></span>{/if}
         <span class="flex items-center gap-[3px]"><kbd>{mod}</kbd><kbd>B</kbd></span>
       </span>
     </DropdownMenu.Item>
 
     <DropdownMenu.Item onclick={ontoggletabbar}>
       <PanelTop class="size-3.5 shrink-0 text-muted-foreground" />
-      <span class="flex-1">Tab Bar</span>
-      <span class="ml-auto flex items-center gap-1.5">
-        {#if tabBarVisible}<Check class="size-3 shrink-0 text-muted-foreground/60" />{:else}<span class="size-3 shrink-0"></span>{/if}
+      <span class="min-w-0 flex-1 truncate whitespace-nowrap">Tab Bar</span>
+      <span class="ml-auto flex shrink-0 items-center gap-2">
+        {#if tabBarVisible}<Check class="size-3 shrink-0 text-muted-foreground/70" />{:else}<span class="size-3 shrink-0"></span>{/if}
         <span class="flex items-center gap-[3px]"><kbd>{mod}</kbd><kbd>⇧</kbd><kbd>T</kbd></span>
       </span>
     </DropdownMenu.Item>
 
     <DropdownMenu.Item onclick={ontoggletabletoolbar}>
       <Rows3 class="size-3.5 shrink-0 text-muted-foreground" />
-      <span class="flex-1">Table Toolbar</span>
-      <span class="ml-auto">
-        {#if tableToolbarVisible}<Check class="size-3 shrink-0 text-muted-foreground/60" />{:else}<span class="size-3 shrink-0"></span>{/if}
+      <span class="min-w-0 flex-1 truncate whitespace-nowrap">Table Toolbar</span>
+      <span class="ml-auto flex shrink-0 items-center">
+        {#if tableToolbarVisible}<Check class="size-3 shrink-0 text-muted-foreground/70" />{:else}<span class="size-3 shrink-0"></span>{/if}
       </span>
     </DropdownMenu.Item>
 
@@ -68,9 +68,9 @@
 
     <DropdownMenu.Item onclick={ontogglestatusbar}>
       <PanelBottom class="size-3.5 shrink-0 text-muted-foreground" />
-      <span class="flex-1">Status Bar</span>
-      <span class="ml-auto flex items-center gap-1.5">
-        {#if statusBarVisible}<Check class="size-3 shrink-0 text-muted-foreground/60" />{:else}<span class="size-3 shrink-0"></span>{/if}
+      <span class="min-w-0 flex-1 truncate whitespace-nowrap">Status Bar</span>
+      <span class="ml-auto flex shrink-0 items-center gap-2">
+        {#if statusBarVisible}<Check class="size-3 shrink-0 text-muted-foreground/70" />{:else}<span class="size-3 shrink-0"></span>{/if}
         <span class="flex items-center gap-[3px]"><kbd>{mod}</kbd><kbd>⇧</kbd><kbd>B</kbd></span>
       </span>
     </DropdownMenu.Item>

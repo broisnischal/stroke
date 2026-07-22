@@ -33,16 +33,16 @@
 {:else}
   <div class="flex h-full flex-col justify-center gap-3 px-4 py-3">
     {#if !noTitle && spec?.title}
-      <p class="font-mono text-[13px] font-semibold text-foreground">{spec.title}</p>
+      <p class="font-mono text-ui-sm font-semibold text-foreground">{spec.title}</p>
     {/if}
 
     <!-- Usage line -->
     <div class="flex items-baseline justify-between">
-      <span class="font-mono text-[11px] text-muted-foreground/60">
+      <span class="font-mono text-ui-2xs text-muted-foreground/60">
         {used.toLocaleString()} used
         {#if remain > 0}· {remain.toLocaleString()} available{/if}
       </span>
-      <span class="font-mono text-[11px] text-muted-foreground/50">{total.toLocaleString()} total</span>
+      <span class="font-mono text-ui-2xs text-muted-foreground/50">{total.toLocaleString()} total</span>
     </div>
 
     <!-- Bar -->
@@ -61,8 +61,8 @@
       {#each segments as seg (seg.name)}
         <div class="flex items-center gap-1.5">
           <span class="size-2.5 shrink-0 rounded-sm" style="background:{seg.color}"></span>
-          <span class="font-mono text-[10px] text-muted-foreground/70">{seg.name}</span>
-          <span class="font-mono text-[10px] text-foreground/50">{seg.value.toLocaleString()}</span>
+          <span class="font-mono text-ui-3xs text-muted-foreground/70">{seg.name}</span>
+          <span class="font-mono text-ui-3xs text-foreground/50">{seg.value.toLocaleString()}</span>
         </div>
       {/each}
     </div>

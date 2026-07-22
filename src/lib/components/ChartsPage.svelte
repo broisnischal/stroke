@@ -449,7 +449,7 @@
                                     <span class="truncate">{d.name}</span>
                                     {#if d.id === $activeDashboardId}
                                       <span
-                                        class="ml-auto font-mono text-[9px] text-muted-foreground/40"
+                                        class="ml-auto font-mono text-ui-3xs text-muted-foreground/40"
                                         >active</span
                                       >
                                     {/if}
@@ -578,7 +578,7 @@
                         >
                       {/if}
                       <span
-                        class="shrink-0 rounded bg-muted/50 px-1 py-px font-mono text-[10px] text-muted-foreground/60"
+                        class="shrink-0 rounded bg-muted/50 px-1 py-px font-mono text-ui-3xs text-muted-foreground/60"
                         >{entry?.label ?? chart.config.type}</span
                       >
                     </div>

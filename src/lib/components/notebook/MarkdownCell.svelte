@@ -108,11 +108,11 @@
           class="flex h-7 shrink-0 items-center gap-2 border-b border-border/20 px-6"
         >
           <span
-            class="rounded px-1.5 py-px text-[9px] font-semibold uppercase tracking-widest text-emerald-500/70"
+            class="rounded px-1.5 py-px text-ui-3xs font-semibold uppercase tracking-widest text-emerald-500/70"
           >
             md source
           </span>
-          <span class="text-[10px] text-muted-foreground/30">Esc or ⌘↵ to preview</span>
+          <span class="text-ui-3xs text-muted-foreground/30">Esc or ⌘↵ to preview</span>
         </div>
         <textarea
           bind:this={textareaEl}
@@ -120,7 +120,7 @@
           oninput={onInput}
           onkeydown={onKeydown}
           onblur={onBlur}
-          class="flex-1 resize-none bg-transparent px-6 py-4 font-mono text-[13px] leading-relaxed text-muted-foreground/85 outline-none placeholder:text-muted-foreground/25"
+          class="flex-1 resize-none bg-transparent px-6 py-4 font-mono text-ui-sm leading-relaxed text-muted-foreground/85 outline-none placeholder:text-muted-foreground/25"
           placeholder="Write markdown here…"
           spellcheck="false"
         ></textarea>
@@ -132,7 +132,7 @@
           class="flex h-7 shrink-0 items-center gap-2 border-b border-border/20 px-6"
         >
           <span
-            class="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/40"
+            class="text-ui-3xs font-semibold uppercase tracking-widest text-muted-foreground/40"
           >preview</span>
         </div>
         <div class="flex-1 overflow-auto px-6 py-4">

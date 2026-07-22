@@ -66,7 +66,7 @@
       _asyncDiagrams[asyncKey] = svg
     } catch (e) {
       const msg = String(e).replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      _asyncDiagrams[asyncKey] = `<div class="flex flex-col gap-1.5 p-3 rounded border border-destructive/30 bg-destructive/5 text-ui-xs"><p class="font-medium text-destructive">Render failed</p><pre class="font-mono text-[10px] text-muted-foreground/70 whitespace-pre-wrap">${msg}</pre></div>`
+      _asyncDiagrams[asyncKey] = `<div class="flex flex-col gap-1.5 p-3 rounded border border-destructive/30 bg-destructive/5 text-ui-xs"><p class="font-medium text-destructive">Render failed</p><pre class="font-mono text-ui-3xs text-muted-foreground/70 whitespace-pre-wrap">${msg}</pre></div>`
     }
   }
 

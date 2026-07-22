@@ -105,7 +105,7 @@
     <header class="relative z-10 flex h-14 shrink-0 items-center justify-between border-b border-border/40 px-6">
       <div class="flex items-center gap-2.5">
         <Logo class="size-[18px]" />
-        <span class="text-[13px] font-semibold tracking-tight text-foreground">Stroke</span>
+        <span class="text-ui-sm font-semibold tracking-tight text-foreground">Stroke</span>
       </div>
 
       <!-- Segmented stepper -->
@@ -115,13 +115,13 @@
           {@const state = n === step ? 'current' : n < step ? 'done' : 'todo'}
           <div class="flex items-center gap-2">
             <span class={
-              'flex items-center gap-1.5 rounded-full px-2 py-1 text-[11px] font-medium transition-colors duration-200 ' +
+              'flex items-center gap-1.5 rounded-full px-2 py-1 text-ui-2xs font-medium transition-colors duration-200 ' +
               (state === 'current' ? 'bg-primary/12 text-foreground'
                : state === 'done'  ? 'text-muted-foreground/70'
                : 'text-muted-foreground/35')
             }>
               <span class={
-                'grid size-4 place-items-center rounded-full text-[9px] font-semibold transition-colors duration-200 ' +
+                'grid size-4 place-items-center rounded-full text-ui-3xs font-semibold transition-colors duration-200 ' +
                 (state === 'current' ? 'bg-primary text-primary-foreground'
                  : state === 'done'  ? 'bg-primary/25 text-foreground'
                  : 'bg-muted text-muted-foreground/50')
@@ -138,7 +138,7 @@
       </nav>
 
       {#if step < TOTAL}
-        <button type="button" class="text-[13px] text-muted-foreground/70 transition-colors hover:text-foreground" onclick={headerSkip}>
+        <button type="button" class="text-ui-sm text-muted-foreground/70 transition-colors hover:text-foreground" onclick={headerSkip}>
           {step === LICENSE_STEP ? 'Skip for now' : 'Skip'}
         </button>
       {:else}
@@ -163,8 +163,8 @@
                   <Logo class="size-7" />
                 </div>
               {/if}
-              <h1 class="text-[26px] font-semibold tracking-tight text-foreground text-balance">{heading.title}</h1>
-              <p class="max-w-md text-[15px] leading-relaxed text-muted-foreground text-balance">{heading.desc}</p>
+              <h1 class="text-ui-3xl font-semibold tracking-tight text-foreground text-balance">{heading.title}</h1>
+              <p class="max-w-md text-ui-lg leading-relaxed text-muted-foreground text-balance">{heading.desc}</p>
             </div>
 
             <!-- ── Step 1: Feature carousel ── -->
@@ -177,8 +177,8 @@
                       <Icon name={f.icon} class="size-5" />
                     </span>
                     <div class="min-w-0">
-                      <p class="text-[13.5px] font-semibold text-foreground">{f.title}</p>
-                      <p class="mt-1 text-[12px] leading-relaxed text-muted-foreground">{f.desc}</p>
+                      <p class="text-ui-sm font-semibold text-foreground">{f.title}</p>
+                      <p class="mt-1 text-ui-xs leading-relaxed text-muted-foreground">{f.desc}</p>
                     </div>
                   </div>
                 {/each}
@@ -186,7 +186,7 @@
 
               <!-- Supported brands strip -->
               <div class="flex flex-col items-center gap-3">
-                <span class="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground/45">Works with</span>
+                <span class="text-ui-2xs font-medium uppercase tracking-[0.08em] text-muted-foreground/45">Works with</span>
                 <div class="flex flex-wrap items-center justify-center gap-x-5 gap-y-2.5">
                   {#each BRANDS as id}
                     <DbIcon {id} class="size-[18px] text-muted-foreground/45 transition-colors hover:text-foreground" />
@@ -206,15 +206,15 @@
                       <Icon name={c.icon} class="size-4" />
                     </span>
                     <div class="min-w-0">
-                      <p class="text-[13px] font-semibold text-foreground">{c.title}</p>
-                      <p class="mt-0.5 text-[11.5px] leading-relaxed text-muted-foreground">{c.desc}</p>
+                      <p class="text-ui-sm font-semibold text-foreground">{c.title}</p>
+                      <p class="mt-0.5 text-ui-2xs leading-relaxed text-muted-foreground">{c.desc}</p>
                     </div>
                   </div>
                 {/each}
               </div>
               <p class="-mt-3 flex items-center gap-1.5 text-xs text-muted-foreground/70">
                 <Icon name="sparkles" class="size-3.5 text-primary/70" /> Press
-                <kbd class="rounded border border-border/60 bg-muted/50 px-1.5 py-px font-mono text-[10px] text-foreground">⌘K</kbd>
+                <kbd class="rounded border border-border/60 bg-muted/50 px-1.5 py-px font-mono text-ui-3xs text-foreground">⌘K</kbd>
                 anytime to jump to any of these.
               </p>
 
@@ -227,7 +227,7 @@
 
                 <div class="flex items-center justify-center gap-5">
                   {#each LICENSE_PERKS as perk (perk.label)}
-                    <span class="flex items-center gap-1.5 text-[11.5px] text-muted-foreground/55">
+                    <span class="flex items-center gap-1.5 text-ui-2xs text-muted-foreground/55">
                       <Icon name={perk.icon} class="size-3 shrink-0" />
                       {perk.label}
                     </span>
@@ -293,7 +293,7 @@
         Back
       </button>
 
-      <span class="text-[13px] text-muted-foreground/70 tabular-nums">Step {step} of {TOTAL}</span>
+      <span class="text-ui-sm text-muted-foreground/70 tabular-nums">Step {step} of {TOTAL}</span>
 
       {#if step === LICENSE_STEP}
         <button

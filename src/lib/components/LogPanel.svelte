@@ -158,15 +158,15 @@
         {@const tag = TYPE_TAG[entry.type] ?? '???'}
         <div
           class={cn(
-            'flex min-w-0 items-baseline gap-1.5 rounded px-1.5 py-[3px] font-mono text-[11px] leading-5 transition-colors hover:bg-accent/25',
+            'flex min-w-0 items-baseline gap-1.5 rounded px-1.5 py-[3px] font-mono text-ui-2xs leading-5 transition-colors hover:bg-accent/25',
             !entry.success && 'bg-destructive/5',
           )}
           title={entry.detail || entry.error || entry.title}
         >
-          <span class="w-[52px] shrink-0 select-none text-[10px] tabular-nums text-muted-foreground/30">
+          <span class="w-[52px] shrink-0 select-none text-ui-3xs tabular-nums text-muted-foreground/30">
             {hms(entry.timestamp)}
           </span>
-          <span class={cn('w-7 shrink-0 select-none text-[9px] font-bold uppercase tracking-wider', color)}>
+          <span class={cn('w-7 shrink-0 select-none text-ui-3xs font-bold uppercase tracking-wider', color)}>
             {tag}
           </span>
           <span class={cn('min-w-0 flex-1 truncate', color)}>
@@ -176,11 +176,11 @@
             {/if}
           </span>
           {#if entry.durationMs != null}
-            <span class="shrink-0 text-[10px] tabular-nums text-muted-foreground/25">{entry.durationMs}ms</span>
+            <span class="shrink-0 text-ui-3xs tabular-nums text-muted-foreground/25">{entry.durationMs}ms</span>
           {/if}
         </div>
         {#if entry.error}
-          <div class="truncate rounded px-1.5 py-px font-mono text-[10px] text-destructive/60" title={entry.error}>
+          <div class="truncate rounded px-1.5 py-px font-mono text-ui-3xs text-destructive/60" title={entry.error}>
             &nbsp;&nbsp;↳ {entry.error.split('\n')[0]}
           </div>
         {/if}

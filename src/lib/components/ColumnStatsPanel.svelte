@@ -32,13 +32,13 @@
   const filledPct = $derived(100 - nullPct);
 </script>
 
-<div class="flex h-full w-64 shrink-0 flex-col border-l border-border/50 bg-panel text-[13px]">
+<div class="flex h-full w-64 shrink-0 flex-col border-l border-border/50 bg-panel text-ui-sm">
   <!-- Header -->
   <div class="flex items-center gap-2 border-b border-border/40 px-3 py-2">
     <BarChart2 class="size-3.5 shrink-0 text-muted-foreground" />
     <span class="min-w-0 flex-1 truncate font-mono font-medium text-foreground">{column}</span>
     {#if dataType}
-      <span class="shrink-0 font-mono text-[11px] text-muted-foreground/60">{dataType}</span>
+      <span class="shrink-0 font-mono text-ui-2xs text-muted-foreground/60">{dataType}</span>
     {/if}
     <button
       type="button"
@@ -58,11 +58,11 @@
         Computing…
       </div>
     {:else if error}
-      <p class="text-[12px] text-destructive">{error}</p>
+      <p class="text-ui-xs text-destructive">{error}</p>
     {:else if stats}
       <!-- Fill/null bar -->
       <div class="mb-4">
-        <div class="mb-1 flex justify-between text-[11px] text-muted-foreground">
+        <div class="mb-1 flex justify-between text-ui-2xs text-muted-foreground">
           <span>Filled {filledPct}%</span>
           <span>Null {nullPct}%</span>
         </div>
@@ -98,7 +98,7 @@
 
 {#snippet statRow(label, value)}
   <div class="flex items-baseline justify-between gap-2">
-    <dt class="shrink-0 text-[12px] text-muted-foreground">{label}</dt>
-    <dd class="min-w-0 truncate text-right font-mono text-[12px] text-foreground" title={String(value)}>{value}</dd>
+    <dt class="shrink-0 text-ui-xs text-muted-foreground">{label}</dt>
+    <dd class="min-w-0 truncate text-right font-mono text-ui-xs text-foreground" title={String(value)}>{value}</dd>
   </div>
 {/snippet}

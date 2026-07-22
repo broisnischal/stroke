@@ -688,9 +688,9 @@
     <div class="shrink-0 border-b border-border/60 bg-panel px-3 py-2">
       <div class="flex w-full max-w-2xl items-center gap-1.5 pb-1.5">
         <Variable class="size-3 text-muted-foreground/50" />
-        <span class="select-none text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground/55">Parameters</span>
+        <span class="select-none text-ui-3xs font-medium uppercase tracking-[0.08em] text-muted-foreground/55">Parameters</span>
         <span
-          class="select-none text-[10px] text-muted-foreground/35"
+          class="select-none text-ui-3xs text-muted-foreground/35"
           title="Auto detects numbers, booleans and NULL — everything else runs as a quoted string."
         >· Enter runs</span>
         <button

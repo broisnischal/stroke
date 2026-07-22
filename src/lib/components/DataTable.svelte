@@ -5565,7 +5565,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               <div class="flex items-center justify-center py-2">
                 <div class="flex items-center gap-1.5 rounded-full border border-border/20 bg-background px-3 py-1 elevate-2-rim">
                   <Loader class="size-3 animate-spin text-muted-foreground/50" />
-                  <span class="text-[11px] text-muted-foreground/50">Loading more…</span>
+                  <span class="text-ui-2xs text-muted-foreground/50">Loading more…</span>
                 </div>
               </div>
             </div>
@@ -5574,7 +5574,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                  knows scrolling won't fetch more (vs. "is it still loading?"). -->
             <div style="position:relative;width:100%;pointer-events:none;z-index:5">
               <div class="flex items-center justify-center py-2.5">
-                <span class="rounded-full border border-border/15 bg-muted/20 px-3 py-1 text-[11px] text-muted-foreground/40">
+                <span class="rounded-full border border-border/15 bg-muted/20 px-3 py-1 text-ui-2xs text-muted-foreground/40">
                   End of results — {rows.length.toLocaleString()} {rows.length === 1 ? 'row' : 'rows'}
                 </span>
               </div>
@@ -5625,12 +5625,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         <ContextMenu.Item onSelect={() => runMenuAction(() => headerSortDirect(hcol, 'asc'))}>
           <ArrowUp />
           {$t('menu.sortAsc')}
-          {#if hAsc}<span class="ml-auto text-[10px] text-primary">✓</span>{/if}
+          {#if hAsc}<span class="ml-auto text-ui-3xs text-primary">✓</span>{/if}
         </ContextMenu.Item>
         <ContextMenu.Item onSelect={() => runMenuAction(() => headerSortDirect(hcol, 'desc'))}>
           <ArrowDown />
           {$t('menu.sortDesc')}
-          {#if hDesc}<span class="ml-auto text-[10px] text-primary">✓</span>{/if}
+          {#if hDesc}<span class="ml-auto text-ui-3xs text-primary">✓</span>{/if}
         </ContextMenu.Item>
         {#if hSorted}
           <ContextMenu.Item onSelect={() => runMenuAction(() => { if (pendingEdits.size > 0) { toast.error('Unsaved changes', { description: 'Apply or reset your edits before sorting.' }); return } onsortchange([]) })}>
@@ -5686,7 +5686,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           <ContextMenu.Item onSelect={() => runMenuAction(() => { statsCol = statsCol === hcol ? null : hcol })}>
             <BarChart2 />
             {$t('menu.columnStats')}
-            {#if statsCol === hcol}<span class="ml-auto text-[10px] text-primary">✓</span>{/if}
+            {#if statsCol === hcol}<span class="ml-auto text-ui-3xs text-primary">✓</span>{/if}
           </ContextMenu.Item>
         {/if}
         <ContextMenu.Separator />
@@ -5701,7 +5701,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               <ContextMenu.Item onSelect={() => runMenuAction(() => setColHighlight(hcol, h.id))}>
                 <span class="size-3.5 shrink-0 rounded-full border border-border/40" style="background:{h.hex}"></span>
                 {h.label}
-                {#if colHighlights[hcol]?.color === h.id}<span class="ml-auto text-[10px] text-primary">✓</span>{/if}
+                {#if colHighlights[hcol]?.color === h.id}<span class="ml-auto text-ui-3xs text-primary">✓</span>{/if}
               </ContextMenu.Item>
             {/each}
             {#if colHighlights[hcol]?.color}
@@ -5728,7 +5728,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           <ContextMenu.SubTrigger>
             <Wand2 />
             {$t('menu.transformColumn')}
-            {#if colTransforms[hcol]}<span class="ml-auto text-[10px] text-primary">on</span>{/if}
+            {#if colTransforms[hcol]}<span class="ml-auto text-ui-3xs text-primary">on</span>{/if}
           </ContextMenu.SubTrigger>
           <ContextMenu.SubContent class="w-56 [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
             {#if menuColTransforms.length > 0}
@@ -5736,11 +5736,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                 <ContextMenu.Item onSelect={() => runMenuAction(() => setColTransform(hcol, t.id))}>
                   <Wand2 />
                   {t.label}
-                  {#if colTransforms[hcol] === t.id}<span class="ml-auto text-[10px] text-primary">✓</span>{/if}
+                  {#if colTransforms[hcol] === t.id}<span class="ml-auto text-ui-3xs text-primary">✓</span>{/if}
                 </ContextMenu.Item>
               {/each}
             {:else}
-              <div class="px-2 py-1.5 text-[11px] italic text-muted-foreground/50">No transforms apply to this column</div>
+              <div class="px-2 py-1.5 text-ui-2xs italic text-muted-foreground/50">No transforms apply to this column</div>
             {/if}
             {#if colTransforms[hcol]}
               <ContextMenu.Separator />
@@ -5856,7 +5856,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               {#each menuGenerators as grp, gi (grp.group)}
                 {#if gi > 0}<ContextMenu.Separator />{/if}
                 {@const GIcon = grp.group === 'IDs' ? KeyRound : grp.group === 'TIME' ? Clock : Dices}
-                <div class="select-none px-2 pb-0.5 pt-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/45">{grp.group}</div>
+                <div class="select-none px-2 pb-0.5 pt-1 text-ui-3xs font-medium uppercase tracking-wide text-muted-foreground/45">{grp.group}</div>
                 {#each grp.items as g (g.id)}
                   <ContextMenu.Item onSelect={() => runMenuAction(() => insertGeneratedValue(contextRowIdx, contextColIdx, g))}>
                     <GIcon />

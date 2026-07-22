@@ -32,10 +32,10 @@
           <TriangleAlert class="size-3.5 text-destructive" />
         </div>
         <div class="min-w-0 flex-1">
-          <p class="text-[13px] font-semibold text-foreground">
+          <p class="text-ui-sm font-semibold text-foreground">
             {isDropAction ? 'Drop table' : 'Truncate table'}
           </p>
-          <p class="mt-1 text-[12px] leading-[1.5] text-muted-foreground/70">
+          <p class="mt-1 text-ui-xs leading-[1.5] text-muted-foreground/70">
             {isDropAction
               ? 'Permanently removes the table, all data, and constraints. This cannot be undone.'
               : 'Deletes every row in this table. The table structure is kept but all data is permanently lost.'}
@@ -49,8 +49,8 @@
         <!-- Cascade toggle -->
         <div class="flex items-center justify-between gap-4 px-5 py-3.5">
           <div>
-            <p class="text-[12px] font-medium text-foreground">Cascade</p>
-            <p class="mt-0.5 text-[11px] text-muted-foreground/55">Also drop all dependent objects</p>
+            <p class="text-ui-xs font-medium text-foreground">Cascade</p>
+            <p class="mt-0.5 text-ui-2xs text-muted-foreground/55">Also drop all dependent objects</p>
           </div>
           <button
             type="button"
@@ -75,9 +75,9 @@
 
       <!-- SQL preview -->
       <div class="px-5 py-4">
-        <p class="mb-2 text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-foreground/35">Will execute</p>
+        <p class="mb-2 text-ui-3xs font-semibold uppercase tracking-[0.07em] text-muted-foreground/35">Will execute</p>
         <div class="rounded-xl border border-border/20 bg-muted/[0.3] px-3.5 py-2.5">
-          <code class="break-all font-mono text-[12px]">
+          <code class="break-all font-mono text-ui-xs">
             <span class="text-destructive">{isDropAction ? 'DROP TABLE' : 'TRUNCATE TABLE'}</span>
             <span class="text-foreground/70"> "{schema}"."{table}"</span>
             {#if isDropAction && cascade}
@@ -91,12 +91,12 @@
       <div class="flex items-center justify-end gap-2 border-t border-border/25 px-5 py-3">
         <button
           type="button"
-          class="inline-flex h-8 items-center rounded-lg px-3.5 text-[13px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
+          class="inline-flex h-8 items-center rounded-lg px-3.5 text-ui-sm text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
           onclick={() => (open = false)}
         >Cancel</button>
         <button
           type="button"
-          class="inline-flex h-8 items-center rounded-lg bg-destructive px-4 text-[13px] font-medium text-white transition-opacity hover:opacity-90"
+          class="inline-flex h-8 items-center rounded-lg bg-destructive px-4 text-ui-sm font-medium text-white transition-opacity hover:opacity-90"
           onclick={() => { open = false; onconfirm(cascade) }}
         >{confirmLabel}</button>
       </div>

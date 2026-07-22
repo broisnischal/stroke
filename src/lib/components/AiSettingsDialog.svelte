@@ -182,14 +182,14 @@
 </script>
 
 <Dialog.Root bind:open onOpenChange={handleOpenChange}>
-  <Dialog.Content showCloseButton={false} class="w-[min(380px,calc(100vw-2rem))] sm:max-w-none gap-0 overflow-hidden p-0">
+  <Dialog.Content showCloseButton={false} class="w-[min(580px,calc(100vw-2rem))] sm:max-w-none gap-0 overflow-hidden p-0">
 
     <!-- ══ LIST VIEW ═════════════════════════════════════════════════════ -->
     {#if view === "list"}
       <div class="flex items-center gap-2 border-b border-border/25 px-5 py-4">
         <div class="flex-1">
-          <Dialog.Title class="text-[13px] font-semibold text-foreground">AI Models</Dialog.Title>
-          <Dialog.Description class="mt-0.5 text-[11px] text-muted-foreground/60">
+          <Dialog.Title class="text-ui-sm font-semibold text-foreground">AI Models</Dialog.Title>
+          <Dialog.Description class="mt-0.5 text-ui-2xs text-muted-foreground/60">
             Select an active model or add a new one.
           </Dialog.Description>
         </div>
@@ -198,7 +198,7 @@
 
       <div class="app-scroll max-h-[min(60vh,30rem)] overflow-y-auto px-3 py-2">
         {#if $aiProfiles.length === 0}
-          <p class="py-6 text-center text-[12px] text-muted-foreground/50">No models configured.</p>
+          <p class="py-6 text-center text-ui-xs text-muted-foreground/50">No models configured.</p>
         {:else}
           <div class="flex flex-col gap-px">
             {#each $aiProfiles as profile (profile.id)}
@@ -214,15 +214,15 @@
                 onkeydown={(e) => e.key === "Enter" && void setActiveProfile(profile.id)}
               >
                 <div class="min-w-0 flex-1">
-                  <p class="truncate text-[13px] font-medium text-foreground">{profile.name}</p>
-                  <p class="mt-0.5 truncate font-mono text-[10px] text-muted-foreground/50">{profile.model}</p>
+                  <p class="truncate text-ui-sm font-medium text-foreground">{profile.name}</p>
+                  <p class="mt-0.5 truncate font-mono text-ui-3xs text-muted-foreground/50">{profile.model}</p>
                 </div>
                 <div class="flex shrink-0 items-center gap-1.5">
                   {#if isActive}
-                    <span class="rounded-md bg-muted/60 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/50">active</span>
+                    <span class="rounded-md bg-muted/60 px-1.5 py-0.5 text-ui-3xs font-semibold uppercase tracking-wider text-muted-foreground/50">active</span>
                   {/if}
                   <button
-                    class="rounded-md px-2 py-0.5 text-[11px] text-muted-foreground/40 opacity-0 transition-colors hover:bg-muted/60 hover:text-foreground group-hover:opacity-100"
+                    class="rounded-md px-2 py-0.5 text-ui-2xs text-muted-foreground/40 opacity-0 transition-colors hover:bg-muted/60 hover:text-foreground group-hover:opacity-100"
                     onclick={(e) => { e.stopPropagation(); void startEdit(profile) }}
                   >Edit</button>
                 </div>
@@ -234,7 +234,7 @@
 
       <div class="border-t border-border/25 px-4 py-3">
         <button type="button"
-          class="flex w-full items-center justify-center gap-1.5 rounded-lg border border-border/25 bg-muted/[0.2] py-2 text-[12px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
+          class="flex w-full items-center justify-center gap-1.5 rounded-lg border border-border/25 bg-muted/[0.2] py-2 text-ui-xs text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
           onclick={startAdd}>
           <Plus class="size-3.5" />
           Add model
@@ -253,7 +253,7 @@
           >
             <ChevronLeft class="size-3.5" />
           </button>
-          <Dialog.Title class="flex-1 text-center text-[13px] font-semibold text-foreground">
+          <Dialog.Title class="flex-1 text-center text-ui-sm font-semibold text-foreground">
             {editingId ? "Edit model" : "Add model"}
           </Dialog.Title>
           <Dialog.Close class="inline-flex size-6 items-center justify-center rounded-lg text-muted-foreground/30 transition-colors hover:bg-muted/50 hover:text-muted-foreground focus-visible:outline-none" />
@@ -264,14 +264,14 @@
           {#each STEPS as label, i}
             <div class="flex items-center gap-1.5">
               <span class={cn(
-                "flex size-[18px] items-center justify-center rounded-full text-[9px] font-semibold tabular-nums transition-all",
+                "flex size-[18px] items-center justify-center rounded-full text-ui-3xs font-semibold tabular-nums transition-all",
                 i < step  ? "bg-primary text-primary-foreground"
                 : i === step ? "bg-primary/10 text-primary ring-1 ring-primary/50"
                 : "bg-transparent text-muted-foreground/35 ring-1 ring-border/40",
               )}>
                 {#if i < step}<Check class="size-2" />{:else}{i + 1}{/if}
               </span>
-              <span class={cn("text-[10px] font-medium", i === step ? "text-foreground" : "text-muted-foreground/35")}>
+              <span class={cn("text-ui-3xs font-medium", i === step ? "text-foreground" : "text-muted-foreground/35")}>
                 {label}
               </span>
             </div>
@@ -287,18 +287,18 @@
 
         <!-- Step 0 · Provider ─────────────────────────────────────────── -->
         {#if step === 0}
-          <div class="flex flex-col gap-px">
+          <div class="grid grid-cols-2 gap-1.5">
             {#each PROVIDERS as p (p.id)}
               {@const selected = formProvider === p.id}
               <button
                 type="button"
                 class={cn(
-                  "flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left transition-colors",
-                  selected ? "bg-primary/10 ring-1 ring-inset ring-primary/20" : "hover:bg-muted/40",
+                  "flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                  selected ? "border-primary/40 bg-primary/10" : "border-border/40 hover:border-border hover:bg-muted/30",
                 )}
                 onclick={() => selectProvider(p.id)}
               >
-                <span class={cn("text-[13px] font-medium", selected ? "text-foreground" : "text-foreground/90")}>{p.label}</span>
+                <span class={cn("text-ui-sm font-medium", selected ? "text-foreground" : "text-foreground/90")}>{p.label}</span>
                 {#if selected}<Check class="size-3.5 shrink-0 text-primary" />{/if}
               </button>
             {/each}
@@ -314,20 +314,20 @@
               </div>
             {:else}
               {@const list = copilotModels.length > 0 ? copilotModels.map(m => ({ label: m.name, model: m.id, tag: '' })) : modelPresets}
-              <div class="flex flex-col gap-px">
+              <div class="grid grid-cols-2 gap-1.5">
                 {#each list as preset (preset.model)}
                   {@const selected = formModel === preset.model}
                   <button
                     type="button"
                     class={cn(
-                      "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors",
-                      selected ? "bg-muted/50" : "hover:bg-muted/30",
+                      "flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                      selected ? "border-border bg-muted/50" : "border-border/40 hover:border-border hover:bg-muted/30",
                     )}
                     onclick={() => { formModel = preset.model; testState = "idle"; }}
                   >
                     <div class="min-w-0 flex-1">
-                      <p class="text-[13px] font-medium text-foreground">{preset.label}</p>
-                      {#if preset.tag}<p class="mt-0.5 font-mono text-[10px] text-muted-foreground/50">{preset.tag}</p>{/if}
+                      <p class="text-ui-sm font-medium text-foreground">{preset.label}</p>
+                      {#if preset.tag}<p class="mt-0.5 font-mono text-ui-3xs text-muted-foreground/50">{preset.tag}</p>{/if}
                     </div>
                     {#if selected}<Check class="size-3 shrink-0 text-foreground/70" />{/if}
                   </button>
@@ -335,20 +335,20 @@
               </div>
             {/if}
           {:else if modelPresets.length > 0}
-            <div class="flex flex-col gap-px">
+            <div class="grid grid-cols-2 gap-1.5">
               {#each modelPresets as preset (preset.model)}
                 {@const selected = formModel === preset.model}
                 <button
                   type="button"
                   class={cn(
-                    "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors",
-                    selected ? "bg-muted/50" : "hover:bg-muted/30",
+                    "flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                    selected ? "border-border bg-muted/50" : "border-border/40 hover:border-border hover:bg-muted/30",
                   )}
                   onclick={() => { formModel = preset.model; testState = "idle"; }}
                 >
                   <div class="min-w-0 flex-1">
-                    <p class="text-[13px] font-medium text-foreground">{preset.label}</p>
-                    {#if preset.tag}<p class="mt-0.5 font-mono text-[10px] text-muted-foreground/50">{preset.tag}</p>{/if}
+                    <p class="text-ui-sm font-medium text-foreground">{preset.label}</p>
+                    {#if preset.tag}<p class="mt-0.5 font-mono text-ui-3xs text-muted-foreground/50">{preset.tag}</p>{/if}
                   </div>
                   {#if selected}<Check class="size-3 shrink-0 text-foreground/70" />{/if}
                 </button>
@@ -381,7 +381,7 @@
               <div class="flex flex-col gap-1.5">
                 <div class="flex items-baseline gap-1.5">
                   <label for="form-key" class="text-xs font-medium text-foreground">API key</label>
-                  <span class="text-[10px] text-muted-foreground">stored securely</span>
+                  <span class="text-ui-3xs text-muted-foreground">stored securely</span>
                 </div>
                 <div class="relative">
                   <Input
@@ -434,11 +434,11 @@
             {/if}
 
             {#if testState === "ok"}
-              <div class="flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.08] px-3 py-2.5 text-[12px] text-emerald-500">
+              <div class="flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.08] px-3 py-2.5 text-ui-xs text-emerald-500">
                 <Check class="size-3.5 shrink-0" />{testMsg}
               </div>
             {:else if testState === "error"}
-              <div class="flex items-start gap-2 rounded-xl border border-destructive/20 bg-destructive/[0.08] px-3 py-2.5 text-[12px] text-destructive">
+              <div class="flex items-start gap-2 rounded-xl border border-destructive/20 bg-destructive/[0.08] px-3 py-2.5 text-ui-xs text-destructive">
                 <AlertTriangle class="mt-0.5 size-3.5 shrink-0" /><span class="break-words">{testMsg}</span>
               </div>
             {/if}
@@ -451,7 +451,7 @@
         <div class="flex items-center gap-1.5">
           {#if step === 2}
             <button type="button"
-              class="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/25 px-3 text-[12px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-40"
+              class="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/25 px-3 text-ui-xs text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-40"
               disabled={testState === "testing" || !formModel.trim()}
               onclick={testConnection}>
               {#if testState === "testing"}<Loader2 class="size-3 animate-spin" />Testing…{:else}Test{/if}
@@ -468,14 +468,14 @@
 
         {#if step < STEPS.length - 1}
           <button type="button"
-            class="inline-flex h-7 items-center gap-1 rounded-lg bg-primary px-3 text-[12px] font-medium text-primary-foreground elevate-1 transition-[background-color,transform] duration-150 hover:bg-primary/90 active:scale-[0.97] disabled:opacity-40"
+            class="inline-flex h-7 items-center gap-1 rounded-lg bg-primary px-3 text-ui-xs font-medium text-primary-foreground elevate-1 transition-[background-color,transform] duration-150 hover:bg-primary/90 active:scale-[0.97] disabled:opacity-40"
             disabled={!stepCanProceed}
             onclick={nextStep}>
             Continue <ChevronRight class="size-3" />
           </button>
         {:else}
           <button type="button"
-            class="inline-flex h-7 items-center gap-1.5 rounded-lg bg-primary px-3 text-[12px] font-medium text-primary-foreground elevate-1 transition-[background-color,transform] duration-150 hover:bg-primary/90 active:scale-[0.97] disabled:opacity-40"
+            class="inline-flex h-7 items-center gap-1.5 rounded-lg bg-primary px-3 text-ui-xs font-medium text-primary-foreground elevate-1 transition-[background-color,transform] duration-150 hover:bg-primary/90 active:scale-[0.97] disabled:opacity-40"
             disabled={saving || !formModel.trim()}
             onclick={() => void save()}>
             {#if saving}<Loader2 class="size-3 animate-spin" />{/if}
