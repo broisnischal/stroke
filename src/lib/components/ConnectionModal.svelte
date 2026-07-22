@@ -813,6 +813,14 @@
       style="top: var(--app-titlebar-h, 38px); bottom: var(--app-statusbar-h, 0px);"
       class="fixed inset-x-0 z-50 flex bg-background text-foreground outline-none data-open:animate-in data-closed:animate-out data-open:fade-in-0 data-closed:fade-out-0 data-open:zoom-in-[0.98] data-closed:zoom-out-[0.98] ease-out duration-200"
       onEscapeKeydown={(e) => { if (isDirty && !isBusy) { e.preventDefault(); confirmDiscardOpen = true } }}
+      onFocusOutside={(e) => {
+        // Never let focus leaving the content dismiss the modal. Starting a native
+        // window drag/resize from the titlebar makes the webview lose focus, which
+        // bits-ui treats as focus-outside and closes the dialog. The modal is only
+        // meant to close via ×, Escape, or a genuine outside pointer interaction
+        // (handled below) — not because the OS took focus for a window drag.
+        e.preventDefault()
+      }}
       onInteractOutside={(e) => {
         // The modal is inset to leave the titlebar (drag region) and status bar
         // usable. Interactions on that chrome must NOT dismiss the dialog or prompt
