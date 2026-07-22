@@ -415,7 +415,9 @@ jobs:
 #      changelog from the public repo — both must live in RELEASES_REPO, not
 #      in this private source repo.
   update-scoop:
-    needs: build
+    # Runs AFTER publish-release: it downloads the installer from the public
+    # releases/download/ URL to hash it, which 404s while the release is a draft.
+    needs: publish-release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -513,7 +515,7 @@ jobs:
 #      builds, the updater JSON, and the Scoop manifest are done. If any of those
 #      jobs fail, this job is skipped and the release stays a draft.
   publish-release:
-    needs: [build, publish-updater-json, update-scoop]
+    needs: [build, publish-updater-json]
     runs-on: ubuntu-latest
     steps:
       - name: Un-draft the release
