@@ -491,6 +491,10 @@
     return s?.table ? JSON.stringify([s.schema, s.table]) : ''
   })
   let _liveRefetchTimer = /** @type {ReturnType<typeof setTimeout> | null} */ (null)
+  // True while the backend watcher has been stopped *because the window is
+  // hidden*. Doubles as the guard that we only ever resume a watcher we paused
+  // (never start one that was off), so the visibility handler can't double-start.
+  let _livePausedByHide = false
 
   // Start/stop the backend watcher whenever the watched table (or toggle) changes.
   $effect(() => {
@@ -1212,7 +1216,33 @@ let rowSearch = $state('')
   $effect(() => {
     if (typeof window === 'undefined') return
     const kick = () => { if (connection && connectionLost) void silentReconnect() }
-    const onVis = () => { if (typeof document !== 'undefined' && !document.hidden) kick() }
+    const onVis = () => {
+      if (typeof document === 'undefined') return
+      if (document.hidden) {
+        // Backgrounded/minimized: stop the backend live watcher so it stops
+        // polling the DB (and doing remote round-trips) for a window nobody can
+        // see. liveTableKey is non-empty only when a watcher is actually running
+        // (live enabled + supported + a table tab active), which is exactly the
+        // "live is active" guard; the flag prevents redundant stops.
+        if (liveTableKey && !_livePausedByHide) {
+          _livePausedByHide = true
+          void liveStop().catch(() => {})
+        }
+      } else {
+        kick()
+        // Back in view: resume only a watcher we paused on hide, retargeting
+        // whatever table is active now. Re-checking liveTableKey means we never
+        // start when live got disabled or the table tab went away while hidden,
+        // and clearing the flag first prevents a double-start.
+        if (_livePausedByHide) {
+          _livePausedByHide = false
+          if (liveTableKey) {
+            const [schema, table] = JSON.parse(liveTableKey)
+            void liveStart(schema, table).catch(() => {})
+          }
+        }
+      }
+    }
     window.addEventListener('online', kick)
     window.addEventListener('focus', kick)
     document.addEventListener('visibilitychange', onVis)
