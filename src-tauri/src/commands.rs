@@ -214,7 +214,7 @@ use crate::db::{
     update_table_cell, ConnectionConfig, D1Config, DbState, EnumInfo, FunctionInfo, ExplainResult, IndexInfo, LibSqlConfig,
     SqlResult, SqliteConfig, TableInfo, TableRowCount, TableRows, TriggerInfo, SequenceInfo,
     ColumnStructureRow, IncomingForeignKey, InsertRowResult, TunnelState,
-    explain_pg, explain_mysql, explain_sqlite,
+    explain_pg, explain_mysql, explain_sqlite, explain_from_text_lines,
 };
 use crate::db::connection::{require_conn, ClickhouseConfig, DuckdbConfig, MssqlConfig, MysqlConfig, RedisConfig};
 use crate::db::ActiveConnection;
@@ -320,6 +320,21 @@ pub async fn connect_redis_db(state: State<'_, DbState>, config: RedisConfig) ->
     connect_redis(state, config).await
 }
 
+/// Non-blocking keyspace iteration for the active Redis connection. Returns one
+/// SCAN page (next cursor + keys); the frontend loops until the cursor is "0".
+#[tauri::command]
+pub async fn redis_scan(
+    state: State<'_, DbState>,
+    cursor: String,
+    pattern: Option<String>,
+    count: u32,
+) -> Result<crate::db::redis::ScanReply, String> {
+    match require_conn(&state)? {
+        ActiveConnection::Redis(cfg) => crate::db::redis::scan(&cfg, &cursor, pattern, count).await,
+        _ => Err("Not connected to a Redis database".into()),
+    }
+}
+
 // ── DuckDB ────────────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -380,6 +395,16 @@ pub async fn disconnect_postgres(
     disconnect(state, tunnel_state).await
 }
 
+/// Flatten an EXPLAIN result set to plan lines (first column of each row) for
+/// engines whose EXPLAIN returns a textual, indented plan.
+fn explain_rows_to_lines(res: &SqlResult) -> Vec<String> {
+    res.rows
+        .iter()
+        .filter_map(|r| r.first())
+        .map(|v| v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string()))
+        .collect()
+}
+
 #[tauri::command]
 pub async fn pg_explain_sql(
     state: State<'_, DbState>,
@@ -389,7 +414,15 @@ pub async fn pg_explain_sql(
         ActiveConnection::Postgres(pool) => explain_pg(&pool, &sql).await,
         ActiveConnection::Mysql(pool) => explain_mysql(&pool, &sql).await,
         ActiveConnection::Sqlite(pool) => explain_sqlite(&pool, &sql).await,
-        _ => Err("EXPLAIN is only supported for PostgreSQL, MySQL, and SQLite".into()),
+        ActiveConnection::Duckdb(h) => {
+            let res = crate::db::duckdb::execute_sql(&h, &format!("EXPLAIN {sql}")).await?;
+            Ok(explain_from_text_lines(explain_rows_to_lines(&res), "duckdb"))
+        }
+        ActiveConnection::Clickhouse(cfg) => {
+            let res = crate::db::clickhouse::query(&cfg, &format!("EXPLAIN {sql}")).await?;
+            Ok(explain_from_text_lines(explain_rows_to_lines(&res), "clickhouse"))
+        }
+        _ => Err("EXPLAIN isn't supported for this engine yet".into()),
     }
 }
 

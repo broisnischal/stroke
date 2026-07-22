@@ -13,6 +13,77 @@ pub struct ExplainResult {
     pub driver: String,
 }
 
+/// Build an ExplainResult from an engine's textual EXPLAIN output (one plan line
+/// per string). Leading whitespace defines nesting, so an indented plan
+/// (DuckDB / ClickHouse) becomes the same `{Node Type, Plans}` tree the renderer
+/// already draws for Postgres/SQLite. Never executes anything itself.
+pub fn explain_from_text_lines(lines: Vec<String>, driver: &str) -> ExplainResult {
+    struct N {
+        text: String,
+        children: Vec<usize>,
+    }
+    let mut arena: Vec<N> = Vec::new();
+    let mut roots: Vec<usize> = Vec::new();
+    // Stack of (indent, node index) — a node attaches under the nearest
+    // strictly-shallower ancestor still on the stack.
+    let mut stack: Vec<(usize, usize)> = Vec::new();
+
+    for raw in lines {
+        let line = raw.trim_end_matches(['\r', '\n']);
+        if line.trim().is_empty() {
+            continue;
+        }
+        let indent = line.len() - line.trim_start().len();
+        let idx = arena.len();
+        arena.push(N {
+            text: line.trim().to_string(),
+            children: Vec::new(),
+        });
+        while matches!(stack.last(), Some(&(ind, _)) if ind >= indent) {
+            stack.pop();
+        }
+        match stack.last() {
+            Some(&(_, parent)) => arena[parent].children.push(idx),
+            None => roots.push(idx),
+        }
+        stack.push((indent, idx));
+    }
+
+    fn to_json(arena: &[N], idx: usize) -> serde_json::Value {
+        let n = &arena[idx];
+        let mut obj = serde_json::json!({
+            "Node Type": n.text,
+            "Total Cost": 0.0,
+            "Startup Cost": 0.0,
+            "Plan Rows": 0,
+        });
+        if !n.children.is_empty() {
+            obj["Plans"] =
+                serde_json::Value::Array(n.children.iter().map(|&c| to_json(arena, c)).collect());
+        }
+        obj
+    }
+
+    let plan = match roots.len() {
+        1 => to_json(&arena, roots[0]),
+        0 => serde_json::json!({ "Node Type": "Query Plan", "Total Cost": 0.0, "Startup Cost": 0.0, "Plan Rows": 0 }),
+        _ => serde_json::json!({
+            "Node Type": "Query Plan",
+            "Total Cost": 0.0,
+            "Startup Cost": 0.0,
+            "Plan Rows": 0,
+            "Plans": roots.iter().map(|&r| to_json(&arena, r)).collect::<Vec<_>>(),
+        }),
+    };
+
+    ExplainResult {
+        plan,
+        planning_time: 0.0,
+        execution_time: 0.0,
+        driver: driver.to_string(),
+    }
+}
+
 fn strip_sql(sql: &str) -> &str {
     let s = sql.trim().trim_end_matches(';').trim();
     // Strip any existing EXPLAIN prefix so callers never double-wrap

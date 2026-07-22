@@ -21,7 +21,7 @@ pub use connection::{
     test_clickhouse_connection, test_connection, test_d1_connection, test_duckdb_connection, test_libsql_connection, test_mssql_connection, test_mysql_connection, test_redis_connection, test_sqlite_connection,
     ActiveConnection, AnyConnectionConfig, ConnectionConfig, D1Config, DbState, LibSqlConfig, SqliteConfig,
 };
-pub use explain::{explain_pg, explain_mysql, explain_sqlite, ExplainResult};
+pub use explain::{explain_pg, explain_mysql, explain_sqlite, explain_from_text_lines, ExplainResult};
 pub use insights::{
     instance_activity, instance_config, instance_replication, instance_state, instance_version,
     ConfigSetting, InstanceActivity, InstanceReplication, InstanceState, InstanceVersion,

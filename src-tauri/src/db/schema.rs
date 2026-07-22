@@ -167,7 +167,16 @@ pub async fn table_row_counts(
                     let pool = pool.clone();
                     let schema = schema.clone();
                     async move {
-                        let row_count = exact_row_count(&pool, &schema, &name).await.unwrap_or(0);
+                        // -1 (not 0) on failure: 0 is a real "empty" count and must
+                        // not be faked when the COUNT actually errored, or a view
+                        // whose count can't be resolved reads as genuinely empty.
+                        let row_count = match exact_row_count(&pool, &schema, &name).await {
+                            Ok(n) => n,
+                            Err(e) => {
+                                eprintln!("[row count] {schema}.{name}: {e}");
+                                -1
+                            }
+                        };
                         TableRowCount { name, row_count }
                     }
                 }))
@@ -182,8 +191,13 @@ pub async fn table_row_counts(
                     let pool = pool.clone();
                     let schema = schema.clone();
                     async move {
-                        let row_count =
-                            mysql_exact_row_count(&pool, &schema, &name).await.unwrap_or(0);
+                        let row_count = match mysql_exact_row_count(&pool, &schema, &name).await {
+                            Ok(n) => n,
+                            Err(e) => {
+                                eprintln!("[row count] {schema}.{name}: {e}");
+                                -1
+                            }
+                        };
                         TableRowCount { name, row_count }
                     }
                 }))
@@ -933,11 +947,42 @@ async fn list_functions_pg(pool: &PgPool, schema: &str) -> Result<Vec<FunctionIn
         .collect()
 }
 
+async fn list_functions_mysql(pool: &sqlx::MySqlPool, schema: &str) -> Result<Vec<FunctionInfo>, String> {
+    let rows = sqlx::query(
+        r#"SELECT ROUTINE_NAME AS name, DTD_IDENTIFIER AS return_type, ROUTINE_TYPE AS routine_type
+           FROM information_schema.ROUTINES
+           WHERE ROUTINE_SCHEMA = ?
+           ORDER BY ROUTINE_NAME"#,
+    )
+    .bind(schema)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("Failed to list functions: {e}"))?;
+
+    rows.iter()
+        .map(|row| {
+            let name: String = row.try_get("name").map_err(|e| e.to_string())?;
+            let return_type: Option<String> = row.try_get("return_type").map_err(|e| e.to_string())?;
+            let routine_type: String = row.try_get("routine_type").map_err(|e| e.to_string())?;
+            Ok(FunctionInfo {
+                signature: format!("{name}()"),
+                name,
+                return_type: return_type.unwrap_or_default(),
+                kind: routine_type.to_lowercase(),
+            })
+        })
+        .collect()
+}
+
 pub async fn list_functions(state: State<'_, DbState>, schema: String) -> Result<Vec<FunctionInfo>, String> {
     match require_conn(&state)? {
         ActiveConnection::Postgres(pool) => {
             validate_ident(&schema)?;
             list_functions_pg(&pool, &schema).await
+        }
+        ActiveConnection::Mysql(pool) => {
+            validate_ident(&schema)?;
+            list_functions_mysql(&pool, &schema).await
         }
         _ => Ok(vec![]),
     }
