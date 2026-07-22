@@ -127,6 +127,8 @@
         columnWidthsKey={`${tableState.schema}.${tableState.table}`}
         loading={false}
         readonly={true}
+        initialScroll={{ left: tableState.scrollLeft ?? 0, top: tableState.scrollTop ?? 0 }}
+        initialExpandedRows={tableState.expandedRows ?? []}
         bind:selected
         bind:focusedRow
         bind:inspectorRow

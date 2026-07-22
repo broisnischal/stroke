@@ -229,6 +229,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
      *  layout settles. */
     getScroll = $bindable(/** @type {() => { left: number, top: number }} */ (() => ({ left: 0, top: 0 }))),
     applyScroll = $bindable(/** @type {(pos: { left?: number, top?: number }) => void} */ (() => {})),
+    /** Background/snapshot panes seed their scroll offset and open row-expand
+     *  panels from the tab's saved state, so a defocused split pane keeps its
+     *  position and expanded rows instead of resetting to the top/collapsed.
+     *  Null for the live grid, which persists via getScroll/getExpanded. */
+    initialScroll = /** @type {{ left?: number, top?: number } | null} */ (null),
+    initialExpandedRows = /** @type {number[] | null} */ (null),
+    /** Assigned by this component so the parent can persist the open row-expand
+     *  panels per tab (mirrors getScroll). Returns the open row indices. */
+    getExpanded = $bindable(/** @type {() => number[]} */ (() => [])),
     /** Called when user picks "Filter by this column" from the column header context menu. */
     onfiltercolumn = /** @type {(colName: string) => void} */ (() => {}),
     /** Called when user right-clicks a cell and picks "Filter by value" or "Exclude value". */
@@ -458,8 +467,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let pendingContextMenu = $state(false);
   /** Block item activation from the right-click pointerup that opened the menu */
   let suppressMenuSelect = $state(false);
-  /** Row indices with inline JSON detail open */
-  let expandedRows = $state(new Set());
+  /** Row indices with inline JSON detail open. Seeded from initialExpandedRows
+   *  so background/snapshot panes render already-expanded (no collapse flicker). */
+  let expandedRows = $state(new Set(initialExpandedRows ?? []));
   /** @type {Record<string, number>} */
   let columnWidths = $state({});
   /** @type {string | null} */
@@ -1497,6 +1507,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Save/restore the PHYSICAL scroll position so it round-trips regardless of
     // whether the scroll range is compressed (same table → same scale).
     getScroll = () => ({ left: _scrollLeft, top: _physScrollTop });
+    getExpanded = () => [...expandedRows];
     applyScroll = (pos) => {
       // Wait for the new tab's columns/rows to lay out (spacer width) before
       // setting scroll — otherwise the container clamps to 0.
@@ -1511,6 +1522,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         scheduleDraw();
       }));
     };
+  });
+
+  // Snapshot/background panes: restore the saved scroll once on mount. The live
+  // grid passes initialScroll=null and restores via applyScroll on tab switch.
+  let _didSeedScroll = false;
+  $effect(() => {
+    if (_didSeedScroll || !initialScroll || !tableContainer) return;
+    _didSeedScroll = true;
+    applyScroll(initialScroll);
   });
 
   // Surface beginInsertRow to the parent (→ toolbar Add Row button).
