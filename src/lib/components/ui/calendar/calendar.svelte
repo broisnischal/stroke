@@ -27,7 +27,7 @@
 			>
 				<ChevronLeft class="size-4" />
 			</CalendarPrimitive.PrevButton>
-			<CalendarPrimitive.Heading class="text-[13px] font-medium text-foreground" />
+			<CalendarPrimitive.Heading class="text-ui-sm font-medium text-foreground" />
 			<CalendarPrimitive.NextButton
 				class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
 			>
@@ -41,7 +41,7 @@
 					<CalendarPrimitive.GridRow class="flex">
 						{#each weekdays as day}
 							<CalendarPrimitive.HeadCell
-								class="w-9 rounded-md text-[11px] font-normal text-muted-foreground"
+								class="w-9 rounded-md text-ui-2xs font-normal text-muted-foreground"
 							>
 								{day.slice(0, 2)}
 							</CalendarPrimitive.HeadCell>
@@ -52,10 +52,10 @@
 					{#each month.weeks as weekDates}
 						<CalendarPrimitive.GridRow class="mt-1 flex">
 							{#each weekDates as date}
-								<CalendarPrimitive.Cell {date} month={month.value} class="relative p-0 text-center text-[13px]">
+								<CalendarPrimitive.Cell {date} month={month.value} class="relative p-0 text-center text-ui-sm">
 									<CalendarPrimitive.Day
 										class={cn(
-											"inline-flex size-9 items-center justify-center rounded-md text-[13px] font-normal transition-colors",
+											"inline-flex size-9 items-center justify-center rounded-md text-ui-sm font-normal transition-colors",
 											"hover:bg-muted hover:text-foreground",
 											"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
 											"data-selected:bg-primary data-selected:text-primary-foreground data-selected:hover:bg-primary/90",
