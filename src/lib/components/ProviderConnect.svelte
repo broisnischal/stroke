@@ -66,6 +66,22 @@
       : databases,
   )
 
+  // Keyboard navigation for the database list, driven from the search box.
+  let hlIdx = $state(0)
+  $effect(() => {
+    filtered
+    hlIdx = 0
+  })
+  /** @param {KeyboardEvent} e */
+  function onSearchKeydown(e) {
+    if (e.key === 'Escape') { search = ''; return }
+    const n = filtered.length
+    if (!n) return
+    if (e.key === 'ArrowDown') { e.preventDefault(); hlIdx = (hlIdx + 1) % n }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); hlIdx = (hlIdx - 1 + n) % n }
+    else if (e.key === 'Enter') { e.preventDefault(); const d = filtered[hlIdx] ?? filtered[0]; if (d) pick(d.db_ref) }
+  }
+
   /** Turn a raw backend error into a calm title + one-line explanation. */
   function friendlyError(msg) {
     const m = String(msg ?? '')
@@ -201,7 +217,7 @@
           type="text"
           bind:value={tokenInput}
           placeholder="postgres://…"
-          class="h-9 w-full rounded-lg border border-border/60 bg-muted/25 px-3 font-mono text-ui-2xs outline-none transition-[border-color,box-shadow] focus:border-ring focus:ring-1 focus:ring-ring focus:border-ring focus:ring-1 focus:ring-ring"
+          class="h-9 w-full rounded-lg border-2 border-foreground/15 bg-muted/25 px-3 font-mono text-ui-2xs outline-none transition-[border-color] focus:border-foreground/55"
           onkeydown={(e) => { if (e.key === 'Enter') saveToken() }}
         />
         <button
@@ -306,7 +322,7 @@
             autocomplete="current-password"
             autofocus
             placeholder="Database password"
-            class="h-9 w-full rounded-lg border border-border bg-muted/30 pl-3 pr-9 text-ui-xs outline-none focus:border-ring focus:ring-1 focus:ring-ring"
+            class="h-9 w-full rounded-lg border-2 border-foreground/15 bg-muted/30 pl-3 pr-9 text-ui-xs outline-none transition-[border-color] focus:border-foreground/55"
             onkeydown={(e) => { if (e.key === 'Enter') confirmPassword() }}
           />
           <button
@@ -329,11 +345,11 @@
           </button>
           <button
             type="button"
-            class="flex-[2] rounded-lg bg-primary px-3 py-2 text-ui-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
-            disabled={!pw.trim()}
+            class="flex-[2] inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-ui-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+            disabled={!pw.trim() || phase === 'building'}
             onclick={confirmPassword}
           >
-            Connect
+            {#if phase === 'building'}<Loader2 class="size-3.5 shrink-0 animate-spin" />Connecting…{:else}Connect{/if}
           </button>
         </div>
       </div>
@@ -346,26 +362,31 @@
             <Search class="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground/40" />
             <input
               type="text"
+              aria-label="Search databases"
               placeholder="Search databases…"
               bind:value={search}
-              class="h-9 w-full bg-transparent pl-9 pr-2.5 text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/35"
-              onkeydown={(e) => { if (e.key === 'Escape') search = '' }}
+              class="no-focus-ring h-8 w-full bg-transparent pl-9 pr-2.5 text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/35"
+              onkeydown={onSearchKeydown}
             />
           </div>
         {/if}
         <div class="db-list-scroll flex max-h-[240px] flex-col gap-0.5 overflow-y-auto p-1.5">
-          {#each filtered as db (db.db_ref)}
+          {#each filtered as db, idx (db.db_ref)}
             {@const active = db.db_ref === selectedRef}
             <button
               type="button"
               class={cn(
-                'flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors',
-                active ? 'bg-primary/10 text-foreground ring-1 ring-primary/25' : 'hover:bg-muted/50',
+                'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors',
+                active
+                  ? 'bg-accent text-foreground'
+                  : idx === hlIdx
+                    ? 'bg-accent/60 text-foreground'
+                    : 'text-foreground/80 hover:bg-accent/60',
               )}
               onclick={() => pick(db.db_ref)}
             >
-              <DbIcon id={provider} class={cn('size-4 shrink-0', active ? 'text-foreground' : 'text-muted-foreground/45')} />
-              <span class="min-w-0 flex-1 truncate font-mono text-ui-xs font-medium leading-snug {active ? 'text-foreground' : 'text-foreground/85'}">{db.name}</span>
+              <DbIcon id={provider} class={cn('size-4 shrink-0', active ? 'text-foreground' : 'text-muted-foreground/50')} />
+              <span class="min-w-0 flex-1 truncate font-mono text-ui-xs leading-snug {active ? 'font-medium text-foreground' : 'text-foreground/85'}">{db.name}</span>
               {#if db.region}<span class="shrink-0 text-ui-3xs text-muted-foreground/40">{db.region}</span>{/if}
               {#if active && phase === 'building'}<Loader2 class="size-3.5 shrink-0 animate-spin text-primary" />{:else if active}<Check class="size-3.5 shrink-0 text-primary" />{/if}
             </button>
