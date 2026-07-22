@@ -19,6 +19,9 @@
     /** Popover side — use "top" for triggers anchored to the bottom (status bar). */
     side = "bottom",
     contentClass = "w-56",
+    /** Show the search box only when there are more than this many items
+     *  (short lists don't need filtering). Set to -1 to always show it. */
+    searchThreshold = 5,
     /** @type {(item: any) => void} */
     onselect = () => {},
     /** snippet({ props }) — renders the trigger button */
@@ -32,6 +35,8 @@
   } = $props();
 
   let search = $state("");
+  // Search box only materializes for longer lists; short menus are already scannable.
+  const showSearch = $derived(searchThreshold < 0 || items.length > searchThreshold);
   /** @type {HTMLInputElement | null} */
   let inputEl = $state(null);
   /** @type {HTMLElement | null} */
@@ -110,7 +115,9 @@
       )}
     >
       <Command.Root loop class="flex max-h-72 flex-col">
-        <div class="flex items-center gap-2 border-b border-border/50 px-2.5 py-2">
+        <!-- Input stays mounted (Command needs it for keyboard nav) but is only
+             shown for longer lists; short menus hide it and are just scannable. -->
+        <div class={cn("flex items-center gap-2 border-b border-border/50 px-2.5 py-2", !showSearch && "sr-only")}>
           <SearchIcon class="size-3.5 shrink-0 text-muted-foreground/45" />
           <Command.Input bind:value={search} {placeholder}>
             {#snippet child({ props })}
@@ -120,7 +127,7 @@
                 bind:this={inputEl}
                 onkeydown={(e) => { /** @type {any} */ (props).onkeydown?.(e); onInputKeydown(e); }}
                 {placeholder}
-                class="min-w-0 flex-1 bg-transparent text-ui-sm text-foreground outline-none placeholder:text-muted-foreground/40"
+                class="no-focus-ring min-w-0 flex-1 bg-transparent text-ui-sm text-foreground outline-none placeholder:text-muted-foreground/40"
               />
             {/snippet}
           </Command.Input>
