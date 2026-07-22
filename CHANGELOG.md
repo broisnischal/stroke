@@ -6,7 +6,24 @@ All notable changes to Stroke are listed here, newest first.
 
 ## [Unreleased]
 
+
+## [1.13.0] - 2026-07-22
+
 ### New Features
+
+#### Redis (new engine)
+- **Redis support** — connect to Redis end-to-end: a keyspace browser (scan keys by type and inspect values), a redis-cli-style command console with formatted replies, and capability-gated UI that hides SQL-only surfaces (table browser, SQL editor, ERD, insights) for key-value connections. Redis replaces BigQuery in the "coming soon" slot.
+
+#### SQL Editor
+- **Multiple SQL editor tabs** — open several independent SQL editor tabs from the command palette ("New SQL Editor") and work across them, each with its own draft and results.
+
+#### Charts
+- **Charts overhaul** — theme-aware series colours that follow `--primary`, categorical bars sorted by value with ellipsis on truncated labels, bar shadow-hover, a compact Y axis and horizontal scroll, plus crash-safety and large-data handling across sankey / tree / dendrogram / word-cloud.
+
+#### Design System
+- **App-wide design system** — a documented `DESIGN_SYSTEM.md` type scale (`text-ui-*`) swept across every surface, aligned `ui/*` primitives (standardized `rounded-[10px]` menus and submenus), a unified searchable-dropdown component, a widened AI model picker with 2-column provider/model grids, and grayscale font antialiasing for crisper text.
+- **Connection modal redesign** — a full-page providers-as-tabs layout with a searchable engine picker, a full-width Advanced section and smaller inputs.
+- **Command-palette page navigator** — the vertical activity bar is replaced by a ⌘P "Go to page" navigator; a `+` button in the status bar opens new surfaces, and the Tools launcher is removed.
 
 #### Instance Insights
 - **Instance Insights** — a live monitoring dashboard for PostgreSQL and MySQL, opened from the command palette or the welcome screen. Activity / State / Config / Replication sub-tabs surface session, TPS, tuple and block-I/O stat cards, ECharts timelines (per-second rates diffed from cumulative counters), sessions / locks / prepared-transaction tables, a searchable `pg_settings` / server-variables browser, and replication stats & slots. Auto-refreshes, and degrades gracefully when catalogs or permissions are missing.
@@ -45,7 +62,6 @@ All notable changes to Stroke are listed here, newest first.
 - **Query-log console** — every executed statement logged in a console at the bottom.
 
 #### Interface
-- **VSCode-style activity bar** — a vertical icon rail (Tables, Connections, Search, Schema, ERD, Roles & RLS, Insights, Extensions, AI, Settings) switching primary surfaces; dialect-aware (hides unsupported entries), a single active indicator, docked to the sidebar's side and hidden with it on ⌘B.
 - **Panel-switchable sidebar** — a Connections panel (list / add / switch connections inline) and an Extensions panel (VSCode-style list with Install toggles; clicking an extension opens its detail as a tab) alongside the Tables panel.
 - **Unified tooltips** — a single delegated GlobalTooltip styles every tooltip app-wide with a consistent arrow, 8px offset, 450ms delay, hover-persistence and viewport-aware flipping, replacing native `title` and per-component tooltips.
 - **Status bar** — shows the app version, a searchable connection switcher with provider brand icons, and a last-fetch timing readout; switch database straight from the ⌘K root.
@@ -94,7 +110,6 @@ All notable changes to Stroke are listed here, newest first.
 - **Clipboard** — copy routes through Tauri's native clipboard plugin.
 
 #### Interface
-- **Activity bar** — the Tables rail icon opens the table view, only the active icon highlights, dialect-unsupported icons are hidden, and the rail docks to and hides with the sidebar.
 - **Extensions panel** — per-extension icons and kind labels.
 - **Diagram export** — success / error toasts on ERD export.
 - **Off-screen window** — an off-screen app window is recovered, and split-pane layout no longer shifts.
