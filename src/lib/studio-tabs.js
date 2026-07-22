@@ -33,6 +33,7 @@ import { loadDefaultPageSize } from '$lib/table-query.js'
  * @property {'table' | 'json' | 'record' | 'text' | 'chart' | 'erd'} [dataViewMode]
  * @property {number} [scrollLeft]
  * @property {number} [scrollTop]
+ * @property {number[]} [expandedRows] — row indices with an open inline detail panel; restored in background/snapshot panes
  */
 
 /** @typedef {object} SqlTabState
@@ -76,6 +77,7 @@ export function cloneTableTabState(state) {
     selected: new Set(state.selected),
     hiddenColumns: new Set(state.hiddenColumns),
     editingCell: state.editingCell ? { ...state.editingCell } : null,
+    expandedRows: [...(state.expandedRows ?? [])],
   }
 }
 
@@ -115,6 +117,7 @@ export function createTableTabState(schema = 'public', table = null, tableKind =
     dataViewMode: 'table',
     scrollLeft: 0,
     scrollTop: 0,
+    expandedRows: [],
   }
 }
 

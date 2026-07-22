@@ -938,6 +938,8 @@
   // preserved across tab switches.
   /** @type {() => { left: number, top: number }} */
   let tableGetScroll = $state(() => ({ left: 0, top: 0 }))
+  /** @type {() => number[]} — live grid's open row-expand panels, persisted per tab */
+  let tableGetExpanded = $state(() => /** @type {number[]} */ ([]))
   /** @type {(pos: { left?: number, top?: number }) => void} */
   let tableApplyScroll = $state(() => {})
   /** @type {{ refresh: () => void } | null} */
@@ -1418,6 +1420,7 @@ let rowSearch = $state('')
       filterBarOpen,
       dataViewMode,
       ...(() => { const s = tableGetScroll(); return { scrollLeft: s.left, scrollTop: s.top } })(),
+      expandedRows: tableGetExpanded(),
     }
   }
 
@@ -5886,6 +5889,7 @@ let rowSearch = $state('')
                 bind:canScrollHorizontally={tableCanScrollH}
                 bind:focusColumn={focusTableColumn}
                 bind:getScroll={tableGetScroll}
+                bind:getExpanded={tableGetExpanded}
                 bind:applyScroll={tableApplyScroll}
                 bind:vcolPanelOpen
                 {rowSort}
