@@ -138,7 +138,7 @@
       <!-- Active license -->
       <div class="flex flex-col gap-3 rounded-xl border border-border/70 bg-card p-4">
         <div class="flex items-center gap-2 text-ui-sm font-medium text-foreground">
-          <BadgeCheck class="size-4 text-green-500" />
+          <BadgeCheck class="size-4 text-success" />
           License active
         </div>
         <dl class="flex flex-col gap-1.5 text-ui-xs">

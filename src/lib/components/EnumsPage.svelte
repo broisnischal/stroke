@@ -78,7 +78,7 @@
                 {#if (e.usedInTables ?? []).length > 0}
                   <div class="flex flex-wrap gap-1">
                     {#each e.usedInTables as tbl (tbl)}
-                      <span class="rounded bg-muted/40 px-1.5 py-px font-mono text-[10px] text-foreground/60">{tbl}</span>
+                      <span class="rounded bg-muted/40 px-1.5 py-px font-mono text-ui-3xs text-foreground/60">{tbl}</span>
                     {/each}
                   </div>
                 {:else}

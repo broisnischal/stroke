@@ -203,7 +203,7 @@
           <Icon class="size-3 shrink-0" />
           {tab.label}
           {#if cnt > 0}
-            <span class="rounded-full bg-muted/80 px-1 font-mono text-[9px] tabular-nums {activeType === tab.id ? 'text-foreground/60' : 'text-muted-foreground/60'}">{cnt}</span>
+            <span class="rounded-full bg-muted/80 px-1 font-mono text-ui-3xs tabular-nums {activeType === tab.id ? 'text-foreground/60' : 'text-muted-foreground/60'}">{cnt}</span>
           {/if}
         </button>
       {/each}
@@ -441,7 +441,7 @@
                   {#if (e.usedInTables ?? []).length > 0}
                     <div class="flex flex-wrap gap-1">
                       {#each e.usedInTables as tbl (tbl)}
-                        <span class="rounded bg-muted/40 px-1.5 py-px font-mono text-[10px] text-foreground/60">{tbl}</span>
+                        <span class="rounded bg-muted/40 px-1.5 py-px font-mono text-ui-3xs text-foreground/60">{tbl}</span>
                       {/each}
                     </div>
                   {:else}

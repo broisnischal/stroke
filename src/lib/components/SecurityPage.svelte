@@ -477,7 +477,7 @@
                   <div class="flex items-center gap-2">
                     <span
                       class={cn(
-                        "inline-flex size-6 shrink-0 items-center justify-center rounded-full font-mono text-[10px] font-semibold uppercase",
+                        "inline-flex size-6 shrink-0 items-center justify-center rounded-full font-mono text-ui-3xs font-semibold uppercase",
                         isSuper
                           ? "bg-destructive/10 text-destructive"
                           : isLogin
@@ -564,7 +564,7 @@
                 >
                   <span
                     class={cn(
-                      "inline-flex size-5 shrink-0 items-center justify-center rounded-full font-mono text-[9px] font-semibold uppercase",
+                      "inline-flex size-5 shrink-0 items-center justify-center rounded-full font-mono text-ui-3xs font-semibold uppercase",
                       isSuper ? "bg-destructive/10 text-destructive" : isLogin ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground",
                     )}>{String(r.rolname).slice(0, 2)}</span>
                   <span class={cn("truncate font-mono text-ui-xs", isSel ? "font-medium text-foreground" : "text-muted-foreground")}>{r.rolname}</span>
@@ -585,7 +585,7 @@
               <div class="flex items-center gap-2.5 border-b border-border/40 px-4 py-3">
                 <span
                   class={cn(
-                    "inline-flex size-7 shrink-0 items-center justify-center rounded-full font-mono text-[11px] font-semibold uppercase",
+                    "inline-flex size-7 shrink-0 items-center justify-center rounded-full font-mono text-ui-2xs font-semibold uppercase",
                     bool(role.rolsuper) ? "bg-destructive/10 text-destructive" : bool(role.rolcanlogin) ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground",
                   )}>{String(role.rolname).slice(0, 2)}</span>
                 <div class="min-w-0">
