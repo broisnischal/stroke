@@ -36,7 +36,11 @@ env:
   # URLs baked into already-shipped versions continue to resolve.
   RELEASES_REPO: broisnischal/stroke
 
-# ── 1. Create the release before any build starts ────────────────────────────
+# ── 1. Create the release as a DRAFT before builds ───────────────────────────
+#      A draft is private and unannounced, so users never see an empty/partial
+#      release. Builds attach their assets to the draft; the final publish-release
+#      job un-drafts it only after every build + updater JSON + scoop succeeds.
+#      If any build fails, it stays a draft (delete & re-tag to retry).
 jobs:
   create-release:
     runs-on: ubuntu-latest
@@ -107,6 +111,7 @@ jobs:
             --repo "$RELEASES_REPO" \
             --title "Stroke $TAG" \
             --notes-file /tmp/notes.md \
+            --draft \
             $PRERELEASE
 
 # ── 2. Build on each platform ────────────────────────────────────────────────
@@ -502,3 +507,17 @@ jobs:
           fi
           gh workflow run update-cask.yml -R broisnischal/homebrew-tap || \
             echo "Tap dispatch failed — tap will self-update on schedule."
+
+# ── 5. Publish the release (un-draft) — ONLY after everything succeeded ───────
+#      This is the gate the user wants: no public release until all platform
+#      builds, the updater JSON, and the Scoop manifest are done. If any of those
+#      jobs fail, this job is skipped and the release stays a draft.
+  publish-release:
+    needs: [build, publish-updater-json, update-scoop]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Un-draft the release
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          TAG: ${{ env.RELEASE_TAG }}
+        run: gh release edit "$TAG" --repo "$RELEASES_REPO" --draft=false
