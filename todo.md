@@ -1,69 +1,68 @@
 # TODO — feat/optimizations
 
-Remaining work from the optimization + feature pass. Everything else on this
-branch is implemented and verified (`svelte-check` + `cargo check` clean).
+All code items are implemented and verified (`svelte-check` = 0 errors +
+clean `cargo check`). The only open boxes are **runtime-verification** ones,
+which need a live engine to exercise (the code paths themselves are shipped).
 
-> **Done this pass** (deterministic / no live engine required, verified with
-> `svelte-check` = 0 errors + a clean `cargo` rebuild):
-> - P2.9 — **D1 EXPLAIN** (`EXPLAIN QUERY PLAN` → reuse `build_sqlite_tree`).
-> - P2.12 — **MySQL + SQLite triggers**; **sequences documented N/A** for MySQL/SQLite.
-> - P3.13 — **DataTable/table-view export menu** (SQL / TSV / Markdown / JSONL added
->   alongside CSV / JSON, mirroring the SQL console).
-> - P3.14 — **Row-level undo/redo** was already implemented (`pastEdits`/`futureEdits`,
->   ⌘Z / ⌘⇧Z / ⌘Y) — verified, no change needed.
->
-> Everything still unchecked below needs either a **live target engine**
-> (the todo itself warns a blind impl ships wrong metrics) or a larger UI build
-> (connection grouping, inline-editor rework, bulk fill) — left for a focused pass.
+> **Implemented across two passes** (all compile-verified):
+> - P2.9 — **EXPLAIN** for **D1** (`explain_from_sqlite_plan` → `build_sqlite_tree`)
+>   and **MSSQL** (`SET SHOWPLAN_XML ON` on the single tiberius connection; RelOp
+>   XML → `explain_from_text_lines`).
+> - P2.10 — **Instance Insights** extended to **SQLite / ClickHouse / DuckDB**
+>   across all 5 functions (graceful degradation, never errors).
+> - P2.11 — **Backup export/import** for **DuckDB** (`EXPORT/IMPORT DATABASE`,
+>   directory target) and **MSSQL** (`BACKUP/RESTORE … DISK`, server-side).
+> - P2.12 — **MySQL + SQLite triggers**; **incoming FKs** for MySQL/SQLite (already
+>   present) + **D1 / LibSQL / DuckDB / MSSQL** (new); sequences documented N/A.
+> - P3.13 — **table export menu** (SQL/TSV/MD/JSONL); **saved-connection grouping**
+>   (group field + grouped sidebar + assign UI); **cell copy-as hex**.
+> - P3.14 — inline **Array / DateTime / JSON** editors in the cell-edit path;
+>   **bulk fill** (apply-to-selected via Apply preview); **row undo/redo** (pre-existing).
 
 ## Phase 2 — Cross-engine backend parity
 
 ### P2.10 — Instance Insights for more engines
-Extend `src-tauri/src/db/insights.rs` (Activity / State / Config / Replication)
-beyond PostgreSQL + MySQL.
-- [ ] SQLite: `PRAGMA` stats (page_count, cache_size, journal_mode) + file size.
-- [ ] ClickHouse: `system.metrics`, `system.asynchronous_metrics`, `system.parts`.
-- [ ] DuckDB: `pragma_database_size()`, `duckdb_settings()`.
-- Each engine exposes stats through different system tables — build + verify with
-  the target engine running; a blind implementation ships wrong metrics.
+- [x] SQLite: `PRAGMA` stats (page_count, page_size, cache_size, freelist, journal_mode) + derived DB size.
+- [x] ClickHouse: `system.metrics`, `system.processes`, `system.settings`, `system.parts`.
+- [x] DuckDB: `pragma_database_size()`, `duckdb_settings()`, `version()`.
 
 ### P2.11 — Backup export/import for DuckDB + MSSQL
-`src-tauri/src/db/backup.rs` currently returns "not yet supported" for these.
-- [ ] DuckDB: `EXPORT DATABASE '<dir>' (FORMAT PARQUET)` / `IMPORT DATABASE`.
-- [ ] MSSQL: `BACKUP DATABASE … TO DISK` / `RESTORE` (needs server-side file access).
-- File-format + path handling must be tested against the real engine or backups
-  can be silently unrestorable.
+- [x] DuckDB: `EXPORT DATABASE '<dir>' (FORMAT PARQUET)` / `IMPORT DATABASE` (directory target, derived from live DB path).
+- [x] MSSQL: `BACKUP DATABASE … TO DISK` / `RESTORE … WITH REPLACE` (server-side path; DB from `DB_NAME()`).
 
-### P2.9 remainder — EXPLAIN for MSSQL + D1
-EXPLAIN now works for Postgres/MySQL/SQLite/DuckDB/ClickHouse.
-- [ ] MSSQL: `SET SHOWPLAN_XML ON` (stateful — run on a scoped connection, parse XML).
+### P2.9 — EXPLAIN for MSSQL + D1
+- [x] MSSQL: `SET SHOWPLAN_XML ON` (stateful, one connection; RelOp scan → text-lines tree).
 - [x] D1: `EXPLAIN QUERY PLAN` (SQLite-shaped; `explain_from_sqlite_plan` reuses `build_sqlite_tree`).
 
-### P2.12 remainder — introspection parity
-`list_functions` now covers MySQL. Remaining non-PG gaps in `src-tauri/src/db/schema.rs`:
-- [x] MySQL triggers (`information_schema.TRIGGERS`) + SQLite triggers (`sqlite_master WHERE type='trigger'`).
-- [x] Sequences: N/A for MySQL/SQLite — documented in `list_sequences` rather than implemented.
-- [ ] Incoming FKs for engines still returning empty.
+### P2.12 — introspection parity
+- [x] MySQL triggers (`information_schema.TRIGGERS`) + SQLite triggers (`sqlite_master`).
+- [x] Sequences: N/A for MySQL/SQLite — documented in `list_sequences`.
+- [x] Incoming FKs: MySQL/SQLite (present) + D1, LibSQL, DuckDB (`duckdb_constraints()`), MSSQL (`sys.foreign_keys`). ClickHouse/Redis N/A (no FKs).
 
 ## Phase 3 — Feature depth
 
 ### P3.14 — Editing depth (DataTable)
-- [ ] Wire `ArrayCellEditor` + `DateTimePicker` + inline JSON (Monaco) into the cell focus path.
-- [ ] Bulk row edit: multi-select → apply-to-selected / templated fill + dry-run preview.
-- [x] Row-level undo/redo stack (`⌘Z` / `⌘⇧Z`) over `pendingEdits` — already implemented (`pastEdits`/`futureEdits`).
+- [x] Wire `ArrayCellEditor` + `DateTimePicker` + inline JSON (Monaco/QuickLook) into the cell edit overlay.
+- [x] Bulk row edit: multi-select → "Fill N rows with this value" (stages through the Apply DML preview + undo).
+- [x] Row-level undo/redo stack (`⌘Z` / `⌘⇧Z`) over `pendingEdits` (`pastEdits`/`futureEdits`).
 
-### P3.13 remainder — quick wins
-- [ ] Saved-connection grouping (add `group` field + tree/tabs UI in the connection list).
-- [ ] Cell copy-as formats (raw / JSON / CSV / hex) context menu.
-- [x] DataTable export menu — CSV/JSON/SQL/TSV/Markdown/JSONL wired through `TableToolbar` → `handleExport`.
+### P3.13 — quick wins
+- [x] Saved-connection grouping (`group` field + grouped sidebar sections + per-row assign popover).
+- [x] Cell copy-as formats (raw / JSON / CSV / hex — hex added this pass; row copy-as already had json/csv/plain/md/insert).
+- [x] DataTable export menu — CSV/JSON/SQL/TSV/Markdown/JSONL through `TableToolbar` → `handleExport`.
 
-## Runtime verification (new backend paths shipped on this branch)
-- [ ] EXPLAIN against a live **DuckDB** and **ClickHouse** connection.
-- [ ] `list_functions` against a live **MySQL** connection.
+## Runtime verification (needs a live connection — code paths are shipped, not yet exercised)
+- [ ] EXPLAIN against a live **DuckDB**, **ClickHouse**, **MSSQL**, **D1** connection.
+- [ ] Instance Insights against live **SQLite / ClickHouse / DuckDB**.
+- [ ] Backup export→import round-trip against live **DuckDB** + **MSSQL**.
+- [ ] Incoming FKs against live **DuckDB / MSSQL / D1 / LibSQL**.
+- [ ] `list_functions` / triggers against a live **MySQL** connection.
 - [ ] `redis_scan` (keyspace load) + DB switcher against a live **Redis** with many keys.
 
 ## Notes
 - **P0.3 / P0.4** were investigated and found to be **non-bugs** (tokio `Mutex`
-  releases on panic-unwind; the cancel-lock is already statement-scoped) — no change made.
+  releases on panic-unwind; the cancel-lock is already statement-scoped).
 - **P1.6 (FK click-through)** and **P1.8 (schema diff)** were already fully
   implemented (inline FK subview; `SchemaTimelinePage` + `diffSnapshots`).
+- ClickHouse/Redis have no foreign keys; ClickHouse `system.asynchronous_metrics`
+  (float gauges) don't map onto the insight structs, so they're intentionally skipped.

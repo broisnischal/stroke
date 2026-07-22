@@ -30,6 +30,7 @@ const LAST_ID_KEY  = 'stroke:last-connection-id'
  *   readOnly?: boolean
  *   environment?: 'prod' | 'staging' | 'dev' | null
  *   provider?: 'neon' | 'supabase' | 'planetscale' | 'prisma'
+ *   group?: string | null
  * }} SavedConnection
  */
 
@@ -105,6 +106,31 @@ export function upsertConnection(conn) {
 export function removeConnection(id) {
   const list = loadSavedConnections().filter((c) => c.id !== id)
   saveConnections(list)
+  return list
+}
+
+/**
+ * Assigns (or clears) the free-text group/folder a saved connection belongs to.
+ * Pass `null`/empty to move it back to Ungrouped. Absent `group` = ungrouped, so
+ * connections saved before groups existed need no migration. Returns the full
+ * updated list (like `removeConnection`) so callers can refresh their view.
+ * @param {string} id
+ * @param {string | null} group
+ * @returns {SavedConnection[]}
+ */
+export function setConnectionGroup(id, group) {
+  const g = group && String(group).trim() ? String(group).trim() : null
+  const list = loadSavedConnections()
+  const idx  = list.findIndex((c) => c.id === id)
+  if (idx >= 0) {
+    if (g) {
+      list[idx] = { ...list[idx], group: g }
+    } else {
+      const { group: _drop, ...rest } = list[idx]
+      list[idx] = rest
+    }
+    saveConnections(list)
+  }
   return list
 }
 

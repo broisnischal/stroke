@@ -1664,6 +1664,22 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
   }
 
+  /**
+   * Copy a cell as a hex byte string (Postgres bytea style: `\x` + UTF-8 bytes).
+   * Numbers/booleans use their string representation; objects use JSON.
+   * @param {number} rowIdx @param {number} colIdx
+   */
+  async function copyCellHex(rowIdx, colIdx) {
+    const value = effectiveCellValue(rowIdx, colIdx);
+    let hex = "";
+    if (value !== null && value !== undefined) {
+      const s = typeof value === "object" ? cellJsonString(value) : String(value);
+      for (const b of new TextEncoder().encode(s)) hex += b.toString(16).padStart(2, "0");
+    }
+    if (await writeClipboard("\\x" + hex)) toast.success("Copied as hex");
+    else toast.error("Could not copy to clipboard");
+  }
+
   async function copyRowJson(rowIdx) {
     const record = rowToRecord(columns, rows[rowIdx] ?? [], hiddenColumns);
     try {
@@ -1811,6 +1827,45 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     stageEdit(rowIdx, colIdx, null);
     pastEdits = [...pastEdits.slice(-49), { rowIdx, colIdx, oldValue: prevValue, newValue: null }];
     futureEdits = [];
+  }
+
+  /**
+   * Bulk fill: stage `value` into `colIdx` for every currently selected row.
+   * Each staged edit flows through the normal Apply DML preview + undo/redo,
+   * exactly like an inline edit. Guarded on PK/editable-type like startEdit.
+   * @param {number} colIdx @param {unknown} value
+   */
+  function fillSelectedColumn(colIdx, value) {
+    const col = columns[colIdx];
+    if (!canEditColumn(colIdx)) {
+      toast.error("Cannot edit column", { description: `${col?.name ?? "This column"} is not editable.` });
+      return;
+    }
+    if (value === null && col?.nullable === false) {
+      toast.error("Cannot set NULL", { description: `"${col.name}" is NOT NULL.` });
+      return;
+    }
+    const targets = [...selected].sort((a, b) => a - b);
+    if (!targets.length) return;
+    /** @type {typeof pastEdits} */
+    const batch = [];
+    for (const rowIdx of targets) {
+      // Skip truncated previews — staging one would write the preview back.
+      if (oversizeCellInfo(rows[rowIdx]?.[colIdx])) continue;
+      const prevValue = effectiveCellValue(rowIdx, colIdx);
+      if (valuesEqual(prevValue, value)) continue;
+      stageEdit(rowIdx, colIdx, value);
+      batch.push({ rowIdx, colIdx, oldValue: prevValue, newValue: value });
+    }
+    if (!batch.length) {
+      toast.message("No changes to stage");
+      return;
+    }
+    pastEdits = [...pastEdits, ...batch].slice(-50);
+    futureEdits = [];
+    toast.success(`Staged ${col?.name ?? "value"} on ${batch.length} row${batch.length === 1 ? "" : "s"}`, {
+      description: "Review in Apply, or undo per row.",
+    });
   }
 
   /** Open the dedicated array editor for a cell (from the context menu). */
@@ -5481,6 +5536,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                 {@const eEnum = ecached?.enumValues ?? null}
                 {@const eType = ecached?.colType ?? ''}
                 {@const eNullable = ecol?.nullable ?? true}
+                {@const eIsArray = isPgArrayDialect && isSqlArrayType(eType)}
+                {@const eIsJson = !eIsArray && /json/i.test(eType)}
+                {@const eDateTime = !eIsArray && !eIsJson && shouldUseDateTimePicker(eType, ecol?.name ?? '')}
+                {@const eDateOnly = !eIsArray && !eIsJson && isDateOnlyType(eType)}
+                {@const eTimeOnly = !eIsArray && !eIsJson && isTimeOnlyType(eType)}
                 <div
                   in:fade={{ duration: 100, easing: cubicOut }}
                   class="absolute z-30 box-border bg-background ring-2 ring-inset ring-primary"
@@ -5547,6 +5607,99 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                       </span>
                       <span class={isNull ? "text-muted-foreground" : ""}>{isNull ? "NULL" : editingCell.draft === "true" ? "true" : "false"}</span>
                     </button>
+                  {:else if eIsArray}
+                    <!-- SQL array cell → dedicated array editor (add/remove/reorder),
+                         reusing the same open/commit path as the context menu so the
+                         edit stages via commitArrayEditor → stageEdit (Apply/undo work). -->
+                    {@const eArrVal = effectiveCellValue(editingCell.rowIdx, editingCell.colIdx)}
+                    <button
+                      type="button"
+                      bind:this={editInput}
+                      disabled={saving}
+                      aria-label="Edit array {ecol?.name ?? 'cell'}"
+                      class="flex h-full w-full items-center gap-2 px-3 font-mono text-ui-xs text-foreground outline-none"
+                      onclick={(e) => {
+                        e.stopPropagation();
+                        if (!editingCell) return;
+                        const { rowIdx, colIdx } = editingCell;
+                        cancelEdit();
+                        openArrayEditor(rowIdx, colIdx);
+                      }}
+                      onkeydown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault(); e.stopPropagation();
+                          if (!editingCell) return;
+                          const { rowIdx, colIdx } = editingCell;
+                          cancelEdit();
+                          openArrayEditor(rowIdx, colIdx);
+                        } else if (e.key === "Escape") {
+                          e.preventDefault(); e.stopPropagation(); cancelEdit();
+                        }
+                      }}
+                    >
+                      <Braces class="size-3.5 shrink-0 text-muted-foreground/60" />
+                      <span class="truncate">{Array.isArray(eArrVal) ? arrayDisplay(eArrVal) : (editingCell.draft || "{}")}</span>
+                      <Maximize2 class="ml-auto size-3 shrink-0 text-muted-foreground/50" />
+                    </button>
+                  {:else if eDateTime || eDateOnly}
+                    <!-- Date/timestamp cell → calendar picker bound to the draft.
+                         Picking commits immediately (like the enum dropdown): a
+                         click-away cancels the inline edit, so we can't defer the
+                         commit without losing the pick. -->
+                    <div class="flex h-full w-full items-center px-3">
+                      <DateTimePicker
+                        colName={ecol?.name}
+                        showTime={eDateTime}
+                        disabled={saving}
+                        value={editingCell.draft}
+                        onchange={(v) => {
+                          if (!editingCell) return;
+                          editingCell.draft = v;
+                          void commitEdit();
+                        }}
+                      />
+                    </div>
+                  {:else if eTimeOnly}
+                    <input
+                      bind:this={editInput}
+                      type="time"
+                      bind:value={editingCell.draft}
+                      disabled={saving}
+                      aria-label="Edit {ecol?.name ?? 'cell'}"
+                      class="box-border block h-full w-full min-w-0 max-w-full border-0 bg-transparent px-3 font-mono text-ui-xs text-foreground outline-none selection:bg-primary/20"
+                      onclick={(e) => e.stopPropagation()}
+                      onkeydown={handleEditKeydown}
+                    />
+                  {:else if eIsJson}
+                    <!-- JSON/JSONB cell: inline typing (Enter/Esc commit) plus an
+                         expand affordance to the editable quick-look surface, whose
+                         commit routes through stageEdit like a plain edit. The
+                         read-only Monaco lightbox is a separate view. -->
+                    <div class="flex h-full w-full items-center">
+                      <input
+                        bind:this={editInput}
+                        bind:value={editingCell.draft}
+                        disabled={saving}
+                        aria-label="Edit {ecol?.name ?? 'cell'}"
+                        class="box-border block h-full min-w-0 flex-1 border-0 bg-transparent pl-3 pr-1 font-mono text-ui-xs text-foreground outline-none [field-sizing:fixed] selection:bg-primary/20"
+                        onclick={(e) => e.stopPropagation()}
+                        onkeydown={handleEditKeydown}
+                      />
+                      <button
+                        type="button"
+                        disabled={saving}
+                        title="Open JSON editor"
+                        aria-label="Open JSON editor"
+                        class="mr-1 inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground/60 outline-none hover:bg-accent hover:text-foreground"
+                        onclick={(e) => {
+                          e.stopPropagation();
+                          if (!editingCell) return;
+                          openQuickLook(editingCell.rowIdx, editingCell.colIdx);
+                        }}
+                      >
+                        <Maximize2 class="size-3.5" />
+                      </button>
+                    </div>
                   {:else}
                     <input
                       bind:this={editInput}
@@ -5825,6 +5978,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           Copy
           <ContextMenu.Shortcut>⌘C</ContextMenu.Shortcut>
         </ContextMenu.Item>
+        <ContextMenu.Item onSelect={() => runMenuAction(() => copyCellHex(contextRowIdx, contextColIdx))}>
+          <Copy />
+          Copy as hex
+        </ContextMenu.Item>
         {#if hasTableContext}
           <ContextMenu.Item
             disabled={menuCellOversize}
@@ -5847,6 +6004,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             <CircleSlash />
             Set NULL
           </ContextMenu.Item>
+          {#if selected.size > 1 && selected.has(contextRowIdx)}
+            <ContextMenu.Item
+              disabled={!menuEditable || menuCellOversize || readonly}
+              class="whitespace-nowrap"
+              onSelect={() => runMenuAction(() => fillSelectedColumn(contextColIdx, effectiveCellValue(contextRowIdx, contextColIdx)))}
+            >
+              <CopyPlus />
+              Fill {formatCompactCount(selected.size)} rows with this value
+            </ContextMenu.Item>
+          {/if}
         {/if}
         {#if showRowExpand}
           <ContextMenu.Item onSelect={() => runMenuAction(() => toggleRowExpand(contextRowIdx))}>

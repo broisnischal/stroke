@@ -1566,6 +1566,127 @@ async fn get_incoming_fks_sqlite(pool: &sqlx::SqlitePool, table: &str) -> Result
     Ok(result)
 }
 
+/// Group `PRAGMA foreign_key_list` JSON rows (id, seq, table, from, to, ...) whose
+/// referenced `table` equals `target` into per-constraint IncomingForeignKey entries.
+/// Shared by the SQLite-shaped-over-HTTP engines (D1, LibSQL).
+fn incoming_fks_from_pragma_json(
+    from_table: &str,
+    fk_rows: &[Vec<serde_json::Value>],
+    target: &str,
+) -> Vec<IncomingForeignKey> {
+    let mut fk_map: std::collections::BTreeMap<i64, (Vec<String>, Vec<String>)> = Default::default();
+    for r in fk_rows {
+        let ref_table = r.get(2).and_then(|v| v.as_str()).unwrap_or("");
+        if !ref_table.eq_ignore_ascii_case(target) { continue; }
+        let id = r.get(0).and_then(|v| v.as_i64()).unwrap_or(0);
+        let fc = r.get(3).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let tc = r.get(4).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let e = fk_map.entry(id).or_default(); e.0.push(fc); e.1.push(tc);
+    }
+    fk_map.into_iter().map(|(_, (from_columns, to_columns))| IncomingForeignKey {
+        from_schema: "main".to_string(), from_table: from_table.to_string(),
+        from_columns, to_columns, constraint_name: String::new(),
+    }).collect()
+}
+
+async fn get_incoming_fks_d1(cfg: &super::connection::D1Config, table: &str) -> Result<Vec<IncomingForeignKey>, String> {
+    let tables: Vec<String> = super::d1::query(
+        cfg,
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+        vec![],
+    )
+    .await
+    .map_err(|e| format!("Failed to list tables: {e}"))?
+    .rows.iter().filter_map(|r| r.first().and_then(|v| v.as_str()).map(String::from)).collect();
+
+    let mut result = Vec::new();
+    for from_table in tables {
+        let tq = format!("\"{}\"", from_table.replace('"', "\"\""));
+        let fk_rows = super::d1::query(cfg, &format!("PRAGMA foreign_key_list({tq})"), vec![])
+            .await.map(|r| r.rows).unwrap_or_default();
+        result.extend(incoming_fks_from_pragma_json(&from_table, &fk_rows, table));
+    }
+    Ok(result)
+}
+
+async fn get_incoming_fks_libsql(cfg: &super::connection::LibSqlConfig, table: &str) -> Result<Vec<IncomingForeignKey>, String> {
+    let tables: Vec<String> = super::libsql::query(
+        cfg,
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+        vec![],
+    )
+    .await
+    .map_err(|e| format!("Failed to list tables: {e}"))?
+    .rows.iter().filter_map(|r| r.first().and_then(|v| v.as_str()).map(String::from)).collect();
+
+    let mut result = Vec::new();
+    for from_table in tables {
+        let tq = format!("\"{}\"", from_table.replace('"', "\"\""));
+        let fk_rows = super::libsql::query(cfg, &format!("PRAGMA foreign_key_list({tq})"), vec![])
+            .await.map(|r| r.rows).unwrap_or_default();
+        result.extend(incoming_fks_from_pragma_json(&from_table, &fk_rows, table));
+    }
+    Ok(result)
+}
+
+async fn get_incoming_fks_duckdb(handle: &super::connection::DuckdbHandle, table: &str) -> Result<Vec<IncomingForeignKey>, String> {
+    let t = table.replace('\'', "''");
+    let sql = format!(
+        "SELECT schema_name, table_name, array_to_string(constraint_column_names, ','), \
+                array_to_string(referenced_column_names, ','), constraint_name \
+         FROM duckdb_constraints() \
+         WHERE constraint_type = 'FOREIGN KEY' AND referenced_table = '{t}' \
+         ORDER BY schema_name, table_name, constraint_name"
+    );
+    let rows = super::duckdb::execute_sql(handle, &sql)
+        .await
+        .map_err(|e| format!("Failed to get incoming foreign keys: {e}"))?
+        .rows;
+    Ok(rows.iter().filter_map(|r| Some(IncomingForeignKey {
+        from_schema:  r.get(0).and_then(|v| v.as_str()).unwrap_or("main").to_string(),
+        from_table:   r.get(1).and_then(|v| v.as_str())?.to_string(),
+        from_columns: r.get(2).and_then(|v| v.as_str()).unwrap_or("").split(',').filter(|s| !s.is_empty()).map(String::from).collect(),
+        to_columns:   r.get(3).and_then(|v| v.as_str()).unwrap_or("").split(',').filter(|s| !s.is_empty()).map(String::from).collect(),
+        constraint_name: r.get(4).and_then(|v| v.as_str()).unwrap_or("").to_string(),
+    })).collect())
+}
+
+async fn get_incoming_fks_mssql(handle: &super::connection::MssqlHandle, schema: &str, table: &str) -> Result<Vec<IncomingForeignKey>, String> {
+    let s = schema.replace('\'', "''");
+    let t = table.replace('\'', "''");
+    let sql = format!(
+        "SELECT sch.name, tp.name, cp.name, cr.name, fk.name \
+         FROM sys.foreign_keys fk \
+         JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = fk.object_id \
+         JOIN sys.tables tp   ON tp.object_id  = fk.parent_object_id \
+         JOIN sys.schemas sch ON sch.schema_id = tp.schema_id \
+         JOIN sys.tables tr   ON tr.object_id  = fk.referenced_object_id \
+         JOIN sys.schemas rsch ON rsch.schema_id = tr.schema_id \
+         JOIN sys.columns cp ON cp.object_id = fkc.parent_object_id     AND cp.column_id = fkc.parent_column_id \
+         JOIN sys.columns cr ON cr.object_id = fkc.referenced_object_id AND cr.column_id = fkc.referenced_column_id \
+         WHERE rsch.name = '{s}' AND tr.name = '{t}' \
+         ORDER BY sch.name, tp.name, fk.name, fkc.constraint_column_id"
+    );
+    let rows = super::mssql::execute_sql(handle, &sql)
+        .await
+        .map_err(|e| format!("Failed to get incoming foreign keys: {e}"))?
+        .rows;
+
+    let mut map: std::collections::BTreeMap<(String, String, String), (Vec<String>, Vec<String>)> = Default::default();
+    for r in &rows {
+        let fs: String = r.get(0).and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let ft: String = r.get(1).and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let fc: String = r.get(2).and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let tc: String = r.get(3).and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let cn: String = r.get(4).and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let e = map.entry((fs, ft, cn)).or_default();
+        e.0.push(fc); e.1.push(tc);
+    }
+    Ok(map.into_iter().map(|((fs, ft, cn), (fc, tc))| IncomingForeignKey {
+        from_schema: fs, from_table: ft, from_columns: fc, to_columns: tc, constraint_name: cn,
+    }).collect())
+}
+
 pub async fn get_incoming_foreign_keys(
     state: State<'_, DbState>,
     schema: String,
@@ -1577,6 +1698,11 @@ pub async fn get_incoming_foreign_keys(
         ActiveConnection::Postgres(pool) => get_incoming_fks_pg(&pool, &schema, &table).await,
         ActiveConnection::Mysql(pool)    => get_incoming_fks_mysql(&pool, &schema, &table).await,
         ActiveConnection::Sqlite(pool)   => get_incoming_fks_sqlite(&pool, &table).await,
+        ActiveConnection::D1(cfg)        => get_incoming_fks_d1(&cfg, &table).await,
+        ActiveConnection::LibSql(cfg)    => get_incoming_fks_libsql(&cfg, &table).await,
+        ActiveConnection::Duckdb(h)      => get_incoming_fks_duckdb(&h, &table).await,
+        ActiveConnection::Mssql(h)       => get_incoming_fks_mssql(&h, &schema, &table).await,
+        // ClickHouse and Redis have no foreign keys.
         _                                => Ok(vec![]),
     }
 }
