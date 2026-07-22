@@ -1,5 +1,8 @@
 <script>
   import Icon from "./Icon.svelte";
+  import CaseSensitive from "@lucide/svelte/icons/case-sensitive";
+  import WholeWord from "@lucide/svelte/icons/whole-word";
+  import Regex from "@lucide/svelte/icons/regex";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
@@ -22,8 +25,7 @@
     ANY_COLUMN,
   } from "$lib/table-query.js";
   import { untrack } from "svelte";
-  import { fly } from "svelte/transition";
-  import { cubicOut } from "svelte/easing";
+  import { fade } from "svelte/transition";
   import { formatCompactCount } from "$lib/table-list.js";
   import { describeTableView } from "$lib/stores/table-views.js";
 
@@ -124,9 +126,9 @@
   } = $props();
 
   const SEARCH_OPTS = /** @type {const} */ ([
-    { key: "matchCase", label: "Aa", title: "Match case", underline: false },
-    { key: "wholeWord", label: "ab", title: "Match whole word", underline: true },
-    { key: "regex", label: ".*", title: "Use regular expression", underline: false },
+    { key: "matchCase", icon: CaseSensitive, title: "Match case" },
+    { key: "wholeWord", icon: WholeWord, title: "Match whole word" },
+    { key: "regex", icon: Regex, title: "Use regular expression" },
   ]);
 
   let searchFocused = $state(false);
@@ -593,7 +595,7 @@
         <div
           class="absolute inset-y-0 right-8 flex items-center gap-px"
           onmousedown={(e) => e.preventDefault()}
-          transition:fly={{ x: 8, duration: 160, easing: cubicOut }}
+          transition:fade={{ duration: 120 }}
         >
           {#each SEARCH_OPTS as opt (opt.key)}
             <button
@@ -601,14 +603,17 @@
               title={opt.title}
               aria-pressed={searchOptions[opt.key]}
               class={cn(
-                "flex size-5 items-center justify-center rounded font-mono text-ui-2xs font-medium leading-none transition-[background-color,color] duration-150 ease-out",
+                "inline-flex size-[22px] items-center justify-center rounded-md transition-[background-color,color] duration-150 ease-out",
                 searchOptions[opt.key]
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground/60 hover:bg-muted hover:text-foreground",
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground/50 hover:bg-muted/70 hover:text-foreground",
               )}
               onclick={() => onsearchoptionschange({ ...searchOptions, [opt.key]: !searchOptions[opt.key] })}
             >
-              <span class={opt.underline ? "underline decoration-1 underline-offset-2" : ""}>{opt.label}</span>
+              <!-- Integer px (not size-3.5 = 12.25px on the 14px rem base): a
+                   fractional SVG box renders these detailed icons off the pixel
+                   grid and blurry. 16px in a 22px box centres at an integer 3px. -->
+              <opt.icon class="size-[16px] shrink-0" />
             </button>
           {/each}
         </div>
@@ -616,7 +621,7 @@
       <button
         type="button"
         class={cn(
-          "absolute right-1 inline-flex size-5 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+          "absolute right-1 inline-flex size-5 items-center justify-center rounded-md text-muted-foreground/50 transition-[background-color,color,opacity] duration-150 ease-out hover:bg-muted/70 hover:text-foreground",
           localSearch ? "opacity-100" : "pointer-events-none opacity-0",
         )}
         aria-label="Clear search"

@@ -8,7 +8,7 @@
  * no triggers." These flags let the UI say *why* a section is empty ("Triggers
  * require PostgreSQL") and let callers skip pointless round-trips entirely.
  *
- * @typedef {'postgres'|'mysql'|'sqlite'|'d1'|'libsql'|'clickhouse'|'duckdb'|'mssql'} Engine
+ * @typedef {'postgres'|'mysql'|'sqlite'|'d1'|'libsql'|'clickhouse'|'duckdb'|'mssql'|'redis'} Engine
  */
 
 /**
@@ -81,6 +81,7 @@ const ENGINE_LABEL = /** @type {Record<string, string>} */ ({
   mssql: 'SQL Server',
   mariadb: 'MariaDB',
   cockroachdb: 'CockroachDB',
+  redis: 'Redis',
 })
 
 /** @param {string | null | undefined} engine */
@@ -99,4 +100,17 @@ export function unsupportedReason(featureLabel, feature) {
   if (engines.length === 1) return `${featureLabel} require ${engines[0]}.`
   const last = engines.pop()
   return `${featureLabel} are only available on ${engines.join(', ')} and ${last}.`
+}
+
+/**
+ * Key-value (non-SQL) engines. These sit outside the SUPPORT feature sets so
+ * SQL-oriented features auto-disable; later phases key their key-value UI off
+ * this set.
+ * @type {Set<string>}
+ */
+export const KEY_VALUE_ENGINES = new Set(['redis'])
+
+/** @param {string | null | undefined} engine */
+export function isKeyValue(engine) {
+  return KEY_VALUE_ENGINES.has(engine)
 }

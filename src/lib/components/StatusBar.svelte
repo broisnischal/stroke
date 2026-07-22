@@ -207,6 +207,7 @@
   )
   const isPostgres = $derived(engineFamily(connection?.type) === 'postgres' || engineFamily(connection?.type) === 'mysql')
   const isD1 = $derived(connection?.type === 'd1')
+  const isRedis = $derived(engineFamily(connection?.type) === 'redis')
   /** Connection that originated from a provider sign-in (Neon/Supabase/…). */
   const isProvider = $derived(!!connection?.provider)
   /** Whether this connection supports switching databases in-place. */
@@ -215,7 +216,8 @@
    * the db name "postgres", so show the project name instead (from the connection
    * name, e.g. "Prisma · stroke-testing" → "stroke-testing"). */
   const currentDbLabel = $derived(
-    isProvider ? ((connection?.name?.split(' · ').pop()) || connection?.name || currentDb)
+    isRedis ? `db ${connection?.db ?? 0}`
+    : isProvider ? ((connection?.name?.split(' · ').pop()) || connection?.name || currentDb)
     : isD1 ? (connection?.database || connection?.name || '')
     : currentDb,
   )
@@ -303,6 +305,7 @@
       : connection?.type === 'duckdb' ? 'DuckDB'
       : connection?.type === 'mssql' ? 'SQL Server'
       : connection?.type === 'd1' ? 'D1'
+      : connection?.type === 'redis' ? 'Redis'
       : 'PostgreSQL',
   )
   const connLabel = $derived(connection?.name ?? connection?.host ?? '')

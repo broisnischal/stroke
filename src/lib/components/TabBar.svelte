@@ -259,7 +259,7 @@
           <ContextMenu.Separator />
           <ContextMenu.Item disabled={!canreopenclosed} onSelect={onreopenclosed}>
             <Icon name="history" class="size-3.5" />
-            Reopen Closed Tab
+            Reopen last tab
             <ContextMenu.Shortcut>⌘⇧T</ContextMenu.Shortcut>
           </ContextMenu.Item>
           <ContextMenu.Separator />

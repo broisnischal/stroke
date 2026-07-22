@@ -409,6 +409,12 @@ async fn execute_sql(
             let rows: Vec<_> = result.rows.iter().take(max_rows).collect();
             Ok(json!({"columns":result.columns.iter().map(|c|&c.name).collect::<Vec<_>>(),"rows":rows,"row_count":rows.len(),"truncated":truncated}).to_string())
         }
+        ActiveConnection::Redis(cfg) => {
+            let result = crate::db::redis::query(cfg, sql).await?;
+            let truncated = result.rows.len() > max_rows;
+            let rows: Vec<_> = result.rows.iter().take(max_rows).collect();
+            Ok(json!({"columns":result.columns.iter().map(|c|&c.name).collect::<Vec<_>>(),"rows":rows,"row_count":rows.len(),"truncated":truncated}).to_string())
+        }
         ActiveConnection::Duckdb(h) => {
             let result = crate::db::duckdb::execute_sql(h, sql).await?;
             let truncated = result.rows.len() > max_rows;
@@ -544,6 +550,10 @@ async fn list_tables(conn: &ActiveConnection, schema: &str) -> Result<String, St
             let tables = crate::db::clickhouse::list_tables(cfg).await?;
             Ok(json!({"tables":tables.iter().map(|t|&t.name).collect::<Vec<_>>()}).to_string())
         }
+        ActiveConnection::Redis(cfg) => {
+            let tables = crate::db::redis::list_tables(cfg).await?;
+            Ok(json!({"tables":tables.iter().map(|t|&t.name).collect::<Vec<_>>()}).to_string())
+        }
         ActiveConnection::Duckdb(h) => {
             let tables = crate::db::duckdb::list_tables(h).await?;
             Ok(json!({"tables":tables.iter().map(|t|&t.name).collect::<Vec<_>>()}).to_string())
@@ -656,6 +666,14 @@ async fn describe_table(
         ActiveConnection::Mysql(pool) => describe_table_mysql(pool, schema, table).await,
         ActiveConnection::Clickhouse(cfg) => {
             let cols = crate::db::clickhouse::get_column_structure(cfg, table).await?;
+            let columns: Vec<_> = cols.iter().map(|c| json!({
+                "name": c.name, "type": c.data_type, "nullable": c.is_nullable,
+                "default": c.column_default, "comment": c.comment,
+            })).collect();
+            Ok(json!({"table":table,"columns":columns}).to_string())
+        }
+        ActiveConnection::Redis(cfg) => {
+            let cols = crate::db::redis::get_column_structure(cfg, table).await?;
             let columns: Vec<_> = cols.iter().map(|c| json!({
                 "name": c.name, "type": c.data_type, "nullable": c.is_nullable,
                 "default": c.column_default, "comment": c.comment,
@@ -932,6 +950,7 @@ async fn check_migrations(conn: &ActiveConnection, schema: &str) -> Result<Strin
         ActiveConnection::LibSql(_) => Ok(json!({"migrations":[],"note":"Migration detection not yet supported for LibSQL"}).to_string()),
         ActiveConnection::Mysql(pool) => check_migrations_mysql(pool, schema).await,
         ActiveConnection::Clickhouse(_) => Ok(json!({"migrations":[],"note":"Migration detection not supported for ClickHouse"}).to_string()),
+        ActiveConnection::Redis(_) => Ok(json!({"migrations":[],"note":"Migration detection not supported for Redis"}).to_string()),
         ActiveConnection::Duckdb(_) => Ok(json!({"migrations":[],"note":"Migration detection not supported for DuckDB"}).to_string()),
         ActiveConnection::Mssql(_) => Ok(json!({"migrations":[],"note":"Migration detection not supported for MS SQL Server"}).to_string()),
     }
@@ -1139,6 +1158,7 @@ async fn explain_query(conn: &ActiveConnection, sql: &str) -> Result<String, Str
             let r = crate::db::clickhouse::query(cfg, &format!("EXPLAIN {sql}")).await?;
             Ok(json!({"plan":r.rows,"database":"clickhouse"}).to_string())
         }
+        ActiveConnection::Redis(_) => Ok(json!({"plan":[],"database":"redis","note":"EXPLAIN is not supported on Redis"}).to_string()),
         ActiveConnection::Duckdb(h) => {
             let r = crate::db::duckdb::execute_sql(h, &format!("EXPLAIN {sql}")).await?;
             Ok(json!({"plan":r.rows,"database":"duckdb"}).to_string())
@@ -1221,6 +1241,10 @@ async fn get_database_stats(conn: &ActiveConnection, schema: &str) -> Result<Str
         ActiveConnection::Clickhouse(cfg) => {
             let tables = crate::db::clickhouse::list_tables(cfg).await?;
             Ok(json!({"database":"clickhouse","table_count":tables.len()}).to_string())
+        }
+        ActiveConnection::Redis(cfg) => {
+            let tables = crate::db::redis::list_tables(cfg).await?;
+            Ok(json!({"database":"redis","table_count":tables.len()}).to_string())
         }
         ActiveConnection::Duckdb(h) => {
             let tables = crate::db::duckdb::list_tables(h).await?;
