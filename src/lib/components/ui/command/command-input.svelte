@@ -25,7 +25,7 @@
 				{...props}
 				bind:value
 				bind:this={ref}
-				class="min-w-0 flex-1 bg-transparent text-[13px] text-foreground outline-none placeholder:text-muted-foreground/35"
+				class="no-focus-ring min-w-0 flex-1 bg-transparent text-ui-sm text-foreground outline-none placeholder:text-muted-foreground/35"
 			/>
 		{/snippet}
 	</CommandPrimitive.Input>
