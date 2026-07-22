@@ -54,6 +54,8 @@
     onopenpages = /** @type {() => void} */ (() => {}),
     ondisconnect = /** @type {() => void} */ (() => {}),
     pendingEditCount = 0,
+    /** True while staged changes are being written — shows a spinner on Apply. */
+    applying = false,
     onapplyedits = /** @type {() => void} */ (() => {}),
     onresetedits = /** @type {() => void} */ (() => {}),
     showTableNav = false,
@@ -681,17 +683,24 @@
     {#if pendingEditCount > 0}
       <button
         type="button"
-        class="inline-flex h-5 items-center gap-1 rounded-md bg-primary px-2 text-ui-2xs font-medium text-primary-foreground transition-opacity hover:opacity-85"
+        class="inline-flex h-5 items-center gap-1 rounded-md bg-primary px-2 text-ui-2xs font-medium text-primary-foreground transition-opacity hover:opacity-85 disabled:opacity-60"
         onclick={onapplyedits}
+        disabled={applying}
         title="Apply {pendingEditCount} unsaved change{pendingEditCount === 1 ? '' : 's'}"
       >
-        <Icon name="check" class="size-2.5 shrink-0" />
-        Apply {pendingEditCount}
+        {#if applying}
+          <span class="size-2.5 shrink-0 animate-spin rounded-full border border-current/40 border-t-current"></span>
+          Applying…
+        {:else}
+          <Icon name="check" class="size-2.5 shrink-0" />
+          Apply {pendingEditCount}
+        {/if}
       </button>
       <button
         type="button"
-        class="inline-flex h-5 items-center gap-1 rounded-md px-2 text-ui-2xs text-muted-foreground/50 transition-colors hover:bg-muted/50 hover:text-foreground"
+        class="inline-flex h-5 items-center gap-1 rounded-md px-2 text-ui-2xs text-muted-foreground/50 transition-colors hover:bg-muted/50 hover:text-foreground disabled:opacity-40"
         onclick={onresetedits}
+        disabled={applying}
         title="Discard unsaved changes"
       >
         <Icon name="undo-2" class="size-2.5 shrink-0" />

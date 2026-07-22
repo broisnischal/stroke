@@ -4673,7 +4673,17 @@ let rowSearch = $state('')
         }
       }
 
+      // The splice above only removes rows already resident on the client. On a
+      // paginated/windowed table that leaves the view empty (or showing a stale
+      // total) while thousands of rows remain server-side, so refetch the current
+      // page — this also refreshes the true COUNT(*).
+      if (pageSize !== PAGE_SIZE_ALL && total > 0 && (page - 1) * pageSize >= total) {
+        // The current page fell past the end after the deletion — step back.
+        page = Math.max(1, Math.ceil(total / pageSize))
+        rawOffset = null
+      }
       saveActiveTabState()
+      await loadRows({ keepScroll: true })
     } finally {
       deletingRows = false
     }
@@ -6245,6 +6255,7 @@ let rowSearch = $state('')
   {activeConnectionId}
   {queryMs}
   {pendingEditCount}
+  applying={savingCell || deletingRows || insertingRow}
   onapplyedits={() => void applyEdits()}
   onresetedits={() => resetEdits()}
   showTableNav={activeTab?.kind === 'table'}
