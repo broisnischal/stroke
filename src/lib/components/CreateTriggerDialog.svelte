@@ -74,9 +74,9 @@
     } finally { saving = false; confirmOpen = false }
   }
 
-  const lbl = 'mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-foreground/50'
-  const inp = 'h-8 w-full rounded-lg border border-border/25 bg-muted/[0.4] px-3 font-mono text-[12px] outline-none placeholder:text-muted-foreground/30 focus:border-border/50 focus:ring-0'
-  const sel = 'h-8 w-full appearance-none rounded-lg border border-border/25 bg-muted/[0.4] px-3 pr-7 font-mono text-[12px] text-foreground outline-none focus:border-border/50'
+  const lbl = 'mb-1.5 block text-ui-3xs font-semibold uppercase tracking-[0.07em] text-muted-foreground/50'
+  const inp = 'h-8 w-full rounded-lg border border-border/25 bg-muted/[0.4] px-3 font-mono text-ui-xs outline-none placeholder:text-muted-foreground/30 focus:border-border/50 focus:ring-0'
+  const sel = 'h-8 w-full appearance-none rounded-lg border border-border/25 bg-muted/[0.4] px-3 pr-7 font-mono text-ui-xs text-foreground outline-none focus:border-border/50'
 </script>
 
 <Dialog.Root bind:open onOpenChange={(v) => { if (!v) reset() }}>
@@ -90,8 +90,8 @@
           <GitBranch class="size-3.5 text-muted-foreground/70" />
         </div>
         <div class="min-w-0 flex-1">
-          <Dialog.Title class="text-[13px] font-semibold text-foreground">Create Trigger</Dialog.Title>
-          <p class="mt-0.5 text-[11px] text-muted-foreground/60">PostgreSQL trigger on <span class="font-mono">{schema}</span></p>
+          <Dialog.Title class="text-ui-sm font-semibold text-foreground">Create Trigger</Dialog.Title>
+          <p class="mt-0.5 text-ui-2xs text-muted-foreground/60">PostgreSQL trigger on <span class="font-mono">{schema}</span></p>
         </div>
         <Dialog.Close class="inline-flex size-6 items-center justify-center rounded-lg text-muted-foreground/30 transition-colors hover:bg-muted/50 hover:text-muted-foreground focus-visible:outline-none" />
       </div>
@@ -126,7 +126,7 @@
               <div class="flex gap-0.5 rounded-lg border border-border/25 bg-muted/[0.3] p-0.5">
                 {#each ['BEFORE', 'AFTER', 'INSTEAD OF'] as t (t)}
                   <button type="button"
-                    class="flex flex-1 items-center justify-center truncate rounded-md px-2 py-1.5 text-[11px] font-medium transition-all {timing === t
+                    class="flex flex-1 items-center justify-center truncate rounded-md px-2 py-1.5 text-ui-2xs font-medium transition-all {timing === t
                       ? 'bg-background text-foreground shadow-sm ring-1 ring-border/30'
                       : 'text-muted-foreground/50 hover:text-foreground'}"
                     onclick={() => (timing = t)}>{t}</button>
@@ -137,12 +137,12 @@
               <p class={lbl}>Fires per</p>
               <div class="flex gap-0.5 rounded-lg border border-border/25 bg-muted/[0.3] p-0.5">
                 <button type="button" disabled={timing === 'INSTEAD OF'}
-                  class="flex flex-1 items-center justify-center rounded-md px-2 py-1.5 text-[11px] font-medium transition-all disabled:opacity-40 {rowLevel
+                  class="flex flex-1 items-center justify-center rounded-md px-2 py-1.5 text-ui-2xs font-medium transition-all disabled:opacity-40 {rowLevel
                     ? 'bg-background text-foreground shadow-sm ring-1 ring-border/30'
                     : 'text-muted-foreground/50 hover:text-foreground'}"
                   onclick={() => (rowLevel = true)}>Row</button>
                 <button type="button" disabled={timing === 'INSTEAD OF'}
-                  class="flex flex-1 items-center justify-center rounded-md px-2 py-1.5 text-[11px] font-medium transition-all disabled:opacity-40 {!rowLevel
+                  class="flex flex-1 items-center justify-center rounded-md px-2 py-1.5 text-ui-2xs font-medium transition-all disabled:opacity-40 {!rowLevel
                     ? 'bg-background text-foreground shadow-sm ring-1 ring-border/30'
                     : 'text-muted-foreground/50 hover:text-foreground'}"
                   onclick={() => (rowLevel = false)}>Statement</button>
@@ -157,7 +157,7 @@
               {#each EVENTS as ev (ev)}
                 {@const active = events.has(ev)}
                 <button type="button"
-                  class="flex h-7 flex-1 items-center justify-center rounded-lg border font-mono text-[10px] font-semibold transition-all {active
+                  class="flex h-7 flex-1 items-center justify-center rounded-lg border font-mono text-ui-3xs font-semibold transition-all {active
                     ? 'border-foreground/20 bg-muted/70 text-foreground'
                     : 'border-border/20 bg-muted/[0.15] text-muted-foreground/45 hover:border-border/35 hover:text-foreground'}"
                   onclick={() => toggleEvent(ev)}>{ev}</button>
@@ -182,7 +182,7 @@
           <!-- SQL preview -->
           <div>
             <p class="{lbl} mb-2">SQL preview</p>
-            <pre class="overflow-x-auto rounded-xl border border-border/20 bg-muted/[0.15] px-4 py-3 font-mono text-[11px] leading-relaxed text-muted-foreground/70 whitespace-pre">{sql}</pre>
+            <pre class="overflow-x-auto rounded-xl border border-border/20 bg-muted/[0.15] px-4 py-3 font-mono text-ui-2xs leading-relaxed text-muted-foreground/70 whitespace-pre">{sql}</pre>
           </div>
 
         </div>
@@ -191,10 +191,10 @@
       <!-- Footer -->
       <div class="flex items-center justify-end gap-2 border-t border-border/25 px-5 py-3">
         <button type="button"
-          class="inline-flex h-8 items-center rounded-lg px-3.5 text-[13px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
+          class="inline-flex h-8 items-center rounded-lg px-3.5 text-ui-sm text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
           onclick={() => { reset(); open = false }}>Cancel</button>
         <button type="button"
-          class="inline-flex h-8 items-center gap-1.5 rounded-lg bg-foreground px-4 text-[13px] font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-40"
+          class="inline-flex h-8 items-center gap-1.5 rounded-lg bg-foreground px-4 text-ui-sm font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-40"
           disabled={!isValid || saving}
           onclick={() => (confirmOpen = true)}>
           {#if saving}<Loader class="size-3 animate-spin" />{/if}

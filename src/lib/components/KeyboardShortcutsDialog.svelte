@@ -208,7 +208,7 @@
         </div>
         <div>
           <h1 class="text-sm font-semibold tracking-tight">Keyboard Shortcuts</h1>
-          <p class="text-[11px] text-muted-foreground/50 leading-none mt-0.5">
+          <p class="text-ui-2xs text-muted-foreground/50 leading-none mt-0.5">
             {mod} on {isMac ? "macOS" : "Windows/Linux"} · {mod}F to search
           </p>
         </div>
@@ -273,7 +273,7 @@
               />
               {group.label}
               <span class={cn(
-                "ml-auto text-[10px] tabular-nums transition-colors",
+                "ml-auto text-ui-3xs tabular-nums transition-colors",
                 active ? "text-muted-foreground/70" : "text-muted-foreground/30 group-hover:text-muted-foreground/50",
               )}>
                 {group.shortcuts.length}
@@ -301,7 +301,7 @@
                 {#if isSearching}
                   <div class="mb-4 flex items-center gap-2">
                     <Icon class="size-3.5 text-muted-foreground/40" />
-                    <span class="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/40">
+                    <span class="text-ui-2xs font-semibold uppercase tracking-widest text-muted-foreground/40">
                       {group.label}
                     </span>
                   </div>
@@ -323,7 +323,7 @@
                         {#each shortcut.keys as key, ki (ki)}
                           <kbd>{key}</kbd>
                           {#if ki < shortcut.keys.length - 1}
-                            <span class="text-[10px] text-muted-foreground/20 select-none">+</span>
+                            <span class="text-ui-3xs text-muted-foreground/20 select-none">+</span>
                           {/if}
                         {/each}
                       </span>

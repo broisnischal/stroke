@@ -40,7 +40,7 @@
       <span class="inline-flex size-6 shrink-0 items-center justify-center rounded-md bg-primary/12 text-primary">
         <Icon name="table-2" class="size-3.5" />
       </span>
-      <Dialog.Title class="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
+      <Dialog.Title class="min-w-0 flex-1 truncate text-ui-sm font-medium text-foreground">
         Table DDL
         <span class="text-muted-foreground/50">·</span>
         <span class="font-mono text-ui-sm">{tableName}</span>

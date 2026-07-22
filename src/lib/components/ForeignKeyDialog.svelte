@@ -87,21 +87,21 @@
     }
   }
 
-  const lbl = 'mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/40'
-  const inp = 'h-9 w-full rounded-lg border border-border/30 bg-muted/[0.3] px-3 font-mono text-[13px] text-foreground placeholder:text-muted-foreground/25 outline-none focus:border-primary/40 focus:ring-1 focus:ring-primary/15 transition-colors'
-  const sel = 'h-9 w-full appearance-none rounded-lg border border-border/30 bg-muted/[0.3] px-3 pr-7 font-mono text-[13px] text-foreground outline-none focus:border-primary/40 transition-colors'
+  const lbl = 'mb-1.5 block text-ui-3xs font-semibold uppercase tracking-widest text-muted-foreground/40'
+  const inp = 'h-9 w-full rounded-lg border border-border/30 bg-muted/[0.3] px-3 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/25 outline-none focus:border-primary/40 focus:ring-1 focus:ring-primary/15 transition-colors'
+  const sel = 'h-9 w-full appearance-none rounded-lg border border-border/30 bg-muted/[0.3] px-3 pr-7 font-mono text-ui-sm text-foreground outline-none focus:border-primary/40 transition-colors'
 
   /**
    * Action pill class — active uses primary styling for both sections
    * (destructive styling only for truly dangerous actions like CASCADE in On Delete).
    */
   function actionCls(a, active, section) {
-    if (!active) return 'rounded-md px-2.5 py-1 font-mono text-[11px] font-medium text-muted-foreground/40 transition-colors hover:bg-muted/40 hover:text-foreground'
+    if (!active) return 'rounded-md px-2.5 py-1 font-mono text-ui-2xs font-medium text-muted-foreground/40 transition-colors hover:bg-muted/40 hover:text-foreground'
     const isDanger = section === 'delete' && (a === 'CASCADE')
     const isWarn = section === 'delete' && (a === 'SET NULL' || a === 'SET DEFAULT')
-    if (isDanger) return 'rounded-md px-2.5 py-1 font-mono text-[11px] font-medium bg-destructive/10 text-destructive ring-1 ring-destructive/25'
-    if (isWarn)   return 'rounded-md px-2.5 py-1 font-mono text-[11px] font-medium bg-amber-500/10 text-amber-400 ring-1 ring-amber-500/25'
-    return 'rounded-md px-2.5 py-1 font-mono text-[11px] font-medium bg-primary/10 text-primary ring-1 ring-primary/25'
+    if (isDanger) return 'rounded-md px-2.5 py-1 font-mono text-ui-2xs font-medium bg-destructive/10 text-destructive ring-1 ring-destructive/25'
+    if (isWarn)   return 'rounded-md px-2.5 py-1 font-mono text-ui-2xs font-medium bg-amber-500/10 text-amber-400 ring-1 ring-amber-500/25'
+    return 'rounded-md px-2.5 py-1 font-mono text-ui-2xs font-medium bg-primary/10 text-primary ring-1 ring-primary/25'
   }
 </script>
 
@@ -127,10 +127,10 @@
           <Link class="size-3.5 text-muted-foreground/70" />
         </div>
         <div class="min-w-0 flex-1">
-          <Dialog.Title class="text-[13px] font-semibold leading-none text-foreground">
+          <Dialog.Title class="text-ui-sm font-semibold leading-none text-foreground">
             {constraintName ? 'Edit foreign key' : 'Add foreign key'}
           </Dialog.Title>
-          <p class="mt-1 truncate font-mono text-[11px] text-muted-foreground/50">
+          <p class="mt-1 truncate font-mono text-ui-2xs text-muted-foreground/50">
             {table}.<span class="text-foreground/60">{column}</span>
           </p>
         </div>
@@ -142,16 +142,16 @@
 
         <!-- FK path preview -->
         <div class="flex min-w-0 items-center gap-2 overflow-hidden rounded-lg border border-border/20 bg-muted/[0.18] px-3.5 py-2.5">
-          <span class="min-w-0 shrink truncate font-mono text-[12px]">
+          <span class="min-w-0 shrink truncate font-mono text-ui-xs">
             <span class="text-muted-foreground/40">{schema}.</span><span class="text-foreground/70">{table}</span>.<span class="font-semibold text-foreground">{column}</span>
           </span>
           <ArrowRight class="size-3 shrink-0 text-muted-foreground/30" />
           {#if refTable && refColumn}
-            <span class="min-w-0 shrink truncate font-mono text-[12px]">
+            <span class="min-w-0 shrink truncate font-mono text-ui-xs">
               <span class="text-muted-foreground/40">{schema}.</span><span class="text-foreground/70">{refTable}</span>.<span class="font-semibold text-blue-400">{refColumn}</span>
             </span>
           {:else}
-            <span class="shrink-0 font-mono text-[11px] text-muted-foreground/30 italic">select table and column below</span>
+            <span class="shrink-0 font-mono text-ui-2xs text-muted-foreground/30 italic">select table and column below</span>
           {/if}
         </div>
 
@@ -201,7 +201,7 @@
       <div class="flex items-center gap-2 border-t border-border/25 px-5 py-3">
         {#if constraintName}
           <button type="button" disabled={deleting || saving}
-            class="mr-auto inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-[12px] text-destructive/70 transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
+            class="mr-auto inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-ui-xs text-destructive/70 transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
             onclick={() => (dropConfirmOpen = true)}>
             {#if deleting}<Loader class="size-3 animate-spin" />{/if}
             Remove FK
@@ -209,10 +209,10 @@
         {/if}
         <div class="ml-auto flex items-center gap-2">
           <button type="button"
-            class="inline-flex h-8 items-center whitespace-nowrap rounded-lg px-3.5 text-[13px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
+            class="inline-flex h-8 items-center whitespace-nowrap rounded-lg px-3.5 text-ui-sm text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
             onclick={() => (open = false)}>Cancel</button>
           <button type="button" disabled={!isValid || saving || deleting}
-            class="inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg bg-foreground px-4 text-[13px] font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-40"
+            class="inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg bg-foreground px-4 text-ui-sm font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-40"
             onclick={handleSave}>
             {#if saving}<Loader class="size-3 animate-spin" />{/if}
             {constraintName ? 'Update FK' : 'Add FK'}

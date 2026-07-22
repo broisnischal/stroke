@@ -146,7 +146,7 @@
           spellcheck="false"
           disabled={loading}
         />
-        <p class="mt-1 text-[10px] text-muted-foreground/50">Letters, digits, underscores · max 63 chars</p>
+        <p class="mt-1 text-ui-3xs text-muted-foreground/50">Letters, digits, underscores · max 63 chars</p>
       </div>
 
       <!-- Advanced toggle -->
@@ -158,7 +158,7 @@
         <ChevronDown class={cn('size-3.5 transition-transform duration-150', showAdvanced && 'rotate-180')} />
         <span class="font-medium">Advanced options</span>
         {#if !showAdvanced}
-          <span class="ml-1 text-[10px] text-muted-foreground/50">
+          <span class="ml-1 text-ui-3xs text-muted-foreground/50">
             encoding, collation, owner…
           </span>
         {/if}
