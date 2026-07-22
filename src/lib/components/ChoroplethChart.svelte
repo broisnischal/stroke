@@ -243,7 +243,7 @@
         <p class="text-ui-xs text-destructive">{loadError}</p>
         <button
           type="button"
-          class="rounded border border-border/50 px-3 py-1.5 font-mono text-[10px] text-muted-foreground hover:bg-accent"
+          class="rounded border border-border/50 px-3 py-1.5 font-mono text-ui-3xs text-muted-foreground hover:bg-accent"
           onclick={() => { loadError = ''; if (el) void initChart(el) }}
         >Retry</button>
       </div>
