@@ -137,24 +137,14 @@
   >
     {@render renderGroup(node, isFocused)}
 
-    <!-- Active / inactive treatment (tmux-style) — only when split, so a lone
-         pane is never decorated. The focused pane gets a crisp accent border
-         plus a brighter top rail; the rest are dimmed so the active pane is
-         unmistakable. All overlays are pointer-events-none, so a click still
-         passes straight through to focus the pane underneath. -->
-    {#if multiPane}
-      {#if isFocused}
-        <div
-          class="pointer-events-none absolute inset-0 z-30 ring-1 ring-inset ring-primary/70"
-        ></div>
-        <div
-          class="pointer-events-none absolute inset-x-0 top-0 z-30 h-0.5 bg-primary"
-        ></div>
-      {:else}
-        <div
-          class="pointer-events-none absolute inset-0 z-30 bg-background/45 transition-opacity duration-150"
-        ></div>
-      {/if}
+    <!-- Active / inactive treatment — only when split. No accent border/rail on
+         the focused pane (too loud); instead the inactive panes are gently dimmed
+         so the active one still reads clearly. Overlay is pointer-events-none, so
+         a click passes straight through to focus the pane underneath. -->
+    {#if multiPane && !isFocused}
+      <div
+        class="pointer-events-none absolute inset-0 z-30 bg-background/45 transition-opacity duration-150"
+      ></div>
     {/if}
 
     <!-- Drop hint: translucent preview of where the dragged tab will land. -->

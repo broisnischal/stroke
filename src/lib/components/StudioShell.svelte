@@ -31,7 +31,6 @@
   import { pickRandomTip } from '$lib/insider-tips.js'
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import Sidebar from './Sidebar.svelte'
-  import ActivityBar from './ActivityBar.svelte'
   import TabBar from './TabBar.svelte'
   import PaneLayout from './PaneLayout.svelte'
   import PaneSnapshot from './PaneSnapshot.svelte'
@@ -314,7 +313,10 @@
   let ddlDialogTable = $state('')
   let ddlDialogSql = $state('')
   let commandOpen = $state(false)
-  let commandPage = $state(/** @type {'root'|'docker'|'connections'|'tables'} */ ('root'))
+  let commandPage = $state(/** @type {'root'|'docker'|'connections'|'tables'|'pages'} */ ('root'))
+  // Reset to the root view whenever the palette closes so generic openers
+  // (⌘K, the status-bar button) never reopen onto a stale sub-page.
+  $effect(() => { if (!commandOpen) commandPage = 'root' })
 
   // ── DB-type capability flags ───────────────────────────────────────────────
   // Normalize wire-compatible aliases (mariadb → mysql, cockroachdb → postgres)
@@ -1544,7 +1546,26 @@ let rowSearch = $state('')
 
   createHotkey('Mod+K', (e) => {
     e.preventDefault()
+    commandPage = 'root'
     commandOpen = true
+  })
+
+  // Ctrl/⌘+P — VSCode-style "Go to page" navigator. Registered as a capture-phase
+  // window listener (not createHotkey) so it beats the webview's native Print
+  // accelerator on WebKitGTK/WebView2 — otherwise the print dialog opens first
+  // and the handler never runs.
+  $effect(() => {
+    /** @param {KeyboardEvent} e */
+    function onKeyP(e) {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && (e.key === 'p' || e.key === 'P')) {
+        e.preventDefault()
+        e.stopPropagation()
+        commandPage = 'pages'
+        commandOpen = true
+      }
+    }
+    window.addEventListener('keydown', onKeyP, { capture: true })
+    return () => window.removeEventListener('keydown', onKeyP, { capture: true })
   })
 
   createHotkey('Mod+Shift+E', (e) => {
@@ -1704,6 +1725,7 @@ let rowSearch = $state('')
   // Command palette — VS Code muscle-memory alias for Mod+K.
   createHotkey('Mod+Shift+P', (e) => {
     e.preventDefault()
+    commandPage = 'pages'
     commandOpen = true
   })
 
@@ -4716,14 +4738,6 @@ let rowSearch = $state('')
     }
   }
 
-  /** @param {'table' | 'sql'} view */
-  async function handleSidebarViewChange(view) {
-    if (view === 'sql') {
-      await focusSqlView()
-      return
-    }
-    await focusDataView()
-  }
 </script>
 
 <Onboarding bind:open={showOnboarding} onconnect={() => (showConnectionModal = true)} onsample={handleSampleConnect} />
@@ -4856,6 +4870,9 @@ let rowSearch = $state('')
   onopenorm={() => { if (aiMode) exitAiMode(); openOrmTab() }}
   onopenerd={() => { if (aiMode) exitAiMode(); openErdTab() }}
   onopenbackup={() => { if (aiMode) exitAiMode(); openBackupTab() }}
+  onopendashboard={() => { if (aiMode) exitAiMode(); openDashboardTab() }}
+  onopencharts={() => { if (aiMode) exitAiMode(); openChartsTab() }}
+  onopendiagrams={() => { if (aiMode) exitAiMode(); openDiagramsTab() }}
   onopenSchema={() => { if (aiMode) exitAiMode(); openSchemaTab() }}
   onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
   onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
@@ -4932,35 +4949,17 @@ let rowSearch = $state('')
 />
 <div class="flex min-h-0 flex-1 overflow-hidden">
   {#if connection}
-    <!-- Activity rail + sidebar behave as one unit: they dock to the same side and
-         hide together on Ctrl+B. The rail stays visible in AI mode so it can be exited. -->
+    <!-- Sidebar dock. Navigation between pages/views now lives in the ⌘P
+         "Go to page" palette, so there's no activity rail — the sidebar just
+         hosts the tables list. Hidden on Ctrl+B and in AI mode. -->
     <div
-      class="flex min-h-0 shrink-0"
+      class="flex min-h-0 shrink-0 flex-col"
       class:order-last={sidebarSide === 'right'}
-      class:flex-row-reverse={sidebarSide === 'right'}
-      style={sidebarOpen || aiMode ? '' : 'display:none'}
+      style={sidebarOpen && !aiMode ? '' : 'display:none'}
     >
-    <ActivityBar
-      {aiMode}
-      {sidebarOpen}
-      activePanel={navSidebarPanel}
-      side={sidebarSide}
-      activeKind={activeTab?.kind ?? ''}
-      {dbType}
-      ontoggletables={() => { if (aiMode) exitAiMode(); setSidebarPanel('tables') }}
-      onopenconnections={() => { if (aiMode) exitAiMode(); setSidebarPanel('connections') }}
-      onopensearch={() => { if (aiMode) exitAiMode(); openSearchTab() }}
-      onopenschema={() => { if (aiMode) exitAiMode(); openSchemaTab() }}
-      onopenerd={() => { if (aiMode) exitAiMode(); openErdTab() }}
-      onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
-      onopeninsights={() => { if (aiMode) exitAiMode(); openInsightsTab() }}
-      onopenextensions={() => { if (aiMode) exitAiMode(); setSidebarPanel('extensions') }}
-      onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
-      onopenaimode={() => (aiMode ? exitAiMode() : enterAiMode())}
-      onopensettings={() => (showSettingsModal = true)}
-    />
     {#if sidebarEverOpened}
     <div
+      class="flex min-h-0 flex-1"
       style={sidebarOpen && !aiMode ? '' : 'display:none'}
       inert={!sidebarOpen || aiMode || undefined}
     >
@@ -4998,7 +4997,6 @@ let rowSearch = $state('')
         onschemachange={handleSchemaChange}
         ontableselect={handleTableSelect}
         ontablefilter={(v) => (tableFilter = v)}
-        onviewchange={handleSidebarViewChange}
         onrefresh={handleRefresh}
         ondisconnect={requestDisconnect}
         onopensettings={() => (showSettingsModal = true)}
@@ -5898,13 +5896,13 @@ let rowSearch = $state('')
       {#if !activeTab || activeTab.kind === 'welcome'}
         {@const isMac = navigator.platform.toUpperCase().includes('MAC')}
         {@const mod = isMac ? '⌘' : 'Ctrl'}
-        {@const cell = 'group relative flex flex-col gap-3 rounded-lg border border-border/60 bg-card p-3 text-left transition-colors hover:border-border hover:bg-accent/40'}
-        {@const proCell = 'group relative flex flex-col gap-3 rounded-lg border border-border/40 bg-card/70 p-3 text-left cursor-not-allowed transition-colors hover:border-amber-500/30 hover:bg-amber-500/[0.03]'}
-        {@const iconCls = 'size-3.5 text-muted-foreground transition-colors group-hover:text-foreground'}
-        {@const proIconCls = 'size-3.5 text-muted-foreground/40'}
-        {@const labelCls = 'text-[11px] font-medium leading-none text-foreground/70 transition-colors group-hover:text-foreground'}
-        {@const proLabelCls = 'text-[11px] font-medium leading-none text-foreground/35'}
-        {@const hotkeyCls = 'text-[9px] tabular-nums text-muted-foreground/50 group-hover:text-muted-foreground transition-colors self-end'}
+        {@const cell = 'group relative flex flex-col gap-3 rounded-lg border border-border/50 bg-card/60 p-3 text-left transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-[var(--ease-out)] hover:border-border hover:bg-accent/40 hover:shadow-sm active:scale-[0.98]'}
+        {@const proCell = 'group relative flex flex-col gap-3 rounded-lg border border-border/40 bg-card/40 p-3 text-left cursor-not-allowed transition-[color,background-color,border-color] duration-150 hover:border-amber-500/30 hover:bg-amber-500/[0.03]'}
+        {@const iconCls = 'size-4 text-muted-foreground transition-colors group-hover:text-foreground'}
+        {@const proIconCls = 'size-4 text-muted-foreground/40'}
+        {@const labelCls = 'text-ui-2xs font-medium leading-none text-foreground/70 transition-colors group-hover:text-foreground'}
+        {@const proLabelCls = 'text-ui-2xs font-medium leading-none text-foreground/35'}
+        {@const hotkeyCls = 'text-ui-3xs tabular-nums text-muted-foreground/50 group-hover:text-muted-foreground transition-colors self-end'}
 
         <!-- Scroll container keeps top/bottom padding reachable when the content
              outgrows the viewport (e.g. at high zoom); inner wrapper centers when it fits. -->
@@ -5916,7 +5914,7 @@ let rowSearch = $state('')
             <div class="flex size-11 items-center justify-center rounded-xl border border-border bg-muted">
               <Logo class="size-6" />
             </div>
-            <p class="text-[9px] font-medium uppercase tracking-[0.25em] text-muted-foreground/60">Quick access</p>
+            <p class="text-ui-3xs font-medium uppercase tracking-[0.25em] text-muted-foreground/60">Quick access</p>
             {#if connection}
               <div class="flex items-center gap-2 text-sm font-medium text-foreground/80">
                 <span class="size-1.5 rounded-full bg-emerald-500 shrink-0"></span>
@@ -6036,12 +6034,12 @@ let rowSearch = $state('')
 
 
           <!-- Footer -->
-          <div class="flex items-center gap-3 text-[10px] text-muted-foreground/50">
+          <div class="flex items-center gap-3 text-ui-3xs text-muted-foreground/50">
             <button
               onclick={() => showShortcutsModal = true}
               class="flex items-center gap-1 transition-colors hover:text-muted-foreground"
             >
-              <Command size={9} />
+              <Command size={12} />
               <span>shortcuts</span>
             </button>
             <span>·</span>
@@ -6133,7 +6131,6 @@ let rowSearch = $state('')
   onswitchconnection={handleSwitchDatabase}
   {mcpRunning}
   hasUpdate={statusBarHasUpdate}
-  {activeView}
   onopenmcp={() => (showMcpPanel = true)}
   onconnect={() => (showConnectionModal = true)}
   onswitchtodb={(dbName) => {
@@ -6182,7 +6179,6 @@ let rowSearch = $state('')
   ontoggletabbar={toggleTabBar}
   ontoggletabletoolbar={toggleTableToolbar}
   ontogglestatusbar={toggleStatusBar}
-  onviewchange={handleSidebarViewChange}
   {aiMode}
   onopenaimode={() => (aiMode ? exitAiMode() : openAiTab())}
   hasPro={$hasPro}
@@ -6200,6 +6196,7 @@ let rowSearch = $state('')
   onopenerd={() => { if (aiMode) exitAiMode(); openErdTab() }}
   onopensettings={() => (showSettingsModal = true)}
   onopencommand={() => (commandOpen = true)}
+  onopenpages={() => { commandPage = 'pages'; commandOpen = true }}
   bind:readonly={tableReadonly}
   ondisconnect={requestDisconnect}
   oncreatedatabase={async ({ name, owner, encoding, lcCollate, lcCtype, template, connectionLimit }) => {
