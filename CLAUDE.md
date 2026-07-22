@@ -56,6 +56,15 @@ Keep code style consistent with the repo:
 
 ## 5) UI and styling conventions
 
+**`DESIGN_SYSTEM.md` (repo root) is the source of truth for all UI.** It defines the
+type scale, color tokens, spacing, radius, control heights, icon sizing, and the
+shared component patterns. Follow it exactly; when a component disagrees, fix the
+component. Key hard rules:
+
+- **Font size: `text-ui-*` scale only** (`text-ui-3xl/2xl/xl/lg/ui/-sm/-xs/-2xs/-3xs`).
+  Never `text-[Npx]` or Tailwind `text-sm/xs/base` — those bypass the 14px base.
+- **Control heights are fixed:** `h-7` compact · `h-8` default · `h-9` field.
+- **Icons:** `size-3.5` default; `size-4` in list rows/headers. Always `shrink-0` in flex.
 - Always prefer components from `src/lib/components/ui/*` instead of ad hoc primitives.
 - Use semantic utility classes (`bg-background`, `text-muted-foreground`, `border-border`, etc.).
 - Prefer Tailwind utilities and `cn()` from `src/lib/utils.js`.
