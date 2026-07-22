@@ -168,10 +168,10 @@
       onclick={(e) => e.stopPropagation()}
     >
       {#if imgNatural.w > 0}
-        <span class="font-mono text-[10px] text-white/50">{imgNatural.w} × {imgNatural.h}</span>
+        <span class="font-mono text-ui-3xs text-white/50">{imgNatural.w} × {imgNatural.h}</span>
         <span class="h-3 w-px bg-white/20"></span>
       {/if}
-      <p class="max-w-[55ch] truncate font-mono text-[10px] text-white/60">{url}</p>
+      <p class="max-w-[55ch] truncate font-mono text-ui-3xs text-white/60">{url}</p>
     </div>
   </div>
 {/if}

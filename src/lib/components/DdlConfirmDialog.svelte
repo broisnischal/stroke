@@ -36,9 +36,9 @@
           {/if}
         </div>
         <div class="min-w-0 flex-1">
-          <p class="text-[13px] font-semibold text-foreground">{title}</p>
+          <p class="text-ui-sm font-semibold text-foreground">{title}</p>
           {#if description}
-            <p class="mt-0.5 text-[12px] leading-[1.5] text-muted-foreground/70">{description}</p>
+            <p class="mt-0.5 text-ui-xs leading-[1.5] text-muted-foreground/70">{description}</p>
           {/if}
         </div>
       </div>
@@ -47,12 +47,12 @@
 
       <!-- SQL preview -->
       <div class="px-5 py-4">
-        <p class="mb-2 text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-foreground/35">SQL preview</p>
+        <p class="mb-2 text-ui-3xs font-semibold uppercase tracking-[0.07em] text-muted-foreground/35">SQL preview</p>
         <div class="rounded-xl border border-border/20 bg-muted/[0.3] px-3.5 py-3">
           {#each sqlLines as line, i}
             <div class="{i > 0 ? 'mt-2 pt-2 border-t border-border/15' : ''} flex items-start gap-2.5">
               <span class="mt-[5px] size-1.5 shrink-0 rounded-full {isDestructive ? 'bg-destructive/50' : 'bg-muted-foreground/25'}"></span>
-              <code class="min-w-0 break-all font-mono text-[12px] text-foreground/80">{line}</code>
+              <code class="min-w-0 break-all font-mono text-ui-xs text-foreground/80">{line}</code>
             </div>
           {/each}
         </div>
@@ -63,13 +63,13 @@
         <button
           type="button"
           disabled={loading}
-          class="inline-flex h-8 items-center rounded-lg px-3.5 text-[13px] text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-40"
+          class="inline-flex h-8 items-center rounded-lg px-3.5 text-ui-sm text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-40"
           onclick={() => (open = false)}
         >Cancel</button>
         <button
           type="button"
           disabled={loading}
-          class="inline-flex h-8 items-center gap-1.5 rounded-lg px-4 text-[13px] font-medium transition-opacity hover:opacity-90 disabled:opacity-40 {isDestructive ? 'bg-destructive text-white' : 'bg-foreground text-background'}"
+          class="inline-flex h-8 items-center gap-1.5 rounded-lg px-4 text-ui-sm font-medium transition-opacity hover:opacity-90 disabled:opacity-40 {isDestructive ? 'bg-destructive text-white' : 'bg-foreground text-background'}"
           onclick={onconfirm}
         >
           {#if loading}<Loader class="size-3 animate-spin" />{/if}
