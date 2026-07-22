@@ -508,7 +508,7 @@
 
   /** Shared field chrome for schema select + table filter (aligned in sidebar grid) */
   const sidebarFieldClass =
-    "h-7 w-full min-w-0 rounded-md border border-border bg-background/40 text-ui-sm text-foreground shadow-none transition-colors hover:bg-background/55 focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring";
+    "h-7 w-full min-w-0 rounded-md border-2 border-foreground/15 bg-background/40 text-ui-sm text-foreground shadow-none transition-colors hover:border-foreground/40 hover:bg-background/55 focus-visible:border-foreground/55 focus-visible:ring-0";
 </script>
 
 <svelte:window onkeydown={(e) => {
