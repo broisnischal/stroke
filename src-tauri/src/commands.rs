@@ -405,6 +405,56 @@ fn explain_rows_to_lines(res: &SqlResult) -> Vec<String> {
         .collect()
 }
 
+/// Turn a SQL Server SHOWPLAN_XML document into indented plan lines — one line
+/// per `<RelOp>` operator, indented by its RelOp-nesting depth — so the shared
+/// `explain_from_text_lines` builder produces the same `{Node Type, Plans}` tree
+/// the renderer already draws for other engines. Uses a lightweight tag scan
+/// (no XML crate is available) that only tracks `<RelOp>` open/close: the
+/// intermediate elements between a parent and child RelOp don't affect depth,
+/// so the counter mirrors the operator hierarchy exactly.
+fn mssql_plan_lines(xml: &str) -> Vec<String> {
+    // Read the value of `name="..."` out of an element's attribute text.
+    fn attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+        let key = format!("{name}=\"");
+        let start = tag.find(&key)? + key.len();
+        let rest = &tag[start..];
+        rest.find('"').map(|end| &rest[..end])
+    }
+
+    let mut lines: Vec<String> = Vec::new();
+    let mut depth: usize = 0;
+    let mut rest = xml;
+    while let Some(lt) = rest.find('<') {
+        rest = &rest[lt + 1..];
+        let Some(gt) = rest.find('>') else { break };
+        let tag = &rest[..gt];
+        rest = &rest[gt + 1..];
+
+        if tag == "/RelOp" {
+            depth = depth.saturating_sub(1);
+        } else if let Some(after) = tag.strip_prefix("RelOp") {
+            // Opening RelOp tag (the name is followed by whitespace before its
+            // attributes, or nothing at all) — not `RelOpXyz` or a comment.
+            if after.is_empty() || after.starts_with(char::is_whitespace) {
+                let phys = attr(tag, "PhysicalOp");
+                let logi = attr(tag, "LogicalOp");
+                let label = match (phys, logi) {
+                    (Some(p), Some(l)) if !l.eq_ignore_ascii_case(p) => format!("{p} ({l})"),
+                    (Some(p), _) => p.to_string(),
+                    (None, Some(l)) => l.to_string(),
+                    (None, None) => "RelOp".to_string(),
+                };
+                lines.push(format!("{}{label}", "  ".repeat(depth)));
+                // `<RelOp .../>` (self-closing) carries no child operators.
+                if !tag.trim_end().ends_with('/') {
+                    depth += 1;
+                }
+            }
+        }
+    }
+    lines
+}
+
 #[tauri::command]
 pub async fn pg_explain_sql(
     state: State<'_, DbState>,
@@ -427,6 +477,60 @@ pub async fn pg_explain_sql(
             // (id, parent, notused, detail) rows the SQLite path builds its tree from.
             let res = crate::db::d1::query(&cfg, &format!("EXPLAIN QUERY PLAN {sql}"), vec![]).await?;
             Ok(explain_from_sqlite_plan(&res, "d1"))
+        }
+        ActiveConnection::Mssql(h) => {
+            // SHOWPLAN_XML is session state: turning it ON makes the *next* query
+            // return its plan as an XML column instead of executing it. All three
+            // statements must therefore run on the same tiberius session — and it
+            // is a single persistent connection (no pool), so holding the guard
+            // across the sequence keeps them on that session with no interleaving.
+            // `SET SHOWPLAN_XML ON` must also be alone in its batch, which each
+            // separate `simple_query` call satisfies.
+            let query = {
+                let q = sql.trim().trim_end_matches(';').trim();
+                match q.get(..8) {
+                    Some(p) if p.eq_ignore_ascii_case("EXPLAIN ") => q[8..].trim_start(),
+                    _ => q,
+                }
+            };
+            let mut client = h.lock().await;
+
+            // Bail before running the query if plan capture can't be enabled —
+            // otherwise the query would execute for real (e.g. a DML statement).
+            match client.simple_query("SET SHOWPLAN_XML ON").await {
+                Ok(stream) => {
+                    stream.into_results().await.map_err(|e| format!("EXPLAIN failed: {e}"))?;
+                }
+                Err(e) => return Err(format!("EXPLAIN failed: {e}")),
+            }
+            // Run the target query; with SHOWPLAN on it yields the plan XML.
+            let captured = match client.simple_query(query).await {
+                Ok(stream) => stream.into_results().await,
+                Err(e) => Err(e),
+            };
+            // Restore session state no matter what — this connection is reused
+            // for every later query, so it must not stay in plan-only mode.
+            if let Ok(off) = client.simple_query("SET SHOWPLAN_XML OFF").await {
+                let _ = off.into_results().await;
+            }
+
+            let result_sets = captured.map_err(|e| format!("EXPLAIN failed: {e}"))?;
+            let mut xml = String::new();
+            for rows in &result_sets {
+                for row in rows {
+                    if let Ok(Some(x)) = row.try_get::<&tiberius::xml::XmlData, _>(0usize) {
+                        xml.push_str(x.as_ref());
+                    } else if let Ok(Some(s)) = row.try_get::<&str, _>(0usize) {
+                        xml.push_str(s);
+                    }
+                }
+            }
+            drop(client);
+
+            if xml.trim().is_empty() {
+                return Err("Empty EXPLAIN result".into());
+            }
+            Ok(explain_from_text_lines(mssql_plan_lines(&xml), "mssql"))
         }
         _ => Err("EXPLAIN isn't supported for this engine yet".into()),
     }

@@ -205,6 +205,7 @@
     getLastConnection,
     loadSavedConnections,
     removeConnection,
+    setConnectionGroup,
     setLastConnectionId,
     upsertConnection,
     engineFamily,
@@ -5095,6 +5096,7 @@ let rowSearch = $state('')
         onswitchconnection={(c) => { if (aiMode) exitAiMode(); void handleSwitchDatabase(c) }}
         onaddconnection={() => { showConnectionModal = true }}
         onremoveconnection={(id) => { savedConnections = removeConnection(id) }}
+        onsetconnectiongroup={(id, group) => { savedConnections = setConnectionGroup(id, group) }}
         ondisconnectconnection={() => handleDisconnect()}
         onopenextensiondetail={(ext) => openExtensionDetailTab(ext)}
         side={sidebarSide}

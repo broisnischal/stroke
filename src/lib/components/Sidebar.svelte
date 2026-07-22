@@ -38,6 +38,8 @@
     onaddconnection = () => {},
     /** @type {(id: string) => void} */
     onremoveconnection = () => {},
+    /** @type {(id: string, group: string | null) => void} */
+    onsetconnectiongroup = () => {},
     ondisconnectconnection = () => {},
     /** Open an extension's detail tab (Extensions panel). @type {(ext: any) => void} */
     onopenextensiondetail = () => {},
@@ -1481,6 +1483,7 @@
         onswitch={onswitchconnection}
         onadd={onaddconnection}
         onremove={onremoveconnection}
+        onsetgroup={onsetconnectiongroup}
         ondisconnect={ondisconnectconnection}
       />
     {:else if navSidebarPanel === "extensions"}
