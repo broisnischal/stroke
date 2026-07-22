@@ -13,7 +13,7 @@
 //!   than failing the whole command. The dashboard must never hard-fail because,
 //!   e.g., `pg_stat_replication` requires a privileged role.
 
-use super::connection::{require_conn, ActiveConnection, ClickhouseConfig, DbState, DuckdbHandle};
+use super::connection::{require_conn, ActiveConnection, ClickhouseConfig, DbState};
 use super::query::SqlResult;
 use serde::Serialize;
 use serde_json::{Map, Value};
