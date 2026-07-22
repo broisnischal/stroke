@@ -214,7 +214,7 @@ use crate::db::{
     update_table_cell, ConnectionConfig, D1Config, DbState, EnumInfo, FunctionInfo, ExplainResult, IndexInfo, LibSqlConfig,
     SqlResult, SqliteConfig, TableInfo, TableRowCount, TableRows, TriggerInfo, SequenceInfo,
     ColumnStructureRow, IncomingForeignKey, InsertRowResult, TunnelState,
-    explain_pg, explain_mysql, explain_sqlite, explain_from_text_lines,
+    explain_pg, explain_mysql, explain_sqlite, explain_from_text_lines, explain_from_sqlite_plan,
 };
 use crate::db::connection::{require_conn, ClickhouseConfig, DuckdbConfig, MssqlConfig, MysqlConfig, RedisConfig};
 use crate::db::ActiveConnection;
@@ -421,6 +421,12 @@ pub async fn pg_explain_sql(
         ActiveConnection::Clickhouse(cfg) => {
             let res = crate::db::clickhouse::query(&cfg, &format!("EXPLAIN {sql}")).await?;
             Ok(explain_from_text_lines(explain_rows_to_lines(&res), "clickhouse"))
+        }
+        ActiveConnection::D1(cfg) => {
+            // D1 is SQLite over HTTP — EXPLAIN QUERY PLAN returns the same
+            // (id, parent, notused, detail) rows the SQLite path builds its tree from.
+            let res = crate::db::d1::query(&cfg, &format!("EXPLAIN QUERY PLAN {sql}"), vec![]).await?;
+            Ok(explain_from_sqlite_plan(&res, "d1"))
         }
         _ => Err("EXPLAIN isn't supported for this engine yet".into()),
     }
