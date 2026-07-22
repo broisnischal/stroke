@@ -95,7 +95,7 @@
     onclick={(e) => { if (e.target === e.currentTarget) cancel() }}
     onkeydown={(e) => { if (e.key === 'Escape') { e.preventDefault(); cancel() } }}
   >
-    <div class="flex max-h-[80vh] w-full max-w-md flex-col overflow-hidden rounded-xl border border-border/50 bg-background shadow-2xl shadow-black/40">
+    <div class="flex max-h-[80vh] w-full max-w-md flex-col overflow-hidden rounded-[10px] border border-border/50 bg-background shadow-2xl shadow-black/40">
       <!-- Header -->
       <div class="flex items-center gap-3 border-b border-border/15 px-4 py-3.5">
         <div class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">

@@ -354,6 +354,16 @@
   let statusBarVisible = $state(loadLayout().statusBarVisible)
   let tabBarVisible = $state(loadLayout().tabBarVisible)
   let tableToolbarVisible = $state(loadLayout().tableToolbarVisible)
+
+  // Publish the app-chrome heights as CSS vars on :root so PORTALED overlays
+  // (the connection modal lives in document.body, outside this tree) can inset
+  // themselves below the draggable titlebar and above the status bar — leaving
+  // the window's drag region and status controls usable while the modal is open.
+  $effect(() => {
+    const root = document.documentElement
+    root.style.setProperty('--app-titlebar-h', '38px') // TitleBar is always shown
+    root.style.setProperty('--app-statusbar-h', statusBarVisible ? '32px' : '0px')
+  })
   // Width for the loading-fallback shell, so the spinner fills a properly-sized
   // sidebar panel (matching saved width) instead of a zero-width strip while the
   // lazy AiSidebar chunk downloads.
@@ -3448,7 +3458,7 @@ let rowSearch = $state('')
       // Stale guard: the user may have switched connection/schema meanwhile.
       if (`${persistConnectionId ?? ''}:${activeSchema}` !== key) return
       const byName = new Map(counts.map((c) => [c.name, normalizeTableRowCount(c.rowCount ?? c.row_count)]))
-      tables = tables.map((t) => (byName.has(t.name) ? { ...t, rowCount: byName.get(t.name) ?? 0 } : t))
+      tables = tables.map((t) => (byName.has(t.name) ? { ...t, rowCount: byName.get(t.name) ?? null } : t))
       const cached = _tableListCache.get(key)
       if (cached) _tableListCache.set(key, { tables, at: cached.at })
     } catch {
@@ -4898,12 +4908,12 @@ let rowSearch = $state('')
       <div class="mb-5 flex size-10 items-center justify-center rounded-lg border border-amber-500/20 bg-amber-500/10">
         <Lock class="size-5 text-amber-500/80" />
       </div>
-      <h2 class="mb-1.5 text-sm font-semibold text-foreground">Stroke Pro required</h2>
-      <p class="mb-5 text-[12px] leading-relaxed text-muted-foreground">This feature is not available on the free plan. Upgrade to Stroke Pro to unlock AI, dashboards, ORM runner, schema explorer, and more.</p>
+      <h2 class="mb-1.5 text-ui-sm font-semibold text-foreground">Stroke Pro required</h2>
+      <p class="mb-5 text-ui-xs leading-relaxed text-muted-foreground">This feature is not available on the free plan. Upgrade to Stroke Pro to unlock AI, dashboards, ORM runner, schema explorer, and more.</p>
       <div class="flex items-center gap-2">
         <button
           onclick={() => (showProGate = false)}
-          class="flex h-8 flex-1 items-center justify-center rounded-lg border border-border/60 bg-muted/50 px-4 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          class="flex h-8 flex-1 items-center justify-center rounded-lg border border-border/60 bg-muted/50 px-4 text-ui-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
           Back
         </button>
@@ -4912,7 +4922,7 @@ let rowSearch = $state('')
             showProGate = false
             openLicenseTab()
           }}
-          class="flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-foreground px-4 text-[12px] font-medium text-background transition-colors hover:bg-foreground/90"
+          class="flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-foreground px-4 text-ui-xs font-medium text-background transition-colors hover:bg-foreground/90"
         >
           <KeyRound class="size-3" />
           Activate Pro
@@ -5009,8 +5019,8 @@ let rowSearch = $state('')
 
     <!-- Text -->
     <div class="flex flex-col items-center gap-1.5 text-center">
-      <p class="text-[13px] font-medium text-foreground/70">Reconnecting</p>
-      <p class="text-[11px] text-muted-foreground/35">Establishing database connection…</p>
+      <p class="text-ui-sm font-medium text-foreground/70">Reconnecting</p>
+      <p class="text-ui-2xs text-muted-foreground/35">Establishing database connection…</p>
     </div>
   </div>
 {/if}
@@ -5175,8 +5185,8 @@ let rowSearch = $state('')
         </div>
 
         <div class="relative flex max-w-md flex-col items-center gap-2.5">
-          <h1 class="text-[1.7rem] font-bold leading-tight tracking-tight text-foreground">Connect a database</h1>
-          <p class="max-w-[21rem] text-[0.95rem] leading-relaxed text-muted-foreground">
+          <h1 class="text-ui-3xl font-semibold leading-tight tracking-tight text-foreground">Connect a database</h1>
+          <p class="max-w-[21rem] text-ui-sm leading-relaxed text-muted-foreground">
             Browse schemas, edit rows, and run SQL — all in one fast, native window.
           </p>
         </div>

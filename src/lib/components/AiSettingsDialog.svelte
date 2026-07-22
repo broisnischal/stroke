@@ -434,11 +434,11 @@
             {/if}
 
             {#if testState === "ok"}
-              <div class="flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.08] px-3 py-2.5 text-ui-xs text-emerald-500">
+              <div class="flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.08] px-3 py-2.5 text-ui-xs text-emerald-500">
                 <Check class="size-3.5 shrink-0" />{testMsg}
               </div>
             {:else if testState === "error"}
-              <div class="flex items-start gap-2 rounded-xl border border-destructive/20 bg-destructive/[0.08] px-3 py-2.5 text-ui-xs text-destructive">
+              <div class="flex items-start gap-2 rounded-lg border border-destructive/20 bg-destructive/[0.08] px-3 py-2.5 text-ui-xs text-destructive">
                 <AlertTriangle class="mt-0.5 size-3.5 shrink-0" /><span class="break-words">{testMsg}</span>
               </div>
             {/if}
