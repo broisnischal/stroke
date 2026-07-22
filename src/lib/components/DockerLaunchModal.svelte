@@ -145,7 +145,7 @@
         </div>
         <div
           bind:this={logEl}
-          class="h-52 overflow-y-auto rounded-md border border-border bg-black/5 dark:bg-white/5 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground"
+          class="h-52 overflow-y-auto rounded-md border border-border bg-black/5 dark:bg-white/5 p-3 font-mono text-ui-2xs leading-relaxed text-muted-foreground"
         >
           {#each logs as line (line)}
             <div class="whitespace-pre-wrap break-all">{line}</div>
