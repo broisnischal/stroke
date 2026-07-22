@@ -22,6 +22,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import DataTable from "./DataTable.svelte";
   import TableLoading from "./TableLoading.svelte";
+  import ShikiBlock from "./ShikiBlock.svelte";
   import JsonViewer from "./JsonViewer.svelte";
   import ResizeHandle from "./ResizeHandle.svelte";
   import { cn } from "$lib/utils.js";
@@ -798,8 +799,7 @@
     </button>
     {#if sqlPreviewOpen && generatedSql}
       <div class="px-3 pb-2">
-        <pre
-          class="overflow-x-auto rounded border border-border/60 bg-muted/30 px-3 py-2 font-mono text-ui-xs leading-relaxed text-foreground/80">{generatedSql}</pre>
+        <ShikiBlock code={generatedSql} lang="sql" embedded class="overflow-x-auto rounded border border-border/60 bg-muted/30" />
       </div>
     {/if}
   </div>

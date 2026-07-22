@@ -277,7 +277,7 @@
             <!-- Type chip -->
             <span
               class={cn(
-                "inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-px font-mono text-xs font-medium lowercase",
+                "inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-px font-mono text-ui-xs font-medium lowercase",
                 chipClass(entry),
               )}
             >

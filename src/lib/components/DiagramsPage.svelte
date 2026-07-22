@@ -273,7 +273,7 @@
                 class={cn(
                   'rounded px-2 py-0.5 text-ui-3xs transition-colors border',
                   draftCode === tpl
-                    ? 'border-primary/50 bg-primary/10 text-primary'
+                    ? 'border-border bg-accent text-foreground'
                     : 'border-border/40 text-muted-foreground hover:border-border hover:text-foreground'
                 )}
               >

@@ -2770,7 +2770,7 @@
 
                 <div class="space-y-2.5">
                   <h1
-                    class="text-[1.9rem] font-semibold leading-[1.2] tracking-[-0.025em] text-foreground"
+                    class="text-ui-3xl font-semibold leading-[1.2] tracking-[-0.025em] text-foreground"
                   >
                     What would you like<br />to explore?
                   </h1>
@@ -3631,7 +3631,7 @@
           <!-- Textarea row -->
           <textarea
             bind:this={inputRef}
-            class="block w-full resize-none bg-transparent px-4 pt-3.5 pb-2 text-[0.9375rem] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/35 disabled:cursor-not-allowed"
+            class="block w-full resize-none bg-transparent px-4 pt-3.5 pb-2 text-ui-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/35 disabled:cursor-not-allowed"
             style="height:auto;min-height:56px;max-height:200px;overflow-y:auto;font-family:inherit"
             placeholder={hasPendingConfirm
               ? "Confirm or cancel the operation above…"

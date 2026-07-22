@@ -143,7 +143,7 @@
               max="23"
               value={hourVal}
               oninput={handleHourChange}
-              class="w-full bg-transparent px-2 py-1.5 text-center font-mono text-ui-sm text-foreground outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              class="no-focus-ring w-full bg-transparent px-2 py-1.5 text-center font-mono text-ui-sm text-foreground outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
               placeholder="HH"
             />
           </div>
@@ -155,7 +155,7 @@
               max="59"
               value={minVal}
               oninput={handleMinChange}
-              class="w-full bg-transparent px-2 py-1.5 text-center font-mono text-ui-sm text-foreground outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              class="no-focus-ring w-full bg-transparent px-2 py-1.5 text-center font-mono text-ui-sm text-foreground outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
               placeholder="MM"
             />
           </div>

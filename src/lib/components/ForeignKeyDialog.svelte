@@ -101,7 +101,7 @@
     const isWarn = section === 'delete' && (a === 'SET NULL' || a === 'SET DEFAULT')
     if (isDanger) return 'rounded-md px-2.5 py-1 font-mono text-ui-2xs font-medium bg-destructive/10 text-destructive ring-1 ring-destructive/25'
     if (isWarn)   return 'rounded-md px-2.5 py-1 font-mono text-ui-2xs font-medium bg-amber-500/10 text-amber-400 ring-1 ring-amber-500/25'
-    return 'rounded-md px-2.5 py-1 font-mono text-ui-2xs font-medium bg-primary/10 text-primary ring-1 ring-primary/25'
+    return 'rounded-md px-2.5 py-1 font-mono text-ui-2xs font-medium bg-accent text-foreground ring-1 ring-border/60'
   }
 </script>
 
