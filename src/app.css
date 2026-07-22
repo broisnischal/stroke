@@ -50,10 +50,38 @@
      crisp physical edge. Pure white/black at low alpha only (never a tinted
      neutral, which reads as dirt). */
   --rim: inset 0 1px 0 0 oklch(1 0 0 / 0.65);
+
+  /* ── Semantic status palette ───────────────────────────────────────────────
+     One set of status hues for the whole app — success / warning / info,
+     alongside the per-theme --destructive. Kept theme-independent on purpose:
+     a status signal must read the same regardless of the accent theme. These
+     are the LIGHT values (fills dark enough to carry near-white text); the
+     .dark block overrides with lighter fills + dark foregrounds. OKLCH so equal
+     L means equal brightness across hues, and contrast is tuned on L alone. */
+  --success:            oklch(0.52 0.14 152);
+  --success-foreground: oklch(0.99 0 0);
+  --warning:            oklch(0.56 0.13 71);
+  --warning-foreground: oklch(0.99 0 0);
+  --info:               oklch(0.50 0.16 248);
+  --info-foreground:    oklch(0.99 0 0);
+
+  /* ── Motion — shared easing curves ─────────────────────────────────────────
+     The built-in CSS easings are too weak to feel intentional. These strong
+     custom curves give UI motion its punch (Emil Kowalski / better-ui). Use via
+     `ease-[var(--ease-out)]`. --ease-out for enter/exit + press feedback;
+     --ease-in-out for on-screen movement/morphs. Never ease-in on UI. */
+  --ease-out:    cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
 }
 
 .dark {
   color-scheme: dark;
+  --success:            oklch(0.72 0.15 155);
+  --success-foreground: oklch(0.17 0.03 155);
+  --warning:            oklch(0.79 0.14 78);
+  --warning-foreground: oklch(0.20 0.04 78);
+  --info:               oklch(0.71 0.13 245);
+  --info-foreground:    oklch(0.16 0.03 245);
   --elevate-1: 0 1px 2px oklch(0 0 0 / 0.4), 0 1px 3px oklch(0 0 0 / 0.3);
   --elevate-2: 0 2px 5px -1px oklch(0 0 0 / 0.45), 0 8px 20px -4px oklch(0 0 0 / 0.5);
   --elevate-3: 0 12px 28px -8px oklch(0 0 0 / 0.55), 0 28px 60px -16px oklch(0 0 0 / 0.62);
@@ -90,6 +118,24 @@ html[data-theme="light"] {
 html[data-icon-style="light"] svg.lucide { stroke-width: 1.5px; }
 html[data-icon-style="bold"]  svg.lucide { stroke-width: 2.5px; }
 
+/* ── Focus ring — one premium treatment for every text field, app-wide ───────
+   Unlayered on purpose: unlayered CSS beats Tailwind's layered `ring-1
+   ring-ring` utilities, so this overrides the ~40 per-component focus styles
+   at once without editing each call site. Instead of a hard, fully-opaque 2px
+   double-line (border + ring stacked in the same color), it draws a calm 1px
+   accent border plus a soft translucent halo — the Linear/shadcn look.
+   aria-invalid fields keep their own destructive ring. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]):not([aria-invalid="true"]):not(.no-focus-ring):focus-visible,
+textarea:not([aria-invalid="true"]):not(.no-focus-ring):focus-visible {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 26%, transparent);
+  outline: none;
+}
+
+/* Borderless search inputs (command palette, dropdown filters) opt out of the
+   halo — they already sit inside a bordered popover, so the ring reads as noise. */
+input.no-focus-ring:focus-visible { box-shadow: none; border-color: transparent; }
+
 /* OS-native border-radius conventions */
 html[data-os="macos"]   { --radius: 0.5rem; --window-radius: 10px; }  /* macOS Big Sur+ system radius */
 html[data-os="windows"] { --radius: 0.4375rem; --window-radius: 8px; } /* Windows 11 */
@@ -116,6 +162,12 @@ html[data-os="linux"]   { --window-radius: 8px; }
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -167,12 +219,12 @@ html[data-os="linux"]   { --window-radius: 8px; }
        Linux overrides this to 'antialiased' below via data-os="linux". */
     -webkit-font-smoothing: auto;
     -moz-osx-font-smoothing: auto;
-    /* optimizeSpeed (not optimizeLegibility): a data-grid renders tens of
-       thousands of text nodes, and optimizeLegibility forces kerning + ligature
-       shaping on every one of them — the single biggest cause of scroll/paint
-       jank on WebKitGTK here. Speed mode skips that shaping; the visual
-       difference on UI/mono text is negligible. */
-    text-rendering: optimizeSpeed;
+    /* optimizeLegibility: proper kerning + shaping so UI text stays smooth and
+       crisp at every zoom level (optimizeSpeed skips shaping and looks rough,
+       especially scaled down). The perf-sensitive data grid opts back into
+       optimizeSpeed via a scoped rule (.studio-data-table) so large grids don't
+       pay the shaping cost on every cell. */
+    text-rendering: optimizeLegibility;
     /* font-synthesis and text-size-adjust omitted: font-synthesis:none can trigger
        a WebKit font assertion on Linux startup; text-size-adjust is a no-op on desktop. */
   }
@@ -401,16 +453,17 @@ html[data-os="linux"]   { --window-radius: 8px; }
     justify-content: center;
     min-width: 20px;
     height: 20px;
-    padding: 0 5px;
+    padding: 0 6px;
     font-family: var(--font-mono);
-    font-size: 10px;
+    font-size: calc(11 / 14 * 1rem);  /* text-ui-2xs — crisper than a fixed 10px */
     font-weight: 500;
     line-height: 1;
-    color: var(--muted-foreground);
-    background: color-mix(in oklch, var(--muted) 60%, transparent);
-    border: 1px solid color-mix(in oklch, var(--border) 90%, transparent);
-    border-bottom: 2px solid var(--border);
-    border-radius: 5px;
+    color: color-mix(in oklch, var(--muted-foreground) 85%, var(--foreground));
+    background: color-mix(in oklch, var(--muted) 45%, transparent);
+    border: 1px solid color-mix(in oklch, var(--border) 75%, transparent);
+    border-radius: 6px;
+    /* One clean keycap shadow instead of a chunky 2px bottom border. */
+    box-shadow: 0 1px 0 color-mix(in oklch, var(--border) 55%, transparent);
     white-space: nowrap;
     user-select: none;
     vertical-align: middle;
@@ -421,7 +474,7 @@ html[data-os="linux"]   { --window-radius: 8px; }
     color: color-mix(in oklch, var(--primary-foreground) 80%, transparent);
     background: color-mix(in oklch, var(--primary-foreground) 14%, transparent);
     border-color: color-mix(in oklch, var(--primary-foreground) 28%, transparent);
-    border-bottom-color: color-mix(in oklch, var(--primary-foreground) 42%, transparent);
+    box-shadow: 0 1px 0 color-mix(in oklch, var(--primary-foreground) 30%, transparent);
   }
 
   .studio-data-table {
@@ -429,6 +482,9 @@ html[data-os="linux"]   { --window-radius: 8px; }
     border-spacing: 0;
     line-height: 1.25;
     user-select: none;
+    /* Opt the large grid back into speed rendering — skips per-cell shaping so
+       scrolling stays smooth on WebKitGTK even with tens of thousands of cells. */
+    text-rendering: optimizeSpeed;
   }
 
   /* Focused cell — set imperatively via $effect (not reactive template class)
@@ -509,6 +565,7 @@ html[data-os="linux"]   { --window-radius: 8px; }
   .elevate-1 { box-shadow: var(--elevate-1); }
   .elevate-2 { box-shadow: var(--elevate-2); }
   .elevate-3 { box-shadow: var(--elevate-3); }
+  .elevate-1-rim { box-shadow: var(--rim), var(--elevate-1); }
   .elevate-2-rim { box-shadow: var(--rim), var(--elevate-2); }
   .elevate-3-rim { box-shadow: var(--rim), var(--elevate-3); }
 
@@ -531,7 +588,28 @@ html[data-os="linux"]   { --window-radius: 8px; }
   /* UI type scale (1rem = --app-font-size = 14px).
      Denominators match the base so each step lands on a whole pixel at 100% zoom,
      eliminating the sub-pixel rounding differences that made text look
-     inconsistent across macOS / Windows / Linux. */
+     inconsistent across macOS / Windows / Linux.
+     See DESIGN_SYSTEM.md — this is the ONLY sanctioned font-size scale. */
+  .text-ui-3xl {
+    font-size: calc(24 / 14 * 1rem);  /* 24px — onboarding / full-screen hero */
+    line-height: calc(30 / 14 * 1rem);
+  }
+
+  .text-ui-2xl {
+    font-size: calc(20 / 14 * 1rem);  /* 20px — page/section hero */
+    line-height: calc(28 / 14 * 1rem);
+  }
+
+  .text-ui-xl {
+    font-size: calc(18 / 14 * 1rem);  /* 18px — dialog titles, empty-state */
+    line-height: calc(26 / 14 * 1rem);
+  }
+
+  .text-ui-lg {
+    font-size: calc(16 / 14 * 1rem);  /* 16px — card/panel titles */
+    line-height: calc(24 / 14 * 1rem);
+  }
+
   .text-ui {
     font-size: 1rem;           /* 14px */
   }
