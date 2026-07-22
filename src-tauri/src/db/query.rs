@@ -1209,7 +1209,8 @@ pub async fn get_table_rows(
     if let Some(ks) = keyset_ok {
         let col = quoted_column(&ks.column)?;
         let op = if ks.after == !ks.desc { ">" } else { "<" };
-        let fetch_order = if (if ks.after { ks.desc } else { !ks.desc }) { "DESC" } else { "ASC" };
+        let fetch_desc = if ks.after { ks.desc } else { !ks.desc };
+        let fetch_order = if fetch_desc { "DESC" } else { "ASC" };
         keyset_reverse = !ks.after;
         keyset_bind = Some(ks.value.clone());
         let ks_param = where_clause.binds.len() + 1;
