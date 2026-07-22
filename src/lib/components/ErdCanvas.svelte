@@ -23,7 +23,13 @@
     onnodemoved = /** @type {(id:string,x:number,y:number)=>void} */ (() => {}),
   } = $props()
 
-  const { NODE_W, ROW_H, HDR_H, PAD_B } = cfg
+  // Layout constants from the parent's config. $derived so they track `cfg` if
+  // the parent swaps it — plain destructuring freezes the initial values, which
+  // is what Svelte's `state_referenced_locally` warning flags.
+  const NODE_W = $derived(cfg.NODE_W)
+  const ROW_H  = $derived(cfg.ROW_H)
+  const HDR_H  = $derived(cfg.HDR_H)
+  const PAD_B  = $derived(cfg.PAD_B)
 
   // Match the app's type system (Geist / Geist Mono) — the generic ui-monospace
   // fallback renders poorly on Linux/WebKitGTK. Names use sans, types use mono.
