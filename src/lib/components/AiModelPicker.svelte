@@ -39,8 +39,8 @@
           class="flex items-center gap-2 px-2.5 py-1.5"
         >
           <div class="flex flex-col min-w-0">
-            <span class="truncate text-[11px] font-medium text-foreground leading-tight">{profile.name}</span>
-            <span class="truncate font-mono text-[9px] text-muted-foreground/60 leading-tight">{profile.model}</span>
+            <span class="truncate text-ui-2xs font-medium text-foreground leading-tight">{profile.name}</span>
+            <span class="truncate font-mono text-ui-3xs text-muted-foreground/60 leading-tight">{profile.model}</span>
           </div>
         </DropdownMenu.RadioItem>
       {/each}
@@ -49,7 +49,7 @@
     <DropdownMenu.Separator />
 
     <DropdownMenu.Item
-      class="flex items-center gap-2 px-2.5 py-1.5 text-[11px]"
+      class="flex items-center gap-2 px-2.5 py-1.5 text-ui-2xs"
       onclick={onopenSettings}
     >
       <Settings2 class="size-3" />

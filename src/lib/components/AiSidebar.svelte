@@ -829,13 +829,13 @@
                         <span class="flex size-4 shrink-0 items-center justify-center text-muted-foreground/40">
                           {#if sqlOpen}<ChevronDown class="size-3.5" />{:else}<ChevronRight class="size-3.5" />{/if}
                         </span>
-                        <span class="shrink-0 rounded border border-border/40 bg-muted/50 px-1 font-mono text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/55">SQL</span>
+                        <span class="shrink-0 rounded border border-border/40 bg-muted/50 px-1 font-mono text-ui-3xs font-semibold uppercase tracking-widest text-muted-foreground/55">SQL</span>
                         <span class="min-w-0 truncate font-mono text-ui-2xs text-muted-foreground/45">{part.content.trim().replace(/\s+/g, ' ').slice(0, 60)}</span>
                       </button>
                       <div class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/sqlbar:opacity-100">
                         <button type="button" class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/50 hover:bg-muted/60 hover:text-foreground" title="Copy" onclick={() => copyText(part.content)}><Copy class="size-3" /></button>
                         <button type="button" class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/50 hover:bg-muted/60 hover:text-foreground" title="Accept" onclick={() => acceptSql(part.content)}><CornerDownLeft class="size-3" /></button>
-                        <button type="button" class="inline-flex h-6 items-center gap-1 rounded bg-primary px-2 text-[10px] font-medium text-primary-foreground hover:opacity-90 disabled:opacity-40" disabled={loading} onclick={() => void runSqlBlock(part.content)}><Play class="size-2.5" />Run</button>
+                        <button type="button" class="inline-flex h-6 items-center gap-1 rounded bg-primary px-2 text-ui-3xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-40" disabled={loading} onclick={() => void runSqlBlock(part.content)}><Play class="size-2.5" />Run</button>
                       </div>
                     </div>
                     <AiSqlBlock sql={part.content} open={sqlOpen} />
@@ -881,7 +881,7 @@
           {:else if item.kind === 'executing'}
             <div class="flex items-center gap-2.5">
               <Loader2 class="size-3 shrink-0 animate-spin text-muted-foreground/50" />
-              <span class="shrink-0 rounded bg-amber-500/10 px-1.5 py-0.5 font-mono text-[9px] font-medium text-amber-500/70">SQL</span>
+              <span class="shrink-0 rounded bg-amber-500/10 px-1.5 py-0.5 font-mono text-ui-3xs font-medium text-amber-500/70">SQL</span>
               <span class="min-w-0 truncate text-ui-xs text-muted-foreground/45">{item.sql}</span>
             </div>
 
@@ -895,20 +895,20 @@
                 <Table2 class={cn('size-3 shrink-0', item.isSchema ? 'text-primary/50' : 'text-muted-foreground/40')} />
                 <span class="min-w-0 flex-1 truncate text-ui-xs text-muted-foreground/55">{item.sql || 'Query'}</span>
                 {#if !item.error}
-                  <span class="shrink-0 rounded bg-muted/50 px-1.5 py-0.5 font-mono text-[9px] tabular-nums text-muted-foreground/50">{formatCompactCount(item.total)} {item.total === 1 ? 'row' : 'rows'}</span>
+                  <span class="shrink-0 rounded bg-muted/50 px-1.5 py-0.5 font-mono text-ui-3xs tabular-nums text-muted-foreground/50">{formatCompactCount(item.total)} {item.total === 1 ? 'row' : 'rows'}</span>
                 {/if}
               </button>
               {#if resOpen}
                 {#if item.error}
                   <div class="flex items-start gap-2 px-2.5 py-2">
                     <AlertTriangle class="mt-0.5 size-3.5 shrink-0 text-destructive" />
-                    <p class="font-mono text-[11px] leading-relaxed text-destructive">{item.error}</p>
+                    <p class="font-mono text-ui-2xs leading-relaxed text-destructive">{item.error}</p>
                   </div>
                 {:else if item.rows.length === 0}
                   <p class="px-2.5 py-2.5 text-center text-ui-2xs italic text-muted-foreground/50">No rows returned.</p>
                 {:else}
                   <div class="overflow-x-auto"><DataTable columns={item.columns} rows={item.rows.slice(0, 15)} embedded showSelection={false} /></div>
-                  {#if item.total > 15}<p class="border-t border-border/20 px-2.5 py-1 text-[10px] text-muted-foreground/40">Showing 15 of {formatCompactCount(item.total)} rows</p>{/if}
+                  {#if item.total > 15}<p class="border-t border-border/20 px-2.5 py-1 text-ui-3xs text-muted-foreground/40">Showing 15 of {formatCompactCount(item.total)} rows</p>{/if}
                 {/if}
               {/if}
             </div>
@@ -934,8 +934,8 @@
                 </p>
               {:else}
                 <div class="mb-0.5 flex items-center gap-1.5">
-                  <span class="min-w-0 flex-1 truncate font-mono text-[10px] font-medium text-foreground/55">{item.spec.title || ''}</span>
-                  <span class="font-mono text-[9px] capitalize text-muted-foreground/25 opacity-0 transition-opacity group-hover/chart:opacity-100">{item.spec.type}</span>
+                  <span class="min-w-0 flex-1 truncate font-mono text-ui-3xs font-medium text-foreground/55">{item.spec.title || ''}</span>
+                  <span class="font-mono text-ui-3xs capitalize text-muted-foreground/25 opacity-0 transition-opacity group-hover/chart:opacity-100">{item.spec.type}</span>
                 </div>
                 <div style="height:{['choropleth','dendrogram','tree','sankey'].includes(item.spec.type) ? 340 : 240}px; width:100%">
                   <AiChartRenderer spec={item.spec} noTitle={true} />
@@ -993,7 +993,7 @@
               onmousedown={(e) => { e.preventDefault(); insertMention(item.insert) }}
             >
               <Table2 class={cn('size-3 shrink-0', active ? 'text-primary' : 'text-muted-foreground/40')} />
-              <span class={cn('min-w-0 flex-1 truncate font-mono text-[11px]', active ? 'text-foreground' : 'text-foreground/70')}>{item.label}</span>
+              <span class={cn('min-w-0 flex-1 truncate font-mono text-ui-2xs', active ? 'text-foreground' : 'text-foreground/70')}>{item.label}</span>
             </button>
           {/each}
         </div>
@@ -1010,9 +1010,9 @@
               class={cn('flex w-full items-center gap-2 rounded-[5px] px-2 py-1 text-left transition-colors', active ? 'bg-accent' : 'hover:bg-accent/40')}
               onmousedown={(e) => { e.preventDefault(); runSlash(item) }}
             >
-              <span class={cn('w-14 shrink-0 truncate font-mono text-[11px]', active ? 'text-primary' : 'text-muted-foreground/55')}>/{item.cmd}</span>
-              <span class="shrink-0 text-[11px] font-medium text-foreground/85">{item.label}</span>
-              <span class="min-w-0 flex-1 truncate text-right text-[10px] text-muted-foreground/40">{item.desc}</span>
+              <span class={cn('w-14 shrink-0 truncate font-mono text-ui-2xs', active ? 'text-primary' : 'text-muted-foreground/55')}>/{item.cmd}</span>
+              <span class="shrink-0 text-ui-2xs font-medium text-foreground/85">{item.label}</span>
+              <span class="min-w-0 flex-1 truncate text-right text-ui-3xs text-muted-foreground/40">{item.desc}</span>
             </button>
           {/each}
         </div>
@@ -1025,7 +1025,7 @@
       {#if contextTables.length || schemaContext.activeTable || (currentView === 'sql' && currentSql.trim())}
         <div class="flex flex-wrap items-center gap-1 border-b border-border/30 px-2.5 py-1.5">
           {#each contextTables as t (t)}
-            <span class="inline-flex items-center gap-1 rounded-md bg-primary/10 py-0.5 pl-1.5 pr-1 font-mono text-[10px] text-primary/80">
+            <span class="inline-flex items-center gap-1 rounded-md bg-primary/10 py-0.5 pl-1.5 pr-1 font-mono text-ui-3xs text-primary/80">
               <Table2 class="size-2.5 shrink-0" />{t}
               <button type="button" class="ml-0.5 flex rounded-sm text-primary/45 transition-colors hover:text-primary" title="Remove" onclick={() => (contextTables = contextTables.filter((x) => x !== t))}>
                 <X class="size-2.5" />
@@ -1033,12 +1033,12 @@
             </span>
           {/each}
           {#if schemaContext.activeTable && !contextTables.includes(`${schemaContext.activeSchema}.${schemaContext.activeTable}`)}
-            <span class="inline-flex items-center gap-1 rounded-md bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/55">
+            <span class="inline-flex items-center gap-1 rounded-md bg-muted/50 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground/55">
               <Table2 class="size-2.5 shrink-0" />{schemaContext.activeSchema}.{schemaContext.activeTable}
             </span>
           {/if}
           {#if currentView === 'sql' && currentSql.trim()}
-            <span class="inline-flex items-center gap-1 rounded-md bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/55">SQL editor</span>
+            <span class="inline-flex items-center gap-1 rounded-md bg-muted/50 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground/55">SQL editor</span>
           {/if}
         </div>
       {/if}
