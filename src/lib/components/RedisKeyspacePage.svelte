@@ -646,6 +646,9 @@
   $effect(() => {
     if (!hasExpiry || editingTtl) return
     const id = setInterval(() => {
+      // Skip while the window is backgrounded so we don't churn reactivity
+      // every second when nothing is visible; the label resyncs on reload.
+      if (typeof document !== 'undefined' && document.hidden) return
       if (selectedTtl != null && selectedTtl > 0) selectedTtl -= 1
     }, 1000)
     return () => clearInterval(id)

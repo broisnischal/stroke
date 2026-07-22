@@ -597,6 +597,23 @@
     open = false
   }
 
+  /**
+   * True when a pointer interaction landed on window chrome that must never
+   * dismiss the dialog — the titlebar / tab-bar drag region, the status bar, or
+   * any studio region. Checks the event target AND the element under the pointer:
+   * while a native window drag is starting, WebKit can report the document (not
+   * the drag element) as the target, so the pointer coordinates are the reliable
+   * signal. Without this, dragging the window to move it closed the modal.
+   * @param {PointerEvent} e
+   */
+  function isChromeInteraction(e) {
+    const sel = '[data-tauri-drag-region],[data-studio-chrome],[data-studio-region]'
+    const t = /** @type {Element | null} */ (e.target)
+    if (t?.closest?.(sel)) return true
+    const at = document.elementFromPoint?.(e.clientX, e.clientY)
+    return !!at?.closest?.(sel)
+  }
+
   async function d1Discover() {
     if (!apiToken.trim()) { d1DiscoverError = 'Enter your API token first.'; return }
     d1DiscoverPhase = 'loading'; d1DiscoverError = ''
@@ -771,10 +788,9 @@
       onEscapeKeydown={(e) => { if (isDirty && !isBusy) { e.preventDefault(); confirmDiscardOpen = true } }}
       onInteractOutside={(e) => {
         // The modal is inset to leave the titlebar (drag region) and status bar
-        // usable. Interactions there must NOT dismiss the dialog or prompt discard
-        // — otherwise dragging the window or using status controls closes it.
-        const t = /** @type {Element | null} */ (e.target)
-        if (t?.closest?.('[data-studio-chrome],[data-studio-region]')) { e.preventDefault(); return }
+        // usable. Interactions on that chrome must NOT dismiss the dialog or prompt
+        // discard — otherwise dragging the window to move it closes the modal.
+        if (isChromeInteraction(e)) { e.preventDefault(); return }
         if (isDirty && !isBusy) { e.preventDefault(); confirmDiscardOpen = true }
       }}
     >
