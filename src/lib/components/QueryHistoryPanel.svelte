@@ -7,11 +7,13 @@
   import Search from '@lucide/svelte/icons/search'
   import X from '@lucide/svelte/icons/x'
   import BarChart2 from '@lucide/svelte/icons/bar-chart-2'
+  import Star from '@lucide/svelte/icons/star'
   import { cn } from '$lib/utils.js'
   import {
     clearQueryHistory,
     deleteQueryHistoryEntry,
     deleteSavedQuery,
+    setQueryHistoryFavorite,
   } from '$lib/stores/query-history.js'
   import { savedCharts } from '$lib/stores/saved-charts.js'
 
@@ -60,10 +62,11 @@
 
   const filteredHistory = $derived.by(() => {
     const q = filter.trim().toLowerCase()
-    if (!q) return history
-    return history.filter(
-      (e) => e.title.toLowerCase().includes(q) || e.sql.toLowerCase().includes(q),
-    )
+    const base = q
+      ? history.filter((e) => e.title.toLowerCase().includes(q) || e.sql.toLowerCase().includes(q))
+      : history
+    // Pin favorites to the top; stable sort preserves the store's recency order within each group.
+    return [...base].sort((a, b) => (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0))
   })
 
   const filteredSaved = $derived.by(() => {
@@ -77,6 +80,12 @@
   /** @param {string} id */
   async function removeHistory(id) {
     await deleteQueryHistoryEntry(id)
+    await onrefresh()
+  }
+
+  /** @param {string} id @param {boolean|undefined} favorite */
+  async function toggleFavorite(id, favorite) {
+    await setQueryHistoryFavorite(id, !favorite)
     await onrefresh()
   }
 
@@ -188,7 +197,7 @@
           <div class="group relative">
             <button
               type="button"
-              class="flex w-full min-w-0 items-start gap-1.5 px-2.5 py-1.5 pr-7 text-left transition-colors hover:bg-accent/30"
+              class="flex w-full min-w-0 items-start gap-1.5 px-2.5 py-1.5 pr-12 text-left transition-colors hover:bg-accent/30"
               onclick={() => onselect(entry.sql)}
             >
               <History class="mt-px size-3 shrink-0 text-muted-foreground/40" />
@@ -201,8 +210,22 @@
                   {#if entry.queryMs}
                     <span class="tabular-nums opacity-70">{entry.queryMs}ms</span>
                   {/if}
+                  {#if entry.runCount && entry.runCount > 1}
+                    <span class="tabular-nums opacity-70" title="Run {entry.runCount} times">·{entry.runCount}×</span>
+                  {/if}
                 </span>
               </div>
+            </button>
+            <button
+              type="button"
+              class={cn(
+                'absolute right-6 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded transition-colors hover:!text-amber-500',
+                entry.favorite ? 'text-amber-500' : 'text-muted-foreground/0 group-hover:text-muted-foreground/40',
+              )}
+              title={entry.favorite ? 'Unfavorite' : 'Favorite'}
+              onclick={(e) => { e.stopPropagation(); void toggleFavorite(entry.id, entry.favorite) }}
+            >
+              <Star class={cn('size-3', entry.favorite && 'fill-current')} />
             </button>
             <button
               type="button"
