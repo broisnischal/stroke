@@ -107,6 +107,13 @@ jobs:
           # No --target: the source SHA lives in the private repo, not in
           # RELEASES_REPO. The tag there just points at its default branch;
           # the real source commit is recorded in the notes ("Built from …").
+          # Idempotent: if a release/tag for this version already exists (e.g. a
+          # failed prior run left a draft), remove it so `create` never collides.
+          if gh release view "$TAG" --repo "$RELEASES_REPO" >/dev/null 2>&1; then
+            echo "Existing $TAG release found — deleting it for a clean rebuild."
+            gh release delete "$TAG" --repo "$RELEASES_REPO" --yes --cleanup-tag
+          fi
+
           gh release create "$TAG" \
             --repo "$RELEASES_REPO" \
             --title "Stroke $TAG" \
