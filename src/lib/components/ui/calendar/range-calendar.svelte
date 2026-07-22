@@ -29,7 +29,7 @@
       >
         <ChevronLeft class="size-4" />
       </RangeCalendarPrimitive.PrevButton>
-      <RangeCalendarPrimitive.Heading class="text-[13px] font-medium text-foreground" />
+      <RangeCalendarPrimitive.Heading class="text-ui-sm font-medium text-foreground" />
       <RangeCalendarPrimitive.NextButton
         class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
       >
@@ -44,7 +44,7 @@
             <RangeCalendarPrimitive.GridRow class="flex">
               {#each weekdays as day}
                 <RangeCalendarPrimitive.HeadCell
-                  class="w-9 rounded-md text-[11px] font-normal text-muted-foreground"
+                  class="w-9 rounded-md text-ui-2xs font-normal text-muted-foreground"
                 >
                   {day.slice(0, 2)}
                 </RangeCalendarPrimitive.HeadCell>
@@ -58,11 +58,11 @@
                   <RangeCalendarPrimitive.Cell
                     {date}
                     month={month.value}
-                    class="relative p-0 text-center text-[13px]"
+                    class="relative p-0 text-center text-ui-sm"
                   >
                     <RangeCalendarPrimitive.Day
                       class={cn(
-                        "inline-flex size-9 items-center justify-center rounded-md text-[13px] font-normal transition-colors",
+                        "inline-flex size-9 items-center justify-center rounded-md text-ui-sm font-normal transition-colors",
                         "hover:bg-muted hover:text-foreground",
                         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                         // All days in range: light tint, no rounding (continuous strip)
