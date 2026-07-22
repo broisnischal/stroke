@@ -16,7 +16,10 @@ pub const OAUTH: OAuthConfig = OAuthConfig {
     auth_url: "https://auth.prisma.io/authorize",
     // token_url is used by the proxy, not the app (the app posts to TOKEN_PROXY).
     token_url: "https://auth.prisma.io/token",
-    scopes: "workspace:admin",
+    // `offline_access` is REQUIRED to receive a refresh token — without it the
+    // access token dies after 1h and every Management-API call 401s (the app
+    // still shows "connected" because the dead access token is on disk).
+    scopes: "workspace:admin offline_access",
 };
 
 const API: &str = "https://api.prisma.io/v1";
@@ -34,13 +37,24 @@ async fn get(token: &str, path: &str) -> Result<Value, String> {
         .await
         .map_err(|e| format!("Prisma: bad JSON: {e}"))?;
     if status != 200 {
-        let msg = body["message"]
-            .as_str()
-            .or_else(|| body["error"].as_str())
-            .unwrap_or("request failed");
-        return Err(format!("Prisma API error ({status}): {msg}"));
+        return Err(api_error(status, &body));
     }
     Ok(body)
+}
+
+/// Format a Management-API error. A 401 almost always means the stored token
+/// expired — tell the user to reconnect rather than showing "request failed".
+fn api_error(status: u16, body: &Value) -> String {
+    let msg = body["message"]
+        .as_str()
+        .or_else(|| body["error"].as_str())
+        .unwrap_or("request failed");
+    if status == 401 {
+        return "Your Prisma session has expired. Click \"Sign out\" and sign in \
+                again to reconnect."
+            .to_string();
+    }
+    format!("Prisma API error ({status}): {msg}")
 }
 
 async fn post(token: &str, path: &str, body: serde_json::Value) -> Result<Value, String> {
@@ -57,11 +71,7 @@ async fn post(token: &str, path: &str, body: serde_json::Value) -> Result<Value,
         .await
         .map_err(|e| format!("Prisma: bad JSON: {e}"))?;
     if !(200..300).contains(&status) {
-        let msg = body["message"]
-            .as_str()
-            .or_else(|| body["error"].as_str())
-            .unwrap_or("request failed");
-        return Err(format!("Prisma API error ({status}): {msg}"));
+        return Err(api_error(status, &body));
     }
     Ok(body)
 }
