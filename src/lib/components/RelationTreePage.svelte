@@ -327,8 +327,8 @@
                     {#if isPk}<KeyRound class="size-3 shrink-0 text-amber-400/80" />
                     {:else if isFk}<Link class="size-3 shrink-0 text-blue-400/60" />
                     {:else}<span class="size-3 shrink-0"></span>{/if}
-                    <span class="font-mono text-[10px] {isPk ? 'font-semibold text-amber-300/90' : isFk ? 'text-blue-300/75' : 'text-foreground/60'}">{col.name}</span>
-                    <span class="ml-auto font-mono text-[9px] text-muted-foreground/35">{col.dataType}</span>
+                    <span class="font-mono text-ui-3xs {isPk ? 'font-semibold text-amber-300/90' : isFk ? 'text-blue-300/75' : 'text-foreground/60'}">{col.name}</span>
+                    <span class="ml-auto font-mono text-ui-3xs text-muted-foreground/35">{col.dataType}</span>
                   </div>
                 {/each}
               </div>
@@ -345,7 +345,7 @@
                 References <span class="text-muted-foreground/50">({rootOut.length})</span>
               </h3>
               <div class="flex-1 border-t border-border/30"></div>
-              <span class="font-mono text-[10px] text-muted-foreground/40">this FK → other PK</span>
+              <span class="font-mono text-ui-3xs text-muted-foreground/40">this FK → other PK</span>
             </div>
             <div class="flex flex-col gap-2 pl-4">
               {#each rootOut as rel (rel.col)}
@@ -372,7 +372,7 @@
                 Referenced by <span class="text-muted-foreground/50">({rootIn.length})</span>
               </h3>
               <div class="flex-1 border-t border-border/30"></div>
-              <span class="font-mono text-[10px] text-muted-foreground/40">other FK → this PK</span>
+              <span class="font-mono text-ui-3xs text-muted-foreground/40">other FK → this PK</span>
             </div>
             <div class="flex flex-col gap-2 pl-4">
               {#each rootIn as rel (`${rel.fromTable}${rel.fromCol}`)}
