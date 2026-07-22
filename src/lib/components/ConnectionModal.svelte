@@ -606,12 +606,39 @@
    * signal. Without this, dragging the window to move it closed the modal.
    * @param {PointerEvent} e
    */
+  const CHROME_SEL = '[data-tauri-drag-region],[data-studio-chrome],[data-studio-region]'
+
+  // The reliable signal: capture the REAL pointerdown on `window` (capture phase
+  // fires before bits-ui's document-level dismiss listener). bits-ui hands
+  // onInteractOutside a synthetic event whose `target`/`clientX` don't survive a
+  // native window drag — during a drag WebKit reports `document` as the target and
+  // drops the coordinates — so neither `e.target.closest` nor `elementFromPoint`
+  // can see the titlebar. This tracker records whether the last pointerdown landed
+  // on the titlebar/tab-bar chrome, which is what the drag/move/resize starts from.
+  let _pointerInChrome = false
+  $effect(() => {
+    if (!open) return
+    const onPointerDown = (/** @type {PointerEvent} */ e) => {
+      const t = /** @type {Element | null} */ (e.target)
+      _pointerInChrome = !!t?.closest?.(CHROME_SEL)
+    }
+    window.addEventListener('pointerdown', onPointerDown, true)
+    return () => window.removeEventListener('pointerdown', onPointerDown, true)
+  })
+
   function isChromeInteraction(e) {
-    const sel = '[data-tauri-drag-region],[data-studio-chrome],[data-studio-region]'
-    const t = /** @type {Element | null} */ (e.target)
-    if (t?.closest?.(sel)) return true
-    const at = document.elementFromPoint?.(e.clientX, e.clientY)
-    return !!at?.closest?.(sel)
+    if (_pointerInChrome) return true
+    // Defensive fallbacks (in case the tracker missed): try the synthetic event's
+    // wrapped original event, then the raw target, then the pointer coordinates.
+    const orig = e?.detail?.originalEvent ?? e
+    const t = /** @type {Element | null} */ (orig?.target ?? e?.target)
+    if (t?.closest?.(CHROME_SEL)) return true
+    const x = orig?.clientX, y = orig?.clientY
+    if (typeof x === 'number' && typeof y === 'number') {
+      const at = document.elementFromPoint(x, y)
+      if (at?.closest?.(CHROME_SEL)) return true
+    }
+    return false
   }
 
   async function d1Discover() {
