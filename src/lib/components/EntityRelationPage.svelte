@@ -856,25 +856,25 @@
                 {#if isPk}<KeyRound class="size-3 shrink-0 text-amber-400/80" />
                 {:else if isFk}<Link class="size-3 shrink-0 text-blue-400/60" />
                 {:else}<span class="size-3 shrink-0"></span>{/if}
-                <span class="min-w-0 flex-1 truncate font-mono text-[10px]
+                <span class="min-w-0 flex-1 truncate font-mono text-ui-3xs
                   {isPk ? 'font-semibold text-amber-300/90' : isFk ? 'text-blue-300/75' : 'text-foreground/65'}"
                 >{col.name}</span>
-                <span class="shrink-0 font-mono text-[9px] text-muted-foreground/40">{col.dataType}</span>
+                <span class="shrink-0 font-mono text-ui-3xs text-muted-foreground/40">{col.dataType}</span>
               </div>
             {/each}
           </div>
 
           {#if selFks.length > 0}
             <div class="border-t border-border/40 bg-muted/10 px-3 py-2">
-              <p class="mb-1 font-mono text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/50">References</p>
+              <p class="mb-1 font-mono text-ui-3xs font-semibold uppercase tracking-widest text-muted-foreground/50">References</p>
               {#each selFks as fk (fk.name)}
                 {@const ref = fk.foreignKey?.split('.') ?? []}
                 <div class="flex items-baseline gap-1.5 py-0.5">
-                  <span class="font-mono text-[10px] text-muted-foreground/55">{fk.name}</span>
-                  <span class="text-[10px] text-muted-foreground/30">→</span>
+                  <span class="font-mono text-ui-3xs text-muted-foreground/55">{fk.name}</span>
+                  <span class="text-ui-3xs text-muted-foreground/30">→</span>
                   <button
                     type="button"
-                    class="font-mono text-[10px] text-blue-400/80 hover:underline"
+                    class="font-mono text-ui-3xs text-blue-400/80 hover:underline"
                     onclick={() => { selectedTable = ref[1] ?? null }}
                   >{ref[1]}.{ref[2]}</button>
                 </div>
@@ -884,11 +884,11 @@
 
           {#if refBy.length > 0}
             <div class="border-t border-border/40 bg-muted/10 px-3 py-2">
-              <p class="mb-1 font-mono text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/50">Referenced by</p>
+              <p class="mb-1 font-mono text-ui-3xs font-semibold uppercase tracking-widest text-muted-foreground/50">Referenced by</p>
               {#each refBy as t (t.name)}
                 <button
                   type="button"
-                  class="block py-0.5 font-mono text-[10px] text-muted-foreground/65 hover:text-foreground"
+                  class="block py-0.5 font-mono text-ui-3xs text-muted-foreground/65 hover:text-foreground"
                   onclick={() => { selectedTable = t.name }}
                 >← {t.name}</button>
               {/each}

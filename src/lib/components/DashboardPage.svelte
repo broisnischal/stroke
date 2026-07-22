@@ -523,7 +523,7 @@
                 </div>
                 <div class="px-2.5 py-1.5">
                   <p class="truncate text-ui-xs font-medium text-foreground/80">{chart.name}</p>
-                  <p class="text-[10px] text-muted-foreground/50">{chart.group}</p>
+                  <p class="text-ui-3xs text-muted-foreground/50">{chart.group}</p>
                 </div>
               </button>
             {/each}

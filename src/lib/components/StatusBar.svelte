@@ -3,13 +3,12 @@
   import { tick, onMount } from 'svelte'
   import { cn }       from '$lib/utils.js'
   import { aiProfiles, activeProfileId, setActiveProfile } from '$lib/stores/ai-settings.js'
-  import { toggleLightDark, isCurrentThemeDark, appVimMode } from '$lib/stores/settings.js'
+  import { toggleLightDark, isCurrentThemeDark, appVimMode, appLiveMode } from '$lib/stores/settings.js'
   import { vimSubMode, VIM_MODE_LABEL } from '$lib/vim/vim.js'
   import { executeSql, cloudflareListD1Databases } from '$lib/api.js'
   import { providerListDatabases } from '$lib/providers.js'
   import { engineFamily } from '$lib/stores/connections.js'
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js'
-  import * as Dialog from '$lib/components/ui/dialog/index.js'
   import AppearanceMenu from './AppearanceMenu.svelte'
   import CreateDatabaseDialog from './CreateDatabaseDialog.svelte'
   import SearchableMenu from './SearchableMenu.svelte'
@@ -52,9 +51,8 @@
     onopendiagrams = /** @type {() => void} */ (() => {}),
     onopensettings = /** @type {() => void} */ (() => {}),
     onopencommand = /** @type {() => void} */ (() => {}),
+    onopenpages = /** @type {() => void} */ (() => {}),
     ondisconnect = /** @type {() => void} */ (() => {}),
-    activeView = /** @type {'table' | 'sql'} */ ('table'),
-    onviewchange = /** @type {(v: 'table' | 'sql') => void} */ ((_v) => {}),
     pendingEditCount = 0,
     onapplyedits = /** @type {() => void} */ (() => {}),
     onresetedits = /** @type {() => void} */ (() => {}),
@@ -344,37 +342,15 @@
   /** Shared label+icon button */
   const labelBtn = 'flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors hover:bg-muted/50 hover:text-foreground data-[state=open]:bg-muted/50 data-[state=open]:text-foreground'
 
-  let toolsOpen = $state(false)
   let aiModelMenuOpen = $state(false)
 
   /** "132ms" under a second, "1.24s" above — always tabular so it never jitters. */
   const queryMsLabel = $derived(
     queryMs >= 1000 ? `${(queryMs / 1000).toFixed(2)}s` : `${Math.round(queryMs)}ms`,
   )
-
-  // Tools launcher — built from one list so every card renders identically.
-  const toolItems = $derived.by(() => {
-    const t = connection?.type ?? 'postgres'
-    /** @type {{ label: string, desc: string, icon: string, onclick: () => void }[]} */
-    const items = []
-    if (t === 'postgres' || t === 'mysql') items.push({ label: 'Schema Explorer', desc: 'Tables, columns & types', icon: 'layout-template', onclick: onopenSchema })
-    items.push({ label: 'Activity Log', desc: 'Recent queries & events', icon: 'history', onclick: onopenlogs })
-    if (t === 'postgres') items.push({ label: 'Security', desc: 'Roles, policies & RLS', icon: 'shield-check', onclick: onopensecurity })
-    items.push({ label: 'ORM Runner', desc: 'Run typed ORM queries', icon: 'code-2', onclick: onopenorm })
-    items.push({ label: 'Backup & Restore', desc: 'Export & import data', icon: 'archive', onclick: onopenbackup })
-    items.push({ label: 'Charts', desc: 'Visualize query results', icon: 'bar-chart-2', onclick: onopenchartspage })
-    items.push({ label: 'Dashboard', desc: 'Saved metrics at a glance', icon: 'layout-dashboard', onclick: onopendashboard })
-    items.push({ label: 'Diagrams', desc: 'Entity-relationship map', icon: 'git-branch', onclick: onopendiagrams })
-    return items
-  })
 </script>
 
 <svelte:window onkeydown={onWindowKeydown} />
-
-<!-- PRO chip -->
-{#snippet proBadge()}
-  <span class="ml-auto shrink-0 rounded bg-amber-400/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-500/90 dark:text-amber-400/80">PRO</span>
-{/snippet}
 
 <!-- Vertical separator -->
 {#snippet sep()}
@@ -382,7 +358,7 @@
 {/snippet}
 
 <div
-  class="@container/sb flex h-8 shrink-0 items-center border-t border-border/30 bg-background px-2 text-[11px] text-muted-foreground select-none"
+  class="@container/sb flex h-8 shrink-0 items-center border-t border-border/30 bg-background px-2 text-ui-2xs text-muted-foreground select-none"
   data-studio-region="statusbar"
 >
   <!-- ── Left group ──────────────────────────────────────────────────── -->
@@ -510,7 +486,7 @@
                 bind:this={dbInputEl}
                 type="text"
                 placeholder={isD1 ? 'Filter D1 databases…' : 'Filter databases…'}
-                class="h-7 w-full rounded-lg bg-muted/40 px-2.5 text-[11px] outline-none placeholder:text-muted-foreground/35 focus:ring-0"
+                class="h-7 w-full rounded-lg bg-muted/40 px-2.5 text-ui-2xs outline-none placeholder:text-muted-foreground/35 focus:ring-0"
                 bind:value={dbSearch}
                 onkeydown={onDbInputKeydown}
               />
@@ -520,10 +496,10 @@
               {#if dbLoading}
                 <div class="flex items-center justify-center gap-2 py-4 text-muted-foreground/50">
                   <Icon name="refresh-cw" class="size-3 animate-spin" />
-                  <span class="text-[11px]">Loading…</span>
+                  <span class="text-ui-2xs">Loading…</span>
                 </div>
               {:else if dbFiltered.length === 0}
-                <div class="py-3 text-center text-[11px] text-muted-foreground/45">
+                <div class="py-3 text-center text-ui-2xs text-muted-foreground/45">
                   {dbSearch ? 'No match' : 'No databases found'}
                 </div>
               {:else}
@@ -557,7 +533,7 @@
 
             {#if canSwitchDb}
               <div class="flex items-center justify-between border-t border-border/50 px-2.5 py-1.5">
-                <span class="text-[10px] text-muted-foreground/40">
+                <span class="text-ui-3xs text-muted-foreground/40">
                   {dbList.length} database{dbList.length === 1 ? '' : 's'}
                 </span>
                 <div class="flex items-center gap-0.5">
@@ -598,40 +574,6 @@
         {/if}
       </div>
 
-      {@render sep()}
-
-      <!-- Data / Query pill toggle -->
-      <div class="flex items-center gap-px rounded-md bg-muted/20 p-0.5">
-        <button
-          type="button"
-          class={cn(
-            'flex items-center gap-1 rounded px-2 py-[3px] transition-all',
-            activeView === 'table'
-              ? 'bg-muted/70 text-foreground shadow-sm'
-              : 'text-muted-foreground/50 hover:text-foreground',
-          )}
-          onclick={() => onviewchange('table')}
-          title="Data view (⌘⇧D)"
-        >
-          <Icon name="table-2" class="size-3 shrink-0" />
-          <span class={cn('@max-[700px]/sb:hidden', activeView === 'table' ? 'font-medium' : '')}>Data</span>
-        </button>
-        <button
-          type="button"
-          class={cn(
-            'flex items-center gap-1 rounded px-2 py-[3px] transition-all',
-            activeView === 'sql'
-              ? 'bg-muted/70 text-foreground shadow-sm'
-              : 'text-muted-foreground/50 hover:text-foreground',
-          )}
-          onclick={() => onviewchange('sql')}
-          title="Query Editor (⌘⇧S)"
-        >
-          <Icon name="terminal" class="size-3 shrink-0" />
-          <span class={cn('@max-[700px]/sb:hidden', activeView === 'sql' ? 'font-medium' : '')}>Query</span>
-        </button>
-      </div>
-
       <!-- Table scroll nav -->
       {#if showTableNav}
         {@render sep()}
@@ -653,8 +595,8 @@
         </div>
       {/if}
 
-      <!-- Live mode toggle — renders as an unmistakable badge when active -->
-      {#if showTableNav && liveSupported}
+      <!-- Live mode toggle (experimental — only shown when enabled in Settings) -->
+      {#if showTableNav && liveSupported && $appLiveMode}
         {@render sep()}
         <button
           type="button"
@@ -682,7 +624,7 @@
       {#if queryMs > 0}
         {@render sep()}
         <span
-          class="shrink-0 px-1 font-mono text-[11px] tabular-nums text-muted-foreground/55"
+          class="shrink-0 px-1 font-mono text-ui-2xs tabular-nums text-muted-foreground/55"
           title="Last data fetch took {queryMs.toLocaleString('en-US')}ms"
         >{queryMsLabel}</span>
       {/if}
@@ -708,7 +650,7 @@
     {#if $appVimMode}
       <span
         class={cn(
-          'inline-flex h-5 items-center rounded-md px-1.5 font-mono text-[10px] font-semibold uppercase tracking-wider',
+          'inline-flex h-5 items-center rounded-md px-1.5 font-mono text-ui-3xs font-semibold uppercase tracking-wider',
           $vimSubMode === 'insert' && 'bg-emerald-500/15 text-emerald-500',
           $vimSubMode === 'visual' && 'bg-amber-500/15 text-amber-500',
           $vimSubMode === 'command' && 'bg-primary/15 text-primary',
@@ -720,14 +662,14 @@
 
     <!-- App version -->
     {#if appVersion}
-      <span class="inline-flex h-5 items-center rounded-md px-1.5 font-mono text-[10px] tabular-nums text-muted-foreground/45" title="Stroke v{appVersion}">v{appVersion}</span>
+      <span class="inline-flex h-5 items-center rounded-md px-1.5 font-mono text-ui-3xs tabular-nums text-muted-foreground/45" title="Stroke v{appVersion}">v{appVersion}</span>
     {/if}
 
     <!-- Pending edits -->
     {#if pendingEditCount > 0}
       <button
         type="button"
-        class="inline-flex h-5 items-center gap-1 rounded-md bg-primary px-2 text-[11px] font-medium text-primary-foreground transition-opacity hover:opacity-85"
+        class="inline-flex h-5 items-center gap-1 rounded-md bg-primary px-2 text-ui-2xs font-medium text-primary-foreground transition-opacity hover:opacity-85"
         onclick={onapplyedits}
         title="Apply {pendingEditCount} unsaved change{pendingEditCount === 1 ? '' : 's'}"
       >
@@ -736,7 +678,7 @@
       </button>
       <button
         type="button"
-        class="inline-flex h-5 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground/50 transition-colors hover:bg-muted/50 hover:text-foreground"
+        class="inline-flex h-5 items-center gap-1 rounded-md px-2 text-ui-2xs text-muted-foreground/50 transition-colors hover:bg-muted/50 hover:text-foreground"
         onclick={onresetedits}
         title="Discard unsaved changes"
       >
@@ -746,43 +688,17 @@
       {@render sep()}
     {/if}
 
-    <!-- Tools launcher (all navigation tools in one panel) -->
+    <!-- Go to page — opens the ⌘P page navigator -->
     {#if connection}
-      <Dialog.Root bind:open={toolsOpen}>
-        <Dialog.Trigger class={cn(iconBtn, toolsOpen && 'bg-muted/50 text-foreground')} title="Tools">
-          <Icon name="layout-list" class="size-3.5" />
-        </Dialog.Trigger>
-        <Dialog.Content showCloseButton={false} class="gap-0 overflow-hidden p-0 sm:max-w-lg">
-          <div class="flex items-center justify-between border-b border-border/50 px-4 py-3">
-            <div class="flex items-center gap-2">
-              <Icon name="layout-list" class="size-4 text-muted-foreground/50" />
-              <Dialog.Title class="text-ui-sm font-semibold tracking-tight">Tools</Dialog.Title>
-            </div>
-            <span class="font-mono text-ui-2xs text-muted-foreground/40">{toolItems.length} features</span>
-          </div>
-          <div class="grid grid-cols-2 gap-1.5 p-3">
-            {#each toolItems as item (item.label)}
-              {@const iconName = item.icon}
-              <button
-                type="button"
-                class="group/tool flex items-center gap-3 rounded-lg border border-transparent p-2.5 text-left transition-colors hover:border-border/60 hover:bg-accent focus-visible:border-border/60 focus-visible:bg-accent focus-visible:outline-none"
-                onclick={() => { toolsOpen = false; item.onclick() }}
-              >
-                <span class="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-muted/40 text-muted-foreground/70 transition-colors group-hover/tool:border-border group-hover/tool:bg-muted group-hover/tool:text-foreground">
-                  <Icon name={iconName} class="size-4" />
-                </span>
-                <span class="flex min-w-0 flex-1 flex-col">
-                  <span class="flex items-center gap-1.5">
-                    <span class="truncate text-ui-xs font-medium text-foreground">{item.label}</span>
-                    {#if !hasPro}{@render proBadge()}{/if}
-                  </span>
-                  <span class="truncate text-ui-2xs text-muted-foreground/50">{item.desc}</span>
-                </span>
-              </button>
-            {/each}
-          </div>
-        </Dialog.Content>
-      </Dialog.Root>
+      <button
+        type="button"
+        class={iconBtn}
+        onclick={onopenpages}
+        title="Go to page (⌘P)"
+        aria-label="Go to page"
+      >
+        <Icon name="plus" class="size-3.5" />
+      </button>
       {@render sep()}
     {/if}
 
@@ -865,7 +781,7 @@
     {#if hasUpdate}
       <button
         type="button"
-        class="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-amber-500 transition-colors hover:bg-muted/50 hover:text-amber-400"
+        class="flex items-center gap-1 rounded-md px-2 py-1 text-ui-2xs font-medium text-amber-500 transition-colors hover:bg-muted/50 hover:text-amber-400"
         onclick={oncheckupdate}
         title="Update available"
       >

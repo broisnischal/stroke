@@ -432,11 +432,11 @@
               </span>
 
               <!-- Type tag -->
-              <span class="shrink-0 font-mono text-[10px] text-muted-foreground/40">{item.detail}</span>
+              <span class="shrink-0 font-mono text-ui-3xs text-muted-foreground/40">{item.detail}</span>
 
               <!-- Value preview only on selected row -->
               {#if i === activeIdx && item.preview}
-                <span class="max-w-36 shrink-0 truncate font-mono text-[10px] text-muted-foreground/35">{item.preview}</span>
+                <span class="max-w-36 shrink-0 truncate font-mono text-ui-3xs text-muted-foreground/35">{item.preview}</span>
               {/if}
             </button>
           </li>

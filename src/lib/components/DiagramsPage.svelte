@@ -213,7 +213,7 @@
               >
                 <Icon class="size-3.5 shrink-0" />
                 <span class="min-w-0 flex-1 truncate font-mono text-ui-sm">{d.name}</span>
-                <span class="shrink-0 text-[10px] tabular-nums opacity-50">{relTime(d.updatedAt)}</span>
+                <span class="shrink-0 text-ui-3xs tabular-nums opacity-50">{relTime(d.updatedAt)}</span>
               </button>
             {/each}
           {/each}
@@ -222,7 +222,7 @@
 
       <!-- Footer -->
       <div class="shrink-0 border-t border-border/40 px-3 py-2">
-        <p class="text-[10px] text-muted-foreground/40">
+        <p class="text-ui-3xs text-muted-foreground/40">
           {all.length} diagram{all.length === 1 ? '' : 's'}
         </p>
       </div>
@@ -265,13 +265,13 @@
         {#if isNew}
           <!-- Template picker -->
           <div class="flex shrink-0 items-center gap-1.5 border-b border-border/40 px-4 py-2">
-            <span class="text-[10px] text-muted-foreground/50 mr-1">Template:</span>
+            <span class="text-ui-3xs text-muted-foreground/50 mr-1">Template:</span>
             {#each Object.entries(TEMPLATES) as [key, tpl]}
               <button
                 type="button"
                 onclick={() => { draftCode = tpl }}
                 class={cn(
-                  'rounded px-2 py-0.5 text-[10px] transition-colors border',
+                  'rounded px-2 py-0.5 text-ui-3xs transition-colors border',
                   draftCode === tpl
                     ? 'border-primary/50 bg-primary/10 text-primary'
                     : 'border-border/40 text-muted-foreground hover:border-border hover:text-foreground'
@@ -286,7 +286,7 @@
         <!-- Editor + preview -->
         <div class="flex min-h-0 flex-1 gap-0 overflow-hidden">
           <div class="flex w-1/2 min-w-0 flex-col border-r border-border/40 p-3">
-            <p class="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/50">Mermaid code</p>
+            <p class="mb-1.5 text-ui-3xs font-medium uppercase tracking-wide text-muted-foreground/50">Mermaid code</p>
             <textarea
               bind:value={draftCode}
               spellcheck="false"
@@ -294,7 +294,7 @@
             ></textarea>
           </div>
           <div class="flex w-1/2 min-w-0 flex-col overflow-hidden">
-            <p class="shrink-0 px-3 pb-1.5 pt-3 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/50">Preview</p>
+            <p class="shrink-0 px-3 pb-1.5 pt-3 text-ui-3xs font-medium uppercase tracking-wide text-muted-foreground/50">Preview</p>
             <div class="min-h-0 flex-1 overflow-hidden">
               <MermaidViewer code={draftCode} class="h-full w-full" />
             </div>
@@ -305,7 +305,7 @@
         <!-- State B: View mode -->
         <div class="flex shrink-0 items-center gap-2 border-b border-border/50 px-4 py-3">
           <h3 class="min-w-0 flex-1 truncate text-ui-sm font-medium text-foreground">{selected.name}</h3>
-          <span class="shrink-0 rounded border border-border/40 bg-muted/30 px-1.5 py-0.5 text-[10px] text-muted-foreground/70">{selected.group}</span>
+          <span class="shrink-0 rounded border border-border/40 bg-muted/30 px-1.5 py-0.5 text-ui-3xs text-muted-foreground/70">{selected.group}</span>
           <div class="flex shrink-0 items-center gap-0.5 ml-1">
             <button
               type="button"
@@ -317,7 +317,7 @@
               <button
                 type="button"
                 onclick={confirmDelete}
-                class="inline-flex h-7 items-center gap-1 rounded-md bg-destructive px-2 text-[10px] text-destructive-foreground hover:opacity-90"
+                class="inline-flex h-7 items-center gap-1 rounded-md bg-destructive px-2 text-ui-3xs text-destructive-foreground hover:opacity-90"
               ><Check class="size-3" />Confirm</button>
               <button
                 type="button"
@@ -355,13 +355,13 @@
             <button
               type="button"
               onclick={() => viewerRef?.exportSvg(`${selected.name}.svg`)}
-              class="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
+              class="inline-flex h-7 items-center gap-1 rounded-md px-2 text-ui-3xs text-muted-foreground hover:bg-accent hover:text-foreground"
               title="Export SVG"
             ><Download class="size-3" />SVG</button>
             <button
               type="button"
               onclick={() => viewerRef?.exportPng(`${selected.name}.png`)}
-              class="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
+              class="inline-flex h-7 items-center gap-1 rounded-md px-2 text-ui-3xs text-muted-foreground hover:bg-accent hover:text-foreground"
               title="Export PNG"
             ><Download class="size-3" />PNG</button>
             <div class="mx-1 h-4 w-px bg-border/40"></div>
@@ -415,6 +415,6 @@
     <div class="min-h-0 flex-1 overflow-hidden">
       <MermaidViewer bind:this={fullscreenViewerRef} code={fullscreenCode} class="h-full w-full" />
     </div>
-    <p class="shrink-0 py-1.5 text-center text-[10px] text-muted-foreground/30">Drag to pan · Ctrl+scroll to zoom · Double-click to reset · Esc to close</p>
+    <p class="shrink-0 py-1.5 text-center text-ui-3xs text-muted-foreground/30">Drag to pan · Ctrl+scroll to zoom · Double-click to reset · Esc to close</p>
   </div>
 {/if}

@@ -9,6 +9,7 @@
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
   import Search from '@lucide/svelte/icons/search'
   import DbIcon from './DbIcon.svelte'
+  import SearchableMenu from './SearchableMenu.svelte'
   import { cfStartOAuth, cfOAuthStatus, cfLogout } from '$lib/cloudflare.js'
   import { cloudflareListAccounts, cloudflareListD1Databases } from '$lib/api.js'
   import { cn } from '$lib/utils.js'
@@ -31,6 +32,7 @@
   /** @type {Array<{id: string, name: string}>} */
   let accounts = $state([])
   let selectedAccountId = $state('')
+  const selectedAccountName = $derived(accounts.find((a) => a.id === selectedAccountId)?.name ?? '')
 
   /** @type {Array<{uuid: string, name: string, created_at?: string, num_tables?: number}>} */
   let databases = $state([])
@@ -88,7 +90,9 @@
       const token = await cfGetValidToken()
       accounts = await cloudflareListAccounts(token)
       phase = 'selecting'
-      if (accounts.length === 1) {
+      // Auto-select the first account so the D1 database list loads immediately;
+      // the user can still switch accounts via the dropdown when there are several.
+      if (accounts.length && !selectedAccountId) {
         await selectAccount(accounts[0].id)
       }
     } catch (e) {
@@ -151,13 +155,13 @@
     <div class="flex flex-col gap-2">
       <button
         type="button"
-        class="group flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-foreground px-5 text-[13px] font-semibold text-background shadow-sm transition-[background-color,transform] duration-150 ease-out hover:bg-foreground/85 active:scale-[0.98]"
+        class="group flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-foreground px-4 text-ui-sm font-medium text-background shadow-sm transition-[background-color,transform] duration-150 ease-out hover:bg-foreground/90 active:scale-[0.98]"
         onclick={startAuth}
       >
         Sign in with Cloudflare
         <ArrowRight class="size-4 transition-transform duration-150 ease-out group-hover:translate-x-0.5" />
       </button>
-      <p class="text-xs text-muted-foreground">Opens your browser to authorize · same PKCE flow as Wrangler</p>
+      <p class="text-ui-xs text-muted-foreground">Opens your browser to authorize · same PKCE flow as Wrangler</p>
     </div>
 
   {:else if phase === 'authorizing'}
@@ -169,8 +173,8 @@
           <DbIcon id="d1" class="size-5 text-foreground" />
         </div>
         <div class="min-w-0">
-          <p class="text-sm font-semibold leading-tight text-foreground">Waiting for Cloudflare…</p>
-          <p class="mt-1 text-xs leading-relaxed text-pretty text-muted-foreground">
+          <p class="text-ui-sm font-semibold leading-tight text-foreground">Waiting for Cloudflare…</p>
+          <p class="mt-1 text-ui-xs leading-relaxed text-pretty text-muted-foreground">
             Finish authorizing in the browser tab, then come back here.
           </p>
         </div>
@@ -182,7 +186,7 @@
 
   {:else if phase === 'fetching'}
     <!-- ── Loading accounts ── -->
-    <div class="flex items-center gap-2.5 py-2 text-[12.5px] text-muted-foreground">
+    <div class="flex items-center gap-2.5 py-2 text-ui-xs text-muted-foreground">
       <Loader2 class="size-4 animate-spin" />
       Loading your Cloudflare accounts…
     </div>
@@ -194,12 +198,12 @@
         <DbIcon id="d1" class="size-4 text-foreground" />
       </div>
       <div class="min-w-0 flex-1">
-        <p class="flex items-center gap-1.5 text-[12px] font-medium text-foreground">
+        <p class="flex items-center gap-1.5 text-ui-xs font-medium text-foreground">
           Cloudflare
-          <span class="inline-flex items-center gap-1 text-[10px] font-normal text-emerald-500"><Check class="size-3" />Connected</span>
+          <span class="inline-flex items-center gap-1 text-ui-3xs font-normal text-success"><Check class="size-3" />Connected</span>
         </p>
         {#if email}
-          <p class="truncate text-[10px] text-muted-foreground/50">{email}</p>
+          <p class="truncate text-ui-3xs text-muted-foreground/50">{email}</p>
         {/if}
       </div>
       <button
@@ -215,30 +219,41 @@
     <!-- Account selector -->
     {#if accounts.length > 1}
       <div class="flex flex-col gap-1.5">
-        <label for="cf-account-select" class="text-[10.5px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/55">Account</label>
-        <div class="relative">
-          <select
-            id="cf-account-select"
-            class="h-9 w-full appearance-none rounded-lg border border-border/60 bg-muted/25 pl-3 pr-8 text-[12px] transition-[border-color,box-shadow] hover:border-border focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none/20"
-            value={selectedAccountId}
-            onchange={(e) => selectAccount(e.currentTarget.value)}
-          >
-            {#if !selectedAccountId}<option value="">— select account —</option>{/if}
-            {#each accounts as acc (acc.id)}
-              <option value={acc.id}>{acc.name}</option>
-            {/each}
-          </select>
-          <ChevronDown class="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-        </div>
+        <span class="text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground/55">Account</span>
+        <SearchableMenu
+          items={accounts.map((a) => ({ value: a.id, label: a.name }))}
+          placeholder="Search accounts…"
+          empty="No matching account"
+          contentClass="w-[var(--bits-popover-anchor-width)] min-w-[240px]"
+          onselect={(it) => selectAccount(it.value)}
+        >
+          {#snippet trigger(props)}
+            <button
+              {...props}
+              type="button"
+              class="flex h-9 w-full items-center gap-2 rounded-lg border border-border/60 bg-muted/25 pl-3 pr-2.5 text-left text-ui-xs transition-[border-color,box-shadow] hover:border-border focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none data-[state=open]:border-ring"
+            >
+              <span class={cn('min-w-0 flex-1 truncate', !selectedAccountId && 'text-muted-foreground')}>
+                {selectedAccountName || '— select account —'}
+              </span>
+              <ChevronDown class="size-3.5 shrink-0 text-muted-foreground" />
+            </button>
+          {/snippet}
+          {#snippet item(it)}
+            <DbIcon id="d1" class="size-3.5 shrink-0 text-muted-foreground/45" />
+            <span class="min-w-0 flex-1 truncate">{it.label}</span>
+            {#if it.value === selectedAccountId}<Check class="size-3.5 shrink-0 text-primary" />{/if}
+          {/snippet}
+        </SearchableMenu>
       </div>
     {:else if accounts.length === 1}
-      <p class="text-[11px] text-muted-foreground/50">Account · <span class="text-foreground/70">{accounts[0].name}</span></p>
+      <p class="text-ui-2xs text-muted-foreground/50">Account · <span class="text-foreground/70">{accounts[0].name}</span></p>
     {/if}
 
     <!-- Database selector -->
     {#if selectedAccountId}
       <div class="flex flex-col gap-1.5">
-        <label class="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/55">
+        <label class="flex items-center gap-1.5 text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground/55">
           D1 Database
           {#if loadingDbs}<Loader2 class="size-3 animate-spin text-muted-foreground" />{/if}
         </label>
@@ -252,7 +267,7 @@
                   type="text"
                   placeholder="Search databases…"
                   bind:value={dbSearch}
-                  class="h-9 w-full bg-transparent pl-9 pr-2.5 text-[12.5px] text-foreground outline-none placeholder:text-muted-foreground/35"
+                  class="h-9 w-full bg-transparent pl-9 pr-2.5 text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/35"
                   onkeydown={(e) => { if (e.key === 'Escape') dbSearch = '' }}
                 />
               </div>
@@ -269,24 +284,24 @@
                   onclick={() => selectDatabase(db.uuid)}
                 >
                   <DbIcon id="d1" class={cn("size-4 shrink-0", selected ? "text-foreground" : "text-muted-foreground/45")} />
-                  <span class="min-w-0 flex-1 truncate font-mono text-[12.5px] font-medium leading-snug {selected ? 'text-foreground' : 'text-foreground/85'}">{db.name}</span>
+                  <span class="min-w-0 flex-1 truncate font-mono text-ui-xs font-medium leading-snug {selected ? 'text-foreground' : 'text-foreground/85'}">{db.name}</span>
                   {#if selected}
                     <Check class="size-3.5 shrink-0 text-primary" />
                   {/if}
                 </button>
               {/each}
               {#if filteredDatabases.length === 0}
-                <p class="px-2.5 py-3 text-center text-[11px] text-muted-foreground/45">No match for “{dbSearch}”</p>
+                <p class="px-2.5 py-3 text-center text-ui-2xs text-muted-foreground/45">No match for “{dbSearch}”</p>
               {/if}
             </div>
           </div>
         {:else if !loadingDbs}
           <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border/50 px-4 py-6 text-center">
             <DbIcon id="d1" class="size-5 text-muted-foreground/25" />
-            <p class="text-[11px] text-muted-foreground/50">No D1 databases in this account.</p>
+            <p class="text-ui-2xs text-muted-foreground/50">No D1 databases in this account.</p>
             <button
               type="button"
-              class="flex items-center gap-1 text-[10px] text-muted-foreground/40 hover:text-muted-foreground"
+              class="flex items-center gap-1 text-ui-3xs text-muted-foreground/40 hover:text-muted-foreground"
               onclick={() => selectAccount(selectedAccountId)}
             >
               <RefreshCw class="size-3" /> Retry
@@ -297,23 +312,25 @@
     {/if}
 
   {:else if phase === 'error'}
-    <div class="flex flex-col gap-3 rounded-xl border border-destructive/25 bg-destructive/[0.07] p-3.5">
-      <div class="flex items-start gap-3">
-        <div class="flex size-7 shrink-0 items-center justify-center rounded-lg bg-destructive/12 text-destructive">
-          <AlertTriangle class="size-4" />
+    <div class="err-card overflow-hidden rounded-xl border border-border/70 bg-card shadow-[var(--elevate-1)]">
+      <div class="flex items-start gap-3 p-4">
+        <div class="flex size-9 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive ring-1 ring-inset ring-destructive/15">
+          <AlertTriangle class="size-[18px]" />
         </div>
         <div class="min-w-0 flex-1">
-          <p class="text-[13px] font-semibold leading-tight text-destructive">{shownError.title}</p>
-          <p class="mt-1 text-xs leading-relaxed text-pretty break-words text-destructive/75">{shownError.detail}</p>
+          <p class="text-ui-sm font-semibold leading-snug text-foreground">{shownError.title}</p>
+          <p class="mt-1.5 break-words rounded-md bg-muted/40 px-2 py-1.5 font-mono text-ui-2xs leading-relaxed text-muted-foreground select-text">{shownError.detail}</p>
         </div>
       </div>
-      <button
-        type="button"
-        class="inline-flex h-8 items-center justify-center gap-1.5 self-start rounded-lg border border-destructive/30 bg-destructive/5 px-3 text-xs font-medium text-destructive transition-[color,background-color,transform] duration-150 ease-out hover:bg-destructive/12 active:scale-[0.96]"
-        onclick={startAuth}
-      >
-        <RefreshCw class="size-3.5" /> Try again
-      </button>
+      <div class="flex items-center justify-end border-t border-border/50 bg-muted/[0.15] px-3 py-2.5">
+        <button
+          type="button"
+          class="group inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-foreground px-3.5 text-ui-xs font-medium text-background shadow-sm transition-[background-color,transform] duration-150 ease-[var(--ease-out)] hover:bg-foreground/90 active:scale-[0.97]"
+          onclick={startAuth}
+        >
+          <RefreshCw class="size-3.5 transition-transform duration-500 ease-[var(--ease-out)] group-hover:rotate-180" /> Try again
+        </button>
+      </div>
     </div>
   {/if}
 
@@ -334,8 +351,16 @@
   }
   .progress-slide { animation: progress-slide 1.3s ease-in-out infinite; }
 
+  /* Error card entrance — a calm rise + settle (never scale from 0). */
+  @keyframes err-in {
+    from { opacity: 0; transform: translateY(6px) scale(0.985); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .err-card { animation: err-in 240ms var(--ease-out, cubic-bezier(0.23, 1, 0.32, 1)) both; }
+
   @media (prefers-reduced-motion: reduce) {
     .pulse-ring { animation: none; opacity: 0.4; }
     .progress-slide { animation: none; width: 100%; opacity: 0.5; }
+    .err-card { animation: none; }
   }
 </style>

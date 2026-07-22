@@ -1,0 +1,77 @@
+<script>
+  // Canonical dropdown/select for the app: a data-driven Select built on
+  // SearchableMenu, so every dropdown looks identical and automatically grows a
+  // search box once it has more than `searchThreshold` items (default 5).
+  // Drop-in replacement for bits-ui <Select> in the common case.
+  //
+  //   <SelectMenu value={x} onValueChange={setX} items={[{value,label,icon?,hint?}]} />
+  //
+  // For custom leading visuals (font preview, variable-weight icon, brand icon)
+  // pass a `lead` snippet — it receives the full item and renders both the
+  // trigger's and each row's leading glyph.
+  import SearchableMenu from './SearchableMenu.svelte'
+  import Icon from './Icon.svelte'
+  import { cn } from '$lib/utils.js'
+
+  let {
+    /** Current value (compared with String() so numbers/ids both work). */
+    value = undefined,
+    /** @type {(v: any) => void} */
+    onValueChange = () => {},
+    /** @type {Array<{ value: any, label: string, icon?: string, hint?: string, keywords?: string[], [k: string]: any }>} */
+    items = [],
+    placeholder = 'Select…',
+    searchPlaceholder = 'Search…',
+    empty = 'No results',
+    ariaLabel = undefined,
+    /** Extra classes for the trigger button (size/width live here). */
+    triggerClass = 'h-8 w-56',
+    contentClass = 'w-[var(--bits-popover-anchor-width)] min-w-[13rem]',
+    searchThreshold = 5,
+    align = 'start',
+    side = 'bottom',
+    disabled = false,
+    /** snippet(item) — custom leading visual for the trigger + rows. */
+    lead,
+    open = $bindable(false),
+  } = $props()
+
+  const selected = $derived(items.find((i) => String(i.value) === String(value)))
+</script>
+
+<SearchableMenu
+  bind:open
+  {items}
+  {align}
+  {side}
+  {contentClass}
+  {searchThreshold}
+  {empty}
+  placeholder={searchPlaceholder}
+  onselect={(it) => { if (it && it.value !== undefined) onValueChange(it.value) }}
+>
+  {#snippet trigger(props)}
+    <button
+      {...props}
+      type="button"
+      {disabled}
+      aria-label={ariaLabel}
+      class={cn(
+        'inline-flex items-center justify-between gap-2 rounded-[10px] border border-border/70 bg-background px-2.5 text-ui-xs font-normal transition-colors hover:bg-muted/40 focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none data-[state=open]:border-ring disabled:pointer-events-none disabled:opacity-50',
+        triggerClass,
+      )}
+    >
+      <span class="flex min-w-0 items-center gap-2">
+        {#if lead && selected}{@render lead(selected)}{:else if selected?.icon}<Icon name={selected.icon} class="size-3.5 shrink-0 text-muted-foreground" />{/if}
+        <span class="truncate font-medium">{selected?.label ?? placeholder}</span>
+      </span>
+      <Icon name="chevron-down" class="size-3.5 shrink-0 text-muted-foreground/70" />
+    </button>
+  {/snippet}
+  {#snippet item(it)}
+    {#if lead}{@render lead(it)}{:else if it.icon}<Icon name={it.icon} class="size-4 shrink-0 text-muted-foreground" />{/if}
+    <span class="min-w-0 flex-1 truncate">{it.label}</span>
+    {#if it.hint}<span class="shrink-0 text-ui-3xs text-muted-foreground/65">{it.hint}</span>{/if}
+    {#if String(it.value) === String(value)}<Icon name="check" class="ml-auto size-3.5 shrink-0 text-primary" />{/if}
+  {/snippet}
+</SearchableMenu>

@@ -201,31 +201,31 @@
           type="text"
           bind:value={tokenInput}
           placeholder="postgres://…"
-          class="h-9 w-full rounded-lg border border-border/60 bg-muted/25 px-3 font-mono text-[11px] outline-none transition-[border-color,box-shadow] focus:border-ring focus:ring-1 focus:ring-ring focus:border-ring focus:ring-1 focus:ring-ring"
+          class="h-9 w-full rounded-lg border border-border/60 bg-muted/25 px-3 font-mono text-ui-2xs outline-none transition-[border-color,box-shadow] focus:border-ring focus:ring-1 focus:ring-ring focus:border-ring focus:ring-1 focus:ring-ring"
           onkeydown={(e) => { if (e.key === 'Enter') saveToken() }}
         />
         <button
           type="button"
-          class="flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-foreground px-4 text-[13px] font-semibold text-background shadow-sm transition-[background-color,transform] duration-150 ease-out hover:bg-foreground/85 active:scale-[0.98] disabled:opacity-40 disabled:shadow-none"
+          class="flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-foreground px-4 text-ui-sm font-medium text-background shadow-sm transition-[background-color,transform] duration-150 ease-out hover:bg-foreground/90 active:scale-[0.98] disabled:opacity-40 disabled:shadow-none"
           disabled={!tokenInput.trim()}
           onclick={saveToken}
         >
           <KeyRound class="size-4" /> Continue
         </button>
-        <p class="text-xs text-muted-foreground">Paste your {meta?.name} connection string to continue.</p>
+        <p class="text-ui-xs text-muted-foreground">Paste your {meta?.name} connection string to continue.</p>
       </div>
     {:else}
       <div class="flex flex-col gap-2">
         <button
           type="button"
-          class="group flex h-10 w-full items-center justify-center gap-2.5 rounded-lg bg-foreground px-5 text-[13px] font-semibold text-background shadow-sm transition-[background-color,transform,box-shadow] duration-150 ease-out hover:bg-foreground/90 hover:shadow-md active:scale-[0.98]"
+          class="group flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-foreground px-4 text-ui-sm font-medium text-background shadow-sm transition-[background-color,transform] duration-150 ease-out hover:bg-foreground/90 active:scale-[0.98]"
           onclick={startAuth}
         >
           <DbIcon id={provider} class="size-4 shrink-0" />
           <span>Sign in with {meta?.name}</span>
           <ArrowRight class="size-4 shrink-0 transition-transform duration-150 ease-out group-hover:translate-x-0.5" />
         </button>
-        <p class="text-xs text-muted-foreground">Opens your browser to authorize · secure PKCE flow</p>
+        <p class="text-ui-xs text-muted-foreground">Opens your browser to authorize · secure PKCE flow</p>
       </div>
     {/if}
 
@@ -238,8 +238,8 @@
           <DbIcon id={provider} class="size-5 text-foreground" />
         </div>
         <div class="min-w-0">
-          <p class="text-sm font-semibold leading-tight text-foreground">Waiting for {meta?.name}…</p>
-          <p class="mt-1 text-xs leading-relaxed text-pretty text-muted-foreground">
+          <p class="text-ui-sm font-semibold leading-tight text-foreground">Waiting for {meta?.name}…</p>
+          <p class="mt-1 text-ui-xs leading-relaxed text-pretty text-muted-foreground">
             Finish authorizing in the browser tab, then come back here.
           </p>
         </div>
@@ -249,10 +249,10 @@
         <span class="progress-slide block h-full w-1/3 rounded-full bg-primary/70"></span>
       </div>
       <div class="flex items-center justify-between gap-3">
-        <span class="text-[11px] tabular-nums text-muted-foreground/50">Times out in 5 min</span>
+        <span class="text-ui-2xs tabular-nums text-muted-foreground/50">Times out in 5 min</span>
         <button
           type="button"
-          class="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/50 px-2.5 text-[11px] font-medium text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted/50 hover:text-foreground active:scale-[0.96]"
+          class="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/50 px-2.5 text-ui-2xs font-medium text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted/50 hover:text-foreground active:scale-[0.96]"
           onclick={cancelAuth}
         >
           <X class="size-3" /> Cancel
@@ -261,7 +261,7 @@
     </div>
 
   {:else if phase === 'fetching'}
-    <div class="flex items-center gap-2.5 py-2 text-[12.5px] text-muted-foreground">
+    <div class="flex items-center gap-2.5 py-2 text-ui-xs text-muted-foreground">
       <Loader2 class="size-4 animate-spin" /> Loading your databases…
     </div>
 
@@ -272,11 +272,11 @@
         <DbIcon id={provider} class="size-4 text-foreground" />
       </div>
       <div class="min-w-0 flex-1">
-        <p class="flex items-center gap-1.5 text-[12px] font-medium text-foreground">
+        <p class="flex items-center gap-1.5 text-ui-xs font-medium text-foreground">
           {meta?.name}
-          <span class="inline-flex items-center gap-1 text-[10px] font-normal text-emerald-500"><Check class="size-3" />Connected</span>
+          <span class="inline-flex items-center gap-1 text-ui-3xs font-normal text-success"><Check class="size-3" />Connected</span>
         </p>
-        <p class="text-[10px] text-muted-foreground/50">Pick a database to connect</p>
+        <p class="text-ui-3xs text-muted-foreground/50">Pick a database to connect</p>
       </div>
       <button
         type="button"
@@ -291,10 +291,10 @@
     {#if phase === 'password'}
       <!-- Inline password step — providers that don't expose the DB password -->
       <div class="flex flex-col gap-2.5 rounded-lg border border-border/50 p-3">
-        <p class="text-[12px] text-foreground">
+        <p class="text-ui-xs text-foreground">
           Database password for <span class="font-medium">{resolved?.name}</span>
         </p>
-        <p class="text-[11px] leading-relaxed text-muted-foreground/70">
+        <p class="text-ui-2xs leading-relaxed text-muted-foreground/70">
           {meta?.name} doesn't expose the database password through its API — enter it once.
           Find or reset it in your {meta?.name} dashboard under Database settings.
         </p>
@@ -306,7 +306,7 @@
             autocomplete="current-password"
             autofocus
             placeholder="Database password"
-            class="h-9 w-full rounded-lg border border-border bg-muted/30 pl-3 pr-9 text-[12px] outline-none focus:border-ring focus:ring-1 focus:ring-ring"
+            class="h-9 w-full rounded-lg border border-border bg-muted/30 pl-3 pr-9 text-ui-xs outline-none focus:border-ring focus:ring-1 focus:ring-ring"
             onkeydown={(e) => { if (e.key === 'Enter') confirmPassword() }}
           />
           <button
@@ -322,14 +322,14 @@
         <div class="flex gap-2">
           <button
             type="button"
-            class="flex-1 rounded-lg border border-border px-3 py-2 text-center text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            class="flex-1 rounded-lg border border-border px-3 py-2 text-center text-ui-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             onclick={() => { phase = 'selecting'; selectedRef = ''; resolved = null }}
           >
             Back
           </button>
           <button
             type="button"
-            class="flex-[2] rounded-lg bg-primary px-3 py-2 text-[12px] font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+            class="flex-[2] rounded-lg bg-primary px-3 py-2 text-ui-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
             disabled={!pw.trim()}
             onclick={confirmPassword}
           >
@@ -340,69 +340,71 @@
 
     <!-- Database list -->
     {:else if databases.length > 0}
-      <div class="flex flex-col overflow-hidden rounded-lg border border-border/50">
+      <div class="flex flex-col overflow-hidden rounded-lg border border-border/60">
         {#if databases.length > 6}
-          <div class="relative border-b border-border/40">
-            <Search class="pointer-events-none absolute top-1/2 left-2.5 size-3 -translate-y-1/2 text-muted-foreground/40" />
+          <div class="relative border-b border-border/50">
+            <Search class="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground/40" />
             <input
               type="text"
               placeholder="Search databases…"
               bind:value={search}
-              class="h-8 w-full bg-transparent pl-7 pr-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/35"
+              class="h-9 w-full bg-transparent pl-9 pr-2.5 text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/35"
               onkeydown={(e) => { if (e.key === 'Escape') search = '' }}
             />
           </div>
         {/if}
-        <div class="db-list-scroll flex max-h-[220px] flex-col gap-0.5 overflow-y-auto p-1.5">
+        <div class="db-list-scroll flex max-h-[240px] flex-col gap-0.5 overflow-y-auto p-1.5">
           {#each filtered as db (db.db_ref)}
             {@const active = db.db_ref === selectedRef}
             <button
               type="button"
               class={cn(
-                'flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition-colors',
-                active ? 'bg-primary/15 ring-1 ring-primary/30' : 'hover:bg-muted/50',
+                'flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors',
+                active ? 'bg-primary/10 text-foreground ring-1 ring-primary/25' : 'hover:bg-muted/50',
               )}
               onclick={() => pick(db.db_ref)}
             >
-              <DbIcon id={provider} class={cn('size-3.5', active ? 'text-foreground' : 'text-muted-foreground/45')} />
-              <span class="min-w-0 flex-1 truncate font-mono text-[12px] font-medium leading-snug {active ? 'text-foreground' : 'text-foreground/85'}">{db.name}</span>
-              {#if db.region}<span class="shrink-0 text-[10px] text-muted-foreground/40">{db.region}</span>{/if}
+              <DbIcon id={provider} class={cn('size-4 shrink-0', active ? 'text-foreground' : 'text-muted-foreground/45')} />
+              <span class="min-w-0 flex-1 truncate font-mono text-ui-xs font-medium leading-snug {active ? 'text-foreground' : 'text-foreground/85'}">{db.name}</span>
+              {#if db.region}<span class="shrink-0 text-ui-3xs text-muted-foreground/40">{db.region}</span>{/if}
               {#if active && phase === 'building'}<Loader2 class="size-3.5 shrink-0 animate-spin text-primary" />{:else if active}<Check class="size-3.5 shrink-0 text-primary" />{/if}
             </button>
           {/each}
           {#if filtered.length === 0}
-            <p class="px-2.5 py-3 text-center text-[11px] text-muted-foreground/45">No match for “{search}”</p>
+            <p class="px-2.5 py-3 text-center text-ui-2xs text-muted-foreground/45">No match for “{search}”</p>
           {/if}
         </div>
       </div>
     {:else}
       <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border/50 px-4 py-5 text-center">
         <DbIcon id={provider} class="size-5 text-muted-foreground/25" />
-        <p class="text-[11px] text-muted-foreground/50">No databases found on this account.</p>
-        <button type="button" class="flex items-center gap-1 text-[10px] text-muted-foreground/40 hover:text-muted-foreground" onclick={loadDatabases}>
+        <p class="text-ui-2xs text-muted-foreground/50">No databases found on this account.</p>
+        <button type="button" class="flex items-center gap-1 text-ui-3xs text-muted-foreground/40 hover:text-muted-foreground" onclick={loadDatabases}>
           <RefreshCw class="size-3" /> Retry
         </button>
       </div>
     {/if}
 
   {:else if phase === 'error'}
-    <div class="flex flex-col gap-3 rounded-xl border border-destructive/25 bg-destructive/[0.07] p-3.5">
-      <div class="flex items-start gap-3">
-        <div class="flex size-7 shrink-0 items-center justify-center rounded-lg bg-destructive/12 text-destructive">
-          <AlertTriangle class="size-4" />
+    <div class="err-card overflow-hidden rounded-xl border border-border/70 bg-card shadow-[var(--elevate-1)]">
+      <div class="flex items-start gap-3 p-4">
+        <div class="flex size-9 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive ring-1 ring-inset ring-destructive/15">
+          <AlertTriangle class="size-[18px]" />
         </div>
         <div class="min-w-0 flex-1">
-          <p class="text-[13px] font-semibold leading-tight text-destructive">{shownError.title}</p>
-          <p class="mt-1 text-xs leading-relaxed text-pretty break-words text-destructive/75">{shownError.detail}</p>
+          <p class="text-ui-sm font-semibold leading-snug text-foreground">{shownError.title}</p>
+          <p class="mt-1.5 break-words rounded-md bg-muted/40 px-2 py-1.5 font-mono text-ui-2xs leading-relaxed text-muted-foreground select-text">{shownError.detail}</p>
         </div>
       </div>
-      <button
-        type="button"
-        class="inline-flex h-8 items-center justify-center gap-1.5 self-start rounded-lg border border-destructive/30 bg-destructive/5 px-3 text-xs font-medium text-destructive transition-[color,background-color,transform] duration-150 ease-out hover:bg-destructive/12 active:scale-[0.96]"
-        onclick={() => (phase = 'idle')}
-      >
-        <RefreshCw class="size-3.5" /> Try again
-      </button>
+      <div class="flex items-center justify-end border-t border-border/50 bg-muted/[0.15] px-3 py-2.5">
+        <button
+          type="button"
+          class="group inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-foreground px-3.5 text-ui-xs font-medium text-background shadow-sm transition-[background-color,transform] duration-150 ease-[var(--ease-out)] hover:bg-foreground/90 active:scale-[0.97]"
+          onclick={() => (phase = 'idle')}
+        >
+          <RefreshCw class="size-3.5 transition-transform duration-500 ease-[var(--ease-out)] group-hover:rotate-180" /> Try again
+        </button>
+      </div>
     </div>
   {/if}
 </div>
@@ -422,8 +424,16 @@
   }
   .progress-slide { animation: progress-slide 1.3s ease-in-out infinite; }
 
+  /* Error card entrance — a calm rise + settle (never scale from 0). */
+  @keyframes err-in {
+    from { opacity: 0; transform: translateY(6px) scale(0.985); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .err-card { animation: err-in 240ms var(--ease-out, cubic-bezier(0.23, 1, 0.32, 1)) both; }
+
   @media (prefers-reduced-motion: reduce) {
     .pulse-ring { animation: none; opacity: 0.4; }
     .progress-slide { animation: none; width: 100%; opacity: 0.5; }
+    .err-card { animation: none; }
   }
 </style>

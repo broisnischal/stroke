@@ -89,13 +89,13 @@
     class="flex h-7 shrink-0 items-center gap-2 px-4 transition-opacity"
   >
     <span
-      class="select-none rounded px-1.5 py-px text-[9px] font-semibold uppercase tracking-widest text-blue-500/60"
+      class="select-none rounded px-1.5 py-px text-ui-3xs font-semibold uppercase tracking-widest text-blue-500/60"
     >
       [{cellIndex + 1}] sql
     </span>
-    <span class="text-[10px] text-muted-foreground/25">⌘↵ run</span>
+    <span class="text-ui-3xs text-muted-foreground/25">⌘↵ run</span>
     {#if running}
-      <span class="flex items-center gap-1 text-[10px] text-muted-foreground/50">
+      <span class="flex items-center gap-1 text-ui-3xs text-muted-foreground/50">
         <Loader2 class="size-3 animate-spin" />running…
       </span>
     {/if}
@@ -195,7 +195,7 @@
             title="Export CSV"
           >
             <Download class="size-3" />
-            <span class="text-[10px]">CSV</span>
+            <span class="text-ui-3xs">CSV</span>
           </button>
         {/if}
       </div>
@@ -221,7 +221,7 @@
                     >
                       <span class="font-medium">{col.name}</span>
                       {#if col.dataType}
-                        <span class="ml-1.5 font-normal text-muted-foreground/35 text-[10px]"
+                        <span class="ml-1.5 font-normal text-muted-foreground/35 text-ui-3xs"
                           >{col.dataType}</span
                         >
                       {/if}
@@ -238,7 +238,7 @@
                     )}
                   >
                     <td
-                      class="border-r border-border/20 px-3 py-1 text-right font-mono text-muted-foreground/20 text-[10px] select-none"
+                      class="border-r border-border/20 px-3 py-1 text-right font-mono text-muted-foreground/20 text-ui-3xs select-none"
                     >{ri + 1}</td>
                     {#each row as cell}
                       <td class="max-w-[320px] border-r border-border/10 px-4 py-1 font-mono">

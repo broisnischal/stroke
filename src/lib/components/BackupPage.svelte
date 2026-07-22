@@ -368,13 +368,13 @@
       data-studio-chrome
     >
       <span
-        class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+        class="text-ui-3xs font-medium uppercase tracking-wide text-muted-foreground"
         >Live log</span
       >
       {#if exportPhase === "running"}
         <Loader class="ml-auto size-3 animate-spin text-muted-foreground" />
       {:else if exportLogs.length > 0}
-        <span class="ml-auto text-[10px] text-muted-foreground/50"
+        <span class="ml-auto text-ui-3xs text-muted-foreground/50"
           >{exportLogs.length} entries</span
         >
       {/if}
@@ -384,13 +384,13 @@
       class="min-h-0 flex-1 overflow-y-auto bg-muted/10 p-4 font-mono"
     >
       {#if exportLogs.length === 0}
-        <p class="text-[11px] text-muted-foreground/30">
+        <p class="text-ui-2xs text-muted-foreground/30">
           Run an export to see progress here.
         </p>
       {:else}
         {#each exportLogs as entry (entry.ts + entry.message)}
           <div
-            class="mb-0.5 text-[11px] leading-relaxed {logColor[entry.level] ??
+            class="mb-0.5 text-ui-2xs leading-relaxed {logColor[entry.level] ??
               'text-muted-foreground'}"
           >
             {entry.message}
@@ -398,7 +398,7 @@
         {/each}
         {#if exportPhase === "running"}
           <div
-            class="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground/50"
+            class="mt-1 flex items-center gap-1.5 text-ui-2xs text-muted-foreground/50"
           >
             <Loader class="size-3 animate-spin" /><span>Running…</span>
           </div>
@@ -415,13 +415,13 @@
       data-studio-chrome
     >
       <span
-        class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+        class="text-ui-3xs font-medium uppercase tracking-wide text-muted-foreground"
         >Live log</span
       >
       {#if importPhase === "running"}
         <Loader class="ml-auto size-3 animate-spin text-muted-foreground" />
       {:else if restoreLogs.length > 0}
-        <span class="ml-auto text-[10px] text-muted-foreground/50"
+        <span class="ml-auto text-ui-3xs text-muted-foreground/50"
           >{restoreLogs.length} entries</span
         >
       {/if}
@@ -431,7 +431,7 @@
       class="min-h-0 flex-1 overflow-y-auto bg-muted/10 p-4 font-mono"
     >
       {#if restoreLogs.length === 0}
-        <p class="text-[11px] text-muted-foreground/30">
+        <p class="text-ui-2xs text-muted-foreground/30">
           {importPhase === "idle"
             ? "Run a restore to see progress here."
             : "Waiting for log entries…"}
@@ -439,7 +439,7 @@
       {:else}
         {#each restoreLogs as entry (entry.ts + entry.message)}
           <div
-            class="mb-0.5 text-[11px] leading-relaxed {logColor[entry.level] ??
+            class="mb-0.5 text-ui-2xs leading-relaxed {logColor[entry.level] ??
               'text-muted-foreground'}"
           >
             {entry.message}
@@ -447,7 +447,7 @@
         {/each}
         {#if importPhase === "running"}
           <div
-            class="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground/50"
+            class="mt-1 flex items-center gap-1.5 text-ui-2xs text-muted-foreground/50"
           >
             <Loader class="size-3 animate-spin" /><span>Running…</span>
           </div>
@@ -498,7 +498,7 @@
           <!-- DB label -->
           <div class="border-b border-border/30 px-4 py-3">
             <p
-              class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+              class="text-ui-3xs font-medium uppercase tracking-wide text-muted-foreground"
             >
               Database
             </p>
@@ -510,7 +510,7 @@
             <div class="border-b border-border/30 px-4 py-3">
               <label
                 for="export-schema-select"
-                class="mb-1.5 block text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+                class="mb-1.5 block text-ui-3xs font-medium uppercase tracking-wide text-muted-foreground"
                 >Schema</label
               >
               <div class="relative">
@@ -532,7 +532,7 @@
           <!-- What to include -->
           <div class="border-b border-border/30 px-4 py-3">
             <p
-              class="mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+              class="mb-2 text-ui-3xs font-medium uppercase tracking-wide text-muted-foreground"
             >
               Include
             </p>
@@ -595,7 +595,7 @@
           <div class="px-4 py-3">
             <div class="mb-2 flex items-center justify-between">
               <span
-                class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+                class="text-ui-3xs font-medium uppercase tracking-wide text-muted-foreground"
               >
                 Tables
                 {#if tables.length > 0}
@@ -605,7 +605,7 @@
                 {/if}
               </span>
               {#if tables.length > 0}
-                <div class="flex gap-2 text-[10px] text-muted-foreground">
+                <div class="flex gap-2 text-ui-3xs text-muted-foreground">
                   <button
                     type="button"
                     class="hover:text-foreground"
@@ -622,7 +622,7 @@
             </div>
 
             {#if tables.length === 0}
-              <p class="text-[11px] text-muted-foreground/40">
+              <p class="text-ui-2xs text-muted-foreground/40">
                 No tables found.
               </p>
             {:else}
@@ -651,7 +651,7 @@
                     >
                     {#if t.rowCount != null && t.rowCount >= 0}
                       <span
-                        class="shrink-0 font-mono text-[10px] text-muted-foreground/50"
+                        class="shrink-0 font-mono text-ui-3xs text-muted-foreground/50"
                         >{fmtRows(t.rowCount)}</span
                       >
                     {/if}
@@ -673,7 +673,7 @@
                   >
                 </div>
                 <div
-                  class="mt-2 grid grid-cols-3 gap-1 font-mono text-[10px] text-muted-foreground"
+                  class="mt-2 grid grid-cols-3 gap-1 font-mono text-ui-3xs text-muted-foreground"
                 >
                   <span
                     >{exportResult.tableCount} table{exportResult.tableCount ===
@@ -775,12 +775,12 @@
                   <p class="truncate text-xs font-medium text-foreground">
                     {importFileName}
                   </p>
-                  <p class="mt-0.5 text-[10px] text-muted-foreground">
+                  <p class="mt-0.5 text-ui-3xs text-muted-foreground">
                     {importFileSize} · SQL file
                   </p>
                   <div class="mt-2 flex items-center gap-2">
                     <label
-                      class="cursor-pointer text-[11px] text-primary hover:underline"
+                      class="cursor-pointer text-ui-2xs text-primary hover:underline"
                     >
                       <input
                         type="file"
@@ -794,7 +794,7 @@
                     <button
                       type="button"
                       onclick={discardFile}
-                      class="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-destructive"
+                      class="flex items-center gap-1 text-ui-2xs text-muted-foreground hover:text-destructive"
                     >
                       <X class="size-3" />Discard
                     </button>
@@ -821,13 +821,13 @@
                     <p class="text-xs font-medium text-foreground">
                       Select a SQL backup file
                     </p>
-                    <p class="mt-0.5 text-[10px] text-muted-foreground/60">
+                    <p class="mt-0.5 text-ui-3xs text-muted-foreground/60">
                       Supports <span class="font-mono">.sql</span> and
                       <span class="font-mono">.txt</span>
                     </p>
                   </div>
                   <span
-                    class="rounded-md border border-border/60 bg-background px-3 py-1.5 text-[11px] text-muted-foreground shadow-sm"
+                    class="rounded-md border border-border/60 bg-background px-3 py-1.5 text-ui-2xs text-muted-foreground shadow-sm"
                     >Browse file…</span
                   >
                 </div>
@@ -846,7 +846,7 @@
                   >
                 </div>
                 <p
-                  class="mb-3 text-[11px] leading-relaxed text-muted-foreground"
+                  class="mb-3 text-ui-2xs leading-relaxed text-muted-foreground"
                 >
                   Executes SQL against <strong class="text-foreground"
                     >{dbLabel}</strong
@@ -858,7 +858,7 @@
                     bind:checked={importConfirmed}
                     class="mt-0.5 shrink-0 accent-amber-500"
                   />
-                  <span class="text-[11px] text-muted-foreground"
+                  <span class="text-ui-2xs text-muted-foreground"
                     >I understand and want to proceed</span
                   >
                 </label>
@@ -880,7 +880,7 @@
                 <p class="text-sm font-medium text-foreground">
                   Executing statements…
                 </p>
-                <p class="mt-1 text-[11px] text-muted-foreground">
+                <p class="mt-1 text-ui-2xs text-muted-foreground">
                   This may take a moment.
                 </p>
               </div>
@@ -902,7 +902,7 @@
                     <p class="text-xs font-semibold text-foreground">
                       Restore complete
                     </p>
-                    <p class="text-[10px] text-muted-foreground">
+                    <p class="text-ui-3xs text-muted-foreground">
                       All statements succeeded
                     </p>
                   </div>
@@ -916,7 +916,7 @@
                     <p class="text-xs font-semibold text-foreground">
                       Finished with errors
                     </p>
-                    <p class="text-[10px] text-muted-foreground">
+                    <p class="text-ui-3xs text-muted-foreground">
                       Some statements failed
                     </p>
                   </div>
@@ -928,7 +928,7 @@
               >
                 <div>
                   <p
-                    class="text-[10px] uppercase tracking-wide text-muted-foreground/60"
+                    class="text-ui-3xs uppercase tracking-wide text-muted-foreground/60"
                   >
                     OK
                   </p>
@@ -939,7 +939,7 @@
                 {#if importResult.statementsErr > 0}
                   <div>
                     <p
-                      class="text-[10px] uppercase tracking-wide text-muted-foreground/60"
+                      class="text-ui-3xs uppercase tracking-wide text-muted-foreground/60"
                     >
                       Failed
                     </p>
@@ -953,7 +953,7 @@
               {#if importResult.errors.length > 0}
                 <button
                   type="button"
-                  class="mt-3 text-[11px] text-muted-foreground underline"
+                  class="mt-3 text-ui-2xs text-muted-foreground underline"
                   onclick={() => (showImportErrors = !showImportErrors)}
                 >
                   {showImportErrors ? "Hide" : "Show"}
@@ -967,7 +967,7 @@
                     class="mt-2 max-h-36 overflow-y-auto rounded-lg border border-border/40 bg-background p-2.5"
                   >
                     {#each importResult.errors as err, i (i)}
-                      <p class="font-mono text-[10px] text-destructive/80">
+                      <p class="font-mono text-ui-3xs text-destructive/80">
                         {err}
                       </p>
                     {/each}
@@ -989,7 +989,7 @@
                   <p class="mb-1 text-xs font-semibold text-foreground">
                     Restore failed
                   </p>
-                  <p class="break-words text-[11px] text-destructive/80">
+                  <p class="break-words text-ui-2xs text-destructive/80">
                     {importError}
                   </p>
                 </div>

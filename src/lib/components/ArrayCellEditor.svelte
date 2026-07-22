@@ -103,7 +103,7 @@
         </div>
         <div class="min-w-0 flex-1">
           <p class="truncate text-sm font-semibold tracking-tight text-foreground antialiased">{column}</p>
-          <p class="truncate text-[11.5px] leading-relaxed text-muted-foreground/70">
+          <p class="truncate text-ui-2xs leading-relaxed text-muted-foreground/70">
             <span class="font-mono">{elementType || 'array'}[]</span>
             <span class="text-muted-foreground/40">·</span>
             <span class="tabular-nums">{items.length}</span> {items.length === 1 ? 'element' : 'elements'}
@@ -123,10 +123,10 @@
       <div class="min-h-0 flex-1 overflow-y-auto p-2">
         {#if items.length === 0}
           <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border/50 px-4 py-8 text-center">
-            <p class="text-[12px] text-muted-foreground/60">Empty array <span class="font-mono">{'{}'}</span></p>
+            <p class="text-ui-xs text-muted-foreground/60">Empty array <span class="font-mono">{'{}'}</span></p>
             <button
               type="button"
-              class="inline-flex items-center gap-1.5 rounded-md border border-border/50 px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.96]"
+              class="inline-flex items-center gap-1.5 rounded-md border border-border/50 px-2.5 py-1 text-ui-2xs font-medium text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.96]"
               onclick={addItem}
             >
               <Plus class="size-3.5" /> Add element
@@ -160,11 +160,11 @@
                 >
                   <GripVertical class="size-3.5" />
                 </button>
-                <span class="w-5 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground/35">{i}</span>
+                <span class="w-5 shrink-0 text-right font-mono text-ui-2xs tabular-nums text-muted-foreground/35">{i}</span>
                 {#if item.v === null}
                   <button
                     type="button"
-                    class="flex h-8 flex-1 items-center rounded-md border border-border/40 bg-muted/15 px-2.5 text-[12px] font-medium italic tracking-wide text-amber-500/80 transition-colors hover:bg-muted/25"
+                    class="flex h-8 flex-1 items-center rounded-md border border-border/40 bg-muted/15 px-2.5 text-ui-xs font-medium italic tracking-wide text-amber-500/80 transition-colors hover:bg-muted/25"
                     onclick={() => toggleNull(i)}
                     title="Click to enter a value"
                   >NULL</button>
@@ -175,7 +175,7 @@
                     placeholder="value"
                     spellcheck="false"
                     autocomplete="off"
-                    class="h-8 min-w-0 flex-1 rounded-md border border-border/40 bg-muted/15 px-2.5 font-mono text-[12px] leading-none text-foreground outline-none transition-[border-color,box-shadow] duration-150 placeholder:text-muted-foreground/30 hover:border-border/60 focus:border-ring focus:ring-1 focus:ring-ring focus:border-ring focus:ring-1 focus:ring-ring"
+                    class="h-8 min-w-0 flex-1 rounded-md border border-border/40 bg-muted/15 px-2.5 font-mono text-ui-xs leading-none text-foreground outline-none transition-[border-color,box-shadow] duration-150 placeholder:text-muted-foreground/30 hover:border-border/60 focus:border-ring focus:ring-1 focus:ring-ring focus:border-ring focus:ring-1 focus:ring-ring"
                     onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addItem() } }}
                   />
                 {/if}
@@ -199,7 +199,7 @@
       <div class="flex items-center gap-2 border-t border-border/15 px-3 py-2.5">
         <button
           type="button"
-          class="inline-flex h-8 items-center gap-1.5 rounded-md border border-border/50 px-2.5 text-[12px] font-medium text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.96]"
+          class="inline-flex h-8 items-center gap-1.5 rounded-md border border-border/50 px-2.5 text-ui-xs font-medium text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.96]"
           onclick={addItem}
         >
           <Plus class="size-3.5" /> Add
@@ -207,19 +207,19 @@
         {#if items.length > 0}
           <button
             type="button"
-            class="inline-flex h-8 items-center rounded-md px-2.5 text-[12px] text-muted-foreground/50 transition-colors hover:text-destructive"
+            class="inline-flex h-8 items-center rounded-md px-2.5 text-ui-xs text-muted-foreground/50 transition-colors hover:text-destructive"
             onclick={clearAll}
           >Clear</button>
         {/if}
         <div class="ml-auto flex items-center gap-2">
           <button
             type="button"
-            class="inline-flex h-8 items-center rounded-md border border-border/50 px-3 text-[12px] text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.96]"
+            class="inline-flex h-8 items-center rounded-md border border-border/50 px-3 text-ui-xs text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.96]"
             onclick={cancel}
           >Cancel</button>
           <button
             type="button"
-            class="inline-flex h-8 items-center rounded-md bg-foreground px-4 text-[12px] font-semibold text-background shadow-sm transition-[background-color,transform] duration-150 ease-out hover:bg-foreground/85 active:scale-[0.96]"
+            class="inline-flex h-8 items-center rounded-md bg-foreground px-4 text-ui-xs font-medium text-background shadow-sm transition-[background-color,transform] duration-150 ease-out hover:bg-foreground/85 active:scale-[0.96]"
             onclick={save}
           >Save</button>
         </div>

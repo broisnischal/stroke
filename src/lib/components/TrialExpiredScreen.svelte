@@ -27,8 +27,8 @@
     </div>
 
     <div class="space-y-2">
-      <h1 class="text-[22px] font-semibold tracking-tight text-foreground text-balance">Your free trial has ended</h1>
-      <p class="text-[14px] leading-relaxed text-muted-foreground text-balance">
+      <h1 class="text-ui-3xl font-semibold tracking-tight text-foreground text-balance">Your free trial has ended</h1>
+      <p class="text-ui leading-relaxed text-muted-foreground text-balance">
         Activate a license to keep using Stroke. Your saved connections and settings are untouched — they'll be right here.
       </p>
     </div>
@@ -38,7 +38,7 @@
       <LicenseActivation naked />
     </div>
 
-    <div class="flex items-center gap-4 text-[12px]">
+    <div class="flex items-center gap-4 text-ui-xs">
       <a
         href="https://stroke.click"
         target="_blank"

@@ -872,7 +872,7 @@
     } catch (e) {
       const msg = String(e).replace(/</g, "&lt;").replace(/>/g, "&gt;");
       _asyncDiagrams[asyncKey] =
-        `<div class="flex flex-col gap-1.5 p-3 rounded border border-destructive/30 bg-destructive/5"><p class="text-ui-xs font-medium text-destructive">Diagram render failed</p><p class="font-mono text-[10px] text-muted-foreground/70 whitespace-pre-wrap">${msg}</p></div>`;
+        `<div class="flex flex-col gap-1.5 p-3 rounded border border-destructive/30 bg-destructive/5"><p class="text-ui-xs font-medium text-destructive">Diagram render failed</p><p class="font-mono text-ui-3xs text-muted-foreground/70 whitespace-pre-wrap">${msg}</p></div>`;
     }
   }
 
@@ -2506,7 +2506,7 @@
             <span class="truncate text-ui-xs font-medium text-foreground"
               >New chat</span
             >
-            <span class="text-[10px] text-muted-foreground/50">Draft</span>
+            <span class="text-ui-3xs text-muted-foreground/50">Draft</span>
           </button>
         {/if}
 
@@ -2526,7 +2526,7 @@
                   autofocus
                   type="text"
                   bind:value={renamingTitle}
-                  class="min-w-0 flex-1 rounded border border-border/60 bg-background px-1.5 py-0.5 font-mono text-[11px] text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring"
+                  class="min-w-0 flex-1 rounded border border-border/60 bg-background px-1.5 py-0.5 font-mono text-ui-2xs text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring"
                   onkeydown={(e) => {
                     if (e.key === "Enter") void commitRename();
                     if (e.key === "Escape") cancelRename();
@@ -2555,7 +2555,7 @@
                 <span class="truncate text-ui-xs font-medium leading-snug"
                   >{conv.title}</span
                 >
-                <span class="mt-0.5 text-[10px] text-muted-foreground/50"
+                <span class="mt-0.5 text-ui-3xs text-muted-foreground/50"
                   >{relativeTime(conv.updatedAt)}</span
                 >
               </button>
@@ -2593,10 +2593,10 @@
           <div
             class="flex flex-col items-center gap-1.5 px-4 py-10 text-center"
           >
-            <p class="text-[11px] text-muted-foreground/50">
+            <p class="text-ui-2xs text-muted-foreground/50">
               No conversations yet
             </p>
-            <p class="text-[10px] text-muted-foreground/30">
+            <p class="text-ui-3xs text-muted-foreground/30">
               Chats save automatically
             </p>
           </div>
@@ -2931,7 +2931,7 @@
                       </span>
                     </div>
                     <span
-                      class="min-w-0 truncate font-mono text-[10px] text-muted-foreground/45"
+                      class="min-w-0 truncate font-mono text-ui-3xs text-muted-foreground/45"
                       >{#if item.op === "query" || item.op === "run"}{item.sql
                           .trim()
                           .slice(0, 120)}{:else}{meta.detail}{/if}</span
@@ -2959,31 +2959,31 @@
                             class="flex items-center justify-between gap-2 border-b border-border/40 bg-muted/20 px-3 py-1.5"
                           >
                             <span
-                              class="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wider"
+                              class="text-ui-3xs font-medium text-muted-foreground/60 uppercase tracking-wider"
                               >Diagram</span
                             >
                             <div class="flex items-center gap-0.5">
                               <span
-                                class="hidden text-[10px] text-muted-foreground/30 sm:block mr-1"
+                                class="hidden text-ui-3xs text-muted-foreground/30 sm:block mr-1"
                                 >drag · Ctrl+scroll zoom</span
                               >
                               <button
                                 type="button"
-                                class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                                class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-ui-3xs text-muted-foreground hover:bg-accent hover:text-foreground"
                                 onclick={() => copyText(part.content)}
                                 title="Copy source"
                                 ><Copy class="size-2.5" />Source</button
                               >
                               <button
                                 type="button"
-                                class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                                class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-ui-3xs text-muted-foreground hover:bg-accent hover:text-foreground"
                                 onclick={() => exportDiagramSvg(part.content)}
                                 title="Export SVG"
                                 ><ArrowDownToLine class="size-3" />SVG</button
                               >
                               <button
                                 type="button"
-                                class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                                class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-ui-3xs text-muted-foreground hover:bg-accent hover:text-foreground"
                                 onclick={() =>
                                   void exportDiagramPng(part.content)}
                                 title="Export PNG"
@@ -2991,7 +2991,7 @@
                               >
                               <button
                                 type="button"
-                                class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                                class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-ui-3xs text-muted-foreground hover:bg-accent hover:text-foreground"
                                 onclick={() => {
                                   const name =
                                     part.content
@@ -3053,7 +3053,7 @@
                                   />{/if}
                               </span>
                               <span
-                                class="shrink-0 rounded-md border border-border/40 bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60"
+                                class="shrink-0 rounded-md border border-border/40 bg-muted/50 px-1.5 py-0.5 font-mono text-ui-3xs font-semibold uppercase tracking-widest text-muted-foreground/60"
                                 >SQL</span
                               >
                               <span
@@ -3220,7 +3220,7 @@
                           class="mt-0.5 size-3.5 shrink-0 text-destructive"
                         />
                         <p
-                          class="font-mono text-[11px] leading-relaxed text-destructive"
+                          class="font-mono text-ui-2xs leading-relaxed text-destructive"
                         >
                           {item.error}
                         </p>
@@ -3242,7 +3242,7 @@
                       </div>
                       {#if item.total > 15}
                         <p
-                          class="border-t border-border/20 px-3 py-1.5 text-[10px] text-muted-foreground/40"
+                          class="border-t border-border/20 px-3 py-1.5 text-ui-3xs text-muted-foreground/40"
                         >
                           Showing 15 of {formatCompactCount(item.total)} rows{item.capped
                             ? ` (limited to ${AI_ROW_LIMIT})`
@@ -3318,11 +3318,11 @@
                     <!-- Floating header — no background, no border, appears on hover -->
                     <div class="mb-0.5 flex items-center gap-1.5">
                       <span
-                        class="min-w-0 flex-1 truncate font-mono text-[11px] font-medium text-foreground/60"
+                        class="min-w-0 flex-1 truncate font-mono text-ui-2xs font-medium text-foreground/60"
                         >{item.spec.title || ""}</span
                       >
                       <span
-                        class="font-mono text-[9px] capitalize text-muted-foreground/25"
+                        class="font-mono text-ui-3xs capitalize text-muted-foreground/25"
                         >{item.spec.type}</span
                       >
                       <div
@@ -3491,7 +3491,7 @@
                         class="size-3 shrink-0 text-muted-foreground/50"
                       />
                       <span
-                        class="truncate text-[10px] font-medium text-foreground/70"
+                        class="truncate text-ui-3xs font-medium text-foreground/70"
                         >{item.title}</span
                       >
                     </div>
@@ -3499,26 +3499,26 @@
                       class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/diag:opacity-100"
                     >
                       <span
-                        class="hidden text-[10px] text-muted-foreground/30 sm:block mr-1"
+                        class="hidden text-ui-3xs text-muted-foreground/30 sm:block mr-1"
                         >drag · Ctrl+scroll zoom</span
                       >
                       <button
                         type="button"
-                        class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                        class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-ui-3xs text-muted-foreground hover:bg-accent hover:text-foreground"
                         onclick={() => copyText(item.code)}
                         title="Copy source"
                         ><Copy class="size-2.5" />Source</button
                       >
                       <button
                         type="button"
-                        class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                        class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-ui-3xs text-muted-foreground hover:bg-accent hover:text-foreground"
                         onclick={() => exportDiagramSvg(item.code)}
                         title="Export SVG"
                         ><ArrowDownToLine class="size-3" />SVG</button
                       >
                       <button
                         type="button"
-                        class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                        class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-ui-3xs text-muted-foreground hover:bg-accent hover:text-foreground"
                         onclick={() => void exportDiagramPng(item.code)}
                         title="Export PNG"
                         ><ArrowDownToLine class="size-3" />PNG</button
@@ -3533,7 +3533,7 @@
                         type="button"
                         class={savedDiagramIds.has(item.id)
                           ? "inline-flex size-5 items-center justify-center rounded text-emerald-500/70"
-                          : "inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"}
+                          : "inline-flex h-5 items-center gap-1 rounded px-1.5 text-ui-3xs text-muted-foreground hover:bg-accent hover:text-foreground"}
                         title={savedDiagramIds.has(item.id) ? "Saved to Diagrams library" : "Save to Diagrams library"}
                         disabled={savedDiagramIds.has(item.id)}
                         onclick={() => {
@@ -3655,7 +3655,7 @@
             {#if contextStats.messages > 0}
               <button
                 type="button"
-                class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/35 transition-colors hover:bg-muted/50 hover:text-muted-foreground select-none"
+                class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground/35 transition-colors hover:bg-muted/50 hover:text-muted-foreground select-none"
                 onclick={() => {
                   settingsOpen = true;
                   settingsTab = "context";
@@ -3675,7 +3675,7 @@
                 {/if}
               </button>
             {:else}
-              <span class="text-[10px] text-muted-foreground/20">
+              <span class="text-ui-3xs text-muted-foreground/20">
                 {hasPendingConfirm
                   ? "Confirm or cancel above"
                   : "↵ send · ⇧↵ newline"}
@@ -3812,12 +3812,12 @@
                   <div
                     class="flex items-center justify-between gap-3 px-3 py-2"
                   >
-                    <span class="shrink-0 text-[10px] text-muted-foreground/60"
+                    <span class="shrink-0 text-ui-3xs text-muted-foreground/60"
                       >{row.label}</span
                     >
                     <span
                       class="min-w-0 {row.truncate ? 'truncate' : ''} {row.mono
-                        ? 'font-mono text-[10px]'
+                        ? 'font-mono text-ui-3xs'
                         : 'text-ui-xs'} text-right text-foreground/80"
                       >{row.value}</span
                     >
@@ -3835,7 +3835,7 @@
               Configure model…
             </button>
 
-            <p class="text-center text-[10px] text-muted-foreground/40">
+            <p class="text-center text-ui-3xs text-muted-foreground/40">
               Shared with AI sidebar · <kbd class="font-mono">{modKey}I</kbd>
             </p>
           </div>
@@ -3851,7 +3851,7 @@
                   class="text-ui-xs font-medium text-foreground"
                   >Temperature</label
                 >
-                <span class="font-mono text-[11px] text-muted-foreground"
+                <span class="font-mono text-ui-2xs text-muted-foreground"
                   >{$aiChatParams.temperature.toFixed(2)}</span
                 >
               </div>
@@ -3868,7 +3868,7 @@
                   })}
                 class="w-full accent-primary"
               />
-              <p class="text-[10px] text-muted-foreground/50">
+              <p class="text-ui-3xs text-muted-foreground/50">
                 0 = deterministic · 1 = balanced · 2 = creative
               </p>
             </div>
@@ -3881,12 +3881,12 @@
                   class="text-ui-xs font-medium text-foreground">Top-K</label
                 >
                 <div class="flex items-center gap-1.5">
-                  <span class="font-mono text-[11px] text-muted-foreground"
+                  <span class="font-mono text-ui-2xs text-muted-foreground"
                     >{$aiChatParams.topK ?? "off"}</span
                   >
                   <button
                     type="button"
-                    class="font-mono text-[10px] text-muted-foreground/50 hover:text-foreground"
+                    class="font-mono text-ui-3xs text-muted-foreground/50 hover:text-foreground"
                     onclick={() =>
                       updateChatParams({
                         topK: $aiChatParams.topK === null ? 40 : null,
@@ -3910,7 +3910,7 @@
                   class="w-full accent-primary"
                 />
               {/if}
-              <p class="text-[10px] text-muted-foreground/50">
+              <p class="text-ui-3xs text-muted-foreground/50">
                 Limits token sampling pool. Not supported by all providers.
               </p>
             </div>
@@ -3923,7 +3923,7 @@
                   class="text-ui-xs font-medium text-foreground"
                   >Max tokens</label
                 >
-                <span class="font-mono text-[11px] text-muted-foreground"
+                <span class="font-mono text-ui-2xs text-muted-foreground"
                   >{$aiChatParams.maxTokens.toLocaleString()}</span
                 >
               </div>
@@ -3958,9 +3958,9 @@
                   updateChatParams({
                     customInstructions: e.currentTarget.value,
                   })}
-                class="w-full resize-none rounded-lg border border-border/50 bg-background/60 px-2.5 py-2 font-mono text-[11px] text-foreground outline-none placeholder:text-muted-foreground/30 focus:border-ring focus:ring-1 focus:ring-ring"
+                class="w-full resize-none rounded-lg border border-border/50 bg-background/60 px-2.5 py-2 font-mono text-ui-2xs text-foreground outline-none placeholder:text-muted-foreground/30 focus:border-ring focus:ring-1 focus:ring-ring"
               ></textarea>
-              <p class="text-[10px] text-muted-foreground/50">
+              <p class="text-ui-3xs text-muted-foreground/50">
                 Prepended to the system prompt on every turn.
               </p>
             </div>
@@ -3968,7 +3968,7 @@
             <!-- Reset params -->
             <button
               type="button"
-              class="self-start font-mono text-[10px] text-muted-foreground/50 hover:text-foreground"
+              class="self-start font-mono text-ui-3xs text-muted-foreground/50 hover:text-foreground"
               onclick={resetChatParams}>Reset to defaults</button
             >
 
@@ -3978,7 +3978,7 @@
             <!-- Clear all history -->
             <div class="flex flex-col gap-1.5">
               <p class="text-ui-xs font-medium text-foreground">Chat history</p>
-              <p class="text-[10px] text-muted-foreground/50">
+              <p class="text-ui-3xs text-muted-foreground/50">
                 Permanently delete all saved conversations for this connection.
               </p>
               <button
@@ -4008,7 +4008,7 @@
           <div class="flex flex-col gap-3 p-4">
             <!-- Action row -->
             <div class="flex items-center gap-1.5">
-              <p class="flex-1 text-[10px] text-muted-foreground/60">
+              <p class="flex-1 text-ui-3xs text-muted-foreground/60">
                 Inject domain knowledge into every request.
               </p>
               <label
@@ -4043,7 +4043,7 @@
                 <div class="flex flex-col gap-1">
                   <label
                     for="skill-name"
-                    class="text-[10px] text-muted-foreground/60">Name *</label
+                    class="text-ui-3xs text-muted-foreground/60">Name *</label
                   >
                   <Input
                     id="skill-name"
@@ -4055,7 +4055,7 @@
                 <div class="flex flex-col gap-1">
                   <label
                     for="skill-desc"
-                    class="text-[10px] text-muted-foreground/60"
+                    class="text-ui-3xs text-muted-foreground/60"
                     >Description</label
                   >
                   <Input
@@ -4068,7 +4068,7 @@
                 <div class="flex flex-col gap-1">
                   <label
                     for="skill-content"
-                    class="text-[10px] text-muted-foreground/60"
+                    class="text-ui-3xs text-muted-foreground/60"
                     >Content (Markdown) *</label
                   >
                   <textarea
@@ -4097,14 +4097,14 @@
             <!-- Built-in -->
             <div class="flex flex-col gap-1.5">
               <p
-                class="text-[10px] font-medium text-muted-foreground/50 uppercase tracking-wide"
+                class="text-ui-3xs font-medium text-muted-foreground/50 uppercase tracking-wide"
               >
                 Built-in
               </p>
               <div class="flex flex-wrap gap-1">
                 {#each ["PostgreSQL", "MySQL", "SQLite", "Mermaid", "Charts"] as b}
                   <span
-                    class="inline-flex items-center gap-1 rounded-full border border-border/40 bg-muted/30 px-2 py-0.5 text-[10px] text-muted-foreground/70"
+                    class="inline-flex items-center gap-1 rounded-full border border-border/40 bg-muted/30 px-2 py-0.5 text-ui-3xs text-muted-foreground/70"
                   >
                     <span class="size-1.5 rounded-full bg-primary/50"></span>{b}
                   </span>
@@ -4118,14 +4118,14 @@
                 class="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border/40 py-7 text-center"
               >
                 <BookOpen class="size-5 text-muted-foreground/25" />
-                <p class="text-[11px] text-muted-foreground/50">
+                <p class="text-ui-2xs text-muted-foreground/50">
                   No custom skills yet
                 </p>
               </div>
             {:else}
               <div class="flex flex-col gap-1">
                 <p
-                  class="text-[10px] font-medium text-muted-foreground/50 uppercase tracking-wide"
+                  class="text-ui-3xs font-medium text-muted-foreground/50 uppercase tracking-wide"
                 >
                   Custom ({skills.length})
                 </p>
@@ -4142,7 +4142,7 @@
                       </p>
                       {#if skill.description}
                         <p
-                          class="mt-0.5 line-clamp-2 text-[10px] leading-relaxed text-muted-foreground/60"
+                          class="mt-0.5 line-clamp-2 text-ui-3xs leading-relaxed text-muted-foreground/60"
                         >
                           {skill.description}
                         </p>
@@ -4170,7 +4170,7 @@
               <div class="flex items-center justify-between">
                 <span class="text-ui-xs font-medium">Context window</span>
                 <span
-                  class="font-mono text-[10px] tabular-nums text-muted-foreground/70"
+                  class="font-mono text-ui-3xs tabular-nums text-muted-foreground/70"
                   >{tokEst(contextStats.totalChars)} / {tokEst(
                     contextStats.maxChars,
                   )}</span
@@ -4191,7 +4191,7 @@
                   style="width: {Math.min(contextStats.pct, 100)}%"
                 ></div>
               </div>
-              <p class="text-[10px] text-muted-foreground/50">
+              <p class="text-ui-3xs text-muted-foreground/50">
                 {contextStats.pct}% used · auto-compresses at 30k tokens
               </p>
             </div>
@@ -4206,7 +4206,7 @@
                     class="font-mono text-base font-semibold tabular-nums text-foreground"
                     >{stat.value}</span
                   >
-                  <span class="text-[10px] text-muted-foreground/60"
+                  <span class="text-ui-3xs text-muted-foreground/60"
                     >{stat.label}</span
                   >
                 </div>
@@ -4219,7 +4219,7 @@
             >
               {#each [{ color: "bg-primary/50", text: "Full history re-sent each turn for context." }, { color: "bg-primary/50", text: "Compresses at 30k — keeps last 10 turns." }, { color: "bg-primary/50", text: "Only schema for mentioned tables is injected." }, { color: "bg-amber-500/60", text: "Failed tool calls blocked after 2 retries." }] as item}
                 <div
-                  class="flex items-start gap-2 text-[10px] text-muted-foreground/70"
+                  class="flex items-start gap-2 text-ui-3xs text-muted-foreground/70"
                 >
                   <span
                     class="mt-1.5 size-1.5 shrink-0 rounded-full {item.color}"
@@ -4346,10 +4346,10 @@
       class="flex shrink-0 items-center gap-3 border-b border-border/60 bg-background/80 px-4 py-2"
     >
       <span
-        class="min-w-0 flex-1 truncate font-mono text-[13px] font-semibold text-foreground/80"
+        class="min-w-0 flex-1 truncate font-mono text-ui-sm font-semibold text-foreground/80"
         >{fullscreenChart.title}</span
       >
-      <span class="font-mono text-[10px] capitalize text-muted-foreground/40"
+      <span class="font-mono text-ui-3xs capitalize text-muted-foreground/40"
         >{fullscreenChart.spec.type}</span
       >
       <div class="flex items-center gap-1">
@@ -4385,7 +4385,7 @@
       />
     </div>
     <p
-      class="shrink-0 border-t border-border/30 px-4 py-1.5 text-center font-mono text-[10px] text-muted-foreground/30"
+      class="shrink-0 border-t border-border/30 px-4 py-1.5 text-center font-mono text-ui-3xs text-muted-foreground/30"
     >
       Ctrl+scroll to zoom · drag to pan · double-click to reset
     </p>
@@ -4472,7 +4472,7 @@
       </div>
     </div>
     <p
-      class="shrink-0 border-t border-border/40 px-4 py-1.5 text-center text-[10px] text-muted-foreground/40"
+      class="shrink-0 border-t border-border/40 px-4 py-1.5 text-center text-ui-3xs text-muted-foreground/40"
     >
       Drag to pan · Ctrl+scroll to zoom · Double-click to reset
     </p>
