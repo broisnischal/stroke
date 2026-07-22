@@ -573,7 +573,10 @@ pub async fn insert_table_row(
 
     let mut q = sqlx::query(&sql);
     for col in &col_names {
-        q = bind_value(q, values.get(col).unwrap());
+        let value = values
+            .get(col)
+            .ok_or_else(|| format!("Missing value for column: {col}"))?;
+        q = bind_value(q, value);
     }
     q.execute(pool).await.map_err(|e| format!("Insert failed: {e}"))?;
 
@@ -593,7 +596,10 @@ pub async fn insert_table_row(
             let sel = format!("SELECT * FROM {}.{} WHERE {} LIMIT 1", bt(schema), bt(table), where_parts.join(" AND "));
             let mut sel_q = sqlx::query(&sel);
             for pk_col in &pk_cols {
-                sel_q = bind_value(sel_q, values.get(pk_col).unwrap());
+                let value = values
+                    .get(pk_col)
+                    .ok_or_else(|| format!("Missing value for column: {pk_col}"))?;
+                sel_q = bind_value(sel_q, value);
             }
             sel_q.fetch_optional(pool).await.map_err(|e| format!("Failed to fetch inserted row: {e}"))?
         } else {
