@@ -9,6 +9,7 @@
    *   colIdx: number,
    *   draft: string,
    *   original: string,
+   *   isNull: boolean,
    *   columnName: string,
    *   dataType: string,
    *   nullable: boolean,
@@ -25,7 +26,9 @@
   /** @type {HTMLTextAreaElement | null} */
   let textareaEl = $state(null);
 
-  const isNull = $derived(cell !== null && cell.draft === "");
+  // NULL is an explicit state (set via "Set NULL"), distinct from an empty
+  // string. Typing anything clears it so `""` can be saved as a real value.
+  const isNull = $derived(cell !== null && cell.isNull);
   const charCount = $derived(cell?.draft.length ?? 0);
 
   $effect(() => {
@@ -55,6 +58,7 @@
   function setNull() {
     if (!cell) return;
     cell.draft = "";
+    cell.isNull = true;
   }
 </script>
 
@@ -79,7 +83,7 @@
       <!-- Header -->
       <div class="flex shrink-0 items-center gap-2.5 border-b border-border/40 px-4 py-3">
         <div class="flex min-w-0 flex-1 items-center gap-2">
-          <span class="truncate font-mono text-sm font-medium text-foreground">
+          <span class="truncate font-mono text-ui-sm font-medium text-foreground">
             {cell.columnName}
           </span>
           {#if cell.dataType}
@@ -109,7 +113,7 @@
           <div
             class="pointer-events-none absolute inset-0 flex items-start p-4"
           >
-            <span class="font-mono text-sm text-muted-foreground/30 italic">NULL</span>
+            <span class="font-mono text-ui-sm text-muted-foreground/30 italic">NULL</span>
           </div>
         {/if}
         <textarea
@@ -118,10 +122,11 @@
           disabled={saving}
           spellcheck={false}
           class={cn(
-            "block h-full min-h-[280px] w-full resize-none bg-transparent p-4 font-mono text-sm text-foreground outline-none placeholder:text-muted-foreground/30",
+            "block h-full min-h-[280px] w-full resize-none bg-transparent p-4 font-mono text-ui-sm text-foreground outline-none placeholder:text-muted-foreground/30",
             isNull && "opacity-0 pointer-events-none",
           )}
           placeholder="Enter value…"
+          oninput={() => { if (cell) cell.isNull = false; }}
           onkeydown={handleKeydown}
         ></textarea>
       </div>
@@ -132,7 +137,7 @@
           <button
             type="button"
             disabled={saving || isNull}
-            class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/50 px-2.5 text-xs text-muted-foreground transition-colors hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-30"
+            class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/50 px-2.5 text-ui-xs text-muted-foreground transition-colors hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-30"
             onclick={setNull}
           >
             Set NULL
@@ -146,7 +151,7 @@
         <button
           type="button"
           disabled={saving}
-          class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/50 px-3 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+          class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/50 px-3 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
           onclick={oncancel}
         >
           Cancel
@@ -156,7 +161,7 @@
         <button
           type="button"
           disabled={saving}
-          class="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-40"
+          class="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-3 text-ui-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-40"
           onclick={onsave}
         >
           {saving ? "Saving…" : "Save"}

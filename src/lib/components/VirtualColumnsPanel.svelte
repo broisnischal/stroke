@@ -126,7 +126,7 @@
   <!-- Header -->
   <div class="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
     <FunctionSquare class="size-3.5 shrink-0 text-primary/60" />
-    <span class="flex-1 text-sm font-semibold tracking-tight">Virtual columns</span>
+    <span class="flex-1 text-ui-sm font-semibold tracking-tight">Virtual columns</span>
     <span class="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-ui-2xs text-muted-foreground/55">{tableName}</span>
     <button
       type="button"
@@ -143,7 +143,7 @@
 
         <!-- Section title -->
         <div class="flex h-8 shrink-0 items-center border-b border-border/50 px-3">
-          <span class="text-xs font-semibold text-foreground/70">
+          <span class="text-ui-xs font-semibold text-foreground/70">
             {editId ? 'Edit column' : 'New column'}
           </span>
         </div>
@@ -151,7 +151,7 @@
         <!-- Name ─────────────────────────────────────────────────────────── -->
         <div class="border-b border-border/40 px-3 py-3">
           <label class="block">
-            <span class="mb-1.5 block text-xs font-medium text-foreground/60">Name</span>
+            <span class="mb-1.5 block text-ui-xs font-medium text-foreground/60">Name</span>
             <input
               type="text"
               bind:value={draftName}
@@ -164,7 +164,7 @@
         <!-- Expression ───────────────────────────────────────────────────── -->
         <div class="border-b border-border/40 px-3 py-3">
           <div class="mb-1.5 flex items-center justify-between">
-            <span class="text-xs font-medium text-foreground/60">Expression</span>
+            <span class="text-ui-xs font-medium text-foreground/60">Expression</span>
             <span class="rounded bg-muted/50 px-1.5 font-mono text-ui-2xs text-muted-foreground/60">{'{ col }'}</span>
           </div>
           <textarea
@@ -183,14 +183,14 @@
         <!-- Columns ──────────────────────────────────────────────────────── -->
         {#if columns.length > 0}
           <div class="border-b border-border/40 px-3 py-3">
-            <p class="mb-2 text-xs font-medium text-foreground/60">Columns</p>
+            <p class="mb-2 text-ui-xs font-medium text-foreground/60">Columns</p>
             <div class="mb-1.5 flex items-center gap-1.5 rounded border border-border/50 bg-muted/30 px-2 py-1">
               <Search class="size-3.5 shrink-0 text-muted-foreground/50" />
               <input
                 type="text"
                 bind:value={colSearch}
                 placeholder="Search columns…"
-                class="min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground/35"
+                class="min-w-0 flex-1 bg-transparent text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/35"
                 autocomplete="off"
                 spellcheck="false"
               />
@@ -215,7 +215,7 @@
                     )}
                     onclick={() => insertCol(col.name)}
                   >
-                    <span class="min-w-0 flex-1 truncate font-mono text-xs">{col.name}</span>
+                    <span class="min-w-0 flex-1 truncate font-mono text-ui-xs">{col.name}</span>
                     {#if draftRefs.includes(col.name)}
                       <Check class="size-2.5 shrink-0 text-primary" />
                     {/if}
@@ -228,7 +228,7 @@
 
         <!-- Functions ────────────────────────────────────────────────────── -->
         <div class="border-b border-border/40 px-3 py-3">
-          <p class="mb-3 text-xs font-medium text-foreground/60">Functions</p>
+          <p class="mb-3 text-ui-xs font-medium text-foreground/60">Functions</p>
           <div class="flex flex-col gap-3">
             {#each fnGroups as group}
               <div>
@@ -237,7 +237,7 @@
                   {#each group.fns as fn}
                     <button
                       type="button"
-                      class="inline-flex items-center justify-center rounded border border-border/60 bg-muted/50 px-2 py-1 font-mono text-xs font-medium text-foreground/70 transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
+                      class="inline-flex items-center justify-center rounded border border-border/60 bg-muted/50 px-2 py-1 font-mono text-ui-xs font-medium text-foreground/70 transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
                       onclick={() => insertFn(fn)}
                     >{fn.label}</button>
                   {/each}
@@ -249,7 +249,7 @@
 
         <!-- Preview ──────────────────────────────────────────────────────── -->
         <div class="border-b border-border/40 px-3 py-3">
-          <p class="mb-2 text-xs font-medium text-foreground/60">Preview</p>
+          <p class="mb-2 text-ui-xs font-medium text-foreground/60">Preview</p>
           {#if draftExpr.trim() && previewRows.length > 0}
             <div class="overflow-hidden rounded border border-border/40 bg-muted/20">
               {#each previewRows as row, i}
@@ -257,14 +257,14 @@
                 <div class="flex items-center gap-2.5 px-2.5 py-1.5 {i > 0 ? 'border-t border-border/30' : ''}">
                   <span class="shrink-0 font-mono text-ui-2xs tabular-nums text-muted-foreground/45">#{i+1}</span>
                   <span class={cn(
-                    "min-w-0 flex-1 truncate font-mono text-xs",
+                    "min-w-0 flex-1 truncate font-mono text-ui-xs",
                     val === '(empty)' || val === '—' ? "italic text-muted-foreground/45" : "text-foreground/80"
                   )}>{val}</span>
                 </div>
               {/each}
             </div>
           {:else}
-            <div class="rounded border border-border/30 bg-muted/15 px-2.5 py-2 text-xs italic text-muted-foreground/40">
+            <div class="rounded border border-border/30 bg-muted/15 px-2.5 py-2 text-ui-xs italic text-muted-foreground/40">
               Enter an expression above to preview
             </div>
           {/if}
@@ -277,14 +277,14 @@
               type="button"
               onclick={save}
               disabled={!canSave}
-              class="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded bg-primary text-xs font-semibold text-primary-foreground transition-opacity disabled:cursor-not-allowed disabled:opacity-30 hover:not-disabled:opacity-90"
+              class="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded bg-primary text-ui-xs font-semibold text-primary-foreground transition-opacity disabled:cursor-not-allowed disabled:opacity-30 hover:not-disabled:opacity-90"
             >
               <Check class="size-3.5" /> Save
             </button>
             <button
               type="button"
               onclick={cancelForm}
-              class="inline-flex h-8 items-center justify-center rounded border border-border/50 px-3.5 text-xs font-medium text-foreground/65 transition-colors hover:bg-muted hover:text-foreground"
+              class="inline-flex h-8 items-center justify-center rounded border border-border/50 px-3.5 text-ui-xs font-medium text-foreground/65 transition-colors hover:bg-muted hover:text-foreground"
             >Cancel</button>
           </div>
         </div>
@@ -301,7 +301,7 @@
             </div>
             <div>
               <p class="text-ui-sm font-medium text-foreground/55">No virtual columns</p>
-              <p class="mt-0.5 text-xs text-muted-foreground/45">Compute values from existing columns using templates and functions.</p>
+              <p class="mt-0.5 text-ui-xs text-muted-foreground/45">Compute values from existing columns using templates and functions.</p>
             </div>
           </div>
         {:else}
@@ -357,7 +357,7 @@
         <button
           type="button"
           onclick={openAdd}
-          class="flex w-full items-center justify-center gap-1.5 rounded border border-dashed border-border/50 py-2 text-xs font-medium text-muted-foreground/60 transition-colors hover:border-primary/40 hover:bg-primary/5 hover:text-primary"
+          class="flex w-full items-center justify-center gap-1.5 rounded border border-dashed border-border/50 py-2 text-ui-xs font-medium text-muted-foreground/60 transition-colors hover:border-primary/40 hover:bg-primary/5 hover:text-primary"
         >
           <Plus class="size-3" /> Add virtual column
         </button>

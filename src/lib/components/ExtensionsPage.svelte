@@ -160,7 +160,7 @@
   function removeRule(i) { setRules(rulesOf().filter((_, idx) => idx !== i)); }
 
   const selTrigger =
-    "h-7 w-[12rem] justify-between gap-2 border-border/70 bg-background px-2.5 text-xs font-normal shadow-none";
+    "h-7 w-[12rem] justify-between gap-2 border-border/70 bg-background px-2.5 text-ui-xs font-normal shadow-none";
   const ruleInput =
     "h-7 min-w-0 rounded-md border border-border/70 bg-background px-2.5 font-mono text-ui-xs text-foreground outline-none focus:border-primary/60";
 </script>
@@ -343,7 +343,7 @@
                   <Select.Root type="single" value={c.timeZone} onValueChange={(v) => v && setPluginConfig(selected.id, { timeZone: v })}>
                     <Select.Trigger size="sm" class={selTrigger} aria-label="Timezone"><span class="truncate">{tzLabel(selected.id)}</span></Select.Trigger>
                     <Select.Content class="z-[120] max-h-[18rem] min-w-[12rem] p-1" sideOffset={6}>
-                      {#each TIMEZONE_OPTIONS as tz (tz.value)}<Select.Item value={tz.value} label={tz.label} class="rounded-md py-1.5 pl-2 text-xs">{tz.label}</Select.Item>{/each}
+                      {#each TIMEZONE_OPTIONS as tz (tz.value)}<Select.Item value={tz.value} label={tz.label} class="rounded-md py-1.5 pl-2 text-ui-xs">{tz.label}</Select.Item>{/each}
                     </Select.Content>
                   </Select.Root>
                 {/snippet}
@@ -360,7 +360,7 @@
                   <Select.Root type="single" value={c.currency} onValueChange={(v) => v && setPluginConfig(selected.id, { currency: v })}>
                     <Select.Trigger size="sm" class={selTrigger} aria-label="Currency"><span class="truncate">{c.currency}</span></Select.Trigger>
                     <Select.Content class="z-[120] max-h-[18rem] min-w-[8rem] p-1" sideOffset={6}>
-                      {#each CURRENCIES as cur (cur)}<Select.Item value={cur} label={cur} class="rounded-md py-1.5 pl-2 text-xs">{cur}</Select.Item>{/each}
+                      {#each CURRENCIES as cur (cur)}<Select.Item value={cur} label={cur} class="rounded-md py-1.5 pl-2 text-ui-xs">{cur}</Select.Item>{/each}
                     </Select.Content>
                   </Select.Root>
                 {/snippet}
@@ -373,7 +373,7 @@
                   <Select.Root type="single" value={c.unit} onValueChange={(v) => v && setPluginConfig(selected.id, { unit: v })}>
                     <Select.Trigger size="sm" class={selTrigger} aria-label="Duration unit"><span class="truncate">{DURATION_UNITS.find((u) => u.value === c.unit)?.label ?? "Auto"}</span></Select.Trigger>
                     <Select.Content class="z-[120] min-w-[12rem] p-1" sideOffset={6}>
-                      {#each DURATION_UNITS as u (u.value)}<Select.Item value={u.value} label={u.label} class="rounded-md py-1.5 pl-2 text-xs">{u.label}</Select.Item>{/each}
+                      {#each DURATION_UNITS as u (u.value)}<Select.Item value={u.value} label={u.label} class="rounded-md py-1.5 pl-2 text-ui-xs">{u.label}</Select.Item>{/each}
                     </Select.Content>
                   </Select.Root>
                 {/snippet}
@@ -392,7 +392,7 @@
                   <Select.Root type="single" value={c.palette} onValueChange={(v) => v && setPluginConfig(selected.id, { palette: v })}>
                     <Select.Trigger size="sm" class={selTrigger} aria-label="Heatmap palette"><span class="truncate">{HEAT_PALETTES.find((p) => p.value === c.palette)?.label ?? "Blue"}</span></Select.Trigger>
                     <Select.Content class="z-[120] min-w-[12rem] p-1" sideOffset={6}>
-                      {#each HEAT_PALETTES as p (p.value)}<Select.Item value={p.value} label={p.label} class="rounded-md py-1.5 pl-2 text-xs">{p.label}</Select.Item>{/each}
+                      {#each HEAT_PALETTES as p (p.value)}<Select.Item value={p.value} label={p.label} class="rounded-md py-1.5 pl-2 text-ui-xs">{p.label}</Select.Item>{/each}
                     </Select.Content>
                   </Select.Root>
                 {/snippet}

@@ -426,9 +426,21 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     } catch {}
     return 260
   })())
+  // Active drag listeners (column resize / FK dock resize). Tracked so a mid-drag
+  // unmount can remove them in onDestroy instead of leaking them on window.
+  /** @type {{ move: (e: PointerEvent) => void, up: () => void } | null} */
+  let _activeResizeListeners = null
+  function clearActiveResizeListeners() {
+    if (!_activeResizeListeners) return
+    window.removeEventListener('pointermove', _activeResizeListeners.move)
+    window.removeEventListener('pointerup', _activeResizeListeners.up)
+    _activeResizeListeners = null
+  }
+
   /** @param {PointerEvent} e */
   function startFkDockResize(e) {
     e.preventDefault()
+    clearActiveResizeListeners()
     const startY = e.clientY, startH = fkDockHeight
     const move = (/** @type {PointerEvent} */ ev) => {
       fkDockHeight = Math.min(FK_DOCK_MAX, Math.max(FK_DOCK_MIN, startH + (startY - ev.clientY)))
@@ -436,10 +448,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const up = () => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
+      _activeResizeListeners = null
       try { localStorage.setItem('stroke:fk-dock-height', String(fkDockHeight)) } catch {}
     }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
+    _activeResizeListeners = { move, up }
   }
 
   /** Column whose quick-stats panel is open, or null. */
@@ -1088,6 +1102,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const col = columns[colIdx];
     if (!col) return;
 
+    // A hidden column has no on-canvas cell, so the edit overlay can't anchor to
+    // it — setting editingCell would trap keyboard nav until Esc. Bail out.
+    if (hiddenColumns.has(col.name)) return;
+
     if (!primaryKey.length) {
       toast.error("Cannot edit", {
         // ClickHouse is OLAP: rows aren't primary-key addressable, so the backend
@@ -1163,6 +1181,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       colIdx,
       draft: original,
       original,
+      isNull: startValue === null || startValue === undefined,
+      originalIsNull: startValue === null || startValue === undefined,
       columnName: col.name,
       dataType,
       nullable: col.nullable ?? true,
@@ -1176,15 +1196,27 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   async function commitQuickLook() {
     if (!quickLookCell || saving) return;
-    const { rowIdx, colIdx, draft } = quickLookCell;
+    const { rowIdx, colIdx, draft, isNull } = quickLookCell;
     const col = columns[colIdx];
     if (!col) return;
-    if (draft === quickLookCell.original) {
+    // No-op only when BOTH the text and the null-state are unchanged — otherwise
+    // a NULL→"" (or ""→NULL) flip would be silently dropped as a "no change".
+    if (draft === quickLookCell.original && isNull === quickLookCell.originalIsNull) {
       quickLookCell = null;
       tick().then(() => tableContainer?.focus({ preventScroll: true }));
       return;
     }
-    const parsed = parseCellInput(draft, col.dataType ?? col.data_type ?? "text", getColumnEnumValues(col));
+    // NULL is explicit ("Set NULL"); otherwise an empty draft is a genuine empty
+    // string, so bypass parseCellInput's ""→null collapse for that one case.
+    /** @type {import('$lib/cell-value.js').ParseResult} */
+    let parsed;
+    if (isNull) {
+      parsed = { ok: true, value: null };
+    } else if (draft === "") {
+      parsed = { ok: true, value: "" };
+    } else {
+      parsed = parseCellInput(draft, col.dataType ?? col.data_type ?? "text", getColumnEnumValues(col));
+    }
     if (!parsed.ok) {
       toast.error("Invalid value", { description: parsed.message });
       return;
@@ -1311,6 +1343,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         next.delete(key);
         pendingEdits = next;
       }
+      // Drop undo/redo history for this cell too — the value is already in the DB,
+      // so an undo must not re-stage the old value and a later Apply re-write it.
+      pastEdits = pastEdits.filter((e) => !(e.rowIdx === rowIdx && e.colIdx === colIdx));
+      futureEdits = futureEdits.filter((e) => !(e.rowIdx === rowIdx && e.colIdx === colIdx));
       editingCell = null;
       toast.success("Saved", { description: `${col.name} updated` });
       if (afterAction) navigateAfterEdit(rowIdx, colIdx, afterAction);
@@ -1433,7 +1469,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     pendingDeletes = new Set();
     pastEdits = [];
     futureEdits = [];
-    clearPendingChanges(columnWidthsKey ?? '');
+    clearPendingChanges(_persistKey);
   }
 
   /** Collapse any range back to the single focused cell. */
@@ -1966,6 +2002,17 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (readonly) return;
     const row = rows[rowIdx];
     if (!row) return;
+    // Any oversized/truncated cell holds only a preview sentinel — duplicating it
+    // would write that sentinel object into the new row. Block it and point to SQL.
+    for (let i = 0; i < columns.length; i++) {
+      const over = oversizeCellInfo(row[i]);
+      if (over) {
+        toast.error("Cannot duplicate row", {
+          description: `${columns[i].name} holds ${formatByteSize(over.bytes)} and is only partially loaded; duplicate it with a SQL INSERT instead.`,
+        });
+        return;
+      }
+    }
     const record = rowToRecord(columns, row);
     for (const pk of primaryKey) delete record[pk];
     try {
@@ -2483,17 +2530,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // ── Virtual relationship columns (reverse FK / one-to-many) ─────────────────
   // One per unique fromTable, max 8. Shown as badge columns to the right of real data.
   const MAX_VIRTUAL_COLS = 5
-  /** User-overridden logical width for all virtual rel columns (null = auto-computed). */
-  let virtualColWidthOverride = $state(/** @type {number | null} */ (null))
-  // Width adapts to the longest label (7px/char estimate + padding), clamped 110–180px
-  const VIRTUAL_COL_W = $derived.by(() => {
-    if (virtualColWidthOverride !== null) return Math.round(virtualColWidthOverride * canvasZoom)
-    if (!virtualRelCols.length) return Math.round(200 * canvasZoom)
-    // Fit the badge with comfortable side gaps instead of a fixed ~300px slab, so
-    // the centered pill reads as intentional rather than floating in dead space.
+  /** Per-column logical width overrides for virtual rel columns, keyed by label (unset = auto). */
+  let _vrelWidths = $state(/** @type {Record<string, number>} */ ({}))
+  // Auto width adapts to the longest label (8px/char estimate + padding), clamped 150–260px.
+  const _vrelBaseW = $derived.by(() => {
+    if (!virtualRelCols.length) return 200
     const maxChars = Math.max(...virtualRelCols.map(v => v.label.length))
-    const base = Math.min(260, Math.max(150, maxChars * 8 + 44))
-    return Math.round(base * canvasZoom)
+    return Math.min(260, Math.max(150, maxChars * 8 + 44))
   })
   const virtualRelCols = $derived.by(() => {
     if (!incomingForeignKeys.length) return /** @type {typeof incomingForeignKeys} */ ([])
@@ -2544,9 +2587,25 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ? _vexprLayout[_vexprLayout.length - 1].x + _vexprLayout[_vexprLayout.length - 1].w - geom.totalWidth
       : 0
   )
+  /** Canvas-space x/w layout for each virtual rel column — per-column widths so
+   *  resizing one doesn't resize the rest. x is absolute (right of real + expr cols). */
+  const _vrelLayout = $derived.by(() => {
+    let x = geom.totalWidth + vexprTotalW
+    return virtualRelCols.map((vc, i) => {
+      const w = Math.round((_vrelWidths[vc.label] ?? _vrelBaseW) * canvasZoom)
+      const pos = { i, label: vc.label, x, w, hoverKey: _vrelHoverKeys[i] }
+      x += w
+      return pos
+    })
+  })
+  const vrelTotalW = $derived(
+    _vrelLayout.length > 0
+      ? _vrelLayout[_vrelLayout.length - 1].x + _vrelLayout[_vrelLayout.length - 1].w - geom.totalWidth - vexprTotalW
+      : 0
+  )
 
   // Total scrollable width includes virtual expr cols + virtual rel columns
-  const totalContentWidth = $derived(geom.totalWidth + vexprTotalW + virtualRelCols.length * VIRTUAL_COL_W)
+  const totalContentWidth = $derived(geom.totalWidth + vexprTotalW + vrelTotalW)
   // Surface whether the grid overflows horizontally so the parent can show the
   // go-to-left / go-to-right controls only when they'd actually do something.
   $effect(() => {
@@ -2670,10 +2729,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       out.push({ name: `__vcol__${vc.id}`, x })
     }
     // Virtual rel column resize handles (right edge of each virtual col)
-    for (let vi = 0; vi < virtualRelCols.length; vi++) {
-      const x = geom.totalWidth + vexprTotalW + (vi + 1) * VIRTUAL_COL_W - _scrollLeft
+    for (const vp of _vrelLayout) {
+      const x = vp.x + vp.w - _scrollLeft
       if (x < occludeLeft - 6 || x > _viewportWidth + 6) continue
-      out.push({ name: `__vrel__${vi}`, x })
+      out.push({ name: `__vrel__${vp.i}`, x })
     }
     return out
   })
@@ -2711,7 +2770,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       // target the wrong rows.
       if (pendingEdits.size) pendingEdits = new Map()
       if (pendingDeletes.size) pendingDeletes = new Set()
-      clearPendingChanges(columnWidthsKey ?? '')
+      clearPendingChanges(_persistKey)
       // A fresh row set also invalidates the row-index-keyed cell range.
       if (selAnchor !== null) selAnchor = null
     })
@@ -2860,6 +2919,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     columnWidths = next
   })
 
+  // Virtual (relationship / expression) column widths persist alongside real
+  // ones, under sibling keys so the real-column effect above never clobbers
+  // them. Reloaded on table switch; written on resize in endColumnResize.
+  $effect(() => {
+    const key = columnWidthsKey
+    _vrelWidths = key ? loadColumnWidths(`${key}\x00__vrel`) : {}
+    _vexprWidths = key ? loadColumnWidths(`${key}\x00__vcol`) : {}
+  })
+
   /** @param {string} colName */
   function startColumnResize(colName) {
     resizingColName = colName;
@@ -2869,7 +2937,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       const id = colName.slice(8)
       resizeStartWidth = _vexprWidths[id] ?? VEXPR_COL_DEFAULT_W
     } else if (colName.startsWith('__vrel__')) {
-      resizeStartWidth = virtualColWidthOverride ?? Math.round(VIRTUAL_COL_W / canvasZoom)
+      const label = virtualRelCols[Number(colName.slice(8))]?.label
+      resizeStartWidth = (label ? _vrelWidths[label] : null) ?? _vrelBaseW
     } else {
       resizeStartWidth = columnWidths[colName] ?? defaultColumnWidth("")
     }
@@ -2893,7 +2962,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         const id = resizingColName.slice(8)
         _vexprWidths = { ..._vexprWidths, [id]: _pendingResizeWidth }
       } else if (resizingColName.startsWith('__vrel__')) {
-        virtualColWidthOverride = _pendingResizeWidth;
+        const label = virtualRelCols[Number(resizingColName.slice(8))]?.label
+        if (label) _vrelWidths = { ..._vrelWidths, [label]: _pendingResizeWidth }
       } else {
         columnWidths = { ...columnWidths, [resizingColName]: _pendingResizeWidth };
       }
@@ -2909,14 +2979,17 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           const id = resizingColName.slice(8)
           _vexprWidths = { ..._vexprWidths, [id]: _pendingResizeWidth }
         } else if (resizingColName.startsWith('__vrel__')) {
-          virtualColWidthOverride = _pendingResizeWidth;
+          const label = virtualRelCols[Number(resizingColName.slice(8))]?.label
+          if (label) _vrelWidths = { ..._vrelWidths, [label]: _pendingResizeWidth }
         } else {
           columnWidths = { ...columnWidths, [resizingColName]: _pendingResizeWidth };
         }
       }
     }
-    if (resizingColName && !resizingColName.startsWith('__vrel__') && !resizingColName.startsWith('__vcol__')) {
-      if (columnWidthsKey) saveColumnWidths(columnWidthsKey, columnWidths);
+    if (columnWidthsKey && resizingColName) {
+      if (resizingColName.startsWith('__vrel__')) saveColumnWidths(`${columnWidthsKey}\x00__vrel`, _vrelWidths);
+      else if (resizingColName.startsWith('__vcol__')) saveColumnWidths(`${columnWidthsKey}\x00__vcol`, _vexprWidths);
+      else saveColumnWidths(columnWidthsKey, columnWidths);
     }
     resizingColName = null;
     _zoomGuard.resizing = false
@@ -3717,8 +3790,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (ex <= frozenW) continue
       vSeps.push(ex)
     }
-    for (let vi = 0; vi < virtualRelCols.length; vi++) {
-      const ex = geom.totalWidth + vexprTotalW + vi * VIRTUAL_COL_W - _scrollLeft + VIRTUAL_COL_W - 0.5
+    for (const vp of _vrelLayout) {
+      const ex = vp.x + vp.w - _scrollLeft - 0.5
       if (ex <= frozenW || ex >= W) continue
       vSeps.push(ex)
     }
@@ -3881,9 +3954,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Drawn BEFORE the bottom grid line so the line renders on top of cell fills.
     for (let vi = 0; vi < virtualRelCols.length; vi++) {
       const vc = virtualRelCols[vi]
-      const cellX = geom.totalWidth + vexprTotalW + vi * VIRTUAL_COL_W - _scrollLeft
-      if (cellX + VIRTUAL_COL_W <= 0 || cellX >= _viewportWidth) continue
-      ctx.fillStyle = c.cPanel; ctx.fillRect(cellX, ry, VIRTUAL_COL_W, rh)
+      const cw = _vrelLayout[vi].w
+      const cellX = _vrelLayout[vi].x - _scrollLeft
+      if (cellX + cw <= 0 || cellX >= _viewportWidth) continue
+      ctx.fillStyle = c.cPanel; ctx.fillRect(cellX, ry, cw, rh)
       const isActive = fkSubview?.rowIdx === idx && fkSubview?.kind === 'reverse' && fkSubview?.label === vc.label
       const isVHov = hoveredRow === idx && hoveredColName === _vrelHoverKeys[vi]
       if (!_fonts) return
@@ -3897,14 +3971,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
       // Consistent side gutters so the pill is centered with breathing room.
       const gutter = Math.round(14 * canvasZoom)
-      const maxLabelW = VIRTUAL_COL_W - gutter * 2 - bPadX * 2
+      const maxLabelW = cw - gutter * 2 - bPadX * 2
       const labelTxt = truncText(ctx, vc.label, maxLabelW)
       const textW = textWidth(ctx, labelTxt)
-      const bW = Math.min(textW + bPadX * 2, VIRTUAL_COL_W - gutter * 2)
-      const bX = cellX + (VIRTUAL_COL_W - bW) / 2
+      const bW = Math.min(textW + bPadX * 2, cw - gutter * 2)
+      const bX = cellX + (cw - bW) / 2
       const bY = ry + (rh - bH) / 2
 
-      if (isActive) { ctx.fillStyle = withAlpha(c.cPrimary, 0.05); ctx.fillRect(cellX, ry, VIRTUAL_COL_W, rh) }
+      if (isActive) { ctx.fillStyle = withAlpha(c.cPrimary, 0.05); ctx.fillRect(cellX, ry, cw, rh) }
 
       ctx.fillStyle = isActive
         ? withAlpha(c.cPrimary, 0.15)
@@ -4330,27 +4404,28 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     for (let vi = 0; vi < virtualRelCols.length; vi++) {
       const vc = virtualRelCols[vi]
       const vrelKey = `__vrel__${vi}`
-      const x = geom.totalWidth + vexprTotalW + vi * VIRTUAL_COL_W - _scrollLeft
-      if (x + VIRTUAL_COL_W <= 0 || x >= c.W) continue
+      const cw = _vrelLayout[vi].w
+      const x = _vrelLayout[vi].x - _scrollLeft
+      if (x + cw <= 0 || x >= c.W) continue
       ctx.fillStyle = withAlpha(c.cMutedBg, resizingColName === vrelKey ? 0.25 : 0.1)
-      ctx.fillRect(x, 0, VIRTUAL_COL_W, HEADER_H)
+      ctx.fillRect(x, 0, cw, HEADER_H)
       if (vi === 0) {
         ctx.strokeStyle = withAlpha(c.cPrimary, 0.25); ctx.lineWidth = 2
         ctx.beginPath(); ctx.moveTo(x + 1, 4); ctx.lineTo(x + 1, HEADER_H - 4); ctx.stroke()
       }
       ctx.strokeStyle = c.cGrid; ctx.lineWidth = 1
-      ctx.beginPath(); ctx.moveTo(x + VIRTUAL_COL_W - 0.5, 0); ctx.lineTo(x + VIRTUAL_COL_W - 0.5, HEADER_H); ctx.stroke()
+      ctx.beginPath(); ctx.moveTo(x + cw - 0.5, 0); ctx.lineTo(x + cw - 0.5, HEADER_H); ctx.stroke()
       if (!_fonts) continue
       // Centre the header label over the centred cell badge — a left-aligned label
       // above centred pills reads as a misaligned "gap" in the relation column.
       ctx.font = _fonts.header; ctx.fillStyle = withAlpha(c.cMuted, 0.6)
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-      ctx.fillText(truncText(ctx, vc.label, VIRTUAL_COL_W - 24), x + VIRTUAL_COL_W / 2, HEADER_H / 2 + 0.5)
+      ctx.fillText(truncText(ctx, vc.label, cw - 24), x + cw / 2, HEADER_H / 2 + 0.5)
       // Resize edge affordance (matches regular column behaviour)
       if (_resizeHoverCol === vrelKey || resizingColName === vrelKey) {
         ctx.strokeStyle = withAlpha(c.cPrimary, 0.7)
         ctx.lineWidth = 2
-        ctx.beginPath(); ctx.moveTo(x + VIRTUAL_COL_W - 1, 5); ctx.lineTo(x + VIRTUAL_COL_W - 1, HEADER_H - 5); ctx.stroke()
+        ctx.beginPath(); ctx.moveTo(x + cw - 1, 5); ctx.lineTo(x + cw - 1, HEADER_H - 5); ctx.stroke()
       }
     }
 
@@ -4619,6 +4694,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (_resizeRafId) cancelAnimationFrame(_resizeRafId)
     if (_scrollLoopId) cancelAnimationFrame(_scrollLoopId)
     if (_focusColTimer) { clearTimeout(_focusColTimer); _focusColTimer = null }
+    // Remove any window resize listeners still attached from a drag in progress.
+    clearActiveResizeListeners()
   })
 
   // End a drag-select on pointer-up anywhere (the release often lands outside the
@@ -4708,7 +4785,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // also re-syncs the canvas backing store) doesn't run on every scroll frame.
     void _viewportHeight; void newRowDrafts; void colMeta
     void geom; void rowTops; void _redrawToken; void foreignKeys; void indexes
-    void _colCache; void expandedRows; void expandedRowHeights; void virtualRelCols; void VIRTUAL_COL_W
+    void _colCache; void expandedRows; void expandedRowHeights; void virtualRelCols; void _vrelLayout
     void vexprTotalW; void _vcolFns
     void zoomState.value; void canvasZoom
     const { ok, resized } = syncCanvasSurface()
@@ -4815,10 +4892,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Check virtual relationship column clicks (right of real columns)
     if (y >= HEADER_H && virtualRelCols.length > 0) {
       const cx = x + _scrollLeft
-      const vOffset = cx - geom.totalWidth - vexprTotalW
-      if (vOffset >= 0) {
-        const vi = Math.floor(vOffset / VIRTUAL_COL_W)
-        if (vi >= 0 && vi < virtualRelCols.length) {
+      const vi = _vrelLayout.findIndex(vp => cx >= vp.x && cx < vp.x + vp.w)
+      if (vi >= 0) {
+        {
           const vc = virtualRelCols[vi]
           const bodyY = y + _scrollTop - HEADER_H - insertRowOffset
           const r = rowAtContentY(rowTops, rows.length, ROW_HEIGHT, bodyY)
@@ -4997,17 +5073,20 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     e.preventDefault()
     e.stopPropagation()
     startColumnResize(colName)
+    clearActiveResizeListeners()
     const startX = e.clientX
     const move = (/** @type {PointerEvent} */ ev) => applyColumnResize(ev.clientX - startX)
     const up = () => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
+      _activeResizeListeners = null
       endColumnResize()
       _suppressNextClick = true
       setTimeout(() => { _suppressNextClick = false }, 0)
     }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
+    _activeResizeListeners = { move, up }
   }
 
   /** @param {string} colName */
@@ -5109,15 +5188,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Check virtual rel columns (they are to the right of real + expr columns)
     if (y >= HEADER_H && virtualRelCols.length > 0) {
       const cx = x + _scrollLeft
-      const vOffset = cx - geom.totalWidth - vexprTotalW
-      if (vOffset >= 0) {
-        const vi = Math.floor(vOffset / VIRTUAL_COL_W)
-        if (vi >= 0 && vi < virtualRelCols.length) {
-          const bodyY = y + _scrollTop - HEADER_H - insertRowOffset
-          const r = rowAtContentY(rowTops, rows.length, ROW_HEIGHT, bodyY)
-          if (r?.inRowBody) { hoveredRow = r.idx; hoveredColName = `__vrel__${vi}` }
-          return
-        }
+      const vi = _vrelLayout.findIndex(vp => cx >= vp.x && cx < vp.x + vp.w)
+      if (vi >= 0) {
+        const bodyY = y + _scrollTop - HEADER_H - insertRowOffset
+        const r = rowAtContentY(rowTops, rows.length, ROW_HEIGHT, bodyY)
+        if (r?.inRowBody) { hoveredRow = r.idx; hoveredColName = `__vrel__${vi}` }
+        return
       }
     }
     const t = hitTest(x, y)
@@ -6196,8 +6272,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 <Dialog.Root bind:open={tagDialogOpen}>
   <Dialog.Content class="max-w-sm gap-4">
     <Dialog.Header>
-      <Dialog.Title class="text-sm font-semibold">Tag column</Dialog.Title>
-      <Dialog.Description class="text-xs text-muted-foreground">
+      <Dialog.Title class="text-ui-sm font-semibold">Tag column</Dialog.Title>
+      <Dialog.Description class="text-ui-xs text-muted-foreground">
         A short label shown on the “{tagDialogCol}” header. Leave empty to remove.
       </Dialog.Description>
     </Dialog.Header>

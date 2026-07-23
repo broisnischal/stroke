@@ -159,7 +159,7 @@
       <div class="flex shrink-0 items-center justify-between border-b border-border/50 px-4 py-2">
         <div class="flex items-center gap-2">
           <Braces class="size-3.5 text-muted-foreground" />
-          <span class="font-mono text-sm font-medium text-foreground">{data.colName}</span>
+          <span class="font-mono text-ui-sm font-medium text-foreground">{data.colName}</span>
         </div>
         <div class="flex items-center gap-1">
           <button

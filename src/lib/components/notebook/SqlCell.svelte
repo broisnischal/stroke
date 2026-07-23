@@ -103,13 +103,13 @@
       <button
         onclick={onmoveup}
         disabled={!canmoveup}
-        class="rounded px-1 py-0.5 text-xs text-muted-foreground/30 opacity-0 transition-opacity group-hover/sql:opacity-100 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-0"
+        class="rounded px-1 py-0.5 text-ui-xs text-muted-foreground/30 opacity-0 transition-opacity group-hover/sql:opacity-100 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-0"
         title="Move up"
       >↑</button>
       <button
         onclick={onmovedown}
         disabled={!canmovedown}
-        class="rounded px-1 py-0.5 text-xs text-muted-foreground/30 opacity-0 transition-opacity group-hover/sql:opacity-100 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-0"
+        class="rounded px-1 py-0.5 text-ui-xs text-muted-foreground/30 opacity-0 transition-opacity group-hover/sql:opacity-100 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-0"
         title="Move down"
       >↓</button>
       <button
@@ -124,7 +124,7 @@
         onclick={onrun}
         disabled={running}
         class={cn(
-          'flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium transition-colors',
+          'flex items-center gap-1 rounded px-2 py-0.5 text-ui-xs font-medium transition-colors',
           'bg-primary/90 text-primary-foreground hover:bg-primary disabled:pointer-events-none disabled:opacity-40',
         )}
       >
@@ -161,7 +161,7 @@
   {#if hasResults}
     <div>
       <!-- Results header -->
-      <div class="flex items-center gap-2 px-4 py-1.5 text-xs">
+      <div class="flex items-center gap-2 px-4 py-1.5 text-ui-xs">
         <button
           onclick={() => { resultsCollapsed = !resultsCollapsed }}
           class="flex min-w-0 flex-1 items-center gap-1.5 hover:opacity-80"
@@ -203,13 +203,13 @@
       {#if !resultsCollapsed}
         {#if hasError}
           <div
-            class="mx-4 mb-3 rounded-md border border-destructive/20 bg-destructive/[0.04] px-4 py-3 font-mono text-xs leading-relaxed text-destructive/80 whitespace-pre-wrap"
+            class="mx-4 mb-3 rounded-md border border-destructive/20 bg-destructive/[0.04] px-4 py-3 font-mono text-ui-xs leading-relaxed text-destructive/80 whitespace-pre-wrap"
           >
             {result?.error}
           </div>
         {:else if result?.columns.length}
           <div class="max-h-[360px] overflow-auto border-t border-border/20">
-            <table class="w-full min-w-max border-collapse text-xs">
+            <table class="w-full min-w-max border-collapse text-ui-xs">
               <thead class="sticky top-0 z-10">
                 <tr class="bg-background/95 backdrop-blur-sm">
                   <th
@@ -255,7 +255,7 @@
                   <tr>
                     <td
                       colspan={result.columns.length + 1}
-                      class="px-4 py-2 text-center text-xs italic text-muted-foreground/40"
+                      class="px-4 py-2 text-center text-ui-xs italic text-muted-foreground/40"
                     >
                       Showing first {MAX_DISPLAY_ROWS} of {result.rows.length} rows
                     </td>
@@ -265,7 +265,7 @@
             </table>
           </div>
         {:else if result?.message}
-          <div class="px-4 pb-3 text-xs text-muted-foreground/60">{result.message}</div>
+          <div class="px-4 pb-3 text-ui-xs text-muted-foreground/60">{result.message}</div>
         {/if}
       {/if}
     </div>

@@ -141,7 +141,7 @@
               {@html previewHtml}
             </div>
           {:else}
-            <span class="text-sm italic text-muted-foreground/25">Preview will appear here…</span>
+            <span class="text-ui-sm italic text-muted-foreground/25">Preview will appear here…</span>
           {/if}
         </div>
       </div>
@@ -155,13 +155,13 @@
         <button
           onclick={onmoveup}
           disabled={!canmoveup}
-          class="rounded px-1 py-0.5 text-xs text-muted-foreground/40 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-20"
+          class="rounded px-1 py-0.5 text-ui-xs text-muted-foreground/40 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-20"
           title="Move up"
         >↑</button>
         <button
           onclick={onmovedown}
           disabled={!canmovedown}
-          class="rounded px-1 py-0.5 text-xs text-muted-foreground/40 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-20"
+          class="rounded px-1 py-0.5 text-ui-xs text-muted-foreground/40 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-20"
           title="Move down"
         >↓</button>
         <button
@@ -189,7 +189,7 @@
           {@html previewHtml}
         </div>
       {:else}
-        <span class="text-sm italic text-muted-foreground/25">Click to add markdown…</span>
+        <span class="text-ui-sm italic text-muted-foreground/25">Click to add markdown…</span>
       {/if}
 
       <!-- Hover actions -->
@@ -199,13 +199,13 @@
         <button
           onclick={(e) => { e.stopPropagation(); onmoveup?.() }}
           disabled={!canmoveup}
-          class="rounded px-1 py-0.5 text-xs text-muted-foreground/50 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-20"
+          class="rounded px-1 py-0.5 text-ui-xs text-muted-foreground/50 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-20"
           title="Move up"
         >↑</button>
         <button
           onclick={(e) => { e.stopPropagation(); onmovedown?.() }}
           disabled={!canmovedown}
-          class="rounded px-1 py-0.5 text-xs text-muted-foreground/50 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-20"
+          class="rounded px-1 py-0.5 text-ui-xs text-muted-foreground/50 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-20"
           title="Move down"
         >↓</button>
         <button
