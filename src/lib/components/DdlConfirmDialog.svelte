@@ -28,7 +28,7 @@
 
       <!-- Header -->
       <div class="flex items-start gap-3.5 px-5 pt-5 pb-4">
-        <div class="mt-px shrink-0 rounded-xl p-2 {isDestructive ? 'bg-destructive/10' : 'bg-muted/50'}">
+        <div class="mt-px shrink-0 rounded-lg p-2 {isDestructive ? 'bg-destructive/10' : 'bg-muted/50'}">
           {#if isDestructive}
             <TriangleAlert class="size-3.5 text-destructive" />
           {:else}
@@ -48,7 +48,7 @@
       <!-- SQL preview -->
       <div class="px-5 py-4">
         <p class="mb-2 text-ui-3xs font-semibold uppercase tracking-[0.07em] text-muted-foreground/35">SQL preview</p>
-        <div class="rounded-xl border border-border/20 bg-muted/[0.3] px-3.5 py-3">
+        <div class="rounded-lg border border-border/20 bg-muted/[0.3] px-3.5 py-3">
           {#each sqlLines as line, i}
             <div class="{i > 0 ? 'mt-2 pt-2 border-t border-border/15' : ''} flex items-start gap-2.5">
               <span class="mt-[5px] size-1.5 shrink-0 rounded-full {isDestructive ? 'bg-destructive/50' : 'bg-muted-foreground/25'}"></span>

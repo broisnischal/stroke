@@ -1,3 +1,4 @@
+use super::query::SqlResult;
 use serde::Serialize;
 use sqlx::Row;
 
@@ -11,6 +12,77 @@ pub struct ExplainResult {
     pub execution_time: f64,
     /// Which driver produced this result — helps the frontend pick the renderer.
     pub driver: String,
+}
+
+/// Build an ExplainResult from an engine's textual EXPLAIN output (one plan line
+/// per string). Leading whitespace defines nesting, so an indented plan
+/// (DuckDB / ClickHouse) becomes the same `{Node Type, Plans}` tree the renderer
+/// already draws for Postgres/SQLite. Never executes anything itself.
+pub fn explain_from_text_lines(lines: Vec<String>, driver: &str) -> ExplainResult {
+    struct N {
+        text: String,
+        children: Vec<usize>,
+    }
+    let mut arena: Vec<N> = Vec::new();
+    let mut roots: Vec<usize> = Vec::new();
+    // Stack of (indent, node index) — a node attaches under the nearest
+    // strictly-shallower ancestor still on the stack.
+    let mut stack: Vec<(usize, usize)> = Vec::new();
+
+    for raw in lines {
+        let line = raw.trim_end_matches(['\r', '\n']);
+        if line.trim().is_empty() {
+            continue;
+        }
+        let indent = line.len() - line.trim_start().len();
+        let idx = arena.len();
+        arena.push(N {
+            text: line.trim().to_string(),
+            children: Vec::new(),
+        });
+        while matches!(stack.last(), Some(&(ind, _)) if ind >= indent) {
+            stack.pop();
+        }
+        match stack.last() {
+            Some(&(_, parent)) => arena[parent].children.push(idx),
+            None => roots.push(idx),
+        }
+        stack.push((indent, idx));
+    }
+
+    fn to_json(arena: &[N], idx: usize) -> serde_json::Value {
+        let n = &arena[idx];
+        let mut obj = serde_json::json!({
+            "Node Type": n.text,
+            "Total Cost": 0.0,
+            "Startup Cost": 0.0,
+            "Plan Rows": 0,
+        });
+        if !n.children.is_empty() {
+            obj["Plans"] =
+                serde_json::Value::Array(n.children.iter().map(|&c| to_json(arena, c)).collect());
+        }
+        obj
+    }
+
+    let plan = match roots.len() {
+        1 => to_json(&arena, roots[0]),
+        0 => serde_json::json!({ "Node Type": "Query Plan", "Total Cost": 0.0, "Startup Cost": 0.0, "Plan Rows": 0 }),
+        _ => serde_json::json!({
+            "Node Type": "Query Plan",
+            "Total Cost": 0.0,
+            "Startup Cost": 0.0,
+            "Plan Rows": 0,
+            "Plans": roots.iter().map(|&r| to_json(&arena, r)).collect::<Vec<_>>(),
+        }),
+    };
+
+    ExplainResult {
+        plan,
+        planning_time: 0.0,
+        execution_time: 0.0,
+        driver: driver.to_string(),
+    }
 }
 
 fn strip_sql(sql: &str) -> &str {
@@ -269,5 +341,43 @@ fn build_sqlite_tree(nodes: &[serde_json::Value]) -> serde_json::Value {
             "Plan Rows": 0,
             "Plans": roots,
         }),
+    }
+}
+
+/// Build an ExplainResult from the rows of a `EXPLAIN QUERY PLAN` statement that
+/// was run through a non-SQLx path (Cloudflare D1). D1 is SQLite under the hood
+/// and returns the same `(id, parent, notused, detail)` shape, so we reuse
+/// `build_sqlite_tree`. Columns are matched by name because the transport
+/// (JSON object per row) doesn't guarantee positional ordering.
+pub fn explain_from_sqlite_plan(res: &SqlResult, driver: &str) -> ExplainResult {
+    let col = |name: &str| res.columns.iter().position(|c| c.name.eq_ignore_ascii_case(name));
+    let (id_i, parent_i, detail_i) = (col("id"), col("parent"), col("detail"));
+
+    let flat: Vec<serde_json::Value> = res
+        .rows
+        .iter()
+        .map(|r| {
+            let as_i64 = |i: Option<usize>| {
+                i.and_then(|i| r.get(i))
+                    .map(|v| v.as_i64().unwrap_or_else(|| v.as_str().and_then(|s| s.parse().ok()).unwrap_or(0)))
+                    .unwrap_or(0)
+            };
+            let detail = detail_i
+                .and_then(|i| r.get(i))
+                .map(|v| v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string()))
+                .unwrap_or_default();
+            serde_json::json!({
+                "id": as_i64(id_i),
+                "parent": as_i64(parent_i),
+                "detail": detail,
+            })
+        })
+        .collect();
+
+    ExplainResult {
+        plan: build_sqlite_tree(&flat),
+        planning_time: 0.0,
+        execution_time: 0.0,
+        driver: driver.into(),
     }
 }

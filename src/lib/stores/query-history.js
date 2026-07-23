@@ -18,6 +18,8 @@ function maxHistoryPerConnection() {
  *   title: string
  *   executedAt: number
  *   queryMs?: number
+ *   runCount?: number
+ *   favorite?: boolean
  * }} QueryHistoryEntry
  */
 
@@ -60,6 +62,7 @@ export async function recordQueryExecution(connectionId, sql, meta = {}) {
       ...latest,
       executedAt: Date.now(),
       title: queryTitle(trimmed),
+      runCount: (latest.runCount ?? 1) + 1,
       ...meta,
     })
     return
@@ -71,17 +74,27 @@ export async function recordQueryExecution(connectionId, sql, meta = {}) {
     sql: trimmed,
     title: queryTitle(trimmed),
     executedAt: Date.now(),
+    runCount: 1,
     ...meta,
   })
   await db.put(HISTORY_STORE, entry)
 
+  // Cap the ring buffer — but favorites are pinned and never evicted.
   const merged = [entry, ...existing].sort((a, b) => b.executedAt - a.executedAt)
+  const evictable = merged.filter((e) => !e.favorite)
   const cap = maxHistoryPerConnection()
-  if (merged.length > cap) {
+  if (evictable.length > cap) {
     await Promise.all(
-      merged.slice(cap).map((stale) => db.delete(HISTORY_STORE, stale.id)),
+      evictable.slice(cap).map((stale) => db.delete(HISTORY_STORE, stale.id)),
     )
   }
+}
+
+/** @param {string} id @param {boolean} favorite */
+export async function setQueryHistoryFavorite(id, favorite) {
+  const db = await getStudioDb()
+  const entry = await db.get(HISTORY_STORE, id)
+  if (entry) await db.put(HISTORY_STORE, { ...entry, favorite })
 }
 
 /** @param {string} connectionId @returns {Promise<QueryHistoryEntry[]>} */

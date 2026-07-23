@@ -113,8 +113,8 @@ pub async fn backup_export(
         ActiveConnection::LibSql(_) => Err("Backup export is not supported for LibSQL/Turso connections".to_string()),
         ActiveConnection::Clickhouse(_) => Err("Backup export is not supported for ClickHouse connections".to_string()),
         ActiveConnection::Redis(_) => Err("Backup is not supported on Redis".to_string()),
-        ActiveConnection::Duckdb(_) => Err("Backup export is not yet supported for DuckDB connections".to_string()),
-        ActiveConnection::Mssql(_) => Err("Backup export is not yet supported for MS SQL Server connections".to_string()),
+        ActiveConnection::Duckdb(h) => export_duckdb(&app, &h).await,
+        ActiveConnection::Mssql(h) => export_mssql(&app, &h).await,
     }
 }
 
@@ -133,8 +133,8 @@ pub async fn backup_import(
         ActiveConnection::LibSql(_) => Err("Backup import is not supported for LibSQL/Turso connections".to_string()),
         ActiveConnection::Clickhouse(_) => Err("Backup import is not supported for ClickHouse connections".to_string()),
         ActiveConnection::Redis(_) => Err("Backup is not supported on Redis".to_string()),
-        ActiveConnection::Duckdb(_) => Err("Backup import is not yet supported for DuckDB connections".to_string()),
-        ActiveConnection::Mssql(_) => Err("Backup import is not yet supported for MS SQL Server connections".to_string()),
+        ActiveConnection::Duckdb(h) => import_duckdb(&app, &h, &sql).await,
+        ActiveConnection::Mssql(h) => import_mssql(&app, &h, &sql).await,
     }
 }
 
@@ -1250,6 +1250,213 @@ async fn import_d1(app: &AppHandle, cfg: &super::connection::D1Config, sql: &str
                 }
             }
             Err(e) => errors.push(format!("{e} — near: {}…", truncate_chars(stmt, 60))),
+        }
+    }
+
+    let msg = format!("Restore complete: {} ok, {} failed", ok, total - ok);
+    if errors.is_empty() {
+        emit_log(app, "restore-log", "ok", &msg);
+    } else {
+        emit_log(app, "restore-log", "warn", &msg);
+    }
+    Ok(ImportResult { statements_ok: ok, statements_err: total - ok, errors })
+}
+
+// ── DuckDB export / import ────────────────────────────────────────────────────
+
+/// DuckDB's `EXPORT`/`IMPORT DATABASE` operate on a *directory* of Parquet files
+/// (schema.sql + load.sql + one file per table), not a single SQL script. The
+/// engine is embedded, so that directory lives on this client's filesystem.
+///
+/// The whole database is exported — DuckDB has no per-table/schema `EXPORT`, so
+/// the schema/table selection used by the SQL-scripting engines doesn't apply.
+/// The export directory is derived next to the database file (a `:memory:`
+/// database falls back to the system temp dir). The returned "script" records
+/// the directory and, when re-imported, runs `IMPORT DATABASE` against it.
+async fn export_duckdb(
+    app: &AppHandle,
+    handle: &super::connection::DuckdbHandle,
+) -> Result<ExportResult, String> {
+    emit_log(app, "backup-log", "info", "Starting DuckDB export…");
+
+    let db_path = duckdb_database_path(handle).await;
+    let export_dir = derive_duckdb_export_dir(db_path.as_deref());
+    std::fs::create_dir_all(&export_dir)
+        .map_err(|e| format!("Failed to create export directory {}: {e}", export_dir.display()))?;
+    let dir_str = export_dir.to_string_lossy().to_string();
+    let dir_esc = dir_str.replace('\'', "''");
+
+    emit_log(app, "backup-log", "info", format!("Exporting database to {dir_str}…"));
+    super::duckdb::execute_sql(handle, &format!("EXPORT DATABASE '{dir_esc}' (FORMAT PARQUET)")).await?;
+
+    // Best-effort table count for the UI; the export has already succeeded.
+    let table_count = duckdb_table_count(handle).await;
+
+    let mut out = backup_header("DuckDB", None);
+    out.push_str(
+        "-- NOTE: DuckDB EXPORT/IMPORT DATABASE operate on a directory of Parquet\n\
+         --       files on the local filesystem. The data was written to the path\n\
+         --       below; keep that directory to restore. Re-running this script\n\
+         --       executes IMPORT DATABASE against it.\n\n",
+    );
+    out.push_str(&format!("IMPORT DATABASE '{dir_esc}';\n"));
+
+    emit_log(app, "backup-log", "ok", format!("Export complete: {table_count} tables → {dir_str}"));
+    Ok(ExportResult { sql: out, table_count, row_count: 0 })
+}
+
+/// Path of the current DuckDB database file (`None` for an in-memory database).
+async fn duckdb_database_path(handle: &super::connection::DuckdbHandle) -> Option<String> {
+    let res = super::duckdb::execute_sql(
+        handle,
+        "SELECT path FROM duckdb_databases() WHERE path IS NOT NULL AND path <> '' LIMIT 1",
+    )
+    .await
+    .ok()?;
+    res.rows.first()?.first()?.as_str().map(|s| s.to_string())
+}
+
+/// Fresh, timestamped export directory beside the database file (or in the system
+/// temp dir when the database has no on-disk path).
+fn derive_duckdb_export_dir(db_path: Option<&str>) -> std::path::PathBuf {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    match db_path {
+        Some(p) => {
+            let path = std::path::Path::new(p);
+            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("duckdb");
+            let parent = match path.parent() {
+                Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+                _ => std::path::PathBuf::from("."),
+            };
+            parent.join(format!("{stem}_stroke_backup_{ts}"))
+        }
+        None => std::env::temp_dir().join(format!("duckdb_stroke_backup_{ts}")),
+    }
+}
+
+async fn duckdb_table_count(handle: &super::connection::DuckdbHandle) -> usize {
+    super::duckdb::execute_sql(
+        handle,
+        "SELECT count(*) FROM information_schema.tables WHERE table_type = 'BASE TABLE'",
+    )
+    .await
+    .ok()
+    .and_then(|r| r.rows.into_iter().next())
+    .and_then(|row| row.into_iter().next())
+    .and_then(|v| v.as_i64())
+    .unwrap_or(0) as usize
+}
+
+async fn import_duckdb(
+    app: &AppHandle,
+    handle: &super::connection::DuckdbHandle,
+    sql: &str,
+) -> Result<ImportResult, String> {
+    let stmts = split_statements(sql);
+    let total = stmts.len();
+    emit_log(app, "restore-log", "info", format!("Starting restore: {} statements…", total));
+    let mut ok = 0usize;
+    let mut errors: Vec<String> = Vec::new();
+
+    for stmt in &stmts {
+        if is_cancelled() { break; }
+        let low = stmt.trim_start().to_lowercase();
+        if low.starts_with("pragma foreign_keys") { ok += 1; continue; }
+        match super::duckdb::execute_sql(handle, stmt).await {
+            Ok(_) => { ok += 1; }
+            Err(e) => errors.push(format!("{e} — near: {}…", truncate_chars(stmt, 60))),
+        }
+    }
+
+    let msg = format!("Restore complete: {} ok, {} failed", ok, total - ok);
+    if errors.is_empty() {
+        emit_log(app, "restore-log", "ok", &msg);
+    } else {
+        emit_log(app, "restore-log", "warn", &msg);
+    }
+    Ok(ImportResult { statements_ok: ok, statements_err: total - ok, errors })
+}
+
+// ── MS SQL Server export / import ─────────────────────────────────────────────
+
+/// SQL Server backup/restore is a whole-database, server-side operation:
+/// `BACKUP`/`RESTORE` write/read a file on the **SQL Server host** filesystem,
+/// not on this client. A bare filename lands in the instance's configured default
+/// backup directory. The returned "script" records the matching `RESTORE`.
+async fn export_mssql(
+    app: &AppHandle,
+    handle: &super::connection::MssqlHandle,
+) -> Result<ExportResult, String> {
+    emit_log(app, "backup-log", "info", "Starting MS SQL Server export…");
+
+    // The database name comes from the live connection — the active-connection
+    // handle carries the client, not the MssqlConfig.
+    let db = mssql_current_db(handle).await?;
+    let bak_file = format!("{db}_stroke_backup.bak");
+    let db_ident = db.replace(']', "]]"); // bracket-quoted identifier
+    let path_esc = bak_file.replace('\'', "''"); // single-quoted literal
+
+    emit_log(app, "backup-log", "info", format!("Backing up [{db}] to server-side file {bak_file}…"));
+    super::mssql::execute_sql(
+        handle,
+        &format!("BACKUP DATABASE [{db_ident}] TO DISK = N'{path_esc}' WITH FORMAT, INIT"),
+    )
+    .await?;
+
+    let table_count = mssql_table_count(handle).await;
+
+    let mut out = backup_header("MS SQL Server", None);
+    out.push_str(
+        "-- NOTE: BACKUP/RESTORE operate on a file on the SQL Server host filesystem\n\
+         --       (server-side), not on this client. The database was written to the\n\
+         --       server-side path below. Re-running this script issues RESTORE.\n\n",
+    );
+    out.push_str(&format!("RESTORE DATABASE [{db_ident}] FROM DISK = N'{path_esc}' WITH REPLACE;\n"));
+
+    emit_log(app, "backup-log", "ok", format!("Backup complete: [{db}] → {bak_file}"));
+    Ok(ExportResult { sql: out, table_count, row_count: 0 })
+}
+
+/// Name of the database the active MS SQL connection is currently using.
+async fn mssql_current_db(handle: &super::connection::MssqlHandle) -> Result<String, String> {
+    let res = super::mssql::execute_sql(handle, "SELECT DB_NAME()").await?;
+    res.rows
+        .first()
+        .and_then(|r| r.first())
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| "Could not determine current MS SQL Server database name".to_string())
+}
+
+async fn mssql_table_count(handle: &super::connection::MssqlHandle) -> usize {
+    super::mssql::execute_sql(handle, "SELECT count(*) FROM sys.tables")
+        .await
+        .ok()
+        .and_then(|r| r.rows.into_iter().next())
+        .and_then(|row| row.into_iter().next())
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0) as usize
+}
+
+async fn import_mssql(
+    app: &AppHandle,
+    handle: &super::connection::MssqlHandle,
+    sql: &str,
+) -> Result<ImportResult, String> {
+    let stmts = split_statements(sql);
+    let total = stmts.len();
+    emit_log(app, "restore-log", "info", format!("Starting restore: {} statements…", total));
+    let mut ok = 0usize;
+    let mut errors: Vec<String> = Vec::new();
+
+    for stmt in &stmts {
+        if is_cancelled() { break; }
+        match super::mssql::execute_sql(handle, stmt).await {
+            Ok(_) => { ok += 1; }
+            Err(e) => errors.push(format!("{e} — near: {}…", truncate_chars(stmt, 80))),
         }
     }
 

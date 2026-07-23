@@ -205,6 +205,7 @@
     getLastConnection,
     loadSavedConnections,
     removeConnection,
+    setConnectionGroup,
     setLastConnectionId,
     upsertConnection,
     engineFamily,
@@ -238,7 +239,7 @@
     remapNullableRowIndex,
     remapRowIndexSet,
   } from '$lib/table-row-indices.js'
-  import { rowsToCsv, rowsToJson, rowsToCsvAsync, rowsToJsonAsync, saveExportFile, buildExportFilename } from '$lib/export.js'
+  import { rowsToCsv, rowsToJson, rowsToCsvAsync, rowsToJsonAsync, rowsToSql, rowsToTsv, rowsToMarkdown, rowsToJsonl, saveExportFile, buildExportFilename } from '$lib/export.js'
   import {
     recordQueryExecution,
     listQueryHistory,
@@ -354,6 +355,16 @@
   let statusBarVisible = $state(loadLayout().statusBarVisible)
   let tabBarVisible = $state(loadLayout().tabBarVisible)
   let tableToolbarVisible = $state(loadLayout().tableToolbarVisible)
+
+  // Publish the app-chrome heights as CSS vars on :root so PORTALED overlays
+  // (the connection modal lives in document.body, outside this tree) can inset
+  // themselves below the draggable titlebar and above the status bar — leaving
+  // the window's drag region and status controls usable while the modal is open.
+  $effect(() => {
+    const root = document.documentElement
+    root.style.setProperty('--app-titlebar-h', '38px') // TitleBar is always shown
+    root.style.setProperty('--app-statusbar-h', statusBarVisible ? '32px' : '0px')
+  })
   // Width for the loading-fallback shell, so the spinner fills a properly-sized
   // sidebar panel (matching saved width) instead of a zero-width strip while the
   // lazy AiSidebar chunk downloads.
@@ -480,6 +491,10 @@
     return s?.table ? JSON.stringify([s.schema, s.table]) : ''
   })
   let _liveRefetchTimer = /** @type {ReturnType<typeof setTimeout> | null} */ (null)
+  // True while the backend watcher has been stopped *because the window is
+  // hidden*. Doubles as the guard that we only ever resume a watcher we paused
+  // (never start one that was off), so the visibility handler can't double-start.
+  let _livePausedByHide = false
 
   // Start/stop the backend watcher whenever the watched table (or toggle) changes.
   $effect(() => {
@@ -805,6 +820,61 @@
     if (activeTab?.kind === 'search') searchEverOpened = true
     if (activeTab?.kind === 'schema-timeline') schemaTimelineEverOpened = true
     if (activeTab?.kind === 'data-diff') dataDiffEverOpened = true
+  })
+
+  // ── Idle-based teardown of hidden heavy views ─────────────────────────────
+  // Keeping every opened view mounted-but-hidden makes switching instant but
+  // retains its Monaco/ECharts/canvas/observers forever, so memory grows over a
+  // long session. To reclaim it, a teardown-eligible view that has been HIDDEN
+  // (not the active pane) continuously past IDLE_TEARDOWN_MS gets its *EverOpened
+  // flag reset to false, so the {#if} unmounts it and frees its resources.
+  // Reopening re-sets the flag (via the activate effect above) and re-mounts.
+  //
+  // Only purely data-derived views are eligible — they hold no unpersisted user
+  // input, so re-deriving on re-open is lossless. EXCLUDED (kept mounted): sql &
+  // table (kept hot), and orm/json/data-diff/logs/search/redis/objects/extensions
+  // which hold unpersisted user input, editor/undo state, or streaming buffers.
+  const IDLE_TEARDOWN_MS = 3 * 60 * 1000 // 3 min hidden → unmount to reclaim memory
+  /** Teardown-eligible views: tab kind ↔ its keep-alive flag (closures over $state). */
+  const teardownViews = /** @type {const} */ ([
+    { kind: 'security',        get: () => securityEverOpened,       set: (/** @type {boolean} */ v) => (securityEverOpened = v) },
+    { kind: 'backup',          get: () => backupEverOpened,         set: (/** @type {boolean} */ v) => (backupEverOpened = v) },
+    { kind: 'insights',        get: () => insightsEverOpened,       set: (/** @type {boolean} */ v) => (insightsEverOpened = v) },
+    { kind: 'charts',          get: () => chartsEverOpened,         set: (/** @type {boolean} */ v) => (chartsEverOpened = v) },
+    { kind: 'dashboard',       get: () => dashboardEverOpened,      set: (/** @type {boolean} */ v) => (dashboardEverOpened = v) },
+    { kind: 'erd',             get: () => erdEverOpened,            set: (/** @type {boolean} */ v) => (erdEverOpened = v) },
+    { kind: 'diagrams',        get: () => diagramsEverOpened,       set: (/** @type {boolean} */ v) => (diagramsEverOpened = v) },
+    { kind: 'schema-timeline', get: () => schemaTimelineEverOpened, set: (/** @type {boolean} */ v) => (schemaTimelineEverOpened = v) },
+  ])
+  /** kind → Date.now() when it last became hidden; absent while active or unmounted. */
+  let _hiddenSince = /** @type {Record<string, number>} */ ({})
+
+  // Track when each eligible view enters/leaves the hidden state.
+  $effect(() => {
+    const active = activeTab?.kind
+    const now = Date.now()
+    for (const v of teardownViews) {
+      if (v.kind === active) delete _hiddenSince[v.kind]        // active → clear idle clock
+      else if (v.get() && _hiddenSince[v.kind] == null) _hiddenSince[v.kind] = now // just hidden → stamp
+    }
+  })
+
+  // Single sweep (~60s) unmounts views hidden past the idle threshold. Runs even
+  // when backgrounded — freeing memory while hidden is desirable. Cheap scan.
+  $effect(() => {
+    const id = setInterval(() => {
+      const now = Date.now()
+      const active = activeTab?.kind
+      for (const v of teardownViews) {
+        if (v.kind === active || !v.get()) continue            // never the active view; skip already-unmounted
+        const since = _hiddenSince[v.kind]
+        if (since != null && now - since >= IDLE_TEARDOWN_MS) {
+          v.set(false)                                         // {#if} unmounts → disposes Monaco/ECharts/observers
+          delete _hiddenSince[v.kind]
+        }
+      }
+    }, 60 * 1000)
+    return () => clearInterval(id)
   })
 
   let columns = $state([])
@@ -1201,7 +1271,33 @@ let rowSearch = $state('')
   $effect(() => {
     if (typeof window === 'undefined') return
     const kick = () => { if (connection && connectionLost) void silentReconnect() }
-    const onVis = () => { if (typeof document !== 'undefined' && !document.hidden) kick() }
+    const onVis = () => {
+      if (typeof document === 'undefined') return
+      if (document.hidden) {
+        // Backgrounded/minimized: stop the backend live watcher so it stops
+        // polling the DB (and doing remote round-trips) for a window nobody can
+        // see. liveTableKey is non-empty only when a watcher is actually running
+        // (live enabled + supported + a table tab active), which is exactly the
+        // "live is active" guard; the flag prevents redundant stops.
+        if (liveTableKey && !_livePausedByHide) {
+          _livePausedByHide = true
+          void liveStop().catch(() => {})
+        }
+      } else {
+        kick()
+        // Back in view: resume only a watcher we paused on hide, retargeting
+        // whatever table is active now. Re-checking liveTableKey means we never
+        // start when live got disabled or the table tab went away while hidden,
+        // and clearing the flag first prevents a double-start.
+        if (_livePausedByHide) {
+          _livePausedByHide = false
+          if (liveTableKey) {
+            const [schema, table] = JSON.parse(liveTableKey)
+            void liveStart(schema, table).catch(() => {})
+          }
+        }
+      }
+    }
     window.addEventListener('online', kick)
     window.addEventListener('focus', kick)
     document.addEventListener('visibilitychange', onVis)
@@ -3448,7 +3544,7 @@ let rowSearch = $state('')
       // Stale guard: the user may have switched connection/schema meanwhile.
       if (`${persistConnectionId ?? ''}:${activeSchema}` !== key) return
       const byName = new Map(counts.map((c) => [c.name, normalizeTableRowCount(c.rowCount ?? c.row_count)]))
-      tables = tables.map((t) => (byName.has(t.name) ? { ...t, rowCount: byName.get(t.name) ?? 0 } : t))
+      tables = tables.map((t) => (byName.has(t.name) ? { ...t, rowCount: byName.get(t.name) ?? null } : t))
       const cached = _tableListCache.get(key)
       if (cached) _tableListCache.set(key, { tables, at: cached.at })
     } catch {
@@ -4053,12 +4149,20 @@ let rowSearch = $state('')
       await new Promise((res) => setTimeout(res, 16))
       /** @type {string} */
       let content
-      if (n > LARGE) {
+      // Only CSV/JSON have chunked async builders; the other formats (added for
+      // parity with the SQL console) build synchronously even for large sets.
+      if (n > LARGE && (format === 'csv' || format === 'json')) {
         content = format === 'csv'
           ? await rowsToCsvAsync(exportColumns, exportCells)
           : await rowsToJsonAsync(exportColumns, exportCells)
       } else {
-        content = format === 'csv' ? rowsToCsv(exportColumns, exportCells) : rowsToJson(exportColumns, exportCells)
+        content =
+          format === 'csv' ? rowsToCsv(exportColumns, exportCells)
+            : format === 'json' ? rowsToJson(exportColumns, exportCells)
+            : format === 'sql' ? rowsToSql(exportColumns, exportCells, activeTable || 'exported_table')
+            : format === 'tsv' ? rowsToTsv(exportColumns, exportCells)
+            : format === 'md' ? rowsToMarkdown(exportColumns, exportCells)
+            : rowsToJsonl(exportColumns, exportCells)
       }
       const saved = await saveExportFile(content, filename, format)
       toast.dismiss(toastId)
@@ -4655,7 +4759,17 @@ let rowSearch = $state('')
         }
       }
 
+      // The splice above only removes rows already resident on the client. On a
+      // paginated/windowed table that leaves the view empty (or showing a stale
+      // total) while thousands of rows remain server-side, so refetch the current
+      // page — this also refreshes the true COUNT(*).
+      if (pageSize !== PAGE_SIZE_ALL && total > 0 && (page - 1) * pageSize >= total) {
+        // The current page fell past the end after the deletion — step back.
+        page = Math.max(1, Math.ceil(total / pageSize))
+        rawOffset = null
+      }
       saveActiveTabState()
+      await loadRows({ keepScroll: true })
     } finally {
       deletingRows = false
     }
@@ -4898,12 +5012,12 @@ let rowSearch = $state('')
       <div class="mb-5 flex size-10 items-center justify-center rounded-lg border border-amber-500/20 bg-amber-500/10">
         <Lock class="size-5 text-amber-500/80" />
       </div>
-      <h2 class="mb-1.5 text-sm font-semibold text-foreground">Stroke Pro required</h2>
-      <p class="mb-5 text-[12px] leading-relaxed text-muted-foreground">This feature is not available on the free plan. Upgrade to Stroke Pro to unlock AI, dashboards, ORM runner, schema explorer, and more.</p>
+      <h2 class="mb-1.5 text-ui-sm font-semibold text-foreground">Stroke Pro required</h2>
+      <p class="mb-5 text-ui-xs leading-relaxed text-muted-foreground">This feature is not available on the free plan. Upgrade to Stroke Pro to unlock AI, dashboards, ORM runner, schema explorer, and more.</p>
       <div class="flex items-center gap-2">
         <button
           onclick={() => (showProGate = false)}
-          class="flex h-8 flex-1 items-center justify-center rounded-lg border border-border/60 bg-muted/50 px-4 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          class="flex h-8 flex-1 items-center justify-center rounded-lg border border-border/60 bg-muted/50 px-4 text-ui-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
           Back
         </button>
@@ -4912,7 +5026,7 @@ let rowSearch = $state('')
             showProGate = false
             openLicenseTab()
           }}
-          class="flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-foreground px-4 text-[12px] font-medium text-background transition-colors hover:bg-foreground/90"
+          class="flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-foreground px-4 text-ui-xs font-medium text-background transition-colors hover:bg-foreground/90"
         >
           <KeyRound class="size-3" />
           Activate Pro
@@ -5009,8 +5123,8 @@ let rowSearch = $state('')
 
     <!-- Text -->
     <div class="flex flex-col items-center gap-1.5 text-center">
-      <p class="text-[13px] font-medium text-foreground/70">Reconnecting</p>
-      <p class="text-[11px] text-muted-foreground/35">Establishing database connection…</p>
+      <p class="text-ui-sm font-medium text-foreground/70">Reconnecting</p>
+      <p class="text-ui-2xs text-muted-foreground/35">Establishing database connection…</p>
     </div>
   </div>
 {/if}
@@ -5067,6 +5181,7 @@ let rowSearch = $state('')
         onswitchconnection={(c) => { if (aiMode) exitAiMode(); void handleSwitchDatabase(c) }}
         onaddconnection={() => { showConnectionModal = true }}
         onremoveconnection={(id) => { savedConnections = removeConnection(id) }}
+        onsetconnectiongroup={(id, group) => { savedConnections = setConnectionGroup(id, group) }}
         ondisconnectconnection={() => handleDisconnect()}
         onopenextensiondetail={(ext) => openExtensionDetailTab(ext)}
         side={sidebarSide}
@@ -5175,8 +5290,8 @@ let rowSearch = $state('')
         </div>
 
         <div class="relative flex max-w-md flex-col items-center gap-2.5">
-          <h1 class="text-[1.7rem] font-bold leading-tight tracking-tight text-foreground">Connect a database</h1>
-          <p class="max-w-[21rem] text-[0.95rem] leading-relaxed text-muted-foreground">
+          <h1 class="text-ui-3xl font-semibold leading-tight tracking-tight text-foreground">Connect a database</h1>
+          <p class="max-w-[21rem] text-ui-sm leading-relaxed text-muted-foreground">
             Browse schemas, edit rows, and run SQL — all in one fast, native window.
           </p>
         </div>
@@ -6227,6 +6342,7 @@ let rowSearch = $state('')
   {activeConnectionId}
   {queryMs}
   {pendingEditCount}
+  applying={savingCell || deletingRows || insertingRow}
   onapplyedits={() => void applyEdits()}
   onresetedits={() => resetEdits()}
   showTableNav={activeTab?.kind === 'table'}

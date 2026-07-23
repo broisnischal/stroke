@@ -48,7 +48,7 @@
 
     <!-- Hero -->
     <div class="flex flex-col items-center gap-4 px-8 pt-8 pb-6 text-center">
-      <div class="flex size-12 items-center justify-center rounded-2xl bg-foreground/[0.06] ring-1 ring-border/60">
+      <div class="flex size-12 items-center justify-center rounded-lg bg-foreground/[0.06] ring-1 ring-border/60">
         <Logo class="size-7" />
       </div>
       <div class="flex flex-col items-center gap-1">

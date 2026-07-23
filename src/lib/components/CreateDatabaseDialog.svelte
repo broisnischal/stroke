@@ -105,9 +105,9 @@
     }
   }
 
-  const inputCls = "h-8 w-full rounded-md border border-border bg-background px-3 text-xs outline-none placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring disabled:opacity-50"
-  const selectCls = "h-8 w-full rounded-md border border-border bg-background px-2.5 text-xs outline-none focus:border-ring focus:ring-1 focus:ring-ring disabled:opacity-50"
-  const labelCls = "mb-1.5 block text-xs font-medium text-muted-foreground"
+  const inputCls = "h-8 w-full rounded-md border border-border bg-background px-3 text-ui-xs outline-none placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring disabled:opacity-50"
+  const selectCls = "h-8 w-full rounded-md border border-border bg-background px-2.5 text-ui-xs outline-none focus:border-ring focus:ring-1 focus:ring-ring disabled:opacity-50"
+  const labelCls = "mb-1.5 block text-ui-xs font-medium text-muted-foreground"
 </script>
 
 <Dialog.Root bind:open>
@@ -119,8 +119,8 @@
         <Database class="size-3.5 text-muted-foreground" />
       </div>
       <div>
-        <Dialog.Title class="text-sm font-semibold leading-none">Create Database</Dialog.Title>
-        <p class="mt-0.5 text-xs text-muted-foreground">
+        <Dialog.Title class="text-ui-sm font-semibold leading-none">Create Database</Dialog.Title>
+        <p class="mt-0.5 text-ui-xs text-muted-foreground">
           {isMySQL ? 'MySQL' : 'PostgreSQL'} · new database on this server
         </p>
       </div>
@@ -131,7 +131,7 @@
 
       <!-- Name — always visible -->
       <div class="mb-4">
-        <label for="cdb-name" class="mb-1.5 block text-xs font-semibold">
+        <label for="cdb-name" class="mb-1.5 block text-ui-xs font-semibold">
           Database name <span class="text-destructive">*</span>
         </label>
         <input
@@ -141,7 +141,7 @@
           placeholder={isMySQL ? 'my_database' : 'my_database'}
           bind:value={name}
           maxlength="63"
-          class={cn(inputCls, 'font-mono text-sm')}
+          class={cn(inputCls, 'font-mono text-ui-sm')}
           autocomplete="off"
           spellcheck="false"
           disabled={loading}
@@ -152,7 +152,7 @@
       <!-- Advanced toggle -->
       <button
         type="button"
-        class="flex w-full items-center gap-1.5 rounded-md py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        class="flex w-full items-center gap-1.5 rounded-md py-1.5 text-ui-xs text-muted-foreground transition-colors hover:text-foreground"
         onclick={() => (showAdvanced = !showAdvanced)}
       >
         <ChevronDown class={cn('size-3.5 transition-transform duration-150', showAdvanced && 'rotate-180')} />
@@ -251,14 +251,14 @@
 
       <!-- Error -->
       {#if error}
-        <p class="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</p>
+        <p class="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui-xs text-destructive">{error}</p>
       {/if}
 
       <!-- Footer -->
       <div class="mt-4 flex items-center justify-end gap-2 border-t border-border/60 pt-4">
         <button
           type="button"
-          class="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+          class="inline-flex h-8 items-center rounded-md border border-border px-3 text-ui-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
           onclick={() => (open = false)}
           disabled={loading}
         >
@@ -266,7 +266,7 @@
         </button>
         <button
           type="submit"
-          class="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-4 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+          class="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-4 text-ui-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           disabled={loading || !name.trim()}
         >
           {#if loading}

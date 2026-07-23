@@ -69,7 +69,12 @@
     // and fade in the page now that theme + layout are fully ready.
     try {
       const { getCurrentWindow } = await import('@tauri-apps/api/window')
-      await getCurrentWindow().show()
+      const win = getCurrentWindow()
+      // `.maximized(true)` in the Rust builder is unreliable on a window created
+      // hidden (WebKitGTK drops the state before map), so it can open at the small
+      // inner_size. Re-assert maximize here before showing so it opens full-size.
+      try { await win.maximize() } catch { /* WM may not support it */ }
+      await win.show()
     } catch {
       // Browser dev mode or permission error — window already visible, just fade in
     } finally {

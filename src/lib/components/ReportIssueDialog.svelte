@@ -126,7 +126,7 @@
               type="button"
               onclick={() => (issueType = t.id)}
               class={cn(
-                "inline-flex h-[28px] min-w-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border px-1 text-ui-2xs font-medium transition-colors",
+                "inline-flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border px-1 text-ui-2xs font-medium transition-colors",
                 issueType === t.id
                   ? "border-border/50 bg-muted/60 text-foreground"
                   : "border-border/20 text-muted-foreground/35 hover:border-border/30 hover:bg-muted/20 hover:text-muted-foreground/70",
@@ -187,7 +187,7 @@
       <button
         type="button"
         onclick={copyReport}
-        class="inline-flex h-[28px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-ui-2xs text-muted-foreground/40 transition-colors hover:bg-muted/30 hover:text-foreground"
+        class="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-ui-2xs text-muted-foreground/40 transition-colors hover:bg-muted/30 hover:text-foreground"
       >
         {#if copied}
           <Check class="size-3 text-emerald-500" />
@@ -209,7 +209,7 @@
               window.open(`https://github.com/${GITHUB_REPO}/issues`, "_blank");
             }
           }}
-          class="inline-flex h-[28px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-border/25 px-3 text-ui-2xs text-muted-foreground/50 transition-colors hover:bg-muted/30 hover:text-foreground"
+          class="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-border/25 px-3 text-ui-2xs text-muted-foreground/50 transition-colors hover:bg-muted/30 hover:text-foreground"
         >
           <svg
             class="size-3 shrink-0"
@@ -225,7 +225,7 @@
         <button
           type="button"
           onclick={openOnGithub}
-          class="inline-flex h-[28px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-foreground px-3.5 text-ui-xs font-medium text-background transition-colors hover:bg-foreground/85"
+          class="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-foreground px-3.5 text-ui-xs font-medium text-background transition-colors hover:bg-foreground/85"
         >
           <ExternalLink class="size-3 shrink-0" />
           Open on GitHub

@@ -30,6 +30,7 @@ const LAST_ID_KEY  = 'stroke:last-connection-id'
  *   readOnly?: boolean
  *   environment?: 'prod' | 'staging' | 'dev' | null
  *   provider?: 'neon' | 'supabase' | 'planetscale' | 'prisma'
+ *   group?: string | null
  * }} SavedConnection
  */
 
@@ -58,12 +59,24 @@ export function loadSavedConnections() {
     if (!raw) return []
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
-    return parsed.map((c) => ({
-      ...c,
-      id:   c.id   ?? newConnectionId(),
-      type: c.type ?? 'postgres',
-      port: c.port != null ? Number(c.port) : 5432,
-    }))
+    return parsed.map((c) => {
+      const type = c.type ?? 'postgres'
+      const conn = {
+        ...c,
+        id:   c.id   ?? newConnectionId(),
+        type,
+        port: c.port != null ? Number(c.port) : 5432,
+      }
+      // Redis connections can carry stale Postgres-ish fields from an earlier
+      // edit/clone (a `provider` and a non-numeric `db` like "postgres"), which
+      // made the status bar show `db postgres` and open a Postgres db switcher.
+      // Normalize once on load so the UI and backend agree on a numeric logical DB.
+      if (engineFamily(type) === 'redis') {
+        conn.db = Number(conn.db) || 0
+        delete conn.provider
+      }
+      return conn
+    })
   } catch {
     return []
   }
@@ -93,6 +106,31 @@ export function upsertConnection(conn) {
 export function removeConnection(id) {
   const list = loadSavedConnections().filter((c) => c.id !== id)
   saveConnections(list)
+  return list
+}
+
+/**
+ * Assigns (or clears) the free-text group/folder a saved connection belongs to.
+ * Pass `null`/empty to move it back to Ungrouped. Absent `group` = ungrouped, so
+ * connections saved before groups existed need no migration. Returns the full
+ * updated list (like `removeConnection`) so callers can refresh their view.
+ * @param {string} id
+ * @param {string | null} group
+ * @returns {SavedConnection[]}
+ */
+export function setConnectionGroup(id, group) {
+  const g = group && String(group).trim() ? String(group).trim() : null
+  const list = loadSavedConnections()
+  const idx  = list.findIndex((c) => c.id === id)
+  if (idx >= 0) {
+    if (g) {
+      list[idx] = { ...list[idx], group: g }
+    } else {
+      const { group: _drop, ...rest } = list[idx]
+      list[idx] = rest
+    }
+    saveConnections(list)
+  }
   return list
 }
 

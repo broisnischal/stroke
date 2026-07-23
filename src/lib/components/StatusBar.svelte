@@ -54,6 +54,8 @@
     onopenpages = /** @type {() => void} */ (() => {}),
     ondisconnect = /** @type {() => void} */ (() => {}),
     pendingEditCount = 0,
+    /** True while staged changes are being written — shows a spinner on Apply. */
+    applying = false,
     onapplyedits = /** @type {() => void} */ (() => {}),
     onresetedits = /** @type {() => void} */ (() => {}),
     showTableNav = false,
@@ -205,18 +207,25 @@
       ? (connection?.url ?? '').replace(/^(libsql|https?):\/\//, '').split('/')[0]
       : (connection?.database ?? connection?.filePath ?? '')
   )
-  const isPostgres = $derived(engineFamily(connection?.type) === 'postgres' || engineFamily(connection?.type) === 'mysql')
-  const isD1 = $derived(connection?.type === 'd1')
   const isRedis = $derived(engineFamily(connection?.type) === 'redis')
-  /** Connection that originated from a provider sign-in (Neon/Supabase/…). */
-  const isProvider = $derived(!!connection?.provider)
-  /** Whether this connection supports switching databases in-place. */
-  const canSwitchDb = $derived(isPostgres || isD1 || isProvider)
+  const isPostgres = $derived(!isRedis && (engineFamily(connection?.type) === 'postgres' || engineFamily(connection?.type) === 'mysql'))
+  const isD1 = $derived(connection?.type === 'd1')
+  /** Connection that originated from a provider sign-in (Neon/Supabase/…). Redis
+   * connections may carry a stale `provider`/`db` field from an earlier edit, so
+   * they're explicitly excluded here to avoid the Postgres-style switcher. */
+  const isProvider = $derived(!isRedis && !!connection?.provider)
+  /** Whether this connection supports switching databases in-place. Redis uses
+   * numbered logical DBs (no in-place switch yet), so it shows a static label. */
+  const canSwitchDb = $derived(!isRedis && (isPostgres || isD1 || isProvider))
+  /** The numeric logical DB Redis actually connects to — matches api.js
+   * normalizeRedis (`Number(config.db) || 0`), so a stale non-numeric `db`
+   * ("postgres") correctly reads as 0 rather than being shown verbatim. */
+  const redisDb = $derived(Number(connection?.db) || 0)
   /** Label shown in the trigger for the active db. Provider connections all use
    * the db name "postgres", so show the project name instead (from the connection
    * name, e.g. "Prisma · stroke-testing" → "stroke-testing"). */
   const currentDbLabel = $derived(
-    isRedis ? `db ${connection?.db ?? 0}`
+    isRedis ? `db ${redisDb}`
     : isProvider ? ((connection?.name?.split(' · ').pop()) || connection?.name || currentDb)
     : isD1 ? (connection?.database || connection?.name || '')
     : currentDb,
@@ -459,8 +468,9 @@
           onOpenChange={(o) => { if (o && dbList.length === 0) void fetchDatabases(); if (!o) dbSearch = '' }}
         >
           <DropdownMenu.Trigger
-            class={cn(labelBtn, 'text-muted-foreground/80')}
-            title="Switch database (⌘D)"
+            class={cn(labelBtn, 'text-muted-foreground/80', !canSwitchDb && 'cursor-default hover:bg-transparent hover:text-muted-foreground/80')}
+            disabled={!canSwitchDb}
+            title={canSwitchDb ? 'Switch database (⌘D)' : currentDbLabel}
           >
             {#if connection?.type === 'sqlite'}
               <Icon name="hard-drive" class="size-3 shrink-0" />
@@ -488,6 +498,7 @@
               <input
                 bind:this={dbInputEl}
                 type="text"
+                aria-label="Filter databases"
                 placeholder={isD1 ? 'Filter D1 databases…' : 'Filter databases…'}
                 class="h-7 w-full rounded-lg bg-muted/40 px-2.5 text-ui-2xs outline-none placeholder:text-muted-foreground/35 focus:ring-0"
                 bind:value={dbSearch}
@@ -672,17 +683,24 @@
     {#if pendingEditCount > 0}
       <button
         type="button"
-        class="inline-flex h-5 items-center gap-1 rounded-md bg-primary px-2 text-ui-2xs font-medium text-primary-foreground transition-opacity hover:opacity-85"
+        class="inline-flex h-5 items-center gap-1 rounded-md bg-primary px-2 text-ui-2xs font-medium text-primary-foreground transition-opacity hover:opacity-85 disabled:opacity-60"
         onclick={onapplyedits}
+        disabled={applying}
         title="Apply {pendingEditCount} unsaved change{pendingEditCount === 1 ? '' : 's'}"
       >
-        <Icon name="check" class="size-2.5 shrink-0" />
-        Apply {pendingEditCount}
+        {#if applying}
+          <span class="size-2.5 shrink-0 animate-spin rounded-full border border-current/40 border-t-current"></span>
+          Applying…
+        {:else}
+          <Icon name="check" class="size-2.5 shrink-0" />
+          Apply {pendingEditCount}
+        {/if}
       </button>
       <button
         type="button"
-        class="inline-flex h-5 items-center gap-1 rounded-md px-2 text-ui-2xs text-muted-foreground/50 transition-colors hover:bg-muted/50 hover:text-foreground"
+        class="inline-flex h-5 items-center gap-1 rounded-md px-2 text-ui-2xs text-muted-foreground/50 transition-colors hover:bg-muted/50 hover:text-foreground disabled:opacity-40"
         onclick={onresetedits}
+        disabled={applying}
         title="Discard unsaved changes"
       >
         <Icon name="undo-2" class="size-2.5 shrink-0" />

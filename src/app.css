@@ -127,8 +127,8 @@ html[data-icon-style="bold"]  svg.lucide { stroke-width: 2.5px; }
    aria-invalid fields keep their own destructive ring. */
 input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]):not([aria-invalid="true"]):not(.no-focus-ring):focus-visible,
 textarea:not([aria-invalid="true"]):not(.no-focus-ring):focus-visible {
-  border-color: var(--ring);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 26%, transparent);
+  border-color: color-mix(in oklch, var(--foreground) 55%, transparent);
+  box-shadow: none;
   outline: none;
 }
 

@@ -376,14 +376,9 @@
       lintTimer = setTimeout(runLint, 350)
     })
 
-    // Watch <html class="dark"> changes — reliable regardless of mode-watcher internals
-    const themeObserver = new MutationObserver(() => {
-      monaco.editor.setTheme(monacoThemeId(currentTheme()))
-    })
-    themeObserver.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['class', 'data-theme'],
-    })
+    // Theme is re-applied by the single shared <html> observer installed in
+    // configureMonacoWorkers() — monaco.editor.setTheme is global, so one observer
+    // re-themes every live editor. No per-instance observer here (they accumulated).
 
     return () => {
       document.removeEventListener('keydown', docRunHandler, { capture: true })
@@ -394,7 +389,6 @@
       editor?.dispose()
       editor = null
       execDecorations = null
-      themeObserver.disconnect()
     }
   })
 

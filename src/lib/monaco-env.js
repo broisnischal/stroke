@@ -3,7 +3,8 @@ import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
 import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker'
 import tsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker'
 import { appFont, appZoom } from '$lib/stores/settings.js'
-import { readEditorFontOptions } from '$lib/monaco-themes.js'
+import { readEditorFontOptions, monacoThemeId } from '$lib/monaco-themes.js'
+import { normalizeThemeId } from '$lib/themes/registry.js'
 
 const MONO_FALLBACK = '"Geist Mono Variable", ui-monospace, monospace'
 
@@ -71,6 +72,22 @@ export function configureMonacoWorkers() {
     try {
       for (const ed of monaco.editor.getEditors?.() ?? []) ed.updateOptions({ fontSize, lineHeight })
     } catch { /* getEditors unavailable — editors pick up the size on next create */ }
+  })
+
+  // Watch <html data-theme>/class ONCE for all editors. monaco.editor.setTheme is
+  // global (re-themes every live editor in one call), so a single shared observer
+  // replaces the per-instance observers that used to accumulate across mounted
+  // Monaco views and all fire on every toggle. The `configured` guard above makes
+  // this install exactly once for the app's lifetime.
+  const applyTheme = () => {
+    try {
+      monaco.editor.setTheme(monacoThemeId(normalizeThemeId(document.documentElement.dataset.theme)))
+    } catch { /* themes not yet defined — editors set their own theme on create */ }
+  }
+  const themeObserver = new MutationObserver(applyTheme)
+  themeObserver.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['class', 'data-theme'],
   })
 
   // Disable external schema fetching — network requests fail in Tauri desktop env.
