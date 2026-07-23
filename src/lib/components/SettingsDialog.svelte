@@ -666,7 +666,7 @@
         {#snippet item(it)}
           <span class="flex min-w-0 flex-1 items-center gap-2">
             <ThemeSwatch bg={it.bg} accent={it.accent} />
-            <span class="truncate text-xs font-medium">{it.label}</span>
+            <span class="truncate text-ui-xs font-medium">{it.label}</span>
           </span>
           {#if $appThemeId === it.value}<Icon name="check" class="ml-auto size-3.5 shrink-0 text-primary" />{/if}
         {/snippet}
@@ -788,7 +788,7 @@
         <Button type="button" variant="ghost" size="icon" class="size-7" aria-label="Zoom out" disabled={!canDecreaseZoom(settings.zoom)} onclick={() => bumpZoom(-1)}>
           <Minus class="size-3.5" />
         </Button>
-        <button type="button" class="min-w-12 rounded-md px-2 py-1 font-mono text-xs tabular-nums text-foreground transition-[background-color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:bg-muted active:scale-[0.98]" onclick={() => (settings = resetZoom())} title="Reset to 100%">{zoomLabel}</button>
+        <button type="button" class="min-w-12 rounded-md px-2 py-1 font-mono text-ui-xs tabular-nums text-foreground transition-[background-color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:bg-muted active:scale-[0.98]" onclick={() => (settings = resetZoom())} title="Reset to 100%">{zoomLabel}</button>
         <Button type="button" variant="ghost" size="icon" class="size-7" aria-label="Zoom in" disabled={!canIncreaseZoom(settings.zoom)} onclick={() => bumpZoom(1)}>
           <Plus class="size-3.5" />
         </Button>

@@ -94,7 +94,7 @@
     onkeydown={onDialogKeydown}
   >
     <Dialog.Header class="shrink-0 space-y-1 px-5 pt-5 pb-4">
-      <Dialog.Title class="text-sm font-semibold tracking-tight">Insert row</Dialog.Title>
+      <Dialog.Title class="text-ui-sm font-semibold tracking-tight">Insert row</Dialog.Title>
       <Dialog.Description class="text-ui-xs text-muted-foreground">
         {#if tableLabel}
           <span class="font-mono text-foreground/80">{tableLabel}</span>

@@ -212,7 +212,7 @@
                   </div>
                 {/each}
               </div>
-              <p class="-mt-3 flex items-center gap-1.5 text-xs text-muted-foreground/70">
+              <p class="-mt-3 flex items-center gap-1.5 text-ui-xs text-muted-foreground/70">
                 <Icon name="sparkles" class="size-3.5 text-primary/70" /> Press
                 <kbd class="rounded border border-border/60 bg-muted/50 px-1.5 py-px font-mono text-ui-3xs text-foreground">⌘K</kbd>
                 anytime to jump to any of these.
@@ -234,7 +234,7 @@
                   {/each}
                 </div>
 
-                <p class="text-center text-xs text-muted-foreground/60">
+                <p class="text-center text-ui-xs text-muted-foreground/60">
                   No license yet?
                   <a href="https://stroke.click" target="_blank" rel="noopener noreferrer"
                     class="font-medium text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline">stroke.click →</a>
@@ -253,8 +253,8 @@
                     <Icon name="plus" class="size-5" />
                   </span>
                   <span class="min-w-0 flex-1">
-                    <span class="block text-sm font-semibold text-primary-foreground">Add a connection</span>
-                    <span class="block text-xs text-primary-foreground/70">Connect to your own database now.</span>
+                    <span class="block text-ui-sm font-semibold text-primary-foreground">Add a connection</span>
+                    <span class="block text-ui-xs text-primary-foreground/70">Connect to your own database now.</span>
                   </span>
                   <Icon name="arrow-right" class="size-5 shrink-0 text-primary-foreground transition-transform duration-200 group-hover:translate-x-1" />
                 </button>
@@ -268,8 +268,8 @@
                     <Icon name="flask-conical" class="size-5" />
                   </span>
                   <span class="min-w-0 flex-1">
-                    <span class="block text-sm font-semibold text-foreground">Try a sample database</span>
-                    <span class="block text-xs text-muted-foreground">Explore a ready-made SQLite dataset first.</span>
+                    <span class="block text-ui-sm font-semibold text-foreground">Try a sample database</span>
+                    <span class="block text-ui-xs text-muted-foreground">Explore a ready-made SQLite dataset first.</span>
                   </span>
                   <Icon name="arrow-right" class="size-5 shrink-0 text-muted-foreground transition-transform duration-200 group-hover:translate-x-1" />
                 </button>
@@ -285,7 +285,7 @@
     <footer class="relative z-10 flex h-16 shrink-0 items-center justify-between border-t border-border/40 px-6">
       <button
         type="button"
-        class="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-0"
+        class="flex items-center gap-1.5 rounded-lg px-3 py-2 text-ui-sm font-medium text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-0"
         disabled={step === 1}
         onclick={back}
       >
@@ -298,7 +298,7 @@
       {#if step === LICENSE_STEP}
         <button
           type="button"
-          class="group flex items-center gap-2 rounded-lg border border-border/60 bg-card/40 px-6 py-2.5 text-sm font-semibold text-foreground transition-all hover:bg-muted/60 active:scale-[0.98]"
+          class="group flex items-center gap-2 rounded-lg border border-border/60 bg-card/40 px-6 py-2.5 text-ui-sm font-semibold text-foreground transition-all hover:bg-muted/60 active:scale-[0.98]"
           onclick={next}
         >
           Start free trial
@@ -307,7 +307,7 @@
       {:else if step < TOTAL}
         <button
           type="button"
-          class="group flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition-all hover:opacity-90 active:scale-[0.98]"
+          class="group flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 text-ui-sm font-semibold text-primary-foreground shadow-sm transition-all hover:opacity-90 active:scale-[0.98]"
           onclick={next}
         >
           Next
@@ -316,7 +316,7 @@
       {:else}
         <button
           type="button"
-          class="rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+          class="rounded-lg px-3 py-2 text-ui-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
           onclick={() => done(false)}
         >
           Skip for now

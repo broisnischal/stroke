@@ -198,7 +198,7 @@
 
       <!-- User code — large and easy to read -->
       <div class="flex items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2.5">
-        <span class="font-mono text-lg font-bold tracking-widest text-foreground">{userCode}</span>
+        <span class="font-mono text-ui-lg font-bold tracking-widest text-foreground">{userCode}</span>
         <button
           type="button"
           class="shrink-0 rounded px-1.5 py-0.5 text-ui-xs text-muted-foreground hover:bg-accent/20 hover:text-foreground"

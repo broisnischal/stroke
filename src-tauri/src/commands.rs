@@ -671,6 +671,8 @@ pub async fn pg_get_table_rows(
     offset: i64,
     search: Option<String>,
     search_is_regex: Option<bool>,
+    // Optional — defaults to false. Case-sensitive substring search.
+    search_case_sensitive: Option<bool>,
     sort_column: Option<String>,
     sort_direction: Option<String>,
     filters: Option<Vec<crate::db::RowFilter>>,
@@ -695,6 +697,7 @@ pub async fn pg_get_table_rows(
         offset,
         search,
         search_is_regex.unwrap_or(false),
+        search_case_sensitive.unwrap_or(false),
         sort_column,
         sort_direction,
         filters,

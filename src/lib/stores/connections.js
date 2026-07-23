@@ -60,6 +60,9 @@ export function loadSavedConnections() {
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
     return parsed.map((c) => {
+      // Guard per element so one corrupt/null entry is dropped, not the whole
+      // list (a throw here would fall through to the catch and wipe everything).
+      if (!c || typeof c !== 'object') return null
       const type = c.type ?? 'postgres'
       const conn = {
         ...c,
@@ -76,7 +79,7 @@ export function loadSavedConnections() {
         delete conn.provider
       }
       return conn
-    })
+    }).filter((c) => c != null)
   } catch {
     return []
   }

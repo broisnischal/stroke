@@ -192,7 +192,7 @@
     <input
       value={notebook.title}
       oninput={onTitleInput}
-      class="ml-2 min-w-0 flex-1 bg-transparent text-sm font-medium text-foreground/80 outline-none placeholder:text-muted-foreground/30"
+      class="ml-2 min-w-0 flex-1 bg-transparent text-ui-sm font-medium text-foreground/80 outline-none placeholder:text-muted-foreground/30"
       placeholder="Untitled Notebook"
       spellcheck="false"
     />
@@ -211,7 +211,7 @@
     <div class="ml-auto flex shrink-0 items-center gap-0.5">
       <button
         onclick={openFile}
-        class="flex items-center gap-1.5 rounded px-2.5 py-1 text-xs text-muted-foreground/60 hover:bg-muted hover:text-foreground"
+        class="flex items-center gap-1.5 rounded px-2.5 py-1 text-ui-xs text-muted-foreground/60 hover:bg-muted hover:text-foreground"
         title="Open notebook"
       >
         <FolderOpen class="size-3.5" />
@@ -219,7 +219,7 @@
       </button>
       <button
         onclick={save}
-        class="flex items-center gap-1.5 rounded px-2.5 py-1 text-xs text-muted-foreground/60 hover:bg-muted hover:text-foreground"
+        class="flex items-center gap-1.5 rounded px-2.5 py-1 text-ui-xs text-muted-foreground/60 hover:bg-muted hover:text-foreground"
         title="Save (⌘S)"
       >
         <Save class="size-3.5" />
@@ -227,7 +227,7 @@
       </button>
       <button
         onclick={runAll}
-        class="ml-1 flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:opacity-90"
+        class="ml-1 flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1 text-ui-xs font-medium text-primary-foreground hover:opacity-90"
         title="Run all SQL cells"
       >
         <Play class="size-3" />
@@ -241,10 +241,10 @@
     {#if notebook.cells.length === 0}
       <div class="flex flex-col items-center gap-3 py-24 text-muted-foreground">
         <FileCode2 class="size-8 opacity-20" />
-        <p class="text-sm">Empty notebook</p>
+        <p class="text-ui-sm">Empty notebook</p>
         <button
           onclick={() => { update({ cells: [createSqlCell()] }) }}
-          class="flex items-center gap-2 rounded-md border border-dashed border-border px-4 py-2 text-sm hover:bg-muted"
+          class="flex items-center gap-2 rounded-md border border-dashed border-border px-4 py-2 text-ui-sm hover:bg-muted"
         >
           <Plus class="size-4" />
           Add first cell
@@ -317,14 +317,14 @@
   >
     <button
       onclick={() => { addCell(addMenuAfterIdx, 'sql'); addMenuOpen = false }}
-      class="flex w-full items-center gap-2.5 px-3 py-1.5 text-xs hover:bg-muted"
+      class="flex w-full items-center gap-2.5 px-3 py-1.5 text-ui-xs hover:bg-muted"
     >
       <span class="font-mono font-semibold text-blue-500/70">SQL</span>
       <span class="text-muted-foreground">SQL cell</span>
     </button>
     <button
       onclick={() => { addCell(addMenuAfterIdx, 'markdown'); addMenuOpen = false }}
-      class="flex w-full items-center gap-2.5 px-3 py-1.5 text-xs hover:bg-muted"
+      class="flex w-full items-center gap-2.5 px-3 py-1.5 text-ui-xs hover:bg-muted"
     >
       <span class="font-mono font-semibold text-emerald-500/70">MD</span>
       <span class="text-muted-foreground">Markdown cell</span>

@@ -113,17 +113,24 @@ struct WhereClause {
     binds: Vec<String>,
 }
 
-fn build_where(columns: &[String], search: Option<&str>, filters: &[RowFilter]) -> Result<WhereClause, String> {
+fn build_where(columns: &[String], search: Option<&str>, search_is_regex: bool, search_case_sensitive: bool, filters: &[RowFilter]) -> Result<WhereClause, String> {
     // (conjunct — None for first condition, Some("AND"/"OR") for subsequent)
     let mut cond_parts: Vec<(Option<&'static str>, String)> = Vec::new();
     let mut binds: Vec<String> = Vec::new();
 
     if let Some(term) = search.map(str::trim).filter(|s| !s.is_empty()) {
-        let pattern = format!("%{}%", escape_like(term));
-        // CAST to CHAR is required for LIKE since MySQL LIKE only works on strings.
+        // CAST to CHAR/BINARY makes the operand a string LIKE/REGEXP can match;
+        // BINARY additionally forces case-sensitivity. Regex uses the ICU
+        // REGEXP operator; the pattern arrives pre-built from the frontend.
+        let cast = if search_case_sensitive { "BINARY" } else { "CHAR" };
+        let pattern = if search_is_regex { term.to_string() } else { format!("%{}%", escape_like(term)) };
         let parts: Vec<String> = columns
             .iter()
-            .map(|c| format!("CAST({} AS CHAR) LIKE ? ESCAPE '\\\\'", bt(c)))
+            .map(|c| {
+                let qc = bt(c);
+                if search_is_regex { format!("CAST({qc} AS {cast}) REGEXP ?") }
+                else { format!("CAST({qc} AS {cast}) LIKE ? ESCAPE '\\\\'") }
+            })
             .collect();
         if !parts.is_empty() {
             cond_parts.push((None, format!("({})", parts.join(" OR "))));
@@ -157,6 +164,11 @@ fn build_where(columns: &[String], search: Option<&str>, filters: &[RowFilter]) 
             continue;
         }
 
+        // Validate the filter column against the fetched columns so an unknown
+        // name never reaches the query (mirrors the Postgres ensure_column check).
+        if !columns.iter().any(|c| c == &f.column) {
+            return Err(format!("Unknown column: {}", f.column));
+        }
         let col = bt(&f.column);
         match f.op.as_str() {
             "is_null"     => cond_parts.push((conj, format!("{col} IS NULL"))),
@@ -180,7 +192,8 @@ fn build_where(columns: &[String], search: Option<&str>, filters: &[RowFilter]) 
                         binds.push(format!("%{}%", escape_like(v)));
                     }
                     "not_contains" => {
-                        cond_parts.push((conj, format!("CAST({col} AS CHAR) NOT LIKE ? ESCAPE '\\\\'")));
+                        // A NULL cell contains nothing, so it satisfies "does not contain".
+                        cond_parts.push((conj, format!("({col} IS NULL OR CAST({col} AS CHAR) NOT LIKE ? ESCAPE '\\\\')")));
                         binds.push(format!("%{}%", escape_like(v)));
                     }
                     "starts_with" => {
@@ -223,25 +236,41 @@ pub async fn get_table_rows(
     limit: i64,
     offset: i64,
     search: Option<String>,
+    // Search-box modifiers: ICU `REGEXP` instead of substring, and case-sensitive
+    // matching (BINARY cast). Apply to the global search only, not column filters.
+    search_is_regex: bool,
+    search_case_sensitive: bool,
     sort_column: Option<String>,
     sort_direction: Option<String>,
     filters: Option<Vec<RowFilter>>,
     // When false, skip the primary-key/foreign-key catalog round-trips — the
     // frontend already holds them for repeat fetches (pagination/sort/filter/live).
     include_meta: bool,
+    nulls_order: Option<String>,
 ) -> Result<TableRows, String> {
     let started = Instant::now();
     let table_columns = fetch_column_names(pool, schema, table).await?;
     let filters = filters.unwrap_or_default();
-    let where_clause = build_where(&table_columns, search.as_deref(), &filters)?;
+    let where_clause = build_where(&table_columns, search.as_deref(), search_is_regex, search_case_sensitive, &filters)?;
 
     let order_by = if let Some(col) = sort_column.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        // Validate the sort column against the fetched columns so an unknown name
+        // never reaches the query (mirrors the Postgres ensure_column check).
+        if !table_columns.iter().any(|c| c == col) {
+            return Err(format!("Unknown column: {col}"));
+        }
         let dir = match sort_direction.as_deref().unwrap_or("asc") {
             "desc" => "DESC",
             _ => "ASC",
         };
-        // NULLS LAST (MySQL 8.0.22+) keeps NULL rows at the bottom for both ASC and DESC.
-        format!(" ORDER BY {} {dir} NULLS LAST", bt(col))
+        // Emulate NULLS FIRST/LAST — real MySQL (unlike MariaDB) rejects the
+        // `NULLS FIRST/LAST` syntax. `ISNULL(col)` yields 0 for non-NULLs and 1
+        // for NULLs: ordering it ASC keeps NULLs last, DESC puts NULLs first.
+        let qc = bt(col);
+        match nulls_order.as_deref() {
+            Some("first") => format!(" ORDER BY ISNULL({qc}) DESC, {qc} {dir}"),
+            _ => format!(" ORDER BY ISNULL({qc}), {qc} {dir}"),
+        }
     } else {
         String::new()
     };

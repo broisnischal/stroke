@@ -2832,7 +2832,7 @@
                   {#each suggestions as s (s.label)}
                     <button
                       type="button"
-                      class="inline-flex h-7 items-center gap-1 rounded-full border border-border bg-muted/30 px-3 text-xs text-foreground transition-colors hover:bg-accent hover:border-ring/40 disabled:opacity-40"
+                      class="inline-flex h-7 items-center gap-1 rounded-full border border-border bg-muted/30 px-3 text-ui-xs text-foreground transition-colors hover:bg-accent hover:border-ring/40 disabled:opacity-40"
                       disabled={loading}
                       onclick={() => void send([s.prompt])}
                     >
@@ -4203,7 +4203,7 @@
                   class="flex flex-col gap-0.5 rounded-xl border border-border/40 bg-background/60 px-3 py-2.5"
                 >
                   <span
-                    class="font-mono text-base font-semibold tabular-nums text-foreground"
+                    class="font-mono text-ui font-semibold tabular-nums text-foreground"
                     >{stat.value}</span
                   >
                   <span class="text-ui-3xs text-muted-foreground/60"
@@ -4265,7 +4265,7 @@
     >
       <button
         type="button"
-        class="flex w-full items-center gap-2 px-3 py-1.5 text-xs hover:bg-accent"
+        class="flex w-full items-center gap-2 px-3 py-1.5 text-ui-xs hover:bg-accent"
         onclick={() => {
           void selectConversation(menu.id);
           closeContextMenu();
@@ -4276,7 +4276,7 @@
       <div class="my-1 h-px bg-border"></div>
       <button
         type="button"
-        class="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-destructive hover:bg-destructive/10"
+        class="flex w-full items-center gap-2 px-3 py-1.5 text-ui-xs text-destructive hover:bg-destructive/10"
         onclick={() => void removeConversation(menu.id)}
       >
         <Trash2 class="size-3" /> Delete
@@ -4311,13 +4311,13 @@
           href={imageViewerSrc}
           target="_blank"
           rel="noopener noreferrer"
-          class="inline-flex items-center gap-1.5 rounded-full border border-border/50 bg-background/80 px-3 py-1.5 text-xs text-muted-foreground backdrop-blur-sm transition-colors hover:border-border hover:text-foreground"
+          class="inline-flex items-center gap-1.5 rounded-full border border-border/50 bg-background/80 px-3 py-1.5 text-ui-xs text-muted-foreground backdrop-blur-sm transition-colors hover:border-border hover:text-foreground"
           onclick={(e) => e.stopPropagation()}
         >
           <ZoomIn class="size-3" /> Open full size
         </a>
         <button
-          class="inline-flex items-center gap-1.5 rounded-full border border-border/50 bg-background/80 px-3 py-1.5 text-xs text-muted-foreground backdrop-blur-sm transition-colors hover:border-border hover:text-foreground"
+          class="inline-flex items-center gap-1.5 rounded-full border border-border/50 bg-background/80 px-3 py-1.5 text-ui-xs text-muted-foreground backdrop-blur-sm transition-colors hover:border-border hover:text-foreground"
           onclick={() => (imageViewerSrc = null)}
         >
           <X class="size-3" /> Close

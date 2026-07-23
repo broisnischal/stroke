@@ -45,10 +45,13 @@ pub struct ColumnStructureRow {
 }
 
 pub(crate) fn validate_ident(name: &str) -> Result<(), String> {
+    // Disallow `.` — every caller passes a single schema/table/column component
+    // (never a `schema.table` string), so allowing `.` would let "a.b" collapse
+    // into one literal quoted identifier and target the wrong object.
     if name.is_empty()
         || !name
             .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.')
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
     {
         return Err(format!("Invalid identifier: {name}"));
     }

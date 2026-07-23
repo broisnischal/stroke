@@ -132,7 +132,7 @@
   >
     <!-- Header -->
     <div class="flex shrink-0 items-center justify-between border-b border-border/50 px-4 py-2.5">
-      <span class="font-mono text-sm font-medium text-foreground">{title}</span>
+      <span class="font-mono text-ui-sm font-medium text-foreground">{title}</span>
       <button
         type="button"
         class="inline-flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"

@@ -4,6 +4,72 @@ All notable changes to Stroke are listed here, newest first.
 
 ---
 
+## [1.15.0] - 2026-07-23
+
+### Improvements
+
+#### Search
+- Search options (match case, whole word, regex) now work per engine: full support on PostgreSQL and MySQL; case-sensitive matching on SQLite, Cloudflare D1, and libSQL. Toggles the engine can't honor are hidden per connection.
+- Redesigned the table search bar — the match/word/regex toggles moved into a compact options popover so the input stays clean.
+- Data-table search now uses `instr()` on SQLite/D1 instead of `LIKE`, fixing "LIKE or GLOB pattern too complex" errors on long search terms.
+
+#### Data table
+- Relationship columns can now be resized independently (previously resizing one resized all of them).
+- Column widths for relationship and expression columns now persist across reloads.
+
+#### Design
+- Standardized all in-app text onto the unified `text-ui-*` type scale for consistent sizing across the app.
+
+### Bug Fixes
+
+#### SQL & query execution
+- Statement splitting now respects semicolons inside string literals, comments, and `$$…$$` bodies, so multi-statement execution no longer breaks (PostgreSQL).
+- MySQL: sorted queries no longer fail — the unsupported `NULLS LAST/FIRST` clause is replaced with an `ISNULL()` equivalent, and null-placement preference is honored.
+- Keyset pagination no longer skips or reorders NULLs on nullable sort columns (falls back to offset paging).
+
+#### Filters & search (cross-engine)
+- DuckDB, ClickHouse, and MS SQL Server: the filters *not equals*, *not contains*, *starts with*, *ends with*, and *between* were silently ignored — they now apply correctly.
+- *Not contains* now includes NULL rows (a null cell doesn't contain the term) on SQLite/D1, MySQL, and PostgreSQL.
+- Search/LIKE patterns now escape `%`, `_` (and `[` on SQL Server) so those characters match literally instead of acting as wildcards (DuckDB, MS SQL Server).
+- DuckDB: equality compares values natively instead of as text (`5` no longer differs from `05`).
+- ClickHouse: *contains* and *ends with* are now case-insensitive, matching the search box.
+- MySQL: filter and sort columns are validated, returning a clear error instead of a raw database failure.
+
+#### Editing & data grid
+- Duplicating a row that contains an oversized/truncated cell no longer corrupts that cell.
+- Quick Look can now save an empty string distinctly from NULL, and switching a NULL cell to an empty string is no longer dropped.
+- Saving a cell immediately no longer leaves a stale undo-stack entry that could re-write the value.
+- Fixed a keyboard-navigation trap when starting an edit on a hidden column.
+- Array cell editor: fixed stale input focus after removing or reordering elements.
+- Edited cells now repaint immediately in all cases.
+
+#### App & UI
+- Infinite scroll no longer mixes in rows from a previously viewed table when switching quickly.
+- The sidebar no longer gets stuck on "loading tables" when schema loading fails.
+- Failed row deletions now surface an error toast.
+- A single corrupt saved-connection entry no longer wipes the entire connection list.
+- Live mode stops its backend watcher cleanly on teardown.
+- Ctrl/Cmd+P no longer disrupts the command palette when it is already open.
+
+#### Data diff & schema
+- Data diff no longer drops rows when key columns contain duplicate values.
+- Data diff now detects changes in JSON/array/object columns (previously always reported "unchanged").
+- Data diff matches key columns case-sensitively (no more `ID`/`id` collisions).
+- Schema timeline now detects column DEFAULT changes.
+
+#### Import/export & tooling
+- CSV exports include a UTF-8 BOM for correct encoding in spreadsheet apps.
+- Fixed an object-URL leak in the browser download fallback.
+- JSONPath: fixed parsing of quoted keys containing `]`, and `[*]` projection followed by an index, slice, or filter.
+- AI: parallel streaming tool calls no longer merge together when the provider omits chunk indexes.
+
+#### Security
+- MCP read-only mode can no longer be bypassed via CTE-wrapped writes (`WITH … DELETE`) or `TABLE`/`VALUES` statements.
+- LibSQL / D1: fixed incorrect result-truncation reporting in the MCP server.
+- Hardened identifier validation (embedded `.` is rejected).
+
+---
+
 ## [1.14.0] - 2026-07-23
 
 ### New Features

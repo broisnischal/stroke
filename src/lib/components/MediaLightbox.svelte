@@ -78,7 +78,7 @@
         >
           <ZoomOut class="size-4" />
         </button>
-        <span class="min-w-[3rem] text-center font-mono text-xs text-white/70">{Math.round(zoom * 100)}%</span>
+        <span class="min-w-[3rem] text-center font-mono text-ui-xs text-white/70">{Math.round(zoom * 100)}%</span>
         <button
           type="button"
           class="inline-flex size-8 items-center justify-center rounded-full bg-black/50 text-white transition-colors hover:bg-black/70 disabled:opacity-40"
@@ -144,18 +144,18 @@
             <path d="M16 13v3"/>
           </svg>
           <div class="text-center">
-            <p class="text-lg font-semibold">PDF Document</p>
-            <p class="mt-1 max-w-xs truncate text-sm text-white/60">{url.split('/').pop()?.split('?')[0]}</p>
+            <p class="text-ui-lg font-semibold">PDF Document</p>
+            <p class="mt-1 max-w-xs truncate text-ui-sm text-white/60">{url.split('/').pop()?.split('?')[0]}</p>
           </div>
           <button
             type="button"
-            class="inline-flex items-center gap-2 rounded-lg bg-white/15 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-white/25"
+            class="inline-flex items-center gap-2 rounded-lg bg-white/15 px-5 py-2.5 text-ui-sm font-medium text-white transition-colors hover:bg-white/25"
             onclick={() => void openExternal()}
           >
             <ExternalLink class="size-4" />
             Open in system PDF viewer
           </button>
-          <p class="text-xs text-white/40">PDFs open in your default application</p>
+          <p class="text-ui-xs text-white/40">PDFs open in your default application</p>
         </div>
       {/if}
     </div>

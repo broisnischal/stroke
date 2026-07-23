@@ -649,7 +649,7 @@ export async function* chatCompletionStream(settings, messages, tools = null, si
 
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
-  /** @type {Map<number, { id: string, name: string, args: string }>} */
+  /** @type {Map<number | string, { id: string, name: string, args: string }>} */
   const tcAcc = new Map()
   let buf = ''
 
@@ -672,7 +672,9 @@ export async function* chatCompletionStream(settings, messages, tools = null, si
         if (delta.content) yield { textDelta: delta.content }
         if (Array.isArray(delta.tool_calls)) {
           for (const tc of delta.tool_calls) {
-            const idx = tc.index ?? 0
+            // Prefer the provider's stream index; when omitted, key by id so
+            // distinct parallel tool calls don't merge into slot 0.
+            const idx = tc.index ?? (tc.id != null ? `id:${tc.id}` : 0)
             if (!tcAcc.has(idx)) tcAcc.set(idx, { id: '', name: '', args: '' })
             const acc = /** @type {{ id: string, name: string, args: string }} */ (tcAcc.get(idx))
             if (tc.id) acc.id = tc.id
@@ -690,7 +692,15 @@ export async function* chatCompletionStream(settings, messages, tools = null, si
     yield {
       toolCalls: /** @type {ToolCall[]} */ (
         [...tcAcc.entries()]
-          .sort(([a], [b]) => a - b)
+          .sort(([a], [b]) => {
+            // Numeric (index-keyed) calls sort ascending; id-keyed calls keep
+            // their arrival order after the numeric ones.
+            const an = typeof a === 'number', bn = typeof b === 'number'
+            if (an && bn) return a - b
+            if (an) return -1
+            if (bn) return 1
+            return 0
+          })
           .map(([, { id, name, args }]) => ({
             id: id || `call_${Math.random().toString(36).slice(2, 9)}`,
             type: 'function',

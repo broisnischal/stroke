@@ -466,7 +466,7 @@
     <button
       type="button"
       class={cn(
-        "flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-xs font-medium transition-colors",
+        "flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-ui-xs font-medium transition-colors",
         activeTab === "backup"
           ? "border-primary text-foreground"
           : "border-transparent text-muted-foreground hover:text-foreground",
@@ -478,7 +478,7 @@
     <button
       type="button"
       class={cn(
-        "flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-xs font-medium transition-colors",
+        "flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-ui-xs font-medium transition-colors",
         activeTab === "restore"
           ? "border-primary text-foreground"
           : "border-transparent text-muted-foreground hover:text-foreground",
@@ -502,7 +502,7 @@
             >
               Database
             </p>
-            <p class="mt-0.5 font-mono text-xs text-foreground">{dbLabel}</p>
+            <p class="mt-0.5 font-mono text-ui-xs text-foreground">{dbLabel}</p>
           </div>
 
           <!-- Schema picker -->
@@ -517,7 +517,7 @@
                 <select
                   id="export-schema-select"
                   bind:value={exportSchema}
-                  class="h-8 w-full appearance-none rounded-md border border-border/60 bg-background pl-3 pr-8 font-mono text-xs text-foreground focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none/40"
+                  class="h-8 w-full appearance-none rounded-md border border-border/60 bg-background pl-3 pr-8 font-mono text-ui-xs text-foreground focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none/40"
                 >
                   <option value="">All schemas</option>
                   {#each schemas as s (s)}<option value={s}>{s}</option>{/each}
@@ -646,7 +646,7 @@
                       />
                     {/if}
                     <span
-                      class="min-w-0 flex-1 truncate font-mono text-xs text-foreground"
+                      class="min-w-0 flex-1 truncate font-mono text-ui-xs text-foreground"
                       >{t.name}</span
                     >
                     {#if t.rowCount != null && t.rowCount >= 0}
@@ -668,7 +668,7 @@
               >
                 <div class="flex items-center gap-2">
                   <Check class="size-3.5 shrink-0 text-green-400" />
-                  <span class="text-xs font-medium text-foreground"
+                  <span class="text-ui-xs font-medium text-foreground"
                     >Export ready</span
                   >
                 </div>
@@ -689,7 +689,7 @@
           {:else if exportPhase === "error"}
             <div class="px-4 pb-3">
               <div
-                class="rounded-md border border-destructive/30 bg-destructive/8 p-3 text-xs text-destructive"
+                class="rounded-md border border-destructive/30 bg-destructive/8 p-3 text-ui-xs text-destructive"
               >
                 <AlertTriangle class="mb-1 size-3.5" />
                 <span class="break-words">{exportError}</span>
@@ -705,7 +705,7 @@
               type="button"
               disabled={selectedTables.size === 0}
               onclick={runExport}
-              class="flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
+              class="flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-ui-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
             >
               <Download class="size-3.5" />
               Export {selectedTables.size} table{selectedTables.size === 1
@@ -716,7 +716,7 @@
             <div class="flex gap-2">
               <button
                 disabled
-                class="flex flex-1 items-center justify-center gap-2 rounded-md bg-primary/60 px-4 py-2 text-xs font-medium text-primary-foreground"
+                class="flex flex-1 items-center justify-center gap-2 rounded-md bg-primary/60 px-4 py-2 text-ui-xs font-medium text-primary-foreground"
               >
                 <Loader class="size-3.5 animate-spin" />Exporting…
               </button>
@@ -724,7 +724,7 @@
                 type="button"
                 onclick={stopExport}
                 title="Stop export"
-                class="flex items-center justify-center gap-1.5 rounded-md border border-border/60 px-3 py-2 text-xs text-muted-foreground transition-colors hover:border-destructive/50 hover:bg-destructive/8 hover:text-destructive"
+                class="flex items-center justify-center gap-1.5 rounded-md border border-border/60 px-3 py-2 text-ui-xs text-muted-foreground transition-colors hover:border-destructive/50 hover:bg-destructive/8 hover:text-destructive"
               >
                 <StopCircle class="size-3.5" />Stop
               </button>
@@ -734,14 +734,14 @@
               <button
                 type="button"
                 onclick={downloadSql}
-                class="flex flex-1 items-center justify-center gap-2 rounded-md bg-green-700 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-green-600"
+                class="flex flex-1 items-center justify-center gap-2 rounded-md bg-green-700 px-3 py-2 text-ui-xs font-medium text-white transition-colors hover:bg-green-600"
               >
                 <Download class="size-3.5" />Download .sql
               </button>
               <button
                 type="button"
                 onclick={resetExport}
-                class="rounded-md border border-border/60 px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-accent/20"
+                class="rounded-md border border-border/60 px-3 py-2 text-ui-xs text-muted-foreground transition-colors hover:bg-accent/20"
               >
                 Reset
               </button>
@@ -772,7 +772,7 @@
                   <FileText class="size-4 text-muted-foreground/60" />
                 </div>
                 <div class="min-w-0 flex-1">
-                  <p class="truncate text-xs font-medium text-foreground">
+                  <p class="truncate text-ui-xs font-medium text-foreground">
                     {importFileName}
                   </p>
                   <p class="mt-0.5 text-ui-3xs text-muted-foreground">
@@ -818,7 +818,7 @@
                     <FileText class="size-5 text-muted-foreground/40" />
                   </div>
                   <div>
-                    <p class="text-xs font-medium text-foreground">
+                    <p class="text-ui-xs font-medium text-foreground">
                       Select a SQL backup file
                     </p>
                     <p class="mt-0.5 text-ui-3xs text-muted-foreground/60">
@@ -841,7 +841,7 @@
               >
                 <div class="mb-2.5 flex items-center gap-2">
                   <AlertTriangle class="size-3.5 shrink-0 text-amber-500" />
-                  <span class="text-xs font-semibold text-foreground"
+                  <span class="text-ui-xs font-semibold text-foreground"
                     >Confirm restore</span
                   >
                 </div>
@@ -877,7 +877,7 @@
                 </div>
               </div>
               <div class="text-center">
-                <p class="text-sm font-medium text-foreground">
+                <p class="text-ui-sm font-medium text-foreground">
                   Executing statements…
                 </p>
                 <p class="mt-1 text-ui-2xs text-muted-foreground">
@@ -899,7 +899,7 @@
                     <Check class="size-3.5 text-green-400" />
                   </div>
                   <div>
-                    <p class="text-xs font-semibold text-foreground">
+                    <p class="text-ui-xs font-semibold text-foreground">
                       Restore complete
                     </p>
                     <p class="text-ui-3xs text-muted-foreground">
@@ -913,7 +913,7 @@
                     <AlertTriangle class="size-3.5 text-amber-400" />
                   </div>
                   <div>
-                    <p class="text-xs font-semibold text-foreground">
+                    <p class="text-ui-xs font-semibold text-foreground">
                       Finished with errors
                     </p>
                     <p class="text-ui-3xs text-muted-foreground">
@@ -924,7 +924,7 @@
               </div>
 
               <div
-                class="flex gap-5 rounded-lg border border-border/40 bg-background/60 px-3 py-2.5 font-mono text-xs"
+                class="flex gap-5 rounded-lg border border-border/40 bg-background/60 px-3 py-2.5 font-mono text-ui-xs"
               >
                 <div>
                   <p
@@ -986,7 +986,7 @@
                   <AlertTriangle class="size-3.5 text-destructive" />
                 </div>
                 <div class="min-w-0">
-                  <p class="mb-1 text-xs font-semibold text-foreground">
+                  <p class="mb-1 text-ui-xs font-semibold text-foreground">
                     Restore failed
                   </p>
                   <p class="break-words text-ui-2xs text-destructive/80">
@@ -1005,7 +1005,7 @@
               type="button"
               disabled={!importSql || !importConfirmed}
               onclick={runImport}
-              class="flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
+              class="flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-ui-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
             >
               <Upload class="size-3.5" />Execute restore
             </button>
@@ -1013,7 +1013,7 @@
             <div class="flex gap-2">
               <button
                 disabled
-                class="flex flex-1 items-center justify-center gap-2 rounded-md bg-primary/60 px-4 py-2 text-xs font-medium text-primary-foreground"
+                class="flex flex-1 items-center justify-center gap-2 rounded-md bg-primary/60 px-4 py-2 text-ui-xs font-medium text-primary-foreground"
               >
                 <Loader class="size-3.5 animate-spin" />Running…
               </button>
@@ -1021,7 +1021,7 @@
                 type="button"
                 onclick={stopImport}
                 title="Stop restore"
-                class="flex items-center justify-center gap-1.5 rounded-md border border-border/60 px-3 py-2 text-xs text-muted-foreground transition-colors hover:border-destructive/50 hover:bg-destructive/8 hover:text-destructive"
+                class="flex items-center justify-center gap-1.5 rounded-md border border-border/60 px-3 py-2 text-ui-xs text-muted-foreground transition-colors hover:border-destructive/50 hover:bg-destructive/8 hover:text-destructive"
               >
                 <StopCircle class="size-3.5" />Stop
               </button>
@@ -1030,7 +1030,7 @@
             <button
               type="button"
               onclick={resetImport}
-              class="flex w-full items-center justify-center gap-2 rounded-md border border-border/60 px-4 py-2 text-xs text-muted-foreground transition-colors hover:bg-accent/20"
+              class="flex w-full items-center justify-center gap-2 rounded-md border border-border/60 px-4 py-2 text-ui-xs text-muted-foreground transition-colors hover:bg-accent/20"
             >
               New restore
             </button>

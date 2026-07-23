@@ -137,6 +137,17 @@ fn esc_literal(s: &str) -> String {
     super::sql_util::esc_single_quote(s)
 }
 
+/// Escape T-SQL `LIKE` metacharacters (`%`, `_`, `[`) with `\` so user input
+/// matches literally (used with `ESCAPE '\'`), then quote-double for the literal.
+fn esc_like(s: &str) -> String {
+    let escaped = s
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+        .replace('[', "\\[");
+    esc_literal(&escaped)
+}
+
 // ── Query ────────────────────────────────────────────────────────────────────
 
 pub async fn execute_sql(handle: &MssqlHandle, sql: &str) -> Result<SqlResult, String> {
@@ -410,10 +421,10 @@ fn build_where(cols: &[String], search: Option<&str>, filters: Option<&[RowFilte
     let mut clauses: Vec<String> = Vec::new();
 
     if let Some(q) = search.map(str::trim).filter(|s| !s.is_empty()) {
-        let needle = esc_literal(q);
+        let needle = esc_like(q);
         let ors: Vec<String> = cols
             .iter()
-            .map(|c| format!("CAST({} AS NVARCHAR(MAX)) LIKE '%{needle}%'", quote_ident(c)))
+            .map(|c| format!("CAST({} AS NVARCHAR(MAX)) LIKE '%{needle}%' ESCAPE '\\'", quote_ident(c)))
             .collect();
         if !ors.is_empty() {
             clauses.push(format!("({})", ors.join(" OR ")));
@@ -425,15 +436,27 @@ fn build_where(cols: &[String], search: Option<&str>, filters: Option<&[RowFilte
             continue;
         }
         let col = quote_ident(&f.column);
-        let lit = esc_literal(f.value.as_deref().unwrap_or(""));
+        let raw = f.value.as_deref().unwrap_or("");
+        let lit = esc_literal(raw);
+        let like = esc_like(raw);
         let clause = match f.op.as_str() {
             "=" | "eq" => format!("CAST({col} AS NVARCHAR(MAX)) = '{lit}'"),
-            "!=" | "ne" => format!("CAST({col} AS NVARCHAR(MAX)) <> '{lit}'"),
+            "!=" | "ne" | "neq" => format!("CAST({col} AS NVARCHAR(MAX)) <> '{lit}'"),
             ">" | "gt" => format!("{col} > '{lit}'"),
             ">=" | "gte" => format!("{col} >= '{lit}'"),
             "<" | "lt" => format!("{col} < '{lit}'"),
             "<=" | "lte" => format!("{col} <= '{lit}'"),
-            "contains" => format!("CAST({col} AS NVARCHAR(MAX)) LIKE '%{lit}%'"),
+            "contains" => format!("CAST({col} AS NVARCHAR(MAX)) LIKE '%{like}%' ESCAPE '\\'"),
+            // A NULL cell contains nothing, so it satisfies "does not contain".
+            "not_contains" => format!("({col} IS NULL OR NOT (CAST({col} AS NVARCHAR(MAX)) LIKE '%{like}%' ESCAPE '\\'))"),
+            "starts_with" => format!("CAST({col} AS NVARCHAR(MAX)) LIKE '{like}%' ESCAPE '\\'"),
+            "ends_with" => format!("CAST({col} AS NVARCHAR(MAX)) LIKE '%{like}' ESCAPE '\\'"),
+            "between" => {
+                let mut parts = raw.splitn(2, ',');
+                let from = esc_literal(parts.next().unwrap_or("").trim());
+                let to = esc_literal(parts.next().unwrap_or("").trim());
+                format!("{col} BETWEEN '{from}' AND '{to}'")
+            }
             "is_null" => format!("{col} IS NULL"),
             "is_not_null" => format!("{col} IS NOT NULL"),
             _ => continue,

@@ -35,6 +35,7 @@
       items = (Array.isArray(value) ? value : []).map((el) => ({
         v: el === null || el === undefined ? null : String(el),
       }))
+      inputEls.length = items.length
     }
   })
 
@@ -45,6 +46,9 @@
   }
   function removeAt(i) {
     items = items.filter((_, j) => j !== i)
+    // Index-keyed binds shift down; drop the now-stale ref at the old tail so a
+    // later addItem() focuses the right (freshly rebound) input.
+    inputEls.length = items.length
   }
 
   // ── Drag to reorder ──────────────────────────────────────────────────────────
@@ -74,6 +78,7 @@
   }
   function clearAll() {
     items = []
+    inputEls.length = 0
   }
 
   function save() {
@@ -102,7 +107,7 @@
           <Brackets class="size-4" />
         </div>
         <div class="min-w-0 flex-1">
-          <p class="truncate text-sm font-semibold tracking-tight text-foreground antialiased">{column}</p>
+          <p class="truncate text-ui-sm font-semibold tracking-tight text-foreground antialiased">{column}</p>
           <p class="truncate text-ui-2xs leading-relaxed text-muted-foreground/70">
             <span class="font-mono">{elementType || 'array'}[]</span>
             <span class="text-muted-foreground/40">·</span>

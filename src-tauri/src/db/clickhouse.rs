@@ -302,12 +302,22 @@ fn build_where(cols: &[ColumnStructureRow], search: Option<&str>, filters: Optio
         let lit = esc_literal(v);
         let clause = match f.op.as_str() {
             "=" | "eq" => format!("{col} = '{lit}'"),
-            "!=" | "ne" => format!("{col} != '{lit}'"),
+            "!=" | "ne" | "neq" => format!("{col} != '{lit}'"),
             ">" | "gt" => format!("{col} > '{lit}'"),
             ">=" | "gte" => format!("{col} >= '{lit}'"),
             "<" | "lt" => format!("{col} < '{lit}'"),
             "<=" | "lte" => format!("{col} <= '{lit}'"),
-            "contains" => format!("position(toString({col}), '{lit}') > 0"),
+            "contains" => format!("positionCaseInsensitive(toString({col}), '{lit}') > 0"),
+            // A NULL cell contains nothing, so it satisfies "does not contain".
+            "not_contains" => format!("({col} IS NULL OR NOT (positionCaseInsensitive(toString({col}), '{lit}') > 0))"),
+            "starts_with" => format!("positionCaseInsensitive(toString({col}), '{lit}') = 1"),
+            "ends_with" => format!("endsWith(lowerUTF8(toString({col})), lowerUTF8('{lit}'))"),
+            "between" => {
+                let mut parts = v.splitn(2, ',');
+                let from = esc_literal(parts.next().unwrap_or("").trim());
+                let to = esc_literal(parts.next().unwrap_or("").trim());
+                format!("{col} BETWEEN '{from}' AND '{to}'")
+            }
             "is_null" => format!("{col} IS NULL"),
             "is_not_null" => format!("{col} IS NOT NULL"),
             _ => continue,

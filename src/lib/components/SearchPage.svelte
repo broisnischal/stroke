@@ -158,7 +158,7 @@
         bind:this={inputEl}
         type="text"
         placeholder={useRegex ? 'Regex pattern…' : `Search across all tables in ${schema}…`}
-        class="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/30"
+        class="min-w-0 flex-1 bg-transparent text-ui-sm outline-none placeholder:text-muted-foreground/30"
         bind:value={query}
         onkeydown={handleKeydown}
         oninput={() => { regexError = '' }}
@@ -172,7 +172,7 @@
           title="Match case"
           aria-pressed={matchCase}
           class={cn(
-            'flex size-6 shrink-0 items-center justify-center rounded text-xs font-mono transition-colors',
+            'flex size-6 shrink-0 items-center justify-center rounded text-ui-xs font-mono transition-colors',
             matchCase
               ? 'bg-primary/15 text-primary ring-1 ring-inset ring-primary/30'
               : 'text-muted-foreground/50 hover:bg-muted hover:text-muted-foreground',
@@ -184,7 +184,7 @@
           title="Match whole word"
           aria-pressed={wholeWord}
           class={cn(
-            'flex size-6 shrink-0 items-center justify-center rounded text-xs font-mono transition-colors',
+            'flex size-6 shrink-0 items-center justify-center rounded text-ui-xs font-mono transition-colors',
             wholeWord
               ? 'bg-primary/15 text-primary ring-1 ring-inset ring-primary/30'
               : 'text-muted-foreground/50 hover:bg-muted hover:text-muted-foreground',
@@ -196,7 +196,7 @@
           title="Use regular expression"
           aria-pressed={useRegex}
           class={cn(
-            'flex size-6 shrink-0 items-center justify-center rounded text-xs font-mono transition-colors',
+            'flex size-6 shrink-0 items-center justify-center rounded text-ui-xs font-mono transition-colors',
             useRegex
               ? 'bg-primary/15 text-primary ring-1 ring-inset ring-primary/30'
               : 'text-muted-foreground/50 hover:bg-muted hover:text-muted-foreground',
@@ -209,7 +209,7 @@
       {:else}
         <button
           type="button"
-          class="h-6 rounded bg-primary px-2.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-40"
+          class="h-6 rounded bg-primary px-2.5 text-ui-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-40"
           disabled={!query.trim()}
           onclick={() => void runSearch()}
         >
@@ -218,14 +218,14 @@
       {/if}
     </div>
     {#if regexError}
-      <p class="mt-1 px-1 text-xs text-destructive/80">{regexError}</p>
+      <p class="mt-1 px-1 text-ui-xs text-destructive/80">{regexError}</p>
     {/if}
   </div>
 
   <!-- Progress bar (only while searching) -->
   {#if searching}
     <div class="shrink-0 border-b border-border/30 px-3 py-2">
-      <div class="mb-1.5 flex items-center justify-between text-xs text-muted-foreground/50">
+      <div class="mb-1.5 flex items-center justify-between text-ui-xs text-muted-foreground/50">
         <span>{progress.done} / {progress.total} tables searched</span>
         {#if results.length > 0}
           <span class="text-primary/70">{results.length} with matches</span>
@@ -253,8 +253,8 @@
           >
             <div class="flex min-w-0 items-center gap-2">
               <Icon class="size-3.5 shrink-0 text-muted-foreground/40" />
-              <span class="flex-1 truncate font-mono text-sm font-medium">{hit.table}</span>
-              <span class="shrink-0 text-xs font-medium text-primary/80 tabular-nums">
+              <span class="flex-1 truncate font-mono text-ui-sm font-medium">{hit.table}</span>
+              <span class="shrink-0 text-ui-xs font-medium text-primary/80 tabular-nums">
                 {hit.count.toLocaleString()} {hit.count === 1 ? 'match' : 'matches'}
               </span>
               <ArrowRight class="size-3.5 shrink-0 text-muted-foreground/25" />
@@ -286,29 +286,29 @@
       <!-- initial loading state before first result -->
       <div class="flex flex-col items-center justify-center gap-2 py-12 text-center">
         <Loader class="size-6 animate-spin text-muted-foreground/20" />
-        <p class="text-xs text-muted-foreground/40">Searching…</p>
+        <p class="text-ui-xs text-muted-foreground/40">Searching…</p>
       </div>
     {:else if searched && !searching}
       <div class="flex flex-col items-center justify-center gap-2 py-12 text-center">
         <Search class="size-8 text-muted-foreground/15" />
-        <p class="text-sm text-muted-foreground/50">
+        <p class="text-ui-sm text-muted-foreground/50">
           No matches for <span class="font-mono">"{query}"</span>
         </p>
-        <p class="text-xs text-muted-foreground/30">
+        <p class="text-ui-xs text-muted-foreground/30">
           Searched {progress.total} table{progress.total === 1 ? '' : 's'}
         </p>
       </div>
     {:else if !searching}
       <div class="flex flex-col items-center justify-center gap-2 py-12 text-center">
         <Search class="size-8 text-muted-foreground/12" />
-        <p class="text-sm text-muted-foreground/40">Search across all {tables.length} tables</p>
-        <p class="text-xs text-muted-foreground/25">Type a value and press <kbd>Enter</kbd></p>
+        <p class="text-ui-sm text-muted-foreground/40">Search across all {tables.length} tables</p>
+        <p class="text-ui-xs text-muted-foreground/25">Type a value and press <kbd>Enter</kbd></p>
       </div>
     {/if}
   </div>
 
   {#if searched && !searching && results.length > 0}
-    <div class="shrink-0 border-t border-border/30 px-4 py-1.5 text-xs text-muted-foreground/35">
+    <div class="shrink-0 border-t border-border/30 px-4 py-1.5 text-ui-xs text-muted-foreground/35">
       {results.length} table{results.length === 1 ? '' : 's'} with matches · click to open with search pre-filled
     </div>
   {/if}

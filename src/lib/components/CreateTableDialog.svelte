@@ -144,7 +144,7 @@
 <Dialog.Root bind:open>
   <Dialog.Content class="flex max-h-[90vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-xl">
     <Dialog.Header class="shrink-0 border-b border-border px-5 pt-5 pb-4">
-      <Dialog.Title class="text-base">New table</Dialog.Title>
+      <Dialog.Title class="text-ui">New table</Dialog.Title>
       <Dialog.Description class="text-ui-sm text-muted-foreground">
         {#if dbType !== 'sqlite' && dbType !== 'd1'}
           Schema: <span class="font-mono">{activeSchema}</span>
@@ -158,7 +158,7 @@
         <label class="text-ui-xs font-medium text-muted-foreground" for="create-table-name">Table name</label>
         <input
           id="create-table-name"
-          class={cn(inputClass, 'h-8 text-sm')}
+          class={cn(inputClass, 'h-8 text-ui-sm')}
           placeholder="e.g. users"
           bind:value={tableName}
           onkeydown={(e) => e.key === 'Enter' && handleCreate()}
