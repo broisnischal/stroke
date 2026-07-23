@@ -157,7 +157,7 @@
                 aria-selected={active}
                 title={tabDisplayTitle(tab)}
                 class={cn(
-                  'flex min-w-0 flex-1 items-center gap-1.5 pl-3 pr-1 text-left text-xs font-medium leading-none transition-colors duration-100',
+                  'flex min-w-0 flex-1 items-center gap-1.5 pl-3 pr-1 text-left text-ui-xs font-medium leading-none transition-colors duration-100',
                   active ? 'text-foreground' : 'text-muted-foreground/50 hover:text-muted-foreground/80',
                 )}
                 onclick={() => { if (_suppressTabClick) { _suppressTabClick = false; return } onselect(tab.id) }}

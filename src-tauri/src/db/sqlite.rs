@@ -191,6 +191,8 @@ pub async fn get_table_rows(
     limit: i64,
     offset: i64,
     search: Option<String>,
+    // Case-sensitive substring search (drops the LOWER() case-folding).
+    search_case_sensitive: bool,
     sort_column: Option<String>,
     sort_direction: Option<String>,
     filters: Option<Vec<crate::db::RowFilter>>,
@@ -241,14 +243,21 @@ pub async fn get_table_rows(
 
     if let Some(ref s) = search {
         if !s.is_empty() && !col_names.is_empty() {
-            let escaped = escape_like(s);
-            let pattern = format!("%{escaped}%");
+            // Case-insensitive folds both operands with LOWER(); case-sensitive
+            // compares the raw text. instr() has no LIKE pattern-length cap.
             let parts: Vec<String> = col_names
                 .iter()
-                .map(|c| format!("LOWER(CAST(\"{}\" AS TEXT)) LIKE LOWER(?) ESCAPE '\\'", c.replace('"', "\"\"")))
+                .map(|c| {
+                    let qc = c.replace('"', "\"\"");
+                    if search_case_sensitive {
+                        format!("instr(CAST(\"{qc}\" AS TEXT), ?) > 0")
+                    } else {
+                        format!("instr(LOWER(CAST(\"{qc}\" AS TEXT)), LOWER(?)) > 0")
+                    }
+                })
                 .collect();
             cond_parts.push((None, format!("({})", parts.join(" OR "))));
-            for _ in &col_names { binds.push(pattern.clone()); }
+            for _ in &col_names { binds.push(s.clone()); }
         }
     }
 
@@ -387,12 +396,6 @@ pub async fn get_table_rows(
     })
 }
 
-/// Escape special characters in a SQLite/D1 LIKE pattern.
-/// The escape character used is `\` (set via `ESCAPE '\'` in the query).
-pub fn escape_like(input: &str) -> String {
-    super::sql_util::escape_like_backslash(input)
-}
-
 /// Build OR-across-all-columns conditions for the `__any__` sentinel (D1 / JSON params).
 pub fn build_any_column_d1(col_names: &[String], op: &str, val: &str) -> (Vec<String>, Vec<serde_json::Value>) {
     let mut parts = Vec::new();
@@ -422,23 +425,26 @@ fn build_filter_condition(qcol: &str, op: &str, val: &str) -> (String, Vec<Strin
         "gte" => (format!("{qcol} >= ?"), vec![val.to_string()]),
         "lt"  => (format!("{qcol} < ?"),  vec![val.to_string()]),
         "lte" => (format!("{qcol} <= ?"), vec![val.to_string()]),
-        // Text-search operators: cast to TEXT for LIKE, escape wildcards so user
-        // input containing `%` or `_` is treated as literals, not LIKE wildcards.
+        // Text-search operators: use instr()/substr() instead of LIKE. D1 caps
+        // the LIKE pattern length ("LIKE or GLOB pattern too complex" for long
+        // terms); instr() does a literal, case-folded substring match with no
+        // pattern-length limit and no wildcard escaping needed.
         "contains" => (
-            format!("LOWER(CAST({qcol} AS TEXT)) LIKE LOWER(?) ESCAPE '\\'"),
-            vec![format!("%{}%", escape_like(val))],
+            format!("instr(LOWER(CAST({qcol} AS TEXT)), LOWER(?)) > 0"),
+            vec![val.to_string()],
         ),
+        // A NULL cell contains nothing, so it satisfies "does not contain".
         "not_contains" => (
-            format!("LOWER(CAST({qcol} AS TEXT)) NOT LIKE LOWER(?) ESCAPE '\\'"),
-            vec![format!("%{}%", escape_like(val))],
+            format!("({qcol} IS NULL OR instr(LOWER(CAST({qcol} AS TEXT)), LOWER(?)) = 0)"),
+            vec![val.to_string()],
         ),
         "starts_with" => (
-            format!("LOWER(CAST({qcol} AS TEXT)) LIKE LOWER(?) ESCAPE '\\'"),
-            vec![format!("{}%", escape_like(val))],
+            format!("instr(LOWER(CAST({qcol} AS TEXT)), LOWER(?)) = 1"),
+            vec![val.to_string()],
         ),
         "ends_with" => (
-            format!("LOWER(CAST({qcol} AS TEXT)) LIKE LOWER(?) ESCAPE '\\'"),
-            vec![format!("%{}", escape_like(val))],
+            format!("substr(LOWER(CAST({qcol} AS TEXT)), -length(?)) = LOWER(?)"),
+            vec![val.to_string(), val.to_string()],
         ),
         "between" => {
             let mut parts = val.splitn(2, ',');

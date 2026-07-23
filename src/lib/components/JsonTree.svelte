@@ -114,7 +114,7 @@
   }
 </script>
 
-<div class="min-w-0 font-mono text-sm leading-relaxed" style={depth > 0 ? 'padding-left: 1.1rem' : ''}>
+<div class="min-w-0 font-mono text-ui-sm leading-relaxed" style={depth > 0 ? 'padding-left: 1.1rem' : ''}>
   <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
   <div class="group/jsonrow flex min-w-0 items-start gap-1">
     {#if isContainer}
@@ -151,7 +151,7 @@
             class="cursor-pointer select-none bg-transparent p-0 text-left text-muted-foreground/70 hover:text-foreground"
             onclick={() => (expanded = !expanded)}
           >
-            <span class="text-muted-foreground">{isArray ? '[' : '{'}</span>{#if !expanded}<span class="px-1 text-xs text-muted-foreground/60">{summary}</span><span class="text-muted-foreground">{isArray ? ']' : '}'}</span>{/if}
+            <span class="text-muted-foreground">{isArray ? '[' : '{'}</span>{#if !expanded}<span class="px-1 text-ui-xs text-muted-foreground/60">{summary}</span><span class="text-muted-foreground">{isArray ? ']' : '}'}</span>{/if}
           </button>
         {:else}
           <span class={['break-all', leafClass].join(' ')}>{leafText}</span>
@@ -195,7 +195,7 @@
           {#if totalCount > childLimit}
             <button
               type="button"
-              class="ml-5 my-0.5 rounded bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+              class="ml-5 my-0.5 rounded bg-muted/40 px-2 py-0.5 text-ui-xs text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
               onclick={() => (childLimit += CHILD_PAGE)}
             >
               Show {Math.min(CHILD_PAGE, totalCount - childLimit)} more ({totalCount - childLimit} hidden)

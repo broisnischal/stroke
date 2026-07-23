@@ -33,6 +33,7 @@ import { executeSql, executeSqlOnConnection } from '$lib/api.js'
  * @property {string} name
  * @property {SnapshotColumn} before
  * @property {SnapshotColumn} after
+ * @property {Array<'dataType'|'nullable'|'defaultValue'>} changed
  */
 
 /**
@@ -272,8 +273,12 @@ export function diffSnapshots(before, after) {
       for (const [cn, bcol] of bc) {
         const acol = ac.get(cn)
         if (!acol) continue
-        if (bcol.dataType !== acol.dataType || bcol.nullable !== acol.nullable) {
-          modifiedColumns.push({ name: cn, before: bcol, after: acol })
+        const changed = /** @type {ColumnDiff['changed']} */ ([])
+        if (bcol.dataType !== acol.dataType) changed.push('dataType')
+        if (bcol.nullable !== acol.nullable) changed.push('nullable')
+        if (bcol.defaultValue !== acol.defaultValue) changed.push('defaultValue')
+        if (changed.length) {
+          modifiedColumns.push({ name: cn, before: bcol, after: acol, changed })
         }
       }
 

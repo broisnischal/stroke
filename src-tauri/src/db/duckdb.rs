@@ -177,6 +177,12 @@ fn quote_ident(ident: &str) -> String {
     super::sql_util::quote_double(ident)
 }
 
+/// Escape LIKE/ILIKE wildcards (`%`, `_`, `\`) so user input matches literally
+/// (used with `ESCAPE '\'`).
+fn escape_like(input: &str) -> String {
+    super::sql_util::escape_like_backslash(input)
+}
+
 // ── Public API ─────────────────────────────────────────────────────────────────
 
 pub async fn execute_sql(handle: &DuckdbHandle, sql: &str) -> Result<SqlResult, String> {
@@ -443,8 +449,8 @@ fn build_where(
         let ors: Vec<String> = cols
             .iter()
             .map(|c| {
-                params.push(DuckValue::Text(format!("%{q}%")));
-                format!("CAST({} AS VARCHAR) ILIKE ?", quote_ident(c))
+                params.push(DuckValue::Text(format!("%{}%", escape_like(q))));
+                format!("CAST({} AS VARCHAR) ILIKE ? ESCAPE '\\'", quote_ident(c))
             })
             .collect();
         if !ors.is_empty() {
@@ -459,13 +465,26 @@ fn build_where(
         let col = quote_ident(&f.column);
         let v = f.value.clone().unwrap_or_default();
         let clause = match f.op.as_str() {
-            "=" | "eq" => { params.push(DuckValue::Text(v)); format!("CAST({col} AS VARCHAR) = ?") }
-            "!=" | "ne" => { params.push(DuckValue::Text(v)); format!("CAST({col} AS VARCHAR) != ?") }
+            // No CAST for eq/ne: bind the value and let DuckDB coerce types, so numeric
+            // equality compares natively (05 == 5) and typed indexes stay usable.
+            "=" | "eq" => { params.push(DuckValue::Text(v)); format!("{col} = ?") }
+            "!=" | "ne" | "neq" => { params.push(DuckValue::Text(v)); format!("{col} != ?") }
             ">" | "gt" => { params.push(DuckValue::Text(v)); format!("{col} > ?") }
             ">=" | "gte" => { params.push(DuckValue::Text(v)); format!("{col} >= ?") }
             "<" | "lt" => { params.push(DuckValue::Text(v)); format!("{col} < ?") }
             "<=" | "lte" => { params.push(DuckValue::Text(v)); format!("{col} <= ?") }
-            "contains" => { params.push(DuckValue::Text(format!("%{v}%"))); format!("CAST({col} AS VARCHAR) ILIKE ?") }
+            "contains" => { params.push(DuckValue::Text(format!("%{}%", escape_like(&v)))); format!("CAST({col} AS VARCHAR) ILIKE ? ESCAPE '\\'") }
+            "not_contains" => { params.push(DuckValue::Text(format!("%{}%", escape_like(&v)))); format!("({col} IS NULL OR NOT (CAST({col} AS VARCHAR) ILIKE ? ESCAPE '\\'))") }
+            "starts_with" => { params.push(DuckValue::Text(format!("{}%", escape_like(&v)))); format!("CAST({col} AS VARCHAR) ILIKE ? ESCAPE '\\'") }
+            "ends_with" => { params.push(DuckValue::Text(format!("%{}", escape_like(&v)))); format!("CAST({col} AS VARCHAR) ILIKE ? ESCAPE '\\'") }
+            "between" => {
+                let mut parts = v.splitn(2, ',');
+                let from = parts.next().unwrap_or("").trim().to_string();
+                let to = parts.next().unwrap_or("").trim().to_string();
+                params.push(DuckValue::Text(from));
+                params.push(DuckValue::Text(to));
+                format!("{col} BETWEEN ? AND ?")
+            }
             "is_null" => format!("{col} IS NULL"),
             "is_not_null" => format!("{col} IS NOT NULL"),
             _ => continue,

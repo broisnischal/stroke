@@ -523,6 +523,7 @@ export async function getTableRows(schema, table, limit, offset, query = {}) {
       offset,
       search: query.search?.trim() || null,
       searchIsRegex: query.searchIsRegex ?? false,
+      searchCaseSensitive: query.searchCaseSensitive ?? false,
       sortColumn: query.sortColumn || null,
       sortDirection: query.sortDirection || null,
       // Multi-column sort keys (Postgres). Primary key stays in sortColumn above

@@ -441,7 +441,7 @@
               <button
                 onclick={onClearClick}
                 class={cn(
-                  'flex w-full items-center gap-2 px-3 py-1.5 text-xs',
+                  'flex w-full items-center gap-2 px-3 py-1.5 text-ui-xs',
                   clearStep === 1
                     ? 'text-destructive'
                     : 'text-muted-foreground/60 hover:text-destructive',
@@ -563,8 +563,8 @@
       <div class="flex flex-1 flex-col items-center justify-center gap-3">
         <GitCompare class="size-8 text-muted-foreground/55" />
         <div class="text-center">
-          <p class="text-sm font-medium text-foreground/55">No comparison active</p>
-          <p class="mt-1 text-xs text-muted-foreground/50">Mark one snapshot as B and another as A</p>
+          <p class="text-ui-sm font-medium text-foreground/55">No comparison active</p>
+          <p class="mt-1 text-ui-xs text-muted-foreground/50">Mark one snapshot as B and another as A</p>
         </div>
       </div>
 
@@ -624,8 +624,8 @@
             <Check class="size-6 text-emerald-500/50" />
           </div>
           <div class="text-center">
-            <p class="text-sm font-semibold text-foreground/65">Schemas are identical</p>
-            <p class="mt-1 text-xs text-muted-foreground/55">No structural differences between these two snapshots</p>
+            <p class="text-ui-sm font-semibold text-foreground/65">Schemas are identical</p>
+            <p class="mt-1 text-ui-xs text-muted-foreground/55">No structural differences between these two snapshots</p>
           </div>
         </div>
 
@@ -646,7 +646,7 @@
           <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
             {#if !selectedTable}
               <div class="flex flex-1 items-center justify-center">
-                <p class="text-xs text-muted-foreground/50">Select a table to view its DDL diff</p>
+                <p class="text-ui-xs text-muted-foreground/50">Select a table to view its DDL diff</p>
               </div>
             {:else}
               {@render DdlDiff(selectedTable)}
@@ -670,7 +670,7 @@
       <!-- Modal header -->
       <div class="flex shrink-0 items-center gap-2.5 px-5 pt-5 pb-4">
         <Camera class="size-4 shrink-0 text-foreground/40" />
-        <p class="flex-1 text-sm font-semibold text-foreground/85">New Snapshot</p>
+        <p class="flex-1 text-ui-sm font-semibold text-foreground/85">New Snapshot</p>
         <button
           onclick={() => { captureOpen = false }}
           class="rounded p-1 text-muted-foreground/55 hover:text-muted-foreground/70"
@@ -685,7 +685,7 @@
           <input
             bind:value={captureTitle}
             placeholder="Snapshot title (optional) — e.g. Before migration v2"
-            class="w-full bg-transparent text-xs text-foreground/75 outline-none placeholder:text-muted-foreground/50"
+            class="w-full bg-transparent text-ui-xs text-foreground/75 outline-none placeholder:text-muted-foreground/50"
           />
         </div>
 
@@ -699,7 +699,7 @@
               <button
                 onclick={() => selectCaptureConn(null)}
                 class={cn(
-                  'flex w-full items-center gap-3 px-5 py-2 text-left text-xs transition-colors',
+                  'flex w-full items-center gap-3 px-5 py-2 text-left text-ui-xs transition-colors',
                   captureConn === null ? 'bg-muted/[0.08]' : 'hover:bg-muted/[0.05]',
                 )}
               >
@@ -718,7 +718,7 @@
               <button
                 onclick={() => selectCaptureConn(conn)}
                 class={cn(
-                  'flex w-full items-center gap-3 px-5 py-2 text-left text-xs transition-colors',
+                  'flex w-full items-center gap-3 px-5 py-2 text-left text-ui-xs transition-colors',
                   captureConn?.id === conn.id ? 'bg-muted/[0.08]' : 'hover:bg-muted/[0.05]',
                 )}
               >
@@ -733,7 +733,7 @@
               </button>
             {/each}
             {#if !connectionId && connections.length === 0}
-              <p class="px-5 py-3 text-xs text-muted-foreground/55">No connections configured</p>
+              <p class="px-5 py-3 text-ui-xs text-muted-foreground/55">No connections configured</p>
             {/if}
           </div>
         </div>
@@ -755,7 +755,7 @@
                   <button
                     onclick={() => onCaptureDbChange(db)}
                     class={cn(
-                      'flex w-full items-center gap-2 px-4 py-1.5 text-left text-xs',
+                      'flex w-full items-center gap-2 px-4 py-1.5 text-left text-ui-xs',
                       captureDb === db
                         ? 'bg-muted/[0.08] font-medium text-foreground/80'
                         : 'text-muted-foreground/50 hover:bg-muted/[0.05] hover:text-foreground/65',
@@ -796,7 +796,7 @@
                     type="button"
                     onclick={() => toggleCaptureSchema(schema)}
                     class={cn(
-                      'flex w-full cursor-pointer items-center gap-2.5 px-4 py-1.5 text-xs',
+                      'flex w-full cursor-pointer items-center gap-2.5 px-4 py-1.5 text-ui-xs',
                       captureChecked.has(schema)
                         ? 'text-foreground/75'
                         : 'text-muted-foreground/40 hover:text-foreground/55',
@@ -831,12 +831,12 @@
         <div class="flex items-center gap-2">
           <button
             onclick={() => { captureOpen = false }}
-            class="rounded px-3 py-1.5 text-xs text-muted-foreground/50 hover:text-foreground/80"
+            class="rounded px-3 py-1.5 text-ui-xs text-muted-foreground/50 hover:text-foreground/80"
           >Cancel</button>
           <button
             onclick={doCapture}
             disabled={captureLoadingSchemas || captureLoadingDbs || (!connectionId && !captureConn)}
-            class="flex items-center gap-1.5 rounded-lg bg-foreground px-4 py-1.5 text-xs font-medium text-background hover:opacity-85 disabled:opacity-30"
+            class="flex items-center gap-1.5 rounded-lg bg-foreground px-4 py-1.5 text-ui-xs font-medium text-background hover:opacity-85 disabled:opacity-30"
           >
             <Camera class="size-3" />
             Capture
@@ -915,10 +915,10 @@
   {@const removeCount = selectedDdlDiff?.filter((l) => l.type === 'remove').length ?? 0}
 
   <div class="flex h-8 shrink-0 items-center gap-2 border-b border-border/40 px-4">
-    <span class={cn('font-mono text-xs font-bold', statusColor)}>
+    <span class={cn('font-mono text-ui-xs font-bold', statusColor)}>
       {status === 'added' ? '+' : status === 'removed' ? '−' : '~'}
     </span>
-    <span class="min-w-0 flex-1 truncate font-mono text-xs font-medium text-foreground/75">{tableKey}</span>
+    <span class="min-w-0 flex-1 truncate font-mono text-ui-xs font-medium text-foreground/75">{tableKey}</span>
     <div class="ml-auto flex shrink-0 items-center gap-2 text-ui-2xs">
       {#if removeCount > 0}<span class="font-medium text-red-400">−{removeCount}</span>{/if}
       {#if addCount > 0}<span class="font-medium text-emerald-400">+{addCount}</span>{/if}
@@ -927,9 +927,9 @@
 
   <div class="min-h-0 flex-1 overflow-auto">
     {#if !selectedDdlDiff}
-      <div class="flex items-center justify-center py-10 text-xs text-muted-foreground/55">No DDL available</div>
+      <div class="flex items-center justify-center py-10 text-ui-xs text-muted-foreground/55">No DDL available</div>
     {:else}
-      <table class="w-full border-collapse font-mono text-xs leading-5">
+      <table class="w-full border-collapse font-mono text-ui-xs leading-5">
         <tbody>
           {#each selectedDdlDiff as line, i (i)}
             {#if line.type === 'ellipsis'}

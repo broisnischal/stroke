@@ -228,22 +228,46 @@ pub async fn call_tool(
 
 // ── Read-only guard ───────────────────────────────────────────────────────────
 
+/// Write keywords that make a statement mutating. Used to reject writes wrapped
+/// in a leading CTE (`WITH ... DELETE/INSERT/UPDATE ...`), which the first-word
+/// check alone can't catch.
+const WRITE_KEYWORDS: &[&str] = &[
+    "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "TRUNCATE",
+    "REPLACE", "MERGE", "GRANT", "REVOKE", "ATTACH", "DETACH", "REINDEX", "VACUUM",
+];
+
 /// Returns true if the SQL is read-only (SELECT, WITH, EXPLAIN, SHOW, DESCRIBE,
-/// VALUES, PRAGMA) — used to enforce MCP read-only mode.
+/// PRAGMA) — used to enforce MCP read-only mode.
 pub fn is_read_only_sql(sql: &str) -> bool {
     // Strip leading whitespace and block/line comments, then check the first keyword.
     let s = sql.trim();
     // Skip leading block comments (/* ... */) and line comments (--)
-    let first_word = strip_sql_comments(s)
-        .trim()
+    let stripped = strip_sql_comments(s).trim();
+    let first_word = stripped
         .split(|c: char| c.is_whitespace() || c == '(')
         .next()
         .unwrap_or("")
         .to_ascii_uppercase();
+
+    // A `WITH` (CTE) prefix can hide a write in its final statement
+    // (`WITH x AS (...) DELETE/INSERT/UPDATE ...`) or in a data-modifying CTE.
+    // Scan the whole statement for write keywords and reject if any appear.
+    if first_word == "WITH" {
+        let upper = stripped.to_ascii_uppercase();
+        for kw in WRITE_KEYWORDS {
+            if upper
+                .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .any(|tok| tok == *kw)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
     matches!(
         first_word.as_str(),
-        "SELECT" | "WITH" | "EXPLAIN" | "SHOW" | "DESCRIBE" | "DESC"
-            | "VALUES" | "PRAGMA" | "TABLE" | "TABLES"
+        "SELECT" | "EXPLAIN" | "SHOW" | "DESCRIBE" | "DESC" | "PRAGMA"
     )
 }
 
@@ -400,7 +424,9 @@ async fn execute_sql(
         ActiveConnection::D1(cfg) => execute_sql_d1(cfg, sql, max_rows).await,
         ActiveConnection::LibSql(cfg) => {
             let result = crate::db::libsql::query(cfg, sql, vec![]).await?;
-            Ok(json!({"columns":result.columns.iter().map(|c|&c.name).collect::<Vec<_>>(),"rows":&result.rows,"row_count":result.rows.len(),"truncated":result.rows.len()>=max_rows}).to_string())
+            let truncated = result.rows.len() > max_rows;
+            let rows: Vec<_> = result.rows.iter().take(max_rows).collect();
+            Ok(json!({"columns":result.columns.iter().map(|c|&c.name).collect::<Vec<_>>(),"rows":rows,"row_count":rows.len(),"truncated":truncated}).to_string())
         }
         ActiveConnection::Mysql(pool) => execute_sql_mysql(pool, sql, max_rows).await,
         ActiveConnection::Clickhouse(cfg) => {
@@ -525,11 +551,13 @@ async fn execute_sql_d1(
     max_rows: usize,
 ) -> Result<String, String> {
     let result = crate::db::d1::query(cfg, sql, vec![]).await?;
+    let truncated = result.rows.len() > max_rows;
+    let rows: Vec<_> = result.rows.iter().take(max_rows).collect();
     Ok(json!({
         "columns": result.columns.iter().map(|c| &c.name).collect::<Vec<_>>(),
-        "rows": &result.rows,
-        "row_count": result.rows.len(),
-        "truncated": result.rows.len() >= max_rows
+        "rows": rows,
+        "row_count": rows.len(),
+        "truncated": truncated
     })
     .to_string())
 }

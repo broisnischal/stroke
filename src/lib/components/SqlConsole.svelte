@@ -687,11 +687,11 @@
           <ChevronDown class="size-3 shrink-0 opacity-50" />
         </DropdownMenu.Trigger>
         <DropdownMenu.Content align="start" class="min-w-44">
-          <DropdownMenu.Item class="gap-2 whitespace-nowrap font-mono text-xs" onclick={() => copyAsOrm('drizzle')}>
+          <DropdownMenu.Item class="gap-2 whitespace-nowrap font-mono text-ui-xs" onclick={() => copyAsOrm('drizzle')}>
             <Code2 class="size-3.5 shrink-0 text-muted-foreground/50" />
             Copy as Drizzle
           </DropdownMenu.Item>
-          <DropdownMenu.Item class="gap-2 whitespace-nowrap font-mono text-xs" onclick={() => copyAsOrm('prisma')}>
+          <DropdownMenu.Item class="gap-2 whitespace-nowrap font-mono text-ui-xs" onclick={() => copyAsOrm('prisma')}>
             <Code2 class="size-3.5 shrink-0 text-muted-foreground/50" />
             Copy as Prisma
           </DropdownMenu.Item>
@@ -1047,8 +1047,8 @@
 <Dialog.Root bind:open={saveDialogOpen}>
   <Dialog.Content class="max-w-md gap-4">
     <Dialog.Header>
-      <Dialog.Title class="text-sm font-semibold">Save query</Dialog.Title>
-      <Dialog.Description class="text-xs text-muted-foreground">
+      <Dialog.Title class="text-ui-sm font-semibold">Save query</Dialog.Title>
+      <Dialog.Description class="text-ui-xs text-muted-foreground">
         Saved queries are stored per connection and appear in History → Saved.
       </Dialog.Description>
     </Dialog.Header>

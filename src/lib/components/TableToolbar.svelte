@@ -3,7 +3,10 @@
   import CaseSensitive from "@lucide/svelte/icons/case-sensitive";
   import WholeWord from "@lucide/svelte/icons/whole-word";
   import Regex from "@lucide/svelte/icons/regex";
+  import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
+  import Check from "@lucide/svelte/icons/check";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import { Popover, PopoverTrigger, PopoverContent } from "$lib/components/ui/popover/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import SearchableMenu from "./SearchableMenu.svelte";
@@ -25,7 +28,6 @@
     ANY_COLUMN,
   } from "$lib/table-query.js";
   import { untrack } from "svelte";
-  import { fade } from "svelte/transition";
   import { formatCompactCount } from "$lib/table-list.js";
   import { describeTableView } from "$lib/stores/table-views.js";
 
@@ -121,26 +123,40 @@
     /** @type {import('$lib/search-options.js').SearchOptions} */
     searchOptions = { matchCase: false, wholeWord: false, regex: false },
     onsearchoptionschange = /** @type {(opts: import('$lib/search-options.js').SearchOptions) => void} */ (() => {}),
-    /** Engine supports the option toggles (Postgres regex path). */
+    /** Engine supports at least one option toggle. */
     searchOptionsSupported = false,
+    /** Per-option support for the current engine (individual toggle gating). */
+    searchOptionsSupport = /** @type {{ matchCase: boolean, wholeWord: boolean, regex: boolean }} */ ({
+      matchCase: false,
+      wholeWord: false,
+      regex: false,
+    }),
   } = $props();
 
-  const SEARCH_OPTS = /** @type {const} */ ([
+  const ALL_SEARCH_OPTS = /** @type {const} */ ([
     { key: "matchCase", icon: CaseSensitive, title: "Match case" },
     { key: "wholeWord", icon: WholeWord, title: "Match whole word" },
     { key: "regex", icon: Regex, title: "Use regular expression" },
   ]);
+  // Only the options this engine can honor (SQLite/D1 → match-case only, etc.).
+  const SEARCH_OPTS = $derived(
+    ALL_SEARCH_OPTS.filter((o) => searchOptionsSupport[o.key]),
+  );
 
   let searchFocused = $state(false);
+  let searchOptsOpen = $state(false);
   const searchOptsActive = $derived(
-    !!(searchOptions.matchCase || searchOptions.wholeWord || searchOptions.regex),
+    SEARCH_OPTS.some((o) => searchOptions[o.key]),
   );
-  // The toggles only materialize once there's an actual query (or an option is
-  // already on) — not on bare focus — so an empty search field stays clean.
+  // The options button lives next to the clear (✕); the toggles themselves live
+  // in its popover, so the input stays clean. Shown only where the engine can
+  // honor the options (e.g. Postgres regex path) and not in structure view.
   const showSearchOpts = $derived(
-    searchOptionsSupported &&
-      tableViewMode !== "structure" &&
-      (localSearch.trim() !== "" || searchOptsActive),
+    searchOptionsSupported && tableViewMode !== "structure",
+  );
+  // Keep the field expanded while focused, typing, or adjusting options.
+  const searchExpanded = $derived(
+    searchFocused || searchOptsOpen || localSearch.trim() !== "",
   );
 
   let viewsMenuOpen = $state(false);
@@ -548,7 +564,7 @@
     <div
       class={cn(
         "relative flex h-7 shrink-0 items-center transition-[width] duration-200",
-        showSearchOpts ? "w-64" : "w-32 focus-within:w-44",
+        searchExpanded ? "w-44" : "w-32",
       )}
       role="search"
       onfocusin={() => (searchFocused = true)}
@@ -579,7 +595,7 @@
           aria-label="Search all columns"
           class={cn(
             "no-focus-ring h-7 w-full min-w-0 border-transparent bg-accent/40 pl-7 text-ui-sm shadow-none transition-colors focus-visible:border-border focus-visible:bg-input/30",
-            showSearchOpts ? "pr-24" : "pr-7",
+            showSearchOpts ? "pr-14" : "pr-7",
             localSearch.trim() && "border-ring/40 bg-input/30",
           )}
           placeholder="Search…"
@@ -588,48 +604,65 @@
           oninput={(e) => handleSearchInput(e.currentTarget.value)}
         />
       {/if}
-      {#if showSearchOpts}
-        <!-- VS Code-style option toggles; mousedown is swallowed so clicking
-             them never blurs the input (which would hide this cluster). -->
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div
-          class="absolute inset-y-0 right-8 flex items-center gap-px"
-          onmousedown={(e) => e.preventDefault()}
-          transition:fade={{ duration: 120 }}
-        >
-          {#each SEARCH_OPTS as opt (opt.key)}
-            <button
+      <!-- Right-side cluster: search options popover + clear (✕) -->
+      <div class="absolute inset-y-0 right-1 flex items-center gap-0.5">
+        {#if showSearchOpts}
+          <Popover bind:open={searchOptsOpen}>
+            <PopoverTrigger
               type="button"
-              title={opt.title}
-              aria-pressed={searchOptions[opt.key]}
+              title="Search options"
+              aria-label="Search options"
               class={cn(
-                "inline-flex size-[22px] items-center justify-center rounded-md transition-[background-color,color] duration-150 ease-out",
-                searchOptions[opt.key]
+                "relative inline-flex size-5 items-center justify-center rounded-md transition-[background-color,color] duration-150 ease-out",
+                searchOptsActive || searchOptsOpen
                   ? "bg-primary/15 text-primary"
                   : "text-muted-foreground/50 hover:bg-muted/70 hover:text-foreground",
               )}
-              onclick={() => onsearchoptionschange({ ...searchOptions, [opt.key]: !searchOptions[opt.key] })}
             >
-              <!-- Integer px (not size-3.5 = 12.25px on the 14px rem base): a
-                   fractional SVG box renders these detailed icons off the pixel
-                   grid and blurry. 16px in a 22px box centres at an integer 3px. -->
-              <opt.icon class="size-[16px] shrink-0" />
-            </button>
-          {/each}
-        </div>
-      {/if}
-      <button
-        type="button"
-        class={cn(
-          "absolute right-1 inline-flex size-5 items-center justify-center rounded-md text-muted-foreground/50 transition-[background-color,color,opacity] duration-150 ease-out hover:bg-muted/70 hover:text-foreground",
-          localSearch ? "opacity-100" : "pointer-events-none opacity-0",
-        )}
-        aria-label="Clear search"
-        tabindex={localSearch ? 0 : -1}
-        onclick={clearSearch}
-      >
-        <Icon name="x" class="size-3" />
-      </button>
+              <SlidersHorizontal class="size-3.5 shrink-0" />
+              {#if searchOptsActive}
+                <span
+                  class="absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-primary ring-1 ring-background"
+                ></span>
+              {/if}
+            </PopoverTrigger>
+            <PopoverContent align="end" sideOffset={6} class="w-52 p-1">
+              {#each SEARCH_OPTS as opt (opt.key)}
+                {@const active = searchOptions[opt.key]}
+                <button
+                  type="button"
+                  aria-pressed={active}
+                  class={cn(
+                    "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-ui-sm transition-colors",
+                    active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+                    "hover:bg-accent",
+                  )}
+                  onclick={() =>
+                    onsearchoptionschange({ ...searchOptions, [opt.key]: !active })}
+                >
+                  <opt.icon
+                    class={cn("size-4 shrink-0", active ? "text-primary" : "text-muted-foreground")}
+                  />
+                  <span class="min-w-0 flex-1 truncate text-left">{opt.title}</span>
+                  {#if active}
+                    <Check class="size-3.5 shrink-0 text-primary" />
+                  {/if}
+                </button>
+              {/each}
+            </PopoverContent>
+          </Popover>
+        {/if}
+        {#if localSearch}
+          <button
+            type="button"
+            class="inline-flex size-5 items-center justify-center rounded-md text-muted-foreground/50 transition-[background-color,color] duration-150 ease-out hover:bg-muted/70 hover:text-foreground"
+            aria-label="Clear search"
+            onclick={clearSearch}
+          >
+            <Icon name="x" class="size-3" />
+          </button>
+        {/if}
+      </div>
     </div>
 
     {#if tableViewMode !== "structure"}

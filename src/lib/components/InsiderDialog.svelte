@@ -44,8 +44,8 @@
             <Lightbulb class="size-3.5 text-muted-foreground" />
           </div>
           <div class="flex flex-col gap-0.5">
-            <Dialog.Title class="text-sm font-semibold">SQL Insider</Dialog.Title>
-            <Dialog.Description class="text-xs text-muted-foreground">
+            <Dialog.Title class="text-ui-sm font-semibold">SQL Insider</Dialog.Title>
+            <Dialog.Description class="text-ui-xs text-muted-foreground">
               Things worth knowing about SQL and databases.
             </Dialog.Description>
           </div>

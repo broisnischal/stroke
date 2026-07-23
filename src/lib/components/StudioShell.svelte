@@ -61,7 +61,7 @@
   import { loadTableViews, saveTableViews } from '$lib/stores/table-views.js'
   import { loadSqlDraft, saveSqlDraft } from '$lib/stores/sql-draft.js'
   import { buildBatchUpdateSql } from '$lib/sql-batch-update.js'
-  import { buildSearchQuery, searchOptionsSupported } from '$lib/search-options.js'
+  import { buildSearchQuery, searchOptionsSupported, supportedSearchOptions } from '$lib/search-options.js'
   import Onboarding from './Onboarding.svelte'
   import SettingsDialog from './SettingsDialog.svelte'
   import KeyboardShortcutsDialog from './KeyboardShortcutsDialog.svelte'
@@ -499,12 +499,19 @@
   // Start/stop the backend watcher whenever the watched table (or toggle) changes.
   $effect(() => {
     const key = liveTableKey
-    if (!key) { void liveStop().catch(() => {}); return }
+    // No liveStop() here: when the key clears, Svelte runs the prior run's
+    // cleanup (which stops the watcher) *before* re-executing this effect, so
+    // the returned cleanup is the single stop path — calling it again here
+    // would be a redundant double-stop.
+    if (!key) return
     const [schema, table] = JSON.parse(key)
     void liveStart(schema, table).catch((e) => {
       liveEnabled = false
       toast.error(`Live mode unavailable: ${String(e)}`)
     })
+    // Stop the watcher on unmount/HMR (and before the effect re-runs for a new
+    // key), so a backend watcher/trigger never leaks past this component.
+    return () => { void liveStop().catch(() => {}) }
   })
 
   // Auto-disable when the connection can't support live mode (switched to MySQL,
@@ -575,10 +582,12 @@
   /** @type {import('$lib/search-options.js').SearchOptions} */
   let searchOptions = $state({ matchCase: false, wholeWord: false, regex: false })
   const searchOptsSupported = $derived(searchOptionsSupported(dbType))
+  /** Per-option support for the current engine (gates individual toggles). */
+  const searchOptsSupport = $derived(supportedSearchOptions(dbType))
 
   /** Translate a search term + the active options into API search params. */
   function apiSearch(/** @type {string} */ term) {
-    return buildSearchQuery(term, searchOptions, searchOptsSupported)
+    return buildSearchQuery(term, searchOptions, dbType)
   }
 
   /** @param {import('$lib/search-options.js').SearchOptions} next */
@@ -1686,6 +1695,9 @@ let rowSearch = $state('')
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && (e.key === 'p' || e.key === 'P')) {
         e.preventDefault()
         e.stopPropagation()
+        // Only open+set page mode from a closed state — never yank the page mode
+        // if the palette is already open mid-interaction.
+        if (commandOpen) return
         commandPage = 'pages'
         commandOpen = true
       }
@@ -4049,6 +4061,7 @@ let rowSearch = $state('')
     if (total >= 0 && _infiniteRows.length >= total) return
     if (_infiniteRows.length >= INFINITE_ROW_CAP) return
     loadingMore = true
+    const seq = _loadSeq
     try {
       const offset = _infiniteRows.length
       const { sortColumn, sortDirection, sorts } = sortForApi(rowSort, rowSortMore)
@@ -4059,6 +4072,7 @@ let rowSearch = $state('')
         sorts,
         filters: filtersForApi(rowFilters, columns),
       })
+      if (seq !== _loadSeq) return
       const fetched = data.rows ?? []
       if (!fetched.length) return
       // Append in place — spreading the whole accumulated array on every page was
@@ -4266,7 +4280,13 @@ let rowSearch = $state('')
       // ready yet (schemas come back empty); the happy path succeeds on attempt 0.
       for (let attempt = 0; attempt < 3; attempt++) {
         if (attempt > 0) await new Promise(r => setTimeout(r, attempt * 700))
-        await loadSchemas()
+        try {
+          await loadSchemas()
+        } catch (e) {
+          // Schema list failed — surface it but keep going so loadTables() still
+          // runs and clears the loading flag (sidebar must never hang forever).
+          toast.error('Could not load schemas', { description: String(e) })
+        }
         if (schemas.length > 0) break
       }
       await loadTables({ force: true })
@@ -4770,6 +4790,9 @@ let rowSearch = $state('')
       }
       saveActiveTabState()
       await loadRows({ keepScroll: true })
+    } catch (err) {
+      toast.error('Could not delete rows', { description: String(err) })
+      throw err
     } finally {
       deletingRows = false
     }
@@ -4862,6 +4885,9 @@ let rowSearch = $state('')
       rows[detail.rowIdx] = rows[detail.rowIdx].map(
         (cell, j) => (j === detail.colIdx ? detail.value : cell),
       )
+      // rows is $state.raw, so the in-place assignment above doesn't notify the
+      // canvas; bump dataVersion to force the grid to repaint the edited cell.
+      dataVersion++
       saveActiveTabState()
       recordActivity({ type: 'row_save', title: `Updated ${col.name} in ${activeTable}`, schema: activeSchema, table: activeTable, durationMs: Date.now() - _saveStart, success: true })
     } catch (e) {
@@ -5309,7 +5335,7 @@ let rowSearch = $state('')
         <div class="relative flex flex-col items-center gap-4 pt-1">
           <Button
             type="button"
-            class="h-11 rounded-xl px-6 text-sm font-semibold shadow-sm"
+            class="h-11 rounded-xl px-6 text-ui-sm font-semibold shadow-sm"
             onclick={() => (showConnectionModal = true)}
           >
             <Plus class="size-4" />
@@ -5916,6 +5942,7 @@ let rowSearch = $state('')
             {searchOptions}
             onsearchoptionschange={handleSearchOptionsChange}
             searchOptionsSupported={searchOptsSupported}
+            searchOptionsSupport={searchOptsSupport}
             savedViews={savedTableViews}
             viewsEnabled={savedViewsEnabled}
             activeViewId={activeTableViewId}
@@ -6128,14 +6155,14 @@ let rowSearch = $state('')
             </div>
             <p class="text-ui-3xs font-medium uppercase tracking-[0.25em] text-muted-foreground/60">Quick access</p>
             {#if connection}
-              <div class="flex items-center gap-2 text-sm font-medium text-foreground/80">
+              <div class="flex items-center gap-2 text-ui-sm font-medium text-foreground/80">
                 <span class="size-1.5 rounded-full bg-emerald-500 shrink-0"></span>
                 <span class="font-mono">{connection.database ?? connection.filePath?.split('/').at(-1) ?? connection.name ?? connection.databaseId ?? 'connected'}</span>
-                <span class="text-muted-foreground/50 text-xs">·</span>
-                <span class="capitalize text-muted-foreground/70 text-xs font-normal">{dbType}</span>
+                <span class="text-muted-foreground/50 text-ui-xs">·</span>
+                <span class="capitalize text-muted-foreground/70 text-ui-xs font-normal">{dbType}</span>
                 {#if tables.length > 0}
-                  <span class="text-muted-foreground/50 text-xs">·</span>
-                  <span class="text-xs text-muted-foreground/60 font-normal">{tables.length} tables</span>
+                  <span class="text-muted-foreground/50 text-ui-xs">·</span>
+                  <span class="text-ui-xs text-muted-foreground/60 font-normal">{tables.length} tables</span>
                 {/if}
               </div>
             {/if}
@@ -6302,7 +6329,7 @@ let rowSearch = $state('')
               <AlertTriangle class="size-5 text-destructive/60" />
               <div class="space-y-1">
                 <p class="text-ui-xs font-medium text-foreground">AI sidebar error</p>
-                <p class="font-mono text-[10px] text-muted-foreground/60 break-words">{err instanceof Error ? err.message : String(err)}</p>
+                <p class="font-mono text-ui-3xs text-muted-foreground/60 break-words">{err instanceof Error ? err.message : String(err)}</p>
               </div>
               <button
                 type="button"
@@ -6450,7 +6477,7 @@ let rowSearch = $state('')
 <!-- Floating tab drag preview (follows the cursor during a split-pane drag) -->
 {#if dragGhost}
   <div
-    class="pointer-events-none fixed z-[200] -translate-x-1/2 -translate-y-1/2 rounded-md border border-border/60 bg-panel px-3 py-1.5 text-xs font-medium text-foreground opacity-90 shadow-lg"
+    class="pointer-events-none fixed z-[200] -translate-x-1/2 -translate-y-1/2 rounded-md border border-border/60 bg-panel px-3 py-1.5 text-ui-xs font-medium text-foreground opacity-90 shadow-lg"
     style="left:{dragGhost.x}px; top:{dragGhost.y}px"
   >
     {dragGhost.title}
