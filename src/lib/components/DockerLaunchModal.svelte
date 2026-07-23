@@ -127,19 +127,19 @@
           >
             <opt.Icon class="size-5 shrink-0 text-muted-foreground" />
             <div class="min-w-0">
-              <div class="text-sm font-medium">{opt.label}</div>
-              <div class="font-mono text-xs text-muted-foreground">{opt.desc}</div>
+              <div class="text-ui-sm font-medium">{opt.label}</div>
+              <div class="font-mono text-ui-xs text-muted-foreground">{opt.desc}</div>
             </div>
           </button>
         {/each}
-        <p class="pt-1 text-center text-xs text-muted-foreground/60">
+        <p class="pt-1 text-center text-ui-xs text-muted-foreground/60">
           Requires Docker Desktop to be installed and running
         </p>
       </div>
 
     {:else if phase === 'running'}
       <div class="flex flex-col gap-3 py-1">
-        <div class="flex items-center gap-2 text-sm text-muted-foreground">
+        <div class="flex items-center gap-2 text-ui-sm text-muted-foreground">
           <RefreshCw class="size-3.5 shrink-0 animate-spin" />
           <span>Pulling and starting {selectedDb === 'postgres' ? 'PostgreSQL' : 'MySQL'}…</span>
         </div>
@@ -158,11 +158,11 @@
 
     {:else if phase === 'done' && connInfo}
       <div class="flex flex-col gap-3 py-1">
-        <div class="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+        <div class="flex items-center gap-2 text-ui-sm text-green-600 dark:text-green-400">
           <CheckCircle class="size-4 shrink-0" />
           Container is running and ready
         </div>
-        <div class="rounded-md border border-border bg-muted/40 px-3 py-2.5 font-mono text-xs leading-loose">
+        <div class="rounded-md border border-border bg-muted/40 px-3 py-2.5 font-mono text-ui-xs leading-loose">
           <div class="grid grid-cols-[3rem_1fr] gap-x-2">
             <span class="text-muted-foreground">host</span><span>{connInfo.host}:{connInfo.port}</span>
             <span class="text-muted-foreground">user</span><span>{connInfo.user}</span>
@@ -172,7 +172,7 @@
         </div>
         <button
           type="button"
-          class="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          class="w-full rounded-md bg-primary px-4 py-2 text-ui-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           onclick={handleConnect}
         >
           Connect now
@@ -181,13 +181,13 @@
 
     {:else if phase === 'error'}
       <div class="flex flex-col gap-3 py-1">
-        <div class="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm text-destructive">
+        <div class="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-ui-sm text-destructive">
           <XCircle class="mt-0.5 size-4 shrink-0" />
           <span class="leading-snug">{errorMsg}</span>
         </div>
         <button
           type="button"
-          class="text-left text-sm text-muted-foreground transition-colors hover:text-foreground"
+          class="text-left text-ui-sm text-muted-foreground transition-colors hover:text-foreground"
           onclick={() => { phase = 'pick' }}
         >
           ← Try again

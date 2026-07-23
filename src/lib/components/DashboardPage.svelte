@@ -374,7 +374,7 @@
         </div>
         <button
           type="button"
-          class="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+          class="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-4 text-ui-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
           onclick={() => createDashboard("My Dashboard")}
         >
           <Plus class="size-4" />
@@ -390,7 +390,7 @@
         <p class="text-ui-sm text-muted-foreground/50">Add charts to build your dashboard</p>
         <button
           type="button"
-          class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-4 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-4 text-ui-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           onclick={() => (pickerOpen = true)}
         >
           <Plus class="size-4" />
@@ -490,7 +490,7 @@
   >
     <div class="flex w-[480px] max-h-[70vh] flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-xl">
       <div class="flex h-11 shrink-0 items-center justify-between border-b border-border px-4">
-        <span class="text-sm font-semibold">Add chart to dashboard</span>
+        <span class="text-ui-sm font-semibold">Add chart to dashboard</span>
         <button type="button" onclick={() => (pickerOpen = false)} class="text-muted-foreground/50 hover:text-foreground">
           <X class="size-4" />
         </button>

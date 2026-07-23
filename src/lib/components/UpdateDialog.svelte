@@ -242,12 +242,12 @@
     <div class="px-4 py-3 text-ui-sm">
 
       {#if status === 'available'}
-        <p class="mb-3 text-xs text-muted-foreground">A new version is ready to install.</p>
+        <p class="mb-3 text-ui-xs text-muted-foreground">A new version is ready to install.</p>
         <div class="flex gap-2">
           <button
             type="button"
             onclick={openChangelog}
-            class="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            class="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-ui-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             <ScrollText class="size-3.5" />
             Release Notes
@@ -256,7 +256,7 @@
           <button
             type="button"
             onclick={() => void install()}
-            class="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
+            class="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-ui-xs font-medium text-primary-foreground hover:opacity-90"
           >
             <Download class="size-3.5" />
             Install
@@ -289,7 +289,7 @@
             <button
               type="button"
               onclick={openChangelog}
-              class="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              class="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-ui-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
               <ScrollText class="size-3.5" />
               What's New
@@ -299,7 +299,7 @@
           <button
             type="button"
             onclick={() => void restart()}
-            class="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
+            class="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-ui-xs font-medium text-primary-foreground hover:opacity-90"
           >
             <RefreshCw class="size-3" />
             Restart now
@@ -310,14 +310,14 @@
         <p class="font-mono text-ui-xs text-destructive">{errorMsg}</p>
 
       {:else if status === 'up-to-date' || checking}
-        <p class="text-xs leading-relaxed text-muted-foreground">
+        <p class="text-ui-xs leading-relaxed text-muted-foreground">
           {checking ? 'Checking GitHub for a newer release…' : "You're on the latest version."}
         </p>
         {#if !checking}
           <button
             type="button"
             onclick={openChangelog}
-            class="mt-3 inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted hover:text-foreground active:scale-[0.96]"
+            class="mt-3 inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-ui-xs text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted hover:text-foreground active:scale-[0.96]"
           >
             <ScrollText class="size-3.5" />
             View changelog

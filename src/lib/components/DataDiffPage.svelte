@@ -364,8 +364,8 @@
     try {
       const [lRes, rRes] = await Promise.all([runFetch(L), runFetch(R)])
       columns = lRes.columns.length ? lRes.columns : rRes.columns
-      const keyNames = selectedKeyCols.size ? [...selectedKeyCols].map((s) => s.toLowerCase()) : null
-      const keyIdx = keyNames ? keyNames.map((n) => columns.findIndex((c) => c.name.toLowerCase() === n)).filter((i) => i >= 0) : [0]
+      const keyNames = selectedKeyCols.size ? [...selectedKeyCols] : null
+      const keyIdx = keyNames ? keyNames.map((n) => columns.findIndex((c) => c.name === n)).filter((i) => i >= 0) : [0]
       if (!keyIdx.length) { error = 'Key columns not found in result set.'; return }
       diffRows = computeDiff(lRes.rows, rRes.rows, columns.length, keyIdx)
       activeFilter = 'changed'
@@ -375,19 +375,39 @@
     } finally { comparing = false }
   }
 
+  // Compare a single cell: primitives as text, non-primitives via JSON so
+  // JSON/array/object cells don't all collapse to `[object Object]`.
+  function cellCompareText(/** @type {unknown} */ v) {
+    if (v === null || v === undefined) return ''
+    if (typeof v !== 'object') return String(v)
+    try { return JSON.stringify(v) } catch { return String(v) }
+  }
+
   function computeDiff(/** @type {unknown[][]} */ lRows, /** @type {unknown[][]} */ rRows, /** @type {number} */ colCount, /** @type {number[]} */ keyIdx) {
-    const key = (/** @type {unknown[]} */ r) => keyIdx.map((i) => String(r[i] ?? '')).join('\0')
-    const lMap = new Map(lRows.map((r) => [key(r), r]))
-    const rMap = new Map(rRows.map((r) => [key(r), r]))
+    const key = (/** @type {unknown[]} */ r) => keyIdx.map((i) => cellCompareText(r[i])).join('\0')
+    // Bucket rows per key so duplicate keys aren't silently dropped; pair the
+    // buckets positionally (index 0↔0, 1↔1, …), extras become added/removed.
+    /** @type {Map<string, unknown[][]>} */
+    const lMap = new Map()
+    for (const r of lRows) { const k = key(r); (lMap.get(k) ?? lMap.set(k, []).get(k)).push(r) }
+    /** @type {Map<string, unknown[][]>} */
+    const rMap = new Map()
+    for (const r of rRows) { const k = key(r); (rMap.get(k) ?? rMap.set(k, []).get(k)).push(r) }
     /** @type {DiffRow[]} */
     const out = []
-    for (const [k, lr] of lMap) {
-      const rr = rMap.get(k)
-      if (!rr) { out.push({ status: 'removed', left: lr, right: null }); continue }
-      const changed = new Set(Array.from({ length: colCount }, (_, i) => i).filter((i) => String(lr[i] ?? '') !== String(rr[i] ?? '')))
-      out.push({ status: changed.size ? 'modified' : 'unchanged', left: lr, right: rr, changedCols: changed })
+    for (const [k, lBucket] of lMap) {
+      const rBucket = rMap.get(k) ?? []
+      const n = Math.max(lBucket.length, rBucket.length)
+      for (let p = 0; p < n; p++) {
+        const lr = lBucket[p]
+        const rr = rBucket[p]
+        if (!rr) { out.push({ status: 'removed', left: lr, right: null }); continue }
+        if (!lr) { out.push({ status: 'added', left: null, right: rr }); continue }
+        const changed = new Set(Array.from({ length: colCount }, (_, i) => i).filter((i) => cellCompareText(lr[i]) !== cellCompareText(rr[i])))
+        out.push({ status: changed.size ? 'modified' : 'unchanged', left: lr, right: rr, changedCols: changed })
+      }
     }
-    for (const [k, rr] of rMap) if (!lMap.has(k)) out.push({ status: 'added', left: null, right: rr })
+    for (const [k, rBucket] of rMap) if (!lMap.has(k)) for (const rr of rBucket) out.push({ status: 'added', left: null, right: rr })
     out.sort((a, b) => ({ removed: 0, modified: 1, added: 2, unchanged: 3 }[a.status] - { removed: 0, modified: 1, added: 2, unchanged: 3 }[b.status]))
     return out
   }
@@ -433,7 +453,7 @@
       onclick={(e) => { e.stopPropagation(); if (isOpen) closeDd(); else if (!loading && options.length > 0) openDd(id, e) }}
       disabled={loading || (!value && options.length === 0 && !loading)}
       class={cn(
-        'flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-xs transition-colors select-none',
+        'flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-ui-xs transition-colors select-none',
         loading
           ? 'border-border/30 bg-muted/15 text-muted-foreground/40'
           : value
@@ -464,16 +484,16 @@
         <div class="flex items-center gap-2 border-b border-border/25 px-3 py-2">
           <Search class="size-3 shrink-0 text-muted-foreground/35" />
           <input use:focusNode type="text" bind:value={dropdownSearch} placeholder="Search…"
-            class="flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground/25" />
+            class="flex-1 bg-transparent text-ui-xs outline-none placeholder:text-muted-foreground/25" />
           {#if dropdownSearch}<button onclick={() => { dropdownSearch = '' }} class="text-muted-foreground/35 hover:text-foreground"><X class="size-3" /></button>{/if}
         </div>
         <div class="max-h-52 overflow-y-auto py-1">
           {#if filtered.length === 0}
-            <p class="px-3 py-2 text-xs text-muted-foreground/35">No results</p>
+            <p class="px-3 py-2 text-ui-xs text-muted-foreground/35">No results</p>
           {:else}
             {#each filtered as opt}
               <button type="button" onclick={() => { onchange(opt); closeDd() }}
-                class={cn('flex w-full items-center gap-2 px-3 py-1.5 text-xs transition-colors hover:bg-muted/35', value === opt && 'text-primary')}
+                class={cn('flex w-full items-center gap-2 px-3 py-1.5 text-ui-xs transition-colors hover:bg-muted/35', value === opt && 'text-primary')}
               >
                 <span class={cn('w-3 shrink-0 text-center text-ui-3xs', value === opt ? 'text-primary' : 'opacity-0')}>✓</span>
                 {opt}
@@ -494,7 +514,7 @@
   <div class="relative inline-flex">
     <button type="button"
       onclick={(e) => { e.stopPropagation(); if (isOpen) closeDd(); else openDd(id, e) }}
-      class={cn('flex h-7 max-w-[200px] items-center gap-1.5 rounded-md border border-border/40 bg-muted/25 px-2.5 text-xs font-medium text-foreground/90 transition-colors hover:bg-muted/45 select-none', isOpen && 'border-border/70 bg-muted/50 text-foreground')}
+      class={cn('flex h-7 max-w-[200px] items-center gap-1.5 rounded-md border border-border/40 bg-muted/25 px-2.5 text-ui-xs font-medium text-foreground/90 transition-colors hover:bg-muted/45 select-none', isOpen && 'border-border/70 bg-muted/50 text-foreground')}
     >
       {#if value === currentConnectionId}<span class="size-1.5 shrink-0 rounded-full bg-blue-400" title="Active connection"></span>{/if}
       <span class="max-w-[140px] truncate">{selected?.name ?? 'Connection'}</span>
@@ -510,15 +530,15 @@
         <div class="flex items-center gap-2 border-b border-border/25 px-3 py-2">
           <Search class="size-3 shrink-0 text-muted-foreground/35" />
           <input use:focusNode type="text" bind:value={dropdownSearch} placeholder="Search connections…"
-            class="flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground/25" />
+            class="flex-1 bg-transparent text-ui-xs outline-none placeholder:text-muted-foreground/25" />
         </div>
         <div class="max-h-52 overflow-y-auto py-1">
           {#if filtered.length === 0}
-            <p class="px-3 py-2 text-xs text-muted-foreground/35">No results</p>
+            <p class="px-3 py-2 text-ui-xs text-muted-foreground/35">No results</p>
           {:else}
             {#each filtered as conn}
               <button type="button" onclick={() => { onchange(conn.id); closeDd() }}
-                class={cn('flex w-full items-center gap-2 px-3 py-2 text-xs transition-colors hover:bg-muted/35', value === conn.id && 'text-primary')}
+                class={cn('flex w-full items-center gap-2 px-3 py-2 text-ui-xs transition-colors hover:bg-muted/35', value === conn.id && 'text-primary')}
               >
                 <span class={cn('w-3 shrink-0 text-center text-ui-3xs', value === conn.id ? 'text-primary' : 'opacity-0')}>✓</span>
                 <span class="flex-1 truncate text-left">{conn.name}</span>
@@ -623,7 +643,7 @@
         {/if}
       </div>
       <button onclick={compare} disabled={comparing}
-        class="flex shrink-0 items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-50"
+        class="flex shrink-0 items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 text-ui-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-50"
       >
         {#if comparing}<Loader2 class="size-3.5 animate-spin" />{:else}<GitCompare class="size-3.5" />{/if}
         Compare
@@ -631,7 +651,7 @@
     </div>
 
     {#if error}
-      <div class="mx-5 mb-2 rounded bg-destructive/8 px-3 py-1.5 text-xs text-destructive">{error}</div>
+      <div class="mx-5 mb-2 rounded bg-destructive/8 px-3 py-1.5 text-ui-xs text-destructive">{error}</div>
     {/if}
   </div>
 
@@ -653,7 +673,7 @@
         <button
           onclick={() => { activeFilter = f.key }}
           class={cn(
-            'flex items-center gap-1.5 border-b-2 pb-2.5 pt-2 px-3 text-xs transition-all',
+            'flex items-center gap-1.5 border-b-2 pb-2.5 pt-2 px-3 text-ui-xs transition-all',
             activeFilter === f.key
               ? cn('border-current font-medium', f.active)
               : 'border-transparent text-muted-foreground/55 hover:text-muted-foreground/80'
@@ -672,7 +692,7 @@
       <div class="ml-auto flex items-center gap-2 pb-2.5 pl-4">
         <Search class="size-3 shrink-0 text-muted-foreground/50" />
         <input type="text" bind:value={searchQuery} placeholder="Search rows…"
-          class="w-36 bg-transparent text-xs outline-none placeholder:text-muted-foreground/40 focus:w-52 transition-all" />
+          class="w-36 bg-transparent text-ui-xs outline-none placeholder:text-muted-foreground/40 focus:w-52 transition-all" />
         {#if searchQuery}
           <button onclick={() => { searchQuery = '' }} class="text-muted-foreground/50 hover:text-foreground transition-colors">
             <X class="size-3" />
@@ -692,7 +712,7 @@
       class:cursor-col-resize={resizingCol >= 0}
       onscroll={handleTableScroll}
     >
-      <table class="w-full border-separate text-xs" style="table-layout:fixed;min-width:{totalWidth}px;border-spacing:0">
+      <table class="w-full border-separate text-ui-xs" style="table-layout:fixed;min-width:{totalWidth}px;border-spacing:0">
         <colgroup>
           <col style="width:26px" />
           {#each colWidths as w}<col style="width:{w}px" />{/each}
@@ -802,8 +822,8 @@
         <GitCompare class="size-6 opacity-20" />
       </div>
       <div class="text-center">
-        <p class="text-sm font-medium text-foreground/40">Compare any two data sources</p>
-        <p class="mt-1 text-xs text-muted-foreground/25">Tables or SQL — even across different hosts</p>
+        <p class="text-ui-sm font-medium text-foreground/40">Compare any two data sources</p>
+        <p class="mt-1 text-ui-xs text-muted-foreground/25">Tables or SQL — even across different hosts</p>
       </div>
     </div>
   {/if}

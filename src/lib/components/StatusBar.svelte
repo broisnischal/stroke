@@ -526,7 +526,7 @@
                     type="button"
                     data-hl={dbHl === i ? '' : undefined}
                     class={cn(
-                      'flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left font-mono text-xs text-foreground/90 transition-colors',
+                      'flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left font-mono text-ui-xs text-foreground/90 transition-colors',
                       dbHl === i && 'bg-accent text-foreground',
                       isCurrent && 'font-semibold',
                     )}

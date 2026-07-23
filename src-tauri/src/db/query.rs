@@ -861,7 +861,8 @@ fn build_filter_condition(
         "not_contains" => {
             let raw = value.unwrap_or("");
             let p = builder.push_bind(format!("%{}%", escape_ilike_pattern(raw)));
-            builder.push_condition(format!("NOT ({col}::text ILIKE {p} ESCAPE '\\')"), conjunct);
+            // A NULL cell contains nothing, so it satisfies "does not contain".
+            builder.push_condition(format!("({col} IS NULL OR NOT ({col}::text ILIKE {p} ESCAPE '\\'))"), conjunct);
         }
         "starts_with" => {
             let raw = value.unwrap_or("");
@@ -1089,6 +1090,9 @@ pub async fn get_table_rows(
     offset: i64,
     search: Option<String>,
     search_is_regex: bool,
+    // Case-sensitive substring search (drops the default case-folding). Honored
+    // by SQLite/D1/LibSQL/MySQL; Postgres bakes case into the pattern instead.
+    search_case_sensitive: bool,
     sort_column: Option<String>,
     sort_direction: Option<String>,
     filters: Option<Vec<RowFilter>>,
@@ -1113,7 +1117,7 @@ pub async fn get_table_rows(
     keyset: Option<KeysetCursor>,
     // Null placement for the ORDER BY ("first"/"last", or None to keep the
     // NULLS LAST default). Applied on the dialects that support explicit null
-    // placement (Postgres, SQLite, D1/libSQL); ignored by MySQL/ClickHouse/etc.
+    // placement (Postgres, SQLite, D1/libSQL, MySQL); ignored by ClickHouse/etc.
     nulls_order: Option<String>,
 ) -> Result<TableRows, String> {
     if limit > MAX_PAGE_LIMIT {
@@ -1129,18 +1133,18 @@ pub async fn get_table_rows(
     match require_conn(&state)? {
         ActiveConnection::Sqlite(pool) => {
             return super::sqlite::get_table_rows(
-                &pool, &table, limit, offset, search, sort_column, sort_direction, filters, nulls_order,
+                &pool, &table, limit, offset, search, search_case_sensitive, sort_column, sort_direction, filters, nulls_order,
             ).await;
         }
         ActiveConnection::D1(cfg) => {
-            return get_table_rows_remote(&cfg, &table, limit, offset, search, sort_column, sort_direction, filters, nulls_order).await;
+            return get_table_rows_remote(&cfg, &table, limit, offset, search, search_case_sensitive, sort_column, sort_direction, filters, nulls_order).await;
         }
         ActiveConnection::LibSql(cfg) => {
-            return get_table_rows_remote(&cfg, &table, limit, offset, search, sort_column, sort_direction, filters, nulls_order).await;
+            return get_table_rows_remote(&cfg, &table, limit, offset, search, search_case_sensitive, sort_column, sort_direction, filters, nulls_order).await;
         }
         ActiveConnection::Mysql(pool) => {
             return super::mysql::get_table_rows(
-                &pool, &schema, &table, limit, offset, search, sort_column, sort_direction, filters, include_meta,
+                &pool, &schema, &table, limit, offset, search, search_is_regex, search_case_sensitive, sort_column, sort_direction, filters, include_meta, nulls_order,
             ).await;
         }
         ActiveConnection::Clickhouse(cfg) => {
@@ -1206,6 +1210,23 @@ pub async fn get_table_rows(
         !k.sql_type.is_empty()
             && k.sql_type.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ' ')
     });
+    // The keyset predicate (`{col} >/< $val` + `ORDER BY {col}`) has no NULLS
+    // handling, so on a NULLABLE ordering column it would skip/reorder NULL rows
+    // relative to the OFFSET path (which emits explicit NULLS FIRST/LAST). Only
+    // take the fast-path when the ordering column is provably NOT NULL; otherwise
+    // fall back to OFFSET, which is always correct.
+    let keyset_ok = match keyset_ok {
+        Some(k) => {
+            let nullable = fetch_table_column_nullable(&pool, &schema, &table).await?;
+            // Require the column to be known AND non-nullable. Unknown column =>
+            // don't fast-path (stay safe).
+            match nullable.get(&k.column) {
+                Some(false) => Some(k),
+                _ => None,
+            }
+        }
+        None => None,
+    };
     let keyset_reverse;
     // Cursor value to bind after the WHERE binds (keyset), or None (offset). The
     // SQL string is built here in the outer scope so it outlives `data_query`.
@@ -2154,9 +2175,12 @@ async fn execute_sql_pg(
     let query_ms = || started.elapsed().as_millis() as u64;
 
     // Split into individual statements — the extended query protocol rejects multi-statement input.
-    let stmts: Vec<&str> = sql
-        .split(';')
-        .map(str::trim)
+    // Use the literal/comment/dollar-quote-aware splitter so `;` inside strings,
+    // `--`/`/* */` comments, and `$$…$$` bodies don't cut a statement in half.
+    let split = split_sql_statements(sql);
+    let stmts: Vec<&str> = split
+        .iter()
+        .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .collect();
 
@@ -2561,6 +2585,7 @@ async fn get_table_rows_remote<C: RemoteSqlite>(
     limit: i64,
     offset: i64,
     search: Option<String>,
+    search_case_sensitive: bool,
     sort_column: Option<String>,
     sort_direction: Option<String>,
     filters: Option<Vec<RowFilter>>,
@@ -2626,12 +2651,20 @@ async fn get_table_rows_remote<C: RemoteSqlite>(
 
     if let Some(ref s) = search {
         if !s.is_empty() && !col_names.is_empty() {
-            let escaped = super::sqlite::escape_like(s);
+            // Case-insensitive folds both operands with LOWER(); case-sensitive
+            // compares the raw text. instr() has no LIKE pattern-length cap.
             let parts: Vec<String> = col_names.iter()
-                .map(|c| format!("LOWER(CAST(\"{}\" AS TEXT)) LIKE LOWER(?) ESCAPE '\\'", c.replace('"', "\"\"")))
+                .map(|c| {
+                    let qc = c.replace('"', "\"\"");
+                    if search_case_sensitive {
+                        format!("instr(CAST(\"{qc}\" AS TEXT), ?) > 0")
+                    } else {
+                        format!("instr(LOWER(CAST(\"{qc}\" AS TEXT)), LOWER(?)) > 0")
+                    }
+                })
                 .collect();
             cond_parts.push((None, format!("({})", parts.join(" OR "))));
-            for _ in &col_names { params.push(Value::String(format!("%{escaped}%"))); }
+            for _ in &col_names { params.push(Value::String(s.clone())); }
         }
     }
     if let Some(ref fs) = filters {

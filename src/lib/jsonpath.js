@@ -132,6 +132,10 @@ export function evalJsonPath(root, path) {
     let rest = trimmed.startsWith('$') ? trimmed.slice(1) : trimmed
     /** @type {unknown} */
     let cur = root
+    // When true, `cur` is an array whose elements are being projected over, so
+    // a following accessor (index/slice/filter) maps across items rather than
+    // operating on the projection array itself.
+    let projected = false
 
     while (rest.length > 0) {
       // ── Recursive descent: ..key ────────────────────────────────────────
@@ -158,23 +162,44 @@ export function evalJsonPath(root, path) {
 
       // ── Bracket accessor ─────────────────────────────────────────────────
       if (rest.startsWith('[')) {
-        const end = rest.indexOf(']')
+        // Find the closing `]`, but if the content starts with a quote scan to
+        // the matching closing quote first so keys containing `]` aren't split.
+        let end
+        const q = rest[1]
+        if (q === '"' || q === "'") {
+          let i = 2
+          while (i < rest.length && rest[i] !== q) i++
+          if (i >= rest.length) return { ok: false, error: 'Unclosed quote in bracket' }
+          end = rest.indexOf(']', i + 1)
+        } else {
+          end = rest.indexOf(']')
+        }
         if (end === -1) return { ok: false, error: 'Unclosed [' }
         const inner = rest.slice(1, end).trim()
         rest = rest.slice(end + 1)
 
-        // [*] — all items
+        // [*] — all items: mark projection so following accessors map over items
         if (inner === '*') {
           if (!Array.isArray(cur)) return { ok: false, error: '[*] requires an array' }
-          // cur stays as the full array
+          projected = true
           continue
         }
 
         // [n] — numeric index
         if (/^-?\d+$/.test(inner)) {
-          if (!Array.isArray(cur)) return { ok: false, error: `[${inner}] requires an array` }
           const idx = parseInt(inner)
-          cur = idx < 0 ? cur[cur.length + idx] : cur[idx]
+          const at = (/** @type {unknown} */ a) => {
+            if (!Array.isArray(a)) return undefined
+            return idx < 0 ? a[a.length + idx] : a[idx]
+          }
+          if (projected) {
+            if (!Array.isArray(cur)) return { ok: false, error: `[${inner}] requires an array` }
+            cur = cur.map(at)
+            projected = false
+            continue
+          }
+          if (!Array.isArray(cur)) return { ok: false, error: `[${inner}] requires an array` }
+          cur = at(cur)
           continue
         }
 
@@ -182,15 +207,26 @@ export function evalJsonPath(root, path) {
         if (/^-?\d*:-?\d*(:-?\d*)?$/.test(inner)) {
           if (!Array.isArray(cur)) return { ok: false, error: 'Slice requires an array' }
           const parts = inner.split(':')
-          const len = cur.length
-          const s = parts[0] === '' ? 0 : parseInt(parts[0])
-          const e = parts[1] === '' ? len : parseInt(parts[1])
-          const step = parts[2] === undefined || parts[2] === '' ? 1 : parseInt(parts[2])
-          const start = s < 0 ? Math.max(0, len + s) : Math.min(len, s)
-          const end2  = e < 0 ? Math.max(0, len + e) : Math.min(len, e)
-          const result = []
-          for (let i = start; step > 0 ? i < end2 : i > end2; i += step) result.push(cur[i])
-          cur = result
+          /** @param {unknown[]} a */
+          const slice = (a) => {
+            const len = a.length
+            const s = parts[0] === '' ? 0 : parseInt(parts[0])
+            const e = parts[1] === '' ? len : parseInt(parts[1])
+            const step = parts[2] === undefined || parts[2] === '' ? 1 : parseInt(parts[2])
+            const start = s < 0 ? Math.max(0, len + s) : Math.min(len, s)
+            const end2  = e < 0 ? Math.max(0, len + e) : Math.min(len, e)
+            const result = []
+            for (let i = start; step > 0 ? i < end2 : i > end2; i += step) result.push(a[i])
+            return result
+          }
+          if (projected) {
+            // Map the slice over each projected item and flatten; stays projected.
+            const out = []
+            for (const item of cur) if (Array.isArray(item)) out.push(...slice(item))
+            cur = out
+            continue
+          }
+          cur = slice(cur)
           continue
         }
 
@@ -209,6 +245,15 @@ export function evalJsonPath(root, path) {
         if (filterMatch) {
           if (!Array.isArray(cur)) return { ok: false, error: 'Filter [?(...)] requires an array' }
           const expr = filterMatch[1].trim()
+          if (projected) {
+            // Filter within each projected item's array and flatten; stays projected.
+            const out = []
+            for (const item of cur) {
+              if (Array.isArray(item)) out.push(...item.filter(x => matchesFilter(x, expr)))
+            }
+            cur = out
+            continue
+          }
           cur = cur.filter(item => matchesFilter(item, expr))
           continue
         }

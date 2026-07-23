@@ -309,7 +309,7 @@
           {#if isCopilot}
             <!-- Copilot: show dynamic models fetched from the API -->
             {#if copilotModelsLoading}
-              <div class="flex items-center justify-center gap-2 py-4 text-xs text-muted-foreground">
+              <div class="flex items-center justify-center gap-2 py-4 text-ui-xs text-muted-foreground">
                 <Loader2 class="size-3.5 animate-spin" />Fetching available models…
               </div>
             {:else}
@@ -357,21 +357,21 @@
           {/if}
 
           <div class="mt-3 flex flex-col gap-1.5">
-            <label for="form-model" class="text-xs font-medium text-foreground">
+            <label for="form-model" class="text-ui-xs font-medium text-foreground">
               Model ID
               {#if modelPresets.length > 0}
                 <span class="font-normal text-muted-foreground">(editable)</span>
               {/if}
             </label>
-            <Input id="form-model" class="h-8 font-mono text-xs" placeholder="provider/model-name" bind:value={formModel} />
+            <Input id="form-model" class="h-8 font-mono text-ui-xs" placeholder="provider/model-name" bind:value={formModel} />
           </div>
 
         <!-- Step 2 · Credentials ──────────────────────────────────────── -->
         {:else}
           <div class="flex flex-col gap-3">
             <div class="flex flex-col gap-1.5">
-              <label for="form-name" class="text-xs font-medium text-foreground">Display name</label>
-              <Input id="form-name" class="h-8 text-sm" placeholder={formModel ? modelShortName(formModel) : "My model"} bind:value={formName} />
+              <label for="form-name" class="text-ui-xs font-medium text-foreground">Display name</label>
+              <Input id="form-name" class="h-8 text-ui-sm" placeholder={formModel ? modelShortName(formModel) : "My model"} bind:value={formName} />
             </div>
 
             {#if isCopilot}
@@ -380,13 +380,13 @@
             {:else if !isOllama}
               <div class="flex flex-col gap-1.5">
                 <div class="flex items-baseline gap-1.5">
-                  <label for="form-key" class="text-xs font-medium text-foreground">API key</label>
+                  <label for="form-key" class="text-ui-xs font-medium text-foreground">API key</label>
                   <span class="text-ui-3xs text-muted-foreground">stored securely</span>
                 </div>
                 <div class="relative">
                   <Input
                     id="form-key"
-                    class="h-8 pr-8 font-mono text-xs"
+                    class="h-8 pr-8 font-mono text-ui-xs"
                     type={showKey ? "text" : "password"}
                     placeholder="sk-…"
                     bind:value={formApiKey}
@@ -401,7 +401,7 @@
                   </button>
                 </div>
                 {#if needsKey}
-                  <p class="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <p class="flex items-center gap-1.5 text-ui-xs text-muted-foreground">
                     <AlertTriangle class="size-3 shrink-0" />
                     Required for {provider?.label}.
                     {#if provider?.keysUrl}
@@ -416,20 +416,20 @@
 
             {#if isCustom || modelPresets.length === 0}
               <div class="flex flex-col gap-1.5">
-                <label for="form-endpoint" class="text-xs font-medium text-foreground">Endpoint URL</label>
-                <Input id="form-endpoint" class="h-8 font-mono text-xs" placeholder="https://…/v1" bind:value={formBaseUrl} />
+                <label for="form-endpoint" class="text-ui-xs font-medium text-foreground">Endpoint URL</label>
+                <Input id="form-endpoint" class="h-8 font-mono text-ui-xs" placeholder="https://…/v1" bind:value={formBaseUrl} />
               </div>
             {:else if !isOllama}
               <button
                 type="button"
-                class="flex items-center gap-1 self-start text-xs text-muted-foreground hover:text-foreground"
+                class="flex items-center gap-1 self-start text-ui-xs text-muted-foreground hover:text-foreground"
                 onclick={() => (showAdvanced = !showAdvanced)}
               >
                 <ChevronRight class={cn("size-3.5 transition-transform", showAdvanced && "rotate-90")} />
                 Custom endpoint
               </button>
               {#if showAdvanced}
-                <Input class="h-8 font-mono text-xs" placeholder={provider?.url ?? ""} bind:value={formBaseUrl} />
+                <Input class="h-8 font-mono text-ui-xs" placeholder={provider?.url ?? ""} bind:value={formBaseUrl} />
               {/if}
             {/if}
 

@@ -923,7 +923,7 @@
                     <span class="truncate font-mono text-ui-2xs text-muted-foreground">{connSubtitle(conn)}</span>
                   </div>
                   {#if isActive}
-                    <span data-slot="command-trailing" class="shrink-0 text-xs text-muted-foreground">connected</span>
+                    <span data-slot="command-trailing" class="shrink-0 text-ui-xs text-muted-foreground">connected</span>
                   {/if}
                 </Command.Item>
               {/each}

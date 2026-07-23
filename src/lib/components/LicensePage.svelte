@@ -118,7 +118,7 @@
         <KeyRound class="size-5 text-amber-500/80" />
       </div>
       <div class="flex flex-col gap-1">
-        <h1 class="text-lg font-semibold tracking-tight text-foreground">Stroke Pro</h1>
+        <h1 class="text-ui-lg font-semibold tracking-tight text-foreground">Stroke Pro</h1>
         <p class="flex items-center gap-1.5 text-ui-sm text-muted-foreground">
           <span
             class="size-1.5 shrink-0 rounded-full {statusLine.tone === 'good'

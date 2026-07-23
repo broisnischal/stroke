@@ -48,8 +48,8 @@
 <div class="flex flex-col gap-3 {naked ? '' : compact ? 'p-5' : 'p-6'}">
   {#if !compact && !naked}
     <div class="flex flex-col gap-0.5">
-      <p class="text-sm font-semibold text-foreground">Enter your license key</p>
-      <p class="text-xs text-muted-foreground">Sent to your email after purchase.</p>
+      <p class="text-ui-sm font-semibold text-foreground">Enter your license key</p>
+      <p class="text-ui-xs text-muted-foreground">Sent to your email after purchase.</p>
     </div>
   {/if}
 
@@ -70,7 +70,7 @@
 
   <!-- Error -->
   {#if error}
-    <div class="flex items-start gap-2 rounded-lg border border-destructive/25 bg-destructive/[0.06] px-3 py-2.5 text-xs text-destructive">
+    <div class="flex items-start gap-2 rounded-lg border border-destructive/25 bg-destructive/[0.06] px-3 py-2.5 text-ui-xs text-destructive">
       <Icon name="alert-triangle" class="mt-px size-3.5 shrink-0" />
       <span class="leading-relaxed">{error}</span>
     </div>
@@ -78,7 +78,7 @@
 
   <!-- Success -->
   {#if success}
-    <div class="flex items-center gap-2 rounded-lg border border-green-500/25 bg-green-500/[0.07] px-3 py-2.5 text-xs text-green-600 dark:text-green-400">
+    <div class="flex items-center gap-2 rounded-lg border border-green-500/25 bg-green-500/[0.07] px-3 py-2.5 text-ui-xs text-green-600 dark:text-green-400">
       <Icon name="check" class="size-3.5 shrink-0" />
       <span>License activated — welcome aboard!</span>
     </div>
@@ -91,7 +91,7 @@
     onclick={() => void submit()}
     class={cn(
       'inline-flex w-full items-center justify-center gap-2 rounded-lg font-semibold transition-colors',
-      naked ? 'h-11 text-ui-sm' : 'h-11 text-sm',
+      naked ? 'h-11 text-ui-sm' : 'h-11 text-ui-sm',
       ready
         ? 'bg-foreground text-background hover:bg-foreground/85'
         : success

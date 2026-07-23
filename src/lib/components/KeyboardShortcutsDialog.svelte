@@ -207,7 +207,7 @@
           <Keyboard class="size-3.5 text-muted-foreground/70" />
         </div>
         <div>
-          <h1 class="text-sm font-semibold tracking-tight">Keyboard Shortcuts</h1>
+          <h1 class="text-ui-sm font-semibold tracking-tight">Keyboard Shortcuts</h1>
           <p class="text-ui-2xs text-muted-foreground/50 leading-none mt-0.5">
             {mod} on {isMac ? "macOS" : "Windows/Linux"} · {mod}F to search
           </p>
@@ -222,7 +222,7 @@
           type="text"
           placeholder="Search shortcuts…"
           bind:value={query}
-          class="h-7 w-full rounded-md border border-border/40 bg-muted/25 pl-7 pr-3 text-xs text-foreground outline-none placeholder:text-muted-foreground/30 focus:border-border focus:bg-muted/50 transition-colors"
+          class="h-7 w-full rounded-md border border-border/40 bg-muted/25 pl-7 pr-3 text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/30 focus:border-border focus:bg-muted/50 transition-colors"
         />
         {#if query}
           <button
@@ -259,7 +259,7 @@
               type="button"
               onclick={() => (selectedGroup = group.label)}
               class={cn(
-                "group flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-xs transition-colors",
+                "group flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-ui-xs transition-colors",
                 active
                   ? "bg-accent text-foreground font-medium"
                   : "text-muted-foreground hover:bg-accent/40 hover:text-foreground/80",
@@ -290,7 +290,7 @@
             <div class="flex size-10 items-center justify-center rounded-full border border-border/30 bg-muted/30">
               <Search class="size-4 text-muted-foreground/30" />
             </div>
-            <p class="text-sm text-muted-foreground/50">No shortcuts match <span class="text-foreground/60">"{query}"</span></p>
+            <p class="text-ui-sm text-muted-foreground/50">No shortcuts match <span class="text-foreground/60">"{query}"</span></p>
           </div>
         {:else}
           <div class={cn(isSearching ? "divide-y divide-border/30" : "")}>
@@ -315,7 +315,7 @@
                         i !== group.shortcuts.length - 1 && "border-b border-border/20",
                       )}
                     >
-                      <span class="text-xs text-foreground/65 group-hover/row:text-foreground/80 transition-colors">
+                      <span class="text-ui-xs text-foreground/65 group-hover/row:text-foreground/80 transition-colors">
                         {shortcut.desc}
                       </span>
 

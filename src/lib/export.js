@@ -11,10 +11,15 @@ export const csvEscape = (/** @type {unknown} */ v) => {
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
 }
 
+/** UTF-8 byte-order mark so Excel reads non-ASCII CSV/exports as UTF-8. */
+export const UTF8_BOM = '﻿'
+
 export function rowsToCsv(columns, rows) {
   const header = columns.map((c) => csvEscape(c.name)).join(',')
   const body = rows.map((row) => row.map(csvEscape).join(',')).join('\n')
-  return header + '\n' + body
+  // TODO: surface backend row-cap/truncation here once a `truncated` flag is
+  // threaded through to this layer (append a trailing note when capped).
+  return UTF8_BOM + header + '\n' + body
 }
 
 /** A macrotask yield so the UI can paint between chunks of a big export. */
@@ -32,7 +37,7 @@ const yieldToUi = () => new Promise((res) => setTimeout(res, 0))
 export async function rowsToCsvAsync(columns, rows, opts = {}) {
   const { chunkSize = 5000, onProgress } = opts
   const total = rows.length
-  const blocks = [columns.map((c) => csvEscape(c.name)).join(',')]
+  const blocks = [UTF8_BOM + columns.map((c) => csvEscape(c.name)).join(',')]
   for (let i = 0; i < total; i += chunkSize) {
     const end = Math.min(i + chunkSize, total)
     let block = ''
@@ -41,6 +46,8 @@ export async function rowsToCsvAsync(columns, rows, opts = {}) {
     onProgress?.(end, total)
     await yieldToUi()
   }
+  // TODO: surface backend row-cap/truncation here once a `truncated` flag is
+  // threaded through to this layer (append a trailing note when capped).
   return blocks.join('\n')
 }
 
@@ -250,7 +257,14 @@ export async function saveExportFile(content, defaultFilename, format) {
   const a = document.createElement('a')
   a.href = url
   a.download = defaultFilename
-  a.click()
-  URL.revokeObjectURL(url)
+  try {
+    document.body.appendChild(a)
+    a.click()
+  } finally {
+    a.remove()
+    // Defer the revoke so the click-triggered download has picked up the blob;
+    // revoking synchronously can cancel the download in some browsers.
+    setTimeout(() => URL.revokeObjectURL(url), 0)
+  }
   return true
 }

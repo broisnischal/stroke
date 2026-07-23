@@ -176,7 +176,7 @@
       <div class="min-w-0">
         <div class="flex items-center gap-2">
           <Database class="size-4 shrink-0 text-muted-foreground/60" />
-          <h1 class="text-base font-semibold text-foreground">Instance Insights</h1>
+          <h1 class="text-ui font-semibold text-foreground">Instance Insights</h1>
         </div>
         <div class="mt-1 flex items-center gap-2 text-ui-xs text-muted-foreground/60">
           <span>connection:</span>
@@ -226,7 +226,7 @@
       {#if subtab === 'activity'}
         <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <div class="rounded-xl border border-border/50 bg-card/40 p-3">
-            <p class="text-ui-2xs uppercase tracking-wide text-muted-foreground/50">Sessions: <span class="text-base font-bold text-foreground">{activity?.sessions.total ?? '—'}</span></p>
+            <p class="text-ui-2xs uppercase tracking-wide text-muted-foreground/50">Sessions: <span class="text-ui font-bold text-foreground">{activity?.sessions.total ?? '—'}</span></p>
             <div class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-ui-2xs text-muted-foreground/60">
               <span>Active: <b class="text-foreground/80">{activity?.sessions.active ?? '—'}</b></span>
               <span>Idle: <b class="text-foreground/80">{activity?.sessions.idle ?? '—'}</b></span>
@@ -235,7 +235,7 @@
             </div>
           </div>
           <div class="rounded-xl border border-border/50 bg-card/40 p-3">
-            <p class="text-ui-2xs uppercase tracking-wide text-muted-foreground/50">TPS: <span class="text-base font-bold text-foreground">{num(cur?.tps ?? 0)}/s</span></p>
+            <p class="text-ui-2xs uppercase tracking-wide text-muted-foreground/50">TPS: <span class="text-ui font-bold text-foreground">{num(cur?.tps ?? 0)}/s</span></p>
             <div class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-ui-2xs text-muted-foreground/60">
               <span>Commits/s: <b class="text-foreground/80">{num(cur?.commits ?? 0)}</b></span>
               <span>Rollbacks/s: <b class="text-foreground/80">{num(cur?.rollbacks ?? 0)}</b></span>
@@ -244,7 +244,7 @@
             </div>
           </div>
           <div class="rounded-xl border border-border/50 bg-card/40 p-3">
-            <p class="text-ui-2xs uppercase tracking-wide text-muted-foreground/50">Tuples: <span class="text-base font-bold text-foreground">{num((cur?.tupUpdated ?? 0) + (cur?.tupDeleted ?? 0))}/s</span></p>
+            <p class="text-ui-2xs uppercase tracking-wide text-muted-foreground/50">Tuples: <span class="text-ui font-bold text-foreground">{num((cur?.tupUpdated ?? 0) + (cur?.tupDeleted ?? 0))}/s</span></p>
             <div class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-ui-2xs text-muted-foreground/60">
               <span>Updates/s: <b class="text-foreground/80">{num(cur?.tupUpdated ?? 0)}</b></span>
               <span>Deletes/s: <b class="text-foreground/80">{num(cur?.tupDeleted ?? 0)}</b></span>
@@ -253,7 +253,7 @@
             </div>
           </div>
           <div class="rounded-xl border border-border/50 bg-card/40 p-3">
-            <p class="text-ui-2xs uppercase tracking-wide text-muted-foreground/50">Block I/O: <span class="text-base font-bold text-foreground">{num((activity?.bufferHitRatio ?? 0) * 100)}%</span></p>
+            <p class="text-ui-2xs uppercase tracking-wide text-muted-foreground/50">Block I/O: <span class="text-ui font-bold text-foreground">{num((activity?.bufferHitRatio ?? 0) * 100)}%</span></p>
             <div class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-ui-2xs text-muted-foreground/60">
               <span>Reads/s: <b class="text-foreground/80">{num(cur?.reads ?? 0)}</b></span>
               <span>Hits/s: <b class="text-foreground/80">{num(cur?.hits ?? 0)}</b></span>
