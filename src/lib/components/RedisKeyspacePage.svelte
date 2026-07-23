@@ -1,8 +1,9 @@
 <script>
-  import { executeSql } from '$lib/api.js'
+  import { executeSql, connectRedis, redisScan } from '$lib/api.js'
   import { engineFamily } from '$lib/stores/connections.js'
   import { cn } from '$lib/utils.js'
   import { tick } from 'svelte'
+  import ResizeHandle from './ResizeHandle.svelte'
   import Search from '@lucide/svelte/icons/search'
   import X from '@lucide/svelte/icons/x'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
@@ -14,7 +15,7 @@
   import Copy from '@lucide/svelte/icons/copy'
   import Check from '@lucide/svelte/icons/check'
   import Trash2 from '@lucide/svelte/icons/trash-2'
-  import Clock from '@lucide/svelte/icons/clock'
+  import Timer from '@lucide/svelte/icons/timer'
   import Eraser from '@lucide/svelte/icons/eraser'
   import Type from '@lucide/svelte/icons/type'
   import Hash from '@lucide/svelte/icons/hash'
@@ -22,6 +23,13 @@
   import Braces from '@lucide/svelte/icons/braces'
   import ListOrdered from '@lucide/svelte/icons/list-ordered'
   import Radio from '@lucide/svelte/icons/radio'
+  import Server from '@lucide/svelte/icons/server'
+  import HardDrive from '@lucide/svelte/icons/hard-drive'
+  import Users from '@lucide/svelte/icons/users'
+  import Activity from '@lucide/svelte/icons/activity'
+  import Gauge from '@lucide/svelte/icons/gauge'
+  import Plus from '@lucide/svelte/icons/plus'
+  import Pencil from '@lucide/svelte/icons/pencil'
 
   /** @type {{ active?: boolean, connection?: import('$lib/stores/connections.js').SavedConnection | null }} */
   let { active = false, connection = null } = $props()
@@ -29,21 +37,23 @@
   const isRedisConn = $derived(engineFamily(connection?.type) === 'redis')
 
   // ── Type styling ────────────────────────────────────────────────────────────
-  // Per Redis value type: a lucide glyph + accent color for the tree, and a
-  // faint pill fill for the value-panel badge. Type colors are a deliberate,
-  // semantic exception to the token palette (like syntax highlighting).
+  // Per Redis value type: a lucide glyph + accent color for the tree glyph and
+  // the type tag. Type colors are a deliberate, semantic exception to the token
+  // palette (like syntax highlighting) — kept restrained: color lives on the
+  // glyph and a small tag only, never as loud filled chips.
   /**
-   * @typedef {{ short: string, label: string, icon: any, color: string, pill: string }} TypeMeta
+   * @typedef {{ short: string, label: string, icon: any, color: string }} TypeMeta
    * @type {Record<string, TypeMeta>}
    */
   const TYPE_META = {
-    string: { short: 'STR',    label: 'string', icon: Type,        color: 'text-blue-500 dark:text-blue-400',     pill: 'bg-blue-500/10 text-blue-600 dark:text-blue-400' },
-    hash:   { short: 'HASH',   label: 'hash',   icon: Hash,        color: 'text-violet-500 dark:text-violet-400', pill: 'bg-violet-500/10 text-violet-600 dark:text-violet-400' },
-    list:   { short: 'LIST',   label: 'list',   icon: List,        color: 'text-amber-500 dark:text-amber-400',   pill: 'bg-amber-500/10 text-amber-600 dark:text-amber-400' },
-    set:    { short: 'SET',    label: 'set',    icon: Braces,      color: 'text-emerald-500 dark:text-emerald-400', pill: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' },
-    zset:   { short: 'ZSET',   label: 'zset',   icon: ListOrdered, color: 'text-pink-500 dark:text-pink-400',     pill: 'bg-pink-500/10 text-pink-600 dark:text-pink-400' },
-    stream: { short: 'STREAM', label: 'stream', icon: Radio,       color: 'text-cyan-500 dark:text-cyan-400',     pill: 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400' },
+    string: { short: 'STR',    label: 'string', icon: Type,        color: 'text-sky-600 dark:text-sky-400' },
+    hash:   { short: 'HASH',   label: 'hash',   icon: Hash,        color: 'text-violet-600 dark:text-violet-400' },
+    list:   { short: 'LIST',   label: 'list',   icon: List,        color: 'text-amber-600 dark:text-amber-400' },
+    set:    { short: 'SET',    label: 'set',    icon: Braces,      color: 'text-emerald-600 dark:text-emerald-400' },
+    zset:   { short: 'ZSET',   label: 'zset',   icon: ListOrdered, color: 'text-rose-600 dark:text-rose-400' },
+    stream: { short: 'STREAM', label: 'stream', icon: Radio,       color: 'text-cyan-600 dark:text-cyan-400' },
   }
+  const CREATABLE = ['string', 'hash', 'list', 'set', 'zset']
 
   // Canonical icon-button recipe (§6). Add a `size-*` per call site.
   const iconBtn =
@@ -74,6 +84,37 @@
     return '"' + s.replace(/(["\\])/g, '\\$1') + '"'
   }
 
+  /** Humanize a byte count into "1.2 MB". */
+  function humanBytes(/** @type {number | null} */ n) {
+    if (n == null || !Number.isFinite(n)) return ''
+    if (n < 1024) return `${n} B`
+    const units = ['KB', 'MB', 'GB', 'TB']
+    let v = n / 1024
+    let i = 0
+    while (v >= 1024 && i < units.length - 1) {
+      v /= 1024
+      i++
+    }
+    return `${v < 10 ? v.toFixed(1) : Math.round(v)} ${units[i]}`
+  }
+
+  // ── Resizable key list ────────────────────────────────────────────────────
+  const KEYS_WIDTH_KEY = 'stroke:redis:keysWidth'
+  const KEYS_MIN = 220
+  const KEYS_MAX = 520
+  /** @param {number} w */
+  const clampKeysWidth = (w) => Math.round(Math.min(KEYS_MAX, Math.max(KEYS_MIN, w)))
+  function loadKeysWidth() {
+    try {
+      const n = Number(localStorage.getItem(KEYS_WIDTH_KEY))
+      return Number.isFinite(n) && n > 0 ? clampKeysWidth(n) : 280
+    } catch {
+      return 280
+    }
+  }
+  let keysWidth = $state(loadKeysWidth())
+  let resizeStartWidth = 0
+
   // ── Key list state ──────────────────────────────────────────────────────────
   let keys = $state(/** @type {string[]} */ ([]))
   let keysLoading = $state(false)
@@ -88,16 +129,35 @@
   let typesLoading = $state(false)
   let typesTruncated = $state(false)
 
+  /** Fully iterate the keyspace via non-blocking SCAN, deduped + sorted. */
+  async function scanAllKeys() {
+    const seen = new Set()
+    let cursor = '0'
+    let iterations = 0
+    do {
+      const r = await redisScan(cursor, '*', 1000)
+      cursor = r.cursor
+      for (const k of r.keys) seen.add(k)
+      iterations++
+    } while (cursor !== '0' && seen.size < 100000 && iterations < 5000)
+    return [...seen].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+  }
+
   async function loadKeys() {
     if (!active || !isRedisConn) return
     keysLoading = true
     keysError = ''
     try {
-      const res = await executeSql('KEYS *')
-      keys = replyValues(res).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
-    } catch (e) {
-      keysError = String(e)
-      keys = []
+      keys = await scanAllKeys()
+    } catch {
+      // SCAN unavailable/failed — fall back to the (blocking) KEYS *.
+      try {
+        const res = await executeSql('KEYS *')
+        keys = replyValues(res).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+      } catch (e2) {
+        keysError = String(e2).replace(/^Error:\s*/, '')
+        keys = []
+      }
     } finally {
       keysLoading = false
     }
@@ -131,20 +191,100 @@
     }
   }
 
+  // ── Server info (Redis Insight-style overview strip) ──────────────────────
+  let serverInfo = $state(/** @type {Record<string, string> | null} */ (null))
+  let infoLoading = $state(false)
+
+  /** Parse the flat `field:value` lines of an INFO reply into a map. */
+  function parseInfo(/** @type {string} */ text) {
+    /** @type {Record<string, string>} */
+    const map = {}
+    for (const line of text.split(/\r?\n/)) {
+      if (!line || line[0] === '#') continue
+      const idx = line.indexOf(':')
+      if (idx < 0) continue
+      map[line.slice(0, idx)] = line.slice(idx + 1)
+    }
+    return map
+  }
+
+  async function loadInfo() {
+    if (!active || !isRedisConn) return
+    infoLoading = true
+    try {
+      serverInfo = parseInfo(replyValues(await executeSql('INFO'))[0] ?? '')
+    } catch {
+      serverInfo = null
+    } finally {
+      infoLoading = false
+    }
+  }
+
+  const stats = $derived.by(() => {
+    const i = serverInfo
+    if (!i) return null
+    const hits = Number(i.keyspace_hits ?? 0)
+    const misses = Number(i.keyspace_misses ?? 0)
+    const total = hits + misses
+    return {
+      version: i.redis_version ?? '',
+      mode: i.redis_mode ?? 'standalone',
+      memory: i.used_memory_human?.trim() ?? '',
+      memoryPeak: i.used_memory_peak_human?.trim() ?? '',
+      clients: i.connected_clients ?? '',
+      ops: i.instantaneous_ops_per_sec ?? '',
+      uptime: Number(i.uptime_in_seconds ?? 0),
+      hitRate: total > 0 ? Math.round((hits / total) * 100) : null,
+    }
+  })
+
   // Load once per connection when this page first becomes active.
   $effect(() => {
     const cid = connection?.id ?? null
     if (!active || !isRedisConn) return
     if (loadedConnId === cid) return
     loadedConnId = cid
+    currentDb = Number(connection?.db) || 0
     selectedKey = null
     valueData = null
     valueError = ''
     typeMap = new Map()
     typesTruncated = false
     confirmingDelete = false
+    serverInfo = null
+    newKeyOpen = false
     void loadKeys()
+    void loadInfo()
   })
+
+  // ── Logical DB switching (0–15) ─────────────────────────────────────────────
+  // Redis exposes 16 numbered logical DBs. The backend opens a fresh connection
+  // per command at cfg.db, so switching = reconnect the active connection at the
+  // new db (reusing connect_redis_db), then reload the keyspace.
+  let currentDb = $state(0)
+  let switchingDb = $state(false)
+  const DB_OPTIONS = Array.from({ length: 16 }, (_, n) => n)
+
+  /** @param {number} n */
+  async function switchDb(n) {
+    if (n === currentDb || switchingDb || !connection) return
+    switchingDb = true
+    try {
+      await connectRedis({ ...connection, db: n })
+      currentDb = n
+      selectedKey = null
+      valueData = null
+      valueError = ''
+      typeMap = new Map()
+      typesTruncated = false
+      await loadKeys()
+      void loadInfo()
+    } catch (e) {
+      keysError = String(e).replace(/^Error:\s*/, '')
+    } finally {
+      switchingDb = false
+    }
+  }
 
   const filteredKeys = $derived.by(() => {
     const q = filter.trim().toLowerCase()
@@ -180,6 +320,8 @@
   let selectedKey = $state(/** @type {string | null} */ (null))
   let selectedType = $state('')
   let selectedTtl = $state(/** @type {number | null} */ (null))
+  let keyMemory = $state(/** @type {number | null} */ (null))
+  let keyEncoding = $state('')
   let valueData = $state(/** @type {any} */ (null))
   let valueLoading = $state(false)
   let valueError = $state('')
@@ -191,6 +333,7 @@
   async function selectKey(key) {
     selectedKey = key
     confirmingDelete = false
+    editingTtl = false
     await loadValue(key)
   }
 
@@ -202,28 +345,49 @@
     valueData = null
     selectedType = ''
     selectedTtl = null
+    keyMemory = null
+    keyEncoding = ''
     jsonView = true
+    editingString = false
+    addOpen = false
+    valueCapped = false
     const q = quoteArg(key)
     try {
       const t = String(replyValues(await executeSql(`TYPE ${q}`))[0] ?? '')
       selectedType = t
-      try {
-        const ttl = Number(replyValues(await executeSql(`TTL ${q}`))[0])
-        selectedTtl = Number.isFinite(ttl) ? ttl : null
-      } catch {
-        selectedTtl = null
-      }
+      // Metadata in parallel — none of these block the value render meaningfully.
+      const [ttlRes, memRes, encRes] = await Promise.all([
+        executeSql(`TTL ${q}`).catch(() => null),
+        executeSql(`MEMORY USAGE ${q}`).catch(() => null),
+        executeSql(`OBJECT ENCODING ${q}`).catch(() => null),
+      ])
+      const ttl = Number(replyValues(ttlRes)[0])
+      selectedTtl = Number.isFinite(ttl) ? ttl : null
+      const mem = Number(replyValues(memRes)[0])
+      keyMemory = Number.isFinite(mem) ? mem : null
+      keyEncoding = replyValues(encRes)[0] ?? ''
+
       if (t === 'string') {
         const v = replyValues(await executeSql(`GET ${q}`))[0] ?? ''
         valueData = { kind: 'string', value: v }
       } else if (t === 'hash') {
-        valueData = { kind: 'hash', pairs: toPairs(replyValues(await executeSql(`HGETALL ${q}`))) }
+        const pairs = toPairs(replyValues(await executeSql(`HGETALL ${q}`)))
+        valueCapped = pairs.length > VALUE_CAP
+        valueData = { kind: 'hash', pairs: pairs.slice(0, VALUE_CAP) }
       } else if (t === 'list') {
-        valueData = { kind: 'list', items: replyValues(await executeSql(`LRANGE ${q} 0 -1`)) }
+        const items = replyValues(await executeSql(`LRANGE ${q} 0 ${VALUE_CAP - 1}`))
+        valueCapped = items.length >= VALUE_CAP
+        valueData = { kind: 'list', items }
       } else if (t === 'set') {
-        valueData = { kind: 'set', items: replyValues(await executeSql(`SMEMBERS ${q}`)) }
+        const items = replyValues(await executeSql(`SMEMBERS ${q}`))
+        valueCapped = items.length > VALUE_CAP
+        valueData = { kind: 'set', items: items.slice(0, VALUE_CAP) }
       } else if (t === 'zset') {
-        valueData = { kind: 'zset', pairs: toPairs(replyValues(await executeSql(`ZRANGE ${q} 0 -1 WITHSCORES`))) }
+        const pairs = toPairs(replyValues(await executeSql(`ZRANGE ${q} 0 ${VALUE_CAP - 1} WITHSCORES`)))
+        valueCapped = pairs.length >= VALUE_CAP
+        valueData = { kind: 'zset', pairs }
+      } else if (t === 'stream') {
+        valueData = { kind: 'stream', entries: replyValues(await executeSql(`XRANGE ${q} - + COUNT 100`)) }
       } else if (t === 'none' || t === '') {
         valueError = 'Key does not exist'
       } else {
@@ -249,10 +413,169 @@
       selectedTtl = null
       valueError = ''
       await loadKeys()
+      void loadInfo()
     } catch (e) {
       valueError = String(e)
     } finally {
       deleting = false
+    }
+  }
+
+  // ── TTL editing ─────────────────────────────────────────────────────────────
+  let editingTtl = $state(false)
+  let ttlInput = $state('')
+  let savingTtl = $state(false)
+
+  function openTtlEditor() {
+    ttlInput = selectedTtl != null && selectedTtl > 0 ? String(selectedTtl) : ''
+    editingTtl = true
+  }
+
+  /** @param {boolean} persist */
+  async function applyTtl(persist) {
+    if (!selectedKey || savingTtl) return
+    const key = selectedKey
+    savingTtl = true
+    try {
+      if (persist) {
+        await executeSql(`PERSIST ${quoteArg(key)}`)
+      } else {
+        const n = parseInt(ttlInput, 10)
+        if (!Number.isFinite(n) || n <= 0) {
+          savingTtl = false
+          return
+        }
+        await executeSql(`EXPIRE ${quoteArg(key)} ${n}`)
+      }
+      editingTtl = false
+      await loadValue(key)
+    } catch (e) {
+      valueError = String(e)
+    } finally {
+      savingTtl = false
+    }
+  }
+
+  // ── New key ───────────────────────────────────────────────────────────────
+  let newKeyOpen = $state(false)
+  let nkName = $state('')
+  let nkType = $state('string')
+  let nkValue = $state('')
+  let nkField = $state('')
+  let nkScore = $state('')
+  let creatingKey = $state(false)
+  let newKeyError = $state('')
+
+  function resetNewKey() {
+    nkName = ''
+    nkValue = ''
+    nkField = ''
+    nkScore = ''
+    newKeyError = ''
+  }
+
+  async function createKey() {
+    const name = nkName.trim()
+    if (!name || creatingKey) return
+    creatingKey = true
+    newKeyError = ''
+    const q = quoteArg(name)
+    const v = quoteArg(nkValue)
+    try {
+      if (nkType === 'string') await executeSql(`SET ${q} ${v}`)
+      else if (nkType === 'list') await executeSql(`RPUSH ${q} ${v}`)
+      else if (nkType === 'set') await executeSql(`SADD ${q} ${v}`)
+      else if (nkType === 'hash') await executeSql(`HSET ${q} ${quoteArg(nkField.trim() || 'field')} ${v}`)
+      else if (nkType === 'zset') await executeSql(`ZADD ${q} ${quoteArg((nkScore.trim() || '0'))} ${v}`)
+      newKeyOpen = false
+      resetNewKey()
+      await loadKeys()
+      void loadInfo()
+      await selectKey(name)
+    } catch (e) {
+      newKeyError = String(e).replace(/^Error:\s*/, '')
+    } finally {
+      creatingKey = false
+    }
+  }
+
+  // ── Value editing (CRUD) ────────────────────────────────────────────────────
+  let editingString = $state(false)
+  let stringEdit = $state('')
+  let savingValue = $state(false)
+  let addOpen = $state(false)
+  let addField = $state('')
+  let addScore = $state('')
+  let addValue = $state('')
+  let rowBusy = $state('')
+  const VALUE_CAP = 2000
+  let valueCapped = $state(false)
+
+  function startStringEdit() {
+    if (valueData?.kind !== 'string') return
+    stringEdit = valueData.value
+    editingString = true
+  }
+
+  async function saveString() {
+    if (!selectedKey || savingValue) return
+    const key = selectedKey
+    savingValue = true
+    try {
+      await executeSql(`SET ${quoteArg(key)} ${quoteArg(stringEdit)}`)
+      editingString = false
+      await loadValue(key)
+      void loadKeys()
+    } catch (e) {
+      valueError = String(e).replace(/^Error:\s*/, '')
+    } finally {
+      savingValue = false
+    }
+  }
+
+  /** Remove one field/member/element from the selected collection key. */
+  async function deleteEntry(/** @type {string} */ kind, /** @type {string} */ member) {
+    if (!selectedKey || rowBusy) return
+    const key = selectedKey
+    const q = quoteArg(key)
+    rowBusy = member
+    try {
+      if (kind === 'hash') await executeSql(`HDEL ${q} ${quoteArg(member)}`)
+      else if (kind === 'set') await executeSql(`SREM ${q} ${quoteArg(member)}`)
+      else if (kind === 'zset') await executeSql(`ZREM ${q} ${quoteArg(member)}`)
+      else if (kind === 'list') await executeSql(`LREM ${q} 1 ${quoteArg(member)}`)
+      await loadValue(key)
+      void loadKeys()
+    } catch (e) {
+      valueError = String(e).replace(/^Error:\s*/, '')
+    } finally {
+      rowBusy = ''
+    }
+  }
+
+  /** Add a field/member/element to the selected collection key. */
+  async function addEntry() {
+    if (!selectedKey || savingValue) return
+    const key = selectedKey
+    const kind = valueData?.kind
+    const q = quoteArg(key)
+    const v = quoteArg(addValue)
+    savingValue = true
+    try {
+      if (kind === 'hash') await executeSql(`HSET ${q} ${quoteArg(addField.trim() || 'field')} ${v}`)
+      else if (kind === 'set') await executeSql(`SADD ${q} ${v}`)
+      else if (kind === 'zset') await executeSql(`ZADD ${q} ${quoteArg(addScore.trim() || '0')} ${v}`)
+      else if (kind === 'list') await executeSql(`RPUSH ${q} ${v}`)
+      addField = ''
+      addScore = ''
+      addValue = ''
+      addOpen = false
+      await loadValue(key)
+      void loadKeys()
+    } catch (e) {
+      valueError = String(e).replace(/^Error:\s*/, '')
+    } finally {
+      savingValue = false
     }
   }
 
@@ -290,7 +613,7 @@
     return valueData.value
   })
 
-  /** Humanize a positive TTL into a compact "1d 2h" / "5m" label. */
+  /** Humanize a positive duration (seconds) into a compact "1d 2h" / "5m" label. */
   function humanDuration(/** @type {number} */ s) {
     if (s < 60) return `${s}s`
     const d = Math.floor(s / 86400)
@@ -317,6 +640,19 @@
           ? 'expired'
           : humanDuration(selectedTtl),
   )
+
+  // Live TTL countdown — tick the remaining seconds down while a key with an
+  // expiry is selected, so the label decays without a manual reload.
+  $effect(() => {
+    if (!hasExpiry || editingTtl) return
+    const id = setInterval(() => {
+      // Skip while the window is backgrounded so we don't churn reactivity
+      // every second when nothing is visible; the label resyncs on reload.
+      if (typeof document !== 'undefined' && document.hidden) return
+      if (selectedTtl != null && selectedTtl > 0) selectedTtl -= 1
+    }, 1000)
+    return () => clearInterval(id)
+  })
 
   const sizeLabel = $derived.by(() => {
     const d = valueData
@@ -347,6 +683,32 @@
     'zadd', 'zrem', 'zincrby', 'incr', 'decr', 'incrby', 'decrby', 'incrbyfloat',
     'flushdb', 'flushall', 'move', 'copy', 'restore',
   ])
+
+  /** The idiomatic read command for each Redis value type. */
+  const TYPE_READ = /** @type {Record<string, (k: string) => string>} */ ({
+    string: (k) => `GET ${k}`,
+    hash: (k) => `HGETALL ${k}`,
+    list: (k) => `LRANGE ${k} 0 -1`,
+    set: (k) => `SMEMBERS ${k}`,
+    zset: (k) => `ZRANGE ${k} 0 -1 WITHSCORES`,
+    stream: (k) => `XRANGE ${k} - +`,
+  })
+
+  /** On a WRONGTYPE error, resolve the key's real type and suggest the right
+   * command (e.g. `get` on a hash → "try HGETALL"). Returns '' if unavailable. */
+  async function wrongTypeHint(/** @type {string} */ cmd) {
+    const key = cmd.split(/\s+/)[1]
+    if (!key) return ''
+    const bare = key.replace(/^["']|["']$/g, '')
+    try {
+      const t = String(replyValues(await executeSql(`TYPE ${quoteArg(bare)}`))[0] ?? '')
+      if (!t || t === 'none') return ''
+      const suggest = TYPE_READ[t]?.(key)
+      return `→ ${key} holds a ${t}${suggest ? ` — try: ${suggest}` : ''}`
+    } catch {
+      return ''
+    }
+  }
 
   /** Format a flattened reply the way redis-cli prints it. */
   function formatReply(/** @type {string[]} */ values) {
@@ -381,7 +743,12 @@
       lines = formatReply(replyValues(await executeSql(cmd)))
     } catch (e) {
       isError = true
-      lines = [`(error) ${String(e).replace(/^Error:\s*/, '')}`]
+      const msg = String(e).replace(/^Error:\s*/, '')
+      lines = [`(error) ${msg}`]
+      if (/WRONGTYPE/i.test(msg)) {
+        const hint = await wrongTypeHint(cmd)
+        if (hint) lines.push(hint)
+      }
     }
     scrollback = scrollback.map((e, k) => (k === idx ? { cmd: e.cmd, lines, isError, pending: false } : e))
     await scrollConsoleToBottom()
@@ -389,6 +756,7 @@
     const verb = cmd.split(/\s+/)[0]?.toLowerCase() ?? ''
     if (WRITE_VERBS.has(verb)) {
       void loadKeys()
+      void loadInfo()
       if (selectedKey) void loadValue(selectedKey)
     }
   }
@@ -420,9 +788,53 @@
 </script>
 
 <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-panel">
+  <!-- ── Server overview strip ─────────────────────────────────────────────── -->
+  {#if stats}
+    <div class="flex h-8 shrink-0 items-center gap-3 overflow-x-auto border-b border-border px-3 text-ui-2xs text-muted-foreground">
+      <span class="flex shrink-0 items-center gap-1.5 font-medium text-foreground/80">
+        <Server class="size-3.5 shrink-0 text-muted-foreground" />
+        Redis {stats.version}
+      </span>
+      {#if stats.mode && stats.mode !== 'standalone'}
+        <span class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 font-mono uppercase tracking-wide">{stats.mode}</span>
+      {/if}
+      <span class="shrink-0 tabular-nums">
+        <KeyRound class="mr-1 inline size-3 shrink-0 align-[-2px] text-muted-foreground/70" />{totalKeys} keys
+      </span>
+      {#if stats.memory}
+        <span class="shrink-0 font-mono tabular-nums" title={stats.memoryPeak ? `peak ${stats.memoryPeak}` : undefined}>
+          <HardDrive class="mr-1 inline size-3 shrink-0 align-[-2px] text-muted-foreground/70" />{stats.memory}
+        </span>
+      {/if}
+      <span class="shrink-0 font-mono tabular-nums">
+        <Users class="mr-1 inline size-3 shrink-0 align-[-2px] text-muted-foreground/70" />{stats.clients}
+      </span>
+      <span class="shrink-0 font-mono tabular-nums">
+        <Activity class="mr-1 inline size-3 shrink-0 align-[-2px] text-muted-foreground/70" />{stats.ops}/s
+      </span>
+      {#if stats.hitRate != null}
+        <span class="shrink-0 font-mono tabular-nums" title="Keyspace hit rate">
+          <Gauge class="mr-1 inline size-3 shrink-0 align-[-2px] text-muted-foreground/70" />{stats.hitRate}%
+        </span>
+      {/if}
+      {#if stats.uptime}
+        <span class="hidden shrink-0 font-mono tabular-nums sm:inline">up {humanDuration(stats.uptime)}</span>
+      {/if}
+      <button
+        type="button"
+        class={cn(iconBtn, 'ml-auto size-6 shrink-0')}
+        title="Refresh server info"
+        aria-label="Refresh server info"
+        onclick={() => void loadInfo()}
+      >
+        <RefreshCw class={cn('size-3.5', infoLoading && 'animate-spin')} />
+      </button>
+    </div>
+  {/if}
+
   <div class="flex min-h-0 flex-1 overflow-hidden">
     <!-- ── Key list ─────────────────────────────────────────────────────── -->
-    <div class="flex w-[280px] shrink-0 flex-col border-r border-border bg-panel">
+    <div class="flex shrink-0 flex-col border-r border-border bg-panel" style:width="{keysWidth}px">
       <!-- Header -->
       <div class="flex h-8 shrink-0 items-center gap-2 border-b border-border px-3">
         <KeyRound class="size-4 shrink-0 text-muted-foreground" />
@@ -430,9 +842,33 @@
         <span class="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-ui-2xs tabular-nums text-muted-foreground">
           {#if keysLoading}…{:else}{totalKeys}{/if}
         </span>
+        <select
+          value={currentDb}
+          disabled={switchingDb}
+          onchange={(e) => void switchDb(Number(e.currentTarget.value))}
+          title="Switch logical database"
+          aria-label="Logical database"
+          class="h-6 shrink-0 rounded-md border border-input bg-input/30 px-1 font-mono text-ui-2xs text-foreground outline-none transition-colors focus:border-ring disabled:opacity-50"
+        >
+          {#each DB_OPTIONS as n (n)}
+            <option value={n}>db {n}</option>
+          {/each}
+        </select>
         <button
           type="button"
-          class={cn(iconBtn, 'ml-auto size-7')}
+          class={cn(iconBtn, 'ml-auto size-7', newKeyOpen && 'bg-accent text-foreground')}
+          title="New key"
+          aria-label="New key"
+          onclick={() => {
+            newKeyOpen = !newKeyOpen
+            if (!newKeyOpen) resetNewKey()
+          }}
+        >
+          <Plus class="size-3.5" />
+        </button>
+        <button
+          type="button"
+          class={cn(iconBtn, 'size-7')}
           title="Refresh keys"
           aria-label="Refresh keys"
           onclick={() => void loadKeys()}
@@ -440,6 +876,90 @@
           <RefreshCw class={cn('size-3.5', keysLoading && 'animate-spin')} />
         </button>
       </div>
+
+      <!-- New key form -->
+      {#if newKeyOpen}
+        <div class="shrink-0 space-y-2 border-b border-border bg-muted/20 p-2.5">
+          <input
+            type="text"
+            bind:value={nkName}
+            placeholder="key name (e.g. user:1)"
+            spellcheck="false"
+            autocapitalize="off"
+            autocomplete="off"
+            class="h-7 w-full rounded-md border border-input bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
+          />
+          <div class="flex flex-wrap gap-1">
+            {#each CREATABLE as t (t)}
+              {@const m = TYPE_META[t]}
+              {@const Glyph = m.icon}
+              <button
+                type="button"
+                class={cn(
+                  'inline-flex h-6 items-center gap-1 rounded-md border px-1.5 text-ui-2xs font-medium transition-colors',
+                  nkType === t
+                    ? 'border-border bg-accent text-foreground'
+                    : 'border-transparent text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+                )}
+                onclick={() => (nkType = t)}
+              >
+                <Glyph class={cn('size-3 shrink-0', nkType === t ? m.color : '')} />{m.label}
+              </button>
+            {/each}
+          </div>
+          {#if nkType === 'hash'}
+            <input
+              type="text"
+              bind:value={nkField}
+              placeholder="field"
+              spellcheck="false"
+              autocomplete="off"
+              class="h-7 w-full rounded-md border border-input bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
+            />
+          {:else if nkType === 'zset'}
+            <input
+              type="text"
+              bind:value={nkScore}
+              placeholder="score (e.g. 1)"
+              spellcheck="false"
+              autocomplete="off"
+              class="h-7 w-full rounded-md border border-input bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
+            />
+          {/if}
+          <input
+            type="text"
+            bind:value={nkValue}
+            placeholder={nkType === 'hash' || nkType === 'zset' ? 'value' : nkType === 'list' || nkType === 'set' ? 'first element' : 'value'}
+            spellcheck="false"
+            autocomplete="off"
+            onkeydown={(e) => e.key === 'Enter' && void createKey()}
+            class="h-7 w-full rounded-md border border-input bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
+          />
+          {#if newKeyError}
+            <p class="font-mono text-ui-3xs text-destructive">{newKeyError}</p>
+          {/if}
+          <div class="flex items-center gap-1.5">
+            <button
+              type="button"
+              class="inline-flex h-7 flex-1 items-center justify-center gap-1 rounded-md bg-primary px-2 text-ui-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+              disabled={!nkName.trim() || creatingKey}
+              onclick={() => void createKey()}
+            >
+              {creatingKey ? 'Creating…' : 'Create key'}
+            </button>
+            <button
+              type="button"
+              class="inline-flex h-7 items-center rounded-md px-2 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              onclick={() => {
+                newKeyOpen = false
+                resetNewKey()
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      {/if}
 
       <!-- Filter -->
       <div class="shrink-0 border-b border-border/50 p-2">
@@ -497,11 +1017,11 @@
             <div>
               <button
                 type="button"
-                class="flex w-full items-center gap-1.5 px-2 py-1 text-left transition-colors hover:bg-muted/50"
+                class="flex w-full items-center gap-1.5 px-2 py-1 text-left transition-colors hover:bg-accent/50"
                 onclick={() => toggleGroup(group.name)}
               >
                 <ChevronRight class={cn('size-3.5 shrink-0 text-muted-foreground/45 transition-transform', !isCollapsed && 'rotate-90')} />
-                <span class="min-w-0 flex-1 truncate font-mono text-ui-xs font-medium text-foreground/70">{group.name}</span>
+                <span class="min-w-0 flex-1 truncate font-mono text-ui-xs font-medium text-muted-foreground">{group.name}</span>
                 <span class="shrink-0 font-mono text-ui-3xs tabular-nums text-muted-foreground/45">{group.items.length}</span>
               </button>
               {#if !isCollapsed}
@@ -512,8 +1032,8 @@
                     class={cn(
                       'group/key flex w-full items-center gap-2 py-1 pl-7 pr-2 text-left transition-colors',
                       selectedKey === key
-                        ? 'bg-primary/10 text-foreground ring-1 ring-inset ring-primary/20'
-                        : 'text-foreground/80 hover:bg-muted/50',
+                        ? 'bg-accent text-foreground'
+                        : 'text-foreground/80 hover:bg-accent/50',
                     )}
                     onclick={() => void selectKey(key)}
                     title={key}
@@ -527,8 +1047,8 @@
                       </span>
                     {/if}
                     <span class="min-w-0 flex-1 truncate font-mono text-ui-xs">{key}</span>
-                    {#if selectedKey === key}
-                      <Check class="size-3 shrink-0 text-primary" />
+                    {#if meta}
+                      <span class={cn('shrink-0 font-mono text-ui-3xs font-medium tracking-wide opacity-0 transition-opacity group-hover/key:opacity-60', selectedKey === key && 'opacity-60')}>{meta.short}</span>
                     {/if}
                   </button>
                 {/each}
@@ -539,6 +1059,19 @@
       </div>
     </div>
 
+    <ResizeHandle
+      axis="x"
+      edge="end"
+      onresizestart={() => (resizeStartWidth = keysWidth)}
+      onresize={(dx) => (keysWidth = clampKeysWidth(resizeStartWidth + dx))}
+      onresizeend={() => {
+        resizeStartWidth = keysWidth
+        try {
+          localStorage.setItem(KEYS_WIDTH_KEY, String(keysWidth))
+        } catch {}
+      }}
+    />
+
     <!-- ── Value panel ──────────────────────────────────────────────────── -->
     <div class="flex min-w-0 flex-1 flex-col overflow-hidden bg-panel">
       {#if !selectedKey}
@@ -548,7 +1081,7 @@
         </div>
       {:else}
         <!-- Header -->
-        <div class="flex h-9 shrink-0 items-center gap-2 border-b border-border bg-panel px-3">
+        <div class="flex h-9 shrink-0 items-center gap-2 border-b border-border/60 bg-panel px-3">
           {#if selectedType && TYPE_META[selectedType]}
             {@const Glyph = TYPE_META[selectedType].icon}
             <Glyph class={cn('size-4 shrink-0', TYPE_META[selectedType].color)} />
@@ -570,26 +1103,6 @@
               <Copy class="size-3.5" />
             {/if}
           </button>
-
-          {#if selectedType}
-            <span class={cn('shrink-0 rounded px-1.5 py-0.5 font-mono text-ui-3xs font-semibold uppercase tracking-wide', TYPE_META[selectedType]?.pill ?? 'bg-muted/60 text-muted-foreground')}>
-              {selectedType}
-            </span>
-          {/if}
-          {#if sizeLabel}
-            <span class="shrink-0 font-mono text-ui-2xs tabular-nums text-muted-foreground/70">{sizeLabel}</span>
-          {/if}
-          {#if ttlLabel}
-            <span
-              class={cn(
-                'inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 font-mono text-ui-2xs',
-                hasExpiry ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' : 'bg-muted/60 text-muted-foreground',
-              )}
-              title="Time to live"
-            >
-              {#if hasExpiry}<Clock class="size-3 shrink-0" />{/if}{ttlLabel}
-            </span>
-          {/if}
 
           <button
             type="button"
@@ -632,6 +1145,86 @@
           {/if}
         </div>
 
+        <!-- Metadata row -->
+        <div class="flex h-7 shrink-0 items-center gap-x-3 gap-y-0 overflow-x-auto border-b border-border/50 px-3 font-mono text-ui-2xs text-muted-foreground">
+          {#if selectedType}
+            <span class={cn('shrink-0 font-semibold uppercase tracking-wide', TYPE_META[selectedType]?.color ?? 'text-muted-foreground')}>{selectedType}</span>
+          {/if}
+          {#if sizeLabel}
+            <span class="shrink-0 tabular-nums">{sizeLabel}</span>
+          {/if}
+          {#if valueCapped}
+            <span class="shrink-0 rounded bg-amber-500/10 px-1 text-amber-600 dark:text-amber-400" title="Large value — showing the first {VALUE_CAP} entries">first {VALUE_CAP}</span>
+          {/if}
+          {#if keyMemory != null}
+            <span class="shrink-0 tabular-nums" title="Memory used by this key">
+              <HardDrive class="mr-1 inline size-3 shrink-0 align-[-2px] text-muted-foreground/60" />{humanBytes(keyMemory)}
+            </span>
+          {/if}
+          {#if keyEncoding}
+            <span class="shrink-0" title="Internal encoding">{keyEncoding}</span>
+          {/if}
+
+          <!-- TTL (editable) -->
+          <div class="ml-auto flex shrink-0 items-center">
+            {#if editingTtl}
+              <div class="flex items-center gap-1">
+                <input
+                  type="number"
+                  min="1"
+                  bind:value={ttlInput}
+                  placeholder="seconds"
+                  onkeydown={(e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); void applyTtl(false) }
+                    else if (e.key === 'Escape') editingTtl = false
+                  }}
+                  class="h-6 w-24 rounded-md border border-input bg-input/30 px-1.5 text-ui-2xs tabular-nums text-foreground placeholder:text-muted-foreground/45 outline-none focus:border-ring focus:ring-1 focus:ring-ring"
+                />
+                <button
+                  type="button"
+                  class="inline-flex h-6 items-center rounded-md bg-primary px-1.5 text-ui-2xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                  disabled={savingTtl || !ttlInput}
+                  onclick={() => void applyTtl(false)}
+                >
+                  Set
+                </button>
+                {#if hasExpiry}
+                  <button
+                    type="button"
+                    class={cn(iconBtn, 'h-6 px-1.5 text-ui-2xs')}
+                    disabled={savingTtl}
+                    onclick={() => void applyTtl(true)}
+                  >
+                    Persist
+                  </button>
+                {/if}
+                <button
+                  type="button"
+                  class={cn(iconBtn, 'size-6')}
+                  aria-label="Cancel"
+                  onclick={() => (editingTtl = false)}
+                >
+                  <X class="size-3.5" />
+                </button>
+              </div>
+            {:else}
+              <button
+                type="button"
+                class={cn(
+                  'group/ttl inline-flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors hover:bg-accent',
+                  hasExpiry ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground',
+                )}
+                title="Edit TTL"
+                onclick={openTtlEditor}
+              >
+                <Timer class="size-3 shrink-0" />
+                <span class="tabular-nums">{ttlLabel || 'no expiry'}</span>
+                <Pencil class="size-2.5 shrink-0 opacity-0 transition-opacity group-hover/ttl:opacity-70" />
+              </button>
+            {/if}
+          </div>
+        </div>
+
         <!-- Body -->
         <div class="min-h-0 flex-1 overflow-hidden">
           {#if valueLoading}
@@ -649,20 +1242,30 @@
                   <div class="inline-flex overflow-hidden rounded-md border border-border">
                     <button
                       type="button"
-                      class={cn('h-6 px-2 text-ui-2xs font-medium transition-colors', jsonView ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground')}
+                      class={cn('h-6 px-2 text-ui-2xs font-medium transition-colors', jsonView ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground')}
                       onclick={() => (jsonView = true)}
                     >JSON</button>
                     <button
                       type="button"
-                      class={cn('h-6 border-l border-border px-2 text-ui-2xs font-medium transition-colors', !jsonView ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground')}
+                      class={cn('h-6 border-l border-border px-2 text-ui-2xs font-medium transition-colors', !jsonView ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground')}
                       onclick={() => (jsonView = false)}
                     >Raw</button>
                   </div>
                   <span class="font-mono text-ui-3xs text-muted-foreground/50">valid JSON</span>
                 {/if}
+                {#if !editingString}
+                  <button
+                    type="button"
+                    class={cn(iconBtn, 'ml-auto h-6 gap-1 px-2 text-ui-2xs')}
+                    title="Edit value"
+                    onclick={startStringEdit}
+                  >
+                    <Pencil class="size-3" />Edit
+                  </button>
+                {/if}
                 <button
                   type="button"
-                  class={cn(iconBtn, 'ml-auto h-6 gap-1 px-2 text-ui-2xs')}
+                  class={cn(iconBtn, 'h-6 gap-1 px-2 text-ui-2xs', editingString && 'ml-auto')}
                   title="Copy value"
                   onclick={() => copyText(valueData.value, 'val')}
                 >
@@ -673,7 +1276,28 @@
                   {/if}
                 </button>
               </div>
-              <pre class="app-scroll min-h-0 flex-1 select-text overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] rounded-md border border-border/50 bg-background/50 p-3 font-mono text-ui-sm leading-relaxed text-foreground/90">{stringDisplay}</pre>
+              {#if editingString}
+                <textarea
+                  bind:value={stringEdit}
+                  spellcheck="false"
+                  class="no-focus-ring app-scroll min-h-0 flex-1 resize-none rounded-md border border-input bg-input/30 p-3 font-mono text-ui-sm leading-relaxed text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring"
+                ></textarea>
+                <div class="mt-2 flex shrink-0 items-center gap-1.5">
+                  <button
+                    type="button"
+                    class="inline-flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-ui-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                    disabled={savingValue}
+                    onclick={() => void saveString()}
+                  >{savingValue ? 'Saving…' : 'Save'}</button>
+                  <button
+                    type="button"
+                    class="inline-flex h-7 items-center rounded-md px-2.5 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                    onclick={() => (editingString = false)}
+                  >Cancel</button>
+                </div>
+              {:else}
+                <pre class="app-scroll min-h-0 flex-1 select-text overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] rounded-md border border-border/50 bg-background/50 p-3 font-mono text-ui-sm leading-relaxed text-foreground/90">{stringDisplay}</pre>
+              {/if}
             </div>
           {:else if valueData?.kind === 'hash' || valueData?.kind === 'zset'}
             {@const isZset = valueData.kind === 'zset'}
@@ -683,24 +1307,36 @@
                   <tr class="sticky top-0 z-10 bg-panel">
                     <th class="border-b border-border/50 px-3 py-1.5 text-left font-mono text-ui-2xs font-semibold uppercase tracking-wide text-muted-foreground/70">{isZset ? 'member' : 'field'}</th>
                     <th class="border-b border-border/50 px-3 py-1.5 text-left font-mono text-ui-2xs font-semibold uppercase tracking-wide text-muted-foreground/70">{isZset ? 'score' : 'value'}</th>
-                    <th class="w-9 border-b border-border/50"></th>
+                    <th class="w-16 border-b border-border/50"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {#each valueData.pairs as pair, i (i)}
-                    <tr class="group/row border-b border-border/50 last:border-0 hover:bg-muted/40">
+                    <tr class="group/row border-b border-border/50 last:border-0 hover:bg-accent/40">
                       <td class="max-w-[20rem] truncate px-3 py-1.5 align-top font-mono font-medium text-foreground" title={pair[0]}>{pair[0]}</td>
                       <td class={cn('px-3 py-1.5 align-top font-mono [overflow-wrap:anywhere] text-foreground/80', isZset && 'tabular-nums')} title={pair[1]}>{pair[1]}</td>
-                      <td class="w-9 px-1 align-top">
-                        <button
-                          type="button"
-                          class={cn(iconBtn, 'size-6 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100')}
-                          title={isZset ? 'Copy member' : 'Copy value'}
-                          aria-label="Copy"
-                          onclick={() => copyText(isZset ? pair[0] : pair[1], `row-${i}`)}
-                        >
-                          {#if copiedId === `row-${i}`}<Check class="size-3 text-emerald-500" />{:else}<Copy class="size-3" />{/if}
-                        </button>
+                      <td class="w-16 px-1 align-top">
+                        <div class="flex items-center justify-end gap-0.5">
+                          <button
+                            type="button"
+                            class={cn(iconBtn, 'size-6 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100')}
+                            title={isZset ? 'Copy member' : 'Copy value'}
+                            aria-label="Copy"
+                            onclick={() => copyText(isZset ? pair[0] : pair[1], `row-${i}`)}
+                          >
+                            {#if copiedId === `row-${i}`}<Check class="size-3 text-emerald-500" />{:else}<Copy class="size-3" />{/if}
+                          </button>
+                          <button
+                            type="button"
+                            class={cn(iconBtn, 'size-6 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 hover:bg-destructive/10 hover:text-destructive')}
+                            title={isZset ? 'Remove member' : 'Remove field'}
+                            aria-label="Remove"
+                            disabled={rowBusy === pair[0]}
+                            onclick={() => void deleteEntry(valueData.kind, pair[0])}
+                          >
+                            <Trash2 class="size-3" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   {/each}
@@ -717,29 +1353,69 @@
                       <th class="w-14 border-b border-border/50 px-3 py-1.5 text-right font-mono text-ui-2xs font-semibold uppercase tracking-wide text-muted-foreground/60">#</th>
                     {/if}
                     <th class="border-b border-border/50 px-3 py-1.5 text-left font-mono text-ui-2xs font-semibold uppercase tracking-wide text-muted-foreground/70">{isList ? 'value' : 'member'}</th>
-                    <th class="w-9 border-b border-border/50"></th>
+                    <th class="w-16 border-b border-border/50"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {#each valueData.items as item, i (i)}
-                    <tr class="group/row border-b border-border/50 last:border-0 hover:bg-muted/40">
+                    <tr class="group/row border-b border-border/50 last:border-0 hover:bg-accent/40">
                       {#if isList}
                         <td class="w-14 px-3 py-1.5 text-right align-top font-mono text-ui-xs tabular-nums text-muted-foreground/45">{i}</td>
                       {/if}
                       <td class="px-3 py-1.5 align-top font-mono [overflow-wrap:anywhere] text-foreground/85" title={item}>{item}</td>
+                      <td class="w-16 px-1 align-top">
+                        <div class="flex items-center justify-end gap-0.5">
+                          <button
+                            type="button"
+                            class={cn(iconBtn, 'size-6 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100')}
+                            title="Copy value"
+                            aria-label="Copy value"
+                            onclick={() => copyText(item, `row-${i}`)}
+                          >
+                            {#if copiedId === `row-${i}`}<Check class="size-3 text-emerald-500" />{:else}<Copy class="size-3" />{/if}
+                          </button>
+                          <button
+                            type="button"
+                            class={cn(iconBtn, 'size-6 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 hover:bg-destructive/10 hover:text-destructive')}
+                            title={isList ? 'Remove first occurrence' : 'Remove member'}
+                            aria-label="Remove"
+                            disabled={rowBusy === item}
+                            onclick={() => void deleteEntry(valueData.kind, item)}
+                          >
+                            <Trash2 class="size-3" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          {:else if valueData?.kind === 'stream'}
+            <div class="app-scroll h-full overflow-auto">
+              <table class="w-full border-collapse text-ui-sm">
+                <thead>
+                  <tr class="sticky top-0 z-10 bg-panel">
+                    <th class="w-14 border-b border-border/50 px-3 py-1.5 text-right font-mono text-ui-2xs font-semibold uppercase tracking-wide text-muted-foreground/60">#</th>
+                    <th class="border-b border-border/50 px-3 py-1.5 text-left font-mono text-ui-2xs font-semibold uppercase tracking-wide text-muted-foreground/70">entry (id · fields)</th>
+                    <th class="w-9 border-b border-border/50"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each valueData.entries as entry, i (i)}
+                    <tr class="group/row border-b border-border/50 last:border-0 hover:bg-accent/40">
+                      <td class="w-14 px-3 py-1.5 text-right align-top font-mono text-ui-xs tabular-nums text-muted-foreground/45">{i + 1}</td>
+                      <td class="px-3 py-1.5 align-top font-mono [overflow-wrap:anywhere] text-foreground/85" title={entry}>{entry}</td>
                       <td class="w-9 px-1 align-top">
-                        <button
-                          type="button"
-                          class={cn(iconBtn, 'size-6 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100')}
-                          title="Copy value"
-                          aria-label="Copy value"
-                          onclick={() => copyText(item, `row-${i}`)}
-                        >
+                        <button type="button" class={cn(iconBtn, 'size-6 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100')} title="Copy entry" aria-label="Copy entry" onclick={() => copyText(entry, `row-${i}`)}>
                           {#if copiedId === `row-${i}`}<Check class="size-3 text-emerald-500" />{:else}<Copy class="size-3" />{/if}
                         </button>
                       </td>
                     </tr>
                   {/each}
+                  {#if valueData.entries.length === 0}
+                    <tr><td colspan="3" class="px-3 py-6 text-center text-ui-xs text-muted-foreground/50">Empty stream</td></tr>
+                  {/if}
                 </tbody>
               </table>
             </div>

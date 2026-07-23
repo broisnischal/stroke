@@ -845,7 +845,7 @@
                   <div class="overflow-hidden rounded-lg border border-border/50">
                     <div class="flex items-center justify-between gap-1 border-b border-border/30 bg-muted/10 px-2.5 py-1.5">
                       <span class="font-mono text-ui-2xs text-muted-foreground/55">diagram</span>
-                      <button type="button" class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/50 hover:bg-muted/60 hover:text-foreground" onclick={() => copyText(part.content)}><Copy class="size-3" /></button>
+                      <button type="button" class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/50 hover:bg-muted/60 hover:text-foreground" title="Copy" aria-label="Copy" onclick={() => copyText(part.content)}><Copy class="size-3" /></button>
                     </div>
                     <ShikiBlock code={part.content} lang="plaintext" embedded />
                   </div>
@@ -868,7 +868,7 @@
                         <span class="font-mono">{part.lang || 'code'}</span>
                       </button>
                       <div class="flex gap-0.5">
-                        <button type="button" class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/50 hover:bg-muted/60 hover:text-foreground" onclick={() => copyText(part.content)}><Copy class="size-3" /></button>
+                        <button type="button" class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/50 hover:bg-muted/60 hover:text-foreground" title="Copy" aria-label="Copy" onclick={() => copyText(part.content)}><Copy class="size-3" /></button>
                         <button type="button" class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/50 hover:bg-muted/60 hover:text-foreground" title="Accept" onclick={() => acceptCode(part.lang, part.content)}><CornerDownLeft class="size-3" /></button>
                       </div>
                     </div>
@@ -1051,7 +1051,7 @@
         rows="1"
         placeholder={configured ? 'Ask anything —  @ tables · / commands' : 'Configure a model first'}
         disabled={!configured}
-        class="max-h-40 min-h-[2.25rem] w-full resize-none bg-transparent px-3 pt-2 pb-1 text-ui-xs leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/40 disabled:opacity-60"
+        class="no-focus-ring max-h-40 min-h-[2.25rem] w-full resize-none bg-transparent px-3 pt-2 pb-1 text-ui-xs leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/40 disabled:opacity-60"
       ></textarea>
 
       <!-- Bottom toolbar -->

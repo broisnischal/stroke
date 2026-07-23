@@ -1,4 +1,5 @@
 <script>
+  import { rowsToCsv, rowsToJson, rowsToSql, rowsToTsv, rowsToMarkdown, rowsToJsonl, saveExportFile, buildExportFilename } from '$lib/export.js'
   import Play from "@lucide/svelte/icons/play";
   import WifiOff from "@lucide/svelte/icons/wifi-off";
   import Braces from "@lucide/svelte/icons/braces";
@@ -403,6 +404,21 @@
     downloadBlob(jsonText, 'query-result.json', 'application/json')
   }
 
+  /** Unified export via the shared generators + native Save dialog.
+   * @param {'csv'|'json'|'sql'|'tsv'|'md'|'jsonl'} format */
+  async function exportAs(format) {
+    const columns = currentDisplay.columns.map((c) => ({ name: c.name ?? String(c) }))
+    const rows = /** @type {any[][]} */ (currentDisplay.rows)
+    const content =
+      format === 'csv' ? rowsToCsv(columns, rows)
+        : format === 'json' ? rowsToJson(columns, rows)
+        : format === 'sql' ? rowsToSql(columns, rows, 'query_result')
+        : format === 'tsv' ? rowsToTsv(columns, rows)
+        : format === 'md' ? rowsToMarkdown(columns, rows)
+        : rowsToJsonl(columns, rows)
+    await saveExportFile(content, buildExportFilename('query_result', format), format)
+  }
+
   /** @type {HTMLElement | null} */
   let consoleEl = $state(null);
   const initialLayout = loadLayout();
@@ -523,7 +539,7 @@
       <div class="flex shrink-0 items-stretch overflow-hidden rounded-md elevate-1">
         <button
           type="button"
-          class="inline-flex h-7 shrink-0 select-none items-center gap-2 bg-primary pl-2.5 pr-2 text-[0.8rem] font-medium text-primary-foreground transition-[background-color,opacity] hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+          class="inline-flex h-7 shrink-0 select-none items-center gap-2 bg-primary pl-2.5 pr-2 text-ui-2xs font-medium text-primary-foreground transition-[background-color,opacity] hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
           disabled={!sql.trim()}
           onclick={() => handleRun(undefined)}
           title={tipText(
@@ -873,13 +889,23 @@
               <Download class="size-3.5" />
             </DropdownMenu.Trigger>
             <DropdownMenu.Content align="end" class="min-w-36">
-              <DropdownMenu.Item class="gap-2 font-mono text-xs" onclick={exportCsv}>
-                <Download class="size-3.5 shrink-0 text-muted-foreground/50" />
-                Export CSV
+              <DropdownMenu.Item class="gap-2 font-mono text-ui-xs" onclick={() => exportAs('csv')}>
+                <Download class="size-3.5 shrink-0 text-muted-foreground/50" />CSV
               </DropdownMenu.Item>
-              <DropdownMenu.Item class="gap-2 font-mono text-xs" onclick={exportJson}>
-                <Download class="size-3.5 shrink-0 text-muted-foreground/50" />
-                Export JSON
+              <DropdownMenu.Item class="gap-2 font-mono text-ui-xs" onclick={() => exportAs('json')}>
+                <Download class="size-3.5 shrink-0 text-muted-foreground/50" />JSON
+              </DropdownMenu.Item>
+              <DropdownMenu.Item class="gap-2 font-mono text-ui-xs" onclick={() => exportAs('sql')}>
+                <Download class="size-3.5 shrink-0 text-muted-foreground/50" />SQL (INSERT)
+              </DropdownMenu.Item>
+              <DropdownMenu.Item class="gap-2 font-mono text-ui-xs" onclick={() => exportAs('tsv')}>
+                <Download class="size-3.5 shrink-0 text-muted-foreground/50" />TSV
+              </DropdownMenu.Item>
+              <DropdownMenu.Item class="gap-2 font-mono text-ui-xs" onclick={() => exportAs('md')}>
+                <Download class="size-3.5 shrink-0 text-muted-foreground/50" />Markdown
+              </DropdownMenu.Item>
+              <DropdownMenu.Item class="gap-2 font-mono text-ui-xs" onclick={() => exportAs('jsonl')}>
+                <Download class="size-3.5 shrink-0 text-muted-foreground/50" />JSON Lines
               </DropdownMenu.Item>
             </DropdownMenu.Content>
           </DropdownMenu.Root>

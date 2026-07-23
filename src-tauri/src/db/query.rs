@@ -1749,7 +1749,10 @@ pub async fn insert_table_row(
         let meta = insert_meta
             .get(col_name)
             .ok_or_else(|| format!("Unknown column: {col_name}"))?;
-        q = bind_typed_value(q, &meta.data_type, values.get(col_name).unwrap())?;
+        let value = values
+            .get(col_name)
+            .ok_or_else(|| format!("Missing value for column: {col_name}"))?;
+        q = bind_typed_value(q, &meta.data_type, value)?;
     }
 
     let inserted = q

@@ -1,5 +1,5 @@
 <script>
-  import { untrack } from 'svelte'
+  import { untrack, onDestroy } from 'svelte'
   import Icon from './Icon.svelte'
   import CloudflareLogin from './CloudflareLogin.svelte'
   import ProviderConnect from './ProviderConnect.svelte'
@@ -238,6 +238,7 @@
     clearTimeout(flashTimer)
     flashTimer = setTimeout(() => { flashedFields = new Set() }, 1000)
   }
+  onDestroy(() => clearTimeout(flashTimer))
 
   /** Switch the manual/provider tab. Leaving provider mode drops back to Postgres. */
   function setEntryMode(mode) {
@@ -285,8 +286,16 @@
     if (dbType === 'mssql')
       return { type: 'mssql', name, host, port, database, user, password, encrypt, trustCert }
     if (dbType === 'redis')
-      return { type: 'redis', name, host, port, password, db: database, tls: secure }
+      return { type: 'redis', name, host, port, password, db: Number(database) || 0, tls: secure }
     return { type: 'postgres', name, host, port, database, user, password, ssl, ...(ssh && { ssh }) }
+  }
+
+  /** Normalize a thrown value into a concise, user-facing message (no "Error:"
+   * prefix, no raw object noise). */
+  function friendlyError(/** @type {unknown} */ e) {
+    let msg = typeof e === 'string' ? e : e instanceof Error ? e.message : String(e)
+    msg = msg.replace(/^Error:\s*/i, '').trim()
+    return msg || 'Something went wrong. Please try again.'
   }
 
   function resetForm(conn) {
@@ -478,7 +487,7 @@
       setLastConnectionId(conn.id)
       open = false
       await onconnected(updated, conn.id)
-    } catch (e) { if (myOp === opId) error = String(e) }
+    } catch (e) { if (myOp === opId) error = friendlyError(e) }
     finally { if (myOp === opId) connecting = null }
   }
 
@@ -504,7 +513,7 @@
       else await testPostgresConnection(p)
       if (myOp !== opId) return // cancelled by the user
       testOk = true
-    } catch (e) { if (myOp === opId) error = String(e) }
+    } catch (e) { if (myOp === opId) error = friendlyError(e) }
     finally { if (myOp === opId) testing = false }
   }
 
@@ -547,7 +556,7 @@
       setLastConnectionId(id)
       open = false
       await onconnected(saved_conn, id)
-    } catch (e) { if (myOp === opId) error = String(e) }
+    } catch (e) { if (myOp === opId) error = friendlyError(e) }
     finally { if (myOp === opId) connecting = null }
   }
 
@@ -588,6 +597,50 @@
     open = false
   }
 
+  /**
+   * True when a pointer interaction landed on window chrome that must never
+   * dismiss the dialog — the titlebar / tab-bar drag region, the status bar, or
+   * any studio region. Checks the event target AND the element under the pointer:
+   * while a native window drag is starting, WebKit can report the document (not
+   * the drag element) as the target, so the pointer coordinates are the reliable
+   * signal. Without this, dragging the window to move it closed the modal.
+   * @param {PointerEvent} e
+   */
+  const CHROME_SEL = '[data-tauri-drag-region],[data-studio-chrome],[data-studio-region]'
+
+  // The reliable signal: capture the REAL pointerdown on `window` (capture phase
+  // fires before bits-ui's document-level dismiss listener). bits-ui hands
+  // onInteractOutside a synthetic event whose `target`/`clientX` don't survive a
+  // native window drag — during a drag WebKit reports `document` as the target and
+  // drops the coordinates — so neither `e.target.closest` nor `elementFromPoint`
+  // can see the titlebar. This tracker records whether the last pointerdown landed
+  // on the titlebar/tab-bar chrome, which is what the drag/move/resize starts from.
+  let _pointerInChrome = false
+  $effect(() => {
+    if (!open) return
+    const onPointerDown = (/** @type {PointerEvent} */ e) => {
+      const t = /** @type {Element | null} */ (e.target)
+      _pointerInChrome = !!t?.closest?.(CHROME_SEL)
+    }
+    window.addEventListener('pointerdown', onPointerDown, true)
+    return () => window.removeEventListener('pointerdown', onPointerDown, true)
+  })
+
+  function isChromeInteraction(e) {
+    if (_pointerInChrome) return true
+    // Defensive fallbacks (in case the tracker missed): try the synthetic event's
+    // wrapped original event, then the raw target, then the pointer coordinates.
+    const orig = e?.detail?.originalEvent ?? e
+    const t = /** @type {Element | null} */ (orig?.target ?? e?.target)
+    if (t?.closest?.(CHROME_SEL)) return true
+    const x = orig?.clientX, y = orig?.clientY
+    if (typeof x === 'number' && typeof y === 'number') {
+      const at = document.elementFromPoint(x, y)
+      if (at?.closest?.(CHROME_SEL)) return true
+    }
+    return false
+  }
+
   async function d1Discover() {
     if (!apiToken.trim()) { d1DiscoverError = 'Enter your API token first.'; return }
     d1DiscoverPhase = 'loading'; d1DiscoverError = ''
@@ -616,7 +669,7 @@
   const segBtn = 'inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-ui-xs font-medium transition-[color,background-color,box-shadow,transform] duration-150 ease-out active:scale-[0.97]'
   const segOn  = 'bg-muted/70 text-foreground shadow-sm'
   const segOff = 'text-muted-foreground/60 hover:text-foreground'
-  const inp = 'h-8 w-full rounded-md border border-input bg-muted/25 px-2.5 text-ui-xs text-foreground placeholder:text-muted-foreground/35 placeholder:font-normal outline-none transition-[color,border-color,box-shadow] hover:border-ring/40 focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring'
+  const inp = 'h-8 w-full rounded-md border-2 border-foreground/15 bg-muted/20 px-2.5 text-ui-xs text-foreground placeholder:text-muted-foreground/35 placeholder:font-normal outline-none transition-[color,border-color,box-shadow] hover:border-foreground/40'
   const inpNum = inp + ' [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
 
   async function pickSqliteFile() {
@@ -752,16 +805,32 @@
 <DialogPrimitive.Root bind:open>
   <DialogPrimitive.Portal>
     <DialogPrimitive.Overlay
-      class="fixed inset-0 z-50 bg-black/50 data-open:animate-in data-closed:animate-out data-open:fade-in-0 data-closed:fade-out-0 ease-out duration-150"
+      style="top: var(--app-titlebar-h, 38px); bottom: var(--app-statusbar-h, 0px);"
+      class="fixed inset-x-0 z-50 bg-black/50 data-open:animate-in data-closed:animate-out data-open:fade-in-0 data-closed:fade-out-0 ease-out duration-150"
     />
     <DialogPrimitive.Content
       data-connection-modal
-      class="fixed inset-0 z-50 flex bg-background text-foreground outline-none data-open:animate-in data-closed:animate-out data-open:fade-in-0 data-closed:fade-out-0 data-open:zoom-in-[0.98] data-closed:zoom-out-[0.98] ease-out duration-200"
+      style="top: var(--app-titlebar-h, 38px); bottom: var(--app-statusbar-h, 0px);"
+      class="fixed inset-x-0 z-50 flex bg-background text-foreground outline-none data-open:animate-in data-closed:animate-out data-open:fade-in-0 data-closed:fade-out-0 data-open:zoom-in-[0.98] data-closed:zoom-out-[0.98] ease-out duration-200"
       onEscapeKeydown={(e) => { if (isDirty && !isBusy) { e.preventDefault(); confirmDiscardOpen = true } }}
-      onInteractOutside={(e) => { if (isDirty && !isBusy) { e.preventDefault(); confirmDiscardOpen = true } }}
+      onFocusOutside={(e) => {
+        // Never let focus leaving the content dismiss the modal. Starting a native
+        // window drag/resize from the titlebar makes the webview lose focus, which
+        // bits-ui treats as focus-outside and closes the dialog. The modal is only
+        // meant to close via ×, Escape, or a genuine outside pointer interaction
+        // (handled below) — not because the OS took focus for a window drag.
+        e.preventDefault()
+      }}
+      onInteractOutside={(e) => {
+        // The modal is inset to leave the titlebar (drag region) and status bar
+        // usable. Interactions on that chrome must NOT dismiss the dialog or prompt
+        // discard — otherwise dragging the window to move it closes the modal.
+        if (isChromeInteraction(e)) { e.preventDefault(); return }
+        if (isDirty && !isBusy) { e.preventDefault(); confirmDiscardOpen = true }
+      }}
     >
     <DialogPrimitive.Title class="sr-only">Connections</DialogPrimitive.Title>
-    <div class="grid h-full w-full min-h-0 grid-cols-[minmax(300px,340px)_minmax(0,1fr)] overflow-hidden">
+    <div class="grid h-full w-full min-h-0 grid-cols-[minmax(300px,340px)_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden">
 
       <!-- ── Sidebar ─────────────────────────────────────────────── -->
       <aside class="flex min-h-0 flex-col border-r border-border/15 bg-muted/[0.015]">
@@ -794,7 +863,7 @@
 
         <div class="min-h-0 flex-1">
           {#if saved.length > 0}
-            <ScrollArea class="h-full scroll-smooth">
+            <ScrollArea type="auto" class="h-full scroll-smooth">
               <div class="px-2 py-1 flex flex-col gap-0.5">
                 {#each saved as conn, i (conn.id)}
                   {@const isSel = conn.id === editingId}
@@ -866,10 +935,10 @@
       <div class="flex min-h-0 min-w-0 flex-col">
 
         <!-- ── Header + provider tabs — the single "what am I connecting to" control ── -->
-        <div class="shrink-0 px-8 pt-7">
+        <div class="shrink-0 px-8 pt-6">
           <h2 class="text-ui-lg font-semibold tracking-tight text-foreground">Connect a database</h2>
           <p class="mt-1 text-ui-xs text-muted-foreground">Pick a provider to sign in, or set one up manually.</p>
-          <div class="mt-5 -mb-px flex items-center gap-0.5 overflow-x-auto border-b border-border/20 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div class="mt-4 flex items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {#each CONNECT_TABS as t (t.id)}
               {@const active = isTabActive(t.id)}
               <button
@@ -878,10 +947,10 @@
                 disabled={t.disabled}
                 title={t.disabled ? `${t.label} — coming soon` : undefined}
                 class={cn(
-                  'group relative flex shrink-0 items-center gap-1.5 rounded-t-md px-3 py-2.5 text-ui-xs font-medium transition-[color] duration-150',
+                  'group relative flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-ui-xs font-medium transition-colors duration-150',
                   t.disabled
                     ? 'cursor-not-allowed text-muted-foreground/30'
-                    : active ? 'text-foreground' : 'text-muted-foreground/60 hover:text-foreground',
+                    : active ? 'bg-muted/70 text-foreground' : 'text-muted-foreground/55 hover:bg-muted/35 hover:text-foreground',
                 )}
                 aria-current={active ? 'page' : undefined}
               >
@@ -894,27 +963,24 @@
                 {#if t.disabled}
                   <span class="rounded bg-muted/50 px-1 py-px text-ui-3xs font-medium text-muted-foreground/50">soon</span>
                 {/if}
-                {#if active}
-                  <span class="absolute inset-x-1.5 -bottom-px h-0.5 rounded-full bg-primary transition-all duration-200 ease-[var(--ease-out)]"></span>
-                {/if}
               </button>
             {/each}
           </div>
         </div>
 
         <!-- ── Form body — details for the current selection ── -->
-        <ScrollArea class="min-h-0 flex-1 scroll-smooth">
-          <div class="px-8 py-7">
-            <div class={entryMode === 'manual' ? 'max-w-[820px]' : 'max-w-[520px]'}>
+        <ScrollArea type="auto" class="min-h-0 flex-1 scroll-smooth">
+          <div class="px-8 py-6">
+            <div class="max-w-[560px]">
 
               {#if entryMode === 'manual'}
 
                 <!-- Manual form — core connection fields, then a full-width Advanced
                      section at the bottom. -->
-                <div class="flex min-w-0 flex-col gap-6">
+                <div class="flex min-w-0 flex-col gap-5">
 
                 <!-- Engine + name -->
-                <div class="flex flex-col gap-4">
+                <div class="flex flex-col gap-3.5">
                   <div>
                     <span class={lbl}>Database engine</span>
                     <SearchableMenu
@@ -929,7 +995,7 @@
                         <button
                           {...props}
                           type="button"
-                          class={cn(inp, 'flex items-center justify-between gap-2 text-left', driverMenuOpen && 'border-ring ring-1 ring-ring')}
+                          class={cn(inp, 'flex items-center justify-between gap-2 text-left', driverMenuOpen && 'border-foreground/55')}
                         >
                           <span class="flex min-w-0 items-center gap-2">
                             <DbIcon id={activeDriver.id} class={cn('size-4', engineTint(activeDriver.id))} />
@@ -957,7 +1023,7 @@
 
                 <!-- Driver-specific fields -->
                 {#key dbType}
-                <div class="flex flex-col gap-4">
+                <div class="flex flex-col gap-3.5">
 
             <!-- Input mode — connection string vs. individual fields -->
             {#if hasFieldToggle}

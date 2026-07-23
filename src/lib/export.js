@@ -170,9 +170,36 @@ export async function rowsToJsonAsync(columns, rows, opts = {}) {
 }
 
 /**
+ * Convert columns + rows to a series of `INSERT` statements for `tableName`.
+ * Identifiers are double-quoted; values become typed literals — numbers/booleans
+ * raw, NULL for null/undefined, everything else single-quoted with `''` escaping
+ * (objects serialized to JSON first). Safe to paste into any SQL console.
+ * @param {Array<{ name: string }>} columns
+ * @param {unknown[][]} rows
+ * @param {string} [tableName]
+ * @returns {string}
+ */
+export function rowsToSql(columns, rows, tableName = 'exported_table') {
+  const ident = (/** @type {string} */ n) => `"${String(n).replace(/"/g, '""')}"`
+  const lit = (/** @type {unknown} */ v) => {
+    if (v === null || v === undefined) return 'NULL'
+    if (typeof v === 'number' && Number.isFinite(v)) return String(v)
+    if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE'
+    const s = typeof v === 'object' ? JSON.stringify(v) : String(v)
+    return `'${s.replace(/'/g, "''")}'`
+  }
+  const cols = columns.map((c) => ident(c.name)).join(', ')
+  const table = ident(tableName)
+  if (rows.length === 0) return `-- no rows to export from ${table}`
+  return rows
+    .map((row) => `INSERT INTO ${table} (${cols}) VALUES (${row.map(lit).join(', ')});`)
+    .join('\n')
+}
+
+/**
  * Build a default filename like "users_2025-05-24.csv"
  * @param {string | null} tableName
- * @param {'csv' | 'json' | 'tsv' | 'md' | 'jsonl'} format
+ * @param {'csv' | 'json' | 'sql' | 'tsv' | 'md' | 'jsonl'} format
  */
 export function buildExportFilename(tableName, format) {
   const base = tableName ?? 'export'

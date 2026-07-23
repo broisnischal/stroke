@@ -20,7 +20,11 @@ function loadAll() {
 
 /** @param {Record<string, Record<string, number>>} all */
 function saveAll(all) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(all))
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(all))
+  } catch {
+    /* quota/private-mode — column widths are non-critical, drop silently */
+  }
 }
 
 /** @param {string} tableKey @returns {Record<string, number>} */

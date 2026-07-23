@@ -48,8 +48,20 @@
   // Auto-refresh loop (5s) while enabled + visible.
   $effect(() => {
     if (!autoRefresh || !active || !supported) return
-    const id = setInterval(() => { void refreshCurrent() }, 5000)
+    const id = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return
+      void refreshCurrent()
+    }, 5000)
     return () => clearInterval(id)
+  })
+
+  // Re-kick once when the window becomes visible again.
+  $effect(() => {
+    if (!autoRefresh || !active || !supported) return
+    if (typeof document === 'undefined') return
+    const onVisible = () => { if (!document.hidden) void refreshCurrent() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
   })
 
   async function loadVersion() { try { version = await instanceVersion() } catch {} }

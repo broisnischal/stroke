@@ -46,6 +46,22 @@
       : databases,
   )
 
+  // Keyboard navigation for the D1 database list, driven from the search box.
+  let hlIdx = $state(0)
+  $effect(() => {
+    filteredDatabases
+    hlIdx = 0
+  })
+  /** @param {KeyboardEvent} e */
+  function onDbSearchKeydown(e) {
+    if (e.key === 'Escape') { dbSearch = ''; return }
+    const n = filteredDatabases.length
+    if (!n) return
+    if (e.key === 'ArrowDown') { e.preventDefault(); hlIdx = (hlIdx + 1) % n }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); hlIdx = (hlIdx - 1 + n) % n }
+    else if (e.key === 'Enter') { e.preventDefault(); const d = filteredDatabases[hlIdx] ?? filteredDatabases[0]; if (d) selectDatabase(d.uuid) }
+  }
+
   /** Turn a raw backend error into a calm title + one-line explanation. */
   function friendlyError(msg) {
     const m = String(msg ?? '')
@@ -265,26 +281,31 @@
                 <Search class="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground/40" />
                 <input
                   type="text"
+                  aria-label="Search databases"
                   placeholder="Search databases…"
                   bind:value={dbSearch}
-                  class="h-9 w-full bg-transparent pl-9 pr-2.5 text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/35"
-                  onkeydown={(e) => { if (e.key === 'Escape') dbSearch = '' }}
+                  class="no-focus-ring h-8 w-full bg-transparent pl-9 pr-2.5 text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/35"
+                  onkeydown={onDbSearchKeydown}
                 />
               </div>
             {/if}
             <div class="db-list-scroll flex max-h-[240px] flex-col gap-0.5 overflow-y-auto p-1.5">
-              {#each filteredDatabases as db (db.uuid)}
+              {#each filteredDatabases as db, idx (db.uuid)}
                 {@const selected = db.uuid === selectedDbUuid}
                 <button
                   type="button"
                   class={cn(
-                    "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors",
-                    selected ? "bg-primary/10 text-foreground ring-1 ring-primary/25" : "hover:bg-muted/50"
+                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors",
+                    selected
+                      ? "bg-accent text-foreground"
+                      : idx === hlIdx
+                        ? "bg-accent/60 text-foreground"
+                        : "text-foreground/80 hover:bg-accent/60"
                   )}
                   onclick={() => selectDatabase(db.uuid)}
                 >
-                  <DbIcon id="d1" class={cn("size-4 shrink-0", selected ? "text-foreground" : "text-muted-foreground/45")} />
-                  <span class="min-w-0 flex-1 truncate font-mono text-ui-xs font-medium leading-snug {selected ? 'text-foreground' : 'text-foreground/85'}">{db.name}</span>
+                  <DbIcon id="d1" class={cn("size-4 shrink-0", selected ? "text-foreground" : "text-muted-foreground/50")} />
+                  <span class="min-w-0 flex-1 truncate font-mono text-ui-xs leading-snug {selected ? 'font-medium text-foreground' : 'text-foreground/85'}">{db.name}</span>
                   {#if selected}
                     <Check class="size-3.5 shrink-0 text-primary" />
                   {/if}

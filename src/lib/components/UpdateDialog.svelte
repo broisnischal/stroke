@@ -11,7 +11,6 @@
   import Sparkles        from '@lucide/svelte/icons/sparkles'
   import ScrollText      from '@lucide/svelte/icons/scroll-text'
   import ExternalLink    from '@lucide/svelte/icons/external-link'
-  import ReleaseNotesPage from './ReleaseNotesPage.svelte'
 
   let {
     onupdatefound = /** @type {() => void} */ (() => {}),
@@ -29,13 +28,11 @@
   let pendingUpdate   = $state(null)
   let dismissed       = $state(false)
   let checking        = $state(false)
-  let releasePage     = $state(false)
 
   /** Manually trigger an update check (e.g. from the command palette). */
   export async function checkNow() {
     if (checking || status === 'downloading') return
     dismissed = false
-    releasePage = false
     checking = true
     await checkForUpdate()
     if (status === 'idle') status = 'up-to-date'
@@ -43,7 +40,7 @@
   }
 
   const visible = $derived(
-    !dismissed && !releasePage &&
+    !dismissed &&
     (status === 'available' ||
      status === 'downloading' ||
      status === 'done' ||
@@ -192,23 +189,6 @@
   }
 </script>
 
-<!-- ── Release Notes full-page overlay ──────────────────────────── -->
-{#if releasePage}
-  <ReleaseNotesPage
-    version={updateVersion}
-    {changelog}
-    {releaseNotes}
-    {status}
-    {progress}
-    {downloadedBytes}
-    {totalBytes}
-    {errorMsg}
-    oninstall={() => void install()}
-    onrestart={() => void restart()}
-    onclose={() => (releasePage = false)}
-  />
-{/if}
-
 <!-- ── Compact corner toast (all non-page states) ────────────────── -->
 {#if visible}
   <div
@@ -266,11 +246,12 @@
         <div class="flex gap-2">
           <button
             type="button"
-            onclick={() => (releasePage = true)}
+            onclick={openChangelog}
             class="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             <ScrollText class="size-3.5" />
             Release Notes
+            <ExternalLink class="ml-0.5 size-3 text-muted-foreground/60" />
           </button>
           <button
             type="button"
@@ -307,11 +288,12 @@
           {#if changelog.length > 0}
             <button
               type="button"
-              onclick={() => (releasePage = true)}
+              onclick={openChangelog}
               class="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
               <ScrollText class="size-3.5" />
               What's New
+              <ExternalLink class="ml-0.5 size-3 text-muted-foreground/60" />
             </button>
           {/if}
           <button

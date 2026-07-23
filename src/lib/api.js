@@ -259,6 +259,17 @@ export async function connectRedis(config) {
   return inv('connect_redis_db', { config: normalizeRedis(config) })
 }
 
+/**
+ * One page of a non-blocking `SCAN` over the active Redis keyspace.
+ * @param {string} cursor opaque cursor ("0" to start)
+ * @param {string} [pattern] glob MATCH pattern (omit/"*" for all)
+ * @param {number} [count] COUNT hint per page
+ * @returns {Promise<{ cursor: string, keys: string[] }>}
+ */
+export async function redisScan(cursor, pattern, count = 1000) {
+  return inv('redis_scan', { cursor: String(cursor), pattern: pattern || null, count })
+}
+
 // ── DuckDB ──────────────────────────────────────────────────────────────────────
 
 /** @param {{ name: string, filePath: string }} config */
