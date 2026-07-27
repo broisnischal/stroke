@@ -764,7 +764,7 @@
             <!-- File zone -->
             {#if importFileName}
               <div
-                class="mb-4 flex items-start gap-3 rounded-xl border border-border/60 bg-muted/20 p-3.5"
+                class="mb-4 flex items-start gap-3 rounded-lg border border-border/60 bg-muted/20 p-3.5"
               >
                 <div
                   class="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border/50 bg-background"
@@ -810,10 +810,10 @@
                   onchange={onFileSelect}
                 />
                 <div
-                  class="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border/50 bg-muted/10 px-4 py-10 text-center transition-colors hover:bg-muted/20"
+                  class="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border/50 bg-muted/10 px-4 py-10 text-center transition-colors hover:bg-muted/20"
                 >
                   <div
-                    class="flex size-11 items-center justify-center rounded-xl border border-border/50 bg-background shadow-sm"
+                    class="flex size-11 items-center justify-center rounded-lg border border-border/50 bg-background shadow-sm"
                   >
                     <FileText class="size-5 text-muted-foreground/40" />
                   </div>
@@ -837,7 +837,7 @@
             <!-- Confirm block -->
             {#if importSql}
               <div
-                class="rounded-xl border border-amber-600/25 bg-amber-500/5 p-4"
+                class="rounded-lg border border-amber-600/25 bg-amber-500/5 p-4"
               >
                 <div class="mb-2.5 flex items-center gap-2">
                   <AlertTriangle class="size-3.5 shrink-0 text-amber-500" />
@@ -887,7 +887,7 @@
             </div>
           {:else if importPhase === "done" && importResult}
             <div
-              class="rounded-xl border {importResult.statementsErr === 0
+              class="rounded-lg border {importResult.statementsErr === 0
                 ? 'border-green-700/30 bg-green-900/8'
                 : 'border-amber-600/30 bg-amber-900/8'} p-4"
             >
@@ -977,7 +977,7 @@
             </div>
           {:else if importPhase === "error"}
             <div
-              class="rounded-xl border border-destructive/30 bg-destructive/6 p-4"
+              class="rounded-lg border border-destructive/30 bg-destructive/6 p-4"
             >
               <div class="flex items-start gap-2.5">
                 <div

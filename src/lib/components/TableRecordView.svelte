@@ -437,8 +437,8 @@
                     disabled={savingFields[field.colIdx]}
                     placeholder={field.isNull ? 'NULL' : ''}
                     class={cn(
-                      'w-full resize-none rounded-md border bg-muted/15 px-2.5 py-1.5 font-mono text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/40 hover:border-border focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none disabled:opacity-50',
-                      fieldErrors[field.colIdx] ? 'border-destructive' : 'border-border/50',
+                      'w-full resize-none rounded-lg border-2 bg-muted/15 px-2.5 py-1.5 font-mono text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/40 hover:border-border focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none disabled:opacity-50',
+                      fieldErrors[field.colIdx] ? 'border-destructive' : 'border-border',
                     )}
                     oninput={(e) => scheduleFieldSave(field.colIdx, /** @type {HTMLTextAreaElement} */ (e.currentTarget).value)}
                     onblur={(e) => handleFieldBlur(field.colIdx, e)}
@@ -451,8 +451,8 @@
                     disabled={savingFields[field.colIdx]}
                     placeholder={field.isNull ? 'NULL' : ''}
                     class={cn(
-                      'w-full rounded-md border bg-muted/15 px-2.5 py-1.5 font-mono text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/40 hover:border-border focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none disabled:opacity-50',
-                      fieldErrors[field.colIdx] ? 'border-destructive' : 'border-border/50',
+                      'w-full rounded-lg border-2 bg-muted/15 px-2.5 py-1.5 font-mono text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/40 hover:border-border focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none disabled:opacity-50',
+                      fieldErrors[field.colIdx] ? 'border-destructive' : 'border-border',
                     )}
                     oninput={(e) => scheduleFieldSave(field.colIdx, /** @type {HTMLInputElement} */ (e.currentTarget).value)}
                     onblur={(e) => handleFieldBlur(field.colIdx, e)}

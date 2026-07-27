@@ -324,6 +324,16 @@
     { id: "erd", icon: "git-branch", label: "ERD view", title: "ERD view — this table and its related tables" },
   ];
 
+  /** Export formats offered under the "Export" submenu in the more-actions menu. */
+  const EXPORT_FORMATS = [
+    { id: "csv", label: "CSV" },
+    { id: "json", label: "JSON" },
+    { id: "sql", label: "SQL" },
+    { id: "tsv", label: "TSV" },
+    { id: "md", label: "Markdown" },
+    { id: "jsonl", label: "JSONL" },
+  ];
+
   // ── Searchable-menu item lists ──────────────────────────────────────────
   // Sort: two rows per column (ascending / descending), searchable by name.
   const sortItems = $derived(
@@ -564,7 +574,7 @@
     <div
       class={cn(
         "relative flex h-7 shrink-0 items-center transition-[width] duration-200",
-        searchExpanded ? "w-44" : "w-32",
+        searchExpanded ? "w-72" : "w-52",
       )}
       role="search"
       onfocusin={() => (searchFocused = true)}
@@ -579,7 +589,7 @@
           bind:this={structureSearchEl}
           type="text"
           aria-label="Search column"
-          class="h-7 w-full min-w-0 rounded-md border border-input bg-input/30 pl-7 pr-7 font-mono text-ui-sm focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none"
+          class="h-7 w-full min-w-0 rounded-lg border-2 border-border bg-input/30 pl-7 pr-7 font-mono text-ui-sm focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none"
           placeholder="Search column…"
           value={structureSearch}
           oninput={(e) =>
@@ -594,9 +604,9 @@
           role="searchbox"
           aria-label="Search all columns"
           class={cn(
-            "no-focus-ring h-7 w-full min-w-0 border-transparent bg-accent/40 pl-7 text-ui-sm shadow-none transition-colors focus-visible:border-border focus-visible:bg-input/30",
+            "no-focus-ring h-7 w-full min-w-0 rounded-lg border-2 border-border bg-input/30 pl-7 text-ui-sm shadow-none transition-colors hover:border-foreground/30 focus-visible:border-ring focus-visible:bg-input/50",
             showSearchOpts ? "pr-14" : "pr-7",
-            localSearch.trim() && "border-ring/40 bg-input/30",
+            localSearch.trim() && "border-ring/50 bg-input/50",
           )}
           placeholder="Search…"
           value={localSearch}
@@ -1248,30 +1258,20 @@
               {selectedCount} row{selectedCount === 1 ? "" : "s"} selected
             </DropdownMenu.Label>
           {/if}
-          <DropdownMenu.Item disabled={total === 0} onSelect={() => onexport("csv")}>
-            <Icon name="file-down" />
-            Export as CSV
-          </DropdownMenu.Item>
-          <DropdownMenu.Item disabled={total === 0} onSelect={() => onexport("json")}>
-            <Icon name="file-down" />
-            Export as JSON
-          </DropdownMenu.Item>
-          <DropdownMenu.Item disabled={total === 0} onSelect={() => onexport("sql")}>
-            <Icon name="file-down" />
-            Export as SQL
-          </DropdownMenu.Item>
-          <DropdownMenu.Item disabled={total === 0} onSelect={() => onexport("tsv")}>
-            <Icon name="file-down" />
-            Export as TSV
-          </DropdownMenu.Item>
-          <DropdownMenu.Item disabled={total === 0} onSelect={() => onexport("md")}>
-            <Icon name="file-down" />
-            Export as Markdown
-          </DropdownMenu.Item>
-          <DropdownMenu.Item disabled={total === 0} onSelect={() => onexport("jsonl")}>
-            <Icon name="file-down" />
-            Export as JSONL
-          </DropdownMenu.Item>
+          <DropdownMenu.Sub>
+            <DropdownMenu.SubTrigger disabled={total === 0}>
+              <Icon name="file-down" class="size-3.5" />
+              Export
+            </DropdownMenu.SubTrigger>
+            <DropdownMenu.SubContent class="w-40">
+              {#each EXPORT_FORMATS as fmt (fmt.id)}
+                <DropdownMenu.Item onSelect={() => onexport(fmt.id)}>
+                  <Icon name="file-down" class="size-3.5" />
+                  {fmt.label}
+                </DropdownMenu.Item>
+              {/each}
+            </DropdownMenu.SubContent>
+          </DropdownMenu.Sub>
           <DropdownMenu.Separator />
           <DropdownMenu.Item
             variant="destructive"

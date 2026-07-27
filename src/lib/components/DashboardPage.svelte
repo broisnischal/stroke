@@ -276,7 +276,7 @@
                   type="text"
                   bind:value={nameInput}
                   placeholder="Dashboard name…"
-                  class="h-5 flex-1 rounded border border-border/60 bg-background px-1.5 font-mono text-ui-2xs outline-none focus:border-ring focus:ring-1 focus:ring-ring"
+                  class="h-5 flex-1 rounded-lg border-2 border-border bg-background px-1.5 font-mono text-ui-2xs outline-none focus:border-ring focus:ring-1 focus:ring-ring"
                   onkeydown={(e) => {
                     if (e.key === "Enter") handleCreateDashboard();
                     if (e.key === "Escape") namingOpen = false;
@@ -410,7 +410,7 @@
           >
             <div
               data-swapy-item={item.id}
-              class="group flex h-[260px] flex-col overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm transition-shadow hover:shadow-md"
+              class="group flex h-[260px] flex-col overflow-hidden rounded-lg border border-border/60 bg-card shadow-sm transition-shadow hover:shadow-md"
             >
               <!-- Card header -->
               <div class="flex h-9 shrink-0 items-center gap-1 border-b border-border/40 bg-card px-2">
@@ -488,7 +488,7 @@
     onclick={(e) => { if (e.target === e.currentTarget) pickerOpen = false; }}
     onkeydown={(e) => { if (e.key === "Escape") pickerOpen = false; }}
   >
-    <div class="flex w-[480px] max-h-[70vh] flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-xl">
+    <div class="flex w-[480px] max-h-[70vh] flex-col overflow-hidden rounded-[10px] border border-border bg-popover shadow-xl">
       <div class="flex h-11 shrink-0 items-center justify-between border-b border-border px-4">
         <span class="text-ui-sm font-semibold">Add chart to dashboard</span>
         <button type="button" onclick={() => (pickerOpen = false)} class="text-muted-foreground/50 hover:text-foreground">

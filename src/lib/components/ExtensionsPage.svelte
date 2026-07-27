@@ -162,7 +162,7 @@
   const selTrigger =
     "h-7 w-[12rem] justify-between gap-2 border-border/70 bg-background px-2.5 text-ui-xs font-normal shadow-none";
   const ruleInput =
-    "h-7 min-w-0 rounded-md border border-border/70 bg-background px-2.5 font-mono text-ui-xs text-foreground outline-none focus:border-primary/60";
+    "h-7 min-w-0 rounded-lg border-2 border-border bg-background px-2.5 font-mono text-ui-xs text-foreground outline-none focus:border-primary/60";
 </script>
 
 <!-- Compact Linear/Resend-style toggle -->

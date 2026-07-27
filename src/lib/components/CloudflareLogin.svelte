@@ -182,10 +182,10 @@
 
   {:else if phase === 'authorizing'}
     <!-- ── Waiting for browser ── -->
-    <div class="flex flex-col gap-3.5 rounded-xl border border-border/40 bg-muted/[0.03] p-4">
+    <div class="flex flex-col gap-3.5 rounded-lg border border-border/40 bg-muted/[0.03] p-4">
       <div class="flex items-center gap-3.5">
-        <div class="relative flex size-11 shrink-0 items-center justify-center rounded-xl border border-border/50 bg-background">
-          <span class="pulse-ring pointer-events-none absolute inset-0 rounded-xl ring-1 ring-primary/40"></span>
+        <div class="relative flex size-11 shrink-0 items-center justify-center rounded-lg border border-border/50 bg-background">
+          <span class="pulse-ring pointer-events-none absolute inset-0 rounded-lg ring-1 ring-primary/40"></span>
           <DbIcon id="d1" class="size-5 text-foreground" />
         </div>
         <div class="min-w-0">
@@ -333,7 +333,7 @@
     {/if}
 
   {:else if phase === 'error'}
-    <div class="err-card overflow-hidden rounded-xl border border-border/70 bg-card shadow-[var(--elevate-1)]">
+    <div class="err-card overflow-hidden rounded-lg border border-border/70 bg-card shadow-[var(--elevate-1)]">
       <div class="flex items-start gap-3 p-4">
         <div class="flex size-9 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive ring-1 ring-inset ring-destructive/15">
           <AlertTriangle class="size-[18px]" />
