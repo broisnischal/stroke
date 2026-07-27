@@ -88,7 +88,7 @@
   }
 
   const lbl = 'mb-1.5 block text-ui-3xs font-semibold uppercase tracking-widest text-muted-foreground/40'
-  const inp = 'h-9 w-full rounded-lg border border-border/30 bg-muted/[0.3] px-3 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/25 outline-none focus:border-primary/40 focus:ring-1 focus:ring-primary/15 transition-colors'
+  const inp = 'h-9 w-full rounded-lg border-2 border-border bg-muted/[0.3] px-3 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/25 outline-none focus:border-primary/40 focus:ring-1 focus:ring-primary/15 transition-colors'
   const sel = 'h-9 w-full appearance-none rounded-lg border border-border/30 bg-muted/[0.3] px-3 pr-7 font-mono text-ui-sm text-foreground outline-none focus:border-primary/40 transition-colors'
 
   /**

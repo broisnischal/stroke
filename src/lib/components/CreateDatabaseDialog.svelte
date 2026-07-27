@@ -105,7 +105,7 @@
     }
   }
 
-  const inputCls = "h-8 w-full rounded-md border border-border bg-background px-3 text-ui-xs outline-none placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring disabled:opacity-50"
+  const inputCls = "h-8 w-full rounded-lg border-2 border-border bg-background px-3 text-ui-xs outline-none placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring disabled:opacity-50"
   const selectCls = "h-8 w-full rounded-md border border-border bg-background px-2.5 text-ui-xs outline-none focus:border-ring focus:ring-1 focus:ring-ring disabled:opacity-50"
   const labelCls = "mb-1.5 block text-ui-xs font-medium text-muted-foreground"
 </script>

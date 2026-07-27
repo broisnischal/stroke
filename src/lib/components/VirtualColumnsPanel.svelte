@@ -156,7 +156,7 @@
               type="text"
               bind:value={draftName}
               placeholder="full_url"
-              class="w-full rounded border border-border/50 bg-muted/30 px-2.5 py-1.5 font-mono text-ui-sm text-foreground outline-none placeholder:text-muted-foreground/35 focus:border-primary/50 focus:bg-background"
+              class="w-full rounded-lg border-2 border-border bg-muted/30 px-2.5 py-1.5 font-mono text-ui-sm text-foreground outline-none placeholder:text-muted-foreground/35 focus:border-primary/50 focus:bg-background"
             />
           </label>
         </div>
@@ -173,7 +173,7 @@
             rows={3}
             spellcheck={false}
             placeholder={"https://cdn.com/{file_key}"}
-            class="w-full resize-none rounded border border-border/50 bg-muted/30 px-2.5 py-1.5 font-mono text-ui-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/30 focus:border-primary/50 focus:bg-background"
+            class="w-full resize-none rounded-lg border-2 border-border bg-muted/30 px-2.5 py-1.5 font-mono text-ui-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/30 focus:border-primary/50 focus:bg-background"
           ></textarea>
           {#if badRefs.length > 0}
             <p class="mt-1.5 text-ui-2xs text-destructive/80">Unknown: {badRefs.map(r => `{${r}}`).join(', ')}</p>

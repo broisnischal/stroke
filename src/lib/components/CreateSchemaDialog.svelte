@@ -46,7 +46,7 @@
   }
 
   const lbl = 'mb-1.5 block text-ui-3xs font-semibold uppercase tracking-[0.07em] text-muted-foreground/50'
-  const inp = 'h-8 w-full rounded-lg border border-border/25 bg-muted/[0.4] px-3 font-mono text-ui-xs outline-none placeholder:text-muted-foreground/30 focus:border-border/50 focus:ring-0'
+  const inp = 'h-8 w-full rounded-lg border-2 border-border bg-muted/[0.4] px-3 font-mono text-ui-xs outline-none placeholder:text-muted-foreground/30 focus:border-border/50 focus:ring-0'
 </script>
 
 <Dialog.Root bind:open onOpenChange={(v) => { if (!v) reset() }}>

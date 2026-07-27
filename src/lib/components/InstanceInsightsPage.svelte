@@ -225,7 +225,7 @@
       <!-- ── ACTIVITY ── -->
       {#if subtab === 'activity'}
         <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <div class="rounded-xl border border-border/50 bg-card/40 p-3">
+          <div class="rounded-lg border border-border/50 bg-card/40 p-3">
             <p class="text-ui-2xs uppercase tracking-wide text-muted-foreground/50">Sessions: <span class="text-ui font-bold text-foreground">{activity?.sessions.total ?? '—'}</span></p>
             <div class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-ui-2xs text-muted-foreground/60">
               <span>Active: <b class="text-foreground/80">{activity?.sessions.active ?? '—'}</b></span>
@@ -234,7 +234,7 @@
               <span>Usage: <b class="text-foreground/80">{num(activity?.sessions.usagePct)}%</b></span>
             </div>
           </div>
-          <div class="rounded-xl border border-border/50 bg-card/40 p-3">
+          <div class="rounded-lg border border-border/50 bg-card/40 p-3">
             <p class="text-ui-2xs uppercase tracking-wide text-muted-foreground/50">TPS: <span class="text-ui font-bold text-foreground">{num(cur?.tps ?? 0)}/s</span></p>
             <div class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-ui-2xs text-muted-foreground/60">
               <span>Commits/s: <b class="text-foreground/80">{num(cur?.commits ?? 0)}</b></span>
@@ -243,7 +243,7 @@
               <span>Rollbacks: <b class="text-foreground/80">{big(activity?.counters.rollbacks ?? 0)}</b></span>
             </div>
           </div>
-          <div class="rounded-xl border border-border/50 bg-card/40 p-3">
+          <div class="rounded-lg border border-border/50 bg-card/40 p-3">
             <p class="text-ui-2xs uppercase tracking-wide text-muted-foreground/50">Tuples: <span class="text-ui font-bold text-foreground">{num((cur?.tupUpdated ?? 0) + (cur?.tupDeleted ?? 0))}/s</span></p>
             <div class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-ui-2xs text-muted-foreground/60">
               <span>Updates/s: <b class="text-foreground/80">{num(cur?.tupUpdated ?? 0)}</b></span>
@@ -252,7 +252,7 @@
               <span>Returned: <b class="text-foreground/80">{big(activity?.counters.tupReturned ?? 0)}</b></span>
             </div>
           </div>
-          <div class="rounded-xl border border-border/50 bg-card/40 p-3">
+          <div class="rounded-lg border border-border/50 bg-card/40 p-3">
             <p class="text-ui-2xs uppercase tracking-wide text-muted-foreground/50">Block I/O: <span class="text-ui font-bold text-foreground">{num((activity?.bufferHitRatio ?? 0) * 100)}%</span></p>
             <div class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-ui-2xs text-muted-foreground/60">
               <span>Reads/s: <b class="text-foreground/80">{num(cur?.reads ?? 0)}</b></span>
@@ -264,16 +264,16 @@
         </div>
 
         <div class="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <div class="rounded-xl border border-border/50 bg-card/30 p-3">
+          <div class="rounded-lg border border-border/50 bg-card/30 p-3">
             <p class="mb-1 text-ui-sm font-semibold text-foreground">Sessions Timeline</p>
             <div class="h-56"><EChartPanel option={sessionsChart} /></div>
           </div>
-          <div class="rounded-xl border border-border/50 bg-card/30 p-3">
+          <div class="rounded-lg border border-border/50 bg-card/30 p-3">
             <p class="mb-1 text-ui-sm font-semibold text-foreground">Transactions Timeline</p>
             <div class="h-56"><EChartPanel option={txChart} /></div>
           </div>
         </div>
-        <div class="mt-4 rounded-xl border border-border/50 bg-card/30 p-3">
+        <div class="mt-4 rounded-lg border border-border/50 bg-card/30 p-3">
           <p class="mb-1 text-ui-sm font-semibold text-foreground">Block I/O Timeline</p>
           <div class="h-56"><EChartPanel option={ioChart} /></div>
         </div>
@@ -297,7 +297,7 @@
         </div>
         <div class="relative mb-2">
           <Search class="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/40" />
-          <input bind:value={configSearch} placeholder="Search setting name, category, or description…" class="h-8 w-full rounded-lg border border-border/60 bg-background pl-8 pr-3 text-ui-xs text-foreground outline-none focus:border-ring" />
+          <input bind:value={configSearch} placeholder="Search setting name, category, or description…" class="h-8 w-full rounded-lg border-2 border-border bg-background pl-8 pr-3 text-ui-xs text-foreground outline-none focus:border-ring" />
         </div>
         {#if !configFiltered.length}
           <div class="rounded-lg border border-border/40 bg-card/20 py-8 text-center text-ui-xs text-muted-foreground/40">No settings found</div>

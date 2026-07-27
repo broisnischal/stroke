@@ -2526,7 +2526,7 @@
                   autofocus
                   type="text"
                   bind:value={renamingTitle}
-                  class="min-w-0 flex-1 rounded border border-border/60 bg-background px-1.5 py-0.5 font-mono text-ui-2xs text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring"
+                  class="min-w-0 flex-1 rounded-lg border-2 border-border bg-background px-1.5 py-0.5 font-mono text-ui-2xs text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring"
                   onkeydown={(e) => {
                     if (e.key === "Enter") void commitRename();
                     if (e.key === "Escape") cancelRename();
@@ -3958,7 +3958,7 @@
                   updateChatParams({
                     customInstructions: e.currentTarget.value,
                   })}
-                class="w-full resize-none rounded-lg border border-border/50 bg-background/60 px-2.5 py-2 font-mono text-ui-2xs text-foreground outline-none placeholder:text-muted-foreground/30 focus:border-ring focus:ring-1 focus:ring-ring"
+                class="w-full resize-none rounded-lg border-2 border-border bg-background/60 px-2.5 py-2 font-mono text-ui-2xs text-foreground outline-none placeholder:text-muted-foreground/30 focus:border-ring focus:ring-1 focus:ring-ring"
               ></textarea>
               <p class="text-ui-3xs text-muted-foreground/50">
                 Prepended to the system prompt on every turn.
@@ -4073,7 +4073,7 @@
                   >
                   <textarea
                     id="skill-content"
-                    class="min-h-[90px] w-full resize-y rounded-lg border border-border/60 bg-background px-2.5 py-2 font-mono text-ui-xs leading-relaxed text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring focus:border-ring focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/40"
+                    class="min-h-[90px] w-full resize-y rounded-lg border-2 border-border bg-background px-2.5 py-2 font-mono text-ui-xs leading-relaxed text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring focus:border-ring focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/40"
                     placeholder="# My Skill&#10;&#10;Guidelines in Markdown..."
                     bind:value={newSkillContent}
                   ></textarea>

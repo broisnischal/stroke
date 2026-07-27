@@ -91,7 +91,7 @@
 
   const lbl = "mb-1.5 block text-ui-2xs font-medium text-muted-foreground/55";
   const tinp =
-    "w-full rounded-md border border-border/25 bg-muted/15 px-2.5 py-2 text-ui-sm text-foreground placeholder:text-muted-foreground/25 placeholder:font-normal focus-visible:border-border/50 focus-visible:outline-none resize-none transition-colors";
+    "w-full rounded-lg border-2 border-border bg-muted/15 px-2.5 py-2 text-ui-sm text-foreground placeholder:text-muted-foreground/25 placeholder:font-normal focus-visible:border-border/50 focus-visible:outline-none resize-none transition-colors";
 </script>
 
 <Dialog.Root bind:open>
