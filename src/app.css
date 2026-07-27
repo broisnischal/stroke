@@ -142,6 +142,14 @@ html[data-os="windows"] { --radius: 0.4375rem; --window-radius: 8px; } /* Window
 html[data-os="linux"]   { --window-radius: 8px; }
 :root { --window-radius: 10px; }
 
+/* Ceiling for every floating menu panel (context menu, dropdown, submenus).
+   Panels size to their longest label, so this is the only thing standing
+   between a long value — a column name, a file path, a cell preview — and a
+   menu that runs off the edge of the window. Paired with overflow-x-hidden on
+   the panels so anything past it is clipped inside the rounded border rather
+   than painted over it. */
+:root { --menu-max-w: min(22rem, calc(100vw - 2rem)); }
+
 
 @theme inline {
   --radius-sm: calc(var(--radius) - 2px);
