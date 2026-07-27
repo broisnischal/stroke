@@ -6068,7 +6068,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             {#each COL_HIGHLIGHTS as h (h.id)}
               <ContextMenu.Item onSelect={() => runMenuAction(() => setColHighlight(hcol, h.id))}>
                 <span class="size-3.5 shrink-0 rounded-full border border-border/40" style="background:{h.hex}"></span>
-                {h.label}
+                <span data-slot="menu-label">{h.label}</span>
                 {#if colHighlights[hcol]?.color === h.id}<span class="ml-auto text-ui-3xs text-primary">✓</span>{/if}
               </ContextMenu.Item>
             {/each}
@@ -6103,7 +6103,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               {#each menuColTransforms as t (t.id)}
                 <ContextMenu.Item onSelect={() => runMenuAction(() => setColTransform(hcol, t.id))}>
                   <Wand2 />
-                  {t.label}
+                  <span data-slot="menu-label">{t.label}</span>
                   {#if colTransforms[hcol] === t.id}<span class="ml-auto text-ui-3xs text-primary">✓</span>{/if}
                 </ContextMenu.Item>
               {/each}
@@ -6221,7 +6221,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               {#each menuTransforms as t (t.id)}
                 <ContextMenu.Item onSelect={() => runMenuAction(() => runCellTransform(contextRowIdx, contextColIdx, t))}>
                   <Wand2 />
-                  {t.label}
+                  <span data-slot="menu-label">{t.label}</span>
                 </ContextMenu.Item>
               {/each}
             </ContextMenu.SubContent>
@@ -6242,7 +6242,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                 {#each grp.items as g (g.id)}
                   <ContextMenu.Item onSelect={() => runMenuAction(() => insertGeneratedValue(contextRowIdx, contextColIdx, g))}>
                     <GIcon />
-                    {g.label}
+                    <span data-slot="menu-label">{g.label}</span>
                   </ContextMenu.Item>
                 {/each}
               {/each}

@@ -190,9 +190,12 @@ hover:opacity-90`. Never hand-roll a primary button.
   `$t(...)` strings, and a width tuned to English overflows in longer locales.
 - Every panel is capped at `--menu-max-w` (`src/app.css`) and clips with
   `overflow-x-hidden`, so nothing can escape the panel even at the ceiling.
-- Menu items carry `min-w-0`. To truncate a genuinely unbounded label (a column
-  name, a path, a cell value), wrap it: `<span class="min-w-0 flex-1 truncate">`
-  — same idea as the `data-slot="command-label"` rule in the command palette.
+- Menu items carry `min-w-0`. Wrap any label that can run long — a generator or
+  transform label, a column name, a path, a cell value — in
+  `<span data-slot="menu-label">`. The item primitives truncate that slot with an
+  ellipsis, mirroring `data-slot="command-label"` in the command palette.
+  Do **not** add `flex-1` to it: that sets `flex-basis: 0`, which defeats the
+  panel's grow-to-fit sizing and makes every label truncate at `min-w`.
 
 ---
 
