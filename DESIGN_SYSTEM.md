@@ -182,6 +182,18 @@ hover:opacity-90`. Never hand-roll a primary button.
   leading `size-3.5` icon, `gap-2`.
 - One active dialog/menu at a time from the global hotkey flow.
 
+### Menu width (hard rule)
+
+- **Never put a fixed `w-*` on a menu panel** (`Content` / `SubContent`). Use
+  `min-w-*`. Panels shrink-to-fit, so a fixed width cannot grow for a label that
+  does not fit — the text simply paints outside the rounded border. Labels are
+  `$t(...)` strings, and a width tuned to English overflows in longer locales.
+- Every panel is capped at `--menu-max-w` (`src/app.css`) and clips with
+  `overflow-x-hidden`, so nothing can escape the panel even at the ceiling.
+- Menu items carry `min-w-0`. To truncate a genuinely unbounded label (a column
+  name, a path, a cell value), wrap it: `<span class="min-w-0 flex-1 truncate">`
+  — same idea as the `data-slot="command-label"` rule in the command palette.
+
 ---
 
 ## 8. List row pattern (files, tables, dbs, connections)

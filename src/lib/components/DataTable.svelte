@@ -2407,107 +2407,209 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   // ── Image / avatar cell thumbnails ───────────────────────────────────────────
   // When a column's transform is avatar / image-thumb, the cell renders the image
-  // instead of text. Images load async into a bounded cache; a repaint is queued
-  // when each finishes so the thumbnail appears.
+  // instead of text. Source images are routinely multi-megapixel, and a decoded
+  // 4000×3000 JPEG costs ~48 MB of RGBA regardless of how small it is drawn — so
+  // the loader is deliberately stingy:
+  //   • only urls painted in the current frame are ever fetched (see _imgWanted),
+  //   • at most _IMG_MAX_INFLIGHT decode at a time, the rest queue,
+  //   • each one is downscaled to a single _IMG_THUMB square and the full-res
+  //     decode is dropped immediately,
+  //   • the thumbnail cache evicts LRU-style instead of being flushed wholesale.
+  // Without the in-flight cap, switching a 173-row column to image-thumb starts
+  // 173 full-res decodes in the same frame, which is what made it crawl.
   const _IMG_TF = new Set(['avatar', 'image-thumb']);
-  /** @type {Map<string, HTMLImageElement | ImageBitmap | 'error'>} */
+  /** Ready thumbnails / permanent failures, oldest insertion first. @type {Map<string, ImageBitmap | HTMLCanvasElement | 'error'>} */
   const _imgCache = new Map();
   /** @type {Map<string, number>} per-url transient-failure retry counter */
   const _imgRetry = new Map();
-  const _IMG_CACHE_MAX = 400;
+  /** Urls waiting out a retry backoff — not cached, not queued. @type {Set<string>} */
+  const _imgBackoff = new Set();
+  /** Pending retry timers, so a destroyed table cannot fire them. @type {Set<number>} */
+  const _imgTimers = new Set();
+  /** Urls decoding right now, mapped to the element to abort on teardown. @type {Map<string, HTMLImageElement>} */
+  const _imgLoading = new Map();
+  /** Urls waiting for a free decode slot, oldest first. @type {string[]} */
+  let _imgQueue = [];
+  /** Urls painted in the frame being drawn; everything else is off-screen. @type {Set<string>} */
+  const _imgWanted = new Set();
+  const _IMG_CACHE_MAX = 300;
   const _IMG_MAX_RETRY = 3;
-  // Multi-megapixel source images are resampled to a small square thumbnail ONCE
-  // (via createImageBitmap) so the scroll draw blits a ~128px bitmap instead of
-  // resampling the full image every frame — and the full-res decode is released.
   const _IMG_THUMB = 128;
+  const _IMG_MAX_INFLIGHT = 4;
+
   /**
-   * Start (or restart) loading one cell image. Remote avatar CDNs
-   * (lh3.googleusercontent.com, avatars.githubusercontent.com) throttle bursts
-   * of parallel requests and occasionally 403 on the app-origin Referer, so a
-   * single onerror is usually transient — retry with backoff before giving up
-   * rather than freezing the cell as "broken image" permanently.
+   * Center-crop and downscale a loaded image onto a small canvas. Used when
+   * createImageBitmap is unavailable or refuses the image — it rejects
+   * cross-origin sources that were not served with CORS headers, and canvas
+   * drawing has no such restriction. Falling back here (rather than caching the
+   * full-res element) is what keeps a remote image column from retaining
+   * hundreds of megabytes of decoded pixels.
+   * @param {HTMLImageElement} img
+   * @returns {HTMLCanvasElement | 'error'}
+   */
+  function makeThumbCanvas(img, sx, sy, s) {
+    const cv = document.createElement('canvas');
+    cv.width = _IMG_THUMB; cv.height = _IMG_THUMB;
+    const cx = cv.getContext('2d');
+    if (!cx) return 'error';
+    cx.imageSmoothingEnabled = true;
+    cx.imageSmoothingQuality = 'high';
+    cx.drawImage(img, sx, sy, s, s, 0, 0, _IMG_THUMB, _IMG_THUMB);
+    return cv;
+  }
+
+  /**
+   * Store a finished thumbnail, then trim the cache back to its ceiling. Entries
+   * are evicted oldest-first but on-screen urls are always kept, so scrolling
+   * through more images than fit in the cache can never evict the rows the user
+   * is actually looking at (the old code flushed the whole map, which made every
+   * visible thumbnail reload at once).
+   * @param {string} url
+   * @param {ImageBitmap | HTMLCanvasElement | 'error'} val
+   */
+  function setCellImage(url, val) {
+    _imgCache.set(url, val);
+    if (_imgCache.size <= _IMG_CACHE_MAX) return;
+    for (const k of _imgCache.keys()) {
+      if (_imgCache.size <= _IMG_CACHE_MAX) break;
+      if (_imgWanted.has(k)) continue;
+      const v = _imgCache.get(k);
+      if (typeof ImageBitmap !== 'undefined' && v instanceof ImageBitmap) v.close?.();
+      _imgCache.delete(k);
+    }
+  }
+
+  /**
+   * Begin one decode. Remote avatar CDNs (lh3.googleusercontent.com,
+   * avatars.githubusercontent.com) throttle bursts of parallel requests and
+   * occasionally 403 on the app-origin Referer, so a single onerror is usually
+   * transient — retry with backoff before giving up rather than freezing the
+   * cell as "broken image" permanently.
    * @param {string} url
    */
-  function loadCellImage(url) {
+  function startCellImage(url) {
     const img = new Image();
     // These CDNs reject/deny requests that carry tauri://localhost as Referer;
     // no-referrer strips it and never causes an otherwise-good load to fail.
     img.referrerPolicy = 'no-referrer';
     img.decoding = 'async';
+    // Release the full-res decode as soon as the thumbnail exists, and hand the
+    // freed slot to the next queued url.
+    const finish = () => {
+      img.onload = null; img.onerror = null;
+      _imgLoading.delete(url);
+      img.src = '';
+      scheduleDraw();
+      pumpCellImages();
+    };
     img.onload = () => {
       _imgRetry.delete(url);
-      // Downscale the center square to a small bitmap once, off the draw path.
-      // The tiny bitmap replaces the full-res Image in the cache, so per-frame
-      // draws are cheap and the multi-MB decode can be garbage-collected.
+      const s = Math.min(img.naturalWidth, img.naturalHeight);
+      if (s <= 0) { setCellImage(url, 'error'); finish(); return; }
+      const sx = Math.floor((img.naturalWidth - s) / 2);
+      const sy = Math.floor((img.naturalHeight - s) / 2);
       if (typeof createImageBitmap === 'function') {
-        const s = Math.min(img.naturalWidth, img.naturalHeight);
-        if (s > 0) {
-          const sx = Math.floor((img.naturalWidth - s) / 2);
-          const sy = Math.floor((img.naturalHeight - s) / 2);
-          createImageBitmap(img, sx, sy, s, s, { resizeWidth: _IMG_THUMB, resizeHeight: _IMG_THUMB, resizeQuality: 'high' })
-            .then((bmp) => { if (_imgCache.get(url) === img) _imgCache.set(url, bmp); else bmp.close?.(); scheduleDraw(); })
-            .catch(() => scheduleDraw());
-          return;
-        }
+        createImageBitmap(img, sx, sy, s, s, { resizeWidth: _IMG_THUMB, resizeHeight: _IMG_THUMB, resizeQuality: 'high' })
+          .then((bmp) => { setCellImage(url, bmp); })
+          .catch(() => { setCellImage(url, makeThumbCanvas(img, sx, sy, s)); })
+          .finally(finish);
+        return;
       }
-      scheduleDraw();
+      setCellImage(url, makeThumbCanvas(img, sx, sy, s));
+      finish();
     };
     img.onerror = () => {
+      img.onload = null; img.onerror = null;
+      _imgLoading.delete(url);
+      img.src = '';
       const n = (_imgRetry.get(url) || 0) + 1;
       if (n <= _IMG_MAX_RETRY) {
         _imgRetry.set(url, n);
-        // Keep this (now-empty) img cached as a "loading…" placeholder during the
-        // backoff so repaints don't spawn duplicate immediate loads; replace it
-        // when the timer fires. Stagger so a whole column doesn't re-fire at once.
-        setTimeout(() => { if (_imgCache.get(url) === img) loadCellImage(url); }, 350 * n);
-        scheduleDraw();
+        // Hold the url out of the queue while it backs off, otherwise the next
+        // repaint re-requests it immediately and the backoff means nothing.
+        // Stagger so a whole column does not re-fire at once.
+        _imgBackoff.add(url);
+        const t = setTimeout(() => {
+          _imgTimers.delete(t);
+          _imgBackoff.delete(url);
+          if (_imgWanted.has(url)) { _imgQueue.push(url); pumpCellImages(); }
+        }, 350 * n);
+        _imgTimers.add(t);
       } else {
-        _imgCache.set(url, 'error');
-        scheduleDraw();
+        setCellImage(url, 'error');
       }
+      scheduleDraw();
+      pumpCellImages();
     };
+    _imgLoading.set(url, img);
     img.src = url;
-    _imgCache.set(url, img);
-    return img;
   }
-  /** @param {string} url */
-  function getCellImage(url) {
-    const hit = _imgCache.get(url);
-    if (hit) return hit;
-    if (_imgCache.size > _IMG_CACHE_MAX) {
-      for (const v of _imgCache.values()) { if (typeof ImageBitmap !== 'undefined' && v instanceof ImageBitmap) v.close?.(); }
-      _imgCache.clear(); _imgRetry.clear();
+
+  /**
+   * Drain the queue up to the in-flight cap. Called once per frame after the
+   * visible set has been rebuilt, so a fast scroll drops the backlog it flew
+   * past instead of decoding rows that are long gone.
+   */
+  function pumpCellImages() {
+    if (_imgQueue.length) _imgQueue = _imgQueue.filter((u) => _imgWanted.has(u));
+    while (_imgQueue.length && _imgLoading.size < _IMG_MAX_INFLIGHT) {
+      const next = _imgQueue.shift();
+      if (next !== undefined) startCellImage(next);
     }
-    return loadCellImage(url);
   }
+
+  /** Drop every cached/in-flight image. Called on teardown. */
+  function releaseCellImages() {
+    for (const v of _imgCache.values()) {
+      if (typeof ImageBitmap !== 'undefined' && v instanceof ImageBitmap) v.close?.();
+    }
+    _imgCache.clear();
+    for (const img of _imgLoading.values()) { img.onload = null; img.onerror = null; img.src = ''; }
+    _imgLoading.clear();
+    for (const t of _imgTimers) clearTimeout(t);
+    _imgTimers.clear();
+    _imgRetry.clear();
+    _imgBackoff.clear();
+    _imgQueue = [];
+    _imgWanted.clear();
+  }
+
+  /**
+   * Thumbnail for a url if one is ready. Never starts a decode itself — the draw
+   * path only registers interest, and pumpCellImages decides what actually runs.
+   * @param {string} url
+   * @returns {ImageBitmap | HTMLCanvasElement | 'error' | null}
+   */
+  function getCellImage(url) {
+    _imgWanted.add(url);
+    const hit = _imgCache.get(url);
+    if (hit !== undefined) return hit;
+    if (!_imgLoading.has(url) && !_imgBackoff.has(url) && !_imgQueue.includes(url)) _imgQueue.push(url);
+    return null;
+  }
+
   /** Draw an image/avatar thumbnail (center-cropped) with a filename beside it. */
   function drawCellImage(ctx, url, cellX, ry, w, rh, cy, round, c) {
     const size = Math.min(rh - Math.round(6 * canvasZoom), Math.round(26 * canvasZoom));
     const ix = cellX + CELL_PAD_X;
     const iy = Math.round(cy - size / 2);
     const radius = round ? size / 2 : Math.round(4 * canvasZoom);
-    const img = getCellImage(url);
-    const isBitmap = typeof ImageBitmap !== 'undefined' && img instanceof ImageBitmap;
-    const loaded = img !== 'error' && (isBitmap || (img.complete && img.naturalWidth > 0));
+    const thumb = getCellImage(url);
+    const ready = thumb !== null && thumb !== 'error';
     roundRect(ctx, ix, iy, size, size, radius);
     ctx.fillStyle = withAlpha(c.cMutedBg, 0.5); ctx.fill();
-    if (loaded) {
+    if (ready) {
       ctx.save();
       roundRect(ctx, ix, iy, size, size, radius); ctx.clip();
-      if (isBitmap) {
-        // Already a center-cropped square thumbnail — cheap blit, no per-frame resample.
-        ctx.drawImage(img, ix, iy, size, size);
-      } else {
-        const nw = img.naturalWidth, nh = img.naturalHeight, s = Math.min(nw, nh);
-        ctx.drawImage(img, (nw - s) / 2, (nh - s) / 2, s, s, ix, iy, size, size);
-      }
+      // Already a center-cropped square thumbnail — cheap blit, no per-frame resample.
+      ctx.drawImage(/** @type {CanvasImageSource} */ (thumb), ix, iy, size, size);
       ctx.restore();
     }
     ctx.strokeStyle = withAlpha(c.cBorder, 0.6); ctx.lineWidth = 1;
     roundRect(ctx, ix, iy, size, size, radius); ctx.stroke();
     ctx.font = _fonts.cell; ctx.textAlign = 'left';
     ctx.fillStyle = c.cMuted;
-    const label = img === 'error' ? 'broken image' : loaded ? (url.split('/').pop() || url) : 'loading…';
+    const label = thumb === 'error' ? 'broken image' : ready ? (url.split('/').pop() || url) : 'loading…';
     const lx = ix + size + Math.round(8 * canvasZoom);
     ctx.fillText(truncText(ctx, label, Math.max(0, cellX + w - 4 - lx)), lx, cy + 0.5);
   }
@@ -3692,6 +3794,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const ctx = _ctx
     const read = _readColor
     if (!ctx || !read || !canvasEl || !colorProbe) return
+    // Rebuilt as cells paint; pumpCellImages() below uses it to fetch only what
+    // is actually on screen and to protect those thumbnails from eviction.
+    _imgWanted.clear()
     // Fonts are measured off the live DOM probe, so they already reflect the
     // app zoom (.text-ui-* sizes resolve against --app-font-size). The layout
     // constants (ROW_HEIGHT, HEADER_H, …) scale by the same canvasZoom factor,
@@ -3835,6 +3940,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         AMBER, AMBER_FG, BLUE_FG, usedW,
       })
     }
+
+    // Now that the visible set is known, drop the backlog the viewport has moved
+    // past and start whatever decodes fit in the remaining slots.
+    if (_imgQueue.length) pumpCellImages()
   }
 
   /** Skeleton row for a window that hasn't loaded yet (windowed mode only). */
@@ -4694,6 +4803,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (_resizeRafId) cancelAnimationFrame(_resizeRafId)
     if (_scrollLoopId) cancelAnimationFrame(_scrollLoopId)
     if (_focusColTimer) { clearTimeout(_focusColTimer); _focusColTimer = null }
+    // Thumbnails hold GPU/heap memory that is not reclaimed by dropping the
+    // component, and pending retry timers would fire against a dead canvas.
+    releaseCellImages()
     // Remove any window resize listeners still attached from a drag in progress.
     clearActiveResizeListeners()
   })
@@ -5952,7 +6064,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             {$t('menu.highlight')}
             {#if colHighlights[hcol]?.color}<span class="ml-auto size-2.5 rounded-full" style="background:{COL_HL_MAP.get(colHighlights[hcol].color)}"></span>{/if}
           </ContextMenu.SubTrigger>
-          <ContextMenu.SubContent class="w-40 [&_[data-slot=context-menu-item]]:gap-2 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs">
+          <ContextMenu.SubContent class="min-w-40 [&_[data-slot=context-menu-item]]:gap-2 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs">
             {#each COL_HIGHLIGHTS as h (h.id)}
               <ContextMenu.Item onSelect={() => runMenuAction(() => setColHighlight(hcol, h.id))}>
                 <span class="size-3.5 shrink-0 rounded-full border border-border/40" style="background:{h.hex}"></span>
@@ -5986,7 +6098,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             {$t('menu.transformColumn')}
             {#if colTransforms[hcol]}<span class="ml-auto text-ui-3xs text-primary">on</span>{/if}
           </ContextMenu.SubTrigger>
-          <ContextMenu.SubContent class="w-56 [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+          <ContextMenu.SubContent class="min-w-56 [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
             {#if menuColTransforms.length > 0}
               {#each menuColTransforms as t (t.id)}
                 <ContextMenu.Item onSelect={() => runMenuAction(() => setColTransform(hcol, t.id))}>
@@ -6105,7 +6217,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               <Wand2 />
               Transform
             </ContextMenu.SubTrigger>
-            <ContextMenu.SubContent class="w-48 [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+            <ContextMenu.SubContent class="min-w-48 [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
               {#each menuTransforms as t (t.id)}
                 <ContextMenu.Item onSelect={() => runMenuAction(() => runCellTransform(contextRowIdx, contextColIdx, t))}>
                   <Wand2 />
@@ -6122,7 +6234,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               <Dices />
               Insert
             </ContextMenu.SubTrigger>
-            <ContextMenu.SubContent class="app-scroll max-h-[60vh] w-52 overflow-y-auto [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:whitespace-nowrap [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+            <ContextMenu.SubContent class="app-scroll max-h-[60vh] min-w-52 overflow-y-auto [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:whitespace-nowrap [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
               {#each menuGenerators as grp, gi (grp.group)}
                 {#if gi > 0}<ContextMenu.Separator />{/if}
                 {@const GIcon = grp.group === 'IDs' ? KeyRound : grp.group === 'TIME' ? Clock : Dices}
@@ -6143,7 +6255,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             <Copy />
             Copy row as
           </ContextMenu.SubTrigger>
-          <ContextMenu.SubContent class="w-44 [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+          <ContextMenu.SubContent class="min-w-44 [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
             <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'json'))}>
               <Braces />
               JSON

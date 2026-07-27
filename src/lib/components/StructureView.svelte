@@ -903,7 +903,7 @@
                     <span class="flex-1">{idx.indexType}</span>
                     <svg class="size-3 shrink-0 text-muted-foreground/30 opacity-0 group-hover/alg:opacity-100" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6l4 4 4-4"/></svg>
                   </DropdownMenu.Trigger>
-                  <DropdownMenu.Content class="w-44 [&_[data-slot=dropdown-menu-item]]:font-mono [&_[data-slot=dropdown-menu-item]]:text-ui-sm [&_[data-slot=dropdown-menu-item]]:px-3 [&_[data-slot=dropdown-menu-item]]:py-1.5" align="start" sideOffset={1}>
+                  <DropdownMenu.Content class="min-w-44 [&_[data-slot=dropdown-menu-item]]:font-mono [&_[data-slot=dropdown-menu-item]]:text-ui-sm [&_[data-slot=dropdown-menu-item]]:px-3 [&_[data-slot=dropdown-menu-item]]:py-1.5" align="start" sideOffset={1}>
                     {#each INDEX_ALGORITHMS as alg (alg)}
                       <DropdownMenu.Item class={alg.toLowerCase() === idx.indexType.toLowerCase() ? 'bg-accent/60' : ''}
                         onSelect={() => { if (alg.toLowerCase() !== idx.indexType.toLowerCase()) requestIndexRecreate(idx, alg, idx.isUnique, idx.columns) }}
@@ -983,7 +983,7 @@
                     <span class="flex-1">{newIndex.algorithm || 'BTREE'}</span>
                     <svg class="size-3 text-muted-foreground/30 opacity-0 group-hover/na:opacity-100" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6l4 4 4-4"/></svg>
                   </DropdownMenu.Trigger>
-                  <DropdownMenu.Content class="w-44 [&_[data-slot=dropdown-menu-item]]:font-mono [&_[data-slot=dropdown-menu-item]]:text-ui-sm [&_[data-slot=dropdown-menu-item]]:px-3 [&_[data-slot=dropdown-menu-item]]:py-1.5" align="start" sideOffset={1}>
+                  <DropdownMenu.Content class="min-w-44 [&_[data-slot=dropdown-menu-item]]:font-mono [&_[data-slot=dropdown-menu-item]]:text-ui-sm [&_[data-slot=dropdown-menu-item]]:px-3 [&_[data-slot=dropdown-menu-item]]:py-1.5" align="start" sideOffset={1}>
                     {#each INDEX_ALGORITHMS as alg (alg)}
                       <DropdownMenu.Item class={newIndex.algorithm === alg ? 'bg-accent' : ''} onSelect={() => { if (newIndex) newIndex.algorithm = alg }}>{alg}</DropdownMenu.Item>
                     {/each}
