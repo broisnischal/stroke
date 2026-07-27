@@ -5845,6 +5845,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       class={cn(
         "min-w-52 p-1 text-ui-xs",
         "[&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs",
+        "[&_[data-slot=context-menu-sub-trigger]]:gap-1.5 [&_[data-slot=context-menu-sub-trigger]]:px-2 [&_[data-slot=context-menu-sub-trigger]]:py-1 [&_[data-slot=context-menu-sub-trigger]]:text-ui-xs [&_[data-slot=context-menu-sub-trigger]_svg]:size-3.5",
         "[&_[data-slot=context-menu-shortcut]]:text-ui-2xs",
         "[&_[data-slot=context-menu-item]_svg]:size-3.5",
       )}
@@ -6282,7 +6283,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       maxlength="24"
       spellcheck="false"
       placeholder="e.g. PII, money, deprecated"
-      class="h-9 w-full rounded-lg border border-border/60 bg-background px-3 text-ui-sm text-foreground outline-none transition-[border-color,box-shadow] focus:border-ring focus:ring-1 focus:ring-ring"
+      class="h-9 w-full rounded-lg border-2 border-border bg-background px-3 text-ui-sm text-foreground outline-none transition-[border-color,box-shadow] focus:border-ring focus:ring-1 focus:ring-ring"
       onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); confirmTag(); } else if (e.key === 'Escape') { e.preventDefault(); tagDialogOpen = false; } }}
     />
     <Dialog.Footer class="gap-2 sm:justify-end">

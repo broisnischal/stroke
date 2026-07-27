@@ -425,7 +425,7 @@
                     type="text"
                     placeholder="Search for field..."
                     bind:value={fieldSearch}
-                    class="w-full rounded border border-border bg-muted/20 py-1.5 pl-7 pr-2.5 font-mono text-ui-xs placeholder:text-muted-foreground/60 focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none"
+                    class="w-full rounded-lg border-2 border-border bg-muted/20 py-1.5 pl-7 pr-2.5 font-mono text-ui-xs placeholder:text-muted-foreground/60 focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none"
                   />
                 </div>
               </div>
@@ -573,7 +573,7 @@
                             rows={Math.min(6, Math.max(2, (field.initialEditStr.match(/\n/g)?.length ?? 0) + 1))}
                             disabled={savingFields[field.colIdx]}
                             placeholder={field.isNull ? 'NULL' : ''}
-                            class="w-full resize-none rounded border bg-muted/20 px-2.5 py-1.5 font-mono text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none disabled:opacity-50 {fieldErrors[field.colIdx] ? 'border-destructive' : 'border-border'}"
+                            class="w-full resize-none rounded-lg border-2 bg-muted/20 px-2.5 py-1.5 font-mono text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none disabled:opacity-50 {fieldErrors[field.colIdx] ? 'border-destructive' : 'border-border'}"
                             oninput={(e) => scheduleFieldSave(field.colIdx, /** @type {HTMLTextAreaElement} */ (e.currentTarget).value)}
                             onblur={(e) => handleFieldBlur(field.colIdx, e)}
                             onkeydown={(e) => handleFieldKeydown(field.colIdx, e)}
@@ -590,7 +590,7 @@
                             value={field.initialEditStr}
                             disabled={savingFields[field.colIdx]}
                             placeholder={field.isNull ? 'NULL' : ''}
-                            class="w-full rounded border bg-muted/20 px-2.5 py-1.5 font-mono text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none disabled:opacity-50 {fieldErrors[field.colIdx] ? 'border-destructive' : 'border-border'}"
+                            class="w-full rounded-lg border-2 bg-muted/20 px-2.5 py-1.5 font-mono text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none disabled:opacity-50 {fieldErrors[field.colIdx] ? 'border-destructive' : 'border-border'}"
                             oninput={(e) => scheduleFieldSave(field.colIdx, /** @type {HTMLInputElement} */ (e.currentTarget).value)}
                             onblur={(e) => handleFieldBlur(field.colIdx, e)}
                             onkeydown={(e) => handleFieldKeydown(field.colIdx, e)}

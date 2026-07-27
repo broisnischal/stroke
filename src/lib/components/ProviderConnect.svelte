@@ -217,7 +217,7 @@
           type="text"
           bind:value={tokenInput}
           placeholder="postgres://…"
-          class="h-9 w-full rounded-lg border-2 border-foreground/15 bg-muted/25 px-3 font-mono text-ui-2xs outline-none transition-[border-color] focus:border-foreground/55"
+          class="h-9 w-full rounded-lg border-2 border-border bg-muted/25 px-3 font-mono text-ui-2xs outline-none transition-[border-color] focus:border-foreground/55"
           onkeydown={(e) => { if (e.key === 'Enter') saveToken() }}
         />
         <button
@@ -246,11 +246,11 @@
     {/if}
 
   {:else if phase === 'authorizing'}
-    <div class="flex flex-col gap-3.5 rounded-xl border border-border/40 bg-muted/[0.03] p-4">
+    <div class="flex flex-col gap-3.5 rounded-lg border border-border/40 bg-muted/[0.03] p-4">
       <div class="flex items-center gap-3.5">
         <!-- Provider mark with a live pulse ring — reads as "waiting on this one". -->
-        <div class="relative flex size-11 shrink-0 items-center justify-center rounded-xl border border-border/50 bg-background">
-          <span class="pulse-ring pointer-events-none absolute inset-0 rounded-xl ring-1 ring-primary/40"></span>
+        <div class="relative flex size-11 shrink-0 items-center justify-center rounded-lg border border-border/50 bg-background">
+          <span class="pulse-ring pointer-events-none absolute inset-0 rounded-lg ring-1 ring-primary/40"></span>
           <DbIcon id={provider} class="size-5 text-foreground" />
         </div>
         <div class="min-w-0">
@@ -322,7 +322,7 @@
             autocomplete="current-password"
             autofocus
             placeholder="Database password"
-            class="h-9 w-full rounded-lg border-2 border-foreground/15 bg-muted/30 pl-3 pr-9 text-ui-xs outline-none transition-[border-color] focus:border-foreground/55"
+            class="h-9 w-full rounded-lg border-2 border-border bg-muted/30 pl-3 pr-9 text-ui-xs outline-none transition-[border-color] focus:border-foreground/55"
             onkeydown={(e) => { if (e.key === 'Enter') confirmPassword() }}
           />
           <button
@@ -407,7 +407,7 @@
     {/if}
 
   {:else if phase === 'error'}
-    <div class="err-card overflow-hidden rounded-xl border border-border/70 bg-card shadow-[var(--elevate-1)]">
+    <div class="err-card overflow-hidden rounded-lg border border-border/70 bg-card shadow-[var(--elevate-1)]">
       <div class="flex items-start gap-3 p-4">
         <div class="flex size-9 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive ring-1 ring-inset ring-destructive/15">
           <AlertTriangle class="size-[18px]" />

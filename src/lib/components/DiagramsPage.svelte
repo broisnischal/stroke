@@ -180,7 +180,7 @@
             type="text"
             placeholder="Search diagrams…"
             bind:value={searchQ}
-            class="h-7 w-full rounded-md border border-border/40 bg-background/50 pl-6 pr-2 text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:border-border focus:outline-none"
+            class="h-7 w-full rounded-lg border-2 border-border bg-background/50 pl-6 pr-2 text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:border-border focus:outline-none"
           />
         </div>
       </div>
@@ -237,13 +237,13 @@
             type="text"
             bind:value={draftName}
             placeholder="Diagram name…"
-            class="h-7 min-w-0 flex-1 rounded-md border border-border/50 bg-background/50 px-2.5 text-ui-sm text-foreground placeholder:text-muted-foreground/40 focus:border-border focus:outline-none"
+            class="h-7 min-w-0 flex-1 rounded-lg border-2 border-border bg-background/50 px-2.5 text-ui-sm text-foreground placeholder:text-muted-foreground/40 focus:border-border focus:outline-none"
           />
           <input
             type="text"
             bind:value={draftGroup}
             placeholder="Group"
-            class="h-7 w-24 rounded-md border border-border/50 bg-background/50 px-2.5 text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:border-border focus:outline-none"
+            class="h-7 w-24 rounded-lg border-2 border-border bg-background/50 px-2.5 text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:border-border focus:outline-none"
           />
           <button
             type="button"
@@ -290,7 +290,7 @@
             <textarea
               bind:value={draftCode}
               spellcheck="false"
-              class="min-h-0 flex-1 resize-none rounded-lg border border-border/50 bg-background/40 p-3 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/30 focus:border-border/80 focus:outline-none [font-feature-settings:'liga'_0,'calt'_0] [font-variant-ligatures:none]"
+              class="min-h-0 flex-1 resize-none rounded-lg border-2 border-border bg-background/40 p-3 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/30 focus:border-border/80 focus:outline-none [font-feature-settings:'liga'_0,'calt'_0] [font-variant-ligatures:none]"
             ></textarea>
           </div>
           <div class="flex w-1/2 min-w-0 flex-col overflow-hidden">

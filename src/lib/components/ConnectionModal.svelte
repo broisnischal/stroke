@@ -1539,7 +1539,7 @@
     <!-- Discard-changes confirmation (styled, blocks close until answered) -->
     {#if confirmDiscardOpen}
       <div class="absolute inset-0 z-[60] flex items-center justify-center bg-black/50 p-6">
-        <div class="w-full max-w-sm rounded-xl border border-border/40 bg-background p-5 shadow-2xl">
+        <div class="w-full max-w-sm rounded-[10px] border border-border/40 bg-background p-5 shadow-2xl">
           <div class="flex items-start gap-3">
             <div class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-warning/10 text-warning">
               <Icon name="alert-circle" class="size-4" />
