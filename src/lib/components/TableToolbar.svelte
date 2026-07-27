@@ -1263,7 +1263,7 @@
               <Icon name="file-down" class="size-3.5" />
               Export
             </DropdownMenu.SubTrigger>
-            <DropdownMenu.SubContent class="w-40">
+            <DropdownMenu.SubContent class="min-w-40">
               {#each EXPORT_FORMATS as fmt (fmt.id)}
                 <DropdownMenu.Item onSelect={() => onexport(fmt.id)}>
                   <Icon name="file-down" class="size-3.5" />
