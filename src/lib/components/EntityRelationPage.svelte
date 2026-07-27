@@ -664,7 +664,7 @@
         bind:this={searchEl}
         bind:value={search}
         placeholder="Search tables…"
-        class="h-7 w-40 min-w-0 rounded-md border border-input bg-input/30 pl-7 pr-6 text-ui-sm outline-none placeholder:text-muted-foreground/45 focus:border-ring focus:ring-1 focus:ring-ring"
+        class="h-7 w-40 min-w-0 rounded-lg border-2 border-border bg-input/30 pl-7 pr-6 text-ui-sm outline-none placeholder:text-muted-foreground/45 focus:border-ring focus:ring-1 focus:ring-ring"
       />
       {#if search}
         <button type="button" onclick={() => (search = '')} class="absolute right-2 text-muted-foreground/50 hover:text-foreground">
@@ -839,7 +839,7 @@
 
       <!-- ── Detail panel ───────────────────────────────────────────────── -->
       {#if selMeta}
-        <div class="absolute right-4 top-4 z-50 w-64 overflow-hidden rounded-xl border border-border/60 bg-card shadow-xl">
+        <div class="absolute right-4 top-4 z-50 w-64 overflow-hidden rounded-[10px] border border-border/60 bg-card shadow-xl">
           <div class="flex items-center gap-2 border-b border-border/40 bg-muted/20 px-3 py-2.5">
             <Network class="size-3.5 shrink-0 text-primary/60" />
             <span class="min-w-0 flex-1 truncate font-mono text-ui-xs font-bold text-foreground">{selMeta.name}</span>

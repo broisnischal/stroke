@@ -4,6 +4,19 @@ All notable changes to Stroke are listed here, newest first.
 
 ---
 
+## [1.16.0] - 2026-07-27
+
+### Improvements
+
+#### Design
+- Unified every text input, search box, and textarea onto one shape — `rounded-lg` corners with a consistent 2px border — so fields no longer vary between screens. Applied at the shared `Input`/`Textarea`/`InputGroup` primitives and across ~30 raw inputs in dialogs, pages, and panels. Seamless inline editors (grid cells, borderless search) are intentionally left untouched.
+- Normalized card and panel corner radii to the design-system scale: content cards use `rounded-lg`, floating panels use `rounded-[10px]` (Instance Insights, Backup, Dashboard, ERD detail panel, connection pickers, confirm dialogs).
+- Right-click cell menu: sub-menu rows (Transform, Insert, Copy row as) now match the size of their sibling rows instead of rendering a step larger.
+- Wider table search field with a clearer resting border, and the six “Export as …” actions in the table’s more-actions menu are now grouped under a single **Export** submenu.
+
+### Internal
+- Repaired the unit-test harness (the `$lib` alias was missing from the vitest config, so no tests could run) and added `npm test`. Expanded coverage to the table-query filter/sort/search builder across engines, pagination helpers, response mapping, tab/SQL-format helpers, and the oversized-cell capping guard on the Rust side.
+
 ## [1.15.0] - 2026-07-23
 
 ### Improvements

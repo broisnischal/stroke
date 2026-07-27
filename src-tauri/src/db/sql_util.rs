@@ -131,4 +131,47 @@ mod tests {
         assert_eq!(esc_single_quote("O'Brien"), "O''Brien");
         assert_eq!(esc_backslash_quote("a'b\\c"), "a\\'b\\\\c");
     }
+
+    #[test]
+    fn small_values_pass_through_uncapped() {
+        let s = serde_json::json!("hello");
+        assert_eq!(cap_json_value("text", s.clone()), s);
+        let n = serde_json::json!(42);
+        assert_eq!(cap_json_value("int4", n.clone()), n);
+        let small_obj = serde_json::json!({ "a": 1, "b": [1, 2, 3] });
+        assert_eq!(cap_json_value("jsonb", small_obj.clone()), small_obj);
+    }
+
+    #[test]
+    fn oversized_string_collapses_to_sentinel() {
+        let big = "a".repeat(CELL_VALUE_CAP + 1_000);
+        let capped = cap_json_value("text", serde_json::Value::String(big.clone()));
+        assert_eq!(capped["__strokeOversize"], serde_json::json!(true));
+        assert_eq!(capped["dataType"], serde_json::json!("text"));
+        assert_eq!(capped["bytes"], serde_json::json!(big.len()));
+        // Preview is truncated to the preview budget, not the whole payload.
+        assert_eq!(
+            capped["preview"].as_str().unwrap().len(),
+            CELL_PREVIEW_BYTES
+        );
+    }
+
+    #[test]
+    fn oversized_container_collapses_to_sentinel() {
+        let arr = serde_json::Value::Array(
+            (0..100_000).map(|i| serde_json::json!(i)).collect(),
+        );
+        let capped = cap_json_value("jsonb", arr);
+        assert_eq!(capped["__strokeOversize"], serde_json::json!(true));
+        assert!(capped["bytes"].as_u64().unwrap() as usize > CELL_VALUE_CAP);
+    }
+
+    #[test]
+    fn oversize_cell_reports_total_bytes_and_bounded_preview() {
+        let body = vec![b'x'; CELL_PREVIEW_BYTES * 2];
+        let cell = oversize_cell("bytea", 9_999_999, &body);
+        assert_eq!(cell["bytes"], serde_json::json!(9_999_999));
+        assert_eq!(cell["dataType"], serde_json::json!("bytea"));
+        assert_eq!(cell["preview"].as_str().unwrap().len(), CELL_PREVIEW_BYTES);
+    }
 }
