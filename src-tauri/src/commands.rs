@@ -119,6 +119,47 @@ pub fn toggle_devtools(window: tauri::WebviewWindow) {
     let _ = window;
 }
 
+/// Open the window "maximized" to the usable work area.
+///
+/// On Windows & macOS the native `maximize()` already respects the work area
+/// (taskbar / dock / menu bar) AND registers a real maximized *state* that the OS
+/// preserves across minimize → restore. Using it there means the window keeps its
+/// size and position through a minimize/maximize cycle instead of drifting.
+///
+/// Only Linux WMs mis-handle maximize for frameless (`decorations = false`)
+/// windows — an undecorated maximize can spill under the panel — so there we size
+/// and position to the monitor's `work_area()` explicitly instead.
+#[tauri::command]
+pub fn fit_to_work_area(window: tauri::WebviewWindow) {
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = window.maximize();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let monitor = window
+            .current_monitor()
+            .ok()
+            .flatten()
+            .or_else(|| window.primary_monitor().ok().flatten())
+            .or_else(|| window.available_monitors().ok().and_then(|m| m.into_iter().next()));
+        let Some(m) = monitor else {
+            let _ = window.maximize();
+            return;
+        };
+        let wa = m.work_area();
+        let _ = window.unmaximize();
+        let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+            x: wa.position.x,
+            y: wa.position.y,
+        }));
+        let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+            width: wa.size.width,
+            height: wa.size.height,
+        }));
+    }
+}
+
 /// Re-center the window at a sane size on the current (or primary) monitor.
 /// The manual escape hatch when the window is stranded off-screen — e.g. after
 /// an external monitor it was placed on gets disconnected.
