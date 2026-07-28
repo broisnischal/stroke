@@ -8,7 +8,7 @@
   let { content = '', class: className = '', debounceMs = 0, streaming = false } = $props()
 
   // ── Custom marked renderer ────────────────────────────────────────────────
-  // Images are NEVER rendered as <img> tags — they cause massive performance
+  // Images are NEVER rendered as <img> tags - they cause massive performance
   // problems when DB results contain image URL columns (dozens of network
   // requests fire simultaneously). Show a compact link chip instead.
   const renderer = new marked.Renderer()
@@ -101,9 +101,9 @@
 
   // Streaming: fast synchronous parse, coalesced to one per animation frame.
   // Chunks arrive faster than frames, and each parse covers the FULL message
-  // so far — parsing per chunk is quadratic work for output nobody can see.
+  // so far - parsing per chunk is quadratic work for output nobody can see.
   // The rAF callback reads `content` at fire time, so it always renders the
-  // latest accumulated text. No syntax highlighting — when streaming ends,
+  // latest accumulated text. No syntax highlighting - when streaming ends,
   // the item is replaced with a fully highlighted assistant item anyway.
   let _streamRaf = 0
   $effect(() => {

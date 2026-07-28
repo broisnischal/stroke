@@ -173,7 +173,7 @@ async function loadKeyForProfile(profileId) {
   try {
     return await invoke('ai_load_key', { profileId })
   } catch {
-    // Tauri not available (dev mode without backend) — fall back to legacy localStorage
+    // Tauri not available (dev mode without backend) - fall back to legacy localStorage
     try {
       const legacy = localStorage.getItem(LEGACY_KEY)
       if (legacy) return JSON.parse(legacy).apiKey ?? ''

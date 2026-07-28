@@ -60,7 +60,7 @@ export function sqlLiteral(value, dialect) {
   if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'NULL'
   if (typeof value === 'bigint') return String(value)
   if (typeof value === 'boolean') {
-    // SQLite/D1/libsql/MySQL have no boolean literal — they store 1/0.
+    // SQLite/D1/libsql/MySQL have no boolean literal - they store 1/0.
     if (dialect === 'sqlite' || dialect === 'd1' || dialect === 'libsql' || dialect === 'mysql') {
       return value ? '1' : '0'
     }
@@ -102,7 +102,7 @@ function pkWhere(row, ctx, idx) {
 }
 
 /**
- * One UPDATE statement per staged cell edit — matching the backend, which
+ * One UPDATE statement per staged cell edit - matching the backend, which
  * applies edits one cell at a time.
  * @param {{ rowIdx: number, colIdx: number, value: unknown }[]} edits
  * @param {unknown[][]} rows

@@ -1,8 +1,8 @@
-// Better Time — humanized, timezone-aware rendering for date & timestamp columns.
+// Better Time - humanized, timezone-aware rendering for date & timestamp columns.
 //
 // Replaces raw DB timestamps ("2024-01-15 10:30:00+00") with readable, locale +
 // timezone-aware text, with an optional relative mode ("3 hours ago"). The raw
-// value is preserved in the cell tooltip. No moment.js needed — built on the
+// value is preserved in the cell tooltip. No moment.js needed - built on the
 // platform Intl APIs.
 import { isDateTimeType, isDateOnlyType } from '$lib/cell-value.js'
 
@@ -116,7 +116,7 @@ export const betterTime = {
         year: 'numeric', month: 'short', day: 'numeric',
         hour: '2-digit', minute: '2-digit',
       }).format(d)
-      return { display: relative(d), title: `${abs} — ${String(value)}` }
+      return { display: relative(d), title: `${abs}, ${String(value)}` }
     }
 
     const display = dtf(tz, {

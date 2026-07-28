@@ -9,8 +9,8 @@
  *
  * API surface mirrors the parts of svelte-sonner the app uses:
  *   toast.success/error/info/warning/message(title, { description?, duration? })
- *   toast.dismiss(id?)        — dismiss one, or all when id is omitted
- *   toast.getActiveToasts()   — current toasts (reactive read)
+ *   toast.dismiss(id?)        - dismiss one, or all when id is omitted
+ *   toast.getActiveToasts()   - current toasts (reactive read)
  */
 
 let counter = 0

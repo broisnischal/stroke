@@ -77,7 +77,7 @@ function mergeDirective(out, d) {
 
 /**
  * Resolve a render directive for a scalar cell via enabled formatters + linkifiers.
- * Hot path: called per visible cell on every canvas repaint — allocation only
+ * Hot path: called per visible cell on every canvas repaint - allocation only
  * happens for cells that actually match an enabled extension.
  * @param {unknown} value
  * @param {string} type
@@ -124,7 +124,7 @@ export function statsNeeded() {
 /**
  * Whether any formatter or linkifier is enabled. Lets the renderer skip the
  * per-cell formatCellValue() loop entirely in the common case (no display
- * extensions on) — zero added cost on the scroll hot path.
+ * extensions on) - zero added cost on the scroll hot path.
  */
 export function anyDisplayExtEnabled() {
   for (const ext of FORMATTERS) if (isPluginEnabled(ext.id)) return true
@@ -184,7 +184,7 @@ export function enabledGenerators() {
 
 /**
  * Generators from enabled generator extensions, grouped into sections by each
- * generator's `group` (falling back to the extension name) — so the menu can
+ * generator's `group` (falling back to the extension name) - so the menu can
  * render "IDs", "Time", "Numbers", … as separate labelled sections.
  * @returns {{ group: string, items: { id: string, label: string, hint?: string, generate: () => string }[] }[]}
  */

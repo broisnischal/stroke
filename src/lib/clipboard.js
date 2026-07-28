@@ -1,7 +1,7 @@
 // Route clipboard access through Tauri's native clipboard plugin.
 //
 // In the macOS WKWebView, `navigator.clipboard.writeText` is frequently denied
-// with `NotAllowedError` — including Monaco's *internal* copy — because the web
+// with `NotAllowedError` - including Monaco's *internal* copy - because the web
 // Clipboard API needs a trusted gesture + focus the embedded webview doesn't
 // always grant. The Tauri plugin sets the OS clipboard directly from Rust, with
 // no such restriction, so we transparently patch `navigator.clipboard` to use it.
@@ -17,7 +17,7 @@ export async function installClipboardBridge() {
   const clip = /** @type {any} */ (navigator).clipboard
   if (!clip) return
 
-  // Lazily load the Tauri plugin — absent in browser dev, where the native API
+  // Lazily load the Tauri plugin - absent in browser dev, where the native API
   // works fine, so we leave the clipboard untouched there.
   let tauriWrite = null
   let tauriRead = null
@@ -50,11 +50,11 @@ export async function installClipboardBridge() {
       }
     }
   } catch {
-    // `writeText` not reassignable in this engine — nothing more we can do.
+    // `writeText` not reassignable in this engine - nothing more we can do.
   }
 }
 
-/** Synchronous hidden-textarea copy — the classic fallback, stays in-gesture. */
+/** Synchronous hidden-textarea copy - the classic fallback, stays in-gesture. */
 function execCommandCopy(/** @type {string} */ text) {
   try {
     const ta = document.createElement('textarea')

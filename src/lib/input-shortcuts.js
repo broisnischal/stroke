@@ -17,7 +17,7 @@
  *
  * Why this module exists:
  *  1. The Tauri webview does not give Svelte-bound inputs a usable native undo
- *     stack — reassigning `value` from a binding clobbers it — so undo/redo is
+ *     stack - reassigning `value` from a binding clobbers it - so undo/redo is
  *     backed by a per-element stack here.
  *  2. Word/line deletion is inconsistent across the platform webviews, so it is
  *     implemented directly.
@@ -27,7 +27,7 @@
  *     editing chords, so the hotkey layer can never steal them from a focused
  *     field. Non-editing chords (Cmd+K, Cmd+F, …) are untouched and still fire.
  *
- * Monaco/CodeMirror editors are skipped — they ship their own editing model.
+ * Monaco/CodeMirror editors are skipped - they ship their own editing model.
  * contenteditable is shielded from the hotkey layer but left to native editing.
  */
 
@@ -174,7 +174,7 @@ function onKeyDown(e) {
   if (!kind) return
   const key = e.key.toLowerCase()
 
-  // Undo / redo — Ctrl/Cmd without Alt.
+  // Undo / redo - Ctrl/Cmd without Alt.
   if ((e.ctrlKey || e.metaKey) && !e.altKey && (key === 'z' || key === 'y')) {
     e.stopPropagation() // shield from the bubble-phase global hotkey layer
     if (kind === 'ce') return // let native contenteditable undo run

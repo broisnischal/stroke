@@ -25,13 +25,13 @@
     onmodk = undefined,
     onmodenter = undefined,
     /**
-     * Run a single statement (Ctrl/Cmd+R) — receives the selected text, or the
+     * Run a single statement (Ctrl/Cmd+R) - receives the selected text, or the
      * statement under the cursor when there is no selection.
      * @type {((sql: string) => void) | undefined}
      */
     onrunstatement = undefined,
     onmods = undefined,
-    // Global app shortcuts — registered inside Monaco so they work when editor is focused
+    // Global app shortcuts - registered inside Monaco so they work when editor is focused
     onmodi = undefined,
     onmodb = undefined,
     onmodw = undefined,
@@ -52,7 +52,7 @@
   let container = $state(null)
   /** @type {monaco.editor.IStandaloneCodeEditor | null} */
   let editor = null
-  /** `editor` is a plain (non-reactive) let, so effects can't see it come alive —
+  /** `editor` is a plain (non-reactive) let, so effects can't see it come alive -
    *  this flag flips once the editor is created so the Vim effect can attach. */
   let editorReady = $state(false)
   /** Host element for the monaco-vim mode status strip. */
@@ -130,7 +130,7 @@
     ed.addCommand(CtrlCmd | KeyK,     () => run(onmodk))
     ed.addCommand(CtrlCmd | KeyS,     () => run(onmods))
 
-    // Ctrl/Cmd+L — select the statement under the cursor
+    // Ctrl/Cmd+L - select the statement under the cursor
     ed.addCommand(CtrlCmd | KeyL, () => {
       const stmt = statementAtCursor(ed)
       const model = ed.getModel()
@@ -143,7 +143,7 @@
       )
     })
 
-    // Ctrl/Cmd+R — run the selection if any, else the statement under the cursor
+    // Ctrl/Cmd+R - run the selection if any, else the statement under the cursor
     ed.addCommand(CtrlCmd | KeyR, () => {
       if (!onrunstatement) return
       const model = ed.getModel()
@@ -161,7 +161,7 @@
       },
     })
 
-    // Global app shortcuts — work even when Monaco has focus
+    // Global app shortcuts - work even when Monaco has focus
     ed.addCommand(CtrlCmd | KeyI,           () => run(onmodi))
     ed.addCommand(CtrlCmd | KeyB,           () => run(onmodb))
     ed.addCommand(CtrlCmd | KeyW,           () => run(onmodw))
@@ -194,7 +194,7 @@
       value,
       language: 'sql',
       theme: monacoThemeId(currentTheme()),
-      // automaticLayout:false — that option runs a 100ms setInterval per editor
+      // automaticLayout:false - that option runs a 100ms setInterval per editor
       // that never stops, even while this tab is hidden (tabs are kept alive, not
       // unmounted). A ResizeObserver fires only on actual size changes. See below.
       automaticLayout: false,
@@ -233,7 +233,7 @@
       suggestOnTriggerCharacters: true,
       tabCompletion: 'on',
       wordBasedSuggestions: 'off',
-      // 'smart' — Enter inserts a newline unless the suggestion actually
+      // 'smart' - Enter inserts a newline unless the suggestion actually
       // changes the typed text; 'on' stole Enter constantly while writing SQL.
       acceptSuggestionOnEnter: 'smart',
       snippetSuggestions: 'none',
@@ -256,7 +256,7 @@
       parameterHints: { enabled: true, cycle: true },
     })
 
-    // Bind this model to this component's (live) schema hints — the completion
+    // Bind this model to this component's (live) schema hints - the completion
     // provider is global, so hints must be looked up per model, not captured
     // from whichever editor happened to register first.
     setSqlHintsForModel(editor.getModel(), () => schemaHints)
@@ -264,7 +264,7 @@
     registerAppShortcuts(editor)
     editorReady = true
 
-    // Subtle gutter bar marking the statement the cursor is in — only shown
+    // Subtle gutter bar marking the statement the cursor is in - only shown
     // when the buffer holds more than one statement, so single queries stay clean.
     const stmtDecorations = editor.createDecorationsCollection()
     function refreshActiveStatement() {
@@ -345,7 +345,7 @@
       if (isOtherInput) return
       e.preventDefault()
       e.stopPropagation()
-      onmodenter?.()  // call directly — `run` is scoped to registerAppShortcuts, not here
+      onmodenter?.()  // call directly - `run` is scoped to registerAppShortcuts, not here
     }
     document.addEventListener('keydown', docRunHandler, { capture: true, passive: false })
 
@@ -370,14 +370,14 @@
         onchange?.(next)
       }
       refreshActiveStatement()
-      // Executed-✓ marks describe a previous buffer state — drop them on edit
+      // Executed-✓ marks describe a previous buffer state - drop them on edit
       execDecorations?.clear()
       if (lintTimer) clearTimeout(lintTimer)
       lintTimer = setTimeout(runLint, 350)
     })
 
     // Theme is re-applied by the single shared <html> observer installed in
-    // configureMonacoWorkers() — monaco.editor.setTheme is global, so one observer
+    // configureMonacoWorkers() - monaco.editor.setTheme is global, so one observer
     // re-themes every live editor. No per-instance observer here (they accumulated).
 
     return () => {
@@ -426,7 +426,7 @@
     editor.updateOptions({ fontSize, lineHeight })
   })
 
-  // Experimental Vim mode — attach monaco-vim (lazy-loaded) while enabled, and
+  // Experimental Vim mode - attach monaco-vim (lazy-loaded) while enabled, and
   // mirror the editor's mode into the shared status-bar indicator.
   $effect(() => {
     const on = $appVimMode
@@ -521,7 +521,7 @@
 
   /* ── Suggestion widget ──────────────────────────────────────────────── */
   /* fixedOverflowWidgets:true moves these to <body>, so no host ancestor.
-     Widgets lose the editor's inherited font — set it explicitly. */
+     Widgets lose the editor's inherited font, set it explicitly. */
 
   :global(.suggest-widget) {
     font-family: var(--editor-font-family) !important;

@@ -42,7 +42,7 @@
     onopensecurity = () => {},
     hasSchemaExplorer = true,
     hasSecurity = true,
-    /** Redis (key-value) connection — hides SQL-only pages, shows the keyspace. */
+    /** Redis (key-value) connection - hides SQL-only pages, shows the keyspace. */
     isRedis = false,
     onopenredis = () => {},
     onopenlogs = () => {},
@@ -90,7 +90,7 @@
     page = target
   }
 
-  // Single source of truth for page destinations — rendered both in the root
+  // Single source of truth for page destinations - rendered both in the root
   // "Views" group and in the dedicated "Go to page" navigator (Ctrl/⌘+P). Add a
   // page once here and it shows up in both. `keys` is an optional shortcut hint.
   const pageItems = $derived([
@@ -133,7 +133,7 @@
   let askTurns = $state(/** @type {AskTurn[]} */ ([]))
   let askStreaming = $state(false)
   let askError = $state('')
-  /** @type {any[]} — API messages for the conversation (system prompt added per turn). */
+  /** @type {any[]} - API messages for the conversation (system prompt added per turn). */
   let askApi = []
   /** @type {AbortController | null} */
   let askController = null
@@ -142,7 +142,7 @@
 
   const QUICK_ASK_SYS =
     '\n\nYou are answering inside a command-palette quick-ask. Be concise and direct. ' +
-    'Use the execute_sql tool to actually run read-only queries and answer with real data — do NOT just say you will query. ' +
+    'Use the execute_sql tool to actually run read-only queries and answer with real data, do NOT just say you will query. ' +
     'Destructive statements (INSERT/UPDATE/DELETE/DROP/ALTER/TRUNCATE) are blocked here; if one is needed, put it in a ```sql block and tell the user to run it in the editor. ' +
     'Keep answers short and put any ready-to-run query in a ```sql block.'
 
@@ -358,7 +358,7 @@
     return () => cancelAnimationFrame(id)
   })
 
-  // Derived table groups — used in both the root page and the dedicated tables page
+  // Derived table groups - used in both the root page and the dedicated tables page
   const regularTables = $derived(tables.filter((t) => !t.tableKind || t.tableKind === 'table' || t.tableKind === 'foreign_table'))
   const viewTables    = $derived(tables.filter((t) => t.tableKind === 'view'))
   const matViewTables = $derived(tables.filter((t) => t.tableKind === 'materialized_view'))
@@ -377,7 +377,7 @@
   // Precompute per table ONCE per table-list change (not per keystroke): lowercased
   // name, separator-stripped form, word segments, and word initials (for acronym
   // matches like "pv" → product_visitor). The keystroke path then only runs the
-  // integer scorer, never re-lowercasing/splitting N names — so it stays instant
+  // integer scorer, never re-lowercasing/splitting N names - so it stays instant
   // (sub-millisecond) for thousands of tables WITHOUT a debounce.
   /** @param {{ name: string }} t */
   const prep = (t) => {
@@ -781,7 +781,7 @@
             </Command.Group>
           {/if}
 
-          <!-- ── Switch database — other saved connections, right at root ── -->
+          <!-- ── Switch database, other saved connections, right at root ── -->
           {@const otherConns = savedConnections.filter((c) => c.id !== activeConnectionId)}
           {#if otherConns.length > 0}
             <Command.Group heading="Switch database">
@@ -844,7 +844,7 @@
               {/each}
               {#if tablesPageRegular.total > tablesPageRegular.items.length}
                 <div class="px-2.5 py-1.5 text-ui-2xs text-muted-foreground/40">
-                  Showing {tablesPageRegular.items.length} of {tablesPageRegular.total} — keep typing to narrow.
+                  Showing {tablesPageRegular.items.length} of {tablesPageRegular.total}, keep typing to narrow.
                 </div>
               {/if}
             </Command.Group>
@@ -859,7 +859,7 @@
               {/each}
               {#if tablesPageViews.total > tablesPageViews.items.length}
                 <div class="px-2.5 py-1.5 text-ui-2xs text-muted-foreground/40">
-                  Showing {tablesPageViews.items.length} of {tablesPageViews.total} — keep typing to narrow.
+                  Showing {tablesPageViews.items.length} of {tablesPageViews.total}, keep typing to narrow.
                 </div>
               {/if}
             </Command.Group>
@@ -878,7 +878,7 @@
               {/each}
               {#if tablesPageMatViews.total > tablesPageMatViews.items.length}
                 <div class="px-2.5 py-1.5 text-ui-2xs text-muted-foreground/40">
-                  Showing {tablesPageMatViews.items.length} of {tablesPageMatViews.total} — keep typing to narrow.
+                  Showing {tablesPageMatViews.items.length} of {tablesPageMatViews.total}, keep typing to narrow.
                 </div>
               {/if}
             </Command.Group>
@@ -937,7 +937,7 @@
           </Command.Group>
 
         {:else if page === 'pages'}
-          <!-- Go to page — VSCode-style focused navigator (Ctrl/⌘+P) -->
+          <!-- Go to page, VSCode-style focused navigator (Ctrl/⌘+P) -->
           <Command.Group heading="Go to page">
             {#each pageItems as it (it.label)}
               {@render pageRow(it)}

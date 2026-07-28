@@ -1,4 +1,4 @@
-// Experimental app-wide Vim mode — shared modal state.
+// Experimental app-wide Vim mode - shared modal state.
 //
 // This is intentionally decentralized: each surface (the data grid, the Monaco
 // editors, the global/tab layer) interprets Vim keys for its own context and
@@ -36,7 +36,7 @@ export function isTextEntryTarget(el) {
   const tag = el.tagName
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true
   if (el instanceof HTMLElement && el.isContentEditable) return true
-  // Monaco owns its own vim modes — never intercept its keys at the app layer.
+  // Monaco owns its own vim modes - never intercept its keys at the app layer.
   if (el.closest('.monaco-editor')) return true
   return false
 }

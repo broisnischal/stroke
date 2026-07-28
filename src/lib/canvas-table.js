@@ -16,12 +16,12 @@
 // Canvas can't use CSS classes, so we resolve the computed colour of each token
 // once per draw via a hidden probe element. Values are cached by expression for
 // the lifetime of the reader (call `createColorReader` again after a theme flip
-// — the component recreates it on a theme-change tick).
+// - the component recreates it on a theme-change tick).
 //
 // IMPORTANT: each colour is resolved on a FRESH element rather than by mutating
 // one shared probe's `style.color`. macOS WKWebView (Tauri's engine) returns a
 // STALE `getComputedStyle(el).color` when `el.style.color` is reassigned to a
-// different `var(--…)` between synchronous reads — every lookup after the first
+// different `var(--…)` between synchronous reads - every lookup after the first
 // froze at the first colour's value, so the grid painted every token the same
 // colour (text/grid lines vanished, only rgba-literal badges survived). Reading
 // each token off a throwaway node sidesteps the stale-recompute bug entirely.
@@ -46,7 +46,7 @@ export function createColorReader(probe) {
   return (/** @type {string} */ expr) => {
     const hit = cache.get(expr);
     if (hit !== undefined) return hit;
-    // Append the throwaway node to a GUARANTEED-connected host — a detached node
+    // Append the throwaway node to a GUARANTEED-connected host - a detached node
     // yields an empty computed colour in WebKit, which would poison the fill.
     // Theme tokens live on <html>, so <body> inherits them just as the probe does.
     const host = probe.isConnected ? (probe.parentNode ?? document.body) : document.body;
@@ -78,11 +78,11 @@ export function createColorReader(probe) {
   };
 }
 
-// Memoize results — (colour, alpha) combos are few and stable, but this runs in
+// Memoize results - (colour, alpha) combos are few and stable, but this runs in
 // the per-frame draw loop, so caching avoids repeated regex parsing on scroll.
 /** @type {Map<string, string>} */
 // color -> (alpha -> rgba string). Nested so the cache hit path (the common
-// case, called several times per visible cell every frame) does no allocation —
+// case, called several times per visible cell every frame) does no allocation -
 // the old `color + "@" + a` key minted a throwaway string on every call, which
 // was hundreds of thousands of transient strings per second during scroll.
 const _alphaCache = new Map();
@@ -157,7 +157,7 @@ const ICON_PATHS = {
   "arrow-up": ["M12 19V5", "m5 12 7-7 7 7"],
   "arrow-down": ["M12 5v14", "m19 12-7 7-7-7"],
   "arrow-up-down": ["m21 16-4 4-4-4", "M17 20V4", "m3 8 4-4 4 4", "M7 4v16"],
-  // Primary-key (key-round) and foreign-key (link) column-header glyphs — exact
+  // Primary-key (key-round) and foreign-key (link) column-header glyphs - exact
   // lucide path data so they match the rest of the app's icon set.
   "key-round": [
     "M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 0 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 0 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z",
@@ -280,7 +280,7 @@ export function drawBadge(ctx, x, y, size, spec) {
   ctx.restore();
 }
 
-/** Filled triangle pointing up/down — the sort indicator + chevrons. */
+/** Filled triangle pointing up/down - the sort indicator + chevrons. */
 export function drawTriangle(ctx, cx, cy, r, dir, color) {
   ctx.save();
   ctx.fillStyle = color;
@@ -388,8 +388,8 @@ export function resizeColAtX(x, geom, scrollLeft, slop = 5, frozenLeft = geom.gu
 /**
  * @typedef {{ rowHeight: number, idxs: Int32Array, prefix: Float64Array }} RowTops
  * Sparse row-offset model. Only the (usually few) expanded rows are stored:
- *   `idxs`   — expanded row indices, ascending
- *   `prefix` — prefix sums of their expand heights (prefix[k] = Σ heights before k)
+ *   `idxs`   - expanded row indices, ascending
+ *   `prefix` - prefix sums of their expand heights (prefix[k] = Σ heights before k)
  * so nothing here scales with the total row count. `null` means no row is
  * expanded, and every row top is exactly `idx * rowHeight`.
  *

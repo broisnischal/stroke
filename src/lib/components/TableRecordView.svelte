@@ -19,7 +19,7 @@
   } from '$lib/cell-value.js'
 
   /**
-   * Record mode for the data table — shows one row at a time as a vertical
+   * Record mode for the data table - shows one row at a time as a vertical
    * field list (DBeaver-style "record view") with prev/next navigation and
    * the same inline field editing as the row inspector panel.
    */
@@ -48,7 +48,7 @@
     readonly = false,
   } = $props()
 
-  // svelte-ignore state_referenced_locally — the initial index deliberately
+  // svelte-ignore state_referenced_locally - the initial index deliberately
   // captures the mount-time rows; later row changes are handled by the effect below.
   let idx = $state(Math.min(Math.max(initialIndex ?? 0, 0), Math.max(rows.length - 1, 0)))
   let fieldSearch = $state('')
@@ -389,7 +389,7 @@
                 <span class="flex items-center gap-1 truncate font-mono text-ui-xs text-foreground/85">
                   <span class="truncate">{field.name}</span>
                   {#if field.isPk}
-                    <span title="Primary key — cannot be changed" class="inline-flex shrink-0 items-center gap-0.5 font-mono text-ui-3xs text-amber-500/70">
+                    <span title="Primary key, cannot be changed" class="inline-flex shrink-0 items-center gap-0.5 font-mono text-ui-3xs text-amber-500/70">
                       <Icon name="key-round" class="size-2.5" />
                     </span>
                   {/if}

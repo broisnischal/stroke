@@ -34,7 +34,7 @@ export async function refreshLicenseStatus() {
     licenseStatus.set(/** @type {LicenseStatus} */ (status))
     return status
   } catch (e) {
-    // Keep the last known status — flipping to Error here would drop Pro
+    // Keep the last known status - flipping to Error here would drop Pro
     // access (trial or paid) over a transient IPC failure.
     console.error('[license] status check failed:', e)
     return null
@@ -76,7 +76,7 @@ export async function runLicenseCheck() {
     const status = await invoke('run_license_check')
     licenseStatus.set(/** @type {LicenseStatus} */ (status))
   } catch {
-    // Non-critical — ignore errors, license state is already loaded
+    // Non-critical - ignore errors, license state is already loaded
   }
 }
 
@@ -97,7 +97,7 @@ const PRO_FEATURES = new Set([
  *
  * Fails OPEN: only a definitive `TrialExpired` verdict locks Pro features.
  * `null` (status still loading) and `Error` (data dir inaccessible, transient
- * check failure) must never lock out an active-trial or paid user — an
+ * check failure) must never lock out an active-trial or paid user - an
  * expired trial is the only state where we positively know there's no Pro.
  */
 export const hasPro = derived(

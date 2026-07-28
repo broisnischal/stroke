@@ -18,7 +18,7 @@
 
   const isSqlite = $derived(result?.driver === 'sqlite')
 
-  // NODE_H is used only as a midpoint estimate for arrow anchors — cards auto-size.
+  // NODE_H is used only as a midpoint estimate for arrow anchors - cards auto-size.
   // Derived (not a plain const) so it tracks the driver instead of freezing on the
   // initial value of `isSqlite`.
   const NODE_W = 216
@@ -201,7 +201,7 @@
     >Expand all</button>
   </div>
 
-  <!-- Pannable canvas — explicit top/left so transform is relative to container origin -->
+  <!-- Pannable canvas, explicit top/left so transform is relative to container origin -->
   <div
     role="img"
     aria-label="Query execution plan diagram"
@@ -227,7 +227,7 @@
       {/if}
     </svg>
 
-    <!-- Plan nodes — auto-height (no fixed height constraint) -->
+    <!-- Plan nodes, auto-height (no fixed height constraint) -->
     {#each flat.nodes as n}
       {@const rel = nodeRelStr(n.node)}
       {@const type = (n.node['Node Type'] ?? 'Unknown').toString()}

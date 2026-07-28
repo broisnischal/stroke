@@ -1,5 +1,5 @@
 /**
- * ORM query builder utilities — Drizzle and Prisma query simulation + SQL conversion.
+ * ORM query builder utilities - Drizzle and Prisma query simulation + SQL conversion.
  */
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -14,9 +14,9 @@ function literalSql(v) {
   if (typeof v === 'boolean') return v ? 'true' : 'false'
   if (typeof v === 'number') return String(v)
   if (v && typeof v === 'object') {
-    // SQL expression (sql`...`, count(), eq(), …) — embed as-is
+    // SQL expression (sql`...`, count(), eq(), …) - embed as-is
     if ('__sql' in /** @type {any} */ (v)) return /** @type {any} */ (v).__sql
-    // Column reference — use qualified name for column-to-column comparisons
+    // Column reference - use qualified name for column-to-column comparisons
     if ('col' in /** @type {any} */ (v)) {
       const r = /** @type {any} */ (v)
       return r.table ? `${r.table}.${r.col}` : r.col
@@ -274,7 +274,7 @@ function buildDrizzleContext(tableNames) {
     not:        (cond) => ({ __sql: `NOT (${cond?.__sql ?? cond})` }),
     asc:        (col) => ({ __orderBy: { col: colExpr(col), dir: 'ASC' } }),
     desc:       (col) => ({ __orderBy: { col: colExpr(col), dir: 'DESC' } }),
-    // Aggregate functions — usable in db.select({ alias: count() })
+    // Aggregate functions - usable in db.select({ alias: count() })
     count:      (col) => ({ __sql: col ? `COUNT(${colExpr(col)})` : 'COUNT(*)' }),
     sum:        (col) => ({ __sql: `SUM(${colExpr(col)})` }),
     avg:        (col) => ({ __sql: `AVG(${colExpr(col)})` }),

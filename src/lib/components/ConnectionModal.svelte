@@ -73,9 +73,9 @@
     {
       label: 'Hosting providers',
       drivers: [
-        { id: 'neon',        label: 'Neon',            desc: 'Serverless Postgres — sign in & pick a database' },
-        { id: 'supabase',    label: 'Supabase',        desc: 'Postgres platform — sign in & pick a project' },
-        { id: 'planetscale', label: 'PlanetScale',     desc: 'Serverless MySQL — sign in & pick a database' },
+        { id: 'neon',        label: 'Neon',            desc: 'Serverless Postgres, sign in & pick a database' },
+        { id: 'supabase',    label: 'Supabase',        desc: 'Postgres platform, sign in & pick a project' },
+        { id: 'planetscale', label: 'PlanetScale',     desc: 'Serverless MySQL, sign in & pick a database' },
         { id: 'prisma',      label: 'Prisma Postgres', desc: 'Paste a Prisma Postgres connection string' },
       ],
     },
@@ -100,10 +100,10 @@
   // out of the manual Type dropdown.
   const PROVIDER_IDS = ['neon', 'supabase', 'planetscale', 'prisma']
   // Cloudflare D1 signs in like a hosting provider (OAuth), so it belongs on the
-  // Provider tab too — but it drives the CloudflareLogin flow, not ProviderConnect.
+  // Provider tab too - but it drives the CloudflareLogin flow, not ProviderConnect.
   const PROVIDER_CARDS = [
     ...PROVIDERS,
-    { id: 'd1', name: 'Cloudflare D1', engine: 'sqlite', blurb: 'Edge SQLite — sign in with Cloudflare' },
+    { id: 'd1', name: 'Cloudflare D1', engine: 'sqlite', blurb: 'Edge SQLite, sign in with Cloudflare' },
   ]
   // Every sign-in provider (incl. D1) is reached from the Provider tab, so keep
   // them all out of the manual Type dropdown.
@@ -163,7 +163,7 @@
   let driverMenuOpen = $state(false)
   // Top-level entry mode: connect manually vs sign in with a hosting provider.
   let entryMode     = $state(/** @type {'manual'|'provider'} */ ('manual'))
-  // Advanced (SSL / SSH / read-only) disclosure — collapsed by default.
+  // Advanced (SSL / SSH / read-only) disclosure - collapsed by default.
   let advancedOpen  = $state(false)
   let name        = $state('')
   let host        = $state('127.0.0.1')
@@ -184,7 +184,7 @@
   let connectionUri = $state('')
   let uriHint       = $state('')
   // Manual-form input mode for URI-capable engines: paste a connection string
-  // vs. fill individual fields. UI-only — not tracked as a dirty change.
+  // vs. fill individual fields. UI-only - not tracked as a dirty change.
   let fieldMode     = $state(/** @type {'string'|'fields'} */ ('fields'))
 
   // ── Connection options ───────────────────────────────────────────────────────
@@ -247,7 +247,7 @@
     if (mode === 'manual' && isProviderTab) switchDriver('postgres')
   }
 
-  /** Select a top connection tab — Manual, or a specific sign-in provider. */
+  /** Select a top connection tab - Manual, or a specific sign-in provider. */
   function selectTab(id) {
     if (DISABLED_TABS.has(id)) return
     if (id === 'manual') { setEntryMode('manual'); return }
@@ -339,20 +339,20 @@
 
   /**
    * A provider adapter resolved a database (with a password if it needed one):
-   * build a SavedConnection and connect immediately via connectWith — no detour
+   * build a SavedConnection and connect immediately via connectWith - no detour
    * through the manual form, so picking a project just connects. Runs the same
    * connect/save/close path as any other connection.
    * @param {import('$lib/providers.js').ProviderConnection} conn
    */
   async function connectProviderConnection(conn) {
     error = ''
-    // dbType is the provider id while the provider flow is showing — tag the
+    // dbType is the provider id while the provider flow is showing - tag the
     // connection with it so the status bar can offer switching to the account's
     // other databases later.
     const providerId = ['neon', 'supabase', 'planetscale', 'prisma'].includes(dbType) ? dbType : undefined
     const type = conn.db_type === 'mysql' ? 'mysql' : 'postgres'
     // Reuse an existing saved entry for this exact database (host + user) instead
-    // of piling up duplicates — connectWith upserts it, keeping the saved password.
+    // of piling up duplicates - connectWith upserts it, keeping the saved password.
     const existing = saved.find((s) => s.host === conn.host && s.user === conn.username && s.type === type)
     await connectWith({
       id: existing?.id ?? newConnectionId(),
@@ -381,7 +381,7 @@
     apiToken = info.token
     if (!name || name === 'Cloudflare D1') name = info.databaseName
     // Reuse an existing saved entry for this exact D1 database instead of piling
-    // up duplicates — connectWith upserts it.
+    // up duplicates - connectWith upserts it.
     const existing = saved.find((s) => s.type === 'd1' && s.databaseId === info.databaseId)
     await connectWith({
       id: existing?.id ?? newConnectionId(),
@@ -585,7 +585,7 @@
     return `${host || '—'}:${port || '—'}/${database || ''}`
   })
 
-  /** Attempt to close the dialog — guard against discarding unsaved edits. */
+  /** Attempt to close the dialog - guard against discarding unsaved edits. */
   function requestClose() {
     if (isBusy) return
     if (isDirty) { confirmDiscardOpen = true; return }
@@ -599,7 +599,7 @@
 
   /**
    * True when a pointer interaction landed on window chrome that must never
-   * dismiss the dialog — the titlebar / tab-bar drag region, the status bar, or
+   * dismiss the dialog - the titlebar / tab-bar drag region, the status bar, or
    * any studio region. Checks the event target AND the element under the pointer:
    * while a native window drag is starting, WebKit can report the document (not
    * the drag element) as the target, so the pointer coordinates are the reliable
@@ -611,8 +611,8 @@
   // The reliable signal: capture the REAL pointerdown on `window` (capture phase
   // fires before bits-ui's document-level dismiss listener). bits-ui hands
   // onInteractOutside a synthetic event whose `target`/`clientX` don't survive a
-  // native window drag — during a drag WebKit reports `document` as the target and
-  // drops the coordinates — so neither `e.target.closest` nor `elementFromPoint`
+  // native window drag - during a drag WebKit reports `document` as the target and
+  // drops the coordinates - so neither `e.target.closest` nor `elementFromPoint`
   // can see the titlebar. This tracker records whether the last pointerdown landed
   // on the titlebar/tab-bar chrome, which is what the drag/move/resize starts from.
   let _pointerInChrome = false
@@ -665,7 +665,7 @@
   }
 
   const lbl = 'mb-1 block text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground/50'
-  // Segmented pill switch (entry-mode + field-mode) — shared base for consistency.
+  // Segmented pill switch (entry-mode + field-mode) - shared base for consistency.
   const segBtn = 'inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-ui-xs font-medium transition-[color,background-color,box-shadow,transform] duration-150 ease-out active:scale-[0.97]'
   const segOn  = 'bg-muted/70 text-foreground shadow-sm'
   const segOff = 'text-muted-foreground/60 hover:text-foreground'
@@ -702,7 +702,7 @@
 </script>
 
 <!-- SSH Tunnel section (shared by PG and MySQL forms) -->
-<!-- Advanced options — SSL / SSH tunnel / encryption / read-only. Laid out to
+<!-- Advanced options, SSL / SSH tunnel / encryption / read-only. Laid out to
      fill the available width (toggle row + horizontal SSH grid); wraps to a
      column on the narrow provider/D1 collapsible. -->
 {#snippet advancedFields()}
@@ -737,7 +737,7 @@
       </label>
     </div>
 
-    <!-- SSH tunnel fields — horizontal, fills the width -->
+    <!-- SSH tunnel fields, horizontal, fills the width -->
     {#if isPgMy && sshEnabled}
       <div class="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] items-start gap-x-4 gap-y-3 border-t border-border/15 pt-4">
         <div class="grid grid-cols-[1fr_72px] gap-2">
@@ -757,7 +757,7 @@
         <div>
           <label for="cn-ssh-key" class={lbl}>Identity file</label>
           <Input id="cn-ssh-key" bind:value={sshKeyPath} placeholder="~/.ssh/id_rsa" class={cn(inp, 'font-mono text-ui-2xs')} />
-          <p class="mt-1 text-ui-3xs leading-snug text-muted-foreground/40">Optional — leave blank to use your SSH agent.</p>
+          <p class="mt-1 text-ui-3xs leading-snug text-muted-foreground/40">Optional, leave blank to use your SSH agent.</p>
         </div>
       </div>
     {/if}
@@ -818,13 +818,13 @@
         // window drag/resize from the titlebar makes the webview lose focus, which
         // bits-ui treats as focus-outside and closes the dialog. The modal is only
         // meant to close via ×, Escape, or a genuine outside pointer interaction
-        // (handled below) — not because the OS took focus for a window drag.
+        // (handled below) - not because the OS took focus for a window drag.
         e.preventDefault()
       }}
       onInteractOutside={(e) => {
         // The modal is inset to leave the titlebar (drag region) and status bar
         // usable. Interactions on that chrome must NOT dismiss the dialog or prompt
-        // discard — otherwise dragging the window to move it closes the modal.
+        // discard - otherwise dragging the window to move it closes the modal.
         if (isChromeInteraction(e)) { e.preventDefault(); return }
         if (isDirty && !isBusy) { e.preventDefault(); confirmDiscardOpen = true }
       }}
@@ -934,7 +934,7 @@
       <!-- ── Form panel ──────────────────────────────────────────── -->
       <div class="flex min-h-0 min-w-0 flex-col">
 
-        <!-- ── Header + provider tabs — the single "what am I connecting to" control ── -->
+        <!-- ── Header + provider tabs, the single "what am I connecting to" control ── -->
         <div class="shrink-0 px-8 pt-6">
           <h2 class="text-ui-lg font-semibold tracking-tight text-foreground">Connect a database</h2>
           <p class="mt-1 text-ui-xs text-muted-foreground">Pick a provider to sign in, or set one up manually.</p>
@@ -945,7 +945,7 @@
                 type="button"
                 onclick={() => selectTab(t.id)}
                 disabled={t.disabled}
-                title={t.disabled ? `${t.label} — coming soon` : undefined}
+                title={t.disabled ? `${t.label}, coming soon` : undefined}
                 class={cn(
                   'group relative flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-ui-xs font-medium transition-colors duration-150',
                   t.disabled
@@ -968,14 +968,14 @@
           </div>
         </div>
 
-        <!-- ── Form body — details for the current selection ── -->
+        <!-- ── Form body, details for the current selection ── -->
         <ScrollArea type="auto" class="min-h-0 flex-1 scroll-smooth">
           <div class="px-8 py-6">
             <div class="max-w-[560px]">
 
               {#if entryMode === 'manual'}
 
-                <!-- Manual form — core connection fields, then a full-width Advanced
+                <!-- Manual form, core connection fields, then a full-width Advanced
                      section at the bottom. -->
                 <div class="flex min-w-0 flex-col gap-5">
 
@@ -1025,7 +1025,7 @@
                 {#key dbType}
                 <div class="flex flex-col gap-3.5">
 
-            <!-- Input mode — connection string vs. individual fields -->
+            <!-- Input mode, connection string vs. individual fields -->
             {#if hasFieldToggle}
               <div class="flex gap-1 rounded-lg border border-border/40 bg-muted/[0.03] p-1">
                 <button type="button" onclick={() => (fieldMode = 'string')}
@@ -1176,7 +1176,7 @@
               <div class="flex flex-col gap-1.5 rounded-lg border border-border/15 bg-muted/[0.04] px-4 py-3.5">
                 <p class="text-ui-xs font-medium text-foreground/70">Ephemeral in-memory database</p>
                 <p class="text-ui-2xs leading-relaxed text-muted-foreground/45">
-                  Data lives only for this session. Nothing is written to disk — closing the connection discards everything.
+                  Data lives only for this session. Nothing is written to disk, closing the connection discards everything.
                 </p>
               </div>
 
@@ -1285,7 +1285,7 @@
               <div class="flex flex-col gap-1.5 rounded-lg border border-border/15 bg-muted/[0.04] px-4 py-3.5">
                 <p class="text-ui-xs font-medium text-foreground/70">Ephemeral in-memory DuckDB</p>
                 <p class="text-ui-2xs leading-relaxed text-muted-foreground/45">
-                  A columnar analytical database that lives only for this session. Nothing is written to disk — closing the connection discards everything.
+                  A columnar analytical database that lives only for this session. Nothing is written to disk, closing the connection discards everything.
                 </p>
               </div>
 
@@ -1381,7 +1381,7 @@
                 </div>
                 {/key}
 
-                <!-- Advanced — full-width section at the bottom -->
+                <!-- Advanced, full-width section at the bottom -->
                 <div class="border-t border-border/40 pt-5">
                   <p class="mb-4 flex items-center gap-1.5 text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground/45">
                     <Icon name="sliders-horizontal" class="size-3 shrink-0" />
@@ -1449,11 +1449,11 @@
           </div>
         </ScrollArea>
 
-        <!-- ── Footer — inline error alert, status chip, then actions ── -->
+        <!-- ── Footer: inline error alert, status chip, then actions ── -->
         <div class="shrink-0 border-t border-border/15 px-8 py-4">
           <div class="mx-auto max-w-none">
 
-            <!-- Connection error — console style: neutral message text with a thin
+            <!-- Connection error, console style: neutral message text with a thin
                  destructive rail, never a red-washed card. -->
             {#if error}
               <div class="mb-3.5 max-w-[560px] border-l-2 border-destructive/50 py-0.5 pl-3" data-studio-selectable="text">
@@ -1484,7 +1484,7 @@
                 <span class="min-w-0 truncate font-mono text-ui-3xs text-muted-foreground/40" title={statusTarget}>{statusTarget}</span>
               </div>
 
-              <!-- Actions — shared Button variants (Resume ghost · Stop soft-destructive
+              <!-- Actions, shared Button variants (Resume ghost · Stop soft-destructive
                    · Test outline · Connect solid primary), one system app-wide. -->
               <div class="ml-auto flex shrink-0 items-center gap-2">
                 {#if lastId && saved.find(c => c.id === lastId)}
@@ -1526,7 +1526,7 @@
 
     </div>
 
-    <!-- Close button — routes through the unsaved-changes guard -->
+    <!-- Close button, routes through the unsaved-changes guard -->
     <button
       type="button"
       onclick={requestClose}
@@ -1571,7 +1571,7 @@
 <style>
   /* The modal is portalled to <body>, outside #app, so it never inherits the
      app-wide `user-select: none`. Re-establish it here so chrome (labels, titles,
-     rows, buttons, status) can't be drag-selected — while real field VALUES stay
+     rows, buttons, status) can't be drag-selected, while real field VALUES stay
      selectable. Scoped to this modal only via the data attribute. */
   :global([data-connection-modal]),
   :global([data-connection-modal] *) {
@@ -1591,7 +1591,7 @@
     cursor: pointer;
   }
 
-  /* Decorative entrance for saved / provider rows — fades + rises in.
+  /* Decorative entrance for saved / provider rows - fades + rises in.
      Never blocks clicks (runs on the interactive element itself). */
   @keyframes -global-cn-rise-in {
     from { opacity: 0; transform: translateY(8px); }

@@ -47,7 +47,7 @@
 
   /**
    * Per-table exact row counts, filled in a BACKGROUND pass after the tree has
-   * already rendered — the schema/column load (`load()`) never waits on these,
+   * already rendered - the schema/column load (`load()`) never waits on these,
    * so opening the relation view and running the main queries stays instant.
    * Counts patch in optimistically as `pg_table_row_counts` resolves.
    * @type {Map<string, number>}
@@ -112,13 +112,13 @@
     return q ? all.filter(t => t.name.toLowerCase().includes(q)) : all
   })
 
-  // ── Load — batched ────────────────────────────────────────────────────────
+  // ── Load - batched ────────────────────────────────────────────────────────
   const BATCH = 8
 
   /**
    * Background, non-blocking row-count pass. Fired (not awaited) once the tree
    * is built so it never delays schema loading or the main query path. Only
-   * Postgres/MySQL return counts — other engines resolve to `[]` and this is a
+   * Postgres/MySQL return counts - other engines resolve to `[]` and this is a
    * silent no-op. Best-effort: failures are swallowed, the tree stays usable.
    */
   async function loadRowCounts() {
@@ -133,7 +133,7 @@
         if (typeof rowCount === 'number' && rowCount >= 0) next.set(name, rowCount)
       }
       rowCounts = next
-    } catch { /* counts are best-effort — never block or surface an error */ }
+    } catch { /* counts are best-effort - never block or surface an error */ }
   }
 
   async function load() {

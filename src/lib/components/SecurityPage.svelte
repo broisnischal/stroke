@@ -16,7 +16,7 @@
   /** @type {{ active?: boolean, connectionType?: string | null }} */
   let { active = false, connectionType = null } = $props();
 
-  // Roles + RLS use pg_catalog — only available on Postgres-compatible engines.
+  // Roles + RLS use pg_catalog - only available on Postgres-compatible engines.
   const supported = $derived(
     connectionType === 'postgres' || connectionType === 'cockroachdb'
   );
@@ -223,7 +223,7 @@
   ) {
     if (role) {
       sqlDraft = `ALTER ROLE "${role.rolname}" WITH LOGIN;\n-- OPTIONS: SUPERUSER | CREATEDB | CREATEROLE | REPLICATION | BYPASSRLS\n-- DROP ROLE "${role.rolname}";`;
-      sqlModal = { title: `Edit role — ${role.rolname}` };
+      sqlModal = { title: `Edit role, ${role.rolname}` };
     } else {
       sqlDraft = `CREATE ROLE new_role WITH LOGIN PASSWORD 'changeme';`;
       sqlModal = { title: "Create role" };
@@ -242,7 +242,7 @@
       ? `ALTER TABLE "${row.schema}"."${row.table_name}" DISABLE ROW LEVEL SECURITY;`
       : `ALTER TABLE "${row.schema}"."${row.table_name}" ENABLE ROW LEVEL SECURITY;`;
     sqlModal = {
-      title: `${on ? "Disable" : "Enable"} RLS — ${row.schema}.${row.table_name}`,
+      title: `${on ? "Disable" : "Enable"} RLS, ${row.schema}.${row.table_name}`,
     };
   }
 

@@ -26,7 +26,7 @@
     return columnWidths[col.name] ?? defaultColumnWidth(col.dataType ?? col.data_type ?? '')
   }
 
-  /** Bar widths as fraction of cell — short left-aligned pills like real cell text */
+  /** Bar widths as fraction of cell - short left-aligned pills like real cell text */
   const barFracs = [0.52, 0.68, 0.41, 0.76, 0.48, 0.61, 0.55, 0.37, 0.72, 0.44]
 
   /** @param {number} rowIdx @param {number} colIdx */

@@ -9,7 +9,7 @@
   let {
     /** Driver id, e.g. 'postgres' | 'supabase' | 'sqlite-memory' */
     id,
-    /** Extra classes — size + color live here (e.g. 'size-4 text-blue-400'). */
+    /** Extra classes - size + color live here (e.g. 'size-4 text-blue-400'). */
     class: className = 'size-4',
   } = $props()
 

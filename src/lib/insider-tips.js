@@ -3,7 +3,7 @@ export const insiderTips = [
   {
     category: 'SQL',
     label: 'NULL semantics',
-    text: 'NULL is not a value — it represents absence. NULL ≠ NULL is always true, which is why IS NULL exists.',
+    text: 'NULL is not a value, it represents absence. NULL ≠ NULL is always true, which is why IS NULL exists.',
   },
   {
     category: 'SQL',
@@ -18,12 +18,12 @@ export const insiderTips = [
   {
     category: 'SQL',
     label: 'CTEs',
-    text: 'WITH clauses (CTEs) are evaluated once and referenced like temp tables — great for breaking up complex queries.',
+    text: 'WITH clauses (CTEs) are evaluated once and referenced like temp tables, great for breaking up complex queries.',
   },
   {
     category: 'SQL',
     label: 'RETURNING clause',
-    text: 'INSERT, UPDATE, and DELETE support RETURNING — get modified rows back without an extra SELECT.',
+    text: 'INSERT, UPDATE, and DELETE support RETURNING, get modified rows back without an extra SELECT.',
   },
   {
     category: 'SQL',
@@ -38,7 +38,7 @@ export const insiderTips = [
   {
     category: 'Performance',
     label: 'Covering indexes',
-    text: 'A covering index includes every column a query needs. The engine never touches the main table — just the index.',
+    text: 'A covering index includes every column a query needs. The engine never touches the main table, just the index.',
   },
   {
     category: 'Performance',
@@ -48,7 +48,7 @@ export const insiderTips = [
   {
     category: 'Performance',
     label: 'B-tree vs Hash',
-    text: "B-tree indexes support equality and range queries. Hash indexes only support equality — and aren't WAL-logged before Postgres 10.",
+    text: "B-tree indexes support equality and range queries. Hash indexes only support equality, and aren't WAL-logged before Postgres 10.",
   },
   {
     category: 'Performance',
@@ -58,12 +58,12 @@ export const insiderTips = [
   {
     category: 'Performance',
     label: 'SELECT FOR UPDATE',
-    text: 'SELECT FOR UPDATE locks the matched rows until your transaction commits — preventing concurrent updates on the same rows.',
+    text: 'SELECT FOR UPDATE locks the matched rows until your transaction commits, preventing concurrent updates on the same rows.',
   },
   {
     category: 'PostgreSQL',
     label: 'MVCC',
-    text: "PostgreSQL's MVCC (Multi-Version Concurrency Control) lets readers never block writers — each transaction sees a consistent snapshot.",
+    text: "PostgreSQL's MVCC (Multi-Version Concurrency Control) lets readers never block writers, each transaction sees a consistent snapshot.",
   },
   {
     category: 'PostgreSQL',
@@ -78,7 +78,7 @@ export const insiderTips = [
   {
     category: 'PostgreSQL',
     label: 'JSONB',
-    text: 'JSONB stores JSON as binary — faster to query than plain JSON and supports GIN indexes for key/value lookups.',
+    text: 'JSONB stores JSON as binary, faster to query than plain JSON and supports GIN indexes for key/value lookups.',
   },
   {
     category: 'PostgreSQL',
@@ -108,7 +108,7 @@ export const insiderTips = [
   {
     category: 'Concepts',
     label: 'Idempotency',
-    text: 'INSERT ... ON CONFLICT DO NOTHING (or DO UPDATE) makes upserts idempotent — safe to retry on failure.',
+    text: 'INSERT ... ON CONFLICT DO NOTHING (or DO UPDATE) makes upserts idempotent, safe to retry on failure.',
   },
 ]
 

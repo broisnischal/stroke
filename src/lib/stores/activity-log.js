@@ -35,7 +35,7 @@ function scheduleNotify() {
   if (_rafId) return
   _rafId = requestAnimationFrame(() => {
     _rafId = 0
-    const snapshot = _log.slice() // shallow copy — new ref every frame
+    const snapshot = _log.slice() // shallow copy - new ref every frame
     for (const fn of _listeners) fn(snapshot)
   })
 }

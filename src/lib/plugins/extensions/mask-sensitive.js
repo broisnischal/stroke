@@ -1,4 +1,4 @@
-// Sensitive-data masking — hide emails, tokens, cards, SSNs by default and
+// Sensitive-data masking - hide emails, tokens, cards, SSNs by default and
 // reveal on hover. Useful for screen-sharing and demos.
 const NAME_RE = /(password|secret|token|api_?key|access_?key|private_?key|ssn|social_security|card|credit|cvv|cvc|pin|auth)/i
 const CARD_NAME_RE = /(card|credit|cc_|_cc|^cc$|pan)/i
@@ -13,7 +13,7 @@ function digits(v) {
   return String(v).replace(/\D/g, '')
 }
 
-/** Luhn checksum — keeps real card numbers in, random long numbers out. */
+/** Luhn checksum - keeps real card numbers in, random long numbers out. */
 function luhn(/** @type {string} */ num) {
   let sum = 0, alt = false
   for (let i = num.length - 1; i >= 0; i--) {

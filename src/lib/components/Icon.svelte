@@ -6,14 +6,14 @@
   //   <Icon name="search" class="size-4 text-muted-foreground" />
   //
   // Sizing + color come from `class` (size-*, text-*), matching how Lucide icons
-  // are used across the app — so this is a drop-in replacement for a bare glyph.
+  // are used across the app - so this is a drop-in replacement for a bare glyph.
   import { HugeiconsIcon } from '@hugeicons/svelte'
   import { appIconSet, appIconStyle } from '$lib/stores/settings.js'
   import { ICON_MAP, PHOSPHOR_MAP } from '$lib/icon-registry.js'
   import { cn } from '$lib/utils.js'
 
   let {
-    /** Semantic icon name — a key in ICON_MAP. */
+    /** Semantic icon name - a key in ICON_MAP. */
     name,
     class: className = 'size-4',
     /** Hugeicons stroke weight (Lucide weight is driven globally by data-icon-style). */

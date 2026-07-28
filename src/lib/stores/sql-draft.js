@@ -1,8 +1,8 @@
 /**
  * Per-connection SQL editor draft.
  *
- * Persists the Query Editor buffer so closing and reopening the tab — or
- * restarting the app — restores the last query text for that connection instead
+ * Persists the Query Editor buffer so closing and reopening the tab - or
+ * restarting the app - restores the last query text for that connection instead
  * of resetting to the default. Keyed by connection id, with defensive try/catch
  * so a quota/serialization failure never throws into the editor flow.
  */

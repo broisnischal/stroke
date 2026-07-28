@@ -147,7 +147,7 @@
   let mentionQuery = $state('')
   let mentionStart = $state(0)
   let mentionIdx = $state(0)
-  /** Tables pinned via @ — shown as removable badges above the input and folded
+  /** Tables pinned via @ - shown as removable badges above the input and folded
    *  into the next message's context. */
   let contextTables = $state(/** @type {string[]} */ ([]))
 
@@ -196,7 +196,7 @@
     const el = /** @type {HTMLTextAreaElement} */ (e.target)
     inputText = el.value
     resizeInput()
-    // Slash command menu — only when the input starts with "/" (no space yet).
+    // Slash command menu - only when the input starts with "/" (no space yet).
     if (inputText.startsWith('/') && !/\s/.test(inputText)) {
       slashQuery = inputText.slice(1)
       slashOpen = true
@@ -507,7 +507,7 @@
   }
 
   /**
-   * Programmatically send a message — called by the parent (e.g. "Fix with AI").
+   * Programmatically send a message - called by the parent (e.g. "Fix with AI").
    * @param {string} text
    */
   export function sendMessage(text) {
@@ -533,7 +533,7 @@
       if (abortController?.signal.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' })
     }
     let fullContent = ''; /** @type {import('$lib/ai.js').ToolCall[]} */ let toolCalls = []; let itemId = /** @type {string | null} */ (null)
-    for await (const chunk of chatCompletionStream($aiSettings, [{ role: 'system', content: turnSystemPrompt }, ...apiHistory], AI_TOOLS, abortController?.signal, ({ attempt, waitMs }) => { aiStatusHint = `Rate limited — retrying in ${Math.ceil(waitMs/1000)}s…` })) {
+    for await (const chunk of chatCompletionStream($aiSettings, [{ role: 'system', content: turnSystemPrompt }, ...apiHistory], AI_TOOLS, abortController?.signal, ({ attempt, waitMs }) => { aiStatusHint = `Rate limited, retrying in ${Math.ceil(waitMs/1000)}s…` })) {
       if (chunk.textDelta) {
         aiStatusHint = ''; fullContent += chunk.textDelta
         if (!itemId) {
@@ -1049,7 +1049,7 @@
         oninput={handleInputChange}
         onkeydown={handleInputKeydown}
         rows="1"
-        placeholder={configured ? 'Ask anything —  @ tables · / commands' : 'Configure a model first'}
+        placeholder={configured ? 'Ask anything,  @ tables · / commands' : 'Configure a model first'}
         disabled={!configured}
         class="no-focus-ring max-h-40 min-h-[2.25rem] w-full resize-none bg-transparent px-3 pt-2 pb-1 text-ui-xs leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/40 disabled:opacity-60"
       ></textarea>

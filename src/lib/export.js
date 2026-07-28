@@ -26,7 +26,7 @@ export function rowsToCsv(columns, rows) {
 const yieldToUi = () => new Promise((res) => setTimeout(res, 0))
 
 /**
- * Chunked, cooperative CSV builder for large exports — yields to the event loop
+ * Chunked, cooperative CSV builder for large exports - yields to the event loop
  * every `chunkSize` rows so the main thread stays responsive and a progress
  * indicator can animate instead of the app appearing frozen.
  * @param {Array<{ name: string }>} columns
@@ -101,7 +101,7 @@ export const mdPad = (s, w) => (s.length >= w ? s : s + ' '.repeat(w - s.length)
 
 /**
  * Convert columns + rows to a column-aligned GitHub-flavored Markdown table.
- * Cells longer than the padding cap simply overflow — still valid Markdown.
+ * Cells longer than the padding cap simply overflow - still valid Markdown.
  * @param {Array<{ name: string }>} columns
  * @param {unknown[][]} rows
  * @param {number[]} [widths] precomputed via markdownColumnWidths
@@ -178,7 +178,7 @@ export async function rowsToJsonAsync(columns, rows, opts = {}) {
 
 /**
  * Convert columns + rows to a series of `INSERT` statements for `tableName`.
- * Identifiers are double-quoted; values become typed literals — numbers/booleans
+ * Identifiers are double-quoted; values become typed literals - numbers/booleans
  * raw, NULL for null/undefined, everything else single-quoted with `''` escaping
  * (objects serialized to JSON first). Safe to paste into any SQL console.
  * @param {Array<{ name: string }>} columns

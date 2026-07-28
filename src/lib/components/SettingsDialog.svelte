@@ -203,8 +203,8 @@
   }
 
   const PAGINATION_OPTIONS = [
-    { id: 'offset',   label: 'Offset',   icon: 'hash', hint: 'Classic LIMIT/OFFSET — jump to any page' },
-    { id: 'cursor',   label: 'Cursor',   icon: 'chevrons-right', hint: 'Keyset by primary key — fast next/prev, no page jump' },
+    { id: 'offset',   label: 'Offset',   icon: 'hash', hint: 'Classic LIMIT/OFFSET, jump to any page' },
+    { id: 'cursor',   label: 'Cursor',   icon: 'chevrons-right', hint: 'Keyset by primary key: fast next/prev, no page jump' },
     { id: 'keyset',   label: 'Keyset',   icon: 'key-round', hint: 'Same as cursor (keyset on the primary key)' },
     { id: 'temporal', label: 'Temporal', icon: 'clock', hint: 'Keyset on a timestamp column, newest-first' },
   ];
@@ -618,13 +618,13 @@
     {@render switchRow($t('settings.previewSql'), $t('settings.previewSql.desc'), settings.previewDmlBeforeApply, togglePreviewDml)}
   {/if}
   {#if show('Vim mode', 'Experimental modal keyboard navigation across the app, the data grid, and the SQL editor')}
-    {@render switchRow('Vim mode', 'Experimental — modal keyboard navigation (hjkl, gg/G, i/Esc) across the grid, the SQL editor, and tabs', settings.vimMode, toggleVimMode)}
+    {@render switchRow('Vim mode', 'Experimental: modal keyboard navigation (hjkl, gg/G, i/Esc) across the grid, the SQL editor, and tabs', settings.vimMode, toggleVimMode)}
   {/if}
-  {#if show('Cmd+K AI', 'Experimental — ask AI directly from the command palette')}
-    {@render switchRow('⌘K AI (experimental)', 'Experimental — show "Ask AI" in the ⌘K command palette. Off by default.', settings.cmdkAiEnabled, toggleCmdkAi)}
+  {#if show('Cmd+K AI', 'Experimental, ask AI directly from the command palette')}
+    {@render switchRow('⌘K AI (experimental)', 'Experimental, show "Ask AI" in the ⌘K command palette. Off by default.', settings.cmdkAiEnabled, toggleCmdkAi)}
   {/if}
-  {#if show('Live mode', 'Experimental — auto-refresh the active table when its data changes')}
-    {@render switchRow('Live mode (experimental)', 'Experimental — show the Live auto-refresh toggle in the status bar. Off by default.', settings.liveModeEnabled, toggleLiveMode)}
+  {#if show('Live mode', 'Experimental, auto-refresh the active table when its data changes')}
+    {@render switchRow('Live mode (experimental)', 'Experimental, show the Live auto-refresh toggle in the status bar. Off by default.', settings.liveModeEnabled, toggleLiveMode)}
   {/if}
   {#if show($t('settings.mcpAutostart'), $t('settings.mcpAutostart.desc'))}
     {@render switchRow($t('settings.mcpAutostart'), $t('settings.mcpAutostart.desc'), settings.mcpAutoStart, toggleMcpAutoStart)}

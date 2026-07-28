@@ -14,7 +14,7 @@ const JSON_TOKEN_RE = /"(?:\\.|[^"\\])*"|\b(?:true|false|null)\b|-?\d+(?:\.\d+)?
 
 /**
  * Colorize a JSON snippet (typically a single line) into `.json-tok-*` spans
- * without any wrapper element — usable per-line by virtualized viewers.
+ * without any wrapper element - usable per-line by virtualized viewers.
  * @param {string} source @returns {string} safe HTML
  */
 export function highlightJsonHtml(source) {
@@ -47,7 +47,7 @@ export function highlightJsonHtml(source) {
 
 /**
  * Lightweight, dependency-free JSON syntax colorizer. Single regex pass, no
- * TextMate grammar / wasm — a fast stand-in for shiki on the JSON viewing path.
+ * TextMate grammar / wasm - a fast stand-in for shiki on the JSON viewing path.
  * Returns a `<pre>` whose tokens are wrapped in `.json-tok-*` spans (colored via
  * CSS vars in app.css). Text-node structure stays linkify-compatible.
  * @param {string} source @returns {string}

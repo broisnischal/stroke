@@ -4,7 +4,7 @@
  * Parameters are located with a small scanner rather than a bare regex so that
  * quoted strings ('…', "…", `…`), dollar-quoted strings ($tag$…$tag$), line and
  * block comments, and Postgres `::type` casts never produce false positives.
- * Before execution the values are inlined as escaped SQL literals — the
+ * Before execution the values are inlined as escaped SQL literals - the
  * substituted text is what runs and what lands in query history, so a run is
  * always reproducible.
  */
@@ -90,7 +90,7 @@ export function extractSqlParams(sql) {
 /**
  * Render one parameter value as a SQL literal.
  * - null  → NULL
- * - raw   → inserted verbatim (expressions, column refs — user's responsibility)
+ * - raw   → inserted verbatim (expressions, column refs - user's responsibility)
  * - auto  → numbers / TRUE / FALSE / NULL pass through, everything else quoted
  * - text  → always a quoted string
  * @param {string} raw @param {SqlParamMode} mode
@@ -160,6 +160,6 @@ export function saveStoredParamValues(values) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(values))
   } catch {
-    // localStorage unavailable — values just won't persist
+    // localStorage unavailable - values just won't persist
   }
 }
