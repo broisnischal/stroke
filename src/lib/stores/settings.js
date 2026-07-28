@@ -7,6 +7,7 @@ import {
   normalizeThemeId,
 } from '$lib/themes/registry.js'
 import { zoomState, ZOOM_MIN, ZOOM_MAX } from '$lib/stores/canvas-zoom.svelte.js'
+import { detectOs } from '$lib/platform.js'
 
 const STORAGE_KEY = 'stroke:settings'
 
@@ -46,7 +47,7 @@ export const FONT_PRESETS = {
     mono: 'ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Monaco, Consolas, monospace',
   },
   // Both faces below ship with the app (fontsource imports in app.css), so
-  // these presets render identically on every platform — no system fallback.
+  // these presets render identically on every platform - no system fallback.
   inter: {
     label: 'Inter',
     description: 'Inter + JetBrains Mono',
@@ -94,7 +95,7 @@ function normalizeFont(/** @type {unknown} */ id) {
 
 /**
  * Selectable icon weights. Applied globally as the `stroke-width` of every Lucide
- * icon via a `[data-icon-style]` rule in app.css — no per-component changes. Bold
+ * icon via a `[data-icon-style]` rule in app.css - no per-component changes. Bold
  * also aids low-vision readability of small nav/toolbar glyphs.
  * @type {Record<IconStyleId, { label: string, description: string, strokeWidth: number }>}
  */
@@ -137,7 +138,7 @@ function normalizeIconSet(/** @type {unknown} */ id) {
 
 /**
  * Data-grid style presets for the canvas table. Each preset only changes how the
- * per-row grid pass draws separators — it's applied in DataTable's virtualized
+ * per-row grid pass draws separators - it's applied in DataTable's virtualized
  * draw(), so it costs O(visible cells) and never scales with total row count.
  *   - rows/cols: draw horizontal / vertical separators
  *   - dash:      canvas setLineDash pattern (null = solid)
@@ -170,10 +171,10 @@ export const DATA_VIEW_IDS = /** @type {const} */ (['table', 'json', 'record', '
 export const DEFAULT_DATA_VIEW = 'table'
 
 // How the grid pages through rows.
-//  • offset   — LIMIT/OFFSET; random access (jump to any page) but O(offset) deep.
-//  • cursor   — keyset by primary key (opaque cursor); O(1) next/prev, no page jump.
-//  • keyset   — same engine as cursor (keyset on the PK); listed separately for clarity.
-//  • temporal — keyset on a timestamp column (newest-first); great for logs/events.
+//  • offset   - LIMIT/OFFSET; random access (jump to any page) but O(offset) deep.
+//  • cursor   - keyset by primary key (opaque cursor); O(1) next/prev, no page jump.
+//  • keyset   - same engine as cursor (keyset on the PK); listed separately for clarity.
+//  • temporal - keyset on a timestamp column (newest-first); great for logs/events.
 // All non-offset modes fall back to offset when their preconditions aren't met
 // (no single-column PK, a multi-column sort, or a jump to an arbitrary page).
 export const PAGINATION_MODE_IDS = /** @type {const} */ (['offset', 'cursor', 'keyset', 'temporal'])
@@ -314,14 +315,51 @@ function recordThemeBeforeChange(theme) {
 /** @type {AppSettings | null} */
 let _settingsCache = null
 
+/**
+ * On a fresh install (no saved settings) pick the theme to match the OS
+ * appearance: Light Studio for a light system, Dark Studio otherwise. Only ever
+ * consulted on the very first load — once the user has any saved settings their
+ * chosen theme wins and this is never used again.
+ * @returns {ThemeId}
+ */
+function systemPreferredTheme() {
+  try {
+    if (
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-color-scheme: light)').matches
+    ) {
+      return 'light'
+    }
+  } catch {}
+  return DEFAULT_THEME_ID
+}
+
+/**
+ * Windows renders the UI a touch small at 100% (higher default DPI handling than
+ * macOS), so new installs there default to 125%. Other platforms keep 100%.
+ * First-launch only — the user's saved zoom always wins afterwards.
+ * @returns {number}
+ */
+function defaultZoomForPlatform() {
+  try {
+    if (detectOs() === 'windows' && ZOOM_STEPS.includes(1.25)) return 1.25
+  } catch {}
+  return DEFAULT_ZOOM
+}
+
 /** @returns {AppSettings} */
 export function loadSettings() {
   if (_settingsCache) return { ..._settingsCache }
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) {
-      _settingsCache = { ...DEFAULT_SETTINGS }
-      return { ...DEFAULT_SETTINGS }
+      _settingsCache = {
+        ...DEFAULT_SETTINGS,
+        theme: systemPreferredTheme(),
+        zoom: defaultZoomForPlatform(),
+      }
+      return { ..._settingsCache }
     }
     const parsed = JSON.parse(raw)
     const theme = normalizeThemeId(parsed.theme)
@@ -373,7 +411,7 @@ export function loadSettings() {
 /** @param {AppSettings} settings */
 export function saveSettings(settings) {
   // Keep the in-memory cache authoritative even if the localStorage write throws
-  // (quota/private-mode) — the running app should still reflect the new settings.
+  // (quota/private-mode) - the running app should still reflect the new settings.
   _settingsCache = { ...settings }
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
@@ -387,7 +425,7 @@ export function saveSettings(settings) {
 // dialog). Unconditional root style/attribute writes fire the canvas table's
 // MutationObserver (colour-reader rebuild + font re-measure + full repaint) and
 // unconditional store.set() re-notifies every subscriber (Monaco updateOptions
-// on all editors) — that was the Settings-page lag. Guard every write so only
+// on all editors) - that was the Settings-page lag. Guard every write so only
 // values that actually changed touch the DOM or notify subscribers.
 /** @param {HTMLElement} el @param {string} prop @param {string} value */
 function setStyleVar(el, prop, value) {
@@ -431,7 +469,7 @@ export function applySettings(settings) {
   setStyleVar(root, '--editor-line-height', `${Math.round(basePx * 1.5 * zoom)}px`)
   setStore(appZoom, zoom)
 
-  // Font family — overrides the stylesheet :root defaults inline (inline style
+  // Font family - overrides the stylesheet :root defaults inline (inline style
   // wins), so the whole UI + canvas grid pick it up. The canvas re-measures its
   // font metrics via the documentElement style MutationObserver.
   const font = normalizeFont(settings.font)
@@ -439,7 +477,7 @@ export function applySettings(settings) {
   setStyleVar(root, '--font-mono', FONT_PRESETS[font].mono)
   setStore(appFont, font)
 
-  // AI/agent chat typography — consumed by the chat surfaces (AiMarkdown, code blocks).
+  // AI/agent chat typography - consumed by the chat surfaces (AiMarkdown, code blocks).
   const chatFont = AGENT_FONT_SIZES.includes(settings.agentChatFontSize) ? settings.agentChatFontSize : DEFAULT_AGENT_CHAT_FONT
   const codeFont = AGENT_FONT_SIZES.includes(settings.agentCodeFontSize) ? settings.agentCodeFontSize : DEFAULT_AGENT_CODE_FONT
   setStyleVar(root, '--ai-chat-font-size', `${chatFont}px`)
@@ -447,26 +485,26 @@ export function applySettings(settings) {
   const thinkStyle = THINKING_STYLE_IDS.includes(settings.agentThinkingStyle) ? settings.agentThinkingStyle : DEFAULT_THINKING_STYLE
   if (root.getAttribute('data-thinking-style') !== thinkStyle) root.setAttribute('data-thinking-style', thinkStyle)
 
-  // Icon weight — a single [data-icon-style] attribute drives the global Lucide
+  // Icon weight - a single [data-icon-style] attribute drives the global Lucide
   // stroke-width rule in app.css. No per-icon or per-component changes needed.
   const iconStyle = normalizeIconStyle(settings.iconStyle)
   setAttr(root, 'data-icon-style', iconStyle)
   setStore(appIconStyle, iconStyle)
 
-  // Icon family — the shared <Icon> wrapper subscribes to appIconSet and swaps
+  // Icon family - the shared <Icon> wrapper subscribes to appIconSet and swaps
   // between icon families. data-icon-set is exposed for any CSS hooks.
   const iconSet = normalizeIconSet(settings.iconSet)
   setAttr(root, 'data-icon-set', iconSet)
   setStore(appIconSet, iconSet)
 
-  // Grid-write DML preview toggle — DataTable subscribes to gate its confirm dialog.
+  // Grid-write DML preview toggle - DataTable subscribes to gate its confirm dialog.
   setStore(appPreviewDml, settings.previewDmlBeforeApply !== false)
   setStore(appVimMode, settings.vimMode === true)
   setStore(appCmdkAi, settings.cmdkAiEnabled === true)
   setStore(appLiveMode, settings.liveModeEnabled === true)
   setStore(appPaginationMode, PAGINATION_MODE_IDS.includes(settings.paginationMode) ? settings.paginationMode : DEFAULT_PAGINATION_MODE)
 
-  // Canvas table grid style — data attribute for any CSS hooks; DataTable reads
+  // Canvas table grid style - data attribute for any CSS hooks; DataTable reads
   // the store and repaints the virtualized grid pass.
   const tableStyle = normalizeTableStyle(settings.tableStyle)
   setAttr(root, 'data-table-style', tableStyle)
@@ -475,12 +513,12 @@ export function applySettings(settings) {
   // Keep the canvas-table zoom in lockstep with the app zoom so Cmd +/-/0 (and
   // the zoom buttons) scale the grid alongside the rest of the UI. The canvas
   // renderer reads zoomState directly and repaints on change.
-  // Drop the legacy per-table key — it drifted from settings.zoom and made only
+  // Drop the legacy per-table key - it drifted from settings.zoom and made only
   // the grid look huge/blurry while the sidebar stayed at normal scale.
   try { localStorage.removeItem('stroke:canvas-zoom') } catch {}
   const canvasZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom))
   if (zoomState.value !== canvasZoom) zoomState.value = canvasZoom
-  // Webview page-zoom reset is an IPC round-trip — only needed when zoom changed
+  // Webview page-zoom reset is an IPC round-trip - only needed when zoom changed
   // (or on the first apply, to undo any stale native zoom from a prior session).
   if (_lastAppliedZoom !== zoom) {
     _lastAppliedZoom = zoom
@@ -566,7 +604,7 @@ export function installZoomShortcuts() {
   zoomListenerInstalled = true
   window.addEventListener('keydown', handleZoomKeydown, true)
   window.addEventListener('wheel', blockNativeScrollZoom, { capture: true, passive: false })
-  // Legacy event — Tauri's zoom polyfill listens on this, not `wheel`.
+  // Legacy event - Tauri's zoom polyfill listens on this, not `wheel`.
   window.addEventListener('mousewheel', blockNativeScrollZoom, { capture: true, passive: false })
   // WebKit-only pinch magnification (macOS). No-op on Chromium.
   window.addEventListener('gesturestart', handleZoomGesture, { capture: true, passive: false })
