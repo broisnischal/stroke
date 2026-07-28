@@ -195,7 +195,7 @@
           class={cn(
             'inline-flex h-6 shrink-0 items-center gap-1 rounded-[5px] px-2.5 text-ui-2xs font-medium transition-all',
             activeType === tab.id
-              ? 'bg-card text-foreground shadow-sm ring-1 ring-border/50'
+              ? 'bg-card text-foreground ring-1 ring-border/50'
               : 'text-muted-foreground hover:text-foreground',
           )}
           onclick={() => { activeType = /** @type {any} */ (tab.id); filter = '' }}
@@ -216,7 +216,7 @@
         placeholder="Filter…"
         bind:this={filterEl}
         bind:value={filter}
-        class="h-7 w-full rounded-lg border-2 border-border bg-background/40 pl-7 pr-2.5 text-ui-xs text-foreground outline-none transition-colors hover:bg-background/60 focus:border-ring focus:ring-1 focus:ring-ring"
+        class="h-7 w-full rounded-lg border border-border bg-background/40 pl-7 pr-2.5 text-ui-xs text-foreground outline-none transition-colors hover:bg-background/60 focus:border-ring focus:ring-1 focus:ring-ring"
       />
     </div>
   </div>
@@ -263,7 +263,7 @@
                 </td>
                 <td class="border-b border-r border-border/40 px-3 font-mono text-ui-sm text-muted-foreground">{idx.tableName}</td>
                 <td class="border-b border-r border-border/40 px-3 font-mono text-ui-sm uppercase text-muted-foreground">{idx.indexType || 'btree'}</td>
-                <td class="border-b border-r border-border/40 px-3 font-mono text-ui-xs {idx.isUnique ? 'text-green-400' : 'text-muted-foreground/50'}">{idx.isUnique ? 'TRUE' : 'FALSE'}</td>
+                <td class="border-b border-r border-border/40 px-3 font-mono text-ui-xs {idx.isUnique ? 'text-success' : 'text-muted-foreground/50'}">{idx.isUnique ? 'TRUE' : 'FALSE'}</td>
                 <td class="border-b border-r border-border/40 px-3 font-mono text-ui-xs text-muted-foreground/70 overflow-hidden"><span class="block truncate">{idx.columns || '—'}</span></td>
                 <td class="border-b border-border/40 px-3 font-mono text-ui-xs text-muted-foreground/50 overflow-hidden"><span class="block truncate">{idx.condition ?? '—'}</span></td>
               </tr>
@@ -320,8 +320,8 @@
                 </td>
                 <td class="border-b border-r border-border/40 px-3">
                   {#if trig.enabled}
-                    <span class="flex items-center gap-1 font-mono text-ui-3xs text-green-400">
-                      <span class="size-1.5 rounded-full bg-green-400"></span>enabled
+                    <span class="flex items-center gap-1 font-mono text-ui-3xs text-success">
+                      <span class="size-1.5 rounded-full bg-success"></span>enabled
                     </span>
                   {:else}
                     <span class="flex items-center gap-1 font-mono text-ui-3xs text-muted-foreground/50">

@@ -216,19 +216,19 @@
         type="button"
         tabindex="-1"
         aria-label="Dismiss"
-        class="absolute inset-0 cursor-default bg-black/50"
+        class="absolute inset-0 cursor-default bg-black/65"
         onclick={() => { if (status !== 'downloading') dismissed = true }}
       ></button>
     {/if}
 
     <div
-      class="pointer-events-auto relative w-[min(420px,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-border/60 bg-card shadow-2xl shadow-black/30"
+      class="pointer-events-auto relative w-[min(420px,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-border/60 bg-background elevate-3-rim"
     >
       <!-- header row -->
       <div class="flex items-center gap-3 border-b border-border/40 px-5 py-3.5">
-        <div class="shrink-0 rounded-xl bg-muted/50 p-2">
+        <div class="shrink-0 rounded-lg bg-muted/50 p-2">
           {#if status === 'done' || status === 'up-to-date'}
-            <CheckCircle2 class="size-4 text-green-500" />
+            <CheckCircle2 class="size-4 text-success" />
           {:else if status === 'error'}
             <AlertCircle class="size-4 text-destructive" />
           {:else if checking}
@@ -349,7 +349,7 @@
             >
               <ScrollText class="size-3.5 shrink-0" />
               View changelog
-              <ExternalLink class="ml-0.5 size-3 shrink-0 text-muted-foreground/60" />
+              <ExternalLink class="ml-0.5 size-3.5 shrink-0 text-muted-foreground/60" />
             </button>
           {/if}
         {/if}

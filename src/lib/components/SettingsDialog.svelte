@@ -287,8 +287,8 @@
 
   const planBadge = $derived.by(() => {
     const s = $licenseStatus;
-    if (s?.status === "Valid") return { label: "Pro", class: "border-green-500/25 bg-green-500/10 text-green-600 dark:text-green-400" };
-    if (s?.status === "Trial") return { label: `Trial · ${s.days_remaining}d`, class: "border-amber-500/25 bg-amber-500/10 text-amber-600 dark:text-amber-400" };
+    if (s?.status === "Valid") return { label: "Pro", class: "border-success/25 bg-success/10 text-success" };
+    if (s?.status === "Trial") return { label: `Trial · ${s.days_remaining}d`, class: "border-warning/25 bg-warning/10 text-warning" };
     return { label: "Free", class: "border-border/70 bg-muted/40 text-muted-foreground" };
   });
 </script>
@@ -306,7 +306,7 @@
           <input
             bind:value={query}
             placeholder="Search settings…"
-            class="h-8 w-full rounded-lg border-2 border-border bg-background pl-8 pr-2.5 text-ui-xs text-foreground outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring"
+            class="h-8 w-full rounded-lg border border-border bg-background pl-8 pr-2.5 text-ui-xs text-foreground outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring"
           />
         </div>
         <nav class="flex flex-col gap-0.5">
@@ -437,7 +437,7 @@
           aria-label={label}
           onchange={(e) => setNumber(/** @type {any} */ (key), e.currentTarget.value, def, min)}
           class={cn(
-            'h-8 w-48 rounded-lg border-2 border-border bg-background pl-2.5 text-right font-mono text-ui-xs tabular-nums text-foreground outline-none transition-[border-color,box-shadow] focus:border-ring',
+            'h-8 w-48 rounded-lg border border-border bg-background pl-2.5 text-right font-mono text-ui-xs tabular-nums text-foreground outline-none transition-[border-color,box-shadow] focus:border-ring focus:ring-1 focus:ring-ring',
             unit ? 'pr-11' : 'pr-2.5',
           )}
         />
@@ -460,7 +460,7 @@
         value={settings[key]}
         aria-label={label}
         onchange={(e) => setText(/** @type {any} */ (key), e.currentTarget.value, def)}
-        class="h-8 w-48 rounded-lg border-2 border-border bg-background px-2.5 font-mono text-ui-xs text-foreground outline-none transition-[border-color,box-shadow] focus:border-ring focus:ring-1 focus:ring-ring"
+        class="h-8 w-48 rounded-lg border border-border bg-background px-2.5 font-mono text-ui-xs text-foreground outline-none transition-[border-color,box-shadow] focus:border-ring focus:ring-1 focus:ring-ring"
       />
       {@render resetBtn(key, def, settings[key] !== def)}
     </div>

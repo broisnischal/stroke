@@ -449,8 +449,8 @@
   const TD = 'border-b border-r border-border/25 p-0 align-middle overflow-hidden'
   const TD_DROP = 'border-b border-r border-border/25 p-0 align-middle overflow-visible'
   const INP = 'box-border block h-full w-full min-w-0 overflow-x-auto border-0 bg-transparent px-3 py-0 font-mono text-ui-xs text-foreground outline-none selection:bg-primary/20'
-  const DROP_PANEL = 'absolute left-0 top-full z-50 mt-0.5 max-h-64 w-48 overflow-y-auto rounded-xl border border-border/35 bg-background p-1.5 shadow-xl shadow-black/30'
-  const DROP_ITEM = 'relative flex w-full cursor-default select-none items-center rounded-lg px-2.5 py-1.5 font-mono text-ui-xs text-foreground outline-none hover:bg-muted/60'
+  const DROP_PANEL = 'absolute left-0 top-full z-50 mt-0.5 max-h-64 min-w-48 overflow-y-auto rounded-[10px] border border-border/60 bg-popover p-1 elevate-2-rim'
+  const DROP_ITEM = 'relative flex w-full cursor-default select-none items-center gap-2 rounded-md px-2 py-1.5 font-mono text-ui-sm text-foreground outline-none hover:bg-accent hover:text-foreground'
 
   // ── Tab state ─────────────────────────────────────────────────────────────
   /** @type {'columns' | 'indexes' | 'relations' | 'triggers'} */
@@ -480,7 +480,7 @@
   <div class="studio-chrome flex shrink-0 items-center gap-3 border-b border-border/30 px-4 py-2.5 font-mono text-ui-2xs" data-studio-chrome>
     <span class="font-semibold text-foreground">{table}</span>
     {#if primaryKey.length > 0}
-      <span class="flex items-center gap-1 rounded-md bg-amber-500/10 px-1.5 py-0.5 text-amber-400/80"><KeyRound class="size-2.5" />{primaryKey.join(', ')}</span>
+      <span class="flex items-center gap-1 rounded-md bg-warning/10 px-1.5 py-0.5 text-warning/80"><KeyRound class="size-2.5" />{primaryKey.join(', ')}</span>
     {/if}
     {#if loading}<Loader class="ml-auto size-3.5 animate-spin text-muted-foreground/50" />{/if}
   </div>
@@ -552,10 +552,10 @@
             {@const displayType = stagedValues['type:' + col.name] ?? col.dataType}
             {@const displayNullable = stagedValues['nullable:' + col.name] !== undefined ? stagedValues['nullable:' + col.name] : col.isNullable}
             {@const displayDefault = stagedValues['default:' + col.name] !== undefined ? stagedValues['default:' + col.name] : (col.columnDefault ?? '')}
-            <tr class="group/row {staged ? 'bg-amber-500/[0.04]' : ''}" style="height:32px;content-visibility:auto;contain-intrinsic-size:auto 32px">
+            <tr class="group/row {staged ? 'bg-warning/[0.04]' : ''}" style="height:32px;content-visibility:auto;contain-intrinsic-size:auto 32px">
 
               <!-- # -->
-              <td class="{TD} {staged ? 'border-l-2 border-l-amber-500/50' : ''}">
+              <td class="{TD} {staged ? 'border-l-2 border-l-warning/50' : ''}">
                 <div class="{INP} flex items-center justify-end text-muted-foreground/40">{col.ordinalPosition}</div>
               </td>
 
@@ -567,9 +567,9 @@
                     onblur={commitRename}
                   />
                 {:else}
-                  <div class="{INP} flex items-center gap-1.5 {isPk ? 'text-amber-400' : 'text-foreground'}">
-                    {#if isPk}<KeyRound class="size-3 shrink-0 text-amber-400/60" />{/if}
-                    <span class="truncate {stagedValues['name:' + col.name] ? 'text-amber-300/90' : ''}">{displayName}</span>
+                  <div class="{INP} flex items-center gap-1.5 {isPk ? 'text-warning' : 'text-foreground'}">
+                    {#if isPk}<KeyRound class="size-3 shrink-0 text-warning/60" />{/if}
+                    <span class="truncate {stagedValues['name:' + col.name] ? 'text-warning/90' : ''}">{displayName}</span>
                   </div>
                 {/if}
               </td>
@@ -577,13 +577,13 @@
               <!-- data_type: plain drop panel, avoids DropdownMenu.Root/Trigger hybrid
                    that causes TypeError in Svelte 5 when the object literal is followed
                    by a cast `(expr)` on the next line (ASI footgun). -->
-              <td class="{TD_DROP} {typeDropOpen[col.name] ? 'ring-2 ring-inset ring-primary' : stagedValues['type:' + col.name] ? 'ring-1 ring-inset ring-amber-500/50' : ''}">
+              <td class="{TD_DROP} {typeDropOpen[col.name] ? 'ring-2 ring-inset ring-primary' : stagedValues['type:' + col.name] ? 'ring-1 ring-inset ring-warning/50' : ''}">
                 <div class="relative h-full">
                   <input
                     type="text"
                     value={typeDraft[col.name] ?? displayType}
                     readonly={!canEdit}
-                    class="{INP} pr-6 {stagedValues['type:' + col.name] ? 'text-amber-300/90' : ''} {canEdit ? '' : 'cursor-default'}"
+                    class="{INP} pr-6 {stagedValues['type:' + col.name] ? 'text-warning/90' : ''} {canEdit ? '' : 'cursor-default'}"
                     onfocus={() => {
                       if (!canEdit) return
                       typeDropOpen = { ...typeDropOpen, [col.name]: true }
@@ -637,12 +637,12 @@
               </td>
 
               <!-- is_nullable -->
-              <td class="{TD} {stagedValues['nullable:' + col.name] !== undefined ? 'ring-1 ring-inset ring-amber-500/50' : ''}">
+              <td class="{TD} {stagedValues['nullable:' + col.name] !== undefined ? 'ring-1 ring-inset ring-warning/50' : ''}">
                 <div class="relative flex h-full items-center px-3">
                   <select
                     value={displayNullable ? 'YES' : 'NO'}
                     disabled={isPk || !canEdit}
-                    class="w-full appearance-none border-0 bg-transparent py-0 font-mono text-ui-sm focus:outline-none disabled:cursor-not-allowed disabled:opacity-40 {displayNullable ? 'text-foreground' : 'text-muted-foreground'} {stagedValues['nullable:' + col.name] !== undefined ? 'text-amber-300/90' : ''}"
+                    class="w-full appearance-none border-0 bg-transparent py-0 font-mono text-ui-sm focus:outline-none disabled:cursor-not-allowed disabled:opacity-40 {displayNullable ? 'text-foreground' : 'text-muted-foreground'} {stagedValues['nullable:' + col.name] !== undefined ? 'text-warning/90' : ''}"
                     onchange={(e) => stageNullable(col.name, /** @type {HTMLSelectElement} */ (e.target).value === 'YES')}
                   >
                     <option value="YES">YES</option>
@@ -655,14 +655,14 @@
               </td>
 
               <!-- column_default -->
-              <td class="{TD_DROP} {defDropOpen[col.name] ? 'ring-2 ring-inset ring-primary' : stagedValues['default:' + col.name] !== undefined ? 'ring-1 ring-inset ring-amber-500/50' : ''}">
+              <td class="{TD_DROP} {defDropOpen[col.name] ? 'ring-2 ring-inset ring-primary' : stagedValues['default:' + col.name] !== undefined ? 'ring-1 ring-inset ring-warning/50' : ''}">
                 <div class="relative h-full">
                   <input
                     type="text"
                     value={defaultDraft[col.name] ?? displayDefault}
                     placeholder="NULL"
                     readonly={!canEdit}
-                    class="{INP} pr-6 placeholder:text-muted-foreground/30 {stagedValues['default:' + col.name] !== undefined ? 'text-amber-300/90' : displayDefault ? '' : 'text-muted-foreground/35'} {canEdit ? '' : 'cursor-default'}"
+                    class="{INP} pr-6 placeholder:text-muted-foreground/30 {stagedValues['default:' + col.name] !== undefined ? 'text-warning/90' : displayDefault ? '' : 'text-muted-foreground/35'} {canEdit ? '' : 'cursor-default'}"
                     onfocus={(e) => {
                       if (!canEdit) return
                       defaultDraft = { ...defaultDraft, [col.name]: /** @type {HTMLInputElement} */ (e.target).value }
@@ -716,7 +716,7 @@
               <!-- foreign_key -->
               <td class={TD}>
                 {#if col.foreignKey}
-                  <button type="button" class="flex h-full w-full items-center gap-1.5 px-3 font-mono text-ui-xs text-blue-400/70 transition-colors hover:bg-muted/40 hover:text-blue-400" onclick={() => openFkDialog(col)}>
+                  <button type="button" class="flex h-full w-full items-center gap-1.5 px-3 font-mono text-ui-xs text-info/70 transition-colors hover:bg-muted/40 hover:text-info" onclick={() => openFkDialog(col)}>
                     <ArrowRight class="size-3 shrink-0" /><span class="truncate">{col.foreignKey}</span>
                   </button>
                 {:else if !isPk}
@@ -759,7 +759,7 @@
 
           <!-- Add column row -->
           {#if newColumn}
-            <tr style="height:34px" class="bg-emerald-500/[0.04] ring-1 ring-inset ring-emerald-500/20">
+            <tr style="height:34px" class="bg-success/[0.04] ring-1 ring-inset ring-success/20">
               <td class={TD}></td>
               <td class="{TD} ring-0">
                 <input type="text" bind:value={newColumn.name} placeholder="column_name" use:focusOnMount class="{INP} placeholder:text-muted-foreground/30" />
@@ -820,7 +820,7 @@
     {#if canEdit}
     <div class="flex items-center gap-2 border-t border-border/25 px-3 py-1.5 font-mono">
     {#if newColumn}
-      <span class="text-ui-3xs text-emerald-500/70">New column, fill in details then save</span>
+      <span class="text-ui-3xs text-success/70">New column, fill in details then save</span>
       <button type="button" disabled={confirmLoading}
         class="ml-auto inline-flex h-6 items-center gap-1 rounded-lg bg-foreground px-2.5 text-ui-2xs font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-40"
         onclick={saveNewColumn}>
@@ -832,7 +832,7 @@
         onclick={() => (newColumn = null)}>Cancel</button>
     {:else}
       {#if hasPending}
-        <span class="text-ui-3xs text-amber-400/70">{pendingCount} pending {pendingCount === 1 ? 'change' : 'changes'}</span>
+        <span class="text-ui-3xs text-warning/70">{pendingCount} pending {pendingCount === 1 ? 'change' : 'changes'}</span>
         <button type="button" disabled={confirmLoading}
           class="inline-flex h-6 items-center gap-1 rounded-lg bg-foreground px-2.5 text-ui-2xs font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-40"
           onclick={applyPendingDdl}>
@@ -920,7 +920,7 @@
                 <div class="flex h-full items-center px-3">
                   <button
                     type="button"
-                    class="rounded-md px-1.5 py-0.5 font-mono text-ui-3xs font-semibold transition-colors {idx.isUnique ? 'bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20' : 'bg-muted/30 text-muted-foreground/50 hover:bg-muted/60 hover:text-foreground'}"
+                    class="rounded-md px-1.5 py-0.5 font-mono text-ui-3xs font-semibold transition-colors {idx.isUnique ? 'bg-success/10 text-success hover:bg-success/20' : 'bg-muted/30 text-muted-foreground/50 hover:bg-muted/60 hover:text-foreground'}"
                     onclick={() => requestIndexRecreate(idx, idx.indexType, !idx.isUnique, idx.columns)}
                     title="Click to toggle uniqueness"
                   >
@@ -973,11 +973,11 @@
 
           <!-- New index row -->
           {#if newIndex}
-            <tr style="height:34px" class="bg-emerald-500/[0.04] ring-1 ring-inset ring-emerald-500/20">
-              <td class="border-b border-r border-green-700/20 p-0">
+            <tr style="height:34px" class="bg-success/[0.04] ring-1 ring-inset ring-success/20">
+              <td class="border-b border-r border-success/20 p-0">
                 <input type="text" bind:value={newIndex.name} placeholder="auto-generated" class="{INP} placeholder:text-muted-foreground/30" />
               </td>
-              <td class="border-b border-r border-green-700/20 p-0">
+              <td class="border-b border-r border-success/20 p-0">
                 <DropdownMenu.Root>
                   <DropdownMenu.Trigger class="group/na flex h-full w-full cursor-pointer items-center gap-1 px-3 font-mono text-ui-sm uppercase text-foreground hover:bg-accent/20">
                     <span class="flex-1">{newIndex.algorithm || 'BTREE'}</span>
@@ -992,29 +992,29 @@
                   </DropdownMenu.Content>
                 </DropdownMenu.Root>
               </td>
-              <td class="border-b border-r border-green-700/20 p-0">
+              <td class="border-b border-r border-success/20 p-0">
                 <div class="flex h-full items-center px-3">
                   <button
                     type="button"
-                    class="rounded px-1.5 py-0.5 font-mono text-ui-xs font-medium transition-colors {newIndex.isUnique ? 'bg-green-500/12 text-green-400 hover:bg-green-500/20' : 'bg-muted/40 text-muted-foreground hover:bg-muted/70 hover:text-foreground'}"
+                    class="rounded px-1.5 py-0.5 font-mono text-ui-xs font-medium transition-colors {newIndex.isUnique ? 'bg-success/12 text-success hover:bg-success/20' : 'bg-muted/40 text-muted-foreground hover:bg-muted/70 hover:text-foreground'}"
                     onclick={() => { if (newIndex) newIndex.isUnique = !newIndex.isUnique }}
                   >
                     {newIndex.isUnique ? 'TRUE' : 'FALSE'}
                   </button>
                 </div>
               </td>
-              <td class="border-b border-r border-green-700/20 p-0">
+              <td class="border-b border-r border-success/20 p-0">
                 <input type="text" bind:value={newIndex.columns} placeholder="col1, col2" class="{INP} placeholder:text-muted-foreground/30" />
               </td>
-              <td class="border-b border-r border-green-700/20 p-0">
+              <td class="border-b border-r border-success/20 p-0">
                 <input type="text" bind:value={newIndex.condition} placeholder="WHERE …" class="{INP} placeholder:text-muted-foreground/30" />
               </td>
-              <td class="border-b border-r border-green-700/20 p-0">
+              <td class="border-b border-r border-success/20 p-0">
                 <input type="text" bind:value={newIndex.comment} placeholder="—" class="{INP} italic placeholder:not-italic placeholder:text-muted-foreground/30" />
               </td>
-              <td class="border-b border-green-700/20 p-0">
+              <td class="border-b border-success/20 p-0">
                 <div class="flex h-full flex-col items-center justify-center gap-px">
-                  <button type="button" disabled={confirmLoading} title="Save" class="flex items-center justify-center text-green-500 hover:text-green-400 disabled:opacity-40" onclick={saveNewIndex}>
+                  <button type="button" disabled={confirmLoading} title="Save" class="flex items-center justify-center text-success hover:text-success/80 disabled:opacity-40" onclick={saveNewIndex}>
                     <svg class="size-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 8l4 4 6-6"/></svg>
                   </button>
                   <button type="button" title="Cancel" class="flex items-center justify-center text-muted-foreground/40 hover:text-muted-foreground" onclick={() => newIndex = null}>
@@ -1053,12 +1053,12 @@
             <tr class="group/rel" style="height:32px">
               <td class="border-b border-r border-border/40 px-3 font-mono text-ui-sm text-foreground overflow-hidden">
                 <div class="flex items-center gap-1.5 truncate">
-                  {#if pkSet.has(col.name)}<KeyRound class="size-3 shrink-0 text-amber-400/60" />{/if}
+                  {#if pkSet.has(col.name)}<KeyRound class="size-3 shrink-0 text-warning/60" />{/if}
                   <span class="truncate">{col.name}</span>
                 </div>
               </td>
               <td class="border-b border-r border-border/40 p-0 overflow-hidden">
-                <button type="button" class="flex h-full w-full items-center gap-1.5 px-3 font-mono text-ui-xs text-blue-400/70 transition-colors hover:bg-muted/40 hover:text-blue-400" onclick={() => openFkDialog(col)}>
+                <button type="button" class="flex h-full w-full items-center gap-1.5 px-3 font-mono text-ui-xs text-info/70 transition-colors hover:bg-muted/40 hover:text-info" onclick={() => openFkDialog(col)}>
                   <ArrowRight class="size-3 shrink-0" /><span class="truncate">{col.foreignKey}</span>
                 </button>
               </td>
@@ -1134,8 +1134,8 @@
               </td>
               <td class="border-b border-r border-border/40 px-3">
                 {#if trig.enabled}
-                  <span class="flex items-center gap-1 font-mono text-ui-3xs text-green-400">
-                    <span class="size-1.5 rounded-full bg-green-400"></span>on
+                  <span class="flex items-center gap-1 font-mono text-ui-3xs text-success">
+                    <span class="size-1.5 rounded-full bg-success"></span>on
                   </span>
                 {:else}
                   <span class="flex items-center gap-1 font-mono text-ui-3xs text-muted-foreground/40">

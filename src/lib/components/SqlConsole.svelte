@@ -559,7 +559,7 @@
           >
             <ChevronDown class="size-3" />
           </DropdownMenu.Trigger>
-          <DropdownMenu.Content align="start" class="w-72 text-ui-sm">
+          <DropdownMenu.Content align="start" class="min-w-72 text-ui-sm">
             <DropdownMenu.Item onSelect={() => handleRun(undefined)}>
               <Play class="size-3.5 shrink-0 text-muted-foreground/60" />
               <span class="whitespace-nowrap">Run all statements</span>
@@ -680,7 +680,7 @@
           title="Copy as ORM query, Drizzle or Prisma"
         >
           {#if ormCopied}
-            <CheckCheck class="size-3.5 shrink-0 text-green-500" />
+            <CheckCheck class="size-3.5 shrink-0 text-success" />
           {:else}
             <Code2 class="size-3.5 shrink-0" />
           {/if}

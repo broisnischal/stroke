@@ -116,6 +116,7 @@ literal colors.
 | `rounded-md` | buttons, icon buttons, inputs, menu items, chips |
 | `rounded-lg` | cards, panels, grouped containers, field wrappers |
 | `rounded-[10px]` | floating popovers / command menus |
+| `rounded-2xl` | modal dialog contents only (`bg-background border-border/60 elevate-3-rim`, overlay `bg-black/65`) |
 | `rounded-full` | dots, pills, avatars, status indicators |
 
 No other radii. No `rounded-xl`/`rounded-sm` in new code unless matching a
@@ -182,6 +183,22 @@ hover:opacity-90`. Never hand-roll a primary button.
   leading `size-3.5` icon, `gap-2`.
 - One active dialog/menu at a time from the global hotkey flow.
 
+### Canonical menu recipe (dropdown / context / select — all identical)
+
+The primitives in `ui/dropdown-menu`, `ui/context-menu`, and `ui/select` share
+ONE recipe. Never re-densify a menu at the call site with `[&_[data-slot=…]]`
+overrides — if a menu looks off, the primitive is wrong; fix it there.
+
+| Part | Recipe |
+|---|---|
+| Panel | `rounded-[10px] border border-border/60 bg-popover p-1 elevate-2-rim` |
+| Item | `gap-2 rounded-md px-2 py-1.5 text-ui-sm` · focus/highlight `bg-accent text-foreground` · disabled `opacity-40` · icons `size-3.5 shrink-0` |
+| Checkbox/radio item | same, with `pl-2 pr-8` (trailing indicator) |
+| Group label | `px-2 pt-1.5 pb-1 text-ui-2xs font-medium text-muted-foreground/70` — **plain case**, never uppercase (uppercase micro-labels are for page/sidebar sections only, §10) |
+| Separator | `bg-border/50 -mx-1 my-1 h-px` |
+| Shortcut / trailing hint | `ml-auto shrink-0 pl-3 text-ui-2xs text-muted-foreground/60` — no letter-spacing |
+| Tooltip | `rounded-lg border-border/60 bg-popover px-2.5 py-1.5 text-ui-xs elevate-2-rim` |
+
 ### Menu width (hard rule)
 
 - **Never put a fixed `w-*` on a menu panel** (`Content` / `SubContent`). Use
@@ -236,6 +253,8 @@ flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-col
 text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground/55
 ```
 Used for ACCOUNT / D1 DATABASE / PINNED / TABLES etc. Always this exact recipe.
+**Page/sidebar sections only** — menu group labels inside dropdowns are plain
+case (§7); do not put uppercase micro-labels inside a menu panel.
 
 ---
 

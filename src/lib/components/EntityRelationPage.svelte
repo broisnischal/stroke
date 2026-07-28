@@ -729,7 +729,7 @@
             <ChevronDown class="size-3 text-muted-foreground/60" />
           </button>
           {#if downloadOpen}
-            <div class="absolute right-0 top-full z-50 mt-1 w-44 overflow-hidden rounded-[10px] border border-border/60 bg-popover p-1 elevate-2-rim">
+            <div class="absolute right-0 top-full z-50 mt-1 min-w-44 overflow-hidden rounded-[10px] border border-border/60 bg-popover p-1 elevate-2-rim">
               <button
                 type="button"
                 class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-ui-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -798,7 +798,7 @@
     {:else}
       {#if focusTable}
         <div class="pointer-events-none absolute inset-x-0 top-3 z-40 flex justify-center">
-          <div class="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-border/60 bg-popover/95 px-3 py-1 text-ui-xs shadow-lg backdrop-blur">
+          <div class="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-border/60 bg-popover/95 px-3 py-1 text-ui-xs elevate-2-rim backdrop-blur">
             <span class="text-muted-foreground/70">Related to</span>
             <span class="font-mono font-medium text-foreground">{focusTable}</span>
             <button type="button" class="ml-0.5 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-muted-foreground/60 transition-colors hover:bg-muted/50 hover:text-foreground" onclick={onclearfocus}>
@@ -829,7 +829,7 @@
       <!-- ── Legend ───────────────────────────────────────────────────────── -->
       {#if tableMeta.size > 0}
         <div class="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center">
-          <div class="flex items-center gap-4 rounded-full border border-border/50 bg-panel/90 px-4 py-1.5 font-mono text-ui-2xs text-muted-foreground/70 shadow-lg backdrop-blur">
+          <div class="flex items-center gap-4 rounded-full border border-border/50 bg-panel/90 px-4 py-1.5 font-mono text-ui-2xs text-muted-foreground/70 elevate-2-rim backdrop-blur">
             <span class="flex items-center gap-1.5"><span class="inline-block size-2 rounded-sm" style="background:hsl(38 92% 55%)"></span>Primary key</span>
             <span class="flex items-center gap-1.5"><span class="inline-block size-2 rounded-sm" style="background:hsl(217 91% 65%)"></span>Foreign key</span>
             <span class="flex items-center gap-1.5"><span class="inline-block h-px w-4" style="background:hsl(var(--border))"></span>Relationship</span>
@@ -839,7 +839,7 @@
 
       <!-- ── Detail panel ───────────────────────────────────────────────── -->
       {#if selMeta}
-        <div class="absolute right-4 top-4 z-50 w-64 overflow-hidden rounded-[10px] border border-border/60 bg-card shadow-xl">
+        <div class="absolute right-4 top-4 z-50 w-64 overflow-hidden rounded-[10px] border border-border/60 bg-card elevate-2-rim">
           <div class="flex items-center gap-2 border-b border-border/40 bg-muted/20 px-3 py-2.5">
             <Network class="size-3.5 shrink-0 text-primary/60" />
             <span class="min-w-0 flex-1 truncate font-mono text-ui-xs font-bold text-foreground">{selMeta.name}</span>
@@ -855,11 +855,11 @@
               {@const isPk = selMeta.pkCols.has(col.name)}
               {@const isFk = !!col.foreignKey}
               <div class="flex items-center gap-2 border-b border-border/10 px-3 py-1 last:border-0">
-                {#if isPk}<KeyRound class="size-3 shrink-0 text-amber-400/80" />
-                {:else if isFk}<Link class="size-3 shrink-0 text-blue-400/60" />
+                {#if isPk}<KeyRound class="size-3 shrink-0 text-warning/80" />
+                {:else if isFk}<Link class="size-3 shrink-0 text-info/60" />
                 {:else}<span class="size-3 shrink-0"></span>{/if}
                 <span class="min-w-0 flex-1 truncate font-mono text-ui-3xs
-                  {isPk ? 'font-semibold text-amber-300/90' : isFk ? 'text-blue-300/75' : 'text-foreground/65'}"
+                  {isPk ? 'font-semibold text-warning/90' : isFk ? 'text-info/75' : 'text-foreground/65'}"
                 >{col.name}</span>
                 <span class="shrink-0 font-mono text-ui-3xs text-muted-foreground/40">{col.dataType}</span>
               </div>
@@ -876,7 +876,7 @@
                   <span class="text-ui-3xs text-muted-foreground/30">→</span>
                   <button
                     type="button"
-                    class="font-mono text-ui-3xs text-blue-400/80 hover:underline"
+                    class="font-mono text-ui-3xs text-info/80 hover:underline"
                     onclick={() => { selectedTable = ref[1] ?? null }}
                   >{ref[1]}.{ref[2]}</button>
                 </div>

@@ -120,7 +120,7 @@
           <div class="flex items-center gap-2">
             <span class={
               'flex items-center gap-1.5 rounded-full px-2 py-1 text-ui-2xs font-medium transition-colors duration-200 ' +
-              (state === 'current' ? 'bg-primary/12 text-foreground'
+              (state === 'current' ? 'bg-primary/10 text-foreground'
                : state === 'done'  ? 'text-muted-foreground/70'
                : 'text-muted-foreground/35')
             }>
@@ -163,7 +163,7 @@
             <!-- Step heading -->
             <div class="flex flex-col items-center gap-2.5 text-center">
               {#if step === 1}
-                <div class="mb-1 grid size-14 place-items-center rounded-2xl border border-border/50 bg-card/40 shadow-sm" in:fly={{ y: 8, duration: 300, easing: cubicOut }}>
+                <div class="mb-1 grid size-14 place-items-center rounded-lg border border-border/50 bg-card/40" in:fly={{ y: 8, duration: 300, easing: cubicOut }}>
                   <Logo class="size-7" />
                 </div>
               {/if}
@@ -176,8 +176,8 @@
               <!-- Clean feature grid, no preview clutter -->
               <div class="grid w-full max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2">
                 {#each FEATURES as f}
-                  <div class="flex items-start gap-3.5 rounded-2xl border border-border/40 bg-card/20 p-4 transition-colors hover:border-border/70 hover:bg-card/40">
-                    <span class="grid size-10 shrink-0 place-items-center rounded-xl border border-border/50 bg-muted/40 text-muted-foreground">
+                  <div class="flex items-start gap-3.5 rounded-lg border border-border/40 bg-card/20 p-4 transition-colors hover:border-border/70 hover:bg-card/40">
+                    <span class="grid size-10 shrink-0 place-items-center rounded-lg border border-border/50 bg-muted/40 text-muted-foreground">
                       <Icon name={f.icon} class="size-5" />
                     </span>
                     <div class="min-w-0">
@@ -224,10 +224,10 @@
               <div class="flex w-full max-w-md flex-col gap-3">
                 <button
                   type="button"
-                  class="group flex w-full items-center gap-3.5 rounded-2xl bg-primary px-5 py-4 text-left shadow-sm transition-all hover:opacity-95 active:scale-[0.99]"
+                  class="group flex w-full items-center gap-3.5 rounded-lg bg-primary px-5 py-4 text-left transition-all hover:opacity-95 active:scale-[0.99]"
                   onclick={() => done(true)}
                 >
-                  <span class="grid size-10 shrink-0 place-items-center rounded-xl bg-primary-foreground/15 text-primary-foreground">
+                  <span class="grid size-10 shrink-0 place-items-center rounded-lg bg-primary-foreground/15 text-primary-foreground">
                     <Icon name="plus" class="size-5" />
                   </span>
                   <span class="min-w-0 flex-1">
@@ -239,10 +239,10 @@
 
                 <button
                   type="button"
-                  class="group flex w-full items-center gap-3.5 rounded-2xl border border-border/60 bg-card/40 px-5 py-4 text-left transition-all hover:border-border hover:bg-muted/50 active:scale-[0.99]"
+                  class="group flex w-full items-center gap-3.5 rounded-lg border border-border/60 bg-card/40 px-5 py-4 text-left transition-all hover:border-border hover:bg-muted/50 active:scale-[0.99]"
                   onclick={trySample}
                 >
-                  <span class="grid size-10 shrink-0 place-items-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
+                  <span class="grid size-10 shrink-0 place-items-center rounded-lg border border-primary/20 bg-primary/10 text-primary">
                     <Icon name="flask-conical" class="size-5" />
                   </span>
                   <span class="min-w-0 flex-1">
@@ -263,7 +263,7 @@
     <footer class="relative z-10 flex h-16 shrink-0 items-center justify-between border-t border-border/40 px-6">
       <button
         type="button"
-        class="flex items-center gap-1.5 rounded-lg px-3 py-2 text-ui-sm font-medium text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-0"
+        class="flex h-9 items-center gap-1.5 rounded-lg px-3 text-ui-sm font-medium text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-0"
         disabled={step === 1}
         onclick={back}
       >
@@ -276,7 +276,7 @@
       {#if step === LICENSE_STEP}
         <button
           type="button"
-          class="group flex items-center gap-2 rounded-lg border border-border/60 bg-card/40 px-6 py-2.5 text-ui-sm font-semibold text-foreground transition-all hover:bg-muted/60 active:scale-[0.98]"
+          class="group flex h-9 items-center gap-2 rounded-lg border border-border/60 bg-card/40 px-6 text-ui-sm font-semibold text-foreground transition-all hover:bg-muted/60 active:scale-[0.98]"
           onclick={next}
         >
           Start free trial
@@ -285,7 +285,7 @@
       {:else if step < TOTAL}
         <button
           type="button"
-          class="group flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 text-ui-sm font-semibold text-primary-foreground shadow-sm transition-all hover:opacity-90 active:scale-[0.98]"
+          class="group flex h-9 items-center gap-2 rounded-lg bg-primary px-6 text-ui-sm font-semibold text-primary-foreground transition-all hover:opacity-90 active:scale-[0.98]"
           onclick={next}
         >
           Next
@@ -294,7 +294,7 @@
       {:else}
         <button
           type="button"
-          class="rounded-lg px-3 py-2 text-ui-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+          class="flex h-9 items-center rounded-lg px-3 text-ui-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
           onclick={() => done(false)}
         >
           Skip for now

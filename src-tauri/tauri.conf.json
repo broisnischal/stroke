@@ -47,7 +47,12 @@
     "windows": {
       "certificateThumbprint": null,
       "digestAlgorithm": "sha256",
-      "timestampUrl": "http://timestamp.digicert.com"
+      "timestampUrl": "http://timestamp.digicert.com",
+      "nsis": {
+        "template": "./nsis/installer.nsi",
+        "installMode": "currentUser",
+        "installerIcon": "icons/icon.ico"
+      }
     },
     "android": {
       "debugApplicationIdSuffix": ".debug"

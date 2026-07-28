@@ -434,7 +434,7 @@
             {/if}
 
             {#if testState === "ok"}
-              <div class="flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.08] px-3 py-2.5 text-ui-xs text-emerald-500">
+              <div class="flex items-center gap-2 rounded-lg border border-success/20 bg-success/[0.08] px-3 py-2.5 text-ui-xs text-success">
                 <Check class="size-3.5 shrink-0" />{testMsg}
               </div>
             {:else if testState === "error"}

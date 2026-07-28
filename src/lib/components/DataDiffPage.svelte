@@ -477,7 +477,7 @@
     {#if isOpen}
       <div
         role="presentation"
-        class={cn('fixed z-40 w-56 overflow-hidden rounded-lg border border-border/50 bg-popover shadow-2xl', ddFlipUp && '-translate-y-full')}
+        class={cn('fixed z-40 w-56 overflow-hidden rounded-[10px] border border-border/60 bg-popover elevate-2-rim', ddFlipUp && '-translate-y-full')}
         style="top:{ddTop}px;left:{ddLeft}px"
         onpointerdown={(e) => e.stopPropagation()}
       >
@@ -516,14 +516,14 @@
       onclick={(e) => { e.stopPropagation(); if (isOpen) closeDd(); else openDd(id, e) }}
       class={cn('flex h-7 max-w-[200px] items-center gap-1.5 rounded-md border border-border/40 bg-muted/25 px-2.5 text-ui-xs font-medium text-foreground/90 transition-colors hover:bg-muted/45 select-none', isOpen && 'border-border/70 bg-muted/50 text-foreground')}
     >
-      {#if value === currentConnectionId}<span class="size-1.5 shrink-0 rounded-full bg-blue-400" title="Active connection"></span>{/if}
+      {#if value === currentConnectionId}<span class="size-1.5 shrink-0 rounded-full bg-info" title="Active connection"></span>{/if}
       <span class="max-w-[140px] truncate">{selected?.name ?? 'Connection'}</span>
       <ChevronDown class={cn('ml-auto size-3 shrink-0 text-muted-foreground/40 transition-transform', isOpen && 'rotate-180')} />
     </button>
     {#if isOpen}
       <div
         role="presentation"
-        class={cn('fixed z-40 w-64 overflow-hidden rounded-lg border border-border/50 bg-popover shadow-2xl', ddFlipUp && '-translate-y-full')}
+        class={cn('fixed z-40 w-64 overflow-hidden rounded-[10px] border border-border/60 bg-popover elevate-2-rim', ddFlipUp && '-translate-y-full')}
         style="top:{ddTop}px;left:{ddLeft}px"
         onpointerdown={(e) => e.stopPropagation()}
       >
@@ -542,7 +542,7 @@
               >
                 <span class={cn('w-3 shrink-0 text-center text-ui-3xs', value === conn.id ? 'text-primary' : 'opacity-0')}>✓</span>
                 <span class="flex-1 truncate text-left">{conn.name}</span>
-                {#if conn.id === currentConnectionId}<span class="shrink-0 text-ui-3xs text-blue-400/60">active</span>{/if}
+                {#if conn.id === currentConnectionId}<span class="shrink-0 text-ui-3xs text-info/60">active</span>{/if}
               </button>
             {/each}
           {/if}
@@ -556,9 +556,9 @@
 {#snippet ModeToggle({ mode, onset })}
   <div class="flex shrink-0 items-center rounded-md border border-border/40 bg-muted/15 p-0.5 text-ui-2xs">
     <button onclick={() => onset('table')}
-      class={cn('rounded px-2 py-0.5 font-medium transition-colors', mode === 'table' ? 'bg-muted text-foreground shadow-sm' : 'text-muted-foreground/45 hover:text-muted-foreground/80')}>Table</button>
+      class={cn('rounded px-2 py-0.5 font-medium transition-colors', mode === 'table' ? 'bg-muted text-foreground' : 'text-muted-foreground/45 hover:text-muted-foreground/80')}>Table</button>
     <button onclick={() => onset('sql')}
-      class={cn('rounded px-2 py-0.5 font-medium transition-colors', mode === 'sql' ? 'bg-muted text-foreground shadow-sm' : 'text-muted-foreground/45 hover:text-muted-foreground/80')}>SQL</button>
+      class={cn('rounded px-2 py-0.5 font-medium transition-colors', mode === 'sql' ? 'bg-muted text-foreground' : 'text-muted-foreground/45 hover:text-muted-foreground/80')}>SQL</button>
   </div>
 {/snippet}
 
@@ -574,8 +574,8 @@
         <!-- SOURCE row -->
         <div class="flex items-center gap-2.5 px-5 py-2.5">
           <span class="flex w-[74px] shrink-0 items-center gap-1.5">
-            <span class="size-1.5 shrink-0 rounded-full bg-blue-500"></span>
-            <span class="text-ui-3xs font-semibold uppercase tracking-wider text-blue-500/90">Source</span>
+            <span class="size-1.5 shrink-0 rounded-full bg-info"></span>
+            <span class="text-ui-3xs font-semibold uppercase tracking-wider text-info/90">Source</span>
           </span>
           {@render ConnSelect({ id: 'L.conn', value: L.connId, onchange: (v) => { L = { ...L, connId: v }; onConnChange('L') } })}
           {#if L.mode === 'table'}
@@ -583,7 +583,7 @@
             {@render SearchSelect({ id: 'L.schema', value: L.schema, options: L.schemas, loading: L.loadingSchemas, placeholder: 'schema', onchange: (v) => { L = { ...L, schema: v, table: '', tables: [] }; onSchemaChange('L') } })}
             {@render SearchSelect({ id: 'L.table', value: L.table, options: L.tables, loading: L.loadingTables, placeholder: 'table', onchange: (v) => { L = { ...L, table: v } } })}
           {:else}
-            <div bind:this={lSqlEl} class="min-h-[64px] flex-1 overflow-hidden rounded-md" style="border: 1px solid rgba(255,255,255,0.06)"></div>
+            <div bind:this={lSqlEl} class="min-h-[64px] flex-1 overflow-hidden rounded-md border border-border/40"></div>
           {/if}
         </div>
 
@@ -603,8 +603,8 @@
         <!-- TARGET row -->
         <div class="flex items-center gap-2.5 px-5 py-2.5">
           <span class="flex w-[74px] shrink-0 items-center gap-1.5">
-            <span class="size-1.5 shrink-0 rounded-full bg-emerald-500"></span>
-            <span class="text-ui-3xs font-semibold uppercase tracking-wider text-emerald-500/90">Target</span>
+            <span class="size-1.5 shrink-0 rounded-full bg-success"></span>
+            <span class="text-ui-3xs font-semibold uppercase tracking-wider text-success/90">Target</span>
           </span>
           {@render ConnSelect({ id: 'R.conn', value: R.connId, onchange: (v) => { R = { ...R, connId: v }; onConnChange('R') } })}
           {#if R.mode === 'table'}
@@ -612,7 +612,7 @@
             {@render SearchSelect({ id: 'R.schema', value: R.schema, options: R.schemas, loading: R.loadingSchemas, placeholder: 'schema', onchange: (v) => { R = { ...R, schema: v, table: '', tables: [] }; onSchemaChange('R') } })}
             {@render SearchSelect({ id: 'R.table', value: R.table, options: R.tables, loading: R.loadingTables, placeholder: 'table', onchange: (v) => { R = { ...R, table: v } } })}
           {:else}
-            <div bind:this={rSqlEl} class="min-h-[64px] flex-1 overflow-hidden rounded-md" style="border: 1px solid rgba(255,255,255,0.06)"></div>
+            <div bind:this={rSqlEl} class="min-h-[64px] flex-1 overflow-hidden rounded-md border border-border/40"></div>
           {/if}
         </div>
 
@@ -630,7 +630,7 @@
       <div class="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
         {#each [...selectedKeyCols] as col}
           <button onclick={() => toggleKeyCol(col)}
-            class="flex items-center gap-1 rounded-full bg-primary/12 px-2.5 py-0.5 text-ui-2xs font-medium text-primary transition-colors hover:bg-primary/20"
+            class="flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-ui-2xs font-medium text-primary transition-colors hover:bg-primary/20"
           >{col}<X class="size-2.5" /></button>
         {/each}
         {#each keyColSuggestions.filter((c) => !selectedKeyCols.has(c)) as col}
@@ -643,7 +643,7 @@
         {/if}
       </div>
       <button onclick={compare} disabled={comparing}
-        class="flex shrink-0 items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 text-ui-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-50"
+        class="flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-primary px-4 text-ui-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-50"
       >
         {#if comparing}<Loader2 class="size-3.5 animate-spin" />{:else}<GitCompare class="size-3.5" />{/if}
         Compare
@@ -651,7 +651,7 @@
     </div>
 
     {#if error}
-      <div class="mx-5 mb-2 rounded bg-destructive/8 px-3 py-1.5 text-ui-xs text-destructive">{error}</div>
+      <div class="mx-5 mb-2 rounded-md bg-destructive/10 px-3 py-1.5 text-ui-xs text-destructive">{error}</div>
     {/if}
   </div>
 
@@ -665,9 +665,9 @@
       {#each [
         { key: 'all',       label: 'All',       count: diffRows.length,                          badge: 'bg-muted/30 text-muted-foreground/50',           active: 'text-foreground' },
         { key: 'changed',   label: 'Changed',   count: stats.added+stats.modified+stats.removed, badge: 'bg-muted/30 text-muted-foreground/50',           active: 'text-foreground' },
-        { key: 'added',     label: 'Added',     count: stats.added,                              badge: 'bg-emerald-500/10 text-emerald-400',             active: 'text-emerald-400' },
-        { key: 'modified',  label: 'Modified',  count: stats.modified,                           badge: 'bg-yellow-500/10 text-yellow-400',               active: 'text-yellow-400' },
-        { key: 'removed',   label: 'Removed',   count: stats.removed,                            badge: 'bg-red-500/10 text-red-400',                     active: 'text-red-400' },
+        { key: 'added',     label: 'Added',     count: stats.added,                              badge: 'bg-success/10 text-success',                     active: 'text-success' },
+        { key: 'modified',  label: 'Modified',  count: stats.modified,                           badge: 'bg-warning/10 text-warning',                     active: 'text-warning' },
+        { key: 'removed',   label: 'Removed',   count: stats.removed,                            badge: 'bg-destructive/10 text-destructive',             active: 'text-destructive' },
         { key: 'unchanged', label: 'Unchanged', count: stats.unchanged,                          badge: 'bg-muted/30 text-muted-foreground/50',           active: 'text-foreground' },
       ] as f}
         <button
@@ -751,20 +751,20 @@
             {@const isRemoved  = row.status === 'removed'}
             {@const isModified = row.status === 'modified'}
             {@const rowBg =
-              isAdded    ? 'bg-emerald-500/[0.04]' :
-              isRemoved  ? 'bg-red-500/[0.04]' :
-              isModified ? 'bg-amber-500/[0.025]' : ''}
+              isAdded    ? 'bg-success/[0.04]' :
+              isRemoved  ? 'bg-destructive/[0.04]' :
+              isModified ? 'bg-warning/[0.025]' : ''}
             {@const statusGlyph =
               isAdded   ? '+' : isRemoved ? '−' : isModified ? '~' : ''}
             {@const statusColor =
-              isAdded   ? 'text-emerald-500' :
-              isRemoved ? 'text-red-400' :
-              isModified? 'text-amber-400/80' :
+              isAdded   ? 'text-success' :
+              isRemoved ? 'text-destructive' :
+              isModified? 'text-warning/80' :
               'text-muted-foreground/15'}
             {@const accentColor =
-              isAdded   ? 'bg-emerald-500/35' :
-              isRemoved ? 'bg-red-500/35' :
-              isModified? 'bg-amber-500/25' : ''}
+              isAdded   ? 'bg-success/35' :
+              isRemoved ? 'bg-destructive/35' :
+              isModified? 'bg-warning/25' : ''}
             <tr class="{rowBg || 'hover:bg-foreground/[0.025]'} transition-colors" style="height:{ROW_HEIGHT}px">
               <td class="relative select-none border-b border-border/8 px-2 text-center font-mono text-ui-3xs font-bold {statusColor}">
                 {#if accentColor}<span class="absolute inset-y-0 left-0 w-[2px] {accentColor}"></span>{/if}
@@ -780,27 +780,27 @@
                   {#if isChanged}
                     <div class="flex min-w-0 items-center gap-1.5">
                       {#if oldVal === null}
-                        <span class="shrink-0 text-ui-3xs italic text-red-400/45 line-through">NULL</span>
+                        <span class="shrink-0 text-ui-3xs italic text-destructive/45 line-through">NULL</span>
                       {:else}
-                        <span class="min-w-0 flex-1 truncate text-ui-3xs text-red-400/55 line-through">{String(oldVal)}</span>
+                        <span class="min-w-0 flex-1 truncate text-ui-3xs text-destructive/55 line-through">{String(oldVal)}</span>
                       {/if}
                       <span class="shrink-0 font-sans text-ui-3xs text-muted-foreground/25">→</span>
                       {#if newVal === null}
-                        <span class="shrink-0 text-ui-3xs italic text-emerald-400/70">NULL</span>
+                        <span class="shrink-0 text-ui-3xs italic text-success/70">NULL</span>
                       {:else}
-                        <span class="min-w-0 flex-1 truncate text-emerald-300/90">{String(newVal)}</span>
+                        <span class="min-w-0 flex-1 truncate text-success/90">{String(newVal)}</span>
                       {/if}
                     </div>
                   {:else if dispVal === null}
                     <span class="italic text-muted-foreground/15">NULL</span>
                   {:else if searchQuery}
-                    <span class="block overflow-hidden text-ellipsis whitespace-nowrap {isAdded ? 'text-emerald-300/80' : isRemoved ? 'text-red-300/60' : ''}">
+                    <span class="block overflow-hidden text-ellipsis whitespace-nowrap {isAdded ? 'text-success/80' : isRemoved ? 'text-destructive/60' : ''}">
                       {#each splitHighlight(dispStr, searchQuery) as seg}
                         {#if seg.match}<mark class="rounded-[2px] bg-primary/20 text-primary not-italic">{seg.text}</mark>{:else}{seg.text}{/if}
                       {/each}
                     </span>
                   {:else}
-                    <span class="block overflow-hidden text-ellipsis whitespace-nowrap {isAdded ? 'text-emerald-300/80' : isRemoved ? 'text-red-300/60' : ''}">{dispStr}</span>
+                    <span class="block overflow-hidden text-ellipsis whitespace-nowrap {isAdded ? 'text-success/80' : isRemoved ? 'text-destructive/60' : ''}">{dispStr}</span>
                   {/if}
                 </td>
               {/each}

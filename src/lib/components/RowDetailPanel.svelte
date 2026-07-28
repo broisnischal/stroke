@@ -425,7 +425,7 @@
                     type="text"
                     placeholder="Search for field..."
                     bind:value={fieldSearch}
-                    class="w-full rounded-lg border-2 border-border bg-muted/20 py-1.5 pl-7 pr-2.5 font-mono text-ui-xs placeholder:text-muted-foreground/60 focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none"
+                    class="w-full rounded-lg border border-border bg-muted/20 py-1.5 pl-7 pr-2.5 font-mono text-ui-xs placeholder:text-muted-foreground/60 focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none"
                   />
                 </div>
               </div>
@@ -439,7 +439,7 @@
                       <div class="mb-0.5 flex h-5 items-center gap-1">
                         <span class="min-w-0 flex-1 truncate font-mono text-ui-2xs text-muted-foreground">{field.name}</span>
                         {#if field.isPk}
-                          <span title="Primary key, cannot be changed" class="inline-flex shrink-0 items-center gap-0.5 font-mono text-ui-3xs text-amber-500/70">
+                          <span title="Primary key, cannot be changed" class="inline-flex shrink-0 items-center gap-0.5 font-mono text-ui-3xs text-warning/70">
                             <KeyRound class="size-2.5" />PK
                           </span>
                         {/if}
@@ -573,7 +573,7 @@
                             rows={Math.min(6, Math.max(2, (field.initialEditStr.match(/\n/g)?.length ?? 0) + 1))}
                             disabled={savingFields[field.colIdx]}
                             placeholder={field.isNull ? 'NULL' : ''}
-                            class="w-full resize-none rounded-lg border-2 bg-muted/20 px-2.5 py-1.5 font-mono text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none disabled:opacity-50 {fieldErrors[field.colIdx] ? 'border-destructive' : 'border-border'}"
+                            class="w-full resize-none rounded-lg border bg-muted/20 px-2.5 py-1.5 font-mono text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none disabled:opacity-50 {fieldErrors[field.colIdx] ? 'border-destructive' : 'border-border'}"
                             oninput={(e) => scheduleFieldSave(field.colIdx, /** @type {HTMLTextAreaElement} */ (e.currentTarget).value)}
                             onblur={(e) => handleFieldBlur(field.colIdx, e)}
                             onkeydown={(e) => handleFieldKeydown(field.colIdx, e)}
@@ -590,7 +590,7 @@
                             value={field.initialEditStr}
                             disabled={savingFields[field.colIdx]}
                             placeholder={field.isNull ? 'NULL' : ''}
-                            class="w-full rounded-lg border-2 bg-muted/20 px-2.5 py-1.5 font-mono text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none disabled:opacity-50 {fieldErrors[field.colIdx] ? 'border-destructive' : 'border-border'}"
+                            class="w-full rounded-lg border bg-muted/20 px-2.5 py-1.5 font-mono text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none disabled:opacity-50 {fieldErrors[field.colIdx] ? 'border-destructive' : 'border-border'}"
                             oninput={(e) => scheduleFieldSave(field.colIdx, /** @type {HTMLInputElement} */ (e.currentTarget).value)}
                             onblur={(e) => handleFieldBlur(field.colIdx, e)}
                             onkeydown={(e) => handleFieldKeydown(field.colIdx, e)}
@@ -624,7 +624,7 @@
                   style="max-height: calc(100% - 2.5rem)"
                 />
               {:else if cellPreviewType === 'pdf'}
-                <div class="flex flex-col items-center gap-3 rounded-xl border border-border bg-muted/30 px-6 py-8 text-center">
+                <div class="flex flex-col items-center gap-3 rounded-lg border border-border bg-muted/30 px-6 py-8 text-center">
                   <svg class="size-10 text-muted-foreground/60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
                     <polyline points="14 2 14 8 20 8"/>

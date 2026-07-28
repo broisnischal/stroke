@@ -223,7 +223,7 @@
         bind:this={listSearchEl}
         bind:value={listSearch}
         placeholder="Filter tables…"
-        class="h-7 w-full rounded-lg border-2 border-border bg-background/60 pl-7 pr-2 font-mono text-ui-xs outline-none placeholder:text-muted-foreground/30 focus:border-ring focus:ring-1 focus:ring-ring"
+        class="h-7 w-full rounded-lg border border-border bg-background/60 pl-7 pr-2 font-mono text-ui-xs outline-none placeholder:text-muted-foreground/30 focus:border-ring focus:ring-1 focus:ring-ring"
       />
     </div>
 
@@ -257,8 +257,8 @@
             <Table2 class="size-3 shrink-0 {active ? 'text-primary/70' : 'text-muted-foreground/30'}" />
             <span class="min-w-0 flex-1 truncate font-mono text-ui-xs">{t.name}</span>
             <span class="flex shrink-0 items-center gap-0.5">
-              {#if hasOut}<ArrowUpRight class="size-2.5 text-blue-400/60" />{/if}
-              {#if hasIn}<ArrowDownRight class="size-2.5 text-green-400/60" />{/if}
+              {#if hasOut}<ArrowUpRight class="size-2.5 text-info/60" />{/if}
+              {#if hasIn}<ArrowDownRight class="size-2.5 text-success/60" />{/if}
             </span>
           </button>
         {:else}
@@ -284,7 +284,7 @@
 
       <div class="mx-auto max-w-4xl">
         <!-- Root card -->
-        <div class="mb-6 overflow-hidden rounded-xl border border-primary/30 bg-primary/5 shadow-sm">
+        <div class="mb-6 overflow-hidden rounded-lg border border-primary/30 bg-primary/5 shadow-sm">
           <div class="flex items-center gap-3 border-b border-primary/20 px-4 py-3">
             <div class="flex size-8 items-center justify-center rounded-lg bg-primary/15">
               <Table2 class="size-4 text-primary/80" />
@@ -324,10 +324,10 @@
                   {@const isPk = rootMeta.pkCols.has(col.name)}
                   {@const isFk = !!col.foreignKey}
                   <div class="flex items-center gap-2 py-0.5">
-                    {#if isPk}<KeyRound class="size-3 shrink-0 text-amber-400/80" />
-                    {:else if isFk}<Link class="size-3 shrink-0 text-blue-400/60" />
+                    {#if isPk}<KeyRound class="size-3 shrink-0 text-warning/80" />
+                    {:else if isFk}<Link class="size-3 shrink-0 text-info/60" />
                     {:else}<span class="size-3 shrink-0"></span>{/if}
-                    <span class="font-mono text-ui-3xs {isPk ? 'font-semibold text-amber-300/90' : isFk ? 'text-blue-300/75' : 'text-foreground/60'}">{col.name}</span>
+                    <span class="font-mono text-ui-3xs {isPk ? 'font-semibold text-warning/90' : isFk ? 'text-info/75' : 'text-foreground/60'}">{col.name}</span>
                     <span class="ml-auto font-mono text-ui-3xs text-muted-foreground/35">{col.dataType}</span>
                   </div>
                 {/each}
@@ -340,7 +340,7 @@
         {#if rootOut.length > 0}
           <section class="mb-6">
             <div class="mb-3 flex items-center gap-2">
-              <ArrowUpRight class="size-4 text-blue-400/70" />
+              <ArrowUpRight class="size-4 text-info/70" />
               <h3 class="font-mono text-ui-xs font-semibold text-foreground/70">
                 References <span class="text-muted-foreground/50">({rootOut.length})</span>
               </h3>
@@ -367,7 +367,7 @@
         {#if rootIn.length > 0}
           <section class="mb-6">
             <div class="mb-3 flex items-center gap-2">
-              <ArrowDownRight class="size-4 text-green-400/70" />
+              <ArrowDownRight class="size-4 text-success/70" />
               <h3 class="font-mono text-ui-xs font-semibold text-foreground/70">
                 Referenced by <span class="text-muted-foreground/50">({rootIn.length})</span>
               </h3>

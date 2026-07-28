@@ -72,7 +72,7 @@
       ready
         ? 'bg-foreground text-background hover:bg-foreground/85'
         : success
-          ? 'bg-emerald-500/15 text-emerald-500'
+          ? 'bg-success/15 text-success'
           : 'cursor-not-allowed border-2 border-border/50 bg-muted/30 text-muted-foreground/50',
     )}
   >
@@ -117,7 +117,7 @@
 
   <!-- Success -->
   {#if success}
-    <div class="flex items-center gap-2 rounded-lg border border-green-500/25 bg-green-500/[0.07] px-3 py-2.5 text-ui-xs text-green-600 dark:text-green-400">
+    <div class="flex items-center gap-2 rounded-lg border border-success/25 bg-success/[0.07] px-3 py-2.5 text-ui-xs text-success">
       <Icon name="check" class="size-3.5 shrink-0" />
       <span>License activated, welcome aboard!</span>
     </div>
