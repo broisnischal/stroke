@@ -4,6 +4,25 @@ All notable changes to Stroke are listed here, newest first.
 
 ---
 
+## [1.17.0] - 2026-07-28
+
+### New Features
+
+#### Installer
+- **One-click Windows installer** — The setup exe now installs immediately with just a progress bar and launches Stroke when done, instead of the classic next-next-next wizard. Shortcuts are created automatically. Power users can run the installer with `/WIZARD` to get the full wizard back (install directory choice, etc.); `/S` silent installs and auto-updates behave exactly as before.
+
+#### Canvas Table
+- **Quick Filter** — Right-click a cell and open "Quick filter" for one-click filters shaped by the column's type: date/timestamp columns get date-range presets (Today, Last 7/30 days, This month/year) plus before/after this value; boolean and enum columns list their values; low-cardinality text columns surface the distinct values present in the loaded rows; number and text columns get the comparison operators seeded with the cell's value; JSON/JSONB columns offer "has key" filters for the object's top-level keys. Applying one drops a normal filter into the filter bar so it composes with everything else.
+
+### Changes
+
+#### UI Polish
+- **Unified menu & popover design** — Every dropdown, context menu, and select now shares one recipe: roomier rows with consistent icon sizing, plain-case group labels, subtler separators, and cleaner shortcut hints. Menus size to their content instead of clipping long labels.
+- **Consistent overlays** — All dialogs, tooltips, and floating panels use the same elevation, radius, and scrim treatment across the app.
+- **Semantic status colors everywhere** — Success/warning/error/info states (diff views, status bar, MCP panel, backups, licenses, toasts) now follow the theme palette, so every theme renders them with correct contrast.
+- **Pixel pass across pages** — Dashboards, data diff, onboarding, schema timeline, ERD, Redis, backup, settings, and 40+ other surfaces aligned to the design-system type scale, control heights, radius scale, and 4px spacing grid.
+
+
 ## [1.16.2] - 2026-07-28
 
 ### Bug Fixes
