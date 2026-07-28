@@ -72,7 +72,7 @@
     hiddenColumns = new Set(),
     /** @type {(next: Set<string>) => void} */
     onhiddencolumnschange = () => {},
-    /** Called when user picks a column from the "Jump to column" menu — the table
+    /** Called when user picks a column from the "Jump to column" menu - the table
      *  scrolls it into view and briefly highlights it. */
     onfocuscolumn = /** @type {(name: string) => void} */ (() => {}),
     /** Virtual FK relationship columns (reverse FK badge cols) to show in the hide/show dropdown. */
@@ -96,10 +96,10 @@
     onstructuresearchchange = /** @type {(v: string) => void} */ (() => {}),
     /** When true, all write operations are disabled in the table */
     readonly = false,
-    /** Infinite scroll mode — hides pagination, shows rows-loaded counter */
+    /** Infinite scroll mode - hides pagination, shows rows-loaded counter */
     infiniteScroll = false,
     oninfinitescrolltoggle = () => {},
-    /** Live mode on — animates the row-count total as it changes. */
+    /** Live mode on - animates the row-count total as it changes. */
     live = false,
     /** Number of active virtual expression columns for this table (badge). */
     virtualColCount = 0,
@@ -112,7 +112,7 @@
     /** @type {string | null} id of the currently applied view */
     activeViewId = null,
     onapplyview = /** @type {(view: import('$lib/stores/table-views.js').SavedTableView) => void} */ (() => {}),
-    /** Clear the applied view — back to the unfiltered default. */
+    /** Clear the applied view - back to the unfiltered default. */
     onresetview = () => {},
     onsaveview = /** @type {(name: string) => void} */ (() => {}),
     ondeleteview = /** @type {(id: string) => void} */ (() => {}),
@@ -319,9 +319,9 @@
     { id: "table", icon: "table-2", label: "Table view" },
     { id: "json", icon: "braces", label: "JSON view" },
     { id: "record", icon: "layout-list", label: "Record view" },
-    { id: "text", icon: "file-text", label: "Text view", title: "Text view — CSV / TSV / Markdown / JSON Lines" },
-    { id: "chart", icon: "bar-chart-2", label: "Chart view", title: "Chart view — visualize the loaded rows" },
-    { id: "erd", icon: "git-branch", label: "ERD view", title: "ERD view — this table and its related tables" },
+    { id: "text", icon: "file-text", label: "Text view", title: "Text view, CSV / TSV / Markdown / JSON Lines" },
+    { id: "chart", icon: "bar-chart-2", label: "Chart view", title: "Chart view, visualize the loaded rows" },
+    { id: "erd", icon: "git-branch", label: "ERD view", title: "ERD view: this table and its related tables" },
   ];
 
   /** Export formats offered under the "Export" submenu in the more-actions menu. */
@@ -431,7 +431,7 @@
     ["contains", "starts_with", "ends_with", "eq"].includes(o.value),
   );
 
-  // Enum columns are a fixed set of values — free-text ops (contains/starts…)
+  // Enum columns are a fixed set of values - free-text ops (contains/starts…)
   // don't make sense; offer equality + null checks and drive the value with a
   // dropdown of the actual enum members.
   const ENUM_FILTER_OPS = FILTER_OPS.filter((o) =>
@@ -549,7 +549,7 @@
     sortMenuOpen = false;
   }
 
-  /** Strips non-digit characters — for whole-number-only inputs (limit, offset). */
+  /** Strips non-digit characters - for whole-number-only inputs (limit, offset). */
   function sanitizeDigits(val) {
     return val.replace(/\D/g, '')
   }
@@ -569,7 +569,7 @@
     class="@container/tb studio-chrome studio-table-toolbar flex h-9 shrink-0 items-center gap-1 border-b border-border bg-panel px-2"
     data-studio-chrome
   >
-    <!-- Search — far left, expands on focus (wider when option toggles show) -->
+    <!-- Search, far left, expands on focus (wider when option toggles show) -->
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <div
       class={cn(
@@ -690,7 +690,7 @@
               (savedViews.length > 0 || viewsMenuOpen) && "bg-accent text-foreground",
               activeViewId && "text-primary",
             )}
-            title={activeViewId ? "Saved views — one applied" : "Saved views"}
+            title={activeViewId ? "Saved views, one applied" : "Saved views"}
             disabled={loading || columns.length === 0}
           >
             <Icon name="bookmark" class="size-3.5" />
@@ -727,7 +727,7 @@
                     <button
                       type="button"
                       class="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left"
-                      title={active ? 'Applied — click to reset to default' : 'Apply view'}
+                      title={active ? 'Applied, click to reset to default' : 'Apply view'}
                       onclick={() => { active ? onresetview() : onapplyview(v); viewsMenuOpen = false; }}
                     >
                       <Icon name="bookmark" class={cn('size-3.5 shrink-0', active ? 'text-primary' : 'text-muted-foreground/50')} />
@@ -934,23 +934,23 @@
         {/if}
       </button>
 
-      <!-- Open in SQL editor — opens a new query tab pre-filled with the current view's SELECT -->
+      <!-- Open in SQL editor, opens a new query tab pre-filled with the current view's SELECT -->
       <button
         type="button"
         class="inline-flex h-7 shrink-0 items-center justify-center rounded-md px-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30 @max-[520px]/tb:hidden"
-        title="Open in SQL editor — new query with current filters & sort"
+        title="Open in SQL editor, new query with current filters & sort"
         disabled={loading || columns.length === 0}
         onclick={onopeninsql}
       >
         <Icon name="terminal" class="size-3.5 shrink-0" />
       </button>
 
-      <!-- Reset everything — only appears when something is non-default -->
+      <!-- Reset everything, only appears when something is non-default -->
       {#if canResetView}
         <button
           type="button"
           class={cn(iconBtn, "shrink-0")}
-          title="Reset view — clear search, filters, sort, hidden columns and view mode"
+          title="Reset view: clear search, filters, sort, hidden columns and view mode"
           disabled={loading}
           onclick={onresetview}
         >
@@ -1030,7 +1030,7 @@
         {#if keysetMode}
           <!-- Cursor pagination: no random page-jump (that's offset's job), just
                a position readout + prev/next. -->
-          <span class="shrink-0 px-1 font-mono text-ui-xs tabular-nums text-muted-foreground/70" title="Cursor pagination — page {page}">
+          <span class="shrink-0 px-1 font-mono text-ui-xs tabular-nums text-muted-foreground/70" title="Cursor pagination, page {page}">
             Page {page}
           </span>
 
@@ -1314,7 +1314,7 @@
         >
           <button
             type="button"
-            class="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-destructive/10 hover:text-destructive"
+            class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/40 transition-[color,background-color,transform] hover:bg-destructive/10 hover:text-destructive active:scale-[0.94]"
             aria-label="Remove filter"
             onclick={() => removeFilter(filter.id)}
           >
@@ -1322,16 +1322,13 @@
           </button>
           {#if i === 0}
             <span
-              class="w-10 shrink-0 select-none text-right font-mono text-ui-xs text-muted-foreground"
+              class="inline-flex h-7 w-12 shrink-0 select-none items-center justify-center font-mono text-ui-2xs uppercase tracking-wide text-muted-foreground/45"
               >where</span
             >
           {:else}
             <button
               type="button"
-              class="inline-flex h-5 w-10 shrink-0 items-center justify-center rounded border font-mono text-ui-2xs font-semibold uppercase tracking-wide transition-colors {filter.conjunct ===
-              'or'
-                ? 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/20'
-                : 'border-border/60 bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground'}"
+              class="inline-flex h-7 w-12 shrink-0 items-center justify-center rounded-md border border-border/50 bg-muted/25 font-mono text-ui-2xs font-semibold uppercase tracking-wide text-muted-foreground/80 transition-[color,background-color,transform] hover:bg-muted/50 hover:text-foreground active:scale-[0.96]"
               title="Toggle AND / OR"
               onclick={() =>
                 patchFilter(filter.id, {
@@ -1351,7 +1348,7 @@
               <button
                 {...props}
                 type="button"
-                class="inline-flex h-7 w-32 shrink-0 items-center gap-1 rounded-md border border-border/60 bg-transparent px-2 text-ui-sm font-normal text-foreground shadow-none transition-colors hover:bg-accent"
+                class="inline-flex h-7 w-32 shrink-0 items-center gap-1 rounded-md border border-border/50 bg-muted/25 px-2.5 text-ui-sm font-normal text-foreground shadow-none transition-colors hover:bg-muted/45"
                 title="Column"
               >
                 <span class="min-w-0 flex-1 truncate text-left">
@@ -1375,7 +1372,7 @@
               <button
                 {...props}
                 type="button"
-                class="inline-flex h-7 w-28 shrink-0 items-center gap-1 rounded-md border border-border/60 bg-transparent px-2 text-ui-sm font-normal text-foreground shadow-none transition-colors hover:bg-accent"
+                class="inline-flex h-7 w-28 shrink-0 items-center gap-1 rounded-md border border-border/50 bg-muted/25 px-2.5 text-ui-sm font-normal text-foreground shadow-none transition-colors hover:bg-muted/45"
                 title="Condition"
               >
                 <span class="min-w-0 flex-1 truncate text-left">{filterOpLabel(filter.op)}</span>
@@ -1415,7 +1412,7 @@
                 type="text"
                 inputmode="decimal"
                 data-filter-value
-                class="h-7 min-w-[6rem] flex-1 border-input bg-input/30 font-mono text-ui-sm shadow-none"
+                class="h-7 min-w-[6rem] flex-1 rounded-md border border-border/50 bg-muted/25 dark:bg-muted/25 px-2.5 font-mono text-ui-sm shadow-none"
                 value={filter.value}
                 placeholder="Number…"
                 oninput={(e) => {
@@ -1435,7 +1432,7 @@
                   <button
                     {...props}
                     type="button"
-                    class="inline-flex h-7 min-w-[8rem] flex-1 items-center gap-1 rounded-md border border-border/60 bg-input/30 px-2 text-ui-sm font-normal shadow-none transition-colors hover:bg-accent"
+                    class="inline-flex h-7 min-w-[8rem] flex-1 items-center gap-1 rounded-md border border-border/50 bg-muted/25 px-2.5 text-ui-sm font-normal shadow-none transition-colors hover:bg-muted/45"
                     title="Value"
                   >
                     <span class={cn("min-w-0 flex-1 truncate text-left font-mono", !filter.value && "font-sans text-muted-foreground")}>
@@ -1452,7 +1449,7 @@
             {:else}
               <Input
                 data-filter-value
-                class="h-7 min-w-[6rem] flex-1 border-input bg-input/30 text-ui-sm shadow-none"
+                class="h-7 min-w-[6rem] flex-1 rounded-md border border-border/50 bg-muted/25 dark:bg-muted/25 px-2.5 text-ui-sm shadow-none"
                 value={filter.value}
                 placeholder="Value…"
                 oninput={(e) =>
@@ -1467,7 +1464,7 @@
       <div class="flex items-center gap-1 px-3 py-1.5">
         <button
           type="button"
-          class="inline-flex h-7 items-center gap-1 rounded-md px-2 text-ui-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          class="inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-ui-sm text-muted-foreground transition-[color,background-color,transform] hover:bg-accent hover:text-foreground active:scale-[0.97]"
           onclick={addFilter}
         >
           <Icon name="plus" class="size-3.5" />
@@ -1477,7 +1474,7 @@
         {#if rowFilters.length > 0}
           <button
             type="button"
-            class="inline-flex h-7 items-center gap-1 rounded-md px-2 text-ui-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            class="inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-ui-sm text-muted-foreground transition-[color,background-color,transform] hover:bg-accent hover:text-foreground active:scale-[0.97]"
             onclick={clearFilters}
           >
             Clear filters
