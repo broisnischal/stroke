@@ -453,7 +453,7 @@
                             >
                               <Ellipsis class="size-3" />
                             </DropdownMenu.Trigger>
-                            <DropdownMenu.Content class="w-40 text-ui-xs" align="end" sideOffset={4}>
+                            <DropdownMenu.Content class="min-w-40 text-ui-xs" align="end" sideOffset={4}>
                               <DropdownMenu.Item
                                 class="gap-2 text-ui-xs"
                                 disabled={savingFields[field.colIdx]}

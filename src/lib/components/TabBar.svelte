@@ -211,7 +211,7 @@
         {@const hasOtherClosable = tabs.some((t) => t.id !== tab.id && !t.pinned)}
         {@const leftClosable = tabs.slice(0, i).filter((t) => !t.pinned)}
         {@const rightClosable = tabs.slice(i + 1).filter((t) => !t.pinned)}
-        <ContextMenu.Content class="w-52">
+        <ContextMenu.Content class="min-w-52">
           <ContextMenu.Item onSelect={() => onpintoggle(tab.id)}>
             {#if tab.pinned}
               <Icon name="pin-off" class="size-3.5" />
