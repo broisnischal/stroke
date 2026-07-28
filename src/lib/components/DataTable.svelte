@@ -6235,7 +6235,7 @@ import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
                 <SlidersHorizontal />
                 Quick filter
               </ContextMenu.SubTrigger>
-              <ContextMenu.SubContent class="app-scroll max-h-[60vh] min-w-48 overflow-y-auto [&_[data-slot=context-menu-item]]:gap-2 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+              <ContextMenu.SubContent class="app-scroll max-h-[60vh] min-w-36 overflow-y-auto [&_[data-slot=context-menu-item]]:gap-2 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
                 {#each quickFilter.groups as group, gi (gi)}
                   {#if gi > 0}<ContextMenu.Separator />{/if}
                   {#if group.title}<ContextMenu.Label>{group.title}</ContextMenu.Label>{/if}
