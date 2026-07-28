@@ -131,7 +131,7 @@
   {#if open}
     <div
       bind:this={panelEl}
-      class="absolute bottom-full left-0 right-0 z-50 mb-1 flex flex-col overflow-hidden rounded-lg border border-border/60 bg-popover shadow-lg"
+      class="absolute bottom-full left-0 right-0 z-50 mb-1 flex flex-col overflow-hidden rounded-[10px] border border-border/60 bg-popover elevate-2-rim"
       style="max-height: min(300px,55vh)"
       role="menu"
       tabindex="-1"
@@ -148,7 +148,7 @@
           <input
             type="text"
             placeholder="Filter…"
-            class="h-6 w-full rounded-lg border-2 border-border bg-background/40 pl-7 pr-2 font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/30 focus:border-ring focus:ring-1 focus:ring-ring"
+            class="h-6 w-full rounded-lg border border-border bg-background/40 pl-7 pr-2 font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/30 focus:border-ring focus:ring-1 focus:ring-ring"
             bind:value={search}
           />
         </div>

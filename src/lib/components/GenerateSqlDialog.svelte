@@ -118,7 +118,7 @@
 <Dialog.Root bind:open>
   <Dialog.Content
     showCloseButton={false}
-    class="w-[min(720px,calc(100vw-2rem))] gap-0 overflow-hidden rounded-xl p-0 sm:max-w-none"
+    class="w-[min(720px,calc(100vw-2rem))] gap-0 overflow-hidden rounded-2xl p-0 sm:max-w-none"
   >
     <!-- Header -->
     <div class="flex h-12 items-center gap-2.5 border-b border-border/60 pl-4 pr-2.5">
@@ -189,10 +189,10 @@
         onclick={handleCopy}
       >
         {#if copied}
-          <Icon name="check" class="size-3 text-green-500" />
+          <Icon name="check" class="size-3.5 shrink-0 text-success" />
           Copied
         {:else}
-          <Icon name="copy" class="size-3" />
+          <Icon name="copy" class="size-3.5 shrink-0" />
           Copy
         {/if}
       </button>
@@ -202,7 +202,7 @@
         disabled={!currentSql}
         onclick={handleOpenInEditor}
       >
-        <Icon name="terminal" class="size-3" />
+        <Icon name="terminal" class="size-3.5 shrink-0" />
         Open in SQL editor
       </button>
     </div>

@@ -58,15 +58,15 @@
   const visited = $derived(new Set(path.split(/[><:]/g).filter(Boolean)))
 </script>
 
-<div class="overflow-hidden rounded-lg border transition-colors {isOut ? 'border-blue-500/20 bg-blue-500/[0.04] hover:border-blue-500/35' : 'border-green-500/20 bg-green-500/[0.04] hover:border-green-500/35'}">
+<div class="overflow-hidden rounded-lg border transition-colors {isOut ? 'border-info/20 bg-info/[0.04] hover:border-info/35' : 'border-success/20 bg-success/[0.04] hover:border-success/35'}">
   <!-- Header row -->
   <div class="flex items-center gap-2.5 px-3 py-2">
     <!-- Direction + relation label -->
     <div class="flex shrink-0 items-center gap-1.5">
       {#if isOut}
-        <ArrowUpRight class="size-3.5 text-blue-400/60" />
+        <ArrowUpRight class="size-3.5 text-info/60" />
       {:else}
-        <ArrowDownRight class="size-3.5 text-green-400/60" />
+        <ArrowDownRight class="size-3.5 text-success/60" />
       {/if}
       <span class="font-mono text-ui-3xs text-muted-foreground/50">
         {isOut ? `${fromCol} → ${tableName}.${toCol}` : `${tableName}.${fromCol} → ${toCol}`}
@@ -76,7 +76,7 @@
     <!-- Table name, click to jump to root -->
     <button
       type="button"
-      class="min-w-0 flex-1 truncate text-left font-mono text-ui-xs font-semibold hover:underline {isOut ? 'text-blue-300/90' : 'text-green-300/90'}"
+      class="min-w-0 flex-1 truncate text-left font-mono text-ui-xs font-semibold hover:underline {isOut ? 'text-info/90' : 'text-success/90'}"
       onclick={() => onfocustable(tableName)}
     >{tableName}</button>
 
@@ -131,10 +131,10 @@
         {@const isPk = meta.pkCols.has(col.name)}
         {@const isFk = !!col.foreignKey}
         <div class="flex items-center gap-1.5 py-[2px]">
-          {#if isPk}<KeyRound class="size-2.5 shrink-0 text-amber-400/70" />
-          {:else if isFk}<Link class="size-2.5 shrink-0 text-blue-400/50" />
+          {#if isPk}<KeyRound class="size-2.5 shrink-0 text-warning/70" />
+          {:else if isFk}<Link class="size-2.5 shrink-0 text-info/50" />
           {:else}<span class="size-2.5 shrink-0"></span>{/if}
-          <span class="font-mono text-ui-3xs {isPk ? 'text-amber-300/80' : isFk ? 'text-blue-300/60' : 'text-foreground/55'}">{col.name}</span>
+          <span class="font-mono text-ui-3xs {isPk ? 'text-warning/80' : isFk ? 'text-info/60' : 'text-foreground/55'}">{col.name}</span>
           <span class="ml-auto font-mono text-ui-3xs text-muted-foreground/30">{col.dataType}</span>
         </div>
       {/each}

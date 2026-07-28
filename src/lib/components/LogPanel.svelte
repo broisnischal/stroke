@@ -67,9 +67,9 @@
     if (!e.success)              return 'text-destructive'
     if (e.type === 'connect')    return 'text-primary'
     if (e.type === 'disconnect') return 'text-muted-foreground/50'
-    if (e.type === 'row_delete') return 'text-orange-500 dark:text-orange-400'
-    if (e.type === 'row_insert') return 'text-emerald-500 dark:text-emerald-400'
-    if (e.type === 'row_save')   return 'text-blue-500 dark:text-blue-400'
+    if (e.type === 'row_delete') return 'text-warning'
+    if (e.type === 'row_insert') return 'text-success'
+    if (e.type === 'row_save')   return 'text-info'
     if (e.type === 'sql_exec')   return 'text-foreground/80'
     return 'text-muted-foreground/70'
   }

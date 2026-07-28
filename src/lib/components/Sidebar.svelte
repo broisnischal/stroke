@@ -597,16 +597,7 @@
             >
               <Icon name="list-filter" class="size-3.5" />
             </DropdownMenu.Trigger>
-            <DropdownMenu.Content
-              align="start"
-              class={cn(
-                "w-52 p-1",
-                // Compact rows: leading icon + 12px label, tight padding.
-                "[&_[data-slot=dropdown-menu-checkbox-item]]:gap-2 [&_[data-slot=dropdown-menu-checkbox-item]]:rounded-md [&_[data-slot=dropdown-menu-checkbox-item]]:py-1 [&_[data-slot=dropdown-menu-checkbox-item]]:pr-7 [&_[data-slot=dropdown-menu-checkbox-item]]:pl-2 [&_[data-slot=dropdown-menu-checkbox-item]]:text-ui-xs",
-                "[&_[data-slot=dropdown-menu-item]]:gap-2 [&_[data-slot=dropdown-menu-item]]:rounded-md [&_[data-slot=dropdown-menu-item]]:py-1 [&_[data-slot=dropdown-menu-item]]:pl-2 [&_[data-slot=dropdown-menu-item]]:text-ui-xs",
-                "[&_svg]:size-3.5 [&_svg]:shrink-0",
-              )}
-            >
+            <DropdownMenu.Content align="start" class="min-w-52">
               <div class="px-2 pt-1 pb-1.5 text-ui-2xs text-muted-foreground/70 leading-relaxed">
                 <span class="font-mono text-foreground/80">{regularTables.length}</span> tables{#if views.length} · <span class="font-mono text-foreground/80">{views.length}</span> views{/if}{#if matViews.length} · <span class="font-mono text-foreground/80">{matViews.length}</span> mat.{/if}
                 {#if hiddenCount > 0}<br /><span class="text-warning">{hiddenCount} hidden by filters</span>{/if}
@@ -1351,7 +1342,7 @@
             <!-- ── Empty state ───────────────────────────────────── -->
             {#if !loadingTables && connectionName && tables.length === 0}
               <div class="flex flex-1 flex-col items-center justify-center gap-3 px-4 py-16 text-center">
-                <div class="flex size-10 items-center justify-center rounded-xl border border-border/50 bg-muted/30">
+                <div class="flex size-10 items-center justify-center rounded-lg border border-border/50 bg-muted/30">
                   <Icon name="table-2" class="size-5 text-muted-foreground/30" />
                 </div>
                 <div>

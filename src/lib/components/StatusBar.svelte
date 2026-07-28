@@ -380,11 +380,11 @@
       <!-- Connection switcher -->
       {#snippet connTriggerInner(/** @type {boolean} */ showChevron)}
         {#if connectionLost}
-          <Icon name="wifi-off" class="size-3 shrink-0 text-red-500" />
+          <Icon name="wifi-off" class="size-3 shrink-0 text-destructive" />
         {:else}
-          <Icon name="wifi" class="size-3 shrink-0 text-emerald-500" />
+          <Icon name="wifi" class="size-3 shrink-0 text-success" />
         {/if}
-        <span class={cn('max-w-[7rem] truncate font-medium', connectionLost && 'text-red-500/70')}>{connType}</span>
+        <span class={cn('max-w-[7rem] truncate font-medium', connectionLost && 'text-destructive/70')}>{connType}</span>
         {#if connLabel}
           <span class="hidden max-w-[6rem] truncate text-muted-foreground/45 @min-[900px]/sb:inline">· {connLabel}</span>
         {/if}
@@ -418,7 +418,7 @@
             {@const subtitle = conn ? connSubtitle(conn) : ''}
             <span class={cn(
               'flex size-5 shrink-0 items-center justify-center rounded-md',
-              isCurrent ? 'bg-emerald-500/12 text-emerald-500' : 'bg-muted/50 text-muted-foreground/55',
+              isCurrent ? 'bg-success/12 text-success' : 'bg-muted/50 text-muted-foreground/55',
             )}>
               {#if conn?.provider && hasBrand(conn.provider)}
                 <BrandIcon name={conn.provider} class="size-3.5" />
@@ -433,7 +433,7 @@
             {#if conn?.environment}
               <span class="size-1.5 shrink-0 rounded-full bg-muted-foreground/30" title={conn.environment}></span>
             {/if}
-            {#if isCurrent}<Icon name="check" class="size-3.5 shrink-0 text-emerald-500" />{/if}
+            {#if isCurrent}<Icon name="check" class="size-3.5 shrink-0 text-success" />{/if}
           {/snippet}
           {#snippet footer()}
             <div class="border-t border-border/50 p-1">
@@ -488,7 +488,7 @@
           <DropdownMenu.Content
             side="top"
             align="start"
-            class="w-56 overflow-hidden p-0"
+            class="min-w-56 overflow-hidden p-0"
             onOpenAutoFocus={focusDbInputOnOpen}
           >
             <!-- Always mounted (not gated on list size) so the search box is
@@ -539,7 +539,7 @@
                       <Icon name="database" class={cn('size-3.5 shrink-0', isCurrent ? 'text-foreground' : 'text-muted-foreground/35')} />
                     {/if}
                     <span class="min-w-0 flex-1 truncate">{db.label}</span>
-                    {#if isCurrent}<Icon name="check" class="ml-auto size-3 shrink-0 text-emerald-500" />{/if}
+                    {#if isCurrent}<Icon name="check" class="ml-auto size-3 shrink-0 text-success" />{/if}
                   </button>
                 {/each}
               {/if}
@@ -617,7 +617,7 @@
           class={cn(
             'flex items-center gap-1.5 rounded-md px-2 py-1 transition-[background-color,color] duration-150',
             live
-              ? 'font-medium text-emerald-600 bg-emerald-500/10 hover:bg-emerald-500/16 dark:text-emerald-400'
+              ? 'font-medium text-success bg-success/10 hover:bg-success/16'
               : 'text-muted-foreground/50 hover:bg-muted/50 hover:text-foreground',
           )}
           onclick={ontogglelive}
@@ -625,7 +625,7 @@
           title={live ? 'Live: on, auto-refreshes when this table changes' : 'Live: off, click to auto-refresh on changes'}
         >
           {#if live}
-            <span class="size-1.5 shrink-0 rounded-full bg-emerald-500 motion-safe:animate-pulse"></span>
+            <span class="size-1.5 shrink-0 rounded-full bg-success motion-safe:animate-pulse"></span>
             <span>Live</span>
           {:else}
             <Icon name="radio" class="size-3 shrink-0" />
@@ -665,8 +665,8 @@
       <span
         class={cn(
           'inline-flex h-5 items-center rounded-md px-1.5 font-mono text-ui-3xs font-semibold uppercase tracking-wider',
-          $vimSubMode === 'insert' && 'bg-emerald-500/15 text-emerald-500',
-          $vimSubMode === 'visual' && 'bg-amber-500/15 text-amber-500',
+          $vimSubMode === 'insert' && 'bg-success/15 text-success',
+          $vimSubMode === 'visual' && 'bg-warning/15 text-warning',
           $vimSubMode === 'command' && 'bg-primary/15 text-primary',
           $vimSubMode === 'normal' && 'bg-muted/40 text-muted-foreground/70',
         )}
@@ -741,7 +741,7 @@
     <!-- Read-only toggle -->
     <button
       type="button"
-      class={cn(iconBtn, readonly && 'text-amber-500! hover:text-amber-400!')}
+      class={cn(iconBtn, readonly && 'text-warning! hover:text-warning/80!')}
       title={readonly ? 'Read-only mode, click to enable editing' : 'Read-write mode, click to lock'}
       aria-pressed={readonly}
       onclick={() => (readonly = !readonly)}
@@ -802,7 +802,7 @@
     {#if hasUpdate}
       <button
         type="button"
-        class="flex items-center gap-1 rounded-md px-2 py-1 text-ui-2xs font-medium text-amber-500 transition-colors hover:bg-muted/50 hover:text-amber-400"
+        class="flex items-center gap-1 rounded-md px-2 py-1 text-ui-2xs font-medium text-warning transition-colors hover:bg-muted/50 hover:text-warning/80"
         onclick={oncheckupdate}
         title="Update available"
       >
@@ -822,7 +822,7 @@
       onclick={onopenmcp}
       title={mcpRunning ? 'MCP running, click to manage' : 'MCP stopped, click to manage'}
     >
-      <span class={cn('size-1.5 shrink-0 rounded-full transition-colors', mcpRunning ? 'bg-emerald-500' : 'bg-muted-foreground/25')}></span>
+      <span class={cn('size-1.5 shrink-0 rounded-full transition-colors', mcpRunning ? 'bg-success' : 'bg-muted-foreground/25')}></span>
       <span class="font-medium @max-[900px]/sb:hidden">MCP</span>
     </button>
 

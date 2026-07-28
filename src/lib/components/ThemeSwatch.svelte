@@ -4,7 +4,7 @@
 </script>
 
 <span
-  class="inline-flex size-4 shrink-0 overflow-hidden rounded-sm border border-border/60 {className}"
+  class="inline-flex size-4 shrink-0 overflow-hidden rounded-md border border-border/60 {className}"
   aria-hidden="true"
 >
   <span class="flex-[2]" style:background={bg}></span>

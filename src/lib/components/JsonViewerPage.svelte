@@ -351,7 +351,7 @@
           class="inline-flex items-center gap-1 rounded px-2 py-0.5 font-mono text-ui-2xs text-muted-foreground/55 transition-colors hover:bg-muted hover:text-foreground"
           onclick={handleCopyInput}
         >
-          {#if copiedInput}<CheckCheck class="size-2.5 text-green-500" />{:else}<Copy class="size-2.5" />{/if}
+          {#if copiedInput}<CheckCheck class="size-2.5 text-success" />{:else}<Copy class="size-2.5" />{/if}
           Copy
         </button>
         <button type="button"
@@ -406,7 +406,7 @@
     {#if pathFocused && completionItems.length > 0}
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
       <ul
-        class="absolute left-0 top-full z-50 mt-px w-full max-w-[480px] overflow-hidden rounded-b-lg border border-t-0 border-border/60 bg-popover shadow-lg"
+        class="absolute left-0 top-full z-50 mt-px w-full max-w-[480px] overflow-hidden rounded-b-lg border border-t-0 border-border/60 bg-popover elevate-2-rim"
         onmousedown={(e) => e.preventDefault()}
         role="listbox"
       >
@@ -451,7 +451,7 @@
         onclick={handleCopyResult}
       >
         {#if copied}
-          <CheckCheck class="size-2.5 text-green-500" />Copied
+          <CheckCheck class="size-2.5 text-success" />Copied
         {:else}
           <Copy class="size-2.5" />Copy result
         {/if}

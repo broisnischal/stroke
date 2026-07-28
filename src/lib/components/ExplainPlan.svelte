@@ -239,7 +239,7 @@
       {@const withActual = hasActualData(n.node)}
       <div
         style="position: absolute; left: {nx(n)}px; top: {ny(n)}px; width: {NODE_W}px"
-        class="overflow-hidden rounded-xl border border-border/50 bg-background shadow-md"
+        class="overflow-hidden rounded-lg border border-border/50 bg-background elevate-2-rim"
       >
         <!-- Header -->
         <div class="border-b border-border/30 px-3 py-2">
@@ -282,7 +282,7 @@
     {#if root}
       <div
         style="position: absolute; left: {qrX}px; top: {qrY}px; width: {QR_W}px; height: {QR_H}px"
-        class="flex items-center justify-center rounded-xl border border-border/50 bg-background font-mono text-ui-3xs font-semibold text-foreground/50 shadow-md"
+        class="flex items-center justify-center rounded-lg border border-border/50 bg-background font-mono text-ui-3xs font-semibold text-foreground/50 elevate-2-rim"
       >
         Query Result
       </div>

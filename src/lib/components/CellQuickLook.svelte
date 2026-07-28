@@ -70,14 +70,14 @@
     onkeydown={handleKeydown}
   >
     <div
-      class="absolute inset-0 bg-black/50"
+      class="absolute inset-0 bg-black/65"
       onclick={oncancel}
       role="presentation"
     ></div>
 
     <!-- Panel -->
     <div
-      class="relative z-10 flex w-[680px] max-w-[calc(100vw-3rem)] flex-col rounded-xl border border-border/60 bg-background shadow-2xl"
+      class="relative z-10 flex w-[680px] max-w-[calc(100vw-3rem)] flex-col rounded-2xl border border-border/60 bg-background elevate-3-rim"
       style="max-height: min(80vh, 640px)"
     >
       <!-- Header -->

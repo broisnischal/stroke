@@ -144,14 +144,14 @@
     role="dialog"
     aria-modal="true"
     aria-label="JSON viewer"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 outline-none"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/65 outline-none"
     onclick={onclose}
     onkeydown={handleKey}
   >
     <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
     <div
       role="presentation"
-      class="relative flex flex-col overflow-hidden rounded-xl border border-border/50 bg-background shadow-2xl"
+      class="relative flex flex-col overflow-hidden rounded-2xl border border-border/60 bg-background elevate-3-rim"
       style="width: min(90vw, 900px); height: min(85vh, 700px)"
       onclick={(e) => e.stopPropagation()}
     >
@@ -168,10 +168,10 @@
             onclick={handleCopy}
           >
             {#if copied}
-              <CheckCheck class="size-3.5 text-green-500" />
+              <CheckCheck class="size-3.5 shrink-0 text-success" />
               <span>Copied</span>
             {:else}
-              <Copy class="size-3.5" />
+              <Copy class="size-3.5 shrink-0" />
               <span>Copy</span>
             {/if}
           </button>
@@ -187,7 +187,7 @@
         </div>
       </div>
       {#if oversize}
-        <div class="flex shrink-0 items-center gap-2 border-b border-border/50 bg-amber-500/10 px-4 py-1.5 text-ui-xs text-amber-600 dark:text-amber-400">
+        <div class="flex shrink-0 items-center gap-2 border-b border-border/50 bg-warning/10 px-4 py-1.5 text-ui-xs text-warning">
           <TriangleAlert class="size-3.5 shrink-0" />
           <span>
             Truncated preview, full value is {formatByteSize(oversize.bytes)}{oversize.dataType ? ` (${oversize.dataType})` : ''}.

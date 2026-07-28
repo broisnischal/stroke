@@ -297,7 +297,7 @@
             tabindex="-1"
             bind:this={pickerRef}
             onkeydown={onPickerKeydown}
-            class="absolute left-0 top-full z-50 mt-1 w-[480px] overflow-hidden rounded-xl border border-border/60 bg-popover/95 shadow-xl backdrop-blur-xl"
+            class="absolute left-0 top-full z-50 mt-1 w-[480px] overflow-hidden rounded-[10px] border border-border/60 bg-popover/95 elevate-2-rim backdrop-blur-xl"
           >
             <!-- Search -->
             <div class="flex items-center gap-2 border-b border-border/40 px-3 py-2">
@@ -423,7 +423,7 @@
           type="text"
           placeholder="Chart name…"
           bind:value={saveName}
-          class="h-6 w-40 rounded-lg border-2 border-border bg-background/80 px-2 font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring"
+          class="h-6 w-40 rounded-lg border border-border bg-background/80 px-2 font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring"
         />
 
         {#if !newGroupMode}
@@ -441,7 +441,7 @@
             type="text"
             placeholder="New group name…"
             bind:value={newGroupName}
-            class="h-6 w-36 rounded-lg border-2 border-border bg-background/80 px-2 font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring"
+            class="h-6 w-36 rounded-lg border border-border bg-background/80 px-2 font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring"
           />
           <button type="button" class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/40 hover:text-foreground" onclick={() => (newGroupMode = false)}>
             <X class="size-3" />

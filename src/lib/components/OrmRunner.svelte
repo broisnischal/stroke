@@ -596,7 +596,7 @@
           class={cn(
             "inline-flex h-6 items-center rounded-[5px] px-2.5 font-mono text-ui-xs font-medium transition-all",
             mode === "drizzle"
-              ? "bg-card text-foreground shadow-sm ring-1 ring-border/50"
+              ? "bg-card text-foreground ring-1 ring-border/50"
               : "text-muted-foreground hover:text-foreground",
           )}
           onclick={() => switchMode("drizzle")}
@@ -610,7 +610,7 @@
           class={cn(
             "inline-flex h-6 items-center rounded-[5px] px-2.5 font-mono text-ui-xs font-medium transition-all",
             mode === "prisma"
-              ? "bg-card text-foreground shadow-sm ring-1 ring-border/50"
+              ? "bg-card text-foreground ring-1 ring-border/50"
               : "text-muted-foreground hover:text-foreground",
           )}
           onclick={() => switchMode("prisma")}
@@ -666,7 +666,7 @@
         onclick={handleCopySql}
       >
         {#if copied === "sql"}
-          <CheckCheck class="size-3.5 shrink-0 text-green-500" />
+          <CheckCheck class="size-3.5 shrink-0 text-success" />
         {:else}
           <Copy class="size-3.5 shrink-0" />
         {/if}
@@ -688,7 +688,7 @@
         onclick={handleCopyCode}
       >
         {#if copied === "code"}
-          <CheckCheck class="size-3.5 shrink-0 text-green-500" />
+          <CheckCheck class="size-3.5 shrink-0 text-success" />
         {:else}
           <Copy class="size-3.5 shrink-0" />
         {/if}
@@ -742,7 +742,7 @@
         >
           {#if copied === "parse"}
             <CheckCheck
-              class="size-3 shrink-0 text-green-600 dark:text-green-500"
+              class="size-3 shrink-0 text-success"
             />
           {:else}
             <Copy class="size-3 shrink-0" />
@@ -824,7 +824,7 @@
           <button
             type="button"
             onclick={() => (outputView = "json")}
-            class="pointer-events-auto inline-flex items-center gap-1.5 rounded-md border border-border/50 bg-background/85 px-2 py-1 font-mono text-ui-2xs text-muted-foreground shadow-md backdrop-blur-sm transition-colors hover:text-foreground"
+            class="pointer-events-auto inline-flex items-center gap-1.5 rounded-md border border-border/50 bg-background/85 px-2 py-1 font-mono text-ui-2xs text-muted-foreground elevate-2-rim backdrop-blur-sm transition-colors hover:text-foreground"
           >
             <Braces class="size-3 shrink-0" />
             JSON
@@ -852,7 +852,7 @@
           >
             {#if copied === "error"}
               <CheckCheck
-                class="size-3 shrink-0 text-green-600 dark:text-green-500"
+                class="size-3 shrink-0 text-success"
               />
             {:else}
               <Copy class="size-3 shrink-0" />

@@ -339,8 +339,8 @@
   /** @type {Record<string, string>} */
   const logColor = {
     info: "text-muted-foreground",
-    ok: "text-green-400",
-    warn: "text-amber-400",
+    ok: "text-success",
+    warn: "text-warning",
     error: "text-destructive",
   };
 </script>
@@ -664,10 +664,10 @@
           {#if exportPhase === "done" && exportResult}
             <div class="px-4 pb-3">
               <div
-                class="rounded-md border border-green-700/30 bg-green-900/10 p-3"
+                class="rounded-md border border-success/30 bg-success/10 p-3"
               >
                 <div class="flex items-center gap-2">
-                  <Check class="size-3.5 shrink-0 text-green-400" />
+                  <Check class="size-3.5 shrink-0 text-success" />
                   <span class="text-ui-xs font-medium text-foreground"
                     >Export ready</span
                   >
@@ -734,7 +734,7 @@
               <button
                 type="button"
                 onclick={downloadSql}
-                class="flex flex-1 items-center justify-center gap-2 rounded-md bg-green-700 px-3 py-2 text-ui-xs font-medium text-white transition-colors hover:bg-green-600"
+                class="flex flex-1 items-center justify-center gap-2 rounded-md bg-success px-3 py-2 text-ui-xs font-medium text-success-foreground transition-colors hover:bg-success/90"
               >
                 <Download class="size-3.5" />Download .sql
               </button>
@@ -837,10 +837,10 @@
             <!-- Confirm block -->
             {#if importSql}
               <div
-                class="rounded-lg border border-amber-600/25 bg-amber-500/5 p-4"
+                class="rounded-lg border border-warning/25 bg-warning/5 p-4"
               >
                 <div class="mb-2.5 flex items-center gap-2">
-                  <AlertTriangle class="size-3.5 shrink-0 text-amber-500" />
+                  <AlertTriangle class="size-3.5 shrink-0 text-warning" />
                   <span class="text-ui-xs font-semibold text-foreground"
                     >Confirm restore</span
                   >
@@ -856,7 +856,7 @@
                   <input
                     type="checkbox"
                     bind:checked={importConfirmed}
-                    class="mt-0.5 shrink-0 accent-amber-500"
+                    class="mt-0.5 shrink-0 accent-warning"
                   />
                   <span class="text-ui-2xs text-muted-foreground"
                     >I understand and want to proceed</span
@@ -888,15 +888,15 @@
           {:else if importPhase === "done" && importResult}
             <div
               class="rounded-lg border {importResult.statementsErr === 0
-                ? 'border-green-700/30 bg-green-900/8'
-                : 'border-amber-600/30 bg-amber-900/8'} p-4"
+                ? 'border-success/30 bg-success/8'
+                : 'border-warning/30 bg-warning/8'} p-4"
             >
               <div class="mb-3 flex items-center gap-2.5">
                 {#if importResult.statementsErr === 0}
                   <div
-                    class="flex size-8 shrink-0 items-center justify-center rounded-full border border-green-700/30 bg-green-900/20"
+                    class="flex size-8 shrink-0 items-center justify-center rounded-full border border-success/30 bg-success/20"
                   >
-                    <Check class="size-3.5 text-green-400" />
+                    <Check class="size-3.5 text-success" />
                   </div>
                   <div>
                     <p class="text-ui-xs font-semibold text-foreground">
@@ -908,9 +908,9 @@
                   </div>
                 {:else}
                   <div
-                    class="flex size-8 shrink-0 items-center justify-center rounded-full border border-amber-600/30 bg-amber-900/20"
+                    class="flex size-8 shrink-0 items-center justify-center rounded-full border border-warning/30 bg-warning/20"
                   >
-                    <AlertTriangle class="size-3.5 text-amber-400" />
+                    <AlertTriangle class="size-3.5 text-warning" />
                   </div>
                   <div>
                     <p class="text-ui-xs font-semibold text-foreground">
@@ -932,7 +932,7 @@
                   >
                     OK
                   </p>
-                  <p class="mt-0.5 font-semibold text-green-400">
+                  <p class="mt-0.5 font-semibold text-success">
                     {importResult.statementsOk}
                   </p>
                 </div>

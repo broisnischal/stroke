@@ -93,7 +93,7 @@
     <!-- ── Header ── -->
     <div class="flex items-start justify-between border-b border-border/40 px-6 py-5">
       <div class="flex items-center gap-3.5">
-        <div class="flex size-9 shrink-0 items-center justify-center rounded-xl bg-muted/50 ring-1 ring-border/30">
+        <div class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted/50 ring-1 ring-border/30">
           <Server class="size-4 text-foreground/70" />
         </div>
         <div>
@@ -124,7 +124,7 @@
                 aria-label="Copy URL"
               >
                 {#if copied === 'url'}
-                  <Check class="size-3.5 text-green-500" />
+                  <Check class="size-3.5 text-success" />
                 {:else}
                   <Copy class="size-3.5" />
                 {/if}
@@ -140,7 +140,7 @@
           <button
             type="button"
             class={cn(
-              "inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-2 text-ui-sm font-medium transition-colors",
+              "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-3 text-ui-sm font-medium transition-colors",
               status?.running
                 ? "border-border/50 bg-muted/30 text-foreground/70 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30"
                 : "border-primary/30 bg-primary/10 text-primary hover:bg-primary/20",
@@ -165,8 +165,8 @@
         <!-- Status badge -->
         <div class="mt-2.5 flex items-center gap-2">
           {#if status?.running}
-            <span class="inline-flex items-center gap-1.5 text-ui-2xs font-medium text-green-500">
-              <span class="size-1.5 animate-pulse rounded-full bg-green-500"></span>
+            <span class="inline-flex items-center gap-1.5 text-ui-2xs font-medium text-success">
+              <span class="size-1.5 animate-pulse rounded-full bg-success"></span>
               Running on port {status.port}
             </span>
           {:else if status}
@@ -186,7 +186,7 @@
           onclick={toggleReadOnly}
         >
           <div class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/40 ring-1 ring-border/25">
-            <ShieldCheck class={cn("size-4", readOnly ? "text-amber-500" : "text-muted-foreground/50")} />
+            <ShieldCheck class={cn("size-4", readOnly ? "text-warning" : "text-muted-foreground/50")} />
           </div>
           <div class="min-w-0 flex-1">
             <div class="flex items-center justify-between gap-3">
@@ -196,14 +196,14 @@
                 class={cn(
                   "flex h-5 w-9 shrink-0 items-center rounded-full border px-0.5 transition-colors duration-200",
                   readOnly
-                    ? "border-amber-500/40 bg-amber-500/20"
+                    ? "border-warning/40 bg-warning/20"
                     : "border-border/40 bg-muted/30"
                 )}
               >
                 <span
                   class={cn(
                     "size-3.5 rounded-full transition-transform duration-200",
-                    readOnly ? "translate-x-4 bg-amber-500" : "translate-x-0 bg-muted-foreground/40"
+                    readOnly ? "translate-x-4 bg-warning" : "translate-x-0 bg-muted-foreground/40"
                   )}
                 ></span>
               </div>
@@ -220,13 +220,13 @@
       <!-- ── Client cards ── -->
       {#if status}
         <div class="px-6 py-5">
-          <p class="mb-4 text-ui-2xs font-semibold uppercase tracking-widest text-muted-foreground/40">
+          <p class="mb-4 text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground/55">
             Connect a client
           </p>
 
           <div class="flex flex-col gap-2.5">
             <!-- Claude Desktop -->
-            <div class="flex items-center gap-4 rounded-xl border border-border/40 bg-muted/[0.07] px-4 py-3.5 transition-colors hover:bg-muted/15">
+            <div class="flex items-center gap-4 rounded-lg border border-border/40 bg-muted/[0.07] px-4 py-3.5 transition-colors hover:bg-muted/15">
               <div class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/50 ring-1 ring-border/30">
                 <Bot class="size-4 text-foreground/70" />
               </div>
@@ -240,7 +240,7 @@
                 onclick={() => void copy(claudeConfig, 'claude')}
               >
                 {#if copied === 'claude'}
-                  <Check class="size-3 text-green-500" />
+                  <Check class="size-3 text-success" />
                   Copied
                 {:else}
                   <Copy class="size-3" />
@@ -250,7 +250,7 @@
             </div>
 
             <!-- Cursor -->
-            <div class="flex items-center gap-4 rounded-xl border border-border/40 bg-muted/[0.07] px-4 py-3.5 transition-colors hover:bg-muted/15">
+            <div class="flex items-center gap-4 rounded-lg border border-border/40 bg-muted/[0.07] px-4 py-3.5 transition-colors hover:bg-muted/15">
               <div class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/50 ring-1 ring-border/30">
                 <Wand2 class="size-4 text-foreground/70" />
               </div>
@@ -273,7 +273,7 @@
                   onclick={() => void copy(cursorConfig, 'cursor')}
                 >
                   {#if copied === 'cursor'}
-                    <Check class="size-3 text-green-500" />
+                    <Check class="size-3 text-success" />
                   {:else}
                     <Copy class="size-3" />
                   {/if}
@@ -282,7 +282,7 @@
             </div>
 
             <!-- VS Code -->
-            <div class="flex items-center gap-4 rounded-xl border border-border/40 bg-muted/[0.07] px-4 py-3.5 transition-colors hover:bg-muted/15">
+            <div class="flex items-center gap-4 rounded-lg border border-border/40 bg-muted/[0.07] px-4 py-3.5 transition-colors hover:bg-muted/15">
               <div class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/50 ring-1 ring-border/30">
                 <Code2 class="size-4 text-foreground/70" />
               </div>
@@ -313,14 +313,14 @@
         </div>
       {:else if connected}
         <div class="flex flex-col items-center justify-center gap-3 px-6 py-14 text-center">
-          <div class="flex size-12 items-center justify-center rounded-2xl border border-border/30 bg-muted/20">
+          <div class="flex size-12 items-center justify-center rounded-lg border border-border/30 bg-muted/20">
             <Server class="size-5 text-muted-foreground/30" />
           </div>
           <p class="text-ui-sm text-muted-foreground/60">Loading server status…</p>
         </div>
       {:else}
         <div class="flex flex-col items-center justify-center gap-3 px-6 py-14 text-center">
-          <div class="flex size-12 items-center justify-center rounded-2xl border border-border/30 bg-muted/20">
+          <div class="flex size-12 items-center justify-center rounded-lg border border-border/30 bg-muted/20">
             <Server class="size-5 text-muted-foreground/30" />
           </div>
           <p class="max-w-[220px] text-ui-sm text-muted-foreground/60">

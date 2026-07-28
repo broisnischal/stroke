@@ -260,8 +260,8 @@
           class={cn(
             'relative border-t border-border/20',
             cell.type === 'sql'
-              ? 'border-l-[2px] border-l-transparent focus-within:border-l-blue-500/30 hover:border-l-blue-500/15'
-              : 'border-l-[2px] border-l-transparent focus-within:border-l-emerald-500/30 hover:border-l-emerald-500/15',
+              ? 'border-l-[2px] border-l-transparent focus-within:border-l-info/30 hover:border-l-info/15'
+              : 'border-l-[2px] border-l-transparent focus-within:border-l-success/30 hover:border-l-success/15',
           )}
         >
           {#if cell.type === 'sql'}
@@ -312,21 +312,21 @@
     role="presentation"
   ></div>
   <div
-    class="fixed z-50 min-w-[140px] overflow-hidden rounded-lg border border-border bg-popover py-1 shadow-xl"
+    class="fixed z-50 min-w-36 overflow-hidden rounded-[10px] border border-border/60 bg-popover p-1 elevate-2-rim"
     style="top:{addMenuTop}px; left:{addMenuLeft}px"
   >
     <button
       onclick={() => { addCell(addMenuAfterIdx, 'sql'); addMenuOpen = false }}
-      class="flex w-full items-center gap-2.5 px-3 py-1.5 text-ui-xs hover:bg-muted"
+      class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-ui-sm hover:bg-accent hover:text-foreground"
     >
-      <span class="font-mono font-semibold text-blue-500/70">SQL</span>
+      <span class="font-mono font-semibold text-info/70">SQL</span>
       <span class="text-muted-foreground">SQL cell</span>
     </button>
     <button
       onclick={() => { addCell(addMenuAfterIdx, 'markdown'); addMenuOpen = false }}
-      class="flex w-full items-center gap-2.5 px-3 py-1.5 text-ui-xs hover:bg-muted"
+      class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-ui-sm hover:bg-accent hover:text-foreground"
     >
-      <span class="font-mono font-semibold text-emerald-500/70">MD</span>
+      <span class="font-mono font-semibold text-success/70">MD</span>
       <span class="text-muted-foreground">Markdown cell</span>
     </button>
   </div>

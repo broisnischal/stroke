@@ -13,7 +13,7 @@
   class={cn(
     'skeleton',
     rounded === 'none' && 'rounded-none',
-    rounded === 'sm' && 'rounded-sm',
+    rounded === 'sm' && 'rounded-md',
     rounded === 'md' && 'rounded-md',
     rounded === 'lg' && 'rounded-lg',
     rounded === 'full' && 'rounded-full',

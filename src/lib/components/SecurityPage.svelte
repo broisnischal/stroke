@@ -497,7 +497,7 @@
                     {/if}
                   </div>
                 </td>
-                {#each [{ col: "rolcanlogin", c: "text-primary" }, { col: "rolsuper", c: "text-amber-500" }, { col: "rolcreatedb", c: "text-primary" }, { col: "rolcreaterole", c: "text-primary" }, { col: "rolbypassrls", c: "text-primary" }] as f (f.col)}
+                {#each [{ col: "rolcanlogin", c: "text-primary" }, { col: "rolsuper", c: "text-warning" }, { col: "rolcreatedb", c: "text-primary" }, { col: "rolcreaterole", c: "text-primary" }, { col: "rolbypassrls", c: "text-primary" }] as f (f.col)}
                   <td class="px-3 py-2 text-center">
                     {#if bool(role[f.col])}
                       <Check class={cn("mx-auto size-3.5", f.c)} />

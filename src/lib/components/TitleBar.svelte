@@ -186,7 +186,7 @@
             type="button"
             onclick={() => (showActivationDialog = true)}
             class={cn(
-              'flex h-[22px] items-center gap-1.5 rounded px-2.5 text-ui-3xs font-semibold transition-[color,background-color,border-color] duration-150',
+              'flex h-[22px] items-center gap-1.5 rounded-full px-2.5 text-ui-3xs font-semibold transition-[color,background-color,border-color] duration-150',
               trialUrgent
                 ? 'border border-warning/40 bg-warning/10 text-warning hover:bg-warning/20'
                 : 'border border-border/50 bg-muted/30 text-muted-foreground hover:bg-muted/60 hover:text-foreground',
@@ -222,6 +222,7 @@
               <Square class="size-[12px]" strokeWidth={1.5} />
             {/if}
           </button>
+          <!-- #e81123 is the native Windows caption close-hover red; a semantic token would be wrong here -->
           <button type="button" class={cn(winCtl, 'hover:bg-[#e81123] hover:text-white')} onclick={winClose} aria-label="Close" title="Close">
             <X class="size-[15px]" strokeWidth={1.5} />
           </button>
@@ -235,8 +236,8 @@
 <!-- License activation dialog (from trial pill) -->
 <Dialog.Root bind:open={showActivationDialog}>
   <Dialog.Portal>
-    <Dialog.Overlay class="fixed inset-0 z-[70] bg-background/80" />
-    <Dialog.Content showCloseButton={false} class="fixed left-1/2 top-1/2 z-[71] w-full max-w-[420px] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border border-border bg-card p-0 shadow-2xl outline-none">
+    <Dialog.Overlay class="fixed inset-0 z-[70] bg-black/65" />
+    <Dialog.Content showCloseButton={false} class="fixed left-1/2 top-1/2 z-[71] w-full max-w-[420px] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border border-border/60 bg-background p-0 elevate-3-rim outline-none">
       <div class="flex items-center justify-between border-b border-border/60 px-5 py-4">
         <div class="flex items-center gap-2.5">
           <div class="flex size-7 items-center justify-center rounded-lg bg-primary/10">

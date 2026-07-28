@@ -667,7 +667,7 @@
   const lbl = 'mb-1 block text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground/50'
   // Segmented pill switch (entry-mode + field-mode) - shared base for consistency.
   const segBtn = 'inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-ui-xs font-medium transition-[color,background-color,box-shadow,transform] duration-150 ease-out active:scale-[0.97]'
-  const segOn  = 'bg-muted/70 text-foreground shadow-sm'
+  const segOn  = 'bg-muted/70 text-foreground'
   const segOff = 'text-muted-foreground/60 hover:text-foreground'
   const inp = 'h-8 w-full rounded-md border-2 border-foreground/15 bg-muted/20 px-2.5 text-ui-xs text-foreground placeholder:text-muted-foreground/35 placeholder:font-normal outline-none transition-[color,border-color,box-shadow] hover:border-foreground/40'
   const inpNum = inp + ' [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
@@ -806,7 +806,7 @@
   <DialogPrimitive.Portal>
     <DialogPrimitive.Overlay
       style="top: var(--app-titlebar-h, 38px); bottom: var(--app-statusbar-h, 0px);"
-      class="fixed inset-x-0 z-50 bg-black/50 data-open:animate-in data-closed:animate-out data-open:fade-in-0 data-closed:fade-out-0 ease-out duration-150"
+      class="fixed inset-x-0 z-50 bg-black/65 data-open:animate-in data-closed:animate-out data-open:fade-in-0 data-closed:fade-out-0 ease-out duration-150"
     />
     <DialogPrimitive.Content
       data-connection-modal
@@ -1151,7 +1151,7 @@
               <!-- Local file vs remote SQLite (Turso / libSQL). Remote reuses the
                    dedicated libsql driver + backend by switching dbType. -->
               <div class="flex gap-0.5 rounded-md border border-border/25 bg-muted/30 p-0.5 text-ui-2xs">
-                <button type="button" class="flex-1 rounded bg-background px-2 py-1 font-medium text-foreground shadow-sm">Local file</button>
+                <button type="button" class="flex-1 rounded bg-background px-2 py-1 font-medium text-foreground">Local file</button>
                 <button type="button" onclick={() => (dbType = 'libsql')}
                   class="flex-1 rounded px-2 py-1 text-muted-foreground/60 transition-colors hover:text-foreground">Remote (Turso / libSQL)</button>
               </div>
@@ -1186,7 +1186,7 @@
               <div class="flex gap-0.5 rounded-md border border-border/25 bg-muted/30 p-0.5 text-ui-2xs">
                 <button type="button" onclick={() => (dbType = 'sqlite')}
                   class="flex-1 rounded px-2 py-1 text-muted-foreground/60 transition-colors hover:text-foreground">Local file</button>
-                <button type="button" class="flex-1 rounded bg-background px-2 py-1 font-medium text-foreground shadow-sm">Remote (Turso / libSQL)</button>
+                <button type="button" class="flex-1 rounded bg-background px-2 py-1 font-medium text-foreground">Remote (Turso / libSQL)</button>
               </div>
 
               <div>
@@ -1538,8 +1538,8 @@
 
     <!-- Discard-changes confirmation (styled, blocks close until answered) -->
     {#if confirmDiscardOpen}
-      <div class="absolute inset-0 z-[60] flex items-center justify-center bg-black/50 p-6">
-        <div class="w-full max-w-sm rounded-[10px] border border-border/40 bg-background p-5 shadow-2xl">
+      <div class="absolute inset-0 z-[60] flex items-center justify-center bg-black/65 p-6">
+        <div class="w-full max-w-sm rounded-[10px] border border-border/40 bg-background p-5 elevate-3-rim">
           <div class="flex items-start gap-3">
             <div class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-warning/10 text-warning">
               <Icon name="alert-circle" class="size-4" />
