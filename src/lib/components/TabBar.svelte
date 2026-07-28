@@ -17,7 +17,7 @@
   function handleDragAreaDblClick(e) {
     if (!isTauri) return
     // Direct double-clicks on the header are already handled by Tauri's
-    // injected drag-region script (data-tauri-drag-region) — toggling here
+    // injected drag-region script (data-tauri-drag-region) - toggling here
     // too made the window maximize and instantly restore. This handler only
     // covers double-clicks on non-interactive children the built-in ignores.
     if (e.target === e.currentTarget) return
@@ -37,7 +37,7 @@
     /** Close a batch of tabs (Close Tabs to Left/Right). anchorId is the tab whose menu was used. */
     onclosemany = /** @type {(ids: string[], anchorId: string) => void} */ (() => {}),
     onduplicate = /** @param {string} _id */ (_id) => {},
-    /** Reset a table tab's view state — search, filters, sort, hidden columns, view mode. */
+    /** Reset a table tab's view state - search, filters, sort, hidden columns, view mode. */
     onresettable = /** @param {string} _id */ (_id) => {},
     onreopenclosed = () => {},
     /** Whether the closed-tab stack has anything to reopen. */
@@ -147,17 +147,17 @@
                 active ? 'bg-panel' : 'hover:bg-muted/20',
               )}
               style={active
-                ? 'box-shadow: 0 1px 0 0 var(--color-panel), inset 0 -2px 0 0 var(--primary)'
+                ? 'box-shadow: 0 1px 0 0 var(--color-panel)'
                 : ''}
             >
-              <!-- Tab button — font-medium on ALL states to prevent layout shift on activation -->
+              <!-- Tab button, font-medium on ALL states to prevent layout shift on activation -->
               <button
                 type="button"
                 role="tab"
                 aria-selected={active}
                 title={tabDisplayTitle(tab)}
                 class={cn(
-                  'flex min-w-0 flex-1 items-center gap-1.5 pl-3 pr-1 text-left text-ui-xs font-medium leading-none transition-colors duration-100',
+                  'flex min-w-0 flex-1 items-center gap-1.5 pl-3 pr-1 text-left text-ui-2xs font-medium leading-none transition-colors duration-100',
                   active ? 'text-foreground' : 'text-muted-foreground/50 hover:text-muted-foreground/80',
                 )}
                 onclick={() => { if (_suppressTabClick) { _suppressTabClick = false; return } onselect(tab.id) }}
@@ -167,7 +167,7 @@
               </button>
 
               {#if tab.pinned}
-                <!-- Pinned: pin badge replaces close — click to unpin -->
+                <!-- Pinned: pin badge replaces close, click to unpin -->
                 <button
                   type="button"
                   class={cn(

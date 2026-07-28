@@ -23,7 +23,7 @@
     if (import.meta.env.DEV) {
       const { invoke } = await import('@tauri-apps/api/core')
       const { refreshLicenseStatus } = await import('$lib/stores/license.js')
-      // @ts-expect-error — dev-only debug surface
+      // @ts-expect-error - dev-only debug surface
       window.__stroke = {
         status: () => invoke('check_license_status'),
         resetTrial: async () => { await invoke('debug_reset_trial'); return refreshLicenseStatus() },
@@ -58,7 +58,7 @@
       _error.apply(console, args)
     }
 
-    // Block print — no Tauri-level API exists for this, so override at the JS boundary
+    // Block print - no Tauri-level API exists for this, so override at the JS boundary
     window.print = () => {}
     window.addEventListener('beforeprint', (e) => e.preventDefault(), { capture: true })
     document.addEventListener('keydown', (e) => {
@@ -72,11 +72,18 @@
       const win = getCurrentWindow()
       // `.maximized(true)` in the Rust builder is unreliable on a window created
       // hidden (WebKitGTK drops the state before map), so it can open at the small
-      // inner_size. Re-assert maximize here before showing so it opens full-size.
-      try { await win.maximize() } catch { /* WM may not support it */ }
+      // inner_size. Size to the monitor work area before showing so it opens
+      // full-size without a frameless window spilling under the taskbar/dock.
+      // Falls back to a native maximize if the command is unavailable (web dev).
+      try {
+        const { invoke } = await import('@tauri-apps/api/core')
+        await invoke('fit_to_work_area')
+      } catch {
+        try { await win.maximize() } catch { /* WM may not support it */ }
+      }
       await win.show()
     } catch {
-      // Browser dev mode or permission error — window already visible, just fade in
+      // Browser dev mode or permission error - window already visible, just fade in
     } finally {
       document.documentElement.style.opacity = '1'
     }

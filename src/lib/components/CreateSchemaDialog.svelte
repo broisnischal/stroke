@@ -6,7 +6,7 @@
 
   let {
     open = $bindable(false),
-    /** Existing schema names — used to flag duplicates. @type {string[]} */
+    /** Existing schema names - used to flag duplicates. @type {string[]} */
     existingSchemas = [],
     /** Run the DDL against the database. @type {(sql: string) => Promise<unknown>} */
     onexecute = async () => {},

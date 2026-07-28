@@ -79,7 +79,7 @@
   const USAGE = {
     formatter: [
       "Toggle it on.",
-      "Open any table — matching cells restyle automatically.",
+      "Open any table, matching cells restyle automatically.",
       "Data is never changed; hover a cell to see the raw value.",
     ],
     generators: [
@@ -108,12 +108,12 @@
     "saved-views": [
       "Open a table and set up filters, sort, search, hidden columns or a view mode.",
       "Click the bookmark icon in the table toolbar → name it → Save.",
-      "Switch views from the same menu — each table keeps its own list.",
+      "Switch views from the same menu, each table keeps its own list.",
     ],
     "find-replace": [
       "Open a table, then choose Find & replace… from the toolbar's ⋯ menu.",
       "Pick a column, a match mode (contains / exact / regex) and a replacement.",
-      "Review the full before → after preview, then apply — nothing is written blind.",
+      "Review the full before → after preview, then apply, nothing is written blind.",
     ],
   };
 
@@ -279,7 +279,7 @@
           <ArrowLeft class="size-3.5" />
           All extensions
         </button>
-        <!-- Header card — the icon tile carries the on/off state (emerald when
+        <!-- Header card, the icon tile carries the on/off state (emerald when
              enabled), so the card and toggle stay quiet. One signal, not four. -->
         <div class="rounded-xl border border-border/60 bg-card/40 p-4">
           <div class="flex items-start gap-3.5">

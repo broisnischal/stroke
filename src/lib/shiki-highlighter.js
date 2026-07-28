@@ -3,7 +3,7 @@
 import { bundledLanguages, createHighlighter } from 'shiki'
 import { DEFAULT_THEME_ID, shikiThemeId } from '$lib/themes/registry.js'
 
-/** Bundled Shiki themes — aligned with app.css (vitesse-light / vitesse-dark). */
+/** Bundled Shiki themes - aligned with app.css (vitesse-light / vitesse-dark). */
 const THEME_IDS = ['vitesse-light', 'vitesse-dark']
 
 const LANG_IDS = [

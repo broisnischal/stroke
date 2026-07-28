@@ -3,7 +3,7 @@
  *
  * Several introspection features (enums, triggers, sequences, functions, RLS)
  * are PostgreSQL-only. The Rust backend returns an empty list for those on
- * other engines rather than erroring — which, on its own, leaves the UI showing
+ * other engines rather than erroring - which, on its own, leaves the UI showing
  * a blank pane that's indistinguishable from "this Postgres schema genuinely has
  * no triggers." These flags let the UI say *why* a section is empty ("Triggers
  * require PostgreSQL") and let callers skip pointless round-trips entirely.
@@ -41,7 +41,7 @@ const SUPPORT = {
 /**
  * Saved-connection type aliases → the backend driver the capabilities map keys
  * on. MariaDB is driven by the MySQL backend, and CockroachDB by the Postgres
- * one, but the frontend keeps their distinct type so the UI can label them —
+ * one, but the frontend keeps their distinct type so the UI can label them -
  * so map them back here before any capability lookup.
  * @type {Record<string, string>}
  */

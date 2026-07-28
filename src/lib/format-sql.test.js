@@ -15,7 +15,7 @@ describe('formatSql', () => {
   })
 
   it('falls back to the original text when formatting throws', () => {
-    // Deliberately malformed — formatSql must never throw, just return input.
+    // Deliberately malformed - formatSql must never throw, just return input.
     const junk = 'this is not ;; valid (( sql'
     expect(typeof formatSql(junk)).toBe('string')
   })

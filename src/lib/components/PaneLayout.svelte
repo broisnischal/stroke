@@ -11,7 +11,7 @@
     node,
     /** @type {string | null} */
     focusedGroupId = null,
-    /** True when >1 pane exists — enables the focused-pane accent (noise when single). */
+    /** True when >1 pane exists - enables the focused-pane accent (noise when single). */
     multiPane = false,
     /** Current pointer-drag drop target (group + edge), or null. Drives the hint. */
     dropTarget = /** @type {{ groupId: string, edge: DropEdge } | null} */ (null),
@@ -48,7 +48,7 @@
       let pct = (pos / total) * 100
       pendingPct = Math.min(90, Math.max(10, pct))
       // Coalesce to one resize per animation frame so a heavy pane (the live
-      // grid) can't stall the drag — the splitter stays glued to the pointer.
+      // grid) can't stall the drag - the splitter stays glued to the pointer.
       if (!raf) raf = requestAnimationFrame(flush)
     }
     const up = () => {
@@ -111,7 +111,7 @@
           node.dir === 'row' ? 'h-8 w-0.5' : 'h-0.5 w-8',
         )}
       ></div>
-      <!-- widened invisible hit area — generous target so it's easy to grab -->
+      <!-- widened invisible hit area, generous target so it's easy to grab -->
       <div
         class={cn(
           'absolute',
@@ -137,7 +137,7 @@
   >
     {@render renderGroup(node, isFocused)}
 
-    <!-- Inactive split panes are intentionally NOT dimmed — every pane renders at
+    <!-- Inactive split panes are intentionally NOT dimmed, every pane renders at
          full brightness so all views stay readable at once. -->
 
     <!-- Drop hint: translucent preview of where the dragged tab will land. -->

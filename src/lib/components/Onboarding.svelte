@@ -9,12 +9,12 @@
   let { open = $bindable(false), onconnect = () => {}, onsample = () => {} } = $props()
 
   let step = $state(1)
-  const TOTAL = 4
-  const LICENSE_STEP = 3
+  const TOTAL = 3
+  const LICENSE_STEP = 2
   const KEY = 'stroke:onboarded'
 
   // Short labels for the header stepper.
-  const STEP_LABELS = ['Welcome', 'Toolkit', 'Activate', 'Connect']
+  const STEP_LABELS = ['Welcome', 'Activate', 'Connect']
 
   // License-step perks, shown under the activation form.
   const LICENSE_PERKS = [
@@ -27,32 +27,15 @@
   const BRANDS = ['postgres', 'mysql', 'sqlite', 'mssql', 'clickhouse', 'd1', 'supabase', 'neon', 'planetscale', 'prisma']
 
   const FEATURES = [
-    { icon: 'database', title: 'Connect any database', desc: 'Postgres, MySQL, SQLite, ClickHouse, Cloudflare D1 and more — all from one window.', preview: 'connect' },
+    { icon: 'database', title: 'Connect any database', desc: 'Postgres, MySQL, SQLite, ClickHouse, Cloudflare D1 and more, all from one window.', preview: 'connect' },
     { icon: 'table-2',  title: 'Browse & edit rows',   desc: 'Filter, sort, paginate, and edit data with a fast spreadsheet feel.',   preview: 'table'   },
     { icon: 'terminal', title: 'Full SQL editor',      desc: 'A multi-tab Monaco editor with history, saved queries, and AI fixes.', preview: 'sql'     },
     { icon: 'bot',      title: 'AI assistance',        desc: 'Generate SQL, fix errors, and ask questions with any AI model.',        preview: 'ai'      },
   ]
 
-  // Everything beyond the core four — shown as a minimal capability grid.
-  const CAPABILITIES = [
-    { icon: 'layout-template', title: 'Schema explorer',    desc: 'Browse schemas, tables, indexes, enums & views.' },
-    { icon: 'workflow',        title: 'Visual ERD',          desc: 'See table relationships as a live diagram.' },
-    { icon: 'share-2',         title: 'Diagrams',            desc: 'Author & render Mermaid diagrams from your DB.' },
-    { icon: 'bar-chart-3',     title: 'Charts & dashboards', desc: 'Turn query results into charts and pin them.' },
-    { icon: 'git-compare',     title: 'Data diff',           desc: 'Compare two tables or result sets row by row.' },
-    { icon: 'history',         title: 'Schema timeline',     desc: 'Track how your schema changed via snapshots.' },
-    { icon: 'notebook-pen',    title: 'SQL notebooks',       desc: 'Mix SQL cells and notes in one document.' },
-    { icon: 'blocks',          title: 'Extensions',          desc: 'Cell formatters, ID generators & transforms.' },
-    { icon: 'search',          title: 'Global search',       desc: 'Find rows across every table at once.' },
-    { icon: 'shield-check',    title: 'Security',            desc: 'Inspect roles, users & row-level policies.' },
-    { icon: 'archive',         title: 'Backup & restore',    desc: 'Export and import your data in a click.' },
-    { icon: 'plug',            title: 'MCP server',          desc: 'Expose your DB to external AI tools.' },
-  ]
-
   const HEADINGS = [
-    { title: 'Welcome to Stroke',    desc: "The developer's database client — connect, explore, and query with AI." },
-    { title: 'A complete toolkit',   desc: 'Everything for working with your data, in one window.' },
-    { title: 'Activate Stroke',      desc: 'Enter your license key, or start a free trial — you can always activate later.' },
+    { title: 'Welcome to Stroke',    desc: "The developer's database client: connect, explore, and query with AI." },
+    { title: 'Activate Stroke',      desc: 'Enter your license key, or start a free trial, you can always activate later.' },
     { title: "You're all set",       desc: 'Connect a real database, or explore with sample data first.' },
   ]
 
@@ -85,12 +68,33 @@
     if (e.key === 'Escape') { e.preventDefault(); done(false) }
     else if (e.key === 'Enter' && step < TOTAL) { e.preventDefault(); next() }
   }
+
+  // While onboarding is open, stop the app's global hotkeys (⌘K command palette,
+  // ⌘P navigator, etc.) from firing *behind* the overlay. A capture-phase window
+  // listener beats @tanstack/svelte-hotkeys (same trick the ⌘P handler uses).
+  // Plain typing and native editing combos (copy/paste/cut/select-all/undo/redo)
+  // still reach the license input, so pasting a key keeps working.
+  $effect(() => {
+    if (!open) return
+    /** @param {KeyboardEvent} e */
+    function blockAppHotkeys(e) {
+      const mod = e.metaKey || e.ctrlKey
+      if (!mod && !e.altKey) return
+      const k = e.key.toLowerCase()
+      if (mod && !e.altKey && ['c', 'v', 'x', 'a', 'z', 'y'].includes(k)) return
+      e.stopImmediatePropagation()
+    }
+    window.addEventListener('keydown', blockAppHotkeys, { capture: true })
+    return () => window.removeEventListener('keydown', blockAppHotkeys, { capture: true })
+  })
 </script>
 
 <svelte:window onkeydown={onWindowKeydown} />
 
 {#if open}
-  <div class="onboarding fixed inset-0 z-[200] flex flex-col bg-background" transition:fade={{ duration: 180 }}>
+  <!-- Sit BELOW the app titlebar so its drag region + min/max/close (per-OS)
+       stay reachable during onboarding. -->
+  <div class="onboarding fixed inset-x-0 bottom-0 z-[200] flex flex-col bg-background" style="top: var(--app-titlebar-h, 38px);" transition:fade={{ duration: 180 }}>
     <!-- Ambient: soft top glow + faint dot grid, kept restrained -->
     <div
       class="pointer-events-none absolute inset-x-0 top-0 h-[62%]"
@@ -169,7 +173,7 @@
 
             <!-- ── Step 1: Feature carousel ── -->
             {#if step === 1}
-              <!-- Clean feature grid — no preview clutter -->
+              <!-- Clean feature grid, no preview clutter -->
               <div class="grid w-full max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2">
                 {#each FEATURES as f}
                   <div class="flex items-start gap-3.5 rounded-2xl border border-border/40 bg-card/20 p-4 transition-colors hover:border-border/70 hover:bg-card/40">
@@ -194,36 +198,10 @@
                 </div>
               </div>
 
-            <!-- ── Step 2: Toolkit grid ── -->
-            {:else if step === 2}
-              <div class="grid w-full grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-                {#each CAPABILITIES as c, i}
-                  <div
-                    class="group flex flex-col gap-2 rounded-xl border border-border/50 bg-card/30 p-3.5 transition-all duration-150 hover:-translate-y-0.5 hover:border-border hover:bg-muted/30 hover:shadow-sm"
-                    in:fly={{ y: 8, duration: 260, delay: i * 22, easing: cubicOut }}
-                  >
-                    <span class="grid size-8 place-items-center rounded-lg border border-border/60 bg-muted/40 text-muted-foreground transition-colors group-hover:border-primary/20 group-hover:bg-primary/10 group-hover:text-primary">
-                      <Icon name={c.icon} class="size-4" />
-                    </span>
-                    <div class="min-w-0">
-                      <p class="text-ui-sm font-semibold text-foreground">{c.title}</p>
-                      <p class="mt-0.5 text-ui-2xs leading-relaxed text-muted-foreground">{c.desc}</p>
-                    </div>
-                  </div>
-                {/each}
-              </div>
-              <p class="-mt-3 flex items-center gap-1.5 text-ui-xs text-muted-foreground/70">
-                <Icon name="sparkles" class="size-3.5 text-primary/70" /> Press
-                <kbd class="rounded border border-border/60 bg-muted/50 px-1.5 py-px font-mono text-ui-3xs text-foreground">⌘K</kbd>
-                anytime to jump to any of these.
-              </p>
-
-            <!-- ── Step 3: Activate license ── -->
+            <!-- ── Step 2: Activate license ── -->
             {:else if step === LICENSE_STEP}
-              <div class="flex w-full max-w-sm flex-col gap-5">
-                <div class="overflow-hidden rounded-2xl border border-border/50 bg-card/30 shadow-sm">
-                  <LicenseActivation compact onactivated={next} />
-                </div>
+              <div class="flex w-full max-w-md flex-col gap-5">
+                <LicenseActivation inline onactivated={next} />
 
                 <div class="flex items-center justify-center gap-5">
                   {#each LICENSE_PERKS as perk (perk.label)}
@@ -241,7 +219,7 @@
                 </p>
               </div>
 
-            <!-- ── Step 4: Connect ── -->
+            <!-- ── Step 3: Connect ── -->
             {:else}
               <div class="flex w-full max-w-md flex-col gap-3">
                 <button

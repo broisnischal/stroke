@@ -19,12 +19,12 @@
     /** @type {StudioTab | null} */
     tab = null,
     /** Reserve a toolbar-height strip so a background table pane lines up with
-        the focused pane (which renders the table toolbar) — prevents the grid
+        the focused pane (which renders the table toolbar), prevents the grid
         from jumping when focus moves between split panes. */
     toolbarSpacer = false,
-    /** Global connection id — chart save/export needs it; not in tab.state. */
+    /** Global connection id - chart save/export needs it; not in tab.state. */
     connectionId = '',
-    /** Global schema list — the ERD view fetches its own metadata and needs it. */
+    /** Global schema list - the ERD view fetches its own metadata and needs it. */
     schemas = [],
   } = $props()
 
@@ -76,7 +76,7 @@
     </div>
   {:else if tableState.dataViewMode === 'chart'}
     <!-- Preserve the active data-view when this pane is demoted from focused to
-         a snapshot (each branch mirrors the live guard in StudioShell) — without
+         a snapshot (each branch mirrors the live guard in StudioShell), without
          these the pane reverted to the plain grid regardless of view mode. -->
     <div class="flex min-h-0 min-w-0 flex-1">
       <ChartView columns={viewColumns} rows={viewRows} {connectionId} />

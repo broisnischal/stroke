@@ -13,10 +13,10 @@ import { invoke } from '@tauri-apps/api/core'
 
 /** UI metadata. `mode: 'token'` providers paste a credential instead of OAuth. */
 export const PROVIDERS = [
-  { id: 'neon',        name: 'Neon',            mode: 'oauth', engine: 'postgres', blurb: 'Serverless Postgres — one-click connect' },
-  { id: 'supabase',    name: 'Supabase',        mode: 'oauth', engine: 'postgres', blurb: 'Postgres platform — asks for your DB password once' },
-  { id: 'planetscale', name: 'PlanetScale',     mode: 'oauth', engine: 'mysql',    blurb: 'Serverless MySQL — mints fresh credentials on connect' },
-  { id: 'prisma',      name: 'Prisma Postgres', mode: 'oauth', engine: 'postgres', blurb: 'Serverless Postgres — sign in with Prisma' },
+  { id: 'neon',        name: 'Neon',            mode: 'oauth', engine: 'postgres', blurb: 'Serverless Postgres, one-click connect' },
+  { id: 'supabase',    name: 'Supabase',        mode: 'oauth', engine: 'postgres', blurb: 'Postgres platform, asks for your DB password once' },
+  { id: 'planetscale', name: 'PlanetScale',     mode: 'oauth', engine: 'mysql',    blurb: 'Serverless MySQL, mints fresh credentials on connect' },
+  { id: 'prisma',      name: 'Prisma Postgres', mode: 'oauth', engine: 'postgres', blurb: 'Serverless Postgres, sign in with Prisma' },
 ]
 
 /** @param {string} id */
@@ -29,7 +29,7 @@ export async function providerStartOAuth(provider) {
   return invoke('provider_start_oauth', { provider })
 }
 
-/** Abort an in-flight OAuth wait — frees the localhost callback port. */
+/** Abort an in-flight OAuth wait - frees the localhost callback port. */
 export async function providerCancelOAuth() {
   return invoke('provider_cancel_oauth')
 }

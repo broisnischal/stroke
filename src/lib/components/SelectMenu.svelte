@@ -7,7 +7,7 @@
   //   <SelectMenu value={x} onValueChange={setX} items={[{value,label,icon?,hint?}]} />
   //
   // For custom leading visuals (font preview, variable-weight icon, brand icon)
-  // pass a `lead` snippet — it receives the full item and renders both the
+  // pass a `lead` snippet - it receives the full item and renders both the
   // trigger's and each row's leading glyph.
   import SearchableMenu from './SearchableMenu.svelte'
   import Icon from './Icon.svelte'
@@ -31,7 +31,7 @@
     align = 'start',
     side = 'bottom',
     disabled = false,
-    /** snippet(item) — custom leading visual for the trigger + rows. */
+    /** snippet(item) - custom leading visual for the trigger + rows. */
     lead,
     open = $bindable(false),
   } = $props()

@@ -23,7 +23,7 @@
 
   /**
    * True when activation happened on this page. The instant a key activates,
-   * the license store flips to Valid — without this flag the page would swap
+   * the license store flips to Valid - without this flag the page would swap
    * the key-entry UI for the "License active" card mid-celebration, cutting
    * off the success banner and confetti. Keeping the activation UI mounted
    * lets the moment play out; onactivated then closes the tab.
@@ -62,13 +62,13 @@
     if (status?.status === 'Valid') return { tone: 'good', text: `Licensed to ${status.email}` }
     if (status?.status === 'Trial') {
       const d = status.days_remaining
-      return { tone: 'trial', text: `Trial — ${d} ${d === 1 ? 'day' : 'days'} remaining` }
+      return { tone: 'trial', text: `Trial, ${d} ${d === 1 ? 'day' : 'days'} remaining` }
     }
-    if (status?.status === 'TrialExpired') return { tone: 'warn', text: 'Trial expired — activate a license to keep Pro features' }
+    if (status?.status === 'TrialExpired') return { tone: 'warn', text: 'Trial expired, activate a license to keep Pro features' }
     return { tone: 'free', text: 'Free plan' }
   })
 
-  /** What a license unlocks — mirrors PRO_FEATURES in $lib/stores/license.js. */
+  /** What a license unlocks - mirrors PRO_FEATURES in $lib/stores/license.js. */
   const features = [
     { icon: Bot, label: 'AI assistant' },
     { icon: LayoutDashboard, label: 'Dashboards' },

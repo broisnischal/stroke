@@ -32,7 +32,7 @@
 
   onMount(() => subscribeActivityLog((log) => { entries = log }))
 
-  // rAF-based auto-scroll — no tick() needed
+  // rAF-based auto-scroll - no tick() needed
   $effect(() => {
     const count = entries.length
     if (!autoScroll || !logEl || count === 0) return

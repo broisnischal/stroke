@@ -15,7 +15,7 @@
   import BrandIcon from './BrandIcon.svelte'
   import { hasBrand } from '$lib/brand-icons.js'
 
-  // App version — shown in the status bar; resolved from the Tauri app metadata.
+  // App version - shown in the status bar; resolved from the Tauri app metadata.
   let appVersion = $state('')
   onMount(async () => {
     try { const { getVersion } = await import('@tauri-apps/api/app'); appVersion = await getVersion() }
@@ -54,7 +54,7 @@
     onopenpages = /** @type {() => void} */ (() => {}),
     ondisconnect = /** @type {() => void} */ (() => {}),
     pendingEditCount = 0,
-    /** True while staged changes are being written — shows a spinner on Apply. */
+    /** True while staged changes are being written - shows a spinner on Apply. */
     applying = false,
     onapplyedits = /** @type {() => void} */ (() => {}),
     onresetedits = /** @type {() => void} */ (() => {}),
@@ -67,12 +67,12 @@
     onscrolltableright = /** @type {() => void} */ (() => {}),
     /** Duration of the last data fetch (table load / refresh / query), in ms. */
     queryMs = 0,
-    /** Live mode (auto-refresh active table) — Postgres/SQLite only. */
+    /** Live mode (auto-refresh active table) - Postgres/SQLite only. */
     live = false,
     liveSupported = false,
     ontogglelive = /** @type {() => void} */ (() => {}),
     oncreatedatabase = /** @type {(opts: import('./CreateDatabaseDialog.svelte').CreateDbOptions) => Promise<void>} */ (async () => {}),
-    /** Global read-only toggle — prevents all writes across the whole session */
+    /** Global read-only toggle - prevents all writes across the whole session */
     readonly = $bindable(false),
     sidebarVisible       = true,
     tabBarVisible        = true,
@@ -90,7 +90,7 @@
 
   let dbOpen = $state(false)
   let createDbOpen = $state(false)
-  /** Unified database list — `key` is what identifies a db (name for SQL, uuid for D1), `label` is what we show. */
+  /** Unified database list - `key` is what identifies a db (name for SQL, uuid for D1), `label` is what we show. */
   let dbList = $state(/** @type {{ key: string, label: string }[]} */ ([]))
   let dbLoading = $state(false)
   let dbSearch = $state('')
@@ -98,7 +98,7 @@
   let dbInputEl = $state(null)
   /** @type {HTMLDivElement | null} */
   let dbListEl = $state(null)
-  /** Keyboard-highlighted row in the db list — driven from the filter input. */
+  /** Keyboard-highlighted row in the db list - driven from the filter input. */
   let dbHl = $state(0)
 
   // Reset the highlight whenever the visible list changes or the menu reopens.
@@ -217,7 +217,7 @@
   /** Whether this connection supports switching databases in-place. Redis uses
    * numbered logical DBs (no in-place switch yet), so it shows a static label. */
   const canSwitchDb = $derived(!isRedis && (isPostgres || isD1 || isProvider))
-  /** The numeric logical DB Redis actually connects to — matches api.js
+  /** The numeric logical DB Redis actually connects to - matches api.js
    * normalizeRedis (`Number(config.db) || 0`), so a stale non-numeric `db`
    * ("postgres") correctly reads as 0 rather than being shown verbatim. */
   const redisDb = $derived(Number(connection?.db) || 0)
@@ -241,7 +241,7 @@
 
   async function fetchDatabases() {
     // Provider connections list the account's other databases/projects via the
-    // provider API (checked first — a Supabase/Neon connection is also postgres).
+    // provider API (checked first - a Supabase/Neon connection is also postgres).
     if (isProvider && connection?.provider) {
       dbLoading = true
       try {
@@ -320,7 +320,7 @@
   const connLabel = $derived(connection?.name ?? connection?.host ?? '')
   let connOpen = $state(false)
 
-  /** Searchable list for the connection switcher — keyword-matched on name/host/db/type. */
+  /** Searchable list for the connection switcher - keyword-matched on name/host/db/type. */
   const connItems = $derived(
     savedConnections.map((c) => ({
       value: c.id,
@@ -330,7 +330,7 @@
   )
 
   /**
-   * Subtitle for a connection row — the database (or host) shown under the name,
+   * Subtitle for a connection row - the database (or host) shown under the name,
    * but only when it isn't already part of the title, so host/db-style names
    * like "1.2.3.4/mydb" don't repeat "mydb" on the line below.
    * @param {import('$lib/stores/connections.js').SavedConnection} c
@@ -356,7 +356,7 @@
 
   let aiModelMenuOpen = $state(false)
 
-  /** "132ms" under a second, "1.24s" above — always tabular so it never jitters. */
+  /** "132ms" under a second, "1.24s" above - always tabular so it never jitters. */
   const queryMsLabel = $derived(
     queryMs >= 1000 ? `${(queryMs / 1000).toFixed(2)}s` : `${Math.round(queryMs)}ms`,
   )
@@ -609,7 +609,7 @@
         </div>
       {/if}
 
-      <!-- Live mode toggle (experimental — only shown when enabled in Settings) -->
+      <!-- Live mode toggle (experimental, only shown when enabled in Settings) -->
       {#if showTableNav && liveSupported && $appLiveMode}
         {@render sep()}
         <button
@@ -622,7 +622,7 @@
           )}
           onclick={ontogglelive}
           aria-pressed={live}
-          title={live ? 'Live: on — auto-refreshes when this table changes' : 'Live: off — click to auto-refresh on changes'}
+          title={live ? 'Live: on, auto-refreshes when this table changes' : 'Live: off, click to auto-refresh on changes'}
         >
           {#if live}
             <span class="size-1.5 shrink-0 rounded-full bg-emerald-500 motion-safe:animate-pulse"></span>
@@ -634,7 +634,7 @@
         </button>
       {/if}
 
-      <!-- Last fetch timing — updates on every table load / refresh / query -->
+      <!-- Last fetch timing, updates on every table load / refresh / query -->
       {#if queryMs > 0}
         {@render sep()}
         <span
@@ -649,7 +649,7 @@
         type="button"
         class="flex items-center gap-1.5 rounded-md px-2 py-1 text-muted-foreground/50 transition-colors hover:bg-muted/50 hover:text-foreground"
         onclick={onconnect}
-        title="No connection — click to connect"
+        title="No connection, click to connect"
       >
         <Icon name="wifi-off" class="size-3 shrink-0" />
         <span class="font-medium">Not connected</span>
@@ -709,7 +709,7 @@
       {@render sep()}
     {/if}
 
-    <!-- Go to page — opens the ⌘P page navigator -->
+    <!-- Go to page, opens the ⌘P page navigator -->
     {#if connection}
       <button
         type="button"
@@ -742,7 +742,7 @@
     <button
       type="button"
       class={cn(iconBtn, readonly && 'text-amber-500! hover:text-amber-400!')}
-      title={readonly ? 'Read-only mode — click to enable editing' : 'Read-write mode — click to lock'}
+      title={readonly ? 'Read-only mode, click to enable editing' : 'Read-write mode, click to lock'}
       aria-pressed={readonly}
       onclick={() => (readonly = !readonly)}
     >
@@ -820,7 +820,7 @@
         mcpRunning ? 'text-muted-foreground/70' : 'text-muted-foreground/30',
       )}
       onclick={onopenmcp}
-      title={mcpRunning ? 'MCP running — click to manage' : 'MCP stopped — click to manage'}
+      title={mcpRunning ? 'MCP running, click to manage' : 'MCP stopped, click to manage'}
     >
       <span class={cn('size-1.5 shrink-0 rounded-full transition-colors', mcpRunning ? 'bg-emerald-500' : 'bg-muted-foreground/25')}></span>
       <span class="font-medium @max-[900px]/sb:hidden">MCP</span>

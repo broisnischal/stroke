@@ -24,7 +24,7 @@ export function normalizeConnectionConfig(raw) {
  * True when the Tauri IPC bridge isn't present (e.g. `npm run dev` in a plain
  * browser). In that case *every* `invoke` fails structurally, so we surface a
  * dev hint. When the bridge IS present, we must pass the backend's real error
- * through untouched — matching on substrings like "invoke"/"Tauri" used to
+ * through untouched - matching on substrings like "invoke"/"Tauri" used to
  * swallow genuine DB failures whose text happened to mention those words.
  */
 function tauriBridgeMissing() {
@@ -45,6 +45,50 @@ async function inv(command, args = {}) {
   } catch (err) {
     throw new Error(formatInvokeError(err))
   }
+}
+
+// ── Connect retry ───────────────────────────────────────────────────────────
+// A connect attempt fails for one of two reasons:
+//   • TRANSIENT — a timeout, the server briefly unreachable, a momentarily
+//     exhausted pool, a DNS/network blip. These usually succeed on an immediate
+//     second try, so we retry a few times with a short backoff for a smoother,
+//     self-healing connect.
+//   • PERMANENT — bad credentials (401/403), wrong host/database, a missing
+//     file. These NEVER succeed on retry, so we surface them at once — the user
+//     sees the real error (e.g. "Authentication error") with no extra delay.
+// Anything we can't confidently classify as transient is treated as permanent
+// (fail fast), so we never spin on an error the user needs to see and act on.
+const CONNECT_MAX_ATTEMPTS = 4
+
+/** Auth / config errors that will never succeed on retry. */
+function isPermanentConnError(msg) {
+  return /\b(401|403|407)\b|unauthor|authenticat|password authentication|access denied|permission denied|invalid[\s_-]*(password|credential|token|api[\s_-]?key|key|secret)|bad credentials|forbidden|no such (database|file|host)|does not exist|not found|unknown database|unknown host|certificate|self[\s-]?signed|\btls\b|\bssl\b/i.test(msg)
+}
+
+/** Network / server errors worth a fast retry. */
+function isTransientConnError(msg) {
+  return /tim(e|ed)[\s_-]?out|timeout|connection refused|refused|reset|closed|broken pipe|econnrefused|econnreset|etimedout|epipe|enetunreach|ehostunreach|temporarily unavailable|unreachable|no route|network|getaddrinfo|eai_again|pool timed out|deadline|\b(502|503|504)\b|too many connections|server closed|connection terminated|starting up|i\/o error/i.test(msg)
+}
+
+/**
+ * Like inv(), but for connect commands: retries a TRANSIENT failure a few times
+ * with fast backoff (200ms → 400ms → 800ms). Permanent failures (auth/config)
+ * are thrown immediately so the real error reaches the UI without delay.
+ */
+async function connectInv(command, args = {}) {
+  let lastErr
+  for (let attempt = 1; attempt <= CONNECT_MAX_ATTEMPTS; attempt++) {
+    try {
+      return await inv(command, args)
+    } catch (e) {
+      lastErr = e
+      const msg = String(e?.message ?? e ?? '')
+      const worthRetry = !isPermanentConnError(msg) && isTransientConnError(msg)
+      if (attempt === CONNECT_MAX_ATTEMPTS || !worthRetry) throw e
+      await new Promise((r) => setTimeout(r, 200 * 2 ** (attempt - 1)))
+    }
+  }
+  throw lastErr
 }
 
 // ── Live mode ───────────────────────────────────────────────────────────────
@@ -93,7 +137,7 @@ function withTimezone(payload) {
     const tz = String(loadSettings().sessionTimezone ?? '').trim()
     if (tz && tz.toUpperCase() !== 'SYSTEM') return { ...payload, timezone: tz }
   } catch {
-    // Settings unavailable — connect without a timezone override.
+    // Settings unavailable - connect without a timezone override.
   }
   return payload
 }
@@ -103,7 +147,7 @@ export async function testPostgresConnection(config) {
 }
 
 export async function connectPostgres(config) {
-  return inv('connect_postgres', { config: withSsh(withTimezone(normalizeConnectionConfig(config)), config) })
+  return connectInv('connect_postgres', { config: withSsh(withTimezone(normalizeConnectionConfig(config)), config) })
 }
 
 /** Toggle the WebView DevTools (no-op in release builds). */
@@ -126,7 +170,7 @@ export async function testSqliteConnection(config) {
 
 /** @param {{ name: string, filePath: string }} config */
 export async function connectSqlite(config) {
-  return inv('connect_sqlite_db', { config: { name: String(config.name || 'SQLite'), filePath: String(config.filePath || '') } })
+  return connectInv('connect_sqlite_db', { config: { name: String(config.name || 'SQLite'), filePath: String(config.filePath || '') } })
 }
 
 /**
@@ -165,7 +209,7 @@ export async function connectMysql(config) {
     password: String(config.password || ''),
     ssl: Boolean(config.ssl),
   }
-  return inv('connect_mysql_db', { config: withSsh(withTimezone(base), config) })
+  return connectInv('connect_mysql_db', { config: withSsh(withTimezone(base), config) })
 }
 
 // ── Cloudflare D1 ─────────────────────────────────────────────────────────────
@@ -177,7 +221,7 @@ export async function testD1Connection(config) {
 
 /** @param {{ name: string, accountId: string, databaseId: string, apiToken: string }} config */
 export async function connectD1(config) {
-  return inv('connect_d1_db', { config })
+  return connectInv('connect_d1_db', { config })
 }
 
 /**
@@ -206,7 +250,7 @@ export async function testLibSqlConnection(config) {
 
 /** @param {{ name: string, url: string, authToken?: string }} config */
 export async function connectLibSql(config) {
-  return inv('connect_libsql_db', { config })
+  return connectInv('connect_libsql_db', { config })
 }
 
 // ── ClickHouse ────────────────────────────────────────────────────────────────
@@ -231,7 +275,7 @@ export async function testClickhouseConnection(config) {
 
 /** @param {{ name: string, host: string, port: number|string, database: string, user: string, password: string, secure?: boolean }} config */
 export async function connectClickhouse(config) {
-  return inv('connect_clickhouse_db', { config: normalizeClickhouse(config) })
+  return connectInv('connect_clickhouse_db', { config: normalizeClickhouse(config) })
 }
 
 // ── Redis ─────────────────────────────────────────────────────────────────────
@@ -256,7 +300,7 @@ export async function testRedis(config) {
 
 /** @param {{ name: string, host: string, port: number|string, password?: string, db?: number|string, tls?: boolean }} config */
 export async function connectRedis(config) {
-  return inv('connect_redis_db', { config: normalizeRedis(config) })
+  return connectInv('connect_redis_db', { config: normalizeRedis(config) })
 }
 
 /**
@@ -287,7 +331,7 @@ export async function testDuckdbConnection(config) {
 
 /** @param {{ name: string, filePath: string }} config */
 export async function connectDuckdb(config) {
-  return inv('connect_duckdb_db', { config: normalizeDuckdb(config) })
+  return connectInv('connect_duckdb_db', { config: normalizeDuckdb(config) })
 }
 
 // ── MS SQL Server ─────────────────────────────────────────────────────────────
@@ -313,7 +357,7 @@ export async function testMssqlConnection(config) {
 
 /** @param {{ name: string, host: string, port: number|string, database: string, user: string, password: string, encrypt?: boolean, trustCert?: boolean }} config */
 export async function connectMssql(config) {
-  return inv('connect_mssql_db', { config: normalizeMssql(config) })
+  return connectInv('connect_mssql_db', { config: normalizeMssql(config) })
 }
 
 // ── Docker ────────────────────────────────────────────────────────────────────
@@ -510,7 +554,7 @@ export async function dropTable(schema, table, cascade = false) {
  *
  * `includeMeta` (default true): fetch column enums/nullability, primary key and
  * foreign keys. Pass false on repeat fetches of a table already loaded
- * (pagination, sort, filter, live refresh) to skip those catalog round-trips —
+ * (pagination, sort, filter, live refresh) to skip those catalog round-trips -
  * the caller keeps the metadata it already has.
  */
 export async function getTableRows(schema, table, limit, offset, query = {}) {
@@ -530,7 +574,7 @@ export async function getTableRows(schema, table, limit, offset, query = {}) {
       // so other engines still sort by it when they ignore `sorts`.
       sorts: query.sorts?.length ? query.sorts : null,
       filters: query.filters?.length ? query.filters : null,
-      // Keyset (cursor) pagination anchor — null = classic OFFSET (Postgres only).
+      // Keyset (cursor) pagination anchor - null = classic OFFSET (Postgres only).
       keyset: query.keyset ?? null,
       includeMeta: query.includeMeta !== false,
       // Default true. Pass false to skip COUNT(*) (returns total = -1) and paint
@@ -750,7 +794,7 @@ export async function mcpStart() {
 /**
  * Sync credential-free connection metadata to the MCP layer so AI tools can
  * call list_databases / current_database.
- * Strip passwords/tokens before calling — this data flows into the MCP server.
+ * Strip passwords/tokens before calling - this data flows into the MCP server.
  * @param {import('$lib/stores/connections.js').SavedConnection[]} connections
  * @param {string | null} activeId
  */

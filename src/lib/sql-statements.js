@@ -85,7 +85,7 @@ export function splitSqlStatements(text) {
  */
 
 /**
- * Lightweight SQL lint — catches lexical problems worth flagging while typing:
+ * Lightweight SQL lint - catches lexical problems worth flagging while typing:
  * unterminated strings/identifiers, unclosed block comments and dollar quotes,
  * unbalanced parentheses, and a missing `;` on the final statement.
  *
@@ -109,7 +109,7 @@ export function lintSql(text) {
     } else if (ch === '/' && next === '*') {
       const close = text.indexOf('*/', i + 2)
       if (close === -1) {
-        diags.push({ message: 'Unclosed block comment — missing */', severity: 'warning', start: i, end: n })
+        diags.push({ message: 'Unclosed block comment: missing */', severity: 'warning', start: i, end: n })
         i = n
       } else {
         i = close + 2
@@ -130,7 +130,7 @@ export function lintSql(text) {
       }
       if (!closed) {
         diags.push({
-          message: ch === "'" ? "Unterminated string — missing closing '" : `Unterminated quoted identifier — missing closing ${ch}`,
+          message: ch === "'" ? "Unterminated string, missing closing '" : `Unterminated quoted identifier, missing closing ${ch}`,
           severity: 'error',
           start: qStart,
           end: n,
@@ -142,7 +142,7 @@ export function lintSql(text) {
         const tag = m[0]
         const close = text.indexOf(tag, i + tag.length)
         if (close === -1) {
-          diags.push({ message: `Unterminated dollar-quoted string — missing closing ${tag}`, severity: 'error', start: i, end: n })
+          diags.push({ message: `Unterminated dollar-quoted string: missing closing ${tag}`, severity: 'error', start: i, end: n })
           i = n
         } else {
           i = close + tag.length

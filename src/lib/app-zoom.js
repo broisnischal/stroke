@@ -12,7 +12,7 @@ export function getAppZoom() {
 
 /**
  * Viewport position for body-portaled overlays (context menus, etc.).
- * Use raw clientX/Y — scaling is via root font-size, not CSS zoom.
+ * Use raw clientX/Y - scaling is via root font-size, not CSS zoom.
  * @param {number} clientX
  * @param {number} clientY
  */

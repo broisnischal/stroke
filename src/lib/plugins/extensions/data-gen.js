@@ -1,4 +1,4 @@
-// Data Gen — insert realistic sample values into editable cells: timestamps,
+// Data Gen - insert realistic sample values into editable cells: timestamps,
 // random numbers, fake names/emails/text, and web/network values. Kept separate
 // from the ID Generators extension (which only mints identifiers). Every
 // generator returns a string and carries a `group` used to section the menu.

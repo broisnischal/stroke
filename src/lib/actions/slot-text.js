@@ -3,7 +3,7 @@ import { slotText } from 'slot-text'
 
 /**
  * Svelte action: roll-animate an element's text whenever the bound value
- * changes — a small tactile effect for live counters and labels.
+ * changes - a small tactile effect for live counters and labels.
  *
  * Usage: `<span use:slotRoll={String(count)}></span>`
  *

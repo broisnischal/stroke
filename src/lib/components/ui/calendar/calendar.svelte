@@ -5,6 +5,7 @@
 	import { cn } from "$lib/utils.js";
 
 	let {
+		type = "single",
 		value = $bindable(),
 		placeholder = $bindable(),
 		class: className,
@@ -14,6 +15,7 @@
 </script>
 
 <CalendarPrimitive.Root
+	{type}
 	bind:value
 	bind:placeholder
 	{weekdayFormat}

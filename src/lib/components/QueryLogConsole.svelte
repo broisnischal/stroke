@@ -104,7 +104,7 @@
     {#if visible.length === 0}
       <div class="flex h-full flex-col items-center justify-center gap-1.5 text-center">
         <Terminal class="size-4 text-muted-foreground/20" />
-        <p class="text-ui-xs text-muted-foreground/40">No queries yet — browse a table or run SQL.</p>
+        <p class="text-ui-xs text-muted-foreground/40">No queries yet, browse a table or run SQL.</p>
       </div>
     {:else}
       {#each visible as e (e.id)}

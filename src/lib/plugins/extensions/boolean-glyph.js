@@ -1,4 +1,4 @@
-// Boolean glyphs — a colored dot (or check/cross) instead of raw true/false.
+// Boolean glyphs - a colored dot (or check/cross) instead of raw true/false.
 import { isBooleanType } from '$lib/cell-value.js'
 import { isCurrentThemeDark } from '$lib/stores/settings.js'
 

@@ -89,7 +89,7 @@
     }
   }
   async function refreshCurrent() {
-    await refreshActivity() // always — keeps the charts flowing regardless of the visible tab
+    await refreshActivity() // always - keeps the charts flowing regardless of the visible tab
     if (subtab === 'state') await refreshState()
     else if (subtab === 'config') await refreshConfig()
     else if (subtab === 'replication') await refreshReplication()

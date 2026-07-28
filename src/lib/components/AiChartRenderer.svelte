@@ -14,7 +14,7 @@
     spec = null,
     /** Suppress the in-chart title (caller shows it in the card header) */
     noTitle = false,
-    /** When true (fullscreen mode), all scroll zooms — no interception needed */
+    /** When true (fullscreen mode), all scroll zooms - no interception needed */
     scrollZoom = false,
   } = $props()
 
@@ -115,7 +115,7 @@
         })
         ro.observe(container)
         // Scroll zoom:
-        // • scrollZoom=true (fullscreen): let ECharts handle all wheel natively — no interception
+        // • scrollZoom=true (fullscreen): let ECharts handle all wheel natively - no interception
         // • inline: Ctrl/Cmd+scroll → synthesize plain wheel for ECharts zoom
         //           plain scroll   → stopPropagation so browser scrolls the page naturally
         if (!scrollZoom) {

@@ -89,7 +89,7 @@
     <!-- ── Drag underlay ──────────────────────────────────────────── -->
     <!-- No ondblclick here: Tauri's injected drag-region script already
          toggles maximize on double-click (on macOS via mouseup). Adding our
-         own handler made both fire — maximize + instant restore. -->
+         own handler made both fire, maximize + instant restore. -->
     <div
       class="absolute inset-0 z-0"
       data-tauri-drag-region
@@ -128,11 +128,11 @@
         <!-- Divider -->
         <div class="mx-2.5 h-[14px] w-px shrink-0 bg-border/30"></div>
       {:else}
-        <!-- Windows / Linux: no left lights — pad so the first control isn't flush to the corner -->
+        <!-- Windows / Linux: no left lights, pad so the first control isn't flush to the corner -->
         <div class="w-2.5 shrink-0"></div>
       {/if}
 
-      <!-- Sidebar toggle — disabled when not connected -->
+      <!-- Sidebar toggle, disabled when not connected -->
       <button
         type="button"
         class={cn(
@@ -180,7 +180,7 @@
       <!-- Right: trial pill + Agent + Chat -->
       <div class={cn('pointer-events-auto flex shrink-0 items-center gap-1', isMac ? 'mr-3' : 'mr-2')}>
 
-        <!-- Trial pill — shown only during active trial -->
+        <!-- Trial pill, shown only during active trial -->
         {#if $isTrialActive}
           <button
             type="button"

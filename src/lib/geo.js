@@ -1,6 +1,6 @@
 /**
  * Loads and caches the world GeoJSON for choropleth maps.
- * Served from /public/world.geo.json — no external network requests.
+ * Served from /public/world.geo.json - no external network requests.
  */
 
 /** @type {any|null} */

@@ -17,7 +17,7 @@
       <div class="space-y-1">
         <h1 class="text-ui font-semibold text-foreground">Something went wrong</h1>
         <p class="mx-auto max-w-md text-ui-sm text-muted-foreground">
-          The interface hit an unexpected error. Try to recover, or reload — your
+          The interface hit an unexpected error. Try to recover, or reload, your
           connections and data are safe.
         </p>
       </div>

@@ -81,7 +81,7 @@
       return
     }
 
-    // Container stays mounted throughout — safe to proceed
+    // Container stays mounted throughout - safe to proceed
     const { init, registerMap } = await import('echarts')
     if (!container.isConnected) return
 
@@ -101,7 +101,7 @@
     ro.observe(container)
 
     // Re-init (theme/data change, IntersectionObserver re-trigger) must not stack
-    // listeners on the same container — abort the prior set first.
+    // listeners on the same container - abort the prior set first.
     chartListeners?.abort()
     chartListeners = new AbortController()
     const { signal } = chartListeners
@@ -234,7 +234,7 @@
 {#if !spec?.data?.length}
   <div class="flex h-full items-center justify-center text-ui-xs text-muted-foreground/50">No data</div>
 {:else}
-  <!-- Chart div stays mounted always — overlays handle loading/error states -->
+  <!-- Chart div stays mounted always, overlays handle loading/error states -->
   <div class="relative h-full w-full">
     <div bind:this={el} class="h-full w-full"></div>
 

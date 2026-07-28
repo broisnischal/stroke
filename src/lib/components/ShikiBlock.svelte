@@ -18,9 +18,9 @@
     lang = 'plaintext',
     /** Enable JSON value select-on-dblclick and clickable URLs */
     jsonInteractive = false,
-    /** Compact embed (AI chat SQL blocks) — no full-height panel chrome */
+    /** Compact embed (AI chat SQL blocks) - no full-height panel chrome */
     embedded = false,
-    /** Disable soft wrapping — long lines scroll horizontally instead of
+    /** Disable soft wrapping - long lines scroll horizontally instead of
      *  breaking mid-token (dialog code surfaces like DDL / generated SQL). */
     nowrap = false,
     class: className = '',
@@ -46,7 +46,7 @@
     const language = lang
     const theme = appTheme
 
-    // JSON / plaintext never touch shiki — keeps the heavy highlighter (and its
+    // JSON / plaintext never touch shiki - keeps the heavy highlighter (and its
     // wasm engine) out of the startup bundle, since the data-browsing path only
     // ever renders these. Other languages lazy-load shiki on demand.
     if (language === 'json') { html = highlightJson(source); loading = false; return }
@@ -124,7 +124,7 @@
   issue (overflow-x:auto on inner blocks blocks vertical chat scroll) and keeps
   the browser's native momentum/smoothness on the AI chat scroll.
 
-  Full mode (SQL console): keeps the scroll container — that surface is wide
+  Full mode (SQL console): keeps the scroll container, that surface is wide
   and benefits from horizontal scroll without a vertical-scroll parent above it.
 -->
 <div
@@ -159,7 +159,7 @@
       class={cn(
         'shiki-block contents [&_pre]:m-0 [&_pre]:bg-transparent! [&_pre]:font-mono [&_.json-inspector-url]:cursor-pointer [&_.json-inspector-url]:text-link [&_.json-inspector-url]:underline [&_.json-inspector-url]:underline-offset-2 [&_.json-inspector-url]:decoration-link/45 hover:[&_.json-inspector-url]:text-link-hover hover:[&_.json-inspector-url]:decoration-link',
         // The row-inspector JSON view (jsonInteractive) reads denser than a
-        // marketing code block — smaller text + normal leading.
+        // marketing code block - smaller text + normal leading.
         isJsonInteractive ? '[&_pre]:leading-normal' : '[&_pre]:leading-relaxed',
         embedded
           ? '[&_pre]:p-3 [&_pre]:text-ui-xs [&_pre]:whitespace-pre'

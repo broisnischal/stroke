@@ -21,7 +21,7 @@
  * @property {string} id
  * @property {'row' | 'col'} dir
  * @property {[PaneNode, PaneNode]} children
- * @property {[number, number]} sizes — percentages, sum ≈ 100
+ * @property {[number, number]} sizes - percentages, sum ≈ 100
  *
  * @typedef {GroupNode | SplitNode} PaneNode
  * @typedef {'center' | 'left' | 'right' | 'top' | 'bottom'} DropEdge

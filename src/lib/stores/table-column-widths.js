@@ -23,7 +23,7 @@ function saveAll(all) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(all))
   } catch {
-    /* quota/private-mode — column widths are non-critical, drop silently */
+    /* quota/private-mode - column widths are non-critical, drop silently */
   }
 }
 

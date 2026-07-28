@@ -59,7 +59,7 @@
   /** @typedef {import('$lib/monaco-sql-complete.js').SqlSchemaHints} SqlSchemaHints */
 
   let {
-    /** Whether the SQL tab is the active/visible tab — gates global hotkeys. */
+    /** Whether the SQL tab is the active/visible tab - gates global hotkeys. */
     active = true,
     sql = $bindable("SELECT 1;"),
     columns = [],
@@ -72,7 +72,7 @@
     multiResults = [],
     schemaHints = /** @type {SqlSchemaHints} */ ({}),
     schemaContext = /** @type {Parameters<typeof buildSystemPrompt>[0] | null} */ (null),
-    /** Run SQL — receives a single-statement override, or undefined to run the whole buffer. */
+    /** Run SQL - receives a single-statement override, or undefined to run the whole buffer. */
     onrun = (/** @type {string | undefined} */ statementSql) => {},
     onmodk = undefined,
     onmods = undefined,
@@ -96,7 +96,7 @@
     onhistoryselect = (sql) => {},
     /** @param {string} name @param {string} sql */
     onsavequery = async (name, sql) => {},
-    /** Called when user clicks "Fix with AI" — parent opens sidebar and sends the message */
+    /** Called when user clicks "Fix with AI" - parent opens sidebar and sends the message */
     /** @param {{ error: string, sql: string }} detail */
     onfixwithai = /** @type {((detail: { error: string, sql: string }) => void) | undefined} */ (undefined),
     onprorequired = /** @type {() => void} */ (() => {}),
@@ -105,7 +105,7 @@
   /** @type {{ focus: () => void, markExecuted: (ranStatement?: string | null) => void, getStatementAtCursor: () => string, getSelectionText: () => string } | null} */
   let sqlEditorRef = $state(null)
 
-  /** Focus the SQL editor — called by the parent when this tab becomes active. */
+  /** Focus the SQL editor - called by the parent when this tab becomes active. */
   export function focusEditor() {
     sqlEditorRef?.focus()
   }
@@ -141,7 +141,7 @@
     const target = single ?? sql
     if (extractSqlParams(target).length > 0) {
       // Block the run until every parameter has a usable value, then inline
-      // them as escaped literals — the substituted text is what executes (and
+      // them as escaped literals - the substituted text is what executes (and
       // what history records), so runs stay reproducible.
       if (missingSqlParams(target, paramValues).length > 0) {
         paramsPanelOpen = true
@@ -223,8 +223,8 @@
     })
   })
 
-  // Route a failed run into its own "Error" results tab — like a real editor's
-  // problems pane — and open the panel so it's visible. When the next run clears
+  // Route a failed run into its own "Error" results tab - like a real editor's
+  // problems pane - and open the panel so it's visible. When the next run clears
   // the error, fall back to the table (the now-empty Error tab drops out too).
   let hadError = false
   $effect(() => {
@@ -248,7 +248,7 @@
   let resultSort = $state(null)
 
   // Sort text for object cells is computed once per value (row references are
-  // stable until a re-run) — stringifying inside the comparator would redo the
+  // stable until a re-run) - stringifying inside the comparator would redo the
   // work n·log n times and stall on large JSON cells.
   /** @type {WeakMap<object, string>} */
   const _sortTextCache = new WeakMap()
@@ -306,7 +306,7 @@
     // DataTable now emits the full ordered key list; SQL result sorting is
     // single-column (client-side), so take the primary key.
     resultSort = Array.isArray(sorts) ? (sorts[0] ?? null) : sorts
-    // Row indices change with the order — selection would point at the wrong rows.
+    // Row indices change with the order - selection would point at the wrong rows.
     selected = new Set()
   }
 
@@ -446,7 +446,7 @@
       errorCopied = true
       if (errorCopyTimer) clearTimeout(errorCopyTimer)
       errorCopyTimer = setTimeout(() => { errorCopied = false }, 1600)
-    } catch { /* clipboard unavailable — no-op */ }
+    } catch { /* clipboard unavailable - no-op */ }
   }
 
   const isMac =
@@ -544,7 +544,7 @@
           onclick={() => handleRun(undefined)}
           title={tipText(
             'Run query',
-            `Runs every statement — each gets its own result tab. ${mod}R runs only the statement under the cursor, ${mod}L selects it.`,
+            `Runs every statement, each gets its own result tab. ${mod}R runs only the statement under the cursor, ${mod}L selects it.`,
             [mod, '↵'],
           )}
         >
@@ -605,7 +605,7 @@
           paramsPanelOpen ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground',
         )}
         onclick={() => (paramsPanelOpen = !paramsPanelOpen)}
-        title={tipText('Query parameters', 'Set values for :name placeholders — they are inlined as escaped literals when the query runs.')}
+        title={tipText('Query parameters', 'Set values for :name placeholders, they are inlined as escaped literals when the query runs.')}
       >
         <Variable class="size-3.5 shrink-0" />
         Parameters
@@ -635,7 +635,7 @@
         class="size-7 p-0 text-muted-foreground hover:text-foreground"
         disabled={!sql.trim()}
         onclick={openSaveDialog}
-        title={tipText('Save query', 'Keep this query for later — saved queries live in History → Saved, per connection.', [mod, 'S'])}
+        title={tipText('Save query', 'Keep this query for later, saved queries live in History → Saved, per connection.', [mod, 'S'])}
       >
         <Bookmark class="size-3.5 shrink-0" />
       </Button>
@@ -664,7 +664,7 @@
         )}
         disabled={!sql.trim() || explainLoading}
         onclick={handleExplain}
-        title={tipText('Explain plan', 'Visualize how the database executes this query — spot slow scans and missing indexes.')}
+        title={tipText('Explain plan', 'Visualize how the database executes this query, spot slow scans and missing indexes.')}
       >
         {#if explainLoading}
           <Loader2 class="size-3.5 shrink-0 animate-spin" />
@@ -677,7 +677,7 @@
         <DropdownMenu.Trigger
           class="flex h-7 items-center gap-1 rounded-md px-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
           disabled={!sql.trim()}
-          title="Copy as ORM query — Drizzle or Prisma"
+          title="Copy as ORM query, Drizzle or Prisma"
         >
           {#if ormCopied}
             <CheckCheck class="size-3.5 shrink-0 text-green-500" />
@@ -707,7 +707,7 @@
         <span class="select-none text-ui-3xs font-medium uppercase tracking-[0.08em] text-muted-foreground/55">Parameters</span>
         <span
           class="select-none text-ui-3xs text-muted-foreground/35"
-          title="Auto detects numbers, booleans and NULL — everything else runs as a quoted string."
+          title="Auto detects numbers, booleans and NULL, everything else runs as a quoted string."
         >· Enter runs</span>
         <button
           type="button"
@@ -744,7 +744,7 @@
               type="text"
               value={v.value}
               disabled={v.mode === 'null'}
-              placeholder={v.mode === 'null' ? 'NULL' : v.mode === 'raw' ? 'now() — inserted verbatim' : 'value'}
+              placeholder={v.mode === 'null' ? 'NULL' : v.mode === 'raw' ? 'now(), inserted verbatim' : 'value'}
               aria-label="Value for {p.name}"
               class="h-7 w-full min-w-0 rounded-md border border-transparent bg-input/30 px-2 font-mono text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/30 hover:border-border/60 focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none disabled:opacity-40"
               oninput={(e) => setParam(p.name, { ...v, value: e.currentTarget.value })}
@@ -879,7 +879,7 @@
           <span class="max-w-[160px] truncate font-mono text-ui-2xs text-muted-foreground">{currentDisplay.message}</span>
         {/if}
 
-        <!-- Export dropdown — only when there are results -->
+        <!-- Export dropdown, only when there are results -->
         {#if outputVisible && currentDisplay.rows.length > 0}
           <DropdownMenu.Root>
             <DropdownMenu.Trigger
@@ -929,16 +929,16 @@
             {#if isNetworkError(error)}
               <div class="flex h-full flex-col items-center justify-center gap-2.5 px-6 text-center">
                 <WifiOff class="size-6 text-muted-foreground/25" />
-                <p class="font-mono text-ui-sm text-muted-foreground/70">Cannot reach database — check your connection and try again.</p>
+                <p class="font-mono text-ui-sm text-muted-foreground/70">Cannot reach database, check your connection and try again.</p>
               </div>
             {:else}
               <!-- SQL error as a console pane (VS Code / Postman feel): neutral
                    monospace output on the panel surface, colour reserved for a
-                   small severity marker and a thin gutter rail — never a red wash.
+                   small severity marker and a thin gutter rail, never a red wash.
                    Body is fully SELECTABLE (the app is select-none by default;
                    data-studio-selectable re-enables selection here). -->
               <div data-studio-selectable="text" class="flex h-full min-h-0 flex-col font-mono">
-                <!-- Console toolbar — neutral chrome, ghost actions -->
+                <!-- Console toolbar, neutral chrome, ghost actions -->
                 <div class="flex shrink-0 items-center gap-2 border-b border-border/60 px-3 py-1.5 select-none">
                   <span class="size-1.5 shrink-0 rounded-full bg-destructive"></span>
                   <span class="text-ui-2xs font-semibold uppercase tracking-[0.08em] text-destructive/90">Error</span>
@@ -967,7 +967,7 @@
                     {/if}
                   </div>
                 </div>
-                <!-- Console output — neutral text, red only in the thin left rail.
+                <!-- Console output, neutral text, red only in the thin left rail.
                      overflow-wrap:anywhere wraps at word boundaries first and only
                      breaks inside a token when it can't fit (unlike break-all,
                      which chopped ordinary words mid-character). -->
@@ -983,7 +983,7 @@
                     {:else if /relation "[^"]*" does not exist|column "[^"]*" does not exist/i.test(error)}
                       <p class="mt-3 text-ui-2xs leading-relaxed text-muted-foreground/60">
                         PostgreSQL folds unquoted names to lowercase, so a table like
-                        <code class="rounded bg-muted/60 px-1 py-px text-foreground/70">Products</code> only matches when quoted —
+                        <code class="rounded bg-muted/60 px-1 py-px text-foreground/70">Products</code> only matches when quoted -
                         <code class="rounded bg-muted/60 px-1 py-px text-foreground/70">SELECT * FROM "Products"</code>. Pick the table from
                         autocomplete and it inserts the quoted form for you.
                       </p>

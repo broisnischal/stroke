@@ -1,4 +1,4 @@
-// ID Generators — insert modern identifiers into editable cells.
+// ID Generators - insert modern identifiers into editable cells.
 // Surfaced in the cell context menu ("Insert generated value").
 
 function uuidv4() {
@@ -46,7 +46,7 @@ function ulid() {
 }
 
 // CUID-style: a letter prefix + base36 timestamp + random tail. Collision-
-// resistant, lowercase, URL-safe — handy for human-readable keys.
+// resistant, lowercase, URL-safe - handy for human-readable keys.
 function cuid() {
   const b = crypto.getRandomValues(new Uint8Array(12))
   const first = String.fromCharCode(97 + (b[0] % 26))
