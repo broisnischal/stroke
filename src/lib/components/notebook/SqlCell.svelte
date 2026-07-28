@@ -74,10 +74,14 @@
       r.map((v) => (v === null ? '' : JSON.stringify(String(v)))).join(','),
     )
     const blob = new Blob([[header, ...rows].join('\n')], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
+    a.href = url
     a.download = `query-${cellIndex + 1}.csv`
     a.click()
+    // Without this the blob is pinned for the lifetime of the window — a few
+    // exports of a large result set hold on to the whole CSV each time.
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 </script>
 

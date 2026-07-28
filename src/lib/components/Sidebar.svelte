@@ -922,7 +922,7 @@
                           {/if}
                         </button>
                       </ContextMenu.Trigger>
-                      <ContextMenu.Content class="w-48 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                      <ContextMenu.Content class="min-w-48 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
                         {#if isSelected && selectedItems.size > 1}
                           <!-- Multi-select: actions apply to all selected tables -->
                           <ContextMenu.Item onSelect={openSelected}>
@@ -1125,7 +1125,7 @@
                             {/if}
                           </button>
                         </ContextMenu.Trigger>
-                        <ContextMenu.Content class="w-48 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                        <ContextMenu.Content class="min-w-48 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
                           {#if isSelected && selectedItems.size > 1}
                             <!-- Multi-select: actions apply to all selected tables -->
                             <ContextMenu.Item onSelect={openSelected}>
@@ -1311,7 +1311,7 @@
                               {/if}
                             </button>
                           </ContextMenu.Trigger>
-                          <ContextMenu.Content class="w-44 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                          <ContextMenu.Content class="min-w-44 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
                             <ContextMenu.Item onSelect={() => toggleSelect(view.name)}>
                               {#if isSelected}
                                 <Icon name="square" />
@@ -1441,7 +1441,7 @@
                               {/if}
                             </button>
                           </ContextMenu.Trigger>
-                          <ContextMenu.Content class="w-44 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                          <ContextMenu.Content class="min-w-44 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
                             <ContextMenu.Item onSelect={() => toggleSelect(mv.name)}>
                               {#if isSelected}
                                 <Icon name="square" />
