@@ -19,7 +19,7 @@
 
     <!-- Body -->
     <div class="flex items-start gap-3.5 px-5 pt-5 pb-4">
-      <div class="mt-px shrink-0 rounded-xl bg-muted/50 p-2">
+      <div class="mt-px shrink-0 rounded-lg bg-muted/50 p-2">
         <Unplug class="size-3.5 text-muted-foreground/70" />
       </div>
       <div class="min-w-0">
@@ -38,12 +38,12 @@
     <div class="flex items-center justify-end gap-2 border-t border-border/25 px-5 py-3">
       <button
         type="button"
-        class="inline-flex h-8 items-center rounded-lg px-3.5 text-ui-sm text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
+        class="inline-flex h-8 items-center rounded-md px-3.5 text-ui-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         onclick={() => (open = false)}
       >Cancel</button>
       <button
         type="button"
-        class="inline-flex h-8 items-center rounded-lg bg-foreground px-4 text-ui-sm font-medium text-background transition-colors hover:bg-foreground/85"
+        class="inline-flex h-8 items-center rounded-md bg-destructive px-4 text-ui-sm font-medium text-destructive-foreground transition-opacity hover:opacity-90"
         onclick={confirm}
       >Disconnect</button>
     </div>

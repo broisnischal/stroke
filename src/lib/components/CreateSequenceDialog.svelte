@@ -76,7 +76,7 @@
 
       <!-- Header -->
       <div class="flex items-start gap-3.5 border-b border-border/25 px-5 pt-5 pb-4">
-        <div class="mt-px flex size-8 shrink-0 items-center justify-center rounded-xl bg-muted/50">
+        <div class="mt-px flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/50">
           <Hash class="size-3.5 text-muted-foreground/70" />
         </div>
         <div class="min-w-0 flex-1">
@@ -101,7 +101,7 @@
                 {#each DATA_TYPES as t (t)}
                   <button type="button"
                     class="flex flex-1 items-center justify-center rounded-md px-1.5 py-1.5 font-mono text-ui-3xs font-medium transition-all {dataType === t
-                      ? 'bg-background text-foreground shadow-sm ring-1 ring-border/30'
+                      ? 'bg-background text-foreground ring-1 ring-border/30'
                       : 'text-muted-foreground/50 hover:text-foreground'}"
                     onclick={() => (dataType = t)}>{t}</button>
                 {/each}
@@ -135,7 +135,7 @@
 
           <!-- Cycle toggle -->
           <button type="button" role="checkbox" aria-checked={cycle}
-            class="flex cursor-pointer items-center gap-3 rounded-xl border border-border/20 bg-muted/[0.15] px-4 py-3 text-left transition-colors hover:bg-muted/25"
+            class="flex cursor-pointer items-center gap-3 rounded-lg border border-border/20 bg-muted/[0.15] px-4 py-3 text-left transition-colors hover:bg-muted/25"
             onclick={() => (cycle = !cycle)}>
             <span class="flex size-4 shrink-0 items-center justify-center rounded border transition-all {cycle ? 'border-foreground bg-foreground' : 'border-border/40 bg-transparent'}">
               {#if cycle}
@@ -151,7 +151,7 @@
           <!-- SQL preview -->
           <div>
             <p class="{lbl} mb-2">SQL preview</p>
-            <pre class="overflow-x-auto rounded-xl border border-border/20 bg-muted/[0.15] px-4 py-3 font-mono text-ui-2xs leading-relaxed text-muted-foreground/70 whitespace-pre">{sql}</pre>
+            <pre class="overflow-x-auto rounded-lg border border-border/20 bg-muted/[0.15] px-4 py-3 font-mono text-ui-2xs leading-relaxed text-muted-foreground/70 whitespace-pre">{sql}</pre>
           </div>
 
         </div>
@@ -166,7 +166,7 @@
           class="inline-flex h-8 items-center gap-1.5 rounded-lg bg-foreground px-4 text-ui-sm font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-40"
           disabled={!isValid || saving}
           onclick={() => (confirmOpen = true)}>
-          {#if saving}<Loader class="size-3 animate-spin" />{/if}
+          {#if saving}<Loader class="size-3.5 shrink-0 animate-spin" />{/if}
           Create Sequence
         </button>
       </div>

@@ -70,11 +70,16 @@
     try {
       const { getCurrentWindow } = await import('@tauri-apps/api/window')
       const win = getCurrentWindow()
-      // `.maximized(true)` in the Rust builder is unreliable on a window created
-      // hidden (WebKitGTK drops the state before map), so it can open at the small
-      // inner_size. Size to the monitor work area before showing so it opens
-      // full-size without a frameless window spilling under the taskbar/dock.
-      // Falls back to a native maximize if the command is unavailable (web dev).
+      // Open genuinely maximized so the OS owns the window state and minimize →
+      // restore / maximize behave like any native app.
+      //
+      // Order matters: pre-size the still-hidden window to the work area (opens
+      // full-size, no small→large flash, no frameless spill under the panel),
+      // then show(), then maximize(). Calling maximize() BEFORE show() — as it
+      // was — does not register a real maximized state on Windows: the restore
+      // rect stays at the tiny builder inner_size, so the window looks maximized
+      // but snaps small on the first minimize → restore. Maximizing only after
+      // the window is visible records the true state the OS then preserves.
       try {
         const { invoke } = await import('@tauri-apps/api/core')
         await invoke('fit_to_work_area')
@@ -82,6 +87,7 @@
         try { await win.maximize() } catch { /* WM may not support it */ }
       }
       await win.show()
+      try { await win.maximize() } catch { /* WM may not support it */ }
     } catch {
       // Browser dev mode or permission error - window already visible, just fade in
     } finally {

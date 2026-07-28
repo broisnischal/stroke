@@ -93,14 +93,14 @@
 {#if open}
   <!-- Centered modal overlay; Escape/backdrop cancels. -->
   <div
-    class="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-6 data-open:animate-in data-open:fade-in-0"
+    class="fixed inset-0 z-[80] flex items-center justify-center bg-black/65 p-6 data-open:animate-in data-open:fade-in-0"
     data-open
     role="button"
     tabindex="-1"
     onclick={(e) => { if (e.target === e.currentTarget) cancel() }}
     onkeydown={(e) => { if (e.key === 'Escape') { e.preventDefault(); cancel() } }}
   >
-    <div class="flex max-h-[80vh] w-full max-w-md flex-col overflow-hidden rounded-[10px] border border-border/50 bg-background shadow-2xl shadow-black/40">
+    <div class="flex max-h-[80vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-border/50 bg-background elevate-3-rim">
       <!-- Header -->
       <div class="flex items-center gap-3 border-b border-border/15 px-4 py-3.5">
         <div class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
@@ -169,7 +169,7 @@
                 {#if item.v === null}
                   <button
                     type="button"
-                    class="flex h-8 flex-1 items-center rounded-md border border-border/40 bg-muted/15 px-2.5 text-ui-xs font-medium italic tracking-wide text-amber-500/80 transition-colors hover:bg-muted/25"
+                    class="flex h-8 flex-1 items-center rounded-md border border-border/40 bg-muted/15 px-2.5 text-ui-xs font-medium italic tracking-wide text-warning/80 transition-colors hover:bg-muted/25"
                     onclick={() => toggleNull(i)}
                     title="Click to enter a value"
                   >NULL</button>
@@ -180,13 +180,13 @@
                     placeholder="value"
                     spellcheck="false"
                     autocomplete="off"
-                    class="h-8 min-w-0 flex-1 rounded-lg border-2 border-border bg-muted/15 px-2.5 font-mono text-ui-xs leading-none text-foreground outline-none transition-[border-color,box-shadow] duration-150 placeholder:text-muted-foreground/30 hover:border-border/60 focus:border-ring focus:ring-1 focus:ring-ring focus:border-ring focus:ring-1 focus:ring-ring"
+                    class="h-8 min-w-0 flex-1 rounded-lg border border-border bg-muted/15 px-2.5 font-mono text-ui-xs leading-none text-foreground outline-none transition-[border-color,box-shadow] duration-150 placeholder:text-muted-foreground/30 hover:border-border/60 focus:border-ring focus:ring-1 focus:ring-ring"
                     onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addItem() } }}
                   />
                 {/if}
                 <div class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
                   <button type="button" aria-label={item.v === null ? 'Clear NULL' : 'Set NULL'}
-                    class={cn('inline-flex size-7 items-center justify-center rounded-md transition-colors hover:bg-muted/50', item.v === null ? 'text-amber-500' : 'text-muted-foreground/60 hover:text-foreground')}
+                    class={cn('inline-flex size-7 items-center justify-center rounded-md transition-colors hover:bg-muted/50', item.v === null ? 'text-warning' : 'text-muted-foreground/60 hover:text-foreground')}
                     title={item.v === null ? 'Clear NULL' : 'Set NULL'}
                     onclick={() => toggleNull(i)}><CircleSlash class="size-3.5" /></button>
                   <button type="button" aria-label="Remove element"
@@ -224,7 +224,7 @@
           >Cancel</button>
           <button
             type="button"
-            class="inline-flex h-8 items-center rounded-md bg-foreground px-4 text-ui-xs font-medium text-background shadow-sm transition-[background-color,transform] duration-150 ease-out hover:bg-foreground/85 active:scale-[0.96]"
+            class="inline-flex h-8 items-center rounded-md bg-foreground px-4 text-ui-xs font-medium text-background transition-[background-color,transform] duration-150 ease-out hover:bg-foreground/85 active:scale-[0.96]"
             onclick={save}
           >Save</button>
         </div>

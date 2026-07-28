@@ -236,9 +236,9 @@
 
   {:else if phase === 'connected'}
     <!-- ── Connected ── -->
-    <div class="flex items-center gap-3 rounded-lg border border-green-700/30 bg-green-900/10 px-3 py-3">
-      <div class="flex size-7 shrink-0 items-center justify-center rounded-full bg-green-900/30">
-        <Check class="size-4 text-green-400" />
+    <div class="flex items-center gap-3 rounded-lg border border-success/30 bg-success/10 px-3 py-3">
+      <div class="flex size-7 shrink-0 items-center justify-center rounded-full bg-success/30">
+        <Check class="size-4 text-success" />
       </div>
       <div class="min-w-0 flex-1">
         <p class="text-ui-sm font-medium text-foreground">Connected to GitHub Copilot</p>

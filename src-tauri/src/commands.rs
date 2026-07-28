@@ -119,45 +119,39 @@ pub fn toggle_devtools(window: tauri::WebviewWindow) {
     let _ = window;
 }
 
-/// Open the window "maximized" to the usable work area.
-///
-/// On Windows & macOS the native `maximize()` already respects the work area
-/// (taskbar / dock / menu bar) AND registers a real maximized *state* that the OS
-/// preserves across minimize → restore. Using it there means the window keeps its
-/// size and position through a minimize/maximize cycle instead of drifting.
-///
-/// Only Linux WMs mis-handle maximize for frameless (`decorations = false`)
-/// windows — an undecorated maximize can spill under the panel — so there we size
-/// and position to the monitor's `work_area()` explicitly instead.
+/// Resolve the current (else primary, else first) monitor for `window`.
+fn window_monitor(window: &tauri::WebviewWindow) -> Option<tauri::Monitor> {
+    window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten())
+        .or_else(|| window.available_monitors().ok().and_then(|m| m.into_iter().next()))
+}
+
+/// Pre-size the hidden window to the monitor's usable work area (excludes
+/// taskbar / dock / panel / menu bar) so it opens full-size without a flash and
+/// without a frameless window spilling under the panel. This only sets the
+/// *geometry*; the real native *maximized state* is applied after `show()` in
+/// `App.svelte` (`win.maximize()`), which is what the OS preserves across a
+/// minimize → restore. Maximizing while still hidden does not register that
+/// state on Windows, which is the bug this ordering fixes.
 #[tauri::command]
 pub fn fit_to_work_area(window: tauri::WebviewWindow) {
-    #[cfg(not(target_os = "linux"))]
-    {
+    let Some(m) = window_monitor(&window) else {
         let _ = window.maximize();
-    }
-    #[cfg(target_os = "linux")]
-    {
-        let monitor = window
-            .current_monitor()
-            .ok()
-            .flatten()
-            .or_else(|| window.primary_monitor().ok().flatten())
-            .or_else(|| window.available_monitors().ok().and_then(|m| m.into_iter().next()));
-        let Some(m) = monitor else {
-            let _ = window.maximize();
-            return;
-        };
-        let wa = m.work_area();
-        let _ = window.unmaximize();
-        let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
-            x: wa.position.x,
-            y: wa.position.y,
-        }));
-        let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
-            width: wa.size.width,
-            height: wa.size.height,
-        }));
-    }
+        return;
+    };
+    let wa = m.work_area();
+    let _ = window.unmaximize();
+    let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+        x: wa.position.x,
+        y: wa.position.y,
+    }));
+    let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+        width: wa.size.width,
+        height: wa.size.height,
+    }));
 }
 
 /// Re-center the window at a sane size on the current (or primary) monitor.
@@ -165,13 +159,7 @@ pub fn fit_to_work_area(window: tauri::WebviewWindow) {
 /// an external monitor it was placed on gets disconnected.
 #[tauri::command]
 pub fn reset_window(window: tauri::WebviewWindow) {
-    let monitor = window
-        .current_monitor()
-        .ok()
-        .flatten()
-        .or_else(|| window.primary_monitor().ok().flatten())
-        .or_else(|| window.available_monitors().ok().and_then(|m| m.into_iter().next()));
-    let Some(m) = monitor else {
+    let Some(m) = window_monitor(&window) else {
         let _ = window.center();
         let _ = window.set_focus();
         return;

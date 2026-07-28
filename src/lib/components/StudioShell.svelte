@@ -5033,10 +5033,10 @@ let rowSearch = $state('')
 
 <Dialog.Root bind:open={showProGate} closeOnEscape={true} closeOnOutsideClick={true}>
   <Dialog.Portal>
-    <Dialog.Overlay class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" />
-    <Dialog.Content class="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border/60 bg-popover p-6 shadow-2xl outline-none">
-      <div class="mb-5 flex size-10 items-center justify-center rounded-lg border border-amber-500/20 bg-amber-500/10">
-        <Lock class="size-5 text-amber-500/80" />
+    <Dialog.Overlay class="fixed inset-0 z-50 bg-black/65" />
+    <Dialog.Content class="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border/60 bg-background p-5 elevate-3-rim outline-none">
+      <div class="mb-5 flex size-10 items-center justify-center rounded-lg border border-warning/20 bg-warning/10">
+        <Lock class="size-5 text-warning/80" />
       </div>
       <h2 class="mb-1.5 text-ui-sm font-semibold text-foreground">Stroke Pro required</h2>
       <p class="mb-5 text-ui-xs leading-relaxed text-muted-foreground">This feature is not available on the free plan. Upgrade to Stroke Pro to unlock AI, dashboards, ORM runner, schema explorer, and more.</p>
@@ -5335,7 +5335,7 @@ let rowSearch = $state('')
         <div class="relative flex flex-col items-center gap-4 pt-1">
           <Button
             type="button"
-            class="h-11 rounded-xl px-6 text-ui-sm font-semibold shadow-sm"
+            class="h-9 rounded-lg px-5 text-ui-sm font-semibold"
             onclick={() => (showConnectionModal = true)}
           >
             <Plus class="size-4" />
@@ -6063,6 +6063,11 @@ let rowSearch = $state('')
                   void handleRowFiltersChange([...rowFilters, newFilter])
                   filterBarOpen = true
                 }}
+                onquickfilter={(colName, op, value) => {
+                  const newFilter = { id: crypto.randomUUID(), column: colName, op: /** @type {any} */ (op), value: value ?? '', conjunct: /** @type {any} */ ('and') }
+                  void handleRowFiltersChange([...rowFilters, newFilter])
+                  filterBarOpen = true
+                }}
                 onsave={handleSaveCell}
                 ondelete={handleDeleteRow}
                 onfollowforeignkey={(d) => void handleFollowForeignKey(d)}
@@ -6136,7 +6141,7 @@ let rowSearch = $state('')
         {@const isMac = navigator.platform.toUpperCase().includes('MAC')}
         {@const mod = isMac ? '⌘' : 'Ctrl'}
         {@const cell = 'group relative flex flex-col gap-3 rounded-lg border border-border/50 bg-card/60 p-3 text-left transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-[var(--ease-out)] hover:border-border hover:bg-accent/40 hover:shadow-sm active:scale-[0.98]'}
-        {@const proCell = 'group relative flex flex-col gap-3 rounded-lg border border-border/40 bg-card/40 p-3 text-left cursor-not-allowed transition-[color,background-color,border-color] duration-150 hover:border-amber-500/30 hover:bg-amber-500/[0.03]'}
+        {@const proCell = 'group relative flex flex-col gap-3 rounded-lg border border-border/40 bg-card/40 p-3 text-left cursor-not-allowed transition-[color,background-color,border-color] duration-150 hover:border-warning/30 hover:bg-warning/[0.03]'}
         {@const iconCls = 'size-4 text-muted-foreground transition-colors group-hover:text-foreground'}
         {@const proIconCls = 'size-4 text-muted-foreground/40'}
         {@const labelCls = 'text-ui-2xs font-medium leading-none text-foreground/70 transition-colors group-hover:text-foreground'}
@@ -6150,13 +6155,13 @@ let rowSearch = $state('')
 
           <!-- Header -->
           <div class="flex flex-col items-center gap-3">
-            <div class="flex size-11 items-center justify-center rounded-xl border border-border bg-muted">
+            <div class="flex size-11 items-center justify-center rounded-lg border border-border bg-muted">
               <Logo class="size-6" />
             </div>
             <p class="text-ui-3xs font-medium uppercase tracking-[0.25em] text-muted-foreground/60">Quick access</p>
             {#if connection}
               <div class="flex items-center gap-2 text-ui-sm font-medium text-foreground/80">
-                <span class="size-1.5 rounded-full bg-emerald-500 shrink-0"></span>
+                <span class="size-1.5 rounded-full bg-success shrink-0"></span>
                 <span class="font-mono">{connection.database ?? connection.filePath?.split('/').at(-1) ?? connection.name ?? connection.databaseId ?? 'connected'}</span>
                 <span class="text-muted-foreground/50 text-ui-xs">·</span>
                 <span class="capitalize text-muted-foreground/70 text-ui-xs font-normal">{dbType}</span>
@@ -6477,7 +6482,7 @@ let rowSearch = $state('')
 <!-- Floating tab drag preview (follows the cursor during a split-pane drag) -->
 {#if dragGhost}
   <div
-    class="pointer-events-none fixed z-[200] -translate-x-1/2 -translate-y-1/2 rounded-md border border-border/60 bg-panel px-3 py-1.5 text-ui-xs font-medium text-foreground opacity-90 shadow-lg"
+    class="pointer-events-none fixed z-[200] -translate-x-1/2 -translate-y-1/2 rounded-md border border-border/60 bg-panel px-3 py-1.5 text-ui-xs font-medium text-foreground opacity-90 elevate-2-rim"
     style="left:{dragGhost.x}px; top:{dragGhost.y}px"
   >
     {dragGhost.title}
@@ -6487,14 +6492,14 @@ let rowSearch = $state('')
 <!-- In-app confirm (window.confirm is blocked in the Tauri webview) -->
 {#if confirmDialog}
   <div
-    class="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4"
+    class="fixed inset-0 z-[100] flex items-center justify-center bg-black/65 p-4"
     role="dialog"
     aria-modal="true"
     onclick={(e) => { if (e.target === e.currentTarget) resolveConfirm(false) }}
     onkeydown={(e) => { if (e.key === 'Escape') resolveConfirm(false); if (e.key === 'Enter') resolveConfirm(true) }}
     tabindex="-1"
   >
-    <div class="w-full max-w-sm rounded-xl border border-border/60 bg-background p-5 shadow-lg">
+    <div class="w-full max-w-sm rounded-2xl border border-border/60 bg-background p-5 elevate-3-rim">
       <p class="text-ui-sm text-foreground">{confirmDialog.message}</p>
       <div class="mt-4 flex justify-end gap-2">
         <button

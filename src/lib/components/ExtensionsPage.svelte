@@ -162,7 +162,7 @@
   const selTrigger =
     "h-7 w-[12rem] justify-between gap-2 border-border/70 bg-background px-2.5 text-ui-xs font-normal shadow-none";
   const ruleInput =
-    "h-7 min-w-0 rounded-lg border-2 border-border bg-background px-2.5 font-mono text-ui-xs text-foreground outline-none focus:border-primary/60";
+    "h-7 min-w-0 rounded-lg border border-border bg-background px-2.5 font-mono text-ui-xs text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring";
 </script>
 
 <!-- Compact Linear/Resend-style toggle -->
@@ -182,7 +182,7 @@
       "shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07),inset_0_1px_2px_rgba(0,0,0,0.2)]",
       // Emerald = the app's "extension enabled" signal (matches the card icon
       // tint); bg-primary is near-white on Studio themes and swallowed the knob.
-      on ? "bg-emerald-600 dark:bg-emerald-500" : "bg-muted-foreground/25 hover:bg-muted-foreground/35",
+      on ? "bg-success" : "bg-muted-foreground/25 hover:bg-muted-foreground/35",
     )}
   >
     <span
@@ -227,7 +227,7 @@
           class="ml-auto flex shrink-0 items-center gap-1.5 rounded-full bg-muted/60 px-2 py-0.5 text-ui-3xs font-medium tabular-nums text-muted-foreground"
           title="{enabledCount} of {EXTENSIONS.length} extensions enabled"
         >
-          {#if enabledCount > 0}<span class="size-1.5 rounded-full bg-emerald-500"></span>{/if}
+          {#if enabledCount > 0}<span class="size-1.5 rounded-full bg-success"></span>{/if}
           {enabledCount} on
         </span>
       </div>
@@ -249,7 +249,7 @@
                 class="group relative flex h-full w-full flex-col gap-2.5 rounded-lg border border-border/60 bg-card p-3 text-left transition-[border-color,background-color] hover:border-border hover:bg-accent/40"
               >
                 {#if Icon}
-                  <Icon class={cn("size-4 shrink-0 transition-colors", on ? "text-emerald-500" : "text-muted-foreground group-hover:text-foreground")} />
+                  <Icon class={cn("size-4 shrink-0 transition-colors", on ? "text-success" : "text-muted-foreground group-hover:text-foreground")} />
                 {/if}
                 <span class="flex min-w-0 flex-col">
                   <span class="truncate text-ui-xs font-medium leading-tight text-foreground/85 transition-colors group-hover:text-foreground">{ext.name}</span>
@@ -281,12 +281,12 @@
         </button>
         <!-- Header card, the icon tile carries the on/off state (emerald when
              enabled), so the card and toggle stay quiet. One signal, not four. -->
-        <div class="rounded-xl border border-border/60 bg-card/40 p-4">
+        <div class="rounded-lg border border-border/60 bg-card/40 p-4">
           <div class="flex items-start gap-3.5">
             <span
               class={cn(
                 "grid size-10 shrink-0 place-items-center rounded-lg border transition-colors",
-                on ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500" : "border-border/60 bg-muted/40 text-muted-foreground",
+                on ? "border-success/30 bg-success/10 text-success" : "border-border/60 bg-muted/40 text-muted-foreground",
               )}
             >
               {#if Icon}<Icon class="size-5" />{/if}

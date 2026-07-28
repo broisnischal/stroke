@@ -136,7 +136,7 @@
 <Dialog.Root bind:open>
   <Dialog.Content
     showCloseButton={false}
-    class="w-[min(640px,calc(100vw-2rem))] gap-0 overflow-hidden rounded-xl p-0 sm:max-w-none"
+    class="w-[min(640px,calc(100vw-2rem))] gap-0 overflow-hidden rounded-2xl p-0 sm:max-w-none"
   >
     <!-- Header -->
     <div class="flex h-12 items-center gap-2.5 border-b border-border/60 pl-4 pr-2.5">
@@ -177,7 +177,7 @@
               class={cn('inline-flex w-full min-w-0 items-center border', selectTriggerCls, colMenuOpen && 'border-border')}
             >
               <span class="min-w-0 flex-1 truncate text-left font-mono">{editableCols.find((c) => c.idx === colIdx)?.name ?? 'Column…'}</span>
-              <Icon name="chevron-down" class="size-3 shrink-0 text-muted-foreground/50" />
+              <Icon name="chevron-down" class="size-3.5 shrink-0 text-muted-foreground/50" />
             </button>
           {/snippet}
           {#snippet item(it)}
@@ -240,7 +240,7 @@
         </div>
       {:else}
         <div class="flex shrink-0 items-center gap-1.5 border-b border-border/40 px-4 py-1.5">
-          <span class="size-1.5 rounded-full bg-emerald-500"></span>
+          <span class="size-1.5 rounded-full bg-success"></span>
           <span class="text-ui-2xs tabular-nums text-muted-foreground">
             {matches.length.toLocaleString('en-US')} cell{matches.length === 1 ? '' : 's'} will change
           </span>
@@ -250,8 +250,8 @@
             <div class="grid grid-cols-[2.5rem_minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 px-4 py-1">
               <span class="select-none font-mono text-ui-3xs tabular-nums text-muted-foreground/35">{m.rowIdx + 1}</span>
               <span class="truncate font-mono text-ui-xs text-muted-foreground/70 line-through decoration-destructive/40" title={m.old}>{clip(m.old)}</span>
-              <Icon name="arrow-right" class="size-3 shrink-0 text-muted-foreground/35" />
-              <span class="truncate font-mono text-ui-xs text-emerald-600 dark:text-emerald-400" title={m.value}>{clip(m.value)}</span>
+              <Icon name="arrow-right" class="size-3.5 shrink-0 text-muted-foreground/35" />
+              <span class="truncate font-mono text-ui-xs text-success" title={m.value}>{clip(m.value)}</span>
             </div>
           {/each}
           {#if matches.length > PREVIEW_CAP}
@@ -278,10 +278,10 @@
         onclick={handleApply}
       >
         {#if applying}
-          <Icon name="loader-2" class="size-3 animate-spin" />
+          <Icon name="loader-2" class="size-3.5 shrink-0 animate-spin" />
           Applying…
         {:else}
-          <Icon name="check" class="size-3" />
+          <Icon name="check" class="size-3.5 shrink-0" />
           Replace {matches.length.toLocaleString('en-US')} value{matches.length === 1 ? '' : 's'}
         {/if}
       </button>

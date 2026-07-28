@@ -2786,7 +2786,7 @@
               <!-- Suggestions -->
               {#if suggestions.length > 0}
                 <div
-                  class="w-full overflow-hidden rounded-xl border border-border/40"
+                  class="w-full overflow-hidden rounded-lg border border-border/40"
                 >
                   <div class="grid grid-cols-2 gap-px bg-border/30">
                     {#each suggestions.slice(0, 8) as s, i (s.label)}
@@ -2861,7 +2861,7 @@
               {#if item.kind === "user"}
                 <div class="flex justify-end px-1">
                   <div
-                    class="max-w-[78%] rounded-2xl rounded-tr-sm bg-primary px-4 py-2.5 text-ui leading-relaxed text-primary-foreground shadow-sm"
+                    class="max-w-[78%] rounded-xl rounded-tr-md bg-primary px-4 py-2.5 text-ui leading-relaxed text-primary-foreground"
                   >
                     {item.text}
                   </div>
@@ -2953,7 +2953,7 @@
                         <AiMarkdown content={part.content} />
                       {:else if part.type === "mermaid"}
                         <div
-                          class="mermaid-output overflow-hidden rounded-xl border border-border/60"
+                          class="mermaid-output overflow-hidden rounded-lg border border-border/60"
                         >
                           <div
                             class="flex items-center justify-between gap-2 border-b border-border/40 bg-muted/20 px-3 py-1.5"
@@ -3031,7 +3031,7 @@
                         {@const sqlKey = `${item.id}-${pi}`}
                         {@const sqlOpen = !collapsed.has(sqlKey)}
                         <div
-                          class="overflow-hidden rounded-xl border border-border/50 bg-card/30"
+                          class="overflow-hidden rounded-lg border border-border/50 bg-card/30"
                         >
                           <!-- SQL block header -->
                           <div
@@ -3095,14 +3095,14 @@
                         </div>
                       {:else if part.type === "error"}
                         <div
-                          class="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/6 px-3 py-2.5 text-ui-xs text-destructive"
+                          class="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/6 px-3 py-2.5 text-ui-xs text-destructive"
                         >
                           <AlertTriangle class="mt-0.5 size-3.5 shrink-0" />
                           <span>{part.content}</span>
                         </div>
                       {:else if part.type === "confirm_prompt"}
                         <div
-                          class="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/6 px-3 py-2.5 text-ui-xs text-amber-600 dark:text-amber-400"
+                          class="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/6 px-3 py-2.5 text-ui-xs text-warning"
                         >
                           <AlertTriangle class="mt-0.5 size-3.5 shrink-0" />
                           <span>{part.content}</span>
@@ -3111,7 +3111,7 @@
                         {@const codeKey = `${item.id}-${pi}`}
                         {@const codeOpen = !collapsed.has(codeKey)}
                         <div
-                          class="overflow-hidden rounded-xl border border-border/60"
+                          class="overflow-hidden rounded-lg border border-border/60"
                         >
                           <div
                             class="flex items-center justify-between gap-2 border-b border-border/40 bg-muted/20 px-3 py-1.5"
@@ -3154,7 +3154,7 @@
               {:else if item.kind === "result"}
                 {@const resOpen = openResultId === item.id}
                 <div
-                  class="ml-8 overflow-hidden rounded-xl border text-ui-xs {item.error
+                  class="ml-8 overflow-hidden rounded-lg border text-ui-xs {item.error
                     ? 'border-destructive/30'
                     : item.isSchema
                       ? 'border-primary/20'
@@ -3272,7 +3272,7 @@
                 <!-- ── Confirm dialog ──────────────────────── -->
               {:else if item.kind === "confirm"}
                 <div
-                  class="ml-8 overflow-hidden rounded-xl border border-destructive/30 bg-destructive/4"
+                  class="ml-8 overflow-hidden rounded-lg border border-destructive/30 bg-destructive/4"
                 >
                   <div
                     class="flex items-center gap-2 border-b border-destructive/20 bg-destructive/8 px-3 py-2"
@@ -3481,7 +3481,7 @@
                 <!-- ── Diagram (render_diagram tool result) ── -->
               {:else if item.kind === "diagram"}
                 <div
-                  class="group/diag ml-8 mermaid-output overflow-hidden rounded-xl border border-border/60"
+                  class="group/diag ml-8 mermaid-output overflow-hidden rounded-lg border border-border/60"
                 >
                   <div
                     class="flex items-center justify-between gap-2 border-b border-border/40 bg-muted/20 px-3 py-1.5"
@@ -3532,7 +3532,7 @@
                       <button
                         type="button"
                         class={savedDiagramIds.has(item.id)
-                          ? "inline-flex size-5 items-center justify-center rounded text-emerald-500/70"
+                          ? "inline-flex size-5 items-center justify-center rounded text-success/70"
                           : "inline-flex h-5 items-center gap-1 rounded px-1.5 text-ui-3xs text-muted-foreground hover:bg-accent hover:text-foreground"}
                         title={savedDiagramIds.has(item.id) ? "Saved to Diagrams library" : "Save to Diagrams library"}
                         disabled={savedDiagramIds.has(item.id)}
@@ -3609,7 +3609,7 @@
         <button
           type="button"
           onclick={jumpToBottom}
-          class="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5 text-ui-xs font-medium text-foreground shadow-lg transition-all hover:bg-accent"
+          class="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5 text-ui-xs font-medium text-foreground elevate-2-rim transition-all hover:bg-accent"
         >
           <ChevronDown class="size-3.5" />Jump to bottom
         </button>
@@ -3624,7 +3624,7 @@
     >
       <div class={mode === "full" ? "mx-auto w-full max-w-3xl" : ""}>
         <div
-          class="overflow-hidden rounded-xl border border-border/60 bg-muted/[0.08] shadow-sm ring-1 ring-transparent transition-all duration-150 focus-within:border-border focus-within:ring-border/20 {hasPendingConfirm
+          class="overflow-hidden rounded-lg border border-border/60 bg-muted/[0.08] ring-1 ring-transparent transition-all duration-150 focus-within:border-border focus-within:ring-border/20 {hasPendingConfirm
             ? 'opacity-50'
             : ''}"
         >
@@ -3670,7 +3670,7 @@
                   <span
                     class={contextStats.pct >= 90
                       ? "text-destructive/60"
-                      : "text-amber-500/60"}>· {contextStats.pct}%</span
+                      : "text-warning/60"}>· {contextStats.pct}%</span
                   >
                 {/if}
               </button>
@@ -3691,7 +3691,7 @@
             {#if loading}
               <button
                 type="button"
-                class="flex size-7 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-foreground/60 shadow-sm transition-colors hover:border-ring/50 hover:text-foreground active:scale-95"
+                class="flex size-7 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-foreground/60 transition-colors hover:border-ring/50 hover:text-foreground active:scale-95"
                 onclick={stop}
                 aria-label="Stop"
                 title="Stop (Esc)"
@@ -3704,7 +3704,7 @@
                 class={cn(
                   "flex size-7 shrink-0 items-center justify-center rounded-lg transition-all active:scale-95",
                   inputText.trim() && !hasPendingConfirm
-                    ? "bg-foreground text-background shadow-sm hover:opacity-85"
+                    ? "bg-foreground text-background hover:opacity-85"
                     : "bg-muted/40 text-muted-foreground/25 cursor-not-allowed",
                 )}
                 disabled={hasPendingConfirm || !inputText.trim()}
@@ -3787,13 +3787,13 @@
             <!-- Not configured warning -->
             {#if !settings.apiKey && !settings.baseUrl.includes("localhost")}
               <div
-                class="flex items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/6 px-3 py-2.5"
+                class="flex items-start gap-2 rounded-lg border border-warning/25 bg-warning/6 px-3 py-2.5"
               >
                 <AlertTriangle
-                  class="mt-0.5 size-3.5 shrink-0 text-amber-500"
+                  class="mt-0.5 size-3.5 shrink-0 text-warning"
                 />
                 <p
-                  class="text-ui-xs leading-relaxed text-amber-600 dark:text-amber-400"
+                  class="text-ui-xs leading-relaxed text-warning"
                 >
                   No API key configured.
                 </p>
@@ -3806,7 +3806,7 @@
                 $aiProfiles.find((p) => p.id === $activeProfileId) ??
                 $aiProfiles[0]}
               <div
-                class="flex flex-col divide-y divide-border/30 rounded-xl border border-border/50 bg-background/60 overflow-hidden"
+                class="flex flex-col divide-y divide-border/30 rounded-lg border border-border/50 bg-background/60 overflow-hidden"
               >
                 {#each [{ label: "Profile", value: activeProfile?.name ?? "—", mono: false }, { label: "Model", value: settings.model || "—", mono: true }, { label: "Endpoint", value: settings.baseUrl, mono: true, truncate: true }, { label: "API key", value: settings.apiKey ? "•••• set" : "not set", mono: true }] as row}
                   <div
@@ -3828,7 +3828,7 @@
 
             <button
               type="button"
-              class="flex h-8 w-full items-center justify-center gap-1.5 rounded-xl border border-border/60 bg-background/60 text-ui-xs text-foreground transition-colors hover:bg-accent"
+              class="flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-border/60 bg-background/60 text-ui-xs text-foreground transition-colors hover:bg-accent"
               onclick={onopenmodelsettings}
             >
               <Settings2 class="size-3.5 text-muted-foreground" />
@@ -4037,7 +4037,7 @@
             <!-- New skill form -->
             {#if newSkillOpen}
               <div
-                class="flex flex-col gap-2 rounded-xl border border-border/50 bg-background/60 p-3"
+                class="flex flex-col gap-2 rounded-lg border border-border/50 bg-background/60 p-3"
               >
                 <p class="text-ui-xs font-medium">New skill</p>
                 <div class="flex flex-col gap-1">
@@ -4115,7 +4115,7 @@
             <!-- Custom skills -->
             {#if skills.length === 0}
               <div
-                class="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border/40 py-7 text-center"
+                class="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border/40 py-7 text-center"
               >
                 <BookOpen class="size-5 text-muted-foreground/25" />
                 <p class="text-ui-2xs text-muted-foreground/50">
@@ -4131,7 +4131,7 @@
                 </p>
                 {#each skills as skill (skill.id)}
                   <div
-                    class="flex items-start gap-2 rounded-xl border border-border/40 bg-background/50 px-3 py-2.5"
+                    class="flex items-start gap-2 rounded-lg border border-border/40 bg-background/50 px-3 py-2.5"
                   >
                     <BookOpen
                       class="mt-0.5 size-3.5 shrink-0 text-primary/50"
@@ -4185,7 +4185,7 @@
                     contextStats.pct >= 90
                       ? "bg-destructive"
                       : contextStats.pct >= 70
-                        ? "bg-amber-500"
+                        ? "bg-warning"
                         : "bg-primary",
                   )}
                   style="width: {Math.min(contextStats.pct, 100)}%"
@@ -4200,7 +4200,7 @@
             <div class="grid grid-cols-2 gap-2">
               {#each [{ label: "Turns", value: String(contextStats.messages) }, { label: "History", value: tokEst(contextStats.historyChars) }, { label: "System", value: tokEst(contextStats.promptChars) }, { label: "Total", value: tokEst(contextStats.totalChars) }] as stat}
                 <div
-                  class="flex flex-col gap-0.5 rounded-xl border border-border/40 bg-background/60 px-3 py-2.5"
+                  class="flex flex-col gap-0.5 rounded-lg border border-border/40 bg-background/60 px-3 py-2.5"
                 >
                   <span
                     class="font-mono text-ui font-semibold tabular-nums text-foreground"
@@ -4215,9 +4215,9 @@
 
             <!-- Info pills -->
             <div
-              class="flex flex-col gap-1.5 rounded-xl border border-border/30 bg-muted/15 p-3"
+              class="flex flex-col gap-1.5 rounded-lg border border-border/30 bg-muted/15 p-3"
             >
-              {#each [{ color: "bg-primary/50", text: "Full history re-sent each turn for context." }, { color: "bg-primary/50", text: "Compresses at 30k, keeps last 10 turns." }, { color: "bg-primary/50", text: "Only schema for mentioned tables is injected." }, { color: "bg-amber-500/60", text: "Failed tool calls blocked after 2 retries." }] as item}
+              {#each [{ color: "bg-primary/50", text: "Full history re-sent each turn for context." }, { color: "bg-primary/50", text: "Compresses at 30k, keeps last 10 turns." }, { color: "bg-primary/50", text: "Only schema for mentioned tables is injected." }, { color: "bg-warning/60", text: "Failed tool calls blocked after 2 retries." }] as item}
                 <div
                   class="flex items-start gap-2 text-ui-3xs text-muted-foreground/70"
                 >
@@ -4232,7 +4232,7 @@
             <!-- Clear button -->
             <button
               type="button"
-              class="flex h-8 w-full items-center justify-center gap-1.5 rounded-xl border border-destructive/25 text-ui-xs text-destructive/80 transition-colors hover:bg-destructive/6 hover:border-destructive/40 hover:text-destructive"
+              class="flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-destructive/25 text-ui-xs text-destructive/80 transition-colors hover:bg-destructive/6 hover:border-destructive/40 hover:text-destructive"
               onclick={() => {
                 apiHistory = [];
                 rawApiHistory = [];
@@ -4260,12 +4260,12 @@
       oncontextmenu={closeContextMenu}
     ></div>
     <div
-      class="fixed z-[201] min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover py-1 shadow-lg"
+      class="fixed z-[201] min-w-[10rem] overflow-hidden rounded-[10px] border border-border/60 bg-popover p-1 elevate-2-rim"
       style="left:{menu.x}px;top:{menu.y}px"
     >
       <button
         type="button"
-        class="flex w-full items-center gap-2 px-3 py-1.5 text-ui-xs hover:bg-accent"
+        class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-ui-sm hover:bg-accent hover:text-foreground"
         onclick={() => {
           void selectConversation(menu.id);
           closeContextMenu();
@@ -4276,7 +4276,7 @@
       <div class="my-1 h-px bg-border"></div>
       <button
         type="button"
-        class="flex w-full items-center gap-2 px-3 py-1.5 text-ui-xs text-destructive hover:bg-destructive/10"
+        class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-ui-sm text-destructive hover:bg-destructive/10"
         onclick={() => void removeConversation(menu.id)}
       >
         <Trash2 class="size-3" /> Delete
@@ -4288,7 +4288,7 @@
 <!-- ── Image viewer ──────────────────────────────────────────────────────── -->
 {#if imageViewerSrc}
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center bg-background/90"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/65"
     onclick={() => (imageViewerSrc = null)}
     onkeydown={(e) => e.key === "Escape" && (imageViewerSrc = null)}
     role="dialog"
@@ -4304,7 +4304,7 @@
       <img
         src={imageViewerSrc}
         alt="Preview"
-        class="max-h-[80vh] max-w-[90vw] rounded-xl border border-border/40 object-contain shadow-2xl"
+        class="max-h-[80vh] max-w-[90vw] rounded-xl border border-border/40 object-contain elevate-3-rim"
       />
       <div class="flex items-center gap-2">
         <a

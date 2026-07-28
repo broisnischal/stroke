@@ -239,14 +239,14 @@
       {#if dashDropdownOpen}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
-          class="absolute left-0 top-full z-50 mt-1 min-w-[180px] overflow-hidden rounded-lg border border-border bg-popover shadow-lg"
+          class="absolute left-0 top-full z-50 mt-1 min-w-[180px] overflow-hidden rounded-[10px] border border-border/60 bg-popover p-1 elevate-2-rim"
           onmouseleave={() => (dashDropdownOpen = false)}
         >
           {#each $dashboards as d (d.id)}
             <button
               type="button"
               class={cn(
-                "flex w-full items-center gap-2 px-3 py-1.5 text-left text-ui-xs transition-colors hover:bg-accent",
+                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-ui-sm transition-colors hover:bg-accent",
                 d.id === $activeDashboardId
                   ? "font-medium text-foreground"
                   : "text-muted-foreground",
@@ -276,7 +276,7 @@
                   type="text"
                   bind:value={nameInput}
                   placeholder="Dashboard name…"
-                  class="h-5 flex-1 rounded-lg border-2 border-border bg-background px-1.5 font-mono text-ui-2xs outline-none focus:border-ring focus:ring-1 focus:ring-ring"
+                  class="h-7 flex-1 rounded-md border border-border bg-background px-2 font-mono text-ui-xs outline-none focus:border-ring focus:ring-1 focus:ring-ring"
                   onkeydown={(e) => {
                     if (e.key === "Enter") handleCreateDashboard();
                     if (e.key === "Escape") namingOpen = false;
@@ -289,7 +289,7 @@
             {:else}
               <button
                 type="button"
-                class="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-ui-xs text-muted-foreground/60 transition-colors hover:text-foreground"
+                class="flex w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-ui-xs text-muted-foreground/60 transition-colors hover:text-foreground"
                 onclick={() => { namingOpen = true; nameInput = ""; }}
               >
                 <Plus class="size-3" />
@@ -305,20 +305,20 @@
       <!-- Rename -->
       <button
         type="button"
-        class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-foreground"
+        class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-foreground"
         title="Rename dashboard"
         onclick={startEditName}
       >
-        <Pencil class="size-3" />
+        <Pencil class="size-3.5" />
       </button>
 
       <!-- Column count cycle -->
-      <div class="flex items-center gap-px rounded border border-border/50">
+      <div class="flex items-center gap-px rounded-md border border-border/50">
         {#each COL_OPTIONS as cols (cols)}
           <button
             type="button"
             class={cn(
-              "flex h-6 w-7 items-center justify-center text-ui-2xs transition-colors first:rounded-l last:rounded-r",
+              "flex h-7 w-7 items-center justify-center text-ui-2xs transition-colors first:rounded-l-md last:rounded-r-md",
               activeDash.columns === cols
                 ? "bg-primary/15 text-primary font-medium"
                 : "text-muted-foreground/50 hover:bg-muted/60 hover:text-foreground",
@@ -333,7 +333,7 @@
       <button
         type="button"
         class={cn(
-          "inline-flex size-6 items-center justify-center rounded transition-colors",
+          "inline-flex size-7 items-center justify-center rounded-md transition-colors",
           confirmDeleteDash
             ? "bg-destructive/15 text-destructive hover:bg-destructive/25"
             : "text-muted-foreground/30 hover:bg-muted/60 hover:text-destructive",
@@ -341,7 +341,7 @@
         title={confirmDeleteDash ? "Click again to confirm delete" : "Delete dashboard"}
         onclick={handleDeleteDashboard}
       >
-        <Trash2 class="size-3" />
+        <Trash2 class="size-3.5" />
       </button>
     {/if}
 
@@ -363,7 +363,7 @@
   <div class="min-h-0 flex-1 overflow-y-auto p-4">
     {#if !activeDash}
       <div class="flex h-full min-h-[300px] flex-col items-center justify-center gap-4">
-        <div class="flex size-16 items-center justify-center rounded-2xl bg-muted/30">
+        <div class="flex size-16 items-center justify-center rounded-lg bg-muted/30">
           <LayoutGrid class="size-8 text-muted-foreground/20" />
         </div>
         <div class="text-center">
@@ -384,7 +384,7 @@
 
     {:else if activeDash.items.length === 0}
       <div class="flex h-full min-h-[300px] flex-col items-center justify-center gap-4">
-        <div class="flex size-16 items-center justify-center rounded-2xl border-2 border-dashed border-border/40">
+        <div class="flex size-16 items-center justify-center rounded-lg border-2 border-dashed border-border/40">
           <BarChart2 class="size-8 text-muted-foreground/20" />
         </div>
         <p class="text-ui-sm text-muted-foreground/50">Add charts to build your dashboard</p>
@@ -410,14 +410,14 @@
           >
             <div
               data-swapy-item={item.id}
-              class="group flex h-[260px] flex-col overflow-hidden rounded-lg border border-border/60 bg-card shadow-sm transition-shadow hover:shadow-md"
+              class="group flex h-[260px] flex-col overflow-hidden rounded-lg border border-border/60 bg-card transition-colors hover:border-border"
             >
               <!-- Card header -->
               <div class="flex h-9 shrink-0 items-center gap-1 border-b border-border/40 bg-card px-2">
                 <!-- Drag handle -->
                 <div
                   data-swapy-handle
-                  class="flex size-6 cursor-grab items-center justify-center rounded text-muted-foreground/30 transition-colors hover:text-muted-foreground active:cursor-grabbing"
+                  class="flex size-6 cursor-grab items-center justify-center rounded-md text-muted-foreground/30 transition-colors hover:text-muted-foreground active:cursor-grabbing"
                   title="Drag to reorder"
                 >
                   <Grip class="size-3.5" />
@@ -435,7 +435,7 @@
                       type="button"
                       onclick={() => setItemSpan(activeDash.id, item.id, /** @type {1|2|3} */ (s))}
                       class={cn(
-                        "flex size-5 items-center justify-center rounded text-ui-2xs font-mono transition-colors",
+                        "flex size-5 items-center justify-center rounded-md text-ui-2xs font-mono transition-colors",
                         span === s
                           ? "bg-primary/15 text-primary"
                           : "text-muted-foreground/40 hover:bg-muted/60 hover:text-foreground",
@@ -449,7 +449,7 @@
                 <button
                   type="button"
                   onclick={() => removeChartFromDashboard(activeDash.id, item.id)}
-                  class="ml-1 flex size-5 items-center justify-center rounded text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/40 hover:!text-destructive"
+                  class="ml-1 flex size-5 items-center justify-center rounded-md text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/40 hover:!text-destructive"
                   title="Remove from dashboard"
                 >
                   <X class="size-3" />
@@ -484,11 +484,11 @@
 {#if pickerOpen}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center bg-background/80"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/65"
     onclick={(e) => { if (e.target === e.currentTarget) pickerOpen = false; }}
     onkeydown={(e) => { if (e.key === "Escape") pickerOpen = false; }}
   >
-    <div class="flex w-[480px] max-h-[70vh] flex-col overflow-hidden rounded-[10px] border border-border bg-popover shadow-xl">
+    <div class="flex w-[480px] max-h-[70vh] flex-col overflow-hidden rounded-2xl border border-border/60 bg-background elevate-3-rim">
       <div class="flex h-11 shrink-0 items-center justify-between border-b border-border px-4">
         <span class="text-ui-sm font-semibold">Add chart to dashboard</span>
         <button type="button" onclick={() => (pickerOpen = false)} class="text-muted-foreground/50 hover:text-foreground">

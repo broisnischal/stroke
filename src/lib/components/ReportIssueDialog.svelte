@@ -190,8 +190,8 @@
         class="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-ui-2xs text-muted-foreground/40 transition-colors hover:bg-muted/30 hover:text-foreground"
       >
         {#if copied}
-          <Check class="size-3 text-emerald-500" />
-          <span class="text-emerald-500">Copied</span>
+          <Check class="size-3 text-success" />
+          <span class="text-success">Copied</span>
         {:else}
           <Copy class="size-3" />
           Copy

@@ -100,7 +100,7 @@
     const isDanger = section === 'delete' && (a === 'CASCADE')
     const isWarn = section === 'delete' && (a === 'SET NULL' || a === 'SET DEFAULT')
     if (isDanger) return 'rounded-md px-2.5 py-1 font-mono text-ui-2xs font-medium bg-destructive/10 text-destructive ring-1 ring-destructive/25'
-    if (isWarn)   return 'rounded-md px-2.5 py-1 font-mono text-ui-2xs font-medium bg-amber-500/10 text-amber-400 ring-1 ring-amber-500/25'
+    if (isWarn)   return 'rounded-md px-2.5 py-1 font-mono text-ui-2xs font-medium bg-warning/10 text-warning ring-1 ring-warning/25'
     return 'rounded-md px-2.5 py-1 font-mono text-ui-2xs font-medium bg-accent text-foreground ring-1 ring-border/60'
   }
 </script>
@@ -148,7 +148,7 @@
           <ArrowRight class="size-3 shrink-0 text-muted-foreground/30" />
           {#if refTable && refColumn}
             <span class="min-w-0 shrink truncate font-mono text-ui-xs">
-              <span class="text-muted-foreground/40">{schema}.</span><span class="text-foreground/70">{refTable}</span>.<span class="font-semibold text-blue-400">{refColumn}</span>
+              <span class="text-muted-foreground/40">{schema}.</span><span class="text-foreground/70">{refTable}</span>.<span class="font-semibold text-info">{refColumn}</span>
             </span>
           {:else}
             <span class="shrink-0 font-mono text-ui-2xs text-muted-foreground/30 italic">select table and column below</span>

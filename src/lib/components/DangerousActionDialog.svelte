@@ -28,7 +28,7 @@
 
       <!-- Header -->
       <div class="flex items-start gap-3.5 px-5 pt-5 pb-4">
-        <div class="mt-px shrink-0 rounded-xl bg-destructive/10 p-2">
+        <div class="mt-px shrink-0 rounded-lg bg-destructive/10 p-2">
           <TriangleAlert class="size-3.5 text-destructive" />
         </div>
         <div class="min-w-0 flex-1">
@@ -76,7 +76,7 @@
       <!-- SQL preview -->
       <div class="px-5 py-4">
         <p class="mb-2 text-ui-3xs font-semibold uppercase tracking-[0.07em] text-muted-foreground/35">Will execute</p>
-        <div class="rounded-xl border border-border/20 bg-muted/[0.3] px-3.5 py-2.5">
+        <div class="rounded-lg border border-border/20 bg-muted/[0.3] px-3.5 py-2.5">
           <code class="break-all font-mono text-ui-xs">
             <span class="text-destructive">{isDropAction ? 'DROP TABLE' : 'TRUNCATE TABLE'}</span>
             <span class="text-foreground/70"> "{schema}"."{table}"</span>
@@ -91,12 +91,12 @@
       <div class="flex items-center justify-end gap-2 border-t border-border/25 px-5 py-3">
         <button
           type="button"
-          class="inline-flex h-8 items-center rounded-lg px-3.5 text-ui-sm text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
+          class="inline-flex h-8 items-center rounded-md px-3.5 text-ui-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           onclick={() => (open = false)}
         >Cancel</button>
         <button
           type="button"
-          class="inline-flex h-8 items-center rounded-lg bg-destructive px-4 text-ui-sm font-medium text-white transition-opacity hover:opacity-90"
+          class="inline-flex h-8 items-center rounded-md bg-destructive px-4 text-ui-sm font-medium text-destructive-foreground transition-opacity hover:opacity-90"
           onclick={() => { open = false; onconfirm(cascade) }}
         >{confirmLabel}</button>
       </div>

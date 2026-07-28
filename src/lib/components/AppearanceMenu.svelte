@@ -35,7 +35,7 @@
     <LayoutTemplate class="size-3.5" />
   </DropdownMenu.Trigger>
 
-  <DropdownMenu.Content class="z-[200] w-64" align="end" sideOffset={6}>
+  <DropdownMenu.Content class="z-[200] min-w-64" align="end" sideOffset={6}>
     <DropdownMenu.Label>Appearance</DropdownMenu.Label>
 
     <DropdownMenu.Item onclick={ontoggleSidebar}>

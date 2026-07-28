@@ -567,7 +567,7 @@
                   <div class="flex items-center gap-1.5 text-ui-2xs {turn.status === 'error' ? 'text-destructive/80' : 'text-muted-foreground/55'}">
                     {#if turn.status === 'running'}<Icon name="sparkles" class="size-3 animate-pulse" />
                     {:else if turn.status === 'error'}<Icon name="x" class="size-3" />
-                    {:else}<Icon name="check" class="size-3 text-emerald-500" />{/if}
+                    {:else}<Icon name="check" class="size-3 text-success" />{/if}
                     <span class="truncate">{turn.label}</span>
                   </div>
                   {#if turn.result && turn.result.columns.length}

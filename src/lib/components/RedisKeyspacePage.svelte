@@ -887,7 +887,7 @@
             spellcheck="false"
             autocapitalize="off"
             autocomplete="off"
-            class="h-7 w-full rounded-lg border-2 border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
+            class="h-7 w-full rounded-lg border border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
           />
           <div class="flex flex-wrap gap-1">
             {#each CREATABLE as t (t)}
@@ -914,7 +914,7 @@
               placeholder="field"
               spellcheck="false"
               autocomplete="off"
-              class="h-7 w-full rounded-lg border-2 border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
+              class="h-7 w-full rounded-lg border border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
             />
           {:else if nkType === 'zset'}
             <input
@@ -923,7 +923,7 @@
               placeholder="score (e.g. 1)"
               spellcheck="false"
               autocomplete="off"
-              class="h-7 w-full rounded-lg border-2 border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
+              class="h-7 w-full rounded-lg border border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
             />
           {/if}
           <input
@@ -933,7 +933,7 @@
             spellcheck="false"
             autocomplete="off"
             onkeydown={(e) => e.key === 'Enter' && void createKey()}
-            class="h-7 w-full rounded-lg border-2 border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
+            class="h-7 w-full rounded-lg border border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
           />
           {#if newKeyError}
             <p class="font-mono text-ui-3xs text-destructive">{newKeyError}</p>
@@ -972,7 +972,7 @@
             spellcheck="false"
             autocapitalize="off"
             autocomplete="off"
-            class="h-7 w-full rounded-lg border-2 border-border bg-input/30 pl-7 pr-7 text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
+            class="h-7 w-full rounded-lg border border-border bg-input/30 pl-7 pr-7 text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
           />
           {#if filter}
             <button
@@ -1098,7 +1098,7 @@
             onclick={() => selectedKey && copyText(selectedKey, 'key')}
           >
             {#if copiedId === 'key'}
-              <Check class="size-3.5 text-emerald-500" />
+              <Check class="size-3.5 text-success" />
             {:else}
               <Copy class="size-3.5" />
             {/if}
@@ -1154,7 +1154,7 @@
             <span class="shrink-0 tabular-nums">{sizeLabel}</span>
           {/if}
           {#if valueCapped}
-            <span class="shrink-0 rounded bg-amber-500/10 px-1 text-amber-600 dark:text-amber-400" title="Large value, showing the first {VALUE_CAP} entries">first {VALUE_CAP}</span>
+            <span class="shrink-0 rounded bg-warning/10 px-1 text-warning" title="Large value, showing the first {VALUE_CAP} entries">first {VALUE_CAP}</span>
           {/if}
           {#if keyMemory != null}
             <span class="shrink-0 tabular-nums" title="Memory used by this key">
@@ -1178,7 +1178,7 @@
                     if (e.key === 'Enter') { e.preventDefault(); void applyTtl(false) }
                     else if (e.key === 'Escape') editingTtl = false
                   }}
-                  class="h-6 w-24 rounded-lg border-2 border-border bg-input/30 px-1.5 text-ui-2xs tabular-nums text-foreground placeholder:text-muted-foreground/45 outline-none focus:border-ring focus:ring-1 focus:ring-ring"
+                  class="h-6 w-24 rounded-lg border border-border bg-input/30 px-1.5 text-ui-2xs tabular-nums text-foreground placeholder:text-muted-foreground/45 outline-none focus:border-ring focus:ring-1 focus:ring-ring"
                 />
                 <button
                   type="button"
@@ -1212,7 +1212,7 @@
                 type="button"
                 class={cn(
                   'group/ttl inline-flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors hover:bg-accent',
-                  hasExpiry ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground',
+                  hasExpiry ? 'text-warning' : 'text-muted-foreground',
                 )}
                 title="Edit TTL"
                 onclick={openTtlEditor}
@@ -1270,7 +1270,7 @@
                   onclick={() => copyText(valueData.value, 'val')}
                 >
                   {#if copiedId === 'val'}
-                    <Check class="size-3 text-emerald-500" />Copied
+                    <Check class="size-3 text-success" />Copied
                   {:else}
                     <Copy class="size-3" />Copy
                   {/if}
@@ -1280,7 +1280,7 @@
                 <textarea
                   bind:value={stringEdit}
                   spellcheck="false"
-                  class="no-focus-ring app-scroll min-h-0 flex-1 resize-none rounded-lg border-2 border-border bg-input/30 p-3 font-mono text-ui-sm leading-relaxed text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring"
+                  class="no-focus-ring app-scroll min-h-0 flex-1 resize-none rounded-lg border border-border bg-input/30 p-3 font-mono text-ui-sm leading-relaxed text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring"
                 ></textarea>
                 <div class="mt-2 flex shrink-0 items-center gap-1.5">
                   <button
@@ -1324,7 +1324,7 @@
                             aria-label="Copy"
                             onclick={() => copyText(isZset ? pair[0] : pair[1], `row-${i}`)}
                           >
-                            {#if copiedId === `row-${i}`}<Check class="size-3 text-emerald-500" />{:else}<Copy class="size-3" />{/if}
+                            {#if copiedId === `row-${i}`}<Check class="size-3 text-success" />{:else}<Copy class="size-3" />{/if}
                           </button>
                           <button
                             type="button"
@@ -1372,7 +1372,7 @@
                             aria-label="Copy value"
                             onclick={() => copyText(item, `row-${i}`)}
                           >
-                            {#if copiedId === `row-${i}`}<Check class="size-3 text-emerald-500" />{:else}<Copy class="size-3" />{/if}
+                            {#if copiedId === `row-${i}`}<Check class="size-3 text-success" />{:else}<Copy class="size-3" />{/if}
                           </button>
                           <button
                             type="button"
@@ -1408,7 +1408,7 @@
                       <td class="px-3 py-1.5 align-top font-mono [overflow-wrap:anywhere] text-foreground/85" title={entry}>{entry}</td>
                       <td class="w-9 px-1 align-top">
                         <button type="button" class={cn(iconBtn, 'size-6 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100')} title="Copy entry" aria-label="Copy entry" onclick={() => copyText(entry, `row-${i}`)}>
-                          {#if copiedId === `row-${i}`}<Check class="size-3 text-emerald-500" />{:else}<Copy class="size-3" />{/if}
+                          {#if copiedId === `row-${i}`}<Check class="size-3 text-success" />{:else}<Copy class="size-3" />{/if}
                         </button>
                       </td>
                     </tr>

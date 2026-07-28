@@ -158,7 +158,7 @@
 
     {:else if phase === 'done' && connInfo}
       <div class="flex flex-col gap-3 py-1">
-        <div class="flex items-center gap-2 text-ui-sm text-green-600 dark:text-green-400">
+        <div class="flex items-center gap-2 text-ui-sm text-success">
           <CheckCircle class="size-4 shrink-0" />
           Container is running and ready
         </div>

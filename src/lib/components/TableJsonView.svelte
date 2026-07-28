@@ -162,7 +162,7 @@
       {#if pathFocused && completions.length > 0}
         <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
         <ul
-          class="absolute left-0 top-full z-50 mt-1 min-w-48 overflow-hidden rounded-lg border border-border/60 bg-popover p-1 shadow-lg"
+          class="absolute left-0 top-full z-50 mt-1 min-w-48 overflow-hidden rounded-[10px] border border-border/60 bg-popover p-1 elevate-2-rim"
           onmousedown={(e) => e.preventDefault()}
         >
           {#each completions as completion, i (completion)}

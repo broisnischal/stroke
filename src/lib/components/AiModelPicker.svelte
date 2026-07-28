@@ -31,7 +31,7 @@
     <ChevronDown class="size-3 opacity-60" />
   </DropdownMenu.Trigger>
 
-  <DropdownMenu.Content side="top" align="start" class="w-56 p-1">
+  <DropdownMenu.Content side="top" align="start" class="min-w-56 p-1">
     <DropdownMenu.RadioGroup value={$activeProfileId} onValueChange={(v) => pick(v)}>
       {#each $aiProfiles as profile (profile.id)}
         <DropdownMenu.RadioItem
