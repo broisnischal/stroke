@@ -248,6 +248,7 @@ pub fn run() {
             commands::restart_app,
             commands::toggle_devtools,
             commands::reset_window,
+            commands::fit_to_work_area,
             commands::test_postgres_connection,
             commands::connect_postgres,
             commands::disconnect_postgres,
