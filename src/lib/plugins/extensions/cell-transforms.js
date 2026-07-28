@@ -1,8 +1,8 @@
-// Cell Transforms — on-demand conversions surfaced in the cell context menu,
+// Cell Transforms - on-demand conversions surfaced in the cell context menu,
 // and (when chosen for a whole column) rendered live in the grid. Each
 // transform is synchronous and returns a string; it never mutates the data.
 //
-// `appliesTo(value, type, name)` gates which transforms surface for a cell —
+// `appliesTo(value, type, name)` gates which transforms surface for a cell -
 // detection-specific ones are listed first so the most relevant option is on
 // top, with a few universal string ops last.
 
@@ -99,11 +99,11 @@ function isHexString(v) {
   const s = v.trim().replace(/^0x/i, '')
   return s.length >= 2 && s.length % 2 === 0 && /^[0-9a-fA-F]+$/.test(s)
 }
-/** @param {unknown} v — looks like an image URL or data URI? */
+/** @param {unknown} v - looks like an image URL or data URI? */
 export function isImageUrl(v) {
   if (typeof v !== 'string') return false
   const s = v.trim()
-  // Accept data:image URIs and any http(s) URL — the transform is opt-in per
+  // Accept data:image URIs and any http(s) URL - the transform is opt-in per
   // column, so being lenient means it works for extension-less avatar URLs
   // (Google/GitHub/CDNs). A non-image URL just shows a broken-image tile.
   return /^data:image\//i.test(s) || /^https?:\/\/\S+$/i.test(s)
@@ -121,7 +121,7 @@ function humanBytes(bytes) {
 export const cellTransforms = {
   id: 'cell-transforms',
   name: 'Cell Transforms',
-  description: 'Decode JWT/Base64/hex/URL, epoch → date, JSON tools, case & text ops — one-click, and applicable per-column.',
+  description: 'Decode JWT/Base64/hex/URL, epoch → date, JSON tools, case & text ops: one-click, and applicable per-column.',
   kind: 'transforms',
   transforms: [
     // ── Media (rendered as a thumbnail when set on a whole column) ────────────
@@ -229,7 +229,7 @@ export const cellTransforms = {
     },
     {
       id: 'json-sort-keys',
-      label: 'JSON — sort keys',
+      label: 'JSON, sort keys',
       /** @param {unknown} v */
       appliesTo: (v) => jsonLike(v),
       /** @param {unknown} v */

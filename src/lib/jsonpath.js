@@ -9,8 +9,8 @@
  *   [0:3]       slice (start:end, step optional)
  *   ["key"]     quoted property (handles keys with spaces/dots)
  *   ..key       recursive descent
- *   [?(@.k)]    filter — truthy check
- *   [?(@.k op v)] filter — ==, !=, >, >=, <, <=
+ *   [?(@.k)]    filter - truthy check
+ *   [?(@.k op v)] filter - ==, !=, >, >=, <, <=
  */
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -178,14 +178,14 @@ export function evalJsonPath(root, path) {
         const inner = rest.slice(1, end).trim()
         rest = rest.slice(end + 1)
 
-        // [*] — all items: mark projection so following accessors map over items
+        // [*] - all items: mark projection so following accessors map over items
         if (inner === '*') {
           if (!Array.isArray(cur)) return { ok: false, error: '[*] requires an array' }
           projected = true
           continue
         }
 
-        // [n] — numeric index
+        // [n] - numeric index
         if (/^-?\d+$/.test(inner)) {
           const idx = parseInt(inner)
           const at = (/** @type {unknown} */ a) => {
@@ -203,7 +203,7 @@ export function evalJsonPath(root, path) {
           continue
         }
 
-        // [start:end] or [start:end:step] — slice
+        // [start:end] or [start:end:step] - slice
         if (/^-?\d*:-?\d*(:-?\d*)?$/.test(inner)) {
           if (!Array.isArray(cur)) return { ok: false, error: 'Slice requires an array' }
           const parts = inner.split(':')
@@ -230,7 +230,7 @@ export function evalJsonPath(root, path) {
           continue
         }
 
-        // ["key"] or ['key'] — quoted property
+        // ["key"] or ['key'] - quoted property
         const quotedMatch = inner.match(/^["'](.+)["']$/)
         if (quotedMatch) {
           const key = quotedMatch[1]
@@ -240,7 +240,7 @@ export function evalJsonPath(root, path) {
           continue
         }
 
-        // [?(expr)] — filter
+        // [?(expr)] - filter
         const filterMatch = inner.match(/^\?\((.+)\)$/)
         if (filterMatch) {
           if (!Array.isArray(cur)) return { ok: false, error: 'Filter [?(...)] requires an array' }

@@ -34,7 +34,7 @@ export function editorFontFamily() {
 
 // Workers spawn lazily, only when a model of the matching language is created.
 // This app only ever creates json (viewer/cells), javascript|typescript (ORM),
-// and sql/postgresql (tokenizer-only — no worker) models, so css/html/scss/less
+// and sql/postgresql (tokenizer-only - no worker) models, so css/html/scss/less
 // workers are never instantiated; any stray label falls back to editorWorker.
 let configured = false
 
@@ -61,7 +61,7 @@ export function configureMonacoWorkers() {
     const ff = editorFontFamily()
     try {
       for (const ed of monaco.editor.getEditors?.() ?? []) ed.updateOptions({ fontFamily: ff })
-    } catch { /* getEditors unavailable — editors pick up the font on next create */ }
+    } catch { /* getEditors unavailable - editors pick up the font on next create */ }
   })
 
   // Rescale every live editor when the app zoom changes. Monaco can't inherit the
@@ -71,7 +71,7 @@ export function configureMonacoWorkers() {
     const { fontSize, lineHeight } = readEditorFontOptions()
     try {
       for (const ed of monaco.editor.getEditors?.() ?? []) ed.updateOptions({ fontSize, lineHeight })
-    } catch { /* getEditors unavailable — editors pick up the size on next create */ }
+    } catch { /* getEditors unavailable - editors pick up the size on next create */ }
   })
 
   // Watch <html data-theme>/class ONCE for all editors. monaco.editor.setTheme is
@@ -82,7 +82,7 @@ export function configureMonacoWorkers() {
   const applyTheme = () => {
     try {
       monaco.editor.setTheme(monacoThemeId(normalizeThemeId(document.documentElement.dataset.theme)))
-    } catch { /* themes not yet defined — editors set their own theme on create */ }
+    } catch { /* themes not yet defined - editors set their own theme on create */ }
   }
   const themeObserver = new MutationObserver(applyTheme)
   themeObserver.observe(document.documentElement, {
@@ -90,7 +90,7 @@ export function configureMonacoWorkers() {
     attributeFilter: ['class', 'data-theme'],
   })
 
-  // Disable external schema fetching — network requests fail in Tauri desktop env.
+  // Disable external schema fetching - network requests fail in Tauri desktop env.
   // Still validates JSON syntax; just no $schema-driven remote schema downloads.
   monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
     validate: true,

@@ -1,12 +1,12 @@
 <script>
-  // Extensions sidebar panel — VSCode-style switchable panel listing built-in
+  // Extensions sidebar panel - VSCode-style switchable panel listing built-in
   // extensions with an inline Install / Installed toggle. There is no real
   // install step: "Install" = enable the plugin, "Installed" (click) = disable.
   import Icon from "./Icon.svelte";
   import { cn } from "$lib/utils.js";
   import { EXTENSIONS } from "$lib/plugins/registry.js";
   import { pluginState, pluginEnabledIn, setPluginEnabled } from "$lib/stores/plugins.js";
-  // Per-extension glyphs — mirror ExtensionsPage's ICONS map so each extension
+  // Per-extension glyphs - mirror ExtensionsPage's ICONS map so each extension
   // shows its own icon (not one shared per-kind glyph).
   import Clock from "@lucide/svelte/icons/clock";
   import DollarSign from "@lucide/svelte/icons/dollar-sign";
@@ -130,7 +130,7 @@
             {#if on}
               <button
                 type="button"
-                title="Installed — click to disable"
+                title="Installed, click to disable"
                 aria-label="Uninstall {ext.name}"
                 onclick={(e) => {
                   e.stopPropagation();

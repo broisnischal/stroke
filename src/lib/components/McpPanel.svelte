@@ -21,7 +21,7 @@
   /** @type {string | null} */
   let copied   = $state(null);
 
-  // Read-only mode — persisted to localStorage
+  // Read-only mode - persisted to localStorage
   let readOnly = $state(
     typeof localStorage !== 'undefined'
       ? localStorage.getItem('stroke:mcp-readonly') === 'true'

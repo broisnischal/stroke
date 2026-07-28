@@ -129,7 +129,7 @@
     <!-- Body -->
     <form onsubmit={handleSubmit} class="flex flex-col gap-0 px-5 py-4">
 
-      <!-- Name — always visible -->
+      <!-- Name, always visible -->
       <div class="mb-4">
         <label for="cdb-name" class="mb-1.5 block text-ui-xs font-semibold">
           Database name <span class="text-destructive">*</span>

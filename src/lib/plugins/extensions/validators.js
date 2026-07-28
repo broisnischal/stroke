@@ -1,4 +1,4 @@
-// Cell validators — flag values that look wrong with a subtle warning marker.
+// Cell validators - flag values that look wrong with a subtle warning marker.
 // Conservative: only fires on strong name signals to avoid false positives.
 import { normalizeColumnType } from '$lib/cell-value.js'
 

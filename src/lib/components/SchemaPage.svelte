@@ -224,7 +224,7 @@
   <!-- Content -->
   <div class="app-scroll min-h-0 flex-1 overflow-y-auto [will-change:transform]">
 
-    <!-- Engine doesn't support the active section — explain why instead of a blank pane. -->
+    <!-- Engine doesn't support the active section, explain why instead of a blank pane. -->
     {#if !activeSupported}
       {@render unsupported(activeFeature.label, activeFeature.key)}
 

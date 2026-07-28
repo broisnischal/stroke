@@ -209,7 +209,7 @@
 
 <div class="flex flex-col gap-3">
   {#if phase === 'idle'}
-    <!-- Not connected — compact CTA (the selected provider row above already
+    <!-- Not connected, compact CTA (the selected provider row above already
          carries the icon + name + blurb, so no redundant hero here). -->
     {#if meta?.mode === 'token'}
       <div class="flex flex-col gap-2">
@@ -248,7 +248,7 @@
   {:else if phase === 'authorizing'}
     <div class="flex flex-col gap-3.5 rounded-lg border border-border/40 bg-muted/[0.03] p-4">
       <div class="flex items-center gap-3.5">
-        <!-- Provider mark with a live pulse ring — reads as "waiting on this one". -->
+        <!-- Provider mark with a live pulse ring, reads as "waiting on this one". -->
         <div class="relative flex size-11 shrink-0 items-center justify-center rounded-lg border border-border/50 bg-background">
           <span class="pulse-ring pointer-events-none absolute inset-0 rounded-lg ring-1 ring-primary/40"></span>
           <DbIcon id={provider} class="size-5 text-foreground" />
@@ -260,7 +260,7 @@
           </p>
         </div>
       </div>
-      <!-- Indeterminate progress — quiet proof the flow is still alive. -->
+      <!-- Indeterminate progress, quiet proof the flow is still alive. -->
       <div class="h-1 overflow-hidden rounded-full bg-muted/60">
         <span class="progress-slide block h-full w-1/3 rounded-full bg-primary/70"></span>
       </div>
@@ -305,13 +305,13 @@
     </div>
 
     {#if phase === 'password'}
-      <!-- Inline password step — providers that don't expose the DB password -->
+      <!-- Inline password step, providers that don't expose the DB password -->
       <div class="flex flex-col gap-2.5 rounded-lg border border-border/50 p-3">
         <p class="text-ui-xs text-foreground">
           Database password for <span class="font-medium">{resolved?.name}</span>
         </p>
         <p class="text-ui-2xs leading-relaxed text-muted-foreground/70">
-          {meta?.name} doesn't expose the database password through its API — enter it once.
+          {meta?.name} doesn't expose the database password through its API, enter it once.
           Find or reset it in your {meta?.name} dashboard under Database settings.
         </p>
         <div class="relative">
@@ -445,7 +445,7 @@
   }
   .progress-slide { animation: progress-slide 1.3s ease-in-out infinite; }
 
-  /* Error card entrance — a calm rise + settle (never scale from 0). */
+  /* Error card entrance - a calm rise + settle (never scale from 0). */
   @keyframes err-in {
     from { opacity: 0; transform: translateY(6px) scale(0.985); }
     to   { opacity: 1; transform: translateY(0) scale(1); }

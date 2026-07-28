@@ -18,7 +18,7 @@ export function cellLinkHref(text) {
   if (!t) return null
   if (!URL_RE.test(t)) return null
   // Percent-encode before the value is ever fetched (image preview) or opened.
-  // `new URL().href` normalizes unsafe characters — spaces, unicode, brackets —
+  // `new URL().href` normalizes unsafe characters - spaces, unicode, brackets -
   // and is idempotent, so an already-encoded URL is left untouched (no
   // %20 -> %2520 double-encoding). Falls back to the raw match if unparseable.
   try {

@@ -1,10 +1,10 @@
 /**
- * Single-statement batch cell updates — powers Find & Replace's apply.
+ * Single-statement batch cell updates - powers Find & Replace's apply.
  *
  * Instead of one round-trip per row, all edits to one column collapse into a
  * `UPDATE … SET col = CASE WHEN <pk> THEN <value> … ELSE col END WHERE <pks>`
  * statement keyed by primary key. This stays exactly WYSIWYG with the dialog's
- * preview (each row gets the precomputed value — no reliance on the engine's
+ * preview (each row gets the precomputed value - no reliance on the engine's
  * REPLACE()/regex semantics matching JavaScript's) and works across engine
  * families, composite keys included.
  */

@@ -399,7 +399,7 @@
       </div>
 
     {:else}
-      <!-- Dashboard grid — fixed columns so Swapy can compute slot positions reliably -->
+      <!-- Dashboard grid, fixed columns so Swapy can compute slot positions reliably -->
       <div bind:this={gridEl} class="grid gap-3" style={gridStyle}>
         {#each activeDash.items as item (item.id)}
           {@const chart = getChart(item.chartId)}

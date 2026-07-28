@@ -173,7 +173,7 @@ describe('readRowsResponse', () => {
   })
 })
 
-describe('buildSelectSql — shape & quoting', () => {
+describe('buildSelectSql, shape & quoting', () => {
   it('builds a minimal SELECT with schema quoting and default limit', () => {
     expect(buildSelectSql({ schema: 'public', table: 'users', engine: 'postgres', limit: 100 }))
       .toBe('SELECT *\nFROM "public"."users"\nLIMIT 100;')
@@ -193,8 +193,8 @@ describe('buildSelectSql — shape & quoting', () => {
   })
 })
 
-// Operator matrix — the surface where per-engine bugs historically hid.
-describe('buildSelectSql — operator matrix (postgres)', () => {
+// Operator matrix - the surface where per-engine bugs historically hid.
+describe('buildSelectSql, operator matrix (postgres)', () => {
   /** @type {[import('./table-query.js').FilterOp, string, string][]} */
   const cases = [
     ['eq', '5', `"age" = '5'`],
@@ -218,7 +218,7 @@ describe('buildSelectSql — operator matrix (postgres)', () => {
   }
 })
 
-describe('buildSelectSql — engine differences for substring search', () => {
+describe('buildSelectSql, engine differences for substring search', () => {
   it('postgres casts to ::text and uses ILIKE', () => {
     expect(sqlFor(mk({ column: 'age', op: 'contains', value: '5' }), 'postgres'))
       .toContain(`"age"::text ILIKE '%5%'`)
@@ -232,7 +232,7 @@ describe('buildSelectSql — engine differences for substring search', () => {
   it('mariadb behaves like mysql', () => {
     expect(sqlFor(mk({ column: 'age', op: 'eq', value: '5' }), 'mariadb')).toContain('`age` = \'5\'')
   })
-  it('sqlite double-quotes and does NOT cast (currently emits ILIKE — display-only)', () => {
+  it('sqlite double-quotes and does NOT cast (currently emits ILIKE, display-only)', () => {
     // NOTE: buildSelectSql is an editable starting point, not executed SQL. SQLite
     // has no native ILIKE; if that ever becomes an issue this assertion flags it.
     expect(sqlFor(mk({ column: 'age', op: 'contains', value: '5' }), 'sqlite'))
@@ -241,7 +241,7 @@ describe('buildSelectSql — engine differences for substring search', () => {
   })
 })
 
-describe('buildSelectSql — WHERE assembly', () => {
+describe('buildSelectSql, WHERE assembly', () => {
   it('emits the search OR-group first, then AND-chains filters, with ORDER BY + LIMIT', () => {
     const sql = buildSelectSql({
       schema: 'public',
@@ -292,7 +292,7 @@ describe('buildSelectSql — WHERE assembly', () => {
   })
 })
 
-describe('buildSelectSql — LIMIT handling', () => {
+describe('buildSelectSql, LIMIT handling', () => {
   it('emits an explicit limit', () => {
     expect(buildSelectSql({ table: 't', engine: 'postgres', limit: 250 })).toContain('\nLIMIT 250;')
   })

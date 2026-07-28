@@ -1,4 +1,4 @@
-// Linkifiers — turn IDs into deep links to external systems via URL templates.
+// Linkifiers - turn IDs into deep links to external systems via URL templates.
 // Templates support {value} (the cell, URL-encoded) and {raw} (unencoded).
 // Ships with Stripe-style defaults; users add their own rules in settings.
 

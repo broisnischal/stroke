@@ -1,4 +1,4 @@
-// Duration — render numeric duration columns as "2h 5m 30s".
+// Duration - render numeric duration columns as "2h 5m 30s".
 import { normalizeColumnType } from '$lib/cell-value.js'
 
 const NUMERIC_RE = /(int|numeric|decimal|real|double|float|number)/i

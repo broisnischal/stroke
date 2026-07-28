@@ -27,7 +27,7 @@ function load() {
   return { enabled: {}, config: {} }
 }
 
-/** Reactive snapshot — subscribe in components/effects that must react. */
+/** Reactive snapshot - subscribe in components/effects that must react. */
 export const pluginState = writable(load())
 
 /** Plain snapshot kept in sync for synchronous hot-path reads. */
@@ -47,14 +47,14 @@ if (typeof window !== 'undefined') {
 
 /**
  * Extensions that ship enabled. Workflow features (saved views, find &
- * replace) are core-adjacent — off-by-default would just hide them; the
+ * replace) are core-adjacent - off-by-default would just hide them; the
  * Extensions page stays the place to switch them off.
  */
 const DEFAULT_ON = new Set(['saved-views', 'find-replace'])
 
 /**
  * Enabled check against an explicit state snapshot (for reactive `$pluginState`
- * reads in components) — honors DEFAULT_ON when the user never toggled the id.
+ * reads in components) - honors DEFAULT_ON when the user never toggled the id.
  * @param {PluginState} state @param {string} id
  */
 export function pluginEnabledIn(state, id) {

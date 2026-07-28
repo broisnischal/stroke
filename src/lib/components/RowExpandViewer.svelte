@@ -106,25 +106,25 @@
   }
 
   $effect(() => {
-    // Tree mode never touches the stringified text — skip the format +
+    // Tree mode never touches the stringified text - skip the format +
     // highlight work entirely until the raw view is actually shown.
     if (viewMode !== 'raw') return
     const { text: source, truncated } = displayInfo
     // Skip per-token highlighting for large values (anything we had to truncate,
-    // or a still-long preview) — the span-per-token HTML is the memory hog. Plain
+    // or a still-long preview) - the span-per-token HTML is the memory hog. Plain
     // escaped text stays cheap to build and render.
     html = truncated || source.length > HIGHLIGHT_LIMIT
       ? `<pre class="m-0 p-0 font-mono text-ui-sm leading-relaxed whitespace-pre text-foreground">${escapeHtml(source)}</pre>`
       : highlightJson(source)
   })
 
-  // keep the wordWrap reactive — the pre's whitespace class is toggled via CSS var
+  // keep the wordWrap reactive - the pre's whitespace class is toggled via CSS var
   const wrapClass = $derived(wordWrap ? 'whitespace-pre-wrap break-all' : 'whitespace-pre')
 
   $effect(() => {
     if (!html || !rootEl) return
     const source = displayText
-    // Plain (non-highlighted) render for large values — skip the link scan too.
+    // Plain (non-highlighted) render for large values - skip the link scan too.
     if (displayInfo.truncated || source.length > HIGHLIGHT_LIMIT) return
     void tick().then(() => {
       const pre = rootEl?.querySelector('pre')
@@ -209,7 +209,7 @@
 
   /**
    * When wrap is off the box is `overflow-x-auto`, which makes the browser
-   * promote `overflow-y` to `auto` too — turning it into a nested scroll
+   * promote `overflow-y` to `auto` too - turning it into a nested scroll
    * container. WebKitGTK won't chain a trapped vertical wheel up to the
    * virtual-scroll table, so vertical scrolling stalls over the JSON. Forward
    * vertical deltas to the table's native scroller; leave genuine horizontal
@@ -222,7 +222,7 @@
     const el = rootEl
     if (!el) return
     const canScrollH = el.scrollWidth > el.clientWidth
-    if (!canScrollH) return // not a scroll trap — let native chaining scroll the table
+    if (!canScrollH) return // not a scroll trap - let native chaining scroll the table
     if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return // horizontal gesture → scroll the JSON
     const scroller = el.closest('[data-canvas-table]')
     if (!(scroller instanceof HTMLElement)) return
@@ -291,7 +291,7 @@
     <div class="ml-auto flex items-center gap-0.5 rounded bg-muted/30 p-0.5">
       <button
         type="button"
-        title="Tree view — expand and collapse nested values"
+        title="Tree view, expand and collapse nested values"
         class={[
           'inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-ui-xs transition-colors',
           viewMode === 'tree' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground/60 hover:text-foreground',
@@ -315,7 +315,7 @@
       </button>
     </div>
 
-    <!-- Close (collapse this row) — also bound to Esc in the grid. -->
+    <!-- Close (collapse this row), also bound to Esc in the grid. -->
     {#if onclose}
       <button
         type="button"
@@ -356,7 +356,7 @@
   {/if}
 </div>
 
-<!-- context menu — portalled to body to escape will-change:transform on DataTable -->
+<!-- context menu, portalled to body to escape will-change:transform on DataTable -->
 {#if contextMenu}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div

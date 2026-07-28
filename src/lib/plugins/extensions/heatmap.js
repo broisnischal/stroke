@@ -1,4 +1,4 @@
-// Conditional formatting / heatmap — tint a numeric cell's background by its
+// Conditional formatting / heatmap - tint a numeric cell's background by its
 // value relative to the column's min/max. Column stats are computed once per
 // data change by the table (passed in via ctx.stats), never per render.
 import { normalizeColumnType } from '$lib/cell-value.js'

@@ -91,7 +91,7 @@
   function cleanPreviewOption(option) {
     if (!option || !Object.keys(option).length) return option
     const o = { ...option, title: undefined }
-    // x-axis formatter is a function — stripped by JSON.stringify when saved.
+    // x-axis formatter is a function - stripped by JSON.stringify when saved.
     // Re-attach it if the axis data looks like timestamps.
     const xData = Array.isArray(o.xAxis?.data) ? o.xAxis.data : null
     if (xData && isTimestampAxis(xData)) {
@@ -369,7 +369,7 @@
                 {/if}
               </div>
 
-              <!-- Chart cards grid — @container so columns adapt to sidebar state -->
+              <!-- Chart cards grid, @container so columns adapt to sidebar state -->
               <div class="@container">
               <div
                 class="grid grid-cols-1 gap-2.5 @[380px]:grid-cols-2 @[580px]:grid-cols-3 @[820px]:grid-cols-4"
@@ -388,7 +388,7 @@
                         />
                       {:else if chart.aiSpec}
                         <!-- AI-generated chart types (meter, choropleth, etc.) that don't
-                             produce an ECharts option — render via AiChartRenderer -->
+                             produce an ECharts option, render via AiChartRenderer -->
                         <div class="absolute inset-0">
                           <AiChartRenderer spec={chart.aiSpec} noTitle={true} />
                         </div>

@@ -218,7 +218,7 @@ function analyzeQuery(textBeforeCursor, knownTables) {
   /** @type {Record<string, string>} */
   const aliasMap = {}
 
-  // Pass 1 — FROM/JOIN tableName [AS] alias
+  // Pass 1 - FROM/JOIN tableName [AS] alias
   const joinRe = /\b(?:FROM|JOIN)\s+([\w"]+)(?:\s+(?:AS\s+)?([\w"]+))?/gi
   let m
   while ((m = joinRe.exec(cleaned)) !== null) {
@@ -231,7 +231,7 @@ function analyzeQuery(textBeforeCursor, knownTables) {
     }
   }
 
-  // Pass 2 — comma-separated tables in FROM clause: FROM t1 a1, t2 a2
+  // Pass 2 - comma-separated tables in FROM clause: FROM t1 a1, t2 a2
   const fromPart = cleaned.match(/\bFROM\s+(.*?)(?=\s*\b(?:WHERE|GROUP|ORDER|HAVING|LIMIT|OFFSET|UNION|INTERSECT|EXCEPT|JOIN|;|$))/i)
   if (fromPart) {
     const segment = fromPart[1].split(/\b(?:INNER|LEFT|RIGHT|FULL|CROSS|OUTER|LATERAL)?\s*JOIN\b/i)[0]
@@ -375,7 +375,7 @@ function getHintTemplates(monaco, hints) {
     lc: table.toLowerCase(),
   }))
 
-  // Columns grouped (and deduped) by short table name — schema-qualified keys
+  // Columns grouped (and deduped) by short table name - schema-qualified keys
   // like "public.users" collapse into "users".
   /** @type {Map<string, SuggestTemplate[]>} */
   const colsByTbl = new Map()
@@ -460,7 +460,7 @@ export function registerMonacoSqlCompletion(monaco, getHints) {
   })
 
   monaco.languages.registerCompletionItemProvider('sql', {
-    // Only '.' — quickSuggestions covers word typing. Space/newline triggers
+    // Only '.' - quickSuggestions covers word typing. Space/newline triggers
     // used to rerun the whole provider on every space, which felt slow and
     // popped the widget when it wasn't wanted.
     triggerCharacters: ['.'],
@@ -480,7 +480,7 @@ export function registerMonacoSqlCompletion(monaco, getHints) {
         endLineNumber: position.lineNumber, endColumn: position.column,
       })
 
-      // Analyze only the statement under the cursor — a FROM in an earlier
+      // Analyze only the statement under the cursor - a FROM in an earlier
       // statement must not leak table/column context into this one.
       const fullText = model.getValue()
       const offset = model.getOffsetAt(position)
@@ -492,7 +492,7 @@ export function registerMonacoSqlCompletion(monaco, getHints) {
       const suggestions = []
       // Stamp a template with this request's range + tier. No prefix filtering
       // here: Monaco requests once per word session and fuzzy-filters the full
-      // list itself — pre-filtering broke matching after backspace/mid-word.
+      // list itself - pre-filtering broke matching after backspace/mid-word.
       /** @param {SuggestTemplate} entry @param {string} tier */
       const push = (entry, tier) => {
         suggestions.push({ ...entry.tpl, range, sortText: tier + entry.lc })
@@ -556,7 +556,7 @@ export function registerMonacoSqlCompletion(monaco, getHints) {
       for (const s of H.schemas) push(s, tierSchema)
       for (const t of H.tables) push(t, tierTable)
 
-      // ── 3. Columns — referenced tables first, then all others ──────────
+      // ── 3. Columns - referenced tables first, then all others ──────────
       // Non-referenced tables are deduped by column name: without a FROM the
       // same column (id, count, …) would otherwise appear once per table.
       const refTableSet = new Set(referencedTables)
@@ -598,7 +598,7 @@ export function registerMonacoSqlCompletion(monaco, getHints) {
       }
 
       // ── 6. Snippets ────────────────────────────────────────────────────
-      // Statement start or while typing a word — not right after a trigger char
+      // Statement start or while typing a word - not right after a trigger char
       if (ctx === 'any' || word.word) {
         for (const s of S.snippets) push(s, tierSnip)
       }

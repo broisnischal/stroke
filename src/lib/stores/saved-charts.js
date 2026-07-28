@@ -1,6 +1,6 @@
 /**
  * Persistent store for saved charts, backed by localStorage.
- * Charts are scoped per database connection — switching connections loads
+ * Charts are scoped per database connection - switching connections loads
  * that connection's charts. An empty connectionId shows nothing.
  */
 import { writable } from 'svelte/store'
@@ -70,7 +70,7 @@ function persist(v, key) {
 export const savedCharts = writable(/** @type {SavedChart[]} */ ([]))
 export const chartGroups = writable(/** @type {string[]} */ (['Default']))
 
-// Debounced persistence — chart edits can fire in bursts; avoid a synchronous
+// Debounced persistence - chart edits can fire in bursts; avoid a synchronous
 // JSON.stringify + localStorage write on every change. Charts and groups use
 // separate debouncers so their distinct keys never coalesce/clobber.
 const persistCharts = debounce((/** @type {any} */ v, /** @type {string} */ key) => persist(v, key), 300)

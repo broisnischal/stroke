@@ -108,7 +108,7 @@
     null
   );
 
-  // Section open/collapsed state — persisted across sidebar toggles
+  // Section open/collapsed state - persisted across sidebar toggles
   const SIDEBAR_EXPAND_KEY = 'stroke:sidebar-sections'
   function loadSidebarSections() {
     try {
@@ -330,7 +330,7 @@
     return result
   }
 
-  // Sorted, hide-filtered, un-pinned base — recomputes only when the data, sort,
+  // Sorted, hide-filtered, un-pinned base - recomputes only when the data, sort,
   // hide toggles or pins change (NOT on every keystroke). The search term then
   // just filters this base, so typing avoids the sort + array clones.
   const sortedRegularBase = $derived(
@@ -340,7 +340,7 @@
     lf ? sortedRegularBase.filter((t) => t.name.toLowerCase().includes(lf)) : sortedRegularBase,
   );
 
-  // Selectable rows in display order (pinned first, then regular) — drives shift range-select.
+  // Selectable rows in display order (pinned first, then regular) - drives shift range-select.
   const selectableOrder = $derived([
     ...visiblePinnedTables,
     ...filteredRegularTables.map((t) => t.name),
@@ -394,7 +394,7 @@
   // The views / materialized-views lists aren't windowed (unlike the tables
   // list), so a schema with thousands of views would instantiate thousands of
   // context-menu components. Render at most VIEW_RENDER_CAP and hint to search
-  // for the rest — only pathological schemas ever hit this.
+  // for the rest - only pathological schemas ever hit this.
   const VIEW_RENDER_CAP = 500;
   const viewsToRender = $derived(filteredViews.length > VIEW_RENDER_CAP ? filteredViews.slice(0, VIEW_RENDER_CAP) : filteredViews);
   const matViewsToRender = $derived(filteredMatViews.length > VIEW_RENDER_CAP ? filteredMatViews.slice(0, VIEW_RENDER_CAP) : filteredMatViews);
@@ -428,7 +428,7 @@
     recentOpen = open; tablesOpen = open; viewsOpen = open; matViewsOpen = open;
   }
   // ── Virtual list (tables only) ───────────────────────────────────────────
-  const VIRT_THRESHOLD = 40   // kick in early — 40+ tables already benefits from virtualization
+  const VIRT_THRESHOLD = 40   // kick in early - 40+ tables already benefits from virtualization
   const VIRT_BUFFER = 12      // extra rows rendered above and below the viewport
   // Row stride is MEASURED from the DOM, not assumed: row height scales with the
   // app zoom / font-size (Linux even uses a 15px base), and any drift between an
@@ -440,7 +440,7 @@
     const el = tableListEl
     if (!el || typeof ResizeObserver === 'undefined') return
     const measure = () => {
-      // Spacer <li>s are aria-hidden — measure the stride between two real rows.
+      // Spacer <li>s are aria-hidden - measure the stride between two real rows.
       const rows = /** @type {NodeListOf<HTMLElement>} */ (el.querySelectorAll('li:not([aria-hidden])'))
       if (rows.length >= 2) {
         const stride = rows[1].offsetTop - rows[0].offsetTop
@@ -459,7 +459,7 @@
   })
   // The window shifts one row at a time: `virtStart` is floored to ROW_H, so the
   // derived already short-circuits (returns the same value) for every scroll event
-  // within a row — no re-render, no spacer resize until you actually cross a row
+  // within a row - no re-render, no spacer resize until you actually cross a row
   // boundary. That keeps each update tiny (±1 row) instead of a batched chunk hitch.
 
   /** @type {HTMLElement | null} */
@@ -560,7 +560,7 @@
                 )}
                 id="sidebar-schema"
               >
-                —
+                -
               </span>
             {:else}
               <SearchableMenu
@@ -1332,7 +1332,7 @@
                     {/each}
                     {#if filteredViews.length > VIEW_RENDER_CAP}
                       <li class="px-3 py-2 text-center text-ui-2xs text-muted-foreground/60">
-                        +{filteredViews.length - VIEW_RENDER_CAP} more — search to narrow
+                        +{filteredViews.length - VIEW_RENDER_CAP} more, search to narrow
                       </li>
                     {/if}
                   {/if}
@@ -1462,7 +1462,7 @@
                     {/each}
                     {#if filteredMatViews.length > VIEW_RENDER_CAP}
                       <li class="px-3 py-2 text-center text-ui-2xs text-muted-foreground/60">
-                        +{filteredMatViews.length - VIEW_RENDER_CAP} more — search to narrow
+                        +{filteredMatViews.length - VIEW_RENDER_CAP} more, search to narrow
                       </li>
                     {/if}
                   {/if}

@@ -33,7 +33,7 @@ import { loadDefaultPageSize } from '$lib/table-query.js'
  * @property {'table' | 'json' | 'record' | 'text' | 'chart' | 'erd'} [dataViewMode]
  * @property {number} [scrollLeft]
  * @property {number} [scrollTop]
- * @property {number[]} [expandedRows] — row indices with an open inline detail panel; restored in background/snapshot panes
+ * @property {number[]} [expandedRows] - row indices with an open inline detail panel; restored in background/snapshot panes
  */
 
 /** @typedef {object} SqlTabState
@@ -51,7 +51,7 @@ import { loadDefaultPageSize } from '$lib/table-query.js'
  * @property {StudioTabKind} kind
  * @property {string} title
  * @property {TableTabState | SqlTabState | null} state
- * @property {boolean} [pinned] — pinned tabs stay grouped at the front and survive "Close Others"/"Close All"
+ * @property {boolean} [pinned] - pinned tabs stay grouped at the front and survive "Close Others"/"Close All"
  */
 
 let tabSeq = 0
@@ -65,7 +65,7 @@ export function nextTabId() {
 export function cloneTableTabState(state) {
   return {
     ...state,
-    // Shallow-copy mutable primitives only — rows/columns/foreignKeys are
+    // Shallow-copy mutable primitives only - rows/columns/foreignKeys are
     // treated as immutable value arrays; no deep clone needed.
     columns: state.columns,
     primaryKey: state.primaryKey,

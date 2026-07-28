@@ -1,6 +1,6 @@
 <script>
   // Hard trial gate. Rendered in place of the whole app once the trial has
-  // expired and no valid license is present — there is no dismiss path, the
+  // expired and no valid license is present - there is no dismiss path, the
   // only way through is activating a license.
   import Logo from './Logo.svelte'
   import Icon from './Icon.svelte'
@@ -10,7 +10,7 @@
     try {
       const { getCurrentWindow } = await import('@tauri-apps/api/window')
       await getCurrentWindow().close()
-    } catch { /* browser/dev — no-op */ }
+    } catch { /* browser/dev - no-op */ }
   }
 </script>
 
@@ -29,11 +29,11 @@
     <div class="space-y-2">
       <h1 class="text-ui-3xl font-semibold tracking-tight text-foreground text-balance">Your free trial has ended</h1>
       <p class="text-ui leading-relaxed text-muted-foreground text-balance">
-        Activate a license to keep using Stroke. Your saved connections and settings are untouched — they'll be right here.
+        Activate a license to keep using Stroke. Your saved connections and settings are untouched, they'll be right here.
       </p>
     </div>
 
-    <!-- Activation — the only way forward. No card; just the field + button. -->
+    <!-- Activation, the only way forward. No card; just the field + button. -->
     <div class="w-full">
       <LicenseActivation naked />
     </div>

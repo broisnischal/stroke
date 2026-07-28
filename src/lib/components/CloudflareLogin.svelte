@@ -167,7 +167,7 @@
 <div class="flex flex-col gap-3">
 
   {#if phase === 'idle'}
-    <!-- Not connected — compact CTA (the provider row above already names it). -->
+    <!-- Not connected, compact CTA (the provider row above already names it). -->
     <div class="flex flex-col gap-2">
       <button
         type="button"
@@ -250,7 +250,7 @@
               class="flex h-9 w-full items-center gap-2 rounded-lg border border-border/60 bg-muted/25 pl-3 pr-2.5 text-left text-ui-xs transition-[border-color,box-shadow] hover:border-border focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none data-[state=open]:border-ring"
             >
               <span class={cn('min-w-0 flex-1 truncate', !selectedAccountId && 'text-muted-foreground')}>
-                {selectedAccountName || '— select account —'}
+                {selectedAccountName || '- select account -'}
               </span>
               <ChevronDown class="size-3.5 shrink-0 text-muted-foreground" />
             </button>
@@ -372,7 +372,7 @@
   }
   .progress-slide { animation: progress-slide 1.3s ease-in-out infinite; }
 
-  /* Error card entrance — a calm rise + settle (never scale from 0). */
+  /* Error card entrance - a calm rise + settle (never scale from 0). */
   @keyframes err-in {
     from { opacity: 0; transform: translateY(6px) scale(0.985); }
     to   { opacity: 1; transform: translateY(0) scale(1); }

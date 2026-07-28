@@ -46,7 +46,7 @@
   import ChartView from './ChartView.svelte'
   import CommandPalette from './CommandPalette.svelte'
   // AiChat / AiSidebar (large, pull in marked + shiki) are loaded lazily the first time
-  // the AI panel is opened — see the {#await import()} blocks below.
+  // the AI panel is opened - see the {#await import()} blocks below.
   import AiSettingsDialog from './AiSettingsDialog.svelte'
   import ConnectionModal from './ConnectionModal.svelte'
   import DbIcon from './DbIcon.svelte'
@@ -73,7 +73,7 @@
   import StatusBar from './StatusBar.svelte'
   import QueryLogConsole from './QueryLogConsole.svelte'
   import DisconnectDialog from './DisconnectDialog.svelte'
-  // InsertRowDialog removed — replaced by inline draft row in DataTable
+  // InsertRowDialog removed - replaced by inline draft row in DataTable
   import McpPanel from './McpPanel.svelte'
   import SearchPage from './SearchPage.svelte'
   // NotebookEditor (pulls Monaco via SqlCell + marked via MarkdownCell) is lazy-loaded
@@ -89,7 +89,7 @@
   // are loaded lazily at their render sites so the Monaco editor stays out of the
   // startup bundle until the user actually opens a SQL / ORM / JSON / diff / security tab.
   // Heavy feature pages (echarts / mermaid / swapy / xyflow+dagre) are loaded lazily
-  // the first time their tab is opened — see the {#await import()} blocks below.
+  // the first time their tab is opened - see the {#await import()} blocks below.
   // This keeps those large libraries out of the startup bundle and idle memory.
   import { Button } from '$lib/components/ui/button/index.js'
   import AlertTriangle from '@lucide/svelte/icons/triangle-alert'
@@ -268,7 +268,7 @@
   const SEARCH_DEBOUNCE_MS = 150
   // Per-table column metadata is tiny (an array of column defs), so we can cache a
   // lot of it. A high cap means revisiting a table almost never re-fetches columns
-  // on-demand — which is what caused a visible flicker on switch-back when the old
+  // on-demand - which is what caused a visible flicker on switch-back when the old
   // 60-entry limit evicted earlier tables in a large schema.
   const COLUMNS_CACHE_MAX = 400
 
@@ -327,7 +327,7 @@
   // Normalize wire-compatible aliases (mariadb → mysql, cockroachdb → postgres)
   // so every capability/dialect check below keeps working unchanged.
   const dbType = $derived(engineFamily(connection?.type))
-  /** Key-value engine (Redis) — swaps the whole relational UI for the keyspace page. */
+  /** Key-value engine (Redis) - swaps the whole relational UI for the keyspace page. */
   const isRedis = $derived(dbType === 'redis')
   /** Schema Explorer is useful for postgres + mysql; sqlite/d1 have no meaningful schema pages. */
   const hasSchemaExplorer = $derived((dbType === 'postgres' || dbType === 'mysql') && !isRedis)
@@ -358,7 +358,7 @@
 
   // Publish the app-chrome heights as CSS vars on :root so PORTALED overlays
   // (the connection modal lives in document.body, outside this tree) can inset
-  // themselves below the draggable titlebar and above the status bar — leaving
+  // themselves below the draggable titlebar and above the status bar - leaving
   // the window's drag region and status controls usable while the modal is open.
   $effect(() => {
     const root = document.documentElement
@@ -389,7 +389,7 @@
   let activeGroupId = $state(/** @type {string | null} */ (null))
   /** Tab id currently being dragged (drives the split drop targets). */
   let dragTabId = $state(/** @type {string | null} */ (null))
-  /** Number of panes (groups) in the layout — drives the focused-pane accent. */
+  /** Number of panes (groups) in the layout - drives the focused-pane accent. */
   const paneCount = $derived(paneRoot ? PaneTree.allGroups(paneRoot).length : 0)
   /** Floating drag preview position + label (follows the cursor). */
   let dragGhost = $state(/** @type {{ x: number, y: number, title: string } | null} */ (null))
@@ -458,10 +458,10 @@
   let sequences = $state([])
   /** @type {'data' | 'structure'} */
   let tableViewMode = $state('data')
-  /** How the data view renders loaded rows — sticky per tab via snapshots. */
+  /** How the data view renders loaded rows - sticky per tab via snapshots. */
   /** @type {'table' | 'json' | 'record' | 'text' | 'chart' | 'erd'} */
   let dataViewMode = $state(/** @type {any} */ (loadSettings().defaultDataView))
-  /** @type {import('$lib/api.js').ColumnStructureRow[] | null} — loaded on demand when switching to structure view */
+  /** @type {import('$lib/api.js').ColumnStructureRow[] | null} - loaded on demand when switching to structure view */
   let structureColumns = $state(/** @type {any[]} */ ([]))
   let loadingStructure = $state(false)
   let _structureSeq = 0
@@ -481,7 +481,7 @@
   // default; per-session, applies to the active table tab.
   let liveEnabled = $state(false)
   const liveSupported = $derived(connection?.type === 'postgres' || connection?.type === 'sqlite')
-  // Stable identity of what should be watched — only changes when the target
+  // Stable identity of what should be watched - only changes when the target
   // table changes, so row refetches (which replace the tab object) don't churn it.
   const liveTableKey = $derived.by(() => {
     if (!liveEnabled || !liveSupported) return ''
@@ -501,7 +501,7 @@
     const key = liveTableKey
     // No liveStop() here: when the key clears, Svelte runs the prior run's
     // cleanup (which stops the watcher) *before* re-executing this effect, so
-    // the returned cleanup is the single stop path — calling it again here
+    // the returned cleanup is the single stop path - calling it again here
     // would be a redundant double-stop.
     if (!key) return
     const [schema, table] = JSON.parse(key)
@@ -577,7 +577,7 @@
   /** @type {{ focusEditor: () => void, openQuery?: (content: string) => void } | null} */
   let sqlConsoleRef = $state(null)
 
-  /** "Open in SQL editor" — generate a SELECT reflecting the current table view and open it in the SQL editor. */
+  /** "Open in SQL editor" - generate a SELECT reflecting the current table view and open it in the SQL editor. */
   // ── Search options (match case / whole word / regex) ──────────────────────
   /** @type {import('$lib/search-options.js').SearchOptions} */
   let searchOptions = $state({ matchCase: false, wholeWord: false, regex: false })
@@ -675,7 +675,7 @@
 
   /**
    * Apply find & replace edits. All edits target one column, so they collapse
-   * into chunked single-statement CASE updates keyed by primary key — one or
+   * into chunked single-statement CASE updates keyed by primary key - one or
    * two round-trips instead of one per row. ClickHouse (no standard UPDATE)
    * keeps the per-row pipeline.
    * @param {Array<{ rowIdx: number, colIdx: number, value: string }>} edits
@@ -760,7 +760,7 @@
     try {
       let n = await countTableRows(activeSchema, tableName)
       if (n < 0) {
-        // The count command is Postgres-only (other engines return -1) — fall
+        // The count command is Postgres-only (other engines return -1) - fall
         // back to a portable COUNT(*) through the regular SQL path, which every
         // driver implements. Quoting/qualification follows the grid's rules.
         const tbl = qualifiedTable({ dialect: dbType, schema: activeSchema, table: tableName })
@@ -839,7 +839,7 @@
   // flag reset to false, so the {#if} unmounts it and frees its resources.
   // Reopening re-sets the flag (via the activate effect above) and re-mounts.
   //
-  // Only purely data-derived views are eligible — they hold no unpersisted user
+  // Only purely data-derived views are eligible - they hold no unpersisted user
   // input, so re-deriving on re-open is lossless. EXCLUDED (kept mounted): sql &
   // table (kept hot), and orm/json/data-diff/logs/search/redis/objects/extensions
   // which hold unpersisted user input, editor/undo state, or streaming buffers.
@@ -869,7 +869,7 @@
   })
 
   // Single sweep (~60s) unmounts views hidden past the idle threshold. Runs even
-  // when backgrounded — freeing memory while hidden is desirable. Cheap scan.
+  // when backgrounded - freeing memory while hidden is desirable. Cheap scan.
   $effect(() => {
     const id = setInterval(() => {
       const now = Date.now()
@@ -901,7 +901,7 @@
     (activeSchema && activeTable) ? (incomingFkCache.get(`${activeSchema}.${activeTable}`) ?? []) : []
   )
   /** Virtual rel column labels for the toolbar columns dropdown.
-   *  Must enumerate ALL incoming FK tables — no cap — so every rel column
+   *  Must enumerate ALL incoming FK tables - no cap - so every rel column
    *  the DataTable can ever render is always reachable in the show/hide panel.
    *  (DataTable caps visible columns at MAX_VIRTUAL_COLS=5 but fills that
    *   quota from whatever isn't hidden, so capping here makes it impossible
@@ -931,19 +931,19 @@
   let deletingRows = $state(false)
   let insertingRow = $state(false)
   let tableReadonly = $state(false)
-  /** Bound from DataTable — triggers the inline new-row draft. */
+  /** Bound from DataTable - triggers the inline new-row draft. */
   let dtBeginInsertRow = $state(/** @type {() => void} */ (() => {}))
   let showMcpPanel = $state(false)
   let mcpRunning = $state(false)
   /** @type {{ rowIdx: number, colIdx: number, draft: string } | null} */
   let editingCell = $state(null)
-  // ── Staged (unsaved) cell edits — surfaced as Apply/Reset in the StatusBar ──
+  // ── Staged (unsaved) cell edits - surfaced as Apply/Reset in the StatusBar ──
   let pendingEditCount = $state(0)
   /** @type {() => void | Promise<void>} */
   let applyEdits = $state(() => {})
   /** @type {() => void} */
   let resetEdits = $state(() => {})
-  /** Bound from DataTable — stages the selected rows for deletion (red diff). */
+  /** Bound from DataTable - stages the selected rows for deletion (red diff). */
   let stageDeleteSelectedRows = $state(() => {})
 
   /** Table key ("schema.table") for a tab, or '' for non-table tabs. */
@@ -996,7 +996,7 @@
           const ok = await askConfirm('You have unsaved table changes. Discard them and quit?', 'Discard & quit')
           if (ok) await win.destroy()
         })
-      } catch { /* non-Tauri / web preview — no window close event */ }
+      } catch { /* non-Tauri / web preview - no window close event */ }
     })()
     return () => unlisten()
   })
@@ -1017,7 +1017,7 @@
   // preserved across tab switches.
   /** @type {() => { left: number, top: number }} */
   let tableGetScroll = $state(() => ({ left: 0, top: 0 }))
-  /** @type {() => number[]} — live grid's open row-expand panels, persisted per tab */
+  /** @type {() => number[]} - live grid's open row-expand panels, persisted per tab */
   let tableGetExpanded = $state(() => /** @type {number[]} */ ([]))
   /** @type {(pos: { left?: number, top?: number }) => void} */
   let tableApplyScroll = $state(() => {})
@@ -1029,7 +1029,7 @@
   /**
    * Run `fn` once a lazily-mounted component ref becomes available. These panels
    * (SQL console, AI sidebar, …) are now loaded via dynamic import, so their
-   * `bind:this` ref is null for the first few frames after opening — a single
+   * `bind:this` ref is null for the first few frames after opening - a single
    * tick/microtask isn't enough. Polls a bounded number of animation frames so
    * the action still fires on first open without ever spinning forever.
    * @template T @param {() => T | null} getRef @param {(ref: T) => void} fn @param {number} [frames]
@@ -1078,7 +1078,7 @@
   })
   /** Temporal is newest-first; keyset/cursor honour the sort dir on the key (default asc). */
   const _keysetDesc = $derived($appPaginationMode === 'temporal' ? true : (rowSort?.column === _keysetKeyCol && rowSort?.direction === 'desc'))
-  /** Whether keyset can drive this table right now (else offset — the safe fallback). */
+  /** Whether keyset can drive this table right now (else offset - the safe fallback). */
   const _keysetActive = $derived.by(() => {
     if ($appPaginationMode === 'offset') return false
     if (!_keysetKeyCol || !_keysetKeyType) return false
@@ -1096,15 +1096,15 @@
   // Monotonic id so an out-of-order / superseded row fetch can't clobber a
   // newer one when the user pages rapidly.
   let _loadSeq = 0
-  // Infinite scroll — accumulated rows across all "load more" fetches.
+  // Infinite scroll - accumulated rows across all "load more" fetches.
   // Kept as deep $state (not .raw): handleLoadMore appends in place with .push()
   // (O(1) amortised) and DataTable's rowTops/contentHeight $derived reads rows.length
-  // to grow the scroll extent — it needs the proxy's length signal to fire on the
+  // to grow the scroll extent - it needs the proxy's length signal to fire on the
   // in-place push. .raw would lose that notify without an O(n²) whole-array copy.
   let _infiniteRows = $state(/** @type {any[]} */ ([]))
   // Hard ceiling on accumulated infinite-scroll rows. Without it, scrolling a
   // huge table in infinite mode would keep appending until the entire result set
-  // was resident (and deep-proxied) — unbounded memory. At the cap we stop
+  // was resident (and deep-proxied) - unbounded memory. At the cap we stop
   // auto-loading; the count/"load more" UI reflects that the view is capped.
   const INFINITE_ROW_CAP = 200_000
   let infiniteScroll = $state(loadInfiniteScroll())
@@ -1114,7 +1114,7 @@
   // sparse array of length = total with only the windows near the viewport
   // loaded, so 5M rows cost ~tens of MB instead of ~GBs. Absolute indexing is
   // preserved (rows[i] is still row i), so selection / hit-testing / scroll are
-  // untouched — only the *data* is windowed. dataVersion bumps trigger a grid
+  // untouched - only the *data* is windowed. dataVersion bumps trigger a grid
   // redraw after a window is spliced in (rows identity is unchanged).
   const WINDOW_FETCH = 20_000     // rows per window request
   const WINDOW_THRESHOLD = 200_000 // window only above this total
@@ -1181,7 +1181,7 @@ let rowSearch = $state('')
   const activeTab = $derived(tabs.find((t) => t.id === activeTabId) ?? null)
   /** Fast id → tab lookup for per-group tab-strip rendering. */
   const tabsById = $derived(new Map(tabs.map((t) => [t.id, t])))
-  /** 'table' | 'view' | 'materialized_view' | 'foreign_table' — for the active table tab */
+  /** 'table' | 'view' | 'materialized_view' | 'foreign_table' - for the active table tab */
   const activeTableKind = $derived(
     activeTab?.kind === 'table'
       ? (/** @type {any} */ (activeTab.state))?.tableKind ?? 'table'
@@ -1202,7 +1202,7 @@ let rowSearch = $state('')
   const activeView = $derived(activeTab?.kind === 'sql' ? 'sql' : 'table')
 
   // Stable name arrays derived separately so sqlSchemaHints doesn't rebuild
-  // on every row fetch — only rebuilds when the column set actually changes.
+  // on every row fetch - only rebuilds when the column set actually changes.
   const _activeColNames = $derived(columns.map((c) => c.name))
   const _sqlColNames = $derived(sqlColumns.map((c) => c.name))
   const _tableNames = $derived(tables.map((t) => t.name))
@@ -1216,7 +1216,7 @@ let rowSearch = $state('')
   $effect(() => {
     if (activeView !== 'sql' || !connection || !activeSchema) return
     const schema = activeSchema
-    // Enum/function completion hints are PostgreSQL-only — skip the round-trips
+    // Enum/function completion hints are PostgreSQL-only - skip the round-trips
     // (which would just return empty) on every other engine.
     if (engineSupports('enums', connection?.type)) {
       listEnums(schema).then((enums) => {
@@ -1239,7 +1239,7 @@ let rowSearch = $state('')
 
   // ── Connection health monitor ─────────────────────────────────────────────────
   // Pings the active DB periodically. On failure it flags the connection as lost
-  // (a subtle red dot in the StatusBar) and silently reconnects in place — NO
+  // (a subtle red dot in the StatusBar) and silently reconnects in place - NO
   // popup. Pings every 30s when healthy; every 6s while lost so recovery is
   // detected fast. Clears itself the moment the connection is back.
   $effect(() => {
@@ -1275,7 +1275,7 @@ let rowSearch = $state('')
   })
 
   // Reconnect the instant the OS reports the network is back, or when the user
-  // returns to a backgrounded window — the two moments a dropped remote DB most
+  // returns to a backgrounded window - the two moments a dropped remote DB most
   // likely became reachable again. Both are no-ops unless the connection is lost.
   $effect(() => {
     if (typeof window === 'undefined') return
@@ -1320,7 +1320,7 @@ let rowSearch = $state('')
   const sqlSchemaHints = $derived.by(() => {
     // Only the SQL editor consumes this, and building columnsByTable iterates the
     // whole table-column cache (dozens of tables). Skip that work entirely unless
-    // the SQL view is active — otherwise every table-tab switch paid for hints
+    // the SQL view is active - otherwise every table-tab switch paid for hints
     // nothing was showing. When the user opens SQL, activeView flips and this
     // rebuilds fresh from the current caches.
     if (activeView !== 'sql') {
@@ -1433,7 +1433,7 @@ let rowSearch = $state('')
   // The all-tables column map only changes when the table-column cache changes
   // (a new table is fetched), NOT when the user switches to an already-cached
   // table. Splitting it into its own derived means a table click no longer
-  // rebuilds this whole object — that rebuild (Object.fromEntries over every
+  // rebuilds this whole object - that rebuild (Object.fromEntries over every
   // cached table) was a main-thread stall on each table switch while AI was open.
   const _allTableColumns = $derived.by(() => {
     if (!_aiActive) return /** @type {Record<string, { name: string, dataType: string, nullable: boolean, enumValues?: string[] }[]>} */ ({})
@@ -1447,7 +1447,7 @@ let rowSearch = $state('')
 
   const aiSchemaContext = $derived.by(() => {
     // Only rebuild the expensive schema context when AI is actually visible.
-    // When AI is hidden, return a cheap stable object — components using it
+    // When AI is hidden, return a cheap stable object - components using it
     // are either hidden or inert, so stale data is fine.
     if (!_aiActive) {
       return {
@@ -1496,7 +1496,7 @@ let rowSearch = $state('')
 
   /** @returns {TableTabState} */
   function captureTableSnapshot() {
-    // A windowed result set holds a huge sparse array — never cache it into the
+    // A windowed result set holds a huge sparse array - never cache it into the
     // tab. Store empty columns/rows so re-activation takes the refetch path
     // (fetchRowsForTab → loadRows) and re-establishes windowing cleanly.
     return {
@@ -1553,11 +1553,11 @@ let rowSearch = $state('')
     activeTable = s.table
     hiddenColumns = new Set(s.hiddenColumns)
     filterBarOpen = s.filterBarOpen ?? false
-    // Fresh tabs have no stored view mode — honor Settings → Database → Default view.
+    // Fresh tabs have no stored view mode - honor Settings → Database → Default view.
     dataViewMode = s.dataViewMode ?? /** @type {any} */ (loadSettings().defaultDataView)
     // Restore the grid scroll position for this tab. Defer one tick so that
     // if DataTable just remounted (switching from a non-table tab), the new
-    // applyScroll binding is in place before we call it — otherwise the old
+    // applyScroll binding is in place before we call it - otherwise the old
     // closure reads a null tableContainer and the restore is silently dropped.
     const _restoreLeft = s.scrollLeft ?? 0
     const _restoreTop = s.scrollTop ?? 0
@@ -1613,7 +1613,7 @@ let rowSearch = $state('')
 
   // Raw (non-proxied) row arrays keyed by tab id. `tabs` is a deep-proxied
   // $state, so a rows array stored inside it and read back on re-activation
-  // returns a proxy — which the canvas draw() would then index per cell per
+  // returns a proxy - which the canvas draw() would then index per cell per
   // frame (the scroll-lag regression). We keep the raw reference here and hand it
   // straight back on restore so the live grid always holds a genuine raw array.
   const _liveRowsByTab = new Map()
@@ -1658,11 +1658,11 @@ let rowSearch = $state('')
         await loadTables()
       }
       if (raw.columns.length === 0) {
-        // No cached data — apply lightweight snapshot (no need to clone rows)
+        // No cached data - apply lightweight snapshot (no need to clone rows)
         applyTableSnapshot(raw)
         if (raw.table && !fetchingTabIds.has(tab.id)) void fetchRowsForTab(tab.id)
       } else {
-        // Has cached data — clone Sets so mutations don't bleed between tabs, and
+        // Has cached data - clone Sets so mutations don't bleed between tabs, and
         // restore the RAW rows reference (not the proxied tab.state.rows) so the
         // grid doesn't index a proxy on the scroll hot path.
         const snap = cloneTableTabState(raw)
@@ -1685,9 +1685,9 @@ let rowSearch = $state('')
     commandOpen = true
   })
 
-  // Ctrl/⌘+P — VSCode-style "Go to page" navigator. Registered as a capture-phase
+  // Ctrl/⌘+P - VSCode-style "Go to page" navigator. Registered as a capture-phase
   // window listener (not createHotkey) so it beats the webview's native Print
-  // accelerator on WebKitGTK/WebView2 — otherwise the print dialog opens first
+  // accelerator on WebKitGTK/WebView2 - otherwise the print dialog opens first
   // and the handler never runs.
   $effect(() => {
     /** @param {KeyboardEvent} e */
@@ -1695,7 +1695,7 @@ let rowSearch = $state('')
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && (e.key === 'p' || e.key === 'P')) {
         e.preventDefault()
         e.stopPropagation()
-        // Only open+set page mode from a closed state — never yank the page mode
+        // Only open+set page mode from a closed state - never yank the page mode
         // if the palette is already open mid-interaction.
         if (commandOpen) return
         commandPage = 'pages'
@@ -1784,7 +1784,7 @@ let rowSearch = $state('')
   })
 
   // Note: Mod+Tab / Mod+Shift+Tab above already map to Ctrl+Tab on Windows/Linux
-  // and Cmd+Tab on macOS. No additional Ctrl+Tab registration needed — duplicates
+  // and Cmd+Tab on macOS. No additional Ctrl+Tab registration needed - duplicates
   // cause the "[already registered]" warning from @tanstack/svelte-hotkeys.
 
   createHotkey('Mod+B', (e) => {
@@ -1832,7 +1832,7 @@ let rowSearch = $state('')
     })
   }
 
-  // Find & replace in the current table — editor-style Ctrl/⌘+H.
+  // Find & replace in the current table - editor-style Ctrl/⌘+H.
   createHotkey('Mod+H', (e) => {
     if (!connection || !activeTable || columns.length === 0 || !findReplaceEnabled) return
     e.preventDefault()
@@ -1840,7 +1840,7 @@ let rowSearch = $state('')
   })
 
   // Also bind Cmd/Ctrl+Alt+F (VS Code's macOS "replace" shortcut). On macOS the OS
-  // swallows Cmd+H to hide the app, so Mod+H never reaches us there — this is the
+  // swallows Cmd+H to hide the app, so Mod+H never reaches us there - this is the
   // reliable cross-platform binding.
   createHotkey('Mod+Alt+F', (e) => {
     if (!connection || !activeTable || columns.length === 0 || !findReplaceEnabled) return
@@ -1848,7 +1848,7 @@ let rowSearch = $state('')
     findReplaceOpen = true
   })
 
-  // Switch to saved database connection N (Mod+Alt+1..9) — plain digits, not
+  // Switch to saved database connection N (Mod+Alt+1..9) - plain digits, not
   // shifted ones, so the binding survives non-US keyboard layouts.
   for (let n = 1; n <= 9; n++) {
     createHotkey(`Mod+Alt+${n}`, (e) => {
@@ -1860,7 +1860,7 @@ let rowSearch = $state('')
     })
   }
 
-  // Command palette — VS Code muscle-memory alias for Mod+K.
+  // Command palette - VS Code muscle-memory alias for Mod+K.
   createHotkey('Mod+Shift+P', (e) => {
     e.preventDefault()
     commandPage = 'pages'
@@ -1874,14 +1874,14 @@ let rowSearch = $state('')
     showDisconnectDialog = true
   })
 
-  // Open the keyboard-shortcuts reference (Ctrl/⌘+/ — same key as Mod+? without shift).
+  // Open the keyboard-shortcuts reference (Ctrl/⌘+/ - same key as Mod+? without shift).
   createHotkey('Mod+/', (e) => {
     if (commandOpen || showConnectionModal || showSettingsModal || showShortcutsModal) return
     e.preventDefault()
     showShortcutsModal = true
   })
 
-  // Jump straight to tab N (Ctrl/⌘+1..8); 9 always jumps to the last tab —
+  // Jump straight to tab N (Ctrl/⌘+1..8); 9 always jumps to the last tab -
   // the same convention as browsers and editors.
   for (let n = 1; n <= 9; n++) {
     createHotkey(`Mod+${n}`, (e) => {
@@ -1913,7 +1913,7 @@ let rowSearch = $state('')
     restorePreviousTheme()
   })
 
-  // Refresh everything — schemas, table list, and the active table's rows.
+  // Refresh everything - schemas, table list, and the active table's rows.
   createHotkey('Mod+Shift+R', (e) => {
     if (!connection) return
     e.preventDefault()
@@ -1951,7 +1951,7 @@ let rowSearch = $state('')
     }
   })
 
-  // Table toolbar menus — open the Filter / Sort / Columns menu for the active
+  // Table toolbar menus - open the Filter / Sort / Columns menu for the active
   // table tab (data view only). Guarded so they don't fire while typing.
   /** @param {KeyboardEvent} e */
   function tableMenuHotkeyGuard(e) {
@@ -2020,7 +2020,7 @@ let rowSearch = $state('')
 
   createHotkey('Mod+Backspace', (e) => {
     if (commandOpen || showConnectionModal || showSettingsModal) return
-    // Ctrl+Backspace is the word-delete shortcut in inputs/textareas — don't steal it
+    // Ctrl+Backspace is the word-delete shortcut in inputs/textareas - don't steal it
     const el = document.activeElement
     if (
       el instanceof HTMLInputElement ||
@@ -2299,7 +2299,7 @@ let rowSearch = $state('')
     whenRefReady(() => aiSidebarRef, (r) => r.sendMessage(q))
   }
 
-  /** Context-aware Accept from the AI sidebar — routes into the right editor. */
+  /** Context-aware Accept from the AI sidebar - routes into the right editor. */
   /** @param {{ kind: 'sql' | 'code', lang?: string, content: string }} detail */
   async function handleAiSidebarAccept(detail) {
     if (detail.kind === 'code' && activeTab?.kind === 'orm') {
@@ -2322,9 +2322,9 @@ let rowSearch = $state('')
     void activateTab(tabs[idx].id)
   }
 
-  // ── Experimental Vim mode — global layer ────────────────────────────────────
+  // ── Experimental Vim mode - global layer ────────────────────────────────────
   // `:` opens the command palette (command mode); `gt` / `gT` cycle tabs. Only
-  // fires on "neutral" surfaces — inputs, Monaco editors, and the data grid own
+  // fires on "neutral" surfaces - inputs, Monaco editors, and the data grid own
   // their own Vim handling. A focusin listener keeps the status indicator honest.
   let _vimGPending = false
   let _vimGTimer = /** @type {ReturnType<typeof setTimeout> | 0} */ (0)
@@ -2438,7 +2438,7 @@ let rowSearch = $state('')
   // append, and activate it. Replaces ~13 near-identical open*Tab bodies.
   // `capability` gates availability; `capabilityFirst` runs that gate before the
   // pro check (so an unavailable feature returns silently rather than showing the
-  // pro upsell) — matching the original per-tab ordering.
+  // pro upsell) - matching the original per-tab ordering.
   /**
    * @param {{ find: (tabs: any[]) => any, create: () => any, capability?: () => boolean, capabilityFirst?: boolean }} cfg
    */
@@ -2484,7 +2484,7 @@ let rowSearch = $state('')
     openSingletonTab({ find: findObjectsTab, create: createObjectsTab })
   }
 
-  /** The Redis keyspace workspace. NOT pro-gated — it's the primary (and only)
+  /** The Redis keyspace workspace. NOT pro-gated - it's the primary (and only)
    *  interface for a Redis connection, so it must open on connect for everyone. */
   function openRedisTab() {
     const existing = findRedisTab(tabs)
@@ -2513,7 +2513,7 @@ let rowSearch = $state('')
     clearTableEditor()
   }
 
-  /** License activation page. Deliberately NOT via openSingletonTab — that
+  /** License activation page. Deliberately NOT via openSingletonTab - that
    *  helper is pro-gated, and this tab exists precisely for non-Pro users. */
   function openLicenseTab() {
     const existing = findLicenseTab(tabs)
@@ -2649,7 +2649,7 @@ let rowSearch = $state('')
   function evictColdTabRows(activeId) {
     _tabRowsMru = [..._tabRowsMru.filter((x) => x !== activeId), activeId]
     const keep = new Set(_tabRowsMru.slice(-TAB_ROWS_MRU_MAX))
-    // Never evict a tab that is the active tab of a visible split pane — its rows
+    // Never evict a tab that is the active tab of a visible split pane - its rows
     // are on screen in that pane's snapshot, so blanking them would flip the pane
     // to the empty "Focus this pane to load" placeholder.
     if (paneRoot) for (const g of PaneTree.allGroups(paneRoot)) if (g.activeTabId) keep.add(g.activeTabId)
@@ -2755,10 +2755,10 @@ let rowSearch = $state('')
     if (!tab || tab.kind === 'welcome') return
     _liveRowsByTab.delete(tab.id)
     // Snapshot with a shallow state clone so later edits to the live tree can't
-    // mutate what we'll restore. `id`/`pinned` are dropped — reopen mints fresh.
+    // mutate what we'll restore. `id`/`pinned` are dropped - reopen mints fresh.
     const { id: _id, pinned: _pinned, ...rest } = tab
     const state = tab.state ? { ...tab.state } : tab.state
-    // Drop the bulky payloads — a closed 1M-row tab must not pin its whole result
+    // Drop the bulky payloads - a closed 1M-row tab must not pin its whole result
     // set in memory (20 stacked closed tabs could otherwise retain gigabytes).
     // Reopen restores the query/filters/sort and refetches: applyTabToEditor
     // already treats columns.length === 0 as "no cached data → fetch".
@@ -2774,7 +2774,7 @@ let rowSearch = $state('')
     closedTabStack = [...closedTabStack, snapshot].slice(-CLOSED_TAB_STACK_MAX)
   }
 
-  /** Ctrl/⌘+Shift+T — reopen the most recently closed tab. */
+  /** Ctrl/⌘+Shift+T - reopen the most recently closed tab. */
   function reopenLastClosedTab() {
     const entry = closedTabStack[closedTabStack.length - 1]
     if (!entry) return
@@ -2786,7 +2786,7 @@ let rowSearch = $state('')
     void activateTab(tab.id)
   }
 
-  /** @param {string} id — keep this tab (and pinned tabs), close everything else */
+  /** @param {string} id - keep this tab (and pinned tabs), close everything else */
   async function closeOtherTabs(id) {
     const keep = tabs.find((t) => t.id === id)
     if (!keep) return
@@ -2811,7 +2811,7 @@ let rowSearch = $state('')
   /**
    * Close a batch of tabs at once ("Close Tabs to Left/Right"). Pinned tabs are
    * skipped; a single confirm covers all unsaved changes in the batch.
-   * @param {string[]} ids @param {string} anchorId — the tab whose menu was used
+   * @param {string[]} ids @param {string} anchorId - the tab whose menu was used
    */
   async function closeManyTabs(ids, anchorId) {
     saveActiveTabState()
@@ -2838,7 +2838,7 @@ let rowSearch = $state('')
   }
 
   /**
-   * Duplicate a table/SQL tab — a fresh tab with a deep-enough copy of the
+   * Duplicate a table/SQL tab - a fresh tab with a deep-enough copy of the
    * source state, inserted right after the original.
    * @param {string} id
    */
@@ -2974,7 +2974,7 @@ let rowSearch = $state('')
       const key = tabTableKey(closing)
       if (key) clearPendingChanges(key)
     }
-    // Remember it so Reopen Closed Tab (⌘⇧T) can restore it — mirrors closeTab().
+    // Remember it so Reopen Closed Tab (⌘⇧T) can restore it - mirrors closeTab().
     rememberClosedTab(closing)
     const nextTabs = tabs.filter((t) => t.id !== id)
     if (nextTabs.length === 0) {
@@ -3058,7 +3058,7 @@ let rowSearch = $state('')
   }
 
   /**
-   * "View data structure" from the sidebar — open the table's tab and switch
+   * "View data structure" from the sidebar - open the table's tab and switch
    * straight to the structure view (the structure auto-load effect fetches it).
    * @param {string} table
    */
@@ -3068,7 +3068,7 @@ let rowSearch = $state('')
     tableViewMode = 'structure'
   }
 
-  /** @param {string} id — pin/unpin a tab; pinned tabs group at the front */
+  /** @param {string} id - pin/unpin a tab; pinned tabs group at the front */
   function toggleTabPin(id) {
     const tab = tabs.find((t) => t.id === id)
     if (!tab) return
@@ -3147,9 +3147,9 @@ let rowSearch = $state('')
       activeSchema = schema
       await loadTables()
     }
-    // Fire the fetch in background — caller can open more tabs without waiting
+    // Fire the fetch in background - caller can open more tabs without waiting
     void fetchRowsForTab(tab.id)
-    // Load reverse FKs once per table (cached — not re-fetched on page/sort changes)
+    // Load reverse FKs once per table (cached - not re-fetched on page/sort changes)
     void loadIncomingForeignKeys(schema, table)
   }
 
@@ -3159,7 +3159,7 @@ let rowSearch = $state('')
   function setIncomingFkCache(key, value) {
     const next = new Map(incomingFkCache)
     next.set(key, value)
-    // FIFO eviction — Map preserves insertion order, so drop the oldest entries.
+    // FIFO eviction - Map preserves insertion order, so drop the oldest entries.
     while (next.size > INCOMING_FK_CACHE_MAX) {
       const oldest = next.keys().next().value
       if (oldest === undefined) break
@@ -3197,7 +3197,7 @@ let rowSearch = $state('')
         return { columns: data.columns ?? [], rows: data.rows ?? [] }
       } else {
         const revFilters = buildReverseForeignKeyFilters(detail, columns, detail.row)
-        if (!revFilters) return { columns: [], rows: [], error: 'Cannot build filter — value may be NULL' }
+        if (!revFilters) return { columns: [], rows: [], error: 'Cannot build filter, value may be NULL' }
         const fromSchema = detail.fromSchema || activeSchema
         const data = await getTableRows(fromSchema, detail.fromTable, 50, 0, { filters: filtersForApi(revFilters) })
         return { columns: data.columns ?? [], rows: data.rows ?? [] }
@@ -3424,7 +3424,7 @@ let rowSearch = $state('')
       const list = await listEnums(activeSchema)
       // Dedupe values defensively: enum labels are a set, but a bad introspection
       // join could return repeats, and the schema pages key their {#each} on the
-      // value — a duplicate would crash the view (each_key_duplicate).
+      // value - a duplicate would crash the view (each_key_duplicate).
       enums = list.map((e) => ({ name: e.name ?? '', values: [...new Set(e.values ?? [])] }))
     } catch {
       enums = []
@@ -3469,14 +3469,14 @@ let rowSearch = $state('')
 
   // Table-list cache keyed by connection+schema. Rapid navigation (switching
   // between tabs in different schemas, reopening the sidebar) used to re-run the
-  // full listTables round-trip — which includes a per-table row count — on every
+  // full listTables round-trip - which includes a per-table row count - on every
   // move. A short TTL collapses those repeats while keeping counts near-live;
   // data-changing paths (connect, refresh, DDL) pass { force: true } to bypass it.
   const TABLE_LIST_TTL_MS = 3000
   /** @type {Map<string, { tables: any[], at: number }>} */
   let _tableListCache = new Map()
   // Which connection+schema the catalog sub-state (indexes/enums/triggers/
-  // sequences) currently reflects — so a cached table-list hit never leaves it
+  // sequences) currently reflects - so a cached table-list hit never leaves it
   // showing another schema's catalog.
   let _catalogLoadedFor = ''
 
@@ -3526,7 +3526,7 @@ let rowSearch = $state('')
     }
     // The list arrives with unknown (null) counts so it renders immediately;
     // resolve them with exact COUNT(*)s in the background and patch them in.
-    // Covers the cached path too — a list cached mid-resolve may still hold nulls.
+    // Covers the cached path too - a list cached mid-resolve may still hold nulls.
     const unresolved = tables.filter((t) => t.rowCount === null).map((t) => t.name)
     if (unresolved.length > 0) void resolveRowCounts(key, schemaAtCall, unresolved)
     // Reload the catalog sub-state only when it doesn't already reflect this
@@ -3544,7 +3544,7 @@ let rowSearch = $state('')
   /**
    * Background pass: exact counts for tables whose row count came back unknown
    * from listTables. Patches the sidebar (and the list cache) as results land.
-   * Failures are ignored — counts are cosmetic and must never block the catalog.
+   * Failures are ignored - counts are cosmetic and must never block the catalog.
    * @param {string} key connection:schema cache key at the time of the request
    * @param {string} schema
    * @param {string[]} names
@@ -3560,7 +3560,7 @@ let rowSearch = $state('')
       const cached = _tableListCache.get(key)
       if (cached) _tableListCache.set(key, { tables, at: cached.at })
     } catch {
-      /* ignore — counts fill in on the next refresh instead */
+      /* ignore - counts fill in on the next refresh instead */
     }
   }
 
@@ -3681,10 +3681,10 @@ let rowSearch = $state('')
       return
     }
     // A fresh fetch replaces the row set, so any row-index-keyed staged changes
-    // cached for this table no longer line up — drop them.
+    // cached for this table no longer line up - drop them.
     clearPendingChanges(`${s.schema}.${s.table}`)
 
-    // Single helper to patch the tab state — avoids multiple tabs.map() calls per fetch
+    // Single helper to patch the tab state - avoids multiple tabs.map() calls per fetch
     /** @param {Partial<TableTabState>} patch */
     function patchTab(patch) {
       const i = tabs.findIndex((t) => t.id === tabId)
@@ -3694,13 +3694,13 @@ let rowSearch = $state('')
       tabs = next
     }
 
-    // Mark loading — one tabs write
+    // Mark loading - one tabs write
     patchTab({ loadingRows: true, error: '' })
     if (tabId === activeTabId) { loadingRows = true; error = '' }
 
     // "All" on a large table would pull the whole set into this tab. Route the
     // active tab through loadRows (which windows it) and skip prefetch entirely
-    // for large background tabs — they window on activation instead.
+    // for large background tabs - they window on activation instead.
     if (s.pageSize === PAGE_SIZE_ALL && (s.total > WINDOW_THRESHOLD || s.total <= 0)) {
       fetchingTabIds.delete(tabId)
       if (tabId === activeTabId) await loadRows()
@@ -3717,7 +3717,7 @@ let rowSearch = $state('')
     }
 
     try {
-      // Resolve the "All" sentinel — and guard a corrupt/unset value — into a
+      // Resolve the "All" sentinel - and guard a corrupt/unset value - into a
       // real fetch limit; the backend rejects limit < 1. Mirrors effectivePageSize.
       const limit =
         s.pageSize === PAGE_SIZE_ALL
@@ -3746,7 +3746,7 @@ let rowSearch = $state('')
         editingCell: null,
       }
 
-      // Persist result to tab — one tabs write
+      // Persist result to tab - one tabs write
       patchTab(result)
 
       // Update AI schema cache (LRU, capped)
@@ -3764,7 +3764,7 @@ let rowSearch = $state('')
         error = ''
       }
 
-      // Background count — keeps the tab's row fetch non-blocking. Patches the
+      // Background count - keeps the tab's row fetch non-blocking. Patches the
       // tab (and global total if still active) when it resolves; -1 (non-PG /
       // failure) leaves the total readRowsResponse already set.
       void (async () => {
@@ -3826,7 +3826,7 @@ let rowSearch = $state('')
       _windowLoaded.add(w)
       dataVersion++
     } catch {
-      // leave unloaded — the next visible-range emit retries
+      // leave unloaded - the next visible-range emit retries
     } finally {
       _windowFetching.delete(w)
     }
@@ -3880,7 +3880,7 @@ let rowSearch = $state('')
 
   /**
    * @param {{ keepScroll?: boolean }} [opts]
-   *   keepScroll — used by live refresh: re-run the *current* query (filters,
+   *   keepScroll - used by live refresh: re-run the *current* query (filters,
    *   sort, search, page from global state) but update rows in place without
    *   jumping the grid to the top or closing the row inspector.
    */
@@ -3930,7 +3930,7 @@ let rowSearch = $state('')
       // fetches (pagination, sort, filter, live) reuse what we already hold,
       // skipping several round-trips per fetch.
       const includeMeta = columns.length === 0
-      // Window only in "All" mode on a large set — fixed page sizes still
+      // Window only in "All" mode on a large set - fixed page sizes still
       // paginate exactly as before. When windowing we cap the first fetch to one
       // window and ask for the count up front (needed to size the sparse array).
       const wantsWindow = pageSize === PAGE_SIZE_ALL && effectivePageSize > WINDOW_THRESHOLD
@@ -3946,7 +3946,7 @@ let rowSearch = $state('')
           filters: filtersForApi(rowFilters, columns),
           keyset: keysetArg,
           includeMeta,
-          // Don't wait on COUNT(*) — paint rows now, count streams in below.
+          // Don't wait on COUNT(*) - paint rows now, count streams in below.
           // Windowed loads need the total immediately to size the sparse array.
           includeCount: wantsWindow,
         })
@@ -3978,7 +3978,7 @@ let rowSearch = $state('')
         total = windowTotal
         dataVersion++
       } else if (wantsWindow) {
-        // Below the windowing bar after counting — load the remainder in full.
+        // Below the windowing bar after counting - load the remainder in full.
         resetWindowing()
         if (windowTotal > fetched.length) {
           const restData = await getTableRows(activeSchema, activeTable, Math.min(windowTotal - fetched.length, MAX_PAGE_SIZE), fetched.length, currentRowQuery(false))
@@ -4003,7 +4003,7 @@ let rowSearch = $state('')
         _pageFirstKey = rows.length ? rows[0]?.[_keyColIndex] : null
         _pageLastKey = rows.length ? rows[rows.length - 1]?.[_keyColIndex] : null
       }
-      // Live refresh updates in place — only reset scroll for user-driven loads
+      // Live refresh updates in place - only reset scroll for user-driven loads
       // (page/filter/sort/search), where jumping to the top is expected.
       if (!keepScroll) reloadToken++
       if (total >= 0) {
@@ -4035,7 +4035,7 @@ let rowSearch = $state('')
    * Background row-count pass for the main grid. Runs after loadRows() has
    * already painted the rows, so COUNT(*) never blocks the initial view. The
    * _loadSeq token drops results from a superseded load (fast tab/filter
-   * switches). Returns -1 on non-Postgres engines / failure — in which case the
+   * switches). Returns -1 on non-Postgres engines / failure - in which case the
    * total set by loadRows() is kept untouched.
    * @param {number} seq
    */
@@ -4052,7 +4052,7 @@ let rowSearch = $state('')
         const maxPage = Math.max(1, Math.ceil(total / effectivePageSize) || 1)
         if (page > maxPage) page = maxPage
       }
-    } catch { /* count is best-effort — leave the current total as-is */ }
+    } catch { /* count is best-effort - leave the current total as-is */ }
   }
 
   async function handleLoadMore() {
@@ -4075,7 +4075,7 @@ let rowSearch = $state('')
       if (seq !== _loadSeq) return
       const fetched = data.rows ?? []
       if (!fetched.length) return
-      // Append in place — spreading the whole accumulated array on every page was
+      // Append in place - spreading the whole accumulated array on every page was
       // O(n) per load (O(n²) over a scroll session). Pages are page-size (small),
       // so push() is cheap and the proxied $state array still notifies the grid.
       for (let i = 0; i < fetched.length; i++) _infiniteRows.push(fetched[i])
@@ -4155,7 +4155,7 @@ let rowSearch = $state('')
     exportingData = true
     // A persistent toast that stays up for the whole build/save, dismissed on completion.
     const toastId = toast.info(`Exporting ${formatCompactCount(n)} rows…`, {
-      description: `Preparing ${format.toUpperCase()} — please wait`,
+      description: `Preparing ${format.toUpperCase()}, please wait`,
       duration: 60 * 60 * 1000,
     })
     try {
@@ -4202,7 +4202,7 @@ let rowSearch = $state('')
     const sqlRan = typeof overrideSql === 'string' && overrideSql.trim() ? overrideSql : sqlText
     if (!connection || !sqlRan.trim()) return
     if (tableReadonly && /^\s*(insert|update|delete|drop|truncate|alter|create|replace)\b/i.test(sqlRan)) {
-      sqlError = 'Connection is read-only — write queries are blocked.'
+      sqlError = 'Connection is read-only, write queries are blocked.'
       return
     }
     sqlLoading = true
@@ -4258,7 +4258,7 @@ let rowSearch = $state('')
     // The connection is live: render the shell NOW (setting `connection` above
     // dropped the reconnect overlay) with the welcome tab open and the sidebar
     // in its skeleton state, and let the catalog stream in below. This is what
-    // makes reconnect feel instant — the overlay no longer waits on the
+    // makes reconnect feel instant - the overlay no longer waits on the
     // schema/table/row-count round trips.
     tabs = []
     // Redis has no relational catalog: skip schema/table loading entirely and
@@ -4283,14 +4283,14 @@ let rowSearch = $state('')
         try {
           await loadSchemas()
         } catch (e) {
-          // Schema list failed — surface it but keep going so loadTables() still
+          // Schema list failed - surface it but keep going so loadTables() still
           // runs and clears the loading flag (sidebar must never hang forever).
           toast.error('Could not load schemas', { description: String(e) })
         }
         if (schemas.length > 0) break
       }
       await loadTables({ force: true })
-      // Retry only when the fetch actually failed — an empty database is a valid
+      // Retry only when the fetch actually failed - an empty database is a valid
       // result and must not pay a 1 s penalty on every connect.
       if (tables.length === 0 && schemas.length > 0 && error) {
         await new Promise(r => setTimeout(r, 1000))
@@ -4299,7 +4299,7 @@ let rowSearch = $state('')
     } else {
       loadingTables = false
     }
-    // MCP autostart is independent of the catalog — don't block first render on it.
+    // MCP autostart is independent of the catalog - don't block first render on it.
     void (async () => {
       try {
         const { loadSettings } = await import('$lib/stores/settings.js')
@@ -4317,7 +4317,7 @@ let rowSearch = $state('')
   // Warm the lazy page/panel chunks during browser idle time so the first
   // navigation to a tab is instant instead of paying a cold chunk fetch+parse.
   // These chunks pull in heavy deps (monaco, echarts, marked+shiki), so we warm
-  // ONE per idle slot — never blocking interaction. Ordered by how commonly each
+  // ONE per idle slot - never blocking interaction. Ordered by how commonly each
   // is opened; the monaco-backed editors come first since they dominate latency.
   // If the user opens a page sooner, import() dedups to the same promise and
   // resolves immediately. Fire-and-forget; failures are harmless.
@@ -4364,10 +4364,10 @@ let rowSearch = $state('')
         localStorage.setItem(SAMPLE_SEEDED_KEY, '1')
       }
     } catch {
-      // Non-critical — don't block app start if Tauri backend unavailable (browser dev)
+      // Non-critical - don't block app start if Tauri backend unavailable (browser dev)
     }
 
-    // First-time user — show onboarding instead of bare connection modal
+    // First-time user - show onboarding instead of bare connection modal
     try {
       if (!localStorage.getItem(ONBOARDING_KEY)) {
         showOnboarding = true
@@ -4378,7 +4378,7 @@ let rowSearch = $state('')
     const last = getLastConnection()
     if (!last) { showConnectionModal = true; return }
 
-    // Respect the "auto reconnect on startup" setting — if disabled, go straight
+    // Respect the "auto reconnect on startup" setting - if disabled, go straight
     // to the connection modal instead of re-connecting silently.
     if (!loadSettings().autoReconnectOnStartup) { showConnectionModal = true; return }
 
@@ -4399,7 +4399,7 @@ let rowSearch = $state('')
       else if (last.type === 'redis') await withTimeout(connectRedis(last))
       else await withTimeout(connectPostgres(last))
       // onConnected already refreshes the query stores (concurrently with the
-      // catalog load) — no second fetch needed here.
+      // catalog load) - no second fetch needed here.
       await onConnected(last, last.id)
     } catch {
       showConnectionModal = true
@@ -4573,7 +4573,7 @@ let rowSearch = $state('')
   }
 
   // ── Silent auto-reconnect ──────────────────────────────────────────────────
-  // Heals a dropped connection IN PLACE — rebuilds the backend pool for the
+  // Heals a dropped connection IN PLACE - rebuilds the backend pool for the
   // CURRENT connection config, with no UI teardown, no full-screen overlay, and
   // no toast. The health monitor, an `online` event, a table switch, a refresh,
   // or a failed query can all trigger this, so the app recovers by itself instead
@@ -4782,9 +4782,9 @@ let rowSearch = $state('')
       // The splice above only removes rows already resident on the client. On a
       // paginated/windowed table that leaves the view empty (or showing a stale
       // total) while thousands of rows remain server-side, so refetch the current
-      // page — this also refreshes the true COUNT(*).
+      // page - this also refreshes the true COUNT(*).
       if (pageSize !== PAGE_SIZE_ALL && total > 0 && (page - 1) * pageSize >= total) {
-        // The current page fell past the end after the deletion — step back.
+        // The current page fell past the end after the deletion - step back.
         page = Math.max(1, Math.ceil(total / pageSize))
         rawOffset = null
       }
@@ -4922,7 +4922,7 @@ let rowSearch = $state('')
     await openQueryInEditor(sql)
   }
 
-  /** Run SQL from AI chat — writes to editor and executes. */
+  /** Run SQL from AI chat - writes to editor and executes. */
   async function handleAiRunSql(sql) {
     await focusSqlView()
     sqlText = sql
@@ -5174,7 +5174,7 @@ let rowSearch = $state('')
 <div class="flex min-h-0 flex-1 overflow-hidden">
   {#if connection}
     <!-- Sidebar dock. Navigation between pages/views now lives in the ⌘P
-         "Go to page" palette, so there's no activity rail — the sidebar just
+         "Go to page" palette, so there's no activity rail, the sidebar just
          hosts the tables list. Hidden on Ctrl+B and in AI mode. -->
     <div
       class="flex min-h-0 shrink-0 flex-col"
@@ -5304,7 +5304,7 @@ let rowSearch = $state('')
 
     {#if !connection}
       <div class="relative flex flex-1 flex-col items-center justify-center gap-8 p-8 text-center">
-        <!-- Subtle vignette — kept faint for a flat, crisp surface -->
+        <!-- Subtle vignette, kept faint for a flat, crisp surface -->
         <div
           class="pointer-events-none absolute inset-0"
           style="background: radial-gradient(58% 48% at 50% 36%, color-mix(in oklch, var(--primary) 7%, transparent), transparent 72%);"
@@ -5318,11 +5318,11 @@ let rowSearch = $state('')
         <div class="relative flex max-w-md flex-col items-center gap-2.5">
           <h1 class="text-ui-3xl font-semibold leading-tight tracking-tight text-foreground">Connect a database</h1>
           <p class="max-w-[21rem] text-ui-sm leading-relaxed text-muted-foreground">
-            Browse schemas, edit rows, and run SQL — all in one fast, native window.
+            Browse schemas, edit rows, and run SQL, all in one fast, native window.
           </p>
         </div>
 
-        <!-- Supported engines — real brand marks -->
+        <!-- Supported engines, real brand marks -->
         <div class="relative flex flex-wrap items-center justify-center gap-2">
           {#each [['postgres','PostgreSQL'],['mysql','MySQL'],['sqlite','SQLite'],['clickhouse','ClickHouse'],['d1','Cloudflare D1']] as [id, label]}
             <span class="inline-flex items-center gap-2 rounded-full border border-border/50 bg-muted/20 py-1.5 pl-2.5 pr-3.5 text-ui-xs font-medium text-muted-foreground/85 transition-colors hover:border-border hover:text-foreground">
@@ -5349,7 +5349,7 @@ let rowSearch = $state('')
         </div>
       </div>
     {:else}
-      <!-- Full-window AI chat — kept mounted after first open so state is preserved -->
+      <!-- Full-window AI chat, kept mounted after first open so state is preserved -->
       {#if aiEverOpened}
         <div
           class={aiMode ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
@@ -5550,7 +5550,7 @@ let rowSearch = $state('')
         </div>
       {/if}
 
-      <!-- Extension detail tab — one per extension, rendered on demand -->
+      <!-- Extension detail tab, one per extension, rendered on demand -->
       {#if activeTab?.kind === 'extension-detail'}
         {#key activeTab.id}
           <div class="flex min-h-0 flex-1 flex-col">
@@ -5563,7 +5563,7 @@ let rowSearch = $state('')
         {/key}
       {/if}
 
-      <!-- License tab — rarely opened, no keep-alive needed -->
+      <!-- License tab, rarely opened, no keep-alive needed -->
       {#if activeTab?.kind === 'license'}
         <div class="flex min-h-0 flex-1 flex-col">
           <svelte:boundary failed={tabError}>
@@ -5674,7 +5674,7 @@ let rowSearch = $state('')
         </div>
       {/if}
 
-      <!-- Notebook tabs — one instance per open notebook, kept alive -->
+      <!-- Notebook tabs, one instance per open notebook, kept alive -->
       {#each tabs.filter((t) => t.kind === 'notebook') as nbTab (nbTab.id)}
         {@const nbState = /** @type {import('$lib/studio-tabs.js').NotebookTabState} */ (nbTab.state)}
         <div
@@ -5814,7 +5814,7 @@ let rowSearch = $state('')
       {#if activeTab?.kind === 'table'}
         {#if error}
           {#if isNetworkError(error)}
-            <!-- ── Network / offline error — full-area friendly state ── -->
+            <!-- ── Network / offline error, full-area friendly state ── -->
             <div class="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
               <WifiOff class="size-8 text-muted-foreground/20" />
               <div class="space-y-1">
@@ -5831,7 +5831,7 @@ let rowSearch = $state('')
               </button>
             </div>
           {:else}
-            <!-- ── SQL / application error — compact banner ── -->
+            <!-- ── SQL / application error, compact banner ── -->
             <div class="flex shrink-0 items-start gap-2.5 border-b border-destructive/15 bg-destructive/[0.04] px-3 py-2">
               <AlertTriangle class="mt-px size-3.5 shrink-0 text-destructive/70" />
               <p class="min-w-0 flex-1 font-mono text-ui-xs leading-relaxed text-destructive/90">{error}</p>
@@ -5955,7 +5955,7 @@ let rowSearch = $state('')
             ondeleteselected={() => stageDeleteSelectedRows()}
             onexport={handleExport}
             onaddrow={() => {
-              // Row insertion happens on the canvas grid — jump back to it first.
+              // Row insertion happens on the canvas grid - jump back to it first.
               if (dataViewMode !== 'table') dataViewMode = 'table'
               void tick().then(() => dtBeginInsertRow?.())
             }}
@@ -6168,7 +6168,7 @@ let rowSearch = $state('')
             {/if}
           </div>
 
-          <!-- Action grid — max-w-sm keeps all sections aligned -->
+          <!-- Action grid, max-w-sm keeps all sections aligned -->
           <div class="grid w-full max-w-sm grid-cols-4 gap-1.5">
 
             {#if isRedis}
@@ -6400,9 +6400,9 @@ let rowSearch = $state('')
       const { providerBuildConnection } = await import('$lib/providers.js')
       const built = await providerBuildConnection(provider, dbRef)
       if (built.needs_password) {
-        // Supabase needs a per-project password — can't switch silently, so
+        // Supabase needs a per-project password - can't switch silently, so
         // send the user to the connect dialog to finish it.
-        toast.message(`${name} needs its database password — opening the connection dialog.`)
+        toast.message(`${name} needs its database password, opening the connection dialog.`)
         showConnectionModal = true
         return
       }

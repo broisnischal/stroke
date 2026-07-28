@@ -72,7 +72,7 @@
   const hostStyle = $derived(hostInsetStyle(position, offset))
 
   // Toasts enter from the top edge; the stack lives in normal flow so adding /
-  // removing a card just reflows the column — no manual height measurement.
+  // removing a card just reflows the column - no manual height measurement.
   const flyY = $derived(String(position).startsWith('bottom') ? 16 : -16)
 </script>
 

@@ -83,7 +83,7 @@
     textareaEl.style.height = `${Math.max(textareaEl.scrollHeight, 140)}px`
   }
 
-  /** Blur fires before the new element gets focus — use a tick to check if still inside cell */
+  /** Blur fires before the new element gets focus - use a tick to check if still inside cell */
   function onBlur() {
     setTimeout(() => {
       if (!cellEl?.contains(document.activeElement)) commit()
@@ -222,7 +222,7 @@
 </div>
 
 <style>
-  /* Notebook prose — markdown rendering styles */
+  /* Notebook prose - markdown rendering styles */
   :global(.nb-prose) {
     font-size: 0.9rem;
     line-height: 1.7;

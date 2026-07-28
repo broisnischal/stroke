@@ -70,7 +70,7 @@
   let optIncludeViews = $state(true);
 
   // Table selection. Reset to "all selected" only when the table list itself
-  // changes (new connection/schema) — not on every user toggle. The previous
+  // changes (new connection/schema) - not on every user toggle. The previous
   // version also read selectedTables inside the effect, so any deselection
   // re-triggered it and was instantly reverted to all.
   /** @type {Set<string>} */
@@ -283,7 +283,7 @@
       importResult = result;
       importPhase = "done";
       if (result.statementsErr === 0) {
-        toast.success(`Restore complete — ${result.statementsOk} statements`);
+        toast.success(`Restore complete, ${result.statementsOk} statements`);
       } else {
         toast.warning(`Restore finished with ${result.statementsErr} error(s)`);
       }

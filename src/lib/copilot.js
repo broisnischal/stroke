@@ -2,8 +2,8 @@
  * GitHub Copilot OAuth device flow + JWT management.
  *
  * Auth is two-layer:
- *  1. OAuth token  — long-lived, obtained via device flow, stored via ai_store_key
- *  2. Copilot JWT  — short-lived (~30 min), exchanged from the OAuth token on demand
+ *  1. OAuth token  - long-lived, obtained via device flow, stored via ai_store_key
+ *  2. Copilot JWT  - short-lived (~30 min), exchanged from the OAuth token on demand
  *
  * All Copilot API requests must use the JWT as the Bearer token plus the
  * required Copilot-Integration-Id header (handled in ai.js).
@@ -55,7 +55,7 @@ export async function storeOAuthToken(token) {
   try {
     await invoke('ai_store_key', { profileId: OAUTH_STORE_KEY, apiKey: token })
   } catch {
-    // dev mode without Tauri — ignore
+    // dev mode without Tauri - ignore
   }
 }
 
@@ -97,7 +97,7 @@ export async function getCopilotJwt() {
 
   const oauthToken = await loadOAuthToken()
   if (!oauthToken) {
-    throw new Error('Not connected to GitHub Copilot — please log in via AI model settings.')
+    throw new Error('Not connected to GitHub Copilot, please log in via AI model settings.')
   }
 
   const result = await invoke('copilot_get_copilot_token', { oauthToken })

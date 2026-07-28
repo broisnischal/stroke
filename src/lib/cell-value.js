@@ -45,7 +45,7 @@ export function formatByteSize(bytes) {
  */
 export function oversizeCellText(over) {
   const head = over.preview.length > 200 ? over.preview.slice(0, 200) + '…' : over.preview
-  return `[${over.dataType || 'value'} · ${formatByteSize(over.bytes)} — truncated] ${head}`
+  return `[${over.dataType || 'value'} · ${formatByteSize(over.bytes)}, truncated] ${head}`
 }
 
 /**

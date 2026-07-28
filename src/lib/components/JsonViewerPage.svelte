@@ -38,7 +38,7 @@
 
   // ── Raw JSON: split into "immediate" (for header) + "debounced" (for parse).
   //    JSON.parse() on every keystroke for large documents is the main CPU hog.
-  let rawJson          = $state('')   // updated immediately — drives header
+  let rawJson          = $state('')   // updated immediately - drives header
   let rawJsonDebounced = $state('')   // updated 250ms after typing stops
   /** @type {ReturnType<typeof setTimeout> | null} */
   let parseDebounceTimer = null
@@ -56,7 +56,7 @@
   /** @type {ReturnType<typeof setTimeout> | null} */
   let copiedInputTimer = null
 
-  // ── Derived — use debounced JSON so parse runs at most once per 250ms ─────
+  // ── Derived - use debounced JSON so parse runs at most once per 250ms ─────
   const parsedJson = $derived.by(() => {
     try { return JSON.parse(rawJsonDebounced) } catch { return null }
   })
@@ -93,7 +93,7 @@
     if (!pathFocused || completionItems.length === 0) activeIdx = -1
   })
 
-  // Track resultJson BEFORE the guard — Svelte only registers deps that are
+  // Track resultJson BEFORE the guard - Svelte only registers deps that are
   // read during execution. Reading after an early-return skips registration.
   $effect(() => {
     const content = resultJson
@@ -150,7 +150,7 @@
     }
   }
 
-  // ── Kind icon + color (minimal — single letter, no text chars like "{}") ──
+  // ── Kind icon + color (minimal - single letter, no text chars like "{}") ──
   /** @param {import('$lib/jsonpath.js').CompletionItem['kind']} kind */
   function kindMeta(kind) {
     switch (kind) {
@@ -216,7 +216,7 @@
   // ── Monaco base config ────────────────────────────────────────────────────
   const MONACO_BASE = {
     language: 'json',
-    // automaticLayout: false — we use a single ResizeObserver instead.
+    // automaticLayout: false - we use a single ResizeObserver instead.
     // Monaco's automaticLayout uses setInterval(100ms) per editor instance,
     // which means two continuous polling loops running the whole time the
     // page is open. A ResizeObserver fires only when the size actually changes.
@@ -281,7 +281,7 @@
       cursorStyle: /** @type {'line-thin'} */ ('line-thin'),
     })
 
-    // Single ResizeObserver for both containers — much cheaper than two
+    // Single ResizeObserver for both containers - much cheaper than two
     // automaticLayout polling loops. Calls layout() only when size changes.
     const ro = new ResizeObserver(() => {
       inputEditor?.layout()
@@ -419,7 +419,7 @@
               class="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors {i === activeIdx ? 'bg-accent' : 'hover:bg-accent/40'}"
               onclick={() => pickCompletion(item)}
             >
-              <!-- Color dot (no text icons — just a colored 6px circle) -->
+              <!-- Color dot (no text icons, just a colored 6px circle) -->
               <span class="size-1.5 shrink-0 rounded-full {meta.dot}"></span>
 
               <!-- Label: highlighted match prefix + remainder -->

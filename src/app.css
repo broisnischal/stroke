@@ -16,29 +16,29 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Non-theme tokens only — color palettes live on html[data-theme] in app-themes.css */
+/* Non-theme tokens only - color palettes live on html[data-theme] in app-themes.css */
 :root {
   /* Tell the engine to render native controls (the <select> popup + <option>
      list, scrollbars, date pickers, form fields) in the active scheme. Without
      this, WebKitGTK (Linux) and Windows draw the native dropdown list on a white
-     background regardless of CSS — the `.dark` block below flips it to dark for
+     background regardless of CSS - the `.dark` block below flips it to dark for
      every dark theme. One declaration fixes every native dropdown at zero cost. */
   color-scheme: light;
   --radius: 0.375rem;
   --app-zoom: 1;
   --app-font-size: 14px;
   --editor-font-size: 14px;
-  /* 1.5 ratio — matches VS Code / Cursor's default editor line height. */
+  /* 1.5 ratio - matches VS Code / Cursor's default editor line height. */
   --editor-line-height: 21px;
   /* Dedicated code font for Monaco editors, kept independent of the app's UI /
-     data-grid mono (`--font-mono`) — same separation VS Code makes between its
+     data-grid mono (`--font-mono`) - same separation VS Code makes between its
      "editor font" and everything else. JetBrains Mono is a true code typeface:
      heavier, even rhythm, designed ligatures. */
   --editor-font-family: "JetBrains Mono Variable", "Geist Mono Variable", ui-monospace, monospace;
 
   /* ── Elevation system ──────────────────────────────────────────────────────
      Layered shadows for raised surfaces (menus, popovers, dialogs, cards).
-     Depth reads better as several soft, offset layers than one hard drop —
+     Depth reads better as several soft, offset layers than one hard drop -
      see better-ui "Shadows Over Borders". These are the LIGHT defaults; the
      `.dark` block below (toggled for every dark theme via classList) swaps in
      stronger black + a dim rim, since a light drop-shadow is nearly invisible
@@ -46,13 +46,13 @@
   --elevate-1: 0 1px 2px oklch(0 0 0 / 0.05), 0 1px 1px oklch(0 0 0 / 0.04);
   --elevate-2: 0 2px 5px -1px oklch(0 0 0 / 0.07), 0 6px 16px -3px oklch(0 0 0 / 0.09);
   --elevate-3: 0 10px 22px -6px oklch(0 0 0 / 0.11), 0 22px 52px -12px oklch(0 0 0 / 0.16);
-  /* Top rim highlight — a 1px inner catch-light that gives raised surfaces a
+  /* Top rim highlight - a 1px inner catch-light that gives raised surfaces a
      crisp physical edge. Pure white/black at low alpha only (never a tinted
      neutral, which reads as dirt). */
   --rim: inset 0 1px 0 0 oklch(1 0 0 / 0.65);
 
   /* ── Semantic status palette ───────────────────────────────────────────────
-     One set of status hues for the whole app — success / warning / info,
+     One set of status hues for the whole app - success / warning / info,
      alongside the per-theme --destructive. Kept theme-independent on purpose:
      a status signal must read the same regardless of the accent theme. These
      are the LIGHT values (fills dark enough to carry near-white text); the
@@ -65,7 +65,7 @@
   --info:               oklch(0.50 0.16 248);
   --info-foreground:    oklch(0.99 0 0);
 
-  /* ── Motion — shared easing curves ─────────────────────────────────────────
+  /* ── Motion - shared easing curves ─────────────────────────────────────────
      The built-in CSS easings are too weak to feel intentional. These strong
      custom curves give UI motion its punch (Emil Kowalski / better-ui). Use via
      `ease-[var(--ease-out)]`. --ease-out for enter/exit + press feedback;
@@ -88,13 +88,13 @@
   --rim: inset 0 1px 0 0 oklch(1 0 0 / 0.055);
 }
 
-/* JSON colorizer tokens (highlightJson) — dark-friendly defaults, light override
+/* JSON colorizer tokens (highlightJson) - dark-friendly defaults, light override
    below. Most themes are dark, so they inherit these via the `html` selector. */
 html {
-  --json-key: oklch(0.74 0.1 245);     /* property keys — blue */
-  --json-string: oklch(0.78 0.13 150); /* strings — green */
-  --json-number: oklch(0.8 0.12 75);   /* numbers — amber */
-  --json-boolean: oklch(0.76 0.13 310);/* true/false — purple */
+  --json-key: oklch(0.74 0.1 245);     /* property keys - blue */
+  --json-string: oklch(0.78 0.13 150); /* strings - green */
+  --json-number: oklch(0.8 0.12 75);   /* numbers - amber */
+  --json-boolean: oklch(0.76 0.13 310);/* true/false - purple */
   --json-null: var(--muted-foreground);
 }
 html[data-theme="light"] {
@@ -109,7 +109,7 @@ html[data-theme="light"] {
 .json-tok-bool { color: var(--json-boolean); }
 .json-tok-null { color: var(--json-null); font-style: italic; }
 
-/* Icon weight — user-selectable Lucide stroke width (see ICON_STYLES in
+/* Icon weight - user-selectable Lucide stroke width (see ICON_STYLES in
    stores/settings.js). Lucide renders each icon as `<svg class="lucide …">` with
    a stroke-width *attribute*; a CSS `stroke-width` on the element wins over that
    attribute and is inherited by the child paths, so one rule restyles every icon
@@ -118,12 +118,12 @@ html[data-theme="light"] {
 html[data-icon-style="light"] svg.lucide { stroke-width: 1.5px; }
 html[data-icon-style="bold"]  svg.lucide { stroke-width: 2.5px; }
 
-/* ── Focus ring — one premium treatment for every text field, app-wide ───────
+/* ── Focus ring - one premium treatment for every text field, app-wide ───────
    Unlayered on purpose: unlayered CSS beats Tailwind's layered `ring-1
    ring-ring` utilities, so this overrides the ~40 per-component focus styles
    at once without editing each call site. Instead of a hard, fully-opaque 2px
    double-line (border + ring stacked in the same color), it draws a calm 1px
-   accent border plus a soft translucent halo — the Linear/shadcn look.
+   accent border plus a soft translucent halo - the Linear/shadcn look.
    aria-invalid fields keep their own destructive ring. */
 input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]):not([aria-invalid="true"]):not(.no-focus-ring):focus-visible,
 textarea:not([aria-invalid="true"]):not(.no-focus-ring):focus-visible {
@@ -133,7 +133,7 @@ textarea:not([aria-invalid="true"]):not(.no-focus-ring):focus-visible {
 }
 
 /* Borderless search inputs (command palette, dropdown filters) opt out of the
-   halo — they already sit inside a bordered popover, so the ring reads as noise. */
+   halo - they already sit inside a bordered popover, so the ring reads as noise. */
 input.no-focus-ring:focus-visible { box-shadow: none; border-color: transparent; }
 
 /* OS-native border-radius conventions */
@@ -189,7 +189,7 @@ html[data-os="linux"]   { --window-radius: 8px; }
     @apply border-border outline-ring/50;
   }
 
-  /* Brand-tinted text selection — a subtle signature that stays legible on
+  /* Brand-tinted text selection - a subtle signature that stays legible on
      any surface (better-typography principle 18). Alpha kept low so it never
      fights syntax highlighting in the editor or data cells. */
   ::selection {
@@ -208,7 +208,7 @@ html[data-os="linux"]   { --window-radius: 8px; }
     font-size: var(--app-font-size);
     font-family: var(--font-sans);
     font-weight: 400;
-    /* Enable optical sizing axis on variable fonts — improves stroke contrast at
+    /* Enable optical sizing axis on variable fonts - improves stroke contrast at
        small sizes without requiring manual weight tweaks per component. */
     font-optical-sizing: auto;
     @apply h-full overflow-hidden;
@@ -254,13 +254,13 @@ html[data-os="linux"]   { --window-radius: 8px; }
     font-family: var(--font-sans);
     /* Round the opaque body background to match the system window radius.
        html has background:transparent above, so the clipped corners are truly
-       transparent — the desktop shows through on macOS with transparent(true). */
+       transparent - the desktop shows through on macOS with transparent(true). */
     border-radius: var(--window-radius);
   }
 
   #app {
     @apply m-0 h-full min-h-0 overflow-hidden;
-    /* NO border-radius here — body already clips everything. Adding it twice
+    /* NO border-radius here - body already clips everything. Adding it twice
        creates a double-clip that leaves a visible margin ring. */
     user-select: none;
     -webkit-user-select: none;
@@ -304,7 +304,7 @@ html[data-os="linux"]   { --window-radius: 8px; }
     -webkit-user-select: text;
   }
 
-  /* Resize/drag surfaces — never highlight text */
+  /* Resize/drag surfaces - never highlight text */
   #app :is(
     .cursor-col-resize,
     .cursor-row-resize,
@@ -317,7 +317,7 @@ html[data-os="linux"]   { --window-radius: 8px; }
     -webkit-user-select: none !important;
   }
 
-  /* Force correct resize cursors — !important beats WKWebView's cursor resets */
+  /* Force correct resize cursors - !important beats WKWebView's cursor resets */
   .studio-resize-handle[aria-orientation="vertical"]   { cursor: col-resize !important; }
   .studio-resize-handle[aria-orientation="horizontal"] { cursor: row-resize !important; }
 
@@ -333,7 +333,7 @@ html[data-os="linux"]   { --window-radius: 8px; }
   }
 
   /* Keyboard navigation: chrome buttons (tab bar, toolbars, status bar) are
-     plain <button>s with no ring classes of their own — give them a visible
+     plain <button>s with no ring classes of their own - give them a visible
      theme-colored ring so tabbing through the app is followable. */
   [data-studio-chrome] :is(button, [role='button']):focus-visible {
     outline: 2px solid color-mix(in oklch, var(--ring) 55%, transparent);
@@ -347,7 +347,7 @@ html[data-os="linux"]   { --window-radius: 8px; }
     outline: none !important;
   }
 
-  /* Portaled overlays — these render outside #app so must explicitly inherit
+  /* Portaled overlays - these render outside #app so must explicitly inherit
      the correct family, optical-sizing, and OS font-weight. */
   [data-slot='context-menu-content'],
   [data-slot='dropdown-menu-content'],
@@ -389,7 +389,7 @@ html[data-os="linux"]   { --window-radius: 8px; }
     -webkit-font-smoothing: antialiased;
   }
 
-  /* Sonner — frosted notifications */
+  /* Sonner - frosted notifications */
   .toaster,
   .studio-toaster,
   [data-sonner-toaster] {
@@ -401,7 +401,7 @@ html[data-os="linux"]   { --window-radius: 8px; }
   [data-sonner-toaster] [data-sonner-toast] {
     font-family: inherit;
     font-size: inherit;
-    /* Inherit 'auto' from html — don't force antialiased which blurs on Linux */
+    /* Inherit 'auto' from html - don't force antialiased which blurs on Linux */
   }
 
   [data-sonner-toaster] [data-sonner-toast][data-styled='false'] [data-description] {
@@ -427,7 +427,7 @@ html[data-os="linux"]   { --window-radius: 8px; }
     background-color: transparent !important;
   }
 
-  /* WebKit may still autolink emails/phones — keep them looking like normal cells */
+  /* WebKit may still autolink emails/phones - keep them looking like normal cells */
   [data-studio-region='main'] table td a[x-apple-data-detectors] {
     color: inherit;
     text-decoration: none;
@@ -457,7 +457,7 @@ html[data-os="linux"]   { --window-radius: 8px; }
     height: 20px;
     padding: 0 6px;
     font-family: var(--font-mono);
-    font-size: calc(11 / 14 * 1rem);  /* text-ui-2xs — crisper than a fixed 10px */
+    font-size: calc(11 / 14 * 1rem);  /* text-ui-2xs - crisper than a fixed 10px */
     font-weight: 500;
     line-height: 1;
     color: color-mix(in oklch, var(--muted-foreground) 85%, var(--foreground));
@@ -484,12 +484,12 @@ html[data-os="linux"]   { --window-radius: 8px; }
     border-spacing: 0;
     line-height: 1.25;
     user-select: none;
-    /* Opt the large grid back into speed rendering — skips per-cell shaping so
+    /* Opt the large grid back into speed rendering - skips per-cell shaping so
        scrolling stays smooth on WebKitGTK even with tens of thousands of cells. */
     text-rendering: optimizeSpeed;
   }
 
-  /* Focused cell — set imperatively via $effect (not reactive template class)
+  /* Focused cell - set imperatively via $effect (not reactive template class)
      so focus changes only update 2 DOM nodes instead of re-rendering all cells. */
   .studio-data-table tbody td[data-focused-cell] {
     color: var(--color-foreground) !important;
@@ -591,24 +591,24 @@ html[data-os="linux"]   { --window-radius: 8px; }
      Denominators match the base so each step lands on a whole pixel at 100% zoom,
      eliminating the sub-pixel rounding differences that made text look
      inconsistent across macOS / Windows / Linux.
-     See DESIGN_SYSTEM.md — this is the ONLY sanctioned font-size scale. */
+     See DESIGN_SYSTEM.md - this is the ONLY sanctioned font-size scale. */
   .text-ui-3xl {
-    font-size: calc(24 / 14 * 1rem);  /* 24px — onboarding / full-screen hero */
+    font-size: calc(24 / 14 * 1rem);  /* 24px - onboarding / full-screen hero */
     line-height: calc(30 / 14 * 1rem);
   }
 
   .text-ui-2xl {
-    font-size: calc(20 / 14 * 1rem);  /* 20px — page/section hero */
+    font-size: calc(20 / 14 * 1rem);  /* 20px - page/section hero */
     line-height: calc(28 / 14 * 1rem);
   }
 
   .text-ui-xl {
-    font-size: calc(18 / 14 * 1rem);  /* 18px — dialog titles, empty-state */
+    font-size: calc(18 / 14 * 1rem);  /* 18px - dialog titles, empty-state */
     line-height: calc(26 / 14 * 1rem);
   }
 
   .text-ui-lg {
-    font-size: calc(16 / 14 * 1rem);  /* 16px — card/panel titles */
+    font-size: calc(16 / 14 * 1rem);  /* 16px - card/panel titles */
     line-height: calc(24 / 14 * 1rem);
   }
 
@@ -629,7 +629,7 @@ html[data-os="linux"]   { --window-radius: 8px; }
   }
 
   .text-ui-3xs {
-    font-size: calc(10 / 14 * 1rem);  /* 10px — minimum for legibility */
+    font-size: calc(10 / 14 * 1rem);  /* 10px - minimum for legibility */
   }
 
   /* ── Hardcoded text-[Npx] → rem equivalents ────────────────────────────────
@@ -699,7 +699,7 @@ html[data-os="linux"]   { --window-radius: 8px; }
     will-change: scroll-position;
   }
 
-  /* Minimal thin scrollbars — all platforms */
+  /* Minimal thin scrollbars - all platforms */
   :is(.app-scroll, .overflow-auto, .overflow-y-auto, .overflow-x-auto) {
     scrollbar-width: thin;
     scrollbar-color: color-mix(in oklch, var(--muted-foreground) 35%, transparent) transparent;
@@ -743,7 +743,7 @@ html[data-os="linux"]   { --window-radius: 8px; }
     background: transparent;
   }
 
-  /* Tab bar: hide scrollbar — navigate via trackpad/wheel */
+  /* Tab bar: hide scrollbar - navigate via trackpad/wheel */
   [role='tablist'] .app-scroll {
     scrollbar-width: none;
   }
@@ -770,7 +770,7 @@ html[data-os="linux"]   { --window-radius: 8px; }
   }
 }
 
-/* Number inputs render as bare text fields — no native up/down spinner anywhere.
+/* Number inputs render as bare text fields - no native up/down spinner anywhere.
    Callers keep type="number" for numeric keypad + validation; the stepper UI is
    suppressed app-wide. */
 input[type='number'] {
@@ -787,7 +787,7 @@ input[type='number']::-webkit-inner-spin-button {
    Unlayered on purpose: `@theme inline` bakes the build-time font stack into the
    `font-mono`/`font-sans` utilities (utilities layer), which would beat any
    @layer rule. Unlayered author CSS wins over ALL layers, so these var()
-   references let Settings → Font swap families at runtime — including the
+   references let Settings → Font swap families at runtime - including the
    canvas grid, whose probe measures a `font-mono` element. */
 .font-mono,
 [data-font='mono'] {
@@ -799,7 +799,7 @@ input[type='number']::-webkit-inner-spin-button {
 }
 
 /* ── Data-grid scrollbars ─────────────────────────────────────────────────────
-   The canvas table is the app's largest scroll surface — give it a wider,
+   The canvas table is the app's largest scroll surface - give it a wider,
    padded pill thumb (10px lane, ~4px visible pill via content-box clipping)
    that's easy to grab, fading stronger on hover/drag. Small lists keep the
    global 4px hairline. */

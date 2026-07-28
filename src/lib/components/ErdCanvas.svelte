@@ -24,14 +24,14 @@
   } = $props()
 
   // Layout constants from the parent's config. $derived so they track `cfg` if
-  // the parent swaps it — plain destructuring freezes the initial values, which
+  // the parent swaps it - plain destructuring freezes the initial values, which
   // is what Svelte's `state_referenced_locally` warning flags.
   const NODE_W = $derived(cfg.NODE_W)
   const ROW_H  = $derived(cfg.ROW_H)
   const HDR_H  = $derived(cfg.HDR_H)
   const PAD_B  = $derived(cfg.PAD_B)
 
-  // Match the app's type system (Geist / Geist Mono) — the generic ui-monospace
+  // Match the app's type system (Geist / Geist Mono) - the generic ui-monospace
   // fallback renders poorly on Linux/WebKitGTK. Names use sans, types use mono.
   const FONT_SANS = '"Geist Variable", ui-sans-serif, system-ui, sans-serif'
   const FONT_MONO = '"Geist Mono Variable", ui-monospace, monospace'
@@ -76,7 +76,7 @@
    * Resolve a CSS custom property (e.g. '--card') to concrete "r,g,b".
    * Themes store tokens as full oklch() colors; the canvas fillStyle getter
    * preserves the oklch string rather than converting it, so we rasterize a
-   * single pixel and read it back — that always yields device sRGB bytes,
+   * single pixel and read it back - that always yields device sRGB bytes,
    * correct for oklch / hsl / hex alike.
    * @param {string} name
    */
@@ -122,9 +122,9 @@
   /** @type {Map<string,FlowNode>} */
   let byId = new Map()
   // Auto-fit the first time nodes populate (they load async, after mount), then
-  // never again until the graph empties — so search/rebuild doesn't reset the view.
+  // never again until the graph empties - so search/rebuild doesn't reset the view.
   let _fitted = false
-  // Zoom below which cards stop being legible — a big/deep schema whose whole
+  // Zoom below which cards stop being legible - a big/deep schema whose whole
   // bounding box would fit only under this is NOT fit-to-view (that produces an
   // unreadable sliver). Instead we land at READABLE_ZOOM anchored at the graph's
   // top-left so real cards are visible and the user pans to explore.
@@ -142,7 +142,7 @@
     const bw = x1 - x0 || 1, bh = y1 - y0 || 1
     const zFit = Math.min(cssW / bw, cssH / bh) * (1 - 0.12)
     if (zFit >= READABLE_ZOOM) {
-      // Small enough to show entirely at a legible size — fit-and-centre.
+      // Small enough to show entirely at a legible size - fit-and-centre.
       fit()
       return
     }
@@ -176,12 +176,12 @@
     if (!ctx) return
     const { panX, panY, zoom } = cam
 
-    // Clear to transparent — the themed page background shows through, so we
+    // Clear to transparent - the themed page background shows through, so we
     // never depend on resolving --background (which can misparse per webview).
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, cssW, cssH)
 
-    // World transform — everything below is drawn in world coordinates.
+    // World transform - everything below is drawn in world coordinates.
     ctx.setTransform(dpr * zoom, 0, 0, dpr * zoom, dpr * panX, dpr * panY)
     const vx0 = -panX / zoom, vy0 = -panY / zoom
     const vx1 = (cssW - panX) / zoom, vy1 = (cssH - panY) / zoom
@@ -220,7 +220,7 @@
     ctx.closePath()
   }
 
-  /** Stable non-negative hash of a string — used to fan parallel edges into
+  /** Stable non-negative hash of a string - used to fan parallel edges into
    *  separate lanes without any global bookkeeping. */
   function hashStr(/** @type {string} */ s) {
     let h = 0
@@ -272,7 +272,7 @@
     ctx.beginPath()
     ctx.moveTo(sx, sy)
     if (Math.abs(vGap) < 1) {
-      // Same row height — a straight horizontal run reads cleaner than a flat jog.
+      // Same row height - a straight horizontal run reads cleaner than a flat jog.
       ctx.lineTo(tx, ty)
     } else {
       const r = Math.min(12, Math.abs(midX - sx), Math.abs(midX - tx), Math.abs(vGap) / 2)

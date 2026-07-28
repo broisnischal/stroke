@@ -38,7 +38,7 @@ const BUILTIN_VALS  = Object.values(BUILTINS)
 // ── Detection ─────────────────────────────────────────────────────────────────
 /**
  * Returns true when the expression contains function calls, arithmetic, or
- * comparisons — i.e. it needs the Function evaluator rather than the fast
+ * comparisons - i.e. it needs the Function evaluator rather than the fast
  * string-concatenation path.
  * @param {string} expr
  */
@@ -119,7 +119,7 @@ function bindComplex(expr, nameToIdx) {
 /**
  * Compile + bind an expression to resolved column indices.
  * Returns a fast (row: unknown[]) => string evaluator.
- * Safe to call in a canvas draw loop — the expensive compilation happens once.
+ * Safe to call in a canvas draw loop - the expensive compilation happens once.
  * @param {string} expr
  * @param {Map<string,number>} nameToIdx
  * @returns {(row:unknown[])=>string}

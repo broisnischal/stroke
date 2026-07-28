@@ -73,7 +73,7 @@
       </span>
     </div>
 
-    <!-- Table name — click to jump to root -->
+    <!-- Table name, click to jump to root -->
     <button
       type="button"
       class="min-w-0 flex-1 truncate text-left font-mono text-ui-xs font-semibold hover:underline {isOut ? 'text-blue-300/90' : 'text-green-300/90'}"
@@ -81,7 +81,7 @@
     >{tableName}</button>
 
     <div class="flex shrink-0 items-center gap-1">
-      <!-- Row count — filled in asynchronously; absent until the background pass resolves -->
+      <!-- Row count, filled in asynchronously; absent until the background pass resolves -->
       {#if rowCount !== undefined}
         <span
           class="inline-flex h-5 items-center gap-1 rounded px-1.5 font-mono text-ui-3xs tabular-nums text-muted-foreground/45"

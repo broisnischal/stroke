@@ -268,7 +268,7 @@
       if (!isValidIdentifier(name)) continue;
       const cols = /** @type {string[]} */ (columnsByTable?.[name] ?? []);
       if (cols.length > 0) {
-        // No index signature — named properties give proper autocomplete in Monaco
+        // No index signature - named properties give proper autocomplete in Monaco
         lines.push(`declare const ${name}: { ${cols.map((c) => `${c}: DbCol`).join("; ")}; };`);
       } else {
         lines.push(`declare const ${name}: { [col: string]: DbCol; };`);
@@ -482,7 +482,7 @@
       value: code,
       language: "javascript",
       theme: monacoThemeId(currentTheme()),
-      // automaticLayout:false — that option polls via setInterval(100ms) forever,
+      // automaticLayout:false - that option polls via setInterval(100ms) forever,
       // even while this tab is hidden. ResizeObserver fires only on real resizes.
       automaticLayout: false,
       minimap: { enabled: false },
@@ -531,13 +531,13 @@
       ro.disconnect();
       editor?.dispose();
       editor = null;
-      // Dispose the Monaco extra-lib — it lives on javascriptDefaults globally.
+      // Dispose the Monaco extra-lib - it lives on javascriptDefaults globally.
       if (_extraLibDisposable) { _extraLibDisposable.dispose(); _extraLibDisposable = null; }
       themeObs.disconnect();
     };
   });
 
-  // Experimental Vim mode — attach monaco-vim (lazy) while enabled.
+  // Experimental Vim mode - attach monaco-vim (lazy) while enabled.
   $effect(() => {
     const on = $appVimMode;
     const el = vimStatusEl;
@@ -723,7 +723,7 @@
     {/if}
   </div>
 
-  <!-- Parse error — inline below editor -->
+  <!-- Parse error, inline below editor -->
   {#if parseError}
     <div
       class="group/console-error shrink-0 border-b border-destructive/20 bg-destructive/5 px-3 py-2"
@@ -817,7 +817,7 @@
           primaryKey={[]}
           foreignKeys={[]}
         />
-        <!-- JSON toggle overlay — top right, matching JsonViewer toolbar style -->
+        <!-- JSON toggle overlay, top right, matching JsonViewer toolbar style -->
         <div
           class="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-end p-2"
         >

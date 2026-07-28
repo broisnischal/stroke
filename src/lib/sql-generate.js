@@ -1,5 +1,5 @@
 /**
- * Statement templates for the "Generate SQL" dialog — skeleton queries for a
+ * Statement templates for the "Generate SQL" dialog - skeleton queries for a
  * table with `:name` placeholders where values would go. Identifier quoting
  * and schema qualification reuse the grid's DML rules (dml-preview.js) so the
  * generated SQL matches what the app itself would execute per engine.
@@ -26,7 +26,7 @@ const pkConditions = (ctx) =>
   ctx.primaryKey.map((k) => `${quoteIdent(k, ctx.dialect)} = ${ph(k)}`).join('\n  AND ')
 
 /**
- * WHERE clause targeting the primary key — or the always-false `1 = 0` guard
+ * WHERE clause targeting the primary key - or the always-false `1 = 0` guard
  * when the table has none, so a pasted statement can't touch every row.
  * @param {GenContext} ctx
  */
@@ -74,7 +74,7 @@ export function genDelete(ctx) {
 }
 
 /**
- * Engine-specific upsert — null when the table has no primary key or the
+ * Engine-specific upsert - null when the table has no primary key or the
  * dialect has no native upsert form.
  * @param {GenContext} ctx
  */

@@ -1,4 +1,4 @@
-// Query log — every SQL statement the app runs (table browse, row count, SQL
+// Query log - every SQL statement the app runs (table browse, row count, SQL
 // console, AI, ORM), captured centrally in api.js with the exact SQL the backend
 // executed + its duration. Rendered in the bottom query-log console.
 

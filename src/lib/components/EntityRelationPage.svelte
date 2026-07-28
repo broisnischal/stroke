@@ -101,7 +101,7 @@
       for (const e of es) g.setEdge(e.source, e.target)
       dagre.layout(g)
 
-      // Dagre already minimises edge crossings — so for a normal schema we trust
+      // Dagre already minimises edge crossings - so for a normal schema we trust
       // its coordinates directly and the graph reads clean (few/no crossings).
       // The one case it handles poorly is a single rank that fans into a huge
       // vertical stack (a hub referenced by dozens of tables): there we re-flow
