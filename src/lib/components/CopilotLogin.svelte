@@ -196,7 +196,7 @@
         <span class="font-mono {secondsLeft < 60 ? 'text-destructive' : ''}">{fmt(secondsLeft)}</span>
       </div>
 
-      <!-- User code — large and easy to read -->
+      <!-- User code, large and easy to read -->
       <div class="flex items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2.5">
         <span class="font-mono text-ui-lg font-bold tracking-widest text-foreground">{userCode}</span>
         <button

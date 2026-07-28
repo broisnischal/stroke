@@ -11,6 +11,7 @@
   import Sparkles        from '@lucide/svelte/icons/sparkles'
   import ScrollText      from '@lucide/svelte/icons/scroll-text'
   import ExternalLink    from '@lucide/svelte/icons/external-link'
+  import { cn }          from '$lib/utils.js'
 
   let {
     onupdatefound = /** @type {() => void} */ (() => {}),
@@ -78,7 +79,7 @@
       const trimmed = line.trim()
 
       if (/^#{1,3}\s/.test(trimmed)) {
-        // Top-level section (## or ###) — determines the type inherited by sub-sections
+        // Top-level section (## or ###) - determines the type inherited by sub-sections
         const title = trimmed.replace(/^#+\s*/, '').trim()
         const lower = title.toLowerCase()
         currentType =
@@ -91,7 +92,7 @@
         sections.push(current)
 
       } else if (/^#{4,}\s/.test(trimmed)) {
-        // Sub-section (#### Category) — inherits parent type
+        // Sub-section (#### Category) - inherits parent type
         const title = trimmed.replace(/^#+\s*/, '').trim()
         current = { title, type: currentType, items: [] }
         sections.push(current)
@@ -108,7 +109,7 @@
         if (item) current.items.push(item)
 
       } else if (trimmed && current && current.items.length === 0 && !/^#+/.test(trimmed)) {
-        // Plain text before any bullet — treat as a description item
+        // Plain text before any bullet - treat as a description item
         current.items.push(trimmed)
       }
     }
@@ -117,6 +118,15 @@
   }
 
   const changelog = $derived(parseChangelog(releaseNotes))
+
+  // Actionable states are true modals (dark backdrop, blocks the app);
+  // passive states (checking / up-to-date) float without blocking.
+  const isModal = $derived(
+    status === 'available' ||
+    status === 'downloading' ||
+    status === 'done' ||
+    status === 'error',
+  )
 
   onMount(() => {
     if (import.meta.env.DEV) return
@@ -189,143 +199,162 @@
   }
 </script>
 
-<!-- ── Compact corner toast (all non-page states) ────────────────── -->
+<!-- ── Centered update dialog (sits above the connection modal) ───── -->
 {#if visible}
+  <!-- Actionable states get a dark backdrop; passive states float without blocking. -->
   <div
-    class="fixed bottom-4 right-4 z-50 w-[22rem] overflow-hidden rounded-xl border border-border bg-card shadow-lg shadow-black/10"
+    class={cn(
+      'fixed inset-0 z-[200] flex items-center justify-center p-4',
+      !isModal && 'pointer-events-none',
+    )}
     role="dialog"
+    aria-modal={isModal}
     aria-label="Application update"
   >
-    <!-- header row -->
-    <div class="flex items-center gap-2.5 border-b border-border px-4 py-3">
-      {#if status === 'done' || status === 'up-to-date'}
-        <CheckCircle2 class="size-4 shrink-0 text-green-500" />
-      {:else if status === 'error'}
-        <AlertCircle class="size-4 shrink-0 text-destructive" />
-      {:else if checking}
-        <Loader2 class="size-4 shrink-0 animate-spin text-primary/70" />
-      {:else if status === 'available'}
-        <Sparkles class="size-4 shrink-0 text-primary" />
-      {:else}
-        <Download class="size-4 shrink-0 text-primary/70" />
-      {/if}
+    {#if isModal}
+      <button
+        type="button"
+        tabindex="-1"
+        aria-label="Dismiss"
+        class="absolute inset-0 cursor-default bg-black/50"
+        onclick={() => { if (status !== 'downloading') dismissed = true }}
+      ></button>
+    {/if}
 
-      <span class="flex-1 text-ui-sm font-medium text-foreground">
-        {#if checking}
-          Checking for updates…
-        {:else if status === 'available'}
-          Stroke {updateVersion} available
-        {:else if status === 'downloading'}
-          Downloading update…
-        {:else if status === 'done'}
-          Ready to install
-        {:else if status === 'error'}
-          Update failed
-        {:else if status === 'up-to-date'}
-          Up to date
+    <div
+      class="pointer-events-auto relative w-[min(420px,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-border/60 bg-card shadow-2xl shadow-black/30"
+    >
+      <!-- header row -->
+      <div class="flex items-center gap-3 border-b border-border/40 px-5 py-3.5">
+        <div class="shrink-0 rounded-xl bg-muted/50 p-2">
+          {#if status === 'done' || status === 'up-to-date'}
+            <CheckCircle2 class="size-4 text-green-500" />
+          {:else if status === 'error'}
+            <AlertCircle class="size-4 text-destructive" />
+          {:else if checking}
+            <Loader2 class="size-4 animate-spin text-primary/70" />
+          {:else if status === 'available'}
+            <Sparkles class="size-4 text-primary" />
+          {:else}
+            <Download class="size-4 text-primary/70" />
+          {/if}
+        </div>
+
+        <span class="flex-1 whitespace-nowrap text-ui font-semibold text-foreground">
+          {#if checking}
+            Checking for updates…
+          {:else if status === 'available'}
+            Stroke {updateVersion} available
+          {:else if status === 'downloading'}
+            Downloading update…
+          {:else if status === 'done'}
+            Ready to install
+          {:else if status === 'error'}
+            Update failed
+          {:else if status === 'up-to-date'}
+            Up to date
+          {/if}
+        </span>
+
+        {#if status !== 'downloading'}
+          <button
+            type="button"
+            onclick={() => (dismissed = true)}
+            class="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
+            aria-label="Dismiss"
+          >
+            <X class="size-4" />
+          </button>
         {/if}
-      </span>
+      </div>
 
-      {#if status !== 'downloading'}
-        <button
-          type="button"
-          onclick={() => (dismissed = true)}
-          class="inline-flex size-5 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-          aria-label="Dismiss"
-        >
-          <X class="size-3" />
-        </button>
-      {/if}
-    </div>
+      <!-- body -->
+      <div class="px-5 py-4 text-ui-sm">
 
-    <!-- body -->
-    <div class="px-4 py-3 text-ui-sm">
-
-      {#if status === 'available'}
-        <p class="mb-3 text-ui-xs text-muted-foreground">A new version is ready to install.</p>
-        <div class="flex gap-2">
-          <button
-            type="button"
-            onclick={openChangelog}
-            class="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-ui-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <ScrollText class="size-3.5" />
-            Release Notes
-            <ExternalLink class="ml-0.5 size-3 text-muted-foreground/60" />
-          </button>
-          <button
-            type="button"
-            onclick={() => void install()}
-            class="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-ui-xs font-medium text-primary-foreground hover:opacity-90"
-          >
-            <Download class="size-3.5" />
-            Install
-          </button>
-        </div>
-
-      {:else if status === 'downloading'}
-        <div class="flex flex-col gap-2">
-          <div class="flex items-center justify-between text-ui-xs text-muted-foreground">
-            <span>{totalBytes > 0 ? `${fmt(downloadedBytes)} / ${fmt(totalBytes)}` : 'Downloading…'}</span>
-            <span class="font-mono tabular-nums">{progress}%</span>
-          </div>
-          <div class="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-            <div
-              class="h-full rounded-full bg-primary transition-all duration-150"
-              style="width:{progress}%"
-            ></div>
-          </div>
-          <p class="text-ui-xs text-muted-foreground">
-            Stroke <span class="font-mono font-medium text-foreground">{updateVersion}</span>
-          </p>
-        </div>
-
-      {:else if status === 'done'}
-        <p class="mb-3 text-muted-foreground">
-          Version <span class="font-mono font-medium text-foreground">{updateVersion}</span> downloaded. Restart to apply.
-        </p>
-        <div class="flex gap-2">
-          {#if changelog.length > 0}
+        {#if status === 'available'}
+          <p class="mb-4 text-ui-sm text-muted-foreground">A new version is ready to install.</p>
+          <div class="flex gap-2.5">
             <button
               type="button"
               onclick={openChangelog}
-              class="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-ui-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              class="inline-flex h-9 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-border px-3 text-ui-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
-              <ScrollText class="size-3.5" />
-              What's New
-              <ExternalLink class="ml-0.5 size-3 text-muted-foreground/60" />
+              <ScrollText class="size-3.5 shrink-0" />
+              Release Notes
+            </button>
+            <button
+              type="button"
+              onclick={() => void install()}
+              class="inline-flex h-9 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-primary px-3 text-ui-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              <Download class="size-3.5 shrink-0" />
+              Install
+            </button>
+          </div>
+
+        {:else if status === 'downloading'}
+          <div class="flex flex-col gap-2.5">
+            <div class="flex items-center justify-between text-ui-xs text-muted-foreground">
+              <span>{totalBytes > 0 ? `${fmt(downloadedBytes)} / ${fmt(totalBytes)}` : 'Downloading…'}</span>
+              <span class="font-mono tabular-nums">{progress}%</span>
+            </div>
+            <div class="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                class="h-full rounded-full bg-primary transition-all duration-150"
+                style="width:{progress}%"
+              ></div>
+            </div>
+            <p class="text-ui-xs text-muted-foreground">
+              Stroke <span class="font-mono font-medium text-foreground">{updateVersion}</span>
+            </p>
+          </div>
+
+        {:else if status === 'done'}
+          <p class="mb-4 text-ui-sm text-muted-foreground">
+            Version <span class="font-mono font-medium text-foreground">{updateVersion}</span> downloaded. Restart to apply.
+          </p>
+          <div class="flex gap-2.5">
+            {#if changelog.length > 0}
+              <button
+                type="button"
+                onclick={openChangelog}
+                class="inline-flex h-9 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-border px-3 text-ui-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <ScrollText class="size-3.5 shrink-0" />
+                What's New
+              </button>
+            {/if}
+            <button
+              type="button"
+              onclick={() => void restart()}
+              class="inline-flex h-9 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-primary px-3 text-ui-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              <RefreshCw class="size-3.5 shrink-0" />
+              Restart now
+            </button>
+          </div>
+
+        {:else if status === 'error'}
+          <p class="font-mono text-ui-xs text-destructive">{errorMsg}</p>
+
+        {:else if status === 'up-to-date' || checking}
+          <p class="text-ui-sm leading-relaxed text-muted-foreground">
+            {checking ? 'Checking GitHub for a newer release…' : "You're on the latest version."}
+          </p>
+          {#if !checking}
+            <button
+              type="button"
+              onclick={openChangelog}
+              class="mt-4 inline-flex h-9 items-center gap-1.5 rounded-lg border border-border px-3 text-ui-sm text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted hover:text-foreground active:scale-[0.97]"
+            >
+              <ScrollText class="size-3.5 shrink-0" />
+              View changelog
+              <ExternalLink class="ml-0.5 size-3 shrink-0 text-muted-foreground/60" />
             </button>
           {/if}
-          <button
-            type="button"
-            onclick={() => void restart()}
-            class="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-ui-xs font-medium text-primary-foreground hover:opacity-90"
-          >
-            <RefreshCw class="size-3" />
-            Restart now
-          </button>
-        </div>
-
-      {:else if status === 'error'}
-        <p class="font-mono text-ui-xs text-destructive">{errorMsg}</p>
-
-      {:else if status === 'up-to-date' || checking}
-        <p class="text-ui-xs leading-relaxed text-muted-foreground">
-          {checking ? 'Checking GitHub for a newer release…' : "You're on the latest version."}
-        </p>
-        {#if !checking}
-          <button
-            type="button"
-            onclick={openChangelog}
-            class="mt-3 inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-ui-xs text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted hover:text-foreground active:scale-[0.96]"
-          >
-            <ScrollText class="size-3.5" />
-            View changelog
-            <ExternalLink class="ml-0.5 size-3 text-muted-foreground/60" />
-          </button>
         {/if}
-      {/if}
 
+      </div>
     </div>
   </div>
 {/if}

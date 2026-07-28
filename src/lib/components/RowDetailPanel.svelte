@@ -134,7 +134,7 @@
       const isBoolean = isBooleanType(dataType)
       const isPk = pkSet.has(col.name)
       // PK columns, non-editable types, and truncated oversize cells (only a
-      // preview was loaded — saving would write it back) are read-only.
+      // preview was loaded - saving would write it back) are read-only.
       const editable = canEdit && !isPk && isEditableType(dataType) && !oversizeCellInfo(raw)
       const isNull = raw === null
       const isEmpty = typeof raw === 'string' && raw === ''
@@ -348,7 +348,7 @@
       const pretty = JSON.stringify(parsed, null, 2)
       await commitValue(field.colIdx, pretty)
     } catch {
-      toast.error('Invalid JSON — cannot pretty-format')
+      toast.error('Invalid JSON, cannot pretty-format')
     }
   }
 </script>
@@ -439,7 +439,7 @@
                       <div class="mb-0.5 flex h-5 items-center gap-1">
                         <span class="min-w-0 flex-1 truncate font-mono text-ui-2xs text-muted-foreground">{field.name}</span>
                         {#if field.isPk}
-                          <span title="Primary key — cannot be changed" class="inline-flex shrink-0 items-center gap-0.5 font-mono text-ui-3xs text-amber-500/70">
+                          <span title="Primary key, cannot be changed" class="inline-flex shrink-0 items-center gap-0.5 font-mono text-ui-3xs text-amber-500/70">
                             <KeyRound class="size-2.5" />PK
                           </span>
                         {/if}

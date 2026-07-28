@@ -1,6 +1,6 @@
 import { oversizeCellInfo, oversizeCellText } from './cell-value.js'
 
-// Strings longer than this are never JSON.parse-probed for expandability —
+// Strings longer than this are never JSON.parse-probed for expandability -
 // parsing multi-MB strings on render freezes the UI. (Backend caps cells well
 // below this; the guard covers engines without capping.)
 const EXPAND_PARSE_LIMIT = 1_000_000

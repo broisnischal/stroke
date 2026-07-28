@@ -107,7 +107,7 @@
       language: 'json',
       theme: monacoThemeId(currentTheme()),
       readOnly: true,
-      // automaticLayout:false — that option runs a 100ms setInterval per editor
+      // automaticLayout:false - that option runs a 100ms setInterval per editor
       // forever; a ResizeObserver (below) handles relayout without the polling.
       automaticLayout: false,
       minimap: { enabled: false },

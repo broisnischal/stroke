@@ -1,4 +1,4 @@
-// Saved table views — a named combination of search + filters + sort + hidden
+// Saved table views - a named combination of search + filters + sort + hidden
 // columns + data view mode, persisted per connection + schema + table
 // (localStorage, same keying scheme as hidden columns in table-prefs.js).
 
@@ -36,12 +36,12 @@ export function saveTableViews(connId, schema, table, views) {
   try {
     localStorage.setItem(tableViewsKey(connId, schema, table), JSON.stringify(views))
   } catch {
-    // localStorage unavailable/full — views just won't persist
+    // localStorage unavailable/full - views just won't persist
   }
 }
 
 /**
- * Short human summary of what a view changes — shown next to its name.
+ * Short human summary of what a view changes - shown next to its name.
  * @param {SavedTableView} v
  */
 export function describeTableView(v) {

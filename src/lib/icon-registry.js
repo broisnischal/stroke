@@ -1,5 +1,5 @@
 /**
- * Shared icon registry — maps a stable semantic name to both a Lucide component
+ * Shared icon registry - maps a stable semantic name to both a Lucide component
  * and a Hugeicons data object, so the <Icon> wrapper can render either family
  * based on the user's icon-set setting.
  *

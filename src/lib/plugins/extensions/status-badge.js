@@ -1,4 +1,4 @@
-// Status / enum badges — colored pills for status/role/state columns.
+// Status / enum badges - colored pills for status/role/state columns.
 // Only applies to columns whose name signals a categorical state, so ordinary
 // text columns are never badged.
 const NAME_RE = /(^|_)(status|state|role|kind|stage|phase|level|priority|tier|plan|severity|visibility|mode|result|outcome|health)($|_)/i
@@ -29,7 +29,7 @@ const DARK = {
   blue: { bg: 'rgba(59,130,246,0.16)', fg: 'rgb(96,165,250)' },
   gray: { bg: 'rgba(148,163,184,0.16)', fg: 'rgb(148,163,184)' },
 }
-// Light mode: saturated ~700-shade text on a pale tint — dark-on-light pills
+// Light mode: saturated ~700-shade text on a pale tint - dark-on-light pills
 // that stay legible on a cream background (the old palette used the dark-mode
 // light-400 text, which washed out to near-invisible in light mode).
 const LIGHT = {
@@ -40,8 +40,8 @@ const LIGHT = {
   gray: { bg: 'rgba(100,116,139,0.16)', fg: 'rgb(51,65,85)' },
 }
 
-// One long-lived subscription keeps a plain boolean in sync, so format() — a
-// per-cell hot path — never touches the store on each call.
+// One long-lived subscription keeps a plain boolean in sync, so format() - a
+// per-cell hot path - never touches the store on each call.
 let _dark = true
 isCurrentThemeDark.subscribe((v) => { _dark = v })
 

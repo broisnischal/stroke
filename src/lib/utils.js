@@ -32,7 +32,7 @@ const NETWORK_ERROR_PATTERNS = [
   'server closed the connection',
   'terminating connection',  // Postgres idle-timeout / admin close
   'connection is closed',
-  // NB: deliberately NOT matching bare 'timed out' / 'i/o error' — those also fire
+  // NB: deliberately NOT matching bare 'timed out' / 'i/o error' - those also fire
   // on a statement/lock timeout (a slow query, not a dropped connection), which
   // would spuriously flag connectionLost and churn the pool on every subsequent tap.
 ]
@@ -55,7 +55,7 @@ export function cn(...inputs) {
 /**
  * Like `cn` but skips `tailwind-merge`'s conflict resolution. Use ONLY for hot
  * render paths (per-row / per-cell) whose class lists are authored to have no
- * conflicting utilities — it just joins, which is much cheaper at scale.
+ * conflicting utilities - it just joins, which is much cheaper at scale.
  * @param {...import('clsx').ClassValue} inputs
  */
 export function cx(...inputs) {

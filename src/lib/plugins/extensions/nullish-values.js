@@ -1,4 +1,4 @@
-// Empty & NULL markers — make the difference between NULL, an empty string, and
+// Empty & NULL markers - make the difference between NULL, an empty string, and
 // a whitespace-only string obvious (they look identical in a raw grid). NULL is
 // rendered as ∅ by the grid itself (it skips formatters for null); this handles
 // the two non-null cases via a display directive.

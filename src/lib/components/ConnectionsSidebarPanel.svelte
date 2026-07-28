@@ -1,5 +1,5 @@
 <script>
-  // Connections sidebar panel — VSCode-style switchable panel that lists saved
+  // Connections sidebar panel - VSCode-style switchable panel that lists saved
   // connections, lets the user switch between them, add new ones, and remove
   // them. Connection lifecycle actions (switch/add/remove/disconnect) are
   // delegated to the shell. Group assignment persists locally via the store and
@@ -100,7 +100,7 @@
   }
 
   /**
-   * Per-engine leading icon. All engines map to `database` today — kept as a
+   * Per-engine leading icon. All engines map to `database` today - kept as a
    * lookup so a per-engine glyph can be swapped in later without touching the row.
    * @param {string | undefined} type
    */

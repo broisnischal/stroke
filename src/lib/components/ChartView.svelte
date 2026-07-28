@@ -167,7 +167,7 @@
 
   // Resolve the app's --primary token to a concrete rgb() string so charts follow
   // the current theme. Reading the CSS var directly yields oklch(), which
-  // zrender/ECharts can't parse — painting it onto a probe element lets the
+  // zrender/ECharts can't parse - painting it onto a probe element lets the
   // browser normalise it to rgb(). Recomputes when the theme (isDark) flips.
   // Re-resolve the theme accent whenever the theme flips. buildOption also
   // resolves it internally as a default, so non-ChartView chart paths (AI charts,
@@ -351,7 +351,7 @@
       <!-- Separator -->
       <span class="h-4 w-px shrink-0 bg-border/50"></span>
 
-      <!-- Axis pickers — integrated label + select tokens -->
+      <!-- Axis pickers, integrated label + select tokens -->
       {#if requiredAxes.x}
         <div class={axisToken}>
           <span class={axisLabel}>{requiredAxes.x.split(' ')[0]}</span>

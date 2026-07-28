@@ -1,6 +1,6 @@
 /**
  * Utilities for converting SQL result sets (columns + rows) into ECharts option objects.
- * All functions return pure JSON — no callbacks — so AI can generate them too.
+ * All functions return pure JSON - no callbacks - so AI can generate them too.
  *
  * NOTE: echarts-wordcloud is registered lazily at the chart init sites (EChartPanel,
  * AiChartRenderer) so that importing this pure-JSON util module does NOT drag echarts
@@ -111,7 +111,7 @@ const DEFAULT_PALETTE = [
 /** Resolve the app's --primary token to a concrete rgb() string, so every chart
  * across the app (table view, SQL editor, AI charts, previews) follows the active
  * theme without each caller wiring it up. Returns '' when --primary can't resolve
- * to a real color (unset, or unparseable in this engine — in which case the probe
+ * to a real color (unset, or unparseable in this engine - in which case the probe
  * inherits the foreground and would paint bars white); callers then fall back to
  * DEFAULT_PALETTE. */
 export function resolveChartAccent() {
@@ -131,7 +131,7 @@ export function resolveChartAccent() {
 /**
  * Format a raw value for tooltip display.
  * Timestamps from PostgreSQL arrive as strings like "2025-12-01 00:00:00 UTC"
- * or ISO "2026-01-01T00:00:00.000Z" — convert to "Dec 2025" / "Jan 2026".
+ * or ISO "2026-01-01T00:00:00.000Z" - convert to "Dec 2025" / "Jan 2026".
  */
 function fmtTooltipValue(val) {
   if (Array.isArray(val)) return fmtTooltipValue(val[val.length - 1])
@@ -243,7 +243,7 @@ function aggPairs(rows, xi, yi) {
     .sort((a, b) => b.value - a.value)
 }
 
-/** Max/min over an array WITHOUT spreading — `Math.max(...arr)` throws
+/** Max/min over an array WITHOUT spreading - `Math.max(...arr)` throws
  * `RangeError: Maximum call stack size exceeded` once the array passes ~100k
  * elements, which is exactly the large-result case we must survive. */
 function arrMax(arr, seed = -Infinity) {
@@ -646,7 +646,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
   // ── Word Cloud ─────────────────────────────────────────────────────────────
   if (type === 'word-cloud') {
     // Aggregate duplicate words (like pie/donut) and cap to the top 150 by
-    // weight — the layout is a synchronous canvas packer, so thousands of words
+    // weight - the layout is a synchronous canvas packer, so thousands of words
     // would freeze the UI.
     const data = aggPairs(rows, xi, yi).slice(0, 150).map((d) => ({ name: d.name, value: d.value || 1 }))
     return {
@@ -924,7 +924,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
     }
   }
 
-  // ── Choropleth / Meter — handled by dedicated Svelte components ────────────
+  // ── Choropleth / Meter - handled by dedicated Svelte components ────────────
   // buildOption is not called for these types; return empty so callers get {}
   if (type === 'choropleth' || type === 'meter') return {}
 
@@ -1117,7 +1117,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
     const dataMap = aggDataMap(rows, xi, yi)
     // Categories are on the Y axis; past ~25 they overflow vertically. Add a
     // vertical scroll/zoom (slider on the right + wheel/drag inside) so many
-    // categories stay usable instead of cramming — the generic dataZoom only
+    // categories stay usable instead of cramming - the generic dataZoom only
     // covers the horizontal x-axis and this branch never reaches it.
     const needsZoom = xData.length > 25
     const dataZoom = needsZoom ? [
@@ -1313,7 +1313,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
 
   return {
     ...base,
-    // Bars get a 'shadow' pointer (highlights the whole hovered category column —
+    // Bars get a 'shadow' pointer (highlights the whole hovered category column -
     // the expected bar-chart hover); line/area keep the thin crosshair line.
     tooltip: { ...base.tooltip, trigger: 'axis', axisPointer: { type: type === 'bar' ? 'shadow' : 'line' } },
     legend: series.length > 1 ? { textStyle: base.textStyle, top: 4 } : undefined,
@@ -1334,7 +1334,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
  * @param {number} [n] total row count for perf decisions
  */
 function makeSeries(type, name, data, color, n = 0) {
-  // Progressive rendering kicks in above this threshold — renders in 400-item
+  // Progressive rendering kicks in above this threshold - renders in 400-item
   // chunks per animation frame so the thread stays responsive.
   const prog = n > 1000 ? { progressive: 400, progressiveThreshold: 1000 } : {}
 
@@ -1362,11 +1362,11 @@ function makeSeries(type, name, data, color, n = 0) {
   }
 
   const isArea = type === 'area'
-  // Hide per-point symbols when there are many points — they cost more to render
+  // Hide per-point symbols when there are many points - they cost more to render
   // than the line itself and become invisible noise past ~200 points anyway.
   const showSymbols = n < 200
   // LTTB (Largest-Triangle-Three-Buckets) down-samples the visible line while
-  // preserving shape — the chart looks identical but draws far fewer paths.
+  // preserving shape - the chart looks identical but draws far fewer paths.
   const sampling = n > 500 ? { sampling: 'lttb' } : {}
 
   return {
@@ -1471,7 +1471,7 @@ export const CHART_CATALOG = [
     label: 'Lollipop H',
     group: 'Bar',
     icon: 'minus',
-    description: 'Horizontal lollipop — good for ranked categories',
+    description: 'Horizontal lollipop, good for ranked categories',
     axes: { x: 'category', y: 'value' },
     requires: { x: 'any', y: 'number' },
     aiHint: 'ORDER BY value DESC for ranking effect',
@@ -1721,7 +1721,7 @@ export const CHART_CATALOG = [
     label: 'Pareto',
     group: 'Bar',
     icon: 'chart-no-axes-combined',
-    description: 'Sorted bar + cumulative % line — identifies top contributors (80/20 rule)',
+    description: 'Sorted bar + cumulative % line, identifies top contributors (80/20 rule)',
     axes: { x: 'category', y: 'value' },
     requires: { x: 'any', y: 'number' },
     aiHint: 'Query category and count/value; chart auto-sorts descending and adds cumulative line',
@@ -1731,7 +1731,7 @@ export const CHART_CATALOG = [
     label: 'Step',
     group: 'Line & Area',
     icon: 'step-forward',
-    description: 'Step-interpolated line — ideal for inventory, prices, or status changes',
+    description: 'Step-interpolated line: ideal for inventory, prices, or status changes',
     axes: { x: 'date or category', y: 'value', group: 'optional' },
     requires: { x: 'any', y: 'number', group: 'optional-category' },
     aiHint: 'Same data as a line chart; ORDER BY date for correct sequence',

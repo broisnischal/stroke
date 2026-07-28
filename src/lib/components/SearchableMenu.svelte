@@ -16,7 +16,7 @@
     empty = "No results",
     closeOnSelect = true,
     align = "start",
-    /** Popover side — use "top" for triggers anchored to the bottom (status bar). */
+    /** Popover side - use "top" for triggers anchored to the bottom (status bar). */
     side = "bottom",
     contentClass = "w-56",
     /** Show the search box only when there are more than this many items
@@ -24,9 +24,9 @@
     searchThreshold = 5,
     /** @type {(item: any) => void} */
     onselect = () => {},
-    /** snippet({ props }) — renders the trigger button */
+    /** snippet({ props }) - renders the trigger button */
     trigger,
-    /** snippet(item) — renders one row's content */
+    /** snippet(item) - renders one row's content */
     item,
     /** optional snippet() rendered above the list (e.g. a header bar) */
     header,
@@ -84,7 +84,7 @@
 
 <!--
   cmdk always calls #selectFirstItem() on every re-render (sort/filter pass), so "id"
-  gets data-selected any time the parent state changes — even if the mouse is over a
+  gets data-selected any time the parent state changes, even if the mouse is over a
   different row. The :has() rule below suppresses that background while the mouse is
   inside the list: the hovered item shows its own :hover highlight, and the stale
   cmdk auto-selection on other items is invisible. Keyboard navigation is unaffected

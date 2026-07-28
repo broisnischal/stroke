@@ -1,4 +1,4 @@
-// Temporal freshness — tint timestamp cells by recency: bright when just now,
+// Temporal freshness - tint timestamp cells by recency: bright when just now,
 // fading to nothing as they age. Great for created_at / updated_at / last_seen.
 // Returns only a `bgTint`, so it yields to dirty/fk/focus tints.
 
@@ -28,7 +28,7 @@ const TIME_NAME = /_at$|_time$|_on$|created|updated|modified|deleted|last_?seen|
 export const freshness = {
   id: 'freshness',
   name: 'Freshness Heat',
-  description: 'Tint timestamp cells by recency — bright when recent, fading as they age.',
+  description: 'Tint timestamp cells by recency, bright when recent, fading as they age.',
   kind: 'formatter',
 
   /** @param {string} type @param {string} name @param {unknown} value */

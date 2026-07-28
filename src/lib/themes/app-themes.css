@@ -1,21 +1,24 @@
-/* App color tokens — 3 light + 5 dark, solid borders throughout */
+/* App color tokens - 3 light + 5 dark, solid borders throughout */
 
 /* ─────────────────────────────────────────────────────────────────────────────
    LIGHT THEMES
    ───────────────────────────────────────────────────────────────────────────── */
 
-/* ── Studio Light — clean neutral white, signature indigo primary ── */
+/* ── Studio Light - clean neutral white, signature indigo primary ── */
 html[data-theme="light"] {
   --background:               oklch(0.975 0 0);
   --foreground:               oklch(0.13 0 0);
   /* Raised surfaces read LIGHTER than the canvas in light mode (elevation =
      more light), so cards/popovers sit above the background instead of below
-     it — the drop shadow + rim highlight then agree with the colour. */
+     it - the drop shadow + rim highlight then agree with the colour. */
   --card:                     oklch(0.995 0 0);
   --card-foreground:          oklch(0.13 0 0);
   --popover:                  oklch(0.998 0 0);
   --popover-foreground:       oklch(0.13 0 0);
-  --primary:                  oklch(0.515 0.194 266);
+  /* Deeper, slightly less electric blue: reads richer on the near-white canvas
+     and lifts white-label contrast above the AA floor (the old 0.515 mid-blue
+     looked flat and washed the +/chevron affordances). */
+  --primary:                  oklch(0.485 0.185 264);
   --primary-foreground:       oklch(0.99 0 0);
   --secondary:                oklch(0.956 0 0);
   --secondary-foreground:     oklch(0.20 0 0);
@@ -26,7 +29,7 @@ html[data-theme="light"] {
   --destructive:              oklch(0.55 0.22 25);
   --border:                   oklch(0.878 0 0);
   --input:                    oklch(0.878 0 0);
-  --ring:                     oklch(0.560 0.165 266);
+  --ring:                     oklch(0.530 0.160 264);
   --sidebar:                  oklch(0.970 0 0);
   --sidebar-foreground:       oklch(0.17 0 0);
   --sidebar-accent:           oklch(0.944 0 0);
@@ -40,7 +43,7 @@ html[data-theme="light"] {
   --editor-line-highlight:    #f0f0f0;
 }
 
-/* ── Parchment — warm amber cream, indigo accent ── */
+/* ── Parchment - warm amber cream, indigo accent ── */
 html[data-theme="parchment"] {
   --background:               oklch(0.968 0.016 86);
   --foreground:               oklch(0.165 0.022 64);
@@ -73,7 +76,7 @@ html[data-theme="parchment"] {
   --editor-line-highlight:    #ede9de;
 }
 
-/* ── Ice — cool blue-steel tint, vivid blue accent ── */
+/* ── Ice - cool blue-steel tint, vivid blue accent ── */
 html[data-theme="ice"] {
   --background:               oklch(0.982 0.008 242);
   --foreground:               oklch(0.135 0.026 252);
@@ -110,7 +113,7 @@ html[data-theme="ice"] {
    DARK THEMES
    ───────────────────────────────────────────────────────────────────────────── */
 
-/* ── Studio — neutral near-black, signature indigo primary (default) ── */
+/* ── Studio - neutral near-black, signature indigo primary (default) ── */
 html[data-theme="dark"] {
   --background:               oklch(0.132 0 0);
   --foreground:               oklch(0.940 0 0);
@@ -143,7 +146,7 @@ html[data-theme="dark"] {
   --editor-line-highlight:    #252525;
 }
 
-/* ── Midnight — deep ocean navy, blue accent ── */
+/* ── Midnight - deep ocean navy, blue accent ── */
 html[data-theme="midnight"] {
   --background:               oklch(0.140 0.030 265);
   --foreground:               oklch(0.930 0.016 250);
@@ -176,7 +179,7 @@ html[data-theme="midnight"] {
   --editor-line-highlight:    #171e27;
 }
 
-/* ── Dusk — warm amber-brown charcoal, amber accent ── */
+/* ── Dusk - warm amber-brown charcoal, amber accent ── */
 html[data-theme="vitesse"] {
   --background:               oklch(0.150 0.014 64);
   --foreground:               oklch(0.920 0.016 70);
@@ -209,7 +212,7 @@ html[data-theme="vitesse"] {
   --editor-line-highlight:    #26201a;
 }
 
-/* ── Iris — deep violet-purple, vivid violet accent ── */
+/* ── Iris - deep violet-purple, vivid violet accent ── */
 html[data-theme="slate"] {
   --background:               oklch(0.148 0.022 285);
   --foreground:               oklch(0.928 0.014 290);
@@ -242,7 +245,7 @@ html[data-theme="slate"] {
   --editor-line-highlight:    #221d2e;
 }
 
-/* ── Mono — pure black shadcn-style, crisp borders ── */
+/* ── Mono - pure black shadcn-style, crisp borders ── */
 html[data-theme="mono"] {
   --background:               oklch(0 0 0);
   --foreground:               oklch(0.985 0 0);
@@ -275,7 +278,7 @@ html[data-theme="mono"] {
   --editor-line-highlight:    #0f0f0f;
 }
 
-/* ── Forest — dark emerald green, bright green accent ── */
+/* ── Forest - dark emerald green, bright green accent ── */
 html[data-theme="forest"] {
   --background:               oklch(0.135 0.020 152);
   --foreground:               oklch(0.905 0.016 142);
@@ -315,7 +318,7 @@ html[data-theme="forest"] {
    chosen to clear WCAG AA (≥4.5:1) on their own background.
    ───────────────────────────────────────────────────────────────────────────── */
 
-/* ── GitHub Light — crisp high-contrast, signature blue accent ── */
+/* ── GitHub Light - crisp high-contrast, signature blue accent ── */
 html[data-theme="github-light"] {
   --background:               #ffffff;
   --foreground:               #1f2328;
@@ -348,7 +351,7 @@ html[data-theme="github-light"] {
   --editor-line-highlight:    #f6f8fa;
 }
 
-/* ── Rosé Pine — muted rose & pine, iris accent ── */
+/* ── Rosé Pine - muted rose & pine, iris accent ── */
 html[data-theme="rose-pine"] {
   --background:               #191724;
   --foreground:               #e0def4;
@@ -381,7 +384,7 @@ html[data-theme="rose-pine"] {
   --editor-line-highlight:    #1f1d2e;
 }
 
-/* ── Catppuccin Mocha — soft pastel dark, mauve accent ── */
+/* ── Catppuccin Mocha - soft pastel dark, mauve accent ── */
 html[data-theme="catppuccin"] {
   --background:               #1e1e2e;
   --foreground:               #cdd6f4;
@@ -414,7 +417,7 @@ html[data-theme="catppuccin"] {
   --editor-line-highlight:    #2a2b3c;
 }
 
-/* ── Solarized — Ethan Schoonover's classic dark, blue accent ── */
+/* ── Solarized - Ethan Schoonover's classic dark, blue accent ── */
 html[data-theme="solarized"] {
   --background:               #002b36;
   --foreground:               #93a1a1;
@@ -447,7 +450,7 @@ html[data-theme="solarized"] {
   --editor-line-highlight:    #073642;
 }
 
-/* ── Graphite — cool JetBrains-style graphite, restrained blue accent ──
+/* ── Graphite - cool JetBrains-style graphite, restrained blue accent ──
    Flat surfaces: content #1e1f22, chrome a step darker, raised menus lighter.
    Separation comes from hairline borders; blue is reserved for primary/
    selection/focus so data (syntax colors, statuses) is the only other color. */
@@ -483,7 +486,7 @@ html[data-theme="graphite"] {
   --editor-line-highlight:    #26282d;
 }
 
-/* ── Dark High Contrast — maximum contrast for low vision (pure black,
+/* ── Dark High Contrast - maximum contrast for low vision (pure black,
       bright text, strong borders, yellow accent). ── */
 html[data-theme="dark-high-contrast"] {
   --background:               oklch(0 0 0);
@@ -517,7 +520,7 @@ html[data-theme="dark-high-contrast"] {
   --editor-line-highlight:    #1c1c1c;
 }
 
-/* ── Light High Contrast — maximum contrast for low vision (pure white,
+/* ── Light High Contrast - maximum contrast for low vision (pure white,
       black text, strong dark borders, deep blue accent). ── */
 html[data-theme="light-high-contrast"] {
   --background:               oklch(1 0 0);

@@ -1,4 +1,4 @@
-// Money / currency — render numeric money columns as localized currency.
+// Money / currency - render numeric money columns as localized currency.
 import { normalizeColumnType } from '$lib/cell-value.js'
 
 const NUMERIC_RE = /(int|numeric|decimal|real|double|float|money|number)/i

@@ -143,7 +143,7 @@ export async function captureSnapshot(connectionId, connectionLabel, dbType = 'p
     }
   }
 
-  // Generate DDL inline from already-captured column data — no extra API calls
+  // Generate DDL inline from already-captured column data - no extra API calls
   const ddl = /** @type {{ [key: string]: string }} */ ({})
   for (const [schema, tableList] of Object.entries(tables)) {
     for (const t of tableList) {

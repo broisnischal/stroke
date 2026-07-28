@@ -25,7 +25,7 @@
   const rowCount = $derived(data?.rows?.length ?? 0)
 </script>
 
-<!-- Docked bottom panel — fills the dock's height (flex column) and owns its
+<!-- Docked bottom panel, fills the dock's height (flex column) and owns its
      scroll. The dock container provides the top border + resize handle. -->
 <div class="flex h-full min-h-0 w-full flex-col bg-background">
 
@@ -65,7 +65,7 @@
     </div>
   </div>
 
-  <!-- Content — three visually distinct states: loading / failed / empty -->
+  <!-- Content, three visually distinct states: loading / failed / empty -->
   {#if data?.loading}
     <div class="flex flex-1 items-center gap-2 px-3 py-4">
       <Loader class="size-3.5 animate-spin text-muted-foreground/40" />
@@ -88,7 +88,7 @@
     </div>
 
   {:else}
-    <!-- The dock owns this scroll — both axes contained here, never chained to
+    <!-- The dock owns this scroll, both axes contained here, never chained to
          the grid (the panel lives outside the grid's scroll container). -->
     <div class="app-scroll min-h-0 flex-1 overflow-auto overscroll-contain" data-fk-subview-scroll>
       <table class="w-max min-w-full border-separate" style="border-spacing:0">
@@ -124,7 +124,7 @@
 
     {#if rowCount >= 50}
       <div class="flex shrink-0 items-center border-t border-border/25 bg-muted/5 px-3 py-1">
-        <span class="font-mono text-ui-2xs text-muted-foreground/30">First 50 rows shown — open in sub view for all</span>
+        <span class="font-mono text-ui-2xs text-muted-foreground/30">First 50 rows shown, open in sub view for all</span>
       </div>
     {/if}
   {/if}

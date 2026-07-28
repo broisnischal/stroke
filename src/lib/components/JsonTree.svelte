@@ -1,5 +1,5 @@
 <script>
-  // Lightweight collapsible JSON tree — Monaco-style folding without Monaco's
+  // Lightweight collapsible JSON tree - Monaco-style folding without Monaco's
   // weight, so it can live inline in expanded table rows. Perf model: only
   // expanded children mount, arrays/objects render at most CHILD_PAGE children
   // until "Show more" is clicked, and string leaves are display-truncated.
@@ -40,12 +40,12 @@
   )
   const isContainer = $derived(isArray || isObject)
 
-  // Initial expansion depends on the node's fixed depth props — capture only
+  // Initial expansion depends on the node's fixed depth props - capture only
   // the initial value (untrack) since a node's depth never changes at runtime.
   let expanded = $state(untrack(() => depth < defaultDepth))
   let childLimit = $state(CHILD_PAGE)
 
-  // Total child count — cheap for arrays (.length). Avoids materializing a tuple
+  // Total child count - cheap for arrays (.length). Avoids materializing a tuple
   // for every element of a huge array/object just to show a count.
   const totalCount = $derived(
     isArray ? /** @type {unknown[]} */ (value).length
@@ -87,7 +87,7 @@
 
   /** Display text for a primitive leaf. */
   const leafText = $derived.by(() => {
-    if (oversize) return `${oversize.dataType || 'value'} · ${formatByteSize(oversize.bytes)} — truncated`
+    if (oversize) return `${oversize.dataType || 'value'} · ${formatByteSize(oversize.bytes)}, truncated`
     if (value === null || value === undefined) return 'null'
     if (typeof value === 'string') {
       const s = value.length > STRING_DISPLAY_LIMIT ? value.slice(0, STRING_DISPLAY_LIMIT) + '…' : value

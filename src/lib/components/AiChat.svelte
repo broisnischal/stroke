@@ -177,7 +177,7 @@
     onwritesql = (sql) => {},
     /** Open the dedicated AI model settings dialog. */
     onopenmodelsettings = () => {},
-    /** Called when user saves a diagram — opens Diagrams page */
+    /** Called when user saves a diagram - opens Diagrams page */
     onopendiagramspage = /** @type {(() => void) | undefined} */ (undefined),
   } = $props();
 
@@ -364,7 +364,7 @@
     const conv = convList.find((c) => c.id === id);
     if (!conv) return;
     activeConvId = id;
-    // Restore — filter out ephemeral items (including any stuck streaming items)
+    // Restore - filter out ephemeral items (including any stuck streaming items)
     items = /** @type {ChatItem[]} */ (
       (conv.items ?? []).filter(
         (i) =>
@@ -408,7 +408,7 @@
       if (msg) {
         const code = json?.error?.code ?? json?.code ?? json?.type ?? null;
         if (code === "rate_limit_exceeded" || json?.type === "rate_limited") {
-          return `Rate limit reached — wait a moment and try again.`;
+          return `Rate limit reached, wait a moment and try again.`;
         }
         return String(msg);
       }
@@ -416,12 +416,12 @@
       /* not JSON */
     }
     if (/rate.limit/i.test(raw))
-      return `Rate limit reached — wait a moment and try again.`;
+      return `Rate limit reached, wait a moment and try again.`;
     if (/429/.test(raw))
-      return `Too many requests (429) — wait a moment and try again.`;
+      return `Too many requests (429), wait a moment and try again.`;
     if (/401|unauthorized/i.test(raw))
-      return `Authentication failed — check your API key.`;
-    if (/timeout/i.test(raw)) return `Request timed out — try again.`;
+      return `Authentication failed, check your API key.`;
+    if (/timeout/i.test(raw)) return `Request timed out, try again.`;
     return raw.replace(/^Error:\s*/i, "").slice(0, 200);
   }
 
@@ -486,7 +486,7 @@
     contextMenu = null;
   }
 
-  /** Persist current chat to IndexedDB (upsert). Updates convList in-place — no re-sort. */
+  /** Persist current chat to IndexedDB (upsert). Updates convList in-place - no re-sort. */
   async function persistCurrent() {
     if (items.length === 0) return;
     const saveable = items.filter(
@@ -507,7 +507,7 @@
         items: plainItems,
         apiHistory: plainHistory,
       });
-      // Patch title in place — no re-sort, no visual shuffle
+      // Patch title in place - no re-sort, no visual shuffle
       convList = convList.map((c) =>
         c.id === activeConvId ? { ...c, title } : c,
       );
@@ -546,7 +546,7 @@
         c.id === activeConvId ? { ...c, title } : c,
       );
     } catch {
-      /* non-critical — leave existing title */
+      /* non-critical - leave existing title */
     }
   }
 
@@ -600,7 +600,7 @@
   let items = $state([]);
   /** @type {import('$lib/ai.js').ApiMessage[]} */
   let apiHistory = $state([]);
-  /** Full uncompressed history — never trimmed, always saved to IndexedDB */
+  /** Full uncompressed history - never trimmed, always saved to IndexedDB */
   let rawApiHistory = $state([]);
   let loading = $state(false);
   let error = $state("");
@@ -661,7 +661,7 @@
   });
   let inputText = $state("");
   const isDraftChat = $derived(!activeConvId && items.length > 0);
-  /** Tracks all (name:args) combos executed this turn — prevents exact duplicate calls */
+  /** Tracks all (name:args) combos executed this turn - prevents exact duplicate calls */
   let executedCalls = new Set();
   /**
    * Tracks failure count + last error per callKey this turn.
@@ -677,7 +677,7 @@
   /** Pending commit timer (null = no pending update) */
   let _streamTimer = /** @type {ReturnType<typeof setTimeout> | null} */ (null);
   let _lastStreamCommit = 0;
-  /** Min ms between streaming commits — caps marked.parse churn so long answers (tables/diagrams) stay smooth. */
+  /** Min ms between streaming commits - caps marked.parse churn so long answers (tables/diagrams) stay smooth. */
   const STREAM_COMMIT_MS = 90;
 
   /**
@@ -713,9 +713,9 @@
     // the (growing) streamed string entirely unless a think tag is present.
     streamingContent.includes("<think>")
       ? streamingContent
-          // Complete think blocks — hide entirely
+          // Complete think blocks - hide entirely
           .replace(/<think>[\s\S]*?<\/think>/g, "")
-          // Partial/open think block currently being written — hide from cursor onwards
+          // Partial/open think block currently being written - hide from cursor onwards
           .replace(/<think>[\s\S]*$/, "")
           .trim()
       : streamingContent.trim(),
@@ -763,7 +763,7 @@
     abortController.abort();
     // Flush any buffered content before reading it
     flushStreamingContent();
-    // Immediately finalize UI — don't wait for the async finally block
+    // Immediately finalize UI - don't wait for the async finally block
     const partial = streamingContent.trim();
     const sid = streamingId;
     loading = false;
@@ -808,7 +808,7 @@
 
   // ── Mermaid ───────────────────────────────────────────────────────────────
   /** App :root defines --muted, --accent, --border which inherit into SVG and override
-   *  beautiful-mermaid's color-mix fallbacks — ER attributes/lines become illegible. */
+   *  beautiful-mermaid's color-mix fallbacks - ER attributes/lines become illegible. */
   /** @param {import('$lib/themes/registry.js').ThemeId} themeId */
   function resolveMermaidTheme(themeId) {
     const base =
@@ -830,14 +830,14 @@
   const mermaidCache = new Map();
   const MERMAID_CACHE_MAX = 30;
 
-  /** `usecaseDiagram` is not a real Mermaid type — auto-correct it. */
+  /** `usecaseDiagram` is not a real Mermaid type - auto-correct it. */
   function normalizeMermaidCode(code) {
     return code.replace(/^usecaseDiagram\b/m, "flowchart TD");
   }
 
   /** Reactive store for async-rendered diagrams (from full mermaid.js). */
   /** @type {Record<string, string>} */
-  /** Capped LRU object for async mermaid SVGs — prevents unbounded memory growth. */
+  /** Capped LRU object for async mermaid SVGs - prevents unbounded memory growth. */
   const ASYNC_DIAGRAMS_MAX = 20;
   let _asyncDiagrams = $state({});
   let _asyncDiagramKeys = /** @type {string[]} */ ([]);
@@ -1157,7 +1157,7 @@
   // Stick-to-bottom: the final assistant message renders asynchronously (markdown +
   // shiki highlighting), and charts/mermaid settle even later, so a one-shot scroll
   // fires too early. Instead, observe the message content and keep the view pinned to
-  // the bottom whenever it grows — unless the user has deliberately scrolled up.
+  // the bottom whenever it grows - unless the user has deliberately scrolled up.
   $effect(() => {
     const content = msgListEl;
     if (!content) return;
@@ -1290,7 +1290,7 @@
       ),
   );
 
-  /** System prompt for the current AI turn — built fresh each send() with selective schema injection */
+  /** System prompt for the current AI turn - built fresh each send() with selective schema injection */
   let turnSystemPrompt = $state("");
 
   /**
@@ -1367,7 +1367,7 @@
 
   /** Accordion: ID of the currently expanded result card (null = all collapsed) */
   let openResultId = $state(/** @type {string | null} */ (null));
-  /** Whether the user has manually collapsed results — respected by auto-open logic */
+  /** Whether the user has manually collapsed results - respected by auto-open logic */
   let userPrefersCollapsed = $state(false);
 
   /** @param {string} id */
@@ -1453,7 +1453,7 @@
   /**
    * Fetch column definitions for ALL tables in the active schema that aren't yet cached.
    * After the first call this is a no-op (all tables cached). Stores in fetchedSchemas,
-   * NOT in apiHistory — gets merged into the system prompt each turn.
+   * NOT in apiHistory - gets merged into the system prompt each turn.
    */
   async function ensureFullSchemaCache() {
     if (!schemaContext.tables?.length) return;
@@ -1513,7 +1513,7 @@
 
       fetchedSchemas = { ...fetchedSchemas, ...byTable };
     } catch {
-      // Non-fatal — AI will call describe_table if schema fetch fails
+      // Non-fatal - AI will call describe_table if schema fetch fails
     }
   }
 
@@ -1572,7 +1572,7 @@
     turnSystemPrompt = ci ? `${ci}\n\n---\n\n${basePrompt}` : basePrompt;
 
     // Smart context management: sliding window + optional summarization.
-    // managedLen marks where new messages start after the turn — used to append to rawApiHistory.
+    // managedLen marks where new messages start after the turn - used to append to rawApiHistory.
     const { history: managedHistory, summarized } = await manageHistory(
       settings,
       apiHistory,
@@ -1638,7 +1638,7 @@
     }
   }
 
-  /** Max rows fetched from DB per AI tool call — prevents OOM on large tables */
+  /** Max rows fetched from DB per AI tool call - prevents OOM on large tables */
   const AI_ROW_LIMIT = 500;
   /** Max rows kept in chat state for display */
   const AI_DISPLAY_ROWS = 200;
@@ -1650,7 +1650,7 @@
    * @returns {{ sql: string, capped: boolean }}
    */
   function guardSelectLimit(sql) {
-    // Strip trailing semicolons first — appending "\nLIMIT N" after a ";" produces
+    // Strip trailing semicolons first - appending "\nLIMIT N" after a ";" produces
     // a bare LIMIT statement that PostgreSQL rejects with a syntax error.
     const cleaned = sql.trimEnd().replace(/;+$/, "");
     const t = cleaned.trimStart();
@@ -1662,7 +1662,7 @@
   /** @param {number} depth */
   async function runAiTurn(depth) {
     if (depth > 40)
-      throw new Error("Too many AI iterations — aborting runaway execution");
+      throw new Error("Too many AI iterations, aborting runaway execution");
     if (abortController?.signal.aborted)
       throw Object.assign(new Error("Aborted"), { name: "AbortError" });
 
@@ -1686,7 +1686,7 @@
       abortController?.signal,
       ({ attempt, waitMs }) => {
         const sec = Math.ceil(waitMs / 1000);
-        aiStatusHint = `Rate limited — retrying in ${sec}s (attempt ${attempt}/${MAX_AI_RETRIES})…`;
+        aiStatusHint = `Rate limited, retrying in ${sec}s (attempt ${attempt}/${MAX_AI_RETRIES})…`;
       },
     )) {
       if (chunk.textDelta) {
@@ -1710,7 +1710,7 @@
       }
     }
 
-    // Bail out immediately if the user stopped generation — stop() already finalized UI
+    // Bail out immediately if the user stopped generation - stop() already finalized UI
     if (abortController?.signal.aborted) {
       throw Object.assign(new Error("Aborted"), { name: "AbortError" });
     }
@@ -1746,7 +1746,7 @@
       for (const call of toolCalls) {
         await runToolCall(call);
       }
-      // The next turn is the model interpreting the tool output — show that as a
+      // The next turn is the model interpreting the tool output - show that as a
       // distinct phase instead of a generic "Thinking…". Cleared when it streams.
       aiStatusHint = "Reviewing results…";
       items.push(/** @type {ChatItem} */ ({ id: uid(), kind: "thinking" }));
@@ -1777,7 +1777,7 @@
         tool_call_id: call.id,
         content: JSON.stringify({
           error:
-            "Duplicate call — this exact operation already ran this turn. Use the previous result instead of calling again.",
+            "Duplicate call, this exact operation already ran this turn. Use the previous result instead of calling again.",
         }),
       });
       return;
@@ -1848,7 +1848,7 @@
             data.message.startsWith("Showing first");
           const execIdx = items.findIndex((i) => i.id === execId);
           // Only show a result card when there are actual rows to display.
-          // Zero-row results are silently removed from the chat — the AI still
+          // Zero-row results are silently removed from the chat - the AI still
           // receives the empty result via toolResult and can explain it.
           if (total > 0) {
             const resultId = uid();
@@ -1866,7 +1866,7 @@
             else items.push(resultItem);
             autoOpenResult(resultId);
           } else {
-            // 0 rows — just remove the executing indicator, no result card
+            // 0 rows - just remove the executing indicator, no result card
             if (execIdx >= 0) items.splice(execIdx, 1);
           }
           await scrollBottom();
@@ -1894,7 +1894,7 @@
             message: data.message ?? null,
           });
         } catch (sqlErr) {
-          // Remove executing indicator silently — AI sees the error via toolResult
+          // Remove executing indicator silently - AI sees the error via toolResult
           const execIdx = items.findIndex((i) => i.id === execId);
           if (execIdx >= 0) items.splice(execIdx, 1);
           const msg = String(sqlErr);
@@ -1944,7 +1944,7 @@
             let toastId;
             if (total > LARGE && fmt !== "md") {
               // Large export: keep the UI responsive + show progress, like the table export.
-              toastId = toast.info(`Preparing ${fmt.toUpperCase()} — ${formatCompactCount(total)} rows…`, { description: "This can take a moment for large files", duration: 60 * 60 * 1000 });
+              toastId = toast.info(`Preparing ${fmt.toUpperCase()}: ${formatCompactCount(total)} rows…`, { description: "This can take a moment for large files", duration: 60 * 60 * 1000 });
               await new Promise((r) => setTimeout(r, 16));
               content = fmt === "json" ? await rowsToJsonAsync(cols, rows) : await rowsToCsvAsync(cols, rows);
             } else {
@@ -1956,7 +1956,7 @@
             if (toastId != null) toast.dismiss(toastId);
             if (saved) {
               toast.success(`Downloaded ${filename}`, { description: `${formatCompactCount(total)} rows exported` });
-              toolResult = JSON.stringify({ exported: true, filename, format: fmt, row_count: total, message: `Exported ${total} rows to ${filename} — the file has been downloaded.` });
+              toolResult = JSON.stringify({ exported: true, filename, format: fmt, row_count: total, message: `Exported ${total} rows to ${filename}, the file has been downloaded.` });
             } else {
               toolResult = JSON.stringify({ exported: false, message: "The user cancelled the save dialog." });
             }
@@ -2017,7 +2017,7 @@
             default: r[3] ?? null,
           }));
         }
-        // Schema describe is an internal AI operation — remove the executing
+        // Schema describe is an internal AI operation - remove the executing
         // indicator without adding a result card. The AI gets the data via toolResult.
         const execIdx = items.findIndex((i) => i.id === execId);
         if (execIdx >= 0) items.splice(execIdx, 1);
@@ -2147,7 +2147,7 @@
                 columns: cols,
               });
             } else {
-              // All tables — use already-loaded context, fall back to sqlite_master
+              // All tables - use already-loaded context, fall back to sqlite_master
               const tableNames = schemaContext.tables.map((t) => t.name);
               const byTable = /** @type {Record<string, unknown[]>} */ ({});
               for (const tbl of tableNames) {
@@ -2226,7 +2226,7 @@
         });
       }
     } catch (e) {
-      // Outer catch: JSON parse errors, unexpected exceptions — remove executing indicator silently
+      // Outer catch: JSON parse errors, unexpected exceptions - remove executing indicator silently
       items = items.filter((i) => i.kind !== "executing");
       const msg = String(e);
       const hint = classifyDbError(msg);
@@ -2777,7 +2777,7 @@
                   <p
                     class="mx-auto max-w-sm text-ui-sm leading-relaxed text-muted-foreground/55"
                   >
-                    Write queries, build charts, explore your schema — just
+                    Write queries, build charts, explore your schema, just
                     describe what you need.
                   </p>
                 </div>
@@ -3064,7 +3064,7 @@
                                   .slice(0, 80)}</span
                               >
                             </button>
-                            <!-- Right: actions — visible on hover -->
+                            <!-- Right: actions, visible on hover -->
                             <div
                               class="flex shrink-0 items-center gap-1 opacity-0 transition-opacity duration-150 group-hover/sqlbar:opacity-100"
                             >
@@ -3315,7 +3315,7 @@
                       <AlertTriangle class="size-3 shrink-0" />{item.error}
                     </p>
                   {:else}
-                    <!-- Floating header — no background, no border, appears on hover -->
+                    <!-- Floating header: no background, no border, appears on hover -->
                     <div class="mb-0.5 flex items-center gap-1.5">
                       <span
                         class="min-w-0 flex-1 truncate font-mono text-ui-2xs font-medium text-foreground/60"
@@ -3461,7 +3461,7 @@
                         </button>
                       </div>
                     </div>
-                    <!-- Chart body — fills full width, height by type -->
+                    <!-- Chart body, fills full width, height by type -->
                     <div
                       data-chart-id={item.id}
                       style="height:{[
@@ -3725,7 +3725,7 @@
     <aside
       class="flex w-80 shrink-0 flex-col border-l border-border/50 bg-panel"
     >
-      <!-- Header — py-2 matches main chat header height so border-b aligns -->
+      <!-- Header, py-2 matches main chat header height so border-b aligns -->
       <div
         class="studio-chrome flex shrink-0 items-center border-b border-border/50 px-2 py-2"
         data-studio-chrome
@@ -4217,7 +4217,7 @@
             <div
               class="flex flex-col gap-1.5 rounded-xl border border-border/30 bg-muted/15 p-3"
             >
-              {#each [{ color: "bg-primary/50", text: "Full history re-sent each turn for context." }, { color: "bg-primary/50", text: "Compresses at 30k — keeps last 10 turns." }, { color: "bg-primary/50", text: "Only schema for mentioned tables is injected." }, { color: "bg-amber-500/60", text: "Failed tool calls blocked after 2 retries." }] as item}
+              {#each [{ color: "bg-primary/50", text: "Full history re-sent each turn for context." }, { color: "bg-primary/50", text: "Compresses at 30k, keeps last 10 turns." }, { color: "bg-primary/50", text: "Only schema for mentioned tables is injected." }, { color: "bg-amber-500/60", text: "Failed tool calls blocked after 2 retries." }] as item}
                 <div
                   class="flex items-start gap-2 text-ui-3xs text-muted-foreground/70"
                 >
@@ -4376,7 +4376,7 @@
         >
       </div>
     </div>
-    <!-- Chart body — fills remaining space; scrollZoom lets ECharts handle wheel natively -->
+    <!-- Chart body, fills remaining space; scrollZoom lets ECharts handle wheel natively -->
     <div class="min-h-0 flex-1" data-chart-fs>
       <AiChartRenderer
         spec={fullscreenChart.spec}
@@ -4480,7 +4480,7 @@
 {/if}
 
 <style>
-  /* Thinking-indicator style — driven by data-thinking-style on <html> (see settings.js applySettings). */
+  /* Thinking-indicator style - driven by data-thinking-style on <html> (see settings.js applySettings). */
   :global([data-thinking-style="shimmer"]) .agent-think-label {
     background: linear-gradient(
       90deg,
@@ -4526,7 +4526,7 @@
     color: var(--foreground);
     word-break: break-word;
     letter-spacing: -0.011em;
-    /* Inherit font-smoothing — do NOT override to 'antialiased' here
+    /* Inherit font-smoothing - do NOT override to 'antialiased' here
        (breaks FreeType hinting on Linux/WebKitGTK). */
   }
   :global(.prose-ai > *:first-child) {
@@ -4698,7 +4698,7 @@
     cursor: grabbing;
   }
 
-  /* Images are never rendered — the custom marked renderer outputs link chips instead.
+  /* Images are never rendered - the custom marked renderer outputs link chips instead.
      This rule is a safety net for any stray <img> that might appear from other sources. */
   :global(.prose-ai img) { display: none !important; }
 

@@ -20,7 +20,7 @@
   margin: 0;
 }
 
-/* No slide/fade-in-up — appear in place; stack motion only */
+/* No slide/fade-in-up - appear in place; stack motion only */
 .studio-toaster [data-sonner-toast] {
   --y: translateY(0) !important;
   transition:

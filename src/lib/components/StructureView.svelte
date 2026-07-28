@@ -139,7 +139,7 @@
   function guardEdit() {
     if (canEdit) return true
     toast.error('Structure editing not available here', {
-      description: `Editing columns on ${engineLabel(connectionType)} isn't supported yet — use the SQL console to alter this table.`,
+      description: `Editing columns on ${engineLabel(connectionType)} isn't supported yet, use the SQL console to alter this table.`,
     })
     return false
   }
@@ -382,7 +382,7 @@
     columnSearch.trim() ? columns.filter(c => c.name.toLowerCase().includes(columnSearch.toLowerCase())) : columns
   )
   const tableIndexes = $derived(indexes.filter(i => i.tableName === table && !i.isPrimary))
-  // Index search uses the same columnSearch field — matches index name or column list
+  // Index search uses the same columnSearch field - matches index name or column list
   const visibleIndexes = $derived(
     columnSearch.trim()
       ? tableIndexes.filter(i =>
@@ -512,11 +512,11 @@
     {/each}
   </div>
 
-  <!-- Read-only notice — engines whose structure DDL we don't generate yet. -->
+  <!-- Read-only notice, engines whose structure DDL we don't generate yet. -->
   {#if !canEdit}
     <div class="flex shrink-0 items-center gap-2 border-b border-border/30 bg-muted/15 px-4 py-1.5 font-mono text-ui-2xs text-muted-foreground/70">
       <Lock class="size-3 shrink-0 text-muted-foreground/40" />
-      <span>Read-only structure on {engineLabel(connectionType)} — alter this table from the SQL console.</span>
+      <span>Read-only structure on {engineLabel(connectionType)}, alter this table from the SQL console.</span>
     </div>
   {/if}
 
@@ -559,8 +559,8 @@
                 <div class="{INP} flex items-center justify-end text-muted-foreground/40">{col.ordinalPosition}</div>
               </td>
 
-              <!-- column_name — dblclick to rename -->
-              <td class="{TD} cursor-default {isRenaming ? 'ring-2 ring-inset ring-primary' : ''}" ondblclick={() => !isPk && startRename(col)} title={isPk ? 'Primary key — cannot be renamed' : 'Double-click to rename'}>
+              <!-- column_name, dblclick to rename -->
+              <td class="{TD} cursor-default {isRenaming ? 'ring-2 ring-inset ring-primary' : ''}" ondblclick={() => !isPk && startRename(col)} title={isPk ? 'Primary key, cannot be renamed' : 'Double-click to rename'}>
                 {#if isRenaming}
                   <input data-rename-input type="text" bind:value={renameDraft} class={INP}
                     onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitRename(); /** @type {HTMLElement} */ (e.currentTarget).blur() } if (e.key === 'Escape') { cancelRename(); /** @type {HTMLElement} */ (e.currentTarget).blur() } }}
@@ -574,7 +574,7 @@
                 {/if}
               </td>
 
-              <!-- data_type: plain drop panel — avoids DropdownMenu.Root/Trigger hybrid
+              <!-- data_type: plain drop panel, avoids DropdownMenu.Root/Trigger hybrid
                    that causes TypeError in Svelte 5 when the object literal is followed
                    by a cast `(expr)` on the next line (ASI footgun). -->
               <td class="{TD_DROP} {typeDropOpen[col.name] ? 'ring-2 ring-inset ring-primary' : stagedValues['type:' + col.name] ? 'ring-1 ring-inset ring-amber-500/50' : ''}">
@@ -694,7 +694,7 @@
                   <svg class="pointer-events-none absolute right-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/30" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6l4 4 4-4"/></svg>
                   {#if defDropOpen[col.name]}
                     <div class="{DROP_PANEL} w-52">
-                      <button type="button" class={DROP_ITEM} onmousedown={(e) => { e.preventDefault(); defDropOpen = {...defDropOpen,[col.name]:false}; stageDefault(col.name, null) }}>EMPTY — drop default</button>
+                      <button type="button" class={DROP_ITEM} onmousedown={(e) => { e.preventDefault(); defDropOpen = {...defDropOpen,[col.name]:false}; stageDefault(col.name, null) }}>EMPTY, drop default</button>
                       <button type="button" class={DROP_ITEM} onmousedown={(e) => { e.preventDefault(); defDropOpen = {...defDropOpen,[col.name]:false}; stageDefault(col.name, 'NULL') }}>NULL</button>
                       {#if isTimestamp(col.dataType)}
                         <div class="my-0.5 border-t border-border/40"></div>
@@ -754,7 +754,7 @@
           {:else if visibleColumns.length === 0 && columnSearch}
             <tr><td colspan="7" class="px-4 py-6 font-mono text-ui-xs text-muted-foreground/50">No columns match "{columnSearch}"</td></tr>
           {:else if columns.length === 0 && !loading}
-            <tr><td colspan="7" class="px-4 py-6 font-mono text-ui-xs text-muted-foreground/40">No structure data — click Refresh in the toolbar</td></tr>
+            <tr><td colspan="7" class="px-4 py-6 font-mono text-ui-xs text-muted-foreground/40">No structure data, click Refresh in the toolbar</td></tr>
           {/if}
 
           <!-- Add column row -->
@@ -820,7 +820,7 @@
     {#if canEdit}
     <div class="flex items-center gap-2 border-t border-border/25 px-3 py-1.5 font-mono">
     {#if newColumn}
-      <span class="text-ui-3xs text-emerald-500/70">New column — fill in details then save</span>
+      <span class="text-ui-3xs text-emerald-500/70">New column, fill in details then save</span>
       <button type="button" disabled={confirmLoading}
         class="ml-auto inline-flex h-6 items-center gap-1 rounded-lg bg-foreground px-2.5 text-ui-2xs font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-40"
         onclick={saveNewColumn}>

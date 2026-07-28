@@ -1,4 +1,4 @@
-// Smart text — country flags, phone formatting, and URL shortening.
+// Smart text - country flags, phone formatting, and URL shortening.
 const COUNTRY_NAME_RE = /(country|nationality|locale|region)(_code)?$/i
 const PHONE_NAME_RE = /(phone|mobile|tel|cell|contact_number|whatsapp)/i
 const URL_RE = /^https?:\/\/\S+$/i

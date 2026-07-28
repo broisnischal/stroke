@@ -8,7 +8,7 @@
   /**
    * Shared read-only Monaco surface for large generated documents (table JSON
    * and text views). Monaco's renderer is already virtualized and gives smooth
-   * native scrolling, ⌘F find, and full text selection — the "large document
+   * native scrolling, ⌘F find, and full text selection - the "large document
    * lag" came from whole-document passes, which this wrapper disables or makes
    * adaptive:
    *
@@ -33,7 +33,7 @@
   let editor = null
   /** @type {monaco.editor.ITextModel | null} */
   let model = null
-  // Last applied text, compared by reference — model.getValue() would copy
+  // Last applied text, compared by reference - model.getValue() would copy
   // the whole (potentially multi-MB) document just to diff it.
   let appliedText = /** @type {string | null} */ (null)
 
@@ -57,7 +57,7 @@
       theme: monacoThemeId(currentTheme()),
       readOnly: true,
       domReadOnly: true,
-      // automaticLayout:false — that option runs a 100ms setInterval per editor
+      // automaticLayout:false - that option runs a 100ms setInterval per editor
       // forever; a ResizeObserver (below) handles relayout without the polling.
       automaticLayout: false,
       minimap: { enabled: false },

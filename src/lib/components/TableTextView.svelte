@@ -13,7 +13,7 @@
   } from '$lib/export.js'
 
   /**
-   * Text mode for the data table — CSV / TSV / Markdown / JSON Lines views of
+   * Text mode for the data table - CSV / TSV / Markdown / JSON Lines views of
    * the current page, rendered through the shared read-only Monaco surface
    * (smooth virtualized scrolling, ⌘F find, full selection). CSV/TSV get
    * colored values via a tiny Monarch tokenizer; Markdown tables are
@@ -59,7 +59,7 @@
     try {
       localStorage.setItem(STORAGE_KEY, next)
     } catch {
-      // localStorage unavailable — format just won't persist
+      // localStorage unavailable - format just won't persist
     }
   }
 

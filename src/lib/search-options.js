@@ -12,7 +12,7 @@
  *
  * Support differs by engine (see `supportedSearchOptions`):
  *   - Postgres / MySQL: all three (Postgres via ARE `~*`, MySQL via ICU REGEXP).
- *   - SQLite / D1 / LibSQL: match-case only — there is no built-in REGEXP
+ *   - SQLite / D1 / LibSQL: match-case only - there is no built-in REGEXP
  *     function (D1 ships none), so regex/whole-word can't be honored.
  *   - Everything else: none (the toggles stay hidden; plain substring search).
  */

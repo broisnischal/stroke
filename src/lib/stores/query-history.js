@@ -4,7 +4,7 @@ import { loadSettings, DEFAULT_MAX_QUERY_HISTORY } from '$lib/stores/settings.js
 const HISTORY_STORE = STORES.queryHistory
 const SAVED_STORE = STORES.savedQueries
 
-/** How many history entries to keep per connection — configurable in Settings → Database. */
+/** How many history entries to keep per connection - configurable in Settings → Database. */
 function maxHistoryPerConnection() {
   const n = loadSettings().maxQueryHistory
   return Number.isFinite(n) && n > 0 ? n : DEFAULT_MAX_QUERY_HISTORY
@@ -79,7 +79,7 @@ export async function recordQueryExecution(connectionId, sql, meta = {}) {
   })
   await db.put(HISTORY_STORE, entry)
 
-  // Cap the ring buffer — but favorites are pinned and never evicted.
+  // Cap the ring buffer - but favorites are pinned and never evicted.
   const merged = [entry, ...existing].sort((a, b) => b.executedAt - a.executedAt)
   const evictable = merged.filter((e) => !e.favorite)
   const cap = maxHistoryPerConnection()

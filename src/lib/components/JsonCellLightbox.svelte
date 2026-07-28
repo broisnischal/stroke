@@ -19,14 +19,14 @@
    */
   let { data = null, onclose } = $props()
 
-  // Oversized cells arrive as a backend sentinel carrying only a preview —
+  // Oversized cells arrive as a backend sentinel carrying only a preview -
   // show that preview directly instead of pretty-printing the sentinel wrapper.
   const oversize = $derived(data ? oversizeCellInfo(data.value) : null)
   const jsonString = $derived.by(() => {
     if (!data) return ''
     if (oversize) return oversize.preview
     const s = JSON.stringify(data.value, null, 2)
-    // Defensive cap for engines without backend cell capping — Monaco chokes
+    // Defensive cap for engines without backend cell capping - Monaco chokes
     // on multi-MB documents created synchronously on the main thread.
     return s.length > 2_000_000 ? s.slice(0, 2_000_000) + '\n… [truncated]' : s
   })
@@ -190,7 +190,7 @@
         <div class="flex shrink-0 items-center gap-2 border-b border-border/50 bg-amber-500/10 px-4 py-1.5 text-ui-xs text-amber-600 dark:text-amber-400">
           <TriangleAlert class="size-3.5 shrink-0" />
           <span>
-            Truncated preview — full value is {formatByteSize(oversize.bytes)}{oversize.dataType ? ` (${oversize.dataType})` : ''}.
+            Truncated preview, full value is {formatByteSize(oversize.bytes)}{oversize.dataType ? ` (${oversize.dataType})` : ''}.
             Query it with SQL to retrieve it in full.
           </span>
         </div>

@@ -14,7 +14,7 @@
   import { evalJsonPath, getCompletions, applyCompletion, describeResult } from '$lib/jsonpath.js'
 
   /**
-   * JSON mode for the data table — a read-only Monaco surface (smooth
+   * JSON mode for the data table - a read-only Monaco surface (smooth
    * virtualized scrolling, ⌘F find, full selection) with adaptive large-doc
    * settings, plus a JSONPath bar evaluated against the live records so the
    * document is never re-parsed.
@@ -24,7 +24,7 @@
     columns = [],
     /** @type {unknown[][]} */
     rows = [],
-    /** Identity of the table shown — scopes the JSONPath filter to this tab. */
+    /** Identity of the table shown - scopes the JSONPath filter to this tab. */
     tableKey = '',
     // Kept in the API for the parent; the view toolbar owns these actions now.
     onshowtable = () => {},
@@ -46,7 +46,7 @@
       if (key === _prevKey) return
       pathByTable.set(_prevKey, jsonPath) // stash the outgoing tab's filter
       jsonPath = pathByTable.get(key) ?? '' // restore the incoming tab's
-      evalPath = jsonPath // snap immediately — no debounce lag on tab switch
+      evalPath = jsonPath // snap immediately - no debounce lag on tab switch
       _prevKey = key
     })
   })
@@ -121,7 +121,7 @@
 </script>
 
 <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-  <!-- JSONPath filter bar — a quiet filter field (SQL Studio-style): glyph +
+  <!-- JSONPath filter bar, a quiet filter field (SQL Studio-style): glyph +
        mono input in a rounded inset, result hint right-aligned. Actions like
        copy/export/view-switch live in the table toolbar, not here. -->
   <div class="studio-chrome flex h-8 shrink-0 items-center gap-2 border-b border-border bg-panel px-2">
@@ -158,7 +158,7 @@
         </button>
       {/if}
 
-      <!-- Autocomplete dropdown — anchored under the field -->
+      <!-- Autocomplete dropdown, anchored under the field -->
       {#if pathFocused && completions.length > 0}
         <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
         <ul

@@ -1,4 +1,4 @@
-// Number Format — humanize numeric columns (thousands separators, byte sizes,
+// Number Format - humanize numeric columns (thousands separators, byte sizes,
 // compact notation).
 //
 // Conservative by design: only applies to numeric columns whose *name* hints at

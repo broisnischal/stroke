@@ -1,5 +1,5 @@
 <!--
-  GlobalTooltip — one styled tooltip for the whole app.
+  GlobalTooltip, one styled tooltip for the whole app.
 
   Delegates off `title` (and opt-in `data-tip`) attributes so every element that
   used to fall back to the browser's native tooltip now renders the same styled
@@ -111,7 +111,7 @@
   function onPointerOut(/** @type {PointerEvent} */ e) {
     if (!currentEl) return
     const to = /** @type {Node | null} */ (e.relatedTarget)
-    // Still inside the current trigger — keep it up.
+    // Still inside the current trigger - keep it up.
     if (to && currentEl.contains(to)) return
     hide()
   }

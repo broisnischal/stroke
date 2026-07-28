@@ -92,7 +92,7 @@
   const sel = 'h-9 w-full appearance-none rounded-lg border border-border/30 bg-muted/[0.3] px-3 pr-7 font-mono text-ui-sm text-foreground outline-none focus:border-primary/40 transition-colors'
 
   /**
-   * Action pill class — active uses primary styling for both sections
+   * Action pill class - active uses primary styling for both sections
    * (destructive styling only for truly dangerous actions like CASCADE in On Delete).
    */
   function actionCls(a, active, section) {
@@ -175,7 +175,7 @@
           </div>
         </div>
 
-        <!-- ON UPDATE + ON DELETE — stacked so each pill row has full width -->
+        <!-- ON UPDATE + ON DELETE, stacked so each pill row has full width -->
         <div class="flex flex-col gap-3.5">
           <div>
             <p class={lbl}>On update</p>

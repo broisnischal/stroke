@@ -1,6 +1,6 @@
 <script>
   /**
-   * Proportional meter chart — pure SVG/HTML, no extra dependencies.
+   * Proportional meter chart - pure SVG/HTML, no extra dependencies.
    * x_col = segment label, y_col = value, z_col = optional total override.
    */
   let {

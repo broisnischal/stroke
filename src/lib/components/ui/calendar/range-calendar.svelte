@@ -69,7 +69,7 @@
                         "data-selected:bg-primary/12 data-selected:text-foreground data-selected:rounded-none data-selected:hover:bg-primary/20",
                         // Hover preview
                         "data-highlighted:bg-primary/8 data-highlighted:text-foreground data-highlighted:rounded-none",
-                        // Endpoints: solid bg, restore rounding — use ! to override data-selected
+                        // Endpoints: solid bg, restore rounding - use ! to override data-selected
                         "data-selection-start:!bg-primary data-selection-start:!text-primary-foreground data-selection-start:rounded-l-full data-selection-start:rounded-r-none",
                         "data-selection-end:!bg-primary data-selection-end:!text-primary-foreground data-selection-end:rounded-r-full data-selection-end:rounded-l-none",
                         // Today marker (ring instead of bg so it doesn't fight the range tint)

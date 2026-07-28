@@ -210,7 +210,7 @@
       if (conn) {
         cfg = (db && db !== conn.database) ? { ...conn, database: db } : conn
       } else {
-        // Active connection — if a different DB is selected, we must use a config override
+        // Active connection - if a different DB is selected, we must use a config override
         const activeConn = connections.find((c) => c.id === connectionId)
         if (activeConn && db && db !== activeConn.database) {
           cfg = { ...activeConn, database: db }
@@ -253,13 +253,13 @@
     if (conn) {
       cfgConn = (captureDb && captureDb !== conn.database) ? { ...conn, database: captureDb } : conn
     } else {
-      // Active connection — if a different DB was selected, pass a config with the override
+      // Active connection - if a different DB was selected, pass a config with the override
       const activeConn = connections.find((c) => c.id === connectionId)
       if (activeConn && captureDb && captureDb !== activeConn.database) {
         cfgConn = { ...activeConn, database: captureDb }
       }
     }
-    // Pass null when all schemas selected — avoids name-mismatch silently dropping schemas
+    // Pass null when all schemas selected - avoids name-mismatch silently dropping schemas
     const schemasFilter = (captureChecked.size > 0 && captureChecked.size < captureSchemaList.length)
       ? captureChecked
       : null
@@ -684,7 +684,7 @@
         <div class="border-t border-border/25 px-5 py-3">
           <input
             bind:value={captureTitle}
-            placeholder="Snapshot title (optional) — e.g. Before migration v2"
+            placeholder="Snapshot title (optional), e.g. Before migration v2"
             class="w-full bg-transparent text-ui-xs text-foreground/75 outline-none placeholder:text-muted-foreground/50"
           />
         </div>
@@ -855,7 +855,7 @@
     {#each Object.entries(grouped) as [schema, items] (schema)}
       {@const collapsed = collapsedSchemas.has(schema)}
       <li>
-        <!-- Schema group header — mirrors Sidebar section header -->
+        <!-- Schema group header, mirrors Sidebar section header -->
         <button
           onclick={() => toggleSchemaGroup(schema)}
           class="flex w-full items-center gap-1 px-2.5 pb-1 pt-2 text-left"
@@ -873,7 +873,7 @@
         </button>
 
         {#if !collapsed}
-          <!-- Table rows — mirrors Sidebar table rows exactly -->
+          <!-- Table rows, mirrors Sidebar table rows exactly -->
           <ul class="flex flex-col gap-0.5">
             {#each items as item (item.name)}
               {@const key = `${item.schema}.${item.name}`}

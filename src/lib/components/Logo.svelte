@@ -4,7 +4,7 @@
 
   /**
    * Stroke brand mark. Picks the asset from the active app theme (not the CSS
-   * media query) so a light mark shows on dark UI and a dark mark on light UI —
+   * media query) so a light mark shows on dark UI and a dark mark on light UI -
    * keeping the logo visible either way.
    * @type {{ class?: string }}
    */

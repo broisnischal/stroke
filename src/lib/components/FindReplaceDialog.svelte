@@ -10,7 +10,7 @@
    * Find & replace inside one column of the loaded page. Matching runs live
    * over the in-memory rows and every change is shown as a before → after
    * preview; Apply writes each cell through the app's normal parameterized
-   * cell-save pipeline (per-PK UPDATEs) — nothing is written blind.
+   * cell-save pipeline (per-PK UPDATEs) - nothing is written blind.
    */
   let {
     open = $bindable(false),
@@ -44,7 +44,7 @@
       .filter((c) => isEditableType(c.dataType ?? '')),
   )
 
-  // Column picker — searchable menu (tables can have dozens of columns).
+  // Column picker - searchable menu (tables can have dozens of columns).
   let colMenuOpen = $state(false)
   const colItems = $derived(
     editableCols.map((c) => ({
@@ -57,7 +57,7 @@
     })),
   )
 
-  // Reset per open — default to the first editable column.
+  // Reset per open - default to the first editable column.
   $effect(() => {
     if (!open) return
     findText = ''
@@ -96,7 +96,7 @@
     }
     for (let r = 0; r < rows.length; r++) {
       const v = rows[r]?.[colIdx]
-      // Only string cells — rewriting numbers/json through string replace is a footgun.
+      // Only string cells - rewriting numbers/json through string replace is a footgun.
       if (typeof v !== 'string') continue
       let next = v
       if (mode === 'exact') {
@@ -160,7 +160,7 @@
     <div class="grid grid-cols-[3.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2 border-b border-border/60 bg-panel/50 px-4 py-3">
       <span class="select-none text-right text-ui-2xs text-muted-foreground/60">Column</span>
       <div class="grid grid-cols-[minmax(0,1fr)_8rem_auto] items-center gap-2">
-        <!-- Themed dropdowns (bits-ui) — the native <select> popup is unstyled
+        <!-- Themed dropdowns (bits-ui), the native <select> popup is unstyled
              OS chrome (broken on Linux/WebKitGTK) and clashed with the app. -->
         <SearchableMenu
           bind:open={colMenuOpen}
@@ -217,7 +217,7 @@
       </div>
 
       <label for="fr-find" class="select-none text-right text-ui-2xs text-muted-foreground/60">Find</label>
-      <input id="fr-find" type="text" class={inputCls} placeholder={mode === 'regex' ? '^(\\w+)@ — regular expression' : 'text to find'} bind:value={findText} />
+      <input id="fr-find" type="text" class={inputCls} placeholder={mode === 'regex' ? '^(\\w+)@, regular expression' : 'text to find'} bind:value={findText} />
 
       <label for="fr-replace" class="select-none text-right text-ui-2xs text-muted-foreground/60">Replace</label>
       <input id="fr-replace" type="text" class={inputCls} placeholder={mode === 'regex' ? '$1 uses capture groups' : 'replacement'} bind:value={replaceText} />

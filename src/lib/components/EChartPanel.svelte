@@ -62,14 +62,14 @@
     io.observe(container)
 
     // ResizeObserver: react to layout changes.
-    // Guard the 0-dimension case here too — hidden containers fire with 0×0
+    // Guard the 0-dimension case here too - hidden containers fire with 0×0
     // and calling chart.resize() on a 0×0 canvas triggers the ECharts warning.
     ro = new ResizeObserver((entries) => {
       const { width, height } = entries[0].contentRect
       if (width === 0 || height === 0) return
       if (!chart) { void tryInit(); return }
       // Coalesce resize bursts (pane drags / window resizes fire many events per
-      // frame) into a single chart.resize() per animation frame — a synchronous
+      // frame) into a single chart.resize() per animation frame - a synchronous
       // resize on every event janks the whole UI.
       if (resizeRaf) return
       resizeRaf = requestAnimationFrame(() => {
@@ -89,7 +89,7 @@
   })
 
   // Keep chart in sync with option changes.
-  // lazyUpdate batches setOption calls that arrive in the same task — reduces
+  // lazyUpdate batches setOption calls that arrive in the same task - reduces
   // unnecessary redraws when multiple reactive updates fire together.
   $effect(() => {
     const c = chart

@@ -1,4 +1,4 @@
-// Color swatches — render a small color chip beside hex / rgb / hsl values.
+// Color swatches - render a small color chip beside hex / rgb / hsl values.
 const HEX_RE = /^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i
 const FUNC_RE = /^(?:rgb|rgba|hsl|hsla)\(\s*[\d.,%\s/]+\)$/i
 

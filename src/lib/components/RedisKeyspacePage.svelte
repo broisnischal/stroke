@@ -39,7 +39,7 @@
   // ── Type styling ────────────────────────────────────────────────────────────
   // Per Redis value type: a lucide glyph + accent color for the tree glyph and
   // the type tag. Type colors are a deliberate, semantic exception to the token
-  // palette (like syntax highlighting) — kept restrained: color lives on the
+  // palette (like syntax highlighting) - kept restrained: color lives on the
   // glyph and a small tag only, never as loud filled chips.
   /**
    * @typedef {{ short: string, label: string, icon: any, color: string }} TypeMeta
@@ -150,7 +150,7 @@
     try {
       keys = await scanAllKeys()
     } catch {
-      // SCAN unavailable/failed — fall back to the (blocking) KEYS *.
+      // SCAN unavailable/failed - fall back to the (blocking) KEYS *.
       try {
         const res = await executeSql('KEYS *')
         keys = replyValues(res).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
@@ -355,7 +355,7 @@
     try {
       const t = String(replyValues(await executeSql(`TYPE ${q}`))[0] ?? '')
       selectedType = t
-      // Metadata in parallel — none of these block the value render meaningfully.
+      // Metadata in parallel - none of these block the value render meaningfully.
       const [ttlRes, memRes, encRes] = await Promise.all([
         executeSql(`TTL ${q}`).catch(() => null),
         executeSql(`MEMORY USAGE ${q}`).catch(() => null),
@@ -641,7 +641,7 @@
           : humanDuration(selectedTtl),
   )
 
-  // Live TTL countdown — tick the remaining seconds down while a key with an
+  // Live TTL countdown - tick the remaining seconds down while a key with an
   // expiry is selected, so the label decays without a manual reload.
   $effect(() => {
     if (!hasExpiry || editingTtl) return
@@ -704,7 +704,7 @@
       const t = String(replyValues(await executeSql(`TYPE ${quoteArg(bare)}`))[0] ?? '')
       if (!t || t === 'none') return ''
       const suggest = TYPE_READ[t]?.(key)
-      return `→ ${key} holds a ${t}${suggest ? ` — try: ${suggest}` : ''}`
+      return `→ ${key} holds a ${t}${suggest ? `, try: ${suggest}` : ''}`
     } catch {
       return ''
     }
@@ -731,7 +731,7 @@
     consoleInput = ''
     // `clear` clears the console, like a terminal (not sent to Redis).
     if (/^clear$/i.test(cmd)) { scrollback = []; return }
-    // Push a pending entry, then replace it IMMUTABLY once the reply lands —
+    // Push a pending entry, then replace it IMMUTABLY once the reply lands -
     // mutating the pushed object in place bypasses the $state proxy so the reply
     // never renders.
     const idx = scrollback.length
@@ -752,7 +752,7 @@
     }
     scrollback = scrollback.map((e, k) => (k === idx ? { cmd: e.cmd, lines, isError, pending: false } : e))
     await scrollConsoleToBottom()
-    // A mutating command may have changed the keyspace / current value — refresh.
+    // A mutating command may have changed the keyspace / current value - refresh.
     const verb = cmd.split(/\s+/)[0]?.toLowerCase() ?? ''
     if (WRITE_VERBS.has(verb)) {
       void loadKeys()
@@ -1154,7 +1154,7 @@
             <span class="shrink-0 tabular-nums">{sizeLabel}</span>
           {/if}
           {#if valueCapped}
-            <span class="shrink-0 rounded bg-amber-500/10 px-1 text-amber-600 dark:text-amber-400" title="Large value — showing the first {VALUE_CAP} entries">first {VALUE_CAP}</span>
+            <span class="shrink-0 rounded bg-amber-500/10 px-1 text-amber-600 dark:text-amber-400" title="Large value, showing the first {VALUE_CAP} entries">first {VALUE_CAP}</span>
           {/if}
           {#if keyMemory != null}
             <span class="shrink-0 tabular-nums" title="Memory used by this key">
@@ -1422,7 +1422,7 @@
           {:else if valueData?.kind === 'other'}
             <div class="p-3">
               <p class="text-ui-sm text-muted-foreground">
-                Preview for <span class="font-mono text-foreground/80">{valueData.type}</span> values isn't supported yet — use the console below.
+                Preview for <span class="font-mono text-foreground/80">{valueData.type}</span> values isn't supported yet, use the console below.
               </p>
             </div>
           {/if}
@@ -1470,7 +1470,7 @@
           <div class="space-y-1 text-muted-foreground/50">
             <p>
               Type a Redis command and press
-              <span class="rounded bg-muted/60 px-1 py-0.5 text-foreground/70">Enter</span> — e.g.
+              <span class="rounded bg-muted/60 px-1 py-0.5 text-foreground/70">Enter</span>, e.g.
               <span class="text-foreground/70">KEYS *</span>,
               <span class="text-foreground/70">GET app:name</span>,
               <span class="text-foreground/70">HGETALL user:1</span>

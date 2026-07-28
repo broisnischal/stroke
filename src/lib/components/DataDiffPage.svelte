@@ -40,7 +40,7 @@
   const _init = activeSchema
 
   // System/catalog schemas that sort ahead of the user's real schema (e.g.
-  // Cockroach's crdb_internal, PG's pg_catalog) — picking schemas[0] would land
+  // Cockroach's crdb_internal, PG's pg_catalog) - picking schemas[0] would land
   // on one of these and every table lookup fails ("relation X does not exist").
   const SYSTEM_SCHEMAS = new Set([
     'crdb_internal', 'information_schema', 'pg_catalog', 'pg_toast', 'pg_extension',
@@ -113,7 +113,7 @@
     lineNumbersMinChars: 0,
     glyphMargin: false,
     folding: false,
-    // automaticLayout:false — it polls via setInterval(100ms) per editor (two here)
+    // automaticLayout:false - it polls via setInterval(100ms) per editor (two here)
     // and never stops, even when this tab is hidden. ResizeObserver is event-driven.
     automaticLayout: false,
     scrollbar: { vertical: 'auto', horizontal: 'hidden', alwaysConsumeMouseWheel: false },
@@ -316,7 +316,7 @@
     const tmp = L; L = R; R = tmp
   }
 
-  // Source/target share one input mode — a single toggle drives both.
+  // Source/target share one input mode - a single toggle drives both.
   const mode = $derived(L.mode)
   function setMode(/** @type {'table'|'sql'} */ m) {
     L = { ...L, mode: m }
@@ -639,7 +639,7 @@
           ><Plus class="size-2.5" />{col}</button>
         {/each}
         {#if !keyColSuggestions.length && !selectedKeyCols.size}
-          <span class="text-ui-2xs italic text-muted-foreground/20">auto — uses first column</span>
+          <span class="text-ui-2xs italic text-muted-foreground/20">auto, uses first column</span>
         {/if}
       </div>
       <button onclick={compare} disabled={comparing}
@@ -659,7 +659,7 @@
   {#if diffRows.length > 0}
 
     <!-- Filter + search bar (tab-style, Vercel/Resend inspired) ── -->
-    <!-- No divider here — the elevated header band below provides the separation. -->
+    <!-- No divider here, the elevated header band below provides the separation. -->
     <div class="flex shrink-0 items-end gap-0 px-5">
 
       {#each [
@@ -823,7 +823,7 @@
       </div>
       <div class="text-center">
         <p class="text-ui-sm font-medium text-foreground/40">Compare any two data sources</p>
-        <p class="mt-1 text-ui-xs text-muted-foreground/25">Tables or SQL — even across different hosts</p>
+        <p class="mt-1 text-ui-xs text-muted-foreground/25">Tables or SQL, even across different hosts</p>
       </div>
     </div>
   {/if}

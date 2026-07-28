@@ -3,7 +3,7 @@
  *
  * bits-ui restores focus to a `Dialog.Trigger` when one is used, but most dialogs
  * in this app open programmatically (`bind:open` from app state) with no trigger,
- * so on close focus falls back to `<body>` — stranding keyboard users. The shared
+ * so on close focus falls back to `<body>` - stranding keyboard users. The shared
  * dialog content reads this value on close and restores focus there instead.
  *
  * A single capture-phase `focusin` listener records every focus change, ignoring

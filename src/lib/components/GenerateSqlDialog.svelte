@@ -15,7 +15,7 @@
   } from '$lib/sql-generate.js'
 
   /**
-   * "Generate SQL" — ready-to-paste statement skeletons for a table (create /
+   * "Generate SQL" - ready-to-paste statement skeletons for a table (create /
    * select / insert / update / delete / upsert), with `:name` placeholders and
    * the same per-engine identifier quoting the grid's own writes use.
    */
@@ -90,7 +90,7 @@
     tabs.find((t) => t.id === activeTab)?.sql ?? tabs[0]?.sql ?? '',
   )
 
-  // Only the DML skeletons carry :name placeholders — the note would be
+  // Only the DML skeletons carry :name placeholders - the note would be
   // noise (and wrong) on the Create Table / Select tabs.
   const hasPlaceholders = $derived(
     activeTab === 'insert' || activeTab === 'update' || activeTab === 'delete' || activeTab === 'upsert',
@@ -179,7 +179,7 @@
     <div class="flex h-13 items-center gap-2 border-t border-border/60 bg-background px-4">
       <p class="min-w-0 flex-1 truncate text-ui-2xs text-muted-foreground/60">
         {#if hasPlaceholders}
-          Values use <span class="rounded bg-muted/60 px-1 font-mono text-foreground/70">:name</span> placeholders — replace before running.
+          Values use <span class="rounded bg-muted/60 px-1 font-mono text-foreground/70">:name</span> placeholders, replace before running.
         {/if}
       </p>
       <button

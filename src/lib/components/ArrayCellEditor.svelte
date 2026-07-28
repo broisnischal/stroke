@@ -23,7 +23,7 @@
     onsave = /** @type {(next: any[]) => void} */ (() => {}),
   } = $props()
 
-  // Local working copy — each row is { v: string|null }. Strings map to array
+  // Local working copy - each row is { v: string|null }. Strings map to array
   // elements; `null` is a genuine SQL NULL element.
   let items = $state(/** @type {{ v: string | null }[]} */ ([]))
   /** @type {HTMLInputElement[]} */

@@ -50,7 +50,7 @@
 <svelte:window onkeydown={handleKey} />
 
 {#if url}
-  <!-- Backdrop — focusable so keyboard events land here -->
+  <!-- Backdrop, focusable so keyboard events land here -->
   <div
     bind:this={backdropEl}
     tabindex="-1"

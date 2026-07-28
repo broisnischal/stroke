@@ -74,7 +74,7 @@ export function loadDefaultPageSize() {
 export function saveDefaultPageSize(n) {
   try {
     localStorage.setItem(DEFAULT_PAGE_SIZE_KEY, String(clampPageSize(n)))
-  } catch { /* storage unavailable — non-fatal */ }
+  } catch { /* storage unavailable - non-fatal */ }
 }
 
 export const FILTER_OPS = /** @type {{ value: FilterOp, label: string, needsValue: boolean }[]} */ ([
@@ -135,7 +135,7 @@ export function activeFilters(filters) {
 
 /**
  * @param {TableFilter[]} filters
- * @param {{ name: string, dataType?: string }[]} [columns] — when provided, the
+ * @param {{ name: string, dataType?: string }[]} [columns] - when provided, the
  *   column's dataType is included so the backend can cast parameters correctly
  *   and keep filter conditions SARGable (index-eligible) on typed columns.
  */
@@ -186,17 +186,17 @@ export function hasTableQuery(search, filters, sort) {
 /**
  * Build a SELECT statement that reflects the current table view (columns,
  * filters, search, sort). Meant as an editable starting point in the SQL editor,
- * NOT a parameterized query — values are inlined and escaped for display.
+ * NOT a parameterized query - values are inlined and escaped for display.
  *
  * @param {object} opts
  * @param {string} [opts.schema]
  * @param {string} opts.table
- * @param {{ name: string }[]} [opts.columns]   — when given, emits an explicit column list
+ * @param {{ name: string }[]} [opts.columns]   - when given, emits an explicit column list
  * @param {TableFilter[]} [opts.filters]
  * @param {string} [opts.search]
  * @param {TableSort | null} [opts.sort]
  * @param {number} [opts.limit]
- * @param {string} [opts.engine]                — connection type, for quoting/casing
+ * @param {string} [opts.engine]                - connection type, for quoting/casing
  * @returns {string}
  */
 export function buildSelectSql({ schema, table, columns = [], filters = [], search = '', sort = null, limit = 100, engine = 'postgres' }) {
