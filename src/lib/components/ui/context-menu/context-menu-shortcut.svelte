@@ -11,7 +11,7 @@
 <span
 	bind:this={ref}
 	data-slot="context-menu-shortcut"
-	class={cn("text-muted-foreground group-focus/context-menu-item:text-accent-foreground ml-auto text-ui-2xs tracking-widest", className)}
+	class={cn("text-muted-foreground/60 group-focus/context-menu-item:text-muted-foreground ml-auto shrink-0 pl-3 text-ui-2xs", className)}
 	{...restProps}
 >
 	{@render children?.()}

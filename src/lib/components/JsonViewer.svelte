@@ -190,7 +190,7 @@
     {#if pathFocused && completions.length > 0}
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
       <ul
-        class="absolute left-0 top-full z-50 mt-px min-w-48 overflow-hidden rounded-b-md border border-border bg-popover shadow-lg"
+        class="absolute left-0 top-full z-50 mt-px min-w-48 overflow-hidden rounded-b-md border border-border bg-popover elevate-2-rim"
         onmousedown={(e) => e.preventDefault()}
       >
         {#each completions as completion, i (completion)}
@@ -227,7 +227,7 @@
         onclick={handleCopy}
       >
         {#if copied}
-          <CheckCheck class="size-3 shrink-0 text-green-500" />
+          <CheckCheck class="size-3 shrink-0 text-success" />
           <span>Copied</span>
         {:else}
           <Copy class="size-3 shrink-0" />

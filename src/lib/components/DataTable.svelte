@@ -16,6 +16,7 @@
   import EyeOff from "@lucide/svelte/icons/eye-off";
   import ListFilter from "@lucide/svelte/icons/list-filter";
 import FilterX from "@lucide/svelte/icons/filter-x";
+import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import KeyRound from "@lucide/svelte/icons/key-round";
   import Link2 from "@lucide/svelte/icons/link-2";
@@ -58,6 +59,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   } from "$lib/table-column-widths.js";
   import { formatCompactCount } from "$lib/table-list.js";
   import { cn } from "$lib/utils.js";
+  import { buildQuickFilter } from "$lib/quick-filter.js";
   import {
     formatJsonValue,
     formatNormalValue,
@@ -242,6 +244,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     onfiltercolumn = /** @type {(colName: string) => void} */ (() => {}),
     /** Called when user right-clicks a cell and picks "Filter by value" or "Exclude value". */
     onfilterbyvalue = /** @type {(colName: string, value: unknown, exclude?: boolean) => void} */ (() => {}),
+    onquickfilter = /** @type {(colName: string, op: string, value: string) => void} */ (() => {}),
     /** Called when user picks "Hide column" from the column header context menu. */
     onhidecolumn = /** @type {(colName: string) => void} */ (() => {}),
     /**
@@ -741,6 +744,17 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   );
   // Truncated cells only hold a preview - filtering on it would build wrong SQL.
   const menuCellOversize = $derived(!!oversizeCellInfo(rows[contextRowIdx]?.[contextColIdx]));
+  // Context-aware quick filters for the right-clicked cell. Only scans the loaded
+  // rows for categorical/distinct values when the page is modest - large tables
+  // (1M+ rows are a supported use case) skip the scan and fall back to metadata.
+  const quickFilter = $derived.by(() => {
+    if (!hasTableContext || contextColIdx < 0 || contextRowIdx < 0) return null;
+    const col = columns[contextColIdx];
+    if (!col || menuCellOversize) return null;
+    const cellValue = rows[contextRowIdx]?.[contextColIdx];
+    const colValues = rows.length <= 2000 ? rows.map((r) => r?.[contextColIdx]) : [];
+    return buildQuickFilter(col, cellValue, colValues);
+  });
   // SQL array column? (value already decoded to a JS array, or type ends with []).
   const menuColType = $derived(
     String(columns[contextColIdx]?.dataType ?? columns[contextColIdx]?.data_type ?? _colCache[contextColIdx]?.colType ?? ""),
@@ -5566,7 +5580,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               {#if newRowDrafts}
                 <div
                   role="none"
-                  class="sticky z-20 flex border-b border-border/30 bg-panel ring-1 ring-inset ring-emerald-500/25"
+                  class="sticky z-20 flex border-b border-border/30 bg-panel ring-1 ring-inset ring-success/25"
                   style="top:{HEADER_H}px; height:{ROW_HEIGHT}px; width:{insertRowTotalWidth}px"
                   onkeydown={onNewRowKeydown}
                 >
@@ -6206,7 +6220,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             onSelect={() => runMenuAction(() => onfilterbyvalue(menuColName, rows[contextRowIdx]?.[contextColIdx]))}
           >
             <ListFilter />
-            {menuCellNull ? 'Filter: is NULL' : 'Filter by value'}
+            {menuCellNull ? 'Filter: is NULL' : 'Filter by this value'}
           </ContextMenu.Item>
           <ContextMenu.Item
             disabled={menuCellOversize}
@@ -6215,6 +6229,26 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             <FilterX />
             {menuCellNull ? 'Exclude: not NULL' : 'Exclude this value'}
           </ContextMenu.Item>
+          {#if quickFilter}
+            <ContextMenu.Sub>
+              <ContextMenu.SubTrigger disabled={menuCellOversize}>
+                <SlidersHorizontal />
+                Quick filter
+              </ContextMenu.SubTrigger>
+              <ContextMenu.SubContent class="app-scroll max-h-[60vh] min-w-48 overflow-y-auto [&_[data-slot=context-menu-item]]:gap-2 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                {#each quickFilter.groups as group, gi (gi)}
+                  {#if gi > 0}<ContextMenu.Separator />{/if}
+                  {#if group.title}<ContextMenu.Label>{group.title}</ContextMenu.Label>{/if}
+                  {#each group.items as item (item.key)}
+                    <ContextMenu.Item onSelect={() => runMenuAction(() => onquickfilter(menuColName, item.op, item.value))}>
+                      <span data-slot="menu-label">{item.label}</span>
+                      {#if item.active}<Check class="ml-auto text-primary" />{/if}
+                    </ContextMenu.Item>
+                  {/each}
+                {/each}
+              </ContextMenu.SubContent>
+            </ContextMenu.Sub>
+          {/if}
           <ContextMenu.Item
             disabled={!menuEditable || menuCellNull || readonly}
             onSelect={() => runMenuAction(() => setCellNull(contextRowIdx, contextColIdx))}
@@ -6512,7 +6546,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       </div>
 
       {#if dmlWasEdited}
-        <p class="text-ui-2xs text-amber-500/80">
+        <p class="text-ui-2xs text-warning/80">
           You edited the SQL, Apply will run it exactly as written.
         </p>
       {/if}

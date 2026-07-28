@@ -222,11 +222,11 @@
         />
         <button
           type="button"
-          class="flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-foreground px-4 text-ui-sm font-medium text-background shadow-sm transition-[background-color,transform] duration-150 ease-out hover:bg-foreground/90 active:scale-[0.98] disabled:opacity-40 disabled:shadow-none"
+          class="flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-foreground px-4 text-ui-sm font-medium text-background transition-[background-color,transform] duration-150 ease-out hover:bg-foreground/90 active:scale-[0.98] disabled:opacity-40"
           disabled={!tokenInput.trim()}
           onclick={saveToken}
         >
-          <KeyRound class="size-4" /> Continue
+          <KeyRound class="size-4 shrink-0" /> Continue
         </button>
         <p class="text-ui-xs text-muted-foreground">Paste your {meta?.name} connection string to continue.</p>
       </div>
@@ -234,7 +234,7 @@
       <div class="flex flex-col gap-2">
         <button
           type="button"
-          class="group flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-foreground px-4 text-ui-sm font-medium text-background shadow-sm transition-[background-color,transform] duration-150 ease-out hover:bg-foreground/90 active:scale-[0.98]"
+          class="group flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-foreground px-4 text-ui-sm font-medium text-background transition-[background-color,transform] duration-150 ease-out hover:bg-foreground/90 active:scale-[0.98]"
           onclick={startAuth}
         >
           <DbIcon id={provider} class="size-4 shrink-0" />
@@ -378,7 +378,7 @@
               class={cn(
                 'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors',
                 active
-                  ? 'bg-accent text-foreground'
+                  ? 'bg-primary/10 text-foreground ring-1 ring-primary/25'
                   : idx === hlIdx
                     ? 'bg-accent/60 text-foreground'
                     : 'text-foreground/80 hover:bg-accent/60',
@@ -410,7 +410,7 @@
     <div class="err-card overflow-hidden rounded-lg border border-border/70 bg-card shadow-[var(--elevate-1)]">
       <div class="flex items-start gap-3 p-4">
         <div class="flex size-9 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive ring-1 ring-inset ring-destructive/15">
-          <AlertTriangle class="size-[18px]" />
+          <AlertTriangle class="size-4" />
         </div>
         <div class="min-w-0 flex-1">
           <p class="text-ui-sm font-semibold leading-snug text-foreground">{shownError.title}</p>
@@ -420,7 +420,7 @@
       <div class="flex items-center justify-end border-t border-border/50 bg-muted/[0.15] px-3 py-2.5">
         <button
           type="button"
-          class="group inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-foreground px-3.5 text-ui-xs font-medium text-background shadow-sm transition-[background-color,transform] duration-150 ease-[var(--ease-out)] hover:bg-foreground/90 active:scale-[0.97]"
+          class="group inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-foreground px-3.5 text-ui-xs font-medium text-background transition-[background-color,transform] duration-150 ease-[var(--ease-out)] hover:bg-foreground/90 active:scale-[0.97]"
           onclick={() => (phase = 'idle')}
         >
           <RefreshCw class="size-3.5 transition-transform duration-500 ease-[var(--ease-out)] group-hover:rotate-180" /> Try again

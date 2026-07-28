@@ -219,8 +219,8 @@
             <button
               type="button"
               class={cn(
-                'absolute right-6 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded transition-colors hover:!text-amber-500',
-                entry.favorite ? 'text-amber-500' : 'text-muted-foreground/0 group-hover:text-muted-foreground/40',
+                'absolute right-6 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded transition-colors hover:!text-warning',
+                entry.favorite ? 'text-warning' : 'text-muted-foreground/0 group-hover:text-muted-foreground/40',
               )}
               title={entry.favorite ? 'Unfavorite' : 'Favorite'}
               onclick={(e) => { e.stopPropagation(); void toggleFavorite(entry.id, entry.favorite) }}

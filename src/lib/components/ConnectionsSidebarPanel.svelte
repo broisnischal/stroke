@@ -167,7 +167,7 @@
         >
           <Icon name="folder-open" class="size-3.5" />
         </PopoverTrigger>
-        <PopoverContent align="end" sideOffset={4} class="w-56 p-1.5 text-ui-xs">
+        <PopoverContent align="end" sideOffset={4} class="min-w-56 p-1.5 text-ui-xs">
           <div class="px-1.5 py-1 text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground/50">
             Group
           </div>

@@ -77,8 +77,8 @@
             aria-hidden="true"
           >
             <div class="flex min-w-0 flex-col gap-px leading-tight">
-              <div class="skeleton h-3 max-w-[min(7rem,75%)] rounded-sm" aria-hidden="true"></div>
-              <div class="skeleton h-2 max-w-[min(4.5rem,50%)] rounded-sm opacity-80" aria-hidden="true"></div>
+              <div class="skeleton h-3 max-w-[min(7rem,75%)] rounded-md" aria-hidden="true"></div>
+              <div class="skeleton h-2 max-w-[min(4.5rem,50%)] rounded-md opacity-80" aria-hidden="true"></div>
             </div>
           </th>
         {/each}
@@ -113,7 +113,7 @@
               aria-hidden="true"
             >
               <div
-                class={cn('skeleton h-3 rounded-sm')}
+                class={cn('skeleton h-3 rounded-md')}
                 style={barStyle(rowIdx, colIdx)}
                 aria-hidden="true"
               ></div>

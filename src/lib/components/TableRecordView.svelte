@@ -389,7 +389,7 @@
                 <span class="flex items-center gap-1 truncate font-mono text-ui-xs text-foreground/85">
                   <span class="truncate">{field.name}</span>
                   {#if field.isPk}
-                    <span title="Primary key, cannot be changed" class="inline-flex shrink-0 items-center gap-0.5 font-mono text-ui-3xs text-amber-500/70">
+                    <span title="Primary key, cannot be changed" class="inline-flex shrink-0 items-center gap-0.5 font-mono text-ui-3xs text-warning/70">
                       <Icon name="key-round" class="size-2.5" />
                     </span>
                   {/if}

@@ -29,12 +29,10 @@
   const iconWrap = 'flex size-5 shrink-0 items-center justify-center rounded-md'
 
   const iconClass = {
-    success:
-      'bg-emerald-500/12 text-emerald-600 dark:bg-emerald-400/12 dark:text-emerald-400',
+    success: 'bg-success/12 text-success',
     error: 'bg-destructive/10 text-destructive dark:bg-destructive/15',
-    info: 'bg-blue-500/10 text-blue-600 dark:bg-blue-400/12 dark:text-blue-400',
-    warning:
-      'bg-amber-500/12 text-amber-600 dark:bg-amber-400/12 dark:text-amber-400',
+    info: 'bg-info/10 text-info dark:bg-info/12',
+    warning: 'bg-warning/12 text-warning',
   }
 
   /** @param {string} pos @param {string | Record<string, string | number>} off */

@@ -711,7 +711,7 @@
   <!-- History dropdown -->
   {#if historyOpen}
     <button type="button" class="absolute inset-0 z-30 cursor-default" aria-label="Close history" onclick={() => (historyOpen = false)}></button>
-    <div class="absolute right-2 top-11 z-40 flex max-h-[55%] w-[calc(100%-1rem)] flex-col overflow-hidden rounded-xl border border-border/60 bg-popover shadow-xl">
+    <div class="absolute right-2 top-11 z-40 flex max-h-[55%] w-[calc(100%-1rem)] flex-col overflow-hidden rounded-[10px] border border-border/60 bg-popover elevate-2-rim">
       <div class="flex items-center justify-between gap-2 border-b border-border/50 px-3 py-2.5">
         <span class="text-ui-xs font-medium text-foreground/70">History</span>
         {#if convList.length}
@@ -747,7 +747,7 @@
     {#if items.length === 0}
       <!-- Empty state -->
       <div class="flex h-full flex-col items-center justify-center gap-5 px-4 py-6 text-center">
-        <div class="flex size-9 items-center justify-center rounded-xl border border-primary/20 bg-primary/8">
+        <div class="flex size-9 items-center justify-center rounded-lg border border-primary/20 bg-primary/8">
           <Sparkles class="size-4 text-primary" />
         </div>
         <div class="space-y-1.5">
@@ -770,7 +770,7 @@
             <Sparkles class="size-3.5" />Configure a model
           </button>
         {:else}
-          <div class="w-full overflow-hidden rounded-xl border border-border/35">
+          <div class="w-full overflow-hidden rounded-lg border border-border/35">
             <div class="grid grid-cols-1 gap-px bg-border/25">
               {#each suggestions as s}
                 <button type="button"
@@ -797,7 +797,7 @@
           <div class={item.kind === 'thinking' || item.kind === 'executing' || item.kind === 'streaming' ? '' : '[content-visibility:auto] [contain-intrinsic-size:auto_100px]'}>
           {#if item.kind === 'user'}
             <div class="flex justify-end">
-              <div class="max-w-[88%] rounded-2xl rounded-tr-sm bg-primary px-3 py-2 text-ui-xs leading-relaxed text-primary-foreground whitespace-pre-wrap">{item.text}</div>
+              <div class="max-w-[88%] rounded-xl rounded-tr-md bg-primary px-3 py-2 text-ui-xs leading-relaxed text-primary-foreground whitespace-pre-wrap">{item.text}</div>
             </div>
 
           {:else if item.kind === 'thinking'}
@@ -854,7 +854,7 @@
                   <p class="text-ui-xs text-muted-foreground/70">{part.content}</p>
 
                 {:else if part.type === 'confirm_prompt'}
-                  <div class="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/6 px-3 py-2 text-ui-xs text-amber-600 dark:text-amber-400">
+                  <div class="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/6 px-3 py-2 text-ui-xs text-warning">
                     <AlertTriangle class="mt-0.5 size-3.5 shrink-0" /><span>{part.content}</span>
                   </div>
 
@@ -881,7 +881,7 @@
           {:else if item.kind === 'executing'}
             <div class="flex items-center gap-2.5">
               <Loader2 class="size-3 shrink-0 animate-spin text-muted-foreground/50" />
-              <span class="shrink-0 rounded bg-amber-500/10 px-1.5 py-0.5 font-mono text-ui-3xs font-medium text-amber-500/70">SQL</span>
+              <span class="shrink-0 rounded bg-warning/10 px-1.5 py-0.5 font-mono text-ui-3xs font-medium text-warning/70">SQL</span>
               <span class="min-w-0 truncate text-ui-xs text-muted-foreground/45">{item.sql}</span>
             </div>
 
@@ -972,7 +972,7 @@
   <!-- Jump to bottom -->
   {#if userScrolledUp}
     <div class="pointer-events-none absolute inset-x-0 bottom-20 z-10 flex justify-center">
-      <button type="button" onclick={jumpToBottom} class="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/50 bg-background px-3 py-1.5 text-ui-2xs font-medium text-foreground shadow-lg transition-all hover:bg-accent">
+      <button type="button" onclick={jumpToBottom} class="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/50 bg-background px-3 py-1.5 text-ui-2xs font-medium text-foreground elevate-2-rim transition-all hover:bg-accent">
         <ChevronDown class="size-3" />Jump to bottom
       </button>
     </div>
@@ -984,12 +984,12 @@
     <!-- @ mention popup -->
     {#if mentionOpen && mentionItems.length > 0}
       <div bind:this={mentionEl}
-        class="absolute bottom-full left-2.5 right-2.5 z-50 mb-1.5 overflow-hidden rounded-lg border border-border/60 bg-popover shadow-lg">
+        class="absolute bottom-full left-2.5 right-2.5 z-50 mb-1.5 overflow-hidden rounded-[10px] border border-border/60 bg-popover elevate-2-rim">
         <div class="app-scroll max-h-56 overflow-y-auto p-1">
           {#each mentionItems as item, idx (item.insert)}
             {@const active = idx === mentionIdx}
             <button type="button"
-              class={cn('flex w-full items-center gap-2 rounded-[5px] px-2 py-1 text-left transition-colors', active ? 'bg-accent' : 'hover:bg-accent/40')}
+              class={cn('flex w-full items-center gap-2 rounded-md px-2 py-1 text-left transition-colors', active ? 'bg-accent' : 'hover:bg-accent/40')}
               onmousedown={(e) => { e.preventDefault(); insertMention(item.insert) }}
             >
               <Table2 class={cn('size-3 shrink-0', active ? 'text-primary' : 'text-muted-foreground/40')} />
@@ -1002,12 +1002,12 @@
 
     <!-- slash command popup -->
     {#if slashOpen && slashItems.length > 0}
-      <div class="absolute bottom-full left-2.5 right-2.5 z-50 mb-1.5 overflow-hidden rounded-lg border border-border/60 bg-popover shadow-lg">
+      <div class="absolute bottom-full left-2.5 right-2.5 z-50 mb-1.5 overflow-hidden rounded-[10px] border border-border/60 bg-popover elevate-2-rim">
         <div class="app-scroll max-h-56 overflow-y-auto p-1">
           {#each slashItems as item, idx (item.cmd)}
             {@const active = idx === slashIdx}
             <button type="button"
-              class={cn('flex w-full items-center gap-2 rounded-[5px] px-2 py-1 text-left transition-colors', active ? 'bg-accent' : 'hover:bg-accent/40')}
+              class={cn('flex w-full items-center gap-2 rounded-md px-2 py-1 text-left transition-colors', active ? 'bg-accent' : 'hover:bg-accent/40')}
               onmousedown={(e) => { e.preventDefault(); runSlash(item) }}
             >
               <span class={cn('w-14 shrink-0 truncate font-mono text-ui-2xs', active ? 'text-primary' : 'text-muted-foreground/55')}>/{item.cmd}</span>
@@ -1020,14 +1020,14 @@
     {/if}
 
     <!-- Input box -->
-    <div class="overflow-hidden rounded-xl border border-border/50 bg-muted/10 transition-colors focus-within:border-border/80 focus-within:bg-background">
+    <div class="overflow-hidden rounded-lg border border-border/50 bg-muted/10 transition-colors focus-within:border-border/80 focus-within:bg-background">
       <!-- Context bar: show active table/view -->
       {#if contextTables.length || schemaContext.activeTable || (currentView === 'sql' && currentSql.trim())}
         <div class="flex flex-wrap items-center gap-1 border-b border-border/30 px-2.5 py-1.5">
           {#each contextTables as t (t)}
             <span class="inline-flex items-center gap-1 rounded-md bg-primary/10 py-0.5 pl-1.5 pr-1 font-mono text-ui-3xs text-primary/80">
               <Table2 class="size-2.5 shrink-0" />{t}
-              <button type="button" class="ml-0.5 flex rounded-sm text-primary/45 transition-colors hover:text-primary" title="Remove" onclick={() => (contextTables = contextTables.filter((x) => x !== t))}>
+              <button type="button" class="ml-0.5 flex rounded-md text-primary/45 transition-colors hover:text-primary" title="Remove" onclick={() => (contextTables = contextTables.filter((x) => x !== t))}>
                 <X class="size-2.5" />
               </button>
             </span>
@@ -1068,12 +1068,12 @@
         ><Slash class="size-3.5" /></button>
         <div class="flex-1"></div>
         {#if loading}
-          <button type="button" class="inline-flex size-7 shrink-0 items-center justify-center rounded-lg border border-border/50 bg-background text-foreground/60 shadow-sm transition-colors hover:border-ring/50 hover:text-foreground" onclick={stop} title="Stop">
+          <button type="button" class="inline-flex size-7 shrink-0 items-center justify-center rounded-lg border border-border/50 bg-background text-foreground/60 transition-colors hover:border-ring/50 hover:text-foreground" onclick={stop} title="Stop">
             <Square class="size-2.5 fill-current" />
           </button>
         {:else}
           <button type="button"
-            class={cn('flex size-7 shrink-0 items-center justify-center rounded-lg transition-all', inputText.trim() && configured ? 'bg-primary text-primary-foreground shadow-sm hover:opacity-90' : 'bg-muted/40 text-muted-foreground/25 cursor-not-allowed')}
+            class={cn('flex size-7 shrink-0 items-center justify-center rounded-lg transition-all', inputText.trim() && configured ? 'bg-primary text-primary-foreground hover:opacity-90' : 'bg-muted/40 text-muted-foreground/25 cursor-not-allowed')}
             disabled={!inputText.trim() || !configured}
             onclick={() => void send()}
             title="Send (Enter)"

@@ -262,10 +262,10 @@
       onclick={copyJson}
     >
       {#if copied}
-        <Check class="size-3 text-green-500" />
+        <Check class="size-3.5 shrink-0 text-success" />
         <span>Copied</span>
       {:else}
-        <Copy class="size-3" />
+        <Copy class="size-3.5 shrink-0" />
         <span>Copy JSON</span>
       {/if}
     </button>
@@ -282,7 +282,7 @@
           try { localStorage.setItem(WRAP_KEY, String(wordWrap)) } catch { /* ignore */ }
         }}
       >
-        <WrapText class="size-3" />
+        <WrapText class="size-3.5 shrink-0" />
         <span>Wrap</span>
       </button>
     {/if}
@@ -294,11 +294,11 @@
         title="Tree view, expand and collapse nested values"
         class={[
           'inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-ui-xs transition-colors',
-          viewMode === 'tree' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground/60 hover:text-foreground',
+          viewMode === 'tree' ? 'bg-background text-foreground' : 'text-muted-foreground/60 hover:text-foreground',
         ].join(' ')}
         onclick={() => setViewMode('tree')}
       >
-        <ListTree class="size-3" />
+        <ListTree class="size-3.5 shrink-0" />
         <span>Tree</span>
       </button>
       <button
@@ -306,11 +306,11 @@
         title="Raw JSON text"
         class={[
           'inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-ui-xs transition-colors',
-          viewMode === 'raw' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground/60 hover:text-foreground',
+          viewMode === 'raw' ? 'bg-background text-foreground' : 'text-muted-foreground/60 hover:text-foreground',
         ].join(' ')}
         onclick={() => setViewMode('raw')}
       >
-        <Braces class="size-3" />
+        <Braces class="size-3.5 shrink-0" />
         <span>Raw</span>
       </button>
     </div>
@@ -366,7 +366,7 @@
     oncontextmenu={(e) => e.preventDefault()}
   >
     <div
-      class="min-w-36 overflow-hidden rounded border border-border/60 bg-popover py-0.5 shadow-lg"
+      class="min-w-36 overflow-hidden rounded border border-border/60 bg-popover py-0.5 elevate-2-rim"
       style="position:fixed;left:{contextMenu.x}px;top:{contextMenu.y}px"
       onmousedown={(e) => e.stopPropagation()}
     >
@@ -376,7 +376,7 @@
           class="flex w-full items-center gap-2 px-2.5 py-1 text-left font-mono text-ui-sm text-foreground hover:bg-accent hover:text-accent-foreground"
           onclick={() => { copyText(/** @type {string} */ (contextMenu?.value)); dismissMenu() }}
         >
-          <Copy class="size-3 shrink-0 text-muted-foreground" />
+          <Copy class="size-3.5 shrink-0 text-muted-foreground" />
           Copy value
         </button>
       {/if}
@@ -385,7 +385,7 @@
         class="flex w-full items-center gap-2 px-2.5 py-1 text-left font-mono text-ui-sm text-foreground hover:bg-accent hover:text-accent-foreground"
         onclick={() => { copyJson(); dismissMenu() }}
       >
-        <Copy class="size-3 shrink-0 text-muted-foreground" />
+        <Copy class="size-3.5 shrink-0 text-muted-foreground" />
         Copy JSON
       </button>
     </div>

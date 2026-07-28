@@ -124,7 +124,7 @@
         onclick={handleCopy}
       >
         {#if copied}
-          <Icon name="check" class="size-3 shrink-0 text-green-500" />
+          <Icon name="check" class="size-3 shrink-0 text-success" />
           <span>Copied</span>
         {:else}
           <Icon name="copy" class="size-3 shrink-0" />

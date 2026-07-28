@@ -114,17 +114,17 @@
   <div class="mx-auto flex w-full max-w-md flex-col gap-8 px-6 py-14">
     <!-- Header -->
     <div class="flex flex-col items-start gap-4">
-      <div class="flex size-11 items-center justify-center rounded-xl border border-amber-500/20 bg-amber-500/10">
-        <KeyRound class="size-5 text-amber-500/80" />
+      <div class="flex size-11 items-center justify-center rounded-xl border border-warning/20 bg-warning/10">
+        <KeyRound class="size-5 text-warning/80" />
       </div>
       <div class="flex flex-col gap-1">
         <h1 class="text-ui-lg font-semibold tracking-tight text-foreground">Stroke Pro</h1>
         <p class="flex items-center gap-1.5 text-ui-sm text-muted-foreground">
           <span
             class="size-1.5 shrink-0 rounded-full {statusLine.tone === 'good'
-              ? 'bg-green-500'
+              ? 'bg-success'
               : statusLine.tone === 'trial'
-                ? 'bg-amber-500'
+                ? 'bg-warning'
                 : statusLine.tone === 'warn'
                   ? 'bg-destructive'
                   : 'bg-muted-foreground/40'}"

@@ -126,7 +126,7 @@
   <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
   <div
     role="presentation"
-    class="flex w-[640px] flex-col overflow-hidden rounded-xl border border-border/50 bg-background shadow-2xl"
+    class="flex w-[640px] flex-col overflow-hidden rounded-2xl border border-border/60 bg-background elevate-3-rim"
     style="height: 420px"
     onclick={(e) => e.stopPropagation()}
   >
@@ -158,20 +158,20 @@
       <div class="flex items-center gap-2">
         <button
           type="button"
-          class="rounded-md border border-border/60 px-3 py-1.5 font-mono text-ui-xs text-muted-foreground transition-colors hover:bg-muted"
+          class="inline-flex h-7 items-center rounded-md border border-border/60 px-3 font-mono text-ui-xs text-muted-foreground transition-colors hover:bg-muted"
           onclick={onclose}
           disabled={running}
         >Cancel</button>
         <button
           type="button"
-          class="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 font-mono text-ui-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+          class="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-3 font-mono text-ui-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
           onclick={onrun}
           disabled={running || !sql.trim()}
         >
           {#if running}
-            <RefreshCw class="size-3 animate-spin" />Running…
+            <RefreshCw class="size-3.5 shrink-0 animate-spin" />Running…
           {:else}
-            <Play class="size-3" />Run SQL
+            <Play class="size-3.5 shrink-0" />Run SQL
           {/if}
         </button>
       </div>

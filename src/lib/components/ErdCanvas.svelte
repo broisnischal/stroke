@@ -601,7 +601,7 @@
   ></canvas>
 
   <!-- Zoom controls -->
-  <div class="absolute left-4 bottom-4 flex flex-col overflow-hidden rounded-lg border border-border/50 bg-panel shadow-lg">
+  <div class="absolute left-4 bottom-4 flex flex-col overflow-hidden rounded-lg border border-border/50 bg-panel elevate-2-rim">
     <button type="button" class="flex size-8 items-center justify-center border-b border-border/40 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground" onclick={zoomIn} title="Zoom in">
       <Plus class="size-3.5" />
     </button>
@@ -617,7 +617,7 @@
   {#if nodes.length}
     <canvas
       bind:this={mini}
-      class="absolute right-4 bottom-4 cursor-pointer rounded-lg border border-border/50 shadow-lg"
+      class="absolute right-4 bottom-4 cursor-pointer rounded-lg border border-border/50 elevate-2-rim"
       onpointerdown={onMiniDown}
     ></canvas>
   {/if}

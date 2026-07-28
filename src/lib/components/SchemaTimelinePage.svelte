@@ -437,11 +437,11 @@
             <Ellipsis class="size-3" />
           </button>
           {#if moreMenuOpen}
-            <div class="absolute right-0 top-full z-20 mt-1 w-40 overflow-hidden rounded-lg border border-border/50 bg-popover py-1 shadow-xl">
+            <div class="absolute right-0 top-full z-20 mt-1 min-w-40 overflow-hidden rounded-[10px] border border-border/60 bg-popover p-1 elevate-2-rim">
               <button
                 onclick={onClearClick}
                 class={cn(
-                  'flex w-full items-center gap-2 px-3 py-1.5 text-ui-xs',
+                  'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-ui-sm hover:bg-accent',
                   clearStep === 1
                     ? 'text-destructive'
                     : 'text-muted-foreground/60 hover:text-destructive',
@@ -598,13 +598,13 @@
         {#if diff}
           <div class="ml-auto flex shrink-0 items-center gap-3 pl-3">
             {#if diff.addedTables.length}
-              <span class="font-medium text-emerald-500/80">+{diff.addedTables.length}</span>
+              <span class="font-medium text-success/80">+{diff.addedTables.length}</span>
             {/if}
             {#if diff.removedTables.length}
-              <span class="font-medium text-red-500/80">−{diff.removedTables.length}</span>
+              <span class="font-medium text-destructive/80">−{diff.removedTables.length}</span>
             {/if}
             {#if diff.modifiedTables.length}
-              <span class="font-medium text-amber-500/80">~{diff.modifiedTables.length}</span>
+              <span class="font-medium text-warning/80">~{diff.modifiedTables.length}</span>
             {/if}
             {#if isDiffEmpty(diff)}
               <span class="text-muted-foreground/60">Identical</span>
@@ -620,8 +620,8 @@
 
       {:else if isDiffEmpty(diff)}
         <div class="flex flex-1 flex-col items-center justify-center gap-4">
-          <div class="flex size-14 items-center justify-center rounded-2xl border border-emerald-500/20 bg-emerald-500/5">
-            <Check class="size-6 text-emerald-500/50" />
+          <div class="flex size-14 items-center justify-center rounded-lg border border-success/20 bg-success/5">
+            <Check class="size-6 text-success/50" />
           </div>
           <div class="text-center">
             <p class="text-ui-sm font-semibold text-foreground/65">Schemas are identical</p>
@@ -661,11 +661,11 @@
 <!-- ── Capture modal ─────────────────────────────────────────────────────── -->
 {#if captureOpen}
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/65"
     role="presentation"
     onclick={(e) => { if (e.target === e.currentTarget) captureOpen = false }}
   >
-    <div class="flex w-[460px] flex-col overflow-hidden rounded-xl border border-border/60 bg-popover shadow-2xl">
+    <div class="flex w-[460px] flex-col overflow-hidden rounded-2xl border border-border/60 bg-popover elevate-3-rim">
 
       <!-- Modal header -->
       <div class="flex shrink-0 items-center gap-2.5 px-5 pt-5 pb-4">
@@ -711,7 +711,7 @@
                   {#if captureConn === null}<span class="size-1.5 rounded-full bg-primary/80"></span>{/if}
                 </span>
                 <span class="min-w-0 flex-1 truncate font-medium text-foreground/75" title={connectionLabel}>{shortName(connectionLabel)}</span>
-                <span class="shrink-0 rounded bg-emerald-500/10 px-1.5 py-0.5 text-ui-3xs font-medium text-emerald-500/70">active</span>
+                <span class="shrink-0 rounded bg-success/10 px-1.5 py-0.5 text-ui-3xs font-medium text-success/70">active</span>
               </button>
             {/if}
             {#each connections.filter((c) => c.id !== connectionId) as conn (conn.id)}
@@ -879,9 +879,9 @@
               {@const key = `${item.schema}.${item.name}`}
               {@const isActive = selectedTable === key}
               {@const statusColor =
-                item.status === 'added'   ? 'text-emerald-500' :
-                item.status === 'removed' ? 'text-red-400' :
-                'text-amber-400'}
+                item.status === 'added'   ? 'text-success' :
+                item.status === 'removed' ? 'text-destructive' :
+                'text-warning'}
               <li class="[contain-intrinsic-size:auto_30px] [content-visibility:auto]">
                 <button
                   onclick={() => { selectedTable = key }}
@@ -910,7 +910,7 @@
 
 {#snippet DdlDiff(tableKey)}
   {@const status = getTableStatus(diff, tableKey)}
-  {@const statusColor = status === 'added' ? 'text-emerald-500' : status === 'removed' ? 'text-red-500' : 'text-amber-500'}
+  {@const statusColor = status === 'added' ? 'text-success' : status === 'removed' ? 'text-destructive' : 'text-warning'}
   {@const addCount    = selectedDdlDiff?.filter((l) => l.type === 'add').length    ?? 0}
   {@const removeCount = selectedDdlDiff?.filter((l) => l.type === 'remove').length ?? 0}
 
@@ -920,8 +920,8 @@
     </span>
     <span class="min-w-0 flex-1 truncate font-mono text-ui-xs font-medium text-foreground/75">{tableKey}</span>
     <div class="ml-auto flex shrink-0 items-center gap-2 text-ui-2xs">
-      {#if removeCount > 0}<span class="font-medium text-red-400">−{removeCount}</span>{/if}
-      {#if addCount > 0}<span class="font-medium text-emerald-400">+{addCount}</span>{/if}
+      {#if removeCount > 0}<span class="font-medium text-destructive">−{removeCount}</span>{/if}
+      {#if addCount > 0}<span class="font-medium text-success">+{addCount}</span>{/if}
     </div>
   </div>
 
@@ -940,18 +940,18 @@
                 <td class="px-4 py-0.5 text-ui-3xs text-muted-foreground/55">··· {line.count} unchanged line{line.count !== 1 ? 's' : ''}</td>
               </tr>
             {:else if line.type === 'add'}
-              <tr class="bg-emerald-500/[0.06] hover:bg-emerald-500/[0.1]">
-                <td class="w-10 select-none border-r border-emerald-500/10 px-2 text-right text-ui-3xs text-muted-foreground/40"></td>
-                <td class="w-10 select-none border-r border-emerald-500/10 px-2 text-right text-ui-3xs text-emerald-500/40">{line.lineB}</td>
-                <td class="w-5 select-none text-center text-emerald-500/50">+</td>
-                <td class="px-4 py-px text-emerald-300/80"><span class="whitespace-pre">{line.content}</span></td>
+              <tr class="bg-success/[0.06] hover:bg-success/[0.1]">
+                <td class="w-10 select-none border-r border-success/10 px-2 text-right text-ui-3xs text-muted-foreground/40"></td>
+                <td class="w-10 select-none border-r border-success/10 px-2 text-right text-ui-3xs text-success/40">{line.lineB}</td>
+                <td class="w-5 select-none text-center text-success/50">+</td>
+                <td class="px-4 py-px text-success/80"><span class="whitespace-pre">{line.content}</span></td>
               </tr>
             {:else if line.type === 'remove'}
-              <tr class="bg-red-500/[0.06] hover:bg-red-500/[0.1]">
-                <td class="w-10 select-none border-r border-red-500/10 px-2 text-right text-ui-3xs text-red-500/40">{line.lineA}</td>
-                <td class="w-10 select-none border-r border-red-500/10 px-2 text-right text-ui-3xs text-muted-foreground/40"></td>
-                <td class="w-5 select-none text-center text-red-500/50">−</td>
-                <td class="px-4 py-px text-red-300/80"><span class="whitespace-pre">{line.content}</span></td>
+              <tr class="bg-destructive/[0.06] hover:bg-destructive/[0.1]">
+                <td class="w-10 select-none border-r border-destructive/10 px-2 text-right text-ui-3xs text-destructive/40">{line.lineA}</td>
+                <td class="w-10 select-none border-r border-destructive/10 px-2 text-right text-ui-3xs text-muted-foreground/40"></td>
+                <td class="w-5 select-none text-center text-destructive/50">−</td>
+                <td class="px-4 py-px text-destructive/80"><span class="whitespace-pre">{line.content}</span></td>
               </tr>
             {:else}
               <tr class="hover:bg-muted/8">

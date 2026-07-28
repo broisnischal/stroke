@@ -636,14 +636,14 @@
                 ></span>
               {/if}
             </PopoverTrigger>
-            <PopoverContent align="end" sideOffset={6} class="w-52 p-1">
+            <PopoverContent align="end" sideOffset={6} class="min-w-52 p-1">
               {#each SEARCH_OPTS as opt (opt.key)}
                 {@const active = searchOptions[opt.key]}
                 <button
                   type="button"
                   aria-pressed={active}
                   class={cn(
-                    "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-ui-sm transition-colors",
+                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-ui-sm transition-colors",
                     active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
                     "hover:bg-accent",
                   )}
@@ -698,7 +698,7 @@
               <span class="tabular-nums text-ui-2xs font-medium text-primary" aria-hidden="true">{savedViews.length}</span>
             {/if}
           </DropdownMenu.Trigger>
-          <DropdownMenu.Content align="start" class="w-64 p-0 text-ui-sm">
+          <DropdownMenu.Content align="start" class="min-w-64 p-0 text-ui-sm">
             <div class="flex items-center border-b border-border/50 px-3 py-1.5">
               <span class="text-ui-2xs font-medium uppercase tracking-[0.08em] text-muted-foreground/55">Saved views</span>
               <button
@@ -1126,7 +1126,7 @@
       >
         <Icon name="sliders-horizontal" class="size-3.5" />
       </DropdownMenu.Trigger>
-      <DropdownMenu.Content align="end" class="w-52 p-0 text-ui-sm">
+      <DropdownMenu.Content align="end" class="min-w-52 p-0 text-ui-sm">
         <div class="border-b border-border px-3 py-2.5">
           <p class="font-medium text-foreground">Pagination</p>
         </div>
@@ -1215,7 +1215,7 @@
       >
         <Icon name="more-horizontal" class="size-3.5" />
       </DropdownMenu.Trigger>
-      <DropdownMenu.Content align="end" class="w-56 text-ui-sm [&_[data-slot=dropdown-menu-item]]:whitespace-nowrap [&_[data-slot=dropdown-menu-radio-item]]:whitespace-nowrap">
+      <DropdownMenu.Content align="end" class="min-w-56 text-ui-sm [&_[data-slot=dropdown-menu-item]]:whitespace-nowrap [&_[data-slot=dropdown-menu-radio-item]]:whitespace-nowrap">
         {#if structureAllowed}
           <DropdownMenu.Item onSelect={ontogglestructure}>
             <Icon name="layout-list" class="size-3.5" />

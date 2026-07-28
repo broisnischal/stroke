@@ -284,7 +284,7 @@
         class="flex h-full min-h-[280px] flex-col items-center justify-center gap-4"
       >
         <div
-          class="flex size-16 items-center justify-center rounded-2xl bg-muted/30"
+          class="flex size-16 items-center justify-center rounded-lg bg-muted/30"
         >
           <BarChart2 class="size-8 text-muted-foreground/25" />
         </div>
@@ -411,7 +411,7 @@
                             title="Open SQL in editor"
                             onclick={() => handleRunSql(chart)}
                           >
-                            <Play class="size-2.5" />
+                            <Play class="size-2.5 shrink-0" />
                             Run
                           </button>
                           <div class="relative">
@@ -427,17 +427,17 @@
                                     : chart.id;
                               }}
                             >
-                              <LayoutDashboard class="size-2.5" />
+                              <LayoutDashboard class="size-2.5 shrink-0" />
                               Dashboard
                             </button>
                             {#if dashPickerChartId === chart.id}
                               <div
-                                class="absolute bottom-full left-0 z-30 mb-1 min-w-[160px] overflow-hidden rounded-lg border border-border bg-popover shadow-xl"
+                                class="absolute bottom-full left-0 z-30 mb-1 min-w-[160px] overflow-hidden rounded-[10px] border border-border/60 bg-popover p-1 elevate-2-rim"
                               >
                                 {#each $dashboards as d (d.id)}
                                   <button
                                     type="button"
-                                    class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-ui-xs transition-colors hover:bg-accent"
+                                    class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-ui-sm transition-colors hover:bg-accent hover:text-foreground"
                                     onclick={(e) => {
                                       e.stopPropagation();
                                       addToDashboardById(chart.id, d.id);
@@ -458,7 +458,7 @@
                                 <div class="border-t border-border/50">
                                   <button
                                     type="button"
-                                    class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-ui-xs text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
+                                    class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-ui-sm text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
                                     onclick={(e) => {
                                       e.stopPropagation();
                                       addToNewDashboard(chart.id);
@@ -501,12 +501,12 @@
                             </button>
                             {#if moveChartId === chart.id}
                               <div
-                                class="absolute bottom-full right-0 z-20 mb-1 min-w-[130px] rounded-lg border border-border/60 bg-popover p-1 shadow-lg"
+                                class="absolute bottom-full right-0 z-20 mb-1 min-w-[130px] rounded-[10px] border border-border/60 bg-popover p-1 elevate-2-rim"
                               >
                                 {#each $chartGroups.filter((g) => g !== chart.group) as g (g)}
                                   <button
                                     type="button"
-                                    class="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                                    class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-ui-sm text-muted-foreground hover:bg-accent hover:text-foreground"
                                     onclick={() => handleMoveChart(chart.id, g)}
                                   >
                                     <FolderOpen class="size-3 shrink-0" />{g}

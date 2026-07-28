@@ -54,7 +54,7 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-  class="fixed z-[9999] max-w-[268px] overflow-hidden rounded-xl border border-border bg-popover shadow-2xl"
+  class="fixed z-[9999] max-w-[268px] overflow-hidden rounded-[10px] border border-border/60 bg-popover elevate-2-rim"
   style={style}
   onmouseenter={onmouseenter}
   onmouseleave={onmouseleave}
@@ -91,7 +91,7 @@
 
   {:else if type === 'pdf'}
     <div class="flex items-center gap-2.5 px-3 py-3">
-      <FileText class="size-6 shrink-0 text-red-500/80" />
+      <FileText class="size-6 shrink-0 text-destructive/80" />
       <div class="min-w-0">
         <p class="text-ui-sm font-medium text-foreground">PDF Document</p>
         <p class="truncate text-ui-xs text-muted-foreground">{filename}</p>
@@ -105,20 +105,20 @@
     {#if type === 'image' || type === 'pdf'}
       <button
         type="button"
-        class="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         title="Open full screen"
         onclick={(e) => { e.stopPropagation(); onexpand() }}
       >
-        <Maximize2 class="size-3" />
+        <Maximize2 class="size-3.5" />
       </button>
     {/if}
     <button
       type="button"
-      class="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
       title="Open in browser"
       onclick={(e) => { e.stopPropagation(); onopen() }}
     >
-      <ExternalLink class="size-3" />
+      <ExternalLink class="size-3.5" />
     </button>
   </div>
 </div>
