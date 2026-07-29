@@ -115,7 +115,6 @@
     deleteTableRows,
     insertTableRow,
     toggleDevtools,
-    resetWindow,
     mcpStart,
     mcpStop,
     mcpUpdateConnections,
@@ -542,8 +541,10 @@
   onMount(() => {
     let unlisten = () => {}
     void (async () => {
-      const { listen } = await import('@tauri-apps/api/event')
-      unlisten = await listen('live-change', (e) => onLiveChange(/** @type {any} */ (e.payload)))
+      try {
+        const { listen } = await import('@tauri-apps/api/event')
+        unlisten = await listen('live-change', (e) => onLiveChange(/** @type {any} */ (e.payload)))
+      } catch { /* non-Tauri / web preview - no live-change events */ }
     })()
     return () => { unlisten(); if (_liveRefetchTimer) clearTimeout(_liveRefetchTimer) }
   })
@@ -1676,8 +1677,6 @@ let rowSearch = $state('')
   // F12 or Ctrl/Cmd+Shift+I → toggle DevTools (no-op in release builds)
   createHotkey('F12', (e) => { e.preventDefault(); void toggleDevtools() })
   createHotkey('Mod+Shift+I', (e) => { e.preventDefault(); void toggleDevtools() })
-  // Recover a window stranded off-screen (e.g. after unplugging a monitor).
-  createHotkey('Mod+Shift+0', (e) => { e.preventDefault(); void resetWindow() })
 
   createHotkey('Mod+K', (e) => {
     e.preventDefault()

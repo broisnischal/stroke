@@ -155,12 +155,6 @@ export async function toggleDevtools() {
   return inv('toggle_devtools')
 }
 
-/** Re-center + right-size the window on the current monitor. Recovers the
- *  window when it's stranded off-screen (e.g. after unplugging a monitor). */
-export async function resetWindow() {
-  return inv('reset_window')
-}
-
 // ── SQLite ────────────────────────────────────────────────────────────────────
 
 /** @param {{ name: string, filePath: string }} config */

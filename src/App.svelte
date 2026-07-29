@@ -65,34 +65,10 @@
       if ((e.ctrlKey || e.metaKey) && e.key === 'p') { e.preventDefault(); e.stopPropagation() }
     }, { capture: true })
 
-    // Show the window (started hidden to avoid flash of small→maximized snap)
-    // and fade in the page now that theme + layout are fully ready.
-    try {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window')
-      const win = getCurrentWindow()
-      // Open genuinely maximized so the OS owns the window state and minimize →
-      // restore / maximize behave like any native app.
-      //
-      // Order matters: pre-size the still-hidden window to the work area (opens
-      // full-size, no small→large flash, no frameless spill under the panel),
-      // then show(), then maximize(). Calling maximize() BEFORE show() — as it
-      // was — does not register a real maximized state on Windows: the restore
-      // rect stays at the tiny builder inner_size, so the window looks maximized
-      // but snaps small on the first minimize → restore. Maximizing only after
-      // the window is visible records the true state the OS then preserves.
-      try {
-        const { invoke } = await import('@tauri-apps/api/core')
-        await invoke('fit_to_work_area')
-      } catch {
-        try { await win.maximize() } catch { /* WM may not support it */ }
-      }
-      await win.show()
-      try { await win.maximize() } catch { /* WM may not support it */ }
-    } catch {
-      // Browser dev mode or permission error - window already visible, just fade in
-    } finally {
-      document.documentElement.style.opacity = '1'
-    }
+    // Fade in the page now that theme + layout are ready. The window uses native
+    // OS decorations and opens maximized via the Tauri builder, so the OS owns
+    // all window state — no JS show/maximize/geometry handling needed here.
+    document.documentElement.style.opacity = '1'
   })
 </script>
 

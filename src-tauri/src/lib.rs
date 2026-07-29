@@ -78,7 +78,7 @@ pub fn run() {
             // Load or generate a stable MCP token from the app data directory.
             app.state::<McpState>().init_token(app.handle());
 
-            let window = tauri::WebviewWindowBuilder::new(
+            let mut window_builder = tauri::WebviewWindowBuilder::new(
                 app,
                 "main",
                 tauri::WebviewUrl::App("/".into()),
@@ -87,11 +87,26 @@ pub fn run() {
             .inner_size(1280.0, 800.0)
             .min_inner_size(960.0, 600.0)
             .resizable(true)
-            .maximized(true)
-            .decorations(false)
-            .transparent(true)
-            .shadow(true)
-            .visible(false)
+            .maximized(true);
+
+            // Custom titlebar (TitleBar.svelte) everywhere. macOS keeps the real,
+            // OS-drawn traffic lights via the Overlay style - they just float over
+            // our content instead of sitting in a native title bar strip, so
+            // clicking/hovering/dragging them stays pixel-native with no code on
+            // our side. Windows/Linux get no decorations at all; TitleBar.svelte
+            // draws its own drag region and minimize/maximize/close buttons.
+            #[cfg(target_os = "macos")]
+            {
+                window_builder = window_builder
+                    .title_bar_style(tauri::TitleBarStyle::Overlay)
+                    .hidden_title(true);
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                window_builder = window_builder.decorations(false);
+            }
+
+            let window = window_builder
             // devtools(true) enables WebKit's inspector protocol. On Linux with
             // WebKitGTK 2.48+, having the protocol active without a connected
             // DevTools client causes JavaScriptCore to emit SIGTRAP
@@ -116,28 +131,8 @@ pub fn run() {
             })
             .build()?;
 
-            // Set native macOS window corner radius on the contentView's CALayer.
-            // CSS border-radius alone doesn't work for transparent frameless windows
-            // because WKWebView's backing layer clips at 0 radius by default.
             #[cfg(target_os = "macos")]
             {
-                use objc2_app_kit::NSWindow;
-
-                if let Ok(raw) = window.ns_window() {
-                    unsafe {
-                        let ns_win = raw as *mut objc2::runtime::AnyObject;
-                        let ns_win_ref: &NSWindow = &*(ns_win as *const NSWindow);
-
-                        if let Some(content_view) = ns_win_ref.contentView() {
-                            content_view.setWantsLayer(true);
-                            if let Some(layer) = content_view.layer() {
-                                layer.setCornerRadius(10.0);
-                                layer.setMasksToBounds(true);
-                            }
-                        }
-                    }
-                }
-
                 // Defensive: disable every native WKWebView zoom path. App zoom is
                 // CSS-based (--app-zoom); stray pinch near column resize handles
                 // must never page-zoom the webview (devicePixelRatio drift → blur).
@@ -149,9 +144,8 @@ pub fn run() {
                     view.setPageZoom(1.0);
                 });
 
-                // The window is frameless (decorations = false), so no application
-                // menu is created automatically. On macOS, WKWebView text fields
-                // rely on the app menu's Edit items for the standard editing
+                // Install the standard macOS application menu. WKWebView text
+                // fields rely on the app menu's Edit items for the standard editing
                 // shortcuts — ⌘Z undo, ⌘⇧Z redo, ⌘X/⌘C/⌘V, ⌘A select-all, and
                 // ⌥⌫ / ⌘⌫ word/line delete. Install the standard menu so native
                 // text editing works everywhere (inputs, textareas, cell editors).
@@ -226,13 +220,6 @@ pub fn run() {
                         }
                     }
                 }
-                // If a display was unplugged and left the window spilling
-                // off-screen, pull it back the moment the user focuses it.
-                tauri::WindowEvent::Focused(true) => {
-                    if let Some(w) = app_handle.get_webview_window("main") {
-                        commands::ensure_window_on_screen(&w);
-                    }
-                }
                 _ => {}
             });
 
@@ -247,8 +234,6 @@ pub fn run() {
             commands::read_file,
             commands::restart_app,
             commands::toggle_devtools,
-            commands::reset_window,
-            commands::fit_to_work_area,
             commands::test_postgres_connection,
             commands::connect_postgres,
             commands::disconnect_postgres,
