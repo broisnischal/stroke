@@ -541,8 +541,10 @@
   onMount(() => {
     let unlisten = () => {}
     void (async () => {
-      const { listen } = await import('@tauri-apps/api/event')
-      unlisten = await listen('live-change', (e) => onLiveChange(/** @type {any} */ (e.payload)))
+      try {
+        const { listen } = await import('@tauri-apps/api/event')
+        unlisten = await listen('live-change', (e) => onLiveChange(/** @type {any} */ (e.payload)))
+      } catch { /* non-Tauri / web preview - no live-change events */ }
     })()
     return () => { unlisten(); if (_liveRefetchTimer) clearTimeout(_liveRefetchTimer) }
   })

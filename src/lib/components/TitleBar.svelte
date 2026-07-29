@@ -1,4 +1,5 @@
 <script>
+  import { onMount } from 'svelte'
   import ChevronLeft   from '@lucide/svelte/icons/chevron-left'
   import ChevronRight  from '@lucide/svelte/icons/chevron-right'
   import PanelLeft     from '@lucide/svelte/icons/panel-left'
@@ -9,10 +10,31 @@
   import { detectOs } from '$lib/platform.js'
   import { isTrialActive, licenseStatus } from '$lib/stores/license.js'
   import LicenseActivation from './LicenseActivation.svelte'
+  import Logo from './Logo.svelte'
+  import WindowControls from './WindowControls.svelte'
   import * as Dialog from '$lib/components/ui/dialog/index.js'
 
   const isMac = typeof navigator !== 'undefined' && detectOs() === 'macos'
   const mod   = isMac ? '⌘' : 'Ctrl'
+
+  // Window is frameless everywhere (see src-tauri/src/lib.rs), so this bar is
+  // the drag region and double-click-to-maximize target.
+  let isTauri = $state(false)
+  onMount(() => {
+    isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+  })
+
+  // Native title bars maximize on a background double-click. Our drag region
+  // only covers elements tagged `data-tauri-drag-region`; Tauri's own injected
+  // handler already maximizes when the click lands directly on one of those -
+  // this only picks up the rest (e.g. the flex spacer's non-tagged padding).
+  /** @param {MouseEvent} e */
+  function onDragRegionDblClick(e) {
+    if (!isTauri) return
+    if (e.target === e.currentTarget) return
+    if (/** @type {Element} */ (e.target).closest('button')) return
+    import('@tauri-apps/api/window').then(({ getCurrentWindow }) => getCurrentWindow().toggleMaximize())
+  }
 
   let {
     title = 'studio',
@@ -38,12 +60,28 @@
 </script>
 
 <!--
-  App toolbar. The window uses native OS decorations, so the OS draws the title
-  bar and the minimize / maximize / close controls. This bar carries only the
-  in-app controls (sidebar, navigation, chat) — no window chrome, drag region,
-  or window-state handling.
+  The window is frameless (see src-tauri/src/lib.rs), so this bar IS the title
+  bar: it's the drag region and, on Windows/Linux, draws its own minimize /
+  maximize / close. macOS keeps the real OS-drawn traffic lights (Overlay
+  style) floating over this bar, so it only reserves space for them here.
 -->
-<div class="studio-chrome relative flex h-[38px] shrink-0 items-center border-b border-border/40 bg-background px-2.5 select-none" data-studio-chrome>
+<div
+  class="studio-chrome relative flex h-[38px] shrink-0 items-center border-b border-border/40 bg-background px-2.5 select-none"
+  data-studio-chrome
+  data-tauri-drag-region
+  role="toolbar"
+  aria-label="Window title bar"
+  tabindex="-1"
+  ondblclick={onDragRegionDblClick}
+>
+
+  <!-- macOS: space reserved for the native traffic lights -->
+  {#if isMac}
+    <div class="w-[70px] shrink-0"></div>
+  {/if}
+
+  <!-- Stroke mark -->
+  <Logo class="mr-2 size-4 shrink-0" />
 
   <!-- Sidebar toggle, disabled when not connected -->
   <button
@@ -87,8 +125,8 @@
     </span>
   </div>
 
-  <!-- Spacer -->
-  <div class="min-w-0 flex-1"></div>
+  <!-- Spacer (also draggable - it's the largest empty stretch of the bar) -->
+  <div class="min-w-0 flex-1" data-tauri-drag-region></div>
 
   <!-- Right: trial pill + Chat -->
   <div class="flex shrink-0 items-center gap-1">
@@ -120,6 +158,12 @@
     >
       <MessageSquare class="size-[13px]" />
     </button>
+
+    {#if isTauri && !isMac}
+      <div class="ml-1 border-l border-border/40 pl-1.5">
+        <WindowControls />
+      </div>
+    {/if}
   </div>
 </div>
 

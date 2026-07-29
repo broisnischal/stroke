@@ -78,7 +78,7 @@ pub fn run() {
             // Load or generate a stable MCP token from the app data directory.
             app.state::<McpState>().init_token(app.handle());
 
-            let window = tauri::WebviewWindowBuilder::new(
+            let mut window_builder = tauri::WebviewWindowBuilder::new(
                 app,
                 "main",
                 tauri::WebviewUrl::App("/".into()),
@@ -87,11 +87,26 @@ pub fn run() {
             .inner_size(1280.0, 800.0)
             .min_inner_size(960.0, 600.0)
             .resizable(true)
-            .maximized(true)
-            // Native OS window decorations: the OS draws the title bar and the
-            // minimize / maximize / close controls, and owns all window state.
-            // No custom frameless chrome, transparency, or geometry math.
-            .decorations(true)
+            .maximized(true);
+
+            // Custom titlebar (TitleBar.svelte) everywhere. macOS keeps the real,
+            // OS-drawn traffic lights via the Overlay style - they just float over
+            // our content instead of sitting in a native title bar strip, so
+            // clicking/hovering/dragging them stays pixel-native with no code on
+            // our side. Windows/Linux get no decorations at all; TitleBar.svelte
+            // draws its own drag region and minimize/maximize/close buttons.
+            #[cfg(target_os = "macos")]
+            {
+                window_builder = window_builder
+                    .title_bar_style(tauri::TitleBarStyle::Overlay)
+                    .hidden_title(true);
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                window_builder = window_builder.decorations(false);
+            }
+
+            let window = window_builder
             // devtools(true) enables WebKit's inspector protocol. On Linux with
             // WebKitGTK 2.48+, having the protocol active without a connected
             // DevTools client causes JavaScriptCore to emit SIGTRAP
