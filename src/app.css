@@ -220,9 +220,9 @@ html[data-os="linux"]   { --window-radius: 8px; }
        small sizes without requiring manual weight tweaks per component. */
     font-optical-sizing: auto;
     @apply h-full overflow-hidden;
-    /* Transparent so the rounded body corners reveal the desktop, not a square
-       html background. Body's bg-background would otherwise propagate here. */
-    background: transparent;
+    /* Opaque background: the window uses native OS decorations (rectangular,
+       no transparency), so nothing shows through behind the content. */
+    background: var(--background);
     /* Grayscale antialiasing on every platform. On macOS the default subpixel
        ('auto') renders UI text noticeably heavier; 'antialiased' gives the
        crisp, lighter weight the design system targets and keeps rendering
@@ -260,16 +260,12 @@ html[data-os="linux"]   { --window-radius: 8px; }
   body {
     @apply m-0 h-full min-h-0 overflow-hidden bg-background text-foreground;
     font-family: var(--font-sans);
-    /* Round the opaque body background to match the system window radius.
-       html has background:transparent above, so the clipped corners are truly
-       transparent - the desktop shows through on macOS with transparent(true). */
-    border-radius: var(--window-radius);
+    /* No border-radius: the window uses native OS decorations, so the OS draws
+       the (rectangular) frame and corners. */
   }
 
   #app {
     @apply m-0 h-full min-h-0 overflow-hidden;
-    /* NO border-radius here - body already clips everything. Adding it twice
-       creates a double-clip that leaves a visible margin ring. */
     user-select: none;
     -webkit-user-select: none;
   }
