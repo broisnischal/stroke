@@ -303,6 +303,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     loadingMore = false,
     /** Called when the user scrolls near the bottom in infinite scroll mode. */
     onloadmore = /** @type {() => void} */ (() => {}),
+    /** Called when the cell cursor moves because the user *aimed* at a cell (a
+     *  click) rather than roaming with the arrow keys. Lets the parent record a
+     *  back/forward position for a short, deliberate move it would otherwise
+     *  treat as roaming. */
+    onjump = /** @type {() => void} */ (() => {}),
     /** True when every row has been loaded in infinite scroll mode (no more pages). */
     endOfResults = false,
     /** Active row-search query (toolbar search). Matched substrings are
@@ -5177,6 +5182,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         focusedRow = idx
         const vi = actualToVisColIdx(actualIdx)
         if (vi >= 0) focusedCol = vi
+        // Clicking a cell is a deliberate jump, however short the distance, so it
+        // earns a back/forward entry. Arrow-key roaming deliberately does not —
+        // that is what the parent's row-gap threshold is for.
+        onjump()
         if (inspectorRow !== null) inspectorRow = idx
 
         const cached = _colCache[actualIdx]

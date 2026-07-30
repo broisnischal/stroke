@@ -451,6 +451,19 @@
   /** >0 while travelling to a history entry, so the arrival isn't recorded as a
    *  new jump. A counter, not a flag: a restore spans an await and a frame. */
   let _navRestore = 0
+  /**
+   * Set when the grid reports an aimed cursor move (a cell click), consumed by the
+   * recording effect below.
+   *
+   * Without it, moving around inside one table almost never records anything: the
+   * row-gap threshold only fires past NAV_ROW_GAP rows, so clicking between two
+   * nearby cells was unrecoverable and back/forward looked like it only worked
+   * across tabs. A click is aimed, so distance shouldn't decide — that threshold
+   * exists to stop *arrow-key roaming* filling the stack, and roaming still
+   * refreshes in place.
+   */
+  let _navJumpPending = false
+  function markNavJump() { _navJumpPending = true }
 
   function syncNavFlags() {
     canGoBack = navCanGoBack(_nav)
@@ -2772,11 +2785,19 @@ let rowSearch = $state('')
     const row = focusedRow
     const col = focusedCol
     const pg = page
+    // Consumed unconditionally, before the guards below, so a click that lands
+    // mid-travel can't leave the flag set and turn the next roam into a jump.
+    const aimed = _navJumpPending
+    _navJumpPending = false
     if (!tabId) return
     // Mid-travel: the cursor is being parked on an entry we already have.
     if (_navRestore > 0) return
     const cur = navCurrent(_nav)
-    switch (navTransition(cur, { tabId, row, col, page: pg })) {
+    // An aimed move inside the current tab is always a position worth keeping —
+    // unless it didn't actually move, which would just stack duplicates.
+    const aimedJump =
+      aimed && cur !== null && cur.tabId === tabId && row !== null && row !== cur.row
+    switch (aimedJump ? NAV_PUSH : navTransition(cur, { tabId, row, col, page: pg })) {
       case NAV_PUSH:
         pushNav(_nav, { tabId, row, col, page: pg })
         syncNavFlags()
@@ -6153,6 +6174,7 @@ let rowSearch = $state('')
                 bind:selected
                 bind:focusedRow
                 bind:focusedCol
+                onjump={markNavJump}
                 bind:inspectorRow
                 bind:editingCell
                 bind:pendingEditCount
