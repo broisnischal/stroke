@@ -44,6 +44,8 @@
   let selectedDbUuid = $state('')
   let loadingDbs = $state(false)
 
+  // `value` is the uuid because that is what selection needs; SearchableMenu makes
+  // the label searchable on its own.
   const dbItems = $derived(databases.map((d) => ({ value: d.uuid, label: d.name })))
   // Falls back to the saved connection's name so a sidebar pick reads as selected
   // straight away, before (or even without) the account's database list arriving.
