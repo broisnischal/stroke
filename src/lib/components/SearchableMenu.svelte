@@ -136,9 +136,15 @@
         <Command.List bind:ref={listEl} class="sm-item-list min-h-0 flex-1 overflow-y-auto p-1">
           <Command.Empty class="px-2 py-5 text-center text-ui-xs text-muted-foreground/50">{empty}</Command.Empty>
           {#each items as it (it.value)}
+            <!-- cmdk scores a row against `value` + `keywords`, never its rendered
+                 content. `value` is the selection key, so whenever it is an id
+                 (a uuid, an account id) the visible label is not searchable at all
+                 and typing it filters everything out. Default the keywords to the
+                 label so every menu is searchable by what it shows; callers can
+                 still pass `keywords` to add aliases. -->
             <Command.Item
               value={it.value}
-              keywords={it.keywords}
+              keywords={it.keywords ?? (it.label ? [it.label] : undefined)}
               disabled={it.disabled}
               onSelect={() => handleSelect(it)}
               class={cn(
