@@ -25,6 +25,7 @@ import { loadDefaultPageSize } from '$lib/table-query.js'
  * @property {string} error
  * @property {Set<number>} selected
  * @property {number | null} focusedRow
+ * @property {number | null} [focusedCol] - focused column, in *visible* column space
  * @property {number | null} inspectorRow
  * @property {{ rowIdx: number, colIdx: number, draft: string, original: string } | null} editingCell
  * @property {boolean} savingCell
@@ -109,6 +110,7 @@ export function createTableTabState(schema = 'public', table = null, tableKind =
     error: '',
     selected: new Set(),
     focusedRow: null,
+    focusedCol: null,
     inspectorRow: null,
     editingCell: null,
     savingCell: false,

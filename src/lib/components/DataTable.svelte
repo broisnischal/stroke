@@ -155,6 +155,11 @@ import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
     selected = $bindable(new Set()),
     /** @type {number | null} */
     focusedRow = $bindable(null),
+    /** Visible-column index of the focused cell (null = no cell focus). Bindable
+     *  so the parent can persist the whole cursor per tab and put it back on
+     *  back/forward - a row without its column only restores half the position.
+     *  @type {number | null} */
+    focusedCol = $bindable(null),
     /** @type {number | null} */
     inspectorRow = $bindable(null),
     /** @type {{ rowIdx: number, colIdx: number, draft: string, original: string } | null} */
@@ -226,6 +231,10 @@ import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
      *  calls focusColumn(name) to scroll a column into view and briefly
      *  highlight it. */
     focusColumn = $bindable(/** @type {(name: string) => void} */ (() => {})),
+    /** Assigned by this component; the parent calls focusCell(row, col) to put the
+     *  cursor on a specific cell and bring it on screen - used when restoring a
+     *  back/forward position. Indices are clamped to the loaded data. */
+    focusCell = $bindable(/** @type {(row: number, col?: number | null) => void} */ (() => {})),
     /** Assigned by this component so the parent can persist/restore scroll per
      *  tab. getScroll() reads the live position; applyScroll() restores it once
      *  layout settles. */
@@ -498,8 +507,6 @@ import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   let _vexprWidths = $state(/** @type {Record<string,number>} */ ({}));
 
   // ── Keyboard navigation / undo ────────────────────────────────────────────
-  /** Visible-column index of the focused cell (null = no cell focus). */
-  let focusedCol = $state(/** @type {number | null} */ (null));
   /** Column name briefly highlighted after the user picks it from the toolbar's
    *  "Jump to column" menu (header + body band). null = no highlight. */
   let focusColName = $state(/** @type {string | null} */ (null));
@@ -1021,13 +1028,14 @@ import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   }
 
   /**
-   * Scroll a visible column into view (if it's off-screen) and briefly highlight
-   * it. Pinned columns are always visible, so they only get the highlight.
+   * Bring a column into view if it's off-screen. Pinned columns are always
+   * visible, so they only ever need the highlight.
    * @param {string} name
+   * @returns {boolean} false if there is no such column
    */
-  function focusColumnByName(name) {
+  function scrollColumnIntoView(name) {
     const col = geom.cols.find((c) => c.name === name)
-    if (!col) return
+    if (!col) return false
     if (tableContainer && !col.pinned) {
       // Left edge of the scrollable area is occluded by the frozen pinned cols.
       const frozen = geom.frozenWidth
@@ -1045,6 +1053,16 @@ import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
         tableContainer.scrollTo({ left: target, behavior: "smooth" })
       }
     }
+    return true
+  }
+
+  /**
+   * Scroll a visible column into view (if it's off-screen) and briefly highlight
+   * it.
+   * @param {string} name
+   */
+  function focusColumnByName(name) {
+    if (!scrollColumnIntoView(name)) return
     focusColName = name
     if (_focusColTimer) clearTimeout(_focusColTimer)
     _focusColTimer = setTimeout(() => {
@@ -1579,6 +1597,24 @@ import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
         _scrollTop = physToVirt(_physScrollTop);
         scheduleDraw();
       }));
+    };
+    // Restoring a back/forward position. Clamped to the data that's actually
+    // loaded, so a history entry that outlived a filter/delete lands on the
+    // nearest real cell instead of focusing past the end.
+    focusCell = (row, col) => {
+      // The parent holds this closure past unmount (switching to the structure
+      // view tears the grid down), so bail while there's no live container
+      // rather than touch geometry that belongs to a destroyed component.
+      if (!tableContainer) return;
+      const rowLen = rows.length;
+      const visLen = navigableColumns.length;
+      if (rowLen === 0 || visLen === 0) return;
+      focusedRow = Math.min(Math.max(row, 0), rowLen - 1);
+      focusedCol = Math.min(Math.max(col ?? 0, 0), visLen - 1);
+      selAnchor = null; // a restored position is one cell, never a range
+      scrollRowIntoView(focusedRow);
+      scrollColumnIntoView(navigableColumns[focusedCol].name);
+      scheduleDraw();
     };
   });
 
@@ -3996,30 +4032,39 @@ import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
     }
   }
 
+  /**
+   * Full-row background tint for a body row, or null when the row draws bare.
+   * One source of truth so pinned cells - which repaint an opaque panel band to
+   * mask the scrolled content beneath them - can re-apply the same tint and the
+   * highlight reads as one continuous row instead of stopping at the frozen edge.
+   * `cMutedBg` is only a hair off `--panel` in dark themes, so the focused row
+   * uses a faint primary tint (the focused *cell* layers 0.08 more on top).
+   * @returns {string | null}
+   */
+  function rowBgStyle(idx, c) {
+    // Red diff tint for rows staged for deletion.
+    if (hasPendingDeletes && pendingDeletes.has(idx)) return withAlpha(c.RED, hoveredRow === idx ? 0.2 : 0.14)
+    if (selected.has(idx)) return withAlpha(c.cPrimary, hoveredRow === idx ? 0.18 : 0.13)
+    if (focusedRow === idx) return withAlpha(c.cPrimary, hoveredRow === idx ? 0.09 : 0.07)
+    if (hoveredRow === idx) return withAlpha(c.cMutedBg, 0.18)
+    // Zebra striping - a soft tint on odd rows. Below every interactive state
+    // above so selection/hover/focus always win; O(1), no per-row allocation.
+    if (c.tableStyle.zebra && (idx & 1)) return withAlpha(c.cMutedBg, 0.07)
+    return null
+  }
+
+  /** Row tint for the row currently being drawn, hoisted so drawCell reads it for free. */
+  let _rowBg = /** @type {string | null} */ (null)
+
   /** @param {CanvasRenderingContext2D} ctx */
   function drawBodyRow(ctx, idx, ry, c) {
     const rh = ROW_HEIGHT
-    if (windowed && rows[idx] === undefined) { drawLoadingRow(ctx, idx, ry, rh, c); return }
-    // Row background - selected uses primary tint, others use muted.
+    if (windowed && rows[idx] === undefined) { _rowBg = null; drawLoadingRow(ctx, idx, ry, rh, c); return }
     const isSel = selected.has(idx)
     const isPendingDelete = hasPendingDeletes && pendingDeletes.has(idx)
-    if (isPendingDelete) {
-      // Red diff tint for rows staged for deletion.
-      ctx.fillStyle = withAlpha(c.RED, hoveredRow === idx ? 0.2 : 0.14)
-      ctx.fillRect(0, ry, c.usedW, rh)
-    } else if (isSel) {
-      ctx.fillStyle = withAlpha(c.cPrimary, hoveredRow === idx ? 0.18 : 0.13)
-      ctx.fillRect(0, ry, c.usedW, rh)
-    } else if (focusedRow === idx) {
-      ctx.fillStyle = withAlpha(c.cMutedBg, 0.22)
-      ctx.fillRect(0, ry, c.usedW, rh)
-    } else if (hoveredRow === idx) {
-      ctx.fillStyle = withAlpha(c.cMutedBg, 0.18)
-      ctx.fillRect(0, ry, c.usedW, rh)
-    } else if (c.tableStyle.zebra && (idx & 1)) {
-      // Zebra striping - a soft tint on odd rows. Below every interactive state
-      // above so selection/hover/focus always win; O(1), no per-row allocation.
-      ctx.fillStyle = withAlpha(c.cMutedBg, 0.07)
+    _rowBg = rowBgStyle(idx, c)
+    if (_rowBg) {
+      ctx.fillStyle = _rowBg
       ctx.fillRect(0, ry, c.usedW, rh)
     }
 
@@ -4185,6 +4230,8 @@ import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
     if (pinned) {
       ctx.fillStyle = c.cPanel
       ctx.fillRect(cellX, ry, w, rh)
+      // The opaque mask above wipes the row tint, so lay it back down.
+      if (_rowBg) { ctx.fillStyle = _rowBg; ctx.fillRect(cellX, ry, w, rh) }
     }
 
     const editing = editingCell && editingCell.rowIdx === idx && editingCell.colIdx === actualIdx
@@ -4393,11 +4440,9 @@ import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
     const isPendingDelete = hasPendingDeletes && pendingDeletes.has(idx)
     ctx.fillStyle = c.cPanel
     ctx.fillRect(offsetX, ry, gutterWidth, rh)
-    if (isPendingDelete) {
-      // Red diff tint over the gutter so the marker reads on the same band.
-      ctx.fillStyle = withAlpha(c.RED, hoveredRow === idx ? 0.2 : 0.14)
-      ctx.fillRect(offsetX, ry, gutterWidth, rh)
-    }
+    // Re-apply the row tint over the opaque band so the highlight (and the red
+    // staged-delete diff) runs edge to edge instead of starting after the gutter.
+    if (_rowBg) { ctx.fillStyle = _rowBg; ctx.fillRect(offsetX, ry, gutterWidth, rh) }
     let gx = offsetX
     if (showRowExpand) {
       if (isPendingDelete) {

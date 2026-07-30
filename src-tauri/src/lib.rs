@@ -153,13 +153,23 @@ pub fn run() {
                 app.set_menu(menu)?;
             }
 
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
+            // Logging is installed in release too, not just dev. Connection
+            // problems get reported from machines we can't attach a debugger to (a
+            // user's Windows PC behind a VPN), and the connect path logs which
+            // phase was slow — name lookup vs TCP vs TLS+auth. Without a release
+            // log there is nothing to go on but "it's slow".
+            //
+            // The plugin's default targets are already [Stdout, LogDir], so dev
+            // gets the terminal and release gets the rotating file in the platform
+            // log dir (%LOCALAPPDATA%\<app>\logs on Windows, ~/.local/share/<app>/logs
+            // on Linux, ~/Library/Logs/<app> on macOS). Don't add a target here —
+            // `target()` appends to that list and every line would be logged twice.
+            // Info level keeps this to phase timings and failures, not query traffic.
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log::LevelFilter::Info)
+                    .build(),
+            )?;
             // ── System tray ───────────────────────────────────────────────────
             let show_item = MenuItem::with_id(app, "show", "Open Stroke", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit Stroke", true, None::<&str>)?;
