@@ -3629,13 +3629,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // i/x/dd/yy, …) before the default arrow / type-to-edit handling.
     if ($appVimMode && handleVimGridKey(e)) return;
 
-    // Cmd/Ctrl+Arrow is table-level navigation (scroll to top/bottom, first/last
-    // column, paginate) owned by the app-level handler in StudioShell. Let it
-    // bubble instead of moving the cell cursor here - the old double-handling
-    // (cursor jumped one cell AND the grid scrolled) made the shortcut feel
-    // broken.
+    // Modified arrows belong to the app-level handler in StudioShell, not to the
+    // cell cursor: Cmd/Ctrl+Arrow is table-level navigation (scroll to top/bottom,
+    // first/last column, paginate) and Alt+Arrow is Go Back / Go Forward. Let them
+    // bubble untouched — the old double-handling (cursor jumped one cell AND the
+    // view navigated) is what made both shortcuts feel broken.
     if (
-      (e.ctrlKey || e.metaKey) &&
+      (e.ctrlKey || e.metaKey || e.altKey) &&
       (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "ArrowRight" || e.key === "ArrowLeft")
     ) {
       return;
