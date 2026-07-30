@@ -16,7 +16,6 @@
   import EyeOff from "@lucide/svelte/icons/eye-off";
   import ListFilter from "@lucide/svelte/icons/list-filter";
 import FilterX from "@lucide/svelte/icons/filter-x";
-import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import KeyRound from "@lucide/svelte/icons/key-round";
   import Link2 from "@lucide/svelte/icons/link-2";
@@ -5807,8 +5806,15 @@ import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
                    silently fails to paint in WebKit on huge / scaled tables. -->
               <div style="position:sticky;top:0;left:0;width:0;height:0;overflow:visible;z-index:30">
               {#if editingCell && editOverlay}
-                {@const ecol = columns[editingCell.colIdx]}
-                {@const ecached = _colCache[editingCell.colIdx]}
+                <!-- Every read below goes through `?.` even though the {#if} already
+                     proved the cell is non-null. Committing an edit (date pick, enum
+                     pick, boolean toggle) sets `editingCell = null` synchronously, and
+                     these {@const}s are deriveds that a child's lazy prop getter can
+                     force to revalidate before the {#if} tears this branch down —
+                     `columns[editingCell.colIdx]` then throws "null is not an object".
+                     Editing a `created_at`-style column reproduced exactly that. -->
+                {@const ecol = columns[editingCell?.colIdx ?? -1]}
+                {@const ecached = _colCache[editingCell?.colIdx ?? -1]}
                 {@const eEnum = ecached?.enumValues ?? null}
                 {@const eType = ecached?.colType ?? ''}
                 {@const eNullable = ecol?.nullable ?? true}
@@ -5828,7 +5834,7 @@ import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
                          WebKitGTK. Auto-opens on edit; picking a value commits. -->
                     <Select.Root
                       type="single"
-                      value={editingCell.draft}
+                      value={editingCell?.draft ?? ''}
                       open={enumEditorOpen}
                       onOpenChange={(o) => {
                         enumEditorOpen = o;
@@ -5847,14 +5853,14 @@ import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
                         class="box-border h-full w-full min-w-0 max-w-full rounded-none border-0 bg-transparent px-3 py-0 font-mono text-ui-sm text-foreground shadow-none focus-visible:ring-0"
                       >
                         <span data-slot="select-value" class="truncate">
-                          {editingCell.draft || (eNullable ? 'NULL' : 'Select…')}
+                          {editingCell?.draft || (eNullable ? 'NULL' : 'Select…')}
                         </span>
                       </Select.Trigger>
                       <Select.Content align="start" sideOffset={2} class="max-h-64 min-w-[var(--bits-select-anchor-width)] p-1">
                         {#if eNullable}
                           <Select.Item value="" label="NULL" class="py-1.5 pl-2.5 pr-8 font-mono text-ui-sm text-muted-foreground">NULL</Select.Item>
                         {/if}
-                        {#if editingCell.original && !eEnum.includes(editingCell.original)}
+                        {#if editingCell?.original && !eEnum.includes(editingCell.original)}
                           <Select.Item value={editingCell.original} label={editingCell.original} class="py-1.5 pl-2.5 pr-8 font-mono text-ui-sm">{editingCell.original}</Select.Item>
                         {/if}
                         {#each eEnum as option (option)}
@@ -5863,8 +5869,8 @@ import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
                       </Select.Content>
                     </Select.Root>
                   {:else if isBooleanType(eType)}
-                    {@const isOn = editingCell.draft === "true"}
-                    {@const isNull = eNullable && editingCell.draft !== "true" && editingCell.draft !== "false"}
+                    {@const isOn = editingCell?.draft === "true"}
+                    {@const isNull = eNullable && editingCell?.draft !== "true" && editingCell?.draft !== "false"}
                     <button
                       type="button"
                       bind:this={editInput}
@@ -5881,13 +5887,13 @@ import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
                       <span class={cn("relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors duration-150", isOn ? "bg-primary/80" : "bg-muted-foreground/30")}>
                         <span class="absolute size-3 rounded-full bg-white shadow-sm transition-transform duration-150" style={isOn ? "transform: translateX(14px)" : "transform: translateX(2px)"}></span>
                       </span>
-                      <span class={isNull ? "text-muted-foreground" : ""}>{isNull ? "NULL" : editingCell.draft === "true" ? "true" : "false"}</span>
+                      <span class={isNull ? "text-muted-foreground" : ""}>{isNull ? "NULL" : editingCell?.draft === "true" ? "true" : "false"}</span>
                     </button>
                   {:else if eIsArray}
                     <!-- SQL array cell → dedicated array editor (add/remove/reorder),
                          reusing the same open/commit path as the context menu so the
                          edit stages via commitArrayEditor → stageEdit (Apply/undo work). -->
-                    {@const eArrVal = effectiveCellValue(editingCell.rowIdx, editingCell.colIdx)}
+                    {@const eArrVal = editingCell ? effectiveCellValue(editingCell.rowIdx, editingCell.colIdx) : null}
                     <button
                       type="button"
                       bind:this={editInput}
@@ -5914,7 +5920,7 @@ import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
                       }}
                     >
                       <Braces class="size-3.5 shrink-0 text-muted-foreground/60" />
-                      <span class="truncate">{Array.isArray(eArrVal) ? arrayDisplay(eArrVal) : (editingCell.draft || "{}")}</span>
+                      <span class="truncate">{Array.isArray(eArrVal) ? arrayDisplay(eArrVal) : (editingCell?.draft || "{}")}</span>
                       <Maximize2 class="ml-auto size-3 shrink-0 text-muted-foreground/50" />
                     </button>
                   {:else if eDateTime || eDateOnly}
@@ -5923,11 +5929,16 @@ import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
                          click-away cancels the inline edit, so we can't defer the
                          commit without losing the pick. -->
                     <div class="flex h-full w-full items-center px-3">
+                      <!-- `editingCell?.draft`, not `editingCell.draft`: a prop is a
+                           lazy getter, and picking a date runs onchange → commitEdit,
+                           which sets `editingCell = null` synchronously. The picker's
+                           own deriveds then re-read this getter before it unmounts, so
+                           a bare dereference throws (null is not an object). -->
                       <DateTimePicker
                         colName={ecol?.name}
                         showTime={eDateTime}
                         disabled={saving}
-                        value={editingCell.draft}
+                        value={editingCell?.draft ?? ''}
                         onchange={(v) => {
                           if (!editingCell) return;
                           editingCell.draft = v;
@@ -6040,15 +6051,12 @@ import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
       {/snippet}
     </ContextMenu.Trigger>
 
+    <!-- No [&_[data-slot=…]] density overrides here: the dense recipe now lives in
+         ui/context-menu/* for every menu in the app, which is what DESIGN_SYSTEM.md
+         §7 requires ("if a menu looks off, the primitive is wrong; fix it there"). -->
     <ContextMenu.Content
       onOpenAutoFocus={(e) => e.preventDefault()}
-      class={cn(
-        "min-w-52 p-1 text-ui-xs",
-        "[&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs",
-        "[&_[data-slot=context-menu-sub-trigger]]:gap-1.5 [&_[data-slot=context-menu-sub-trigger]]:px-2 [&_[data-slot=context-menu-sub-trigger]]:py-1 [&_[data-slot=context-menu-sub-trigger]]:text-ui-xs [&_[data-slot=context-menu-sub-trigger]_svg]:size-3.5",
-        "[&_[data-slot=context-menu-shortcut]]:text-ui-2xs",
-        "[&_[data-slot=context-menu-item]_svg]:size-3.5",
-      )}
+      class="min-w-52"
     >
       {#if contextIsHeader && contextHeaderCol.startsWith('__vcol__')}
         {@const vcid = contextHeaderCol.slice(8)}
@@ -6152,7 +6160,7 @@ import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
             {$t('menu.highlight')}
             {#if colHighlights[hcol]?.color}<span class="ml-auto size-2.5 rounded-full" style="background:{COL_HL_MAP.get(colHighlights[hcol].color)}"></span>{/if}
           </ContextMenu.SubTrigger>
-          <ContextMenu.SubContent class="min-w-40 [&_[data-slot=context-menu-item]]:gap-2 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs">
+          <ContextMenu.SubContent class="min-w-40">
             {#each COL_HIGHLIGHTS as h (h.id)}
               <ContextMenu.Item onSelect={() => runMenuAction(() => setColHighlight(hcol, h.id))}>
                 <span class="size-3.5 shrink-0 rounded-full border border-border/40" style="background:{h.hex}"></span>
@@ -6186,7 +6194,7 @@ import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
             {$t('menu.transformColumn')}
             {#if colTransforms[hcol]}<span class="ml-auto text-ui-3xs text-primary">on</span>{/if}
           </ContextMenu.SubTrigger>
-          <ContextMenu.SubContent class="min-w-56 [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+          <ContextMenu.SubContent class="min-w-56">
             {#if menuColTransforms.length > 0}
               {#each menuColTransforms as t (t.id)}
                 <ContextMenu.Item onSelect={() => runMenuAction(() => setColTransform(hcol, t.id))}>
@@ -6255,34 +6263,71 @@ import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
           Copy
           <ContextMenu.Shortcut>⌘C</ContextMenu.Shortcut>
         </ContextMenu.Item>
-        <ContextMenu.Item onSelect={() => runMenuAction(() => copyCellHex(contextRowIdx, contextColIdx))}>
-          <Copy />
-          Copy as hex
-        </ContextMenu.Item>
+        <ContextMenu.Sub>
+          <ContextMenu.SubTrigger>
+            <Copy />
+            Copy as
+          </ContextMenu.SubTrigger>
+          <ContextMenu.SubContent class="min-w-44">
+            <ContextMenu.Label>Cell</ContextMenu.Label>
+            <ContextMenu.Item onSelect={() => runMenuAction(() => copyCellHex(contextRowIdx, contextColIdx))}>
+              <Copy />
+              Hex
+            </ContextMenu.Item>
+            <ContextMenu.Separator />
+            <ContextMenu.Label>Row</ContextMenu.Label>
+            <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'json'))}>
+              <Braces />
+              JSON
+            </ContextMenu.Item>
+            <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'csv'))}>
+              <Copy />
+              CSV
+            </ContextMenu.Item>
+            <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'plain'))}>
+              <Copy />
+              Plain text
+            </ContextMenu.Item>
+            <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'markdown'))}>
+              <Copy />
+              Markdown table
+            </ContextMenu.Item>
+            {#if hasTableContext}
+              <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'insert'))}>
+                <Copy />
+                INSERT statement
+              </ContextMenu.Item>
+            {/if}
+          </ContextMenu.SubContent>
+        </ContextMenu.Sub>
         {#if hasTableContext}
-          <ContextMenu.Item
-            disabled={menuCellOversize}
-            onSelect={() => runMenuAction(() => onfilterbyvalue(menuColName, rows[contextRowIdx]?.[contextColIdx]))}
-          >
-            <ListFilter />
-            {menuCellNull ? 'Filter: is NULL' : 'Filter by this value'}
-          </ContextMenu.Item>
-          <ContextMenu.Item
-            disabled={menuCellOversize}
-            onSelect={() => runMenuAction(() => onfilterbyvalue(menuColName, rows[contextRowIdx]?.[contextColIdx], true))}
-          >
-            <FilterX />
-            {menuCellNull ? 'Exclude: not NULL' : 'Exclude this value'}
-          </ContextMenu.Item>
-          {#if quickFilter}
-            <ContextMenu.Sub>
-              <ContextMenu.SubTrigger disabled={menuCellOversize}>
-                <SlidersHorizontal />
-                Quick filter
-              </ContextMenu.SubTrigger>
-              <ContextMenu.SubContent class="app-scroll max-h-[60vh] min-w-36 overflow-y-auto [&_[data-slot=context-menu-item]]:gap-2 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+          <ContextMenu.Sub>
+            <ContextMenu.SubTrigger disabled={menuCellOversize}>
+              <ListFilter />
+              Filter
+            </ContextMenu.SubTrigger>
+            <!-- `quickFilter` is read ONLY inside this SubContent, which bits-ui does
+                 not render until the submenu opens. That matters: building it scans
+                 every loaded row (up to 2000) and JSON.stringifies each object cell,
+                 uncached. Reading it in the parent content - as the old "Quick filter"
+                 sub-trigger's {#if} did - paid that scan on every single right-click,
+                 even when the user never went near the submenu. -->
+            <ContextMenu.SubContent class="app-scroll max-h-[60vh] min-w-40 overflow-y-auto">
+              <ContextMenu.Item
+                onSelect={() => runMenuAction(() => onfilterbyvalue(menuColName, rows[contextRowIdx]?.[contextColIdx]))}
+              >
+                <ListFilter />
+                {menuCellNull ? 'Is NULL' : 'By this value'}
+              </ContextMenu.Item>
+              <ContextMenu.Item
+                onSelect={() => runMenuAction(() => onfilterbyvalue(menuColName, rows[contextRowIdx]?.[contextColIdx], true))}
+              >
+                <FilterX />
+                {menuCellNull ? 'Is not NULL' : 'Exclude this value'}
+              </ContextMenu.Item>
+              {#if quickFilter}
                 {#each quickFilter.groups as group, gi (gi)}
-                  {#if gi > 0}<ContextMenu.Separator />{/if}
+                  <ContextMenu.Separator />
                   {#if group.title}<ContextMenu.Label>{group.title}</ContextMenu.Label>{/if}
                   {#each group.items as item (item.key)}
                     <ContextMenu.Item onSelect={() => runMenuAction(() => onquickfilter(menuColName, item.op, item.value))}>
@@ -6291,9 +6336,49 @@ import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
                     </ContextMenu.Item>
                   {/each}
                 {/each}
-              </ContextMenu.SubContent>
-            </ContextMenu.Sub>
-          {/if}
+              {/if}
+            </ContextMenu.SubContent>
+          </ContextMenu.Sub>
+        {/if}
+        {#if menuTransforms.length > 0}
+          <ContextMenu.Sub>
+            <ContextMenu.SubTrigger>
+              <Wand2 />
+              Transform
+            </ContextMenu.SubTrigger>
+            <ContextMenu.SubContent class="min-w-48">
+              {#each menuTransforms as t (t.id)}
+                <ContextMenu.Item onSelect={() => runMenuAction(() => runCellTransform(contextRowIdx, contextColIdx, t))}>
+                  <Wand2 />
+                  <span data-slot="menu-label">{t.label}</span>
+                </ContextMenu.Item>
+              {/each}
+            </ContextMenu.SubContent>
+          </ContextMenu.Sub>
+        {/if}
+        {#if menuGenerators.length > 0 && menuEditable && !readonly && hasTableContext}
+          <ContextMenu.Sub>
+            <ContextMenu.SubTrigger>
+              <Dices />
+              Insert
+            </ContextMenu.SubTrigger>
+            <ContextMenu.SubContent class="app-scroll max-h-[60vh] min-w-52 overflow-y-auto">
+              {#each menuGenerators as grp, gi (grp.group)}
+                {#if gi > 0}<ContextMenu.Separator />{/if}
+                {@const GIcon = grp.group === 'IDs' ? KeyRound : grp.group === 'TIME' ? Clock : Dices}
+                <ContextMenu.Label>{grp.group}</ContextMenu.Label>
+                {#each grp.items as g (g.id)}
+                  <ContextMenu.Item onSelect={() => runMenuAction(() => insertGeneratedValue(contextRowIdx, contextColIdx, g))}>
+                    <GIcon />
+                    <span data-slot="menu-label">{g.label}</span>
+                  </ContextMenu.Item>
+                {/each}
+              {/each}
+            </ContextMenu.SubContent>
+          </ContextMenu.Sub>
+        {/if}
+        <ContextMenu.Separator />
+        {#if hasTableContext}
           <ContextMenu.Item
             disabled={!menuEditable || menuCellNull || readonly}
             onSelect={() => runMenuAction(() => setCellNull(contextRowIdx, contextColIdx))}
@@ -6318,77 +6403,6 @@ import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
             {isRowExpanded(contextRowIdx) ? "Collapse row JSON" : "Expand"}
           </ContextMenu.Item>
         {/if}
-        {#if menuTransforms.length > 0}
-          <ContextMenu.Separator />
-          <ContextMenu.Sub>
-            <ContextMenu.SubTrigger>
-              <Wand2 />
-              Transform
-            </ContextMenu.SubTrigger>
-            <ContextMenu.SubContent class="min-w-48 [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
-              {#each menuTransforms as t (t.id)}
-                <ContextMenu.Item onSelect={() => runMenuAction(() => runCellTransform(contextRowIdx, contextColIdx, t))}>
-                  <Wand2 />
-                  <span data-slot="menu-label">{t.label}</span>
-                </ContextMenu.Item>
-              {/each}
-            </ContextMenu.SubContent>
-          </ContextMenu.Sub>
-        {/if}
-        {#if menuGenerators.length > 0 && menuEditable && !readonly && hasTableContext}
-          {#if menuTransforms.length === 0}<ContextMenu.Separator />{/if}
-          <ContextMenu.Sub>
-            <ContextMenu.SubTrigger>
-              <Dices />
-              Insert
-            </ContextMenu.SubTrigger>
-            <ContextMenu.SubContent class="app-scroll max-h-[60vh] min-w-52 overflow-y-auto [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:whitespace-nowrap [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
-              {#each menuGenerators as grp, gi (grp.group)}
-                {#if gi > 0}<ContextMenu.Separator />{/if}
-                {@const GIcon = grp.group === 'IDs' ? KeyRound : grp.group === 'TIME' ? Clock : Dices}
-                <div class="select-none px-2 pb-0.5 pt-1 text-ui-3xs font-medium uppercase tracking-wide text-muted-foreground/45">{grp.group}</div>
-                {#each grp.items as g (g.id)}
-                  <ContextMenu.Item onSelect={() => runMenuAction(() => insertGeneratedValue(contextRowIdx, contextColIdx, g))}>
-                    <GIcon />
-                    <span data-slot="menu-label">{g.label}</span>
-                  </ContextMenu.Item>
-                {/each}
-              {/each}
-            </ContextMenu.SubContent>
-          </ContextMenu.Sub>
-        {/if}
-        <ContextMenu.Separator />
-        <ContextMenu.Sub>
-          <ContextMenu.SubTrigger>
-            <Copy />
-            Copy row as
-          </ContextMenu.SubTrigger>
-          <ContextMenu.SubContent class="min-w-44 [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
-            <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'json'))}>
-              <Braces />
-              JSON
-            </ContextMenu.Item>
-            <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'csv'))}>
-              <Copy />
-              CSV
-            </ContextMenu.Item>
-            <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'plain'))}>
-              <Copy />
-              Plain text
-            </ContextMenu.Item>
-            <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'markdown'))}>
-              <Copy />
-              Markdown table
-            </ContextMenu.Item>
-            {#if hasTableContext}
-              <ContextMenu.Separator />
-              <ContextMenu.Item onSelect={() => runMenuAction(() => copyAs(contextRowIdx, 'insert'))}>
-                <Copy />
-                INSERT statement
-              </ContextMenu.Item>
-            {/if}
-          </ContextMenu.SubContent>
-        </ContextMenu.Sub>
         <ContextMenu.Item onSelect={() => runMenuAction(() => toggleRow(contextRowIdx))}>
           <CheckSquare />
           {selected.has(contextRowIdx) ? "Deselect row" : "Select row"}
