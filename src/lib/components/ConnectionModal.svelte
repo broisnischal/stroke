@@ -517,6 +517,45 @@
     finally { if (myOp === opId) testing = false }
   }
 
+  /**
+   * Persist the form WITHOUT connecting. Same validation and payload as
+   * handleConnect, minus the connect round trip and the dialog close — so a
+   * connection can be filed away (or an edit corrected) while the current
+   * session stays live. Re-stamps `baseline` so the "Unsaved" dot clears and the
+   * close guard stops treating the form as dirty.
+   */
+  function handleSave() {
+    if (!editingId && saved.length >= maxConnections) {
+      error = `Free plan allows ${maxConnections} saved connections. Upgrade to Stroke Pro for unlimited.`
+      return
+    }
+    error = ''
+    if (fieldMode === 'string' && URI_TOGGLE_ENGINES.includes(dbType) && !applyConnectionUri()) {
+      error = uriHint || 'Enter a valid connection string'
+      return
+    }
+    const payload = formPayload()
+    const existing = editingId ? saved.find(s => s.id === editingId) : null
+    const id = existing?.id ?? newConnectionId()
+    const hasHostPort = ['postgres', 'mysql', 'mariadb', 'cockroachdb', 'clickhouse', 'mssql', 'redis'].includes(payload.type)
+    const defaultPort = { mysql: 3306, mariadb: 3306, cockroachdb: 26257, postgres: 5432, clickhouse: 8123, mssql: 1433, redis: 6379 }[payload.type] ?? 5432
+    saved = upsertConnection({
+      id, ...payload,
+      port: hasHostPort ? (Number(payload.port) || defaultPort) : undefined,
+      // lastConnectedAt is deliberately NOT touched - nothing was connected, so
+      // this must not jump to the top of the recents list or become "Resume".
+      lastConnectedAt: existing?.lastConnectedAt,
+      readOnly: readOnly || undefined,
+    }).sort((a, b) => (b.lastConnectedAt ?? 0) - (a.lastConnectedAt ?? 0))
+    // Keep editing the row we just saved, so a follow-up Connect updates it
+    // instead of creating a duplicate.
+    editingId = id
+    baseline = snapshot()
+    justSaved = true
+    clearTimeout(justSavedTimer)
+    justSavedTimer = setTimeout(() => { justSaved = false }, 2000)
+  }
+
   async function handleConnect() {
     if (!editingId && saved.length >= maxConnections) {
       error = `Free plan allows ${maxConnections} saved connections. Upgrade to Stroke Pro for unlimited.`
@@ -562,6 +601,12 @@
 
   const canTest = $derived(true)
   const isBusy  = $derived(testing || !!connecting)
+
+  // Transient "Saved" confirmation on the Save button (no toast - the dialog
+  // stays open, so the feedback belongs on the control that was pressed).
+  let justSaved = $state(false)
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let justSavedTimer
 
   // ── Dirty tracking + close guard ─────────────────────────────────────────────
   // A snapshot of every editable field; `baseline` is re-stamped each time a form
@@ -1507,6 +1552,11 @@
                     {#if testing}<Icon name="loader-2" class="size-3.5 animate-spin" />Testing…{:else}Test{/if}
                   </Button>
                 {/if}
+                <!-- Save only: persists the form and leaves the active session
+                     alone. Paired with the solid Connect button beside it. -->
+                <Button variant="outline" disabled={isBusy} onclick={handleSave}>
+                  {#if justSaved}<Icon name="check" class="size-3.5 text-success" />Saved{:else}Save{/if}
+                </Button>
                 <Button
                   class={cn('px-5', connecting === (editingId ?? '__new__') && 'disabled:opacity-90')}
                   disabled={isBusy}

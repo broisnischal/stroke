@@ -58,24 +58,41 @@ async function inv(command, args = {}) {
 //     sees the real error (e.g. "Authentication error") with no extra delay.
 // Anything we can't confidently classify as transient is treated as permanent
 // (fail fast), so we never spin on an error the user needs to see and act on.
-const CONNECT_MAX_ATTEMPTS = 4
+const CONNECT_MAX_ATTEMPTS = 3
+/**
+ * Wall-clock ceiling on the whole retry sequence. Each backend attempt is itself
+ * bounded (probe + handshake deadline), and multiplying a slow attempt by the
+ * retry count is what turned one unreachable host into ~20 s of spinner before
+ * the user saw any message. No new attempt starts past this mark.
+ */
+const CONNECT_TOTAL_BUDGET_MS = 12_000
 
 /** Auth / config errors that will never succeed on retry. */
 function isPermanentConnError(msg) {
   return /\b(401|403|407)\b|unauthor|authenticat|password authentication|access denied|permission denied|invalid[\s_-]*(password|credential|token|api[\s_-]?key|key|secret)|bad credentials|forbidden|no such (database|file|host)|does not exist|not found|unknown database|unknown host|certificate|self[\s-]?signed|\btls\b|\bssl\b/i.test(msg)
 }
 
-/** Network / server errors worth a fast retry. */
+/**
+ * Errors worth a fast retry: a server mid-restart, an exhausted pool, a socket
+ * that died between attempts. Deliberately EXCLUDES the "nothing is there"
+ * family — connection refused, no route, host unreachable, DNS failure, and the
+ * backend's own "Can't reach …" preflight verdict. Those are definitive: the
+ * backend already probed every resolved address concurrently, so a retry buys
+ * nothing and only multiplies the delay before the user sees the real problem.
+ */
 function isTransientConnError(msg) {
-  return /tim(e|ed)[\s_-]?out|timeout|connection refused|refused|reset|closed|broken pipe|econnrefused|econnreset|etimedout|epipe|enetunreach|ehostunreach|temporarily unavailable|unreachable|no route|network|getaddrinfo|eai_again|pool timed out|deadline|\b(502|503|504)\b|too many connections|server closed|connection terminated|starting up|i\/o error/i.test(msg)
+  if (/can't reach|can't resolve|connection refused|econnrefused|enetunreach|ehostunreach|no route|unreachable|getaddrinfo|eai_again|did not resolve|didn't resolve/i.test(msg)) return false
+  return /pool timed out|reset|broken pipe|econnreset|epipe|temporarily unavailable|\b(502|503|504)\b|too many connections|server closed|connection terminated|starting up|i\/o error/i.test(msg)
 }
 
 /**
- * Like inv(), but for connect commands: retries a TRANSIENT failure a few times
- * with fast backoff (200ms → 400ms → 800ms). Permanent failures (auth/config)
- * are thrown immediately so the real error reaches the UI without delay.
+ * Like inv(), but for connect commands: retries a TRANSIENT failure with fast
+ * backoff (200ms → 400ms), bounded by CONNECT_TOTAL_BUDGET_MS. Permanent
+ * failures (auth/config) and definitively-unreachable hosts are thrown at once
+ * so the real error reaches the UI without delay.
  */
 async function connectInv(command, args = {}) {
+  const startedAt = Date.now()
   let lastErr
   for (let attempt = 1; attempt <= CONNECT_MAX_ATTEMPTS; attempt++) {
     try {
@@ -85,7 +102,9 @@ async function connectInv(command, args = {}) {
       const msg = String(e?.message ?? e ?? '')
       const worthRetry = !isPermanentConnError(msg) && isTransientConnError(msg)
       if (attempt === CONNECT_MAX_ATTEMPTS || !worthRetry) throw e
-      await new Promise((r) => setTimeout(r, 200 * 2 ** (attempt - 1)))
+      const backoff = 200 * 2 ** (attempt - 1)
+      if (Date.now() - startedAt + backoff >= CONNECT_TOTAL_BUDGET_MS) throw e
+      await new Promise((r) => setTimeout(r, backoff))
     }
   }
   throw lastErr

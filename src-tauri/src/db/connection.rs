@@ -323,20 +323,177 @@ async fn close_existing(state: &State<'_, DbState>) {
     });
 }
 
-// ── Fast reachability preflight ───────────────────────────────────────────────
+// ── Reachability preflight ────────────────────────────────────────────────────
 
-/// Confirm the host:port is reachable before building a pool. Unreachable hosts,
-/// wrong ports, and empty values fail here in a few seconds instead of stalling
-/// on the pool's much longer acquire timeout ("pool timed out…").
-async fn tcp_preflight(host: &str, port: u16) -> Result<(), String> {
-    if host.trim().is_empty() {
-        return Err("Host is empty".to_string());
+/// Name-resolution budget. Split from the TCP budget because a stalled resolver
+/// (VPN split-DNS, an unreachable DNS server) is a distinct failure from a
+/// stalled handshake and must not eat the whole probe window.
+const DNS_BUDGET: Duration = Duration::from_secs(5);
+/// Per-address TCP handshake budget for the probe.
+const TCP_BUDGET: Duration = Duration::from_secs(6);
+/// Hard ceiling on one whole connect attempt (probe + handshake + auth). Exists
+/// so an indeterminate stall surfaces a real error instead of spinning: a
+/// blackholed route gives no reply at all, and the OS SYN-retry window is ~21 s
+/// on Windows, well past any point where waiting is still useful.
+const CONNECT_DEADLINE: Duration = Duration::from_secs(20);
+
+/// What the pre-connect probe learned about `host:port`.
+enum Preflight {
+    /// A candidate address completed a TCP handshake. Drivers dial it directly:
+    /// that skips a second name lookup and, on a dual-stack host, skips the
+    /// address family that is blackholed.
+    Reachable(std::net::SocketAddr),
+    /// Definitive answer: the name doesn't resolve, nothing is listening, or
+    /// there is no route. Waiting longer or retrying cannot change it.
+    Unreachable(String),
+    /// Indeterminate: candidates were still in flight when the budget ran out.
+    /// A slow VPN/satellite link looks exactly like this, so this must NEVER
+    /// veto the real connect — it only supplies the message if that stalls too.
+    Inconclusive(String),
+}
+
+/// Probe `host:port` before building a pool so unreachable hosts and wrong ports
+/// fail with a clear message instead of stalling on the pool's acquire timeout.
+async fn preflight(host: &str, port: u16) -> Preflight {
+    let host = host.trim();
+    if host.is_empty() {
+        return Preflight::Unreachable("Host is empty".to_string());
     }
-    let addr = format!("{host}:{port}");
-    match tokio::time::timeout(Duration::from_secs(4), tokio::net::TcpStream::connect(&addr)).await {
-        Ok(Ok(_)) => Ok(()),
-        Ok(Err(e)) => Err(format!("Can't reach {addr}: {e}")),
-        Err(_) => Err(format!("Can't reach {addr} (timed out after 4s)")),
+    let target = format!("{host}:{port}");
+
+    let addrs = match tokio::time::timeout(DNS_BUDGET, tokio::net::lookup_host(&target)).await {
+        Ok(Ok(it)) => it.collect::<Vec<_>>(),
+        Ok(Err(e)) => return Preflight::Unreachable(format!("Can't resolve host {host}: {e}")),
+        Err(_) => {
+            return Preflight::Inconclusive(format!(
+                "Name lookup for {host} didn't answer within {}s",
+                DNS_BUDGET.as_secs()
+            ))
+        }
+    };
+    if addrs.is_empty() {
+        return Preflight::Unreachable(format!("Host {host} didn't resolve to any address"));
+    }
+
+    // Happy eyeballs: probe every resolved address CONCURRENTLY and take the
+    // first that completes. Both `TcpStream::connect(host_str)` and the sqlx /
+    // tiberius drivers walk the address list SEQUENTIALLY, so a host whose AAAA
+    // record has no working route stalls on IPv6 for the full OS SYN-retry
+    // window (~21 s on Windows, where an unroutable v6 destination black-holes
+    // instead of returning ENETUNREACH like Linux usually does) before the
+    // working IPv4 address is ever tried. Racing them removes that stall and
+    // hands the driver the address we know answers.
+    let mut probes = tokio::task::JoinSet::new();
+    for addr in addrs {
+        probes.spawn(async move {
+            let r = tokio::time::timeout(TCP_BUDGET, tokio::net::TcpStream::connect(addr)).await;
+            (addr, r)
+        });
+    }
+
+    let mut last_err: Option<String> = None;
+    let mut stalled = false;
+    while let Some(joined) = probes.join_next().await {
+        match joined {
+            // Dropping `probes` here aborts the remaining in-flight probes.
+            Ok((addr, Ok(Ok(_stream)))) => return Preflight::Reachable(addr),
+            Ok((addr, Ok(Err(e)))) => last_err = Some(format!("{addr}: {e}")),
+            Ok((_, Err(_))) => stalled = true,
+            Err(_) => {} // probe task panicked or was cancelled - ignore
+        }
+    }
+
+    if stalled {
+        // Some address never answered. Could be a slow link, so stay advisory.
+        Preflight::Inconclusive(format!(
+            "Can't reach {target} — no response within {}s. Check the host/port, and whether a firewall or VPN is blocking it.",
+            TCP_BUDGET.as_secs()
+        ))
+    } else {
+        Preflight::Unreachable(format!(
+            "Can't reach {target} ({})",
+            last_err.unwrap_or_else(|| "no route to host".to_string())
+        ))
+    }
+}
+
+/// Race the driver's real connect against the reachability probe.
+///
+/// The probe NEVER vetoes a connect that could still succeed. It only
+/// short-circuits on a *definitive* answer (the name doesn't resolve, nothing is
+/// listening, no route). Two separate failure modes forced this shape, both
+/// observed against a real remote database:
+///
+///   • Probing *before* connecting adds the probe's full cost to every connect.
+///     On a lossy link a dropped SYN is retried at 1s/2s/4s, so the probe can
+///     burn 6s for a database that then completes its handshake in 335ms.
+///   • Treating an inconclusive probe as failure aborts the connect for hosts
+///     that are merely slow to answer. That is the "can't connect at all on some
+///     machines" report: the app returned "Can't reach host" having never
+///     attempted a handshake, and the frontend then retried that same verdict.
+///
+/// Racing gives all three properties at once: no added latency on the happy
+/// path, a fast clear error for genuinely dead hosts, and a slow-but-reachable
+/// host still connects.
+///
+/// Phase timings are logged at info level. "Connecting is slow" is otherwise
+/// unattributable from the outside — name lookup, TCP, and TLS+auth stall for
+/// completely different reasons, and the machines where this reproduces (Windows
+/// behind a VPN, corporate DNS) are rarely the machine doing the debugging.
+async fn connect_racing_probe<T>(
+    host: &str,
+    port: u16,
+    connect: impl std::future::Future<Output = Result<T, String>>,
+) -> Result<T, String> {
+    let t0 = std::time::Instant::now();
+    let probe = preflight(host, port);
+    let deadline = tokio::time::sleep(CONNECT_DEADLINE);
+    tokio::pin!(probe);
+    tokio::pin!(connect);
+    tokio::pin!(deadline);
+
+    // Diagnosis to report if the handshake never finishes. Only an inconclusive
+    // probe produces one; a definitive failure returns immediately instead.
+    let mut hint: Option<String> = None;
+    let mut probe_pending = true;
+
+    loop {
+        tokio::select! {
+            // `probe_pending` stops select! from polling an already-completed
+            // future on the next loop iteration.
+            outcome = &mut probe, if probe_pending => {
+                probe_pending = false;
+                let ms = t0.elapsed().as_millis();
+                match outcome {
+                    Preflight::Reachable(addr) => {
+                        log::info!("preflight {host}:{port} -> {addr} reachable in {ms}ms");
+                    }
+                    Preflight::Unreachable(msg) => {
+                        log::warn!("preflight {host}:{port} definitively unreachable in {ms}ms: {msg}");
+                        return Err(msg);
+                    }
+                    Preflight::Inconclusive(h) => {
+                        log::warn!("preflight {host}:{port} inconclusive after {ms}ms - still waiting on the handshake");
+                        hint = Some(h);
+                    }
+                }
+            }
+            result = &mut connect => {
+                let ms = t0.elapsed().as_millis();
+                match &result {
+                    Ok(_) => log::info!("connected to {host}:{port} in {ms}ms"),
+                    Err(e) => log::warn!("connect to {host}:{port} failed after {ms}ms: {e}"),
+                }
+                return result;
+            }
+            _ = &mut deadline => {
+                let ms = t0.elapsed().as_millis();
+                log::warn!("connect to {host}:{port} gave up after {ms}ms");
+                return Err(hint.unwrap_or_else(|| {
+                    format!("Connection timed out after {}s", CONNECT_DEADLINE.as_secs())
+                }));
+            }
+        }
     }
 }
 
@@ -355,9 +512,12 @@ fn pg_pool_builder() -> PgPoolOptions {
         // No min_connections: keeping idle connections alive causes ping failures
         // after network changes or laptop sleep/wake (os error 60), then a 27 s
         // stall while the pool replaces the dead connection.
-        // Preflight already filtered unreachable hosts, so a short acquire timeout
-        // keeps auth/handshake failures snappy instead of hanging ~10 s.
-        .acquire_timeout(Duration::from_secs(6))
+        // The preflight already filtered definitively unreachable hosts, so a
+        // short acquire timeout keeps auth/handshake failures snappy. It must
+        // still clear a cold-pool handshake on a slow remote link (TCP + TLS +
+        // auth is ~6 round trips), hence 10 s rather than something tighter —
+        // warm_pool below is what keeps the common path off this ceiling.
+        .acquire_timeout(Duration::from_secs(10))
         // Keep connections warm for the whole active session. A short idle_timeout
         // (was 30 s) meant any pause longer than that forced a full TCP+TLS+auth
         // re-handshake on the next query — on a remote/SSL host that's seconds of
@@ -369,11 +529,46 @@ fn pg_pool_builder() -> PgPoolOptions {
         .max_lifetime(Duration::from_secs(1800))
 }
 
+/// Turn sqlx's `PoolTimedOut` into the error that actually caused it.
+///
+/// A pool `acquire()` retries internally and reports only "pool timed out while
+/// waiting for an open connection" — which says nothing about *why* no
+/// connection could be established (bad password, server at max_connections, TLS
+/// refused). One direct connection attempt surfaces the real message. Runs only
+/// on the failure path, so a successful connect pays nothing.
+async fn explain_pg_failure(opts: &PgConnectOptions, pool_err: String) -> String {
+    if !pool_err.contains("pool timed out") {
+        return pool_err;
+    }
+    use sqlx::Connection;
+    match tokio::time::timeout(
+        Duration::from_secs(10),
+        sqlx::postgres::PgConnection::connect_with(opts),
+    )
+    .await
+    {
+        Ok(Ok(c)) => {
+            // A direct connection works, so the pool timeout was contention or a
+            // transient stall rather than a broken configuration.
+            let _ = c.close().await;
+            // A single connection works, so this is contention, not configuration:
+            // either the server is at its connection limit, or the pool's own
+            // connections are all tied up in long-running queries.
+            format!("{pool_err} (a direct connection did succeed, so the server is reachable - the pool's connections are all busy, or the server is at its connection limit)")
+        }
+        Ok(Err(e)) => format!("Connection failed: {e}"),
+        Err(_) => pool_err,
+    }
+}
+
 pub(crate) async fn open_pg(config: &PgConfig) -> Result<PgPool, String> {
     let opts: PgConnectOptions = config
         .connection_url()
         .parse()
         .map_err(|e| format!("Connection failed: {e}"))?;
+    // The hostname is deliberately kept rather than swapped for the probed IP:
+    // the driver needs it for TLS SNI (managed Postgres behind a proxy routes on
+    // it) and the OS resolver caches the lookup anyway.
     let opts = opts.log_slow_statements(LevelFilter::Debug, Duration::from_secs(5));
 
     // Kill truly runaway queries. 10 min covers bulk inserts / migrations while
@@ -404,6 +599,7 @@ pub(crate) async fn open_pg(config: &PgConfig) -> Result<PgPool, String> {
         .as_ref()
         .map(|t| format!("SET TIME ZONE '{}'", t.replace('\'', "''")));
 
+    let explain_opts = opts.clone();
     let connect = async {
         match pg_pool_builder().connect_with(fast_opts).await {
             Ok(pool) => Ok(pool),
@@ -428,25 +624,11 @@ pub(crate) async fn open_pg(config: &PgConfig) -> Result<PgPool, String> {
                     .await
                     .map_err(|e| format!("Connection failed: {e}"))
             }
-            Err(e) => Err(format!("Connection failed: {e}")),
+            Err(e) => Err(explain_pg_failure(&explain_opts, format!("Connection failed: {e}")).await),
         }
     };
 
-    // Race the real connect against a raw TCP preflight instead of running the
-    // preflight first: it exists only to fail fast with a clear message on
-    // unreachable hosts/wrong ports/empty values. When the host is reachable
-    // the preflight resolves Ok quickly and we simply keep waiting for the
-    // handshake — no longer a serial extra round trip before every connect.
-    let preflight = tcp_preflight(&config.host, config.port);
-    tokio::pin!(preflight);
-    tokio::pin!(connect);
-    tokio::select! {
-        pre = &mut preflight => {
-            pre?;
-            connect.await
-        }
-        pool = &mut connect => pool,
-    }
+    connect_racing_probe(&config.host, config.port, connect).await
 }
 
 pub async fn test_connection(config: PgConfig) -> Result<(), String> {
@@ -532,7 +714,6 @@ pub async fn connect_sqlite(state: State<'_, DbState>, config: SqliteConfig) -> 
 // ── MySQL connect / test ──────────────────────────────────────────────────────
 
 pub(crate) async fn open_mysql(config: &MysqlConfig) -> Result<MySqlPool, String> {
-    tcp_preflight(&config.host, config.port).await?;
     let opts: MySqlConnectOptions = config
         .connection_url()
         .parse()
@@ -548,10 +729,11 @@ pub(crate) async fn open_mysql(config: &MysqlConfig) -> Result<MySqlPool, String
         .filter(|t| !t.is_empty() && !t.eq_ignore_ascii_case("SYSTEM"))
         .map(|t| format!("SET time_zone = '{}'", t.replace('\'', "''")));
 
-    MySqlPoolOptions::new()
+    let connect = MySqlPoolOptions::new()
         // Same rationale as PG: 4 is the real-world ceiling for a desktop app.
         .max_connections(4)
-        .acquire_timeout(Duration::from_secs(6))
+        // See pg_pool_builder: must clear a cold-pool handshake on a slow link.
+        .acquire_timeout(Duration::from_secs(10))
         // Keep connections warm for the session (see open_pg for the full rationale)
         // so repeat fetches don't pay a fresh TCP+TLS+auth handshake.
         .idle_timeout(Duration::from_secs(600))
@@ -571,9 +753,14 @@ pub(crate) async fn open_mysql(config: &MysqlConfig) -> Result<MySqlPool, String
                 Ok(())
             })
         })
-        .connect_with(opts)
-        .await
-        .map_err(|e| format!("Connection failed: {e}"))
+        .connect_with(opts);
+
+    connect_racing_probe(
+        &config.host,
+        config.port,
+        async { connect.await.map_err(|e| format!("Connection failed: {e}")) },
+    )
+    .await
 }
 
 pub async fn test_mysql_connection(config: MysqlConfig) -> Result<(), String> {
@@ -645,9 +832,12 @@ pub async fn connect_libsql(state: State<'_, DbState>, config: LibSqlConfig) -> 
 // ── ClickHouse connect / test ─────────────────────────────────────────────────
 
 pub async fn test_clickhouse_connection(config: ClickhouseConfig) -> Result<(), String> {
-    tcp_preflight(&config.host, config.port).await?;
-    crate::db::clickhouse::query(&config, "SELECT 1").await?;
-    Ok(())
+    let (host, port) = (config.host.clone(), config.port);
+    connect_racing_probe(&host, port, async move {
+        crate::db::clickhouse::query(&config, "SELECT 1").await?;
+        Ok(())
+    })
+    .await
 }
 
 pub async fn connect_clickhouse(state: State<'_, DbState>, config: ClickhouseConfig) -> Result<(), String> {
@@ -660,8 +850,8 @@ pub async fn connect_clickhouse(state: State<'_, DbState>, config: ClickhouseCon
 // ── Redis connect / test ──────────────────────────────────────────────────────
 
 pub async fn test_redis_connection(config: RedisConfig) -> Result<(), String> {
-    tcp_preflight(&config.host, config.port).await?;
-    crate::db::redis::ping(&config).await
+    let (host, port) = (config.host.clone(), config.port);
+    connect_racing_probe(&host, port, crate::db::redis::ping(&config)).await
 }
 
 pub async fn connect_redis(state: State<'_, DbState>, config: RedisConfig) -> Result<(), String> {
@@ -704,8 +894,8 @@ pub async fn connect_duckdb(state: State<'_, DbState>, config: DuckdbConfig) -> 
 // ── MS SQL Server connect / test ────────────────────────────────────────────────
 
 pub(crate) async fn open_mssql(config: &MssqlConfig) -> Result<MssqlHandle, String> {
-    tcp_preflight(&config.host, config.port).await?;
-    let client = crate::db::mssql::connect(config).await?;
+    let client =
+        connect_racing_probe(&config.host, config.port, crate::db::mssql::connect(config)).await?;
     Ok(Arc::new(tokio::sync::Mutex::new(client)))
 }
 
@@ -734,4 +924,123 @@ pub async fn disconnect(
     // Kill the SSH tunnel (if any) after the pool is closed.
     tunnel_state.clear();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Nothing listening is a definitive answer: it must fail fast rather than
+    /// come back Inconclusive (which the caller treats as "keep waiting") or be
+    /// retried by the frontend.
+    #[tokio::test]
+    async fn refused_port_is_definitive() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener); // free the port so connects are refused
+
+        let started = std::time::Instant::now();
+        match preflight("127.0.0.1", port).await {
+            Preflight::Unreachable(msg) => assert!(msg.contains("Can't reach"), "{msg}"),
+            Preflight::Reachable(a) => panic!("closed port reported reachable: {a}"),
+            Preflight::Inconclusive(m) => panic!("closed port must be definitive, got: {m}"),
+        }
+        assert!(started.elapsed() < TCP_BUDGET, "refusal should not burn the probe budget");
+    }
+
+    #[tokio::test]
+    async fn open_port_returns_the_probed_address() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let want = listener.local_addr().unwrap();
+        match preflight("127.0.0.1", want.port()).await {
+            Preflight::Reachable(addr) => assert_eq!(addr, want),
+            Preflight::Unreachable(m) | Preflight::Inconclusive(m) => panic!("{m}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn unresolvable_host_is_definitive() {
+        // .invalid is reserved by RFC 2606 and never resolves.
+        match preflight("stroke-no-such-host.invalid", 5432).await {
+            Preflight::Unreachable(_) => {}
+            Preflight::Reachable(a) => panic!("bogus host resolved to {a}"),
+            Preflight::Inconclusive(m) => panic!("DNS failure must be definitive, got: {m}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn empty_host_fails_without_a_lookup() {
+        assert!(matches!(preflight("   ", 5432).await, Preflight::Unreachable(_)));
+    }
+
+    /// A dual-stack name where one family is dead must still resolve to the live
+    /// one. `localhost` is the portable stand-in: it resolves to both ::1 and
+    /// 127.0.0.1, and only one of them has a listener here.
+    #[tokio::test]
+    async fn dual_stack_picks_the_family_that_answers() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let addrs: Vec<_> = tokio::net::lookup_host(format!("localhost:{port}"))
+            .await
+            .map(|it| it.collect())
+            .unwrap_or_default();
+        if addrs.len() < 2 {
+            return; // single-stack resolver - nothing to prove
+        }
+        match preflight("localhost", port).await {
+            Preflight::Reachable(addr) => assert!(addr.is_ipv4(), "expected the IPv4 listener, got {addr}"),
+            Preflight::Unreachable(m) | Preflight::Inconclusive(m) => panic!("{m}"),
+        }
+    }
+
+    /// The regression that made databases unconnectable: an inconclusive probe
+    /// (host slow to answer) must NOT abort a handshake that then succeeds.
+    /// 127.0.0.1:<closed port> can't be used here - that's *definitive* - so this
+    /// drives the race with a host that swallows SYNs. 192.0.2.0/24 (RFC 5737
+    /// TEST-NET-1) is reserved and unrouteable, so the probe stalls.
+    #[tokio::test]
+    async fn slow_probe_does_not_veto_a_successful_connect() {
+        let connect = async {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            Ok::<u8, String>(7)
+        };
+        // The probe is still in flight (or inconclusive) when connect resolves.
+        let got = connect_racing_probe("192.0.2.1", 5432, connect).await;
+        assert_eq!(got, Ok(7), "a completed handshake must win over a stalled probe");
+    }
+
+    /// A definitively dead host short-circuits instead of waiting out the
+    /// connect: that's what keeps a wrong port from spinning for 20s.
+    #[tokio::test]
+    async fn definitive_probe_failure_short_circuits() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+
+        let started = std::time::Instant::now();
+        // A connect that would never finish on its own.
+        let never = async {
+            tokio::time::sleep(CONNECT_DEADLINE * 2).await;
+            Ok::<u8, String>(0)
+        };
+        let got = connect_racing_probe("127.0.0.1", port, never).await;
+        assert!(got.is_err(), "closed port must fail, got {got:?}");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "should fail fast, took {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// The whole attempt is bounded, and the probe's diagnosis is what surfaces.
+    /// Paused clock so the deadline fires without waiting CONNECT_DEADLINE.
+    #[tokio::test(start_paused = true)]
+    async fn deadline_bounds_a_stalled_connect() {
+        let never = async {
+            tokio::time::sleep(CONNECT_DEADLINE * 3).await;
+            Ok::<u8, String>(0)
+        };
+        let got = connect_racing_probe("192.0.2.1", 5432, never).await;
+        assert!(got.is_err(), "a stalled connect must not hang forever");
+    }
 }

@@ -63,6 +63,11 @@ objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSView", "objc2-quar
 objc2-quartz-core = { version = "0.3", features = ["CALayer"] }
 objc2-web-kit = { version = "0.3", features = ["WKWebView"] }
 
+[dev-dependencies]
+# `start_paused` in #[tokio::test] - lets the connect-deadline test fire the
+# timeout on a virtual clock instead of waiting CONNECT_DEADLINE for real.
+tokio = { version = "1", features = ["test-util"] }
+
 [profile.release]
 strip = true
 lto = true

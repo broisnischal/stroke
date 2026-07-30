@@ -104,7 +104,7 @@
     class={cn('ml-0.5 shrink-0', iconBtn, !canGoBack && 'opacity-20 !pointer-events-none')}
     onclick={ongoback}
     disabled={!canGoBack}
-    title="Go back"
+    title="Go back (Alt+←)"
   >
     <ChevronLeft class="size-[13px]" />
   </button>
@@ -113,7 +113,7 @@
     class={cn('shrink-0', iconBtn, !canGoForward && 'opacity-20 !pointer-events-none')}
     onclick={ongoforward}
     disabled={!canGoForward}
-    title="Go forward"
+    title="Go forward (Alt+→)"
   >
     <ChevronRight class="size-[13px]" />
   </button>
