@@ -1459,6 +1459,9 @@
                       <CloudflareLogin
                         onselect={connectD1Selection}
                         ondisconnect={() => { accountId = ''; databaseId = ''; apiToken = '' }}
+                        initialAccountId={accountId}
+                        initialDatabaseId={databaseId}
+                        initialDatabaseName={editingId ? name : ''}
                       />
                     {/key}
 
