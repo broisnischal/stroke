@@ -2140,6 +2140,39 @@ let rowSearch = $state('')
     return () => document.removeEventListener('keydown', onArrowKey)
   })
 
+  // The mouse's dedicated back/forward buttons → Go Back / Go Forward, same two
+  // actions as Alt+Left/Right.
+  //
+  // They arrive as `mousedown`/`auxclick` with `button` 3 and 4. The default must
+  // be suppressed even when there is nowhere to go: left alone, the webview acts
+  // on them itself and walks its *document* history, which in a Tauri window means
+  // navigating away from the app's own page.
+  //
+  // Registered in the capture phase so a handler that stops propagation on its own
+  // subtree (the grid canvas has several) can't swallow the button first.
+  $effect(() => {
+    /** @param {MouseEvent} e */
+    function onMouseNav(e) {
+      if (e.button !== 3 && e.button !== 4) return
+      e.preventDefault()
+      if (commandOpen || showConnectionModal || showSettingsModal) return
+      if (e.button === 3) void navBack()
+      else void navForward()
+    }
+    /** Swallow the paired auxclick/mouseup so the webview can't act on them either. */
+    function swallowAux(/** @type {MouseEvent} */ e) {
+      if (e.button === 3 || e.button === 4) e.preventDefault()
+    }
+    document.addEventListener('mousedown', onMouseNav, { capture: true })
+    document.addEventListener('auxclick', swallowAux, { capture: true })
+    document.addEventListener('mouseup', swallowAux, { capture: true })
+    return () => {
+      document.removeEventListener('mousedown', onMouseNav, { capture: true })
+      document.removeEventListener('auxclick', swallowAux, { capture: true })
+      document.removeEventListener('mouseup', swallowAux, { capture: true })
+    }
+  })
+
   // F11 (all platforms) and Cmd+Ctrl+F (macOS standard) for fullscreen toggle.
   $effect(() => {
     const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
