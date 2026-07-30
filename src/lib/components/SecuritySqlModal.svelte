@@ -5,6 +5,7 @@
   import { registerMonacoSqlFormatter } from '$lib/format-sql.js'
   import {
     defineStrokeMonacoThemes,
+    applyMonacoTheme,
     monacoThemeId,
     readEditorFontOptions,
   } from '$lib/monaco-themes.js'
@@ -89,7 +90,7 @@
     })
 
     const themeObs = new MutationObserver(() => {
-      monaco.editor.setTheme(monacoThemeId(currentTheme()))
+      applyMonacoTheme(currentTheme())
     })
     themeObs.observe(document.documentElement, {
       attributes: true,
