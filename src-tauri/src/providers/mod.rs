@@ -437,7 +437,9 @@ async fn refresh_token(
 
 // ── Token storage (namespaced per provider in the secrets store) ─────────────────
 
-fn store_tokens(
+// `async` because the keychain is only ever touched off the caller's thread —
+// see the module comment in secrets.rs.
+async fn store_tokens(
     app: &tauri::AppHandle,
     p: Provider,
     access: &str,
@@ -446,7 +448,7 @@ fn store_tokens(
     email: Option<&str>,
 ) -> Result<(), String> {
     let k = p.key();
-    let mut map = crate::secrets::read_all(app);
+    let mut map = crate::secrets::read_all_async(app).await;
     map.insert(format!("__{k}_access__"), access.to_string());
     if let Some(r) = refresh {
         map.insert(format!("__{k}_refresh__"), r.to_string());
@@ -457,23 +459,23 @@ fn store_tokens(
     if let Some(e) = email {
         map.insert(format!("__{k}_email__"), e.to_string());
     }
-    crate::secrets::write_all(app, &map)
+    crate::secrets::write_all_async(app, map).await
 }
 
-fn clear_tokens(app: &tauri::AppHandle, p: Provider) -> Result<(), String> {
+async fn clear_tokens(app: &tauri::AppHandle, p: Provider) -> Result<(), String> {
     let k = p.key();
-    let mut map = crate::secrets::read_all(app);
+    let mut map = crate::secrets::read_all_async(app).await;
     for suffix in ["access", "refresh", "expires", "email"] {
         map.remove(&format!("__{k}_{suffix}__"));
     }
-    crate::secrets::write_all(app, &map)
+    crate::secrets::write_all_async(app, map).await
 }
 
 /// A valid access token, refreshing transparently if the stored one expired.
 /// For token-based providers, the "access token" is the pasted API key.
 async fn valid_token(app: &tauri::AppHandle, p: Provider) -> Result<String, String> {
     let k = p.key();
-    let map = crate::secrets::read_all(app);
+    let map = crate::secrets::read_all_async(app).await;
     let access = map
         .get(&format!("__{k}_access__"))
         .cloned()
@@ -516,7 +518,8 @@ async fn valid_token(app: &tauri::AppHandle, p: Provider) -> Result<String, Stri
                 t.refresh_token.as_deref().or(Some(&refresh)),
                 t.expires_in,
                 None,
-            )?;
+            )
+            .await?;
             Ok(t.access_token)
         }
         Err(_) => Ok(access),
@@ -598,7 +601,8 @@ pub async fn provider_start_oauth(
         t.refresh_token.as_deref(),
         t.expires_in,
         None,
-    )?;
+    )
+    .await?;
 
     Ok(ProviderOAuthStatus {
         connected: true,
@@ -614,25 +618,25 @@ pub fn provider_cancel_oauth() {
 
 /// Store a pasted API token for a token-based provider (e.g. Prisma).
 #[tauri::command]
-pub fn provider_store_token(
+pub async fn provider_store_token(
     app: tauri::AppHandle,
     provider: String,
     token: String,
 ) -> Result<(), String> {
     let p = Provider::parse(&provider)?;
     if token.trim().is_empty() {
-        return clear_tokens(&app, p);
+        return clear_tokens(&app, p).await;
     }
-    store_tokens(&app, p, token.trim(), None, None, None)
+    store_tokens(&app, p, token.trim(), None, None, None).await
 }
 
 #[tauri::command]
-pub fn provider_oauth_status(
+pub async fn provider_oauth_status(
     app: tauri::AppHandle,
     provider: String,
 ) -> Result<ProviderOAuthStatus, String> {
     let p = Provider::parse(&provider)?;
-    let map = crate::secrets::read_all(&app);
+    let map = crate::secrets::read_all_async(&app).await;
     let k = p.key();
     Ok(ProviderOAuthStatus {
         connected: map.contains_key(&format!("__{k}_access__")),
@@ -641,8 +645,8 @@ pub fn provider_oauth_status(
 }
 
 #[tauri::command]
-pub fn provider_logout(app: tauri::AppHandle, provider: String) -> Result<(), String> {
-    clear_tokens(&app, Provider::parse(&provider)?)
+pub async fn provider_logout(app: tauri::AppHandle, provider: String) -> Result<(), String> {
+    clear_tokens(&app, Provider::parse(&provider)?).await
 }
 
 #[tauri::command]

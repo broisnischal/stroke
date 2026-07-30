@@ -109,25 +109,79 @@ pub(crate) fn write_all(app: &tauri::AppHandle, map: &HashMap<String, String>) -
     std::fs::write(&path, json).map_err(|e| e.to_string())
 }
 
+// ── Keychain access must never run on the caller's thread ────────────────────
+//
+// A keychain call blocks for an unbounded time: the first one of a run can put
+// the OS "<app> wants to use your confidential information" prompt on screen and
+// only returns once the user answers it. Tauri runs a command *without* `async`
+// on the main thread (see "Async Commands" in the Tauri docs), and blocking the
+// main thread stalls the event loop — the window stops compositing and shows an
+// unpainted surface (pure white) for as long as the prompt is up. Inside an
+// async command the same call instead parks a runtime worker, stalling unrelated
+// queries.
+//
+// So every path that can reach the keychain goes through `read_all_async` /
+// `write_all_async`, which move the blocking work to the dedicated blocking
+// pool. The sync `read_all`/`write_all` stay for use *inside* those closures.
+async fn off_thread<T, F>(f: F) -> Result<T, String>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+pub(crate) async fn read_all_async(app: &tauri::AppHandle) -> HashMap<String, String> {
+    let app = app.clone();
+    // A join error here means the closure panicked; an empty vault is the same
+    // answer callers already handle for "nothing stored yet".
+    off_thread(move || read_all(&app)).await.unwrap_or_default()
+}
+
+pub(crate) async fn write_all_async(
+    app: &tauri::AppHandle,
+    map: HashMap<String, String>,
+) -> Result<(), String> {
+    let app = app.clone();
+    off_thread(move || write_all(&app, &map)).await?
+}
+
 #[tauri::command]
-pub fn ai_store_key(app: tauri::AppHandle, profile_id: String, api_key: String) -> Result<(), String> {
-    let mut map = read_all(&app);
-    if api_key.is_empty() {
+pub async fn ai_store_key(
+    app: tauri::AppHandle,
+    profile_id: String,
+    api_key: String,
+) -> Result<(), String> {
+    // Read and write in one hop so the pair shares a single keychain unlock.
+    off_thread(move || {
+        let mut map = read_all(&app);
+        if api_key.is_empty() {
+            map.remove(&profile_id);
+        } else {
+            map.insert(profile_id, api_key);
+        }
+        write_all(&app, &map)
+    })
+    .await?
+}
+
+#[tauri::command]
+pub async fn ai_load_key(app: tauri::AppHandle, profile_id: String) -> Result<String, String> {
+    Ok(read_all_async(&app)
+        .await
+        .get(&profile_id)
+        .cloned()
+        .unwrap_or_default())
+}
+
+#[tauri::command]
+pub async fn ai_delete_key(app: tauri::AppHandle, profile_id: String) -> Result<(), String> {
+    off_thread(move || {
+        let mut map = read_all(&app);
         map.remove(&profile_id);
-    } else {
-        map.insert(profile_id, api_key);
-    }
-    write_all(&app, &map)
-}
-
-#[tauri::command]
-pub fn ai_load_key(app: tauri::AppHandle, profile_id: String) -> Result<String, String> {
-    Ok(read_all(&app).get(&profile_id).cloned().unwrap_or_default())
-}
-
-#[tauri::command]
-pub fn ai_delete_key(app: tauri::AppHandle, profile_id: String) -> Result<(), String> {
-    let mut map = read_all(&app);
-    map.remove(&profile_id);
-    write_all(&app, &map)
+        write_all(&app, &map)
+    })
+    .await?
 }

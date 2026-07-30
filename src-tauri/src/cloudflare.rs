@@ -332,14 +332,16 @@ async fn fetch_user_email(access_token: &str) -> Option<String> {
 
 // ── Token storage helpers ─────────────────────────────────────────────────────
 
-fn store_tokens(
+// `async` because the keychain is only ever touched off the caller's thread —
+// see the module comment in secrets.rs.
+async fn store_tokens(
     app: &tauri::AppHandle,
     access: &str,
     refresh: Option<&str>,
     expires_in: Option<u64>,
     email: Option<&str>,
 ) -> Result<(), String> {
-    let mut map = crate::secrets::read_all(app);
+    let mut map = crate::secrets::read_all_async(app).await;
     map.insert(KEY_ACCESS.to_string(), access.to_string());
     if let Some(r) = refresh {
         map.insert(KEY_REFRESH.to_string(), r.to_string());
@@ -356,16 +358,16 @@ fn store_tokens(
     if let Some(e) = email {
         map.insert(KEY_EMAIL.to_string(), e.to_string());
     }
-    crate::secrets::write_all(app, &map)
+    crate::secrets::write_all_async(app, map).await
 }
 
-fn clear_tokens(app: &tauri::AppHandle) -> Result<(), String> {
-    let mut map = crate::secrets::read_all(app);
+async fn clear_tokens(app: &tauri::AppHandle) -> Result<(), String> {
+    let mut map = crate::secrets::read_all_async(app).await;
     map.remove(KEY_ACCESS);
     map.remove(KEY_REFRESH);
     map.remove(KEY_EXPIRES);
     map.remove(KEY_EMAIL);
-    crate::secrets::write_all(app, &map)
+    crate::secrets::write_all_async(app, map).await
 }
 
 fn now_secs() -> u64 {
@@ -421,7 +423,8 @@ pub async fn cloudflare_start_oauth(app: tauri::AppHandle) -> Result<CfOAuthStat
         token.refresh_token.as_deref(),
         token.expires_in,
         email.as_deref(),
-    )?;
+    )
+    .await?;
 
     Ok(CfOAuthStatus {
         connected: true,
@@ -431,8 +434,8 @@ pub async fn cloudflare_start_oauth(app: tauri::AppHandle) -> Result<CfOAuthStat
 
 /// Returns the current OAuth status (connected + email) without side effects.
 #[tauri::command]
-pub fn cloudflare_oauth_status(app: tauri::AppHandle) -> CfOAuthStatus {
-    let map = crate::secrets::read_all(&app);
+pub async fn cloudflare_oauth_status(app: tauri::AppHandle) -> CfOAuthStatus {
+    let map = crate::secrets::read_all_async(&app).await;
     let access = map.get(KEY_ACCESS).cloned().unwrap_or_default();
     if access.is_empty() {
         return CfOAuthStatus { connected: false, email: None };
@@ -446,7 +449,7 @@ pub fn cloudflare_oauth_status(app: tauri::AppHandle) -> CfOAuthStatus {
 /// Return a valid access token, transparently refreshing via the refresh token if needed.
 #[tauri::command]
 pub async fn cloudflare_get_valid_token(app: tauri::AppHandle) -> Result<String, String> {
-    let map = crate::secrets::read_all(&app);
+    let map = crate::secrets::read_all_async(&app).await;
     let access = map.get(KEY_ACCESS).cloned().unwrap_or_default();
 
     if access.is_empty() {
@@ -480,7 +483,8 @@ pub async fn cloudflare_get_valid_token(app: tauri::AppHandle) -> Result<String,
         new_token.refresh_token.as_deref().or(Some(&refresh)),
         new_token.expires_in,
         email.as_deref(),
-    )?;
+    )
+    .await?;
 
     Ok(new_token.access_token)
 }
@@ -488,7 +492,7 @@ pub async fn cloudflare_get_valid_token(app: tauri::AppHandle) -> Result<String,
 /// Revoke the stored tokens and clear them from the keychain.
 #[tauri::command]
 pub async fn cloudflare_logout(app: tauri::AppHandle) -> Result<(), String> {
-    let map = crate::secrets::read_all(&app);
+    let map = crate::secrets::read_all_async(&app).await;
     let token = map.get(KEY_ACCESS).cloned().unwrap_or_default();
 
     // Best-effort revoke
@@ -500,7 +504,7 @@ pub async fn cloudflare_logout(app: tauri::AppHandle) -> Result<(), String> {
             .await;
     }
 
-    clear_tokens(&app)
+    clear_tokens(&app).await
 }
 
 // ── Discovery commands (reused from before) ───────────────────────────────────
