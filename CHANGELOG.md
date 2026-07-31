@@ -4,6 +4,63 @@ All notable changes to Stroke are listed here, newest first.
 
 ---
 
+## [1.19.0] - 2026-07-31
+
+### New Features
+
+#### Connections
+- **Save without connecting** — the connection dialog has a Save button alongside Save & Connect, so you can store a connection's details without dialling it.
+
+#### Navigation
+- **Back / forward now restores your cursor, not just the tab** — like an editor's Go Back. Focus a cell, go somewhere else, press `Alt+←` and you land back on the same row and column, scrolled into view; `Alt+→` goes forward. Works across tabs and within a single table (jump far down a table and come straight back).
+- **The mouse's back / forward buttons** drive the same two actions, alongside the arrows in the title bar.
+
+### Bug Fixes
+
+#### Connections
+- **Fixed connections hanging or failing outright** — the reachability preflight could veto a connection that would have succeeded (observed vetoing a database that then handshook in 335ms). It now races the probe against the real connect: zero added latency, fails fast only when the host is *definitively* unreachable, and never overrides a working handshake. Addresses are probed concurrently (happy eyeballs) instead of walked one at a time, which is what made this far worse on Windows with unroutable IPv6.
+- **Fixed retry amplification** — a definitively unreachable host was being retried as if it were a transient error, turning one dead host into ~17s of spinner. Unreachable errors now fail immediately; only genuinely transient ones retry, under a total time budget.
+- **Fixed `pool timed out` errors during normal browsing** — sidebar row counts ran unbounded `COUNT(*)` queries that pinned most of the connection pool, starving interactive queries and leaving counts stuck on `…`. Counts are now time-bounded (Postgres via `SET LOCAL statement_timeout` inside a transaction, MySQL via `MAX_EXECUTION_TIME` plus a client-side backstop for MariaDB) and run below the pool's capacity.
+- **Release builds now write logs** — logging was compiled out of release builds, so failures on user machines produced nothing to diagnose.
+
+#### Window
+- **The window no longer turns white while macOS asks for keychain access** — the *"Stroke wants to use your confidential information"* prompt ran on the main thread, stalling the event loop so the window could not repaint until the prompt was answered. Secret-store reads now happen off the main thread, the first read is deferred until after the app has painted, and the window's own surface matches the theme instead of defaulting to white.
+- **No white flash on launch** — the window and webview had no background colour, so any frame before the UI painted showed white against the dark themes.
+
+#### Navigation
+- **`Alt+←` / `Alt+→` reach the history at all** — the grid claimed modified arrows for its own cell cursor, so the shortcut nudged the cursor sideways instead of navigating.
+- **Positions inside a single table are recorded** — an entry was only kept once the cursor crossed twelve rows, so clicking between two nearby cells left nothing to go back to and back / forward looked like a cross-tab-only feature. Clicking a cell is aimed, so it now counts however short the move; arrow-key roaming still does not fill the history.
+- **Back / forward now works for freshly opened tables** — opening a table from the sidebar bypassed the history entirely, so the back arrow did nothing.
+- The focused column is kept in each tab's state, so switching tabs no longer loses which column you were on.
+
+#### Data grid
+- **Focused row highlight** — the row your cursor is on now carries a visible tint that runs edge to edge, across pinned columns and the row gutter, instead of stopping at the frozen edge.
+
+#### Editing
+- **Editing a date cell no longer crashes the view** — a `created_at`-style column that stores Unix millis opened the calendar picker, which then threw `null is not an object`. Committing an edit clears the cell while the picker is still mounted, and the picker's lazily-read props dereferenced the cleared value.
+- **Editing a date no longer destroys the stored timestamp** — the calendar could not parse epoch numbers, so it showed *"Pick a date…"* for a row that plainly held a timestamp, and picking a date then wrote an ISO string into a column storing epoch millis. The picker now detects the stored format (epoch millis, epoch seconds, or ISO) and writes back in that same format, keeping the seconds and milliseconds it never displays.
+
+#### Theming
+- **Text colours are no longer dropped on the dark themes** — any element given a colour alongside a `text-ui-*` size lost the colour and inherited the ambient one. The "Add connection" button was the visible case: white text and icon on a white button, so it read as a blank slab.
+- **Editors match the app's background** — the JSON view, SQL editors and data-diff panes painted a slightly different shade than the app around them, most visibly in the dark Studio theme. Editor surfaces are now taken from the live theme, so every theme matches.
+- **Opening the data-diff page no longer re-tints every other editor** — it pinned itself to VS Code's dark theme, and an editor theme is applied globally.
+- **Switching light / dark keeps the theme you chose** — toggling away from a hand-picked theme and back could land on plain Dark Studio instead of the one you were using.
+
+#### Menus
+- **Menus can be searched by what they show** — typing a database name in the Cloudflare D1 picker matched nothing, because rows were scored against their internal id rather than their label. Also fixes the Cloudflare account picker and the connection switcher.
+
+### Changes
+
+#### Data grid
+- **The cell context menu is shorter and opens instantly** — the Copy and Filter variants moved into submenus (seventeen top-level rows down to thirteen), and building the quick-filter list no longer scans every loaded row on every right-click. Menus across the app are a touch denser, and submenus open without the scale animation that made them feel late.
+
+#### Connections
+- **The Cloudflare D1 database picker is a dropdown**, matching the engine and account pickers beside it, and a saved D1 connection opened from the sidebar now shows its account and database already selected instead of restarting on the first account.
+
+#### AI
+- **The conversation tab strip is gone from full-window AI mode**, where the sidebar already lists every chat and carries its own New-chat button. The docked panel keeps it.
+
+
 ## [1.18.0] - 2026-07-29
 
 ### Changes
