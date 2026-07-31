@@ -173,6 +173,11 @@
     cloneSqlTabState,
   } from '$lib/studio-tabs.js'
   import {
+    createNavStack, navCurrent, navCanGoBack, navCanGoForward,
+    navTransition, pushNav, navStepBack, navStepForward, resetNav,
+    NAV_PUSH, NAV_PUSH_TAB, NAV_REFRESH, NAV_FORGET_CELL,
+  } from '$lib/nav-history.js'
+  import {
     pendingChangesCount,
     clearPendingChanges,
     anyPendingChanges,
@@ -434,14 +439,37 @@
     dropTarget = null
   }
 
-  // ── Tab navigation history (back/forward) ────────────────────────────────
-  /** @type {string[]} */
-  let navHistory = $state([])
-  let navIndex = $state(-1)
-  let _navigating = false  // prevent history push during back/forward jumps
+  // ── Navigation history (back/forward) ─────────────────────────────────────
+  // Positions, not just tabs: an entry is a tab plus the focused cell, so going
+  // back lands on the row/column you left. The stack is deliberately NOT $state -
+  // it's refreshed as the cursor moves, and a reactive array there would churn
+  // the graph on every keystroke. Only these two booleans (which the title bar
+  // buttons read) are reactive, and they flip rarely. See lib/nav-history.js.
+  const _nav = createNavStack()
+  let canGoBack = $state(false)
+  let canGoForward = $state(false)
+  /** >0 while travelling to a history entry, so the arrival isn't recorded as a
+   *  new jump. A counter, not a flag: a restore spans an await and a frame. */
+  let _navRestore = 0
+  /**
+   * Set when the grid reports an aimed cursor move (a cell click), consumed by the
+   * recording effect below.
+   *
+   * Without it, moving around inside one table almost never records anything: the
+   * row-gap threshold only fires past NAV_ROW_GAP rows, so clicking between two
+   * nearby cells was unrecoverable and back/forward looked like it only worked
+   * across tabs. A click is aimed, so distance shouldn't decide — that threshold
+   * exists to stop *arrow-key roaming* filling the stack, and roaming still
+   * refreshes in place.
+   */
+  let _navJumpPending = false
+  function markNavJump() { _navJumpPending = true }
 
-  const canGoBack    = $derived(navIndex > 0)
-  const canGoForward = $derived(navIndex < navHistory.length - 1)
+  function syncNavFlags() {
+    canGoBack = navCanGoBack(_nav)
+    canGoForward = navCanGoForward(_nav)
+  }
+
   /** @type {import('$lib/stores/recent-tabs.js').RecentTab[]} */
   let recentTabs = $state([])
 
@@ -1022,6 +1050,9 @@
   let tableGetExpanded = $state(() => /** @type {number[]} */ ([]))
   /** @type {(pos: { left?: number, top?: number }) => void} */
   let tableApplyScroll = $state(() => {})
+  /** Put the grid cursor on a cell and scroll it into view (back/forward restore).
+   *  @type {(row: number, col?: number | null) => void} */
+  let tableFocusCell = $state(() => {})
   /** @type {{ refresh: () => void } | null} */
   let securityPageRef = $state(null)
   /** @type {{ sendMessage: (text: string) => void } | null} */
@@ -1158,6 +1189,10 @@ let rowSearch = $state('')
   let selected = $state(new Set())
   /** @type {number | null} */
   let focusedRow = $state(null)
+  /** Visible-column index of the focused cell. Held here (not just inside the
+   *  grid) so the full cursor round-trips through a tab snapshot and through the
+   *  back/forward history. @type {number | null} */
+  let focusedCol = $state(null)
   /** @type {number | null} */
   let inspectorRow = $state(null)
 
@@ -1519,6 +1554,7 @@ let rowSearch = $state('')
       error,
       selected: new Set(selected),
       focusedRow,
+      focusedCol,
       inspectorRow,
       editingCell: editingCell ? { ...editingCell } : null,
       savingCell: false,
@@ -1548,6 +1584,7 @@ let rowSearch = $state('')
     error = s.error
     selected = new Set(s.selected)
     focusedRow = s.focusedRow
+    focusedCol = s.focusedCol ?? null
     inspectorRow = s.inspectorRow ?? null
     editingCell = s.editingCell ? { ...s.editingCell } : null
     savingCell = false
@@ -1607,6 +1644,7 @@ let rowSearch = $state('')
     error = ''
     selected = new Set()
     focusedRow = null
+    focusedCol = null
     inspectorRow = null
     editingCell = null
     savingCell = false
@@ -2046,8 +2084,10 @@ let rowSearch = $state('')
     /** @param {KeyboardEvent} e */
     function onArrowKey(e) {
       const mod = e.ctrlKey || e.metaKey
-      if (!mod) return
       if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return
+      // Bail before the guards below for plain arrows - they belong to the grid,
+      // and this listener sits on their hot path (key repeat while scrolling).
+      if (!mod && !e.altKey) return
       if (commandOpen || showConnectionModal || showSettingsModal) return
       const el = document.activeElement
       if (
@@ -2055,6 +2095,13 @@ let rowSearch = $state('')
         el instanceof HTMLTextAreaElement ||
         (el instanceof HTMLElement && el.isContentEditable)
       ) return
+
+      // Alt+Left/Right (no Ctrl/Cmd) → Go Back / Go Forward, as in an editor.
+      if (e.altKey && !mod) {
+        if (e.key === 'ArrowLeft') { e.preventDefault(); void navBack(); return }
+        if (e.key === 'ArrowRight') { e.preventDefault(); void navForward(); return }
+        return
+      }
 
       // Ctrl/Cmd+Alt+Left/Right → scroll grid to the first / last column.
       if (e.altKey) {
@@ -2104,6 +2151,39 @@ let rowSearch = $state('')
     }
     document.addEventListener('keydown', onArrowKey)
     return () => document.removeEventListener('keydown', onArrowKey)
+  })
+
+  // The mouse's dedicated back/forward buttons → Go Back / Go Forward, same two
+  // actions as Alt+Left/Right.
+  //
+  // They arrive as `mousedown`/`auxclick` with `button` 3 and 4. The default must
+  // be suppressed even when there is nowhere to go: left alone, the webview acts
+  // on them itself and walks its *document* history, which in a Tauri window means
+  // navigating away from the app's own page.
+  //
+  // Registered in the capture phase so a handler that stops propagation on its own
+  // subtree (the grid canvas has several) can't swallow the button first.
+  $effect(() => {
+    /** @param {MouseEvent} e */
+    function onMouseNav(e) {
+      if (e.button !== 3 && e.button !== 4) return
+      e.preventDefault()
+      if (commandOpen || showConnectionModal || showSettingsModal) return
+      if (e.button === 3) void navBack()
+      else void navForward()
+    }
+    /** Swallow the paired auxclick/mouseup so the webview can't act on them either. */
+    function swallowAux(/** @type {MouseEvent} */ e) {
+      if (e.button === 3 || e.button === 4) e.preventDefault()
+    }
+    document.addEventListener('mousedown', onMouseNav, { capture: true })
+    document.addEventListener('auxclick', swallowAux, { capture: true })
+    document.addEventListener('mouseup', swallowAux, { capture: true })
+    return () => {
+      document.removeEventListener('mousedown', onMouseNav, { capture: true })
+      document.removeEventListener('auxclick', swallowAux, { capture: true })
+      document.removeEventListener('mouseup', swallowAux, { capture: true })
+    }
   })
 
   // F11 (all platforms) and Cmd+Ctrl+F (macOS standard) for fullscreen toggle.
@@ -2232,6 +2312,7 @@ let rowSearch = $state('')
 
   function closeInspector() {
     focusedRow = null
+    focusedCol = null
     inspectorRow = null
     selected = new Set()
     editingCell = null
@@ -2362,6 +2443,9 @@ let rowSearch = $state('')
   function resetTabs() {
     tabs = []
     activeTabId = null
+    // Every tab id in the history just died with the tab list.
+    resetNav(_nav)
+    syncNavFlags()
     clearTableEditor()
     sqlText = 'SELECT 1;'
     sqlColumns = []
@@ -2671,50 +2755,116 @@ let rowSearch = $state('')
     saveActiveTabState()
     activeTabId = id
     evictColdTabRows(id)
-
-    // Push to nav history unless we're mid back/forward jump
-    if (!_navigating) {
-      const trimmed = navHistory.slice(0, navIndex + 1)
-      // Don't duplicate consecutive same id
-      if (trimmed[trimmed.length - 1] !== id) {
-        navHistory = [...trimmed, id].slice(-50) // cap at 50
-        navIndex = navHistory.length - 1
-      }
-    }
-
     const tab = tabs.find((t) => t.id === id)
     if (tab) await applyTabToEditor(tab)
   }
 
-  async function navBack() {
-    if (!canGoBack) return
-    _navigating = true
-    navIndex -= 1
-    const id = navHistory[navIndex]
-    // Skip ids for tabs that no longer exist
-    if (!tabs.find(t => t.id === id)) {
-      navHistory = navHistory.filter((_, i) => i !== navIndex)
-      navIndex = Math.max(0, navIndex - 1)
-      _navigating = false
-      return
+  /** Keep the current entry level with the live cursor. O(1), no allocation. */
+  function refreshNavCurrent() {
+    const cur = navCurrent(_nav)
+    if (!cur || cur.tabId !== activeTabId || focusedRow === null) return
+    cur.row = focusedRow
+    cur.col = focusedCol
+    cur.page = page
+  }
+
+  /**
+   * Record where the cursor goes.
+   *
+   * Every route into a tab ends up assigning `activeTabId` - some through
+   * activateTab, some (openTableTab, closeTab's fallback, the pane splits) by
+   * hand - so watching the signal here catches all of them instead of asking a
+   * dozen call sites to remember.
+   *
+   * The cost per keystroke is this effect's own comparisons: roaming refreshes
+   * the current entry in place, and only a real jump (another tab, another page,
+   * or NAV_ROW_GAP rows away) touches the array.
+   */
+  $effect(() => {
+    const tabId = activeTabId
+    const row = focusedRow
+    const col = focusedCol
+    const pg = page
+    // Consumed unconditionally, before the guards below, so a click that lands
+    // mid-travel can't leave the flag set and turn the next roam into a jump.
+    const aimed = _navJumpPending
+    _navJumpPending = false
+    if (!tabId) return
+    // Mid-travel: the cursor is being parked on an entry we already have.
+    if (_navRestore > 0) return
+    const cur = navCurrent(_nav)
+    // An aimed move inside the current tab is always a position worth keeping —
+    // unless it didn't actually move, which would just stack duplicates.
+    const aimedJump =
+      aimed && cur !== null && cur.tabId === tabId && row !== null && row !== cur.row
+    switch (aimedJump ? NAV_PUSH : navTransition(cur, { tabId, row, col, page: pg })) {
+      case NAV_PUSH:
+        pushNav(_nav, { tabId, row, col, page: pg })
+        syncNavFlags()
+        break
+      case NAV_PUSH_TAB:
+        // Land with no cell yet - row/col right now still describe the tab we
+        // left. refreshNavCurrent fills them in once the snapshot applies.
+        pushNav(_nav, { tabId, row: null, col: null, page: null })
+        syncNavFlags()
+        break
+      case NAV_REFRESH:
+        refreshNavCurrent()
+        break
+      case NAV_FORGET_CELL:
+        if (cur) {
+          cur.row = null
+          cur.col = null
+          cur.page = pg
+        }
+        break
     }
-    await activateTab(id)
-    _navigating = false
+  })
+
+  /** @param {import('$lib/nav-history.js').NavEntry} entry */
+  async function gotoNavEntry(entry) {
+    _navRestore += 1
+    try {
+      if (entry.tabId !== activeTabId) await activateTab(entry.tabId)
+      if (entry.page != null && entry.page !== page && activeTab?.kind === 'table') {
+        page = entry.page
+        await loadRows()
+      }
+      if (entry.row === null) return
+      focusedRow = entry.row
+      focusedCol = entry.col
+      await tick()
+      const { row, col } = entry
+      // Deferred a frame so this beats the tab snapshot's own scroll restore,
+      // which lands on the same frame - otherwise a position from deeper in the
+      // history loses to the tab's last-known offset. The guard is held across
+      // the frame (hence the counter) so that if the grid clamps a stale row to
+      // the loaded range, that resolves into this entry instead of recording a
+      // brand new jump and wiping the forward branch.
+      _navRestore += 1
+      requestAnimationFrame(() => {
+        tableFocusCell(row, col)
+        refreshNavCurrent()
+        _navRestore -= 1
+      })
+    } finally {
+      _navRestore -= 1
+    }
+  }
+
+  /** Does this history entry still point at an open tab? */
+  const _navTabAlive = (/** @type {string} */ id) => tabs.some((t) => t.id === id)
+
+  async function navBack() {
+    const target = navStepBack(_nav, _navTabAlive)
+    syncNavFlags()
+    if (target) await gotoNavEntry(target)
   }
 
   async function navForward() {
-    if (!canGoForward) return
-    _navigating = true
-    navIndex += 1
-    const id = navHistory[navIndex]
-    if (!tabs.find(t => t.id === id)) {
-      navHistory = navHistory.filter((_, i) => i !== navIndex)
-      navIndex = Math.min(navHistory.length - 1, navIndex)
-      _navigating = false
-      return
-    }
-    await activateTab(id)
-    _navigating = false
+    const target = navStepForward(_nav, _navTabAlive)
+    syncNavFlags()
+    if (target) await gotoNavEntry(target)
   }
 
   /** @param {string} id */
@@ -3139,6 +3289,7 @@ let rowSearch = $state('')
     error = ''
     selected = new Set()
     focusedRow = null
+    focusedCol = null
     inspectorRow = null
     editingCell = null
     hiddenColumns = loadHiddenCols(persistConnectionId, schema, table)
@@ -3741,6 +3892,7 @@ let rowSearch = $state('')
         error: '',
         selected: new Set(),
         focusedRow: null,
+        focusedCol: null,
         inspectorRow: null,
         editingCell: null,
       }
@@ -3898,6 +4050,7 @@ let rowSearch = $state('')
     if (!keepScroll) {
       selected = new Set()
       focusedRow = null
+      focusedCol = null
       inspectorRow = null
       editingCell = null
     }
@@ -4260,6 +4413,8 @@ let rowSearch = $state('')
     // makes reconnect feel instant - the overlay no longer waits on the
     // schema/table/row-count round trips.
     tabs = []
+    resetNav(_nav)
+    syncNavFlags()
     // Redis has no relational catalog: skip schema/table loading entirely and
     // open the keyspace workspace instead of the welcome tab + tables sidebar.
     const connIsRedis = engineFamily(conn.type) === 'redis'
@@ -6018,6 +6173,8 @@ let rowSearch = $state('')
                 saving={savingCell || deletingRows || insertingRow}
                 bind:selected
                 bind:focusedRow
+                bind:focusedCol
+                onjump={markNavJump}
                 bind:inspectorRow
                 bind:editingCell
                 bind:pendingEditCount
@@ -6029,6 +6186,7 @@ let rowSearch = $state('')
                 bind:scrollToRight={scrollTableRight}
                 bind:canScrollHorizontally={tableCanScrollH}
                 bind:focusColumn={focusTableColumn}
+                bind:focusCell={tableFocusCell}
                 bind:getScroll={tableGetScroll}
                 bind:getExpanded={tableGetExpanded}
                 bind:applyScroll={tableApplyScroll}

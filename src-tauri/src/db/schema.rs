@@ -125,23 +125,53 @@ const LIST_INDEXES_SQL: &str = r#"
     ORDER BY t.relname, ix.indisprimary DESC, i.relname
     "#;
 
+/// How long one sidebar COUNT(*) may hold a pooled connection.
+///
+/// The session default is `statement_timeout = 10min` (see open_pg), which is
+/// right for a query the user asked for and catastrophic for a background one:
+/// `COUNT(*)` on a large production table is a full scan, so a handful of them
+/// pin most of the pool for minutes. Interactive queries then can't get a
+/// connection and fail with "pool timed out while waiting for an open
+/// connection" — the app starving itself, which reads as the connection being
+/// broken. A count that can't finish in this budget is not worth a sidebar
+/// number; it degrades to "unknown" instead.
+const COUNT_STATEMENT_TIMEOUT: &str = "4s";
+/// Same budget in milliseconds, for engines whose knob takes ms (MySQL).
+const COUNT_STATEMENT_TIMEOUT_MS: u64 = 4_000;
+
 async fn exact_row_count(pool: &PgPool, schema: &str, table: &str) -> Result<i64, String> {
     // Names arrive from the frontend in the lazy-count pass — escape embedded
     // quotes so an unusual (or hostile) identifier can't break out of the quoting.
     let q = |id: &str| format!("\"{}\"", id.replace('"', "\"\""));
     let sql = format!("SELECT COUNT(*)::bigint FROM {}.{}", q(schema), q(table));
-    sqlx::query_scalar(&sql)
-        .fetch_one(pool)
+
+    // SET LOCAL needs a transaction; it reverts on rollback, so the pooled
+    // connection goes back with the session's 10min default intact.
+    let mut tx = pool
+        .begin()
         .await
-        .map_err(|e| format!("Failed to count rows for {table}: {e}"))
+        .map_err(|e| format!("Failed to count rows for {table}: {e}"))?;
+    let timeout_sql = format!("SET LOCAL statement_timeout = '{COUNT_STATEMENT_TIMEOUT}'");
+    sqlx::query(&timeout_sql)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("Failed to count rows for {table}: {e}"))?;
+    let count: Result<i64, _> = sqlx::query_scalar(&sql).fetch_one(&mut *tx).await;
+    // Read-only, so rollback is the cheap way back; failure to roll back doesn't
+    // change the answer.
+    let _ = tx.rollback().await;
+    count.map_err(|e| format!("Failed to count rows for {table}: {e}"))
 }
 
 /// Bound on concurrent COUNT(*) queries in the lazy-count pass. Firing all of
 /// them at once (join_all) on a large schema swamps the small desktop pool —
-/// 70+ acquires against max_connections=4 queue for seconds each ("time to
-/// acquire exceeded slow threshold") and starve interactive queries. Matches
-/// the pool's max_connections (see open_pg).
-const COUNT_CONCURRENCY: usize = 4;
+/// 70+ acquires queue for seconds each ("time to acquire exceeded slow
+/// threshold") and starve interactive queries.
+///
+/// Deliberately BELOW the pool's max_connections (8, see open_pg) so the
+/// background pass can never consume the whole pool: a table open bursts ~6
+/// concurrent queries and must still find connections while counts are running.
+const COUNT_CONCURRENCY: usize = 3;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -573,11 +603,26 @@ async fn list_schemas_mysql(pool: &MySqlPool) -> Result<Vec<String>, String> {
 
 async fn mysql_exact_row_count(pool: &MySqlPool, schema: &str, table: &str) -> Result<i64, String> {
     let q = |id: &str| format!("`{}`", id.replace('`', "``"));
-    let sql = format!("SELECT COUNT(*) FROM {}.{}", q(schema), q(table));
-    sqlx::query_scalar::<_, i64>(&sql)
-        .fetch_one(pool)
-        .await
-        .map_err(|e| format!("Failed to count rows for {table}: {e}"))
+    // Same starvation guard as the Postgres path (see COUNT_STATEMENT_TIMEOUT):
+    // an unbounded background COUNT(*) on a large remote table pins a pooled
+    // connection for minutes, and this pool only has 4, so interactive queries
+    // then fail with "pool timed out". MAX_EXECUTION_TIME is an optimizer hint
+    // (MySQL 5.7.8+), so it needs no session state and nothing to reset;
+    // MariaDB ignores it as a comment, hence the client-side backstop below.
+    let ms = COUNT_STATEMENT_TIMEOUT_MS;
+    let sql = format!(
+        "SELECT /*+ MAX_EXECUTION_TIME({ms}) */ COUNT(*) FROM {}.{}",
+        q(schema),
+        q(table)
+    );
+    let query = sqlx::query_scalar::<_, i64>(&sql).fetch_one(pool);
+    // Backstop for servers that ignore the hint. Dropping the future returns the
+    // connection to the pool, which is the point - a missing sidebar count is
+    // cheaper than a starved pool.
+    match tokio::time::timeout(std::time::Duration::from_millis(ms + 1_000), query).await {
+        Ok(r) => r.map_err(|e| format!("Failed to count rows for {table}: {e}")),
+        Err(_) => Err(format!("Failed to count rows for {table}: timed out")),
+    }
 }
 
 async fn list_tables_mysql(pool: &MySqlPool, schema: &str) -> Result<Vec<TableInfo>, String> {

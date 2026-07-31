@@ -3,7 +3,7 @@ import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
 import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker'
 import tsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker'
 import { appFont, appZoom } from '$lib/stores/settings.js'
-import { readEditorFontOptions, monacoThemeId } from '$lib/monaco-themes.js'
+import { readEditorFontOptions, applyMonacoTheme } from '$lib/monaco-themes.js'
 import { normalizeThemeId } from '$lib/themes/registry.js'
 
 const MONO_FALLBACK = '"Geist Mono Variable", ui-monospace, monospace'
@@ -81,7 +81,7 @@ export function configureMonacoWorkers() {
   // this install exactly once for the app's lifetime.
   const applyTheme = () => {
     try {
-      monaco.editor.setTheme(monacoThemeId(normalizeThemeId(document.documentElement.dataset.theme)))
+      applyMonacoTheme(normalizeThemeId(document.documentElement.dataset.theme))
     } catch { /* themes not yet defined - editors set their own theme on create */ }
   }
   const themeObserver = new MutationObserver(applyTheme)

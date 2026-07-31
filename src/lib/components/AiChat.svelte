@@ -2668,8 +2668,13 @@
       </div>
     </div>
 
-    <!-- ── Conversation tab bar ───────────────────────────────────────── -->
-    {#if openTabs.length > 0 || !activeConvId}
+    <!-- ── Conversation tab bar ─────────────────────────────────────────
+         Not in full AI mode: there the conversation sidebar already lists every
+         chat and carries its own New-chat button, so the tab strip was a second
+         switcher for the same thing, eating a row of vertical space above the
+         messages. The docked panel keeps it (it is narrow enough that the
+         sidebar is usually collapsed there). -->
+    {#if mode !== "full" && (openTabs.length > 0 || !activeConvId)}
       <div
         class="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border bg-panel px-1.5 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >

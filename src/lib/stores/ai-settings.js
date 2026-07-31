@@ -191,10 +191,24 @@ export async function refreshActiveSettings() {
   aiSettings.set({ baseUrl: profile.baseUrl, apiKey, model: profile.model })
 }
 
-// Bootstrap on module load. Swallow errors so a failed secret-store read can't
-// surface as an unhandled promise rejection; consumers read `aiSettings` and get
-// the default until this resolves.
-void refreshActiveSettings().catch(() => {})
+// Bootstrap after the first paint, not during module evaluation. This is the
+// process's first read of the secrets vault, and the OS may put a "Stroke wants
+// to use your confidential information" keychain prompt in front of it — firing
+// it inline would land that prompt on screen before the window has composited a
+// single frame, i.e. a system modal over an empty white window. One frame plus a
+// macrotask is enough for the shell to be on screen behind it.
+//
+// Errors are swallowed so a failed secret-store read can't surface as an
+// unhandled promise rejection; consumers read `aiSettings` and get the default
+// until this resolves.
+function bootstrapActiveSettings() {
+  void refreshActiveSettings().catch(() => {})
+}
+if (typeof requestAnimationFrame === 'function') {
+  requestAnimationFrame(() => setTimeout(bootstrapActiveSettings, 0))
+} else {
+  bootstrapActiveSettings()
+}
 
 // ── Actions ───────────────────────────────────────────────────────────────────
 

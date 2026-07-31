@@ -662,6 +662,14 @@ export function cycleTheme() {
 /** Toggle between the user's last-used dark theme and last-used light theme. */
 export function toggleLightDark() {
   const current = loadSettings()
+  // Record the theme being *left* before reading the other mode's memory.
+  // `updateSettings` only ever records the theme being set, so a theme that was
+  // chosen in an earlier session — or before this per-mode memory existed, or on
+  // a first launch where the default came from the OS appearance — was never
+  // written down. Toggling away from it then fell back to plain Dark/Light
+  // Studio and the choice was lost on the way back. Recording here makes the
+  // round-trip lossless: whatever you are looking at is what you return to.
+  saveLastForMode(current.theme)
   const { dark, light } = loadLastForMode()
   const target = isDarkTheme(current.theme) ? light : dark
   return updateSettings({ theme: target })

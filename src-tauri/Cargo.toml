@@ -59,9 +59,16 @@ redis = { version = "1", features = ["tokio-comp", "tls-rustls", "tokio-rustls-c
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSView", "objc2-quartz-core"] }
+# NSColor: builds the WKWebView `underPageBackgroundColor` that stands in for the
+# page before it paints (see set_macos_webview_backdrop in lib.rs).
+objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSView", "NSColor", "objc2-quartz-core"] }
 objc2-quartz-core = { version = "0.3", features = ["CALayer"] }
 objc2-web-kit = { version = "0.3", features = ["WKWebView"] }
+
+[dev-dependencies]
+# `start_paused` in #[tokio::test] - lets the connect-deadline test fire the
+# timeout on a virtual clock instead of waiting CONNECT_DEADLINE for real.
+tokio = { version = "1", features = ["test-util"] }
 
 [profile.release]
 strip = true
