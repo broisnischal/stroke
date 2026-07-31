@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import * as monaco from 'monaco-editor'
   import { configureMonacoWorkers, editorFontFamily } from '$lib/monaco-env.js'
-  import { defineStrokeMonacoThemes, monacoThemeId, readEditorFontOptions } from '$lib/monaco-themes.js'
+  import { defineStrokeMonacoThemes, applyMonacoTheme, monacoThemeId, readEditorFontOptions } from '$lib/monaco-themes.js'
   import { normalizeThemeId } from '$lib/themes/registry.js'
   import Table2 from '@lucide/svelte/icons/table-2'
   import Copy from '@lucide/svelte/icons/copy'
@@ -139,7 +139,7 @@
     })
 
     const themeObs = new MutationObserver(() => {
-      monaco.editor.setTheme(monacoThemeId(currentTheme()))
+      applyMonacoTheme(currentTheme())
     })
     themeObs.observe(document.documentElement, {
       attributes: true,

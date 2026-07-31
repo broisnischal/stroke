@@ -18,6 +18,56 @@ use tauri::{
     Manager,
 };
 
+// The surface behind the page, shown whenever the webview has yet to composite a
+// frame — a cold start, a reload, or any moment the UI is mid-repaint. The
+// default is white, which flashes hard against the (mostly dark) app themes, so
+// match the `--background` token of the base light/dark theme in
+// src/lib/themes/app-themes.css: oklch(0.132 0 0) and oklch(0.975 0 0).
+// Only the light/dark end has to be right — the frontend paints the exact
+// per-theme background as soon as it has a frame.
+const DARK_SURFACE: tauri::window::Color = tauri::window::Color(8, 8, 8, 255);
+const LIGHT_SURFACE: tauri::window::Color = tauri::window::Color(247, 247, 247, 255);
+
+fn surface_for_theme(theme: tauri::Theme) -> tauri::window::Color {
+    match theme {
+        tauri::Theme::Light => LIGHT_SURFACE,
+        _ => DARK_SURFACE,
+    }
+}
+
+/// Paint the webview's own backdrop on macOS.
+///
+/// `WebviewWindow::set_background_color` is documented as "not implemented for
+/// the webview layer" on macOS, and it is the WKWebView — not the NSWindow —
+/// that owns the white rectangle the user sees before the page paints. The
+/// equivalent knob there is `underPageBackgroundColor`.
+#[cfg(target_os = "macos")]
+fn set_macos_webview_backdrop(window: &tauri::WebviewWindow, color: tauri::window::Color) {
+    let _ = window.with_webview(move |webview| unsafe {
+        use objc2::{msg_send, runtime::AnyObject, sel};
+        use objc2_app_kit::NSColor;
+        use objc2_web_kit::WKWebView;
+
+        let view: &WKWebView = &*webview.inner().cast();
+        // underPageBackgroundColor is macOS 12+. Tauri still supports older
+        // versions, where sending the selector would be a hard crash
+        // ("unrecognized selector"), so ask before sending.
+        let obj: &AnyObject = &*(view as *const WKWebView).cast();
+        let responds: bool = msg_send![obj, respondsToSelector: sel!(setUnderPageBackgroundColor:)];
+        if !responds {
+            return;
+        }
+        let tauri::window::Color(r, g, b, a) = color;
+        let ns_color = NSColor::colorWithSRGBRed_green_blue_alpha(
+            r as f64 / 255.0,
+            g as f64 / 255.0,
+            b as f64 / 255.0,
+            a as f64 / 255.0,
+        );
+        view.setUnderPageBackgroundColor(Some(&ns_color));
+    });
+}
+
 /// Resolve the tray icon that matches the current system appearance.
 /// A dark mark sits on the light menu bar; a light mark on the dark menu bar,
 /// so the logo stays visible regardless of the OS theme.
@@ -87,7 +137,12 @@ pub fn run() {
             .inner_size(1280.0, 800.0)
             .min_inner_size(960.0, 600.0)
             .resizable(true)
-            .maximized(true);
+            .maximized(true)
+            // Never let the default white surface show. The real theme is only
+            // known to the frontend (localStorage), so start on the dark base —
+            // 11 of the 16 themes are dark — and correct to light right after
+            // build(), which still runs before the event loop composites.
+            .background_color(DARK_SURFACE);
 
             // Custom titlebar (TitleBar.svelte) everywhere. macOS keeps the real,
             // OS-drawn traffic lights via the Overlay style - they just float over
@@ -131,6 +186,16 @@ pub fn run() {
             })
             .build()?;
 
+            // Match the surface to the OS appearance before the first frame. Both
+            // calls land inside `setup`, i.e. before the event loop starts, so
+            // nothing has been composited yet and there is no flash of the wrong
+            // colour. `window.theme()` is the same signal the tray icon uses below.
+            let window_theme = window.theme().unwrap_or(tauri::Theme::Dark);
+            let surface = surface_for_theme(window_theme);
+            let _ = window.set_background_color(Some(surface));
+            #[cfg(target_os = "macos")]
+            set_macos_webview_backdrop(&window, surface);
+
             #[cfg(target_os = "macos")]
             {
                 // Defensive: disable every native WKWebView zoom path. App zoom is
@@ -153,13 +218,23 @@ pub fn run() {
                 app.set_menu(menu)?;
             }
 
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
+            // Logging is installed in release too, not just dev. Connection
+            // problems get reported from machines we can't attach a debugger to (a
+            // user's Windows PC behind a VPN), and the connect path logs which
+            // phase was slow — name lookup vs TCP vs TLS+auth. Without a release
+            // log there is nothing to go on but "it's slow".
+            //
+            // The plugin's default targets are already [Stdout, LogDir], so dev
+            // gets the terminal and release gets the rotating file in the platform
+            // log dir (%LOCALAPPDATA%\<app>\logs on Windows, ~/.local/share/<app>/logs
+            // on Linux, ~/Library/Logs/<app> on macOS). Don't add a target here —
+            // `target()` appends to that list and every line would be logged twice.
+            // Info level keeps this to phase timings and failures, not query traffic.
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log::LevelFilter::Info)
+                    .build(),
+            )?;
             // ── System tray ───────────────────────────────────────────────────
             let show_item = MenuItem::with_id(app, "show", "Open Stroke", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit Stroke", true, None::<&str>)?;
@@ -212,12 +287,19 @@ pub fn run() {
                         let _ = w.hide();
                     }
                 }
-                // Keep the tray mark visible when the OS flips light/dark.
+                // Keep the tray mark visible when the OS flips light/dark, and keep
+                // the pre-paint surface on the same end of the scale.
                 tauri::WindowEvent::ThemeChanged(theme) => {
                     if let Some(tray) = app_handle.tray_by_id("main-tray") {
                         if let Some(icon) = tray_icon_for_theme(&app_handle, *theme) {
                             let _ = tray.set_icon(Some(icon));
                         }
+                    }
+                    if let Some(w) = app_handle.get_webview_window("main") {
+                        let surface = surface_for_theme(*theme);
+                        let _ = w.set_background_color(Some(surface));
+                        #[cfg(target_os = "macos")]
+                        set_macos_webview_backdrop(&w, surface);
                     }
                 }
                 _ => {}

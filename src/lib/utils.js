@@ -1,5 +1,30 @@
 import { clsx } from 'clsx'
-import { twMerge } from 'tailwind-merge'
+import { extendTailwindMerge } from 'tailwind-merge'
+
+/**
+ * `text-ui-*` are this app's font sizes (see the scale in app.css / DESIGN_SYSTEM
+ * §2), but tailwind-merge has no way to know that: it sees `text-<something>` it
+ * doesn't recognise and files it under *text colour*. It then resolves the two as
+ * conflicting, so a base class list and a call-site override like
+ *
+ *   cn('bg-primary text-primary-foreground', 'text-ui-sm font-semibold')
+ *
+ * silently loses `text-primary-foreground` — the element falls back to inheriting
+ * the ambient colour. That is how the "Add connection" button rendered as a blank
+ * white slab on the dark themes: white-on-white, label and icon invisible.
+ *
+ * Registering the scale as font sizes makes size and colour independent again,
+ * while still collapsing two sizes (or two colours) to the last one.
+ */
+const twMerge = extendTailwindMerge({
+  extend: {
+    classGroups: {
+      'font-size': [
+        { text: ['ui', 'ui-sm', 'ui-xs', 'ui-2xs', 'ui-3xs', 'ui-lg', 'ui-xl', 'ui-2xl', 'ui-3xl'] },
+      ],
+    },
+  },
+})
 
 const NETWORK_ERROR_PATTERNS = [
   'failed to lookup address',

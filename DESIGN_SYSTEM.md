@@ -179,8 +179,14 @@ hover:opacity-90`. Never hand-roll a primary button.
   `SearchableMenu.svelte`. Panel: `rounded-[10px] border-border/60 bg-popover
   elevate-2-rim`, width matches trigger via `w-[var(--bits-popover-anchor-width)]`
   (add `min-w-[240px]`).
-- **Action menu** (non-filterable) → `ui/dropdown-menu`. Items `text-ui-sm`,
-  leading `size-3.5` icon, `gap-2`.
+- **Action menu** (non-filterable) → `ui/dropdown-menu`. Items `text-ui-xs`,
+  leading `size-3.5` icon, `gap-1.5`.
+- **Submenu panels** animate fade-only (`duration-75`). No scale/slide: a submenu
+  opens under a pointer already moving toward it, so a panel still growing into
+  place reads as lag.
+- Prefer folding variants of one action into a submenu over a long flat list —
+  a menu past ~10 top-level rows is hard to scan (see the DataTable cell menu:
+  Copy as ›, Filter ›, Transform ›, Insert ›).
 - One active dialog/menu at a time from the global hotkey flow.
 
 ### Canonical menu recipe (dropdown / context / select — all identical)
@@ -192,10 +198,10 @@ overrides — if a menu looks off, the primitive is wrong; fix it there.
 | Part | Recipe |
 |---|---|
 | Panel | `rounded-[10px] border border-border/60 bg-popover p-1 elevate-2-rim` |
-| Item | `gap-2 rounded-md px-2 py-1.5 text-ui-sm` · focus/highlight `bg-accent text-foreground` · disabled `opacity-40` · icons `size-3.5 shrink-0` |
+| Item | `gap-1.5 rounded-md px-2 py-1 text-ui-xs` · focus/highlight `bg-accent text-foreground` · disabled `opacity-40` · icons `size-3.5 shrink-0` · **no `transition-colors`** — a colour fade on hover makes highlight tracking feel laggy in a long menu |
 | Checkbox/radio item | same, with `pl-2 pr-8` (trailing indicator) |
 | Group label | `px-2 pt-1.5 pb-1 text-ui-2xs font-medium text-muted-foreground/70` — **plain case**, never uppercase (uppercase micro-labels are for page/sidebar sections only, §10) |
-| Separator | `bg-border/50 -mx-1 my-1 h-px` |
+| Separator | `bg-border/50 -mx-1 my-0.5 h-px` |
 | Shortcut / trailing hint | `ml-auto shrink-0 pl-3 text-ui-2xs text-muted-foreground/60` — no letter-spacing |
 | Tooltip | `rounded-lg border-border/60 bg-popover px-2.5 py-1.5 text-ui-xs elevate-2-rim` |
 

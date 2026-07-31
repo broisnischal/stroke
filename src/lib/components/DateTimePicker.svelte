@@ -27,11 +27,32 @@
 
   let open = $state(false);
 
+  // Which wire format the incoming value is in. An edit has to write the column
+  // back in the format it already stores: a `created_at` column holding Unix
+  // millis (as text or an integer) must not come back as "2026-07-30T12:34", and
+  // a seconds column must not silently gain three digits.
+  const valueFormat = $derived.by(() => {
+    const s = String(value ?? "").trim();
+    if (/^-?\d{11,}$/.test(s)) return "epoch-ms";
+    if (/^-?\d{9,10}$/.test(s)) return "epoch-s";
+    return "iso";
+  });
+
   // Parse the current string value into date parts
   const parsed = $derived.by(() => {
-    if (!value) return null;
+    const s = String(value ?? "").trim();
+    if (!s) return null;
     try {
-      const d = new Date(value.includes("T") ? value : value + "T00:00:00");
+      // Epoch numbers are not parseable as `s + "T00:00:00"` — that produced an
+      // Invalid Date, so the calendar rendered "Pick a date…" for a row that
+      // plainly held a timestamp, and picking a date overwrote it with ISO text.
+      if (valueFormat === "epoch-ms" || valueFormat === "epoch-s") {
+        const n = Number(s);
+        if (!Number.isFinite(n)) return null;
+        const d = new Date(valueFormat === "epoch-s" ? n * 1000 : n);
+        return isNaN(d.getTime()) ? null : d;
+      }
+      const d = new Date(s.includes("T") ? s : s + "T00:00:00");
       if (isNaN(d.getTime())) return null;
       return d;
     } catch {
@@ -86,13 +107,29 @@
     return showTime ? `${date}  ${timeStr}` : date;
   });
 
+  /**
+   * Serialise a picked date back into the format the column already stores —
+   * see `valueFormat`. Emitting ISO into an epoch column is a silent data
+   * corruption: the write succeeds and the timestamp is destroyed.
+   */
   function buildIsoString(dateVal, time) {
     if (!dateVal) return "";
     const yyyy = String(dateVal.year).padStart(4, "0");
     const mm = String(dateVal.month).padStart(2, "0");
     const dd = String(dateVal.day).padStart(2, "0");
-    if (!showTime) return `${yyyy}-${mm}-${dd}`;
     const [hh, mi] = (time || "00:00").split(":").map((s) => s.padStart(2, "0"));
+    if (valueFormat === "epoch-ms" || valueFormat === "epoch-s") {
+      // An epoch always carries a time component, so honour hh:mm even when the
+      // picker is in date-only mode. Seconds/millis are carried over from the
+      // stored value rather than zeroed — the picker only edits down to the
+      // minute, so it must not quietly drop precision it never showed.
+      const ms = new Date(
+        Number(yyyy), Number(mm) - 1, Number(dd), Number(hh), Number(mi),
+        parsed?.getSeconds() ?? 0, parsed?.getMilliseconds() ?? 0,
+      ).getTime();
+      return String(valueFormat === "epoch-s" ? Math.floor(ms / 1000) : ms);
+    }
+    if (!showTime) return `${yyyy}-${mm}-${dd}`;
     return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
   }
 

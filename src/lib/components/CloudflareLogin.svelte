@@ -7,7 +7,6 @@
   import ChevronDown from '@lucide/svelte/icons/chevron-down'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
-  import Search from '@lucide/svelte/icons/search'
   import DbIcon from './DbIcon.svelte'
   import SearchableMenu from './SearchableMenu.svelte'
   import { cfStartOAuth, cfOAuthStatus, cfLogout } from '$lib/cloudflare.js'
@@ -22,6 +21,12 @@
     onselect = () => {},
     /** Called when user logs out. */
     ondisconnect = () => {},
+    // Seeds from a saved connection picked in the dialog's sidebar, so its
+    // account and database show as already selected instead of the picker
+    // restarting on the first account. Selection only — see `seedFromSaved`.
+    initialAccountId = '',
+    initialDatabaseId = '',
+    initialDatabaseName = '',
   } = $props()
 
   /** @type {'idle' | 'authorizing' | 'fetching' | 'selecting' | 'error'} */
@@ -38,29 +43,29 @@
   let databases = $state([])
   let selectedDbUuid = $state('')
   let loadingDbs = $state(false)
-  let dbSearch = $state('')
 
-  const filteredDatabases = $derived(
-    dbSearch.trim()
-      ? databases.filter((d) => d.name.toLowerCase().includes(dbSearch.toLowerCase()))
-      : databases,
+  // `value` is the uuid because that is what selection needs; SearchableMenu makes
+  // the label searchable on its own.
+  const dbItems = $derived(databases.map((d) => ({ value: d.uuid, label: d.name })))
+  // Falls back to the saved connection's name so a sidebar pick reads as selected
+  // straight away, before (or even without) the account's database list arriving.
+  const selectedDbName = $derived(
+    databases.find((d) => d.uuid === selectedDbUuid)?.name || initialDatabaseName || '',
   )
 
-  // Keyboard navigation for the D1 database list, driven from the search box.
-  let hlIdx = $state(0)
+  // Show a saved connection's database as the current selection. Deliberately
+  // does not call `onselect` — that is what connects, and picking a row in the
+  // connections sidebar is not a request to dial it. Latched on the id so it
+  // seeds once per saved connection and never fights a manual pick.
+  let seededDbId = ''
   $effect(() => {
-    filteredDatabases
-    hlIdx = 0
+    const want = initialDatabaseId
+    if (!want || seededDbId === want) return
+    if (databases.some((d) => d.uuid === want)) {
+      seededDbId = want
+      selectedDbUuid = want
+    }
   })
-  /** @param {KeyboardEvent} e */
-  function onDbSearchKeydown(e) {
-    if (e.key === 'Escape') { dbSearch = ''; return }
-    const n = filteredDatabases.length
-    if (!n) return
-    if (e.key === 'ArrowDown') { e.preventDefault(); hlIdx = (hlIdx + 1) % n }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); hlIdx = (hlIdx - 1 + n) % n }
-    else if (e.key === 'Enter') { e.preventDefault(); const d = filteredDatabases[hlIdx] ?? filteredDatabases[0]; if (d) selectDatabase(d.uuid) }
-  }
 
   /** Turn a raw backend error into a calm title + one-line explanation. */
   function friendlyError(msg) {
@@ -106,10 +111,14 @@
       const token = await cfGetValidToken()
       accounts = await cloudflareListAccounts(token)
       phase = 'selecting'
-      // Auto-select the first account so the D1 database list loads immediately;
-      // the user can still switch accounts via the dropdown when there are several.
+      // Auto-select an account so the D1 database list loads immediately; the
+      // user can still switch accounts via the dropdown when there are several.
+      // A saved connection's own account wins, otherwise the first one.
       if (accounts.length && !selectedAccountId) {
-        await selectAccount(accounts[0].id)
+        const seeded = accounts.some((a) => a.id === initialAccountId)
+          ? initialAccountId
+          : accounts[0].id
+        await selectAccount(seeded)
       }
     } catch (e) {
       phase = 'error'
@@ -269,54 +278,44 @@
     <!-- Database selector -->
     {#if selectedAccountId}
       <div class="flex flex-col gap-1.5">
-        <label class="flex items-center gap-1.5 text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground/55">
-          D1 Database
-          {#if loadingDbs}<Loader2 class="size-3 animate-spin text-muted-foreground" />{/if}
-        </label>
+        <span class="text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground/55">D1 Database</span>
 
         {#if databases.length > 0}
-          <div class="flex flex-col overflow-hidden rounded-lg border border-border/60">
-            {#if databases.length > 6}
-              <div class="relative border-b border-border/50">
-                <Search class="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground/40" />
-                <input
-                  type="text"
-                  aria-label="Search databases"
-                  placeholder="Search databases…"
-                  bind:value={dbSearch}
-                  class="no-focus-ring h-8 w-full bg-transparent pl-9 pr-2.5 text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/35"
-                  onkeydown={onDbSearchKeydown}
-                />
-              </div>
-            {/if}
-            <div class="db-list-scroll flex max-h-[240px] flex-col gap-0.5 overflow-y-auto p-1.5">
-              {#each filteredDatabases as db, idx (db.uuid)}
-                {@const selected = db.uuid === selectedDbUuid}
-                <button
-                  type="button"
-                  class={cn(
-                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors",
-                    selected
-                      ? "bg-primary/10 text-foreground ring-1 ring-primary/25"
-                      : idx === hlIdx
-                        ? "bg-accent/60 text-foreground"
-                        : "text-foreground/80 hover:bg-accent/60"
-                  )}
-                  onclick={() => selectDatabase(db.uuid)}
-                >
-                  <DbIcon id="d1" class={cn("size-4 shrink-0", selected ? "text-foreground" : "text-muted-foreground/50")} />
-                  <span class="min-w-0 flex-1 truncate font-mono text-ui-xs leading-snug {selected ? 'font-medium text-foreground' : 'text-foreground/85'}">{db.name}</span>
-                  {#if selected}
-                    <Check class="size-3.5 shrink-0 text-primary" />
-                  {/if}
-                </button>
-              {/each}
-              {#if filteredDatabases.length === 0}
-                <p class="px-2.5 py-3 text-center text-ui-2xs text-muted-foreground/45">No match for “{dbSearch}”</p>
-              {/if}
-            </div>
+          <SearchableMenu
+            items={dbItems}
+            placeholder="Search databases…"
+            empty="No matching database"
+            contentClass="w-[var(--bits-popover-anchor-width)] min-w-[240px]"
+            align="start"
+            onselect={(it) => selectDatabase(it.value)}
+          >
+            {#snippet trigger(props)}
+              <button
+                {...props}
+                type="button"
+                class="flex h-9 w-full items-center gap-2 rounded-lg border border-border/60 bg-muted/25 pl-3 pr-2.5 text-left text-ui-xs transition-[border-color,box-shadow] hover:border-border focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none data-[state=open]:border-ring"
+              >
+                <DbIcon id="d1" class={cn('size-4 shrink-0', selectedDbName ? 'text-foreground' : 'text-muted-foreground/45')} />
+                <span class={cn('min-w-0 flex-1 truncate font-mono', !selectedDbName && 'font-sans text-muted-foreground')}>
+                  {selectedDbName || '- select database -'}
+                </span>
+                <ChevronDown class="size-3.5 shrink-0 text-muted-foreground" />
+              </button>
+            {/snippet}
+            {#snippet item(it)}
+              <DbIcon id="d1" class={cn('size-4 shrink-0', it.value === selectedDbUuid ? 'text-foreground' : 'text-muted-foreground/50')} />
+              <span class="min-w-0 flex-1 truncate font-mono leading-snug">{it.label}</span>
+              {#if it.value === selectedDbUuid}<Check class="size-3.5 shrink-0 text-primary" />{/if}
+            {/snippet}
+          </SearchableMenu>
+        {:else if loadingDbs}
+          <!-- Hold the control's footprint while the list loads so the form does
+               not jump once the databases arrive. -->
+          <div class="flex h-9 w-full items-center gap-2 rounded-lg border border-border/60 bg-muted/15 pl-3 pr-2.5 text-ui-xs text-muted-foreground/50">
+            <Loader2 class="size-3.5 shrink-0 animate-spin" />
+            <span class="min-w-0 flex-1 truncate">Loading databases…</span>
           </div>
-        {:else if !loadingDbs}
+        {:else}
           <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border/50 px-4 py-6 text-center">
             <DbIcon id="d1" class="size-5 text-muted-foreground/25" />
             <p class="text-ui-2xs text-muted-foreground/50">No D1 databases in this account.</p>

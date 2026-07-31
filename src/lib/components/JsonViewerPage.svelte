@@ -2,7 +2,7 @@
   import { onMount, tick, untrack } from 'svelte'
   import * as monaco from 'monaco-editor'
   import { configureMonacoWorkers, editorFontFamily } from '$lib/monaco-env.js'
-  import { defineStrokeMonacoThemes, monacoThemeId, readEditorFontOptions } from '$lib/monaco-themes.js'
+  import { defineStrokeMonacoThemes, applyMonacoTheme, monacoThemeId, readEditorFontOptions } from '$lib/monaco-themes.js'
   import { normalizeThemeId } from '$lib/themes/registry.js'
   import ResizeHandle from './ResizeHandle.svelte'
   import { loadLayout, saveLayout } from '$lib/stores/layout.js'
@@ -305,7 +305,7 @@
     })
 
     const themeObs = new MutationObserver(() => {
-      monaco.editor.setTheme(monacoThemeId(currentTheme()))
+      applyMonacoTheme(currentTheme())
     })
     themeObs.observe(document.documentElement, {
       attributes: true,

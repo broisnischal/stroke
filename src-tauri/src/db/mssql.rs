@@ -13,6 +13,9 @@ pub type MssqlClient = Client<Compat<TcpStream>>;
 // ── Connect ──────────────────────────────────────────────────────────────────
 
 /// Open a tiberius client, following one Azure-style routing redirect if needed.
+///
+/// Has no timeout of its own: callers wrap this in `connect_racing_probe`, which
+/// bounds the whole attempt and reports which phase stalled.
 pub async fn connect(cfg: &MssqlConfig) -> Result<MssqlClient, String> {
     let config = build_config(cfg);
     let addr = config.get_addr();

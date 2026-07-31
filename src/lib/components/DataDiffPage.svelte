@@ -10,6 +10,8 @@
   import Search from '@lucide/svelte/icons/search'
   import { onMount, untrack } from 'svelte'
   import { cn } from '$lib/utils.js'
+  import { defineStrokeMonacoThemes, applyMonacoTheme } from '$lib/monaco-themes.js'
+  import { normalizeThemeId } from '$lib/themes/registry.js'
   import {
     getTableRows,
     executeSql,
@@ -98,9 +100,17 @@
   /** @type {monaco.editor.IStandaloneCodeEditor|null} */
   let rMonaco = null
 
+  /** The app theme these editors should paint in. */
+  function currentDiffTheme() {
+    return normalizeThemeId(document.documentElement.dataset.theme)
+  }
+
   const MONACO_OPTS = /** @type {monaco.editor.IStandaloneEditorConstructionOptions} */ ({
     language: 'sql',
-    theme: 'vs-dark',
+    // No hardcoded theme. `monaco.editor.setTheme` — and a `theme` in create
+    // options — is *global*: pinning this to 'vs-dark' re-tinted every other
+    // editor in the app the moment this page mounted, and left a stock VS Code
+    // dark editor sitting on a light app theme. The app theme is applied below.
     minimap: { enabled: false },
     lineNumbers: 'off',
     scrollBeyondLastLine: false,
@@ -126,7 +136,9 @@
   $effect(() => {
     const el = lSqlEl
     if (!el) return
+    defineStrokeMonacoThemes()
     const ed = monaco.editor.create(el, { ...MONACO_OPTS, value: untrack(() => L.sql) })
+    applyMonacoTheme(currentDiffTheme())
     ed.onDidChangeModelContent(() => { L = { ...L, sql: ed.getValue() } })
     lMonaco = ed
     const ro = new ResizeObserver(() => ed.layout())
@@ -137,7 +149,9 @@
   $effect(() => {
     const el = rSqlEl
     if (!el) return
+    defineStrokeMonacoThemes()
     const ed = monaco.editor.create(el, { ...MONACO_OPTS, value: untrack(() => R.sql) })
+    applyMonacoTheme(currentDiffTheme())
     ed.onDidChangeModelContent(() => { R = { ...R, sql: ed.getValue() } })
     rMonaco = ed
     const ro = new ResizeObserver(() => ed.layout())
