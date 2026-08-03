@@ -452,6 +452,13 @@
    *  new jump. A counter, not a flag: a restore spans an await and a frame. */
   let _navRestore = 0
   /**
+   * Bumped once per history step. A second Back pressed while the first is still
+   * resolving must win outright, so every await in gotoNavEntry re-checks this
+   * and a superseded travel stops instead of fighting the newer one for the
+   * cursor - otherwise holding Alt+← lands wherever the slowest fetch finished.
+   */
+  let _navTravel = 0
+  /**
    * Set when the grid reports an aimed cursor move (a cell click), consumed by the
    * recording effect below.
    *
@@ -1699,7 +1706,7 @@ let rowSearch = $state('')
       if (raw.columns.length === 0) {
         // No cached data - apply lightweight snapshot (no need to clone rows)
         applyTableSnapshot(raw)
-        if (raw.table && !fetchingTabIds.has(tab.id)) void fetchRowsForTab(tab.id)
+        if (raw.table && !fetchingTabIds.has(tab.id)) void startTabFetch(tab.id)
       } else {
         // Has cached data - clone Sets so mutations don't bleed between tabs, and
         // restore the RAW rows reference (not the proxied tab.state.rows) so the
@@ -2736,18 +2743,22 @@ let rowSearch = $state('')
     // are on screen in that pane's snapshot, so blanking them would flip the pane
     // to the empty "Focus this pane to load" placeholder.
     if (paneRoot) for (const g of PaneTree.allGroups(paneRoot)) if (g.activeTabId) keep.add(g.activeTabId)
-    let changed = false
-    const next = tabs.map((t) => {
-      if (t.kind !== 'table' || t.id === activeId || keep.has(t.id)) return t
+    /** @param {StudioTab} t */
+    const evictable = (t) => {
+      if (t.kind !== 'table' || t.id === activeId || keep.has(t.id)) return false
       const st = /** @type {TableTabState} */ (t.state)
-      if (st && Array.isArray(st.rows) && st.rows.length > TAB_EVICT_ROW_THRESHOLD) {
-        changed = true
-        _liveRowsByTab.delete(t.id)
-        return { ...t, state: { ...st, rows: [], columns: [], selected: new Set() } }
-      }
-      return t
+      return !!st && Array.isArray(st.rows) && st.rows.length > TAB_EVICT_ROW_THRESHOLD
+    }
+    // Most switches evict nothing. Test first so the common path doesn't rebuild
+    // the tabs array - that write invalidates every consumer of `tabs` (tab strip,
+    // panes, tabsById) for no change at all.
+    if (!tabs.some(evictable)) return
+    tabs = tabs.map((t) => {
+      if (!evictable(t)) return t
+      _liveRowsByTab.delete(t.id)
+      const st = /** @type {TableTabState} */ (t.state)
+      return { ...t, state: { ...st, rows: [], columns: [], selected: new Set() } }
     })
-    if (changed) tabs = next
   }
 
   async function activateTab(id) {
@@ -2823,17 +2834,30 @@ let rowSearch = $state('')
 
   /** @param {import('$lib/nav-history.js').NavEntry} entry */
   async function gotoNavEntry(entry) {
+    const travel = ++_navTravel
+    const superseded = () => travel !== _navTravel
     _navRestore += 1
     try {
       if (entry.tabId !== activeTabId) await activateTab(entry.tabId)
+      if (superseded()) return
       if (entry.page != null && entry.page !== page && activeTab?.kind === 'table') {
         page = entry.page
         await loadRows()
+        if (superseded()) return
       }
       if (entry.row === null) return
+      // A tab whose rows were evicted - or that was never cached - refetches on
+      // activation, and the grid refuses to focus a cell while it holds none. So
+      // the restore has to wait for that fetch, or it quietly lands on nothing
+      // and the tab opens at the top: the failure people hit once more than
+      // TAB_ROWS_MRU_MAX tables are open. The guard is held across the wait, so
+      // the rows arriving can't be mistaken for a new jump.
+      await awaitTabFetch(entry.tabId)
+      if (superseded()) return
       focusedRow = entry.row
       focusedCol = entry.col
       await tick()
+      if (superseded()) return
       const { row, col } = entry
       // Deferred a frame so this beats the tab snapshot's own scroll restore,
       // which lands on the same frame - otherwise a position from deeper in the
@@ -2843,8 +2867,10 @@ let rowSearch = $state('')
       // brand new jump and wiping the forward branch.
       _navRestore += 1
       requestAnimationFrame(() => {
-        tableFocusCell(row, col)
-        refreshNavCurrent()
+        if (!superseded()) {
+          tableFocusCell(row, col)
+          refreshNavCurrent()
+        }
         _navRestore -= 1
       })
     } finally {
@@ -2855,17 +2881,36 @@ let rowSearch = $state('')
   /** Does this history entry still point at an open tab? */
   const _navTabAlive = (/** @type {string} */ id) => tabs.some((t) => t.id === id)
 
-  async function navBack() {
-    const target = navStepBack(_nav, _navTabAlive)
+  /** Set while a coalesced travel is waiting for its frame. */
+  let _navStepQueued = false
+
+  /**
+   * Walk the history one step and travel there.
+   *
+   * A burst of presses - key repeat on Alt+←, an impatient click - should walk
+   * the stack and travel *once*, to wherever it lands. Visiting every entry on
+   * the way costs a snapshot save, a tab activation and possibly a refetch each,
+   * which is what made holding the shortcut crawl. Stepping the index stays
+   * synchronous so the buttons and the next press see the truth immediately;
+   * only the travel is deferred a frame and coalesced.
+   *
+   * @param {-1 | 1} dir
+   */
+  function navStepBy(dir) {
+    const moved = dir === -1 ? navStepBack(_nav, _navTabAlive) : navStepForward(_nav, _navTabAlive)
     syncNavFlags()
-    if (target) await gotoNavEntry(target)
+    if (!moved || _navStepQueued) return
+    _navStepQueued = true
+    requestAnimationFrame(() => {
+      _navStepQueued = false
+      const target = navCurrent(_nav)
+      if (target) void gotoNavEntry(target)
+    })
   }
 
-  async function navForward() {
-    const target = navStepForward(_nav, _navTabAlive)
-    syncNavFlags()
-    if (target) await gotoNavEntry(target)
-  }
+  function navBack() { navStepBy(-1) }
+
+  function navForward() { navStepBy(1) }
 
   /** @param {string} id */
   async function closeTab(id) {
@@ -3298,7 +3343,7 @@ let rowSearch = $state('')
       await loadTables()
     }
     // Fire the fetch in background - caller can open more tabs without waiting
-    void fetchRowsForTab(tab.id)
+    void startTabFetch(tab.id)
     // Load reverse FKs once per table (cached - not re-fetched on page/sort changes)
     void loadIncomingForeignKeys(schema, table)
   }
@@ -3810,9 +3855,40 @@ let rowSearch = $state('')
   }
 
   /**
+   * Background row fetches in flight, keyed by tab. Only history travel needs to
+   * wait on one, so this stays a plain Map - nothing renders off it.
+   * @type {Map<string, Promise<void>>}
+   */
+  const _tabFetches = new Map()
+
+  /**
+   * Kick off a background fetch for `tabId`, or hand back the one already
+   * running. Mirrors fetchRowsForTab's own re-entry guard: without this, a second
+   * call would replace the map entry with a promise that resolves instantly and
+   * anyone waiting would be told the rows had landed while they were still in
+   * flight.
+   * @param {string} tabId
+   */
+  function startTabFetch(tabId) {
+    const existing = _tabFetches.get(tabId)
+    if (existing) return existing
+    const p = fetchRowsForTab(tabId).finally(() => {
+      if (_tabFetches.get(tabId) === p) _tabFetches.delete(tabId)
+    })
+    _tabFetches.set(tabId, p)
+    return p
+  }
+
+  /** Resolve once nothing is fetching rows for `tabId`. @param {string} tabId */
+  async function awaitTabFetch(tabId) {
+    await _tabFetches.get(tabId)
+  }
+
+  /**
    * Fetch rows for any tab in the background.
    * Writes results into that tab's state; if the tab is still active when the
    * fetch resolves, also syncs to the global editor state so the UI updates.
+   * Callers should go through startTabFetch so history travel can wait on it.
    * @param {string} tabId
    */
   async function fetchRowsForTab(tabId) {
@@ -3899,6 +3975,14 @@ let rowSearch = $state('')
 
       // Persist result to tab - one tabs write
       patchTab(result)
+
+      // Keep the raw array too. Everything inside `tabs` comes back through the
+      // $state proxy, and the grid indexes rows[r][c] per visible cell per frame -
+      // so handing it a proxied array puts a trap on every one of those reads.
+      // saveActiveTabState only ever caches the tab you *leave*, which left every
+      // prefetched background tab proxied on its first activation: open a handful
+      // of tables and each one felt sticky the first time you clicked it.
+      _liveRowsByTab.set(tabId, result.rows)
 
       // Update AI schema cache (LRU, capped)
       lruSet(tableColumnsCache, `${s.schema}.${s.table}`, result.columns)
