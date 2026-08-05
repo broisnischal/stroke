@@ -187,6 +187,7 @@
   import { createNotebook, deserializeNotebook, titleFromPath } from '$lib/notebook.js'
   import { openNotebookFile } from '$lib/api.js'
   import { formatCompactCount, normalizeTableRowCount } from '$lib/table-list.js'
+  import { humanizeDbError } from '$lib/ai.js'
   import {
     MAX_PAGE_SIZE,
     PAGE_SIZE_ALL,
@@ -1221,6 +1222,11 @@ let rowSearch = $state('')
   /** Tracks which tab IDs currently have an in-flight background fetch. */
   const fetchingTabIds = new Set()
   let error = $state('')
+  /** Whether the error banner is showing the raw driver text. */
+  let showRawError = $state(false)
+  // A new failure starts collapsed; leaving it expanded from a previous
+  // error would dump raw driver text on someone who never asked for it.
+  $effect(() => { void error; showRawError = false })
   let selected = $state(new Set())
   /** @type {number | null} */
   let focusedRow = $state(null)
@@ -6170,7 +6176,22 @@ let rowSearch = $state('')
             <!-- ── SQL / application error, compact banner ── -->
             <div class="flex shrink-0 items-start gap-2.5 border-b border-destructive/15 bg-destructive/[0.04] px-3 py-2">
               <AlertTriangle class="mt-px size-3.5 shrink-0 text-destructive/70" />
-              <p class="min-w-0 flex-1 font-mono text-ui-xs leading-relaxed text-destructive/90">{error}</p>
+              <!-- Drivers wrap the cause in transport noise — D1 returns its whole
+                   HTTP envelope around a five-word message. Show the cause; the
+                   raw text stays one click away and in the query log. -->
+              <p class="min-w-0 flex-1 font-mono text-ui-xs leading-relaxed text-destructive/90">
+                {humanizeDbError(error)}
+                {#if humanizeDbError(error) !== error.replace(/^Error:\s*/, '').trim()}
+                  <button
+                    type="button"
+                    class="ml-1.5 align-baseline text-ui-3xs text-destructive/45 underline-offset-2 transition-colors hover:text-destructive hover:underline"
+                    onclick={() => (showRawError = !showRawError)}
+                  >{showRawError ? 'hide raw' : 'raw'}</button>
+                  {#if showRawError}
+                    <span class="mt-1 block break-all text-ui-3xs text-destructive/45">{error}</span>
+                  {/if}
+                {/if}
+              </p>
               <button
                 type="button"
                 class="mt-px shrink-0 text-destructive/40 transition-colors hover:text-destructive"
