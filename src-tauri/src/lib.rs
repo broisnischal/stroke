@@ -8,6 +8,7 @@ mod mcp;
 mod metrics;
 mod providers;
 mod secrets;
+mod web_search;
 
 use db::{ActiveConnection, DbState, TunnelState};
 use mcp::McpState;
