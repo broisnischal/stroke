@@ -97,7 +97,7 @@
         bind:value={filter}
         placeholder="Search extensions"
         aria-label="Search extensions"
-        class="h-7 w-full min-w-0 rounded-lg border-2 border-border bg-background/40 pl-8 pr-2.5 text-ui-sm text-foreground shadow-none outline-none transition-colors hover:bg-background/55 focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring"
+        class="h-7 w-full min-w-0 rounded-lg border-2 border-border bg-background/40 pl-8 pr-2.5 text-ui-sm text-foreground shadow-none outline-none transition-colors hover:bg-background/55 focus-visible:border-ring/55 focus-visible:ring-1 focus-visible:ring-ring"
       />
     </div>
   </div>

@@ -222,7 +222,7 @@
           type="text"
           placeholder="Search shortcuts…"
           bind:value={query}
-          class="h-7 w-full rounded-lg border border-border bg-muted/25 pl-7 pr-3 text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/30 focus:border-ring focus:ring-1 focus:ring-ring focus:bg-muted/50 transition-colors"
+          class="h-7 w-full rounded-lg border border-border bg-muted/25 pl-7 pr-3 text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/30 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:bg-muted/50 transition-colors"
         />
         {#if query}
           <button

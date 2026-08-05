@@ -1,6 +1,9 @@
 import { invoke } from '@tauri-apps/api/core'
 import { loadSettings } from '$lib/stores/settings.js'
 import { recordQuery } from '$lib/stores/query-log.js'
+import { assertWritable } from '$lib/stores/read-only.js'
+import { getLastConnection } from '$lib/stores/connections.js'
+import { isWriteSql } from '$lib/sql-write.js'
 
 /** @typedef {{ name: string, host: string, port: number, database: string, user: string, password: string, ssl: boolean }} PgConnectionConfig */
 /** @typedef {{ name: string, filePath: string }} SqliteConnectionConfig */
@@ -39,11 +42,53 @@ function formatInvokeError(err) {
   return err instanceof Error ? err.message : String(err)
 }
 
+// ── D1 auth self-heal ────────────────────────────────────────────────────────
+// A Cloudflare OAuth token is short-lived, and the backend keeps whichever one it
+// was handed at connect time. Once that one expires, EVERY later call — queries,
+// table lists, row counts — comes back 401 while the app still shows a live
+// connection, so the session is permanently broken until the user reconnects by
+// hand. `connect_d1_db` and `test_d1` already refresh; the query path did not.
+// Replaying is safe: D1 rejects an unauthorized request at the edge, before any
+// SQL runs, so a retried write cannot apply twice.
+let _d1Healing = false
+
+/**
+ * Rebuild the D1 pool with a freshly minted token.
+ * @param {string} msg the failure text from the call that just 401'd
+ * @returns {Promise<boolean>} true when the caller should retry
+ */
+async function healD1Auth(msg) {
+  if (_d1Healing || !D1_UNAUTHORIZED.test(msg)) return false
+  const conn = /** @type {any} */ (getLastConnection())
+  if (conn?.type !== 'd1') return false
+  _d1Healing = true
+  try {
+    const fresh = await d1WithFreshToken(conn)
+    // Same object back means there was no OAuth session to refresh from (a manually
+    // pasted token) — the 401 is real and belongs to the user, not to us.
+    if (fresh === conn) return false
+    await invoke('connect_d1_db', { config: fresh })
+    return true
+  } catch {
+    return false
+  } finally {
+    _d1Healing = false
+  }
+}
+
 async function inv(command, args = {}) {
   try {
     return await invoke(command, args)
   } catch (err) {
-    throw new Error(formatInvokeError(err))
+    const msg = formatInvokeError(err)
+    if (await healD1Auth(msg)) {
+      try {
+        return await invoke(command, args)
+      } catch (retryErr) {
+        throw new Error(formatInvokeError(retryErr))
+      }
+    }
+    throw new Error(msg)
   }
 }
 
@@ -227,14 +272,64 @@ export async function connectMysql(config) {
 
 // ── Cloudflare D1 ─────────────────────────────────────────────────────────────
 
-/** @param {{ name: string, accountId: string, databaseId: string, apiToken: string }} config */
-export async function testD1Connection(config) {
-  return inv('test_d1', { config })
+/**
+ * A D1 connection saved from the Cloudflare sign-in carries a *snapshot* of an
+ * OAuth access token, and those live about ten minutes. So reconnecting to a
+ * saved D1 database later fails with `D1 API error 401 Unauthorized` while the
+ * app still shows Cloudflare as connected - and it starts working the moment
+ * anything else (the account or database dropdown) asks for a fresh token.
+ *
+ * The keychain can always mint a valid one, so D1 asks for it here rather than
+ * trusting the stored copy. A manually pasted API token doesn't expire and has
+ * no OAuth session behind it, so it is left exactly as saved.
+ */
+const D1_UNAUTHORIZED = /\b40[13]\b|unauthorized|invalid api token|authentication error/i
+
+/**
+ * @param {any} config
+ * @returns {Promise<any>} the config, with a live token when one is available
+ */
+async function d1WithFreshToken(config) {
+  try {
+    const { cfGetValidToken } = await import('$lib/cloudflare.js')
+    const token = await cfGetValidToken()
+    if (token && token !== config?.apiToken) return { ...config, apiToken: token }
+  } catch {
+    // No OAuth session (manual token), or refresh failed - use what we were given.
+  }
+  return config
 }
 
-/** @param {{ name: string, accountId: string, databaseId: string, apiToken: string }} config */
+/**
+ * Run a D1 call, and if it comes back unauthorized, try once more with a token
+ * refreshed from the keychain. Covers connections saved before they carried the
+ * `oauth` marker, and any token that expires mid-session.
+ * @param {any} config
+ * @param {(cfg: any) => Promise<any>} run
+ */
+async function d1Call(config, run) {
+  // Connections created through the sign-in flow are known to hold a short-lived
+  // token: refresh up front instead of paying for a doomed request first.
+  const first = config?.oauth ? await d1WithFreshToken(config) : config
+  try {
+    return await run(first)
+  } catch (err) {
+    const msg = String(/** @type {any} */ (err)?.message ?? err ?? '')
+    if (!D1_UNAUTHORIZED.test(msg)) throw err
+    const retry = await d1WithFreshToken(first)
+    if (retry === first) throw err
+    return run(retry)
+  }
+}
+
+/** @param {{ name: string, accountId: string, databaseId: string, apiToken: string, oauth?: boolean }} config */
+export async function testD1Connection(config) {
+  return d1Call(config, (cfg) => inv('test_d1', { config: cfg }))
+}
+
+/** @param {{ name: string, accountId: string, databaseId: string, apiToken: string, oauth?: boolean }} config */
 export async function connectD1(config) {
-  return connectInv('connect_d1_db', { config })
+  return d1Call(config, (cfg) => connectInv('connect_d1_db', { config: cfg }))
 }
 
 /**
@@ -531,6 +626,7 @@ export async function getTableDdlOnConnection(connectionConfig, schema, table) {
  * @param {string} table
  */
 export async function truncateTable(schema, table) {
+  assertWritable('truncate a table')
   try {
     return await invoke('pg_truncate_table', { schema, table })
   } catch (err) {
@@ -544,6 +640,7 @@ export async function truncateTable(schema, table) {
  * @param {boolean} [cascade]
  */
 export async function dropTable(schema, table, cascade = false) {
+  assertWritable('drop a table')
   try {
     return await invoke('pg_drop_table', { schema, table, cascade })
   } catch (err) {
@@ -648,6 +745,7 @@ export async function cancelQuery() {
 
 /** @param {string} sql */
 export async function executeSql(sql) {
+  if (isWriteSql(sql)) assertWritable('run that statement')
   const _t0 = performance.now()
   try {
     const r = await invoke('pg_execute_sql', { sql })
@@ -661,6 +759,7 @@ export async function executeSql(sql) {
 
 /** Execute one or more SQL statements and return each result as a separate entry. */
 export async function executeSqlMulti(sql) {
+  if (isWriteSql(sql)) assertWritable('run that statement')
   return await inv('pg_execute_sql_multi', { sql })
 }
 
@@ -687,6 +786,7 @@ export async function explainSql(sql) {
  * @param {string} sql
  */
 export async function executeSqlOnConnection(connectionConfig, sql) {
+  if (isWriteSql(sql)) assertWritable('run that statement')
   try {
     return await invoke('execute_sql_on_connection', { config: connectionConfig, sql })
   } catch (err) {
@@ -717,6 +817,7 @@ export async function listTablesOnConnection(connectionConfig, schema) {
 
 /** Execute a DDL statement outside a transaction (CREATE/DROP DATABASE, etc.). */
 export async function executeDdl(sql) {
+  assertWritable('run that statement')
   try {
     return await invoke('pg_execute_ddl', { sql })
   } catch (err) {
@@ -732,6 +833,7 @@ export async function executeDdl(sql) {
  * @param {unknown} value
  */
 export async function updateTableCell(schema, table, primaryKey, column, value) {
+  assertWritable('edit a cell')
   try {
     return await invoke('pg_update_table_cell', {
       schema,
@@ -751,6 +853,7 @@ export async function updateTableCell(schema, table, primaryKey, column, value) 
  * @param {Record<string, unknown>} primaryKey
  */
 export async function deleteTableRow(schema, table, primaryKey) {
+  assertWritable('delete a row')
   try {
     return await invoke('pg_delete_table_row', {
       schema,
@@ -768,6 +871,7 @@ export async function deleteTableRow(schema, table, primaryKey) {
  * @param {Record<string, unknown>[]} primaryKeys
  */
 export async function deleteTableRows(schema, table, primaryKeys) {
+  assertWritable('delete rows')
   try {
     return await invoke('pg_delete_table_rows', {
       schema,
@@ -786,6 +890,7 @@ export async function deleteTableRows(schema, table, primaryKeys) {
  * @returns {Promise<{ row: unknown[] }>}
  */
 export async function insertTableRow(schema, table, values) {
+  assertWritable('insert a row')
   try {
     return await invoke('pg_insert_table_row', {
       schema,
@@ -878,6 +983,7 @@ export async function backupExport(schema = null, tables = null, options = null)
  * @returns {Promise<{ statementsOk: number, statementsErr: number, errors: string[] }>}
  */
 export async function backupImport(sql) {
+  assertWritable('restore a backup')
   return inv('backup_import', { sql })
 }
 

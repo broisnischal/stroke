@@ -19,6 +19,8 @@
   import Slash from "@lucide/svelte/icons/slash";
   import { cn } from "$lib/utils.js";
   import { executeSql } from "$lib/api.js";
+  import { isReadOnly } from '$lib/stores/read-only.js'
+  import { isWriteSql } from '$lib/sql-write.js'
   import DataTable from "$lib/components/DataTable.svelte";
   import AiMarkdown from "$lib/components/AiMarkdown.svelte";
   import AiSqlBlock from "$lib/components/AiSqlBlock.svelte";
@@ -574,6 +576,12 @@
       if (call.function.name === 'execute_sql') {
         const sql = String(args.sql ?? '').trim()
         if (!sql) { apiHistory.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ error: 'Empty SQL' }) }); return }
+        // Same refusal as the AI tab: answer in the tool channel so the model
+        // stops retrying a write it will never be allowed to make.
+        if (isReadOnly() && isWriteSql(sql)) {
+          apiHistory.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ error: 'This connection is open in read-only mode. Writing statements are blocked - propose the SQL to the user instead of running it.' }) })
+          return
+        }
         if (isDestructiveSql(sql)) { const ok = await waitForConfirm(sql); if (!ok) { apiHistory.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ cancelled: true }) }); return } }
         const { sql: g, capped } = guardSelectLimit(sql)
         const execId = uid(); items.push(/** @type {ChatItem} */ ({ id: execId, kind: 'executing', sql })); await scrollBottom()
@@ -803,12 +811,7 @@
           {:else if item.kind === 'thinking'}
             <div class="flex items-center gap-2.5">
               <Sparkles class="size-3 shrink-0 animate-pulse text-primary/70" />
-              <span class="text-ui-xs text-muted-foreground/60 transition-opacity duration-200 {thinkingVisible ? 'opacity-100' : 'opacity-0'}">{aiStatusHint || thinkingPhrase}</span>
-              <span class="flex gap-0.5">
-                <span class="size-1 animate-bounce rounded-full bg-muted-foreground/30" style="animation-delay:0ms"></span>
-                <span class="size-1 animate-bounce rounded-full bg-muted-foreground/30" style="animation-delay:120ms"></span>
-                <span class="size-1 animate-bounce rounded-full bg-muted-foreground/30" style="animation-delay:240ms"></span>
-              </span>
+              <span class="agent-think-label text-ui-xs text-muted-foreground/60 transition-opacity duration-200 {thinkingVisible ? 'opacity-100' : 'opacity-0'}">{aiStatusHint || thinkingPhrase}</span>
             </div>
 
           {:else if item.kind === 'streaming'}
@@ -949,12 +952,7 @@
         {#if showWorking}
           <div class="flex items-center gap-2.5">
             <Sparkles class="size-3 shrink-0 animate-pulse text-primary/70" />
-            <span class="text-ui-xs text-muted-foreground/60 transition-opacity duration-200 {thinkingVisible ? 'opacity-100' : 'opacity-0'}">{aiStatusHint || thinkingPhrase}</span>
-            <span class="flex gap-0.5">
-              <span class="size-1 animate-bounce rounded-full bg-muted-foreground/30" style="animation-delay:0ms"></span>
-              <span class="size-1 animate-bounce rounded-full bg-muted-foreground/30" style="animation-delay:120ms"></span>
-              <span class="size-1 animate-bounce rounded-full bg-muted-foreground/30" style="animation-delay:240ms"></span>
-            </span>
+            <span class="agent-think-label text-ui-xs text-muted-foreground/60 transition-opacity duration-200 {thinkingVisible ? 'opacity-100' : 'opacity-0'}">{aiStatusHint || thinkingPhrase}</span>
           </div>
         {/if}
 

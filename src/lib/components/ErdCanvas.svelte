@@ -3,6 +3,7 @@
   import Plus from '@lucide/svelte/icons/plus'
   import Minus from '@lucide/svelte/icons/minus'
   import Maximize from '@lucide/svelte/icons/maximize'
+  import { routeEdges, CORNER, MAX_ROUTED_NODES } from '$lib/erd-routing.js'
 
   /**
    * High-FPS canvas ER renderer. Consumes the same node/edge model the page
@@ -10,7 +11,8 @@
    * and level-of-detail, so large schemas stay smooth where a DOM graph chokes.
    *
    * @typedef {{ id:string, position:{x:number,y:number}, data:any }} FlowNode
-   * @typedef {{ id:string, source:string, target:string, sourceHandle?:string }} FlowEdge
+   * @typedef {{ id:string, source:string, target:string, sourceHandle?:string,
+   *   targetHandle?:string, many?:boolean, optional?:boolean }} FlowEdge
    */
 
   let {
@@ -18,6 +20,12 @@
     edges = /** @type {FlowEdge[]} */ ([]),
     cfg = { NODE_W: 230, ROW_H: 22, HDR_H: 34, PAD_B: 4 },
     selectedId = /** @type {string|null} */ (null),
+    /** The table the diagram was opened for - drawn with a primary ring + "current" chip. */
+    focusId = /** @type {string|null} */ (null),
+    /** 'smart' routes edges around cards; 'direct' is the cheap elbow (huge schemas). */
+    routing = /** @type {'smart'|'direct'} */ ('smart'),
+    showTypes = true,
+    grid = true,
     onselect = /** @type {(id:string|null)=>void} */ (() => {}),
     onopen = /** @type {(id:string)=>void} */ (() => {}),
     onnodemoved = /** @type {(id:string,x:number,y:number)=>void} */ (() => {}),
@@ -65,8 +73,28 @@
   // ── Theme palette (resolved from CSS tokens to concrete rgb) ─────────────
   /** @type {Record<string,string>} */
   let pal = {}
-  const PK = '251,191,36'
-  const FK = '96,165,250'
+  // ERD ink, authored in OKLCH so the light/dark pairs are perceptually matched
+  // (equal L steps read as equal brightness) and hue stays put. Rasterised to
+  // sRGB bytes at runtime, like the theme tokens.
+  // `focus` is teal: far enough from the FK blue (252) and the PK amber (82) to be
+  // told apart instantly, without borrowing green's "success" or red's "danger"
+  // meaning. It is the only accent on a card, so it stays low-key.
+  const INK = {
+    dark: {
+      pk: 'oklch(0.80 0.12 82)', fk: 'oklch(0.70 0.11 252)',
+      edge: 'oklch(0.55 0.03 255)', edgeSoft: 'oklch(0.32 0.015 255)',
+      focus: 'oklch(0.80 0.11 192)', grid: 0.16, rim: 0.5, hdr: 0.6,
+    },
+    light: {
+      pk: 'oklch(0.60 0.13 72)', fk: 'oklch(0.52 0.14 255)',
+      edge: 'oklch(0.62 0.04 255)', edgeSoft: 'oklch(0.86 0.012 255)',
+      focus: 'oklch(0.55 0.10 196)', grid: 0.34, rim: 0.95, hdr: 1,
+    },
+  }
+  /** Polarity-dependent weights - a light theme needs firmer rims and darker dots. */
+  let tone = INK.dark
+  let PK = '251,191,36'
+  let FK = '96,165,250'
   /** @type {HTMLSpanElement|null} */
   let probe = null
 
@@ -82,7 +110,10 @@
    */
   function resolveRgb(name) {
     const el = probe || host || document.documentElement
-    const raw = getComputedStyle(el).getPropertyValue(name).trim()
+    return resolveColor(getComputedStyle(el).getPropertyValue(name).trim())
+  }
+  /** @param {string} raw Any CSS color (oklch included). */
+  function resolveColor(raw) {
     if (!raw) return '128,128,128'
     if (!probeCtx) {
       const cv = document.createElement('canvas')
@@ -107,15 +138,27 @@
       mfg: resolveRgb('--muted-foreground'),
       muted: resolveRgb('--muted'),
       primary: resolveRgb('--primary'),
+      pfg: resolveRgb('--primary-foreground'),
     }
+    // One ink set per theme polarity, judged off the resolved background.
+    const [r, g, b] = pal.bg.split(',').map(Number)
+    tone = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 < 0.5 ? INK.dark : INK.light
+    PK = resolveColor(tone.pk)
+    FK = resolveColor(tone.fk)
+    pal.edge = resolveColor(tone.edge)
+    pal.edgeSoft = resolveColor(tone.edgeSoft)
+    pal.focus = resolveColor(tone.focus)
     markDirty()
   }
   /** @param {string} name @param {number} a */
   const c = (name, a = 1) => `rgba(${pal[name] ?? '128,128,128'},${a})`
 
   // ── Geometry helpers ───────────────────────────────────────────────────
+  // A card with hidden columns gets one extra "+N more" row, so its height must
+  // match what the page's layout pass reserved for it.
   /** @param {any} data */
-  const nodeH = (data) => HDR_H + (data?.columns?.length ?? 0) * ROW_H + PAD_B
+  const nodeH = (data) =>
+    HDR_H + (data?.columns?.length ?? 0) * ROW_H + (data?.hiddenCount ? ROW_H : 0) + PAD_B
   /** @param {FlowNode} n */
   const posOf = (n) => (dragPos && dragPos.id === n.id ? dragPos : n.position)
 
@@ -129,9 +172,14 @@
   // unreadable sliver). Instead we land at READABLE_ZOOM anchored at the graph's
   // top-left so real cards are visible and the user pans to explore.
   const READABLE_ZOOM = 0.62
-  function ensureFit() {
-    if (_fitted || !cssW || !nodes.length) return
-    _fitted = true
+  /**
+   * Pick the most useful starting view: fit the whole graph when that stays
+   * legible, otherwise land at a readable zoom - centred on the focused table if
+   * there is one (a wide fan would otherwise open with it off-screen), else at
+   * the graph's top-left so the first ranks are visible.
+   */
+  export function reveal() {
+    if (!cssW || !nodes.length) return
     // Graph bounding box (world coords).
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
     for (const n of nodes) {
@@ -142,12 +190,18 @@
     const bw = x1 - x0 || 1, bh = y1 - y0 || 1
     const zFit = Math.min(cssW / bw, cssH / bh) * (1 - 0.12)
     if (zFit >= READABLE_ZOOM) {
-      // Small enough to show entirely at a legible size - fit-and-centre.
       fit()
       return
     }
-    // Too large to fit legibly: land readable at the top-left of the graph so the
-    // first ranks are visible; the user pans right/down through the rest.
+    const fn = focusId ? byId.get(focusId) : null
+    if (fn) {
+      const p = posOf(fn), h = nodeH(fn.data)
+      cam.zoom = READABLE_ZOOM
+      cam.panX = cssW / 2 - (p.x + NODE_W / 2) * READABLE_ZOOM
+      cam.panY = cssH / 2 - (p.y + h / 2) * READABLE_ZOOM
+      markDirty()
+      return
+    }
     const M = 56 // screen-px margin from the viewport's top-left
     cam.zoom = READABLE_ZOOM
     cam.panX = M - x0 * READABLE_ZOOM
@@ -157,13 +211,18 @@
       : M - y0 * READABLE_ZOOM
     markDirty()
   }
+  function ensureFit() {
+    if (_fitted || !cssW || !nodes.length) return
+    _fitted = true
+    reveal()
+  }
   $effect(() => {
     byId = new Map(nodes.map((n) => [n.id, n]))
     if (!nodes.length) _fitted = false
     ensureFit()
     markDirty()
   })
-  $effect(() => { void edges; void selectedId; markDirty() })
+  $effect(() => { void edges; void selectedId; void focusId; void routing; void showTypes; void grid; markDirty() })
 
   // ── Render scheduling ───────────────────────────────────────────────────
   let rafId = 0
@@ -186,23 +245,29 @@
     const vx0 = -panX / zoom, vy0 = -panY / zoom
     const vx1 = (cssW - panX) / zoom, vy1 = (cssH - panY) / zoom
 
-    if (zoom > 0.45) drawGrid(vx0, vy0, vx1, vy1)
+    if (grid && zoom > 0.45) drawGrid(vx0, vy0, vx1, vy1)
 
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
-    for (const e of edges) drawEdge(e, vx0, vy0, vx1, vy1)
+    ensureRoutes(zoom >= LOD_ROWS)
+    drawEdges(vx0, vy0, vx1, vy1)
+    /** @type {FlowNode|null} */
+    let focusNode = null
     for (const n of nodes) {
       const p = posOf(n), h = nodeH(n.data)
       if (p.x > vx1 || p.x + NODE_W < vx0 || p.y > vy1 || p.y + h < vy0) continue
+      // The focused card draws last so its ring is never clipped by a neighbour.
+      if (focusId && n.id === focusId) { focusNode = n; continue }
       drawNode(n, p, h, zoom)
     }
+    if (focusNode) drawNode(focusNode, posOf(focusNode), nodeH(focusNode.data), zoom)
     drawMinimap()
   }
 
   /** @param {number} x0 @param {number} y0 @param {number} x1 @param {number} y1 */
   function drawGrid(x0, y0, x1, y1) {
     const G = 22
-    ctx.fillStyle = c('mfg', 0.14)
+    ctx.fillStyle = c('mfg', tone.grid)
     const sx = Math.floor(x0 / G) * G, sy = Math.floor(y0 / G) * G
     for (let x = sx; x < x1; x += G)
       for (let y = sy; y < y1; y += G) ctx.fillRect(x, y, 1, 1)
@@ -228,104 +293,263 @@
     return Math.abs(h)
   }
 
-  /** @param {FlowEdge} e */
-  function drawEdge(e, vx0, vy0, vx1, vy1) {
-    const s = byId.get(e.source), t = byId.get(e.target)
-    if (!s || !t) return
+  // ── Edge routing ────────────────────────────────────────────────────────
+  // Geometry lives in $lib/erd-routing.js (shared with the SVG/PNG export).
+  // Routes are built once per layout - never per frame - and cached; anything
+  // the router can't place falls back to a plain elbow below.
+  /** @type {Map<string, {x:number,y:number}[]>} */
+  let routes = new Map()
+  let routeKey = ''
+
+  /** Positions come from `n.position` (not posOf) so a live drag doesn't thrash
+   *  the cache - the dragged node's own edges fall back to the elbow instead. */
+  function routeSignature(/** @type {boolean} */ rowsShown) {
+    let h = (nodes.length * 397 + edges.length * 31 + (rowsShown ? 7 : 0)) | 0
+    for (const n of nodes) {
+      h = (h * 33 + Math.round(n.position.x) * 7 + Math.round(n.position.y) * 13) | 0
+      h = (h * 33 + (n.data?.columns?.length ?? 0)) | 0
+    }
+    return `${routing}:${h}`
+  }
+
+  /** Ports: which side of each card the line leaves/enters, and at which row. */
+  function portsOf(/** @type {FlowEdge} */ e, /** @type {FlowNode} */ s, /** @type {FlowNode} */ t, /** @type {boolean} */ rowsShown) {
     const sp = posOf(s), tp = posOf(t)
     const sh = nodeH(s.data), th = nodeH(t.data)
     const scols = s.data?.columns ?? []
     const tcols = t.data?.columns ?? []
     const ci = e.sourceHandle ? scols.findIndex((/** @type {any} */ col) => `src-${col.name}` === e.sourceHandle) : -1
     const ti = e.targetHandle ? tcols.findIndex((/** @type {any} */ col) => `tgt-${col.name}` === e.targetHandle) : -1
-
-    // Anchor each end to its column row (FK column → referenced key column). Past
-    // the row LOD the rows aren't drawn, so fall back to the card's centre.
-    const rowsShown = cam.zoom >= LOD_ROWS
+    // Past the row LOD the rows aren't drawn, so anchor to the card instead.
     const rowY = (/** @type {number} */ y, /** @type {number} */ i, /** @type {number} */ h) =>
       rowsShown && i >= 0 ? y + HDR_H + i * ROW_H + ROW_H / 2 : y + (rowsShown ? HDR_H / 2 : h / 2)
+    const leftToRight = tp.x + NODE_W / 2 >= sp.x + NODE_W / 2
+    return {
+      ci,
+      sx: leftToRight ? sp.x + NODE_W : sp.x,
+      sy: rowY(sp.y, ci, sh),
+      tx: leftToRight ? tp.x : tp.x + NODE_W,
+      ty: rowY(tp.y, ti, th),
+      sdir: leftToRight ? 1 : -1,
+      tdir: leftToRight ? -1 : 1,
+    }
+  }
 
-    // Exit whichever side of each card faces the other, so the elbow reads cleanly.
-    const leftToRight = tp.x >= sp.x
-    const sx = leftToRight ? sp.x + NODE_W : sp.x
-    const sy = rowY(sp.y, ci, sh)
-    const tx = leftToRight ? tp.x : tp.x + NODE_W
-    const ty = rowY(tp.y, ti, th)
+  /** @param {boolean} rowsShown */
+  function ensureRoutes(rowsShown) {
+    const key = routeSignature(rowsShown)
+    if (key === routeKey) return
+    routeKey = key
+    routes = new Map()
+    if (routing === 'direct' || !nodes.length || nodes.length > MAX_ROUTED_NODES) return
+    const boxes = nodes.map(n => ({
+      id: n.id, x: n.position.x, y: n.position.y, w: NODE_W, h: nodeH(n.data),
+    }))
+    /** @type {import('$lib/erd-routing.js').Link[]} */
+    const links = []
+    for (const e of edges) {
+      const s = byId.get(e.source), t = byId.get(e.target)
+      if (!s || !t) continue
+      const { sx, sy, tx, ty, sdir, tdir } = portsOf(e, s, t, rowsShown)
+      links.push({ id: e.id, source: e.source, target: e.target, sx, sy, tx, ty, sdir, tdir })
+    }
+    routes = routeEdges(boxes, links)
+  }
 
-    // Cull: skip when the edge's bounding box misses the viewport.
-    if (Math.max(sx, tx) < vx0 || Math.min(sx, tx) > vx1 || Math.max(sy, ty) < vy0 || Math.min(sy, ty) > vy1) return
+  /** Add a rounded orthogonal polyline to the current path.
+   *  @param {{x:number,y:number}[]} pts */
+  function tracePolyline(pts) {
+    ctx.moveTo(pts[0].x, pts[0].y)
+    for (let i = 1; i < pts.length - 1; i++) {
+      const a = pts[i - 1], b = pts[i], d = pts[i + 1]
+      const inLen = Math.abs(b.x - a.x) + Math.abs(b.y - a.y)
+      const outLen = Math.abs(d.x - b.x) + Math.abs(d.y - b.y)
+      ctx.arcTo(b.x, b.y, d.x, d.y, Math.min(CORNER, inLen / 2, outLen / 2))
+    }
+    const last = pts[pts.length - 1]
+    ctx.lineTo(last.x, last.y)
+  }
 
-    const active = e.source === selectedId || e.target === selectedId
-    const dim = s.data?.highlighted === false && t.data?.highlighted === false
+  // ── Cardinality markers ─────────────────────────────────────────────────
+  // Crow's foot notation, read straight off the schema:
+  //   child end  - fork ("many"), or a bar when the FK column is itself unique/PK
+  //                (that makes it one-to-one)
+  //   parent end - bar ("one"), preceded by a hollow ring when the FK is nullable
+  //                (participation is optional: zero-or-one)
+  const MARK_LOD = 0.3
+  /**
+   * @param {number} x @param {number} y
+   * @param {number} dx @param {number} dy unit vector pointing away from the card
+   * @param {'fork'|'bar'} kind @param {boolean} ring
+   */
+  function traceMarker(x, y, dx, dy, kind, ring) {
+    const s = 1 / cam.zoom            // markers keep a constant screen size
+    const L = 11 * s, W = 5.5 * s     // length along the line, half-spread across
+    const px = -dy, py = dx           // perpendicular
+    if (kind === 'fork') {
+      const bx = x + dx * L, by = y + dy * L
+      ctx.moveTo(bx, by); ctx.lineTo(x + px * W, y + py * W)
+      ctx.moveTo(bx, by); ctx.lineTo(x - px * W, y - py * W)
+      ctx.moveTo(bx, by); ctx.lineTo(x, y)
+    } else {
+      const bx = x + dx * (L * 0.55), by = y + dy * (L * 0.55)
+      ctx.moveTo(bx + px * W, by + py * W)
+      ctx.lineTo(bx - px * W, by - py * W)
+    }
+    if (ring) {
+      const cx = x + dx * (L * 1.5), cy = y + dy * (L * 1.5)
+      ctx.moveTo(cx + 3 * s, cy)
+      ctx.arc(cx, cy, 3 * s, 0, Math.PI * 2)
+    }
+  }
 
-    // Orthogonal (right-angle) routing with rounded corners: exit the FK row
-    // horizontally, drop straight down/up a shared mid-column, then run into the
-    // referenced key row. Reads as a structured schema diagram. A per-edge lane
-    // offset on the mid-column fans parallel edges (e.g. several FKs off one
-    // table) so they don't collapse onto a single line.
-    const vGap = ty - sy
+  /**
+   * Draw all edges in three batched passes - dimmed, plain, highlighted - with a
+   * single stroke each. One stroke of a compound path composites once, so two
+   * lines that cross or briefly share a lane never paint brighter than one line;
+   * the diagram stays even instead of glowing where it is busiest.
+   */
+  function drawEdges(vx0, vy0, vx1, vy1) {
+    const rowsShown = cam.zoom >= LOD_ROWS
+    const marks = cam.zoom >= MARK_LOD
+    /** @type {{pts:{x:number,y:number}[], e:FlowEdge}[][]} */
+    const bands = [[], [], []]
+
+    for (const e of edges) {
+      const s = byId.get(e.source), t = byId.get(e.target)
+      if (!s || !t) continue
+      const dragging = !!dragPos && (dragPos.id === e.source || dragPos.id === e.target)
+      const cached = dragging ? null : routes.get(e.id)
+      const { ci, sx, sy, tx, ty } = portsOf(e, s, t, rowsShown)
+
+      const pts = cached ?? elbow(e, ci, sx, sy, tx, ty)
+      // Cull: skip when the polyline's bounding box misses the viewport.
+      let bx0 = Infinity, bx1 = -Infinity, by0 = Infinity, by1 = -Infinity
+      for (const p of pts) {
+        bx0 = Math.min(bx0, p.x); bx1 = Math.max(bx1, p.x)
+        by0 = Math.min(by0, p.y); by1 = Math.max(by1, p.y)
+      }
+      if (bx1 < vx0 || bx0 > vx1 || by1 < vy0 || by0 > vy1) continue
+
+      const active = e.source === selectedId || e.target === selectedId
+      const dim = s.data?.highlighted === false && t.data?.highlighted === false
+      bands[active ? 2 : dim ? 0 : 1].push({ pts, e })
+    }
+
+    const styles = [
+      { color: c('edgeSoft', 1), width: 1 },
+      { color: c('edge', 1), width: 1.25 },
+      { color: c('fg', 0.8), width: 1.9 },
+    ]
+    for (let b = 0; b < bands.length; b++) {
+      if (!bands[b].length) continue
+      ctx.lineWidth = styles[b].width / cam.zoom
+      ctx.strokeStyle = styles[b].color
+      ctx.lineJoin = 'round'
+      ctx.lineCap = 'round'
+      ctx.beginPath()
+      for (const { pts } of bands[b]) tracePolyline(pts)
+      ctx.stroke()
+
+      if (!marks) continue
+      ctx.beginPath()
+      for (const { pts, e } of bands[b]) {
+        const a0 = pts[0], a1 = pts[1] ?? pts[0]
+        const z0 = pts[pts.length - 1], z1 = pts[pts.length - 2] ?? z0
+        const sd = unit(a1.x - a0.x, a1.y - a0.y)
+        const td = unit(z1.x - z0.x, z1.y - z0.y)
+        traceMarker(a0.x, a0.y, sd.x, sd.y, e.many === false ? 'bar' : 'fork', false)
+        traceMarker(z0.x, z0.y, td.x, td.y, 'bar', e.optional === true)
+      }
+      ctx.stroke()
+    }
+  }
+
+  /** @param {number} x @param {number} y */
+  function unit(x, y) {
+    const m = Math.hypot(x, y)
+    return m < 0.001 ? { x: 1, y: 0 } : { x: x / m, y: y / m }
+  }
+
+  /** Fallback elbow: direct mode, live drag, or no clear corridor found. */
+  function elbow(/** @type {FlowEdge} */ e, /** @type {number} */ ci, sx, sy, tx, ty) {
+    const leftToRight = tx >= sx
     const lane = (((ci >= 0 ? ci : 0) % 5) - 2) * 12 + ((hashStr(e.id) % 3) - 1) * 6
     let midX = sx + (tx - sx) * 0.5 + (leftToRight ? lane : -lane)
-    // Keep the elbow in the gap between the two cards, with room for the corners.
     const loX = Math.min(sx, tx) + 12, hiX = Math.max(sx, tx) - 12
     midX = loX <= hiX ? Math.max(loX, Math.min(hiX, midX)) : (sx + tx) / 2
-    ctx.beginPath()
-    ctx.moveTo(sx, sy)
-    if (Math.abs(vGap) < 1) {
-      // Same row height - a straight horizontal run reads cleaner than a flat jog.
-      ctx.lineTo(tx, ty)
-    } else {
-      const r = Math.min(12, Math.abs(midX - sx), Math.abs(midX - tx), Math.abs(vGap) / 2)
-      ctx.arcTo(midX, sy, midX, ty, r)
-      ctx.arcTo(midX, ty, tx, ty, r)
-      ctx.lineTo(tx, ty)
-    }
-    ctx.lineWidth = (active ? 2 : 1.3) / cam.zoom
-    ctx.strokeStyle = active ? c('primary', 0.95) : dim ? c('mfg', 0.12) : `rgba(${FK},0.6)`
-    ctx.lineJoin = 'round'
-    ctx.lineCap = 'round'
-    ctx.stroke()
-
-    // Endpoint nubs on both column rows.
-    const dr = 2.8 / cam.zoom
-    ctx.fillStyle = active ? c('primary', 0.95) : dim ? c('mfg', 0.15) : `rgba(${FK},0.85)`
-    ctx.beginPath(); ctx.arc(sx, sy, dr, 0, Math.PI * 2); ctx.fill()
-    ctx.beginPath(); ctx.arc(tx, ty, dr, 0, Math.PI * 2); ctx.fill()
+    if (Math.abs(ty - sy) < 1) return [{ x: sx, y: sy }, { x: tx, y: ty }]
+    return [{ x: sx, y: sy }, { x: midX, y: sy }, { x: midX, y: ty }, { x: tx, y: ty }]
   }
 
   /** @param {FlowNode} n @param {{x:number,y:number}} p @param {number} h @param {number} zoom */
   function drawNode(n, p, h, zoom) {
     const d = n.data ?? {}
-    const dim = d.highlighted === false
+    const isFocus = !!focusId && n.id === focusId
+    const dim = d.highlighted === false && !isFocus
     const sel = n.id === selectedId
     const hov = n.id === hoveredId
     ctx.globalAlpha = dim ? 0.18 : 1
+
+    // The table this diagram was opened for: one hairline halo for separation, and
+    // the rim below. A filled glow plus a tinted header plus a solid chip all at
+    // once was what made this shout.
+    if (isFocus) {
+      roundRect(p.x - 5, p.y - 5, NODE_W + 10, h + 10, 12)
+      ctx.lineWidth = 1 / zoom
+      ctx.strokeStyle = c('focus', 0.22)
+      ctx.stroke()
+    }
 
     // Card + border.
     roundRect(p.x, p.y, NODE_W, h, 8)
     ctx.fillStyle = c('card', 1)
     ctx.fill()
-    ctx.lineWidth = (sel ? 2 : 1) / zoom
-    ctx.strokeStyle = sel ? c('primary', 0.85) : hov ? c('border', 1) : c('border', 0.45)
+    ctx.lineWidth = (isFocus ? 1.75 : sel ? 2 : 1) / zoom
+    ctx.strokeStyle = isFocus
+      ? c('focus', 0.9)
+      : sel ? c('fg', 0.75)
+      : hov ? c('border', 1) : c('border', tone.rim)
     ctx.stroke()
 
     // Header band.
     ctx.save()
     roundRect(p.x, p.y, NODE_W, Math.min(HDR_H + 8, h), 8)
     ctx.clip()
-    ctx.fillStyle = c('muted', 0.6)
+    ctx.fillStyle = c('muted', tone.hdr)
     ctx.fillRect(p.x, p.y, NODE_W, HDR_H)
+    if (isFocus) {
+      ctx.fillStyle = c('focus', 0.07)
+      ctx.fillRect(p.x, p.y, NODE_W, HDR_H)
+    }
     ctx.restore()
     ctx.beginPath()
     ctx.moveTo(p.x, p.y + HDR_H); ctx.lineTo(p.x + NODE_W, p.y + HDR_H)
-    ctx.lineWidth = 1 / zoom; ctx.strokeStyle = c('border', 0.4); ctx.stroke()
+    ctx.lineWidth = 1 / zoom; ctx.strokeStyle = isFocus ? c('focus', 0.35) : c('border', tone.rim * 0.8); ctx.stroke()
 
     ctx.textBaseline = 'middle'
     if (zoom >= LOD_NAME) {
+      // "current" chip in the header, so the focused table is readable even when
+      // the ring is off-screen or the diagram is exported/zoomed out.
+      let nameW = NODE_W - 32
+      if (isFocus) {
+        const label = 'current'
+        ctx.font = `700 9px ${FONT_MONO}`
+        const bw = ctx.measureText(label).width + 12
+        const bx = p.x + NODE_W - bw - 12
+        roundRect(bx, p.y + HDR_H / 2 - 7, bw, 14, 4)
+        ctx.lineWidth = 1 / zoom
+        ctx.strokeStyle = c('focus', 0.55)
+        ctx.stroke()
+        ctx.fillStyle = c('focus', 0.95)
+        ctx.textAlign = 'center'
+        ctx.fillText(label, bx + bw / 2, p.y + HDR_H / 2 + 0.5)
+        nameW = bx - p.x - 24
+      }
       ctx.font = `600 13.5px ${FONT_SANS}`
       ctx.fillStyle = c('fg', 1)
       ctx.textAlign = 'left'
-      fillClipped(d.name ?? '', p.x + 16, p.y + HDR_H / 2, NODE_W - 32, 13.5)
+      fillClipped(d.name ?? '', p.x + 16, p.y + HDR_H / 2, nameW, 13.5)
     }
 
     if (zoom < LOD_ROWS) { ctx.globalAlpha = 1; return }
@@ -346,18 +570,21 @@
       const midY = cy + ROW_H / 2
       const badge = isPk ? 'pk' : isFk ? 'fk' : ''
       const typeRight = p.x + NODE_W - (badge ? 52 : 16)
+      const nameRight = showTypes ? typeRight - 4 : p.x + NODE_W - (badge ? 46 : 16)
 
       // Column name.
       ctx.font = `${isPk ? '600 ' : ''}12px ${FONT_SANS}`
       ctx.fillStyle = isPk ? `rgba(${PK},0.95)` : isFk ? `rgba(${FK},0.95)` : c('fg', 0.82)
       ctx.textAlign = 'left'
-      fillClipped(col.name ?? '', p.x + 16, midY, typeRight - (p.x + 20), 12)
+      fillClipped(col.name ?? '', p.x + 16, midY, nameRight - (p.x + 16), 12)
 
       // Data type.
-      ctx.font = `11px ${FONT_MONO}`
-      ctx.fillStyle = c('mfg', 0.6)
-      ctx.textAlign = 'right'
-      fillClipped(String(col.dataType ?? ''), typeRight, midY, 72, 11, true)
+      if (showTypes) {
+        ctx.font = `11px ${FONT_MONO}`
+        ctx.fillStyle = c('mfg', 0.6)
+        ctx.textAlign = 'right'
+        fillClipped(String(col.dataType ?? ''), typeRight, midY, 72, 11, true)
+      }
 
       // PK / FK badge.
       if (badge) {
@@ -370,6 +597,19 @@
         ctx.textAlign = 'center'
         ctx.fillText(badge, bx + bw / 2, midY + 0.5)
       }
+    }
+
+    // "Keys only" mode hides the plain columns - say how many, so a card is never
+    // silently truncated.
+    if (d.hiddenCount) {
+      const cy = p.y + HDR_H + cols.length * ROW_H
+      ctx.beginPath()
+      ctx.moveTo(p.x, cy); ctx.lineTo(p.x + NODE_W, cy)
+      ctx.lineWidth = 0.75 / zoom; ctx.strokeStyle = c('border', 0.12); ctx.stroke()
+      ctx.font = `11px ${FONT_MONO}`
+      ctx.fillStyle = c('mfg', 0.45)
+      ctx.textAlign = 'left'
+      fillClipped(`+${d.hiddenCount} more`, p.x + 16, cy + ROW_H / 2, NODE_W - 32, 11)
     }
     ctx.globalAlpha = 1
   }
@@ -413,7 +653,10 @@
     mctx.fillStyle = c('panel', 1); mctx.fillRect(0, 0, MINI_W, MINI_H)
     for (const n of nodes) {
       const p = posOf(n), h = nodeH(n.data)
-      mctx.fillStyle = n.id === selectedId ? c('primary', 0.9) : c('mfg', n.data?.highlighted === false ? 0.15 : 0.4)
+      const isFocus = !!focusId && n.id === focusId
+      mctx.fillStyle = isFocus ? c('focus', 1)
+        : n.id === selectedId ? c('fg', 0.8)
+        : c('mfg', n.data?.highlighted === false ? 0.2 : 0.45)
       mctx.fillRect(p.x * s + ox, p.y * s + oy, NODE_W * s, h * s)
     }
     // Viewport rectangle.

@@ -730,7 +730,7 @@
               <select
                 value={v.mode}
                 aria-label="Parameter type for {p.name}"
-                class="h-7 w-full appearance-none rounded-md border border-border/60 bg-input/30 pl-2 pr-6 text-ui-xs text-foreground/80 transition-colors hover:border-border focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none"
+                class="h-7 w-full appearance-none rounded-md border border-border/60 bg-input/30 pl-2 pr-6 text-ui-xs text-foreground/80 transition-colors hover:border-border focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none"
                 onchange={(e) => setParam(p.name, { ...v, mode: /** @type {any} */ (e.currentTarget.value) })}
               >
                 <option value="auto">Auto</option>
@@ -746,7 +746,7 @@
               disabled={v.mode === 'null'}
               placeholder={v.mode === 'null' ? 'NULL' : v.mode === 'raw' ? 'now(), inserted verbatim' : 'value'}
               aria-label="Value for {p.name}"
-              class="h-7 w-full min-w-0 rounded-md border border-transparent bg-input/30 px-2 font-mono text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/30 hover:border-border/60 focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none disabled:opacity-40"
+              class="h-7 w-full min-w-0 rounded-md border border-transparent bg-input/30 px-2 font-mono text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/30 hover:border-border/60 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none disabled:opacity-40"
               oninput={(e) => setParam(p.name, { ...v, value: e.currentTarget.value })}
               onkeydown={(e) => { if (e.key === 'Enter') handleRun(undefined) }}
             />

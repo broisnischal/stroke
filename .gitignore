@@ -41,4 +41,4 @@ squashfs-root/
 src-tauri/src/**/*.tmp.*
 dummy.txt
 file.txt
-.claude/phobos-state.md
+**/.claude/phobos-state.md

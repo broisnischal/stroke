@@ -216,7 +216,7 @@
         placeholder="Filter…"
         bind:this={filterEl}
         bind:value={filter}
-        class="h-7 w-full rounded-lg border border-border bg-background/40 pl-7 pr-2.5 text-ui-xs text-foreground outline-none transition-colors hover:bg-background/60 focus:border-ring focus:ring-1 focus:ring-ring"
+        class="h-7 w-full rounded-lg border border-border bg-background/40 pl-7 pr-2.5 text-ui-xs text-foreground outline-none transition-colors hover:bg-background/60 focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
       />
     </div>
   </div>

@@ -6,41 +6,54 @@
 
 /* ── Studio Light - clean neutral white, signature indigo primary ── */
 html[data-theme="light"] {
-  --background:               oklch(0.975 0 0);
-  --foreground:               oklch(0.13 0 0);
-  /* Raised surfaces read LIGHTER than the canvas in light mode (elevation =
-     more light), so cards/popovers sit above the background instead of below
-     it - the drop shadow + rim highlight then agree with the colour. */
-  --card:                     oklch(0.995 0 0);
-  --card-foreground:          oklch(0.13 0 0);
-  --popover:                  oklch(0.998 0 0);
-  --popover-foreground:       oklch(0.13 0 0);
+  /* Neutrals carry a trace of the primary's hue (264) instead of being dead
+     0-chroma grey: at C 0.003-0.010 you never read it as "blue", but the greys
+     stop looking like unpainted primer next to the blue accent.
+
+     The surface ladder is spaced so you can actually see it. The old set put
+     canvas 0.975 / panel 0.978 / muted 0.956 within 0.02 L of each other, so
+     chrome, canvas and fields collapsed into one wash. Raised surfaces are
+     LIGHTER than the canvas in light mode (elevation = more light), so the drop
+     shadow and rim highlight agree with the colour. */
+  --background:               oklch(0.966 0.003 264);
+  --foreground:               oklch(0.16 0.010 264);
+  --card:                     oklch(1 0 0);
+  --card-foreground:          oklch(0.16 0.010 264);
+  --popover:                  oklch(1 0 0);
+  --popover-foreground:       oklch(0.16 0.010 264);
   /* Deeper, slightly less electric blue: reads richer on the near-white canvas
-     and lifts white-label contrast above the AA floor (the old 0.515 mid-blue
-     looked flat and washed the +/chevron affordances). */
+     and lifts white-label contrast above the AA floor. */
   --primary:                  oklch(0.485 0.185 264);
   --primary-foreground:       oklch(0.99 0 0);
-  --secondary:                oklch(0.956 0 0);
-  --secondary-foreground:     oklch(0.20 0 0);
-  --muted:                    oklch(0.956 0 0);
-  --muted-foreground:         oklch(0.448 0 0);
-  --accent:                   oklch(0.946 0 0);
-  --accent-foreground:        oklch(0.13 0 0);
+  --secondary:                oklch(0.945 0.004 264);
+  --secondary-foreground:     oklch(0.22 0.010 264);
+  --muted:                    oklch(0.945 0.004 264);
+  --muted-foreground:         oklch(0.470 0.010 264);
+  --accent:                   oklch(0.928 0.006 264);
+  --accent-foreground:        oklch(0.16 0.010 264);
   --destructive:              oklch(0.55 0.22 25);
-  --border:                   oklch(0.878 0 0);
-  --input:                    oklch(0.878 0 0);
-  --ring:                     oklch(0.530 0.160 264);
-  --sidebar:                  oklch(0.970 0 0);
-  --sidebar-foreground:       oklch(0.17 0 0);
-  --sidebar-accent:           oklch(0.944 0 0);
-  --sidebar-accent-foreground: oklch(0.13 0 0);
-  --sidebar-border:           oklch(0.860 0 0);
-  --panel:                    oklch(0.978 0 0);
-  --table-grid:               oklch(0.840 0 0);
+  /* Borders were the weakest link: 0.878 against a 0.975 canvas is a hairline
+     you have to hunt for. 0.855 sits ~0.11 L below the canvas and ~0.145 below a
+     white card - present, still quiet. Inputs get one more step so a field reads
+     as a field before you focus it. */
+  --border:                   oklch(0.858 0.006 264);
+  --input:                    oklch(0.845 0.008 264);
+  /* Less chroma than the old 0.160: with the soft focus halo this reads as an
+     intentional bloom rather than a saturated outline on white. */
+  --ring:                     oklch(0.560 0.120 264);
+  --sidebar:                  oklch(0.955 0.004 264);
+  --sidebar-foreground:       oklch(0.20 0.010 264);
+  --sidebar-accent:           oklch(0.925 0.006 264);
+  --sidebar-accent-foreground: oklch(0.16 0.010 264);
+  --panel:                    oklch(0.986 0.002 264);
+  --sidebar-border:           oklch(0.855 0.006 264);
+  /* Grid lines must sit LIGHTER than component borders - the old 0.840 was
+     darker, which made every data grid read as a heavy table. */
+  --table-grid:               oklch(0.905 0.004 264);
   --link:                     oklch(0.40 0.15 252);
   --link-hover:               oklch(0.30 0.18 252);
-  --editor-surface:           #fafafa;
-  --editor-line-highlight:    #f0f0f0;
+  --editor-surface:           #fbfbfc;
+  --editor-line-highlight:    #eff0f3;
 }
 
 /* ── Parchment - warm amber cream, indigo accent ── */

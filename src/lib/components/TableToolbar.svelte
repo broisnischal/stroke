@@ -66,6 +66,9 @@
     ondeleteselected = () => {},
     /** @type {(format: 'csv' | 'json' | 'sql' | 'tsv' | 'md' | 'jsonl') => void | Promise<void>} */
     onexport = () => {},
+    /** Diagram exports, offered alongside the row formats while the ERD view is open. */
+    /** @type {(kind: 'png' | 'copy-png' | 'svg' | 'mermaid') => void | Promise<void>} */
+    onexportdiagram = () => {},
     onaddrow = () => {},
     onopeninsql = () => {},
     /** @type {Set<string>} */
@@ -325,6 +328,14 @@
   ];
 
   /** Export formats offered under the "Export" submenu in the more-actions menu. */
+  /** @type {Array<{ id: 'png' | 'copy-png' | 'svg' | 'mermaid', label: string, icon: string }>} */
+  const DIAGRAM_FORMATS = [
+    { id: "copy-png", label: "Copy as PNG", icon: "copy" },
+    { id: "png", label: "PNG image", icon: "file-down" },
+    { id: "svg", label: "SVG vector", icon: "code-2" },
+    { id: "mermaid", label: "Mermaid markdown", icon: "file-text" },
+  ];
+
   const EXPORT_FORMATS = [
     { id: "csv", label: "CSV" },
     { id: "json", label: "JSON" },
@@ -589,7 +600,7 @@
           bind:this={structureSearchEl}
           type="text"
           aria-label="Search column"
-          class="h-7 w-full min-w-0 rounded-lg border-2 border-border bg-input/30 pl-7 pr-7 font-mono text-ui-sm focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none"
+          class="h-7 w-full min-w-0 rounded-lg border-2 border-border bg-input/30 pl-7 pr-7 font-mono text-ui-sm focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none"
           placeholder="Search column…"
           value={structureSearch}
           oninput={(e) =>
@@ -604,7 +615,7 @@
           role="searchbox"
           aria-label="Search all columns"
           class={cn(
-            "no-focus-ring h-7 w-full min-w-0 rounded-lg border-2 border-border bg-input/30 pl-7 text-ui-sm shadow-none transition-colors hover:border-foreground/30 focus-visible:border-ring focus-visible:bg-input/50",
+            "no-focus-ring h-7 w-full min-w-0 rounded-lg border-2 border-border bg-input/30 pl-7 text-ui-sm shadow-none transition-colors hover:border-foreground/30 focus-visible:border-ring/55 focus-visible:bg-input/50",
             showSearchOpts ? "pr-14" : "pr-7",
             localSearch.trim() && "border-ring/50 bg-input/50",
           )}
@@ -758,7 +769,7 @@
                 type="text"
                 placeholder="Save current as…"
                 bind:value={viewNameDraft}
-                class="h-7 w-full min-w-0 flex-1 rounded-md border border-transparent bg-input/30 px-2 text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/35 hover:border-border/60 focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none"
+                class="h-7 w-full min-w-0 flex-1 rounded-md border border-transparent bg-input/30 px-2 text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/35 hover:border-border/60 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none"
                 onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitSaveView(); } }}
               />
               <button
@@ -1259,17 +1270,40 @@
             </DropdownMenu.Label>
           {/if}
           <DropdownMenu.Sub>
-            <DropdownMenu.SubTrigger disabled={total === 0}>
+            <DropdownMenu.SubTrigger disabled={total === 0 && dataViewMode !== 'erd'}>
               <Icon name="file-down" class="size-3.5" />
               Export
             </DropdownMenu.SubTrigger>
-            <DropdownMenu.SubContent class="min-w-40">
-              {#each EXPORT_FORMATS as fmt (fmt.id)}
-                <DropdownMenu.Item onSelect={() => onexport(fmt.id)}>
-                  <Icon name="file-down" class="size-3.5" />
-                  {fmt.label}
-                </DropdownMenu.Item>
-              {/each}
+            <DropdownMenu.SubContent class="min-w-44">
+              <!-- GroupHeading needs a Group parent: bits-ui reads the group context
+                   from it, and rendering one bare throws "Menu.Group not found". -->
+              {#if dataViewMode === 'erd'}
+                <DropdownMenu.Group>
+                  <DropdownMenu.GroupHeading class="text-ui-2xs font-medium uppercase tracking-[0.06em] text-muted-foreground/50">
+                    Diagram
+                  </DropdownMenu.GroupHeading>
+                  {#each DIAGRAM_FORMATS as fmt (fmt.id)}
+                    <DropdownMenu.Item onSelect={() => onexportdiagram(fmt.id)}>
+                      <Icon name={fmt.icon} class="size-3.5" />
+                      {fmt.label}
+                    </DropdownMenu.Item>
+                  {/each}
+                </DropdownMenu.Group>
+                <DropdownMenu.Separator />
+              {/if}
+              <DropdownMenu.Group>
+                {#if dataViewMode === 'erd'}
+                  <DropdownMenu.GroupHeading class="text-ui-2xs font-medium uppercase tracking-[0.06em] text-muted-foreground/50">
+                    Rows
+                  </DropdownMenu.GroupHeading>
+                {/if}
+                {#each EXPORT_FORMATS as fmt (fmt.id)}
+                  <DropdownMenu.Item disabled={total === 0} onSelect={() => onexport(fmt.id)}>
+                    <Icon name="file-down" class="size-3.5" />
+                    {fmt.label}
+                  </DropdownMenu.Item>
+                {/each}
+              </DropdownMenu.Group>
             </DropdownMenu.SubContent>
           </DropdownMenu.Sub>
           <DropdownMenu.Separator />

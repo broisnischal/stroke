@@ -1,6 +1,8 @@
 <script>
   import { onMount, onDestroy, untrack, tick } from 'svelte'
   import { fade } from 'svelte/transition'
+  import { setReadOnly } from '$lib/stores/read-only.js'
+  import { isWriteSql } from '$lib/sql-write.js'
   import Logo from './Logo.svelte'
   import Database from '@lucide/svelte/icons/database'
   import Boxes from '@lucide/svelte/icons/boxes'
@@ -65,7 +67,6 @@
   import Onboarding from './Onboarding.svelte'
   import SettingsDialog from './SettingsDialog.svelte'
   import KeyboardShortcutsDialog from './KeyboardShortcutsDialog.svelte'
-  import DdlDialog from './DdlDialog.svelte'
   import InsiderDialog from './InsiderDialog.svelte'
   import AboutDialog from './AboutDialog.svelte'
   import ReportIssueDialog from './ReportIssueDialog.svelte'
@@ -300,6 +301,28 @@
   /** @type {boolean} - true when the DB went away mid-session */
   let connectionLost = $state(false)
   let autoConnecting = $state(false)
+  /** Name of the connection the startup reconnect is waiting on, for the overlay. */
+  let autoConnectName = $state('')
+  /**
+   * Saved connections are often named `db@full.rds.host.name` - too long to read
+   * in the reconnect overlay. Keep the database and the host's first label.
+   * @param {string} name
+   */
+  function shortConnLabel(name) {
+    const at = name.lastIndexOf('@')
+    const label = at === -1 ? name : `${name.slice(0, at)}@${name.slice(at + 1).split('.')[0]}`
+    return label.length > 44 ? `${label.slice(0, 43)}…` : label
+  }
+  /** Set by the overlay's Cancel so a late-landing connect doesn't yank the user back. */
+  let autoConnectCancelled = false
+
+  /** Give up on the startup reconnect and let the user choose a connection instead. */
+  async function cancelAutoConnect() {
+    autoConnectCancelled = true
+    autoConnecting = false
+    showConnectionModal = true
+    try { await disconnectPostgres() } catch { /* nothing to tear down */ }
+  }
   let showConnectionModal = $state(false)
   let showDockerModal = $state(false)
   let dockerInitialDb = $state(/** @type {string | null} */ (null))
@@ -307,6 +330,9 @@
   let queryLogOpen = $state(false)
   /** When set, the ERD tab is scoped to this table + its FK-connected neighbors. */
   let erdFocusTable = $state('')
+  /** The mounted per-table ERD pane, so the tab bar's Export menu can drive its
+   *  diagram exports (PNG / copy PNG / SVG / Mermaid). */
+  let erdPane = $state(/** @type {any} */ (null))
   let showCreateTableDialog = $state(false)
   let showCreateSchemaDialog = $state(false)
   let savedConnections = $state(loadSavedConnections())
@@ -318,9 +344,6 @@
   let showDisconnectDialog = $state(false)
   let showAiModelSettings = $state(false)
   let showProGate = $state(false)
-  let ddlDialogOpen = $state(false)
-  let ddlDialogTable = $state('')
-  let ddlDialogSql = $state('')
   let commandOpen = $state(false)
   let commandPage = $state(/** @type {'root'|'docker'|'connections'|'tables'|'pages'} */ ('root'))
   // Reset to the root view whenever the palette closes so generic openers
@@ -967,6 +990,10 @@
   let deletingRows = $state(false)
   let insertingRow = $state(false)
   let tableReadonly = $state(false)
+  // Mirror it into the store the api layer gates on, so every surface (sidebar
+  // context menu, structure editor, AI tool calls, backup restore) is covered
+  // rather than only the components this shell hands a `readonly` prop to.
+  $effect(() => setReadOnly(tableReadonly))
   /** Bound from DataTable - triggers the inline new-row draft. */
   let dtBeginInsertRow = $state(/** @type {() => void} */ (() => {}))
   let showMcpPanel = $state(false)
@@ -1418,6 +1445,8 @@ let rowSearch = $state('')
     const text = sqlText
     const cid = persistConnectionId
     if (!sqlEverOpened) return
+    // A DDL viewer tab is a scratch buffer, not the user's query draft.
+    if (/** @type {any} */ (activeTab)?.draft === false) return
     if (_sqlDraftTimer) clearTimeout(_sqlDraftTimer)
     _sqlDraftTimer = setTimeout(() => saveSqlDraft(cid, text), 400)
   })
@@ -2508,11 +2537,21 @@ let rowSearch = $state('')
   // "New SQL Editor" command so several query editors can be open at once;
   // the existing per-tab snapshot swap keeps each tab's buffer/results intact.
   function openNewSqlTab() {
+    const count = tabs.filter((t) => t.kind === 'sql').length
+    openSqlTabWith(undefined, count === 0 ? 'Query Editor' : `Query Editor ${count + 1}`)
+  }
+
+  /**
+   * Open a brand-new SQL editor tab seeded with `sql` - the editor is where long
+   * SQL belongs (search, folding, selection, run), rather than a scrollable dialog.
+   * @param {string|undefined} sql @param {string} title
+   * @param {{ draft?: boolean }} [opts] `draft: false` keeps this buffer out of the
+   *   per-connection Query Editor draft (a DDL dump must not clobber it).
+   */
+  function openSqlTabWith(sql, title, { draft = true } = {}) {
     saveActiveTabState()
     dropWelcomeTabs()
-    const count = tabs.filter((t) => t.kind === 'sql').length
-    const title = count === 0 ? 'Query Editor' : `Query Editor ${count + 1}`
-    const tab = createSqlTab(undefined, title)
+    const tab = { ...createSqlTab(sql, title), draft }
     tabs = [...tabs, tab]
     activeTabId = tab.id
     clearTableEditor()
@@ -3273,11 +3312,15 @@ let rowSearch = $state('')
   /**
    * @param {string} schema
    * @param {string} table
-   * @param {{ filters?: TableFilter[], resetQuery?: boolean }} [options]
+   * @param {{ filters?: TableFilter[], resetQuery?: boolean, search?: string|null,
+   *   duplicate?: boolean, viewMode?: string }} [options]
    */
   async function openTableTab(schema, table, options = {}) {
-    const { filters = null, resetQuery = false, search = null } = options
-    const existing = findTableTab(tabs, schema, table)
+    const { filters = null, resetQuery = false, search = null, duplicate = false, viewMode = null } = options
+    // `duplicate` forces a second tab for a table that is already open - used when
+    // the request comes from inside that table's own tab (e.g. "Open table" in the
+    // ERD inspector), where re-activating the existing tab would be a no-op.
+    const existing = duplicate ? null : findTableTab(tabs, schema, table)
     if (existing) {
       tableViewMode = 'data'
       structureColumns = []
@@ -3337,6 +3380,10 @@ let rowSearch = $state('')
     focusedCol = null
     inspectorRow = null
     editingCell = null
+    // A fresh tab opens in the configured default view, never in whatever view the
+    // tab you came from happened to be on - the three-dot picker is per tab. Read
+    // the setting here (not at startup) so changing it takes effect immediately.
+    dataViewMode = /** @type {any} */ (viewMode ?? loadSettings().defaultDataView)
     hiddenColumns = loadHiddenCols(persistConnectionId, schema, table)
     if (schema !== activeSchema) {
       activeSchema = schema
@@ -4437,8 +4484,8 @@ let rowSearch = $state('')
   async function runSql(overrideSql) {
     const sqlRan = typeof overrideSql === 'string' && overrideSql.trim() ? overrideSql : sqlText
     if (!connection || !sqlRan.trim()) return
-    if (tableReadonly && /^\s*(insert|update|delete|drop|truncate|alter|create|replace)\b/i.test(sqlRan)) {
-      sqlError = 'Connection is read-only, write queries are blocked.'
+    if (tableReadonly && isWriteSql(sqlRan)) {
+      sqlError = 'This connection is open in read-only mode, so write statements are blocked.'
       return
     }
     sqlLoading = true
@@ -4621,10 +4668,19 @@ let rowSearch = $state('')
     if (!loadSettings().autoReconnectOnStartup) { showConnectionModal = true; return }
 
     autoConnecting = true
+    autoConnectName = last.name ?? ''
+    // The backend already enforces its own per-engine deadlines (DNS + TCP preflight,
+    // a 20s connect deadline for Postgres, HTTP timeouts for the REST engines) and
+    // fails with a message the user can act on. This race is only a last-resort guard
+    // for a command that never returns AT ALL, so it has to sit above those deadlines.
+    // At 5s it fired first and turned every slow-but-healthy wake-up into "not
+    // connected" — serverless Postgres (Neon, and Prisma/Supabase pooler cold starts)
+    // autosuspends and takes 3–15s to come back, which is why resuming one meant
+    // reconnecting by hand on nearly every launch.
     /** @param {Promise<unknown>} p */
     const withTimeout = (p) => Promise.race([
       p,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Connection timed out')), 5000)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Connection timed out')), 45_000)),
     ])
     try {
       if (last.type === 'sqlite') await withTimeout(connectSqlite(last))
@@ -4638,8 +4694,14 @@ let rowSearch = $state('')
       else await withTimeout(connectPostgres(last))
       // onConnected already refreshes the query stores (concurrently with the
       // catalog load) - no second fetch needed here.
+      if (autoConnectCancelled) { try { await disconnectPostgres() } catch { /* ignore */ } return }
       await onConnected(last, last.id)
     } catch {
+      if (autoConnectCancelled) return
+      // Racing the timeout abandons the promise but not the backend: a connect that
+      // lands after we gave up would leave a live pool behind a UI that says
+      // "Not connected", and the next attempt would stack a second one on top.
+      try { await disconnectPostgres() } catch { /* nothing to tear down */ }
       showConnectionModal = true
     } finally {
       autoConnecting = false
@@ -4892,9 +4954,8 @@ let rowSearch = $state('')
   async function handleViewDdl(tableName) {
     try {
       const ddl = await getTableDdl(activeSchema, tableName)
-      ddlDialogTable = tableName
-      ddlDialogSql = ddl
-      ddlDialogOpen = true
+      if (aiMode) exitAiMode()
+      openSqlTabWith(ddl.endsWith('\n') ? ddl : `${ddl}\n`, `DDL · ${tableName}`, { draft: false })
     } catch (e) {
       toast.error('Could not load DDL', { description: String(e) })
     }
@@ -5257,13 +5318,6 @@ let rowSearch = $state('')
 
 <KeyboardShortcutsDialog bind:open={showShortcutsModal} />
 
-<DdlDialog
-  bind:open={ddlDialogOpen}
-  tableName={ddlDialogTable}
-  ddl={ddlDialogSql}
-  onopeninsql={(sql) => { if (aiMode) exitAiMode(); void openQueryInEditor(sql) }}
-/>
-
 <InsiderDialog bind:open={showInsiderModal} />
 
 <AboutDialog bind:open={showAboutModal} onopenreport={() => (showReportIssueDialog = true)} />
@@ -5386,9 +5440,17 @@ let rowSearch = $state('')
     </div>
 
     <!-- Text -->
-    <div class="flex flex-col items-center gap-1.5 text-center">
-      <p class="text-ui-sm font-medium text-foreground/70">Reconnecting</p>
-      <p class="text-ui-2xs text-muted-foreground/35">Establishing database connection…</p>
+    <div class="flex max-w-sm flex-col items-center gap-1.5 text-center">
+      <p class="max-w-full truncate text-ui-sm font-medium text-foreground/70">
+        Reconnecting{autoConnectName ? ` to ${shortConnLabel(autoConnectName)}` : ''}
+      </p>
+      <button
+        type="button"
+        class="mt-3 text-ui-2xs text-muted-foreground/40 underline underline-offset-4 transition-colors hover:text-foreground"
+        onclick={() => void cancelAutoConnect()}
+      >
+        Cancel
+      </button>
     </div>
   </div>
 {/if}
@@ -6192,6 +6254,7 @@ let rowSearch = $state('')
             onfindreplace={() => (findReplaceOpen = true)}
             ondeleteselected={() => stageDeleteSelectedRows()}
             onexport={handleExport}
+            onexportdiagram={(kind) => erdPane?.exportDiagram?.(kind)}
             onaddrow={() => {
               // Row insertion happens on the canvas grid - jump back to it first.
               if (dataViewMode !== 'table') dataViewMode = 'table'
@@ -6353,11 +6416,14 @@ let rowSearch = $state('')
                 <div class="flex min-h-0 min-w-0 flex-1">
                   {#await import('./EntityRelationPage.svelte')}<TabLoading />{:then { default: EntityRelationPage }}
                     <EntityRelationPage
+                      bind:this={erdPane}
+                      hostExports
+                      insideTableTab
                       schema={activeSchema}
                       {schemas}
                       focusTable={activeTable}
                       onclearfocus={() => openErdTab('')}
-                      onopentable={(s, t) => void openTableTab(s, t)}
+                      onopentable={(s, t, opts) => void openTableTab(s, t, opts)}
                     />
                   {/await}
                 </div>

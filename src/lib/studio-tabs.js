@@ -428,7 +428,9 @@ export function tableTabTitle(state) {
 /** @param {StudioTab} tab */
 export function tabDisplayTitle(tab) {
   if (tab.kind === 'table' && tab.state) return tableTabTitle(/** @type {TableTabState} */ (tab.state))
-  if (tab.kind === 'sql') return 'Query Editor'
+  // Honour a custom title: a DDL viewer ("DDL · users") and the 2nd/3rd editor
+  // ("Query Editor 2") are separate buffers and must not all read "Query Editor".
+  if (tab.kind === 'sql') return tab.title || 'Query Editor'
   if (tab.kind === 'ai') return 'AI Chat'
   if (tab.kind === 'schema') return 'Schema Explorer'
   if (tab.kind === 'orm') return 'ORM Runner'
