@@ -45,13 +45,24 @@ export async function svgToPngBlob(svg, opts = {}) {
  */
 export async function svgStringToPngBlob(xml, opts) {
   const { width: w, height: h, scale = 2, background = null } = opts
-  const img = await loadImage(`data:image/svg+xml;base64,${base64Utf8(xml)}`)
+  const cw = Math.max(1, Math.round(w * scale))
+  const ch = Math.max(1, Math.round(h * scale))
+
+  // Rasterize the vector *at* the output size rather than drawing a 1x bitmap
+  // scaled up: an <img> from an SVG data URL is rasterized at its intrinsic
+  // size, so upscaling it in drawImage() resamples 10px label text and the
+  // result reads as blurry. Restating width/height at the target resolution
+  // (with a viewBox to keep the coordinate system) makes the engine lay the
+  // text out at full density instead.
+  const img = await loadImage(`data:image/svg+xml;base64,${base64Utf8(retargetSvg(xml, w, h, cw, ch))}`)
 
   const canvas = document.createElement('canvas')
-  canvas.width = Math.max(1, Math.round(w * scale))
-  canvas.height = Math.max(1, Math.round(h * scale))
+  canvas.width = cw
+  canvas.height = ch
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('Canvas 2D context unavailable')
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
   if (background) {
     ctx.fillStyle = background
     ctx.fillRect(0, 0, canvas.width, canvas.height)
@@ -81,6 +92,39 @@ export function downloadBlob(/** @type {Blob} */ blob, /** @type {string} */ fil
     // revoking synchronously can cancel it.
     setTimeout(() => URL.revokeObjectURL(url), 0)
   }
+  return ''
+}
+
+/**
+ * Restate the root `<svg>` at the raster's pixel size, adding a viewBox over the
+ * original user-space box so nothing inside has to change.
+ * @param {string} xml
+ * @param {number} w user-space width
+ * @param {number} h user-space height
+ * @param {number} pw pixel width
+ * @param {number} ph pixel height
+ */
+function retargetSvg(xml, w, h, pw, ph) {
+  return xml.replace(/<svg\b[^>]*>/i, (tag) => {
+    const hasViewBox = /\sviewBox\s*=/i.test(tag)
+    const body = tag
+      .replace(/\s(?:width|height)\s*=\s*"[^"]*"/gi, '')
+      .replace(/^<svg/i, '<svg')
+      .slice(4) // drop the leading "<svg", re-added with the new attributes below
+    return `<svg width="${pw}" height="${ph}"${hasViewBox ? '' : ` viewBox="0 0 ${w} ${h}"`}${body}`
+  })
+}
+
+/**
+ * A canvas element's contents as a PNG blob, or null when there is nothing to
+ * export. `toBlob` rather than `toDataURL` because the save path wants bytes,
+ * and a base64 round trip of a large chart is pure waste.
+ * @param {HTMLCanvasElement | null} canvas
+ * @returns {Promise<Blob | null>}
+ */
+export function canvasToPngBlob(canvas) {
+  if (!canvas || typeof canvas.toBlob !== 'function') return Promise.resolve(null)
+  return new Promise((resolve) => canvas.toBlob((b) => resolve(b), 'image/png'))
 }
 
 /** @returns {Promise<HTMLImageElement>} */
