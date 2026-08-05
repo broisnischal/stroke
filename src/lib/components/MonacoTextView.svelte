@@ -68,10 +68,13 @@
       fontWeight: 'normal',
       padding: { top: 12, bottom: 12 },
       scrollBeyondLastLine: false,
-      wordWrap: 'off',
+      wordWrap,
       renderLineHighlight: 'none',
       lineNumbers: 'on',
-      lineNumbersMinChars: 3,
+      // Matches the JSON views: a character of inset on the left, 6px on the
+      // right, so the gutter reads as evenly padded rather than flush to the edge.
+      lineNumbersMinChars: 4,
+      lineDecorationsWidth: 6,
       glyphMargin: false,
       folding: model.getLineCount() <= FOLDING_MAX_LINES,
       foldingHighlight: false,
