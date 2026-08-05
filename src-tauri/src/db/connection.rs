@@ -291,6 +291,28 @@ pub fn require_pool(state: &State<'_, DbState>) -> Result<PgPool, String> {
     }
 }
 
+/// The same `Arc` that `DbState` and `McpState` share, parked so code without a
+/// `State` handle can reach the live connection. Set once from `setup()`.
+static ACTIVE: std::sync::OnceLock<Arc<Mutex<Option<ActiveConnection>>>> = std::sync::OnceLock::new();
+
+/// Called once from `setup()`. Later calls are ignored.
+pub fn register_active_conn(conn: Arc<Mutex<Option<ActiveConnection>>>) {
+    let _ = ACTIVE.set(conn);
+}
+
+/// Swap in a newly-refreshed Cloudflare token on the live D1 connection.
+///
+/// Without this, a refresh fixes only the one request that triggered it: the
+/// connection still holds the dead token, so the *next* query 401s and pays for
+/// its own refresh round trip, forever. No-op unless a D1 connection is open.
+pub fn update_d1_token(token: &str) {
+    let Some(slot) = ACTIVE.get() else { return };
+    let Ok(mut guard) = slot.lock() else { return };
+    if let Some(ActiveConnection::D1(cfg)) = guard.as_mut() {
+        cfg.api_token = token.to_string();
+    }
+}
+
 fn set_conn(state: &State<'_, DbState>, conn: Option<ActiveConnection>) -> Result<(), String> {
     *state.conn.lock().map_err(|e| e.to_string())? = conn;
     Ok(())
@@ -529,6 +551,31 @@ fn pg_pool_builder() -> PgPoolOptions {
         .max_lifetime(Duration::from_secs(1800))
 }
 
+/// How many connections to have standing by before the user's first query.
+/// The first table open bursts rows + four catalog lookups; anything the pool
+/// hasn't already opened is a TCP + TLS + auth handshake on the critical path.
+const PG_WARM_CONNECTIONS: usize = 5;
+
+/// Open `PG_WARM_CONNECTIONS` connections in parallel and release them straight
+/// back to the pool.
+///
+/// `min_connections` is deliberately 0 (see `pg_pool_builder`: idle connections
+/// held across a sleep/wake come back dead and cost a 27 s stall), so the pool
+/// starts with exactly the one connection the handshake produced. That left the
+/// first table open paying for four more handshakes at once — several seconds on
+/// a remote host. Filling the pool here moves that cost into the connect step,
+/// where the user is already waiting on a progress indicator, and it stays
+/// filled for `idle_timeout`.
+///
+/// Best effort: a failure here is not a connection failure. The pool opens the
+/// connection on demand later exactly as it did before.
+async fn warm_pool(pool: &PgPool) {
+    let handles: Vec<_> = (0..PG_WARM_CONNECTIONS).map(|_| pool.acquire()).collect();
+    // Held until the end of the statement, so the pool has to open a distinct
+    // connection for each rather than handing the same one out five times.
+    let _ = futures::future::join_all(handles).await;
+}
+
 /// Turn sqlx's `PoolTimedOut` into the error that actually caused it.
 ///
 /// A pool `acquire()` retries internally and reports only "pool timed out while
@@ -650,6 +697,7 @@ pub async fn connect(
     tunnel_state.clear();
     let (effective, tunnel) = resolve_pg_ssh(config).await?;
     let pool = open_pg(&effective).await?;
+    warm_pool(&pool).await;
     close_existing(&state).await;
     set_conn(&state, Some(ActiveConnection::Postgres(pool)))?;
     tunnel_state.set(tunnel);
