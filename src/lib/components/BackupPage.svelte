@@ -1,6 +1,7 @@
 <script>
   import { onDestroy } from "svelte";
   import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
+  import { saveExportAs } from "$lib/api.js";
   import { readOnlyMode, guardWrite, READ_ONLY_HINT } from "$lib/stores/read-only.js";
   import Download from "@lucide/svelte/icons/download";
   import Upload from "@lucide/svelte/icons/upload";
@@ -203,14 +204,8 @@
     toast.info("Export stopped");
   }
 
-  function downloadSql() {
+  async function downloadSql() {
     if (!exportResult?.sql) return;
-    const blob = new Blob([exportResult.sql], {
-      type: "text/sql;charset=utf-8",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
     const ts = new Date()
       .toISOString()
       .slice(0, 19)
@@ -218,10 +213,20 @@
       .replace(/:/g, "-");
     const schemaSlug =
       supportsSchemaFilter && exportSchema ? `_${exportSchema}` : "";
-    a.download = `backup_${dbLabel.toLowerCase().replace(/\s+/g, "_")}${schemaSlug}_${ts}.sql`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success("Backup file downloaded");
+    const name = `backup_${dbLabel.toLowerCase().replace(/\s+/g, "_")}${schemaSlug}_${ts}.sql`;
+    // Was an `<a download>` click followed by an unconditional success toast.
+    // WKWebView ignores that anchor, so the app reported a saved backup when no
+    // file had been written — the worst possible place to be wrong.
+    try {
+      const path = await saveExportAs(exportResult.sql, name, {
+        name: "SQL",
+        extensions: ["sql"],
+      });
+      if (!path) return; // save dialog cancelled
+      toast.success("Backup saved", { description: `Saved to ${path}` });
+    } catch (e) {
+      toast.error("Could not save the backup", { description: String(e) });
+    }
   }
 
   function resetExport() {
@@ -736,7 +741,7 @@
             <div class="flex gap-2">
               <button
                 type="button"
-                onclick={downloadSql}
+                onclick={() => void downloadSql()}
                 class="flex flex-1 items-center justify-center gap-2 rounded-md bg-success px-3 py-2 text-ui-xs font-medium text-success-foreground transition-colors hover:bg-success/90"
               >
                 <Download class="size-3.5" />Download .sql
