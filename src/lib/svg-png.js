@@ -77,8 +77,28 @@ export async function svgStringToPngBlob(xml, opts) {
   })
 }
 
-/** Save a blob to the user's downloads under `filename`. */
-export function downloadBlob(/** @type {Blob} */ blob, /** @type {string} */ filename) {
+/**
+ * Save a blob to disk under `filename`.
+ *
+ * Inside the desktop shell this opens a native save dialog and writes through
+ * the backend — WKWebView ignores `<a download>` on a blob URL, so the anchor
+ * path below silently did nothing there. It stays as the browser-dev fallback.
+ *
+ * @returns {Promise<string | null>} the chosen path, '' when the browser
+ *   fallback handled it, or null if the user cancelled the dialog.
+ */
+export async function downloadBlob(/** @type {Blob} */ blob, /** @type {string} */ filename) {
+  const ext = filename.split('.').pop() || 'bin'
+  try {
+    const { saveExportAs } = await import('$lib/api.js')
+    return await saveExportAs(blob, filename, { name: ext.toUpperCase(), extensions: [ext] })
+  } catch {
+    return anchorDownload(blob, filename)
+  }
+}
+
+/** @returns {''} */
+function anchorDownload(/** @type {Blob} */ blob, /** @type {string} */ filename) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
