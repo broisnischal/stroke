@@ -2995,7 +2995,12 @@
               <button
                 type="button"
                 class={cn(
-                  "relative flex w-full flex-col px-3 py-2 text-left transition-colors",
+                  // pr-12 permanently reserves the strip the hover actions sit
+                  // in. They are absolutely positioned, so without it the pencil
+                  // and trash landed on top of the title and timestamp; padding
+                  // it only on hover would instead re-truncate the title under
+                  // the cursor. Reserved always, so the row never shifts.
+                  "relative flex w-full flex-col py-2 pl-3 pr-12 text-left transition-colors",
                   isActive
                     ? "bg-accent/30 text-foreground"
                     : "text-muted-foreground hover:bg-accent/20 hover:text-foreground",
