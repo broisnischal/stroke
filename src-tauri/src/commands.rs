@@ -84,11 +84,104 @@ pub async fn ai_fetch(
     }
 }
 
+/// Stable device identifier, used to key the free AI tier's per-device quota.
+///
+/// Reuses the same value the licensing/trial flow already sends, so the free tier
+/// needs no second identity and no signup. It is NOT a secret and NOT a
+/// credential: it identifies a device to our gateway for rate limiting, nothing
+/// more, and the gateway must never let it authorise anything else.
+#[tauri::command]
+pub fn ai_device_id() -> String {
+    crate::license::device_id()
+}
+
+/// List the model IDs an OpenAI-compatible endpoint exposes (`GET {base}/models`).
+///
+/// Local servers (Ollama, LM Studio) only know their installed models at runtime —
+/// a hardcoded preset like `llama3.1` fails against an install that has `llama3.1:8b`.
+/// Goes through Rust for the same reason `ai_fetch` does: the WebView can't reach
+/// localhost cross-origin.
+#[tauri::command]
+pub async fn ai_list_models(url: String, api_key: Option<String>) -> Result<Vec<String>, String> {
+    let mut builder = ai_http_client()
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(8));
+
+    if let Some(key) = &api_key {
+        if !key.is_empty() {
+            builder = builder.header("Authorization", format!("Bearer {}", key));
+        }
+    }
+
+    let response = builder.send().await.map_err(|e| {
+        // reqwest's chained source text is unreadable in a dialog; the two cases a
+        // user can act on are "nothing is listening" and "it timed out".
+        if e.is_connect() {
+            format!("Could not reach {url} — is the server running?")
+        } else if e.is_timeout() {
+            format!("Timed out reaching {url}")
+        } else {
+            e.to_string()
+        }
+    })?;
+
+    if !response.status().is_success() {
+        let status = response.status().as_u16();
+        let text = response.text().await.unwrap_or_default();
+        let detail: String = text.chars().take(200).collect();
+        return Err(format!("AI API {}: {}", status, detail));
+    }
+
+    let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+    Ok(json
+        .get("data")
+        .and_then(|d| d.as_array())
+        .map(|models| {
+            models
+                .iter()
+                .filter_map(|m| m.get("id").and_then(|i| i.as_str()).map(String::from))
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
 /// Write text content to a path chosen by the user via a native save dialog.
 /// Uses async I/O so large export files don't block the Tokio executor thread.
 #[tauri::command]
 pub async fn save_file(path: String, content: String) -> Result<(), String> {
     tokio::fs::write(&path, content).await.map_err(|e| e.to_string())
+}
+
+/// Write binary content to a path chosen by the user via a native save dialog.
+/// The webview's `<a download>` is a no-op inside WKWebView, so exports that
+/// produce bytes (PNG diagrams) come through here instead.
+///
+/// Payload is base64 rather than `Vec<u8>`: the IPC bridge has no binary channel,
+/// so raw bytes would cross it as a JSON array — one number per byte, roughly 4x
+/// the payload for a multi-megabyte image.
+#[tauri::command]
+pub async fn save_file_bytes(path: String, base64: String) -> Result<(), String> {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(base64.as_bytes())
+        .map_err(|e| format!("Malformed export payload: {e}"))?;
+    tokio::fs::write(&path, bytes).await.map_err(|e| e.to_string())
+}
+
+/// Search the web on the agent's behalf. Gated in the UI by the AI web-access
+/// setting; the command itself is unconditional so the MCP server can use it too.
+#[tauri::command]
+pub async fn ai_web_search(
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<crate::web_search::SearchHit>, String> {
+    crate::web_search::search(query, limit.unwrap_or(5)).await
+}
+
+/// Fetch one page and return its readable text, for following up a search hit.
+#[tauri::command]
+pub async fn ai_fetch_page(url: String) -> Result<String, String> {
+    crate::web_search::fetch_page(url).await
 }
 
 /// Read a text file from disk — used by the notebook open flow.
@@ -123,11 +216,11 @@ use crate::db::{
     connect, connect_clickhouse, connect_d1, connect_duckdb, connect_libsql, connect_mssql, connect_mysql, connect_redis, connect_sqlite, disconnect,
     delete_table_row, delete_table_rows, execute_ddl, execute_sql, execute_sql_multi, get_table_rows, count_table_rows, insert_table_row,
     list_schemas, list_tables, list_indexes, list_enums, list_functions, list_triggers, list_sequences, ping_connection, table_row_counts,
-    truncate_table, drop_table, get_table_column_structure, get_incoming_foreign_keys, get_table_ddl as db_get_table_ddl,
+    truncate_table, drop_table, get_table_column_structure, get_schema_column_structure, get_incoming_foreign_keys, get_table_ddl as db_get_table_ddl,
     test_clickhouse_connection, test_connection, test_d1_connection, test_duckdb_connection, test_libsql_connection, test_mssql_connection, test_mysql_connection, test_redis_connection, test_sqlite_connection,
     update_table_cell, ConnectionConfig, D1Config, DbState, EnumInfo, FunctionInfo, ExplainResult, IndexInfo, LibSqlConfig,
     SqlResult, SqliteConfig, TableInfo, TableRowCount, TableRows, TriggerInfo, SequenceInfo,
-    ColumnStructureRow, IncomingForeignKey, InsertRowResult, TunnelState,
+    ColumnStructureRow, TableColumnStructure, IncomingForeignKey, InsertRowResult, TunnelState,
     explain_pg, explain_mysql, explain_sqlite, explain_from_text_lines, explain_from_sqlite_plan,
 };
 use crate::db::connection::{require_conn, ClickhouseConfig, DuckdbConfig, MssqlConfig, MysqlConfig, RedisConfig};
@@ -491,6 +584,16 @@ pub async fn pg_get_table_column_structure(
     table: String,
 ) -> Result<Vec<ColumnStructureRow>, String> {
     get_table_column_structure(state, schema, table).await
+}
+
+/// Column structure for every table in one schema — one call instead of one per
+/// table. Used by the ER diagram, which needs the whole schema up front.
+#[tauri::command]
+pub async fn pg_get_schema_column_structure(
+    state: State<'_, DbState>,
+    schema: String,
+) -> Result<Vec<TableColumnStructure>, String> {
+    get_schema_column_structure(state, schema).await
 }
 
 #[tauri::command]

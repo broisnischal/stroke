@@ -44,6 +44,14 @@ pub struct ColumnStructureRow {
     pub comment: Option<String>,
 }
 
+/// One table's column list, as returned by the schema-wide structure fetch.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableColumnStructure {
+    pub table: String,
+    pub columns: Vec<ColumnStructureRow>,
+}
+
 pub(crate) fn validate_ident(name: &str) -> Result<(), String> {
     // Disallow `.` — every caller passes a single schema/table/column component
     // (never a `schema.table` string), so allowing `.` would let "a.b" collapse
@@ -1498,6 +1506,190 @@ async fn get_column_structure_pg(
         .collect();
 
     Ok(result)
+}
+
+// ── Schema-wide column structure (ERD) ───────────────────────────────────────
+
+/// Every table's columns for one schema, in a single round trip.
+///
+/// The ER diagram needs the full column list for the whole schema before it can
+/// draw anything. Asking table by table cost two catalog queries and one IPC hop
+/// *per table*, so a 120-table schema spent most of its load time on round-trip
+/// latency. Postgres and MySQL answer this from one query; the remaining engines
+/// still loop, but server-side, so the frontend waits on one call either way.
+pub async fn get_schema_column_structure(
+    state: State<'_, DbState>,
+    schema: String,
+) -> Result<Vec<TableColumnStructure>, String> {
+    validate_ident(&schema)?;
+    match require_conn(&state)? {
+        ActiveConnection::Postgres(pool) => schema_column_structure_pg(&pool, &schema).await,
+        ActiveConnection::Mysql(pool) => schema_column_structure_mysql(&pool, &schema).await,
+        _ => {
+            // No bulk catalog query for this engine: fan out over the per-table
+            // path here rather than making the frontend do it one invoke at a time.
+            let tables = list_tables(state.clone(), schema.clone()).await?;
+            let mut out = Vec::with_capacity(tables.len());
+            for t in tables {
+                let columns = get_table_column_structure(state.clone(), schema.clone(), t.name.clone()).await?;
+                out.push(TableColumnStructure { table: t.name, columns });
+            }
+            Ok(out)
+        }
+    }
+}
+
+/// Groups flat `(table, column…)` rows into per-table lists, preserving the
+/// order the query returned them in (table name, then ordinal position).
+fn group_by_table(rows: Vec<(String, ColumnStructureRow)>) -> Vec<TableColumnStructure> {
+    let mut out: Vec<TableColumnStructure> = Vec::new();
+    for (table, col) in rows {
+        match out.last_mut() {
+            Some(last) if last.table == table => last.columns.push(col),
+            _ => out.push(TableColumnStructure { table, columns: vec![col] }),
+        }
+    }
+    out
+}
+
+async fn schema_column_structure_pg(
+    pool: &PgPool,
+    schema: &str,
+) -> Result<Vec<TableColumnStructure>, String> {
+    // Same projection as get_column_structure_pg, minus the relname filter and
+    // with the table name carried through so the rows can be regrouped.
+    let rows = sqlx::query(r#"
+        SELECT
+            c.relname::text,
+            a.attnum::int,
+            a.attname::text,
+            CASE
+                WHEN t.typtype = 'b' AND t.typelem <> 0 AND t.typname LIKE '\_%'
+                    THEN (SELECT bt.typname FROM pg_catalog.pg_type bt WHERE bt.oid = t.typelem) || '[]'
+                WHEN a.atttypmod > 0 AND t.typname IN ('varchar','bpchar')
+                    THEN t.typname || '(' || (a.atttypmod - 4)::text || ')'
+                WHEN a.atttypmod > 0 AND t.typname = 'numeric' AND a.atttypmod <> -1
+                    THEN 'numeric(' || (((a.atttypmod - 4) >> 16) & 65535)::text
+                        || ',' || ((a.atttypmod - 4) & 65535)::text || ')'
+                WHEN a.atttypmod > 0 AND t.typname IN ('bit','varbit')
+                    THEN t.typname || '(' || a.atttypmod::text || ')'
+                ELSE t.typname
+            END,
+            NOT a.attnotnull,
+            pg_get_expr(ad.adbin, ad.adrelid),
+            (
+                SELECT rns.nspname || '.' || rt.relname || '.' || ra.attname
+                FROM pg_catalog.pg_constraint pc
+                JOIN pg_catalog.pg_class rt ON rt.oid = pc.confrelid
+                JOIN pg_catalog.pg_namespace rns ON rns.oid = rt.relnamespace
+                JOIN pg_catalog.pg_attribute ra ON ra.attrelid = rt.oid AND ra.attnum = pc.confkey[1]
+                WHERE pc.contype = 'f'
+                  AND pc.conrelid = a.attrelid
+                  AND pc.conkey[1] = a.attnum
+                LIMIT 1
+            ),
+            (
+                SELECT pc.conname
+                FROM pg_catalog.pg_constraint pc
+                WHERE pc.contype = 'f'
+                  AND pc.conrelid = a.attrelid
+                  AND pc.conkey[1] = a.attnum
+                LIMIT 1
+            ),
+            col_description(a.attrelid, a.attnum)
+        FROM pg_catalog.pg_attribute a
+        JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
+        LEFT JOIN pg_catalog.pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
+        WHERE n.nspname = $1
+          AND c.relkind IN ('r','p','v','m','f')
+          AND a.attnum > 0 AND NOT a.attisdropped
+        ORDER BY c.relname, a.attnum
+    "#)
+    .bind(schema)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("Schema column structure query failed: {e}"))?;
+
+    Ok(group_by_table(rows.iter().map(|r| {
+        let table: String = r.try_get(0).unwrap_or_default();
+        (table, ColumnStructureRow {
+            ordinal_position: r.try_get(1).unwrap_or(0),
+            name: r.try_get(2).unwrap_or_default(),
+            data_type: r.try_get(3).unwrap_or_default(),
+            is_nullable: r.try_get(4).unwrap_or(true),
+            column_default: r.try_get(5).ok().flatten(),
+            foreign_key: r.try_get(6).ok().flatten(),
+            fk_constraint_name: r.try_get(7).ok().flatten(),
+            comment: r.try_get(8).ok().flatten(),
+        })
+    }).collect()))
+}
+
+async fn schema_column_structure_mysql(
+    pool: &MySqlPool,
+    schema: &str,
+) -> Result<Vec<TableColumnStructure>, String> {
+    use std::collections::HashMap;
+
+    let col_rows = sqlx::query(
+        "SELECT TABLE_NAME, ORDINAL_POSITION, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT \
+         FROM information_schema.COLUMNS \
+         WHERE TABLE_SCHEMA = ? \
+         ORDER BY TABLE_NAME, ORDINAL_POSITION",
+    )
+    .bind(schema)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("Failed to get column info: {e}"))?;
+
+    // One FK pass for the whole schema, keyed by (table, column).
+    let fk_rows = sqlx::query(
+        "SELECT kcu.TABLE_NAME, kcu.COLUMN_NAME, kcu.REFERENCED_TABLE_SCHEMA, \
+                kcu.REFERENCED_TABLE_NAME, kcu.REFERENCED_COLUMN_NAME, kcu.CONSTRAINT_NAME \
+         FROM information_schema.KEY_COLUMN_USAGE kcu \
+         JOIN information_schema.REFERENTIAL_CONSTRAINTS rc \
+           ON rc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME \
+          AND rc.CONSTRAINT_SCHEMA = kcu.TABLE_SCHEMA \
+         WHERE kcu.TABLE_SCHEMA = ? AND kcu.REFERENCED_TABLE_NAME IS NOT NULL \
+         ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION",
+    )
+    .bind(schema)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
+    let mut fk_map: HashMap<(String, String), (String, String)> = Default::default();
+    for row in &fk_rows {
+        let table: String = row.try_get(0).unwrap_or_default();
+        let col: String = row.try_get(1).unwrap_or_default();
+        let ref_schema: String = row.try_get(2).unwrap_or_default();
+        let ref_table: String = row.try_get(3).unwrap_or_default();
+        let ref_col: String = row.try_get(4).unwrap_or_default();
+        let constraint: String = row.try_get(5).unwrap_or_default();
+        fk_map.insert((table, col), (format!("{ref_schema}.{ref_table}.{ref_col}"), constraint));
+    }
+
+    Ok(group_by_table(col_rows.iter().map(|r| {
+        let table: String = r.try_get(0).unwrap_or_default();
+        let ordinal: u32 = r.try_get(1).unwrap_or(0);
+        let name: String = r.try_get(2).unwrap_or_default();
+        let data_type: String = r.try_get(3).unwrap_or_default();
+        let nullable: String = r.try_get(4).unwrap_or_default();
+        let column_default: Option<String> = r.try_get(5).ok().flatten();
+        let fk = fk_map.get(&(table.clone(), name.clone()));
+        (table, ColumnStructureRow {
+            ordinal_position: ordinal as i32,
+            name,
+            data_type,
+            is_nullable: nullable.eq_ignore_ascii_case("YES"),
+            column_default,
+            foreign_key: fk.map(|(t, _)| t.clone()),
+            fk_constraint_name: fk.map(|(_, c)| c.clone()),
+            comment: None,
+        })
+    }).collect()))
 }
 
 // ── Incoming foreign keys (reverse / one-to-many relationships) ───────────────

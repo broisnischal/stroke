@@ -19,6 +19,24 @@
   import Check from '@lucide/svelte/icons/check'
   import Search from '@lucide/svelte/icons/search'
   import { cn } from '$lib/utils.js'
+
+  /**
+   * Run one of the viewer's exports and name the file it landed in.
+   * @param {Promise<string | null> | undefined} run
+   * @param {string} label
+   * @param {string} filename
+   */
+  async function reportExport(run, label, filename) {
+    try {
+      const path = await run
+      if (path === null) return  // no diagram, or the save dialog was cancelled
+      toast.success(`Exported ${label}`, {
+        description: path ? `Saved to ${path}` : `${filename} saved to your downloads`,
+      })
+    } catch (e) {
+      toast.error('Export failed', { description: String(e) })
+    }
+  }
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
 
   let {
@@ -180,7 +198,7 @@
             type="text"
             placeholder="Search diagrams…"
             bind:value={searchQ}
-            class="h-7 w-full rounded-lg border border-border bg-background/50 pl-6 pr-2 text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none"
+            class="h-7 w-full rounded-lg border border-border bg-background/50 pl-6 pr-2 text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none"
           />
         </div>
       </div>
@@ -237,13 +255,13 @@
             type="text"
             bind:value={draftName}
             placeholder="Diagram name…"
-            class="h-7 min-w-0 flex-1 rounded-lg border border-border bg-background/50 px-2.5 text-ui-sm text-foreground placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none"
+            class="h-7 min-w-0 flex-1 rounded-lg border border-border bg-background/50 px-2.5 text-ui-sm text-foreground placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none"
           />
           <input
             type="text"
             bind:value={draftGroup}
             placeholder="Group"
-            class="h-7 w-24 rounded-lg border border-border bg-background/50 px-2.5 text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none"
+            class="h-7 w-24 rounded-lg border border-border bg-background/50 px-2.5 text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none"
           />
           <button
             type="button"
@@ -290,7 +308,7 @@
             <textarea
               bind:value={draftCode}
               spellcheck="false"
-              class="min-h-0 flex-1 resize-none rounded-lg border border-border bg-background/40 p-3 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/30 focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none [font-feature-settings:'liga'_0,'calt'_0] [font-variant-ligatures:none]"
+              class="min-h-0 flex-1 resize-none rounded-lg border border-border bg-background/40 p-3 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/30 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none [font-feature-settings:'liga'_0,'calt'_0] [font-variant-ligatures:none]"
             ></textarea>
           </div>
           <div class="flex w-1/2 min-w-0 flex-col overflow-hidden">
@@ -354,13 +372,13 @@
             <div class="mx-1 h-4 w-px bg-border/40"></div>
             <button
               type="button"
-              onclick={() => viewerRef?.exportSvg(`${selected.name}.svg`)}
+              onclick={() => reportExport(viewerRef?.exportSvg(`${selected.name}.svg`), 'diagram as SVG', `${selected.name}.svg`)}
               class="inline-flex h-7 items-center gap-1 rounded-md px-2 text-ui-3xs text-muted-foreground hover:bg-accent hover:text-foreground"
               title="Export SVG"
             ><Download class="size-3" />SVG</button>
             <button
               type="button"
-              onclick={() => viewerRef?.exportPng(`${selected.name}.png`)}
+              onclick={() => reportExport(viewerRef?.exportPng(`${selected.name}.png`), 'diagram as PNG', `${selected.name}.png`)}
               class="inline-flex h-7 items-center gap-1 rounded-md px-2 text-ui-3xs text-muted-foreground hover:bg-accent hover:text-foreground"
               title="Export PNG"
             ><Download class="size-3" />PNG</button>

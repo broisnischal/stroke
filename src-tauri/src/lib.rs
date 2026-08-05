@@ -8,6 +8,7 @@ mod mcp;
 mod metrics;
 mod providers;
 mod secrets;
+mod web_search;
 
 use db::{ActiveConnection, DbState, TunnelState};
 use mcp::McpState;
@@ -112,6 +113,7 @@ pub fn run() {
         conn: Arc::clone(&db_conn),
         cancel_tx: Arc::new(std::sync::Mutex::new(None)),
     };
+    let db_conn_for_setup = Arc::clone(&db_conn);
     let mcp_state = McpState::new(db_conn);
 
     tauri::Builder::default()
@@ -124,9 +126,14 @@ pub fn run() {
         .manage(mcp_state)
         .manage(TunnelState::new())
         .manage(db::live::LiveState::default())
-        .setup(|app| {
+        .setup(move |app| {
             // Load or generate a stable MCP token from the app data directory.
             app.state::<McpState>().init_token(app.handle());
+            // Park a handle and the shared connection Arc for the two code
+            // paths that need them without a State/AppHandle argument: the D1
+            // driver refreshing an expired Cloudflare token mid-session.
+            cloudflare::set_app_handle(app.handle().clone());
+            db::connection::register_active_conn(std::sync::Arc::clone(&db_conn_for_setup));
 
             let mut window_builder = tauri::WebviewWindowBuilder::new(
                 app,
@@ -312,7 +319,12 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::ai_fetch,
+            commands::ai_list_models,
+            commands::ai_device_id,
             commands::save_file,
+            commands::save_file_bytes,
+            commands::ai_web_search,
+            commands::ai_fetch_page,
             commands::read_file,
             commands::restart_app,
             commands::toggle_devtools,
@@ -343,6 +355,7 @@ pub fn run() {
             commands::pg_table_row_counts,
             commands::pg_list_indexes,
             commands::pg_get_table_column_structure,
+            commands::pg_get_schema_column_structure,
             commands::pg_get_incoming_foreign_keys,
             commands::pg_list_enums,
             commands::pg_list_functions,

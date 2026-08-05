@@ -38,6 +38,48 @@ export function trimApiHistory(history, maxChars = 80_000) {
 }
 
 /**
+ * Reduce a driver error to the sentence a human needs.
+ *
+ * Engines wrap the useful part in transport noise: D1 returns the whole HTTP
+ * envelope (`D1 API error 400 Bad Request: {"messages":[],"result":[],…}`) around
+ * a five-word cause. Dumping that raw makes a one-line "no such column: activated"
+ * read as a stack trace. The full text is still available on the tool channel and
+ * in the query log; this is only what gets shown.
+ *
+ * Returns the input trimmed when nothing better can be extracted — never empty.
+ * @param {string} raw
+ * @returns {string}
+ */
+export function humanizeDbError(raw) {
+  const text = String(raw ?? '').replace(/^Error:\s*/i, '').trim()
+  if (!text) return 'Query failed'
+
+  // Cloudflare-style envelope: pull the innermost `"message"` out of the JSON tail.
+  const jsonStart = text.search(/[{[]/)
+  if (jsonStart !== -1) {
+    try {
+      const parsed = JSON.parse(text.slice(jsonStart))
+      const errs = Array.isArray(parsed) ? parsed : parsed?.errors
+      const msg = Array.isArray(errs) ? errs.find((e) => e?.message)?.message : parsed?.message
+      if (typeof msg === 'string' && msg.trim()) return cleanEngineMessage(msg)
+    } catch { /* not JSON, fall through to the regex below */ }
+    // Unparseable tail (truncated payload) - lift the first "message" it contains.
+    const m = text.slice(jsonStart).match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)"/)
+    if (m) return cleanEngineMessage(m[1].replace(/\\"/g, '"'))
+  }
+  return cleanEngineMessage(text)
+}
+
+/** Trim engine bookkeeping that means nothing to the reader. */
+function cleanEngineMessage(msg) {
+  return String(msg)
+    // SQLite appends its own error class and a byte offset into the statement.
+    .replace(/\s+at offset \d+/i, '')
+    .replace(/:\s*SQLITE_ERROR$/i, '')
+    .trim() || 'Query failed'
+}
+
+/**
  * Classify a DB error string into an actionable hint for the AI.
  * Returns null if no specific hint applies.
  * @param {string} errorMsg
@@ -382,6 +424,53 @@ export const AI_TOOLS = [
   },
 ]
 
+/**
+ * Web tools, appended to AI_TOOLS only when the user has enabled web access.
+ *
+ * Kept out of the base list deliberately: a tool the model can see is a tool it
+ * will reach for, so advertising these while the setting is off would produce
+ * calls that can only be refused.
+ */
+export const AI_WEB_TOOLS = [
+  {
+    type: 'function',
+    function: {
+      name: 'web_search',
+      description:
+        'Search the web and get back the top results as title, url and snippet. ' +
+        'Use for things the database cannot answer: what an error code means, the syntax of an ' +
+        'unfamiliar function, what a third-party API returns, current documentation. ' +
+        'Snippets are short — call fetch_page on a result URL when you need the detail. ' +
+        'Never use this to answer a question about the user\'s own data; that is what execute_sql is for.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Search query. Write it as you would type it into a search engine.' },
+          limit: { type: 'integer', description: 'How many results to return, 1-10 (default 5).' },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'fetch_page',
+      description:
+        'Fetch one web page and return its readable text (markup, scripts and styles removed, ' +
+        'truncated if long). Use after web_search when a snippet is not enough, or when the user ' +
+        'gives you a URL to read. http/https only.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'Absolute http(s) URL, ideally one returned by web_search.' },
+        },
+        required: ['url'],
+      },
+    },
+  },
+]
+
 export const MAX_AI_RETRIES = 2
 const INITIAL_BACKOFF_MS = 1000
 /** HTTP statuses we retry (transient overload / rate limits). */
@@ -485,6 +574,59 @@ async function tauriFetch(url, init, signal) {
   }
 }
 
+/**
+ * Stroke's free tier authenticates with the device id rather than an API key, so
+ * there is nothing for the user to paste. Cached: it never changes within a run,
+ * and every request would otherwise pay for an IPC round trip.
+ * @type {string | null}
+ */
+let _deviceIdCache = null
+
+/** True for requests bound for our own free gateway. @param {string} base */
+export function isStrokeFreeEndpoint(base) {
+  return base.includes('stroke.click')
+}
+
+/** @returns {Promise<string>} the device id, or '' when unavailable */
+async function strokeDeviceToken() {
+  if (_deviceIdCache != null) return _deviceIdCache
+  if (!isTauriApp()) return ''
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    _deviceIdCache = String(await invoke('ai_device_id'))
+  } catch {
+    _deviceIdCache = ''
+  }
+  return _deviceIdCache
+}
+
+/**
+ * List the model IDs an OpenAI-compatible endpoint exposes.
+ * Local servers (Ollama, LM Studio) name models by installed tag — `llama3.1:8b`,
+ * not `llama3.1` — so the picker has to ask rather than guess.
+ * @param {string} baseUrl
+ * @param {string} [apiKey]
+ * @returns {Promise<string[]>}
+ */
+export async function fetchModelIds(baseUrl, apiKey) {
+  const base = baseUrl.replace(/\/+$/, '')
+  const url = `${base}/models`
+
+  if (isTauriApp()) {
+    const { invoke } = await import('@tauri-apps/api/core')
+    return /** @type {string[]} */ (await invoke('ai_list_models', { url, apiKey: apiKey || null }))
+  }
+
+  const res = await fetch(url, {
+    headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+  })
+  if (!res.ok) throw new Error(formatApiError(res.status, await res.text().catch(() => '')))
+  const data = await res.json()
+  return Array.isArray(data?.data)
+    ? data.data.map((/** @type {{ id?: string }} */ m) => m?.id).filter(Boolean)
+    : []
+}
+
 /** @param {string | null} header */
 function retryAfterMs(header) {
   if (!header) return null
@@ -565,8 +707,12 @@ export async function chatCompletionRaw(settings, messages, tools = null) {
   const base = settings.baseUrl.replace(/\/+$/, '')
   const url = base.endsWith('/chat/completions') ? base : `${base}/chat/completions`
 
+  // `stream: false` is stated rather than left to the default: gateways that front
+  // many providers (OmniRoute) answer an omitted `stream` with an SSE body, which
+  // this path then fails to parse as JSON. Every OpenAI-compatible server accepts
+  // the explicit flag, so saying it costs nothing and removes the ambiguity.
   /** @type {Record<string, unknown>} */
-  const body = { model: settings.model, messages, temperature: settings.temperature ?? 0, max_tokens: settings.maxTokens ?? 16384 }
+  const body = { model: settings.model, messages, stream: false, temperature: settings.temperature ?? 0, max_tokens: settings.maxTokens ?? 16384 }
   if (settings.topK != null) body.top_k = settings.topK
   if (tools?.length) {
     body.tools = tools
@@ -581,6 +727,8 @@ export async function chatCompletionRaw(settings, messages, tools = null) {
     const { getCopilotJwt, COPILOT_EXTRA_HEADERS } = await import('./copilot.js')
     bearerKey = await getCopilotJwt()
     Object.assign(reqHeaders, COPILOT_EXTRA_HEADERS)
+  } else if (isStrokeFreeEndpoint(base)) {
+    bearerKey = await strokeDeviceToken()
   }
   if (bearerKey) reqHeaders['Authorization'] = `Bearer ${bearerKey}`
 
@@ -632,6 +780,8 @@ export async function* chatCompletionStream(settings, messages, tools = null, si
     const { getCopilotJwt, COPILOT_EXTRA_HEADERS } = await import('./copilot.js')
     bearerKey = await getCopilotJwt()
     Object.assign(reqHeaders, COPILOT_EXTRA_HEADERS)
+  } else if (isStrokeFreeEndpoint(base)) {
+    bearerKey = await strokeDeviceToken()
   }
   if (bearerKey) reqHeaders['Authorization'] = `Bearer ${bearerKey}`
 
@@ -1135,6 +1285,22 @@ export function buildSystemPrompt(ctx) {
     return '  ' + parts.join('  ')
   }
 
+  /**
+   * A couple of real rows per table, rendered as compact JSON.
+   *
+   * Column types alone don't say what is *in* a column: whether `status` holds
+   * 'active' or 'ACTIVE' or 1, whether a timestamp is ISO or epoch, whether a
+   * nullable column is null in practice. Guessing that is where generated SQL
+   * goes wrong, so the sample is shown before the model writes any.
+   * @param {string} key `schema.table`
+   */
+  function sampleBlock(key) {
+    const s = ctx.sampleRows?.[key]
+    if (!s?.rows?.length) return ''
+    const lines = s.rows.map((r) => '  ' + JSON.stringify(r))
+    return `Sample rows (${s.rows.length}${s.truncated ? ', values truncated' : ''}):\n${lines.join('\n')}`
+  }
+
   const activeTableSection = ctx.activeTable && ctx.columns.length
     ? [
         ``,
@@ -1150,6 +1316,7 @@ export function buildSystemPrompt(ctx) {
               )
               .join('\n')}`
           : '',
+        sampleBlock(`${ctx.activeSchema}.${ctx.activeTable}`),
       ]
         .filter(Boolean)
         .join('\n')
@@ -1163,7 +1330,7 @@ export function buildSystemPrompt(ctx) {
     return (
       `\n## Other Loaded Tables\n` +
       otherEntries
-        .map(([key, cols]) => `${key}:\n${cols.map(colLine).join('\n')}`)
+        .map(([key, cols]) => [`${key}:`, cols.map(colLine).join('\n'), sampleBlock(key)].filter(Boolean).join('\n'))
         .join('\n\n')
     )
   })()
@@ -1417,7 +1584,10 @@ ${otherTablesSection}
 - \`list_tables()\`, List all tables and views in the active schema.
 - \`get_schema(table?)\`: Get full column info (type, nullable, default) for one or all tables.
 - \`render_chart(type, title, data, x_col, y_col, z_col?, group_col?)\`, Render an interactive ECharts chart. Call \`execute_sql\` first, then pass its \`rows\` array DIRECTLY as \`data\`. Never call render_chart with an empty or missing data array.
-- \`render_diagram(type, title, code)\`, Render and save an interactive Mermaid diagram. Use for ALL diagram/flowchart/ERD/sequence/class/mindmap/state requests. Types: flowchart, classDiagram, sequenceDiagram, erDiagram, mindmap, stateDiagram-v2, gitGraph, timeline, journey. Title: 2–5 words, title-case, describes the subject. NEVER write a bare mermaid code block as the primary output, always use this tool.
+${ctx.webAccess ? `- \`web_search(query, limit?)\`, Search the web. Use for what the database cannot answer: the meaning of an error code, the syntax of an unfamiliar function, a third-party API's behaviour, current documentation. Never for questions about the user's own data.
+- \`fetch_page(url)\`, Read one page's text. Use after web_search when the snippet is not enough, or when the user gives you a URL.
+  Search costs a round trip the user waits through, so reach for it only when the answer is genuinely outside the database and outside what you know. Cite the URL when you use what you found.
+` : ''}- \`render_diagram(type, title, code)\`, Render and save an interactive Mermaid diagram. Use for ALL diagram/flowchart/ERD/sequence/class/mindmap/state requests. Types: flowchart, classDiagram, sequenceDiagram, erDiagram, mindmap, stateDiagram-v2, gitGraph, timeline, journey. Title: 2–5 words, title-case, describes the subject. NEVER write a bare mermaid code block as the primary output, always use this tool.
 
 === OUTPUT RULES ===
 1. Output directly: never open with "Sure!", "Great!", "Here is your chart", "Certainly!" or any filler phrase.
@@ -1437,10 +1607,20 @@ ${otherTablesSection}
 **Primary rule: call execute_sql, never write a bare SQL block for live queries.**
 If the user asks to see data, list rows, count things, or run any SELECT, call the execute_sql tool immediately. Do not write a SQL code block and ask the user to run it.
 
+**Look at the data before you write SQL.** Each table above may carry a "Sample rows" block
+holding a few real rows. Read it. It tells you what the column types cannot: the actual casing
+and spelling of status/enum-like values, whether dates are ISO strings or epochs, whether IDs are
+integers or opaque strings, which columns are null in practice, and what units a number is in.
+Match your WHERE values, comparisons and casts to what you see there, not to what the type name
+suggests. If a table you need has no sample block, run \`SELECT * FROM <table> LIMIT 3\` first and
+look at the result before writing the real query.
+
 Before writing any SQL, reason through it in <think> tags (the UI strips these, the user never sees them):
 <think>
 - Which tables are involved? Are they in the schema above?
+- What do the sample rows show about the values I am about to filter or aggregate on?
 - If a table's columns are NOT listed, call describe_table BEFORE writing SQL.
+- If a table I need has no sample rows shown, SELECT a few rows first.
 - Are any columns USER-DEFINED / enum types? If so, I MUST query the enum values first:
   SELECT enumlabel FROM pg_enum JOIN pg_type ON pg_enum.enumtypid = pg_type.oid WHERE pg_type.typname = '<type_name>' ORDER BY enumsortorder;
 - What JOIN conditions apply? Do the foreign keys support this join?

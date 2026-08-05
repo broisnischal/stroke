@@ -23,6 +23,7 @@
     ICON_STYLES,
     ICON_SETS,
     TABLE_STYLES,
+    TABLE_ALIGN_OPTIONS,
     DEFAULT_MAX_QUERY_HISTORY,
     DEFAULT_CONNECT_TIMEOUT_MS,
     DEFAULT_SOCKET_TIMEOUT_MS,
@@ -128,6 +129,10 @@
     columns: "background-image:linear-gradient(90deg,var(--border) 1px,transparent 1px);background-size:7px 100%;",
   };
 
+  /** @param {string} v */
+  function setTableAlign(v) {
+    if (v) settings = updateSettings({ tableTextAlign: v });
+  }
   /** @param {import('$lib/stores/settings.js').TableStyleId} tableStyle */
   function setTableStyle(tableStyle) {
     if (tableStyle === settings.tableStyle) return;
@@ -193,6 +198,7 @@
     { id: 'record', label: 'Record', icon: 'layout-list' },
     { id: 'text',   label: 'Text',   icon: 'file-text' },
     { id: 'chart',  label: 'Chart',  icon: 'bar-chart-2' },
+    { id: 'erd',    label: 'ERD',    icon: 'git-branch' },
   ];
   const defaultViewOption = $derived(
     DATA_VIEW_OPTIONS.find((o) => o.id === settings.defaultDataView) ?? DATA_VIEW_OPTIONS[0],
@@ -241,6 +247,12 @@
   /** @param {string} v */
   function setAgentThinking(v) {
     if (v) settings = updateSettings({ agentThinkingStyle: v });
+  }
+  function toggleAgentQueryCards() {
+    settings = updateSettings({ agentShowQueryCards: !settings.agentShowQueryCards });
+  }
+  function toggleAgentWebAccess() {
+    settings = updateSettings({ agentWebAccess: !settings.agentWebAccess });
   }
   const thinkingStyleOption = $derived(
     THINKING_STYLES.find((s) => s.id === settings.agentThinkingStyle) ?? THINKING_STYLES[0],
@@ -306,7 +318,7 @@
           <input
             bind:value={query}
             placeholder="Search settings…"
-            class="h-8 w-full rounded-lg border border-border bg-background pl-8 pr-2.5 text-ui-xs text-foreground outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring"
+            class="h-8 w-full rounded-lg border border-border bg-background pl-8 pr-2.5 text-ui-xs text-foreground outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
           />
         </div>
         <nav class="flex flex-col gap-0.5">
@@ -437,7 +449,7 @@
           aria-label={label}
           onchange={(e) => setNumber(/** @type {any} */ (key), e.currentTarget.value, def, min)}
           class={cn(
-            'h-8 w-48 rounded-lg border border-border bg-background pl-2.5 text-right font-mono text-ui-xs tabular-nums text-foreground outline-none transition-[border-color,box-shadow] focus:border-ring focus:ring-1 focus:ring-ring',
+            'h-8 w-48 rounded-lg border border-border bg-background pl-2.5 text-right font-mono text-ui-xs tabular-nums text-foreground outline-none transition-[border-color,box-shadow] focus:border-ring/55 focus:ring-2 focus:ring-ring/15',
             unit ? 'pr-11' : 'pr-2.5',
           )}
         />
@@ -460,7 +472,7 @@
         value={settings[key]}
         aria-label={label}
         onchange={(e) => setText(/** @type {any} */ (key), e.currentTarget.value, def)}
-        class="h-8 w-48 rounded-lg border border-border bg-background px-2.5 font-mono text-ui-xs text-foreground outline-none transition-[border-color,box-shadow] focus:border-ring focus:ring-1 focus:ring-ring"
+        class="h-8 w-48 rounded-lg border border-border bg-background px-2.5 font-mono text-ui-xs text-foreground outline-none transition-[border-color,box-shadow] focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
       />
       {@render resetBtn(key, def, settings[key] !== def)}
     </div>
@@ -604,6 +616,22 @@
       />
     </div>
   {/if}
+  {#if show('Web access', 'Let the agent search the web and read pages')}
+    {@render switchRow(
+      'Web access',
+      'Let the agent search the web and read pages for things your database cannot answer — error codes, function syntax, current docs. Your search terms leave your machine when it does.',
+      settings.agentWebAccess,
+      toggleAgentWebAccess,
+    )}
+  {/if}
+  {#if show('Show query cards', 'Display the SQL the agent ran and the rows it returned')}
+    {@render switchRow(
+      'Show query cards',
+      'Show the SQL the agent ran and the rows it came back with. Failed queries are always shown, so a correction still has something to refer to.',
+      settings.agentShowQueryCards,
+      toggleAgentQueryCards,
+    )}
+  {/if}
 {/snippet}
 
 {#snippet generalContent()}
@@ -653,7 +681,7 @@
             type="button"
             aria-label="Color theme"
             class={cn(
-              "flex h-8 w-56 items-center justify-between gap-2 whitespace-nowrap rounded-[10px] border border-border/70 bg-background px-2.5 text-ui-xs font-normal shadow-none outline-none transition-colors hover:bg-muted/30 focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 data-[state=open]:border-ring",
+              "flex h-8 w-56 items-center justify-between gap-2 whitespace-nowrap rounded-[10px] border border-border/70 bg-background px-2.5 text-ui-xs font-normal shadow-none outline-none transition-colors hover:bg-muted/30 focus-visible:border-ring/55 focus-visible:ring-1 focus-visible:ring-ring/18 data-[state=open]:border-ring",
             )}
           >
             <span class="flex min-w-0 items-center gap-2">
@@ -774,6 +802,22 @@
           <span class="size-4 shrink-0 overflow-hidden rounded-[3px] border border-border/40 bg-background" style={tableStylePreview[it.value] ?? ''} aria-hidden="true"></span>
         {/snippet}
       </SelectMenu>
+    </div>
+  {/if}
+  {#if show('Cell alignment', 'Which side grid cell text sits on')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-ui-sm font-medium text-foreground">Cell alignment</p>
+        <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">
+          Which side grid cell text sits on. "Numbers right" lines digits up by place value so you can compare magnitudes down a column, and leaves prose on the left.
+        </p>
+      </div>
+      <SelectMenu
+        ariaLabel="Cell alignment"
+        value={settings.tableTextAlign}
+        onValueChange={setTableAlign}
+        items={TABLE_ALIGN_OPTIONS.map((o) => ({ value: o.id, label: o.label, keywords: [o.label] }))}
+      />
     </div>
   {/if}
 

@@ -2,6 +2,7 @@
   import { executeSql, connectRedis, redisScan } from '$lib/api.js'
   import { engineFamily } from '$lib/stores/connections.js'
   import { cn } from '$lib/utils.js'
+  import { readOnlyMode, guardWrite, READ_ONLY_HINT } from '$lib/stores/read-only.js'
   import { tick } from 'svelte'
   import ResizeHandle from './ResizeHandle.svelte'
   import Search from '@lucide/svelte/icons/search'
@@ -536,6 +537,7 @@
   /** Remove one field/member/element from the selected collection key. */
   async function deleteEntry(/** @type {string} */ kind, /** @type {string} */ member) {
     if (!selectedKey || rowBusy) return
+    if (!guardWrite('delete entries from this key')) return
     const key = selectedKey
     const q = quoteArg(key)
     rowBusy = member
@@ -887,7 +889,7 @@
             spellcheck="false"
             autocapitalize="off"
             autocomplete="off"
-            class="h-7 w-full rounded-lg border border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
+            class="h-7 w-full rounded-lg border border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
           />
           <div class="flex flex-wrap gap-1">
             {#each CREATABLE as t (t)}
@@ -914,7 +916,7 @@
               placeholder="field"
               spellcheck="false"
               autocomplete="off"
-              class="h-7 w-full rounded-lg border border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
+              class="h-7 w-full rounded-lg border border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
             />
           {:else if nkType === 'zset'}
             <input
@@ -923,7 +925,7 @@
               placeholder="score (e.g. 1)"
               spellcheck="false"
               autocomplete="off"
-              class="h-7 w-full rounded-lg border border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
+              class="h-7 w-full rounded-lg border border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
             />
           {/if}
           <input
@@ -933,7 +935,7 @@
             spellcheck="false"
             autocomplete="off"
             onkeydown={(e) => e.key === 'Enter' && void createKey()}
-            class="h-7 w-full rounded-lg border border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
+            class="h-7 w-full rounded-lg border border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
           />
           {#if newKeyError}
             <p class="font-mono text-ui-3xs text-destructive">{newKeyError}</p>
@@ -972,7 +974,7 @@
             spellcheck="false"
             autocapitalize="off"
             autocomplete="off"
-            class="h-7 w-full rounded-lg border border-border bg-input/30 pl-7 pr-7 text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
+            class="h-7 w-full rounded-lg border border-border bg-input/30 pl-7 pr-7 text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
           />
           {#if filter}
             <button
@@ -1136,8 +1138,9 @@
             <button
               type="button"
               class={cn(iconBtn, 'size-7 hover:bg-destructive/10 hover:text-destructive')}
-              title="Delete key"
+              title={$readOnlyMode ? READ_ONLY_HINT : 'Delete key'}
               aria-label="Delete key"
+              disabled={$readOnlyMode}
               onclick={() => (confirmingDelete = true)}
             >
               <Trash2 class="size-3.5" />
@@ -1178,7 +1181,7 @@
                     if (e.key === 'Enter') { e.preventDefault(); void applyTtl(false) }
                     else if (e.key === 'Escape') editingTtl = false
                   }}
-                  class="h-6 w-24 rounded-lg border border-border bg-input/30 px-1.5 text-ui-2xs tabular-nums text-foreground placeholder:text-muted-foreground/45 outline-none focus:border-ring focus:ring-1 focus:ring-ring"
+                  class="h-6 w-24 rounded-lg border border-border bg-input/30 px-1.5 text-ui-2xs tabular-nums text-foreground placeholder:text-muted-foreground/45 outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
                 />
                 <button
                   type="button"
@@ -1214,7 +1217,8 @@
                   'group/ttl inline-flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors hover:bg-accent',
                   hasExpiry ? 'text-warning' : 'text-muted-foreground',
                 )}
-                title="Edit TTL"
+                title={$readOnlyMode ? READ_ONLY_HINT : 'Edit TTL'}
+                disabled={$readOnlyMode}
                 onclick={openTtlEditor}
               >
                 <Timer class="size-3 shrink-0" />
@@ -1257,7 +1261,8 @@
                   <button
                     type="button"
                     class={cn(iconBtn, 'ml-auto h-6 gap-1 px-2 text-ui-2xs')}
-                    title="Edit value"
+                    title={$readOnlyMode ? READ_ONLY_HINT : 'Edit value'}
+                    disabled={$readOnlyMode}
                     onclick={startStringEdit}
                   >
                     <Pencil class="size-3" />Edit
@@ -1280,7 +1285,7 @@
                 <textarea
                   bind:value={stringEdit}
                   spellcheck="false"
-                  class="no-focus-ring app-scroll min-h-0 flex-1 resize-none rounded-lg border border-border bg-input/30 p-3 font-mono text-ui-sm leading-relaxed text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring"
+                  class="no-focus-ring app-scroll min-h-0 flex-1 resize-none rounded-lg border border-border bg-input/30 p-3 font-mono text-ui-sm leading-relaxed text-foreground outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
                 ></textarea>
                 <div class="mt-2 flex shrink-0 items-center gap-1.5">
                   <button

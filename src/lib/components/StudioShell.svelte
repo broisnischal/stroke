@@ -1,6 +1,8 @@
 <script>
   import { onMount, onDestroy, untrack, tick } from 'svelte'
   import { fade } from 'svelte/transition'
+  import { setReadOnly } from '$lib/stores/read-only.js'
+  import { isWriteSql } from '$lib/sql-write.js'
   import Logo from './Logo.svelte'
   import Database from '@lucide/svelte/icons/database'
   import Boxes from '@lucide/svelte/icons/boxes'
@@ -65,7 +67,6 @@
   import Onboarding from './Onboarding.svelte'
   import SettingsDialog from './SettingsDialog.svelte'
   import KeyboardShortcutsDialog from './KeyboardShortcutsDialog.svelte'
-  import DdlDialog from './DdlDialog.svelte'
   import InsiderDialog from './InsiderDialog.svelte'
   import AboutDialog from './AboutDialog.svelte'
   import ReportIssueDialog from './ReportIssueDialog.svelte'
@@ -122,6 +123,7 @@
   import {
     createTableTab,
     createSqlTab,
+    createDdlTab,
     createWelcomeTab,
     createAiTab,
     createSchemaTab,
@@ -185,6 +187,7 @@
   import { createNotebook, deserializeNotebook, titleFromPath } from '$lib/notebook.js'
   import { openNotebookFile } from '$lib/api.js'
   import { formatCompactCount, normalizeTableRowCount } from '$lib/table-list.js'
+  import { humanizeDbError } from '$lib/ai.js'
   import {
     MAX_PAGE_SIZE,
     PAGE_SIZE_ALL,
@@ -300,6 +303,28 @@
   /** @type {boolean} - true when the DB went away mid-session */
   let connectionLost = $state(false)
   let autoConnecting = $state(false)
+  /** Name of the connection the startup reconnect is waiting on, for the overlay. */
+  let autoConnectName = $state('')
+  /**
+   * Saved connections are often named `db@full.rds.host.name` - too long to read
+   * in the reconnect overlay. Keep the database and the host's first label.
+   * @param {string} name
+   */
+  function shortConnLabel(name) {
+    const at = name.lastIndexOf('@')
+    const label = at === -1 ? name : `${name.slice(0, at)}@${name.slice(at + 1).split('.')[0]}`
+    return label.length > 44 ? `${label.slice(0, 43)}…` : label
+  }
+  /** Set by the overlay's Cancel so a late-landing connect doesn't yank the user back. */
+  let autoConnectCancelled = false
+
+  /** Give up on the startup reconnect and let the user choose a connection instead. */
+  async function cancelAutoConnect() {
+    autoConnectCancelled = true
+    autoConnecting = false
+    showConnectionModal = true
+    try { await disconnectPostgres() } catch { /* nothing to tear down */ }
+  }
   let showConnectionModal = $state(false)
   let showDockerModal = $state(false)
   let dockerInitialDb = $state(/** @type {string | null} */ (null))
@@ -307,6 +332,9 @@
   let queryLogOpen = $state(false)
   /** When set, the ERD tab is scoped to this table + its FK-connected neighbors. */
   let erdFocusTable = $state('')
+  /** The mounted per-table ERD pane, so the tab bar's Export menu can drive its
+   *  diagram exports (PNG / copy PNG / SVG / Mermaid). */
+  let erdPane = $state(/** @type {any} */ (null))
   let showCreateTableDialog = $state(false)
   let showCreateSchemaDialog = $state(false)
   let savedConnections = $state(loadSavedConnections())
@@ -318,9 +346,6 @@
   let showDisconnectDialog = $state(false)
   let showAiModelSettings = $state(false)
   let showProGate = $state(false)
-  let ddlDialogOpen = $state(false)
-  let ddlDialogTable = $state('')
-  let ddlDialogSql = $state('')
   let commandOpen = $state(false)
   let commandPage = $state(/** @type {'root'|'docker'|'connections'|'tables'|'pages'} */ ('root'))
   // Reset to the root view whenever the palette closes so generic openers
@@ -451,6 +476,13 @@
   /** >0 while travelling to a history entry, so the arrival isn't recorded as a
    *  new jump. A counter, not a flag: a restore spans an await and a frame. */
   let _navRestore = 0
+  /**
+   * Bumped once per history step. A second Back pressed while the first is still
+   * resolving must win outright, so every await in gotoNavEntry re-checks this
+   * and a superseded travel stops instead of fighting the newer one for the
+   * cursor - otherwise holding Alt+← lands wherever the slowest fetch finished.
+   */
+  let _navTravel = 0
   /**
    * Set when the grid reports an aimed cursor move (a cell click), consumed by the
    * recording effect below.
@@ -960,6 +992,10 @@
   let deletingRows = $state(false)
   let insertingRow = $state(false)
   let tableReadonly = $state(false)
+  // Mirror it into the store the api layer gates on, so every surface (sidebar
+  // context menu, structure editor, AI tool calls, backup restore) is covered
+  // rather than only the components this shell hands a `readonly` prop to.
+  $effect(() => setReadOnly(tableReadonly))
   /** Bound from DataTable - triggers the inline new-row draft. */
   let dtBeginInsertRow = $state(/** @type {() => void} */ (() => {}))
   let showMcpPanel = $state(false)
@@ -1186,6 +1222,11 @@ let rowSearch = $state('')
   /** Tracks which tab IDs currently have an in-flight background fetch. */
   const fetchingTabIds = new Set()
   let error = $state('')
+  /** Whether the error banner is showing the raw driver text. */
+  let showRawError = $state(false)
+  // A new failure starts collapsed; leaving it expanded from a previous
+  // error would dump raw driver text on someone who never asked for it.
+  $effect(() => { void error; showRawError = false })
   let selected = $state(new Set())
   /** @type {number | null} */
   let focusedRow = $state(null)
@@ -1411,6 +1452,8 @@ let rowSearch = $state('')
     const text = sqlText
     const cid = persistConnectionId
     if (!sqlEverOpened) return
+    // A DDL viewer tab is a scratch buffer, not the user's query draft.
+    if (/** @type {any} */ (activeTab)?.draft === false) return
     if (_sqlDraftTimer) clearTimeout(_sqlDraftTimer)
     _sqlDraftTimer = setTimeout(() => saveSqlDraft(cid, text), 400)
   })
@@ -1681,7 +1724,7 @@ let rowSearch = $state('')
 
   /** @param {StudioTab} tab */
   async function applyTabToEditor(tab) {
-    if (tab.kind === 'welcome' || tab.kind === 'ai' || tab.kind === 'schema' || tab.kind === 'orm') {
+    if (tab.kind === 'welcome' || tab.kind === 'ai' || tab.kind === 'schema' || tab.kind === 'orm' || tab.kind === 'ddl') {
       clearTableEditor()
       return
     }
@@ -1699,7 +1742,7 @@ let rowSearch = $state('')
       if (raw.columns.length === 0) {
         // No cached data - apply lightweight snapshot (no need to clone rows)
         applyTableSnapshot(raw)
-        if (raw.table && !fetchingTabIds.has(tab.id)) void fetchRowsForTab(tab.id)
+        if (raw.table && !fetchingTabIds.has(tab.id)) void startTabFetch(tab.id)
       } else {
         // Has cached data - clone Sets so mutations don't bleed between tabs, and
         // restore the RAW rows reference (not the proxied tab.state.rows) so the
@@ -2501,15 +2544,45 @@ let rowSearch = $state('')
   // "New SQL Editor" command so several query editors can be open at once;
   // the existing per-tab snapshot swap keeps each tab's buffer/results intact.
   function openNewSqlTab() {
+    const count = tabs.filter((t) => t.kind === 'sql').length
+    openSqlTabWith(undefined, count === 0 ? 'Query Editor' : `Query Editor ${count + 1}`)
+  }
+
+  /**
+   * Open a brand-new SQL editor tab seeded with `sql` - the editor is where long
+   * SQL belongs (search, folding, selection, run), rather than a scrollable dialog.
+   * @param {string|undefined} sql @param {string} title
+   * @param {{ draft?: boolean }} [opts] `draft: false` keeps this buffer out of the
+   *   per-connection Query Editor draft (a DDL dump must not clobber it).
+   */
+  function openSqlTabWith(sql, title, { draft = true } = {}) {
     saveActiveTabState()
     dropWelcomeTabs()
-    const count = tabs.filter((t) => t.kind === 'sql').length
-    const title = count === 0 ? 'Query Editor' : `Query Editor ${count + 1}`
-    const tab = createSqlTab(undefined, title)
+    const tab = { ...createSqlTab(sql, title), draft }
     tabs = [...tabs, tab]
     activeTabId = tab.id
     clearTableEditor()
     applySqlSnapshot(cloneSqlTabState(/** @type {SqlTabState} */ (tab.state)))
+  }
+
+  /**
+   * Open a read-only DDL tab, or re-focus the one already showing this object.
+   * @param {string} ddlText @param {string} title
+   */
+  function openDdlTab(ddlText, title) {
+    const existing = tabs.find((t) => t.kind === 'ddl' && t.title === title)
+    if (existing) {
+      // Refresh in place — the object may have been altered since it was opened.
+      tabs = tabs.map((t) => (t.id === existing.id ? { ...t, state: { ddlText } } : t))
+      void activateTab(existing.id)
+      return
+    }
+    saveActiveTabState()
+    dropWelcomeTabs()
+    const tab = createDdlTab(ddlText, title)
+    tabs = [...tabs, tab]
+    activeTabId = tab.id
+    clearTableEditor()
   }
 
   function openAiTab() {
@@ -2736,18 +2809,22 @@ let rowSearch = $state('')
     // are on screen in that pane's snapshot, so blanking them would flip the pane
     // to the empty "Focus this pane to load" placeholder.
     if (paneRoot) for (const g of PaneTree.allGroups(paneRoot)) if (g.activeTabId) keep.add(g.activeTabId)
-    let changed = false
-    const next = tabs.map((t) => {
-      if (t.kind !== 'table' || t.id === activeId || keep.has(t.id)) return t
+    /** @param {StudioTab} t */
+    const evictable = (t) => {
+      if (t.kind !== 'table' || t.id === activeId || keep.has(t.id)) return false
       const st = /** @type {TableTabState} */ (t.state)
-      if (st && Array.isArray(st.rows) && st.rows.length > TAB_EVICT_ROW_THRESHOLD) {
-        changed = true
-        _liveRowsByTab.delete(t.id)
-        return { ...t, state: { ...st, rows: [], columns: [], selected: new Set() } }
-      }
-      return t
+      return !!st && Array.isArray(st.rows) && st.rows.length > TAB_EVICT_ROW_THRESHOLD
+    }
+    // Most switches evict nothing. Test first so the common path doesn't rebuild
+    // the tabs array - that write invalidates every consumer of `tabs` (tab strip,
+    // panes, tabsById) for no change at all.
+    if (!tabs.some(evictable)) return
+    tabs = tabs.map((t) => {
+      if (!evictable(t)) return t
+      _liveRowsByTab.delete(t.id)
+      const st = /** @type {TableTabState} */ (t.state)
+      return { ...t, state: { ...st, rows: [], columns: [], selected: new Set() } }
     })
-    if (changed) tabs = next
   }
 
   async function activateTab(id) {
@@ -2823,17 +2900,30 @@ let rowSearch = $state('')
 
   /** @param {import('$lib/nav-history.js').NavEntry} entry */
   async function gotoNavEntry(entry) {
+    const travel = ++_navTravel
+    const superseded = () => travel !== _navTravel
     _navRestore += 1
     try {
       if (entry.tabId !== activeTabId) await activateTab(entry.tabId)
+      if (superseded()) return
       if (entry.page != null && entry.page !== page && activeTab?.kind === 'table') {
         page = entry.page
         await loadRows()
+        if (superseded()) return
       }
       if (entry.row === null) return
+      // A tab whose rows were evicted - or that was never cached - refetches on
+      // activation, and the grid refuses to focus a cell while it holds none. So
+      // the restore has to wait for that fetch, or it quietly lands on nothing
+      // and the tab opens at the top: the failure people hit once more than
+      // TAB_ROWS_MRU_MAX tables are open. The guard is held across the wait, so
+      // the rows arriving can't be mistaken for a new jump.
+      await awaitTabFetch(entry.tabId)
+      if (superseded()) return
       focusedRow = entry.row
       focusedCol = entry.col
       await tick()
+      if (superseded()) return
       const { row, col } = entry
       // Deferred a frame so this beats the tab snapshot's own scroll restore,
       // which lands on the same frame - otherwise a position from deeper in the
@@ -2843,8 +2933,10 @@ let rowSearch = $state('')
       // brand new jump and wiping the forward branch.
       _navRestore += 1
       requestAnimationFrame(() => {
-        tableFocusCell(row, col)
-        refreshNavCurrent()
+        if (!superseded()) {
+          tableFocusCell(row, col)
+          refreshNavCurrent()
+        }
         _navRestore -= 1
       })
     } finally {
@@ -2855,17 +2947,36 @@ let rowSearch = $state('')
   /** Does this history entry still point at an open tab? */
   const _navTabAlive = (/** @type {string} */ id) => tabs.some((t) => t.id === id)
 
-  async function navBack() {
-    const target = navStepBack(_nav, _navTabAlive)
+  /** Set while a coalesced travel is waiting for its frame. */
+  let _navStepQueued = false
+
+  /**
+   * Walk the history one step and travel there.
+   *
+   * A burst of presses - key repeat on Alt+←, an impatient click - should walk
+   * the stack and travel *once*, to wherever it lands. Visiting every entry on
+   * the way costs a snapshot save, a tab activation and possibly a refetch each,
+   * which is what made holding the shortcut crawl. Stepping the index stays
+   * synchronous so the buttons and the next press see the truth immediately;
+   * only the travel is deferred a frame and coalesced.
+   *
+   * @param {-1 | 1} dir
+   */
+  function navStepBy(dir) {
+    const moved = dir === -1 ? navStepBack(_nav, _navTabAlive) : navStepForward(_nav, _navTabAlive)
     syncNavFlags()
-    if (target) await gotoNavEntry(target)
+    if (!moved || _navStepQueued) return
+    _navStepQueued = true
+    requestAnimationFrame(() => {
+      _navStepQueued = false
+      const target = navCurrent(_nav)
+      if (target) void gotoNavEntry(target)
+    })
   }
 
-  async function navForward() {
-    const target = navStepForward(_nav, _navTabAlive)
-    syncNavFlags()
-    if (target) await gotoNavEntry(target)
-  }
+  function navBack() { navStepBy(-1) }
+
+  function navForward() { navStepBy(1) }
 
   /** @param {string} id */
   async function closeTab(id) {
@@ -3228,11 +3339,15 @@ let rowSearch = $state('')
   /**
    * @param {string} schema
    * @param {string} table
-   * @param {{ filters?: TableFilter[], resetQuery?: boolean }} [options]
+   * @param {{ filters?: TableFilter[], resetQuery?: boolean, search?: string|null,
+   *   duplicate?: boolean, viewMode?: string }} [options]
    */
   async function openTableTab(schema, table, options = {}) {
-    const { filters = null, resetQuery = false, search = null } = options
-    const existing = findTableTab(tabs, schema, table)
+    const { filters = null, resetQuery = false, search = null, duplicate = false, viewMode = null } = options
+    // `duplicate` forces a second tab for a table that is already open - used when
+    // the request comes from inside that table's own tab (e.g. "Open table" in the
+    // ERD inspector), where re-activating the existing tab would be a no-op.
+    const existing = duplicate ? null : findTableTab(tabs, schema, table)
     if (existing) {
       tableViewMode = 'data'
       structureColumns = []
@@ -3292,13 +3407,17 @@ let rowSearch = $state('')
     focusedCol = null
     inspectorRow = null
     editingCell = null
+    // A fresh tab opens in the configured default view, never in whatever view the
+    // tab you came from happened to be on - the three-dot picker is per tab. Read
+    // the setting here (not at startup) so changing it takes effect immediately.
+    dataViewMode = /** @type {any} */ (viewMode ?? loadSettings().defaultDataView)
     hiddenColumns = loadHiddenCols(persistConnectionId, schema, table)
     if (schema !== activeSchema) {
       activeSchema = schema
       await loadTables()
     }
     // Fire the fetch in background - caller can open more tabs without waiting
-    void fetchRowsForTab(tab.id)
+    void startTabFetch(tab.id)
     // Load reverse FKs once per table (cached - not re-fetched on page/sort changes)
     void loadIncomingForeignKeys(schema, table)
   }
@@ -3810,9 +3929,40 @@ let rowSearch = $state('')
   }
 
   /**
+   * Background row fetches in flight, keyed by tab. Only history travel needs to
+   * wait on one, so this stays a plain Map - nothing renders off it.
+   * @type {Map<string, Promise<void>>}
+   */
+  const _tabFetches = new Map()
+
+  /**
+   * Kick off a background fetch for `tabId`, or hand back the one already
+   * running. Mirrors fetchRowsForTab's own re-entry guard: without this, a second
+   * call would replace the map entry with a promise that resolves instantly and
+   * anyone waiting would be told the rows had landed while they were still in
+   * flight.
+   * @param {string} tabId
+   */
+  function startTabFetch(tabId) {
+    const existing = _tabFetches.get(tabId)
+    if (existing) return existing
+    const p = fetchRowsForTab(tabId).finally(() => {
+      if (_tabFetches.get(tabId) === p) _tabFetches.delete(tabId)
+    })
+    _tabFetches.set(tabId, p)
+    return p
+  }
+
+  /** Resolve once nothing is fetching rows for `tabId`. @param {string} tabId */
+  async function awaitTabFetch(tabId) {
+    await _tabFetches.get(tabId)
+  }
+
+  /**
    * Fetch rows for any tab in the background.
    * Writes results into that tab's state; if the tab is still active when the
    * fetch resolves, also syncs to the global editor state so the UI updates.
+   * Callers should go through startTabFetch so history travel can wait on it.
    * @param {string} tabId
    */
   async function fetchRowsForTab(tabId) {
@@ -3899,6 +4049,14 @@ let rowSearch = $state('')
 
       // Persist result to tab - one tabs write
       patchTab(result)
+
+      // Keep the raw array too. Everything inside `tabs` comes back through the
+      // $state proxy, and the grid indexes rows[r][c] per visible cell per frame -
+      // so handing it a proxied array puts a trap on every one of those reads.
+      // saveActiveTabState only ever caches the tab you *leave*, which left every
+      // prefetched background tab proxied on its first activation: open a handful
+      // of tables and each one felt sticky the first time you clicked it.
+      _liveRowsByTab.set(tabId, result.rows)
 
       // Update AI schema cache (LRU, capped)
       lruSet(tableColumnsCache, `${s.schema}.${s.table}`, result.columns)
@@ -4353,8 +4511,8 @@ let rowSearch = $state('')
   async function runSql(overrideSql) {
     const sqlRan = typeof overrideSql === 'string' && overrideSql.trim() ? overrideSql : sqlText
     if (!connection || !sqlRan.trim()) return
-    if (tableReadonly && /^\s*(insert|update|delete|drop|truncate|alter|create|replace)\b/i.test(sqlRan)) {
-      sqlError = 'Connection is read-only, write queries are blocked.'
+    if (tableReadonly && isWriteSql(sqlRan)) {
+      sqlError = 'This connection is open in read-only mode, so write statements are blocked.'
       return
     }
     sqlLoading = true
@@ -4537,10 +4695,19 @@ let rowSearch = $state('')
     if (!loadSettings().autoReconnectOnStartup) { showConnectionModal = true; return }
 
     autoConnecting = true
+    autoConnectName = last.name ?? ''
+    // The backend already enforces its own per-engine deadlines (DNS + TCP preflight,
+    // a 20s connect deadline for Postgres, HTTP timeouts for the REST engines) and
+    // fails with a message the user can act on. This race is only a last-resort guard
+    // for a command that never returns AT ALL, so it has to sit above those deadlines.
+    // At 5s it fired first and turned every slow-but-healthy wake-up into "not
+    // connected" — serverless Postgres (Neon, and Prisma/Supabase pooler cold starts)
+    // autosuspends and takes 3–15s to come back, which is why resuming one meant
+    // reconnecting by hand on nearly every launch.
     /** @param {Promise<unknown>} p */
     const withTimeout = (p) => Promise.race([
       p,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Connection timed out')), 5000)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Connection timed out')), 45_000)),
     ])
     try {
       if (last.type === 'sqlite') await withTimeout(connectSqlite(last))
@@ -4554,8 +4721,14 @@ let rowSearch = $state('')
       else await withTimeout(connectPostgres(last))
       // onConnected already refreshes the query stores (concurrently with the
       // catalog load) - no second fetch needed here.
+      if (autoConnectCancelled) { try { await disconnectPostgres() } catch { /* ignore */ } return }
       await onConnected(last, last.id)
     } catch {
+      if (autoConnectCancelled) return
+      // Racing the timeout abandons the promise but not the backend: a connect that
+      // lands after we gave up would leave a live pool behind a UI that says
+      // "Not connected", and the next attempt would stack a second one on top.
+      try { await disconnectPostgres() } catch { /* nothing to tear down */ }
       showConnectionModal = true
     } finally {
       autoConnecting = false
@@ -4808,9 +4981,8 @@ let rowSearch = $state('')
   async function handleViewDdl(tableName) {
     try {
       const ddl = await getTableDdl(activeSchema, tableName)
-      ddlDialogTable = tableName
-      ddlDialogSql = ddl
-      ddlDialogOpen = true
+      if (aiMode) exitAiMode()
+      openDdlTab(ddl.endsWith('\n') ? ddl : `${ddl}\n`, `DDL · ${tableName}`)
     } catch (e) {
       toast.error('Could not load DDL', { description: String(e) })
     }
@@ -5173,13 +5345,6 @@ let rowSearch = $state('')
 
 <KeyboardShortcutsDialog bind:open={showShortcutsModal} />
 
-<DdlDialog
-  bind:open={ddlDialogOpen}
-  tableName={ddlDialogTable}
-  ddl={ddlDialogSql}
-  onopeninsql={(sql) => { if (aiMode) exitAiMode(); void openQueryInEditor(sql) }}
-/>
-
 <InsiderDialog bind:open={showInsiderModal} />
 
 <AboutDialog bind:open={showAboutModal} onopenreport={() => (showReportIssueDialog = true)} />
@@ -5302,9 +5467,17 @@ let rowSearch = $state('')
     </div>
 
     <!-- Text -->
-    <div class="flex flex-col items-center gap-1.5 text-center">
-      <p class="text-ui-sm font-medium text-foreground/70">Reconnecting</p>
-      <p class="text-ui-2xs text-muted-foreground/35">Establishing database connection…</p>
+    <div class="flex max-w-sm flex-col items-center gap-1.5 text-center">
+      <p class="max-w-full truncate text-ui-sm font-medium text-foreground/70">
+        Reconnecting{autoConnectName ? ` to ${shortConnLabel(autoConnectName)}` : ''}
+      </p>
+      <button
+        type="button"
+        class="mt-3 text-ui-2xs text-muted-foreground/40 underline underline-offset-4 transition-colors hover:text-foreground"
+        onclick={() => void cancelAutoConnect()}
+      >
+        Cancel
+      </button>
     </div>
   </div>
 {/if}
@@ -5849,6 +6022,21 @@ let rowSearch = $state('')
         </div>
       {/each}
 
+      <!-- DDL tabs, one read-only editor per open object, kept alive -->
+      {#each tabs.filter((t) => t.kind === 'ddl') as ddlTab (ddlTab.id)}
+        {@const ddlState = /** @type {{ ddlText: string }} */ (ddlTab.state)}
+        <div
+          class={activeTab?.id === ddlTab.id ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+          inert={activeTab?.id !== ddlTab.id || undefined}
+        >
+          <svelte:boundary failed={tabError}>
+            {#await import('./DdlView.svelte')}<TabLoading />{:then { default: DdlView }}
+              <DdlView ddl={ddlState.ddlText} objectName={ddlTab.title.replace(/^DDL · /, '')} />
+            {/await}
+          </svelte:boundary>
+        </div>
+      {/each}
+
       <!-- Schema Timeline tab - mount once, keep alive -->
       {#if schemaTimelineEverOpened}
         <div
@@ -5988,7 +6176,22 @@ let rowSearch = $state('')
             <!-- ── SQL / application error, compact banner ── -->
             <div class="flex shrink-0 items-start gap-2.5 border-b border-destructive/15 bg-destructive/[0.04] px-3 py-2">
               <AlertTriangle class="mt-px size-3.5 shrink-0 text-destructive/70" />
-              <p class="min-w-0 flex-1 font-mono text-ui-xs leading-relaxed text-destructive/90">{error}</p>
+              <!-- Drivers wrap the cause in transport noise — D1 returns its whole
+                   HTTP envelope around a five-word message. Show the cause; the
+                   raw text stays one click away and in the query log. -->
+              <p class="min-w-0 flex-1 font-mono text-ui-xs leading-relaxed text-destructive/90">
+                {humanizeDbError(error)}
+                {#if humanizeDbError(error) !== error.replace(/^Error:\s*/, '').trim()}
+                  <button
+                    type="button"
+                    class="ml-1.5 align-baseline text-ui-3xs text-destructive/45 underline-offset-2 transition-colors hover:text-destructive hover:underline"
+                    onclick={() => (showRawError = !showRawError)}
+                  >{showRawError ? 'hide raw' : 'raw'}</button>
+                  {#if showRawError}
+                    <span class="mt-1 block break-all text-ui-3xs text-destructive/45">{error}</span>
+                  {/if}
+                {/if}
+              </p>
               <button
                 type="button"
                 class="mt-px shrink-0 text-destructive/40 transition-colors hover:text-destructive"
@@ -6108,6 +6311,7 @@ let rowSearch = $state('')
             onfindreplace={() => (findReplaceOpen = true)}
             ondeleteselected={() => stageDeleteSelectedRows()}
             onexport={handleExport}
+            onexportdiagram={(kind) => erdPane?.exportDiagram?.(kind)}
             onaddrow={() => {
               // Row insertion happens on the canvas grid - jump back to it first.
               if (dataViewMode !== 'table') dataViewMode = 'table'
@@ -6269,11 +6473,14 @@ let rowSearch = $state('')
                 <div class="flex min-h-0 min-w-0 flex-1">
                   {#await import('./EntityRelationPage.svelte')}<TabLoading />{:then { default: EntityRelationPage }}
                     <EntityRelationPage
+                      bind:this={erdPane}
+                      hostExports
+                      insideTableTab
                       schema={activeSchema}
                       {schemas}
                       focusTable={activeTable}
                       onclearfocus={() => openErdTab('')}
-                      onopentable={(s, t) => void openTableTab(s, t)}
+                      onopentable={(s, t, opts) => void openTableTab(s, t, opts)}
                     />
                   {/await}
                 </div>

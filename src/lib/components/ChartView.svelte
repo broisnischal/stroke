@@ -8,6 +8,8 @@
   import { isCurrentThemeDark } from '$lib/stores/settings.js'
   import { chartGroups, saveChart, addGroup } from '$lib/stores/saved-charts.js'
   import { cn } from '$lib/utils.js'
+  import { saveExportAs } from '$lib/api.js'
+  import { canvasToPngBlob } from '$lib/svg-png.js'
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import ChevronDown  from '@lucide/svelte/icons/chevron-down'
   import Download     from '@lucide/svelte/icons/download'
@@ -212,15 +214,19 @@
     } catch { toast.error('Could not copy') }
   }
 
-  function downloadPng() {
-    const canvas = document.querySelector('.chart-canvas-host canvas')
-    const img = /** @type {HTMLCanvasElement|null} */ (canvas)?.toDataURL?.('image/png')
-    if (!img) { toast.error('Could not export chart'); return }
-    const a = document.createElement('a')
-    a.href = img
-    a.download = `chart_${Date.now()}.png`
-    a.click()
-    toast.success('Chart downloaded')
+  async function downloadPng() {
+    const canvas = /** @type {HTMLCanvasElement|null} */ (
+      document.querySelector('.chart-canvas-host canvas')
+    )
+    const blob = await canvasToPngBlob(canvas)
+    if (!blob) { toast.error('Could not export chart'); return }
+    try {
+      const path = await saveExportAs(blob, `chart_${Date.now()}.png`, { name: 'PNG', extensions: ['png'] })
+      if (!path) return  // dialog cancelled
+      toast.success('Chart saved', { description: `Saved to ${path}` })
+    } catch (e) {
+      toast.error('Could not save the chart', { description: String(e) })
+    }
   }
 
   // ── Save panel ────────────────────────────────────────────────────────────
@@ -409,7 +415,7 @@
         <button type="button" class={iconBtn} title="Copy ECharts JSON (AI-ready)" onclick={copyConfig}>
           <Copy class="size-3.5" />
         </button>
-        <button type="button" class={iconBtn} title="Download PNG" onclick={downloadPng}>
+        <button type="button" class={iconBtn} title="Download PNG" onclick={() => void downloadPng()}>
           <Download class="size-3.5" />
         </button>
       </div>
@@ -423,12 +429,12 @@
           type="text"
           placeholder="Chart name…"
           bind:value={saveName}
-          class="h-6 w-40 rounded-lg border border-border bg-background/80 px-2 font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring"
+          class="h-6 w-40 rounded-lg border border-border bg-background/80 px-2 font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
         />
 
         {#if !newGroupMode}
           <div class="relative">
-            <select bind:value={saveGroup} class="h-6 appearance-none rounded border border-border/50 bg-background/60 pl-2 pr-6 font-mono text-ui-xs text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring">
+            <select bind:value={saveGroup} class="h-6 appearance-none rounded border border-border/50 bg-background/60 pl-2 pr-6 font-mono text-ui-xs text-foreground outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15">
               {#each $chartGroups as g (g)}<option value={g}>{g}</option>{/each}
             </select>
             <ChevronDown class="pointer-events-none absolute right-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/50" />
@@ -441,7 +447,7 @@
             type="text"
             placeholder="New group name…"
             bind:value={newGroupName}
-            class="h-6 w-36 rounded-lg border border-border bg-background/80 px-2 font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring"
+            class="h-6 w-36 rounded-lg border border-border bg-background/80 px-2 font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
           />
           <button type="button" class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/40 hover:text-foreground" onclick={() => (newGroupMode = false)}>
             <X class="size-3" />

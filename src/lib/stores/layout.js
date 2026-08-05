@@ -22,7 +22,9 @@ export const DEFAULT_LAYOUT = {
 }
 
 export const NAV_SIDEBAR_MIN = 180
-export const NAV_SIDEBAR_MAX = 420
+// Long, prefix-heavy table names (django_/invoicing_/bots_…) truncate well past
+// 420px, so the nav sidebar can be dragged much wider.
+export const NAV_SIDEBAR_MAX = 720
 export const INSPECTOR_MIN = 220
 export const INSPECTOR_MAX = 640
 export const SQL_EDITOR_MIN = 120

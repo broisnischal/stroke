@@ -2,6 +2,7 @@
   import { tick } from 'svelte'
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import { executeSql } from '$lib/api.js'
+  import { readOnlyMode, READ_ONLY_HINT } from '$lib/stores/read-only.js'
   import Loader from '@lucide/svelte/icons/loader'
   import KeyRound from '@lucide/svelte/icons/key-round'
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
@@ -129,7 +130,7 @@
   // COMMENT ON COLUMN, double-quoted identifiers). On other engines that SQL is
   // invalid, so editing is gated and we point users to the SQL console. The
   // structure itself stays fully readable everywhere.
-  const canEdit = $derived(engineSupports('editStructure', connectionType))
+  const canEdit = $derived(engineSupports('editStructure', connectionType) && !$readOnlyMode)
 
   /**
    * Block a structural edit on engines where our generated DDL isn't valid.
@@ -137,6 +138,13 @@
    * runDdlDirect, so no engine can ever execute the Postgres-only DDL.
    */
   function guardEdit() {
+    if ($readOnlyMode) {
+      toast.warning('Read-only connection', {
+        description: 'Turn read-only off to change this table\u2019s structure.',
+        duration: 5000,
+      })
+      return false
+    }
     if (canEdit) return true
     toast.error('Structure editing not available here', {
       description: `Editing columns on ${engineLabel(connectionType)} isn't supported yet, use the SQL console to alter this table.`,
@@ -955,9 +963,9 @@
 
               <!-- delete -->
               <td class="border-b border-border/40 p-0 align-middle">
-                <button type="button" disabled={confirmLoading}
-                  class="flex h-full w-full items-center justify-center text-muted-foreground/20 transition-colors hover:text-destructive disabled:opacity-40 group-hover/idx:text-muted-foreground/50"
-                  title="Drop index" onclick={() => requestDropIndex(idx.name)}
+                <button type="button" disabled={confirmLoading || $readOnlyMode}
+                  class="flex h-full w-full items-center justify-center text-muted-foreground/20 transition-colors hover:text-destructive disabled:opacity-40 disabled:hover:text-muted-foreground/20 group-hover/idx:text-muted-foreground/50"
+                  title={$readOnlyMode ? READ_ONLY_HINT : 'Drop index'} onclick={() => requestDropIndex(idx.name)}
                 >
                   <Trash2 class="size-3.5" />
                 </button>
@@ -1144,9 +1152,9 @@
                 {/if}
               </td>
               <td class="border-b border-border/40 p-0 align-middle">
-                <button type="button" disabled={confirmLoading}
-                  class="flex h-full w-full items-center justify-center text-muted-foreground/20 transition-colors hover:text-destructive disabled:opacity-40 group-hover/trig:text-muted-foreground/50"
-                  title="Drop trigger"
+                <button type="button" disabled={confirmLoading || $readOnlyMode}
+                  class="flex h-full w-full items-center justify-center text-muted-foreground/20 transition-colors hover:text-destructive disabled:opacity-40 disabled:hover:text-muted-foreground/20 group-hover/trig:text-muted-foreground/50"
+                  title={$readOnlyMode ? READ_ONLY_HINT : 'Drop trigger'}
                   onclick={() => askConfirm(
                     { title: `Drop trigger "${trig.name}"`, description: `Permanently removes this trigger from "${table}".`, sql: `DROP TRIGGER "${trig.name}" ON ${tbl()};`, confirmLabel: 'Drop', variant: 'destructive' },
                     async () => { await executeSql(`DROP TRIGGER "${trig.name}" ON ${tbl()}`); toast.success(`Trigger "${trig.name}" dropped`); onrefresh() }

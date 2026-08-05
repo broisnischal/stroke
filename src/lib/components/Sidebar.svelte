@@ -5,6 +5,7 @@
   import SearchableMenu from "./SearchableMenu.svelte";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import DangerousActionDialog from "./DangerousActionDialog.svelte";
+  import { readOnlyMode, guardWrite, READ_ONLY_HINT } from "$lib/stores/read-only.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
   import PanelRight from "@lucide/svelte/icons/panel-right";
@@ -261,6 +262,9 @@
 
   /** @param {'drop' | 'truncate'} kind @param {string} tableName */
   function openDangerDialog(kind, tableName) {
+    // The menu items are disabled in read-only mode, but the guard stays: a
+    // keyboard-driven select on a disabled item is one bits-ui version away.
+    if (!guardWrite(kind === 'drop' ? 'drop this table' : 'truncate this table')) return
     dangerAction = kind
     dangerTable = tableName
     dangerCascade = false
@@ -510,7 +514,7 @@
 
   /** Shared field chrome for schema select + table filter (aligned in sidebar grid) */
   const sidebarFieldClass =
-    "h-7 w-full min-w-0 rounded-lg border-2 border-border bg-background/40 text-ui-sm text-foreground shadow-none transition-colors hover:border-foreground/30 hover:bg-background/55 focus-visible:border-ring focus-visible:ring-0";
+    "h-7 w-full min-w-0 rounded-lg border-2 border-border bg-background/40 text-ui-sm text-foreground shadow-none transition-colors hover:border-foreground/30 hover:bg-background/55 focus-visible:border-ring/55 focus-visible:ring-2 focus-visible:ring-ring/15";
 </script>
 
 <svelte:window onkeydown={(e) => {
@@ -698,11 +702,21 @@
                 <Icon name="plus" class="size-3.5" />
               </DropdownMenu.Trigger>
               <DropdownMenu.Content align="end" class="w-44 p-1 text-ui-sm">
-                <DropdownMenu.Item onSelect={onnewtable} class="gap-2">
+                <DropdownMenu.Item
+                  onSelect={onnewtable}
+                  disabled={$readOnlyMode}
+                  title={$readOnlyMode ? READ_ONLY_HINT : undefined}
+                  class="gap-2"
+                >
                   <Icon name="table-2" class="size-3.5 shrink-0 text-muted-foreground" />
                   {$t('sidebar.newTable')}
                 </DropdownMenu.Item>
-                <DropdownMenu.Item onSelect={onnewschema} class="gap-2">
+                <DropdownMenu.Item
+                  onSelect={onnewschema}
+                  disabled={$readOnlyMode}
+                  title={$readOnlyMode ? READ_ONLY_HINT : undefined}
+                  class="gap-2"
+                >
                   <Icon name="box" class="size-3.5 shrink-0 text-muted-foreground" />
                   {$t('sidebar.newSchema')}
                 </DropdownMenu.Item>
@@ -712,8 +726,8 @@
             <button
               type="button"
               class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
-              title="New table"
-              disabled={!connectionName}
+              title={$readOnlyMode ? READ_ONLY_HINT : 'New table'}
+              disabled={!connectionName || $readOnlyMode}
               onclick={onnewtable}
             >
               <Icon name="plus" class="size-3.5" />
@@ -1212,11 +1226,20 @@
                             Export data
                           </ContextMenu.Item>
                           <ContextMenu.Separator />
-                          <ContextMenu.Item onSelect={() => openDangerDialog('truncate', table.name)}>
+                          <ContextMenu.Item
+                            disabled={$readOnlyMode}
+                            title={$readOnlyMode ? READ_ONLY_HINT : undefined}
+                            onSelect={() => openDangerDialog('truncate', table.name)}
+                          >
                             <Icon name="eraser" />
                             Truncate table
                           </ContextMenu.Item>
-                          <ContextMenu.Item variant="destructive" onSelect={() => openDangerDialog('drop', table.name)}>
+                          <ContextMenu.Item
+                            variant="destructive"
+                            disabled={$readOnlyMode}
+                            title={$readOnlyMode ? READ_ONLY_HINT : undefined}
+                            onSelect={() => openDangerDialog('drop', table.name)}
+                          >
                             <Icon name="trash-2" />
                             Drop table
                           </ContextMenu.Item>
@@ -1313,7 +1336,7 @@
                               {/if}
                             </ContextMenu.Item>
                             <ContextMenu.Separator />
-                            <ContextMenu.Item variant="destructive" onSelect={() => openDangerDialog('drop', view.name)}>
+                            <ContextMenu.Item variant="destructive" disabled={$readOnlyMode} title={$readOnlyMode ? READ_ONLY_HINT : undefined} onSelect={() => openDangerDialog('drop', view.name)}>
                               <Icon name="trash-2" />
                               Drop view
                             </ContextMenu.Item>
@@ -1443,7 +1466,7 @@
                               {/if}
                             </ContextMenu.Item>
                             <ContextMenu.Separator />
-                            <ContextMenu.Item variant="destructive" onSelect={() => openDangerDialog('drop', mv.name)}>
+                            <ContextMenu.Item variant="destructive" disabled={$readOnlyMode} title={$readOnlyMode ? READ_ONLY_HINT : undefined} onSelect={() => openDangerDialog('drop', mv.name)}>
                               <Icon name="trash-2" />
                               Drop view
                             </ContextMenu.Item>

@@ -121,7 +121,12 @@
       wordWrap: 'off',
       renderLineHighlight: 'none',
       lineNumbers: 'on',
-      lineNumbersMinChars: 3,
+      // 4 (not 3) so the right-aligned numbers get a character of inset instead
+      // of sitting flush against the editor edge, and 6px (not Monaco's default
+      // 10) of decoration space on the other side — the two together make the
+      // gutter read as evenly padded rather than shoved left.
+      lineNumbersMinChars: 4,
+      lineDecorationsWidth: 6,
       glyphMargin: false,
       folding: true,
       foldingHighlight: false,

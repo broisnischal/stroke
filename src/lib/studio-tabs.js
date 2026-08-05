@@ -1,4 +1,4 @@
-/** @typedef {'table' | 'sql' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'extensions' | 'extension-detail' | 'backup' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search' | 'notebook' | 'schema-timeline' | 'data-diff' | 'insights' | 'objects' | 'redis' | 'license'} StudioTabKind */
+/** @typedef {'table' | 'sql' | 'ddl' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'extensions' | 'extension-detail' | 'backup' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search' | 'notebook' | 'schema-timeline' | 'data-diff' | 'insights' | 'objects' | 'redis' | 'license'} StudioTabKind */
 
 import { loadDefaultPageSize } from '$lib/table-query.js'
 
@@ -154,6 +154,26 @@ export function createSqlTab(sqlText, title = 'Query Editor') {
     kind: 'sql',
     title,
     state: createSqlTabState(sqlText),
+  })
+}
+
+/** @typedef {object} DdlTabState
+ * @property {string} ddlText
+ */
+
+/**
+ * A read-only DDL view. Distinct from a `sql` tab on purpose: DDL is something
+ * you read, so it gets a bare editor with no Run button, no query toolbar and no
+ * results pane — none of which do anything useful for a CREATE TABLE you can't
+ * execute against the table it already describes.
+ * @param {string} ddlText @param {string} title
+ */
+export function createDdlTab(ddlText, title) {
+  return /** @type {StudioTab} */ ({
+    id: nextTabId(),
+    kind: 'ddl',
+    title,
+    state: /** @type {any} */ ({ ddlText }),
   })
 }
 
@@ -428,7 +448,9 @@ export function tableTabTitle(state) {
 /** @param {StudioTab} tab */
 export function tabDisplayTitle(tab) {
   if (tab.kind === 'table' && tab.state) return tableTabTitle(/** @type {TableTabState} */ (tab.state))
-  if (tab.kind === 'sql') return 'Query Editor'
+  // Honour a custom title: a DDL viewer ("DDL · users") and the 2nd/3rd editor
+  // ("Query Editor 2") are separate buffers and must not all read "Query Editor".
+  if (tab.kind === 'sql') return tab.title || 'Query Editor'
   if (tab.kind === 'ai') return 'AI Chat'
   if (tab.kind === 'schema') return 'Schema Explorer'
   if (tab.kind === 'orm') return 'ORM Runner'

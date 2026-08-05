@@ -1,7 +1,7 @@
 <script>
   // Canonical dropdown/select for the app: a data-driven Select built on
-  // SearchableMenu, so every dropdown looks identical and automatically grows a
-  // search box once it has more than `searchThreshold` items (default 5).
+  // SearchableMenu, so every dropdown looks identical and carries a search box
+  // regardless of how many items it holds (see `searchThreshold` there).
   // Drop-in replacement for bits-ui <Select> in the common case.
   //
   //   <SelectMenu value={x} onValueChange={setX} items={[{value,label,icon?,hint?}]} />
@@ -27,7 +27,7 @@
     /** Extra classes for the trigger button (size/width live here). */
     triggerClass = 'h-8 w-56',
     contentClass = 'w-[var(--bits-popover-anchor-width)] min-w-[13rem]',
-    searchThreshold = 5,
+    searchThreshold = -1,
     align = 'start',
     side = 'bottom',
     disabled = false,
@@ -57,7 +57,7 @@
       {disabled}
       aria-label={ariaLabel}
       class={cn(
-        'inline-flex items-center justify-between gap-2 rounded-[10px] border border-border/70 bg-background px-2.5 text-ui-xs font-normal transition-colors hover:bg-muted/40 focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none data-[state=open]:border-ring disabled:pointer-events-none disabled:opacity-50',
+        'inline-flex items-center justify-between gap-2 rounded-[10px] border border-border/70 bg-background px-2.5 text-ui-xs font-normal transition-colors hover:bg-muted/40 focus-visible:border-ring/55 focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none data-[state=open]:border-ring disabled:pointer-events-none disabled:opacity-50',
         triggerClass,
       )}
     >

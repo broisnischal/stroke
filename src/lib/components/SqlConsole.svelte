@@ -383,27 +383,6 @@
     return s
   }
 
-  function downloadBlob(content, filename, type) {
-    const blob = new Blob([content], { type })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url; a.download = filename; a.click()
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
-  }
-
-  function exportCsv() {
-    const cols = currentDisplay.columns.map(c => c.name ?? String(c))
-    const header = cols.map(_csvCell).join(',')
-    const body = currentDisplay.rows.map(r =>
-      /** @type {any[]} */ (r).map(_csvCell).join(',')
-    ).join('\n')
-    downloadBlob(header + '\n' + body, 'query-result.csv', 'text/csv')
-  }
-
-  function exportJson() {
-    downloadBlob(jsonText, 'query-result.json', 'application/json')
-  }
-
   /** Unified export via the shared generators + native Save dialog.
    * @param {'csv'|'json'|'sql'|'tsv'|'md'|'jsonl'} format */
   async function exportAs(format) {
@@ -730,7 +709,7 @@
               <select
                 value={v.mode}
                 aria-label="Parameter type for {p.name}"
-                class="h-7 w-full appearance-none rounded-md border border-border/60 bg-input/30 pl-2 pr-6 text-ui-xs text-foreground/80 transition-colors hover:border-border focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none"
+                class="h-7 w-full appearance-none rounded-md border border-border/60 bg-input/30 pl-2 pr-6 text-ui-xs text-foreground/80 transition-colors hover:border-border focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none"
                 onchange={(e) => setParam(p.name, { ...v, mode: /** @type {any} */ (e.currentTarget.value) })}
               >
                 <option value="auto">Auto</option>
@@ -746,7 +725,7 @@
               disabled={v.mode === 'null'}
               placeholder={v.mode === 'null' ? 'NULL' : v.mode === 'raw' ? 'now(), inserted verbatim' : 'value'}
               aria-label="Value for {p.name}"
-              class="h-7 w-full min-w-0 rounded-md border border-transparent bg-input/30 px-2 font-mono text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/30 hover:border-border/60 focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none disabled:opacity-40"
+              class="h-7 w-full min-w-0 rounded-md border border-transparent bg-input/30 px-2 font-mono text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/30 hover:border-border/60 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none disabled:opacity-40"
               oninput={(e) => setParam(p.name, { ...v, value: e.currentTarget.value })}
               onkeydown={(e) => { if (e.key === 'Enter') handleRun(undefined) }}
             />

@@ -3,7 +3,14 @@ import { invoke } from '@tauri-apps/api/core'
 
 // ── Provider catalogue ───────────────────────────────────────────────────────
 
+/** Stroke's own zero-config gateway — see stroke-web/FREE_AI_TIER.md. */
+export const STROKE_FREE_BASE_URL = 'https://stroke.click/api/ai'
+
 export const PROVIDERS = [
+  // First in the list and the default profile: a new install has a working
+  // assistant before it has any credentials. Authenticated by device id, so
+  // there is no key field and nothing to paste.
+  { id: 'stroke', label: 'Stroke Free', url: STROKE_FREE_BASE_URL, keysUrl: null },
   { id: 'openrouter', label: 'OpenRouter',      url: 'https://openrouter.ai/api/v1', keysUrl: 'https://openrouter.ai/keys' },
   { id: 'openai',     label: 'OpenAI',           url: 'https://api.openai.com/v1', keysUrl: 'https://platform.openai.com/api-keys' },
   { id: 'anthropic',  label: 'Anthropic',        url: 'https://api.anthropic.com/v1', keysUrl: 'https://console.anthropic.com/settings/keys' },
@@ -11,11 +18,21 @@ export const PROVIDERS = [
   { id: 'mistral',    label: 'Mistral',          url: 'https://api.mistral.ai/v1', keysUrl: 'https://console.mistral.ai/api-keys' },
   { id: 'google',     label: 'Google',           url: 'https://generativelanguage.googleapis.com/v1beta/openai', keysUrl: 'https://aistudio.google.com/apikey' },
   { id: 'ollama',     label: 'Ollama',           url: 'http://localhost:11434/v1', keysUrl: null },
+  // OmniRoute is a gateway you run yourself (`npm i -g omniroute && omniroute`); it
+  // fronts many providers behind one OpenAI-compatible endpoint on :20128, and its
+  // key comes from its own local dashboard rather than a hosted console.
+  { id: 'omniroute',  label: 'OmniRoute',        url: 'http://localhost:20128/v1', keysUrl: 'http://localhost:20128/dashboard' },
   { id: 'custom',     label: 'Custom',           url: '', keysUrl: null },
 ]
 
 /** @type {Record<string, { label: string, model: string, tag: string }[]>} */
 export const PROVIDER_MODELS = {
+  // Aliases, not upstream model names: the gateway decides what actually serves
+  // the request, so routing can change without invalidating a saved profile.
+  stroke: [
+    { label: 'Stroke Free', model: 'stroke-free', tag: 'free' },
+    { label: 'Stroke Free · Fast', model: 'stroke-free-fast', tag: 'free' },
+  ],
   openrouter: [
     { label: 'DeepSeek V3', model: 'deepseek/deepseek-chat-v3-0324:free', tag: 'free' },
     { label: 'Llama 3.3 70B', model: 'meta-llama/llama-3.3-70b-instruct:free', tag: 'free' },
@@ -45,13 +62,13 @@ export const PROVIDER_MODELS = {
     { label: 'Gemini 1.5 Pro', model: 'gemini-1.5-pro', tag: 'smart' },
     { label: 'Gemini 1.5 Flash', model: 'gemini-1.5-flash', tag: 'fast' },
   ],
-  ollama: [
-    { label: 'llama3', model: 'llama3', tag: 'local' },
-    { label: 'llama3.1', model: 'llama3.1', tag: 'local' },
-    { label: 'qwen2.5-coder', model: 'qwen2.5-coder', tag: 'local' },
-    { label: 'codellama', model: 'codellama', tag: 'local' },
-    { label: 'mistral', model: 'mistral', tag: 'local' },
-  ],
+  // Ollama models are discovered from the running server — it only accepts exact
+  // installed tags (`llama3.1:8b`), so any hardcoded guess is a 404 waiting to happen.
+  ollama: [],
+  // Same story as Ollama: the catalogue depends on which upstream providers the
+  // user connected in their dashboard, so it is read from the gateway at runtime.
+  // Its routing aliases (`auto`, `auto/best-coding`, …) come back from /v1/models too.
+  omniroute: [],
   // Copilot models are fetched dynamically; these are the static fallback
   copilot: [
     { label: 'GPT-4o',             model: 'gpt-4o',               tag: 'smart' },
@@ -83,16 +100,29 @@ export const PROVIDER_MODELS = {
 const PROFILES_KEY = 'stroke:ai-profiles'
 const ACTIVE_KEY   = 'stroke:ai-active-profile'
 const LEGACY_KEY   = 'stroke:ai-settings'
+// Set once, the first time the default profile is seeded. Without it, a user who
+// deletes every profile gets Stroke Free handed back on the next launch.
+const SEEDED_KEY   = 'stroke:ai-seeded'
 
 // ── Default profile ──────────────────────────────────────────────────────────
 
+/**
+ * The profile a fresh install starts on.
+ *
+ * This used to be an OpenRouter model, which cannot answer without a key the new
+ * user hasn't got — so the assistant was broken until they went and configured
+ * one. Stroke Free needs no credentials, so the AI works on first launch.
+ */
 function makeDefaultProfile() {
   return /** @type {ModelProfile} */ ({
     id: 'default',
-    name: 'DeepSeek V3',
-    provider: 'openrouter',
-    baseUrl: 'https://openrouter.ai/api/v1',
-    model: 'deepseek/deepseek-chat-v3-0324:free',
+    name: 'Stroke Free',
+    provider: 'stroke',
+    baseUrl: STROKE_FREE_BASE_URL,
+    // The fast alias by default. The gateway still routes any turn that carries
+    // tools to the larger model, so the database agent keeps working while plain
+    // conversation runs on the cheap one — the alias sets the floor, not the cap.
+    model: 'stroke-free-fast',
   })
 }
 
@@ -122,16 +152,31 @@ function loadProfiles() {
       }
     }
   } catch { /* ignore */ }
-  return []
+  // Nothing stored and nothing to migrate: this is a fresh install, so seed the
+  // credential-free profile rather than leaving the picker on "No model" — the
+  // assistant has to work before the user has configured anything.
+  try {
+    if (localStorage.getItem(SEEDED_KEY)) return []
+  } catch { /* ignore */ }
+  const seed = [makeDefaultProfile()]
+  try {
+    localStorage.setItem(SEEDED_KEY, '1')
+    localStorage.setItem(PROFILES_KEY, JSON.stringify(seed))
+  } catch { /* ignore */ }
+  return seed
 }
 
 /** @param {string} url */
 function detectProvider(url) {
+  if (url.includes('stroke.click')) return 'stroke'
   if (url.includes('openrouter.ai')) return 'openrouter'
   if (url.includes('openai.com')) return 'openai'
   if (url.includes('anthropic.com')) return 'anthropic'
   if (url.includes('mistral.ai')) return 'mistral'
   if (url.includes('googleapis.com')) return 'google'
+  // Port first: both run on loopback, so the host alone can't tell them apart.
+  if (url.includes(':20128')) return 'omniroute'
+  if (url.includes(':11434')) return 'ollama'
   if (url.includes('localhost') || url.includes('127.0.0.1')) return 'ollama'
   return 'custom'
 }
@@ -270,6 +315,8 @@ export function setAiSettings(s) { aiSettings.set(s); return s }
 export function isAiConfigured(s) {
   return Boolean(s.apiKey) ||
     /localhost|127\.0\.0\.1/.test(s.baseUrl) ||
+    // The free tier authenticates with the device id, so "no key" is configured.
+    (s.baseUrl ?? '').includes('stroke.click') ||
     (s.baseUrl ?? '').includes('githubcopilot.com')
 }
 

@@ -48,7 +48,10 @@ export default defineConfig({
     },
   },
   server: {
-    port: 8080,
+    // Must match `devUrl` in src-tauri/tauri.conf.json. strictPort so a busy port
+    // fails loudly instead of sliding to 8081 and leaving the webview on a dead URL.
+    port: 1420,
+    strictPort: true,
     // The dev server may resolve node_modules from a parent dir (e.g. when running
     // from a git worktree that shares the repo's node_modules). Relax the fs
     // allow-list so those assets (fonts, etc.) serve instead of being blocked.

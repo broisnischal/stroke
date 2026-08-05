@@ -2,6 +2,7 @@
   import { renderMermaidSync, THEMES } from 'beautiful-mermaid'
   import { mermaidThemeFor, normalizeThemeId } from '$lib/themes/registry.js'
   import { cn } from '$lib/utils.js'
+  import { svgToPngBlob, downloadBlob } from '$lib/svg-png.js'
 
   /** @type {{ code: string, class?: string }} */
   let { code, class: className = '' } = $props()
@@ -242,49 +243,27 @@
     container?.dispatchEvent(new CustomEvent(name))
   }
 
-  /** Download the current diagram as an SVG file. */
-  export function exportSvg(filename = 'diagram.svg') {
+  /**
+   * Download the current diagram as an SVG file.
+   * @returns {Promise<string | null>} saved path ('' in browser dev, null if cancelled)
+   */
+  export async function exportSvg(filename = 'diagram.svg') {
     const svg = container?.querySelector('svg')
-    if (!svg) return
+    if (!svg) return null
     const xml = new XMLSerializer().serializeToString(svg)
     const blob = new Blob(['<?xml version="1.0" encoding="UTF-8"?>\n', xml], { type: 'image/svg+xml' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url; a.download = filename; a.click()
-    URL.revokeObjectURL(url)
+    return await downloadBlob(blob, filename)
   }
 
-  /** Download the current diagram as a PNG file. */
+  /**
+   * Download the current diagram as a PNG file.
+   * @returns {Promise<string | null>} saved path ('' in browser dev, null if cancelled)
+   */
   export async function exportPng(filename = 'diagram.png') {
-    const svg = container?.querySelector('svg')
-    if (!svg) return
-    const clone = /** @type {SVGSVGElement} */ (svg.cloneNode(true))
-    const vb = svg.viewBox.baseVal
-    const w = vb.width || svg.clientWidth || 1200
-    const h = vb.height || svg.clientHeight || 800
-    clone.setAttribute('width', String(w))
-    clone.setAttribute('height', String(h))
-    const xml = new XMLSerializer().serializeToString(clone)
-    const blob = new Blob([xml], { type: 'image/svg+xml' })
-    const url = URL.createObjectURL(blob)
-    await new Promise((resolve) => {
-      const img = new Image()
-      img.onload = () => {
-        const dpr = window.devicePixelRatio || 2
-        const canvas = document.createElement('canvas')
-        canvas.width = w * dpr; canvas.height = h * dpr
-        const ctx = canvas.getContext('2d')
-        ctx?.scale(dpr, dpr)
-        ctx?.drawImage(img, 0, 0)
-        URL.revokeObjectURL(url)
-        canvas.toBlob((b) => {
-          if (b) { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = filename; a.click() }
-          resolve(undefined)
-        })
-      }
-      img.onerror = () => { URL.revokeObjectURL(url); resolve(undefined) }
-      img.src = url
-    })
+    const svg = /** @type {SVGSVGElement|null} */ (container?.querySelector('svg'))
+    if (!svg) return null
+    const blob = await svgToPngBlob(svg, { scale: window.devicePixelRatio || 2 })
+    return await downloadBlob(blob, filename)
   }
 </script>
 

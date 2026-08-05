@@ -24,7 +24,7 @@
 	<ScrollAreaPrimitive.Viewport
 		bind:ref={viewportRef}
 		data-slot="scroll-area-viewport"
-		class="size-full rounded-[inherit] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 [&>div]:block! [&>div]:min-w-full [will-change:scroll-position]"
+		class="size-full rounded-[inherit] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/18 focus-visible:outline-1 [&>div]:block! [&>div]:min-w-full [will-change:scroll-position]"
 	>
 		{@render children?.()}
 	</ScrollAreaPrimitive.Viewport>
