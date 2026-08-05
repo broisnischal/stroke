@@ -62,7 +62,6 @@
   const ROW_H     = 28
   const HDR_H     = 42
   const PAD_B     = 10
-  const BATCH     = 16
   const WARN_MANY = 60
 
   const cfg = { NODE_W, ROW_H, HDR_H, PAD_B }
@@ -802,8 +801,8 @@
       markD.push(svgMarker(a0, a1, edge?.many === false ? 'bar' : 'fork', false))
       markD.push(svgMarker(z0, z1, 'bar', edge?.optional === true))
     }
-    o.push(`<path d="${lineD.join(' ')}" fill="none" stroke="${EDGE_INK}" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>`)
-    o.push(`<path d="${markD.join(' ')}" fill="none" stroke="${EDGE_INK}" stroke-width="1.2" stroke-linecap="round"/>`)
+    o.push(`<path d="${lineD.join(' ')}" fill="none" stroke="${c.edge}" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>`)
+    o.push(`<path d="${markD.join(' ')}" fill="none" stroke="${c.edge}" stroke-width="1.2" stroke-linecap="round"/>`)
 
     // nodes
     for (const n of vis) {
@@ -816,21 +815,21 @@
       const isFocus = n.data?.isFocus
 
       // shadow
-      o.push(`<rect x="${nx+3}" y="${ny+4}" width="${NODE_W}" height="${h}" rx="8" fill="rgba(0,0,0,0.45)"/>`)
+      o.push(`<rect x="${nx+3}" y="${ny+4}" width="${NODE_W}" height="${h}" rx="8" fill="${c.shadow}"/>`)
       // focus halo - marks the table the diagram was scoped to
       if (isFocus) {
-        o.push(`<rect x="${nx-6}" y="${ny-6}" width="${NODE_W+12}" height="${h+12}" rx="13" fill="rgba(99,102,241,0.10)" stroke="rgba(99,102,241,0.4)" stroke-width="1.5"/>`)
+        o.push(`<rect x="${nx-6}" y="${ny-6}" width="${NODE_W+12}" height="${h+12}" rx="13" fill="${c.focus}" fill-opacity="0.10" stroke="${c.focus}" stroke-opacity="0.4" stroke-width="1.5"/>`)
       }
       // card bg
-      o.push(`<rect x="${nx}" y="${ny}" width="${NODE_W}" height="${h}" rx="8" fill="#141418" stroke="${isFocus || isSel ? '#6366f1' : '#252535'}" stroke-width="${isFocus ? 2 : isSel ? 1.5 : 1}"/>`)
+      o.push(`<rect x="${nx}" y="${ny}" width="${NODE_W}" height="${h}" rx="8" fill="${c.card}" stroke="${isFocus || isSel ? c.accent : c.border}" stroke-width="${isFocus ? 2 : isSel ? 1.5 : 1}"/>`)
       // header
       o.push(`<clipPath id="hc${n.id.replace(/\W/g,'_')}"><rect x="${nx}" y="${ny}" width="${NODE_W}" height="${HDR_H + 8}" rx="8"/></clipPath>`)
-      o.push(`<rect x="${nx}" y="${ny}" width="${NODE_W}" height="${HDR_H + 8}" fill="${isFocus ? '#252546' : '#1d1d26'}" clip-path="url(#hc${n.id.replace(/\W/g,'_')})"/>`)
-      o.push(`<line x1="${nx}" y1="${ny+HDR_H}" x2="${nx+NODE_W}" y2="${ny+HDR_H}" stroke="${isFocus ? 'rgba(99,102,241,0.55)' : '#252535'}" stroke-width="1"/>`)
-      o.push(`<text x="${nx+12}" y="${ny+HDR_H/2+4}" font-size="11" font-weight="600" font-family="${FONT}" fill="#e2e2ea">${xesc(n.data.name)}</text>`)
+      o.push(`<rect x="${nx}" y="${ny}" width="${NODE_W}" height="${HDR_H + 8}" fill="${c.header}" clip-path="url(#hc${n.id.replace(/\W/g,'_')})"/>`)
+      o.push(`<line x1="${nx}" y1="${ny+HDR_H}" x2="${nx+NODE_W}" y2="${ny+HDR_H}" stroke="${isFocus ? c.accent : c.border}" stroke-opacity="${isFocus ? 0.55 : 1}" stroke-width="1"/>`)
+      o.push(`<text x="${nx+12}" y="${ny+HDR_H/2+4}" font-size="11" font-weight="600" font-family="${FONT}" fill="${c.text}">${xesc(n.data.name)}</text>`)
       if (isFocus) {
-        o.push(`<rect x="${nx+NODE_W-62}" y="${ny+HDR_H/2-7}" width="50" height="14" rx="4" fill="#6366f1"/>`)
-        o.push(`<text x="${nx+NODE_W-37}" y="${ny+HDR_H/2+4}" font-size="8" font-weight="700" font-family="${FONT}" fill="#fff" text-anchor="middle">current</text>`)
+        o.push(`<rect x="${nx+NODE_W-62}" y="${ny+HDR_H/2-7}" width="50" height="14" rx="4" fill="${c.accent}"/>`)
+        o.push(`<text x="${nx+NODE_W-37}" y="${ny+HDR_H/2+4}" font-size="8" font-weight="700" font-family="${FONT}" fill="${c.card}" text-anchor="middle">current</text>`)
       }
 
       for (let i = 0; i < cols.length; i++) {
@@ -928,8 +927,8 @@
   export function exportDiagram(/** @type {'png'|'copy-png'|'svg'|'mermaid'} */ kind) {
     if (kind === 'png') return void renderPng('download')
     if (kind === 'copy-png') return void renderPng('clipboard')
-    if (kind === 'svg') return exportSVG()
-    return exportMermaid()
+    if (kind === 'svg') return void exportSVG()
+    return void exportMermaid()
   }
   /** @param {'download'|'clipboard'} sink */
   async function renderPng(sink) {
