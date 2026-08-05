@@ -1,6 +1,7 @@
 <script>
   import { onDestroy } from "svelte";
   import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
+  import { readOnlyMode, guardWrite, READ_ONLY_HINT } from "$lib/stores/read-only.js";
   import Download from "@lucide/svelte/icons/download";
   import Upload from "@lucide/svelte/icons/upload";
   import Check from "@lucide/svelte/icons/check";
@@ -266,6 +267,8 @@
   }
 
   async function runImport() {
+    // Restoring a dump is the largest write the app can make.
+    if (!guardWrite("restore a backup into this database")) return;
     if (!importSql.trim()) {
       toast.error("No SQL loaded");
       return;
@@ -517,7 +520,7 @@
                 <select
                   id="export-schema-select"
                   bind:value={exportSchema}
-                  class="h-8 w-full appearance-none rounded-md border border-border/60 bg-background pl-3 pr-8 font-mono text-ui-xs text-foreground focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none/40"
+                  class="h-8 w-full appearance-none rounded-md border border-border/60 bg-background pl-3 pr-8 font-mono text-ui-xs text-foreground focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none/40"
                 >
                   <option value="">All schemas</option>
                   {#each schemas as s (s)}<option value={s}>{s}</option>{/each}
@@ -1003,7 +1006,8 @@
           {#if importPhase === "idle"}
             <button
               type="button"
-              disabled={!importSql || !importConfirmed}
+              disabled={!importSql || !importConfirmed || $readOnlyMode}
+              title={$readOnlyMode ? READ_ONLY_HINT : undefined}
               onclick={runImport}
               class="flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-ui-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
             >

@@ -49,6 +49,30 @@ export async function installClipboardBridge() {
         try { return await tauriRead() } catch { return nativeRead ? nativeRead() : '' }
       }
     }
+
+    // Monaco sniffs the UA for Safari, which WebKitGTK also matches, and installs
+    // a Safari clipboard workaround: on *every* click and keydown in an editor it
+    // calls `clipboard.write([new ClipboardItem({'text/plain': <deferred>})])`.
+    // WebKitGTK rejects that with NotAllowedError, so Monaco logged the error and
+    // cancelled the previous deferred - emitting a NotAllowedError plus an
+    // unhandled "Canceled" rejection on every keystroke. Serving `write` from the
+    // Tauri plugin makes it resolve quietly, and still copies the text if the
+    // deferred is ever completed (Monaco's own copy path uses execCommand).
+    let writeSeq = 0
+    clip.write = async (/** @type {any} */ items) => {
+      const seq = ++writeSeq
+      try {
+        const item = items && items[0]
+        if (!item || typeof item.getType !== 'function') return
+        if (item.types && item.types.length && !item.types.includes('text/plain')) return
+        const part = await item.getType('text/plain')
+        // A newer gesture superseded this one - don't clobber the clipboard.
+        if (seq !== writeSeq) return
+        await tauriWrite(typeof part === 'string' ? part : await part.text())
+      } catch {
+        // Deferred cancelled by a newer gesture, or a payload we can't serve.
+      }
+    }
   } catch {
     // `writeText` not reassignable in this engine - nothing more we can do.
   }

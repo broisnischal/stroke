@@ -47,7 +47,7 @@
   )
 
   const fieldClass =
-    'h-8 w-full min-w-0 rounded-md border border-border bg-background/60 px-2.5 font-mono text-ui-sm shadow-none outline-none transition-colors placeholder:text-muted-foreground/45 focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50'
+    'h-8 w-full min-w-0 rounded-md border border-border bg-background/60 px-2.5 font-mono text-ui-sm shadow-none outline-none transition-colors placeholder:text-muted-foreground/45 focus-visible:border-ring/55 focus-visible:ring-1 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50'
 
   const actionBtnClass =
     'inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-border/70 bg-background/70 px-2 font-mono text-ui-2xs text-muted-foreground transition-colors hover:bg-accent/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50'

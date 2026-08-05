@@ -2,6 +2,7 @@
   import Icon         from './Icon.svelte'
   import { tick, onMount } from 'svelte'
   import { cn }       from '$lib/utils.js'
+  import { readOnlyMode, READ_ONLY_HINT } from '$lib/stores/read-only.js'
   import { aiProfiles, activeProfileId, setActiveProfile } from '$lib/stores/ai-settings.js'
   import { toggleLightDark, isCurrentThemeDark, appVimMode, appLiveMode } from '$lib/stores/settings.js'
   import { vimSubMode, VIM_MODE_LABEL } from '$lib/vim/vim.js'
@@ -564,7 +565,8 @@
                       type="button"
                       class="inline-flex size-5 items-center justify-center rounded-md text-muted-foreground/40 transition-colors hover:bg-muted/50 hover:text-foreground"
                       onclick={() => { dbOpen = false; createDbOpen = true }}
-                      title="Create database"
+                      disabled={$readOnlyMode}
+                      title={$readOnlyMode ? READ_ONLY_HINT : 'Create database'}
                     >
                       <Icon name="plus" class="size-3" />
                     </button>
@@ -580,7 +582,8 @@
             type="button"
             class={iconBtn}
             onclick={() => (createDbOpen = true)}
-            title="Create new database"
+            disabled={$readOnlyMode}
+            title={$readOnlyMode ? READ_ONLY_HINT : 'Create new database'}
             aria-label="Create new database"
           >
             <Icon name="plus" class="size-3" />

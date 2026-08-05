@@ -485,6 +485,59 @@ async function tauriFetch(url, init, signal) {
   }
 }
 
+/**
+ * Stroke's free tier authenticates with the device id rather than an API key, so
+ * there is nothing for the user to paste. Cached: it never changes within a run,
+ * and every request would otherwise pay for an IPC round trip.
+ * @type {string | null}
+ */
+let _deviceIdCache = null
+
+/** True for requests bound for our own free gateway. @param {string} base */
+export function isStrokeFreeEndpoint(base) {
+  return base.includes('stroke.click')
+}
+
+/** @returns {Promise<string>} the device id, or '' when unavailable */
+async function strokeDeviceToken() {
+  if (_deviceIdCache != null) return _deviceIdCache
+  if (!isTauriApp()) return ''
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    _deviceIdCache = String(await invoke('ai_device_id'))
+  } catch {
+    _deviceIdCache = ''
+  }
+  return _deviceIdCache
+}
+
+/**
+ * List the model IDs an OpenAI-compatible endpoint exposes.
+ * Local servers (Ollama, LM Studio) name models by installed tag — `llama3.1:8b`,
+ * not `llama3.1` — so the picker has to ask rather than guess.
+ * @param {string} baseUrl
+ * @param {string} [apiKey]
+ * @returns {Promise<string[]>}
+ */
+export async function fetchModelIds(baseUrl, apiKey) {
+  const base = baseUrl.replace(/\/+$/, '')
+  const url = `${base}/models`
+
+  if (isTauriApp()) {
+    const { invoke } = await import('@tauri-apps/api/core')
+    return /** @type {string[]} */ (await invoke('ai_list_models', { url, apiKey: apiKey || null }))
+  }
+
+  const res = await fetch(url, {
+    headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+  })
+  if (!res.ok) throw new Error(formatApiError(res.status, await res.text().catch(() => '')))
+  const data = await res.json()
+  return Array.isArray(data?.data)
+    ? data.data.map((/** @type {{ id?: string }} */ m) => m?.id).filter(Boolean)
+    : []
+}
+
 /** @param {string | null} header */
 function retryAfterMs(header) {
   if (!header) return null
@@ -565,8 +618,12 @@ export async function chatCompletionRaw(settings, messages, tools = null) {
   const base = settings.baseUrl.replace(/\/+$/, '')
   const url = base.endsWith('/chat/completions') ? base : `${base}/chat/completions`
 
+  // `stream: false` is stated rather than left to the default: gateways that front
+  // many providers (OmniRoute) answer an omitted `stream` with an SSE body, which
+  // this path then fails to parse as JSON. Every OpenAI-compatible server accepts
+  // the explicit flag, so saying it costs nothing and removes the ambiguity.
   /** @type {Record<string, unknown>} */
-  const body = { model: settings.model, messages, temperature: settings.temperature ?? 0, max_tokens: settings.maxTokens ?? 16384 }
+  const body = { model: settings.model, messages, stream: false, temperature: settings.temperature ?? 0, max_tokens: settings.maxTokens ?? 16384 }
   if (settings.topK != null) body.top_k = settings.topK
   if (tools?.length) {
     body.tools = tools
@@ -581,6 +638,8 @@ export async function chatCompletionRaw(settings, messages, tools = null) {
     const { getCopilotJwt, COPILOT_EXTRA_HEADERS } = await import('./copilot.js')
     bearerKey = await getCopilotJwt()
     Object.assign(reqHeaders, COPILOT_EXTRA_HEADERS)
+  } else if (isStrokeFreeEndpoint(base)) {
+    bearerKey = await strokeDeviceToken()
   }
   if (bearerKey) reqHeaders['Authorization'] = `Bearer ${bearerKey}`
 
@@ -632,6 +691,8 @@ export async function* chatCompletionStream(settings, messages, tools = null, si
     const { getCopilotJwt, COPILOT_EXTRA_HEADERS } = await import('./copilot.js')
     bearerKey = await getCopilotJwt()
     Object.assign(reqHeaders, COPILOT_EXTRA_HEADERS)
+  } else if (isStrokeFreeEndpoint(base)) {
+    bearerKey = await strokeDeviceToken()
   }
   if (bearerKey) reqHeaders['Authorization'] = `Bearer ${bearerKey}`
 

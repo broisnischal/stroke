@@ -180,7 +180,7 @@
             type="text"
             placeholder="Search diagrams…"
             bind:value={searchQ}
-            class="h-7 w-full rounded-lg border border-border bg-background/50 pl-6 pr-2 text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none"
+            class="h-7 w-full rounded-lg border border-border bg-background/50 pl-6 pr-2 text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none"
           />
         </div>
       </div>
@@ -237,13 +237,13 @@
             type="text"
             bind:value={draftName}
             placeholder="Diagram name…"
-            class="h-7 min-w-0 flex-1 rounded-lg border border-border bg-background/50 px-2.5 text-ui-sm text-foreground placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none"
+            class="h-7 min-w-0 flex-1 rounded-lg border border-border bg-background/50 px-2.5 text-ui-sm text-foreground placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none"
           />
           <input
             type="text"
             bind:value={draftGroup}
             placeholder="Group"
-            class="h-7 w-24 rounded-lg border border-border bg-background/50 px-2.5 text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none"
+            class="h-7 w-24 rounded-lg border border-border bg-background/50 px-2.5 text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none"
           />
           <button
             type="button"
@@ -290,7 +290,7 @@
             <textarea
               bind:value={draftCode}
               spellcheck="false"
-              class="min-h-0 flex-1 resize-none rounded-lg border border-border bg-background/40 p-3 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/30 focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none [font-feature-settings:'liga'_0,'calt'_0] [font-variant-ligatures:none]"
+              class="min-h-0 flex-1 resize-none rounded-lg border border-border bg-background/40 p-3 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/30 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none [font-feature-settings:'liga'_0,'calt'_0] [font-variant-ligatures:none]"
             ></textarea>
           </div>
           <div class="flex w-1/2 min-w-0 flex-col overflow-hidden">

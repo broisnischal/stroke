@@ -276,7 +276,7 @@
                   type="text"
                   bind:value={nameInput}
                   placeholder="Dashboard name…"
-                  class="h-7 flex-1 rounded-md border border-border bg-background px-2 font-mono text-ui-xs outline-none focus:border-ring focus:ring-1 focus:ring-ring"
+                  class="h-7 flex-1 rounded-md border border-border bg-background px-2 font-mono text-ui-xs outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
                   onkeydown={(e) => {
                     if (e.key === "Enter") handleCreateDashboard();
                     if (e.key === "Escape") namingOpen = false;

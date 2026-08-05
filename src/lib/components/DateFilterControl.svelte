@@ -142,7 +142,7 @@
             <Minus class="size-3" />
           </button>
           <input
-            class="h-6 w-9 min-w-0 rounded-lg border border-border bg-input/30 text-center font-mono text-ui-xs tabular-nums outline-none focus:border-ring focus:ring-1 focus:ring-ring"
+            class="h-6 w-9 min-w-0 rounded-lg border border-border bg-input/30 text-center font-mono text-ui-xs tabular-nums outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
             inputmode="numeric"
             value={lastN}
             oninput={(e) => (lastN = Math.max(1, parseInt(e.currentTarget.value.replace(/\D/g, "")) || 1))}
@@ -152,7 +152,7 @@
           </button>
         </div>
         <select
-          class="h-6 w-full rounded-md border border-input bg-input/30 px-1.5 text-ui-xs text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring"
+          class="h-6 w-full rounded-md border border-input bg-input/30 px-1.5 text-ui-xs text-foreground outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
           value={lastUnit}
           onchange={(e) => (lastUnit = e.currentTarget.value)}
         >

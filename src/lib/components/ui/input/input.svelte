@@ -19,7 +19,7 @@
 		bind:this={ref}
 		data-slot={dataSlot}
 		class={cn(
-			"dark:bg-input/30 border-border focus-visible:border-ring focus-visible:ring-0 aria-invalid:ring-destructive/60 aria-invalid:border-destructive dark:aria-invalid:border-destructive/50 disabled:bg-input/50 dark:disabled:bg-input/80 h-9 rounded-lg border-2 bg-transparent px-3 py-1 text-ui-sm transition-[color,box-shadow,border-color] hover:border-foreground/30 file:h-6 file:text-ui-sm file:font-medium aria-invalid:ring-1 file:text-foreground placeholder:text-muted-foreground w-full min-w-0 outline-none file:inline-flex file:border-0 file:bg-transparent disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50",
+			"dark:bg-input/30 border-border focus-visible:border-ring/55 focus-visible:ring-2 focus-visible:ring-ring/15 aria-invalid:ring-destructive/60 aria-invalid:border-destructive dark:aria-invalid:border-destructive/50 disabled:bg-input/50 dark:disabled:bg-input/80 h-9 rounded-lg border-2 bg-transparent px-3 py-1 text-ui-sm transition-[color,box-shadow,border-color] hover:border-foreground/30 file:h-6 file:text-ui-sm file:font-medium aria-invalid:ring-1 file:text-foreground placeholder:text-muted-foreground w-full min-w-0 outline-none file:inline-flex file:border-0 file:bg-transparent disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50",
 			className
 		)}
 		type="file"
@@ -32,7 +32,7 @@
 		bind:this={ref}
 		data-slot={dataSlot}
 		class={cn(
-			"dark:bg-input/30 border-border focus-visible:border-ring focus-visible:ring-0 aria-invalid:ring-destructive/60 aria-invalid:border-destructive dark:aria-invalid:border-destructive/50 disabled:bg-input/50 dark:disabled:bg-input/80 h-9 rounded-lg border-2 bg-transparent px-3 py-1 text-ui-sm transition-[color,box-shadow,border-color] hover:border-foreground/30 file:h-6 file:text-ui-sm file:font-medium aria-invalid:ring-1 file:text-foreground placeholder:text-muted-foreground w-full min-w-0 outline-none file:inline-flex file:border-0 file:bg-transparent disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50",
+			"dark:bg-input/30 border-border focus-visible:border-ring/55 focus-visible:ring-2 focus-visible:ring-ring/15 aria-invalid:ring-destructive/60 aria-invalid:border-destructive dark:aria-invalid:border-destructive/50 disabled:bg-input/50 dark:disabled:bg-input/80 h-9 rounded-lg border-2 bg-transparent px-3 py-1 text-ui-sm transition-[color,box-shadow,border-color] hover:border-foreground/30 file:h-6 file:text-ui-sm file:font-medium aria-invalid:ring-1 file:text-foreground placeholder:text-muted-foreground w-full min-w-0 outline-none file:inline-flex file:border-0 file:bg-transparent disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50",
 			className
 		)}
 		{type}

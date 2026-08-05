@@ -3,7 +3,8 @@
   import Sparkles from "@lucide/svelte/icons/sparkles";
   import Loader2 from "@lucide/svelte/icons/loader-2";
   import Bot from "@lucide/svelte/icons/bot";
-  import Send from "@lucide/svelte/icons/send";
+  import ArrowUp from "@lucide/svelte/icons/arrow-up";
+  import Reply from "@lucide/svelte/icons/reply";
   import Square from "@lucide/svelte/icons/square";
   import Settings2 from "@lucide/svelte/icons/settings-2";
   import Trash2 from "@lucide/svelte/icons/trash-2";
@@ -37,6 +38,8 @@
   import { Label } from "$lib/components/ui/label/index.js";
   import { cn } from "$lib/utils.js";
   import { executeSql } from "$lib/api.js";
+  import { isReadOnly, guardWrite } from "$lib/stores/read-only.js";
+  import { isWriteSql, stripSqlComments } from "$lib/sql-write.js";
   import {
     rowsToCsv,
     rowsToJson,
@@ -77,6 +80,8 @@
     aiProfiles,
     activeProfileId,
   } from "$lib/stores/ai-settings.js";
+  import BrandIcon from "$lib/components/BrandIcon.svelte";
+  import { hasBrand } from "$lib/brand-icons.js";
   import {
     aiChatParams,
     updateChatParams,
@@ -103,11 +108,12 @@
   } from "$lib/stores/conversations.js";
   import { generateSuggestions } from "$lib/ai-suggestions.js";
   import { formatCompactCount } from "$lib/table-list.js";
+  import { svgToPngBlob, downloadBlob } from "$lib/svg-png.js";
 
   /**
    * @typedef {
-   *   | { id: string, kind: 'user', text: string }
-   *   | { id: string, kind: 'assistant', parts: import('$lib/ai.js').AssistantPart[] }
+   *   | { id: string, kind: 'user', text: string, ts?: number }
+   *   | { id: string, kind: 'assistant', parts: import('$lib/ai.js').AssistantPart[], ts?: number }
    *   | { id: string, kind: 'streaming' }
    *   | { id: string, kind: 'result', sql: string, columns: {name:string,dataType?:string}[], rows: unknown[][], total: number, error: string|null, isSchema?: boolean, capped?: boolean }
    *   | { id: string, kind: 'chart', spec: { type: string, title: string, data: object[], x_col: string, y_col: string, z_col?: string, group_col?: string }, error: string|null }
@@ -117,6 +123,17 @@
    *   | { id: string, kind: 'diagram', code: string, title: string }
    * } ChatItem
    */
+
+  /**
+   * Leading keyword of a statement, for the SQL block badge. More useful than a
+   * generic "SQL" chip: at a glance you know whether the model is about to read or
+   * to write, which is the only question that matters before hitting Run.
+   * @param {string} sql
+   */
+  function sqlStatementKind(sql) {
+    const m = /^\s*([a-z]+)/i.exec(stripSqlComments(sql).trim());
+    return m ? m[1].toUpperCase().slice(0, 12) : "SQL";
+  }
 
   /**
    * Returns human-readable label + detail for an executing item.
@@ -502,15 +519,15 @@
     const plainItems = $state.snapshot(saveable);
     const plainHistory = $state.snapshot(rawApiHistory);
     if (activeConvId) {
+      // The title is deliberately NOT written here. It is seeded from the first
+      // message on create, then owned by generateAiTitle (and by rename) — this
+      // save runs after every turn, so re-deriving it from the first message
+      // clobbered the generated title moments after it landed, which is why every
+      // conversation in the list stayed named after its opening word.
       await updateConversation(activeConvId, {
-        title,
         items: plainItems,
         apiHistory: plainHistory,
       });
-      // Patch title in place - no re-sort, no visual shuffle
-      convList = convList.map((c) =>
-        c.id === activeConvId ? { ...c, title } : c,
-      );
     } else {
       const conv = await createConversation({
         title,
@@ -536,10 +553,16 @@
       const { content } = await chatCompletionRaw(settings, [
         {
           role: "user",
-          content: `Given this conversation, write a short 3-6 word title that captures the topic. Reply with ONLY the title, no quotes, no punctuation at the end.\n\nUser: ${String(userMsg.content).slice(0, 300)}\nAssistant: ${String(assistantMsg.content).slice(0, 300)}`,
+          content: `Name this database-assistant conversation with a specific 3-6 word title: what the user is working on, naming the tables, metric or task involved. Prefer "Revenue by plan, last 90d" over "Data question". Never echo a greeting. Reply with ONLY the title — no quotes, no trailing punctuation.\n\nUser: ${String(userMsg.content).slice(0, 600)}\nAssistant: ${String(assistantMsg.content).slice(0, 600)}`,
         },
       ]);
-      const title = content?.trim().slice(0, 60);
+      // Small models like to wrap the answer in quotes or prefix "Title:".
+      const title = content
+        ?.trim()
+        .replace(/^\s*(?:title|chat)\s*:\s*/i, "")
+        .replace(/^["'`]|["'`.]+$/g, "")
+        .trim()
+        .slice(0, 60);
       if (!title || title.length < 3) return;
       await updateConversation(activeConvId, { title });
       convList = convList.map((c) =>
@@ -660,6 +683,12 @@
     return () => { clearInterval(id); clearTimeout(fadeId); };
   });
   let inputText = $state("");
+  /** Composer focus, so the shortcut hint only shows when it is useful. */
+  let inputFocused = $state(false);
+  /** The model in play - its brand mark identifies the chat surfaces. */
+  const activeAiProfile = $derived(
+    $aiProfiles.find((p) => p.id === $activeProfileId) ?? $aiProfiles[0],
+  );
   const isDraftChat = $derived(!activeConvId && items.length > 0);
   /** Tracks all (name:args) combos executed this turn - prevents exact duplicate calls */
   let executedCalls = new Set();
@@ -1106,47 +1135,17 @@
       toast.error("No diagram to export");
       return;
     }
-    const serializer = new XMLSerializer();
-    const svgStr = serializer.serializeToString(svgEl);
-    const svgBlob = new Blob([svgStr], { type: "image/svg+xml" });
-    const url = URL.createObjectURL(svgBlob);
-    const img = new Image();
-    img.onload = () => {
-      const c = document.createElement("canvas");
-      const w = svgEl.viewBox.baseVal.width || svgEl.clientWidth || 800;
-      const h = svgEl.viewBox.baseVal.height || svgEl.clientHeight || 600;
-      c.width = w * 2;
-      c.height = h * 2; // 2x for retina
-      const ctx2 = c.getContext("2d");
-      if (!ctx2) {
-        URL.revokeObjectURL(url);
-        return;
-      }
-      ctx2.fillStyle = "#ffffff";
-      ctx2.fillRect(0, 0, c.width, c.height);
-      ctx2.drawImage(img, 0, 0, c.width, c.height);
-      URL.revokeObjectURL(url);
-      c.toBlob((b) => {
-        if (!b) {
-          toast.error("Could not export PNG");
-          return;
-        }
-        const pngUrl = URL.createObjectURL(b);
-        const a = document.createElement("a");
-        a.href = pngUrl;
-        a.download = "diagram.png";
-        a.click();
-        URL.revokeObjectURL(pngUrl);
-        toast.success("PNG exported", {
-          description: "diagram.png saved to your downloads",
-        });
-      }, "image/png");
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      toast.error("Could not export PNG");
-    };
-    img.src = url;
+    try {
+      const blob = await svgToPngBlob(svgEl, { scale: 2, background: "#ffffff" });
+      downloadBlob(blob, "diagram.png");
+      toast.success("PNG exported", {
+        description: "diagram.png saved to your downloads",
+      });
+    } catch (e) {
+      toast.error("Could not export PNG", {
+        description: e instanceof Error ? e.message : String(e),
+      });
+    }
   }
 
   /** @type {HTMLDivElement | null} */
@@ -1528,7 +1527,9 @@
       resetHistory();
     }
 
-    items.push(/** @type {ChatItem} */ ({ id: uid(), kind: "user", text }));
+    items.push(
+      /** @type {ChatItem} */ ({ id: uid(), kind: "user", text, ts: Date.now() }),
+    );
     apiHistory.push({ role: "user", content: text });
     rawApiHistory.push({ role: "user", content: text });
     await scrollBottom();
@@ -1619,6 +1620,7 @@
                   id: sid,
                   kind: "assistant",
                   parts: parseAssistantMessage(partial || "…"),
+                  ts: Date.now(),
                 })
               : i,
           );
@@ -1702,8 +1704,11 @@
             /** @type {ChatItem} */ ({ id: itemId, kind: "streaming" }),
           );
         }
+        // No scroll here: chunks arrive far faster than the ~90ms commit, and
+        // reading scrollHeight forces a synchronous layout of the whole
+        // conversation. AiMarkdown calls scrollBottomSoon via `onrender`, so the
+        // view sticks to the bottom exactly when the content has actually grown.
         scheduleStreamingUpdate(fullContent);
-        scrollBottomSoon();
       }
       if (chunk.toolCalls) {
         toolCalls = chunk.toolCalls;
@@ -1729,6 +1734,7 @@
               id: itemId,
               kind: "assistant",
               parts: parseAssistantMessage(fullContent),
+              ts: Date.now(),
             })
           : i,
       );
@@ -1761,6 +1767,7 @@
             id: uid(),
             kind: "assistant",
             parts: parseAssistantMessage(fullContent),
+            ts: Date.now(),
           }),
         );
         await scrollBottom();
@@ -1804,6 +1811,19 @@
 
       if (call.function.name === "execute_sql") {
         const sql = String(args.sql ?? "").trim();
+        if (sql && isReadOnly() && isWriteSql(sql)) {
+          // Refuse in the tool channel: the model needs to hear *why*, or it
+          // retries the same write until it hits the retry cap.
+          apiHistory.push({
+            role: "tool",
+            tool_call_id: call.id,
+            content: JSON.stringify({
+              error:
+                "This connection is open in read-only mode. Writing statements are blocked - propose the SQL to the user instead of running it.",
+            }),
+          });
+          return;
+        }
         if (!sql) {
           apiHistory.push({
             role: "tool",
@@ -2254,6 +2274,7 @@
   /** Run SQL from a text-mode code block (user pressed Run). */
   async function runSqlBlock(/** @type {string} */ sql) {
     if (loading) return;
+    if (isWriteSql(sql) && !guardWrite("run write statements from a reply")) return;
     error = "";
     if (isDestructiveSql(sql)) {
       const confirmed = await waitForConfirm(sql);
@@ -2335,6 +2356,147 @@
   async function copyText(text) {
     await navigator.clipboard.writeText(text).catch(() => {});
   }
+
+  // ── Copy / quote ──────────────────────────────────────────────────────────
+  /**
+   * Which control last copied, so it can show a tick without every button
+   * needing its own piece of state. Keyed `<itemId>:<what>`.
+   */
+  let copiedKey = $state("");
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let _copiedTimer;
+
+  /** @param {string} key @param {string} text */
+  async function copyWithFeedback(key, text) {
+    if (!text) return;
+    await copyText(text);
+    copiedKey = key;
+    clearTimeout(_copiedTimer);
+    _copiedTimer = setTimeout(() => {
+      if (copiedKey === key) copiedKey = "";
+    }, 1400);
+  }
+
+  /**
+   * An assistant turn as plain markdown - what a reader would expect on the
+   * clipboard, fenced code and all, rather than the rendered HTML.
+   * @param {import('$lib/ai.js').AssistantPart[]} parts
+   */
+  function assistantMarkdown(parts) {
+    return (parts ?? [])
+      .map((p) => {
+        if (p.type === "text" || p.type === "error" || p.type === "confirm_prompt")
+          return p.content;
+        if (p.type === "sql") return "```sql\n" + p.content.trim() + "\n```";
+        if (p.type === "mermaid") return "```mermaid\n" + p.content.trim() + "\n```";
+        if (p.type === "code")
+          return "```" + (p.lang || "") + "\n" + p.content.trim() + "\n```";
+        return "";
+      })
+      .filter((s) => s.trim())
+      .join("\n\n");
+  }
+
+  /**
+   * Quote `text` into the composer and focus it, the way a mail client replies
+   * to a passage: a `>` block plus a blank line to type into.
+   * @param {string} text
+   */
+  function quoteToInput(text) {
+    const quoted = text
+      .trim()
+      .split("\n")
+      .map((l) => `> ${l}`)
+      .join("\n");
+    const prefix = inputText.trim() ? `${inputText.replace(/\s+$/, "")}\n\n` : "";
+    inputText = `${prefix}${quoted}\n\n`;
+    clearSelectionToolbar();
+    inputRef?.focus();
+    // After the value lands, so the textarea measures its new content height.
+    tick().then(() => {
+      resizeInput();
+      if (inputRef) inputRef.selectionStart = inputRef.selectionEnd = inputText.length;
+    });
+  }
+
+  /**
+   * Wall-clock label under a message. Conversations saved before messages
+   * carried a timestamp have none - those simply show no time.
+   * @param {number | undefined} ts
+   */
+  function fmtMsgTime(ts) {
+    if (!ts) return "";
+    try {
+      return new Date(ts).toLocaleTimeString([], {
+        hour: "numeric",
+        minute: "2-digit",
+      });
+    } catch {
+      return "";
+    }
+  }
+
+  /**
+   * Drop a past prompt back into the composer, verbatim, for editing.
+   * @param {string} text
+   */
+  function reusePrompt(text) {
+    inputText = text;
+    inputRef?.focus();
+    tick().then(() => {
+      resizeInput();
+      if (inputRef) inputRef.selectionStart = inputRef.selectionEnd = inputText.length;
+    });
+  }
+
+  // ── Selection toolbar ─────────────────────────────────────────────────────
+  /**
+   * Floating Copy / Reply bar for a text selection inside the transcript.
+   *
+   * Anchored in viewport coordinates (`position: fixed`) taken from the
+   * selection's own rect: the transcript scrolls, and re-deriving a position
+   * per scroll frame would cost more than dismissing the bar does.
+   * @type {{ x: number, y: number, text: string } | null}
+   */
+  let selToolbar = $state(null);
+
+  function clearSelectionToolbar() {
+    selToolbar = null;
+  }
+
+  /** Read the live selection, if it lies inside the transcript. */
+  function readChatSelection() {
+    const sel = document.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
+    const text = sel.toString().trim();
+    if (!text) return null;
+    const range = sel.getRangeAt(0);
+    const host = msgListEl;
+    if (!host) return null;
+    const anchor =
+      range.commonAncestorContainer instanceof Element
+        ? range.commonAncestorContainer
+        : range.commonAncestorContainer.parentElement;
+    if (!anchor || !host.contains(anchor)) return null;
+    const rect = range.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) return null;
+    return { x: rect.left + rect.width / 2, y: rect.top, text };
+  }
+
+  function syncSelectionToolbar() {
+    selToolbar = readChatSelection();
+  }
+
+  // A click elsewhere in the app collapses the selection without the transcript
+  // ever seeing a mouseup, which would leave the bar floating over nothing.
+  // Nothing reactive is read while this effect runs, so it registers once.
+  $effect(() => {
+    const onSelectionChange = () => {
+      if (selToolbar && !readChatSelection()) clearSelectionToolbar();
+    };
+    document.addEventListener("selectionchange", onSelectionChange);
+    return () => document.removeEventListener("selectionchange", onSelectionChange);
+  });
 
   /**
    * Export a chat query result to a file as CSV / JSON / Markdown, reusing the
@@ -2447,19 +2609,85 @@
      are pixel-identical and never visually drift or double up. -->
 {#snippet agentIndicator()}
   {@const Icon = loadingIcon}
-  <div class="flex items-center gap-3" role="status" aria-live="polite">
-    <div class="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/15">
-      <Icon class="size-3 text-primary transition-opacity duration-200 {thinkingVisible ? 'opacity-100' : 'opacity-40'}" />
+  <div class="flex items-center gap-2.5 px-3.5" role="status" aria-live="polite">
+    <!-- The provider's own mark while it works, so which model is answering is
+         visible without opening the picker. Phase icon when it has no mark. -->
+    <div class="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/10 ring-1 ring-inset ring-primary/15">
+      {#if activeAiProfile && hasBrand(activeAiProfile.provider)}
+        <BrandIcon
+          name={activeAiProfile.provider}
+          class="size-2.5 text-primary transition-opacity duration-200 {thinkingVisible
+            ? 'opacity-100'
+            : 'opacity-40'}"
+        />
+      {:else}
+        <Icon class="size-2.5 text-primary transition-opacity duration-200 {thinkingVisible ? 'opacity-100' : 'opacity-40'}" />
+      {/if}
     </div>
+    <!-- The label's own shimmer carries the "working" signal; a trailing row of
+         bouncing dots on top of it was a second animation saying the same thing. -->
     <span
       class="agent-think-label text-ui-xs text-muted-foreground/70 transition-opacity duration-200 {thinkingVisible ? 'opacity-100' : 'opacity-0'}"
       >{loadingText}</span
     >
-    <span class="flex gap-1" aria-hidden="true">
-      <span class="size-1 animate-bounce rounded-full bg-muted-foreground/30" style="animation-delay:0ms"></span>
-      <span class="size-1 animate-bounce rounded-full bg-muted-foreground/30" style="animation-delay:120ms"></span>
-      <span class="size-1 animate-bounce rounded-full bg-muted-foreground/30" style="animation-delay:240ms"></span>
-    </span>
+  </div>
+{/snippet}
+
+<!-- Per-message footer: time + copy (+ quote for assistant turns).
+     Hidden until the message is hovered or a control inside it takes focus, so a
+     long transcript stays quiet - but always laid out, so revealing it can't
+     shift the message above. -->
+{#snippet msgActions(key, text, ts, align, canQuote)}
+  <!-- Deliberately smaller than the app's default control size: this row sits
+       under body copy as a footnote, so size-7 buttons and size-3.5 icons read
+       as heavier than the message they belong to. -->
+  <div
+    class="flex h-5 items-center gap-0.5 opacity-0 transition-opacity duration-100 group-hover/msg:opacity-100 focus-within:opacity-100 {align ===
+    'end'
+      ? 'justify-end'
+      : 'justify-start'}"
+  >
+    {#if ts}
+      <span class="px-1 text-ui-3xs tabular-nums text-muted-foreground/35"
+        >{fmtMsgTime(ts)}</span
+      >
+    {/if}
+    <button
+      type="button"
+      class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground"
+      title="Copy message"
+      aria-label="Copy message"
+      onclick={() => void copyWithFeedback(`${key}:msg`, text)}
+    >
+      {#if copiedKey === `${key}:msg`}
+        <Check class="size-3 text-success" strokeWidth={2.5} />
+      {:else}
+        <Copy class="size-3" />
+      {/if}
+    </button>
+    {#if canQuote}
+      <button
+        type="button"
+        class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground"
+        title="Reply to this message"
+        aria-label="Reply to this message"
+        onclick={() => quoteToInput(text)}
+      >
+        <Reply class="size-3" />
+      </button>
+    {:else}
+      <!-- Your own turn: put it back in the composer to ask it again with a
+           tweak, which is what re-running a prompt usually means. -->
+      <button
+        type="button"
+        class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground"
+        title="Edit and ask again"
+        aria-label="Edit and ask again"
+        onclick={() => reusePrompt(text)}
+      >
+        <Pencil class="size-3" />
+      </button>
+    {/if}
   </div>
 {/snippet}
 
@@ -2526,7 +2754,7 @@
                   autofocus
                   type="text"
                   bind:value={renamingTitle}
-                  class="min-w-0 flex-1 rounded-lg border-2 border-border bg-background px-1.5 py-0.5 font-mono text-ui-2xs text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring"
+                  class="min-w-0 flex-1 rounded-lg border-2 border-border bg-background px-1.5 py-0.5 font-mono text-ui-2xs text-foreground outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
                   onkeydown={(e) => {
                     if (e.key === "Enter") void commitRename();
                     if (e.key === "Escape") cancelRename();
@@ -2734,7 +2962,15 @@
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div
       bind:this={scrollEl}
-      onscroll={onScrollAreaScroll}
+      onscroll={() => {
+        onScrollAreaScroll();
+        // The bar is anchored to a viewport rect, so scrolling would leave it
+        // stranded away from its own text. Dismiss instead of re-measuring.
+        if (selToolbar) clearSelectionToolbar();
+      }}
+      onmousedown={clearSelectionToolbar}
+      onmouseup={syncSelectionToolbar}
+      onkeyup={syncSelectionToolbar}
       class="app-scroll min-h-0 flex-1 overflow-y-auto relative [overflow-anchor:none]"
       onclick={undefined}
       role="region"
@@ -2744,12 +2980,23 @@
            measure gave 200+ character lines on big windows and left the input
            visually detached from the messages above it. Wide artifacts inside
            messages (result grids, diagrams) scroll within their own cards. -->
+      <!-- Padding lives on the outer box and the measure on the inner one -
+           exactly as the composer is built - so the transcript column and the
+           composer card share one frame. Message rows then carry the same
+           px-3.5 as the textarea, and a reply lines up with what you typed. -->
       <div
         class={mode === "full"
           ? items.length === 0
-            ? "mx-auto w-full max-w-2xl px-8 h-full"
-            : "mx-auto w-full max-w-3xl px-8"
+            ? "px-6 h-full"
+            : "px-6"
           : "px-3 py-3"}
+      >
+      <div
+        class={mode === "full"
+          ? items.length === 0
+            ? "mx-auto w-full max-w-2xl h-full"
+            : "mx-auto w-full max-w-3xl"
+          : ""}
       >
         {#if items.length === 0}
           {#if mode === "full"}
@@ -2852,7 +3099,11 @@
             </div>
           {/if}
         {:else}
-          <div bind:this={msgListEl} class="flex flex-col gap-6 py-8" data-studio-selectable="text">
+          <!-- gap-2, not gap-6: every message already carries a laid-out (invisible
+               until hover) actions footer, so a large gap on top of it was paying
+               for the same separation twice and left paragraphs stranded ~75px
+               apart. The footer IS the breathing room. -->
+          <div bind:this={msgListEl} class="flex flex-col gap-2 py-5" data-studio-selectable="text">
             {#each items as item (item.id)}
               <!-- content-visibility:auto lets the browser skip layout/paint for
                    off-screen messages (markdown, code, mermaid, charts), so scrolling
@@ -2864,12 +3115,13 @@
               <div class={item.kind === "thinking" || item.kind === "executing" || item.kind === "streaming" ? "" : "[content-visibility:auto] [contain-intrinsic-size:auto_120px]"}>
               <!-- ── User message ───────────────────────── -->
               {#if item.kind === "user"}
-                <div class="flex justify-end px-1">
+                <div class="group/msg flex flex-col items-end px-3.5">
                   <div
-                    class="max-w-[78%] rounded-xl rounded-tr-md bg-primary px-4 py-2.5 text-ui leading-relaxed text-primary-foreground"
+                    class="ai-user-bubble max-w-[80%] rounded-lg bg-accent px-3.5 py-2 whitespace-pre-wrap break-words text-accent-foreground"
                   >
                     {item.text}
                   </div>
+                  {@render msgActions(item.id, item.text, item.ts, "end", false)}
                 </div>
 
                 <!-- ── Thinking ───────────────────────────── -->
@@ -2878,81 +3130,49 @@
 
                 <!-- ── Streaming ──────────────────────────── -->
               {:else if item.kind === "streaming"}
-                <div class="flex items-start gap-2.5">
-                  <div
-                    class="mt-1 flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/15"
-                  >
-                    <Sparkles class="size-3 text-primary" />
-                  </div>
-                  <div class="min-w-0 flex-1 pt-0.5">
-                    <AiMarkdown
-                      content={displayStreamingContent}
-                      debounceMs={180}
-                      streaming
-                    />
-                  </div>
+                <!-- No avatar column: the reply is the only thing on this side of
+                     the transcript, so a per-message badge added a gutter that
+                     bought nothing. The user's own turns are the contrast. -->
+                <div class="min-w-0 px-3.5">
+                  <AiMarkdown
+                    content={displayStreamingContent}
+                    debounceMs={180}
+                    streaming
+                    onrender={scrollBottomSoon}
+                  />
                 </div>
 
                 <!-- ── Executing (tool call in progress) ──── -->
               {:else if item.kind === "executing"}
                 {@const meta = execMeta(item.op, item.sql)}
-                <div class="flex items-center gap-3">
-                  <div
-                    class="relative flex size-6 shrink-0 items-center justify-center"
+                <!-- One line, one animation, and the same px-3.5 gutter as every
+                     other row — it used to sit flush left of the text column with a
+                     ping halo AND three bouncing dots competing for attention. -->
+                <div class="flex items-center gap-2 px-3.5">
+                  <span
+                    class="relative flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/10 ring-1 ring-inset ring-primary/20"
                   >
                     <span
-                      class="absolute inset-0 animate-ping rounded-full bg-primary/15 [animation-duration:1.4s]"
+                      class="absolute inset-0 animate-ping rounded-full bg-primary/10 [animation-duration:1.8s]"
                     ></span>
-                    <div
-                      class="relative flex size-6 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/20"
-                    >
-                      {#if item.op === "schema" || item.op === "describe"}
-                        <Layers class="size-3 text-primary/70" />
-                      {:else if item.op === "diagram"}
-                        <GitBranch class="size-3 text-primary/70" />
-                      {:else}
-                        <Database class="size-3 text-primary/70" />
-                      {/if}
-                    </div>
-                  </div>
-                  <div class="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <div class="flex items-center gap-1.5">
-                      <span class="text-ui-xs font-medium text-foreground/70"
-                        >{meta.label}</span
-                      >
-                      <span class="flex gap-0.5">
-                        <span
-                          class="size-1 animate-bounce rounded-full bg-muted-foreground/30"
-                          style="animation-delay:0ms"
-                        ></span>
-                        <span
-                          class="size-1 animate-bounce rounded-full bg-muted-foreground/30"
-                          style="animation-delay:100ms"
-                        ></span>
-                        <span
-                          class="size-1 animate-bounce rounded-full bg-muted-foreground/30"
-                          style="animation-delay:200ms"
-                        ></span>
-                      </span>
-                    </div>
-                    <span
-                      class="min-w-0 truncate font-mono text-ui-3xs text-muted-foreground/45"
-                      >{#if item.op === "query" || item.op === "run"}{item.sql
-                          .trim()
-                          .slice(0, 120)}{:else}{meta.detail}{/if}</span
-                    >
-                  </div>
+                    {#if item.op === "schema" || item.op === "describe"}
+                      <Layers class="relative size-2.5 text-primary/70" />
+                    {:else if item.op === "diagram"}
+                      <GitBranch class="relative size-2.5 text-primary/70" />
+                    {:else}
+                      <Database class="relative size-2.5 text-primary/70" />
+                    {/if}
+                  </span>
+                  <span class="shrink-0 text-ui-xs font-medium text-foreground/70">{meta.label}</span>
+                  <span class="min-w-0 flex-1 truncate font-mono text-ui-3xs text-muted-foreground/45">
+                    {#if item.op === "query" || item.op === "run"}{item.sql.trim().slice(0, 120)}{:else}{meta.detail}{/if}
+                  </span>
                 </div>
 
                 <!-- ── Assistant message ──────────────────── -->
               {:else if item.kind === "assistant"}
-                <div class="flex items-start gap-2.5">
-                  <div
-                    class="mt-1 flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/15"
-                  >
-                    <Sparkles class="size-3 text-primary" />
-                  </div>
-                  <div class="flex min-w-0 flex-1 flex-col gap-2 pt-0.5">
+                <div class="group/msg min-w-0 px-3.5">
+                  <div class="flex min-w-0 flex-col gap-2">
                     {#each item.parts as part, pi}
                       {#if part.type === "text"}
                         <AiMarkdown content={part.content} />
@@ -3035,64 +3255,70 @@
                       {:else if part.type === "sql"}
                         {@const sqlKey = `${item.id}-${pi}`}
                         {@const sqlOpen = !collapsed.has(sqlKey)}
+                        {@const sqlWrites = isWriteSql(part.content)}
                         <div
                           class="overflow-hidden rounded-lg border border-border/50 bg-card/30"
                         >
-                          <!-- SQL block header -->
+                          <!-- Header. When the block is open the code below IS the
+                               query, so the header drops the preview instead of
+                               printing the same statement twice; collapsed, the
+                               preview is the only thing standing in for it. -->
+                          <!-- No border-b here: AiSqlBlock draws its own border-t when
+                               open, and the two stacked into a 2px double rule. -->
                           <div
-                            class="group/sqlbar flex items-center gap-2 border-b border-border/30 bg-muted/8 px-3 py-2"
+                            class="group/sqlbar flex items-center gap-2 bg-muted/8 px-2.5 py-1.5"
                           >
-                            <!-- Left: toggle + badge + preview -->
                             <button
                               type="button"
                               class="flex min-w-0 flex-1 items-center gap-2 text-left"
                               onclick={() => toggleCollapse(sqlKey)}
+                              title={sqlOpen ? "Collapse" : "Expand"}
                             >
                               <span
-                                class="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:text-foreground"
+                                class="flex size-4 shrink-0 items-center justify-center text-muted-foreground/40 transition-colors group-hover/sqlbar:text-muted-foreground/70"
                               >
-                                {#if sqlOpen}<ChevronDown
-                                    class="size-3.5"
-                                  />{:else}<ChevronRight
-                                    class="size-3.5"
-                                  />{/if}
+                                {#if sqlOpen}<ChevronDown class="size-3" />{:else}<ChevronRight class="size-3" />{/if}
                               </span>
+                              <!-- The leading keyword, tinted when the statement
+                                   writes: the one thing worth knowing before Run. -->
                               <span
-                                class="shrink-0 rounded-md border border-border/40 bg-muted/50 px-1.5 py-0.5 font-mono text-ui-3xs font-semibold uppercase tracking-widest text-muted-foreground/60"
-                                >SQL</span
+                                class={cn(
+                                  "shrink-0 rounded font-mono text-ui-3xs font-semibold uppercase tracking-wider px-1 py-px",
+                                  sqlWrites
+                                    ? "bg-warning/12 text-warning/85"
+                                    : "bg-muted/50 text-muted-foreground/55",
+                                )}>{sqlStatementKind(part.content)}</span
                               >
-                              <span
-                                class="min-w-0 truncate font-mono text-ui-xs text-muted-foreground/50"
-                                >{part.content
-                                  .trim()
-                                  .replace(/\s+/g, " ")
-                                  .slice(0, 80)}</span
-                              >
+                              {#if !sqlOpen}
+                                <span
+                                  class="min-w-0 truncate font-mono text-ui-xs text-muted-foreground/45"
+                                  >{part.content.trim().replace(/\s+/g, " ").slice(0, 90)}</span
+                                >
+                              {/if}
                             </button>
-                            <!-- Right: actions, visible on hover -->
-                            <div
-                              class="flex shrink-0 items-center gap-1 opacity-0 transition-opacity duration-150 group-hover/sqlbar:opacity-100"
-                            >
+                            <!-- Copy/edit stay quiet until hover; Run is the point of
+                                 the block, so it is always legible. -->
+                            <div class="flex shrink-0 items-center gap-0.5">
                               <button
                                 type="button"
-                                class="inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground/50 transition-colors hover:bg-muted/60 hover:text-foreground"
+                                class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/40 opacity-0 transition-all duration-150 hover:bg-muted/60 hover:text-foreground group-hover/sqlbar:opacity-100 focus-visible:opacity-100"
                                 title="Copy SQL"
                                 onclick={() => copyText(part.content)}
-                                ><Copy class="size-3.5" /></button
+                                ><Copy class="size-3" /></button
                               >
                               <button
                                 type="button"
-                                class="inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground/50 transition-colors hover:bg-muted/60 hover:text-foreground"
+                                class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/40 opacity-0 transition-all duration-150 hover:bg-muted/60 hover:text-foreground group-hover/sqlbar:opacity-100 focus-visible:opacity-100"
                                 title="Write to editor"
                                 onclick={() => onwritesql(part.content)}
-                                ><PenLine class="size-3.5" /></button
+                                ><PenLine class="size-3" /></button
                               >
                               <button
                                 type="button"
-                                class="inline-flex h-7 items-center gap-1.5 rounded-lg bg-primary px-3 text-ui-xs font-medium text-primary-foreground transition-opacity hover:opacity-85 disabled:opacity-40"
+                                class="ml-0.5 inline-flex h-6 items-center gap-1 rounded-md border border-border/50 bg-muted/40 px-2 text-ui-2xs font-medium text-foreground/80 transition-colors hover:border-primary/40 hover:bg-primary hover:text-primary-foreground disabled:opacity-40"
                                 disabled={loading}
                                 onclick={() => void runSqlBlock(part.content)}
-                                ><Play class="size-3" />Run</button
+                                ><Play class="size-2.5 fill-current" />Run</button
                               >
                             </div>
                           </div>
@@ -3153,13 +3379,20 @@
                       {/if}
                     {/each}
                   </div>
+                  {@render msgActions(
+                    item.id,
+                    assistantMarkdown(item.parts),
+                    item.ts,
+                    "start",
+                    true,
+                  )}
                 </div>
 
                 <!-- ── Query result card ──────────────────── -->
               {:else if item.kind === "result"}
                 {@const resOpen = openResultId === item.id}
                 <div
-                  class="ml-8 overflow-hidden rounded-lg border text-ui-xs {item.error
+                  class="mx-3.5 overflow-hidden rounded-lg border text-ui-xs {item.error
                     ? 'border-destructive/30'
                     : item.isSchema
                       ? 'border-primary/20'
@@ -3209,6 +3442,26 @@
                         onclick={() => onwritesql(item.sql)}
                         ><PenLine class="size-3" /></button
                       >
+                    {/if}
+                    {#if !item.error && item.rows.length > 0}
+                      <!-- The grid as a markdown table - pasteable straight back
+                           into a chat, unlike the rendered card. -->
+                      <button
+                        type="button"
+                        class="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/30 opacity-0 transition-opacity group-hover/res:opacity-100 hover:bg-accent hover:text-foreground"
+                        title="Copy table as Markdown"
+                        onclick={() =>
+                          void copyWithFeedback(
+                            `${item.id}:table`,
+                            rowsToMarkdown(item.columns, item.rows),
+                          )}
+                      >
+                        {#if copiedKey === `${item.id}:table`}
+                          <Check class="size-3 text-success" strokeWidth={2.5} />
+                        {:else}
+                          <Table2 class="size-3" />
+                        {/if}
+                      </button>
                     {/if}
                     {#if !item.error}
                       <span
@@ -3277,7 +3530,7 @@
                 <!-- ── Confirm dialog ──────────────────────── -->
               {:else if item.kind === "confirm"}
                 <div
-                  class="ml-8 overflow-hidden rounded-lg border border-destructive/30 bg-destructive/4"
+                  class="mx-3.5 overflow-hidden rounded-lg border border-destructive/30 bg-destructive/4"
                 >
                   <div
                     class="flex items-center gap-2 border-b border-destructive/20 bg-destructive/8 px-3 py-2"
@@ -3312,7 +3565,7 @@
 
                 <!-- ── Chart card ─────────────────────────── -->
               {:else if item.kind === "chart"}
-                <div class="group/chart ml-8">
+                <div class="group/chart mx-3.5">
                   {#if item.error}
                     <p
                       class="flex items-center gap-1.5 text-ui-xs text-destructive"
@@ -3486,7 +3739,7 @@
                 <!-- ── Diagram (render_diagram tool result) ── -->
               {:else if item.kind === "diagram"}
                 <div
-                  class="group/diag ml-8 mermaid-output overflow-hidden rounded-lg border border-border/60"
+                  class="group/diag mx-3.5 mermaid-output overflow-hidden rounded-lg border border-border/60"
                 >
                   <div
                     class="flex items-center justify-between gap-2 border-b border-border/40 bg-muted/20 px-3 py-1.5"
@@ -3570,6 +3823,7 @@
           </div>
         {/if}
       </div>
+      </div>
     </div>
 
     <!-- Error bar -->
@@ -3622,25 +3876,32 @@
     {/if}
 
     <!-- Input -->
+    <!-- No rule above the composer: it reads as one floating field over the
+         transcript, and the card's own border already separates the two. -->
     <div
-      class="shrink-0 border-t border-border/50 {mode === 'full'
-        ? 'px-6 pb-6 pt-4'
-        : 'px-3 pb-4 pt-3'}"
+      class="shrink-0 {mode === 'full' ? 'px-6 pb-5 pt-2' : 'px-3 pb-3 pt-2'}"
     >
       <div class={mode === "full" ? "mx-auto w-full max-w-3xl" : ""}>
+        <!-- Soft-cornered surface rather than a hard-edged box: the field should
+             read as one calm object floating over the transcript, and only pick up
+             weight (border, lift) once it has focus. -->
         <div
-          class="overflow-hidden rounded-lg border border-border/60 bg-muted/[0.08] ring-1 ring-transparent transition-all duration-150 focus-within:border-border focus-within:ring-border/20 {hasPendingConfirm
-            ? 'opacity-50'
-            : ''}"
+          class={cn(
+            "rounded-2xl border border-border/40 bg-card/30 transition-[background-color,border-color,box-shadow] duration-150",
+            "focus-within:border-border/70 focus-within:bg-card/60 focus-within:shadow-[0_4px_16px_-10px_rgba(0,0,0,0.6)]",
+            hasPendingConfirm && "opacity-50",
+          )}
         >
-          <!-- Textarea row -->
+          <!-- Textarea row. Font size comes from the same var as the transcript
+               (--ai-chat-font-size, Settings → Appearance), so what you type is
+               set at the size you'll read it back at. -->
           <textarea
             bind:this={inputRef}
-            class="block w-full resize-none bg-transparent px-4 pt-3.5 pb-2 text-ui-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/35 disabled:cursor-not-allowed"
-            style="height:auto;min-height:56px;max-height:200px;overflow-y:auto;font-family:inherit"
+            class="ai-composer-input block w-full resize-none bg-transparent px-4 pt-3 pb-1 text-foreground outline-none placeholder:text-muted-foreground/30 disabled:cursor-not-allowed"
+            style="height:auto;min-height:38px;max-height:200px;overflow-y:auto;font-family:inherit"
             placeholder={hasPendingConfirm
               ? "Confirm or cancel the operation above…"
-              : "Message AI…"}
+              : "Ask anything about your database…"}
             rows={1}
             value={inputText}
             oninput={(e) => {
@@ -3649,74 +3910,92 @@
               pushHistory(inputText);
             }}
             onkeydown={handleKeydown}
+            onfocus={() => (inputFocused = true)}
+            onblur={() => (inputFocused = false)}
             disabled={hasPendingConfirm}
           ></textarea>
 
-          <!-- Bottom toolbar row -->
-          <div
-            class="flex items-center gap-2 border-t border-border/25 bg-transparent px-3 py-1.5"
-          >
-            <!-- Context stats (left) -->
+          <!-- Bottom toolbar row: the controls that change what the next turn
+               does sit together on the left, separated by hairlines; the send
+               affordance stays alone on the right. -->
+          <div class="flex items-center gap-1 px-2 pb-1.5">
+            <AiModelPicker onopenSettings={onopenmodelsettings} />
+
             {#if contextStats.messages > 0}
+              <span
+                class="h-3.5 w-px shrink-0 bg-border/70"
+                aria-hidden="true"
+              ></span>
               <button
                 type="button"
-                class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground/35 transition-colors hover:bg-muted/50 hover:text-muted-foreground select-none"
+                class="inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 font-mono text-ui-2xs text-muted-foreground/60 transition-colors hover:bg-accent/60 hover:text-foreground select-none"
                 onclick={() => {
                   settingsOpen = true;
                   settingsTab = "context";
                 }}
-                title="Context usage"
+                title="Context usage — click for a breakdown"
               >
-                <BarChart2 class="size-2.5 shrink-0" />
+                <BarChart2 class="size-3 shrink-0" />
                 <span class="tabular-nums"
                   >{tokEst(contextStats.totalChars)}</span
                 >
                 {#if contextStats.pct >= 70}
                   <span
                     class={contextStats.pct >= 90
-                      ? "text-destructive/60"
-                      : "text-warning/60"}>· {contextStats.pct}%</span
+                      ? "text-destructive"
+                      : "text-warning"}>· {contextStats.pct}%</span
                   >
                 {/if}
               </button>
-            {:else}
-              <span class="text-ui-3xs text-muted-foreground/20">
-                {hasPendingConfirm
-                  ? "Confirm or cancel above"
-                  : "↵ send · ⇧↵ newline"}
+            {/if}
+
+            <div class="min-w-2 flex-1"></div>
+
+            <!-- Shortcut hint only while the empty composer holds focus: it is
+                 guidance for someone about to type, not a permanent label. -->
+            {#if inputFocused && !inputText.trim() && !loading}
+              <span
+                class="hidden shrink-0 text-ui-2xs text-muted-foreground/35 sm:block"
+              >
+                {hasPendingConfirm ? "Confirm or cancel above" : "↵ to send"}
               </span>
             {/if}
 
-            <div class="flex-1"></div>
-
-            <!-- Model picker -->
-            <AiModelPicker onopenSettings={onopenmodelsettings} />
-
-            <!-- Send / Stop -->
+            <!-- Send / Stop. One control, one meaning: the spinner became the halo
+                 around Stop instead of a second indicator sitting beside it, and the
+                 idle Send button stays weightless until there is something to send. -->
             {#if loading}
-              <button
-                type="button"
-                class="flex size-7 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-foreground/60 transition-colors hover:border-ring/50 hover:text-foreground active:scale-95"
-                onclick={stop}
-                aria-label="Stop"
-                title="Stop (Esc)"
-              >
-                <Square class="size-2.5 fill-current" />
-              </button>
+              <div class="relative flex shrink-0 items-center justify-center">
+                <span
+                  class="pointer-events-none absolute -inset-[3px] animate-spin rounded-full border-[1.5px] border-transparent border-t-destructive/70"
+                  aria-hidden="true"
+                ></span>
+                <button
+                  type="button"
+                  class="flex size-6 items-center justify-center rounded-full bg-destructive/90 text-destructive-foreground transition-colors hover:bg-destructive active:scale-95"
+                  onclick={stop}
+                  aria-label="Stop"
+                  title="Stop (Esc)"
+                >
+                  <Square class="size-2 fill-current" />
+                </button>
+              </div>
             {:else}
+              {@const canSend = !!inputText.trim() && !hasPendingConfirm}
               <button
                 type="button"
                 class={cn(
-                  "flex size-7 shrink-0 items-center justify-center rounded-lg transition-all active:scale-95",
-                  inputText.trim() && !hasPendingConfirm
-                    ? "bg-foreground text-background hover:opacity-85"
-                    : "bg-muted/40 text-muted-foreground/25 cursor-not-allowed",
+                  "flex size-6 shrink-0 items-center justify-center rounded-full transition-all duration-150 active:scale-95",
+                  canSend
+                    ? "bg-primary text-primary-foreground hover:opacity-85"
+                    : "text-muted-foreground/25 cursor-not-allowed",
                 )}
-                disabled={hasPendingConfirm || !inputText.trim()}
+                disabled={!canSend}
                 onclick={() => void send()}
                 aria-label="Send"
+                title="Send (↵)"
               >
-                <Send class="size-3" />
+                <ArrowUp class="size-3" strokeWidth={2.5} />
               </button>
             {/if}
           </div>
@@ -3963,7 +4242,7 @@
                   updateChatParams({
                     customInstructions: e.currentTarget.value,
                   })}
-                class="w-full resize-none rounded-lg border-2 border-border bg-background/60 px-2.5 py-2 font-mono text-ui-2xs text-foreground outline-none placeholder:text-muted-foreground/30 focus:border-ring focus:ring-1 focus:ring-ring"
+                class="w-full resize-none rounded-lg border-2 border-border bg-background/60 px-2.5 py-2 font-mono text-ui-2xs text-foreground outline-none placeholder:text-muted-foreground/30 focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
               ></textarea>
               <p class="text-ui-3xs text-muted-foreground/50">
                 Prepended to the system prompt on every turn.
@@ -4078,7 +4357,7 @@
                   >
                   <textarea
                     id="skill-content"
-                    class="min-h-[90px] w-full resize-y rounded-lg border-2 border-border bg-background px-2.5 py-2 font-mono text-ui-xs leading-relaxed text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring focus:border-ring focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/40"
+                    class="min-h-[90px] w-full resize-y rounded-lg border-2 border-border bg-background px-2.5 py-2 font-mono text-ui-xs leading-relaxed text-foreground outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 placeholder:text-muted-foreground/40"
                     placeholder="# My Skill&#10;&#10;Guidelines in Markdown..."
                     bind:value={newSkillContent}
                   ></textarea>
@@ -4289,6 +4568,46 @@
     </div>
   {/if}
 </div>
+
+<!-- ── Selection toolbar ─────────────────────────────────────────────────────
+     Copy / quote whatever is selected in the transcript. Sits above the
+     selection, clamped to the viewport so a selection near an edge can't push
+     it off screen. mousedown is swallowed: letting it through would collapse
+     the selection and unmount this bar before the click landed. -->
+{#if selToolbar}
+  <div
+    class="fixed z-50 -translate-x-1/2 -translate-y-full pb-1.5"
+    style="left:clamp(4.5rem, {selToolbar.x}px, calc(100vw - 4.5rem)); top:{selToolbar.y}px"
+    onmousedown={(e) => e.preventDefault()}
+    role="toolbar"
+    tabindex="-1"
+    aria-label="Selection actions"
+  >
+    <div
+      class="flex items-center gap-0.5 rounded-md border border-border/60 bg-popover p-0.5 elevate-2-rim"
+    >
+      <button
+        type="button"
+        class="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-ui-2xs text-muted-foreground hover:bg-accent hover:text-foreground"
+        onclick={() => {
+          const text = selToolbar?.text ?? "";
+          void copyWithFeedback("selection:msg", text);
+          clearSelectionToolbar();
+          toast.success("Selection copied");
+        }}
+      >
+        <Copy class="size-3" />Copy
+      </button>
+      <button
+        type="button"
+        class="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-ui-2xs text-muted-foreground hover:bg-accent hover:text-foreground"
+        onclick={() => quoteToInput(selToolbar?.text ?? "")}
+      >
+        <Reply class="size-3" />Reply
+      </button>
+    </div>
+  </div>
+{/if}
 
 <!-- ── Image viewer ──────────────────────────────────────────────────────── -->
 {#if imageViewerSrc}
@@ -4516,6 +4835,15 @@
   }
   @media (prefers-reduced-motion: reduce) {
     :global([data-thinking-style]) .agent-think-label { animation: none; }
+  }
+
+  /* The composer and the user's own turns read at the transcript's size, so one
+     conversation is set in one size rather than three. */
+  .ai-composer-input,
+  :global(.ai-user-bubble) {
+    font-size: var(--ai-chat-font-size, 0.9375rem);
+    line-height: 1.6;
+    letter-spacing: -0.011em;
   }
 
   :global(.prose-ai) {

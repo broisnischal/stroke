@@ -256,7 +256,7 @@
             <button
               {...props}
               type="button"
-              class="flex h-9 w-full items-center gap-2 rounded-lg border border-border/60 bg-muted/25 pl-3 pr-2.5 text-left text-ui-xs transition-[border-color,box-shadow] hover:border-border focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none data-[state=open]:border-ring"
+              class="flex h-9 w-full items-center gap-2 rounded-lg border border-border/60 bg-muted/25 pl-3 pr-2.5 text-left text-ui-xs transition-[border-color,box-shadow] hover:border-border focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none data-[state=open]:border-ring"
             >
               <span class={cn('min-w-0 flex-1 truncate', !selectedAccountId && 'text-muted-foreground')}>
                 {selectedAccountName || '- select account -'}
@@ -293,7 +293,7 @@
               <button
                 {...props}
                 type="button"
-                class="flex h-9 w-full items-center gap-2 rounded-lg border border-border/60 bg-muted/25 pl-3 pr-2.5 text-left text-ui-xs transition-[border-color,box-shadow] hover:border-border focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none data-[state=open]:border-ring"
+                class="flex h-9 w-full items-center gap-2 rounded-lg border border-border/60 bg-muted/25 pl-3 pr-2.5 text-left text-ui-xs transition-[border-color,box-shadow] hover:border-border focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none data-[state=open]:border-ring"
               >
                 <DbIcon id="d1" class={cn('size-4 shrink-0', selectedDbName ? 'text-foreground' : 'text-muted-foreground/45')} />
                 <span class={cn('min-w-0 flex-1 truncate font-mono', !selectedDbName && 'font-sans text-muted-foreground')}>

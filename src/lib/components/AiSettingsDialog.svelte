@@ -7,13 +7,21 @@
   import Eye from "@lucide/svelte/icons/eye";
   import EyeOff from "@lucide/svelte/icons/eye-off";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import Sparkles from "@lucide/svelte/icons/sparkles";
+  import Route from "@lucide/svelte/icons/route";
+  import HardDrive from "@lucide/svelte/icons/hard-drive";
+  import Waypoints from "@lucide/svelte/icons/waypoints";
+  import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
+  import BrandIcon from "$lib/components/BrandIcon.svelte";
+  import { hasBrand } from "$lib/brand-icons.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { cn } from "$lib/utils.js";
-  import { chatCompletionRaw } from "$lib/ai.js";
+  import { chatCompletionRaw, fetchModelIds } from "$lib/ai.js";
   import {
     aiProfiles,
     activeProfileId,
@@ -48,6 +56,26 @@
   let step = $state(0);
   const STEPS = ["Provider", "Model", "Credentials"];
 
+  // Selection styling shared by the provider and model grids, so the two steps read
+  // as one system. An idle card is a hairline that firms up on hover; a selected one
+  // is a soft tinted surface with an inset rim rather than a saturated stroke around
+  // a flat fill — the stroke was the loudest thing in the dialog.
+  const CARD_BASE =
+    "flex w-full items-center gap-2.5 rounded-lg border text-left outline-none transition-[background-color,border-color,box-shadow] duration-150 focus-visible:ring-2 focus-visible:ring-ring/40";
+  const CARD_SELECTED =
+    "border-primary/35 bg-primary/[0.07] text-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_1px_2px_rgba(0,0,0,0.14)]";
+  const CARD_IDLE =
+    "border-border/40 text-foreground/85 hover:border-border/70 hover:bg-muted/30 hover:text-foreground";
+
+  /** Marks for the providers brand-icons.js has no logo for. */
+  const PROVIDER_ICON_FALLBACK = /** @type {Record<string, any>} */ ({
+    stroke: Sparkles,
+    openrouter: Route,
+    ollama: HardDrive,
+    omniroute: Waypoints,
+    custom: SlidersHorizontal,
+  });
+
   let formProvider = $state("openrouter");
   let formModel = $state("");
   let formName = $state("");
@@ -64,9 +92,61 @@
   const provider = $derived(PROVIDERS.find((p) => p.id === formProvider) ?? PROVIDERS[0]);
   const modelPresets = $derived(PROVIDER_MODELS[formProvider] ?? []);
   const isOllama = $derived(formProvider === "ollama");
+  const isOmniroute = $derived(formProvider === "omniroute");
+  /** Our own free gateway: authenticated by device id, so there is no key to enter. */
+  const isStroke = $derived(formProvider === "stroke");
   const isCustom = $derived(formProvider === "custom");
   const isCopilot = $derived(formProvider === "copilot");
-  const needsKey = $derived(!formApiKey && !isOllama && !isCustom && !isCopilot);
+  const needsKey = $derived(!formApiKey && !isOllama && !isCustom && !isCopilot && !isStroke);
+
+  /** Models discovered from a local OpenAI-compatible server (Ollama, LM Studio). */
+  let localModels = $state(/** @type {string[]} */ ([]));
+  let localModelsLoading = $state(false);
+  let localModelsError = $state("");
+
+  const isLocalEndpoint = $derived(
+    isOllama || isOmniroute || (isCustom && /localhost|127\.0\.0\.1/.test(formBaseUrl)),
+  );
+
+  function resetLocalModels() {
+    localModels = [];
+    localModelsLoading = false;
+    localModelsError = "";
+  }
+
+  /**
+   * Ask the local server which models it actually has. Ollama rejects anything but
+   * an exact installed tag, so the list has to come from the server, not a preset.
+   */
+  async function loadLocalModels() {
+    localModelsLoading = true;
+    localModelsError = "";
+    try {
+      const ids = await fetchModelIds(formBaseUrl || (provider?.url ?? ""), formApiKey);
+      localModels = ids;
+      if (ids.length === 0) {
+        localModelsError = isOllama
+          ? "No models installed. Pull one first — e.g. `ollama pull llama3.1:8b`."
+          : isOmniroute
+            ? "No models available. Connect a provider in the OmniRoute dashboard first."
+            : "The server reported no models.";
+      } else if (!ids.includes(formModel)) {
+        formModel = ids[0];
+      }
+    } catch (e) {
+      localModels = [];
+      localModelsError = String(/** @type {any} */ (e)?.message ?? e).slice(0, 200);
+    } finally {
+      localModelsLoading = false;
+    }
+  }
+
+  /** Discover local models when entering step 1; retry is manual after that. */
+  $effect(() => {
+    if (isLocalEndpoint && step === 1 && localModels.length === 0 && !localModelsLoading && !localModelsError) {
+      void loadLocalModels();
+    }
+  });
 
   /** Dynamic models fetched from Copilot API after login */
   let copilotModels = $state(/** @type {{id:string,name:string}[]} */ ([]));
@@ -107,6 +187,7 @@
     testState = "idle";
     testMsg = "";
     step = 0;
+    resetLocalModels();
   }
 
   function handleOpenChange(/** @type {boolean} */ next) {
@@ -127,6 +208,7 @@
     testState = "idle";
     testMsg = "";
     step = 0;
+    resetLocalModels();
     try { formApiKey = await invoke("ai_load_key", { profileId: profile.id }); }
     catch { formApiKey = ""; }
     view = "form";
@@ -138,8 +220,9 @@
     const p = PROVIDERS.find((x) => x.id === pid) ?? PROVIDERS[0];
     formBaseUrl = p.url;
     const presets = PROVIDER_MODELS[pid] ?? [];
-    if (presets.length > 0) formModel = presets[0].model;
+    formModel = presets[0]?.model ?? "";
     testState = "idle";
+    resetLocalModels();
   }
 
   function nextStep() { if (step < STEPS.length - 1) step++; }
@@ -181,6 +264,14 @@
   function modelShortName(model) { return model.split("/").pop()?.split(":")[0] ?? model; }
 </script>
 
+<!-- Selected mark: a filled badge reads as a deliberate state, where a bare tick
+     floating in the row read as decoration. -->
+{#snippet checkBadge()}
+  <span class="flex size-4 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-[0_1px_2px_rgba(0,0,0,0.25)]">
+    <Check class="size-2.5" strokeWidth={3.5} />
+  </span>
+{/snippet}
+
 <Dialog.Root bind:open onOpenChange={handleOpenChange}>
   <Dialog.Content showCloseButton={false} class="w-[min(580px,calc(100vw-2rem))] sm:max-w-none gap-0 overflow-hidden p-0">
 
@@ -193,7 +284,7 @@
             Select an active model or add a new one.
           </Dialog.Description>
         </div>
-        <Dialog.Close class="inline-flex size-6 items-center justify-center rounded-lg text-muted-foreground/30 transition-colors hover:bg-muted/50 hover:text-muted-foreground focus-visible:outline-none" />
+        <Dialog.Close class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/30 transition-colors hover:bg-muted/50 hover:text-muted-foreground focus-visible:outline-none" />
       </div>
 
       <div class="app-scroll max-h-[min(60vh,30rem)] overflow-y-auto px-3 py-2">
@@ -205,7 +296,7 @@
               {@const isActive = profile.id === $activeProfileId}
               <div
                 class={cn(
-                  "group flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 transition-colors",
+                  "group flex cursor-pointer items-center gap-3 rounded-md px-3 py-2.5 transition-colors",
                   isActive ? "bg-muted/50" : "hover:bg-muted/30",
                 )}
                 role="button"
@@ -213,6 +304,15 @@
                 onclick={() => void setActiveProfile(profile.id)}
                 onkeydown={(e) => e.key === "Enter" && void setActiveProfile(profile.id)}
               >
+                {#if hasBrand(profile.provider)}
+                  <BrandIcon
+                    name={profile.provider}
+                    class={cn("size-4 shrink-0", isActive ? "text-foreground" : "text-muted-foreground")}
+                  />
+                {:else}
+                  {@const Fallback = PROVIDER_ICON_FALLBACK[profile.provider] ?? Sparkles}
+                  <Fallback class="size-4 shrink-0 text-muted-foreground/70" />
+                {/if}
                 <div class="min-w-0 flex-1">
                   <p class="truncate text-ui-sm font-medium text-foreground">{profile.name}</p>
                   <p class="mt-0.5 truncate font-mono text-ui-3xs text-muted-foreground/50">{profile.model}</p>
@@ -234,7 +334,7 @@
 
       <div class="border-t border-border/25 px-4 py-3">
         <button type="button"
-          class="flex w-full items-center justify-center gap-1.5 rounded-lg border border-border/25 bg-muted/[0.2] py-2 text-ui-xs text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
+          class="flex w-full items-center justify-center gap-1.5 rounded-md border border-border/25 bg-muted/[0.2] py-2 text-ui-xs text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
           onclick={startAdd}>
           <Plus class="size-3.5" />
           Add model
@@ -247,7 +347,7 @@
       <div class="border-b border-border/25 px-4 py-3.5">
         <div class="flex items-center gap-2">
           <button type="button"
-            class="inline-flex size-6 items-center justify-center rounded-lg text-muted-foreground/40 transition-colors hover:bg-muted/50 hover:text-foreground"
+            class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/40 transition-colors hover:bg-muted/50 hover:text-foreground"
             onclick={prevStep}
             title={step === 0 ? "Cancel" : "Back"}
           >
@@ -256,29 +356,27 @@
           <Dialog.Title class="flex-1 text-center text-ui-sm font-semibold text-foreground">
             {editingId ? "Edit model" : "Add model"}
           </Dialog.Title>
-          <Dialog.Close class="inline-flex size-6 items-center justify-center rounded-lg text-muted-foreground/30 transition-colors hover:bg-muted/50 hover:text-muted-foreground focus-visible:outline-none" />
+          <Dialog.Close class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/30 transition-colors hover:bg-muted/50 hover:text-muted-foreground focus-visible:outline-none" />
         </div>
 
-        <!-- Stepper -->
-        <div class="mt-3.5 flex items-center justify-center gap-1.5">
-          {#each STEPS as label, i}
-            <div class="flex items-center gap-1.5">
-              <span class={cn(
-                "flex size-[18px] items-center justify-center rounded-full text-ui-3xs font-semibold tabular-nums transition-all",
-                i < step  ? "bg-primary text-primary-foreground"
-                : i === step ? "bg-primary/10 text-primary ring-1 ring-primary/50"
-                : "bg-transparent text-muted-foreground/35 ring-1 ring-border/40",
-              )}>
-                {#if i < step}<Check class="size-2" />{:else}{i + 1}{/if}
-              </span>
-              <span class={cn("text-ui-3xs font-medium", i === step ? "text-foreground" : "text-muted-foreground/35")}>
-                {label}
-              </span>
-            </div>
-            {#if i < STEPS.length - 1}
-              <div class={cn("h-px w-4 shrink-0 rounded-full transition-colors", i < step ? "bg-primary/30" : "bg-border/30")}></div>
-            {/if}
-          {/each}
+        <!-- Progress. Numbered bubbles joined by connector lines are a lot of
+             chrome for three steps; a named step plus a segmented rail says the
+             same thing in one line and never wraps. -->
+        <div class="mt-3 flex items-center gap-2">
+          <span class="text-ui-xs font-medium text-foreground">{STEPS[step]}</span>
+          <span class="text-ui-2xs tabular-nums text-muted-foreground/50"
+            >{step + 1}/{STEPS.length}</span
+          >
+          <div class="ml-auto flex items-center gap-1" aria-hidden="true">
+            {#each STEPS as _, i}
+              <span
+                class={cn(
+                  "h-0.5 w-5 rounded-full transition-colors",
+                  i <= step ? "bg-primary" : "bg-border",
+                )}
+              ></span>
+            {/each}
+          </div>
         </div>
       </div>
 
@@ -287,19 +385,25 @@
 
         <!-- Step 0 · Provider ─────────────────────────────────────────── -->
         {#if step === 0}
+          <!-- Every row carries a mark: providers are recognised by their logo
+               long before the name is read, and a grid of bare labels was the
+               least identifiable version of this list. -->
           <div class="grid grid-cols-2 gap-1.5">
             {#each PROVIDERS as p (p.id)}
               {@const selected = formProvider === p.id}
+              {@const Fallback = PROVIDER_ICON_FALLBACK[p.id] ?? Sparkles}
               <button
                 type="button"
-                class={cn(
-                  "flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
-                  selected ? "border-primary/40 bg-primary/10" : "border-border/40 hover:border-border hover:bg-muted/30",
-                )}
+                class={cn(CARD_BASE, "h-9 px-2.5", selected ? CARD_SELECTED : CARD_IDLE)}
                 onclick={() => selectProvider(p.id)}
               >
-                <span class={cn("text-ui-sm font-medium", selected ? "text-foreground" : "text-foreground/90")}>{p.label}</span>
-                {#if selected}<Check class="size-3.5 shrink-0 text-primary" />{/if}
+                {#if hasBrand(p.id)}
+                  <BrandIcon name={p.id} class={cn("size-4 shrink-0", !selected && "opacity-70")} />
+                {:else}
+                  <Fallback class={cn("size-4 shrink-0", !selected && "opacity-60")} />
+                {/if}
+                <span class="min-w-0 flex-1 truncate text-ui-sm font-medium">{p.label}</span>
+                {#if selected}{@render checkBadge()}{/if}
               </button>
             {/each}
           </div>
@@ -319,38 +423,91 @@
                   {@const selected = formModel === preset.model}
                   <button
                     type="button"
-                    class={cn(
-                      "flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
-                      selected ? "border-border bg-muted/50" : "border-border/40 hover:border-border hover:bg-muted/30",
-                    )}
+                    class={cn(CARD_BASE, "px-3 py-2", selected ? CARD_SELECTED : CARD_IDLE)}
                     onclick={() => { formModel = preset.model; testState = "idle"; }}
                   >
                     <div class="min-w-0 flex-1">
                       <p class="text-ui-sm font-medium text-foreground">{preset.label}</p>
                       {#if preset.tag}<p class="mt-0.5 font-mono text-ui-3xs text-muted-foreground/50">{preset.tag}</p>{/if}
                     </div>
-                    {#if selected}<Check class="size-3 shrink-0 text-foreground/70" />{/if}
+                    {#if selected}{@render checkBadge()}{/if}
                   </button>
                 {/each}
               </div>
             {/if}
+          {:else if isLocalEndpoint}
+            <!-- Local server: list what is actually installed, never a guessed tag -->
+            {#if localModelsLoading}
+              <div class="flex items-center justify-center gap-2 py-4 text-ui-xs text-muted-foreground">
+                <Loader2 class="size-3.5 animate-spin" />Looking for installed models…
+              </div>
+            {:else if localModels.length > 0}
+              <div class="grid grid-cols-2 gap-1.5">
+                {#each localModels as id (id)}
+                  {@const selected = formModel === id}
+                  <button
+                    type="button"
+                    class={cn(CARD_BASE, "px-3 py-2", selected ? CARD_SELECTED : CARD_IDLE)}
+                    onclick={() => { formModel = id; testState = "idle"; }}
+                  >
+                    <div class="min-w-0 flex-1">
+                      <p class="truncate font-mono text-ui-xs text-foreground">{id}</p>
+                    </div>
+                    {#if selected}{@render checkBadge()}{/if}
+                  </button>
+                {/each}
+              </div>
+            {/if}
+
+            {#if localModelsError}
+              <div class="flex flex-col gap-2 rounded-lg border border-destructive/20 bg-destructive/[0.08] px-3 py-2.5">
+                <p class="flex items-start gap-2 text-ui-xs text-destructive">
+                  <AlertTriangle class="mt-0.5 size-3.5 shrink-0" /><span class="break-words">{localModelsError}</span>
+                </p>
+                {#if isOllama}
+                  <p class="text-ui-3xs text-muted-foreground">
+                    Ollama must be running — start it with <code class="font-mono">ollama serve</code>.
+                  </p>
+                {:else if isOmniroute}
+                  <p class="text-ui-3xs text-muted-foreground">
+                    The gateway runs on your machine — install it with
+                    <code class="font-mono">npm i -g omniroute</code>, then run
+                    <code class="font-mono">omniroute</code>.
+                  </p>
+                {/if}
+                <Input
+                  class="h-8 font-mono text-ui-xs"
+                  placeholder={provider?.url ?? ""}
+                  bind:value={formBaseUrl}
+                />
+              </div>
+            {/if}
+
+            {#if !localModelsLoading}
+              <button
+                type="button"
+                class="mt-2 flex items-center gap-1.5 self-start text-ui-xs text-muted-foreground hover:text-foreground"
+                onclick={() => void loadLocalModels()}
+              >
+                <RefreshCw class="size-3 shrink-0" />
+                {localModels.length > 0 ? `${localModels.length} installed · refresh` : "Retry"}
+              </button>
+            {/if}
+
           {:else if modelPresets.length > 0}
             <div class="grid grid-cols-2 gap-1.5">
               {#each modelPresets as preset (preset.model)}
                 {@const selected = formModel === preset.model}
                 <button
                   type="button"
-                  class={cn(
-                    "flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
-                    selected ? "border-border bg-muted/50" : "border-border/40 hover:border-border hover:bg-muted/30",
-                  )}
+                  class={cn(CARD_BASE, "px-3 py-2", selected ? CARD_SELECTED : CARD_IDLE)}
                   onclick={() => { formModel = preset.model; testState = "idle"; }}
                 >
                   <div class="min-w-0 flex-1">
                     <p class="text-ui-sm font-medium text-foreground">{preset.label}</p>
                     {#if preset.tag}<p class="mt-0.5 font-mono text-ui-3xs text-muted-foreground/50">{preset.tag}</p>{/if}
                   </div>
-                  {#if selected}<Check class="size-3 shrink-0 text-foreground/70" />{/if}
+                  {#if selected}{@render checkBadge()}{/if}
                 </button>
               {/each}
             </div>
@@ -363,7 +520,12 @@
                 <span class="font-normal text-muted-foreground">(editable)</span>
               {/if}
             </label>
-            <Input id="form-model" class="h-8 font-mono text-ui-xs" placeholder="provider/model-name" bind:value={formModel} />
+            <Input
+              id="form-model"
+              class="h-8 font-mono text-ui-xs"
+              placeholder={isOmniroute ? "auto" : isLocalEndpoint ? "llama3.1:8b" : "provider/model-name"}
+              bind:value={formModel}
+            />
           </div>
 
         <!-- Step 2 · Credentials ──────────────────────────────────────── -->
@@ -377,6 +539,11 @@
             {#if isCopilot}
               <!-- GitHub Copilot: OAuth device flow instead of API key -->
               <CopilotLogin onconnect={onCopilotConnect} ondisconnect={() => { testState = "idle"; testMsg = "" }} />
+            {:else if isStroke}
+              <p class="rounded-lg border border-border/40 bg-muted/20 px-3 py-2.5 text-ui-xs text-muted-foreground">
+                No key needed — this is Stroke's own free tier, with a daily limit
+                per device. Add your own provider any time for unlimited use.
+              </p>
             {:else if !isOllama}
               <div class="flex flex-col gap-1.5">
                 <div class="flex items-baseline gap-1.5">
@@ -451,7 +618,7 @@
         <div class="flex items-center gap-1.5">
           {#if step === 2}
             <button type="button"
-              class="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/25 px-3 text-ui-xs text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-40"
+              class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/25 px-3 text-ui-xs text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-40"
               disabled={testState === "testing" || !formModel.trim()}
               onclick={testConnection}>
               {#if testState === "testing"}<Loader2 class="size-3 animate-spin" />Testing…{:else}Test{/if}
@@ -459,7 +626,7 @@
           {/if}
           {#if editingId}
             <button type="button"
-              class="inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground/30 transition-colors hover:bg-muted/40 hover:text-destructive"
+              class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/30 transition-colors hover:bg-muted/40 hover:text-destructive"
               onclick={() => void handleDelete(editingId)}>
               <Trash2 class="size-3.5" />
             </button>
@@ -468,14 +635,14 @@
 
         {#if step < STEPS.length - 1}
           <button type="button"
-            class="inline-flex h-7 items-center gap-1 rounded-lg bg-primary px-3 text-ui-xs font-medium text-primary-foreground elevate-1 transition-[background-color,transform] duration-150 hover:bg-primary/90 active:scale-[0.97] disabled:opacity-40"
+            class="inline-flex h-7 items-center gap-1 rounded-md bg-primary px-3 text-ui-xs font-medium text-primary-foreground elevate-1 transition-[background-color,transform] duration-150 hover:bg-primary/90 active:scale-[0.97] disabled:opacity-40"
             disabled={!stepCanProceed}
             onclick={nextStep}>
             Continue <ChevronRight class="size-3" />
           </button>
         {:else}
           <button type="button"
-            class="inline-flex h-7 items-center gap-1.5 rounded-lg bg-primary px-3 text-ui-xs font-medium text-primary-foreground elevate-1 transition-[background-color,transform] duration-150 hover:bg-primary/90 active:scale-[0.97] disabled:opacity-40"
+            class="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-3 text-ui-xs font-medium text-primary-foreground elevate-1 transition-[background-color,transform] duration-150 hover:bg-primary/90 active:scale-[0.97] disabled:opacity-40"
             disabled={saving || !formModel.trim()}
             onclick={() => void save()}>
             {#if saving}<Loader2 class="size-3 animate-spin" />{/if}

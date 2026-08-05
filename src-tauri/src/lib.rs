@@ -312,6 +312,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::ai_fetch,
+            commands::ai_list_models,
+            commands::ai_device_id,
             commands::save_file,
             commands::read_file,
             commands::restart_app,

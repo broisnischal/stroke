@@ -84,6 +84,67 @@ pub async fn ai_fetch(
     }
 }
 
+/// Stable device identifier, used to key the free AI tier's per-device quota.
+///
+/// Reuses the same value the licensing/trial flow already sends, so the free tier
+/// needs no second identity and no signup. It is NOT a secret and NOT a
+/// credential: it identifies a device to our gateway for rate limiting, nothing
+/// more, and the gateway must never let it authorise anything else.
+#[tauri::command]
+pub fn ai_device_id() -> String {
+    crate::license::device_id()
+}
+
+/// List the model IDs an OpenAI-compatible endpoint exposes (`GET {base}/models`).
+///
+/// Local servers (Ollama, LM Studio) only know their installed models at runtime —
+/// a hardcoded preset like `llama3.1` fails against an install that has `llama3.1:8b`.
+/// Goes through Rust for the same reason `ai_fetch` does: the WebView can't reach
+/// localhost cross-origin.
+#[tauri::command]
+pub async fn ai_list_models(url: String, api_key: Option<String>) -> Result<Vec<String>, String> {
+    let mut builder = ai_http_client()
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(8));
+
+    if let Some(key) = &api_key {
+        if !key.is_empty() {
+            builder = builder.header("Authorization", format!("Bearer {}", key));
+        }
+    }
+
+    let response = builder.send().await.map_err(|e| {
+        // reqwest's chained source text is unreadable in a dialog; the two cases a
+        // user can act on are "nothing is listening" and "it timed out".
+        if e.is_connect() {
+            format!("Could not reach {url} — is the server running?")
+        } else if e.is_timeout() {
+            format!("Timed out reaching {url}")
+        } else {
+            e.to_string()
+        }
+    })?;
+
+    if !response.status().is_success() {
+        let status = response.status().as_u16();
+        let text = response.text().await.unwrap_or_default();
+        let detail: String = text.chars().take(200).collect();
+        return Err(format!("AI API {}: {}", status, detail));
+    }
+
+    let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+    Ok(json
+        .get("data")
+        .and_then(|d| d.as_array())
+        .map(|models| {
+            models
+                .iter()
+                .filter_map(|m| m.get("id").and_then(|i| i.as_str()).map(String::from))
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
 /// Write text content to a path chosen by the user via a native save dialog.
 /// Uses async I/O so large export files don't block the Tokio executor thread.
 #[tauri::command]

@@ -18,6 +18,11 @@ fn client() -> &'static reqwest::Client {
             .tcp_keepalive(std::time::Duration::from_secs(60))
             .pool_max_idle_per_host(10)
             .pool_idle_timeout(std::time::Duration::from_secs(90))
+            // Without these, a REST call that never answers (captive portal, dropped
+            // route, Cloudflare edge stall) leaves the UI spinning on "Connecting…"
+            // forever — the command simply never returns.
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(60))
             .build()
             .expect("failed to build D1 HTTP client")
     })

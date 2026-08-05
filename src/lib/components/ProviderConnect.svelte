@@ -37,6 +37,15 @@
     onselect = () => {},
     ondisconnect = () => {},
     /**
+     * Look up a saved connection for a database by name, so picking a database we
+     * already hold credentials for doesn't mint a second set. PlanetScale creates
+     * a fresh admin-role branch password on every build_connection call, and
+     * Prisma a fresh connection record - going through the picker a dozen times
+     * leaves a dozen live credentials behind in the user's account.
+     * @type {(dbName: string) => { host: string, user: string, password: string, database: string } | undefined}
+     */
+    resolveSavedConnection = () => undefined,
+    /**
      * Look up a previously-saved password for a database (host + user), so a
      * needs-password provider (Supabase) doesn't prompt again once it's known.
      * @type {(host: string, user: string) => string | undefined}
@@ -161,10 +170,37 @@
     }
   }
 
+  /** Providers whose build_connection *creates* a credential rather than reading one. */
+  const MINTS_CREDENTIALS = ['planetscale', 'prisma']
+
   async function pick(ref) {
     selectedRef = ref
     phase = 'building'
     try {
+      // Already hold working credentials for this database? Use them. Minting
+      // again would work too, and leave another admin-role password behind.
+      if (MINTS_CREDENTIALS.includes(provider)) {
+        const dbName = databases.find((d) => d.db_ref === ref)?.name ?? ''
+        const known = dbName ? resolveSavedConnection(dbName) : undefined
+        if (known) {
+          phase = 'selecting'
+          onselect({
+            db_type: meta?.engine === 'mysql' ? 'mysql' : 'postgres',
+            host: known.host,
+            port: meta?.engine === 'mysql' ? 3306 : 5432,
+            username: known.user,
+            password: known.password,
+            database: known.database,
+            ssl: true,
+            needs_password: false,
+            name: dbName,
+            // Lets the caller mint fresh credentials if these turn out to be
+            // revoked provider-side, instead of failing for good.
+            reusedSaved: ref,
+          })
+          return
+        }
+      }
       const conn = await providerBuildConnection(provider, ref)
       if (conn.needs_password) {
         // Reuse a previously-saved password for this exact database (host + user)

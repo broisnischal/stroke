@@ -162,7 +162,7 @@
   const selTrigger =
     "h-7 w-[12rem] justify-between gap-2 border-border/70 bg-background px-2.5 text-ui-xs font-normal shadow-none";
   const ruleInput =
-    "h-7 min-w-0 rounded-lg border border-border bg-background px-2.5 font-mono text-ui-xs text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring";
+    "h-7 min-w-0 rounded-lg border border-border bg-background px-2.5 font-mono text-ui-xs text-foreground outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15";
 </script>
 
 <!-- Compact Linear/Resend-style toggle -->
@@ -175,7 +175,7 @@
     {onclick}
     class={cn(
       // before: expands the hit area beyond the 18px visual without moving neighbors
-      "group/toggle relative inline-flex h-[18px] w-8 shrink-0 cursor-pointer items-center rounded-full before:absolute before:-inset-1 before:content-[''] focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+      "group/toggle relative inline-flex h-[18px] w-8 shrink-0 cursor-pointer items-center rounded-full before:absolute before:-inset-1 before:content-[''] focus-visible:ring-2 focus-visible:ring-ring/18 focus-visible:outline-none",
       "transition-[background-color] duration-150",
       // Inset rim defines the pill edge on dark surfaces; inner shadow gives the
       // trough depth so the knob reads as sitting *in* the track, not on it.

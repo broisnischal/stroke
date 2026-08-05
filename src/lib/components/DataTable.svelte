@@ -6526,7 +6526,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       maxlength="24"
       spellcheck="false"
       placeholder="e.g. PII, money, deprecated"
-      class="h-9 w-full rounded-lg border-2 border-border bg-background px-3 text-ui-sm text-foreground outline-none transition-[border-color,box-shadow] focus:border-ring focus:ring-1 focus:ring-ring"
+      class="h-9 w-full rounded-lg border-2 border-border bg-background px-3 text-ui-sm text-foreground outline-none transition-[border-color,box-shadow] focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
       onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); confirmTag(); } else if (e.key === 'Escape') { e.preventDefault(); tagDialogOpen = false; } }}
     />
     <Dialog.Footer class="gap-2 sm:justify-end">

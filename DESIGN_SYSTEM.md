@@ -168,8 +168,20 @@ hover:opacity-90`. Never hand-roll a primary button.
 
 ### Inputs / selects
 `h-9 rounded-lg border border-border bg-muted/30 px-3 text-ui`, focus:
-`focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none`. Prefer the
-`Input` / `Select` wrappers in `ui/*`.
+`focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none`. Prefer
+the `Input` / `Select` wrappers in `ui/*`.
+
+### Focus ring (one convention, everywhere)
+A focused control gets a **muted accent border plus a tight, low-alpha halo** —
+never a full-chroma outline or a wide glow:
+
+- `focus:border-ring/55 focus:ring-2 focus:ring-ring/15` (bare elements)
+- `focus-visible:border-ring/55 focus-visible:ring-2 focus-visible:ring-ring/18`
+  (`ui/*` primitives: button, select trigger, tabs, checkbox, input group)
+
+Do not use `border-ring` at full opacity, `ring-ring` without an alpha, or
+`ring-3` on focus. Invalid/destructive states stay loud (`aria-invalid:ring-3`) —
+that contrast is the point.
 
 ---
 
