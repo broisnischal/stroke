@@ -16,14 +16,61 @@ export function defineStrokeMonacoThemes() {
 }
 
 /**
- * Return the Monaco theme name for the given app theme.
+ * Return the Monaco theme name for the given app theme, with the registered
+ * definition refreshed from the live CSS tokens first.
+ *
+ * The refresh is not optional. Both `monaco.editor.setTheme` and a `theme` in
+ * `monaco.editor.create` options are *global* — they re-tint every editor in the
+ * app, not just the one being created. So an editor mounting with the name of a
+ * theme whose registered definition still holds the preset's hand-written hexes
+ * dragged every other open editor back onto those hexes, undoing the live-CSS
+ * colours `applyMonacoTheme` had installed. Defining before returning means the
+ * name always resolves to the current palette, whoever asks for it.
+ *
  * Falls back to 'dark' or 'light' if the theme has no custom Monaco spec.
  * @param {import('$lib/themes/registry.js').ThemeId} themeId
  */
 export function monacoThemeId(themeId) {
-  if (MONACO_THEME_SPECS[themeId]) return monacoThemeName(themeId)
-  const def = getThemeDefinition(themeId)
-  return monacoThemeName(def?.isDark ? 'dark' : 'light')
+  defineStrokeMonacoThemes()
+  const specId = MONACO_THEME_SPECS[themeId]
+    ? themeId
+    : (getThemeDefinition(themeId)?.isDark ? 'dark' : 'light')
+  const name = monacoThemeName(specId)
+  redefineFromCss(name, specId)
+  return name
+}
+
+/**
+ * Re-register `name` with the preset's rules but the app's *live* surface
+ * colours.
+ *
+ * The presets carry hand-written hexes that drifted from the CSS tokens: the
+ * dark Studio theme paints `oklch(0.132 0 0)` (#080808) while its preset said
+ * #1c1c1c, so every editor — the JSON view most visibly, since it fills the
+ * pane — sat a shade lighter than the app around it. CSS is the source of truth
+ * for theming (DESIGN_SYSTEM §1), so read it instead of duplicating it, and
+ * every theme stays matched with no per-preset upkeep.
+ *
+ * @param {string} name registered Monaco theme name
+ * @param {string} specId key into MONACO_THEME_SPECS
+ */
+function redefineFromCss(name, specId) {
+  if (!MONACO_THEME_SPECS[specId]) return
+  try {
+    const css = getComputedStyle(document.documentElement)
+    const bg = cssColorToHex(css.getPropertyValue('--background'))
+    const fg = cssColorToHex(css.getPropertyValue('--foreground'))
+    if (!bg && !fg) return
+    const base = monacoThemeDefinition(specId)
+    monaco.editor.defineTheme(name, {
+      ...base,
+      colors: {
+        ...base.colors,
+        ...(bg ? { 'editor.background': bg, 'editorGutter.background': bg } : {}),
+        ...(fg ? { 'editor.foreground': fg } : {}),
+      },
+    })
+  } catch { /* fall through to the preset as authored */ }
 }
 
 /**
@@ -57,41 +104,12 @@ function cssColorToHex(css) {
 
 /**
  * Point Monaco's editor surface at the app's *live* background/foreground, then
- * activate the theme.
- *
- * The presets carry hand-written hexes that drifted from the CSS tokens: the dark
- * Studio theme paints `oklch(0.132 0 0)` (#080808) while its preset said #1c1c1c,
- * so every editor — the JSON view most visibly, since it fills the pane — sat a
- * shade lighter than the app around it. CSS is the source of truth for theming
- * (DESIGN_SYSTEM §1), so read it instead of duplicating it, and every theme stays
- * matched with no per-preset upkeep.
+ * activate the theme. Global by nature — every open editor follows.
  *
  * @param {import('$lib/themes/registry.js').ThemeId} themeId
  */
 export function applyMonacoTheme(themeId) {
-  defineStrokeMonacoThemes()
-  const name = monacoThemeId(themeId)
-  const specId = MONACO_THEME_SPECS[themeId] ? themeId : (getThemeDefinition(themeId)?.isDark ? 'dark' : 'light')
-  const spec = MONACO_THEME_SPECS[specId]
-  if (spec) {
-    try {
-      const css = getComputedStyle(document.documentElement)
-      const bg = cssColorToHex(css.getPropertyValue('--background'))
-      const fg = cssColorToHex(css.getPropertyValue('--foreground'))
-      if (bg || fg) {
-        const base = monacoThemeDefinition(specId)
-        monaco.editor.defineTheme(name, {
-          ...base,
-          colors: {
-            ...base.colors,
-            ...(bg ? { 'editor.background': bg, 'editorGutter.background': bg } : {}),
-            ...(fg ? { 'editor.foreground': fg } : {}),
-          },
-        })
-      }
-    } catch { /* fall through to the preset as authored */ }
-  }
-  monaco.editor.setTheme(name)
+  monaco.editor.setTheme(monacoThemeId(themeId))
 }
 
 /** Read editor font metrics from CSS (falls back to 13 / 22). */
