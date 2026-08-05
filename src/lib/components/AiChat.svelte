@@ -37,7 +37,7 @@
   import { Input } from "$lib/components/ui/input/index.js";
   import { Label } from "$lib/components/ui/label/index.js";
   import { cn } from "$lib/utils.js";
-  import { executeSql } from "$lib/api.js";
+  import { executeSql, aiWebSearch, aiFetchPage, saveExportAs } from "$lib/api.js";
   import { isReadOnly, guardWrite } from "$lib/stores/read-only.js";
   import { isWriteSql, stripSqlComments } from "$lib/sql-write.js";
   import {
@@ -60,10 +60,12 @@
     manageHistory,
     MAX_AI_RETRIES,
     AI_TOOLS,
+    AI_WEB_TOOLS,
     isDestructiveSql,
     parseAssistantMessage,
     buildSystemPrompt,
     classifyDbError,
+    humanizeDbError,
     filterSchemaForQuery,
     stripThinkTags,
   } from "$lib/ai.js";
@@ -208,6 +210,46 @@
   // ── Settings ──────────────────────────────────────────────────────────────
   /** Model config merged with chat params (temperature, topK, maxTokens). */
   const settings = $derived({ ...$aiSettings, ...$aiChatParams });
+
+  /**
+   * Save a chart canvas as PNG through the native dialog.
+   * Both call sites used to build an `<a download>`, which WKWebView ignores —
+   * the button looked like it worked and produced no file.
+   * @param {string} selector CSS selector for the chart's canvas
+   * @param {string} title used for the default filename
+   */
+  async function saveChartPng(selector, title) {
+    const canvas = /** @type {HTMLCanvasElement|null} */ (document.querySelector(selector));
+    const blob = await canvasToPngBlob(canvas);
+    if (!blob) {
+      toast.error("Could not export the chart");
+      return;
+    }
+    try {
+      const path = await saveExportAs(blob, `${title || "chart"}.png`, {
+        name: "PNG",
+        extensions: ["png"],
+      });
+      if (!path) return; // save dialog cancelled
+      toast.success("Chart saved", { description: `Saved to ${path}` });
+    } catch (e) {
+      toast.error("Could not save the chart", { description: String(e) });
+    }
+  }
+
+  /** Open a search result in the user's browser, never inside the app webview. */
+  async function openExternal(/** @type {string} */ url) {
+    try {
+      const { openUrl } = await import("@tauri-apps/plugin-opener");
+      await openUrl(url);
+    } catch {
+      toast.error("Could not open the link", { description: url });
+    }
+  }
+  /** Tools advertised this turn. Web tools appear only once the user opts in. */
+  const activeTools = $derived(
+    $appAgentWebAccess ? [...AI_TOOLS, ...AI_WEB_TOOLS] : AI_TOOLS,
+  );
   let settingsOpen = $state(false);
   /** @type {string | null} */
   let imageViewerSrc = $state(null);
@@ -1785,7 +1827,7 @@
     for await (const chunk of chatCompletionStream(
       settings,
       [{ role: "system", content: turnSystemPrompt }, ...apiHistory],
-      AI_TOOLS,
+      activeTools,
       abortController?.signal,
       ({ attempt, waitMs }) => {
         const sec = Math.ceil(waitMs / 1000);
@@ -2055,6 +2097,70 @@
             ...(hint ? { hint } : {}),
             attempt: existing.count + 1,
           });
+        }
+      } else if (
+        call.function.name === "web_search" ||
+        call.function.name === "fetch_page"
+      ) {
+        // Re-checked here, not just at tool-advertisement time: the user can
+        // turn web access off mid-conversation, and a model that already saw
+        // the tool will keep calling it from history.
+        if (!$appAgentWebAccess) {
+          apiHistory.push({
+            role: "tool",
+            tool_call_id: call.id,
+            content: JSON.stringify({
+              error:
+                "Web access is turned off in Settings → Agent. Answer from the database and your own knowledge instead, and do not call this tool again this conversation.",
+            }),
+          });
+          return;
+        }
+        const isSearch = call.function.name === "web_search";
+        const label = isSearch
+          ? String(args.query ?? "").trim()
+          : String(args.url ?? "").trim();
+        const webId = uid();
+        items.push(
+          /** @type {ChatItem} */ ({
+            id: webId,
+            kind: "web",
+            mode: isSearch ? "search" : "fetch",
+            label,
+            hits: [],
+            error: null,
+            loading: true,
+          }),
+        );
+        await scrollBottom();
+        /** @param {Partial<any>} patch */
+        const patchWeb = (patch) => {
+          const i = items.findIndex((x) => x.id === webId);
+          if (i >= 0) items[i] = { ...items[i], ...patch, loading: false };
+        };
+        try {
+          if (isSearch) {
+            const hits = await aiWebSearch(label, Number(args.limit) || 5);
+            patchWeb({ hits });
+            toolResult = JSON.stringify(
+              hits.length
+                ? { results: hits }
+                : {
+                    results: [],
+                    note: "No results. Try different wording, or answer from what you already know.",
+                  },
+            );
+          } else {
+            const text = await aiFetchPage(label);
+            patchWeb({ hits: [{ title: label, url: label, snippet: "" }] });
+            toolResult = JSON.stringify({ url: label, text });
+          }
+        } catch (webErr) {
+          const msg = String(webErr);
+          patchWeb({ error: humanizeDbError(msg) });
+          const existing = failureTracker.get(callKey) ?? { count: 0, lastError: "" };
+          failureTracker.set(callKey, { count: existing.count + 1, lastError: msg });
+          toolResult = JSON.stringify({ error: msg });
         }
       } else if (call.function.name === "export_data") {
         const sql = String(args.sql ?? "").trim();
@@ -3794,18 +3900,11 @@
                           type="button"
                           class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:text-foreground"
                           title="Download PNG"
-                          onclick={() => {
-                            const canvas = document.querySelector(
+                          onclick={() =>
+                            void saveChartPng(
                               `[data-chart-id="${item.id}"] canvas`,
-                            );
-                            if (!canvas) return;
-                            const a = document.createElement("a");
-                            a.href = /** @type {HTMLCanvasElement} */ (
-                              canvas
-                            ).toDataURL("image/png");
-                            a.download = `${item.spec.title || "chart"}.png`;
-                            a.click();
-                          }}><ArrowDownToLine class="size-3" /></button
+                              item.spec.title,
+                            )}><ArrowDownToLine class="size-3" /></button
                         >
                         <button
                           type="button"
@@ -4869,16 +4968,8 @@
           type="button"
           class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground"
           title="Download PNG"
-          onclick={() => {
-            const canvas = document.querySelector("[data-chart-fs] canvas");
-            if (!canvas) return;
-            const a = document.createElement("a");
-            a.href = /** @type {HTMLCanvasElement} */ (canvas).toDataURL(
-              "image/png",
-            );
-            a.download = `${fullscreenChart?.title || "chart"}.png`;
-            a.click();
-          }}><ArrowDownToLine class="size-3.5" /></button
+          onclick={() =>
+            void saveChartPng("[data-chart-fs] canvas", fullscreenChart?.title ?? "")}><ArrowDownToLine class="size-3.5" /></button
         >
         <button
           type="button"

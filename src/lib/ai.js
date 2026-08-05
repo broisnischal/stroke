@@ -424,6 +424,53 @@ export const AI_TOOLS = [
   },
 ]
 
+/**
+ * Web tools, appended to AI_TOOLS only when the user has enabled web access.
+ *
+ * Kept out of the base list deliberately: a tool the model can see is a tool it
+ * will reach for, so advertising these while the setting is off would produce
+ * calls that can only be refused.
+ */
+export const AI_WEB_TOOLS = [
+  {
+    type: 'function',
+    function: {
+      name: 'web_search',
+      description:
+        'Search the web and get back the top results as title, url and snippet. ' +
+        'Use for things the database cannot answer: what an error code means, the syntax of an ' +
+        'unfamiliar function, what a third-party API returns, current documentation. ' +
+        'Snippets are short — call fetch_page on a result URL when you need the detail. ' +
+        'Never use this to answer a question about the user\'s own data; that is what execute_sql is for.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Search query. Write it as you would type it into a search engine.' },
+          limit: { type: 'integer', description: 'How many results to return, 1-10 (default 5).' },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'fetch_page',
+      description:
+        'Fetch one web page and return its readable text (markup, scripts and styles removed, ' +
+        'truncated if long). Use after web_search when a snippet is not enough, or when the user ' +
+        'gives you a URL to read. http/https only.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'Absolute http(s) URL, ideally one returned by web_search.' },
+        },
+        required: ['url'],
+      },
+    },
+  },
+]
+
 export const MAX_AI_RETRIES = 2
 const INITIAL_BACKOFF_MS = 1000
 /** HTTP statuses we retry (transient overload / rate limits). */
@@ -1537,7 +1584,10 @@ ${otherTablesSection}
 - \`list_tables()\`, List all tables and views in the active schema.
 - \`get_schema(table?)\`: Get full column info (type, nullable, default) for one or all tables.
 - \`render_chart(type, title, data, x_col, y_col, z_col?, group_col?)\`, Render an interactive ECharts chart. Call \`execute_sql\` first, then pass its \`rows\` array DIRECTLY as \`data\`. Never call render_chart with an empty or missing data array.
-- \`render_diagram(type, title, code)\`, Render and save an interactive Mermaid diagram. Use for ALL diagram/flowchart/ERD/sequence/class/mindmap/state requests. Types: flowchart, classDiagram, sequenceDiagram, erDiagram, mindmap, stateDiagram-v2, gitGraph, timeline, journey. Title: 2–5 words, title-case, describes the subject. NEVER write a bare mermaid code block as the primary output, always use this tool.
+${ctx.webAccess ? `- \`web_search(query, limit?)\`, Search the web. Use for what the database cannot answer: the meaning of an error code, the syntax of an unfamiliar function, a third-party API's behaviour, current documentation. Never for questions about the user's own data.
+- \`fetch_page(url)\`, Read one page's text. Use after web_search when the snippet is not enough, or when the user gives you a URL.
+  Search costs a round trip the user waits through, so reach for it only when the answer is genuinely outside the database and outside what you know. Cite the URL when you use what you found.
+` : ''}- \`render_diagram(type, title, code)\`, Render and save an interactive Mermaid diagram. Use for ALL diagram/flowchart/ERD/sequence/class/mindmap/state requests. Types: flowchart, classDiagram, sequenceDiagram, erDiagram, mindmap, stateDiagram-v2, gitGraph, timeline, journey. Title: 2–5 words, title-case, describes the subject. NEVER write a bare mermaid code block as the primary output, always use this tool.
 
 === OUTPUT RULES ===
 1. Output directly: never open with "Sure!", "Great!", "Here is your chart", "Certainly!" or any filler phrase.
