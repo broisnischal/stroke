@@ -345,6 +345,7 @@ pub fn run() {
             commands::pg_table_row_counts,
             commands::pg_list_indexes,
             commands::pg_get_table_column_structure,
+            commands::pg_get_schema_column_structure,
             commands::pg_get_incoming_foreign_keys,
             commands::pg_list_enums,
             commands::pg_list_functions,

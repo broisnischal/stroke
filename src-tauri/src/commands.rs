@@ -184,11 +184,11 @@ use crate::db::{
     connect, connect_clickhouse, connect_d1, connect_duckdb, connect_libsql, connect_mssql, connect_mysql, connect_redis, connect_sqlite, disconnect,
     delete_table_row, delete_table_rows, execute_ddl, execute_sql, execute_sql_multi, get_table_rows, count_table_rows, insert_table_row,
     list_schemas, list_tables, list_indexes, list_enums, list_functions, list_triggers, list_sequences, ping_connection, table_row_counts,
-    truncate_table, drop_table, get_table_column_structure, get_incoming_foreign_keys, get_table_ddl as db_get_table_ddl,
+    truncate_table, drop_table, get_table_column_structure, get_schema_column_structure, get_incoming_foreign_keys, get_table_ddl as db_get_table_ddl,
     test_clickhouse_connection, test_connection, test_d1_connection, test_duckdb_connection, test_libsql_connection, test_mssql_connection, test_mysql_connection, test_redis_connection, test_sqlite_connection,
     update_table_cell, ConnectionConfig, D1Config, DbState, EnumInfo, FunctionInfo, ExplainResult, IndexInfo, LibSqlConfig,
     SqlResult, SqliteConfig, TableInfo, TableRowCount, TableRows, TriggerInfo, SequenceInfo,
-    ColumnStructureRow, IncomingForeignKey, InsertRowResult, TunnelState,
+    ColumnStructureRow, TableColumnStructure, IncomingForeignKey, InsertRowResult, TunnelState,
     explain_pg, explain_mysql, explain_sqlite, explain_from_text_lines, explain_from_sqlite_plan,
 };
 use crate::db::connection::{require_conn, ClickhouseConfig, DuckdbConfig, MssqlConfig, MysqlConfig, RedisConfig};
@@ -552,6 +552,16 @@ pub async fn pg_get_table_column_structure(
     table: String,
 ) -> Result<Vec<ColumnStructureRow>, String> {
     get_table_column_structure(state, schema, table).await
+}
+
+/// Column structure for every table in one schema — one call instead of one per
+/// table. Used by the ER diagram, which needs the whole schema up front.
+#[tauri::command]
+pub async fn pg_get_schema_column_structure(
+    state: State<'_, DbState>,
+    schema: String,
+) -> Result<Vec<TableColumnStructure>, String> {
+    get_schema_column_structure(state, schema).await
 }
 
 #[tauri::command]
