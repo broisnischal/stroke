@@ -112,14 +112,38 @@ pub async fn query(config: &D1Config, sql: &str, params: Vec<Value>) -> Result<S
     );
 
     let t0 = Instant::now();
-    let res = client()
-        .post(&url)
-        .header("Authorization", format!("Bearer {}", config.api_token))
-        .header("Content-Type", "application/json")
-        .json(&serde_json::json!({ "sql": sql, "params": params }))
-        .send()
-        .await
-        .map_err(|e| format!("D1 request failed: {e}"))?;
+    let body = serde_json::json!({ "sql": sql, "params": params });
+    let send = |token: String| {
+        let url = url.clone();
+        let body = body.clone();
+        async move {
+            client()
+                .post(&url)
+                .header("Authorization", format!("Bearer {token}"))
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| format!("D1 request failed: {e}"))
+        }
+    };
+
+    let mut res = send(config.api_token.clone()).await?;
+
+    // Cloudflare OAuth access tokens expire while the app is still connected, so
+    // a session that worked ten minutes ago starts answering 401 to everything
+    // until you reconnect. Exchange the refresh token once and replay the
+    // request; if that still fails, the error below is the real one and the user
+    // genuinely needs to re-authorize. Exactly one retry — a revoked token would
+    // otherwise loop.
+    if res.status() == reqwest::StatusCode::UNAUTHORIZED {
+        if let Some(fresh) = crate::cloudflare::refreshed_token().await {
+            // Update the live connection too, or every subsequent query pays for
+            // its own 401 + refresh round trip.
+            super::connection::update_d1_token(&fresh);
+            res = send(fresh).await?;
+        }
+    }
 
     let status = res.status();
     let elapsed = t0.elapsed().as_millis() as u64;

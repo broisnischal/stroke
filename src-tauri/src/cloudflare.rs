@@ -446,6 +446,53 @@ pub async fn cloudflare_oauth_status(app: tauri::AppHandle) -> CfOAuthStatus {
     }
 }
 
+/// Process-wide handle, set once at startup.
+///
+/// The D1 driver needs to reach the token store when a request comes back 401,
+/// but it is handed only a `D1Config` — the whole `db` layer is deliberately
+/// free of Tauri types. Rather than thread an `AppHandle` through every driver
+/// signature for this one case, the handle is parked here.
+static APP: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
+
+/// Called once from `setup()`. Later calls are ignored.
+pub fn set_app_handle(app: tauri::AppHandle) {
+    let _ = APP.set(app);
+}
+
+/// A freshly-minted access token, or None when this install has no Cloudflare
+/// OAuth session to refresh from (a hand-pasted API token, or not signed in).
+///
+/// Used by the D1 driver to recover from a mid-session expiry. Unconditionally
+/// exchanges the refresh token rather than going through
+/// `cloudflare_get_valid_token`: that one trusts the stored expiry and returns
+/// the cached access token early, which is exactly the token the server just
+/// rejected. A 401 is the authoritative answer about validity, whatever the
+/// bookkeeping says.
+///
+/// Returns None rather than an error because the caller's job is to report the
+/// *original* failure when no refresh is possible — "session expired" would be
+/// a misleading thing to show someone using a manual API token.
+pub async fn refreshed_token() -> Option<String> {
+    let app = APP.get()?.clone();
+    let map = crate::secrets::read_all_async(&app).await;
+    let refresh = map.get(KEY_REFRESH).cloned().unwrap_or_default();
+    if refresh.is_empty() {
+        return None;
+    }
+    let new_token = refresh_access_token(&refresh).await.ok()?;
+    let email = map.get(KEY_EMAIL).cloned();
+    store_tokens(
+        &app,
+        &new_token.access_token,
+        new_token.refresh_token.as_deref().or(Some(&refresh)),
+        new_token.expires_in,
+        email.as_deref(),
+    )
+    .await
+    .ok()?;
+    Some(new_token.access_token)
+}
+
 /// Return a valid access token, transparently refreshing via the refresh token if needed.
 #[tauri::command]
 pub async fn cloudflare_get_valid_token(app: tauri::AppHandle) -> Result<String, String> {
