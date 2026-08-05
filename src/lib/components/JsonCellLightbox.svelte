@@ -79,7 +79,10 @@
       wordWrap: 'off',
       renderLineHighlight: 'none',
       lineNumbers: 'on',
-      lineNumbersMinChars: 3,
+      // Matches JsonViewer: one character of inset on the left, 6px on the
+      // right, so the gutter is evenly padded instead of flush to the edge.
+      lineNumbersMinChars: 4,
+      lineDecorationsWidth: 6,
       glyphMargin: false,
       folding: true,
       foldingHighlight: false,
