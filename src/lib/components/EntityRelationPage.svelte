@@ -19,8 +19,9 @@
   import LayoutGrid from '@lucide/svelte/icons/layout-grid'
   import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal'
   import { toast } from "$lib/components/ui/sonner/toast.svelte.js"
-  import { svgStringToPngBlob, downloadBlob } from '$lib/svg-png.js'
+  import { svgStringToPngBlob } from '$lib/svg-png.js'
   import { Popover, PopoverTrigger, PopoverContent } from '$lib/components/ui/popover/index.js'
+  import { isCurrentThemeDark } from '$lib/stores/settings.js'
   import { loadErdSettings, saveErdSettings, SPACING_PRESETS, SCOPE_DEFAULTS } from '$lib/stores/erd-settings.js'
   import { routeEdges, routeToSvgPath, MAX_ROUTED_NODES } from '$lib/erd-routing.js'
   import { cn } from '$lib/utils.js'
@@ -648,14 +649,49 @@
   )
 
   // ── Export / Download ─────────────────────────────────────────────────────
-  // The export renders on a fixed dark sheet (it has no theme), so its ink is
-  // stated once here in OKLCH rather than sampled from the running theme.
-  const EDGE_INK  = 'oklch(0.55 0.03 255)'
-  const PK_INK    = 'oklch(0.80 0.12 82)'
-  const FK_INK    = 'oklch(0.70 0.11 252)'
-  /** Focus accent: teal - clear of both the FK blue and the PK amber, and free of
-   *  green/red status meaning. */
-  const FOCUS_INK = 'oklch(0.80 0.11 192)'
+  // The export used to render on a fixed dark sheet with hardcoded ink, so a
+  // diagram exported from a light theme came back as someone else's dark
+  // diagram. It samples the running theme instead — same tokens the canvas
+  // resolves, so the file matches what's on screen.
+  //
+  // Ink that carries meaning (PK amber, FK blue, focus teal) stays authored here
+  // in OKLCH, in a light and a dark variant: those hues aren't in the token set,
+  // and picking by polarity keeps them legible on either sheet.
+  const INK = {
+    dark:  { edge: 'oklch(0.55 0.03 255)', pk: 'oklch(0.80 0.12 82)', fk: 'oklch(0.70 0.11 252)', focus: 'oklch(0.80 0.11 192)' },
+    light: { edge: 'oklch(0.62 0.04 255)', pk: 'oklch(0.60 0.13 72)', fk: 'oklch(0.52 0.14 255)', focus: 'oklch(0.55 0.10 196)' },
+  }
+
+  // The on-screen legend and the column key/link glyphs use the same ink as the
+  // canvas, so they have to follow theme polarity rather than sit on the dark set.
+  const ink = $derived($isCurrentThemeDark ? INK.dark : INK.light)
+
+  /**
+   * Snapshot the theme the export should be drawn in. Tokens are read as
+   * computed values so the SVG carries concrete colours rather than `var(--…)`
+   * references, which resolve to nothing once the file leaves the app.
+   */
+  function exportPalette() {
+    const css = getComputedStyle(document.documentElement)
+    const tok = (/** @type {string} */ n, /** @type {string} */ fallback) =>
+      css.getPropertyValue(n).trim() || fallback
+    const dark = document.documentElement.classList.contains('dark')
+    const ink = dark ? INK.dark : INK.light
+    return {
+      ...ink,
+      sheet:  tok('--background', dark ? '#0d0d10' : '#ffffff'),
+      card:   tok('--card', dark ? '#141418' : '#ffffff'),
+      header: tok('--muted', dark ? '#1d1d26' : '#f4f4f5'),
+      border: tok('--border', dark ? '#252535' : '#e4e4e7'),
+      text:   tok('--foreground', dark ? '#e2e2ea' : '#18181b'),
+      muted:  tok('--muted-foreground', dark ? '#6b6b80' : '#71717a'),
+      faint:  tok('--muted-foreground', dark ? '#333345' : '#a1a1aa'),
+      accent: tok('--primary', 'oklch(0.62 0.19 275)'),
+      dot:    dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
+      shadow: dark ? 'rgba(0,0,0,0.45)' : 'rgba(0,0,0,0.10)',
+      rule:   dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)',
+    }
+  }
 
   /**
    * Crow's foot marker as SVG path data, oriented along the line.
@@ -709,12 +745,13 @@
     const dy = -y0 + P
     const FONT = 'ui-monospace,Cascadia Code,Menlo,Consolas,monospace'
     const visIds = new Set(vis.map(n => n.id))
+    const c = exportPalette()
 
     const o = []
     o.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">`)
-    o.push(`<rect width="${W}" height="${H}" fill="#0d0d10"/>`)
+    o.push(`<rect width="${W}" height="${H}" fill="${c.sheet}"/>`)
     o.push(`<defs><pattern id="dp" width="22" height="22" patternUnits="userSpaceOnUse">`)
-    o.push(`<circle cx="1.2" cy="1.2" r="0.8" fill="#1d1d24"/></pattern></defs>`)
+    o.push(`<circle cx="1.2" cy="1.2" r="0.8" fill="${c.dot}"/></pattern></defs>`)
     o.push(`<rect width="${W}" height="${H}" fill="url(#dp)"/>`)
 
     // Edges first (behind nodes), routed by the same engine the canvas uses so an
@@ -801,42 +838,46 @@
         const isPk = pkCols.has(col.name)
         const isFk = !!col.foreignKey
         const cy = ny + HDR_H + i * ROW_H
-        if (i > 0) o.push(`<line x1="${nx}" y1="${cy}" x2="${nx+NODE_W}" y2="${cy}" stroke="#1a1a22" stroke-width="0.5"/>`)
-        const nc = isPk ? PK_INK : isFk ? FK_INK : '#6b6b80'
+        if (i > 0) o.push(`<line x1="${nx}" y1="${cy}" x2="${nx+NODE_W}" y2="${cy}" stroke="${c.rule}" stroke-width="0.5"/>`)
+        const nc = isPk ? c.pk : isFk ? c.fk : c.muted
         const ts = view.showTypes ? String(col.dataType ?? '').slice(0, 11) : ''
         const tyY = cy + ROW_H / 2 + 4
         o.push(`<text x="${nx+12}" y="${tyY}" font-size="10" font-family="${FONT}" fill="${nc}">${xesc(col.name)}</text>`)
         if (isPk || isFk) {
           const b  = isPk ? 'pk' : 'fk'
-          const bc = isPk ? 'oklch(0.80 0.12 82 / 0.16)' : 'oklch(0.70 0.11 252 / 0.14)'
-          const tc = isPk ? PK_INK : FK_INK
-          o.push(`<rect x="${nx+NODE_W-42}" y="${cy+5}" width="18" height="13" rx="2" fill="${bc}"/>`)
+          const tc = isPk ? c.pk : c.fk
+          o.push(`<rect x="${nx+NODE_W-42}" y="${cy+5}" width="18" height="13" rx="2" fill="${tc}" fill-opacity="0.15"/>`)
           o.push(`<text x="${nx+NODE_W-33}" y="${cy+15}" font-size="7.5" font-weight="700" font-family="${FONT}" fill="${tc}" text-anchor="middle">${b}</text>`)
-          if (ts) o.push(`<text x="${nx+NODE_W-50}" y="${tyY}" font-size="9" font-family="${FONT}" fill="#333345" text-anchor="end">${xesc(ts)}</text>`)
+          if (ts) o.push(`<text x="${nx+NODE_W-50}" y="${tyY}" font-size="9" font-family="${FONT}" fill="${c.faint}" fill-opacity="0.7" text-anchor="end">${xesc(ts)}</text>`)
         } else if (ts) {
-          o.push(`<text x="${nx+NODE_W-12}" y="${tyY}" font-size="9" font-family="${FONT}" fill="#333345" text-anchor="end">${xesc(ts)}</text>`)
+          o.push(`<text x="${nx+NODE_W-12}" y="${tyY}" font-size="9" font-family="${FONT}" fill="${c.faint}" fill-opacity="0.7" text-anchor="end">${xesc(ts)}</text>`)
         }
       }
 
       if (n.data?.hiddenCount) {
         const cy = ny + HDR_H + cols.length * ROW_H
-        o.push(`<line x1="${nx}" y1="${cy}" x2="${nx+NODE_W}" y2="${cy}" stroke="#1a1a22" stroke-width="0.5"/>`)
-        o.push(`<text x="${nx+12}" y="${cy+ROW_H/2+4}" font-size="9" font-family="${FONT}" fill="#4a4a5e">+${n.data.hiddenCount} more</text>`)
+        o.push(`<line x1="${nx}" y1="${cy}" x2="${nx+NODE_W}" y2="${cy}" stroke="${c.rule}" stroke-width="0.5"/>`)
+        o.push(`<text x="${nx+12}" y="${cy+ROW_H/2+4}" font-size="9" font-family="${FONT}" fill="${c.faint}">+${n.data.hiddenCount} more</text>`)
       }
     }
     o.push('</svg>')
     return o.join('')
   }
 
-  function dlFile(content, name, mime) {
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(new Blob([content], { type: mime }))
-    a.download = name
-    a.click()
-    setTimeout(() => URL.revokeObjectURL(a.href), 1500)
+  /**
+   * Save an export through the native dialog and report where it landed.
+   * @param {Blob | string} payload
+   * @param {string} name
+   * @param {{ name: string, extensions: string[] }} filter
+   * @param {string} label what was exported, for the toast title
+   */
+  async function saveExport(payload, name, filter, label) {
+    const path = await saveExportAs(payload, name, filter)
+    if (!path) return  // dialog cancelled
+    toast.success(`Exported ${label}`, { description: `Saved to ${path}` })
   }
 
-  function exportMermaid() {
+  async function exportMermaid() {
     const visIds = new Set(nodes.map(n => n.id))
     const lines = ['# ER Diagram', '', '```mermaid', 'erDiagram']
     // relationships
@@ -860,19 +901,23 @@
     }
     lines.push('```')
     try {
-      dlFile(lines.join('\n'), `erd-${activeSchema}.md`, 'text/markdown')
-      toast.success('Exported Mermaid markdown')
+      await saveExport(
+        lines.join('\n'), `erd-${activeSchema}.md`,
+        { name: 'Markdown', extensions: ['md'] }, 'Mermaid markdown',
+      )
     } catch (e) {
       toast.error('Export failed', { description: String(e) })
     }
   }
 
-  function exportSVG() {
+  async function exportSVG() {
     try {
       const svg = generateSvg()
       if (!svg) return
-      dlFile(svg, `erd-${activeSchema}.svg`, 'image/svg+xml')
-      toast.success('Exported diagram as SVG')
+      await saveExport(
+        svg, `erd-${activeSchema}.svg`,
+        { name: 'SVG image', extensions: ['svg'] }, 'diagram as SVG',
+      )
     } catch (e) {
       toast.error('Export failed', { description: String(e) })
     }
@@ -895,11 +940,20 @@
       const m = svg.match(/width="(\d+)" height="(\d+)"/)
       const W = m ? +m[1] : 1200
       const H = m ? +m[2] : 800
-      const scale = Math.min(2, 6000 / Math.max(W, H))
-      const blob = await svgStringToPngBlob(svg, { width: W, height: H, scale })
+      // 3x keeps 8px badge text legible when the diagram is viewed at 100%.
+      // MAX_PX is the safety rail: WebKit refuses to allocate a canvas past
+      // roughly 16k on a side, and a wide schema hits that well before 3x.
+      const MAX_PX = 12000
+      const scale = Math.max(1, Math.min(3, MAX_PX / Math.max(W, H)))
+      // The sheet rect inside the SVG already covers this; the canvas fill is
+      // the backstop so the PNG is never transparent where a viewer would
+      // composite it against its own (possibly white) page.
+      const blob = await svgStringToPngBlob(svg, { width: W, height: H, scale, background: exportPalette().sheet })
       if (sink === 'download') {
-        downloadBlob(blob, `erd-${activeSchema}.png`)
-        toast.success('Exported diagram as PNG')
+        await saveExport(
+          blob, `erd-${activeSchema}.png`,
+          { name: 'PNG image', extensions: ['png'] }, 'diagram as PNG',
+        )
         return
       }
       await copyPngToClipboard(blob)
