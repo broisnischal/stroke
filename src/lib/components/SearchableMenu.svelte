@@ -19,9 +19,12 @@
     /** Popover side - use "top" for triggers anchored to the bottom (status bar). */
     side = "bottom",
     contentClass = "w-56",
-    /** Show the search box only when there are more than this many items
-     *  (short lists don't need filtering). Set to -1 to always show it. */
-    searchThreshold = 5,
+    /** Show the search box only when there are more than this many items.
+     *  Defaults to always showing it: a menu that grows a search field once it
+     *  crosses some invisible count is a menu you can't build muscle memory for,
+     *  so the field is always there whether the list is 3 items or 300. Set a
+     *  positive number to opt a specific menu out. */
+    searchThreshold = -1,
     /** @type {(item: any) => void} */
     onselect = () => {},
     /** snippet({ props }) - renders the trigger button */
