@@ -545,6 +545,21 @@ export async function getTableColumnStructure(schema, table) {
 }
 
 /**
+ * Column structure for every table in a schema, in one call. The ER diagram
+ * needs the whole schema before it can lay anything out, and asking per table
+ * put an IPC round trip in front of each one.
+ * @param {string} schema
+ * @returns {Promise<{ table: string, columns: any[] }[]>}
+ */
+export async function getSchemaColumnStructure(schema) {
+  try {
+    return await invoke('pg_get_schema_column_structure', { schema })
+  } catch (err) {
+    throw new Error(formatInvokeError(err))
+  }
+}
+
+/**
  * Returns tables that have a FK pointing TO the given table (reverse/incoming relationships).
  * @param {string} schema @param {string} table
  * @returns {Promise<Array<{ fromSchema:string, fromTable:string, fromColumns:string[], toColumns:string[], constraintName:string }>>}

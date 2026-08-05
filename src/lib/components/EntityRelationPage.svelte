@@ -1,7 +1,7 @@
 <script>
   import { tick, untrack } from 'svelte'
   import dagre from '@dagrejs/dagre'
-  import { listTables, getTableColumnStructure, listIndexes, getTableDdl } from '$lib/api.js'
+  import { getSchemaColumnStructure, listIndexes, getTableDdl, saveExportAs } from '$lib/api.js'
   import ErdCanvas from './ErdCanvas.svelte'
   import Loader from '@lucide/svelte/icons/loader'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
@@ -502,31 +502,28 @@
     if (_rebuildTimer) { clearTimeout(_rebuildTimer); _rebuildTimer = null }
 
     try {
-      const tableList = /** @type {{ name: string }[]} */ (await listTables(activeSchema))
-      totalCount = tableList.length
-      autoConnected = tableList.length > WARN_MANY
+      // One call for the whole schema. This used to fan out one request per
+      // table, which meant the diagram couldn't start drawing until N round
+      // trips had completed — the dominant cost on any non-trivial schema.
+      const schemaCols = await getSchemaColumnStructure(activeSchema)
+      totalCount = schemaCols.length
+      autoConnected = schemaCols.length > WARN_MANY
 
-      for (let i = 0; i < tableList.length; i += BATCH) {
-        const chunk = tableList.slice(i, i + BATCH)
-        const results = await Promise.allSettled(
-          chunk.map(async t => {
-            const cols = /** @type {Col[]} */ (await getTableColumnStructure(activeSchema, t.name))
-            const pkCols = new Set(
-              cols.filter(c =>
-                c.columnDefault?.includes('nextval') ||
-                (c.name === 'id' && !c.isNullable && !c.foreignKey)
-              ).map(c => c.name)
-            )
-            return /** @type {TableMeta} */ ({ name: t.name, columns: cols, pkCols })
-          }),
+      for (const { table, columns } of schemaCols) {
+        const cols = /** @type {Col[]} */ (columns)
+        // Provisional keys: enough to draw with. refineKeys() replaces these
+        // with the real primary/unique indexes as soon as they land.
+        const pkCols = new Set(
+          cols.filter(c =>
+            c.columnDefault?.includes('nextval') ||
+            (c.name === 'id' && !c.isNullable && !c.foreignKey)
+          ).map(c => c.name)
         )
-        for (const r of results) {
-          if (r.status === 'fulfilled') tableMeta.set(r.value.name, r.value)
-        }
-        loadedCount = Math.min(i + BATCH, tableList.length)
-        tableMeta = new Map(tableMeta)
-        await tick()
+        tableMeta.set(table, /** @type {TableMeta} */ ({ name: table, columns: cols, pkCols }))
       }
+      loadedCount = schemaCols.length
+      tableMeta = new Map(tableMeta)
+      await tick()
       buildGraph(true)
       void refineKeys()
     } catch (e) {
