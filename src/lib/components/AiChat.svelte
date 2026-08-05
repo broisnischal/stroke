@@ -1797,8 +1797,16 @@
         content: JSON.stringify({
           error: `This call has already failed ${prior.count} times this turn. Do NOT retry it again.`,
           last_error: prior.lastError,
+          // The old wording here was "explain to the user why this cannot be
+          // done", which asked the model to account for a failure it had no
+          // information about — so it invented one, and a plain "no such table"
+          // got reported to the user as a database permission problem. Report
+          // the error; do not theorise about its cause.
           instruction:
-            "Analyze the error, use a different approach, or explain to the user why this cannot be done.",
+            "Either try a genuinely different approach (a different tool, or SQL for THIS engine), " +
+            "or tell the user the operation failed and quote last_error verbatim. " +
+            "Do NOT guess at a cause you have not verified — in particular, never claim a permissions, " +
+            "access, or authentication problem unless last_error actually says so.",
         }),
       });
       return;
@@ -1914,11 +1922,25 @@
             message: data.message ?? null,
           });
         } catch (sqlErr) {
-          // Remove executing indicator silently - AI sees the error via toolResult
-          const execIdx = items.findIndex((i) => i.id === execId);
-          if (execIdx >= 0) items.splice(execIdx, 1);
           const msg = String(sqlErr);
           const hint = classifyDbError(msg);
+          // Show the failure in the transcript rather than deleting the
+          // indicator. Hiding it left the user watching the model narrate a
+          // cause for an error they were never shown — the query that actually
+          // failed, and why, is the one thing they need to see.
+          const execIdx = items.findIndex((i) => i.id === execId);
+          const failedItem = /** @type {ChatItem} */ ({
+            id: execId,
+            kind: "result",
+            sql,
+            columns: [],
+            rows: [],
+            total: 0,
+            error: msg,
+            capped: false,
+          });
+          if (execIdx >= 0) items.splice(execIdx, 1, failedItem);
+          else items.push(failedItem);
           const existing = failureTracker.get(callKey) ?? {
             count: 0,
             lastError: "",
