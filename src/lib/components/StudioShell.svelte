@@ -123,6 +123,7 @@
   import {
     createTableTab,
     createSqlTab,
+    createDdlTab,
     createWelcomeTab,
     createAiTab,
     createSchemaTab,
@@ -1717,7 +1718,7 @@ let rowSearch = $state('')
 
   /** @param {StudioTab} tab */
   async function applyTabToEditor(tab) {
-    if (tab.kind === 'welcome' || tab.kind === 'ai' || tab.kind === 'schema' || tab.kind === 'orm') {
+    if (tab.kind === 'welcome' || tab.kind === 'ai' || tab.kind === 'schema' || tab.kind === 'orm' || tab.kind === 'ddl') {
       clearTableEditor()
       return
     }
@@ -2556,6 +2557,26 @@ let rowSearch = $state('')
     activeTabId = tab.id
     clearTableEditor()
     applySqlSnapshot(cloneSqlTabState(/** @type {SqlTabState} */ (tab.state)))
+  }
+
+  /**
+   * Open a read-only DDL tab, or re-focus the one already showing this object.
+   * @param {string} ddlText @param {string} title
+   */
+  function openDdlTab(ddlText, title) {
+    const existing = tabs.find((t) => t.kind === 'ddl' && t.title === title)
+    if (existing) {
+      // Refresh in place — the object may have been altered since it was opened.
+      tabs = tabs.map((t) => (t.id === existing.id ? { ...t, state: { ddlText } } : t))
+      void activateTab(existing.id)
+      return
+    }
+    saveActiveTabState()
+    dropWelcomeTabs()
+    const tab = createDdlTab(ddlText, title)
+    tabs = [...tabs, tab]
+    activeTabId = tab.id
+    clearTableEditor()
   }
 
   function openAiTab() {
@@ -4955,7 +4976,7 @@ let rowSearch = $state('')
     try {
       const ddl = await getTableDdl(activeSchema, tableName)
       if (aiMode) exitAiMode()
-      openSqlTabWith(ddl.endsWith('\n') ? ddl : `${ddl}\n`, `DDL · ${tableName}`, { draft: false })
+      openDdlTab(ddl.endsWith('\n') ? ddl : `${ddl}\n`, `DDL · ${tableName}`)
     } catch (e) {
       toast.error('Could not load DDL', { description: String(e) })
     }
@@ -5990,6 +6011,21 @@ let rowSearch = $state('')
                 dirty={nbState.dirty}
                 onupdate={(updates) => updateNotebookTab(nbTab.id, updates)}
               />
+            {/await}
+          </svelte:boundary>
+        </div>
+      {/each}
+
+      <!-- DDL tabs, one read-only editor per open object, kept alive -->
+      {#each tabs.filter((t) => t.kind === 'ddl') as ddlTab (ddlTab.id)}
+        {@const ddlState = /** @type {{ ddlText: string }} */ (ddlTab.state)}
+        <div
+          class={activeTab?.id === ddlTab.id ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+          inert={activeTab?.id !== ddlTab.id || undefined}
+        >
+          <svelte:boundary failed={tabError}>
+            {#await import('./DdlView.svelte')}<TabLoading />{:then { default: DdlView }}
+              <DdlView ddl={ddlState.ddlText} objectName={ddlTab.title.replace(/^DDL · /, '')} />
             {/await}
           </svelte:boundary>
         </div>
