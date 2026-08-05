@@ -1086,3 +1086,60 @@ export async function saveNotebookAs(content, defaultName = 'notebook.sqlnb') {
 export async function saveNotebook(path, content) {
   return inv('save_file', { path, content })
 }
+
+/**
+ * Search the web for the AI agent.
+ *
+ * Runs in Rust, not the webview: no search endpoint sends CORS headers that
+ * would let a `fetch()` from the app origin read the response.
+ * @param {string} query
+ * @param {number} [limit]
+ * @returns {Promise<{ title: string, url: string, snippet: string }[]>}
+ */
+export async function aiWebSearch(query, limit = 5) {
+  return inv('ai_web_search', { query, limit })
+}
+
+/**
+ * Fetch one page and return its readable text (tags, script and style stripped).
+ * @param {string} url
+ * @returns {Promise<string>}
+ */
+export async function aiFetchPage(url) {
+  return inv('ai_fetch_page', { url })
+}
+
+/**
+ * Show a native save dialog and write the payload to the chosen path.
+ *
+ * `<a download>` is silently ignored inside WKWebView, so every export that has
+ * to land on disk goes through the dialog + a Rust write instead. Returns the
+ * saved path so the caller can name it in a toast, or null when cancelled.
+ *
+ * @param {Blob | string} payload
+ * @param {string} defaultName file name pre-filled in the dialog
+ * @param {{ name: string, extensions: string[] }} filter
+ * @returns {Promise<string | null>}
+ */
+export async function saveExportAs(payload, defaultName, filter) {
+  const { save } = await import('@tauri-apps/plugin-dialog')
+  const path = await save({ defaultPath: defaultName, filters: [filter] })
+  if (!path) return null
+  if (typeof payload === 'string') {
+    await inv('save_file', { path, content: payload })
+  } else {
+    await inv('save_file_bytes', { path, base64: await blobToBase64(payload) })
+  }
+  return path
+}
+
+/** @param {Blob} blob */
+async function blobToBase64(blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer())
+  let binary = ''
+  // Chunked: `apply` on a multi-megabyte array overflows the argument limit.
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode.apply(null, /** @type {any} */ (bytes.subarray(i, i + 0x8000)))
+  }
+  return btoa(binary)
+}
