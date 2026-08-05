@@ -6,6 +6,8 @@
   import Download from '@lucide/svelte/icons/download'
   import Trash2 from '@lucide/svelte/icons/trash-2'
   import { cn } from '$lib/utils.js'
+  import { saveExportAs } from '$lib/api.js'
+  import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import SqlEditor from '$lib/components/SqlEditor.svelte'
 
   /**
@@ -67,21 +69,25 @@
 
   function onResizeEnd() { resizing = false }
 
-  function exportCsv() {
+  async function exportCsv() {
     if (!result?.columns.length) return
     const header = result.columns.map((c) => c.name).join(',')
     const rows = result.rows.map((r) =>
       r.map((v) => (v === null ? '' : JSON.stringify(String(v)))).join(','),
     )
-    const blob = new Blob([[header, ...rows].join('\n')], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `query-${cellIndex + 1}.csv`
-    a.click()
-    // Without this the blob is pinned for the lifetime of the window — a few
-    // exports of a large result set hold on to the whole CSV each time.
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    // `<a download>` is ignored by WKWebView, so the anchor this replaced did
+    // nothing at all in the desktop app.
+    try {
+      const path = await saveExportAs(
+        [header, ...rows].join('\n'),
+        `query-${cellIndex + 1}.csv`,
+        { name: 'CSV', extensions: ['csv'] },
+      )
+      if (!path) return  // dialog cancelled
+      toast.success('Exported as CSV', { description: `Saved to ${path}` })
+    } catch (e) {
+      toast.error('Export failed', { description: String(e) })
+    }
   }
 </script>
 
@@ -194,7 +200,7 @@
 
         {#if !resultsCollapsed && result?.columns.length && !hasError}
           <button
-            onclick={exportCsv}
+            onclick={() => void exportCsv()}
             class="ml-auto flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground/40 hover:bg-muted hover:text-foreground"
             title="Export CSV"
           >
