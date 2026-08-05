@@ -243,24 +243,27 @@
     container?.dispatchEvent(new CustomEvent(name))
   }
 
-  /** Download the current diagram as an SVG file. */
-  export function exportSvg(filename = 'diagram.svg') {
+  /**
+   * Download the current diagram as an SVG file.
+   * @returns {Promise<string | null>} saved path ('' in browser dev, null if cancelled)
+   */
+  export async function exportSvg(filename = 'diagram.svg') {
     const svg = container?.querySelector('svg')
-    if (!svg) return
+    if (!svg) return null
     const xml = new XMLSerializer().serializeToString(svg)
     const blob = new Blob(['<?xml version="1.0" encoding="UTF-8"?>\n', xml], { type: 'image/svg+xml' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url; a.download = filename; a.click()
-    URL.revokeObjectURL(url)
+    return await downloadBlob(blob, filename)
   }
 
-  /** Download the current diagram as a PNG file. */
+  /**
+   * Download the current diagram as a PNG file.
+   * @returns {Promise<string | null>} saved path ('' in browser dev, null if cancelled)
+   */
   export async function exportPng(filename = 'diagram.png') {
     const svg = /** @type {SVGSVGElement|null} */ (container?.querySelector('svg'))
-    if (!svg) return
+    if (!svg) return null
     const blob = await svgToPngBlob(svg, { scale: window.devicePixelRatio || 2 })
-    downloadBlob(blob, filename)
+    return await downloadBlob(blob, filename)
   }
 </script>
 
