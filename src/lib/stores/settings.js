@@ -15,7 +15,7 @@ const STORAGE_KEY = 'stroke:settings'
 /** @typedef {'geist' | 'serif' | 'apple' | 'inter' | 'mono' | 'fira' | 'plex' | 'space' | 'source'} FontId */
 /** @typedef {'regular' | 'light' | 'bold'} IconStyleId */
 /** @typedef {'lucide' | 'hugeicons' | 'phosphor'} IconSetId */
-/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean, defaultDataView: string, paginationMode: string, maxQueryHistory: number, connectTimeoutMs: number, socketTimeoutMs: number, maxAllowedPacket: number, sessionTimezone: string, vimMode: boolean, cmdkAiEnabled: boolean, liveModeEnabled: boolean, nullSortOrder: string, agentChatFontSize: number, agentCodeFontSize: number, agentThinkingStyle: string }} AppSettings */
+/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean, defaultDataView: string, paginationMode: string, maxQueryHistory: number, connectTimeoutMs: number, socketTimeoutMs: number, maxAllowedPacket: number, sessionTimezone: string, vimMode: boolean, cmdkAiEnabled: boolean, liveModeEnabled: boolean, nullSortOrder: string, agentChatFontSize: number, agentCodeFontSize: number, agentThinkingStyle: string, agentShowQueryCards: boolean, agentWebAccess: boolean, tableTextAlign: string }} AppSettings */
 
 /** UI zoom scale (font + layout). 1 = 100%. */
 export const ZOOM_STEPS = [0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.25, 1.5]
@@ -238,6 +238,14 @@ export const DEFAULT_SETTINGS = {
   agentChatFontSize: DEFAULT_AGENT_CHAT_FONT,
   agentCodeFontSize: DEFAULT_AGENT_CODE_FONT,
   agentThinkingStyle: DEFAULT_THINKING_STYLE,
+  // On by default: seeing the SQL the agent ran, and what it returned, is how
+  // you tell a right answer from a confident one.
+  agentShowQueryCards: true,
+  // Off by default. Everything else the agent does stays between the app and
+  // your database; searching sends your question to a third party, so it is a
+  // decision the user makes rather than one they discover afterwards.
+  agentWebAccess: false,
+  tableTextAlign: DEFAULT_TABLE_ALIGN,
 }
 
 /** Reactive app font id (synced by applySettings). */
@@ -267,6 +275,15 @@ export const appCmdkAi = writable(false)
 
 /** Reactive: experimental Live mode (auto-refresh) status-bar toggle enabled (off by default). */
 export const appLiveMode = writable(false)
+
+/** Whether the agent transcript shows a card per executed query. */
+export const appAgentQueryCards = writable(true)
+
+/** Whether the agent may search the web and read pages. */
+export const appAgentWebAccess = writable(false)
+
+/** Grid cell alignment - the canvas table subscribes and repaints on change. */
+export const appTableAlign = writable(/** @type {string} */ (DEFAULT_TABLE_ALIGN))
 
 /** Reactive pagination strategy (offset | cursor | keyset | temporal), synced by applySettings. */
 export const appPaginationMode = writable(/** @type {string} */ (DEFAULT_PAGINATION_MODE))
@@ -401,7 +418,10 @@ export function loadSettings() {
     const agentChatFontSize = AGENT_FONT_SIZES.includes(parsed.agentChatFontSize) ? parsed.agentChatFontSize : DEFAULT_AGENT_CHAT_FONT
     const agentCodeFontSize = AGENT_FONT_SIZES.includes(parsed.agentCodeFontSize) ? parsed.agentCodeFontSize : DEFAULT_AGENT_CODE_FONT
     const agentThinkingStyle = THINKING_STYLE_IDS.includes(parsed.agentThinkingStyle) ? parsed.agentThinkingStyle : DEFAULT_THINKING_STYLE
-    _settingsCache = { theme, zoom, font, iconStyle, iconSet, tableStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply, defaultDataView, paginationMode, maxQueryHistory, connectTimeoutMs, socketTimeoutMs, maxAllowedPacket, sessionTimezone, vimMode, cmdkAiEnabled, liveModeEnabled, nullSortOrder, agentChatFontSize, agentCodeFontSize, agentThinkingStyle }
+    const agentShowQueryCards = parsed.agentShowQueryCards !== false
+    const agentWebAccess = parsed.agentWebAccess === true
+    const tableTextAlign = TABLE_ALIGN_IDS.includes(parsed.tableTextAlign) ? parsed.tableTextAlign : DEFAULT_TABLE_ALIGN
+    _settingsCache = { theme, zoom, font, iconStyle, iconSet, tableStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply, defaultDataView, paginationMode, maxQueryHistory, connectTimeoutMs, socketTimeoutMs, maxAllowedPacket, sessionTimezone, vimMode, cmdkAiEnabled, liveModeEnabled, nullSortOrder, agentChatFontSize, agentCodeFontSize, agentThinkingStyle, agentShowQueryCards, agentWebAccess, tableTextAlign }
     return { ..._settingsCache }
   } catch {
     return { ...DEFAULT_SETTINGS }
@@ -502,6 +522,9 @@ export function applySettings(settings) {
   setStore(appVimMode, settings.vimMode === true)
   setStore(appCmdkAi, settings.cmdkAiEnabled === true)
   setStore(appLiveMode, settings.liveModeEnabled === true)
+  setStore(appAgentQueryCards, settings.agentShowQueryCards !== false)
+  setStore(appAgentWebAccess, settings.agentWebAccess === true)
+  setStore(appTableAlign, TABLE_ALIGN_IDS.includes(settings.tableTextAlign) ? settings.tableTextAlign : DEFAULT_TABLE_ALIGN)
   setStore(appPaginationMode, PAGINATION_MODE_IDS.includes(settings.paginationMode) ? settings.paginationMode : DEFAULT_PAGINATION_MODE)
 
   // Canvas table grid style - data attribute for any CSS hooks; DataTable reads

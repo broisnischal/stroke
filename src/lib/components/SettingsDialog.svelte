@@ -242,6 +242,12 @@
   function setAgentThinking(v) {
     if (v) settings = updateSettings({ agentThinkingStyle: v });
   }
+  function toggleAgentQueryCards() {
+    settings = updateSettings({ agentShowQueryCards: !settings.agentShowQueryCards });
+  }
+  function toggleAgentWebAccess() {
+    settings = updateSettings({ agentWebAccess: !settings.agentWebAccess });
+  }
   const thinkingStyleOption = $derived(
     THINKING_STYLES.find((s) => s.id === settings.agentThinkingStyle) ?? THINKING_STYLES[0],
   );
@@ -603,6 +609,22 @@
         items={THINKING_STYLES.map((o) => ({ value: o.id, label: o.label, keywords: [o.label] }))}
       />
     </div>
+  {/if}
+  {#if show('Web access', 'Let the agent search the web and read pages')}
+    {@render switchRow(
+      'Web access',
+      'Let the agent search the web and read pages for things your database cannot answer — error codes, function syntax, current docs. Your search terms leave your machine when it does.',
+      settings.agentWebAccess,
+      toggleAgentWebAccess,
+    )}
+  {/if}
+  {#if show('Show query cards', 'Display the SQL the agent ran and the rows it returned')}
+    {@render switchRow(
+      'Show query cards',
+      'Show the SQL the agent ran and the rows it came back with. Failed queries are always shown, so a correction still has something to refer to.',
+      settings.agentShowQueryCards,
+      toggleAgentQueryCards,
+    )}
   {/if}
 {/snippet}
 

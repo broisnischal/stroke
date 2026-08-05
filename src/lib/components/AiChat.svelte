@@ -90,7 +90,7 @@
   import { saveChart } from "$lib/stores/saved-charts.js";
   import { saveDiagram } from "$lib/stores/saved-diagrams.js";
   import { buildOption } from "$lib/chart-utils.js";
-  import { isCurrentThemeDark } from "$lib/stores/settings.js";
+  import { isCurrentThemeDark, appAgentQueryCards, appAgentWebAccess } from "$lib/stores/settings.js";
   import Save from "@lucide/svelte/icons/save";
   import Check from "@lucide/svelte/icons/check";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
