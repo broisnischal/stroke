@@ -1372,6 +1372,8 @@
 
   /** Accordion: ID of the currently expanded result card (null = all collapsed) */
   let openResultId = $state(/** @type {string | null} */ (null));
+  /** Result card whose raw (un-humanized) driver error is expanded. */
+  let rawErrorId = $state(/** @type {string | null} */ (null));
   /** Whether the user has manually collapsed results - respected by auto-open logic */
   let userPrefersCollapsed = $state(false);
 
@@ -3511,20 +3513,20 @@
 
                 <!-- ── Query result card ──────────────────── -->
               {:else if item.kind === "result"}
+                <!-- Hidden by the Agent setting, except when the query failed:
+                     suppressing an error would leave the model's recovery in the
+                     transcript with nothing explaining what it recovered from. -->
+                {#if $appAgentQueryCards || item.error}
                 {@const resOpen = openResultId === item.id}
+                <!-- One neutral card for every outcome. Tinting the whole
+                     container per state (red for errors, primary for schema)
+                     gave a transcript of coloured blocks competing with the
+                     prose; state now reads from the leading icon alone. -->
                 <div
-                  class="mx-3.5 overflow-hidden rounded-lg border text-ui-xs {item.error
-                    ? 'border-destructive/30'
-                    : item.isSchema
-                      ? 'border-primary/20'
-                      : 'border-border/50'}"
+                  class="mx-3.5 overflow-hidden rounded-lg border border-border/40 text-ui-xs"
                 >
                   <div
-                    class="group/res flex w-full items-center gap-1.5 px-3 py-2 transition-colors hover:bg-muted/20 {item.error
-                      ? 'bg-destructive/5'
-                      : item.isSchema
-                        ? 'bg-primary/5'
-                        : 'bg-muted/10'} {resOpen
+                    class="group/res flex w-full items-center gap-1.5 px-3 py-1.5 transition-colors hover:bg-muted/20 {resOpen
                       ? 'border-b border-border/30'
                       : ''}"
                   >
@@ -3538,13 +3540,17 @@
                         />{:else}<ChevronRight
                           class="size-3 shrink-0 text-muted-foreground/40"
                         />{/if}
-                      <Table2
-                        class="size-3 shrink-0 {item.isSchema
-                          ? 'text-primary/50'
-                          : 'text-muted-foreground/35'}"
-                      />
+                      {#if item.error}
+                        <AlertTriangle class="size-3 shrink-0 text-destructive/70" />
+                      {:else}
+                        <Table2
+                          class="size-3 shrink-0 {item.isSchema
+                            ? 'text-primary/50'
+                            : 'text-muted-foreground/35'}"
+                        />
+                      {/if}
                       <span
-                        class="min-w-0 flex-1 truncate text-ui-xs text-muted-foreground/60"
+                        class="min-w-0 flex-1 truncate font-mono text-ui-2xs text-muted-foreground/60"
                         >{item.sql || "Query"}</span
                       >
                     </button>
@@ -3594,15 +3600,27 @@
                   </div>
                   {#if resOpen}
                     {#if item.error}
-                      <div class="flex items-start gap-2 px-3 py-2.5">
-                        <AlertTriangle
-                          class="mt-0.5 size-3.5 shrink-0 text-destructive"
-                        />
-                        <p
-                          class="font-mono text-ui-2xs leading-relaxed text-destructive"
-                        >
-                          {item.error}
+                      <!-- The cause on one line, in the body text colour. A
+                           red-on-red block shouted the loudest thing in the
+                           transcript at what is usually a recoverable typo the
+                           model fixes on its next turn; the rail carries the
+                           severity instead. Raw driver text stays one click away. -->
+                      <div class="px-3 py-2.5">
+                        <p class="border-l-2 border-destructive/50 pl-2.5 font-mono text-ui-2xs leading-relaxed text-foreground/70">
+                          {humanizeDbError(item.error)}
                         </p>
+                        {#if humanizeDbError(item.error) !== item.error.replace(/^Error:\s*/i, "").trim()}
+                          <button
+                            type="button"
+                            class="mt-1.5 pl-2.5 text-ui-3xs text-muted-foreground/40 transition-colors hover:text-muted-foreground"
+                            onclick={() => (rawErrorId = rawErrorId === item.id ? null : item.id)}
+                          >{rawErrorId === item.id ? "Hide" : "Show"} raw error</button>
+                          {#if rawErrorId === item.id}
+                            <p class="mt-1.5 pl-2.5 font-mono text-ui-3xs leading-relaxed break-all text-muted-foreground/45">
+                              {item.error}
+                            </p>
+                          {/if}
+                        {/if}
                       </div>
                     {:else if item.rows.length === 0}
                       <p
@@ -3645,6 +3663,55 @@
                         {/each}
                       </div>
                     {/if}
+                  {/if}
+                </div>
+                {/if}
+
+                <!-- ── Web search / page fetch ─────────────── -->
+              {:else if item.kind === "web"}
+                <div class="mx-3.5 overflow-hidden rounded-lg border border-border/40 text-ui-xs">
+                  <div class="flex items-center gap-1.5 px-3 py-1.5">
+                    {#if item.error}
+                      <AlertTriangle class="size-3 shrink-0 text-destructive/70" />
+                    {:else if item.mode === "search"}
+                      <Search class="size-3 shrink-0 text-muted-foreground/35" />
+                    {:else}
+                      <Globe class="size-3 shrink-0 text-muted-foreground/35" />
+                    {/if}
+                    <span class="min-w-0 flex-1 truncate text-ui-2xs text-muted-foreground/60">
+                      {item.mode === "search" ? "Searched" : "Read"} · {item.label}
+                    </span>
+                    {#if item.loading}
+                      <span class="shrink-0 text-ui-3xs text-muted-foreground/40">…</span>
+                    {:else if item.mode === "search" && !item.error}
+                      <span class="shrink-0 rounded bg-muted/40 px-1.5 py-0.5 text-ui-3xs tabular-nums text-muted-foreground/50">
+                        {item.hits.length}
+                        {item.hits.length === 1 ? "result" : "results"}
+                      </span>
+                    {/if}
+                  </div>
+                  {#if item.error}
+                    <p class="border-t border-border/30 px-3 py-2">
+                      <span class="border-l-2 border-destructive/50 pl-2.5 font-mono text-ui-2xs text-foreground/70">{item.error}</span>
+                    </p>
+                  {:else if item.mode === "search" && item.hits.length}
+                    <ul class="border-t border-border/30">
+                      {#each item.hits as hit (hit.url)}
+                        <li class="border-b border-border/15 px-3 py-1.5 last:border-b-0">
+                          <button
+                            type="button"
+                            class="block w-full min-w-0 text-left"
+                            onclick={() => void openExternal(hit.url)}
+                            title={hit.url}
+                          >
+                            <span class="block truncate text-ui-2xs text-foreground/80 hover:underline">{hit.title}</span>
+                            {#if hit.snippet}
+                              <span class="mt-0.5 line-clamp-2 block text-ui-3xs leading-relaxed text-muted-foreground/50">{hit.snippet}</span>
+                            {/if}
+                          </button>
+                        </li>
+                      {/each}
+                    </ul>
                   {/if}
                 </div>
 
