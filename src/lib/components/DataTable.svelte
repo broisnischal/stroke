@@ -142,7 +142,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   } from "$lib/canvas-table.js";
 
   // Local derived so all $derived layout constants track it reactively.
-  const canvasZoom = $derived(zoomState.value)
+  // Embedded results sit inside a chat bubble or a console pane, where the
+  // full-size grid reads as oversized next to the surrounding text. Scaling the
+  // canvas zoom scales every layout constant AND the fonts together, so the
+  // smaller grid stays internally proportioned instead of just having tighter rows.
+  const EMBEDDED_SCALE = 0.85
+  const canvasZoom = $derived(zoomState.value * (embedded ? EMBEDDED_SCALE : 1))
 
   let {
     columns = [],
@@ -2843,8 +2848,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // null when no row is expanded (the common case) → rowDocTop/rowIndexAtY use
   // O(1) `idx * ROW_HEIGHT` math and no per-page Float64Array is allocated.
   const rowTops = $derived(computeRowTops(rows.length, expandedRows, 280, ROW_HEIGHT, expandedRowHeights))
-  /** Total scrollable content height incl. header + insert slot + body + 2-row bottom margin. */
-  const contentHeight = $derived(HEADER_H + insertRowOffset + totalRowsHeight(rowTops, rows.length, ROW_HEIGHT) + ROW_HEIGHT * 2)
+  /**
+   * Total scrollable content height: header + insert slot + body, plus a 2-row
+   * bottom margin so the last row can be scrolled clear of the viewport edge.
+   *
+   * Embedded results get no margin. They are height-capped, not filled, so the
+   * margin never earns its keep there — it just left two empty row-heights
+   * hanging under a short result (a one-row COUNT looked like a broken table).
+   */
+  const contentHeight = $derived(
+    HEADER_H + insertRowOffset + totalRowsHeight(rowTops, rows.length, ROW_HEIGHT) +
+    (embedded ? 0 : ROW_HEIGHT * 2),
+  )
 
   // Browser engines cap element/scroll height at ~33.5M px, so a naive spacer of
   // rows×ROW_HEIGHT breaks past ~1.4M rows (rows become unreachable). When the
