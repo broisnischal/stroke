@@ -152,6 +152,38 @@ pub async fn save_file(path: String, content: String) -> Result<(), String> {
     tokio::fs::write(&path, content).await.map_err(|e| e.to_string())
 }
 
+/// Write binary content to a path chosen by the user via a native save dialog.
+/// The webview's `<a download>` is a no-op inside WKWebView, so exports that
+/// produce bytes (PNG diagrams) come through here instead.
+///
+/// Payload is base64 rather than `Vec<u8>`: the IPC bridge has no binary channel,
+/// so raw bytes would cross it as a JSON array — one number per byte, roughly 4x
+/// the payload for a multi-megabyte image.
+#[tauri::command]
+pub async fn save_file_bytes(path: String, base64: String) -> Result<(), String> {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(base64.as_bytes())
+        .map_err(|e| format!("Malformed export payload: {e}"))?;
+    tokio::fs::write(&path, bytes).await.map_err(|e| e.to_string())
+}
+
+/// Search the web on the agent's behalf. Gated in the UI by the AI web-access
+/// setting; the command itself is unconditional so the MCP server can use it too.
+#[tauri::command]
+pub async fn ai_web_search(
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<crate::web_search::SearchHit>, String> {
+    crate::web_search::search(query, limit.unwrap_or(5)).await
+}
+
+/// Fetch one page and return its readable text, for following up a search hit.
+#[tauri::command]
+pub async fn ai_fetch_page(url: String) -> Result<String, String> {
+    crate::web_search::fetch_page(url).await
+}
+
 /// Read a text file from disk — used by the notebook open flow.
 #[tauri::command]
 pub async fn read_file(path: String) -> Result<String, String> {
