@@ -1285,8 +1285,8 @@
       {#if tableMeta.size > 0}
         <div class="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
           <div class="flex h-6 items-center gap-2.5 rounded-full border border-border/40 bg-panel/75 px-2.5 text-ui-3xs text-muted-foreground/60 backdrop-blur-sm">
-            <span class="flex items-center gap-1"><span class="size-1.5 rounded-full" style="background:{PK_INK}"></span>PK</span>
-            <span class="flex items-center gap-1"><span class="size-1.5 rounded-full" style="background:{FK_INK}"></span>FK</span>
+            <span class="flex items-center gap-1"><span class="size-1.5 rounded-full" style="background:{ink.pk}"></span>PK</span>
+            <span class="flex items-center gap-1"><span class="size-1.5 rounded-full" style="background:{ink.fk}"></span>FK</span>
             <span class="h-2.5 w-px bg-border/60"></span>
             <!-- Crow's foot: fork on the FK side, bar on the referenced side. -->
             <span class="flex items-center gap-1" title="One-to-many: the fork sits on the foreign key side">
@@ -1306,7 +1306,7 @@
               <!-- Matches the rim on the card. Teal, not the theme blue: blue is
                    already the foreign-key colour and the two collided. -->
               <span class="flex items-center gap-1">
-                <span class="size-2 rounded-[3px] border" style="border-color:{FOCUS_INK};background:color-mix(in oklab, {FOCUS_INK} 24%, transparent)"></span>
+                <span class="size-2 rounded-[3px] border" style="border-color:{ink.focus};background:color-mix(in oklab, {ink.focus} 24%, transparent)"></span>
                 Current
               </span>
             {/if}
@@ -1350,8 +1350,8 @@
           {@const isPk = selMeta.pkCols.has(col.name)}
           {@const isFk = !!col.foreignKey}
           <div class="flex items-center gap-2 px-3 py-1">
-            {#if isPk}<KeyRound class="size-3 shrink-0" style="color:{PK_INK}" />
-            {:else if isFk}<Link class="size-3 shrink-0" style="color:{FK_INK}" />
+            {#if isPk}<KeyRound class="size-3 shrink-0" style="color:{ink.pk}" />
+            {:else if isFk}<Link class="size-3 shrink-0" style="color:{ink.fk}" />
             {:else}<span class="size-3 shrink-0"></span>{/if}
             <span class="min-w-0 flex-1 truncate font-mono text-ui-2xs {isPk ? 'font-medium text-foreground' : 'text-foreground/75'}">{col.name}</span>
             <span class="shrink-0 font-mono text-ui-3xs text-muted-foreground/45">{col.dataType}</span>
