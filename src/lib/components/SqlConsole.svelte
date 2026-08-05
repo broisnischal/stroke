@@ -383,27 +383,6 @@
     return s
   }
 
-  function downloadBlob(content, filename, type) {
-    const blob = new Blob([content], { type })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url; a.download = filename; a.click()
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
-  }
-
-  function exportCsv() {
-    const cols = currentDisplay.columns.map(c => c.name ?? String(c))
-    const header = cols.map(_csvCell).join(',')
-    const body = currentDisplay.rows.map(r =>
-      /** @type {any[]} */ (r).map(_csvCell).join(',')
-    ).join('\n')
-    downloadBlob(header + '\n' + body, 'query-result.csv', 'text/csv')
-  }
-
-  function exportJson() {
-    downloadBlob(jsonText, 'query-result.json', 'application/json')
-  }
-
   /** Unified export via the shared generators + native Save dialog.
    * @param {'csv'|'json'|'sql'|'tsv'|'md'|'jsonl'} format */
   async function exportAs(format) {
