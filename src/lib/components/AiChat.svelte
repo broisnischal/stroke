@@ -15,6 +15,7 @@
   import Copy from "@lucide/svelte/icons/copy";
   import Download from "@lucide/svelte/icons/download";
   import AlertTriangle from "@lucide/svelte/icons/alert-triangle";
+  import Globe from "@lucide/svelte/icons/globe";
   import Table2 from "@lucide/svelte/icons/table-2";
   import MessageSquare from "@lucide/svelte/icons/message-square";
   import Zap from "@lucide/svelte/icons/zap";
@@ -110,7 +111,7 @@
   } from "$lib/stores/conversations.js";
   import { generateSuggestions } from "$lib/ai-suggestions.js";
   import { formatCompactCount } from "$lib/table-list.js";
-  import { svgToPngBlob, downloadBlob } from "$lib/svg-png.js";
+  import { svgToPngBlob, downloadBlob, canvasToPngBlob } from "$lib/svg-png.js";
 
   /**
    * @typedef {
@@ -1141,7 +1142,7 @@
     fullscreenCanvasEl?.dispatchEvent(new CustomEvent(name));
   }
 
-  function exportDiagramSvg(code) {
+  async function exportDiagramSvg(code) {
     const canvas =
       fullscreenCanvasEl ?? document.querySelector(".mermaid-canvas");
     const svgEl =
@@ -1155,16 +1156,16 @@
     const svgStr =
       '<?xml version="1.0" encoding="UTF-8"?>\n' +
       serializer.serializeToString(svgEl);
-    const blob = new Blob([svgStr], { type: "image/svg+xml" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "diagram.svg";
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success("SVG exported", {
-      description: "diagram.svg saved to your downloads",
-    });
+    try {
+      const path = await saveExportAs(svgStr, "diagram.svg", {
+        name: "SVG image",
+        extensions: ["svg"],
+      });
+      if (!path) return; // save dialog cancelled
+      toast.success("SVG exported", { description: `Saved to ${path}` });
+    } catch (e) {
+      toast.error("Could not export the SVG", { description: String(e) });
+    }
   }
 
   async function exportDiagramPng(code) {
@@ -1179,9 +1180,10 @@
     }
     try {
       const blob = await svgToPngBlob(svgEl, { scale: 2, background: "#ffffff" });
-      downloadBlob(blob, "diagram.png");
+      const path = await downloadBlob(blob, "diagram.png");
+      if (path === null) return; // save dialog cancelled
       toast.success("PNG exported", {
-        description: "diagram.png saved to your downloads",
+        description: path ? `Saved to ${path}` : "diagram.png saved to your downloads",
       });
     } catch (e) {
       toast.error("Could not export PNG", {
@@ -3436,7 +3438,7 @@
                               <button
                                 type="button"
                                 class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-ui-3xs text-muted-foreground hover:bg-accent hover:text-foreground"
-                                onclick={() => exportDiagramSvg(part.content)}
+                                onclick={() => void exportDiagramSvg(part.content)}
                                 title="Export SVG"
                                 ><ArrowDownToLine class="size-3" />SVG</button
                               >
@@ -4062,7 +4064,7 @@
                       <button
                         type="button"
                         class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-ui-3xs text-muted-foreground hover:bg-accent hover:text-foreground"
-                        onclick={() => exportDiagramSvg(item.code)}
+                        onclick={() => void exportDiagramSvg(item.code)}
                         title="Export SVG"
                         ><ArrowDownToLine class="size-3" />SVG</button
                       >
@@ -5044,7 +5046,7 @@
         <button
           type="button"
           class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-          onclick={() => exportDiagramSvg(fullscreenDiagramCode ?? "")}
+          onclick={() => void exportDiagramSvg(fullscreenDiagramCode ?? "")}
           title="Export as SVG"
         >
           <ArrowDownToLine class="size-3" />SVG
