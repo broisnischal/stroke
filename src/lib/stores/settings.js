@@ -167,7 +167,25 @@ export function normalizeTableStyle(/** @type {unknown} */ id) {
 // consumed by the query-history store; the connector values (packet/timeouts/
 // timezone) are persisted as MySQL connection defaults.
 /** Data-view modes for a table tab (kept in sync with TableToolbar's DATA_VIEW_MODES). */
-export const DATA_VIEW_IDS = /** @type {const} */ (['table', 'json', 'record', 'text', 'chart'])
+// Must stay in step with DATA_VIEW_MODES in TableToolbar.svelte — that list is
+// what a tab can actually switch to, this one is what you may pick as the
+// default. 'erd' was added to the toolbar without being added here, so it was
+// the one view you could open but never default to.
+/**
+ * Grid cell alignment.
+ * 'numbers' is the convention every spreadsheet and DB client uses: digits line
+ * up by place value so you can compare magnitudes down a column, while prose
+ * stays left where the eye finds the start of each line.
+ */
+export const TABLE_ALIGN_OPTIONS = /** @type {const} */ ([
+  { id: 'left', label: 'Left' },
+  { id: 'numbers', label: 'Numbers right' },
+  { id: 'right', label: 'Right' },
+])
+export const TABLE_ALIGN_IDS = TABLE_ALIGN_OPTIONS.map((o) => o.id)
+export const DEFAULT_TABLE_ALIGN = 'left'
+
+export const DATA_VIEW_IDS = /** @type {const} */ (['table', 'json', 'record', 'text', 'chart', 'erd'])
 export const DEFAULT_DATA_VIEW = 'table'
 
 // How the grid pages through rows.

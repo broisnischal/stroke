@@ -193,6 +193,7 @@
     { id: 'record', label: 'Record', icon: 'layout-list' },
     { id: 'text',   label: 'Text',   icon: 'file-text' },
     { id: 'chart',  label: 'Chart',  icon: 'bar-chart-2' },
+    { id: 'erd',    label: 'ERD',    icon: 'git-branch' },
   ];
   const defaultViewOption = $derived(
     DATA_VIEW_OPTIONS.find((o) => o.id === settings.defaultDataView) ?? DATA_VIEW_OPTIONS[0],
