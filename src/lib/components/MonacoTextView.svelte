@@ -22,6 +22,10 @@
     text = '',
     /** Desired language id; may be downgraded to plaintext for huge documents. */
     language = 'plaintext',
+    /** Off by default: wrapping costs a re-layout per width change, which the
+     *  huge JSON/text payloads this wraps can't afford. Views showing hand-sized
+     *  documents (DDL) turn it on. */
+    wordWrap = /** @type {'on' | 'off'} */ ('off'),
   } = $props()
 
   const PLAINTEXT_OVER_CHARS = 4_000_000
@@ -119,6 +123,11 @@
       model?.dispose()
       model = null
     }
+  })
+
+  $effect(() => {
+    const w = wordWrap
+    editor?.updateOptions({ wordWrap: w })
   })
 
   $effect(() => {
