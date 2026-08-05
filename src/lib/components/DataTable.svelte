@@ -4424,8 +4424,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ctx.beginPath(); ctx.arc(textX + dr / 2, cy, dr / 2, 0, Math.PI * 2); ctx.fill()
       leftPad = dr + Math.round(7 * canvasZoom)
     }
-    textX += leftPad
-    const textMaxW = w - CELL_PAD_X - leftPad - rightReserve
+    textX += leftPad + hoverLeftReserve
+    const textMaxW = w - CELL_PAD_X - leftPad - hoverLeftReserve - rightReserve
 
     ctx.font = _fonts.cell
     ctx.textAlign = 'left'
