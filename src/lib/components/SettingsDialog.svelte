@@ -23,6 +23,7 @@
     ICON_STYLES,
     ICON_SETS,
     TABLE_STYLES,
+    TABLE_ALIGN_OPTIONS,
     DEFAULT_MAX_QUERY_HISTORY,
     DEFAULT_CONNECT_TIMEOUT_MS,
     DEFAULT_SOCKET_TIMEOUT_MS,
@@ -128,6 +129,10 @@
     columns: "background-image:linear-gradient(90deg,var(--border) 1px,transparent 1px);background-size:7px 100%;",
   };
 
+  /** @param {string} v */
+  function setTableAlign(v) {
+    if (v) settings = updateSettings({ tableTextAlign: v });
+  }
   /** @param {import('$lib/stores/settings.js').TableStyleId} tableStyle */
   function setTableStyle(tableStyle) {
     if (tableStyle === settings.tableStyle) return;
@@ -797,6 +802,22 @@
           <span class="size-4 shrink-0 overflow-hidden rounded-[3px] border border-border/40 bg-background" style={tableStylePreview[it.value] ?? ''} aria-hidden="true"></span>
         {/snippet}
       </SelectMenu>
+    </div>
+  {/if}
+  {#if show('Cell alignment', 'Which side grid cell text sits on')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-ui-sm font-medium text-foreground">Cell alignment</p>
+        <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">
+          Which side grid cell text sits on. "Numbers right" lines digits up by place value so you can compare magnitudes down a column, and leaves prose on the left.
+        </p>
+      </div>
+      <SelectMenu
+        ariaLabel="Cell alignment"
+        value={settings.tableTextAlign}
+        onValueChange={setTableAlign}
+        items={TABLE_ALIGN_OPTIONS.map((o) => ({ value: o.id, label: o.label, keywords: [o.label] }))}
+      />
     </div>
   {/if}
 

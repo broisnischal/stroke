@@ -5,7 +5,7 @@
   import { zoomState } from '$lib/stores/canvas-zoom.svelte.js'
   // Zoom is driven through the app-level settings so the canvas scales together
   // with the rest of the UI (applySettings mirrors the app zoom into zoomState).
-  import { increaseZoom, decreaseZoom, resetZoom, appPreviewDml, appTableStyle, TABLE_STYLES, normalizeTableStyle, appVimMode } from '$lib/stores/settings.js'
+  import { increaseZoom, decreaseZoom, resetZoom, appPreviewDml, appTableStyle, TABLE_STYLES, normalizeTableStyle, appVimMode, appTableAlign } from '$lib/stores/settings.js'
   import { setVimSubMode } from '$lib/vim/vim.js'
   import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
@@ -970,6 +970,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   const _tableStyle = $derived(TABLE_STYLES[normalizeTableStyle($appTableStyle)]);
   // Repaint the grid the moment the user switches preset.
   $effect(() => { void $appTableStyle; scheduleDraw(); });
+  $effect(() => { void $appTableAlign; scheduleDraw(); });
 
   // ── Search-match highlighting ──────────────────────────────────────────────
   // The toolbar search filters rows server-side (ILIKE, case-insensitive);
@@ -3017,6 +3018,24 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   const STATS_SAMPLE = 5000
   const STATS_BUCKETS = 24
   const _statsNumericRe = /(int|numeric|decimal|real|double|float|money|number|serial)/i
+
+  /**
+   * Whether a column's cell text is drawn flush right, per the Appearance
+   * setting. 'numbers' is the spreadsheet convention: digits line up by place
+   * value so magnitudes are comparable down the column, prose stays left where
+   * the eye finds the start of each line.
+   * @param {number} actualIdx index into `columns`
+   */
+  function isRightAlignedColumn(actualIdx) {
+    const mode = $appTableAlign
+    if (mode === 'right') return true
+    if (mode !== 'numbers') return false
+    const col = columns[actualIdx]
+    const type = String(col?.dataType ?? col?.data_type ?? '')
+    // Booleans match /int/ in some engines (tinyint(1)) but are not quantities.
+    if (/bool/i.test(type)) return false
+    return _statsNumericRe.test(type)
+  }
   const _colStats = $derived.by(() => {
     void $pluginState
     if (!statsNeeded() && !annotatorEnabled()) return null
@@ -3863,15 +3882,29 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     return text.slice(0, lo) + '…'
   }
 
-  /** Right-aligned hover-button rects for a cell (viewport coords). */
-  function cellButtonRects(cellX, w, ry, rh, { canExpand }) {
-    const right = cellX + w - 4  // 4px right margin
+  /**
+   * Hover-button rects for a cell (viewport coords).
+   *
+   * The buttons sit on whichever side the value is *not* using: right of
+   * left-aligned text, left of right-aligned text. That way they always land in
+   * the cell's empty space, so showing them neither covers the value nor pushes
+   * it sideways. Reserving a fixed strip instead left a permanent dead gap down
+   * the column.
+   *
+   * Must stay in step with the draw pass below — this is the click target for
+   * what that paints.
+   */
+  function cellButtonRects(cellX, w, ry, rh, { canExpand, alignRight = false }) {
     const cy = ry + rh / 2
-    const copy = { x: right - ICON_HIT, y: ry, w: ICON_HIT, h: rh, cx: right - ICON_HIT / 2, cy }
-    const quick = canExpand
-      ? { x: copy.x - ICON_HIT, y: ry, w: ICON_HIT, h: rh, cx: copy.x - ICON_HIT / 2, cy }
-      : null
-    return { copy, quick }
+    const rect = (/** @type {number} */ x) => ({ x, y: ry, w: ICON_HIT, h: rh, cx: x + ICON_HIT / 2, cy })
+    if (alignRight) {
+      // Left-to-right: copy first (nearest the edge), then quick-look.
+      const copy = rect(cellX + 4)
+      return { copy, quick: canExpand ? rect(copy.x + ICON_HIT) : null }
+    }
+    const right = cellX + w - 4  // 4px right margin
+    const copy = rect(right - ICON_HIT)
+    return { copy, quick: canExpand ? rect(copy.x - ICON_HIT) : null }
   }
 
   function draw() {
@@ -4357,10 +4390,23 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     else if (dir?.fg && !isFocusedCell && !isDirty && !activeFk) textColor = dir.fg
 
     // Right-side content widths (sequential, no overlap).
+    // Right-alignment applies to the plain-text path only. A swatch, dot or
+    // status pill is a left-anchored object; sliding it to the right edge would
+    // read as a layout bug rather than an alignment choice.
+    const alignRight =
+      !dir?.badge && !dir?.swatch && !dir?.dot && isRightAlignedColumn(actualIdx)
+
     const warnW = dir?.warn ? Math.round(14 * canvasZoom) : 0
+    // The hover actions live on the side the value isn't using — right of
+    // left-aligned text, left of right-aligned text — so they occupy empty
+    // space in both cases. Only long values, the ones that would actually
+    // collide, give up room, and only while the pointer is in the cell.
     const hoverW = isHover ? ICON_HIT + (canExpand ? ICON_HIT : 0) : 0
     const fkW = (activeFk && rowHover) ? 20 : 0
-    const rightReserve = 4 + hoverW + fkW + warnW  // 4 = right margin
+    // Right-aligned text gets a real gap off the edge rather than the 4px
+    // margin that left-aligned values never actually reach.
+    const rightReserve = (alignRight ? CELL_PAD_X : 4) + (alignRight ? 0 : hoverW) + fkW + warnW
+    const hoverLeftReserve = alignRight ? hoverW : 0
 
     // Left-side decorations (color swatch / boolean dot) push the text right.
     let textX = cellX + CELL_PAD_X
@@ -4396,14 +4442,20 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ctx.fillText(label, textX + padX, cy + 0.5)
     } else {
       const drawn = truncText(ctx, shownText, Math.max(0, textMaxW))
-      if (_searchLower && !isNull) drawSearchHighlights(ctx, drawn, textX, ry, rh, c)
+      // Shift the left edge instead of flipping ctx.textAlign: the search
+      // highlighter and the link underline below both measure from this x, so
+      // one origin keeps all three in agreement.
+      const drawX = alignRight
+        ? textX + Math.max(0, textMaxW - textWidth(ctx, drawn))
+        : textX
+      if (_searchLower && !isNull) drawSearchHighlights(ctx, drawn, drawX, ry, rh, c)
       ctx.fillStyle = textColor
-      ctx.fillText(drawn, textX, cy + 0.5)
+      ctx.fillText(drawn, drawX, cy + 0.5)
       if (dir?.link) {
         const uy = cy + Math.round(7 * canvasZoom)
         const uw = Math.min(textWidth(ctx, drawn), Math.max(0, textMaxW))
         ctx.strokeStyle = withAlpha(textColor, 0.5); ctx.lineWidth = 1
-        ctx.beginPath(); ctx.moveTo(textX, uy); ctx.lineTo(textX + uw, uy); ctx.stroke()
+        ctx.beginPath(); ctx.moveTo(drawX, uy); ctx.lineTo(drawX + uw, uy); ctx.stroke()
       }
     }
 
@@ -4418,13 +4470,22 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       rx -= warnW
     }
 
-    // 1. Hover buttons (rightmost when hovering the cell).
+    // 1. Hover buttons. They go on whichever side the value is not using, so
+    //    they land in empty space rather than over the text. Geometry must
+    //    match cellButtonRects(), which is the click target for these.
     if (isHover) {
-      drawIcon(ctx, 'copy', rx - ICON_HIT + 5, cy - 7, 14, c.cMuted, 1.8)
-      rx -= ICON_HIT
-      if (canExpand) {
-        drawIcon(ctx, 'maximize-2', rx - ICON_HIT + 5, cy - 7, 14, c.cMuted, 1.8)
+      if (alignRight) {
+        let lx = cellX + 4
+        drawIcon(ctx, 'copy', lx + 5, cy - 7, 14, c.cMuted, 1.8)
+        lx += ICON_HIT
+        if (canExpand) drawIcon(ctx, 'maximize-2', lx + 5, cy - 7, 14, c.cMuted, 1.8)
+      } else {
+        drawIcon(ctx, 'copy', rx - ICON_HIT + 5, cy - 7, 14, c.cMuted, 1.8)
         rx -= ICON_HIT
+        if (canExpand) {
+          drawIcon(ctx, 'maximize-2', rx - ICON_HIT + 5, cy - 7, 14, c.cMuted, 1.8)
+          rx -= ICON_HIT
+        }
       }
     }
 
@@ -5208,7 +5269,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         const isNull = value === null || value === undefined
         const isJson = !isNull && typeof value === 'object'
         const canExpand = (cached?.canEdit ?? false) && !cached?.enumValues && !isBooleanType(cached?.colType ?? '')
-        const { copy, quick } = cellButtonRects(/** @type {number} */ (t.drawnX), t.col.w, 0, ROW_HEIGHT, { canExpand })
+        // Same alignment test the draw pass uses, so the click target follows
+        // the buttons to whichever side they were painted on.
+        const { copy, quick } = cellButtonRects(
+          /** @type {number} */ (t.drawnX), t.col.w, 0, ROW_HEIGHT,
+          { canExpand, alignRight: isRightAlignedColumn(actualIdx) },
+        )
         const relX = x - /** @type {number} */ (t.drawnX)
         if (relX >= copy.x - /** @type {number} */ (t.drawnX) && relX <= copy.x - /** @type {number} */ (t.drawnX) + copy.w) {
           void copyCellValue(idx, actualIdx); return
