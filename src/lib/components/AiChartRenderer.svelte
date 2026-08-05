@@ -3,6 +3,8 @@
    * Renders AI-generated charts using ECharts + the shared buildOption() utility.
    * Spec format: { type, title, data, x_col, y_col, z_col?, group_col? }
    */
+  import { saveExportAs } from '$lib/api.js'
+  import { canvasToPngBlob } from '$lib/svg-png.js'
   import { onDestroy } from 'svelte'
   import { buildOption } from '$lib/chart-utils.js'
   import { isCurrentThemeDark } from '$lib/stores/settings.js'
@@ -167,13 +169,16 @@
 
   onDestroy(() => { ro?.disconnect(); chart?.dispose() })
 
-  export function downloadPng(filename = 'chart.png') {
-    const canvas = el?.querySelector('canvas')
-    const img = canvas?.toDataURL?.('image/png')
-    if (!img) { toast.error('Could not export chart'); return }
-    const a = document.createElement('a')
-    a.href = img; a.download = filename; a.click()
-    toast.success('Chart saved as PNG')
+  export async function downloadPng(filename = 'chart.png') {
+    const blob = await canvasToPngBlob(el?.querySelector('canvas') ?? null)
+    if (!blob) { toast.error('Could not export chart'); return }
+    try {
+      const path = await saveExportAs(blob, filename, { name: 'PNG', extensions: ['png'] })
+      if (!path) return  // dialog cancelled
+      toast.success('Chart saved as PNG', { description: `Saved to ${path}` })
+    } catch (e) {
+      toast.error('Could not save the chart', { description: String(e) })
+    }
   }
 
   /** @type {ChoroplethChart|null} */
