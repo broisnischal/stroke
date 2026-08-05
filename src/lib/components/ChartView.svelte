@@ -8,6 +8,8 @@
   import { isCurrentThemeDark } from '$lib/stores/settings.js'
   import { chartGroups, saveChart, addGroup } from '$lib/stores/saved-charts.js'
   import { cn } from '$lib/utils.js'
+  import { saveExportAs } from '$lib/api.js'
+  import { canvasToPngBlob } from '$lib/svg-png.js'
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import ChevronDown  from '@lucide/svelte/icons/chevron-down'
   import Download     from '@lucide/svelte/icons/download'
@@ -212,15 +214,19 @@
     } catch { toast.error('Could not copy') }
   }
 
-  function downloadPng() {
-    const canvas = document.querySelector('.chart-canvas-host canvas')
-    const img = /** @type {HTMLCanvasElement|null} */ (canvas)?.toDataURL?.('image/png')
-    if (!img) { toast.error('Could not export chart'); return }
-    const a = document.createElement('a')
-    a.href = img
-    a.download = `chart_${Date.now()}.png`
-    a.click()
-    toast.success('Chart downloaded')
+  async function downloadPng() {
+    const canvas = /** @type {HTMLCanvasElement|null} */ (
+      document.querySelector('.chart-canvas-host canvas')
+    )
+    const blob = await canvasToPngBlob(canvas)
+    if (!blob) { toast.error('Could not export chart'); return }
+    try {
+      const path = await saveExportAs(blob, `chart_${Date.now()}.png`, { name: 'PNG', extensions: ['png'] })
+      if (!path) return  // dialog cancelled
+      toast.success('Chart saved', { description: `Saved to ${path}` })
+    } catch (e) {
+      toast.error('Could not save the chart', { description: String(e) })
+    }
   }
 
   // ── Save panel ────────────────────────────────────────────────────────────
@@ -409,7 +415,7 @@
         <button type="button" class={iconBtn} title="Copy ECharts JSON (AI-ready)" onclick={copyConfig}>
           <Copy class="size-3.5" />
         </button>
-        <button type="button" class={iconBtn} title="Download PNG" onclick={downloadPng}>
+        <button type="button" class={iconBtn} title="Download PNG" onclick={() => void downloadPng()}>
           <Download class="size-3.5" />
         </button>
       </div>
