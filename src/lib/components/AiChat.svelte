@@ -1299,6 +1299,12 @@
    * @type {Record<string, {name:string, dataType:string, nullable?:boolean}[]>}
    */
   let fetchedSchemas = $state({});
+  /**
+   * A few real rows per table, keyed `schema.table`, injected into the system
+   * prompt alongside that table's columns.
+   * @type {Record<string, { rows: Record<string, unknown>[], truncated: boolean }>}
+   */
+  let sampledRows = $state({});
 
   // ── Context window stats ──────────────────────────────────────────────────
   /** Rough token estimate: 1 token ≈ 4 chars (GPT/Mistral rule of thumb) */
@@ -1516,6 +1522,81 @@
     }
   }
 
+  /** Rows sampled per table. Two or three is enough to show the shape of the data. */
+  const SAMPLE_ROWS = 3;
+  /** Tables sampled per turn. A wide schema would otherwise cost one query each. */
+  const SAMPLE_TABLE_CAP = 6;
+  /** Longest sampled value kept intact; past this the prompt cost stops paying off. */
+  const SAMPLE_VALUE_CHARS = 120;
+
+  /**
+   * Read a few real rows from each table about to be described in the prompt.
+   *
+   * Types say a column is `text`; they don't say it holds 'active' rather than
+   * 'ACTIVE' or '1', that a date is stored as an epoch string, or that a
+   * nullable column is null for every row that matters. Queries written against
+   * the type alone get those wrong, so the model sees actual values before it
+   * writes any SQL. Cached per table for the session — the shape of a table's
+   * data doesn't change between turns.
+   *
+   * Best effort throughout: a table that can't be read is simply left out.
+   * @param {string[]} keys `schema.table` keys to sample
+   */
+  async function ensureSampleRows(keys) {
+    const pending = keys.filter((k) => !sampledRows[k]).slice(0, SAMPLE_TABLE_CAP);
+    if (!pending.length) return;
+
+    /** @type {Record<string, { rows: Record<string, unknown>[], truncated: boolean }>} */
+    const found = {};
+    for (const key of pending) {
+      const schema = key.slice(0, key.indexOf("."));
+      const table = key.slice(key.indexOf(".") + 1);
+      try {
+        const data = await executeSql(
+          `SELECT * FROM ${tableRefForEngine(schema, table)} LIMIT ${SAMPLE_ROWS}`,
+        );
+        const cols = (data.columns ?? []).map((c) => c.name);
+        let truncated = false;
+        const rows = (data.rows ?? []).map((r) =>
+          Object.fromEntries(
+            cols.map((n, i) => {
+              const v = /** @type {any[]} */ (r)[i];
+              if (typeof v === "string" && v.length > SAMPLE_VALUE_CHARS) {
+                truncated = true;
+                return [n, v.slice(0, SAMPLE_VALUE_CHARS) + "…"];
+              }
+              return [n, v];
+            }),
+          ),
+        );
+        // Cache the empty result too, so an empty table isn't re-queried every turn.
+        found[key] = { rows, truncated };
+      } catch {
+        /* unreadable table - skip it, the model can still use the columns */
+      }
+    }
+    if (Object.keys(found).length) sampledRows = { ...sampledRows, ...found };
+  }
+
+  /**
+   * Quoted, schema-qualified table reference for the connected engine.
+   * SQLite/D1/LibSQL have no user schemas, so the schema half is dropped there —
+   * qualifying would turn a valid name into a missing-table error.
+   * @param {string} schema @param {string} table
+   */
+  function tableRefForEngine(schema, table) {
+    const db = schemaContext.dbType ?? "postgres";
+    if (db === "sqlite" || db === "d1" || db === "libsql") {
+      return `"${table.replace(/"/g, '""')}"`;
+    }
+    if (db === "mysql") {
+      const q = (/** @type {string} */ s) => `\`${s.replace(/`/g, "``")}\``;
+      return schema ? `${q(schema)}.${q(table)}` : q(table);
+    }
+    const q = (/** @type {string} */ s) => `"${s.replace(/"/g, '""')}"`;
+    return schema ? `${q(schema)}.${q(table)}` : q(table);
+  }
+
   async function send(/** @type {string} */ [overrideText] = []) {
     const text = (overrideText ?? inputText).trim();
     if (!text || loading || hasPendingConfirm) return;
@@ -1568,7 +1649,25 @@
       },
       text,
     );
-    const basePrompt = buildSystemPrompt(filteredCtx);
+
+    // Sample the tables this turn is actually about, before any SQL is written.
+    // filterSchemaForQuery has already narrowed to the active table plus the ones
+    // named in the question, so this samples what the model is about to reason
+    // over rather than the whole schema.
+    if (looksLikeDataQuery) {
+      const keys = Object.keys(filteredCtx.allTableColumns ?? {});
+      if (keys.length) {
+        aiStatusHint = "Reading sample rows…";
+        await ensureSampleRows(keys);
+        aiStatusHint = "";
+      }
+    }
+
+    const basePrompt = buildSystemPrompt({
+      ...filteredCtx,
+      sampleRows: sampledRows,
+      webAccess: $appAgentWebAccess,
+    });
     const ci = $aiChatParams.customInstructions.trim();
     turnSystemPrompt = ci ? `${ci}\n\n---\n\n${basePrompt}` : basePrompt;
 

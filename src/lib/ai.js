@@ -1238,6 +1238,22 @@ export function buildSystemPrompt(ctx) {
     return '  ' + parts.join('  ')
   }
 
+  /**
+   * A couple of real rows per table, rendered as compact JSON.
+   *
+   * Column types alone don't say what is *in* a column: whether `status` holds
+   * 'active' or 'ACTIVE' or 1, whether a timestamp is ISO or epoch, whether a
+   * nullable column is null in practice. Guessing that is where generated SQL
+   * goes wrong, so the sample is shown before the model writes any.
+   * @param {string} key `schema.table`
+   */
+  function sampleBlock(key) {
+    const s = ctx.sampleRows?.[key]
+    if (!s?.rows?.length) return ''
+    const lines = s.rows.map((r) => '  ' + JSON.stringify(r))
+    return `Sample rows (${s.rows.length}${s.truncated ? ', values truncated' : ''}):\n${lines.join('\n')}`
+  }
+
   const activeTableSection = ctx.activeTable && ctx.columns.length
     ? [
         ``,
@@ -1253,6 +1269,7 @@ export function buildSystemPrompt(ctx) {
               )
               .join('\n')}`
           : '',
+        sampleBlock(`${ctx.activeSchema}.${ctx.activeTable}`),
       ]
         .filter(Boolean)
         .join('\n')
@@ -1266,7 +1283,7 @@ export function buildSystemPrompt(ctx) {
     return (
       `\n## Other Loaded Tables\n` +
       otherEntries
-        .map(([key, cols]) => `${key}:\n${cols.map(colLine).join('\n')}`)
+        .map(([key, cols]) => [`${key}:`, cols.map(colLine).join('\n'), sampleBlock(key)].filter(Boolean).join('\n'))
         .join('\n\n')
     )
   })()
@@ -1540,10 +1557,20 @@ ${otherTablesSection}
 **Primary rule: call execute_sql, never write a bare SQL block for live queries.**
 If the user asks to see data, list rows, count things, or run any SELECT, call the execute_sql tool immediately. Do not write a SQL code block and ask the user to run it.
 
+**Look at the data before you write SQL.** Each table above may carry a "Sample rows" block
+holding a few real rows. Read it. It tells you what the column types cannot: the actual casing
+and spelling of status/enum-like values, whether dates are ISO strings or epochs, whether IDs are
+integers or opaque strings, which columns are null in practice, and what units a number is in.
+Match your WHERE values, comparisons and casts to what you see there, not to what the type name
+suggests. If a table you need has no sample block, run \`SELECT * FROM <table> LIMIT 3\` first and
+look at the result before writing the real query.
+
 Before writing any SQL, reason through it in <think> tags (the UI strips these, the user never sees them):
 <think>
 - Which tables are involved? Are they in the schema above?
+- What do the sample rows show about the values I am about to filter or aggregate on?
 - If a table's columns are NOT listed, call describe_table BEFORE writing SQL.
+- If a table I need has no sample rows shown, SELECT a few rows first.
 - Are any columns USER-DEFINED / enum types? If so, I MUST query the enum values first:
   SELECT enumlabel FROM pg_enum JOIN pg_type ON pg_enum.enumtypid = pg_type.oid WHERE pg_type.typname = '<type_name>' ORDER BY enumsortorder;
 - What JOIN conditions apply? Do the foreign keys support this join?
