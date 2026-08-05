@@ -1,7 +1,7 @@
 <script>
   // Canonical dropdown/select for the app: a data-driven Select built on
-  // SearchableMenu, so every dropdown looks identical and automatically grows a
-  // search box once it has more than `searchThreshold` items (default 5).
+  // SearchableMenu, so every dropdown looks identical and carries a search box
+  // regardless of how many items it holds (see `searchThreshold` there).
   // Drop-in replacement for bits-ui <Select> in the common case.
   //
   //   <SelectMenu value={x} onValueChange={setX} items={[{value,label,icon?,hint?}]} />
@@ -27,7 +27,7 @@
     /** Extra classes for the trigger button (size/width live here). */
     triggerClass = 'h-8 w-56',
     contentClass = 'w-[var(--bits-popover-anchor-width)] min-w-[13rem]',
-    searchThreshold = 5,
+    searchThreshold = -1,
     align = 'start',
     side = 'bottom',
     disabled = false,
