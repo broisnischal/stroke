@@ -100,6 +100,9 @@ export const PROVIDER_MODELS = {
 const PROFILES_KEY = 'stroke:ai-profiles'
 const ACTIVE_KEY   = 'stroke:ai-active-profile'
 const LEGACY_KEY   = 'stroke:ai-settings'
+// Set once, the first time the default profile is seeded. Without it, a user who
+// deletes every profile gets Stroke Free handed back on the next launch.
+const SEEDED_KEY   = 'stroke:ai-seeded'
 
 // ── Default profile ──────────────────────────────────────────────────────────
 
@@ -149,7 +152,18 @@ function loadProfiles() {
       }
     }
   } catch { /* ignore */ }
-  return []
+  // Nothing stored and nothing to migrate: this is a fresh install, so seed the
+  // credential-free profile rather than leaving the picker on "No model" — the
+  // assistant has to work before the user has configured anything.
+  try {
+    if (localStorage.getItem(SEEDED_KEY)) return []
+  } catch { /* ignore */ }
+  const seed = [makeDefaultProfile()]
+  try {
+    localStorage.setItem(SEEDED_KEY, '1')
+    localStorage.setItem(PROFILES_KEY, JSON.stringify(seed))
+  } catch { /* ignore */ }
+  return seed
 }
 
 /** @param {string} url */
