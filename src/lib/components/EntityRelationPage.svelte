@@ -485,8 +485,12 @@
 
   /** Persist a dragged node's new position so rebuilds and exports keep it. */
   function onNodeMoved(/** @type {string} */ id, /** @type {number} */ x, /** @type {number} */ y) {
-    _posCache.set(id, { x, y })
-    nodes = nodes.map((n) => (n.id === id ? { ...n, position: { x, y } } : n))
+    // Snap to whole units: the drag divides by the camera zoom, so a card parked
+    // at x.37 renders its 1px borders across two device pixels (soft edges) and
+    // pushes fractional bounds into every export.
+    const p = { x: Math.round(x), y: Math.round(y) }
+    _posCache.set(id, p)
+    nodes = nodes.map((n) => (n.id === id ? { ...n, position: p } : n))
   }
 
   // ── Load ──────────────────────────────────────────────────────────────────
@@ -725,6 +729,7 @@
       .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
   }
 
+  /** @returns {{ xml: string, width: number, height: number } | null} */
   function generateSvg() {
     const vis = nodes.filter(n => n.data?.highlighted !== false)
     if (!vis.length) return null
@@ -738,6 +743,11 @@
       y1 = Math.max(y1, n.position.y + h)
     }
     const P = 56
+    // Dragged nodes carry sub-pixel positions (the drag divides by the camera
+    // zoom), so floor/ceil the bounds: whole numbers keep the raster grid-aligned
+    // and never clip a card by a fraction of a pixel.
+    x0 = Math.floor(x0); y0 = Math.floor(y0)
+    x1 = Math.ceil(x1); y1 = Math.ceil(y1)
     const W = x1 - x0 + P * 2
     const H = y1 - y0 + P * 2
     const dx = -x0 + P
@@ -747,7 +757,7 @@
     const c = exportPalette()
 
     const o = []
-    o.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">`)
+    o.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`)
     o.push(`<rect width="${W}" height="${H}" fill="${c.sheet}"/>`)
     o.push(`<defs><pattern id="dp" width="22" height="22" patternUnits="userSpaceOnUse">`)
     o.push(`<circle cx="1.2" cy="1.2" r="0.8" fill="${c.dot}"/></pattern></defs>`)
@@ -860,7 +870,7 @@
       }
     }
     o.push('</svg>')
-    return o.join('')
+    return { xml: o.join(''), width: W, height: H }
   }
 
   /**
@@ -911,7 +921,7 @@
 
   async function exportSVG() {
     try {
-      const svg = generateSvg()
+      const svg = generateSvg()?.xml
       if (!svg) return
       await saveExport(
         svg, `erd-${activeSchema}.svg`,
@@ -936,9 +946,12 @@
     try {
       const svg = generateSvg()
       if (!svg) return
-      const m = svg.match(/width="(\d+)" height="(\d+)"/)
-      const W = m ? +m[1] : 1200
-      const H = m ? +m[2] : 800
+      // Dimensions come from the generator itself. They used to be scraped back
+      // out of the markup with a regex that only matched whole numbers, so one
+      // dragged (sub-pixel) node silently fell back to a 1200x800 box - which
+      // cropped the diagram to its top-left corner and blew that fragment up to
+      // fill the raster.
+      const { xml, width: W, height: H } = svg
       // 3x keeps 8px badge text legible when the diagram is viewed at 100%.
       // MAX_PX is the safety rail: WebKit refuses to allocate a canvas past
       // roughly 16k on a side, and a wide schema hits that well before 3x.
@@ -947,7 +960,7 @@
       // The sheet rect inside the SVG already covers this; the canvas fill is
       // the backstop so the PNG is never transparent where a viewer would
       // composite it against its own (possibly white) page.
-      const blob = await svgStringToPngBlob(svg, { width: W, height: H, scale, background: exportPalette().sheet })
+      const blob = await svgStringToPngBlob(xml, { width: W, height: H, scale, background: exportPalette().sheet })
       if (sink === 'download') {
         await saveExport(
           blob, `erd-${activeSchema}.png`,
@@ -964,27 +977,6 @@
     }
   }
 
-  /**
-   * Put a PNG on the OS clipboard. The webview's async Clipboard API is denied in
-   * WebKitGTW/WKWebView without a trusted gesture, so the native plugin is the
-   * primary path and the web API is only the fallback (browser dev).
-   * @param {Blob} blob
-   */
-  async function copyPngToClipboard(blob) {
-    const bytes = new Uint8Array(await blob.arrayBuffer())
-    try {
-      const { writeImage } = await import('@tauri-apps/plugin-clipboard-manager')
-      await writeImage(bytes)
-      return
-    } catch (nativeErr) {
-      const w = /** @type {any} */ (window)
-      if (typeof w.ClipboardItem === 'function' && navigator.clipboard?.write) {
-        await navigator.clipboard.write([new w.ClipboardItem({ 'image/png': blob })])
-        return
-      }
-      throw nativeErr
-    }
-  }
 </script>
 
 <svelte:window onkeydown={(e) => {

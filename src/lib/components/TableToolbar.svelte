@@ -69,6 +69,9 @@
     /** Diagram exports, offered alongside the row formats while the ERD view is open. */
     /** @type {(kind: 'png' | 'copy-png' | 'svg' | 'mermaid') => void | Promise<void>} */
     onexportdiagram = () => {},
+    /** Chart image exports, offered alongside the row formats in the chart view. */
+    /** @type {(kind: 'png' | 'copy-png' | 'svg') => void | Promise<void>} */
+    onexportchart = () => {},
     onaddrow = () => {},
     onopeninsql = () => {},
     /** @type {Set<string>} */
@@ -334,6 +337,14 @@
     { id: "png", label: "PNG image", icon: "file-down" },
     { id: "svg", label: "SVG vector", icon: "code-2" },
     { id: "mermaid", label: "Mermaid markdown", icon: "file-text" },
+  ];
+
+  /** Same image actions for the chart view - it has no Mermaid equivalent. */
+  /** @type {Array<{ id: 'png' | 'copy-png' | 'svg', label: string, icon: string }>} */
+  const CHART_FORMATS = [
+    { id: "copy-png", label: "Copy as PNG", icon: "copy" },
+    { id: "png", label: "PNG image", icon: "file-down" },
+    { id: "svg", label: "SVG vector", icon: "code-2" },
   ];
 
   const EXPORT_FORMATS = [
@@ -1270,7 +1281,7 @@
             </DropdownMenu.Label>
           {/if}
           <DropdownMenu.Sub>
-            <DropdownMenu.SubTrigger disabled={total === 0 && dataViewMode !== 'erd'}>
+            <DropdownMenu.SubTrigger disabled={total === 0 && dataViewMode !== 'erd' && dataViewMode !== 'chart'}>
               <Icon name="file-down" class="size-3.5" />
               Export
             </DropdownMenu.SubTrigger>
@@ -1291,8 +1302,22 @@
                 </DropdownMenu.Group>
                 <DropdownMenu.Separator />
               {/if}
+              {#if dataViewMode === 'chart'}
+                <DropdownMenu.Group>
+                  <DropdownMenu.GroupHeading class="text-ui-2xs font-medium uppercase tracking-[0.06em] text-muted-foreground/50">
+                    Chart
+                  </DropdownMenu.GroupHeading>
+                  {#each CHART_FORMATS as fmt (fmt.id)}
+                    <DropdownMenu.Item onSelect={() => onexportchart(fmt.id)}>
+                      <Icon name={fmt.icon} class="size-3.5" />
+                      {fmt.label}
+                    </DropdownMenu.Item>
+                  {/each}
+                </DropdownMenu.Group>
+                <DropdownMenu.Separator />
+              {/if}
               <DropdownMenu.Group>
-                {#if dataViewMode === 'erd'}
+                {#if dataViewMode === 'erd' || dataViewMode === 'chart'}
                   <DropdownMenu.GroupHeading class="text-ui-2xs font-medium uppercase tracking-[0.06em] text-muted-foreground/50">
                     Rows
                   </DropdownMenu.GroupHeading>

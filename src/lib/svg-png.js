@@ -78,6 +78,33 @@ export async function svgStringToPngBlob(xml, opts) {
 }
 
 /**
+ * Put a PNG on the OS clipboard.
+ *
+ * The webview's async Clipboard API is denied in WebKitGTK/WKWebView without a
+ * trusted gesture, so the native plugin is the primary path and the web API is
+ * only the browser-dev fallback.
+ *
+ * @param {Blob | null} blob
+ * @returns {Promise<void>} rejects when neither path is available, so callers
+ *   can surface a real failure instead of silently "succeeding".
+ */
+export async function copyPngToClipboard(blob) {
+  if (!blob) throw new Error('Nothing to copy')
+  const bytes = new Uint8Array(await blob.arrayBuffer())
+  try {
+    const { writeImage } = await import('@tauri-apps/plugin-clipboard-manager')
+    await writeImage(bytes)
+  } catch (nativeErr) {
+    const w = /** @type {any} */ (window)
+    if (typeof w.ClipboardItem === 'function' && navigator.clipboard?.write) {
+      await navigator.clipboard.write([new w.ClipboardItem({ 'image/png': blob })])
+      return
+    }
+    throw nativeErr
+  }
+}
+
+/**
  * Save a blob to disk under `filename`.
  *
  * Inside the desktop shell this opens a native save dialog and writes through
