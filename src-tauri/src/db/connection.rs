@@ -668,11 +668,21 @@ where
     // abandoned pool can leave a half-open connection behind, so retrying three
     // times multiplied connections against a server that may itself be at its
     // limit - making the thing we were trying to avoid more likely.
-    // 800ms: a healthy connect here measures 265-364ms end to end (36ms TCP +
-    // ~120ms TLS + auth), while a lost SYN costs the kernel 1s or 4s. Retrying
-    // just above the healthy ceiling catches the loss without ever firing on a
-    // connection that was merely a bit slow.
-    const BUDGETS_MS: [u64; 1] = [800];
+    // A healthy connect here measures 265-364ms end to end (36ms TCP + ~120ms TLS
+    // + auth), so the first budget sits just above that ceiling: it catches a
+    // lost SYN without ever firing on a connection that was merely slow.
+    //
+    // Every attempt is bounded. With a single bounded attempt followed by an
+    // unbounded one, a run of lost SYNs on the second attempt sat through the
+    // kernel's full backoff - 1+2+4+8s - and the DevTools waterfall showed
+    // connect_postgres at 15.24s. The ladder keeps doubling instead, so no single
+    // attempt can cost more than its own budget, and the outer CONNECT_DEADLINE
+    // still caps the whole thing.
+    //
+    // A timed-out attempt drops its half-built pool, which closes whatever
+    // connections it had opened, so retrying does not pile connections onto the
+    // server.
+    const BUDGETS_MS: [u64; 4] = [800, 1500, 3000, 6000];
     for (i, ms) in BUDGETS_MS.iter().enumerate() {
         match tokio::time::timeout(Duration::from_millis(*ms), attempt()).await {
             Ok(res) => return res,

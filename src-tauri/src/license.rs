@@ -417,7 +417,12 @@ fn hostname() -> String {
 
 fn http_client() -> reqwest::Client {
     reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
+        // 4s, not 10s. This call is fire-and-forget - it only catches server-side
+        // revocation, and a network failure already falls through to the offline
+        // grace path. On a flaky uplink the old timeout meant a request hanging
+        // around for ten seconds (visible as a 10s run_license_check in the
+        // waterfall) to reach a conclusion it was going to reach anyway.
+        .timeout(std::time::Duration::from_secs(4))
         .build()
         .unwrap_or_default()
 }
