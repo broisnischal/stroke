@@ -2841,10 +2841,6 @@
       cancelAnimationFrame(rafId);
       rafId = null;
     }
-    if (_scrollRafId !== null) {
-      cancelAnimationFrame(_scrollRafId);
-      _scrollRafId = null;
-    }
     if (_streamTimer !== null) {
       clearTimeout(_streamTimer);
       _streamTimer = null;
