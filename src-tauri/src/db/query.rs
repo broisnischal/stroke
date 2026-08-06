@@ -171,6 +171,42 @@ fn pg_type_label(type_name: &str) -> String {
     }
 }
 
+/// Render a Postgres interval the way Postgres does: "1 year 2 mons 3 days 04:05:06".
+/// Units are kept separate rather than normalised into seconds because months and
+/// days are not fixed-length — collapsing them would change the value's meaning.
+fn format_pg_interval(iv: &sqlx::postgres::types::PgInterval) -> String {
+    let mut parts: Vec<String> = Vec::new();
+
+    let years = iv.months / 12;
+    let months = iv.months % 12;
+    if years != 0 {
+        parts.push(format!("{years} year{}", if years.abs() == 1 { "" } else { "s" }));
+    }
+    if months != 0 {
+        parts.push(format!("{months} mon{}", if months.abs() == 1 { "" } else { "s" }));
+    }
+    if iv.days != 0 {
+        parts.push(format!("{} day{}", iv.days, if iv.days.abs() == 1 { "" } else { "s" }));
+    }
+
+    let micros = iv.microseconds;
+    if micros != 0 || parts.is_empty() {
+        let neg = micros < 0;
+        let abs = micros.unsigned_abs();
+        let total_secs = abs / 1_000_000;
+        let frac = abs % 1_000_000;
+        let (h, m, sec) = (total_secs / 3600, (total_secs % 3600) / 60, total_secs % 60);
+        let mut t = format!("{}{:02}:{:02}:{:02}", if neg { "-" } else { "" }, h, m, sec);
+        if frac != 0 {
+            // Trim trailing zeros so "1.500000" reads as "1.5", matching Postgres.
+            t.push_str(format!(".{frac:06}").trim_end_matches('0'));
+        }
+        parts.push(t);
+    }
+
+    parts.join(" ")
+}
+
 pub(crate) fn cell_to_json(row: &sqlx::postgres::PgRow, idx: usize) -> Value {
     let col = row.column(idx);
     let type_name = col.type_info().name();
@@ -284,6 +320,19 @@ pub(crate) fn cell_to_json(row: &sqlx::postgres::PgRow, idx: usize) -> Value {
             };
         }
         // Unknown element type (e.g. enum[]) — fall through to the raw branch.
+    }
+
+    // INTERVAL has no text-compatible decode, so without this it reached the raw
+    // branch below and Postgres's 16-byte binary interval (months/days/micros) was
+    // reinterpreted as UTF-8 — a row of NUL boxes plus whatever byte happened to be
+    // printable ("□□□m"). Rebuild Postgres's own text rendering from the parts.
+    if type_name == "INTERVAL" {
+        if let Ok(v) = row.try_get::<Option<sqlx::postgres::types::PgInterval>, _>(idx) {
+            return match v {
+                Some(iv) => json!(format_pg_interval(&iv)),
+                None => Value::Null,
+            };
+        }
     }
 
     // Use raw wire-protocol bytes for all remaining types (TEXT, VARCHAR, enums, domains…).
