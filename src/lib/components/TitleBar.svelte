@@ -68,6 +68,7 @@
 <div
   class="studio-chrome relative flex h-[38px] shrink-0 items-center border-b border-border/40 bg-background px-2.5 select-none"
   data-studio-chrome
+  data-studio-region="titlebar"
   data-tauri-drag-region
   role="toolbar"
   aria-label="Window title bar"

@@ -331,6 +331,19 @@ html[data-os="linux"]   { --window-radius: 8px; }
   body.is-resizing-y,
   body.is-resizing-y * { cursor: row-resize !important; }
 
+  /* An open modal dialog locks `pointer-events: none` on <body> (bits-ui), and
+     only the dialog's own content/overlay opt back in. Dialogs that inset
+     themselves to leave the window chrome visible - the connection manager sits
+     between the titlebar and the status bar - would otherwise leave that chrome
+     dead: it renders, but minimize/maximize/close, the drag region and every
+     status-bar control stop responding. The two window-chrome regions opt back
+     in. Dialogs whose overlay covers the whole viewport are unaffected: the
+     overlay still sits above this chrome and takes the clicks. */
+  [data-studio-region='titlebar'],
+  [data-studio-region='statusbar'] {
+    pointer-events: auto;
+  }
+
   /* App chrome: no focus ring for mouse clicks; keep keyboard focus-visible */
   [data-studio-chrome] :focus:not(:focus-visible) {
     outline: none;

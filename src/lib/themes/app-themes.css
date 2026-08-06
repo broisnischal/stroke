@@ -422,7 +422,11 @@ html[data-theme="catppuccin"] {
   --sidebar-accent:           #313244;
   --sidebar-accent-foreground:#cdd6f4;
   --sidebar-border:           #313244;
-  --panel:                    #1a1a2a;
+  /* Catppuccin Mocha: chrome sits on `mantle`, the data surface on `base`. This
+     used to invert it - panel #1a1a2a was DARKER than background #1e1e2e, the
+     only theme where the grid sank below the chrome instead of rising above it,
+     which is what made the table read as a different theme than the app. */
+  --panel:                    #1e1e2e;
   --table-grid:               #45475a;
   --link:                     #89b4fa;
   --link-hover:               #b4befe;

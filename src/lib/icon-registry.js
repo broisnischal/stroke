@@ -26,6 +26,7 @@ import Minus from '@lucide/svelte/icons/minus'
 import Search from '@lucide/svelte/icons/search'
 import Trash2 from '@lucide/svelte/icons/trash-2'
 import Table2 from '@lucide/svelte/icons/table-2'
+import TableProperties from '@lucide/svelte/icons/table-properties'
 import RefreshCw from '@lucide/svelte/icons/refresh-cw'
 import Copy from '@lucide/svelte/icons/copy'
 import Loader2 from '@lucide/svelte/icons/loader-2'
@@ -135,9 +136,9 @@ import ArrowUpAZ from '@lucide/svelte/icons/arrow-up-a-z'
 import {
   Cancel01Icon, Tick01Icon, CheckmarkCircle02Icon, ArrowDown01Icon, ArrowUp01Icon,
   ArrowRight01Icon, ArrowLeft01Icon, Add01Icon, MinusSignIcon, Search01Icon,
-  Delete02Icon, Table01Icon, GridTableIcon, RefreshIcon, Copy01Icon, Loading03Icon, Key01Icon,
+  Delete02Icon, Table01Icon, GridTableIcon, Table02Icon, RefreshIcon, Copy01Icon, Loading03Icon, Key01Icon,
   LinkSquare01Icon, Database01Icon, SourceCodeIcon, TerminalIcon, ChartLineData02Icon,
-  SparklesIcon, GitBranchIcon, Download04Icon, PlayIcon, ViewIcon, ViewOffSlashIcon,
+  SparklesIcon, GitBranchIcon, Download04Icon, PlayIcon, EyeIcon, EyeOffIcon,
   AiBrain01Icon, Alert02Icon, AlertCircleIcon, Shield01Icon, PencilEdit01Icon,
   BracketsIcon, SquareLock01Icon, DashboardSquare01Icon, HistoryIcon, Clock01Icon,
   FlashIcon, Settings01Icon, Maximize01Icon, FilterIcon, MoreHorizontalIcon,
@@ -169,6 +170,7 @@ export const ICON_MAP = {
   'search':         { lucide: Search,        huge: Search01Icon },
   'trash-2':        { lucide: Trash2,        huge: Delete02Icon },
   'table-2':        { lucide: Table2,        huge: GridTableIcon },
+  'table-view':     { lucide: TableProperties, huge: Table02Icon },
   'refresh-cw':     { lucide: RefreshCw,     huge: RefreshIcon },
   'copy':           { lucide: Copy,          huge: Copy01Icon },
   'loader-2':       { lucide: Loader2,       huge: Loading03Icon },
@@ -182,8 +184,8 @@ export const ICON_MAP = {
   'git-branch':     { lucide: GitBranch,     huge: GitBranchIcon },
   'download':       { lucide: Download,      huge: Download04Icon },
   'play':           { lucide: Play,          huge: PlayIcon },
-  'eye':            { lucide: Eye,           huge: ViewIcon },
-  'eye-off':        { lucide: EyeOff,        huge: ViewOffSlashIcon },
+  'eye':            { lucide: Eye,           huge: EyeIcon },
+  'eye-off':        { lucide: EyeOff,        huge: EyeOffIcon },
   'bot':            { lucide: Bot,           huge: AiBrain01Icon },
   'alert-triangle': { lucide: AlertTriangle, huge: Alert02Icon },
   'alert-circle':   { lucide: AlertCircle,   huge: AlertCircleIcon },
@@ -291,6 +293,7 @@ import PhMinus from 'phosphor-svelte/lib/Minus'
 import PhMagnifyingGlass from 'phosphor-svelte/lib/MagnifyingGlass'
 import PhTrash from 'phosphor-svelte/lib/Trash'
 import PhTable from 'phosphor-svelte/lib/Table'
+import PhCards from 'phosphor-svelte/lib/Cards'
 import PhArrowsClockwise from 'phosphor-svelte/lib/ArrowsClockwise'
 import PhCopy from 'phosphor-svelte/lib/Copy'
 import PhCircleNotch from 'phosphor-svelte/lib/CircleNotch'
@@ -374,6 +377,7 @@ export const PHOSPHOR_MAP = {
   'search': PhMagnifyingGlass,
   'trash-2': PhTrash,
   'table-2': PhTable,
+  'table-view': PhCards,
   'refresh-cw': PhArrowsClockwise,
   'copy': PhCopy,
   'loader-2': PhCircleNotch,
