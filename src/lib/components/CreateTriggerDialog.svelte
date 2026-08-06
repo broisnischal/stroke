@@ -1,4 +1,5 @@
 <script>
+  import FieldSelect from './FieldSelect.svelte';
   import { untrack } from 'svelte'
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import { executeSql } from '$lib/api.js'
@@ -108,13 +109,13 @@
             <div>
               <label for="trig-table" class={lbl}>Table</label>
               <div class="relative">
-                <select id="trig-table" bind:value={targetTable} class={sel}>
-                  <option value="" disabled>Select table…</option>
-                  {#each tables as t (t.name)}<option value={t.name}>{t.name}</option>{/each}
-                </select>
-                <span class="pointer-events-none absolute inset-y-0 right-2 flex items-center text-muted-foreground/35">
-                  <svg class="size-3" viewBox="0 0 10 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4.5l3-3 3 3M2 7.5l3 3 3-3"/></svg>
-                </span>
+                <FieldSelect
+                  id="trig-table"
+                  class="w-full text-ui-xs"
+                  bind:value={targetTable}
+                  placeholder="Select table…"
+                  options={tables.map((t) => ({ value: t.name, label: t.name }))}
+                />
               </div>
             </div>
           </div>

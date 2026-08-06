@@ -57,7 +57,7 @@
       {disabled}
       aria-label={ariaLabel}
       class={cn(
-        'inline-flex items-center justify-between gap-2 rounded-[10px] border border-border/70 bg-background px-2.5 text-ui-xs font-normal transition-colors hover:bg-muted/40 focus-visible:border-ring/55 focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none data-[state=open]:border-ring disabled:pointer-events-none disabled:opacity-50',
+        'inline-flex items-center justify-between gap-2 rounded-[10px] border-2 border-border/70 bg-background px-2.5 text-ui-xs font-normal transition-colors hover:bg-muted/40 focus-visible:border-ring/55 focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none data-[state=open]:border-ring disabled:pointer-events-none disabled:opacity-50',
         triggerClass,
       )}
     >

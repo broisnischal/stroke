@@ -1,4 +1,5 @@
 <script>
+  import FieldSelect from './FieldSelect.svelte';
   import { rowsToCsv, rowsToJson, rowsToSql, rowsToTsv, rowsToMarkdown, rowsToJsonl, saveExportFile, buildExportFilename } from '$lib/export.js'
   import Play from "@lucide/svelte/icons/play";
   import WifiOff from "@lucide/svelte/icons/wifi-off";
@@ -706,18 +707,19 @@
               title=":{p.name}"
             ><span class="text-muted-foreground/50">:</span>{p.name}</span>
             <div class="relative">
-              <select
-                value={v.mode}
+              <FieldSelect
+                size="sm"
+                class="w-full bg-input/30 text-ui-xs"
                 aria-label="Parameter type for {p.name}"
-                class="h-7 w-full appearance-none rounded-md border border-border/60 bg-input/30 pl-2 pr-6 text-ui-xs text-foreground/80 transition-colors hover:border-border focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none"
-                onchange={(e) => setParam(p.name, { ...v, mode: /** @type {any} */ (e.currentTarget.value) })}
-              >
-                <option value="auto">Auto</option>
-                <option value="text">Text</option>
-                <option value="raw">Raw SQL</option>
-                <option value="null">NULL</option>
-              </select>
-              <ChevronDown class="pointer-events-none absolute right-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/50" />
+                value={v.mode}
+                onchange={(mode) => setParam(p.name, { ...v, mode: /** @type {any} */ (mode) })}
+                options={[
+                  { value: 'auto', label: 'Auto' },
+                  { value: 'text', label: 'Text' },
+                  { value: 'raw', label: 'Raw SQL' },
+                  { value: 'null', label: 'NULL' },
+                ]}
+              />
             </div>
             <input
               type="text"

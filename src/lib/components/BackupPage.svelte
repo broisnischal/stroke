@@ -1,4 +1,5 @@
 <script>
+  import FieldSelect from './FieldSelect.svelte';
   import { onDestroy } from "svelte";
   import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
   import { saveExportAs } from "$lib/api.js";
@@ -521,19 +522,13 @@
                 class="mb-1.5 block text-ui-3xs font-medium uppercase tracking-wide text-muted-foreground"
                 >Schema</label
               >
-              <div class="relative">
-                <select
-                  id="export-schema-select"
-                  bind:value={exportSchema}
-                  class="h-8 w-full appearance-none rounded-md border border-border/60 bg-background pl-3 pr-8 font-mono text-ui-xs text-foreground focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none/40"
-                >
-                  <option value="">All schemas</option>
-                  {#each schemas as s (s)}<option value={s}>{s}</option>{/each}
-                </select>
-                <ChevronDown
-                  class="pointer-events-none absolute right-2.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/50"
-                />
-              </div>
+              <FieldSelect
+                id="export-schema-select"
+                class="w-full bg-background text-ui-xs"
+                bind:value={exportSchema}
+                placeholder="All schemas"
+                options={[{ value: '', label: 'All schemas' }, ...schemas.map((s) => ({ value: s, label: s }))]}
+              />
             </div>
           {/if}
 

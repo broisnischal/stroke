@@ -1,4 +1,5 @@
 <script>
+  import FieldSelect from './FieldSelect.svelte';
   import * as Dialog from '$lib/components/ui/dialog/index.js'
   import Database from '@lucide/svelte/icons/database'
   import ChevronDown from '@lucide/svelte/icons/chevron-down'
@@ -106,7 +107,7 @@
   }
 
   const inputCls = "h-8 w-full rounded-lg border-2 border-border bg-background px-3 text-ui-xs outline-none placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 disabled:opacity-50"
-  const selectCls = "h-8 w-full rounded-md border border-border bg-background px-2.5 text-ui-xs outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15 disabled:opacity-50"
+  const selectCls = "h-8 w-full rounded-md border-2 border-border bg-background px-2.5 text-ui-xs outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15 disabled:opacity-50"
   const labelCls = "mb-1.5 block text-ui-xs font-medium text-muted-foreground"
 </script>
 
@@ -189,31 +190,41 @@
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label for="cdb-enc" class={labelCls}>{isMySQL ? 'Character set' : 'Encoding'}</label>
-              <select id="cdb-enc" bind:value={encoding} class={selectCls} disabled={loading}>
-                {#each (isMySQL ? MYSQL_CHARSETS : PG_ENCODINGS) as enc (enc)}
-                  <option value={enc}>{enc}</option>
-                {/each}
-              </select>
+              <FieldSelect
+                id="cdb-enc"
+                class="w-full text-ui-xs"
+                bind:value={encoding}
+                disabled={loading}
+                options={(isMySQL ? MYSQL_CHARSETS : PG_ENCODINGS).map((e) => ({ value: e, label: e }))}
+              />
             </div>
 
             {#if isMySQL}
               <div>
                 <label for="cdb-collation" class={labelCls}>Collation</label>
-                <select id="cdb-collation" bind:value={lcCollate} class={selectCls} disabled={loading || mysqlCollations.length === 0}>
-                  {#if mysqlCollations.length === 0}
-                    <option value="">Default</option>
-                  {:else}
-                    {#each mysqlCollations as col (col)}<option value={col}>{col}</option>{/each}
-                  {/if}
-                </select>
+                <FieldSelect
+                  id="cdb-collation"
+                  class="w-full text-ui-xs"
+                  bind:value={lcCollate}
+                  disabled={loading || mysqlCollations.length === 0}
+                  options={mysqlCollations.length === 0
+                    ? [{ value: '', label: 'Default' }]
+                    : mysqlCollations.map((c) => ({ value: c, label: c }))}
+                />
               </div>
             {:else}
               <div>
                 <label for="cdb-template" class={labelCls}>Template</label>
-                <select id="cdb-template" bind:value={template} class={selectCls} disabled={loading}>
-                  <option value="template0">template0 (clean)</option>
-                  <option value="template1">template1 (default)</option>
-                </select>
+                <FieldSelect
+                  id="cdb-template"
+                  class="w-full text-ui-xs"
+                  bind:value={template}
+                  disabled={loading}
+                  options={[
+                    { value: 'template0', label: 'template0 (clean)' },
+                    { value: 'template1', label: 'template1 (default)' },
+                  ]}
+                />
               </div>
             {/if}
           </div>

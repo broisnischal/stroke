@@ -1,4 +1,5 @@
 <script>
+  import FieldSelect from './FieldSelect.svelte';
   import * as Dialog from '$lib/components/ui/dialog/index.js'
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import { executeSql } from '$lib/api.js'
@@ -160,13 +161,13 @@
           <div>
             <label for="fk-ref-table" class={lbl}>Referenced table</label>
             <div class="relative">
-              <select id="fk-ref-table" bind:value={refTable} class={sel}>
-                <option value="">Select table…</option>
-                {#each tables as t (t.name)}<option value={t.name}>{t.name}</option>{/each}
-              </select>
-              <span class="pointer-events-none absolute inset-y-0 right-2 flex items-center text-muted-foreground/35">
-                <svg class="size-3" viewBox="0 0 10 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4.5l3-3 3 3M2 7.5l3 3 3-3"/></svg>
-              </span>
+              <FieldSelect
+                id="fk-ref-table"
+                class="w-full text-ui-xs"
+                bind:value={refTable}
+                placeholder="Select table…"
+                options={[{ value: '', label: 'Select table…' }, ...tables.map((t) => ({ value: t.name, label: t.name }))]}
+              />
             </div>
           </div>
           <div>

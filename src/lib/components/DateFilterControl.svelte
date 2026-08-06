@@ -1,4 +1,5 @@
 <script>
+  import FieldSelect from './FieldSelect.svelte';
   /**
    * Unified date/timestamp filter control for the filter bar. One popover with:
    *  - a relative-preset column (Today, Last 7 days, This month, "In the last N…")
@@ -142,7 +143,7 @@
             <Minus class="size-3" />
           </button>
           <input
-            class="h-6 w-9 min-w-0 rounded-lg border border-border bg-input/30 text-center font-mono text-ui-xs tabular-nums outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+            class="h-6 w-9 min-w-0 rounded-lg border-2 border-border bg-input/30 text-center font-mono text-ui-xs tabular-nums outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
             inputmode="numeric"
             value={lastN}
             oninput={(e) => (lastN = Math.max(1, parseInt(e.currentTarget.value.replace(/\D/g, "")) || 1))}
@@ -151,16 +152,17 @@
             <Plus class="size-3" />
           </button>
         </div>
-        <select
-          class="h-6 w-full rounded-md border border-input bg-input/30 px-1.5 text-ui-xs text-foreground outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
-          value={lastUnit}
-          onchange={(e) => (lastUnit = e.currentTarget.value)}
-        >
-          <option value="hours">hours</option>
-          <option value="days">days</option>
-          <option value="weeks">weeks</option>
-          <option value="months">months</option>
-        </select>
+        <FieldSelect
+          size="sm"
+          class="h-6 w-full bg-input/30 px-1.5 text-ui-xs"
+          bind:value={lastUnit}
+          options={[
+            { value: 'hours', label: 'hours' },
+            { value: 'days', label: 'days' },
+            { value: 'weeks', label: 'weeks' },
+            { value: 'months', label: 'months' },
+          ]}
+        />
         <button
           type="button"
           class="mt-0.5 inline-flex h-6 items-center justify-center rounded-md bg-primary px-2 text-ui-2xs font-medium text-primary-foreground transition-[background-color,transform] duration-150 hover:bg-primary/90 active:scale-[0.97]"

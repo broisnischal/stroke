@@ -1,4 +1,5 @@
 <script>
+  import FieldSelect from './FieldSelect.svelte';
   import X from '@lucide/svelte/icons/x'
   import Copy from '@lucide/svelte/icons/copy'
   import Search from '@lucide/svelte/icons/search'
@@ -425,7 +426,7 @@
                     type="text"
                     placeholder="Search for field..."
                     bind:value={fieldSearch}
-                    class="w-full rounded-lg border border-border bg-muted/20 py-1.5 pl-7 pr-2.5 font-mono text-ui-xs placeholder:text-muted-foreground/60 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none"
+                    class="w-full rounded-lg border-2 border-border bg-muted/20 py-1.5 pl-7 pr-2.5 font-mono text-ui-xs placeholder:text-muted-foreground/60 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none"
                   />
                 </div>
               </div>
@@ -521,49 +522,41 @@
 
                       {:else if field.isBoolean}
                         <div class="relative">
-                          <select
+                          <FieldSelect
+                            class="w-full bg-muted/20 text-ui-xs"
                             value={field.initialEditStr}
                             disabled={savingFields[field.colIdx]}
-                            class="w-full appearance-none rounded border border-border bg-muted/20 px-2.5 py-1.5 pr-7 font-mono text-ui-xs text-foreground focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none disabled:opacity-50"
-                            onchange={async (e) => {
-                              await saveField(field.colIdx, /** @type {HTMLSelectElement} */ (e.target).value)
-                            }}
-                          >
-                            <option value="">NULL</option>
-                            <option value="true">true</option>
-                            <option value="false">false</option>
-                          </select>
-                          <span class="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground/50">
-                            {#if savingFields[field.colIdx]}
+                            onchange={(v) => void saveField(field.colIdx, v)}
+                            options={[
+                              { value: '', label: 'NULL' },
+                              { value: 'true', label: 'true' },
+                              { value: 'false', label: 'false' },
+                            ]}
+                          />
+                          {#if savingFields[field.colIdx]}
+                            <span class="pointer-events-none absolute right-7 top-1/2 -translate-y-1/2 text-muted-foreground/50">
                               <Loader class="size-3 animate-spin" />
-                            {:else}
-                              <svg class="size-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6l4 4 4-4"/></svg>
-                            {/if}
-                          </span>
+                            </span>
+                          {/if}
                         </div>
 
                       {:else if field.enumValues}
                         <div class="relative">
-                          <select
+                          <FieldSelect
+                            class="w-full bg-muted/20 text-ui-xs"
                             value={field.initialEditStr}
                             disabled={savingFields[field.colIdx]}
-                            class="w-full appearance-none rounded border border-border bg-muted/20 px-2.5 py-1.5 pr-7 font-mono text-ui-xs text-foreground focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none disabled:opacity-50"
-                            onchange={async (e) => {
-                              await saveField(field.colIdx, /** @type {HTMLSelectElement} */ (e.target).value)
-                            }}
-                          >
-                            <option value="">NULL</option>
-                            {#each field.enumValues as opt (opt)}
-                              <option value={opt}>{opt}</option>
-                            {/each}
-                          </select>
-                          <span class="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground/50">
-                            {#if savingFields[field.colIdx]}
+                            onchange={(v) => void saveField(field.colIdx, v)}
+                            options={[
+                              { value: '', label: 'NULL' },
+                              ...field.enumValues.map((/** @type {string} */ o) => ({ value: o, label: o })),
+                            ]}
+                          />
+                          {#if savingFields[field.colIdx]}
+                            <span class="pointer-events-none absolute right-7 top-1/2 -translate-y-1/2 text-muted-foreground/50">
                               <Loader class="size-3 animate-spin" />
-                            {:else}
-                              <svg class="size-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6l4 4 4-4"/></svg>
-                            {/if}
-                          </span>
+                            </span>
+                          {/if}
                         </div>
 
                       {:else if field.isMultiline}

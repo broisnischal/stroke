@@ -1,4 +1,5 @@
 <script>
+  import FieldSelect from './FieldSelect.svelte';
   import { executeSql, connectRedis, redisScan } from '$lib/api.js'
   import { engineFamily } from '$lib/stores/connections.js'
   import { cn } from '$lib/utils.js'
@@ -844,18 +845,16 @@
         <span class="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-ui-2xs tabular-nums text-muted-foreground">
           {#if keysLoading}…{:else}{totalKeys}{/if}
         </span>
-        <select
-          value={currentDb}
+        <FieldSelect
+          size="sm"
+          class="h-6 shrink-0 bg-input/30 px-1 text-ui-2xs"
+          value={String(currentDb)}
           disabled={switchingDb}
-          onchange={(e) => void switchDb(Number(e.currentTarget.value))}
+          onchange={(v) => void switchDb(Number(v))}
           title="Switch logical database"
           aria-label="Logical database"
-          class="h-6 shrink-0 rounded-md border border-input bg-input/30 px-1 font-mono text-ui-2xs text-foreground outline-none transition-colors focus:border-ring disabled:opacity-50"
-        >
-          {#each DB_OPTIONS as n (n)}
-            <option value={n}>db {n}</option>
-          {/each}
-        </select>
+          options={DB_OPTIONS.map((n) => ({ value: String(n), label: `db ${n}` }))}
+        />
         <button
           type="button"
           class={cn(iconBtn, 'ml-auto size-7', newKeyOpen && 'bg-accent text-foreground')}
@@ -889,7 +888,7 @@
             spellcheck="false"
             autocapitalize="off"
             autocomplete="off"
-            class="h-7 w-full rounded-lg border border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+            class="h-7 w-full rounded-lg border-2 border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
           />
           <div class="flex flex-wrap gap-1">
             {#each CREATABLE as t (t)}
@@ -916,7 +915,7 @@
               placeholder="field"
               spellcheck="false"
               autocomplete="off"
-              class="h-7 w-full rounded-lg border border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+              class="h-7 w-full rounded-lg border-2 border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
             />
           {:else if nkType === 'zset'}
             <input
@@ -925,7 +924,7 @@
               placeholder="score (e.g. 1)"
               spellcheck="false"
               autocomplete="off"
-              class="h-7 w-full rounded-lg border border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+              class="h-7 w-full rounded-lg border-2 border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
             />
           {/if}
           <input
@@ -935,7 +934,7 @@
             spellcheck="false"
             autocomplete="off"
             onkeydown={(e) => e.key === 'Enter' && void createKey()}
-            class="h-7 w-full rounded-lg border border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+            class="h-7 w-full rounded-lg border-2 border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
           />
           {#if newKeyError}
             <p class="font-mono text-ui-3xs text-destructive">{newKeyError}</p>
@@ -974,7 +973,7 @@
             spellcheck="false"
             autocapitalize="off"
             autocomplete="off"
-            class="h-7 w-full rounded-lg border border-border bg-input/30 pl-7 pr-7 text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+            class="h-7 w-full rounded-lg border-2 border-border bg-input/30 pl-7 pr-7 text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
           />
           {#if filter}
             <button
@@ -1181,7 +1180,7 @@
                     if (e.key === 'Enter') { e.preventDefault(); void applyTtl(false) }
                     else if (e.key === 'Escape') editingTtl = false
                   }}
-                  class="h-6 w-24 rounded-lg border border-border bg-input/30 px-1.5 text-ui-2xs tabular-nums text-foreground placeholder:text-muted-foreground/45 outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+                  class="h-6 w-24 rounded-lg border-2 border-border bg-input/30 px-1.5 text-ui-2xs tabular-nums text-foreground placeholder:text-muted-foreground/45 outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
                 />
                 <button
                   type="button"
@@ -1285,7 +1284,7 @@
                 <textarea
                   bind:value={stringEdit}
                   spellcheck="false"
-                  class="no-focus-ring app-scroll min-h-0 flex-1 resize-none rounded-lg border border-border bg-input/30 p-3 font-mono text-ui-sm leading-relaxed text-foreground outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+                  class="no-focus-ring app-scroll min-h-0 flex-1 resize-none rounded-lg border-2 border-border bg-input/30 p-3 font-mono text-ui-sm leading-relaxed text-foreground outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
                 ></textarea>
                 <div class="mt-2 flex shrink-0 items-center gap-1.5">
                   <button

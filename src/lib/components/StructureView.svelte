@@ -1,4 +1,5 @@
 <script>
+  import FieldSelect from './FieldSelect.svelte';
   import { tick } from 'svelte'
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import { executeSql } from '$lib/api.js'
@@ -647,18 +648,14 @@
               <!-- is_nullable -->
               <td class="{TD} {stagedValues['nullable:' + col.name] !== undefined ? 'ring-1 ring-inset ring-warning/50' : ''}">
                 <div class="relative flex h-full items-center px-3">
-                  <select
+                  <FieldSelect
+                    size="sm"
+                    class="w-full border-0 bg-transparent px-0 text-ui-sm {displayNullable ? 'text-foreground' : 'text-muted-foreground'} {stagedValues['nullable:' + col.name] !== undefined ? 'text-warning/90' : ''}"
                     value={displayNullable ? 'YES' : 'NO'}
                     disabled={isPk || !canEdit}
-                    class="w-full appearance-none border-0 bg-transparent py-0 font-mono text-ui-sm focus:outline-none disabled:cursor-not-allowed disabled:opacity-40 {displayNullable ? 'text-foreground' : 'text-muted-foreground'} {stagedValues['nullable:' + col.name] !== undefined ? 'text-warning/90' : ''}"
-                    onchange={(e) => stageNullable(col.name, /** @type {HTMLSelectElement} */ (e.target).value === 'YES')}
-                  >
-                    <option value="YES">YES</option>
-                    <option value="NO">NO</option>
-                  </select>
-                  <span class="pointer-events-none absolute right-1.5 text-muted-foreground/40">
-                    <svg class="size-3.5" viewBox="0 0 10 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4.5l3-3 3 3M2 7.5l3 3 3-3"/></svg>
-                  </span>
+                    onchange={(v) => stageNullable(col.name, v === 'YES')}
+                    options={[{ value: 'YES', label: 'YES' }, { value: 'NO', label: 'NO' }]}
+                  />
                 </div>
               </td>
 
@@ -801,14 +798,13 @@
               </td>
               <td class={TD}>
                 <div class="relative flex h-full items-center px-3">
-                  <select bind:value={newColumn.isNullable}
-                    class="w-full appearance-none border-0 bg-transparent py-0 font-mono text-ui-sm focus:outline-none {newColumn.isNullable ? 'text-foreground' : 'text-muted-foreground'}">
-                    <option value={true}>YES</option>
-                    <option value={false}>NO</option>
-                  </select>
-                  <span class="pointer-events-none absolute right-1.5 text-muted-foreground/40">
-                    <svg class="size-3.5" viewBox="0 0 10 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4.5l3-3 3 3M2 7.5l3 3 3-3"/></svg>
-                  </span>
+                  <FieldSelect
+                    size="sm"
+                    class="w-full border-0 bg-transparent px-0 text-ui-sm {newColumn.isNullable ? 'text-foreground' : 'text-muted-foreground'}"
+                    value={newColumn.isNullable ? 'YES' : 'NO'}
+                    onchange={(v) => (newColumn.isNullable = v === 'YES')}
+                    options={[{ value: 'YES', label: 'YES' }, { value: 'NO', label: 'NO' }]}
+                  />
                 </div>
               </td>
               <td class={TD}>
