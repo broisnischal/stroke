@@ -124,7 +124,39 @@ export function resolveChartAccent() {
     probe.style.color = 'var(--stroke-nonexistent-token)'
     const fg = getComputedStyle(probe).color
     probe.remove()
-    return (!c || c === fg) ? '' : c
+    return (!c || c === fg) ? '' : toParseableColor(c)
+  } catch { return '' }
+}
+
+/** Colours echarts can parse itself, not just paint: hex / rgb() / hsl(). */
+const ZR_PARSEABLE = /^(#|rgba?\(|hsla?\()/i
+
+/**
+ * Re-serialize a CSS colour into a notation echarts (zrender) can PARSE.
+ * Theme tokens are authored in `oklch()`, and `getComputedStyle().color` hands
+ * that notation straight back. Canvas paints it fine, so bars look right - but
+ * zrender's own colour parser only understands hex/rgb/hsl, and its liftColor()
+ * (which derives the emphasis/hover fill) returns `undefined` for anything else.
+ * The hovered bar then paints with NO fill and vanishes under the axis-pointer
+ * shadow. Normalising here keeps every derived state (hover, blur, gradients)
+ * working across themes.
+ */
+function toParseableColor(color) {
+  if (!color || ZR_PARSEABLE.test(color.trim())) return color
+  try {
+    const ctx = document.createElement('canvas').getContext('2d')
+    if (!ctx) return ''
+    ctx.fillStyle = '#010203' // sentinel: an unparseable value leaves it untouched
+    ctx.fillStyle = color
+    if (ctx.fillStyle === '#010203') return ''
+    if (ZR_PARSEABLE.test(String(ctx.fillStyle))) return String(ctx.fillStyle)
+    // Engine echoed a modern notation back (oklch/color()): rasterize one pixel
+    // and read the sRGB bytes - the one conversion every engine agrees on.
+    ctx.canvas.width = ctx.canvas.height = 1
+    ctx.fillStyle = color
+    ctx.fillRect(0, 0, 1, 1)
+    const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data
+    return a === 255 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`
   } catch { return '' }
 }
 
@@ -160,6 +192,14 @@ function fmtTooltipValue(val) {
 function animOpts(n) {
   if (n >= 2000) return { animation: false }
   return { animation: true, animationDuration: 400, animationThreshold: 2000 }
+}
+
+/** Hover band behind the focused category. The zrender default (30% mid-grey)
+ * paints a heavy slab across the whole plot - at that weight the highlight
+ * competes with the bars it is meant to point at. A whisper of the foreground
+ * reads as "this column" without repainting the chart. */
+function shadowPointer(isDark) {
+  return { type: 'shadow', shadowStyle: { color: isDark ? 'rgba(255,255,255,0.045)' : 'rgba(0,0,0,0.035)' } }
 }
 
 /** @param {boolean} isDark @param {boolean} [noTitle] */
@@ -792,7 +832,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
       tooltip: {
         ...base.tooltip,
         trigger: 'axis',
-        axisPointer: { type: 'shadow' },
+        axisPointer: shadowPointer(isDark),
         formatter(params) {
           const all = Array.isArray(params) ? params : [params]
           const vis = all.filter(p => !String(p.seriesName ?? '').startsWith('__'))
@@ -1085,7 +1125,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
     const maxVal = Math.max(arrMax(actuals), arrMax(targets), 1)
     return {
       ...base,
-      tooltip: { ...base.tooltip, trigger: 'axis', axisPointer: { type: 'shadow' } },
+      tooltip: { ...base.tooltip, trigger: 'axis', axisPointer: shadowPointer(isDark) },
       xAxis: { type: 'value', max: maxVal * 1.1, ...axisStyle(isDark) },
       yAxis: { type: 'category', data: categories, ...axisStyle(isDark) },
       series: [
@@ -1127,7 +1167,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
     ] : []
     return {
       ...base,
-      tooltip: { ...base.tooltip, trigger: 'axis', axisPointer: { type: 'shadow' } },
+      tooltip: { ...base.tooltip, trigger: 'axis', axisPointer: shadowPointer(isDark) },
       xAxis: { type: 'value', ...axisStyle(isDark) },
       yAxis: { type: 'category', data: xData, ...axisStyle(isDark) },
       series: [{ type: 'bar', name: yCol, data: xData.map((x) => dataMap[x] ?? null), itemStyle: { color: PALETTE[0], borderRadius: [0, 3, 3, 0] }, barMaxWidth: 32 }],
@@ -1315,7 +1355,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
     ...base,
     // Bars get a 'shadow' pointer (highlights the whole hovered category column -
     // the expected bar-chart hover); line/area keep the thin crosshair line.
-    tooltip: { ...base.tooltip, trigger: 'axis', axisPointer: { type: type === 'bar' ? 'shadow' : 'line' } },
+    tooltip: { ...base.tooltip, trigger: 'axis', axisPointer: type === 'bar' ? shadowPointer(isDark) : { type: 'line' } },
     legend: series.length > 1 ? { textStyle: base.textStyle, top: 4 } : undefined,
     xAxis: categoryXAxis(isDark, xData),
     yAxis: valueYAxis(isDark),
