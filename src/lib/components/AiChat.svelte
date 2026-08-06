@@ -802,18 +802,26 @@
   /** True when user has manually scrolled away from bottom during streaming */
   let userScrolledUp = $state(false);
 
-  let _scrollRafId = /** @type {number | null} */ (null)
+  /** Sentinel pinned to the end of the transcript; see the observer below. */
+  let bottomSentinel = $state(/** @type {HTMLElement | null} */ (null))
 
-  function onScrollAreaScroll() {
-    if (_scrollRafId !== null) return
-    _scrollRafId = requestAnimationFrame(() => {
-      _scrollRafId = null
-      if (!scrollEl) return
-      const distFromBottom =
-        scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight
-      userScrolledUp = distFromBottom > 80
-    })
-  }
+  // "Am I at the bottom?" used to be measured in the scroll handler, which read
+  // scrollHeight/scrollTop/clientHeight on every scroll frame. Each of those
+  // reads forces a synchronous layout - and with content-visibility:auto on the
+  // messages, that layout has to resolve the off-screen subtrees it was meant to
+  // skip. An IntersectionObserver answers the same question from the compositor,
+  // costing nothing per frame.
+  $effect(() => {
+    const root = scrollEl
+    const target = bottomSentinel
+    if (!root || !target || typeof IntersectionObserver !== 'function') return
+    const io = new IntersectionObserver(
+      (entries) => { userScrolledUp = !entries[entries.length - 1].isIntersecting },
+      { root, rootMargin: '0px 0px 80px 0px', threshold: 0 },
+    )
+    io.observe(target)
+    return () => io.disconnect()
+  })
 
   /** Scroll to bottom on the next animation frame (throttled; skipped if user scrolled up). */
   function scrollBottomSoon() {
@@ -821,13 +829,26 @@
     if (rafId !== null) return;
     rafId = requestAnimationFrame(() => {
       rafId = null;
-      if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
+      pinToBottom();
     });
+  }
+
+  /**
+   * Scroll the transcript to its end.
+   *
+   * Uses the sentinel rather than `scrollTop = scrollHeight`: reading scrollHeight
+   * forces a synchronous layout of the whole transcript, and during streaming that
+   * happened on every flushed chunk. scrollIntoView asks the engine to do the same
+   * job without the app measuring anything.
+   */
+  function pinToBottom() {
+    if (bottomSentinel) bottomSentinel.scrollIntoView({ block: 'end' });
+    else if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
   }
 
   function jumpToBottom() {
     userScrolledUp = false;
-    if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
+    pinToBottom();
   }
 
   function stop() {
@@ -1205,7 +1226,7 @@
     const content = msgListEl;
     if (!content) return;
     const ro = new ResizeObserver(() => {
-      if (!userScrolledUp && scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
+      if (!userScrolledUp) pinToBottom();
     });
     ro.observe(content);
     return () => ro.disconnect();
@@ -1458,7 +1479,7 @@
     const el = inputRef;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight, 160) + "px";
+    el.style.height = Math.max(60, Math.min(el.scrollHeight, 200)) + "px";
   }
 
   function resetInputHeight() {
@@ -1468,7 +1489,7 @@
   async function scrollBottom() {
     await tick();
     userScrolledUp = false;
-    if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
+    pinToBottom();
   }
 
   /** @param {KeyboardEvent} e */
@@ -3199,7 +3220,6 @@
     <div
       bind:this={scrollEl}
       onscroll={() => {
-        onScrollAreaScroll();
         // The bar is anchored to a viewport rect, so scrolling would leave it
         // stranded away from its own text. Dismiss instead of re-measuring.
         if (selToolbar) clearSelectionToolbar();
@@ -3207,7 +3227,7 @@
       onmousedown={clearSelectionToolbar}
       onmouseup={syncSelectionToolbar}
       onkeyup={syncSelectionToolbar}
-      class="app-scroll min-h-0 flex-1 overflow-y-auto relative [overflow-anchor:none]"
+      class="app-scroll ai-transcript min-h-0 flex-1 overflow-y-auto relative [overflow-anchor:none] overscroll-contain [contain:layout_paint] [-webkit-overflow-scrolling:touch]"
       onclick={undefined}
       role="region"
       aria-label="Chat messages"
@@ -4114,6 +4134,11 @@
             {#if showWorking}
               {@render agentIndicator()}
             {/if}
+
+            <!-- Watched by the observer above to decide whether the transcript is
+                 pinned to the bottom. A zero-height element is enough, and it
+                 costs nothing per frame. -->
+            <div bind:this={bottomSentinel} aria-hidden="true" class="h-px w-full shrink-0"></div>
           </div>
         {/if}
       </div>
@@ -4191,8 +4216,8 @@
                set at the size you'll read it back at. -->
           <textarea
             bind:this={inputRef}
-            class="ai-composer-input block w-full resize-none bg-transparent px-4 pt-3 pb-1 text-foreground outline-none placeholder:text-muted-foreground/30 disabled:cursor-not-allowed"
-            style="height:auto;min-height:38px;max-height:200px;overflow-y:auto;font-family:inherit"
+            class="ai-composer-input block w-full resize-none bg-transparent px-4 pt-3.5 pb-2 text-foreground outline-none placeholder:text-muted-foreground/30 disabled:cursor-not-allowed"
+            style="height:auto;min-height:60px;max-height:200px;overflow-y:auto;font-family:inherit"
             placeholder={hasPendingConfirm
               ? "Confirm or cancel the operation above…"
               : "Ask anything about your database…"}
@@ -5133,13 +5158,10 @@
   }
 
   :global(.prose-ai) {
-    font-family:
-      "Inter Variable",
-      "Inter",
-      -apple-system,
-      BlinkMacSystemFont,
-      ui-sans-serif,
-      sans-serif;
+    /* Follow the app's font setting. This used to hardcode the Inter stack, so
+       picking another font changed the composer and the user's turns but left
+       every response in Inter - one conversation in two typefaces. */
+    font-family: var(--font-sans);
     font-size: var(--ai-chat-font-size, 0.9375rem);
     line-height: 1.65;
     color: var(--foreground);
@@ -5232,20 +5254,32 @@
   :global(.prose-ai-loading pre.shiki) {
     opacity: 0.7;
   }
+  /* The wrapper scrolls, the table doesn't. This used to set `overflow-x: auto`
+     and then `overflow: hidden` on the same element - the shorthand won, so a
+     table wider than the message was clipped with no way to reach the rest of
+     it. Rounding lives on the wrapper for the same reason. */
+  /* The inner element scrolls, the outer one anchors the copy button. This used
+     to be one element doing both, which sent the button sliding into the middle
+     of the table on horizontal scroll. */
+  :global(.ai-table-scroll) {
+    overflow: auto;
+    max-height: 26rem;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin: 0.6rem 0;
+  }
   :global(.prose-ai table) {
     border-collapse: collapse;
-    display: block;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    max-width: 100%;
     width: max-content;
+    min-width: 100%;
     font-size: 0.8125rem;
-    margin: 0.6rem 0;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    overflow: hidden;
   }
   :global(.prose-ai th) {
+    position: sticky;
+    top: 0;
+    z-index: 1;
     border-bottom: 1px solid var(--border);
     border-right: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
     padding: 0.45rem 1rem;
