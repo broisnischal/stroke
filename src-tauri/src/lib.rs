@@ -5,6 +5,7 @@ mod db;
 mod docker;
 mod license;
 mod mcp;
+mod omniroute;
 mod metrics;
 mod providers;
 mod secrets;
@@ -125,6 +126,7 @@ pub fn run() {
         .manage(db_state)
         .manage(mcp_state)
         .manage(TunnelState::new())
+        .manage(omniroute::OmniRouteState::new())
         .manage(db::live::LiveState::default())
         .setup(move |app| {
             // Load or generate a stable MCP token from the app data directory.
@@ -390,6 +392,12 @@ pub fn run() {
             mcp::mcp_status,
             mcp::mcp_update_connections,
             mcp::mcp_set_readonly,
+            db::connection::prewarm_dns,
+            omniroute::omniroute_env,
+            omniroute::omniroute_install,
+            omniroute::omniroute_start,
+            omniroute::omniroute_stop,
+            omniroute::omniroute_running,
             docker::docker_check,
             docker::docker_run_db,
             secrets::ai_store_key,

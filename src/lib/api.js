@@ -468,6 +468,44 @@ export async function connectMssql(config) {
   return connectInv('connect_mssql_db', { config: normalizeMssql(config) })
 }
 
+/**
+ * Resolve saved-connection hostnames into the OS resolver cache ahead of time.
+ *
+ * A cold lookup measured 4147ms against a cached 58ms, and the connect tracked
+ * it almost exactly - so paying it while the user is still choosing is the
+ * difference between a 4s connect and a 300ms one. Fire-and-forget.
+ * @param {string[]} hosts
+ */
+export function prewarmDns(hosts) {
+  return inv('prewarm_dns', { hosts }).catch(() => {})
+}
+
+// ── OmniRoute (local OpenAI-compatible proxy) ────────────────────────────────
+
+/** What's on this machine: `{ node, npm, omniroute }`, each a version or null. */
+export async function omniRouteEnv() {
+  return inv('omniroute_env')
+}
+
+/** `npm i -g omniroute`. Streams progress as `omniroute-log` events. */
+export async function omniRouteInstall() {
+  return inv('omniroute_install')
+}
+
+/** Start the proxy and wait until the port serves. Returns its base URL. */
+export async function omniRouteStart(port) {
+  return inv('omniroute_start', { port })
+}
+
+export async function omniRouteStop() {
+  return inv('omniroute_stop')
+}
+
+/** True when something is serving on the port - ours or the user's own. */
+export async function omniRouteRunning(port) {
+  return inv('omniroute_running', { port })
+}
+
 // ── Docker ────────────────────────────────────────────────────────────────────
 
 /** Returns Docker server version string, or throws a user-facing error. */

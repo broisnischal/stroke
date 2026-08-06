@@ -20,8 +20,10 @@
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
   import { cn } from "$lib/utils.js";
   import { chatCompletionRaw, fetchModelIds } from "$lib/ai.js";
+  import { omniRouteEnv, omniRouteInstall, omniRouteStart, omniRouteRunning } from "$lib/api.js";
   import {
     aiProfiles,
     activeProfileId,
@@ -91,6 +93,18 @@
 
   const provider = $derived(PROVIDERS.find((p) => p.id === formProvider) ?? PROVIDERS[0]);
   const modelPresets = $derived(PROVIDER_MODELS[formProvider] ?? []);
+  /** Show only no-cost models. OpenRouter marks them with a `:free` suffix on the
+   *  id; our own presets carry a `free` tag. Off by default so paid models are
+   *  not hidden from someone who is paying for them. */
+  let freeOnly = $state(false);
+  /** @param {{model?: string, tag?: string}} m */
+  const isFreeModel = (m) => m.tag === 'free' || /:free\b/.test(m.model ?? '');
+  const visiblePresets = $derived(freeOnly ? modelPresets.filter(isFreeModel) : modelPresets);
+  const visibleLocalModels = $derived(freeOnly ? localModels.filter((id) => isFreeModel({ model: id })) : localModels);
+  /** Any free model to filter down to? Hides the toggle where it would do nothing. */
+  const hasFreeModels = $derived(
+    modelPresets.some(isFreeModel) || localModels.some((id) => isFreeModel({ model: id })),
+  );
   const isOllama = $derived(formProvider === "ollama");
   const isOmniroute = $derived(formProvider === "omniroute");
   /** Our own free gateway: authenticated by device id, so there is no key to enter. */
@@ -107,6 +121,61 @@
   const isLocalEndpoint = $derived(
     isOllama || isOmniroute || (isCustom && /localhost|127\.0\.0\.1/.test(formBaseUrl)),
   );
+
+  // ── OmniRoute setup ────────────────────────────────────────────────────────
+  // The proxy is a global npm package the user would otherwise install and run
+  // in a terminal. Offer to do it here, but never silently: each step is a
+  // click, and a missing prerequisite names itself.
+  let omniEnv = $state(/** @type {{node: string|null, npm: string|null, omniroute: string|null} | null} */ (null));
+  let omniBusy = $state(/** @type {'' | 'checking' | 'installing' | 'starting'} */ (''));
+  let omniError = $state("");
+  let omniServing = $state(false);
+  /** Port comes from the provider's own URL (20128), never a literal. Hardcoding
+   *  4000 meant the status line probed a port OmniRoute never uses, so whatever
+   *  else was listening there showed a green "Running" next to a failed fetch. */
+  const OMNI_PORT = $derived.by(() => {
+    const m = (formBaseUrl || provider?.url || '').match(/:(\d{2,5})(?:\/|$)/);
+    return m ? Number(m[1]) : 20128;
+  });
+
+  async function refreshOmni() {
+    omniBusy = 'checking'; omniError = "";
+    try {
+      omniEnv = await omniRouteEnv();
+      omniServing = await omniRouteRunning(OMNI_PORT);
+    } catch (e) {
+      omniError = String(/** @type {any} */ (e)?.message ?? e);
+    } finally { omniBusy = ''; }
+  }
+
+  async function installOmni() {
+    omniBusy = 'installing'; omniError = "";
+    try {
+      await omniRouteInstall();
+      omniEnv = await omniRouteEnv();
+    } catch (e) {
+      omniError = String(/** @type {any} */ (e)?.message ?? e);
+    } finally { omniBusy = ''; }
+  }
+
+  async function startOmni() {
+    omniBusy = 'starting'; omniError = "";
+    try {
+      const url = await omniRouteStart(OMNI_PORT);
+      formBaseUrl = `${url}/v1`;
+      omniServing = true;
+      resetLocalModels();
+      await loadLocalModels();
+    } catch (e) {
+      omniError = String(/** @type {any} */ (e)?.message ?? e);
+    } finally { omniBusy = ''; }
+  }
+
+  // Probe once the user lands on the OmniRoute steps, so the panel opens with
+  // the real state instead of an empty shell.
+  $effect(() => {
+    if (isOmniroute && omniEnv === null && omniBusy === '') void refreshOmni();
+  });
 
   function resetLocalModels() {
     localModels = [];
@@ -234,9 +303,13 @@
     try {
       const id = editingId ?? crypto.randomUUID();
       const name = formName.trim() || modelShortName(formModel);
+      const isNew = !editingId;
       await saveProfile({ id, name, provider: formProvider, baseUrl: formBaseUrl.trim() || (provider?.url ?? ""), model: formModel.trim() }, formApiKey);
       await setActiveProfile(id);
       view = "list";
+      // Adding a model is a finished errand - the new model is already active,
+      // so bouncing back to the list just asks for a second dismissal.
+      if (isNew) open = false;
     } finally { saving = false; }
   }
 
@@ -266,6 +339,26 @@
 
 <!-- Selected mark: a filled badge reads as a deliberate state, where a bare tick
      floating in the row read as decoration. -->
+{#snippet freeToggle()}
+  <!-- Only offered when there is something to filter to, so it never reads as a
+       toggle that does nothing. -->
+  {#if hasFreeModels}
+    <button
+      type="button"
+      class={cn(
+        "mb-2 flex items-center gap-1.5 self-start rounded-md border px-2 py-1 text-ui-3xs transition-colors",
+        freeOnly
+          ? "border-primary/35 bg-primary/[0.07] text-foreground"
+          : "border-border/40 text-muted-foreground/70 hover:border-border/70 hover:text-foreground",
+      )}
+      onclick={() => (freeOnly = !freeOnly)}
+    >
+      <Check class={cn("size-3 shrink-0", !freeOnly && "invisible")} />
+      Free models only
+    </button>
+  {/if}
+{/snippet}
+
 {#snippet checkBadge()}
   <span class="flex size-4 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-[0_1px_2px_rgba(0,0,0,0.25)]">
     <Check class="size-2.5" strokeWidth={3.5} />
@@ -273,70 +366,101 @@
 {/snippet}
 
 <Dialog.Root bind:open onOpenChange={handleOpenChange}>
-  <Dialog.Content showCloseButton={false} class="w-[min(580px,calc(100vw-2rem))] sm:max-w-none gap-0 overflow-hidden p-0">
+  <!-- The list is a short menu of models, the form is a multi-step wizard - one
+       width cannot serve both, so the list stays tight and the form gets room. -->
+  <Dialog.Content
+    showCloseButton={false}
+    class={cn(
+      "sm:max-w-none gap-0 overflow-hidden p-0 transition-[width]",
+      view === "list" ? "w-[min(440px,calc(100vw-2rem))]" : "w-[min(580px,calc(100vw-2rem))]",
+    )}
+  >
 
     <!-- ══ LIST VIEW ═════════════════════════════════════════════════════ -->
     {#if view === "list"}
-      <div class="flex items-center gap-2 border-b border-border/25 px-5 py-4">
+      <div class="flex items-center gap-2 border-b border-border/25 px-4 py-3">
         <div class="flex-1">
-          <Dialog.Title class="text-ui-sm font-semibold text-foreground">AI Models</Dialog.Title>
-          <Dialog.Description class="mt-0.5 text-ui-2xs text-muted-foreground/60">
-            Select an active model or add a new one.
+          <Dialog.Title class="text-ui-xs font-semibold text-foreground">AI Models</Dialog.Title>
+          <Dialog.Description class="mt-0.5 text-ui-3xs text-muted-foreground/50">
+            Right-click a model to edit or delete it.
           </Dialog.Description>
         </div>
         <Dialog.Close class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/30 transition-colors hover:bg-muted/50 hover:text-muted-foreground focus-visible:outline-none" />
       </div>
 
-      <div class="app-scroll max-h-[min(60vh,30rem)] overflow-y-auto px-3 py-2">
+      <div class="app-scroll max-h-[min(60vh,26rem)] overflow-y-auto px-2 py-1.5">
         {#if $aiProfiles.length === 0}
           <p class="py-6 text-center text-ui-xs text-muted-foreground/50">No models configured.</p>
         {:else}
-          <div class="flex flex-col gap-px">
+          <div class="flex flex-col">
             {#each $aiProfiles as profile (profile.id)}
               {@const isActive = profile.id === $activeProfileId}
-              <div
-                class={cn(
-                  "group flex cursor-pointer items-center gap-3 rounded-md px-3 py-2.5 transition-colors",
-                  isActive ? "bg-muted/50" : "hover:bg-muted/30",
-                )}
-                role="button"
-                tabindex="0"
-                onclick={() => void setActiveProfile(profile.id)}
-                onkeydown={(e) => e.key === "Enter" && void setActiveProfile(profile.id)}
-              >
-                {#if hasBrand(profile.provider)}
-                  <BrandIcon
-                    name={profile.provider}
-                    class={cn("size-4 shrink-0", isActive ? "text-foreground" : "text-muted-foreground")}
-                  />
-                {:else}
-                  {@const Fallback = PROVIDER_ICON_FALLBACK[profile.provider] ?? Sparkles}
-                  <Fallback class="size-4 shrink-0 text-muted-foreground/70" />
-                {/if}
-                <div class="min-w-0 flex-1">
-                  <p class="truncate text-ui-sm font-medium text-foreground">{profile.name}</p>
-                  <p class="mt-0.5 truncate font-mono text-ui-3xs text-muted-foreground/50">{profile.model}</p>
-                </div>
-                <div class="flex shrink-0 items-center gap-1.5">
-                  {#if isActive}
-                    <span class="rounded-md bg-muted/60 px-1.5 py-0.5 text-ui-3xs font-semibold uppercase tracking-wider text-muted-foreground/50">active</span>
+              <ContextMenu.Root>
+                <ContextMenu.Trigger>
+                  <div
+                    class={cn(
+                      "group flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors",
+                      isActive ? "bg-muted/40" : "hover:bg-muted/25",
+                    )}
+                    role="button"
+                    tabindex="0"
+                    onclick={() => void setActiveProfile(profile.id)}
+                    onkeydown={(e) => e.key === "Enter" && void setActiveProfile(profile.id)}
+                  >
+                    {#if hasBrand(profile.provider)}
+                      <BrandIcon
+                        name={profile.provider}
+                        class={cn("size-3.5 shrink-0", isActive ? "text-foreground" : "text-muted-foreground/70")}
+                      />
+                    {:else}
+                      {@const Fallback = PROVIDER_ICON_FALLBACK[profile.provider] ?? Sparkles}
+                      <Fallback class="size-3.5 shrink-0 text-muted-foreground/60" />
+                    {/if}
+                    <!-- Name and model id on one line: the id is the detail, not a
+                         second heading, so it trails in mono and truncates first. -->
+                    <div class="flex min-w-0 flex-1 items-baseline gap-2">
+                      <span class={cn("shrink-0 truncate text-ui-xs", isActive ? "font-medium text-foreground" : "text-foreground/80")}>{profile.name}</span>
+                      <span class="min-w-0 truncate font-mono text-ui-3xs text-muted-foreground/40">{profile.model}</span>
+                    </div>
+                    <div class="flex shrink-0 items-center gap-1">
+                      <button
+                        class="rounded px-1.5 py-0.5 text-ui-3xs text-muted-foreground/40 opacity-0 transition-colors hover:text-foreground group-hover:opacity-100"
+                        onclick={(e) => { e.stopPropagation(); void startEdit(profile) }}
+                      >Edit</button>
+                      <!-- A check marks the active model; the old uppercase pill
+                           was the loudest thing in a list of quiet rows. -->
+                      <Check class={cn("size-3.5 shrink-0 text-primary", !isActive && "invisible")} />
+                    </div>
+                  </div>
+                </ContextMenu.Trigger>
+                <ContextMenu.Content class="min-w-40 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                  {#if !isActive}
+                    <ContextMenu.Item onSelect={() => void setActiveProfile(profile.id)}>
+                      <Check />
+                      Set as active
+                    </ContextMenu.Item>
                   {/if}
-                  <button
-                    class="rounded-md px-2 py-0.5 text-ui-2xs text-muted-foreground/40 opacity-0 transition-colors hover:bg-muted/60 hover:text-foreground group-hover:opacity-100"
-                    onclick={(e) => { e.stopPropagation(); void startEdit(profile) }}
-                  >Edit</button>
-                </div>
-              </div>
+                  <ContextMenu.Item onSelect={() => void startEdit(profile)}>
+                    <SlidersHorizontal />
+                    Edit
+                  </ContextMenu.Item>
+                  <ContextMenu.Separator />
+                  <ContextMenu.Item variant="destructive" onSelect={() => void handleDelete(profile.id)}>
+                    <Trash2 />
+                    Delete
+                  </ContextMenu.Item>
+                </ContextMenu.Content>
+              </ContextMenu.Root>
             {/each}
           </div>
         {/if}
       </div>
 
-      <div class="border-t border-border/25 px-4 py-3">
+      <div class="border-t border-border/25 p-1.5">
         <button type="button"
-          class="flex w-full items-center justify-center gap-1.5 rounded-md border border-border/25 bg-muted/[0.2] py-2 text-ui-xs text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
+          class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-ui-xs text-muted-foreground/60 transition-colors hover:bg-muted/30 hover:text-foreground"
           onclick={startAdd}>
-          <Plus class="size-3.5" />
+          <Plus class="size-3.5 shrink-0" />
           Add model
         </button>
       </div>
@@ -436,14 +560,87 @@
               </div>
             {/if}
           {:else if isLocalEndpoint}
+            <!-- OmniRoute setup: Node → package → server, each step named so a
+                 missing prerequisite says which one it is. -->
+            {#if isOmniroute}
+              <div class="mb-3 flex flex-col gap-2 rounded-lg border border-border/40 bg-muted/20 px-3 py-2.5">
+                <div class="flex items-center gap-2">
+                  <span class={cn("size-1.5 shrink-0 rounded-full", omniServing ? "bg-success" : "bg-muted-foreground/30")}></span>
+                  <p class="text-ui-xs font-medium text-foreground">
+                    {omniServing ? `Running on port ${OMNI_PORT}` : "Not running"}
+                  </p>
+                  <button
+                    type="button"
+                    class="ml-auto inline-flex items-center gap-1 text-ui-3xs text-muted-foreground/60 transition-colors hover:text-foreground"
+                    onclick={() => void refreshOmni()}
+                    disabled={omniBusy !== ''}
+                  >
+                    <RefreshCw class={cn("size-3", omniBusy === 'checking' && "animate-spin")} />
+                    Recheck
+                  </button>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-ui-3xs text-muted-foreground/60">
+                  <span>node {omniEnv?.node ?? "—"}</span>
+                  <span>npm {omniEnv?.npm ?? "—"}</span>
+                  <span>omniroute {omniEnv?.omniroute ?? "—"}</span>
+                </div>
+
+                {#if omniEnv && !omniEnv.node}
+                  <p class="flex items-start gap-2 text-ui-3xs text-destructive">
+                    <AlertTriangle class="mt-0.5 size-3 shrink-0" />
+                    <span>Node.js is not installed. OmniRoute runs on Node — install it from nodejs.org, then Recheck.</span>
+                  </p>
+                  <button
+                    type="button"
+                    class="self-start text-ui-3xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                    onclick={() => void openExternal("https://nodejs.org")}
+                  >Open nodejs.org</button>
+                {:else if omniEnv && !omniEnv.omniroute}
+                  <button
+                    type="button"
+                    class="flex items-center justify-center gap-1.5 rounded-md border border-border/40 bg-background/60 py-1.5 text-ui-xs text-foreground transition-colors hover:bg-muted/40 disabled:opacity-50"
+                    onclick={() => void installOmni()}
+                    disabled={omniBusy !== ''}
+                  >
+                    {#if omniBusy === 'installing'}
+                      <Loader2 class="size-3.5 animate-spin" />Installing…
+                    {:else}
+                      <Plus class="size-3.5" />Install OmniRoute (npm i -g omniroute)
+                    {/if}
+                  </button>
+                {:else if omniEnv && !omniServing}
+                  <button
+                    type="button"
+                    class="flex items-center justify-center gap-1.5 rounded-md border border-border/40 bg-background/60 py-1.5 text-ui-xs text-foreground transition-colors hover:bg-muted/40 disabled:opacity-50"
+                    onclick={() => void startOmni()}
+                    disabled={omniBusy !== ''}
+                  >
+                    {#if omniBusy === 'starting'}
+                      <Loader2 class="size-3.5 animate-spin" />Starting…
+                    {:else}
+                      <Waypoints class="size-3.5" />Start the gateway
+                    {/if}
+                  </button>
+                {/if}
+
+                {#if omniError}
+                  <p class="flex items-start gap-2 text-ui-3xs text-destructive">
+                    <AlertTriangle class="mt-0.5 size-3 shrink-0" /><span class="break-words">{omniError}</span>
+                  </p>
+                {/if}
+              </div>
+            {/if}
+
             <!-- Local server: list what is actually installed, never a guessed tag -->
             {#if localModelsLoading}
               <div class="flex items-center justify-center gap-2 py-4 text-ui-xs text-muted-foreground">
                 <Loader2 class="size-3.5 animate-spin" />Looking for installed models…
               </div>
             {:else if localModels.length > 0}
+              {@render freeToggle()}
               <div class="grid grid-cols-2 gap-1.5">
-                {#each localModels as id (id)}
+                {#each visibleLocalModels as id (id)}
                   {@const selected = formModel === id}
                   <button
                     type="button"
@@ -460,21 +657,39 @@
             {/if}
 
             {#if localModelsError}
-              <div class="flex flex-col gap-2 rounded-lg border border-destructive/20 bg-destructive/[0.08] px-3 py-2.5">
-                <p class="flex items-start gap-2 text-ui-xs text-destructive">
-                  <AlertTriangle class="mt-0.5 size-3.5 shrink-0" /><span class="break-words">{localModelsError}</span>
+              <!-- One line, then the fix. A wall of red with the raw fetch error
+                   pasted in reads as a crash; what the user needs is which server
+                   is not answering and the button that starts it. -->
+              <div class="flex flex-col gap-2 rounded-lg border border-border/40 bg-muted/20 px-3 py-2.5">
+                <div class="flex items-center gap-2">
+                  <span class="size-1.5 shrink-0 rounded-full bg-destructive/70"></span>
+                  <p class="min-w-0 flex-1 truncate text-ui-xs text-foreground/80" title={localModelsError}>
+                    {isOllama ? "Ollama is not answering" : isOmniroute ? "The gateway is not answering" : "The server is not answering"}
+                  </p>
+                  {#if isOmniroute && omniEnv?.omniroute && !omniServing}
+                    <button
+                      type="button"
+                      class="inline-flex h-6 shrink-0 items-center gap-1 rounded-md bg-primary px-2 text-ui-3xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                      onclick={() => void startOmni()}
+                      disabled={omniBusy !== ''}
+                    >
+                      {#if omniBusy === 'starting'}<Loader2 class="size-3 animate-spin" />Starting{:else}<Waypoints class="size-3" />Start{/if}
+                    </button>
+                  {:else}
+                    <button
+                      type="button"
+                      class="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-border/50 px-2 text-ui-3xs text-muted-foreground transition-colors hover:text-foreground"
+                      onclick={() => void loadLocalModels()}
+                    ><RefreshCw class="size-3" />Retry</button>
+                  {/if}
+                </div>
+                <p class="text-ui-3xs text-muted-foreground/60">
+                  {#if isOllama}
+                    Start it with <code class="font-mono">ollama serve</code>, or point the URL elsewhere.
+                  {:else}
+                    Start it below, or point the URL at an instance you run yourself.
+                  {/if}
                 </p>
-                {#if isOllama}
-                  <p class="text-ui-3xs text-muted-foreground">
-                    Ollama must be running — start it with <code class="font-mono">ollama serve</code>.
-                  </p>
-                {:else if isOmniroute}
-                  <p class="text-ui-3xs text-muted-foreground">
-                    The gateway runs on your machine — install it with
-                    <code class="font-mono">npm i -g omniroute</code>, then run
-                    <code class="font-mono">omniroute</code>.
-                  </p>
-                {/if}
                 <Input
                   class="h-8 font-mono text-ui-xs"
                   placeholder={provider?.url ?? ""}
@@ -495,8 +710,9 @@
             {/if}
 
           {:else if modelPresets.length > 0}
+            {@render freeToggle()}
             <div class="grid grid-cols-2 gap-1.5">
-              {#each modelPresets as preset (preset.model)}
+              {#each visiblePresets as preset (preset.model)}
                 {@const selected = formModel === preset.model}
                 <button
                   type="button"
