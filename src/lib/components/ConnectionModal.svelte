@@ -34,6 +34,9 @@
     open = $bindable(false),
     onconnected = (conn, id) => {},
     maxConnections = Infinity,
+    /** Name of the live session, '' when nothing is connected. Drives Disconnect. */
+    activeConnectionName = '',
+    ondisconnect = () => {},
   } = $props()
 
   const CATEGORIES = [
@@ -822,50 +825,6 @@
     open = false
   }
 
-  /**
-   * True when a pointer interaction landed on window chrome that must never
-   * dismiss the dialog - the titlebar / tab-bar drag region, the status bar, or
-   * any studio region. Checks the event target AND the element under the pointer:
-   * while a native window drag is starting, WebKit can report the document (not
-   * the drag element) as the target, so the pointer coordinates are the reliable
-   * signal. Without this, dragging the window to move it closed the modal.
-   * @param {PointerEvent} e
-   */
-  const CHROME_SEL = '[data-tauri-drag-region],[data-studio-chrome],[data-studio-region]'
-
-  // The reliable signal: capture the REAL pointerdown on `window` (capture phase
-  // fires before bits-ui's document-level dismiss listener). bits-ui hands
-  // onInteractOutside a synthetic event whose `target`/`clientX` don't survive a
-  // native window drag - during a drag WebKit reports `document` as the target and
-  // drops the coordinates - so neither `e.target.closest` nor `elementFromPoint`
-  // can see the titlebar. This tracker records whether the last pointerdown landed
-  // on the titlebar/tab-bar chrome, which is what the drag/move/resize starts from.
-  let _pointerInChrome = false
-  $effect(() => {
-    if (!open) return
-    const onPointerDown = (/** @type {PointerEvent} */ e) => {
-      const t = /** @type {Element | null} */ (e.target)
-      _pointerInChrome = !!t?.closest?.(CHROME_SEL)
-    }
-    window.addEventListener('pointerdown', onPointerDown, true)
-    return () => window.removeEventListener('pointerdown', onPointerDown, true)
-  })
-
-  function isChromeInteraction(e) {
-    if (_pointerInChrome) return true
-    // Defensive fallbacks (in case the tracker missed): try the synthetic event's
-    // wrapped original event, then the raw target, then the pointer coordinates.
-    const orig = e?.detail?.originalEvent ?? e
-    const t = /** @type {Element | null} */ (orig?.target ?? e?.target)
-    if (t?.closest?.(CHROME_SEL)) return true
-    const x = orig?.clientX, y = orig?.clientY
-    if (typeof x === 'number' && typeof y === 'number') {
-      const at = document.elementFromPoint(x, y)
-      if (at?.closest?.(CHROME_SEL)) return true
-    }
-    return false
-  }
-
   async function d1Discover() {
     if (!apiToken.trim()) { d1DiscoverError = 'Enter your API token first.'; return }
     d1DiscoverPhase = 'loading'; d1DiscoverError = ''
@@ -1056,11 +1015,12 @@
         e.preventDefault()
       }}
       onInteractOutside={(e) => {
-        // The modal is inset to leave the titlebar (drag region) and status bar
-        // usable. Interactions on that chrome must NOT dismiss the dialog or prompt
-        // discard - otherwise dragging the window to move it closes the modal.
-        if (isChromeInteraction(e)) { e.preventDefault(); return }
-        if (isDirty && !isBusy) { e.preventDefault(); confirmDiscardOpen = true }
+        // Nothing outside the content dismisses this dialog. It is inset to leave
+        // the titlebar and status bar usable, so "outside" is window chrome:
+        // dragging the window to move or resize it, or a stray click on the tab
+        // bar, would otherwise throw away a half-filled connection form. Closing
+        // is deliberate only - the × button, Escape, or a successful connect.
+        e.preventDefault()
       }}
     >
     <DialogPrimitive.Title class="sr-only">Connections</DialogPrimitive.Title>
@@ -1761,6 +1721,19 @@
               <!-- Actions, shared Button variants (Resume ghost · Stop soft-destructive
                    · Test outline · Connect solid primary), one system app-wide. -->
               <div class="ml-auto flex shrink-0 items-center gap-2">
+                <!-- Ending the live session belongs next to resuming it: both act
+                     on the current connection rather than on the form. -->
+                {#if activeConnectionName}
+                  <Button
+                    variant="ghost"
+                    class="max-w-[220px] text-muted-foreground hover:text-destructive"
+                    disabled={isBusy}
+                    title="Disconnect {activeConnectionName}"
+                    onclick={() => { open = false; ondisconnect() }}
+                  >
+                    <Icon name="unplug" class="size-3.5" />Disconnect
+                  </Button>
+                {/if}
                 {#if lastId && saved.find(c => c.id === lastId)}
                   {@const lastConn = saved.find(c => c.id === lastId)}
                   <Button variant="ghost" class="max-w-[200px] text-muted-foreground" disabled={isBusy} onclick={() => connectWith(lastConn)}>
