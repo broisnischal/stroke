@@ -74,6 +74,7 @@
   import StatusBar from './StatusBar.svelte'
   import QueryLogConsole from './QueryLogConsole.svelte'
   import DisconnectDialog from './DisconnectDialog.svelte'
+  import SwitchDatabaseDialog from './SwitchDatabaseDialog.svelte'
   // InsertRowDialog removed - replaced by inline draft row in DataTable
   import McpPanel from './McpPanel.svelte'
   import SearchPage from './SearchPage.svelte'
@@ -100,6 +101,7 @@
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
   import {
     disconnectPostgres,
+    prewarmDns,
     listSchemas,
     listTables,
     getTableRowCounts,
@@ -303,11 +305,28 @@
   /** @type {boolean} - true when the DB went away mid-session */
   let connectionLost = $state(false)
   let autoConnecting = $state(false)
-  /** Name of the connection the startup reconnect is waiting on, for the overlay. */
+  /** Name of the connection the overlay is waiting on. */
   let autoConnectName = $state('')
+  /** Overlay verb: resuming the last session reads "Reconnecting", every other
+   *  path (switching database, Docker, sample) is a fresh "Connecting". */
+  let autoConnectVerb = $state('Connecting')
+
+  /**
+   * Raise the full-screen connect overlay. Always name the connection being
+   * dialled - the name is what tells the user which database they are waiting
+   * on, and a stale one during a switch says the wrong database entirely.
+   * @param {string} name
+   * @param {'Connecting' | 'Reconnecting'} [verb]
+   */
+  function beginConnectOverlay(name, verb = 'Connecting') {
+    autoConnectName = name ?? ''
+    autoConnectVerb = verb
+    autoConnecting = true
+  }
+
   /**
    * Saved connections are often named `db@full.rds.host.name` - too long to read
-   * in the reconnect overlay. Keep the database and the host's first label.
+   * in the connect overlay. Keep the database and the host's first label.
    * @param {string} name
    */
   function shortConnLabel(name) {
@@ -335,6 +354,7 @@
   /** The mounted per-table ERD pane, so the tab bar's Export menu can drive its
    *  diagram exports (PNG / copy PNG / SVG / Mermaid). */
   let erdPane = $state(/** @type {any} */ (null))
+  let chartPane = $state(/** @type {any} */ (null))
   let showCreateTableDialog = $state(false)
   let showCreateSchemaDialog = $state(false)
   let savedConnections = $state(loadSavedConnections())
@@ -4666,6 +4686,25 @@ let rowSearch = $state('')
   })
 
   onMount(async () => {
+    // Resolve every saved host before the user can pick one. A cold DNS lookup
+    // measured 4147ms here against 58ms warm, and the connect waits on it, so
+    // this is the difference between a 4s connect and a 300ms one. Fire and
+    // forget - nothing downstream waits on it.
+    // Repeat on an interval, not just once: resolver cache entries expire, and a
+    // cold lookup on this machine has been measured stalling the full 5s DNS
+    // budget - for unrelated hosts at the same instant, so it is the resolver,
+    // not the database. Re-resolving every 60s keeps the entry hot so the connect
+    // lands on the ~260ms path instead of the ~6.9s one. Fire and forget.
+    const warmHosts = () => {
+      try {
+        const hosts = [...new Set(loadSavedConnections().map((c) => c.host).filter(Boolean))]
+        if (hosts.length) void prewarmDns(hosts)
+      } catch { /* best effort */ }
+    }
+    warmHosts()
+    const dnsWarmTimer = setInterval(warmHosts, 60_000)
+    onDestroy(() => clearInterval(dnsWarmTimer))
+
     // Seed the sample SQLite database once on first launch (any install, any user).
     // Uses a sentinel key so re-seeding is skipped if the user later deletes the connection.
     try {
@@ -4694,8 +4733,7 @@ let rowSearch = $state('')
     // to the connection modal instead of re-connecting silently.
     if (!loadSettings().autoReconnectOnStartup) { showConnectionModal = true; return }
 
-    autoConnecting = true
-    autoConnectName = last.name ?? ''
+    beginConnectOverlay(last.name ?? '', 'Reconnecting')
     // The backend already enforces its own per-engine deadlines (DNS + TCP preflight,
     // a 20s connect deadline for Postgres, HTTP timeouts for the REST engines) and
     // fails with a message the user can act on. This race is only a last-resort guard
@@ -4773,8 +4811,71 @@ let rowSearch = $state('')
     saveAiMode(false)
   }
 
+  /** @param {{ provider: string, dbRef: string, name: string }} args */
+  async function switchProviderDb({ provider, dbRef, name }) {
+    if (!connection) return
+    try {
+      const { providerBuildConnection } = await import('$lib/providers.js')
+      const built = await providerBuildConnection(provider, dbRef)
+      if (built.needs_password) {
+        // Supabase needs a per-project password - can't switch silently, so
+        // send the user to the connect dialog to finish it.
+        toast.message(`${name} needs its database password, opening the connection dialog.`)
+        showConnectionModal = true
+        return
+      }
+      void handleSwitchDatabase({
+        ...connection,
+        type: built.db_type === 'mysql' ? 'mysql' : 'postgres',
+        host: built.host,
+        port: built.port,
+        user: built.username,
+        password: built.password,
+        database: built.database,
+        ssl: built.ssl,
+        name: built.name,
+        provider,
+      })
+    } catch (e) {
+      toast.error('Could not switch database', { description: String(e) })
+    }
+  }
+
+  /** @param {{ databaseId: string, name: string }} args */
+  function switchD1Database({ databaseId, name }) {
+    if (!connection) return
+    void handleSwitchDatabase({ ...connection, databaseId, database: name, name })
+  }
+
+  /** @param {string} dbName */
+  function switchToDb(dbName) {
+    if (!connection) return
+    void handleSwitchDatabase({ ...connection, database: dbName, name: `${connection.host ?? connection.name}/${dbName}` })
+  }
+
   function requestDisconnect() {
     showDisconnectDialog = true
+  }
+
+  // ── Switch database (sidebar) ──────────────────────────────────────────────
+  let showSwitchDbDialog = $state(false)
+  /** @type {{ key: string, label: string } | null} */
+  let pendingDbSwitch = $state(null)
+
+  /** Ask first: switching drops the pool, the catalog and every open tab. */
+  function requestDatabaseSwitch(/** @type {{ key: string, label: string }} */ entry) {
+    pendingDbSwitch = entry
+    showSwitchDbDialog = true
+  }
+
+  /** Same three dispatch paths the status-bar switcher uses, by engine. */
+  function commitDatabaseSwitch() {
+    const entry = pendingDbSwitch
+    pendingDbSwitch = null
+    if (!entry || !connection) return
+    if (connection.provider) return void switchProviderDb({ provider: connection.provider, dbRef: entry.key, name: entry.label })
+    if (connection.type === 'd1') return void switchD1Database({ databaseId: entry.key, name: entry.label })
+    switchToDb(entry.label)
   }
 
   /** Reset all connection-scoped UI state to blank. */
@@ -4823,7 +4924,7 @@ let rowSearch = $state('')
     await disconnectPostgres().catch(() => {})
     connection = null
     clearConnectionState()
-    autoConnecting = true
+    beginConnectOverlay(conn.name ?? '')
     try {
       if (conn.type === 'mysql' || conn.type === 'mariadb') await connectMysql(conn)
       else await connectPostgres(conn)
@@ -4842,7 +4943,7 @@ let rowSearch = $state('')
     await disconnectPostgres().catch(() => {})
     connection = null
     clearConnectionState()
-    autoConnecting = true
+    beginConnectOverlay('Sample Database')
     try {
       const filePath = await initSampleDb()
       const sample = /** @type {import('$lib/stores/connections.js').SavedConnection} */ ({
@@ -4887,7 +4988,7 @@ let rowSearch = $state('')
     connection = null
     clearConnectionState()
     // Connect to the chosen saved connection
-    autoConnecting = true
+    beginConnectOverlay(conn.name ?? conn.database ?? conn.host ?? '')
     try {
       await connectByType(conn)
       await onConnected(conn, conn.id)
@@ -5288,7 +5389,19 @@ let rowSearch = $state('')
 </script>
 
 <Onboarding bind:open={showOnboarding} onconnect={() => (showConnectionModal = true)} onsample={handleSampleConnect} />
-<ConnectionModal bind:open={showConnectionModal} onconnected={(conn, id) => onConnected(conn, id)} maxConnections={$hasPro ? Infinity : FREE_CONNECTION_LIMIT} />
+<ConnectionModal
+  bind:open={showConnectionModal}
+  onconnected={(conn, id) => onConnected(conn, id)}
+  maxConnections={$hasPro ? Infinity : FREE_CONNECTION_LIMIT}
+  activeConnectionName={connection ? (connection.name || connection.database || connection.host || connection.filePath || 'Connected') : ''}
+  ondisconnect={requestDisconnect}
+/>
+<SwitchDatabaseDialog
+  bind:open={showSwitchDbDialog}
+  databaseName={pendingDbSwitch?.label ?? ''}
+  currentName={connection?.database ?? connection?.name ?? ''}
+  onconfirm={commitDatabaseSwitch}
+/>
 <DisconnectDialog bind:open={showDisconnectDialog} connectionName={connection ? (connection.name || connection.database || connection.host || connection.filePath || 'Connected') : ''} ondisconnect={handleDisconnect} />
 <CreateTableDialog
   bind:open={showCreateTableDialog}
@@ -5469,7 +5582,7 @@ let rowSearch = $state('')
     <!-- Text -->
     <div class="flex max-w-sm flex-col items-center gap-1.5 text-center">
       <p class="max-w-full truncate text-ui-sm font-medium text-foreground/70">
-        Reconnecting{autoConnectName ? ` to ${shortConnLabel(autoConnectName)}` : ''}
+        {autoConnectVerb}{autoConnectName ? ` to ${shortConnLabel(autoConnectName)}` : ''}
       </p>
       <button
         type="button"
@@ -5566,10 +5679,8 @@ let rowSearch = $state('')
         onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
         onopenextensions={() => { if (aiMode) exitAiMode(); openExtensionsTab() }}
         {connection}
-        onswitchtodb={(dbName) => {
-          if (!connection) return
-          void handleSwitchDatabase({ ...connection, database: dbName, name: `${connection.host ?? connection.name}/${dbName}` })
-        }}
+        onswitchtodb={switchToDb}
+        onswitchdatabase={requestDatabaseSwitch}
         onnewtable={() => (showCreateTableDialog = true)}
         onnewschema={() => (showCreateSchemaDialog = true)}
         ontruncatetable={handleTruncateTable}
@@ -6312,6 +6423,7 @@ let rowSearch = $state('')
             ondeleteselected={() => stageDeleteSelectedRows()}
             onexport={handleExport}
             onexportdiagram={(kind) => erdPane?.exportDiagram?.(kind)}
+            onexportchart={(kind) => chartPane?.exportChart?.(kind)}
             onaddrow={() => {
               // Row insertion happens on the canvas grid - jump back to it first.
               if (dataViewMode !== 'table') dataViewMode = 'table'
@@ -6468,7 +6580,7 @@ let rowSearch = $state('')
               {:else if dataViewMode === 'text'}
                 <TableTextView columns={dataViewColumns} rows={dataViewRows} tableName={activeTable} />
               {:else if dataViewMode === 'chart'}
-                <ChartView columns={dataViewColumns} rows={dataViewRows} connectionId={persistConnectionId} />
+                <ChartView bind:this={chartPane} columns={dataViewColumns} rows={dataViewRows} connectionId={persistConnectionId} />
               {:else if dataViewMode === 'erd'}
                 <div class="flex min-h-0 min-w-0 flex-1">
                   {#await import('./EntityRelationPage.svelte')}<TabLoading />{:then { default: EntityRelationPage }}
@@ -6755,42 +6867,9 @@ let rowSearch = $state('')
   hasUpdate={statusBarHasUpdate}
   onopenmcp={() => (showMcpPanel = true)}
   onconnect={() => (showConnectionModal = true)}
-  onswitchtodb={(dbName) => {
-    if (!connection) return
-    void handleSwitchDatabase({ ...connection, database: dbName, name: `${connection.host ?? connection.name}/${dbName}` })
-  }}
-  onswitchd1database={({ databaseId, name }) => {
-    if (!connection) return
-    void handleSwitchDatabase({ ...connection, databaseId, database: name, name })
-  }}
-  onswitchproviderdb={async ({ provider, dbRef, name }) => {
-    if (!connection) return
-    try {
-      const { providerBuildConnection } = await import('$lib/providers.js')
-      const built = await providerBuildConnection(provider, dbRef)
-      if (built.needs_password) {
-        // Supabase needs a per-project password - can't switch silently, so
-        // send the user to the connect dialog to finish it.
-        toast.message(`${name} needs its database password, opening the connection dialog.`)
-        showConnectionModal = true
-        return
-      }
-      void handleSwitchDatabase({
-        ...connection,
-        type: built.db_type === 'mysql' ? 'mysql' : 'postgres',
-        host: built.host,
-        port: built.port,
-        user: built.username,
-        password: built.password,
-        database: built.database,
-        ssl: built.ssl,
-        name: built.name,
-        provider,
-      })
-    } catch (e) {
-      toast.error('Could not switch database', { description: String(e) })
-    }
-  }}
+  onswitchtodb={switchToDb}
+  onswitchd1database={switchD1Database}
+  onswitchproviderdb={switchProviderDb}
   oncheckupdate={() => updateDialog?.checkNow()}
   onopenmodelsettings={() => (showAiModelSettings = true)}
   sidebarVisible={sidebarOpen}

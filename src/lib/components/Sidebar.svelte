@@ -3,6 +3,7 @@
   import { createHotkey } from "@tanstack/svelte-hotkeys";
   import Icon from "./Icon.svelte";
   import SearchableMenu from "./SearchableMenu.svelte";
+  import { listDatabases, canSwitchDatabase, currentDatabaseKey } from "$lib/databases.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import DangerousActionDialog from "./DangerousActionDialog.svelte";
   import { readOnlyMode, guardWrite, READ_ONLY_HINT } from "$lib/stores/read-only.js";
@@ -73,6 +74,9 @@
     onrecentselect = /** @type {(schema: string, table: string) => void} */ (() => {}),
     onrecentremove = /** @type {(schema: string, table: string) => void} */ (() => {}),
     onrecentclear = () => {},
+    /** Switch the live connection to another database on the same server.
+     *  @type {(entry: { key: string, label: string }) => void} */
+    onswitchdatabase = () => {},
     onviewddl = /** @type {(table: string) => void} */ (() => {}),
     onexportsql = /** @type {(table: string) => void} */ (() => {}),
     onexportdata = /** @type {(table: string) => void} */ (() => {}),
@@ -127,10 +131,58 @@
 
   const _initial = loadSidebarSections()
   let recentOpen = $state(_initial.recent ?? false);
+  let databasesOpen = $state(_initial.databases ?? false);
+  /** @type {import('$lib/databases.js').DatabaseEntry[]} */
+  let dbEntries = $state([]);
+  let dbEntriesLoading = $state(false);
+  let dbEntriesLoaded = $state(false);
   let tablesOpen = $state(_initial.tables ?? true);
   let viewsOpen = $state(_initial.views ?? false);
   let matViewsOpen = $state(_initial.matViews ?? false);
   $effect(() => { saveSidebarSection('recent', recentOpen) })
+  $effect(() => { saveSidebarSection('databases', databasesOpen) })
+
+  // Listing databases costs a round trip (a catalog query, or a Cloudflare /
+  // provider API call), so it waits for the section to be expanded rather than
+  // firing on every sidebar mount.
+  async function loadDatabases() {
+    if (dbEntriesLoading) return
+    dbEntriesLoading = true
+    try {
+      dbEntries = await listDatabases(connection)
+      dbEntriesLoaded = true
+    } finally {
+      dbEntriesLoading = false
+    }
+  }
+
+  function toggleDatabases() {
+    databasesOpen = !databasesOpen
+  }
+
+  // Load whenever the section is open and holds nothing for this connection.
+  // Hanging the fetch off the toggle alone missed both cases that matter: the
+  // section restoring already-expanded from the persisted prefs, and a
+  // connection switch invalidating the list while it stayed open - each showed
+  // an "empty" list that had never been fetched.
+  $effect(() => {
+    const conn = connection
+    const isOpen = databasesOpen
+    if (!isOpen || !conn) return
+    untrack(() => {
+      if (!dbEntriesLoaded && !dbEntriesLoading) void loadDatabases()
+    })
+  })
+
+  // A new connection invalidates the list - drop it so the next expand refetches.
+  $effect(() => {
+    connection
+    dbEntries = []
+    dbEntriesLoaded = false
+  })
+
+  const canSwitchDb = $derived(canSwitchDatabase(connection))
+  const activeDbKey = $derived(currentDatabaseKey(connection))
   $effect(() => { saveSidebarSection('tables', tablesOpen) })
   $effect(() => { saveSidebarSection('views', viewsOpen) })
   $effect(() => { saveSidebarSection('matViews', matViewsOpen) })
@@ -179,7 +231,7 @@
       const raw = localStorage.getItem(DISPLAY_PREFS_KEY)
       if (raw) return JSON.parse(raw)
     } catch {}
-    return { showTables: true, showViews: true, showMatViews: true, showRecent: true, sortBy: 'name', showPins: true, showRowCount: true, sortDir: 'asc', hideEmpty: false, hideSystem: false }
+    return { showTables: true, showViews: true, showMatViews: true, showRecent: true, showDatabases: true, sortBy: 'name', showPins: true, showRowCount: true, sortDir: 'asc', hideEmpty: false, hideSystem: false }
   }
   function saveDisplayPrefs(prefs) {
     try { localStorage.setItem(DISPLAY_PREFS_KEY, JSON.stringify(prefs)) } catch {}
@@ -191,6 +243,7 @@
   let showMatViews = $state(_dp.showMatViews ?? true)
   let showRecent = $state(_dp.showRecent ?? true)
   let showPins = $state(_dp.showPins ?? true)
+  let showDatabases = $state(_dp.showDatabases ?? true)
   let showRowCount = $state(_dp.showRowCount ?? true)
   let hideEmpty = $state(_dp.hideEmpty ?? false)
   let hideSystem = $state(_dp.hideSystem ?? false)
@@ -199,7 +252,7 @@
   /** @type {'asc' | 'desc'} */
   let sortDir = $state(_dp.sortDir ?? 'asc')
 
-  $effect(() => { saveDisplayPrefs({ showTables, showViews, showMatViews, showRecent, sortBy, showPins, showRowCount, sortDir, hideEmpty, hideSystem }) })
+  $effect(() => { saveDisplayPrefs({ showTables, showViews, showMatViews, showRecent, showDatabases, sortBy, showPins, showRowCount, sortDir, hideEmpty, hideSystem }) })
 
   /** System / migration tables that are usually noise: `_prisma_migrations`, `pg_*`, `sqlite_*`, leading-underscore. */
   function isSystemTable(/** @type {string} */ name) {
@@ -306,6 +359,15 @@
   });
 
   const lf = $derived(debouncedFilter.toLowerCase());
+  // The filter box sits above every section, so it filters every section -
+  // databases and recents included. Scoping it to tables meant typing a database
+  // name emptied the table list and left the database sitting there unmatched.
+  const filteredDbEntries = $derived(
+    lf ? dbEntries.filter((d) => d.label.toLowerCase().includes(lf)) : dbEntries,
+  );
+  const filteredRecent = $derived(
+    lf ? recentTabs.filter((r) => r.table.toLowerCase().includes(lf)) : recentTabs,
+  );
   const pinnedSet = $derived(new Set(pinnedTables));
 
   const regularTables = $derived(
@@ -609,6 +671,10 @@
               <DropdownMenu.Separator />
               <DropdownMenu.Label class="px-2 py-0.5 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Show</DropdownMenu.Label>
               <DropdownMenu.CheckboxItem
+                checked={showDatabases}
+                onCheckedChange={(v) => (showDatabases = v)}
+              ><Icon name="database" class="text-muted-foreground" />Databases</DropdownMenu.CheckboxItem>
+              <DropdownMenu.CheckboxItem
                 checked={showRecent}
                 onCheckedChange={(v) => (showRecent = v)}
               ><Icon name="clock" class="text-muted-foreground" />Recent</DropdownMenu.CheckboxItem>
@@ -619,7 +685,7 @@
               <DropdownMenu.CheckboxItem
                 checked={showViews}
                 onCheckedChange={(v) => (showViews = v)}
-              ><Icon name="eye" class="text-muted-foreground" />Views</DropdownMenu.CheckboxItem>
+              ><Icon name="table-view" class="text-muted-foreground" />Views</DropdownMenu.CheckboxItem>
               <DropdownMenu.CheckboxItem
                 checked={showMatViews}
                 onCheckedChange={(v) => (showMatViews = v)}
@@ -743,7 +809,7 @@
           <input
             type="search"
             bind:this={filterEl}
-            placeholder={connectionName ? "Filter tables…" : "Not connected"}
+            placeholder={connectionName ? "Filter…" : "Not connected"}
             value={localFilter}
             disabled={!connectionName}
             oninput={(e) => handleFilterInput(e.currentTarget.value)}
@@ -758,7 +824,7 @@
               }
             }}
             class={cn(sidebarFieldClass, "w-full pl-8 pr-2.5 outline-none disabled:opacity-40 disabled:cursor-not-allowed")}
-            aria-label="Filter tables"
+            aria-label="Filter sidebar"
             data-sidebar-filter
           />
           </div>
@@ -803,8 +869,80 @@
               </span>
             </div>
           {:else}
+            <!-- ── Databases ──────────────────────────────────────
+                 Other databases on the same server. Collapsed by default and
+                 only fetched once expanded - see loadDatabases(). Engines that
+                 cannot switch in place (SQLite, Redis) never render it. -->
+            {#if showDatabases && canSwitchDb && connectionName}
+              <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
+                <button
+                  type="button"
+                  class="flex min-w-0 flex-1 items-center gap-1 text-left"
+                  onclick={toggleDatabases}
+                >
+                  <Icon name="chevron-down"
+                    class={cn(
+                      "size-3 shrink-0 text-muted-foreground/60 transition-transform duration-150",
+                      !databasesOpen && "-rotate-90",
+                    )}
+                  />
+                  <Icon name="database" class="size-3 shrink-0 text-muted-foreground/60" />
+                  <span class="text-ui-2xs font-medium tracking-wider text-muted-foreground/55 uppercase">Databases</span>
+                  {#if filteredDbEntries.length > 0}
+                    <span class="ml-1 font-mono text-ui-2xs text-muted-foreground/60">{filteredDbEntries.length}</span>
+                  {/if}
+                </button>
+                {#if databasesOpen}
+                  <button
+                    type="button"
+                    class="ml-auto inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:text-foreground"
+                    onclick={() => void loadDatabases()}
+                    title="Refresh databases"
+                    disabled={dbEntriesLoading}
+                  >
+                    <Icon name="refresh-cw" class={cn("size-3", dbEntriesLoading && "animate-spin")} />
+                  </button>
+                {/if}
+              </div>
+              {#if databasesOpen}
+                {#if dbEntriesLoading && dbEntries.length === 0}
+                  <p class="px-4 pb-1.5 text-ui-2xs text-muted-foreground/40">Loading…</p>
+                {:else if filteredDbEntries.length === 0}
+                  <p class="px-4 pb-1.5 text-ui-2xs text-muted-foreground/40">
+                    {!dbEntriesLoaded ? 'Loading…' : lf ? 'No matching databases' : 'No other databases'}
+                  </p>
+                {:else}
+                  <ul class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
+                    {#each filteredDbEntries as db (db.key)}
+                      {@const isCurrent = db.key === activeDbKey}
+                      <li>
+                        <button
+                          type="button"
+                          disabled={isCurrent}
+                          class={cn(
+                            "grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 text-left transition-colors",
+                            isCurrent
+                              ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                              : "text-foreground/70 hover:bg-sidebar-accent/50 hover:text-foreground",
+                          )}
+                          onclick={() => !isCurrent && onswitchdatabase(db)}
+                          title={isCurrent ? `${db.label} (current)` : `Switch to ${db.label}`}
+                        >
+                          <Icon name="database" class="size-3 shrink-0 opacity-50" />
+                          <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{db.label}</span>
+                          {#if isCurrent}
+                            <Icon name="check" class="size-3 shrink-0 text-success" />
+                          {/if}
+                        </button>
+                      </li>
+                    {/each}
+                  </ul>
+                {/if}
+              {/if}
+            {/if}
+
             <!-- ── Recent ─────────────────────────────────────────── -->
-            {#if showRecent && recentTabs.length > 0 && connectionName}
+            {#if showRecent && filteredRecent.length > 0 && connectionName}
               <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
                 <button
                   type="button"
@@ -819,7 +957,7 @@
                   />
                   <Icon name="clock" class="size-3 shrink-0 text-muted-foreground/60" />
                   <span class="text-ui-2xs font-medium tracking-wider text-muted-foreground/55 uppercase">Recent</span>
-                  <span class="ml-1 font-mono text-ui-2xs text-muted-foreground/60">{Math.min(recentTabs.length, 5)}</span>
+                  <span class="ml-1 font-mono text-ui-2xs text-muted-foreground/60">{Math.min(filteredRecent.length, 5)}</span>
                 </button>
                 <button
                   type="button"
@@ -830,7 +968,7 @@
               </div>
               {#if recentOpen}
                 <ul class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
-                  {#each recentTabs.slice(0, 5) as item (item.schema + '.' + item.table)}
+                  {#each filteredRecent.slice(0, 5) as item (item.schema + '.' + item.table)}
                     <li class="group/recent">
                       <div
                         class={cn(
@@ -845,7 +983,7 @@
                         onkeydown={(e) => e.key === 'Enter' && onrecentselect(item.schema, item.table)}
                       >
                         {#if item.tableKind === 'view'}
-                          <Icon name="eye" class="size-3 shrink-0 opacity-50" />
+                          <Icon name="table-view" class="size-3 shrink-0 opacity-50" />
                         {:else if item.tableKind === 'materialized_view'}
                           <Icon name="layers" class="size-3 shrink-0 opacity-50" />
                         {:else}
@@ -870,7 +1008,7 @@
             <!-- ── Pinned ─────────────────────────────────────────── -->
             {#if showPins && visiblePinnedTables.length > 0 && connectionName}
               <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
-                <Icon name="pin" class="size-3 shrink-0 text-primary/60" />
+                <Icon name="pin" class="size-3 shrink-0 text-muted-foreground/60" />
                 <span class="text-ui-2xs font-medium tracking-wider text-muted-foreground/55 uppercase">Pinned</span>
                 <span class="ml-1 font-mono text-ui-2xs text-muted-foreground/60">{visiblePinnedTables.length}</span>
                 {#if pinnedTables.length > 5}
@@ -915,7 +1053,7 @@
                             {#if isSelected}
                               <Icon name="square-check" class="size-3 text-primary" />
                             {:else}
-                              <Icon name="pin" class="size-3 text-primary/50 group-hover:hidden" />
+                              <Icon name="pin" class="size-3 text-muted-foreground/45 group-hover:hidden" />
                               <Icon name="square" class="size-3 hidden opacity-40 group-hover:block" />
                             {/if}
                           </span>
@@ -1124,9 +1262,19 @@
                             <!-- Fixed min-width so the column doesn't grow (shifting
                                  every row) when lazy counts resolve from '…' to numbers. -->
                             <span
-                              class="min-w-[4ch] shrink-0 text-right font-mono text-ui-xs leading-4 tabular-nums text-muted-foreground"
-                              title={table.rowCount != null ? Number(table.rowCount).toLocaleString("en-US") : undefined}
-                            >{formatTableRowCount(table.rowCount)}</span>
+                              class="flex min-w-[4ch] shrink-0 items-center justify-end font-mono text-ui-xs leading-4 tabular-nums text-muted-foreground"
+                              title={table.rowCount != null ? Number(table.rowCount).toLocaleString("en-US") : "Counting rows…"}
+                            >
+                              {#if table.rowCount == null}
+                                <!-- A literal "…" sat on the text baseline, so the
+                                     dots hung low and ragged against the numbers in
+                                     neighbouring rows. A centred bar reads as
+                                     "pending" and keeps the column even. -->
+                                <span class="h-1.5 w-4 animate-pulse rounded-full bg-muted-foreground/25"></span>
+                              {:else}
+                                {formatTableRowCount(table.rowCount)}
+                              {/if}
+                            </span>
                             {/if}
                           </button>
                         </ContextMenu.Trigger>
@@ -1315,7 +1463,7 @@
                                 {#if isSelected}
                                   <Icon name="square-check" class="size-3 text-primary" />
                                 {:else}
-                                  <Icon name="eye" class="size-3 opacity-50 group-hover:hidden" />
+                                  <Icon name="table-view" class="size-3 opacity-50 group-hover:hidden" />
                                   <Icon name="square" class="size-3 hidden opacity-40 group-hover:block" />
                                 {/if}
                               </span>

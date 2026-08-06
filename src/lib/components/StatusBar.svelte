@@ -6,8 +6,7 @@
   import { aiProfiles, activeProfileId, setActiveProfile } from '$lib/stores/ai-settings.js'
   import { toggleLightDark, isCurrentThemeDark, appVimMode, appLiveMode } from '$lib/stores/settings.js'
   import { vimSubMode, VIM_MODE_LABEL } from '$lib/vim/vim.js'
-  import { executeSql, cloudflareListD1Databases } from '$lib/api.js'
-  import { providerListDatabases } from '$lib/providers.js'
+  import { listDatabases, canSwitchDatabase, currentDatabaseKey } from '$lib/databases.js'
   import { engineFamily } from '$lib/stores/connections.js'
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js'
   import AppearanceMenu from './AppearanceMenu.svelte'
@@ -217,7 +216,7 @@
   const isProvider = $derived(!isRedis && !!connection?.provider)
   /** Whether this connection supports switching databases in-place. Redis uses
    * numbered logical DBs (no in-place switch yet), so it shows a static label. */
-  const canSwitchDb = $derived(!isRedis && (isPostgres || isD1 || isProvider))
+  const canSwitchDb = $derived(canSwitchDatabase(connection))
   /** The numeric logical DB Redis actually connects to - matches api.js
    * normalizeRedis (`Number(config.db) || 0`), so a stale non-numeric `db`
    * ("postgres") correctly reads as 0 rather than being shown verbatim. */
@@ -232,7 +231,7 @@
     : currentDb,
   )
   /** Key of the active db, used to mark the current row. */
-  const currentDbKey = $derived(isD1 ? (connection?.databaseId ?? '') : currentDb)
+  const currentDbKey = $derived(currentDatabaseKey(connection))
 
   const dbFiltered = $derived(
     dbSearch.trim()
@@ -241,52 +240,8 @@
   )
 
   async function fetchDatabases() {
-    // Provider connections list the account's other databases/projects via the
-    // provider API (checked first - a Supabase/Neon connection is also postgres).
-    if (isProvider && connection?.provider) {
-      dbLoading = true
-      try {
-        const dbs = await providerListDatabases(connection.provider)
-        dbList = (dbs ?? []).map((/** @type {{ db_ref: string, name: string }} */ d) => ({ key: d.db_ref, label: d.name }))
-      } catch {
-        dbList = []
-      } finally {
-        dbLoading = false
-      }
-      return
-    }
-    if (isPostgres) {
-      dbLoading = true
-      try {
-        const result = await executeSql(
-          `SELECT datname FROM pg_catalog.pg_database WHERE datistemplate = false ORDER BY datname`,
-        )
-        dbList = (result?.rows ?? []).map((r) => ({ key: String(r[0]), label: String(r[0]) }))
-      } catch {
-        dbList = []
-      } finally {
-        dbLoading = false
-      }
-    } else if (isD1 && connection?.accountId) {
-      dbLoading = true
-      try {
-        // OAuth D1 connections keep the token in the Cloudflare token store
-        // rather than on the connection, so fall back to it when absent.
-        let token = connection.apiToken
-        if (!token) {
-          const { cfGetValidToken } = await import('$lib/cloudflare.js')
-          token = await cfGetValidToken()
-        }
-        const dbs = await cloudflareListD1Databases(token, connection.accountId)
-        dbList = (dbs ?? [])
-          .map((/** @type {{ uuid: string, name: string }} */ d) => ({ key: d.uuid, label: d.name }))
-          .sort((a, b) => a.label.localeCompare(b.label))
-      } catch {
-        dbList = []
-      } finally {
-        dbLoading = false
-      }
-    }
+    dbLoading = true
+    try { dbList = await listDatabases(connection) } finally { dbLoading = false }
   }
 
   function switchDb(/** @type {{ key: string, label: string }} */ db) {
@@ -357,6 +312,21 @@
 
   let aiModelMenuOpen = $state(false)
 
+  /**
+   * Double-clicking the connection pill jumps straight to the connection
+   * manager. A single click only opens the switcher menu, so reaching "Manage
+   * connections…" otherwise costs an extra hop.
+   * @param {MouseEvent} e
+   */
+  function openConnectionManager(e) {
+    e.preventDefault()
+    e.stopPropagation()
+    connOpen = false
+    // The menu returns focus to its trigger as it closes; opening the dialog in
+    // the same frame would lose that race and leave the modal unfocused.
+    tick().then(onconnect)
+  }
+
   /** "132ms" under a second, "1.24s" above - always tabular so it never jitters. */
   const queryMsLabel = $derived(
     queryMs >= 1000 ? `${(queryMs / 1000).toFixed(2)}s` : `${Math.round(queryMs)}ms`,
@@ -408,7 +378,13 @@
           onselect={(it) => { const c = savedConnections.find((x) => x.id === it.value); if (c && c.id !== activeConnectionId) onswitchconnection(c) }}
         >
           {#snippet trigger(props)}
-            <button {...props} type="button" class={cn(labelBtn, 'text-muted-foreground/80')} title="Switch connection (⇧⌘C)">
+            <button
+              {...props}
+              type="button"
+              class={cn(labelBtn, 'text-muted-foreground/80')}
+              title="Switch connection (⇧⌘C) · double-click to manage"
+              ondblclick={openConnectionManager}
+            >
               {@render connTriggerInner(true)}
             </button>
           {/snippet}
@@ -455,6 +431,7 @@
           class={cn(labelBtn, 'text-muted-foreground/80')}
           title="Manage connections (⇧⌘C)"
           onclick={onconnect}
+          ondblclick={openConnectionManager}
         >
           {@render connTriggerInner(false)}
         </button>
