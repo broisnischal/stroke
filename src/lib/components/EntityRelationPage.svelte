@@ -24,6 +24,7 @@
   import { isCurrentThemeDark } from '$lib/stores/settings.js'
   import { loadErdSettings, saveErdSettings, SPACING_PRESETS, SCOPE_DEFAULTS } from '$lib/stores/erd-settings.js'
   import { routeEdges, routeToSvgPath, MAX_ROUTED_NODES } from '$lib/erd-routing.js'
+  import { separateCards } from '$lib/erd-layout.js'
   import { cn } from '$lib/utils.js'
 
   let {
@@ -226,10 +227,33 @@
    * Connected nodes → Dagre LR.
    * Orphan nodes (no FK edges) → compact grid below connected graph.
    */
+  /**
+   * The one guarantee every layout has to keep: no card sits on another, and
+   * neighbours are far enough apart for the relationship lines between them to
+   * have somewhere to run. Dagre reserves that space for the cards it places,
+   * but a hand-dragged card, a re-flowed rank or a card that changed size since
+   * the layout ran can all break it — so the check happens here, once, on
+   * whatever the layout produced.
+   * @param {any[]} laid @param {string} [pin] a card that must not move
+   */
+  function enforceSpacing(laid, pin) {
+    if (laid.length < 2) return laid
+    const pos = separateCards(
+      laid.map((n) => ({ id: n.id, x: n.position.x, y: n.position.y, w: NODE_W, h: hOf(n) })),
+      {
+        // Wide enough for the routed lanes plus their clearance on both sides.
+        gapX: Math.max(gaps.colGap, 128),
+        gapY: Math.max(gaps.rowGap, 88),
+        fixed: pin ? new Set([pin]) : undefined,
+      },
+    )
+    return laid.map((n) => ({ ...n, position: pos.get(n.id) ?? n.position }))
+  }
+
   function layoutNodes(ns, es) {
     if (focusTable && scope === 'related' && ns.length > 1) {
       const laid = layoutFocus(ns, es, focusTable)
-      if (laid) return laid
+      if (laid) return enforceSpacing(laid, focusTable)
     }
     const linked = new Set()
     for (const e of es) { linked.add(e.source); linked.add(e.target) }
@@ -329,7 +353,7 @@
       },
     }))
 
-    return [...laidConn, ...laidOrphans]
+    return enforceSpacing([...laidConn, ...laidOrphans])
   }
 
   // ── Edge list ─────────────────────────────────────────────────────────────
