@@ -66,6 +66,7 @@
     parseAssistantMessage,
     buildSystemPrompt,
     classifyDbError,
+    describeAiError,
     humanizeDbError,
     filterSchemaForQuery,
     stripThinkTags,
@@ -458,32 +459,10 @@
   }
 
   /** Parse a raw error string into a human-friendly message. */
-  function parseErrorMessage(/** @type {string} */ raw) {
-    try {
-      // Strip leading "Error: " prefix if present
-      const body = raw.replace(/^Error:\s*/i, "");
-      // Try JSON parse (API errors are often JSON)
-      const json = JSON.parse(body);
-      const msg = json?.error?.message ?? json?.message ?? json?.detail ?? null;
-      if (msg) {
-        const code = json?.error?.code ?? json?.code ?? json?.type ?? null;
-        if (code === "rate_limit_exceeded" || json?.type === "rate_limited") {
-          return `Rate limit reached, wait a moment and try again.`;
-        }
-        return String(msg);
-      }
-    } catch {
-      /* not JSON */
-    }
-    if (/rate.limit/i.test(raw))
-      return `Rate limit reached, wait a moment and try again.`;
-    if (/429/.test(raw))
-      return `Too many requests (429), wait a moment and try again.`;
-    if (/401|unauthorized/i.test(raw))
-      return `Authentication failed, check your API key.`;
-    if (/timeout/i.test(raw)) return `Request timed out, try again.`;
-    return raw.replace(/^Error:\s*/i, "").slice(0, 200);
-  }
+  $effect(() => {
+    void error;
+    errorDetailOpen = false;
+  });
 
   /** Start a new chat with a short summary of the current one as opening context. */
   async function continueInNewChat() {
@@ -670,6 +649,18 @@
   let rawApiHistory = $state([]);
   let loading = $state(false);
   let error = $state("");
+  /** Provider payload behind the error banner — collapsed until asked for. */
+  let errorDetailOpen = $state(false);
+
+  /** @param {string} detail */
+  async function copyErrorDetail(detail) {
+    try {
+      await navigator.clipboard.writeText(detail);
+      toast.success("Error details copied");
+    } catch {
+      toast.error("Could not copy");
+    }
+  }
   /** Shown on the thinking row while waiting on rate-limit retries */
   let aiStatusHint = $state("");
 
@@ -4143,16 +4134,45 @@
 
     <!-- Error bar -->
     {#if error}
+      {@const failure = describeAiError(error)}
       <div
         class="shrink-0 border-t border-destructive/20 bg-destructive/6 px-3 py-2"
       >
         <div class="flex items-start gap-2">
           <AlertTriangle class="mt-0.5 size-3.5 shrink-0 text-destructive/70" />
-          <p
-            class="min-w-0 flex-1 text-ui-xs text-destructive/90 leading-relaxed"
-          >
-            {parseErrorMessage(error)}
-          </p>
+          <div class="min-w-0 flex-1">
+            <p class="text-ui-xs font-medium text-destructive/90 leading-relaxed">
+              {failure.title}
+            </p>
+            {#if failure.hint}
+              <p class="mt-0.5 text-ui-2xs leading-relaxed text-destructive/65">
+                {failure.hint}
+              </p>
+            {/if}
+            {#if failure.detail}
+              <button
+                type="button"
+                onclick={() => (errorDetailOpen = !errorDetailOpen)}
+                class="mt-1 inline-flex items-center gap-1 rounded text-ui-2xs text-destructive/50 transition-colors hover:text-destructive/80"
+              >
+                <ChevronRight class={cn('size-3 transition-transform', errorDetailOpen && 'rotate-90')} />
+                {errorDetailOpen ? 'Hide details' : 'Details'}
+              </button>
+              {#if errorDetailOpen}
+                <div class="mt-1.5 flex items-start gap-2">
+                  <pre class="max-h-28 min-w-0 flex-1 overflow-auto whitespace-pre-wrap break-all rounded-md border border-destructive/15 bg-destructive/5 p-2 font-mono text-ui-3xs leading-relaxed text-destructive/70">{failure.detail}</pre>
+                  <button
+                    type="button"
+                    onclick={() => copyErrorDetail(failure.detail)}
+                    title="Copy the provider's response"
+                    class="inline-flex size-6 shrink-0 items-center justify-center rounded text-destructive/45 transition-colors hover:bg-destructive/10 hover:text-destructive"
+                  >
+                    <Copy class="size-3" />
+                  </button>
+                </div>
+              {/if}
+            {/if}
+          </div>
           <div class="flex shrink-0 items-center gap-1">
             <button
               type="button"
