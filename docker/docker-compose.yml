@@ -1,0 +1,86 @@
+# Fixture databases for testing Stroke's Postgres extension support.
+#
+#   docker compose -f docker/docker-compose.yml up -d
+#
+# Both containers seed themselves on first start (a few minutes — the tables are
+# deliberately large). Watch progress with:
+#
+#   docker compose -f docker/docker-compose.yml logs -f
+#
+# Stroke's Docker scanner recognises both images, so they show up under
+# "Docker databases" in the connection modal with credentials filled in.
+
+name: stroke-ext
+
+services:
+  pgvector:
+    image: pgvector/pgvector:pg17
+    container_name: stroke-pgvector
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: stroke
+      POSTGRES_PASSWORD: stroke
+      POSTGRES_DB: stroke_vec
+      # initdb runs before any of our SQL, so index builds get the memory here.
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    ports:
+      - "5441:5432"
+    # A parallel HNSW build wants ~maintenance_work_mem of dynamic shared memory,
+    # and Docker's default 64MB /dev/shm fails the index with "No space left on
+    # device" halfway through.
+    shm_size: 2gb
+    volumes:
+      - ./pgvector:/docker-entrypoint-initdb.d:ro
+      - pgvector-data:/var/lib/postgresql/data
+    command:
+      - postgres
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - maintenance_work_mem=1GB
+      - -c
+      - max_wal_size=4GB
+      - -c
+      - work_mem=64MB
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stroke -d stroke_vec"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 300s
+
+  postgis:
+    image: postgis/postgis:17-3.5
+    container_name: stroke-postgis
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: stroke
+      POSTGRES_PASSWORD: stroke
+      POSTGRES_DB: stroke_geo
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    ports:
+      - "5442:5432"
+    shm_size: 2gb
+    volumes:
+      - ./postgis:/docker-entrypoint-initdb.d:ro
+      - postgis-data:/var/lib/postgresql/data
+    command:
+      - postgres
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - maintenance_work_mem=1GB
+      - -c
+      - max_wal_size=4GB
+      - -c
+      - work_mem=64MB
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stroke -d stroke_geo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 300s
+
+volumes:
+  pgvector-data:
+  postgis-data:

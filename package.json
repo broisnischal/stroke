@@ -12,7 +12,11 @@
     "tauri": "tauri dev",
     "tauri:fresh": "VITE_FRESH_START=1 tauri dev",
     "tauri:build": "tauri build",
-    "tauri:build:arch": "cross-env NO_STRIP=1 tauri build"
+    "tauri:build:arch": "cross-env NO_STRIP=1 tauri build",
+    "fixtures": "bash scripts/fixtures.sh",
+    "fixtures:status": "bash scripts/fixtures.sh status",
+    "fixtures:reset": "bash scripts/fixtures.sh reset",
+    "fixtures:down": "bash scripts/fixtures.sh down"
   },
   "devDependencies": {
     "@emnapi/core": "^1.10.0",
