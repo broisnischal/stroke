@@ -713,9 +713,10 @@ pub struct KeysetCursor {
     pub desc: bool,
 }
 
-struct WhereClause {
-    sql: String,
-    binds: Vec<String>,
+pub(super) struct WhereClause {
+    /// Leading " WHERE …", or empty when there is nothing to filter on.
+    pub(super) sql: String,
+    pub(super) binds: Vec<String>,
 }
 
 struct QueryBuilder {
@@ -777,7 +778,169 @@ fn quoted_column(column: &str) -> Result<String, String> {
     Ok(format!(r#""{column}""#))
 }
 
-async fn fetch_table_column_names(
+/// A column whose Postgres type has no binary output function.
+struct TextOnlyColumn {
+    name: String,
+    type_name: String,
+}
+
+/// True when a Postgres error is the driver asking for a binary value the server
+/// cannot produce. sqlx always requests binary results, so a single column of a
+/// type without `typsend` (PostGIS `raster`, `box2d`, `box3d`, `spheroid`, and
+/// plenty of other extension types) fails the *whole* `SELECT *` — the table
+/// refuses to open rather than showing the columns it could have decoded.
+fn is_missing_binary_output(err: &str) -> bool {
+    err.contains("no binary output function available for type")
+}
+
+/// The columns of a table whose types have no binary output function, in
+/// attribute order. Only consulted after a fetch has already failed with
+/// `is_missing_binary_output`, so an ordinary table never pays for it.
+async fn fetch_text_only_columns(
+    pool: &sqlx::PgPool,
+    schema: &str,
+    table: &str,
+) -> Result<Vec<TextOnlyColumn>, String> {
+    validate_ident(schema)?;
+    validate_ident(table)?;
+    let rows = sqlx::query(
+        r#"
+        SELECT a.attname::text, t.typname::text
+        FROM pg_catalog.pg_attribute a
+        JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
+        LEFT JOIN pg_catalog.pg_type b ON b.oid = t.typbasetype
+        WHERE n.nspname = $1 AND c.relname = $2
+          AND a.attnum > 0 AND NOT a.attisdropped
+          -- typsend = 0 renders as '-': no binary send function. A domain
+          -- inherits its base type's, hence the COALESCE.
+          AND COALESCE(NULLIF(t.typsend, 0), b.typsend, 0) = 0
+        ORDER BY a.attnum
+        "#,
+    )
+    .bind(schema)
+    .bind(table)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("Failed to inspect column types: {e}"))?;
+
+    Ok(rows
+        .iter()
+        .filter_map(|r| {
+            Some(TextOnlyColumn {
+                name: r.try_get::<String, _>(0).ok()?,
+                type_name: r.try_get::<String, _>(1).ok()?,
+            })
+        })
+        .collect())
+}
+
+/// How to read a binary-less column as something a cell can hold.
+///
+/// `::text` is the general answer — it is what psql shows and it round-trips.
+/// `raster` is the exception: its text form is the entire tile as WKB hex, which
+/// is megabytes for any real raster and useless in a grid either way, so it gets
+/// a description of the tile instead. That value is display-only, which costs
+/// nothing that wasn't already lost — a type with no binary output cannot be
+/// edited through the grid regardless.
+fn text_projection(col: &TextOnlyColumn) -> Result<String, String> {
+    let q = quoted_column(&col.name)?;
+    let expr = match col.type_name.as_str() {
+        "raster" => format!(
+            "format('raster %sx%s · %s band(s) · SRID %s', \
+             ST_Width({q}), ST_Height({q}), ST_NumBands({q}), ST_SRID({q}))"
+        ),
+        _ => format!("{q}::text"),
+    };
+    // Always alias: `format(...)` would otherwise report as a column named
+    // "format", and the frontend matches cells to columns by name.
+    Ok(format!("{expr} AS {q}"))
+}
+
+/// A `SELECT` list that reads `text_only` as text and every other column as
+/// itself. `None` when the table has no such columns and `*` is already correct.
+async fn text_safe_projection(
+    pool: &sqlx::PgPool,
+    schema: &str,
+    table: &str,
+) -> Result<Option<(String, Vec<TextOnlyColumn>)>, String> {
+    let text_only = fetch_text_only_columns(pool, schema, table).await?;
+    if text_only.is_empty() {
+        return Ok(None);
+    }
+    let all = fetch_table_column_names(pool, schema, table).await?;
+    let mut parts = Vec::with_capacity(all.len());
+    for name in &all {
+        match text_only.iter().find(|c| &c.name == name) {
+            Some(col) => parts.push(text_projection(col)?),
+            None => parts.push(quoted_column(name)?),
+        }
+    }
+    Ok(Some((parts.join(", "), text_only)))
+}
+
+/// Which of `names` are types with no binary output function. Used to decide
+/// what a hand-written query needs cast; asked only after one has already failed.
+async fn types_without_binary_output(pool: &sqlx::PgPool, names: &[String]) -> Vec<String> {
+    if names.is_empty() {
+        return Vec::new();
+    }
+    sqlx::query_scalar::<_, String>(
+        "SELECT typname::text FROM pg_catalog.pg_type
+         WHERE typname = ANY($1) AND COALESCE(NULLIF(typsend, 0), 0) = 0",
+    )
+    .bind(names)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default()
+}
+
+/// Rewrite a row-returning statement so its binary-less columns come back as
+/// text: `SELECT a, b::text AS b FROM (<stmt>) _stroke_text`. This is what lets
+/// a hand-written `SELECT * FROM tiles` return rows instead of an error.
+///
+/// `None` when the statement can't be wrapped without changing what it means —
+/// unnamed columns (`?column?`), duplicate names, or nothing needing a cast.
+/// The caller then surfaces the original error rather than a rewritten one.
+async fn text_safe_wrap(pool: &sqlx::PgPool, stmt: &str) -> Option<String> {
+    use sqlx::Executor;
+
+    let inner = stmt.trim().trim_end_matches(';').trim();
+    let described = pool.describe(inner).await.ok()?;
+    let cols = described.columns();
+    if cols.is_empty() {
+        return None;
+    }
+
+    let type_names: Vec<String> =
+        cols.iter().map(|c| c.type_info().name().to_ascii_lowercase()).collect();
+    let mut distinct = type_names.clone();
+    distinct.sort();
+    distinct.dedup();
+    let text_only = types_without_binary_output(pool, &distinct).await;
+    if text_only.is_empty() {
+        return None;
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    let mut parts = Vec::with_capacity(cols.len());
+    for (col, type_name) in cols.iter().zip(&type_names) {
+        let name = col.name();
+        if name.is_empty() || !seen.insert(name.to_string()) {
+            return None;
+        }
+        if text_only.iter().any(|t| t == type_name) {
+            let spec = TextOnlyColumn { name: name.to_string(), type_name: type_name.clone() };
+            parts.push(text_projection(&spec).ok()?);
+        } else {
+            parts.push(quoted_column(name).ok()?);
+        }
+    }
+    Some(format!("SELECT {} FROM ({inner}) AS _stroke_text", parts.join(", ")))
+}
+
+pub(super) async fn fetch_table_column_names(
     pool: &sqlx::PgPool,
     schema: &str,
     table: &str,
@@ -1030,7 +1193,7 @@ fn build_any_column_condition(
     Ok(())
 }
 
-fn build_where(
+pub(super) fn build_where(
     columns: &[String],
     search: Option<&str>,
     search_is_regex: bool,
@@ -1151,6 +1314,26 @@ fn build_order_by(
 }
 
 const MAX_PAGE_LIMIT: i64 = 5_000_000;
+
+/// Bind a page query's parameters in the fixed order the SQL is built with:
+/// WHERE binds, then either the keyset cursor + limit, or limit + offset. Taken
+/// out of line so a page can be re-issued with a different SELECT list.
+fn bind_page<'q>(
+    sql: &'q str,
+    where_binds: &'q [String],
+    keyset_bind: Option<&'q String>,
+    limit: i64,
+    offset: i64,
+) -> sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments> {
+    let mut q = sqlx::query(sql);
+    for value in where_binds {
+        q = q.bind(value.as_str());
+    }
+    match keyset_bind {
+        Some(v) => q.bind(v.as_str()).bind(limit),
+        None => q.bind(limit).bind(offset),
+    }
+}
 
 pub async fn get_table_rows(
     state: State<'_, DbState>,
@@ -1301,7 +1484,9 @@ pub async fn get_table_rows(
     // Cursor value to bind after the WHERE binds (keyset), or None (offset). The
     // SQL string is built here in the outer scope so it outlives `data_query`.
     let keyset_bind: Option<String>;
-    let data_sql: String;
+    // Everything after the SELECT list, so the same page can be re-issued with a
+    // different projection if a column turns out to have no binary output.
+    let data_tail: String;
     if let Some(ks) = keyset_ok {
         let col = quoted_column(&ks.column)?;
         let op = if ks.after == !ks.desc { ">" } else { "<" };
@@ -1312,8 +1497,8 @@ pub async fn get_table_rows(
         let ks_param = where_clause.binds.len() + 1;
         let limit_param = where_clause.binds.len() + 2;
         let connector = if where_clause.sql.is_empty() { " WHERE" } else { " AND" };
-        data_sql = format!(
-            "SELECT * FROM {table_ref}{where}{connector} {col} {op} ${ks_param}::{cast} ORDER BY {col} {fetch_order} LIMIT ${limit_param}",
+        data_tail = format!(
+            "FROM {table_ref}{where}{connector} {col} {op} ${ks_param}::{cast} ORDER BY {col} {fetch_order} LIMIT ${limit_param}",
             where = where_clause.sql,
             cast = ks.sql_type,
         );
@@ -1322,20 +1507,14 @@ pub async fn get_table_rows(
         keyset_bind = None;
         let limit_param = where_clause.binds.len() + 1;
         let offset_param = where_clause.binds.len() + 2;
-        data_sql = format!(
-            "SELECT * FROM {table_ref}{}{} LIMIT ${limit_param} OFFSET ${offset_param}",
+        data_tail = format!(
+            "FROM {table_ref}{}{} LIMIT ${limit_param} OFFSET ${offset_param}",
             where_clause.sql,
             order_by
         );
     }
-    let mut data_query = sqlx::query(&data_sql);
-    for value in &where_clause.binds {
-        data_query = data_query.bind(value.as_str());
-    }
-    data_query = match &keyset_bind {
-        Some(v) => data_query.bind(v.as_str()).bind(limit),
-        None => data_query.bind(limit).bind(offset),
-    };
+    let mut data_sql = format!("SELECT * {data_tail}");
+    let data_query = bind_page(&data_sql, &where_clause.binds, keyset_bind.as_ref(), limit, offset);
 
     // Kick the catalog-metadata queries (enums/nullable/pk/fk) off NOW so they run
     // concurrently with the row + count fetch below, instead of as a second
@@ -1367,16 +1546,13 @@ pub async fn get_table_rows(
     // never been analyzed (reltuples = -1). Filtered/searched queries always use
     // an exact count since the WHERE clause bounds the scan and accuracy matters.
     const ESTIMATE_THRESHOLD: i64 = 100_000;
-    let rows;
+    let rows_res;
     let total: i64;
     if !include_count {
         // Non-blocking mode: fetch only the page of rows and defer the count.
         // total = -1 signals "unknown / counting" to the UI (same sentinel the
         // sidebar already uses); the frontend fills it in via count_table_rows.
-        rows = data_query
-            .fetch_all(&pool)
-            .await
-            .map_err(|e| format!("Failed to fetch rows: {e}"))?;
+        rows_res = data_query.fetch_all(&pool).await;
         total = -1;
     } else if where_clause.sql.is_empty() {
         // Estimate and data fetch are independent — run them together so the
@@ -1385,9 +1561,9 @@ pub async fn get_table_rows(
             "SELECT reltuples::bigint FROM pg_class WHERE oid = $1::regclass",
         )
         .bind(&table_ref);
-        let (estimate_res, rows_res) =
+        let (estimate_res, page_res) =
             tokio::join!(estimate_query.fetch_optional(&pool), data_query.fetch_all(&pool));
-        rows = rows_res.map_err(|e| format!("Failed to fetch rows: {e}"))?;
+        rows_res = page_res;
         let estimate = estimate_res.ok().flatten();
         total = match estimate {
             Some(est) if est >= ESTIMATE_THRESHOLD => est,
@@ -1398,13 +1574,40 @@ pub async fn get_table_rows(
         };
     } else {
         // COUNT and data SELECT are independent — run both in parallel.
-        let (total_result, rows_result) = tokio::join!(
+        let (total_result, page_res) = tokio::join!(
             count_query.fetch_one(&pool),
             data_query.fetch_all(&pool),
         );
         total = total_result.map_err(|e| format!("Failed to count rows: {e}"))?;
-        rows = rows_result.map_err(|e| format!("Failed to fetch rows: {e}"))?;
+        rows_res = page_res;
     }
+
+    // A single column of a type with no binary output (PostGIS `raster` and
+    // friends) fails the whole `SELECT *`. Re-read the page with those columns
+    // projected as text so the table opens with every other column intact,
+    // rather than showing an error where the grid should be. Only reached on a
+    // table that actually has one — the common path never runs these queries.
+    let mut text_only: Vec<TextOnlyColumn> = Vec::new();
+    let rows = match rows_res {
+        Ok(rows) => rows,
+        Err(err) => {
+            let msg = err.to_string();
+            if !is_missing_binary_output(&msg) {
+                return Err(format!("Failed to fetch rows: {msg}"));
+            }
+            match text_safe_projection(&pool, &schema, &table).await? {
+                Some((projection, cols)) => {
+                    text_only = cols;
+                    data_sql = format!("SELECT {projection} {data_tail}");
+                    bind_page(&data_sql, &where_clause.binds, keyset_bind.as_ref(), limit, offset)
+                        .fetch_all(&pool)
+                        .await
+                        .map_err(|e| format!("Failed to fetch rows: {e}"))?
+                }
+                None => return Err(format!("Failed to fetch rows: {msg}")),
+            }
+        }
+    };
 
     // Column names + types come from the result set itself (free, always fresh).
     let mut columns: Vec<ColumnInfo> = if let Some(first) = rows.first() {
@@ -1444,6 +1647,15 @@ pub async fn get_table_rows(
             })
             .collect()
     };
+
+    // A re-read page reports its cast columns as `text`. Restore the real type
+    // names so the header, the type filters and the cell viewers still see a
+    // `raster`/`box2d` column rather than a string one.
+    for col in &text_only {
+        if let Some(info) = columns.iter_mut().find(|c| c.name == col.name) {
+            info.data_type = pg_type_label(&col.type_name);
+        }
+    }
 
     // Build row data early so the borrow of `rows` doesn't outlive the join.
     let mut data: Vec<Vec<Value>> = rows
@@ -2293,29 +2505,58 @@ async fn execute_sql_pg(
 
     for (i, stmt) in stmts.iter().enumerate() {
         if i == last_idx && is_row_returning_sql(stmt) {
-            // Last statement returns rows — stream and return.
-            let mut stream = sqlx::query(stmt).fetch(&mut *tx);
+            // Last statement returns rows — stream and return. `executed` is the
+            // statement actually run: the user's, or a text-projecting rewrite of
+            // it after a column turned out to have no binary output.
+            let mut executed = stmt.to_string();
             let mut pg_rows: Vec<sqlx::postgres::PgRow> = Vec::new();
             let mut capped = false;
+            let mut rewritten = false;
 
             loop {
-                match stream.try_next().await {
-                    Ok(Some(row)) => {
-                        pg_rows.push(row);
-                        if pg_rows.len() >= EXECUTE_SQL_MAX_ROWS {
-                            capped = true;
+                let mut stream = sqlx::query(&executed).fetch(&mut *tx);
+                let mut failure = None;
+                loop {
+                    match stream.try_next().await {
+                        Ok(Some(row)) => {
+                            pg_rows.push(row);
+                            if pg_rows.len() >= EXECUTE_SQL_MAX_ROWS {
+                                capped = true;
+                                break;
+                            }
+                        }
+                        Ok(None) => break,
+                        Err(e) => {
+                            failure = Some(e.to_string());
                             break;
                         }
                     }
-                    Ok(None) => break,
-                    Err(e) => {
-                        drop(stream);
-                        let _ = tx.rollback().await;
-                        return Err(format!("Query failed: {e}"));
-                    }
                 }
+                drop(stream);
+
+                let Some(msg) = failure else { break };
+                // The transaction is poisoned by the failed statement either way.
+                let _ = tx.rollback().await;
+                if rewritten || !is_missing_binary_output(&msg) {
+                    return Err(format!("Query failed: {msg}"));
+                }
+                let Some(wrapped) = text_safe_wrap(pool, stmt).await else {
+                    return Err(format!("Query failed: {msg}"));
+                };
+                executed = wrapped;
+                rewritten = true;
+                pg_rows.clear();
+                capped = false;
+                tx = pool
+                    .begin()
+                    .await
+                    .map_err(|e| format!("Failed to begin transaction: {e}"))?;
+                let _ = sqlx::query(&format!(
+                    "SET LOCAL statement_timeout = {EXECUTE_SQL_TIMEOUT_MS}"
+                ))
+                .execute(&mut *tx)
+                .await;
             }
-            drop(stream);
             let _ = tx.rollback().await;
 
             let columns: Vec<ColumnInfo> = pg_rows
