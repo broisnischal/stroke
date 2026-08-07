@@ -126,8 +126,11 @@
   <!-- Header -->
   <div class="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
     <FunctionSquare class="size-3.5 shrink-0 text-primary/60" />
-    <span class="flex-1 text-ui-sm font-semibold tracking-tight">Virtual columns</span>
-    <span class="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-ui-2xs text-muted-foreground/55">{tableName}</span>
+    <span class="shrink-0 whitespace-nowrap text-ui-sm font-semibold tracking-tight">Virtual columns</span>
+    <span
+      title={tableName}
+      class="ml-auto min-w-0 truncate rounded bg-muted/60 px-1.5 py-0.5 font-mono text-ui-2xs text-muted-foreground/55"
+    >{tableName}</span>
     <button
       type="button"
       class="flex size-5 items-center justify-center rounded text-muted-foreground/35 hover:bg-muted hover:text-foreground"
@@ -295,14 +298,25 @@
       <!-- ── Column list ──────────────────────────────────────────────────── -->
       <div class="flex-1 overflow-y-auto">
         {#if vcols.length === 0}
-          <div class="flex flex-col items-center gap-3 px-5 py-10 text-center">
-            <div class="flex size-10 items-center justify-center rounded-lg border border-border/30 bg-muted/20">
-              <FunctionSquare class="size-5 text-muted-foreground/35" />
+          <div class="px-3 py-6">
+            <div class="flex items-start gap-2.5">
+              <span class="flex size-7 shrink-0 items-center justify-center rounded-md border border-border/30 bg-muted/20">
+                <FunctionSquare class="size-3.5 text-muted-foreground/35" />
+              </span>
+              <div class="min-w-0">
+                <p class="text-ui-sm font-medium text-foreground/60">No virtual columns yet</p>
+                <p class="mt-1 text-ui-2xs leading-relaxed text-muted-foreground/45">
+                  Build a column from the ones you already have — join a name, format a date, do the arithmetic once.
+                </p>
+              </div>
             </div>
-            <div>
-              <p class="text-ui-sm font-medium text-foreground/55">No virtual columns</p>
-              <p class="mt-0.5 text-ui-xs text-muted-foreground/45">Compute values from existing columns using templates and functions.</p>
-            </div>
+            <button
+              type="button"
+              onclick={openAdd}
+              class="mt-4 flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-border/50 py-2 text-ui-xs font-medium text-muted-foreground/60 transition-colors hover:border-primary/40 hover:bg-primary/5 hover:text-primary"
+            >
+              <Plus class="size-3" /> Add virtual column
+            </button>
           </div>
         {:else}
           <div class="py-1">
@@ -352,16 +366,19 @@
         {/if}
       </div>
 
-      <!-- Footer -->
-      <div class="shrink-0 border-t border-border/50 px-3 py-2.5">
-        <button
-          type="button"
-          onclick={openAdd}
-          class="flex w-full items-center justify-center gap-1.5 rounded border border-dashed border-border/50 py-2 text-ui-xs font-medium text-muted-foreground/60 transition-colors hover:border-primary/40 hover:bg-primary/5 hover:text-primary"
-        >
-          <Plus class="size-3" /> Add virtual column
-        </button>
-      </div>
+      {#if vcols.length > 0}
+        <!-- Footer: only when there is a list to add to — in the empty state the
+             same button already sits under the explanation. -->
+        <div class="shrink-0 border-t border-border/50 px-3 py-2.5">
+          <button
+            type="button"
+            onclick={openAdd}
+            class="flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-border/50 py-2 text-ui-xs font-medium text-muted-foreground/60 transition-colors hover:border-primary/40 hover:bg-primary/5 hover:text-primary"
+          >
+            <Plus class="size-3" /> Add virtual column
+          </button>
+        </div>
+      {/if}
     {/if}
 
   </div>

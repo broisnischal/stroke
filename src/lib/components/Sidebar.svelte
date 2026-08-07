@@ -504,6 +504,7 @@
   let rowH = $state(27)
   $effect(() => {
     const el = tableListEl
+    void scrollContainerEl // re-attach the observer when the scroll host mounts
     if (!el || typeof ResizeObserver === 'undefined') return
     const measure = () => {
       // Spacer <li>s are aria-hidden - measure the stride between two real rows.
@@ -517,10 +518,17 @@
         const cur = untrack(() => rowH)
         if (stride > 10 && Math.abs(stride - cur) > 0.5) rowH = stride
       }
+      // Same observer covers the other half of the window maths: a layout change
+      // in the list also means its offset in the scroll container may have moved.
+      untrack(() => measureListOffset())
     }
     measure()
     const ro = new ResizeObserver(measure)
     ro.observe(el)
+    // Also watch the scrolled content: a section above the list (databases,
+    // recent, pinned) opening or closing moves the list without resizing it.
+    const content = scrollContainerEl?.firstElementChild
+    if (content) ro.observe(content)
     return () => ro.disconnect()
   })
   // The window shifts one row at a time: `virtStart` is floored to ROW_H, so the
@@ -540,24 +548,44 @@
   // hop would only push the rendered window one frame *behind* the scrollbar thumb,
   // which reads as lag while dragging.
   function onSidebarScroll() {
-    if (scrollContainerEl) sidebarScrollTop = scrollContainerEl.scrollTop
+    if (!scrollContainerEl) return
+    sidebarScrollTop = scrollContainerEl.scrollTop
+    measureListOffset()
   }
   /** Offset of the tables <ul> from the top of the scroll container. Re-measured
    *  whenever sections above it open/close (recent, pinned) or refs change. */
   let tableListOffsetTop = $state(0)
 
+  /**
+   * Distance from the top of the scrolled content to the tables <ul>.
+   *
+   * Measured from live rects rather than walked through `offsetParent`: that walk
+   * only terminated when an ancestor happened to be the scroll container, and it
+   * ran off an enumerated list of "things above the list". Anything else that
+   * grew above it - expanding the databases section, a filter that changes the
+   * pinned block - left the offset stale and small, which pushed `virtStart` far
+   * past the real first visible row: the list rendered its tail behind a giant
+   * empty spacer (the black gap).
+   */
+  function measureListOffset() {
+    const el = tableListEl
+    const container = scrollContainerEl
+    if (!el || !container) return
+    const off = el.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop
+    if (Math.abs(off - tableListOffsetTop) > 0.5) tableListOffsetTop = off
+  }
+
+  // Re-measure whenever anything that can move the list re-renders. Cheap: two
+  // rect reads, and only when one of these actually changes.
   $effect(() => {
-    // Dependencies that change the table-list's position in the scroll container
-    const _recentOpen = recentOpen
-    const _pins = visiblePinnedTables.length
-    const _showRecent = showRecent
-    const _el = tableListEl
-    const _container = scrollContainerEl
-    if (!_el || !_container) return
-    let node = /** @type {HTMLElement | null} */ (_el)
-    let off = 0
-    while (node && node !== _container) { off += node.offsetTop; node = /** @type {HTMLElement | null} */ (node.offsetParent) }
-    tableListOffsetTop = off
+    void recentOpen
+    void visiblePinnedTables.length
+    void showRecent
+    void filteredRegularTables.length
+    void tablesOpen
+    void tableListEl
+    void scrollContainerEl
+    measureListOffset()
   })
 
   const shouldVirtualize = $derived(filteredRegularTables.length > VIRT_THRESHOLD)
@@ -1266,11 +1294,16 @@
                               title={table.rowCount != null ? Number(table.rowCount).toLocaleString("en-US") : "Counting rows…"}
                             >
                               {#if table.rowCount == null}
-                                <!-- A literal "…" sat on the text baseline, so the
-                                     dots hung low and ragged against the numbers in
-                                     neighbouring rows. A centred bar reads as
-                                     "pending" and keeps the column even. -->
-                                <span class="h-1.5 w-4 animate-pulse rounded-full bg-muted-foreground/25"></span>
+                                <!-- A pending count is one static mark, not motion.
+                                     A pulsing pill per row turned a long table list
+                                     into thirty things blinking out of sync, which
+                                     reads as the app struggling; the counts arrive
+                                     in under a second anyway. A literal "…" sat on
+                                     the text baseline and hung low against the
+                                     numbers beside it, so this is an underscore
+                                     rule on the digits' own baseline — it holds the
+                                     column width and stays quiet. -->
+                                <span class="h-px w-3 rounded-full bg-muted-foreground/30" aria-hidden="true"></span>
                               {:else}
                                 {formatTableRowCount(table.rowCount)}
                               {/if}
