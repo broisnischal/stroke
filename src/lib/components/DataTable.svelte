@@ -6192,10 +6192,21 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               </div>
             </div>
           {:else if rows.length === 0 && !newRowDrafts}
+            <!-- "No rows" is a claim about the data, so it must never be shown
+                 while a fetch is still running. The full-page skeleton above
+                 only covers the first load (no columns yet); every later fetch
+                 that empties the grid — a re-query, or the second half of a
+                 windowed load — lands here, and without this it would assert
+                 the table is empty for the whole of a multi-second read. -->
             <div class="pointer-events-none absolute inset-0 z-[3] flex items-center justify-center" role="status" aria-live="polite">
               <div class="flex flex-col items-center gap-2 px-4 text-center">
-                <Table2 class="size-8 text-muted-foreground/25" />
-                <p class="text-ui-sm text-muted-foreground">No rows in this table</p>
+                {#if loading}
+                  <Loader class="size-5 animate-spin text-muted-foreground/40" />
+                  <p class="text-ui-sm text-muted-foreground">Loading rows…</p>
+                {:else}
+                  <Table2 class="size-8 text-muted-foreground/25" />
+                  <p class="text-ui-sm text-muted-foreground">No rows in this table</p>
+                {/if}
               </div>
             </div>
           {/if}
