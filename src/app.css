@@ -724,6 +724,16 @@ html[data-os="linux"]   { --window-radius: 8px; }
     overscroll-behavior: contain;
   }
 
+  /* …but a horizontal-only scroller must still let the page scroll under the
+     cursor. Any overflow value other than `visible` makes the box a scroll
+     container on BOTH axes, so a wide table sitting at scrollTop 0 would swallow
+     every wheel tick with `overscroll-behavior: contain` - the page just froze
+     wherever the pointer happened to be. Only the x axis is contained here. */
+  .overflow-x-auto:not(.overflow-auto):not(.overflow-y-auto) {
+    overscroll-behavior-x: contain;
+    overscroll-behavior-y: auto;
+  }
+
   /* Reserve scrollbar gutter only on the actual scrollable list inside dropdowns/popovers */
   .db-list-scroll {
     scrollbar-gutter: stable;

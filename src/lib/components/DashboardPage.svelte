@@ -25,6 +25,8 @@
   import Check from "@lucide/svelte/icons/check";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import LayoutGrid from "@lucide/svelte/icons/layout-grid";
+  import Presentation from "@lucide/svelte/icons/presentation";
+  import Minimize2 from "@lucide/svelte/icons/minimize-2";
 
   let {
     /** @type {import('$lib/stores/connections.js').SavedConnection | null} */
@@ -35,6 +37,44 @@
   const activeDash = $derived(
     $dashboards.find((d) => d.id === $activeDashboardId) ?? null,
   );
+
+  // ── View-only (presentation) mode ──────────────────────────────────────────
+  // Strips every control - header, drag handles, span pickers, remove buttons -
+  // so the tab shows nothing but the charts. Persisted so a dashboard left on a
+  // wall display comes back up clean after a restart.
+  const VIEW_ONLY_KEY = "stroke:dashboard:view-only";
+
+  let viewOnly = $state(
+    (() => {
+      try {
+        return localStorage.getItem(VIEW_ONLY_KEY) === "1";
+      } catch {
+        return false;
+      }
+    })(),
+  );
+
+  /** @param {boolean} next */
+  function setViewOnly(next) {
+    viewOnly = next;
+    try {
+      localStorage.setItem(VIEW_ONLY_KEY, next ? "1" : "0");
+    } catch {
+      /* private mode / quota - the mode still applies for this session */
+    }
+  }
+
+  // Only actually present when there is something to present; otherwise the
+  // empty states would be unreachable (no header, no create button).
+  const presenting = $derived(viewOnly && (activeDash?.items.length ?? 0) > 0);
+
+  /** @param {KeyboardEvent} e */
+  function handleWindowKeydown(e) {
+    if (e.key === "Escape" && presenting) {
+      e.preventDefault();
+      setViewOnly(false);
+    }
+  }
 
   // ── Chart picker modal ─────────────────────────────────────────────────────
   let pickerOpen = $state(false);
@@ -98,7 +138,7 @@
    */
   const layoutKey = $derived(
     activeDash
-      ? `${activeDash.id}|${activeDash.columns}|${activeDash.items
+      ? `${activeDash.id}|${activeDash.columns}|${presenting}|${activeDash.items
           .map((i) => `${i.id}:${Math.min(i.span, activeDash.columns)}`)
           .join(",")}`
       : "none",
@@ -116,7 +156,8 @@
 
     void (async () => {
       await tick(); // wait for Svelte to reconcile the DOM
-      if (cancelled || !gridEl || !activeDash?.items.length) return;
+      // No drag-to-reorder in view-only mode - there are no handles to grab.
+      if (cancelled || presenting || !gridEl || !activeDash?.items.length) return;
 
       const grid = gridEl;
       const dash = activeDash;
@@ -184,6 +225,8 @@
   }
 </script>
 
+<svelte:window onkeydown={handleWindowKeydown} />
+
 {#if !connection}
   <div class="flex min-h-0 flex-1 items-center justify-center bg-panel">
     <div class="flex flex-col items-center gap-2 text-center">
@@ -192,8 +235,9 @@
     </div>
   </div>
 {:else}
-<div class="flex min-h-0 flex-1 flex-col overflow-hidden">
+<div class="group/dash flex min-h-0 flex-1 flex-col overflow-hidden">
   <!-- Header -->
+  {#if !presenting}
   <div
     class="studio-chrome flex h-10 shrink-0 items-center gap-2 border-b border-border bg-panel px-3"
     data-studio-chrome
@@ -347,6 +391,17 @@
 
     <div class="ml-auto flex items-center gap-1.5">
       {#if activeDash}
+        {#if activeDash.items.length > 0}
+          <button
+            type="button"
+            class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/50 px-2.5 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            title="View only — hide every control (Esc to exit)"
+            onclick={() => setViewOnly(true)}
+          >
+            <Presentation class="size-3.5" />
+            View only
+          </button>
+        {/if}
         <button
           type="button"
           class="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-3 text-ui-xs font-medium text-primary-foreground transition-opacity hover:opacity-90"
@@ -358,9 +413,22 @@
       {/if}
     </div>
   </div>
+  {/if}
 
   <!-- Content -->
-  <div class="min-h-0 flex-1 overflow-y-auto p-4">
+  <div class="relative min-h-0 flex-1 overflow-y-auto p-4">
+    {#if presenting}
+      <!-- Only affordance left on screen: a corner pill that fades in on hover. -->
+      <button
+        type="button"
+        class="fixed right-4 top-4 z-30 inline-flex h-7 items-center gap-1.5 rounded-md border border-border/60 bg-background/85 px-2.5 text-ui-xs text-muted-foreground opacity-0 backdrop-blur transition-opacity duration-150 hover:text-foreground focus-visible:opacity-100 group-hover/dash:opacity-100"
+        title="Exit view only (Esc)"
+        onclick={() => setViewOnly(false)}
+      >
+        <Minimize2 class="size-3.5" />
+        Exit
+      </button>
+    {/if}
     {#if !activeDash}
       <div class="flex h-full min-h-[300px] flex-col items-center justify-center gap-4">
         <div class="flex size-16 items-center justify-center rounded-lg bg-muted/30">
@@ -410,24 +478,37 @@
           >
             <div
               data-swapy-item={item.id}
-              class="group flex h-[260px] flex-col overflow-hidden rounded-lg border border-border/60 bg-card transition-colors hover:border-border"
+              class={cn(
+                "group flex flex-col overflow-hidden rounded-lg border border-border/60 bg-card transition-colors",
+                // Taller cards with no chrome to fight for space when presenting.
+                presenting ? "h-[320px]" : "h-[260px] hover:border-border",
+              )}
             >
-              <!-- Card header -->
-              <div class="flex h-9 shrink-0 items-center gap-1 border-b border-border/40 bg-card px-2">
-                <!-- Drag handle -->
-                <div
-                  data-swapy-handle
-                  class="flex size-6 cursor-grab items-center justify-center rounded-md text-muted-foreground/30 transition-colors hover:text-muted-foreground active:cursor-grabbing"
-                  title="Drag to reorder"
-                >
-                  <Grip class="size-3.5" />
-                </div>
+              <!-- Card header. View-only keeps the chart title (it labels the
+                   data) and drops every control. -->
+              <div
+                class={cn(
+                  "flex h-9 shrink-0 items-center gap-1 border-b border-border/40 bg-card",
+                  presenting ? "px-3" : "px-2",
+                )}
+              >
+                {#if !presenting}
+                  <!-- Drag handle -->
+                  <div
+                    data-swapy-handle
+                    class="flex size-6 cursor-grab items-center justify-center rounded-md text-muted-foreground/30 transition-colors hover:text-muted-foreground active:cursor-grabbing"
+                    title="Drag to reorder"
+                  >
+                    <Grip class="size-3.5" />
+                  </div>
+                {/if}
 
                 <!-- Title -->
                 <span class="min-w-0 flex-1 truncate text-ui-xs font-medium text-foreground/80">
                   {chart?.name ?? "Unknown chart"}
                 </span>
 
+                {#if !presenting}
                 <!-- Span selector (1 … columns) -->
                 <div class="flex items-center gap-px opacity-0 transition-opacity group-hover:opacity-100">
                   {#each Array.from({ length: activeDash.columns }, (_, i) => i + 1) as s (s)}
@@ -454,6 +535,7 @@
                 >
                   <X class="size-3" />
                 </button>
+                {/if}
               </div>
 
               <!-- Chart body -->

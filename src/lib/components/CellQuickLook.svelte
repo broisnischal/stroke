@@ -1,6 +1,8 @@
 <script>
   import { tick } from "svelte";
   import X from "@lucide/svelte/icons/x";
+  import CircleSlash from "@lucide/svelte/icons/circle-slash";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { cn } from "$lib/utils.js";
 
   /**
@@ -30,6 +32,15 @@
   // string. Typing anything clears it so `""` can be saved as a real value.
   const isNull = $derived(cell !== null && cell.isNull);
   const charCount = $derived(cell?.draft.length ?? 0);
+
+  // Save chord is Cmd+Enter on macOS, Ctrl+Enter elsewhere - the hint has to
+  // match what handleKeydown actually accepts.
+  const isMac =
+    typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
+  const saveHint = isMac ? "⌘↵" : "Ctrl ↵";
+
+  /** Inline chord hint: dim monospace inside the button, not a stacked keycap. */
+  const hintCls = "font-mono text-ui-3xs tracking-tight opacity-55";
 
   $effect(() => {
     if (!cell) return;
@@ -132,44 +143,39 @@
       </div>
 
       <!-- Footer -->
-      <div class="flex shrink-0 items-center gap-2 border-t border-border/40 px-4 py-3">
+      <div class="flex shrink-0 items-center gap-1.5 border-t border-border/40 px-3 py-2.5">
         {#if cell.nullable}
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
             disabled={saving || isNull}
-            class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/50 px-2.5 text-ui-xs text-muted-foreground transition-colors hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-30"
+            class="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
             onclick={setNull}
           >
+            <CircleSlash />
             Set NULL
-          </button>
+          </Button>
         {/if}
 
-        <span class="ml-auto font-mono text-ui-2xs text-muted-foreground/30 tabular-nums">
+        <span class="ml-auto pr-1 font-mono text-ui-2xs tabular-nums text-muted-foreground/50">
           {charCount.toLocaleString()} chars
         </span>
 
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="sm"
           disabled={saving}
-          class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/50 px-3 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+          class="text-muted-foreground hover:text-foreground"
           onclick={oncancel}
         >
           Cancel
-          <kbd>Esc</kbd>
-        </button>
+          <span class={hintCls}>Esc</span>
+        </Button>
 
-        <button
-          type="button"
-          disabled={saving}
-          class="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-3 text-ui-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-40"
-          onclick={onsave}
-        >
+        <Button size="sm" disabled={saving} onclick={onsave}>
           {saving ? "Saving…" : "Save"}
-          <span class="flex items-center gap-px">
-            <kbd class="kbd-on-primary">⌘</kbd>
-            <kbd class="kbd-on-primary">↵</kbd>
-          </span>
-        </button>
+          <span class={hintCls}>{saveHint}</span>
+        </Button>
       </div>
     </div>
   </div>

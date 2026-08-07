@@ -140,9 +140,8 @@ fn settings_to_config(
                 name,
                 category: ci.and_then(|i| row.get(i)).map(json_string).unwrap_or_default(),
                 value: vi.and_then(|i| row.get(i)).map(json_string).unwrap_or_default(),
-                unit: String::new(),
-                requires_restart: false,
                 description: di.and_then(|i| row.get(i)).map(json_string).unwrap_or_default(),
+                ..Default::default()
             })
         })
         .collect()
@@ -156,8 +155,7 @@ fn cfg_row(name: &str, value: impl Into<String>, unit: &str, category: &str) -> 
         category: category.into(),
         value: value.into(),
         unit: unit.into(),
-        requires_restart: false,
-        description: String::new(),
+        ..Default::default()
     }
 }
 
@@ -660,7 +658,7 @@ pub async fn instance_state(state: State<'_, DbState>) -> Result<InstanceState, 
 
 // ══ 4. Config ══════════════════════════════════════════════════════════════════
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfigSetting {
     pub name: String,
@@ -669,6 +667,29 @@ pub struct ConfigSetting {
     pub unit: String,
     pub requires_restart: bool,
     pub description: String,
+    // ── Editing metadata ──────────────────────────────────────────────────────
+    // Filled from `pg_settings` so the UI can render the right control (toggle /
+    // select / number / text) and tell "you may change this" from "the server
+    // will refuse". Engines without an equivalent catalog leave these empty and
+    // the UI falls back to a plain text field.
+    /// `internal` | `postmaster` | `sighup` | `superuser` | `user` | …
+    pub context: String,
+    /// `bool` | `enum` | `integer` | `real` | `string`
+    pub vartype: String,
+    /// Allowed values for `vartype = 'enum'`.
+    pub enum_vals: Vec<String>,
+    pub min_val: String,
+    pub max_val: String,
+    /// Compiled-in default — what a reset returns to.
+    pub boot_val: String,
+    /// Value a session reset would see (config file value, not the session override).
+    pub reset_val: String,
+    /// Where the current value came from: `default`, `configuration file`, …
+    pub source: String,
+    /// Already changed on disk, waiting for a server restart.
+    pub pending_restart: bool,
+    /// False for values the engine will never let us write (`context = internal`).
+    pub editable: bool,
 }
 
 pub async fn instance_config(state: State<'_, DbState>) -> Result<Vec<ConfigSetting>, String> {
@@ -680,7 +701,16 @@ pub async fn instance_config(state: State<'_, DbState>) -> Result<Vec<ConfigSett
                         setting AS value,
                         unit,
                         (context = 'postmaster') AS requires_restart,
-                        short_desc AS description
+                        short_desc AS description,
+                        context,
+                        vartype,
+                        enumvals,
+                        min_val,
+                        max_val,
+                        boot_val,
+                        reset_val,
+                        source,
+                        pending_restart
                  FROM pg_settings
                  ORDER BY name",
             )
@@ -692,17 +722,40 @@ pub async fn instance_config(state: State<'_, DbState>) -> Result<Vec<ConfigSett
             };
             Ok(rows
                 .iter()
-                .map(|r| ConfigSetting {
-                    name: r.try_get::<String, _>("name").unwrap_or_default(),
-                    category: opt(r, "category"),
-                    value: opt(r, "value"),
-                    unit: opt(r, "unit"),
-                    requires_restart: r
-                        .try_get::<Option<bool>, _>("requires_restart")
-                        .ok()
-                        .flatten()
-                        .unwrap_or(false),
-                    description: opt(r, "description"),
+                .map(|r| {
+                    let context = opt(r, "context");
+                    ConfigSetting {
+                        name: r.try_get::<String, _>("name").unwrap_or_default(),
+                        category: opt(r, "category"),
+                        value: opt(r, "value"),
+                        unit: opt(r, "unit"),
+                        requires_restart: r
+                            .try_get::<Option<bool>, _>("requires_restart")
+                            .ok()
+                            .flatten()
+                            .unwrap_or(false),
+                        description: opt(r, "description"),
+                        // `internal` values are compiled in (block size, wal segment
+                        // size) - the server rejects every attempt to set them.
+                        editable: context != "internal",
+                        context,
+                        vartype: opt(r, "vartype"),
+                        enum_vals: r
+                            .try_get::<Option<Vec<String>>, _>("enumvals")
+                            .ok()
+                            .flatten()
+                            .unwrap_or_default(),
+                        min_val: opt(r, "min_val"),
+                        max_val: opt(r, "max_val"),
+                        boot_val: opt(r, "boot_val"),
+                        reset_val: opt(r, "reset_val"),
+                        source: opt(r, "source"),
+                        pending_restart: r
+                            .try_get::<Option<bool>, _>("pending_restart")
+                            .ok()
+                            .flatten()
+                            .unwrap_or(false),
+                    }
                 })
                 .collect())
         }
@@ -712,11 +765,9 @@ pub async fn instance_config(state: State<'_, DbState>) -> Result<Vec<ConfigSett
                 .iter()
                 .map(|r| ConfigSetting {
                     name: r.try_get::<String, _>(0).unwrap_or_default(),
-                    category: String::new(),
                     value: r.try_get::<String, _>(1).unwrap_or_default(),
-                    unit: String::new(),
-                    requires_restart: false,
-                    description: String::new(),
+                    editable: true,
+                    ..Default::default()
                 })
                 .collect())
         }
@@ -765,6 +816,160 @@ pub async fn instance_config(state: State<'_, DbState>) -> Result<Vec<ConfigSett
             Ok(out)
         }
         _ => Err(UNSUPPORTED.into()),
+    }
+}
+
+// ── Writing config ─────────────────────────────────────────────────────────────
+
+/// Outcome of a single setting change, phrased for the UI to show verbatim.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetConfigResult {
+    pub name: String,
+    /// Value the server reports *after* the change (unchanged when a restart is pending).
+    pub value: String,
+    /// The write landed but only takes effect after a server restart.
+    pub requires_restart: bool,
+    /// `pg_reload_conf()` ran, so running backends already picked the value up.
+    pub reloaded: bool,
+    pub message: String,
+}
+
+/// GUC / system-variable names are `[a-z_][a-z0-9_]*`, optionally namespaced
+/// (`auto_explain.log_min_duration`). Everything else is rejected before it can
+/// reach a statement - `ALTER SYSTEM` / `SET GLOBAL` take no bind parameters, so
+/// the name is the one part that must be proven safe rather than escaped.
+fn valid_setting_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 128
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
+        && name.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+}
+
+/// Single-quoted SQL literal. Values are free-form (`archive_command` is a shell
+/// line), so they are escaped rather than validated.
+fn sql_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+/// Change one server setting.
+///
+/// Postgres writes through `ALTER SYSTEM` (persisted in `postgresql.auto.conf`)
+/// and then reloads, so `sighup`-context values apply immediately and
+/// `postmaster` ones are reported as restart-pending. `value = None` resets the
+/// setting to its default. Both require the connected role to be superuser (or
+/// hold `pg_write_all_settings`) - the server's own error is passed straight
+/// through when it is not.
+pub async fn instance_set_config(
+    state: State<'_, DbState>,
+    name: String,
+    value: Option<String>,
+) -> Result<SetConfigResult, String> {
+    let name = name.trim().to_string();
+    if !valid_setting_name(&name) {
+        return Err(format!("'{name}' is not a valid setting name"));
+    }
+
+    match require_conn(&state)? {
+        ActiveConnection::Postgres(pool) => {
+            // Read the catalog first: it decides whether the setting can be
+            // written at all, and whether the change needs a restart.
+            let meta = sqlx::query(
+                "SELECT context, vartype FROM pg_settings WHERE name = $1",
+            )
+            .bind(&name)
+            .fetch_optional(&pool)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("No such setting: {name}"))?;
+
+            let context: String = meta.try_get("context").unwrap_or_default();
+            if context == "internal" {
+                return Err(format!(
+                    "{name} is compiled into the server and cannot be changed at runtime"
+                ));
+            }
+
+            let stmt = match &value {
+                Some(v) => format!("ALTER SYSTEM SET \"{name}\" = {}", sql_literal(v)),
+                None => format!("ALTER SYSTEM RESET \"{name}\""),
+            };
+            sqlx::query(&stmt).execute(&pool).await.map_err(|e| e.to_string())?;
+
+            // Reload so sighup-context settings take effect without a restart.
+            let reloaded = sqlx::query("SELECT pg_reload_conf()").execute(&pool).await.is_ok();
+
+            let current: String = sqlx::query("SELECT setting FROM pg_settings WHERE name = $1")
+                .bind(&name)
+                .fetch_optional(&pool)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|r| r.try_get::<String, _>("setting").ok())
+                .unwrap_or_default();
+
+            let requires_restart = context == "postmaster";
+            let message = if value.is_none() {
+                format!("{name} reset to its default")
+            } else if requires_restart {
+                format!("{name} written to postgresql.auto.conf — restart the server to apply it")
+            } else if reloaded {
+                format!("{name} is now {current}")
+            } else {
+                format!("{name} written, but the config reload failed — reload manually")
+            };
+
+            Ok(SetConfigResult { name, value: current, requires_restart, reloaded, message })
+        }
+        ActiveConnection::Mysql(pool) => {
+            // Numbers go through unquoted (MySQL rejects '128M'-style strings for
+            // some numeric variables); anything else is a quoted literal.
+            let rendered = match &value {
+                None => "DEFAULT".to_string(),
+                Some(v) if v.parse::<f64>().is_ok() => v.clone(),
+                Some(v) => sql_literal(v),
+            };
+
+            // MySQL 8 persists across restarts; older servers only have SET GLOBAL.
+            let persisted = sqlx::query(&format!("SET PERSIST `{name}` = {rendered}"))
+                .execute(&pool)
+                .await
+                .is_ok();
+            if !persisted {
+                sqlx::query(&format!("SET GLOBAL `{name}` = {rendered}"))
+                    .execute(&pool)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+
+            let current: String = sqlx::query("SHOW VARIABLES LIKE ?")
+                .bind(&name)
+                .fetch_optional(&pool)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|r| r.try_get::<String, _>(1).ok())
+                .unwrap_or_default();
+
+            let message = if value.is_none() {
+                format!("{name} reset to its default")
+            } else if persisted {
+                format!("{name} is now {current} (persisted)")
+            } else {
+                format!("{name} is now {current} — not persisted, it resets on restart")
+            };
+
+            Ok(SetConfigResult {
+                name,
+                value: current,
+                requires_restart: false,
+                reloaded: true,
+                message,
+            })
+        }
+        _ => Err("Changing configuration is only supported on PostgreSQL and MySQL".into()),
     }
 }
 

@@ -1,8 +1,28 @@
 <script>
   import TriangleAlert from '@lucide/svelte/icons/triangle-alert'
   import RotateCcw from '@lucide/svelte/icons/rotate-ccw'
+  import Bug from '@lucide/svelte/icons/bug'
+  // Static: StudioShell already imports it, so it is in the main chunk either way.
+  import ReportIssueDialog from './ReportIssueDialog.svelte'
 
   let { children } = $props()
+
+  // Report dialog state lives on the boundary itself (not the failed subtree),
+  // so it survives whatever blew up below.
+  let reportOpen = $state(false)
+  let reportTitle = $state('')
+  let reportDetails = $state('')
+
+  /** @param {unknown} error */
+  function openReport(error) {
+    const err = /** @type {any} */ (error)
+    const message = String(err?.message ?? err ?? 'Unknown error')
+    reportTitle = `[crash] ${message.slice(0, 120)}`
+    // Stack when the runtime gave us one, message otherwise. Capped so the
+    // GitHub URL stays under the length browsers and GitHub accept.
+    reportDetails = String(err?.stack || message).slice(0, 2500)
+    reportOpen = true
+  }
 </script>
 
 <svelte:boundary onerror={(e) => { try { console.error('[app-boundary]', e) } catch { /* noop */ } }}>
@@ -39,7 +59,25 @@
         >
           Reload app
         </button>
+        <button
+          type="button"
+          onclick={() => openReport(error)}
+          class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-ui-xs font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+        >
+          <Bug class="size-3.5" /> Report issue
+        </button>
       </div>
     </div>
   {/snippet}
 </svelte:boundary>
+
+<!-- Mounted only after a crash, so the happy path never builds the dialog. -->
+{#if reportOpen}
+  <ReportIssueDialog
+    bind:open={reportOpen}
+    initialType="crash"
+    initialTitle={reportTitle}
+    initialBody="The app hit an unexpected error and showed the recovery screen."
+    details={reportDetails}
+  />
+{/if}

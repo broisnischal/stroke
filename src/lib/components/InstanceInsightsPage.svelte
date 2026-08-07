@@ -2,8 +2,12 @@
   import { onMount } from 'svelte'
   import { cn } from '$lib/utils.js'
   import EChartPanel from './EChartPanel.svelte'
+  import { Button } from '$lib/components/ui/button/index.js'
+  import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
+  import { readOnlyMode, READ_ONLY_HINT } from '$lib/stores/read-only.js'
   import {
     instanceVersion, instanceActivity, instanceState, instanceConfig, instanceReplication,
+    instanceSetConfig,
   } from '$lib/api.js'
   import Database from '@lucide/svelte/icons/database'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
@@ -11,6 +15,10 @@
   import Shield from '@lucide/svelte/icons/shield'
   import Settings from '@lucide/svelte/icons/settings-2'
   import Search from '@lucide/svelte/icons/search'
+  import ChevronRight from '@lucide/svelte/icons/chevron-right'
+  import Lock from '@lucide/svelte/icons/lock'
+  import RotateCcw from '@lucide/svelte/icons/rotate-ccw'
+  import PowerOff from '@lucide/svelte/icons/power-off'
 
   let { active = false, connectionName = '', dbType = '' } = $props()
 
@@ -157,12 +165,80 @@
     ],
   }))
 
-  // ── Generic tables for State / Config / Replication ────────────────────────
+  // ── Config browsing + editing ──────────────────────────────────────────────
+  // pg_settings categories read like "Write-Ahead Log / Archiving" - the part
+  // before the slash is the group people actually think in (WAL, Memory, …).
+  /** @param {any} c */
+  const groupOf = (c) => (c.category || '').split('/')[0].trim()
+
+  /** A value the server is not running with yet, or one the user has moved off the default. */
+  /** @param {any} c */
+  const isModified = (c) => !!c.source && c.source !== 'default' && c.source !== 'client'
+
+  let configGroup = $state('all')
+  let onlyModified = $state(false)
+
+  const chip = 'shrink-0 whitespace-nowrap rounded-md border border-border/40 px-2 py-1 text-ui-3xs text-muted-foreground/70 transition-colors hover:border-border hover:text-foreground'
+  const chipOn = 'border-primary/40 bg-primary/10 text-primary hover:text-primary'
+
+  const configGroups = $derived.by(() => {
+    /** @type {Map<string, number>} */
+    const counts = new Map()
+    for (const c of config) {
+      const g = groupOf(c)
+      if (g) counts.set(g, (counts.get(g) ?? 0) + 1)
+    }
+    return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([id, n]) => ({ id, n }))
+  })
+
   const configFiltered = $derived.by(() => {
     const q = configSearch.trim().toLowerCase()
-    if (!q) return config
-    return config.filter((c) => (c.name + ' ' + c.category + ' ' + c.description).toLowerCase().includes(q))
+    return config.filter((c) => {
+      if (configGroup !== 'all' && groupOf(c) !== configGroup) return false
+      if (onlyModified && !isModified(c)) return false
+      if (!q) return true
+      return (c.name + ' ' + c.category + ' ' + c.description).toLowerCase().includes(q)
+    })
   })
+
+  const pendingRestartCount = $derived(config.filter((c) => c.pendingRestart).length)
+
+  // ── Editing one setting ────────────────────────────────────────────────────
+  let openSetting = $state('')
+  let draft = $state('')
+  let savingSetting = $state('')
+
+  /** @param {any} row */
+  function toggleSetting(row) {
+    if (openSetting === row.name) { openSetting = ''; return }
+    openSetting = row.name
+    draft = row.value ?? ''
+  }
+
+  /** Display value: pg reports an empty string for "unset", which reads as a bug. */
+  /** @param {any} row */
+  const shownValue = (row) => (row.value === '' || row.value == null ? '—' : row.value)
+
+  /**
+   * Write the setting, or reset it to the server default.
+   * @param {any} row
+   * @param {boolean} [toDefault]
+   */
+  async function applySetting(row, toDefault = false) {
+    if (savingSetting) return
+    savingSetting = row.name
+    try {
+      const res = await instanceSetConfig(row.name, toDefault ? null : draft)
+      if (res.requiresRestart) toast.warning('Restart required', { description: res.message, duration: 7000 })
+      else toast.success(res.message)
+      openSetting = ''
+      await refreshConfig()
+    } catch (e) {
+      toast.error('Could not change setting', { description: String(e), duration: 8000 })
+    } finally {
+      savingSetting = ''
+    }
+  }
   /** @param {any[]} rows */
   function keysOf(rows) { return rows?.length ? Object.keys(rows[0]) : [] }
   /** @param {any} v */
@@ -288,54 +364,164 @@
 
       <!-- ── CONFIG ── -->
       {:else if subtab === 'config'}
-        <div class="mb-3 flex items-center justify-between gap-3">
-          <div>
-            <p class="text-ui-sm font-semibold text-foreground">Configuration</p>
-            <p class="text-ui-2xs text-muted-foreground/50">{isPg ? 'Searchable pg_settings' : 'Server variables'}</p>
+        <!-- Sticky toolbar: search and filters stay reachable through a 350-row list. -->
+        <div class="sticky top-0 z-10 -mx-5 -mt-5 mb-3 border-b border-border/40 bg-panel/95 px-5 pb-2.5 pt-4 backdrop-blur">
+          <div class="mb-2.5 flex items-center justify-between gap-3">
+            <div class="flex min-w-0 items-baseline gap-2">
+              <p class="text-ui-sm font-semibold text-foreground">Configuration</p>
+              <span class="shrink-0 font-mono text-ui-2xs tabular-nums text-muted-foreground/60">
+                {configFiltered.length}{configFiltered.length !== config.length ? ` / ${config.length}` : ''}
+              </span>
+              {#if pendingRestartCount}
+                <span class="inline-flex shrink-0 items-center gap-1 rounded-md bg-warning/10 px-1.5 py-0.5 text-ui-3xs text-warning">
+                  <PowerOff class="size-2.5" /> {pendingRestartCount} awaiting restart
+                </span>
+              {/if}
+            </div>
+            <button type="button" class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border/60 px-2.5 text-ui-xs text-foreground/80 transition-colors hover:bg-muted/40" onclick={() => void refreshConfig()}>
+              <RefreshCw class="size-3" /> Refresh
+            </button>
           </div>
-          <button type="button" class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/60 px-2.5 text-ui-xs text-foreground/80 hover:bg-muted/40" onclick={() => void refreshConfig()}><RefreshCw class="size-3" /> Refresh</button>
+
+          <div class="relative">
+            <Search class="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/40" />
+            <input bind:value={configSearch} placeholder="Search name, category, or description…" class="h-8 w-full rounded-lg border border-border bg-background pl-8 pr-3 text-ui-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-ring/60" />
+          </div>
+
+          <!-- Group chips. Horizontal scroll instead of wrapping so the toolbar
+               keeps a fixed height as the filter set changes. -->
+          <div class="app-scroll mt-2 flex items-center gap-1 overflow-x-auto pb-0.5">
+            <button type="button" class={cn(chip, configGroup === 'all' && chipOn)} onclick={() => (configGroup = 'all')}>All</button>
+            {#if isPg}
+              <button type="button" class={cn(chip, onlyModified && chipOn)} onclick={() => (onlyModified = !onlyModified)}>Modified</button>
+            {/if}
+            <span class="mx-0.5 h-3.5 w-px shrink-0 bg-border/60"></span>
+            {#each configGroups as g (g.id)}
+              <button type="button" class={cn(chip, configGroup === g.id && chipOn)} onclick={() => (configGroup = g.id)} title="{g.id} · {g.n} settings">{g.id}</button>
+            {/each}
+          </div>
         </div>
-        <div class="relative mb-2">
-          <Search class="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/40" />
-          <input bind:value={configSearch} placeholder="Search setting name, category, or description…" class="h-8 w-full rounded-lg border-2 border-border bg-background pl-8 pr-3 text-ui-xs text-foreground outline-none focus:border-ring" />
-        </div>
+
         {#if !configFiltered.length}
-          <div class="rounded-lg border border-border/40 bg-card/20 py-8 text-center text-ui-xs text-muted-foreground/40">No settings found</div>
+          <div class="rounded-xl border border-border/40 bg-card/20 py-10 text-center text-ui-xs text-muted-foreground/50">No settings match that filter</div>
         {:else}
-          <!-- Fixed-layout + content-visibility keeps scrolling smooth across the ~350 pg_settings rows:
-               fixed layout skips per-cell column measurement; content-visibility skips off-screen row paint. -->
-          <div class="overflow-x-auto overflow-y-hidden rounded-lg border border-border/40">
-            <table class="cfg-table w-full border-collapse text-ui-2xs">
-              <colgroup>
-                <col style="width:3rem" />
-                <col style="width:17rem" />
-                <col style="width:16rem" />
-                <col style="width:9rem" />
-                <col style="width:4rem" />
-                <col style="width:7rem" />
-                <col />
-              </colgroup>
-              <thead>
-                <tr class="bg-muted/25">
-                  {#each ['#','name','category','value','unit','requiresRestart','description'] as h (h)}
-                    <th class="whitespace-nowrap border-b border-border/40 px-2.5 py-1.5 text-left font-medium text-muted-foreground/50">{h}</th>
-                  {/each}
-                </tr>
-              </thead>
-              <tbody>
-                {#each configFiltered as row, i (row.name ?? i)}
-                  <tr class="cfg-row">
-                    <td class="truncate border-b border-border/15 px-2 py-1 text-muted-foreground/40">{i + 1}</td>
-                    <td class="truncate border-b border-border/15 px-2.5 py-1 font-mono text-foreground/80" title={cell(row.name)}>{cell(row.name)}</td>
-                    <td class="truncate border-b border-border/15 px-2.5 py-1 text-foreground/70" title={cell(row.category)}>{cell(row.category)}</td>
-                    <td class="truncate border-b border-border/15 px-2.5 py-1 font-mono text-foreground/80" title={cell(row.value)}>{cell(row.value)}</td>
-                    <td class="truncate border-b border-border/15 px-2.5 py-1 font-mono text-muted-foreground/60">{cell(row.unit)}</td>
-                    <td class="truncate border-b border-border/15 px-2.5 py-1 text-muted-foreground/60">{cell(row.requiresRestart)}</td>
-                    <td class="truncate border-b border-border/15 px-2.5 py-1 text-muted-foreground/60" title={cell(row.description)}>{cell(row.description)}</td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
+          <!-- One row per setting; content-visibility keeps the ~350-row list
+               smooth by skipping layout/paint for rows that are off-screen. -->
+          <div class="overflow-hidden rounded-xl border border-border/50 bg-card/20">
+            {#each configFiltered as row (row.name)}
+              {@const open = openSetting === row.name}
+              {@const editable = row.editable !== false && !$readOnlyMode}
+              <div class={cn('cfg-row border-b border-border/10 last:border-b-0', open && 'bg-muted/15')}>
+                <button
+                  type="button"
+                  class="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-muted/25"
+                  onclick={() => toggleSetting(row)}
+                >
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center gap-1.5">
+                      <span class="truncate font-mono text-ui-xs font-medium text-foreground">{row.name}</span>
+                      {#if isModified(row)}
+                        <span class="shrink-0 rounded bg-primary/10 px-1 py-px text-ui-3xs text-primary">modified</span>
+                      {/if}
+                      {#if row.pendingRestart}
+                        <span class="shrink-0 rounded bg-warning/10 px-1 py-px text-ui-3xs text-warning">restart pending</span>
+                      {/if}
+                      {#if row.editable === false}
+                        <Lock class="size-2.5 shrink-0 text-muted-foreground/40" />
+                      {/if}
+                    </div>
+                    {#if row.description}
+                      <p class="mt-0.5 truncate text-ui-2xs text-muted-foreground/60">{row.description}</p>
+                    {/if}
+                  </div>
+
+                  <span class="flex shrink-0 items-center gap-1.5">
+                    <span class="max-w-[14rem] truncate rounded-md bg-muted/40 px-1.5 py-0.5 font-mono text-ui-2xs text-foreground/90">{shownValue(row)}</span>
+                    {#if row.unit}<span class="font-mono text-ui-3xs text-muted-foreground/50">{row.unit}</span>{/if}
+                    <ChevronRight class={cn('size-3.5 shrink-0 text-muted-foreground/40 transition-transform duration-150', open && 'rotate-90')} />
+                  </span>
+                </button>
+
+                {#if open}
+                  <div class="border-t border-border/15 px-3 pb-3 pt-2.5">
+                    <div class="flex flex-wrap items-end gap-2">
+                      <div class="min-w-[13rem] flex-1">
+                        <p class="mb-1 text-ui-3xs uppercase tracking-wider text-muted-foreground/50">Value</p>
+                        {#if row.vartype === 'bool'}
+                          <div class="inline-flex items-center gap-0.5 rounded-lg border border-border/60 bg-background p-0.5">
+                            {#each ['on', 'off'] as v (v)}
+                              <button type="button" disabled={!editable} onclick={() => (draft = v)}
+                                class={cn('h-6 rounded-md px-3 font-mono text-ui-2xs transition-colors disabled:opacity-40', draft === v ? 'bg-primary/15 text-primary' : 'text-muted-foreground/60 hover:text-foreground')}
+                              >{v}</button>
+                            {/each}
+                          </div>
+                        {:else if row.vartype === 'enum' && row.enumVals?.length}
+                          <select bind:value={draft} disabled={!editable}
+                            class="h-8 w-full rounded-lg border border-border bg-background px-2 font-mono text-ui-xs text-foreground outline-none transition-colors focus:border-ring/60 disabled:opacity-40"
+                          >
+                            {#each row.enumVals as v (v)}<option value={v}>{v}</option>{/each}
+                          </select>
+                        {:else}
+                          <input bind:value={draft} disabled={!editable}
+                            type={row.vartype === 'integer' || row.vartype === 'real' ? 'number' : 'text'}
+                            placeholder={row.bootVal || 'value'}
+                            class="h-8 w-full rounded-lg border border-border bg-background px-2.5 font-mono text-ui-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground/30 focus:border-ring/60 disabled:opacity-40"
+                          />
+                        {/if}
+                      </div>
+
+                      <div class="flex items-center gap-1.5">
+                        <Button
+                          size="sm"
+                          disabled={!editable || savingSetting === row.name || draft === row.value}
+                          title={$readOnlyMode ? READ_ONLY_HINT : undefined}
+                          onclick={() => void applySetting(row)}
+                        >
+                          {savingSetting === row.name ? 'Applying…' : 'Apply'}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          class="text-muted-foreground hover:text-foreground"
+                          disabled={!editable || savingSetting === row.name}
+                          title="Reset to the server default{row.bootVal ? ` (${row.bootVal})` : ''}"
+                          onclick={() => void applySetting(row, true)}
+                        >
+                          <RotateCcw /> Reset
+                        </Button>
+                      </div>
+                    </div>
+
+                    <!-- Everything the server knows about this setting, in one line. -->
+                    <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-ui-3xs text-muted-foreground/50">
+                      {#if row.category}<span>{row.category}</span>{/if}
+                      {#if row.vartype}<span>type: {row.vartype}</span>{/if}
+                      {#if row.unit}<span>unit: {row.unit}</span>{/if}
+                      {#if row.bootVal}<span>default: {row.bootVal}</span>{/if}
+                      {#if row.minVal || row.maxVal}<span>range: {row.minVal || '−∞'}…{row.maxVal || '∞'}</span>{/if}
+                      {#if row.source}<span>source: {row.source}</span>{/if}
+                      {#if row.context}<span>context: {row.context}</span>{/if}
+                    </div>
+
+                    {#if row.editable === false}
+                      <p class="mt-2 rounded-md bg-muted/30 px-2 py-1.5 text-ui-2xs text-muted-foreground/70">
+                        Compiled into the server — it can only change by rebuilding or re-initialising the cluster.
+                      </p>
+                    {:else if $readOnlyMode}
+                      <p class="mt-2 rounded-md bg-muted/30 px-2 py-1.5 text-ui-2xs text-muted-foreground/70">{READ_ONLY_HINT}</p>
+                    {:else if row.requiresRestart}
+                      <p class="mt-2 rounded-md bg-warning/10 px-2 py-1.5 text-ui-2xs text-warning">
+                        Applying writes the value now, but the server has to restart before it takes effect.
+                      </p>
+                    {:else if isPg}
+                      <p class="mt-2 text-ui-2xs text-muted-foreground/50">
+                        Written with <span class="font-mono">ALTER SYSTEM</span> and reloaded — persists across restarts. Needs a superuser role.
+                      </p>
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+            {/each}
           </div>
         {/if}
 
@@ -365,7 +551,7 @@
   {#if !rows || rows.length === 0}
     <div class="rounded-lg border border-border/40 bg-card/20 py-8 text-center text-ui-xs text-muted-foreground/40">No data found</div>
   {:else}
-    <div class="overflow-x-auto overflow-y-hidden rounded-lg border border-border/40">
+    <div class="overflow-x-auto rounded-lg border border-border/40">
       <table class="w-full border-collapse text-ui-2xs">
         <thead>
           <tr class="bg-muted/25">
@@ -391,14 +577,12 @@
 {/snippet}
 
 <style>
-  /* Config table perf: fixed layout avoids O(rows×cols) column re-measurement on every
-     reflow; content-visibility lets the engine skip layout/paint of off-screen rows so
-     scrolling the full ~350-row pg_settings list stays smooth. */
-  .cfg-table {
-    table-layout: fixed;
-  }
+  /* Config list perf: content-visibility lets the engine skip layout/paint for
+     off-screen rows, so scrolling the full ~350-row pg_settings list stays smooth.
+     The intrinsic size is the collapsed row height - `auto` lets the engine
+     remember the real height of an expanded row once it has measured it. */
   .cfg-row {
     content-visibility: auto;
-    contain-intrinsic-size: auto 25px;
+    contain-intrinsic-size: auto 48px;
   }
 </style>

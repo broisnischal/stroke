@@ -790,6 +790,17 @@ pub async fn instance_config(
     crate::db::instance_config(state).await
 }
 
+/// Write one server setting (Postgres `ALTER SYSTEM`, MySQL `SET PERSIST`).
+/// `value = None` resets it to the server default.
+#[tauri::command]
+pub async fn instance_set_config(
+    state: State<'_, DbState>,
+    name: String,
+    value: Option<String>,
+) -> Result<crate::db::SetConfigResult, String> {
+    crate::db::instance_set_config(state, name, value).await
+}
+
 #[tauri::command]
 pub async fn instance_replication(
     state: State<'_, DbState>,
