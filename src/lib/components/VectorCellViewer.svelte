@@ -82,7 +82,9 @@
 </script>
 
 <Dialog.Root bind:open>
-  <Dialog.Content class="max-w-2xl gap-0 overflow-hidden p-0">
+  <!-- The dialog's own close button is absolutely positioned top-right, where it
+       landed on top of the "Raw" tab. Ours sits in the header row instead. -->
+  <Dialog.Content showCloseButton={false} class="max-w-2xl gap-0 overflow-hidden p-0">
     <!-- Header: what this is, and the one number that identifies it. -->
     <div class="flex h-11 shrink-0 items-center gap-2 border-b border-border/50 px-4">
       <Icon name="bar-chart-2" class="size-3.5 shrink-0 text-primary/60" />
@@ -106,6 +108,13 @@
           >{label}</button>
         {/each}
       </div>
+
+      <Dialog.Close
+        class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none"
+        aria-label="Close"
+      >
+        <Icon name="x" class="size-3.5" />
+      </Dialog.Close>
     </div>
 
     {#if !info}
