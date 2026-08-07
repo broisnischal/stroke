@@ -31,6 +31,22 @@
     return s.length > 2_000_000 ? s.slice(0, 2_000_000) + '\n… [truncated]' : s
   })
 
+  // Size the panel to the document instead of a fixed 900px: payloads with long
+  // URLs or tokens were readable only by scrolling sideways. Widest line wins,
+  // capped at the viewport so the dialog never outgrows the window.
+  const panelWidth = $derived.by(() => {
+    if (!jsonString) return 900
+    let longest = 0
+    // Only the first ~400 lines decide the width - a 2MB document would
+    // otherwise pay a full scan on every open for no visible difference.
+    const lines = jsonString.split('\n', 400)
+    for (const l of lines) if (l.length > longest) longest = l.length
+    const { fontSize } = readEditorFontOptions()
+    // ~0.6em per glyph in a monospace face, plus gutter and padding.
+    const px = Math.round(longest * fontSize * 0.6) + 110
+    return Math.min(1600, Math.max(720, px))
+  })
+
   /** @type {HTMLElement | null} */
   let container = $state(null)
   /** @type {HTMLElement | null} */
@@ -155,7 +171,7 @@
     <div
       role="presentation"
       class="relative flex flex-col overflow-hidden rounded-2xl border border-border/60 bg-background elevate-3-rim"
-      style="width: min(90vw, 900px); height: min(85vh, 700px)"
+      style="width: min(94vw, {panelWidth}px); height: min(88vh, 820px)"
       onclick={(e) => e.stopPropagation()}
     >
       <!-- Header -->
