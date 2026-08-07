@@ -1,4 +1,4 @@
-/** @typedef {'table' | 'sql' | 'ddl' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'extensions' | 'extension-detail' | 'backup' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search' | 'notebook' | 'schema-timeline' | 'data-diff' | 'insights' | 'objects' | 'redis' | 'license'} StudioTabKind */
+/** @typedef {'table' | 'sql' | 'ddl' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'extensions' | 'extension-detail' | 'backup' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search' | 'notebook' | 'schema-timeline' | 'data-diff' | 'insights' | 'objects' | 'redis' | 'license' | 'orm-schema'} StudioTabKind */
 
 import { loadDefaultPageSize } from '$lib/table-query.js'
 
@@ -411,6 +411,21 @@ export function findDiagramsTab(tabs) {
   return tabs.find((t) => t.kind === 'diagrams') ?? null
 }
 
+/** The connected schema rendered as Prisma / Drizzle source. */
+export function createOrmSchemaTab() {
+  return /** @type {StudioTab} */ ({
+    id: nextTabId(),
+    kind: 'orm-schema',
+    title: 'Codegen',
+    state: null,
+  })
+}
+
+/** @param {StudioTab[]} tabs */
+export function findOrmSchemaTab(tabs) {
+  return tabs.find((t) => t.kind === 'orm-schema') ?? null
+}
+
 export function createErdTab() {
   return /** @type {StudioTab} */ ({
     id: nextTabId(),
@@ -454,6 +469,7 @@ export function tabDisplayTitle(tab) {
   if (tab.kind === 'ai') return 'AI Chat'
   if (tab.kind === 'schema') return 'Schema Explorer'
   if (tab.kind === 'orm') return 'ORM Runner'
+  if (tab.kind === 'orm-schema') return 'Codegen'
   if (tab.kind === 'security') return 'Security'
   if (tab.kind === 'logs') return 'Activity Log'
   if (tab.kind === 'json') return 'JSON Viewer'

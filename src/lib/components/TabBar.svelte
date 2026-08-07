@@ -106,6 +106,7 @@
     if (tab.kind === 'ai') return 'bot'
     if (tab.kind === 'schema') return 'layout-template'
     if (tab.kind === 'orm') return 'code-2'
+    if (tab.kind === 'orm-schema') return 'file-text'
     if (tab.kind === 'security') return 'shield-check'
     if (tab.kind === 'extensions') return 'blocks'
     if (tab.kind === 'search') return 'search'

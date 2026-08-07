@@ -6,9 +6,10 @@
   import Logo from './Logo.svelte'
   import Database from '@lucide/svelte/icons/database'
   import Boxes from '@lucide/svelte/icons/boxes'
+  import FileCode2 from '@lucide/svelte/icons/file-code-2'
   import Terminal from '@lucide/svelte/icons/terminal'
   import Table2 from '@lucide/svelte/icons/table-2'
-  import Bot from '@lucide/svelte/icons/bot'
+  import Sparkles from '@lucide/svelte/icons/sparkles'
   import LayoutTemplate from '@lucide/svelte/icons/layout-template'
   import Command from '@lucide/svelte/icons/command'
   import Lightbulb from '@lucide/svelte/icons/lightbulb'
@@ -130,6 +131,8 @@
     createAiTab,
     createSchemaTab,
     createOrmTab,
+    createOrmSchemaTab,
+    findOrmSchemaTab,
     createSecurityTab,
     createLogsTab,
     createInsightsTab,
@@ -655,6 +658,7 @@
   let searchEverOpened = $state(false)
   let schemaTimelineEverOpened = $state(false)
   let dataDiffEverOpened = $state(false)
+  let ormSchemaEverOpened = $state(false)
   /** @type {{ focusEditor: () => void, openQuery?: (content: string) => void } | null} */
   let sqlConsoleRef = $state(null)
 
@@ -910,6 +914,7 @@
     if (activeTab?.kind === 'search') searchEverOpened = true
     if (activeTab?.kind === 'schema-timeline') schemaTimelineEverOpened = true
     if (activeTab?.kind === 'data-diff') dataDiffEverOpened = true
+    if (activeTab?.kind === 'orm-schema') ormSchemaEverOpened = true
   })
 
   // ── Idle-based teardown of hidden heavy views ─────────────────────────────
@@ -935,6 +940,7 @@
     { kind: 'erd',             get: () => erdEverOpened,            set: (/** @type {boolean} */ v) => (erdEverOpened = v) },
     { kind: 'diagrams',        get: () => diagramsEverOpened,       set: (/** @type {boolean} */ v) => (diagramsEverOpened = v) },
     { kind: 'schema-timeline', get: () => schemaTimelineEverOpened, set: (/** @type {boolean} */ v) => (schemaTimelineEverOpened = v) },
+    { kind: 'orm-schema',      get: () => ormSchemaEverOpened,      set: (/** @type {boolean} */ v) => (ormSchemaEverOpened = v) },
   ])
   /** kind → Date.now() when it last became hidden; absent while active or unmounted. */
   let _hiddenSince = /** @type {Record<string, number>} */ ({})
@@ -1889,6 +1895,10 @@ let rowSearch = $state('')
 
   createHotkey('Mod+B', (e) => {
     e.preventDefault()
+    // The connection dialog owns the screen while it's open, and it binds ⌘B to
+    // its own connections rail — toggling the workspace sidebar behind it would
+    // be an invisible edit the user only discovers after closing the dialog.
+    if (showConnectionModal) return
     toggleSidebar()
   })
 
@@ -2638,6 +2648,11 @@ let rowSearch = $state('')
 
   function openOrmTab() {
     openSingletonTab({ find: findOrmTab, create: createOrmTab })
+  }
+
+  /** The live schema written out as Prisma / Drizzle source. */
+  function openOrmSchemaTab() {
+    openSingletonTab({ find: findOrmSchemaTab, create: createOrmSchemaTab, capability: () => !isRedis })
   }
 
   function openSecurityTab() {
@@ -5532,6 +5547,7 @@ let rowSearch = $state('')
   onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
   onopeninsights={() => { if (aiMode) exitAiMode(); openInsightsTab() }}
   onopenobjects={() => { if (aiMode) exitAiMode(); openObjectsTab() }}
+  onopenormschema={() => { if (aiMode) exitAiMode(); openOrmSchemaTab() }}
   ontogglequerylog={() => { commandOpen = false; queryLogOpen = !queryLogOpen }}
   onopenextensions={() => { if (aiMode) exitAiMode(); openExtensionsTab() }}
   onopenredis={() => { if (aiMode) exitAiMode(); openRedisTab() }}
@@ -5898,6 +5914,20 @@ let rowSearch = $state('')
             onrefresh={async () => { await loadSchemas(); await loadTables({ force: true }) }}
           />
         </svelte:boundary>
+      {/if}
+
+      <!-- Schema as ORM code - mount once, keep alive -->
+      {#if ormSchemaEverOpened}
+        <div
+          class={activeTab?.kind === 'orm-schema' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+          inert={activeTab?.kind !== 'orm-schema' || undefined}
+        >
+          <svelte:boundary failed={tabError}>
+            {#await import('./OrmSchemaPage.svelte')}<TabLoading />{:then { default: OrmSchemaPage }}
+              <OrmSchemaPage schema={activeSchema} dbType={connection?.type ?? 'postgres'} connectionId={persistConnectionId} />
+            {/await}
+          </svelte:boundary>
+        </div>
       {/if}
 
       <!-- Security tab - mount once, keep alive -->
@@ -6616,13 +6646,52 @@ let rowSearch = $state('')
       {#if !activeTab || activeTab.kind === 'welcome'}
         {@const isMac = navigator.platform.toUpperCase().includes('MAC')}
         {@const mod = isMac ? '⌘' : 'Ctrl'}
-        {@const cell = 'group relative flex flex-col gap-3 rounded-lg border border-border/50 bg-card/60 p-3 text-left transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-[var(--ease-out)] hover:border-border hover:bg-accent/40 hover:shadow-sm active:scale-[0.98]'}
-        {@const proCell = 'group relative flex flex-col gap-3 rounded-lg border border-border/40 bg-card/40 p-3 text-left cursor-not-allowed transition-[color,background-color,border-color] duration-150 hover:border-warning/30 hover:bg-warning/[0.03]'}
-        {@const iconCls = 'size-4 text-muted-foreground transition-colors group-hover:text-foreground'}
-        {@const proIconCls = 'size-4 text-muted-foreground/40'}
-        {@const labelCls = 'text-ui-2xs font-medium leading-none text-foreground/70 transition-colors group-hover:text-foreground'}
-        {@const proLabelCls = 'text-ui-2xs font-medium leading-none text-foreground/35'}
-        {@const hotkeyCls = 'text-ui-3xs tabular-nums text-muted-foreground/50 group-hover:text-muted-foreground transition-colors self-end'}
+        <!-- Tile chrome. Every tile is the same fixed height with the icon row
+             pinned to the top and the label to the bottom, so labels stay on a
+             shared baseline whether or not a tile carries a chord or wraps to
+             two lines. Colors use solid tokens (not fractional alpha) - thinned
+             strokes read as fuzzy against the dark panel. -->
+        {@const cell = 'group relative flex h-[5.25rem] flex-col justify-between rounded-lg border border-border/60 bg-card/50 p-2.5 text-left transition-[background-color,border-color,box-shadow,transform] duration-150 ease-[var(--ease-out)] hover:border-border hover:bg-accent/40 hover:shadow-sm active:scale-[0.98]'}
+        {@const proCell = 'group relative flex h-[5.25rem] cursor-not-allowed flex-col justify-between rounded-lg border border-border/40 bg-card/30 p-2.5 text-left transition-[background-color,border-color] duration-150 hover:border-warning/30 hover:bg-warning/[0.04]'}
+        {@const iconCls = 'size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground'}
+        {@const proIconCls = 'size-4 shrink-0 text-muted-foreground/50'}
+        {@const labelCls = 'text-ui-2xs font-medium leading-[1.25] text-foreground/85 transition-colors group-hover:text-foreground'}
+        {@const proLabelCls = 'text-ui-2xs font-medium leading-[1.25] text-muted-foreground/60'}
+
+        <!-- Shift is spelled out off macOS: the bundled UI/mono webfonts have no
+             U+21E7, so "Ctrl⇧E" fell back mid-word and rendered as garbage.
+             Keys are separate spans - butted-together chords are unreadable at
+             this size. -->
+        {@const shiftKey = isMac ? '⇧' : 'Shift'}
+        {#snippet chord(/** @type {string[]} */ keys)}
+          <span class="flex shrink-0 items-center gap-1 font-mono text-ui-3xs leading-none text-muted-foreground/70 transition-colors group-hover:text-muted-foreground">
+            {#each keys as k (k)}<span>{k}</span>{/each}
+          </span>
+        {/snippet}
+
+        {#snippet tile(/** @type {any} */ Icon, /** @type {string} */ label, /** @type {() => void} */ onclick, /** @type {{ pro?: boolean, keys?: string[], hint?: string }} */ opts = {})}
+          {@const locked = !!opts.pro && !$hasPro}
+          <button
+            type="button"
+            {onclick}
+            title={opts.hint ? `${opts.hint}${locked ? ' — Pro' : ''}` : locked ? `${label} — Pro` : label}
+            class={locked ? proCell : cell}
+          >
+            <span class="flex w-full items-center justify-between gap-1.5">
+              <Icon class={locked ? proIconCls : iconCls} />
+              {#if locked}<Lock class="size-2.5 shrink-0 text-muted-foreground/30" />{/if}
+            </span>
+            <!-- Label + chord anchored to the bottom. The chord row is always
+                 present (empty when a tile has no shortcut) so every label in a
+                 row lands on the same baseline, wrapped or not. -->
+            <span class="mt-auto flex w-full flex-col gap-1">
+              <span class={locked ? proLabelCls : labelCls}>{label}</span>
+              <span class="flex h-[0.85rem] items-center">
+                {#if opts.keys && !locked}{@render chord(opts.keys)}{/if}
+              </span>
+            </span>
+          </button>
+        {/snippet}
 
         <!-- Scroll container keeps top/bottom padding reachable when the content
              outgrows the viewport (e.g. at high zoom); inner wrapper centers when it fits. -->
@@ -6634,151 +6703,84 @@ let rowSearch = $state('')
             <div class="flex size-11 items-center justify-center rounded-lg border border-border bg-muted">
               <Logo class="size-6" />
             </div>
-            <p class="text-ui-3xs font-medium uppercase tracking-[0.25em] text-muted-foreground/60">Quick access</p>
+            <p class="text-ui-3xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Quick access</p>
             {#if connection}
-              <div class="flex items-center gap-2 text-ui-sm font-medium text-foreground/80">
-                <span class="size-1.5 rounded-full bg-success shrink-0"></span>
-                <span class="font-mono">{connection.database ?? connection.filePath?.split('/').at(-1) ?? connection.name ?? connection.databaseId ?? 'connected'}</span>
-                <span class="text-muted-foreground/50 text-ui-xs">·</span>
-                <span class="capitalize text-muted-foreground/70 text-ui-xs font-normal">{dbType}</span>
+              <div class="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-ui-sm">
+                <span class="flex items-center gap-2 font-mono font-medium text-foreground">
+                  <span class="size-1.5 shrink-0 rounded-full bg-success"></span>
+                  {connection.database ?? connection.filePath?.split('/').at(-1) ?? connection.name ?? connection.databaseId ?? 'connected'}
+                </span>
+                <span class="text-ui-xs text-muted-foreground/60">·</span>
+                <span class="text-ui-xs capitalize text-muted-foreground">{dbType}</span>
                 {#if tables.length > 0}
-                  <span class="text-muted-foreground/50 text-ui-xs">·</span>
-                  <span class="text-ui-xs text-muted-foreground/60 font-normal">{tables.length} tables</span>
+                  <span class="text-ui-xs text-muted-foreground/60">·</span>
+                  <span class="text-ui-xs tabular-nums text-muted-foreground">{tables.length} {tables.length === 1 ? 'table' : 'tables'}</span>
                 {/if}
               </div>
             {/if}
           </div>
 
-          <!-- Action grid, max-w-sm keeps all sections aligned -->
-          <div class="grid w-full max-w-sm grid-cols-4 gap-1.5">
+          <!-- Action grid, max-w-md keeps all sections aligned -->
+          <div class="grid w-full max-w-md grid-cols-4 gap-2">
 
             {#if isRedis}
-              <button onclick={openRedisTab} class={cell}>
-                <KeyRound class={iconCls} />
-                <span class={labelCls}>Keyspace</span>
-              </button>
+              {@render tile(KeyRound, 'Keyspace', openRedisTab, {})}
+            {:else}
+              {@render tile(Terminal, 'SQL', openSqlTab, { keys: [mod, 'T'] })}
+              {@render tile(LayoutDashboard, 'Dashboard', openDashboardTab, { pro: true })}
             {/if}
 
-            {#if !isRedis}
-              <button onclick={openSqlTab} class={cell}>
-                <Terminal class={iconCls} />
-                <div class="flex items-end justify-between gap-1">
-                  <span class={labelCls}>SQL</span>
-                  <span class={hotkeyCls}>{mod}T</span>
-                </div>
-              </button>
-
-              <button onclick={openDashboardTab} class={$hasPro ? cell : proCell}>
-                {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
-                <LayoutDashboard class={$hasPro ? iconCls : proIconCls} />
-                <span class={$hasPro ? labelCls : proLabelCls}>Dashboard</span>
-              </button>
-            {/if}
-
-            <button onclick={openAiTab} class={$hasPro ? cell : proCell}>
-              {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
-              <Bot class={$hasPro ? iconCls : proIconCls} />
-              <div class="flex items-end justify-between gap-1">
-                <span class={$hasPro ? labelCls : proLabelCls}>AI</span>
-                {#if $hasPro}<span class={hotkeyCls}>{mod}⇧E</span>{/if}
-              </div>
-            </button>
+            {@render tile(Sparkles, 'AI', openAiTab, { pro: true, keys: [mod, shiftKey, 'E'] })}
 
             {#if !isRedis}
-              <button onclick={openOrmTab} class={$hasPro ? cell : proCell}>
-                {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
-                <Code2 class={$hasPro ? iconCls : proIconCls} />
-                <div class="flex items-end justify-between gap-1">
-                  <span class={$hasPro ? labelCls : proLabelCls}>ORM</span>
-                  {#if $hasPro}<span class={hotkeyCls}>{mod}⇧O</span>{/if}
-                </div>
-              </button>
+              {@render tile(Code2, 'ORM', openOrmTab, { pro: true, keys: [mod, shiftKey, 'O'] })}
             {/if}
 
             {#if hasSchemaExplorer}
-              <button onclick={openSchemaTab} class={$hasPro ? cell : proCell}>
-                {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
-                <LayoutTemplate class={$hasPro ? iconCls : proIconCls} />
-                <span class={$hasPro ? labelCls : proLabelCls}>Schema</span>
-              </button>
+              {@render tile(LayoutTemplate, 'Schema', openSchemaTab, { pro: true })}
             {/if}
 
             {#if hasSecurity}
-              <button onclick={openSecurityTab} class={$hasPro ? cell : proCell}>
-                {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
-                <ShieldCheck class={$hasPro ? iconCls : proIconCls} />
-                <span class={$hasPro ? labelCls : proLabelCls}>Security</span>
-              </button>
+              {@render tile(ShieldCheck, 'Security', openSecurityTab, { pro: true })}
             {/if}
 
-            <button onclick={openLogsTab} class={$hasPro ? cell : proCell}>
-              {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
-              <ScrollText class={$hasPro ? iconCls : proIconCls} />
-              <span class={$hasPro ? labelCls : proLabelCls}>Logs</span>
-            </button>
+            {@render tile(ScrollText, 'Logs', openLogsTab, { pro: true })}
 
             {#if !isRedis}
-              <button onclick={openInsightsTab} class={cell}>
-                <Database class={iconCls} />
-                <span class={labelCls}>Insights</span>
-              </button>
-
-              <button onclick={openObjectsTab} class={cell}>
-                <Boxes class={iconCls} />
-                <span class={labelCls}>Objects</span>
-              </button>
-
-              <button onclick={openChartsTab} class={$hasPro ? cell : proCell}>
-                {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
-                <BarChart2 class={$hasPro ? iconCls : proIconCls} />
-                <span class={$hasPro ? labelCls : proLabelCls}>Charts</span>
-              </button>
-
-              <button onclick={openDiagramsTab} class={$hasPro ? cell : proCell}>
-                {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
-                <GitBranch class={$hasPro ? iconCls : proIconCls} />
-                <span class={$hasPro ? labelCls : proLabelCls}>Diagrams</span>
-              </button>
-
-              <button onclick={openSchemaTimelineTab} class={$hasPro ? cell : proCell}>
-                {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
-                <History class={$hasPro ? iconCls : proIconCls} />
-                <span class={$hasPro ? labelCls : proLabelCls}>Timeline</span>
-              </button>
-
-              <button onclick={openDataDiffTab} class={$hasPro ? cell : proCell}>
-                {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
-                <GitCompare class={$hasPro ? iconCls : proIconCls} />
-                <span class={$hasPro ? labelCls : proLabelCls}>Data Diff</span>
-              </button>
-
-              <button onclick={openExtensionsTab} class={$hasPro ? cell : proCell}>
-                {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
-                <Blocks class={$hasPro ? iconCls : proIconCls} />
-                <span class={$hasPro ? labelCls : proLabelCls}>Extensions</span>
-              </button>
+              {@render tile(Database, 'Insights', openInsightsTab, {})}
+              {@render tile(Boxes, 'Objects', openObjectsTab, {})}
+              {@render tile(FileCode2, 'Codegen', openOrmSchemaTab, { pro: true, hint: 'Codegen — schema as Prisma or Drizzle code' })}
+              {@render tile(BarChart2, 'Charts', openChartsTab, { pro: true })}
+              {@render tile(GitBranch, 'Diagrams', openDiagramsTab, { pro: true })}
+              {@render tile(History, 'Timeline', openSchemaTimelineTab, { pro: true })}
+              {@render tile(GitCompare, 'Data Diff', openDataDiffTab, { pro: true })}
+              {@render tile(Blocks, 'Extensions', openExtensionsTab, { pro: true })}
             {/if}
 
-            <button onclick={() => (showConnectionModal = true)} class={cell}>
-              <Database class={iconCls} />
-              <span class={labelCls}>Connect</span>
-            </button>
+            {@render tile(Database, 'Connect', () => (showConnectionModal = true), {})}
           </div>
 
 
           <!-- Footer -->
-          <div class="flex items-center gap-3 text-ui-3xs text-muted-foreground/50">
+          <div class="flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 text-ui-3xs text-muted-foreground/80">
             <button
+              type="button"
               onclick={() => showShortcutsModal = true}
-              class="flex items-center gap-1 transition-colors hover:text-muted-foreground"
+              class="flex items-center gap-1.5 rounded-md px-1 py-0.5 transition-colors hover:text-foreground"
             >
-              <Command size={12} />
-              <span>shortcuts</span>
+              <Command class="size-3 shrink-0" />
+              <span>Shortcuts</span>
             </button>
-            <span>·</span>
-            <span class="font-mono">{mod}B sidebar</span>
-            <span>·</span>
-            <span class="font-mono">{mod}W close tab</span>
+            <span class="text-muted-foreground/40">·</span>
+            <span class="flex items-center gap-1.5">
+              {@render chord([mod, 'B'])}
+              <span>sidebar</span>
+            </span>
+            <span class="text-muted-foreground/40">·</span>
+            <span class="flex items-center gap-1.5">
+              {@render chord([mod, 'W'])}
+              <span>close tab</span>
+            </span>
           </div>
           </div>
         </div>
