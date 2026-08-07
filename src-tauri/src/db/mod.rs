@@ -15,6 +15,8 @@ mod schema;
 pub mod sql_util;
 pub mod sqlite;
 pub mod ssh_tunnel;
+pub mod local_scan;
+pub mod pg_ext_types;
 
 pub use connection::{
     connect, connect_clickhouse, connect_d1, connect_duckdb, connect_libsql, connect_mssql, connect_mysql, connect_redis, connect_sqlite, disconnect,
@@ -23,8 +25,9 @@ pub use connection::{
 };
 pub use explain::{explain_pg, explain_mysql, explain_sqlite, explain_from_text_lines, explain_from_sqlite_plan, ExplainResult};
 pub use insights::{
-    instance_activity, instance_config, instance_replication, instance_state, instance_version,
-    ConfigSetting, InstanceActivity, InstanceReplication, InstanceState, InstanceVersion,
+    instance_activity, instance_config, instance_replication, instance_set_config, instance_state,
+    instance_version, ConfigSetting, InstanceActivity, InstanceReplication, InstanceState,
+    InstanceVersion, SetConfigResult,
 };
 pub use ssh_tunnel::TunnelState;
 pub use query::{

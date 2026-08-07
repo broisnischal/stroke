@@ -15,6 +15,7 @@
     testMssqlConnection,    connectMssql,
     testRedis,              connectRedis,
     cloudflareListAccounts, cloudflareListD1Databases,
+    scanLocalStudios, scanDockerDatabases, scanMachineDatabases,
   } from '$lib/api.js'
   import {
     loadSavedConnections, upsertConnection, removeConnection,
@@ -25,6 +26,7 @@
   import { ScrollArea } from '$lib/components/ui/scroll-area/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
   import { Dialog as DialogPrimitive } from 'bits-ui'
+  import ResizeHandle from './ResizeHandle.svelte'
   import { cn }         from '$lib/utils.js'
   import { toast }      from '$lib/components/ui/sonner/toast.svelte.js'
   import { parseConnectionUri } from '$lib/connection-uri.js'
@@ -124,6 +126,7 @@
     supabase:        'text-emerald-500/80',
     planetscale:     'text-foreground/70',
     prisma:          'text-indigo-500/80',
+    drizzle:         'text-lime-500/80',
     redis:           'text-red-500/80',
   }
   function engineTint(id) { return ENGINE_TINT[id] ?? 'text-muted-foreground/60' }
@@ -239,6 +242,7 @@
     error = ''
     testOk = false
     step = 'pick'
+    engineQuery = ''
   }
 
   // Engines that expose the "Connection string | Manual fields" toggle.
@@ -617,6 +621,14 @@
     return null
   })
 
+  /** Left-rail subtitle: engine, or the studio a connection was picked up from. */
+  function connSubtitle(conn, cid) {
+    const source = conn.origin
+      ? (conn.toolLabel || (conn.origin === 'docker' ? 'Docker' : 'Studio'))
+      : driverById(cid).label
+    return `${source} · ${connDetail(conn)}`
+  }
+
   function connDetail(conn) {
     if (conn.type === 'sqlite' || conn.type === 'duckdb') return conn.filePath === ':memory:' ? 'in-memory' : (conn.filePath || '—')
     if (conn.type === 'libsql') return conn.url || '—'
@@ -639,6 +651,8 @@
       saved  = loadSavedConnections().sort((a, b) => (b.lastConnectedAt ?? 0) - (a.lastConnectedAt ?? 0))
       lastId = getLastConnectionId()
       resetForm(null)
+      engineQuery = ''
+      void refreshLocal()
     })
   })
 
@@ -648,25 +662,257 @@
     if (editingId === id) resetForm(null)
   }
 
+  /** Open `conn` with the driver its `type` calls for. */
+  function openConnection(conn) {
+    if (conn.type === 'sqlite') return connectSqlite(conn)
+    if (conn.type === 'd1') return connectD1(conn)
+    if (conn.type === 'libsql') return connectLibSql(conn)
+    if (conn.type === 'mysql' || conn.type === 'mariadb') return connectMysql(conn)
+    if (conn.type === 'clickhouse') return connectClickhouse(conn)
+    if (conn.type === 'duckdb') return connectDuckdb(conn)
+    if (conn.type === 'mssql') return connectMssql(conn)
+    if (conn.type === 'redis') return connectRedis(conn)
+    return connectPostgres(conn)
+  }
+
   async function connectWith(conn) {
     const myOp = ++opId
     connecting = conn.id; error = ''
     try {
-      if (conn.type === 'sqlite') await connectSqlite(conn)
-      else if (conn.type === 'd1') await connectD1(conn)
-      else if (conn.type === 'libsql') await connectLibSql(conn)
-      else if (conn.type === 'mysql' || conn.type === 'mariadb') await connectMysql(conn)
-      else if (conn.type === 'clickhouse') await connectClickhouse(conn)
-      else if (conn.type === 'duckdb') await connectDuckdb(conn)
-      else if (conn.type === 'mssql') await connectMssql(conn)
-      else if (conn.type === 'redis') await connectRedis(conn)
-      else await connectPostgres(conn)
+      await openConnection(conn)
       if (myOp !== opId) return // cancelled by the user
       const updated = { ...conn, lastConnectedAt: Date.now() }
       saved = upsertConnection(updated).sort((a, b) => (b.lastConnectedAt ?? 0) - (a.lastConnectedAt ?? 0))
       setLastConnectionId(conn.id)
       open = false
       await onconnected(updated, conn.id)
+    } catch (e) { if (myOp === opId) failWith(friendlyError(e)) }
+    finally { if (myOp === opId) connecting = null }
+  }
+
+  // ── Studios running on this machine ─────────────────────────────────────────
+  // `prisma studio` / `drizzle-kit studio` are already pointed at a database, and
+  // the backend reads which one out of that project's own schema/config. So they
+  // appear here as one-click targets: nothing to type, and nothing left behind -
+  // the row exists only while the studio does.
+
+  // Free-text filter over the driver grid and the detected studios. 17 engines
+  // in six groups is more than anyone should have to scan by eye.
+  let engineQuery = $state('')
+  /** @type {HTMLInputElement | null} */
+  let engineSearchEl = $state(null)
+
+  const engineMatches = $derived.by(() => {
+    const q = engineQuery.trim().toLowerCase()
+    if (!q) return CATEGORIES
+    return CATEGORIES
+      .map((c) => ({ ...c, drivers: c.drivers.filter((d) => `${d.label} ${d.desc} ${d.id}`.toLowerCase().includes(q)) }))
+      .filter((c) => c.drivers.length > 0)
+  })
+  /** Enter in the search box opens the single obvious result. */
+  const firstEngineMatch = $derived(engineMatches[0]?.drivers.find((d) => !DISABLED_TABS.has(d.id)) ?? null)
+
+  $effect(() => {
+    if (open && step === 'pick' && engineSearchEl) engineSearchEl.focus()
+  })
+
+  // ── Connections rail: width + collapsed state, remembered ──────────────────
+  const RAIL_KEY = 'stroke:conn-rail'
+  const RAIL_MIN = 260
+  const RAIL_MAX = 520
+  const RAIL_DEFAULT = 340
+
+  function loadRail() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(RAIL_KEY) ?? '{}')
+      return {
+        width: Math.min(RAIL_MAX, Math.max(RAIL_MIN, Number(raw.width) || RAIL_DEFAULT)),
+        open: raw.open !== false,
+      }
+    } catch { return { width: RAIL_DEFAULT, open: true } }
+  }
+  const _rail = loadRail()
+  let railWidth = $state(_rail.width)
+  let railOpen  = $state(_rail.open)
+  function saveRail() {
+    try { localStorage.setItem(RAIL_KEY, JSON.stringify({ width: railWidth, open: railOpen })) } catch { /* ignore */ }
+  }
+  let railDragStart = 0
+
+  let studios    = $state(/** @type {import('$lib/api.js').DetectedStudio[]} */ ([]))
+  let dockerDbs  = $state(/** @type {import('$lib/api.js').DockerDatabase[]} */ ([]))
+  let machineDbs = $state(/** @type {import('$lib/api.js').MachineDatabase[]} */ ([]))
+  let localPhase = $state(/** @type {'idle'|'scanning'|'done'} */ ('idle'))
+
+  async function refreshLocal() {
+    localPhase = 'scanning'
+    // Discovery is a convenience on both sides. A failure means "nothing found",
+    // never an error banner over a dialog opened to do something else.
+    const [s, d, m] = await Promise.all([
+      scanLocalStudios().catch(() => []),
+      scanDockerDatabases().catch(() => []),
+      scanMachineDatabases().catch(() => []),
+    ])
+    studios = s
+    dockerDbs = d
+    machineDbs = m
+    localPhase = 'done'
+  }
+
+  /**
+   * One row in "Running on this machine", from either source.
+   * @typedef {{
+   *   id: string, mark: string, trailingMark: string | null, title: string,
+   *   badge: string, subtitle: string, hint: string, conn: any | null,
+   * }} LocalTarget
+   */
+
+  /** @param {import('$lib/api.js').DetectedStudio} s */
+  function studioTarget(s) {
+    const built = s.engine ? studioConnection(s) : null
+    return /** @type {LocalTarget} */ ({
+      id: studioId(s),
+      mark: s.tool,
+      trailingMark: s.engine,
+      title: s.projectName,
+      badge: `:${s.port}`,
+      subtitle: built ? s.target : (s.reason ?? ''),
+      hint: built ? `${s.target} — from ${s.projectDir}/${s.source}` : (s.reason ?? ''),
+      conn: built && { ...built, origin: 'studio', tool: s.tool, toolLabel: s.toolLabel },
+    })
+  }
+
+  /** @param {import('$lib/api.js').DockerDatabase} d */
+  function dockerTarget(d) {
+    const label = `Docker · ${d.image}`
+    // Engine-shaped extras: the container is on loopback, so TLS is off unless
+    // the engine refuses to speak without it (SQL Server does).
+    const extras =
+      d.engine === 'redis' ? { db: 0, tls: false }
+      : d.engine === 'mssql' ? { encrypt: true, trustCert: true }
+      : d.engine === 'clickhouse' ? { secure: false }
+      : { ssl: false }
+    return /** @type {LocalTarget} */ ({
+      id: `docker:${d.name}`,
+      mark: d.engine,
+      trailingMark: null,
+      title: d.name,
+      badge: d.reason ? '' : `:${d.port}`,
+      subtitle: d.reason ?? d.target,
+      hint: d.reason ?? `${d.image} · container ${d.containerId} · ${d.user ? d.user + '@' : ''}${d.target}`,
+      conn: d.reason ? null : {
+        id: `docker:${d.name}`,
+        type: d.engine,
+        name: d.name,
+        host: d.host,
+        port: d.port,
+        user: d.user,
+        password: d.password,
+        database: d.database,
+        origin: 'docker',
+        toolLabel: label,
+        ...extras,
+      },
+    })
+  }
+
+  /** @param {import('$lib/api.js').MachineDatabase} m */
+  function machineTarget(m) {
+    return /** @type {LocalTarget} */ ({
+      id: m.id,
+      mark: m.engine,
+      trailingMark: null,
+      title: m.name,
+      badge: `:${m.port}`,
+      subtitle: m.target,
+      hint: `${m.name} (pid ${m.pid}) — connects as ${m.user || 'the default user'}`,
+      conn: {
+        id: m.id,
+        type: m.engine,
+        name: `${m.name} (:${m.port})`,
+        host: m.host,
+        port: m.port,
+        user: m.user,
+        password: '',
+        database: m.database,
+        origin: 'machine',
+        toolLabel: 'Installed on this machine',
+        ...(m.engine === 'redis' ? { db: 0, tls: false } : { ssl: false }),
+      },
+    })
+  }
+
+  const matchesQuery = (/** @type {LocalTarget} */ t) => {
+    const q = engineQuery.trim().toLowerCase()
+    return !q || `${t.title} ${t.subtitle}`.toLowerCase().includes(q)
+  }
+
+  // Three sources, three groups, in the order you'd reach for them: the studio
+  // you have open right now, then what's installed, then containers. A Docker
+  // container's server process is invisible to the machine scan (its socket
+  // lives in the container's netns), but a stray port collision would still be
+  // a duplicate row, so Docker wins on port.
+  const dockerPorts = $derived(new Set(dockerDbs.filter((d) => !d.reason).map((d) => d.port)))
+  const localGroups = $derived([
+    { key: 'studios', label: 'Local studios', targets: studios.map(studioTarget).filter(matchesQuery) },
+    {
+      key: 'machine',
+      label: 'Installed on this machine',
+      targets: machineDbs.filter((m) => !dockerPorts.has(m.port)).map(machineTarget).filter(matchesQuery),
+    },
+  ].filter((g) => g.targets.length > 0))
+  // Containers sit below the engine picker: eight of them above it pushed the
+  // thing most people came here for off the first screen. A container with no
+  // published port can't be opened from the host, so it isn't offered at all.
+  const dockerTargets = $derived(
+    dockerDbs.filter((d) => !d.reason).map(dockerTarget).filter(matchesQuery),
+  )
+  const localMatches = $derived([...localGroups.flatMap((g) => g.targets), ...dockerTargets])
+
+  /** Stable per project, so query history follows a studio across restarts. */
+  function studioId(s) { return `studio:${s.tool}:${s.projectDir}` }
+
+  /**
+   * A detected studio as a connection payload. Host engines go through the same
+   * URI parser as the paste bar, so one parser owns every connection string in
+   * the app. Null when the URL didn't parse.
+   */
+  function studioConnection(s) {
+    const base = { id: studioId(s), name: `${s.projectName} · ${s.toolLabel}` }
+    if (s.engine === 'sqlite') return { ...base, type: 'sqlite', filePath: s.filePath }
+    if (s.engine === 'libsql') return { ...base, type: 'libsql', url: s.url, authToken: s.authToken ?? '' }
+    if (s.engine === 'd1')     return { ...base, type: 'd1', accountId: s.accountId, databaseId: s.databaseId, apiToken: s.apiToken }
+    const uriType = s.engine === 'mysql' ? 'mysql' : s.engine === 'mssql' ? 'mssql' : 'postgres'
+    const parsed = parseConnectionUri(uriType, s.url ?? '')
+    if (!parsed || 'error' in parsed || !('host' in parsed)) return null
+    return {
+      ...base,
+      type: s.engine,
+      host: parsed.host, port: Number(parsed.port), database: parsed.database,
+      user: parsed.user, password: parsed.password,
+      ...('encrypt' in parsed ? { encrypt: parsed.encrypt, trustCert: parsed.trustCert } : { ssl: parsed.ssl }),
+    }
+  }
+
+  /**
+   * Open a local target. Nobody typed these credentials, but the connection
+   * still has to survive a disconnect and an app restart — so it joins the list
+   * under a stable id and becomes "last connection", and the normal resume path
+   * brings it back even once the studio or container scan is stale.
+   * @param {LocalTarget} t
+   */
+  async function connectLocal(t) {
+    if (!t.conn) return
+    const myOp = ++opId
+    connecting = t.conn.id; error = ''
+    try {
+      await openConnection(t.conn)
+      if (myOp !== opId) return // cancelled by the user
+      const stamped = { ...t.conn, lastConnectedAt: Date.now() }
+      saved = upsertConnection(stamped).sort((a, b) => (b.lastConnectedAt ?? 0) - (a.lastConnectedAt ?? 0))
+      setLastConnectionId(t.conn.id)
+      open = false
+      await onconnected(stamped, t.conn.id)
     } catch (e) { if (myOp === opId) failWith(friendlyError(e)) }
     finally { if (myOp === opId) connecting = null }
   }
@@ -754,15 +1000,7 @@
         return
       }
       const payload = formPayload()
-      if (payload.type === 'sqlite') await connectSqlite(payload)
-      else if (payload.type === 'd1') await connectD1(payload)
-      else if (payload.type === 'libsql') await connectLibSql(payload)
-      else if (payload.type === 'mysql' || payload.type === 'mariadb') await connectMysql(payload)
-      else if (payload.type === 'clickhouse') await connectClickhouse(payload)
-      else if (payload.type === 'duckdb') await connectDuckdb(payload)
-      else if (payload.type === 'mssql') await connectMssql(payload)
-      else if (payload.type === 'redis') await connectRedis(payload)
-      else await connectPostgres(payload)
+      await openConnection(payload)
       if (myOp !== opId) return // cancelled by the user
       const existing = editingId ? saved.find(s => s.id === editingId) : null
       const id = existing?.id ?? newConnectionId()
@@ -891,6 +1129,22 @@
     } catch { /* browser/non-Tauri env */ }
   }
 </script>
+
+<!-- ⌘R / Ctrl+R rescans what's running locally while the dialog is open. The
+     preventDefault matters: without it the webview reloads the whole app. -->
+<svelte:window onkeydown={(e) => {
+  if (!open) return
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'r') {
+    e.preventDefault()
+    saved = loadSavedConnections().sort((a, b) => (b.lastConnectedAt ?? 0) - (a.lastConnectedAt ?? 0))
+    void refreshLocal()
+  }
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'b') {
+    e.preventDefault()
+    railOpen = !railOpen
+    saveRail()
+  }
+}} />
 
 <!-- SSH Tunnel section (shared by PG and MySQL forms) -->
 <!-- Advanced options, SSL / SSH tunnel / encryption / read-only. Laid out to
@@ -1024,22 +1278,46 @@
       }}
     >
     <DialogPrimitive.Title class="sr-only">Connections</DialogPrimitive.Title>
-    <div class="grid h-full w-full min-h-0 grid-cols-[minmax(300px,340px)_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden">
+    <div
+      class="grid h-full w-full min-h-0 grid-rows-[minmax(0,1fr)] overflow-hidden"
+      style="grid-template-columns: {railOpen ? railWidth : 44}px minmax(0, 1fr)"
+    >
 
       <!-- ── Sidebar ─────────────────────────────────────────────── -->
-      <aside class="flex min-h-0 flex-col border-r border-border/15 bg-muted/[0.015]">
+      {#if !railOpen}
+        <aside class="flex min-h-0 flex-col items-center border-r border-border/15 bg-muted/[0.015] pt-2.5">
+          <button
+            type="button"
+            onclick={() => { railOpen = true; saveRail() }}
+            title="Show connections (⌘B)"
+            aria-label="Show connections"
+            class="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground/45 transition-colors hover:bg-muted/50 hover:text-foreground"
+          >
+            <Icon name="chevrons-right" class="size-4" />
+          </button>
+        </aside>
+      {:else}
+      <aside class="relative flex min-h-0 flex-col overflow-hidden border-r border-border/15 bg-muted/[0.015]">
 
         <!-- Title -->
-        <div class="flex h-[52px] shrink-0 items-center px-4">
+        <div class="flex h-[52px] shrink-0 items-center gap-2 px-4">
           <h2 class="text-ui-sm font-semibold text-foreground">Connections</h2>
           {#if saved.length > 0}
-            <span class="ml-2 rounded-full bg-muted/60 px-1.5 py-px text-ui-3xs font-medium tabular-nums text-muted-foreground/70">{saved.length}</span>
+            <span class="rounded-full bg-muted/60 px-1.5 py-px text-ui-3xs font-medium tabular-nums text-muted-foreground/70">{saved.length}</span>
           {/if}
+          <button
+            type="button"
+            onclick={() => { railOpen = false; saveRail() }}
+            title="Hide connections (⌘B)"
+            aria-label="Hide connections"
+            class="ml-auto inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/45 transition-colors hover:bg-muted/50 hover:text-foreground"
+          >
+            <Icon name="chevrons-left" class="size-4" />
+          </button>
         </div>
 
-
         <!-- New connection button -->
-        <div class="shrink-0 px-2 pb-2 pt-2">
+        <div class="shrink-0 border-t border-border/15 px-2 pb-2 pt-2">
           <button
             type="button"
             onclick={() => resetForm(null)}
@@ -1055,7 +1333,7 @@
           </button>
         </div>
 
-        <div class="min-h-0 flex-1">
+        <div class="min-h-0 flex-1 border-t border-border/15 pt-1">
           {#if saved.length > 0}
             <ScrollArea type="auto" class="h-full scroll-smooth">
               <div class="px-2 py-1 flex flex-col gap-0.5">
@@ -1081,7 +1359,7 @@
                     <!-- Fixed-size icon slot keeps every row's text left-edge aligned. Fades to Play on hover. -->
                     <button
                       type="button"
-                      class="relative flex size-7 shrink-0 items-center justify-center rounded-md disabled:opacity-30"
+                      class="relative flex size-6 shrink-0 items-center justify-center rounded-md disabled:opacity-30"
                       title="Connect"
                       disabled={!!connecting}
                       onclick={(e) => { e.stopPropagation(); void connectWith(conn) }}
@@ -1104,7 +1382,7 @@
                         {conn.name || 'Unnamed'}
                       </p>
                       <p class="mt-0.5 truncate text-ui-2xs leading-tight text-muted-foreground/55">
-                        {driverById(cid).label} · {connDetail(conn)}
+                        {connSubtitle(conn, cid)}
                       </p>
                     </div>
 
@@ -1123,11 +1401,21 @@
             </div>
           {/if}
         </div>
+        <!-- Drag the rail wider when connection names are long. -->
+        <div class="absolute inset-y-0 right-0 z-20 w-1">
+          <ResizeHandle
+            axis="x"
+            edge="end"
+            onresizestart={() => (railDragStart = railWidth)}
+            onresize={(dx) => (railWidth = Math.min(RAIL_MAX, Math.max(RAIL_MIN, railDragStart + dx)))}
+            onresizeend={saveRail}
+          />
+        </div>
       </aside>
+      {/if}
 
       <!-- ── Form panel ──────────────────────────────────────────── -->
-      <div class="flex min-h-0 min-w-0 flex-col">
-
+      <div class="relative flex min-h-0 min-w-0 flex-col">
         <!-- ── Header ──────────────────────────────────────────────────────
              One question per screen. Step 1 asks only what you're connecting to;
              the title becomes that choice in step 2, with the back arrow as the
@@ -1163,14 +1451,134 @@
              blurbs turned this into a wall of prose to read before the first
              decision, and the mark is what people actually recognise. -->
         {#if step === 'pick'}
+          <!-- Search sits outside the scroller: it is how you get to an engine
+               without reading six groups, so it must never scroll away. -->
+          <div class="shrink-0 px-8 pt-4">
+            <div class="relative max-w-[720px]">
+              <Icon name="search" class="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/40" />
+              <Input
+                bind:ref={engineSearchEl}
+                bind:value={engineQuery}
+                placeholder="Search databases and local studios…"
+                aria-label="Search databases"
+                class="pl-9 pr-8"
+                onkeydown={(e) => {
+                  if (e.key !== 'Enter' || !firstEngineMatch) return
+                  e.preventDefault()
+                  pickEngine(firstEngineMatch.id)
+                }}
+              />
+              {#if engineQuery}
+                <button
+                  type="button"
+                  onclick={() => { engineQuery = ''; engineSearchEl?.focus() }}
+                  aria-label="Clear search"
+                  class="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground/40 transition-colors hover:text-foreground"
+                ><Icon name="x" class="size-3" /></button>
+              {/if}
+            </div>
+          </div>
           <ScrollArea type="auto" class="min-h-0 flex-1 scroll-smooth">
-            <div class="flex max-w-[880px] flex-col gap-6 px-8 py-6">
-              {#each CATEGORIES as cat (cat.label)}
+            <div class="flex flex-col gap-5 px-8 py-5">
+              <!-- ── Studios running on this machine ────────────────────────
+                   A running `prisma studio` / `drizzle-kit studio` already knows
+                   its database, so this offers it directly - one click, no
+                   connection string, nothing saved afterwards. -->
+              {#if localPhase !== 'idle' && (localMatches.length > 0 || !engineQuery)}
+                <div class="flex flex-col gap-4">
+                  {#if localGroups.length === 0}
+                    <div>
+                      <p class="flex items-center gap-1.5 text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground/40">
+                        {@render liveDot()}
+                        Running on this machine
+                      </p>
+                      <p class="mt-2 text-ui-2xs leading-relaxed text-muted-foreground/45">
+                        {localPhase === 'scanning'
+                          ? 'Looking for local studios, installed servers and database containers…'
+                          : 'Nothing running locally. Start a Prisma or Drizzle studio, or a database container, and it shows up here ready to open.'}
+                      </p>
+                    </div>
+                  {/if}
+                  {#each localGroups as group, i (group.key)}
+                    {@render localGroup(group.label, group.targets, i === 0)}
+                  {/each}
+                </div>
+              {/if}
+
+              {#snippet liveDot()}
+                <span class="relative flex size-1.5 shrink-0">
+                  <span class="absolute inline-flex size-full animate-ping rounded-full bg-success/60"></span>
+                  <span class="relative inline-flex size-1.5 rounded-full bg-success"></span>
+                </span>
+              {/snippet}
+
+              {#snippet localGroup(/** @type {string} */ label, /** @type {LocalTarget[]} */ targets, /** @type {boolean} */ lead = false)}
+                <div>
+                  <p class="flex items-center gap-1.5 text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground/40">
+                    {#if lead}{@render liveDot()}{/if}
+                    {label}
+                    <span class="font-mono text-muted-foreground/30">{targets.length}</span>
+                    {#if lead}
+                      {#if localPhase === 'scanning'}
+                        <Icon name="loader-2" class="size-3 animate-spin text-muted-foreground/35" />
+                      {:else}
+                        <button
+                          type="button"
+                          title="Scan again (⌘R)"
+                          aria-label="Scan again for local databases"
+                          onclick={() => void refreshLocal()}
+                          class="-my-1 inline-flex size-6 items-center justify-center rounded text-muted-foreground/35 transition-colors hover:bg-muted/50 hover:text-foreground"
+                        ><Icon name="refresh-cw" class="size-3" /></button>
+                      {/if}
+                    {/if}
+                  </p>
+                  <div class="mt-2 grid grid-cols-[repeat(auto-fill,minmax(380px,1fr))] gap-2">
+                    {#each targets as t, i (t.id)}
+                      {@const busy = connecting === t.id}
+                      <button
+                        type="button"
+                        disabled={!t.conn || !!connecting}
+                        title={t.hint}
+                        onclick={() => void connectLocal(t)}
+                        style="animation-delay: {Math.min(i, 8) * 35}ms"
+                        class={cn(
+                          'cn-stagger-in group flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-left transition-[color,background-color,border-color,transform] duration-150 ease-out',
+                          t.conn
+                            ? 'border-border/50 text-foreground/90 hover:border-border hover:bg-muted/40 hover:text-foreground active:scale-[0.98] disabled:opacity-60'
+                            : 'cursor-not-allowed border-border/30 text-muted-foreground/40',
+                        )}
+                      >
+                        {#if busy}
+                          <Icon name="loader-2" class="size-4 shrink-0 animate-spin" />
+                        {:else}
+                          <DbIcon id={t.mark} class={cn('size-4 shrink-0', t.conn ? engineTint(t.mark) : 'opacity-30 grayscale')} />
+                        {/if}
+                        <span class="min-w-0 flex-1">
+                          <span class="block truncate text-ui-sm font-medium">{t.title}</span>
+                          <span class="mt-0.5 block truncate font-mono text-ui-2xs leading-tight text-muted-foreground/50">{t.subtitle}</span>
+                        </span>
+                        {#if t.trailingMark}
+                          <span class="flex size-5 shrink-0 items-center justify-center rounded border border-border/40 bg-muted/40">
+                            <DbIcon id={t.trailingMark} class={cn('size-3', engineTint(t.trailingMark))} />
+                          </span>
+                        {/if}
+                      </button>
+                    {/each}
+                  </div>
+                </div>
+              {/snippet}
+
+              {#each engineMatches as cat (cat.label)}
                 <div>
                   <p class="text-ui-3xs font-semibold uppercase tracking-wider text-muted-foreground/45">
                     {cat.label}
                   </p>
-                  <div class="mt-2.5 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
+                  <!-- Columns come from the window, not a fixed count: a card
+                       never goes below 230px (which is what turned "PostgreSQL"
+                       into "PostgreS…"), and on a wide window each group
+                       collapses to one row instead of leaving half the dialog
+                       empty. -->
+                  <div class="mt-2 grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-2">
                     {#each cat.drivers as d (d.id)}
                       {@const off = DISABLED_TABS.has(d.id)}
                       <button
@@ -1179,7 +1587,7 @@
                         title={off ? `${d.label} — coming soon` : d.desc}
                         onclick={() => pickEngine(d.id)}
                         class={cn(
-                          'group flex items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-[color,background-color,border-color,transform] duration-150 ease-out',
+                          'group flex h-9 items-center gap-2 rounded-md border px-2.5 text-left transition-[color,background-color,border-color,transform] duration-150 ease-out',
                           off
                             ? 'cursor-not-allowed border-border/30 text-muted-foreground/30'
                             : 'border-border/50 text-foreground/90 hover:border-border hover:bg-muted/40 hover:text-foreground active:scale-[0.98]',
@@ -1188,24 +1596,34 @@
                         <DbIcon
                           id={d.id}
                           class={cn(
-                            'size-5 shrink-0 transition-opacity',
+                            'size-4 shrink-0 transition-opacity',
                             off ? 'opacity-30 grayscale' : engineTint(d.id),
                           )}
                         />
                         <span class="min-w-0 flex-1 truncate text-ui-sm font-medium">{d.label}</span>
                         {#if off}
                           <span class="shrink-0 rounded bg-muted/50 px-1 py-px text-ui-3xs font-medium text-muted-foreground/50">soon</span>
-                        {:else}
-                          <Icon
-                            name="chevron-right"
-                            class="size-3.5 shrink-0 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/50"
-                          />
                         {/if}
                       </button>
                     {/each}
                   </div>
                 </div>
               {/each}
+
+              {#if dockerTargets.length > 0}
+                {@render localGroup('Docker', dockerTargets, false)}
+              {/if}
+
+              {#if engineQuery && engineMatches.length === 0 && localMatches.length === 0}
+                <div class="py-10 text-center">
+                  <p class="text-ui-sm text-muted-foreground">No database matches “{engineQuery}”.</p>
+                  <button
+                    type="button"
+                    onclick={() => { engineQuery = ''; engineSearchEl?.focus() }}
+                    class="mt-1 text-ui-xs text-muted-foreground/60 underline-offset-2 transition-colors hover:text-foreground hover:underline"
+                  >Clear search</button>
+                </div>
+              {/if}
             </div>
           </ScrollArea>
 
@@ -1693,7 +2111,7 @@
               <div class="flex min-w-0 flex-1 items-center gap-2 text-ui-2xs">
                 {#if step === 'pick'}
                   <span class="text-ui-2xs text-muted-foreground/40">
-                    {saved.length > 0 ? 'Or pick a saved connection on the left' : 'Everything stays on this machine'}
+                    {saved.length === 0 ? 'Everything stays on this machine' : railOpen ? 'Or pick a saved connection on the left' : 'Saved connections are hidden — reopen them from the top left'}
                   </span>
                 {:else if connecting}
                   <span class="flex shrink-0 items-center gap-1.5 font-medium text-muted-foreground/70"><Icon name="loader-2" class="size-3 animate-spin" />Connecting…</span>

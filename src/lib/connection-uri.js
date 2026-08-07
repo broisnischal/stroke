@@ -92,6 +92,33 @@ export function parseMssqlUri(uri) {
   const trimmed = uri.trim()
   if (!trimmed) return null
 
+  // Prisma (and JDBC) write SQL Server as `sqlserver://host:1433;database=x;user=y`
+  // — semicolon parameters, not a URL query string. `new URL` reads that as a
+  // malformed port and throws, so it is parsed on its own terms.
+  const semi = trimmed.match(/^(?:sqlserver|mssql):\/\/([^;]+);(.*)$/i)
+  if (semi) {
+    const [hostPart, rest] = [semi[1], semi[2]]
+    const [host, port] = hostPart.split(':')
+    /** @type {Record<string, string>} */
+    const params = {}
+    for (const pair of rest.split(';')) {
+      const at = pair.indexOf('=')
+      if (at <= 0) continue
+      params[pair.slice(0, at).trim().toLowerCase()] = pair.slice(at + 1).trim()
+    }
+    const yes = (v) => v === 'true' || v === '1' || v === 'yes'
+    const trustRaw = params.trustservercertificate
+    return {
+      host: host || '127.0.0.1',
+      port: port || '1433',
+      database: params.database ?? params.initialcatalog ?? '',
+      user: params.user ?? params.username ?? params.userid ?? '',
+      password: params.password ?? '',
+      encrypt: params.encrypt == null ? true : yes(params.encrypt.toLowerCase()),
+      trustCert: trustRaw == null ? true : yes(trustRaw.toLowerCase()),
+    }
+  }
+
   let normalized = trimmed
   if (/^(sqlserver|mssql):\/\//i.test(normalized)) {
     normalized = `mssql://${normalized.replace(/^[a-z]+:\/\//i, '')}`

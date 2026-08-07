@@ -522,6 +522,59 @@ export async function dockerRunDb(dbType, eventId) {
   return inv('docker_run_db', { dbType, eventId })
 }
 
+// ── Local ORM studios ─────────────────────────────────────────────────────────
+
+/**
+ * Prisma Studio / Drizzle Studio instances running on this machine, each with
+ * the database it is pointed at - read from that project's own schema/config, so
+ * a row can be connected to without anyone typing a connection string.
+ *
+ * @typedef {{
+ *   id: string, tool: 'prisma'|'drizzle', toolLabel: string, pid: number,
+ *   port: number, listening: boolean, projectDir: string, projectName: string,
+ *   engine: string | null, url: string | null, filePath: string | null,
+ *   authToken: string | null, accountId: string | null, databaseId: string | null,
+ *   apiToken: string | null, target: string, source: string, reason: string | null,
+ * }} DetectedStudio
+ *
+ * @returns {Promise<DetectedStudio[]>}
+ */
+export async function scanLocalStudios() {
+  return inv('scan_local_studios')
+}
+
+/**
+ * Database containers running in Docker, with the credentials they were started
+ * with - read from the container's own environment, so nothing has to be typed.
+ * Docker missing or stopped comes back as an empty list, never an error.
+ *
+ * @typedef {{
+ *   name: string, containerId: string, image: string, engine: string,
+ *   host: string, port: number, user: string, password: string,
+ *   database: string, target: string, reason: string | null,
+ * }} DockerDatabase
+ *
+ * @returns {Promise<DockerDatabase[]>}
+ */
+export async function scanDockerDatabases() {
+  return inv('scan_docker_databases')
+}
+
+/**
+ * Database servers installed natively on this machine. There is no password to
+ * recover for these - the row carries the engine's conventional local superuser.
+ *
+ * @typedef {{
+ *   id: string, name: string, pid: number, engine: string, host: string,
+ *   port: number, user: string, database: string, target: string,
+ * }} MachineDatabase
+ *
+ * @returns {Promise<MachineDatabase[]>}
+ */
+export async function scanMachineDatabases() {
+  return inv('scan_machine_databases')
+}
+
 // ── Shared disconnect ─────────────────────────────────────────────────────────
 
 export async function disconnectPostgres() {
@@ -822,6 +875,18 @@ export async function instanceActivity() { return await inv('instance_activity')
 export async function instanceState() { return await inv('instance_state') }
 export async function instanceConfig() { return await inv('instance_config') }
 export async function instanceReplication() { return await inv('instance_replication') }
+
+/**
+ * Change one server setting. Postgres persists it with `ALTER SYSTEM` and
+ * reloads; MySQL uses `SET PERSIST` (falling back to `SET GLOBAL`).
+ * @param {string} name
+ * @param {string | null} value `null` resets the setting to its default
+ * @returns {Promise<{ name: string, value: string, requiresRestart: boolean, reloaded: boolean, message: string }>}
+ */
+export async function instanceSetConfig(name, value) {
+  assertWritable('change server configuration')
+  return await inv('instance_set_config', { name, value })
+}
 
 /**
  * Run EXPLAIN ANALYZE on `sql` and return the parsed plan tree.

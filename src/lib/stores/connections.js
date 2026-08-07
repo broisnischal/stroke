@@ -32,6 +32,9 @@ const LAST_ID_KEY  = 'stroke:last-connection-id'
  *   environment?: 'prod' | 'staging' | 'dev' | null
  *   provider?: 'neon' | 'supabase' | 'planetscale' | 'prisma'
  *   group?: string | null
+ *   origin?: 'studio' | 'docker'  - discovered locally rather than typed in
+ *   tool?: 'prisma' | 'drizzle'
+ *   toolLabel?: string
  * }} SavedConnection
  */
 
