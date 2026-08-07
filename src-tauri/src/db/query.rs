@@ -351,6 +351,27 @@ pub(crate) fn cell_to_json(row: &sqlx::postgres::PgRow, idx: usize) -> Value {
                 return super::sql_util::oversize_cell(&type_name.to_lowercase(), bytes.len(), bytes);
             }
         }
+        // Extension types the driver has no decoder for: pgvector, PostGIS, bit
+        // strings. Their binary form is packed numbers, so the UTF-8 attempt
+        // below can never reach them and the cell used to read `<VECTOR>`.
+        // Both byte-level checks happen before `String::decode`, which consumes
+        // `raw` — and neither copies the payload.
+        if let Ok(bytes) = raw.as_bytes() {
+            if let Some(text) = super::pg_ext_types::decode_ext_type(type_name, bytes) {
+                return super::sql_util::cap_json_value(
+                    &type_name.to_lowercase(),
+                    Value::String(text),
+                );
+            }
+            // Not text and not a type we model: show what the bytes are rather
+            // than what they aren't. A hex preview is inspectable; `<TYPE>` isn't.
+            if !bytes.is_empty()
+                && type_name != "BYTEA"
+                && std::str::from_utf8(bytes).is_err()
+            {
+                return json!(super::pg_ext_types::hex_preview(bytes, 64));
+            }
+        }
         if let Ok(text) = <String as Decode<Postgres>>::decode(raw) {
             return json!(text);
         }

@@ -31,6 +31,9 @@
     onopenjson = null,
     /** Collapse this expanded row. @type {(() => void) | null} */
     onclose = null,
+    /** Width of the grid's left gutters, so the panel's content starts under the
+     *  first column instead of under the checkbox. */
+    indent = 0,
   } = $props()
 
   let html = $state('')
@@ -246,10 +249,16 @@
   }
 </script>
 
-<!-- Elevated card + left accent rail so the expanded row reads as a distinct,
-     contained section over the grid (bg-background matched the grid and had no
-     bottom edge, so it blended in). -->
-<div class="border-y border-l-2 border-border/40 border-l-primary/45 bg-card">
+<!-- Elevated card so the expanded row reads as a distinct section over the grid
+     (bg-background matched the grid and had no bottom edge, so it blended in).
+     It lines up with the grid rather than fighting it: content starts where the
+     first column starts, and the grid's own gutter rule carries on down the left
+     of that content — no coloured accent rail. -->
+<div class="relative border-y border-border/40 bg-card">
+  {#if indent > 0}
+    <span class="pointer-events-none absolute inset-y-0 w-px bg-border/40" style="left:{indent}px"></span>
+  {/if}
+  <div style={indent > 0 ? `padding-left:${indent}px` : undefined}>
   <!-- Toolbar -->
   <div class="flex items-center gap-2 border-b border-border/20 bg-muted/20 px-3 py-1">
     {#if rowLabel}
@@ -354,6 +363,7 @@
       {/if}
     </div>
   {/if}
+  </div>
 </div>
 
 <!-- context menu, portalled to body to escape will-change:transform on DataTable -->

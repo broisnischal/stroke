@@ -110,6 +110,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import MediaLightbox from "./MediaLightbox.svelte";
   import RowExpandViewer from "./RowExpandViewer.svelte";
   import ArrayCellEditor from "./ArrayCellEditor.svelte";
+  import VectorCellViewer from "./VectorCellViewer.svelte";
+  import { vectorSummary } from "$lib/vector-cell.js";
   import FkSubviewPanel from "./FkSubviewPanel.svelte";
   // JsonCellLightbox (Monaco-based) is imported lazily at its render site below.
   import CellQuickLook from "./CellQuickLook.svelte";
@@ -493,6 +495,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let contextMenuOpen = $state(false);
 
   // Array cell editor (Prisma-style add/remove for SQL array columns).
+  // Vector cells get their own viewer: a 1536-number literal in a textarea is
+  // the value without any of the meaning.
+  let vectorViewerOpen = $state(false);
+  let vectorViewerRow = $state(0);
+  let vectorViewerCol = $state(0);
+  let vectorViewerColName = $state("");
+  let vectorViewerType = $state("vector");
+  let vectorViewerNullable = $state(false);
+  let vectorViewerValue = $state("");
+
   let arrayEditorOpen = $state(false);
   let arrayEditorRow = $state(0);
   let arrayEditorCol = $state(0);
@@ -877,6 +889,40 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     return /\[\]\s*$/.test(colType ?? "");
   }
 
+  /** pgvector column types, whose values arrive as `[0.1,0.2,…]` text. */
+  function isVectorType(colType) {
+    return /^(vector|halfvec|sparsevec)\b/i.test(String(colType ?? "").trim());
+  }
+
+  // An embedding printed in full fills the row with digits that say nothing at a
+  // glance. The dimension leads, then as much of the head as fits. Display only:
+  // editing, copy and the viewer all still see the real value.
+  /** @type {Map<string, { heads: number, out: string }>} */
+  const _vectorDisplayCache = new Map();
+  /**
+   * How many leading values to show, from the room the column actually has.
+   * A narrow column that renders `384d · 0.1, 0.1, 0.…` is worse than one that
+   * renders `384d`: the dimension is the part you can read, and half a number is
+   * noise. So the head count follows the width instead of being fixed at three.
+   * @param {number} cellW
+   */
+  function vectorHeads(cellW) {
+    const glyph = _glyphW > 0 ? _glyphW : Math.max(6, (_fonts?.cellPx ?? 12) * 0.6);
+    const fits = Math.floor((cellW - CELL_PAD_X * 2) / glyph);
+    // "384d · " is ~7 glyphs and each value with its separator is ~7 more.
+    if (fits < 14) return 0;
+    return Math.max(1, Math.min(6, Math.floor((fits - 7) / 7)));
+  }
+  /** @param {string} text @param {number} heads */
+  function vectorDisplay(text, heads) {
+    const hit = _vectorDisplayCache.get(text);
+    if (hit !== undefined && hit.heads === heads) return hit.out;
+    const out = vectorSummary(text, heads);
+    if (_vectorDisplayCache.size > 4096) _vectorDisplayCache.clear();
+    _vectorDisplayCache.set(text, { heads, out });
+    return out;
+  }
+
   /** Truncated version for DOM rendering - keeps long values out of the render tree */
   function displayCell(value) {
     const s = formatCell(value);
@@ -1177,6 +1223,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
 
     focusedRow = rowIdx;
+    // A vector opens its own viewer rather than an inline text box: 1,500
+    // characters of `0.1,0.1,…` in a one-line input is not an edit surface.
+    if (openVectorViewer(rowIdx, colIdx)) return;
     const startValue = effectiveCellValue(rowIdx, colIdx);
     const oversize = oversizeCellInfo(startValue);
     if (oversize) {
@@ -1209,6 +1258,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   /** @param {number} rowIdx @param {number} colIdx */
   function openQuickLook(rowIdx, colIdx) {
+    // Vectors have a viewer that says something; the generic preview doesn't.
+    if (openVectorViewer(rowIdx, colIdx)) return;
     const col = columns[colIdx];
     if (!col) return;
     const dataType = col.dataType ?? col.data_type ?? "";
@@ -1973,6 +2024,34 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   }
 
   /** Open the dedicated array editor for a cell (from the context menu). */
+  /** Open the vector viewer for a cell. Returns false when it isn't a vector. */
+  function openVectorViewer(rowIdx, colIdx) {
+    const col = columns[colIdx];
+    if (!col) return false;
+    const type = String(col.dataType ?? col.data_type ?? _colCache[colIdx]?.colType ?? "");
+    if (!isVectorType(type)) return false;
+    const v = effectiveCellValue(rowIdx, colIdx);
+    if (typeof v !== "string") return false;
+    vectorViewerRow = rowIdx;
+    vectorViewerCol = colIdx;
+    vectorViewerColName = col.name ?? "vector";
+    vectorViewerType = type.replace(/\(.*$/, "").trim() || "vector";
+    vectorViewerNullable = col.isNullable ?? col.is_nullable ?? true;
+    vectorViewerValue = v;
+    vectorViewerOpen = true;
+    return true;
+  }
+
+  /** @param {string | null} next */
+  function commitVectorViewer(next) {
+    const rowIdx = vectorViewerRow, colIdx = vectorViewerCol;
+    if (!canEditColumn(colIdx)) return;
+    const prevValue = effectiveCellValue(rowIdx, colIdx);
+    stageEdit(rowIdx, colIdx, next);
+    pastEdits = [...pastEdits.slice(-49), { rowIdx, colIdx, oldValue: prevValue, newValue: next }];
+    futureEdits = [];
+  }
+
   function openArrayEditor(rowIdx, colIdx) {
     const col = columns[colIdx];
     if (!col) return;
@@ -4194,7 +4273,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       const cw = _vrelLayout[vi].w
       const cellX = _vrelLayout[vi].x - _scrollLeft
       if (cellX + cw <= 0 || cellX >= _viewportWidth) continue
+      // Panel base, then the row's own tint on top: painting only the panel left
+      // the relationship columns dark while the rest of a selected row lit up,
+      // so the highlight stopped mid-row.
       ctx.fillStyle = c.cPanel; ctx.fillRect(cellX, ry, cw, rh)
+      if (_rowBg) { ctx.fillStyle = _rowBg; ctx.fillRect(cellX, ry, cw, rh) }
       const isActive = fkSubview?.rowIdx === idx && fkSubview?.kind === 'reverse' && fkSubview?.label === vc.label
       const isVHov = hoveredRow === idx && hoveredColName === _vrelHoverKeys[vi]
       if (!_fonts) return
@@ -4369,13 +4452,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const revealed = dir?.mask && isHover
     // SQL array columns render pgAdmin-style ({a,b}); jsonb arrays stay JSON.
     const isArrayCol = Array.isArray(value) && isSqlArrayType(cached?.colType)
+    const isVectorCol = typeof value === "string" && isVectorType(cached?.colType)
     const text = colTf
       ? colTransformText(idx, actualIdx, value, colTf)
       : dir
         ? String(revealed ? (dir.reveal ?? dir.display) : (dir.display ?? displayCell(value)))
         : isArrayCol
           ? arrayDisplay(value)
-          : staged || !rows[idx]
+          : isVectorCol
+            ? vectorDisplay(value, vectorHeads(w))
+            : staged || !rows[idx]
             ? displayCell(value)
             : cellDisplayText(idx, actualIdx, value)
     // NULL glyph when the Empty & NULL Markers plugin is on (formatters skip null).
@@ -4403,9 +4489,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // collide, give up room, and only while the pointer is in the cell.
     const hoverW = isHover ? ICON_HIT + (canExpand ? ICON_HIT : 0) : 0
     const fkW = (activeFk && rowHover) ? 20 : 0
-    // Right-aligned text gets a real gap off the edge rather than the 4px
-    // margin that left-aligned values never actually reach.
-    const rightReserve = (alignRight ? CELL_PAD_X : 4) + (alignRight ? 0 : hoverW) + fkW + warnW
+    // The same gap on both sides. Left-aligned text used to reserve 4px on the
+    // assumption that a value never reaches the right edge — but a *truncated*
+    // value reaches it every time, which put the ellipsis hard against the column
+    // divider and made every long column read as congested.
+    const rightReserve = CELL_PAD_X + (alignRight ? 0 : hoverW) + fkW + warnW
     const hoverLeftReserve = alignRight ? hoverW : 0
 
     // Left-side decorations (color swatch / boolean dot) push the text right.
@@ -5855,6 +5943,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                 <RowExpandViewer
                   record={rowToRecord(columns, rows[exIdx], hiddenColumns)}
                   rowLabel={"row " + (exIdx + 1)}
+                  indent={gutterWidth}
                   onclose={() => toggleRowExpand(exIdx)}
                   onopenjson={(value, label) => {
                     void prefetchJsonLightbox()
@@ -6635,6 +6724,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     />
   {/await}
 {/if}
+
+<VectorCellViewer
+  bind:open={vectorViewerOpen}
+  column={vectorViewerColName}
+  dataType={vectorViewerType}
+  nullable={vectorViewerNullable}
+  readOnly={readonly}
+  value={vectorViewerValue}
+  onsave={commitVectorViewer}
+/>
 
 <ArrayCellEditor
   bind:open={arrayEditorOpen}
