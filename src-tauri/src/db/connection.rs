@@ -465,6 +465,9 @@ async fn preflight(host: &str, port: u16) -> Preflight {
 async fn connect_racing_probe<T>(
     host: &str,
     port: u16,
+    // Set when TCP is proven, for the Postgres retry ladder. None for engines
+    // whose connect isn't retried.
+    tcp_ok: Option<&std::sync::atomic::AtomicBool>,
     connect: impl std::future::Future<Output = Result<T, String>>,
 ) -> Result<T, String> {
     let t0 = std::time::Instant::now();
@@ -489,6 +492,11 @@ async fn connect_racing_probe<T>(
                 match outcome {
                     Preflight::Reachable(addr) => {
                         log::info!("preflight {host}:{port} -> {addr} reachable in {ms}ms");
+                        // Tells retry_fast to stop restarting the handshake: a SYN
+                        // that gets through here is getting through there too.
+                        if let Some(flag) = tcp_ok {
+                            flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                        }
                     }
                     Preflight::Unreachable(msg) => {
                         log::warn!("preflight {host}:{port} definitively unreachable in {ms}ms: {msg}");
@@ -521,6 +529,23 @@ async fn connect_racing_probe<T>(
 
 // ── PostgreSQL connect / test ─────────────────────────────────────────────────
 
+/// How long a pooled connection may sit idle before it is worth a liveness ping.
+///
+/// The two settings below pull in opposite directions: `min_connections` keeps
+/// connections standing by so a burst never pays a handshake, and
+/// `test_before_acquire(false)` skips the ping that would prove they're alive.
+/// Together they mean that after a laptop sleep, a VPN flip or a wifi change
+/// every standing connection is dead and the next query gets one of them — which
+/// is the slow, error-then-reconnect path the user actually feels.
+///
+/// Pinging every acquire costs a full round trip six times over on one table
+/// open, which is why it was turned off. But a connection handed back seconds ago
+/// cannot have died in the meantime, and one that has been idle for a minute very
+/// well might. So the ping is gated on idle time: free on the hot path, and the
+/// dead-connection case heals inside `acquire()` instead of surfacing as a failed
+/// query and a full reconnect.
+const STALE_AFTER: Duration = Duration::from_secs(25);
+
 fn pg_pool_builder() -> PgPoolOptions {
     PgPoolOptions::new()
         // Desktop app: steady-state use only needs ~4 connections. But the FIRST
@@ -543,17 +568,26 @@ fn pg_pool_builder() -> PgPoolOptions {
         // link that drops ~20% of SYNs (a lost SYN costs the kernel's ~4s
         // retransmit, and several at once outran acquire_timeout).
         //
-        // This was 0 because idle connections come back dead after sleep/wake
-        // and cost a stall while the pool replaced them. With
-        // test_before_acquire(false) a dead connection now surfaces as a query
-        // error, which the app's silent auto-reconnect already heals in place.
-        .min_connections(4)
+        // Two, not four. Idle connections coming back dead after sleep/wake is
+        // handled by the idle-gated ping below, so this only has to cover the
+        // burst — and on a host where one handshake costs seconds (a proxied
+        // serverless Postgres measured at ~5.7s) four background opens raced the
+        // first table open's six queries for the same ten slots. The row counts
+        // lost that race, which is exactly what "pool timed out while waiting for
+        // an open connection" was in the log.
+        .min_connections(2)
         // The preflight already filtered definitively unreachable hosts, so a
         // short acquire timeout keeps auth/handshake failures snappy. It must
         // still clear a cold-pool handshake on a slow remote link (TCP + TLS +
         // auth is ~6 round trips), hence 10 s rather than something tighter —
-        // warm_pool below is what keeps the common path off this ceiling.
-        .acquire_timeout(Duration::from_secs(10))
+        // `min_connections` is what keeps the common path off this ceiling.
+        //
+        // 20s, not 10: a single handshake to a proxied serverless host measured
+        // 5.7s, so a query queued behind two of them blew a 10s ceiling and failed
+        // as "pool timed out" — reporting a timeout for a connection that was
+        // simply still being made. The connect path has its own CONNECT_DEADLINE;
+        // this only bounds how long a query waits for a slot.
+        .acquire_timeout(Duration::from_secs(20))
         // Keep connections warm for the whole active session. A short idle_timeout
         // (was 30 s) meant any pause longer than that forced a full TCP+TLS+auth
         // re-handshake on the next query — on a remote/SSL host that's seconds of
@@ -570,49 +604,32 @@ fn pg_pool_builder() -> PgPoolOptions {
         // makes the pool discard and reopen, retrying until acquire_timeout,
         // which is how warming five connections took exactly 10s.
         //
-        // Staleness is still bounded by max_lifetime, and a connection killed by
-        // sleep/wake now surfaces as a query error that the app's silent
-        // auto-reconnect already heals in place.
+        // Staleness is bounded by max_lifetime, and anything idle long enough to
+        // have been killed by a sleep/wake is checked by `before_acquire` below.
         .test_before_acquire(false)
+        // Ping only what might be dead — see STALE_AFTER. A failure here makes the
+        // pool drop this connection and hand over another (or open one), so a
+        // stale pool repairs itself during acquire rather than after a failed query.
+        .before_acquire(|conn, meta| {
+            Box::pin(async move {
+                if meta.idle_for < STALE_AFTER {
+                    return Ok(true);
+                }
+                sqlx::query("SELECT 1").execute(&mut *conn).await?;
+                Ok(true)
+            })
+        })
 }
 
-/// How many connections to have standing by before the user's first query.
-/// The first table open bursts rows + four catalog lookups; anything the pool
-/// hasn't already opened is a TCP + TLS + auth handshake on the critical path.
-/// Deliberately below `max_connections - 6`: the warm holds every connection it
-/// opens until the last one lands, so it must never be able to starve the
-/// first-open burst that runs alongside it.
-const PG_WARM_CONNECTIONS: usize = 3;
-
-/// Open `PG_WARM_CONNECTIONS` connections in parallel and release them straight
-/// back to the pool.
-///
-/// `min_connections` is deliberately 0 (see `pg_pool_builder`: idle connections
-/// held across a sleep/wake come back dead and cost a 27 s stall), so the pool
-/// starts with exactly the one connection the handshake produced. That left the
-/// first table open paying for four more handshakes at once — several seconds on
-/// a remote host. Filling the pool here moves that cost into the connect step,
-/// where the user is already waiting on a progress indicator, and it stays
-/// filled for `idle_timeout`.
-///
-/// Best effort: a failure here is not a connection failure. The pool opens the
-/// connection on demand later exactly as it did before.
-async fn warm_pool(pool: &PgPool) {
-    let handles: Vec<_> = (0..PG_WARM_CONNECTIONS).map(|_| pool.acquire()).collect();
-    // Held until the end of the statement, so the pool has to open a distinct
-    // connection for each rather than handing the same one out twice.
-    //
-    // Bounded: this is an optimisation, not a requirement. Unbounded it rode the
-    // pool's 10s acquire_timeout, so a host that was slow to open extra
-    // connections got hammered for ten seconds after every single connect.
-    // Off the critical path this costs the user nothing; the timeout only stops
-    // a dead host being retried forever.
-    let _ = tokio::time::timeout(
-        Duration::from_secs(8),
-        futures::future::join_all(handles),
-    )
-    .await;
-}
+// The pool used to force three extra connections open right after connect
+// (`warm_pool`), from a time when `min_connections` was 0 and the pool started
+// with exactly the one connection the handshake produced. `min_connections(4)`
+// now has the pool's own maintenance task doing that in the background, so the
+// warm added nothing but three more acquires per connect — and because it HELD
+// each one until the last landed, it was also what made "pool timed out while
+// waiting for an open connection" reachable on a slow link. Removed rather than
+// tuned: the pool already does this, and one mechanism is easier to reason about
+// than two fighting over the same ceiling.
 
 /// Turn sqlx's `PoolTimedOut` into the error that actually caused it.
 ///
@@ -659,7 +676,7 @@ async fn explain_pg_failure(opts: &PgConnectOptions, pool_err: String) -> String
 /// Escalating budgets so a genuinely slow-but-healthy host (cold serverless
 /// Postgres, distant region) still gets time to answer rather than being retried
 /// forever; the last attempt is unbounded and carries any real error back.
-async fn retry_fast<T, F, Fut>(mut attempt: F) -> Result<T, sqlx::Error>
+async fn retry_fast<T, F, Fut>(tcp_ok: &std::sync::atomic::AtomicBool, mut attempt: F) -> Result<T, sqlx::Error>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<T, sqlx::Error>>,
@@ -682,13 +699,42 @@ where
     // A timed-out attempt drops its half-built pool, which closes whatever
     // connections it had opened, so retrying does not pile connections onto the
     // server.
-    const BUDGETS_MS: [u64; 4] = [800, 1500, 3000, 6000];
+    // The retry only ever earned its place against a LOST SYN — a packet dropped
+    // before the socket exists, where the kernel then sits on its ~1s retransmit.
+    // It cannot help a handshake that is merely slow, because restarting one pays
+    // the TLS and auth round trips again from zero.
+    //
+    // The ladder used to fire on every connect, calibrated against a nearby host
+    // ("a healthy connect measures 265-364ms"). Against a proxied serverless
+    // Postgres whose handshake genuinely takes ~5.7s it did this:
+    //
+    //     preflight reachable in 91ms
+    //     attempt 1 exceeded 800ms   → thrown away
+    //     attempt 2 exceeded 1500ms  → thrown away
+    //     attempt 3 exceeded 3000ms  → thrown away
+    //     connected in 11067ms
+    //
+    // 5.3 seconds of progress binned, and four half-built pools left for the
+    // server to clean up — which is also how "pool timed out" showed up on the
+    // first table open.
+    //
+    // So the probe decides. It opens its own TCP connection to the same host, and
+    // the moment that succeeds we know SYNs are getting through: any stall after
+    // that is slowness, not loss, and the attempt in flight is the fastest one
+    // we will ever have. Only while TCP is still unproven is a fresh SYN worth
+    // sending.
+    const BUDGETS_MS: [u64; 3] = [800, 1500, 3000];
     for (i, ms) in BUDGETS_MS.iter().enumerate() {
+        if tcp_ok.load(std::sync::atomic::Ordering::Relaxed) {
+            // TCP demonstrably works. Stop bounding the handshake and let it land.
+            break;
+        }
         match tokio::time::timeout(Duration::from_millis(*ms), attempt()).await {
             Ok(res) => return res,
             Err(_) => log::info!("connect attempt {} exceeded {ms}ms, retrying with a fresh SYN", i + 1),
         }
     }
+    // Unbounded here, but the caller's CONNECT_DEADLINE still caps the whole thing.
     attempt().await
 }
 
@@ -731,8 +777,11 @@ pub(crate) async fn open_pg(config: &PgConfig) -> Result<PgPool, String> {
         .map(|t| format!("SET TIME ZONE '{}'", t.replace('\'', "''")));
 
     let explain_opts = opts.clone();
+    // Shared with the preflight: set the moment a TCP handshake to this host
+    // succeeds, so the retry ladder stops restarting a handshake that is fine.
+    let tcp_ok = std::sync::atomic::AtomicBool::new(false);
     let connect = async {
-        match retry_fast(|| pg_pool_builder().connect_with(fast_opts.clone())).await {
+        match retry_fast(&tcp_ok, || pg_pool_builder().connect_with(fast_opts.clone())).await {
             Ok(pool) => Ok(pool),
             // Some poolers (PgBouncer without `ignore_startup_parameters=options`)
             // reject the `options` startup parameter outright. Fall back to the
@@ -759,7 +808,7 @@ pub(crate) async fn open_pg(config: &PgConfig) -> Result<PgPool, String> {
         }
     };
 
-    connect_racing_probe(&config.host, config.port, connect).await
+    connect_racing_probe(&config.host, config.port, Some(&tcp_ok), connect).await
 }
 
 pub async fn test_connection(config: PgConfig) -> Result<(), String> {
@@ -782,17 +831,10 @@ pub async fn connect(
     let (effective, tunnel) = resolve_pg_ssh(config).await?;
     let pool = open_pg(&effective).await?;
     close_existing(&state).await;
-    set_conn(&state, Some(ActiveConnection::Postgres(pool.clone())))?;
-    // Warm in the BACKGROUND. Filling the pool is worth doing, but awaiting it
-    // put five more handshakes on the critical path - the user sat on the
-    // connecting overlay for an extra round of TCP+TLS+auth before the app
-    // opened. The pool is an Arc, so the spawned task keeps filling the same one
-    // the UI is already using.
-    tokio::spawn(async move {
-        let t = std::time::Instant::now();
-        warm_pool(&pool).await;
-        log::info!("pool warmed in {}ms", t.elapsed().as_millis());
-    });
+    set_conn(&state, Some(ActiveConnection::Postgres(pool)))?;
+    // Nothing else to do here: `min_connections` fills the pool from the pool's
+    // own maintenance task, off the critical path, and the connect returns as
+    // soon as the first connection is usable.
     tunnel_state.set(tunnel);
     Ok(())
 }
@@ -879,8 +921,18 @@ pub(crate) async fn open_mysql(config: &MysqlConfig) -> Result<MySqlPool, String
         // so repeat fetches don't pay a fresh TCP+TLS+auth handshake.
         .idle_timeout(Duration::from_secs(600))
         .max_lifetime(Duration::from_secs(1800))
-        // See pg_pool_builder: the pre-acquire ping is a round trip per acquire.
+        // See pg_pool_builder: the pre-acquire ping is a round trip per acquire,
+        // so it is gated on idle time instead of run on every one.
         .test_before_acquire(false)
+        .before_acquire(|conn, meta| {
+            Box::pin(async move {
+                if meta.idle_for < STALE_AFTER {
+                    return Ok(true);
+                }
+                sqlx::query("SELECT 1").execute(&mut *conn).await?;
+                Ok(true)
+            })
+        })
         // Enable ANSI_QUOTES on every connection so double-quoted identifiers
         // ("col") work the same as backtick identifiers (`col`). This makes
         // standard SQL and AI-generated queries work without rewriting syntax.
@@ -901,6 +953,7 @@ pub(crate) async fn open_mysql(config: &MysqlConfig) -> Result<MySqlPool, String
     connect_racing_probe(
         &config.host,
         config.port,
+        None,
         async { connect.await.map_err(|e| format!("Connection failed: {e}")) },
     )
     .await
@@ -976,7 +1029,7 @@ pub async fn connect_libsql(state: State<'_, DbState>, config: LibSqlConfig) -> 
 
 pub async fn test_clickhouse_connection(config: ClickhouseConfig) -> Result<(), String> {
     let (host, port) = (config.host.clone(), config.port);
-    connect_racing_probe(&host, port, async move {
+    connect_racing_probe(&host, port, None, async move {
         crate::db::clickhouse::query(&config, "SELECT 1").await?;
         Ok(())
     })
@@ -994,7 +1047,7 @@ pub async fn connect_clickhouse(state: State<'_, DbState>, config: ClickhouseCon
 
 pub async fn test_redis_connection(config: RedisConfig) -> Result<(), String> {
     let (host, port) = (config.host.clone(), config.port);
-    connect_racing_probe(&host, port, crate::db::redis::ping(&config)).await
+    connect_racing_probe(&host, port, None, crate::db::redis::ping(&config)).await
 }
 
 pub async fn connect_redis(state: State<'_, DbState>, config: RedisConfig) -> Result<(), String> {
@@ -1038,7 +1091,7 @@ pub async fn connect_duckdb(state: State<'_, DbState>, config: DuckdbConfig) -> 
 
 pub(crate) async fn open_mssql(config: &MssqlConfig) -> Result<MssqlHandle, String> {
     let client =
-        connect_racing_probe(&config.host, config.port, crate::db::mssql::connect(config)).await?;
+        connect_racing_probe(&config.host, config.port, None, crate::db::mssql::connect(config)).await?;
     Ok(Arc::new(tokio::sync::Mutex::new(client)))
 }
 
@@ -1072,6 +1125,46 @@ pub async fn disconnect(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    /// The whole point of the probe signal: once TCP is proven, a slow handshake
+    /// must be waited out, not restarted. Restarting pays TLS and auth again, and
+    /// against a host whose handshake takes ~5s the old ladder threw away 5.3s
+    /// before the attempt that finally landed.
+    #[tokio::test(start_paused = true)]
+    async fn a_proven_tcp_path_is_never_retried() {
+        let tries = AtomicUsize::new(0);
+        let tcp_ok = AtomicBool::new(true);
+        let got = retry_fast(&tcp_ok, || async {
+            tries.fetch_add(1, Ordering::Relaxed);
+            // Far longer than every budget in the ladder combined.
+            tokio::time::sleep(Duration::from_secs(9)).await;
+            Ok::<u8, sqlx::Error>(7)
+        })
+        .await;
+        assert_eq!(got.unwrap(), 7);
+        assert_eq!(tries.load(Ordering::Relaxed), 1, "a slow but healthy handshake was restarted");
+    }
+
+    /// While TCP is still unproven a stall really might be a lost SYN, and a fresh
+    /// SYN is the only thing that helps — so there the ladder still fires.
+    #[tokio::test(start_paused = true)]
+    async fn an_unproven_tcp_path_still_gets_a_fresh_syn() {
+        let tries = AtomicUsize::new(0);
+        let tcp_ok = AtomicBool::new(false);
+        let got = retry_fast(&tcp_ok, || async {
+            let n = tries.fetch_add(1, Ordering::Relaxed);
+            // First attempt stalls past its 800ms budget; the retry answers.
+            if n == 0 {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+            Ok::<u8, sqlx::Error>(7)
+        })
+        .await;
+        assert_eq!(got.unwrap(), 7);
+        assert_eq!(tries.load(Ordering::Relaxed), 2);
+    }
 
     /// Nothing listening is a definitive answer: it must fail fast rather than
     /// come back Inconclusive (which the caller treats as "keep waiting") or be
@@ -1148,7 +1241,7 @@ mod tests {
             Ok::<u8, String>(7)
         };
         // The probe is still in flight (or inconclusive) when connect resolves.
-        let got = connect_racing_probe("192.0.2.1", 5432, connect).await;
+        let got = connect_racing_probe("192.0.2.1", 5432, None, connect).await;
         assert_eq!(got, Ok(7), "a completed handshake must win over a stalled probe");
     }
 
@@ -1166,7 +1259,7 @@ mod tests {
             tokio::time::sleep(CONNECT_DEADLINE * 2).await;
             Ok::<u8, String>(0)
         };
-        let got = connect_racing_probe("127.0.0.1", port, never).await;
+        let got = connect_racing_probe("127.0.0.1", port, None, never).await;
         assert!(got.is_err(), "closed port must fail, got {got:?}");
         assert!(
             started.elapsed() < Duration::from_secs(5),
@@ -1183,7 +1276,7 @@ mod tests {
             tokio::time::sleep(CONNECT_DEADLINE * 3).await;
             Ok::<u8, String>(0)
         };
-        let got = connect_racing_probe("192.0.2.1", 5432, never).await;
+        let got = connect_racing_probe("192.0.2.1", 5432, None, never).await;
         assert!(got.is_err(), "a stalled connect must not hang forever");
     }
 }
