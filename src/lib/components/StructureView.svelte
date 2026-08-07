@@ -541,7 +541,11 @@
         </colgroup>
         <thead class="sticky top-0 z-20">
           <tr>
-            {#each ['#','column_name','data_type','is_nullable','column_default','foreign_key','comment'] as label, i}
+            <!-- Human labels, not catalog identifiers: `is_nullable` /
+                 `column_default` are the names of pg_catalog fields, not the names
+                 of the things in front of the user. The header row is already an
+                 uppercase micro-label, so the underscores added nothing but noise. -->
+            {#each ['#','Name','Type','Nullable','Default','Foreign key','Comment'] as label, i}
               <th class={TH} style="height:36px">
                 <span class="block truncate pr-3">{label}</span>
                 <!-- Resize handle: right-edge only, drag right to expand -->

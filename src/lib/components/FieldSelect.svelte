@@ -33,6 +33,22 @@
   )
 </script>
 
+{#if disabled}
+  <!-- A disabled trigger still painted its chevron, so a read-only grid (a view's
+       structure, a primary-key row) advertised a dropdown on every line that did
+       nothing when clicked. Render the value as plain text instead: no chevron, no
+       hover state, no affordance the control can't honour. Height matches the
+       trigger so swapping between states never shifts the row. -->
+  <span
+    class={cn(
+      'inline-flex max-w-full items-center truncate font-mono',
+      size === 'sm' ? 'h-7' : 'h-8',
+      className,
+      !label && 'text-muted-foreground/50',
+    )}
+    {...rest}
+  >{label || placeholder}</span>
+{:else}
 <Select.Root
   type="single"
   value={String(value ?? '')}
@@ -41,7 +57,6 @@
     value = v
     onchange(v)
   }}
-  {disabled}
 >
   <Select.Trigger {size} class={cn('font-mono', className)} {...rest}>
     <span class={cn('truncate', !label && 'text-muted-foreground/50')}>{label || placeholder}</span>
@@ -57,3 +72,4 @@
     {/each}
   </Select.Content>
 </Select.Root>
+{/if}

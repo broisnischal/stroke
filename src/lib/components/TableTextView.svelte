@@ -94,51 +94,66 @@
 
 <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
   <!-- Format bar -->
-  <div class="studio-chrome flex h-8 shrink-0 items-center gap-0.5 border-b border-border bg-panel px-2">
-    {#each FORMATS as f (f.id)}
-      <button
-        type="button"
-        class={cn(
-          'rounded-md px-2 py-1 font-mono text-ui-2xs transition-colors',
-          format === f.id
-            ? 'bg-muted text-foreground'
-            : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-        )}
-        aria-pressed={format === f.id}
-        onclick={() => setFormat(f.id)}
-      >
-        {f.label}
-      </button>
-    {/each}
+  <div class="studio-chrome flex h-9 shrink-0 items-center gap-2 border-b border-border bg-panel px-2">
+    <!-- One segmented control, not four loose buttons: the formats are mutually
+         exclusive, so they get a shared boundary and the app's standard active
+         fill. Labels are sans - mono is for data, not chrome. -->
+    <div
+      role="group"
+      aria-label="Text format"
+      class="inline-flex h-7 shrink-0 items-center gap-0.5 rounded-lg border border-border/50 bg-muted/20 p-0.5"
+    >
+      {#each FORMATS as f (f.id)}
+        <button
+          type="button"
+          class={cn(
+            'inline-flex h-full items-center rounded-md px-2.5 text-ui-xs font-medium transition-colors',
+            'focus-visible:ring-2 focus-visible:ring-ring/18 focus-visible:outline-none',
+            format === f.id
+              ? 'bg-background text-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground',
+          )}
+          aria-pressed={format === f.id}
+          onclick={() => setFormat(f.id)}
+        >
+          {f.label}
+        </button>
+      {/each}
+    </div>
 
-    <div class="ml-auto flex shrink-0 items-center gap-0.5">
+    <div class="ml-auto flex shrink-0 items-center gap-1">
       {#if rows.length > 0}
-        <span class="select-none px-2 font-mono text-ui-2xs text-muted-foreground">{rows.length} rows</span>
-        <div class="h-4 w-px bg-border/60"></div>
+        <span class="select-none px-1 text-ui-2xs tabular-nums text-muted-foreground">
+          {rows.length.toLocaleString('en-US')}
+          {rows.length === 1 ? 'row' : 'rows'}
+        </span>
+        <div class="mx-0.5 h-4 w-px bg-border"></div>
       {/if}
 
       <button
         type="button"
         title="Copy to clipboard"
-        class="inline-flex items-center gap-1.5 rounded-md px-2 py-1 font-mono text-ui-2xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        class="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/18 focus-visible:outline-none"
         onclick={handleCopy}
       >
         {#if copied}
-          <Icon name="check" class="size-3 shrink-0 text-success" />
-          <span>Copied</span>
+          <Icon name="check" class="size-3.5 shrink-0 text-success" />
         {:else}
-          <Icon name="copy" class="size-3 shrink-0" />
-          <span>Copy</span>
+          <Icon name="copy" class="size-3.5 shrink-0" />
         {/if}
+        <!-- Fixed width: "Copy" → "Copied" otherwise resizes the button under the
+             cursor at the exact moment it is clicked, nudging Download sideways. -->
+        <span class="w-14 text-left">{copied ? 'Copied' : 'Copy'}</span>
       </button>
 
       <button
         type="button"
         title="Download file"
-        class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        aria-label="Download file"
+        class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/18 focus-visible:outline-none"
         onclick={handleDownload}
       >
-        <Icon name="download" class="size-3 shrink-0" />
+        <Icon name="download" class="size-3.5 shrink-0" />
       </button>
     </div>
   </div>

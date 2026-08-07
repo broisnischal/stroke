@@ -108,17 +108,17 @@ const DEFAULT_PALETTE = [
   '#a855f7', '#14b8a6', '#f97316', '#ec4899', '#64748b',
 ]
 
-/** Resolve the app's --primary token to a concrete rgb() string, so every chart
- * across the app (table view, SQL editor, AI charts, previews) follows the active
- * theme without each caller wiring it up. Returns '' when --primary can't resolve
- * to a real color (unset, or unparseable in this engine - in which case the probe
- * inherits the foreground and would paint bars white); callers then fall back to
- * DEFAULT_PALETTE. */
-export function resolveChartAccent() {
+/** Resolve any CSS custom property that holds a colour into a concrete string
+ * echarts can both paint and parse, so charts follow the active theme instead of
+ * hardcoding hexes. Returns '' when the token can't resolve to a real colour
+ * (unset, or unparseable in this engine - in which case the probe inherits the
+ * foreground and would paint bars white); callers then fall back to a literal.
+ * @param {string} varName e.g. '--primary', '--success' */
+export function resolveCssColor(varName) {
   if (typeof document === 'undefined') return ''
   try {
     const probe = document.createElement('span')
-    probe.style.cssText = 'position:absolute;visibility:hidden;color:var(--primary)'
+    probe.style.cssText = `position:absolute;visibility:hidden;color:var(${varName})`
     document.body.appendChild(probe)
     const c = getComputedStyle(probe).color
     probe.style.color = 'var(--stroke-nonexistent-token)'
@@ -126,6 +126,13 @@ export function resolveChartAccent() {
     probe.remove()
     return (!c || c === fg) ? '' : toParseableColor(c)
   } catch { return '' }
+}
+
+/** The app's --primary token as a concrete colour, for single-series charts
+ * across the app (table view, SQL editor, AI charts, previews). '' when unset —
+ * callers fall back to DEFAULT_PALETTE. */
+export function resolveChartAccent() {
+  return resolveCssColor('--primary')
 }
 
 /** Colours echarts can parse itself, not just paint: hex / rgb() / hsl(). */
