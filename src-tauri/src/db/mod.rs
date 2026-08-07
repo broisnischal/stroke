@@ -17,6 +17,7 @@ pub mod sqlite;
 pub mod ssh_tunnel;
 pub mod local_scan;
 pub mod pg_ext_types;
+pub mod geo;
 
 pub use connection::{
     connect, connect_clickhouse, connect_d1, connect_duckdb, connect_libsql, connect_mssql, connect_mysql, connect_redis, connect_sqlite, disconnect,
@@ -29,6 +30,7 @@ pub use insights::{
     instance_version, ConfigSetting, InstanceActivity, InstanceReplication, InstanceState,
     InstanceVersion, SetConfigResult,
 };
+pub use geo::{geo_features, geo_overview, GeoBbox, GeoFeatures, GeoOverview};
 pub use ssh_tunnel::TunnelState;
 pub use query::{
     delete_table_row, delete_table_rows, execute_ddl, execute_sql, execute_sql_multi, execute_sql_on_conn,

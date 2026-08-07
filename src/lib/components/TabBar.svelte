@@ -109,6 +109,7 @@
     if (tab.kind === 'orm-schema') return 'file-text'
     if (tab.kind === 'security') return 'shield-check'
     if (tab.kind === 'extensions') return 'blocks'
+    if (tab.kind === 'map') return 'globe'
     if (tab.kind === 'search') return 'search'
     if (tab.kind === 'license') return 'key-round'
     return 'file-text'

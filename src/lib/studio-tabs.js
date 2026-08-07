@@ -1,4 +1,4 @@
-/** @typedef {'table' | 'sql' | 'ddl' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'extensions' | 'extension-detail' | 'backup' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search' | 'notebook' | 'schema-timeline' | 'data-diff' | 'insights' | 'objects' | 'redis' | 'license' | 'orm-schema'} StudioTabKind */
+/** @typedef {'table' | 'sql' | 'ddl' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'extensions' | 'extension-detail' | 'backup' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search' | 'notebook' | 'schema-timeline' | 'data-diff' | 'insights' | 'objects' | 'redis' | 'license' | 'orm-schema' | 'map'} StudioTabKind */
 
 import { loadDefaultPageSize } from '$lib/table-query.js'
 
@@ -271,6 +271,20 @@ export function createRedisTab() {
 /** @param {StudioTab[]} tabs */
 export function findRedisTab(tabs) {
   return tabs.find((t) => t.kind === 'redis') ?? null
+}
+
+export function createMapTab() {
+  return /** @type {StudioTab} */ ({
+    id: nextTabId(),
+    kind: 'map',
+    title: 'Map',
+    state: null,
+  })
+}
+
+/** @param {StudioTab[]} tabs */
+export function findMapTab(tabs) {
+  return tabs.find((t) => t.kind === 'map') ?? null
 }
 
 export function createExtensionsTab() {

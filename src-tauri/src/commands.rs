@@ -760,6 +760,39 @@ pub async fn pg_get_column_stats(
     crate::db::get_column_stats(state, schema, table, column).await
 }
 
+// ── Geo view (PostGIS) ────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn geo_overview(
+    state: State<'_, DbState>,
+) -> Result<crate::db::GeoOverview, String> {
+    crate::db::geo_overview(state).await
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn geo_features(
+    state: State<'_, DbState>,
+    schema: String,
+    table: String,
+    column: String,
+    kind: String,
+    srid: i32,
+    geom_type: String,
+    bbox: Option<crate::db::GeoBbox>,
+    limit: i64,
+    simplify: f64,
+    cluster_cell: f64,
+    filters: Option<Vec<crate::db::RowFilter>>,
+    include_extent: bool,
+) -> Result<crate::db::GeoFeatures, String> {
+    crate::db::geo_features(
+        state, schema, table, column, kind, srid, geom_type, bbox, limit, simplify, cluster_cell,
+        filters, include_extent,
+    )
+    .await
+}
+
 // ── Instance Insights (PostgreSQL + MySQL monitoring dashboard) ────────────────
 
 #[tauri::command]

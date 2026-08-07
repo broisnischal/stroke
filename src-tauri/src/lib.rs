@@ -371,6 +371,8 @@ pub fn run() {
             commands::pg_get_table_rows,
             commands::pg_count_table_rows,
             commands::pg_get_column_stats,
+            commands::geo_overview,
+            commands::geo_features,
             commands::instance_version,
             commands::instance_activity,
             commands::instance_state,

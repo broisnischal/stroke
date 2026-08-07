@@ -122,6 +122,7 @@
     mcpStart,
     mcpStop,
     mcpUpdateConnections,
+    geoOverview,
   } from '$lib/api.js'
   import {
     createTableTab,
@@ -143,6 +144,8 @@
     findRedisTab,
     createExtensionsTab,
     findExtensionsTab,
+    createMapTab,
+    findMapTab,
     createExtensionDetailTab,
     findExtensionDetailTab,
     createJsonTab,
@@ -385,6 +388,22 @@
   const hasSchemaExplorer = $derived((dbType === 'postgres' || dbType === 'mysql') && !isRedis)
   /** Security (RLS, policies, roles) is PostgreSQL-only. */
   const hasSecurity = $derived(dbType === 'postgres' && !isRedis)
+  /**
+   * PostGIS present on this connection — gates the Map view, which has nothing
+   * to show without it. Asked once per connection: it is a single indexed
+   * catalog row, and the alternative (offering Map everywhere and dead-ending on
+   * a non-spatial database) is worse than one cheap query.
+   */
+  let geoAvailable = $state(false)
+  $effect(() => {
+    const conn = connection
+    const pg = dbType === 'postgres'
+    untrack(() => (geoAvailable = false))
+    if (!conn || !pg) return
+    void geoOverview()
+      .then((res) => untrack(() => (geoAvailable = Boolean(res?.available))))
+      .catch(() => {})
+  })
   /** @type {import('./UpdateDialog.svelte').default | null} */
   let updateDialog = $state(null)
   let statusBarHasUpdate = $state(false)
@@ -649,6 +668,7 @@
   let objectsEverOpened = $state(false)
   let redisEverOpened = $state(false)
   let extensionsEverOpened = $state(false)
+  let mapEverOpened = $state(false)
   let jsonEverOpened = $state(false)
   let backupEverOpened = $state(false)
   let chartsEverOpened = $state(false)
@@ -905,6 +925,7 @@
     if (activeTab?.kind === 'objects') objectsEverOpened = true
     if (activeTab?.kind === 'redis') redisEverOpened = true
     if (activeTab?.kind === 'extensions') extensionsEverOpened = true
+    if (activeTab?.kind === 'map') mapEverOpened = true
     if (activeTab?.kind === 'json') jsonEverOpened = true
     if (activeTab?.kind === 'backup') backupEverOpened = true
     if (activeTab?.kind === 'charts') chartsEverOpened = true
@@ -2692,6 +2713,10 @@ let rowSearch = $state('')
     openSingletonTab({ find: findExtensionsTab, create: createExtensionsTab })
   }
 
+  function openMapTab() {
+    openSingletonTab({ find: findMapTab, create: createMapTab })
+  }
+
   /** Open (or focus) a per-extension detail tab. Non-singleton: one tab per id. */
   function openExtensionDetailTab(ext) {
     const existing = findExtensionDetailTab(tabs, ext.id)
@@ -4325,15 +4350,22 @@ let rowSearch = $state('')
       } else if (wantsWindow) {
         // Below the windowing bar after counting - load the remainder in full.
         resetWindowing()
+        total = windowTotal
+        // Paint the first window NOW, before going back for the rest. The
+        // remainder is a second round-trip over tens of thousands of rows, and
+        // holding `rows` empty until it lands leaves the grid blank for all of
+        // it — with the columns already drawn, which reads as "this table is
+        // empty" rather than "this is still loading". Every table between
+        // WINDOW_FETCH and WINDOW_THRESHOLD rows opened on "All" comes through
+        // here, so that was the common case, not the rare one.
+        rows = fetched
+        _infiniteRows = fetched
         if (windowTotal > fetched.length) {
           const restData = await getTableRows(activeSchema, activeTable, Math.min(windowTotal - fetched.length, MAX_PAGE_SIZE), fetched.length, currentRowQuery(false))
           if (seq !== _loadSeq) return
           rows = [...fetched, ...(restData.rows ?? [])]
-        } else {
-          rows = fetched
+          _infiniteRows = rows
         }
-        _infiniteRows = rows
-        total = windowTotal
       } else {
         resetWindowing()
         rows = fetched
@@ -5550,8 +5582,10 @@ let rowSearch = $state('')
   onopenormschema={() => { if (aiMode) exitAiMode(); openOrmSchemaTab() }}
   ontogglequerylog={() => { commandOpen = false; queryLogOpen = !queryLogOpen }}
   onopenextensions={() => { if (aiMode) exitAiMode(); openExtensionsTab() }}
+  onopenmap={() => { if (aiMode) exitAiMode(); openMapTab() }}
   onopenredis={() => { if (aiMode) exitAiMode(); openRedisTab() }}
   {isRedis}
+  {geoAvailable}
   {hasSchemaExplorer}
   {hasSecurity}
   onopenJsonViewer={() => { if (aiMode) exitAiMode(); openJsonTab() }}
@@ -6000,6 +6034,20 @@ let rowSearch = $state('')
         >
           <svelte:boundary failed={tabError}>
             <RedisKeyspacePage active={activeTab?.kind === 'redis'} {connection} />
+          </svelte:boundary>
+        </div>
+      {/if}
+
+      <!-- Map tab - mount once, keep alive (holds viewport + fetched features) -->
+      {#if mapEverOpened}
+        <div
+          class={activeTab?.kind === 'map' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+          inert={activeTab?.kind !== 'map' || undefined}
+        >
+          <svelte:boundary failed={tabError}>
+            {#await import('./MapPage.svelte')}<TabLoading />{:then { default: MapPage }}
+              <MapPage />
+            {/await}
           </svelte:boundary>
         </div>
       {/if}
@@ -6611,6 +6659,12 @@ let rowSearch = $state('')
                 <TableTextView columns={dataViewColumns} rows={dataViewRows} tableName={activeTable} />
               {:else if dataViewMode === 'chart'}
                 <ChartView bind:this={chartPane} columns={dataViewColumns} rows={dataViewRows} connectionId={persistConnectionId} />
+              {:else if dataViewMode === 'map'}
+                <div class="flex min-h-0 min-w-0 flex-1">
+                  {#await import('./MapPage.svelte')}<TabLoading />{:then { default: MapPage }}
+                    <MapPage scopeSchema={activeSchema} scopeTable={activeTable ?? ''} />
+                  {/await}
+                </div>
               {:else if dataViewMode === 'erd'}
                 <div class="flex min-h-0 min-w-0 flex-1">
                   {#await import('./EntityRelationPage.svelte')}<TabLoading />{:then { default: EntityRelationPage }}

@@ -870,6 +870,58 @@ export async function executeSqlMulti(sql) {
 }
 
 // ── Instance Insights (PostgreSQL + MySQL monitoring) ───────────────────────
+// ── Geo view (PostGIS) ────────────────────────────────────────────────────────
+
+/**
+ * Is this connection spatial, and what can be mapped? Never throws for a
+ * non-spatial database — it answers `{ available: false, layers: [] }`, so the
+ * caller can ask on every connect without special-casing the engine.
+ * @returns {Promise<{ available: boolean, version: string|null, layers: any[] }>}
+ */
+export async function geoOverview() {
+  return await inv('geo_overview')
+}
+
+/**
+ * Features for one viewport of one spatial column.
+ *
+ * `bbox` is `{ minX, minY, maxX, maxY }` in WGS84 degrees, or null for the whole
+ * layer. When the viewport holds more rows than `limit`, the server returns
+ * grid clusters instead (`mode: 'clusters'`, each feature carrying a `count`)
+ * rather than an arbitrary truncation of the real rows.
+ *
+ * @param {{
+ *   schema: string, table: string, column: string, kind: string,
+ *   srid: number, geomType: string,
+ *   bbox?: { minX: number, minY: number, maxX: number, maxY: number }|null,
+ *   limit?: number, simplify?: number, clusterCell?: number,
+ *   filters?: any[]|null, includeExtent?: boolean,
+ * }} opts
+ */
+export async function geoFeatures(opts) {
+  return await inv('geo_features', {
+    schema: opts.schema,
+    table: opts.table,
+    column: opts.column,
+    kind: opts.kind,
+    srid: opts.srid,
+    geomType: opts.geomType,
+    bbox: opts.bbox
+      ? {
+          minX: opts.bbox.minX,
+          minY: opts.bbox.minY,
+          maxX: opts.bbox.maxX,
+          maxY: opts.bbox.maxY,
+        }
+      : null,
+    limit: opts.limit ?? 4000,
+    simplify: opts.simplify ?? 0,
+    clusterCell: opts.clusterCell ?? 1,
+    filters: opts.filters ?? null,
+    includeExtent: opts.includeExtent ?? false,
+  })
+}
+
 export async function instanceVersion() { return await inv('instance_version') }
 export async function instanceActivity() { return await inv('instance_activity') }
 export async function instanceState() { return await inv('instance_state') }

@@ -46,6 +46,7 @@ import Bot from '@lucide/svelte/icons/bot'
 import AlertTriangle from '@lucide/svelte/icons/alert-triangle'
 import AlertCircle from '@lucide/svelte/icons/alert-circle'
 import ShieldCheck from '@lucide/svelte/icons/shield-check'
+import Globe from '@lucide/svelte/icons/globe'
 import Pencil from '@lucide/svelte/icons/pencil'
 import Braces from '@lucide/svelte/icons/braces'
 import Lock from '@lucide/svelte/icons/lock'
@@ -147,7 +148,7 @@ import {
   HardDriveIcon, DashboardSquare02Icon, SquareUnlock01Icon, Moon02Icon, RadioIcon,
   ServerStack01Icon, Settings02Icon, Sun03Icon, ArrowTurnBackwardIcon, Unlink01Icon,
   WifiConnected01Icon, WifiDisconnected01Icon, TestTubeIcon, WorkflowSquare02Icon,
-  Share08Icon, GitCompareIcon, PuzzleIcon, PlugSocketIcon, NoteEditIcon, ChartBarLineIcon,
+  Share08Icon, GitCompareIcon, PuzzleIcon, PlugSocketIcon, NoteEditIcon, ChartBarLineIcon, GlobalIcon,
   InformationCircleIcon, ArrowUpDownIcon, ArrowLeftRightIcon, Bookmark01Icon, BugIcon,
   UnavailableIcon, Target01Icon, EraserIcon, FileDownloadIcon, File01Icon, FunctionSquareIcon,
   HashIcon, InfinityIcon, KeyboardIcon, Layers01Icon, LeftToRightListBulletIcon, Link01Icon,
@@ -230,6 +231,7 @@ export const ICON_MAP = {
   'share-2':        { lucide: Share2,        huge: Share08Icon },
   'git-compare':    { lucide: GitCompare,    huge: GitCompareIcon },
   'blocks':         { lucide: Blocks,        huge: PuzzleIcon },
+  'globe':          { lucide: Globe,         huge: GlobalIcon },
   'plug':           { lucide: Plug,          huge: PlugSocketIcon },
   'notebook-pen':   { lucide: NotebookPen,   huge: NoteEditIcon },
   'bar-chart-3':    { lucide: BarChart3,     huge: ChartBarLineIcon },
@@ -313,6 +315,7 @@ import PhRobot from 'phosphor-svelte/lib/Robot'
 import PhWarning from 'phosphor-svelte/lib/Warning'
 import PhWarningCircle from 'phosphor-svelte/lib/WarningCircle'
 import PhShieldCheck from 'phosphor-svelte/lib/ShieldCheck'
+import PhGlobe from 'phosphor-svelte/lib/Globe'
 import PhPencilSimple from 'phosphor-svelte/lib/PencilSimple'
 import PhBracketsCurly from 'phosphor-svelte/lib/BracketsCurly'
 import PhLock from 'phosphor-svelte/lib/Lock'
@@ -446,6 +449,7 @@ export const PHOSPHOR_MAP = {
   'layout-dashboard': PhSquaresFour,
   'layers': PhStack,
   'blocks': PhPuzzlePiece,
+  'globe': PhGlobe,
   'wifi': PhWifiHigh,
   'wifi-off': PhWifiSlash,
   'columns-3': PhColumns,

@@ -320,15 +320,30 @@
   const iconBtn =
     "inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30";
 
-  /** @type {Array<{ id: 'table' | 'json' | 'record' | 'text' | 'chart' | 'erd', icon: string, label: string, title?: string }>} */
+  /** @type {Array<{ id: 'table' | 'json' | 'record' | 'text' | 'chart' | 'erd' | 'map', icon: string, label: string, title?: string }>} */
   const DATA_VIEW_MODES = [
     { id: "table", icon: "table-2", label: "Table view" },
     { id: "json", icon: "braces", label: "JSON view" },
     { id: "record", icon: "layout-list", label: "Record view" },
     { id: "text", icon: "file-text", label: "Text view", title: "Text view, CSV / TSV / Markdown / JSON Lines" },
     { id: "chart", icon: "bar-chart-2", label: "Chart view", title: "Chart view, visualize the loaded rows" },
+    { id: "map", icon: "globe", label: "Map view", title: "Map view: plot this table's geometry" },
     { id: "erd", icon: "git-branch", label: "ERD view", title: "ERD view: this table and its related tables" },
   ];
+
+  /**
+   * Map view is offered only when the table has something to map. Listing it
+   * everywhere would make it the one view in the menu that opens onto nothing,
+   * on the overwhelming majority of tables.
+   */
+  const dataViewModes = $derived(
+    columns.some((c) => {
+      const t = String(c?.data_type ?? c?.dataType ?? "").toLowerCase();
+      return t === "geometry" || t === "geography";
+    })
+      ? DATA_VIEW_MODES
+      : DATA_VIEW_MODES.filter((m) => m.id !== "map"),
+  );
 
   /** Export formats offered under the "Export" submenu in the more-actions menu. */
   /** @type {Array<{ id: 'png' | 'copy-png' | 'svg' | 'mermaid', label: string, icon: string }>} */
@@ -1252,7 +1267,7 @@
             value={dataViewMode}
             onValueChange={(v) => (dataViewMode = /** @type {'table' | 'json' | 'record' | 'text' | 'chart' | 'erd'} */ (v))}
           >
-            {#each DATA_VIEW_MODES as m (m.id)}
+            {#each dataViewModes as m (m.id)}
               <DropdownMenu.RadioItem value={m.id} disabled={columns.length === 0}>
                 <Icon name={m.icon} class="size-3.5" />
                 {m.label}
