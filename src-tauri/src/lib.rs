@@ -443,6 +443,14 @@ pub fn run() {
             #[cfg(debug_assertions)]
             commands::debug_reset_trial,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            // Real exit only (tray Quit / OS shutdown) — the hide-to-tray
+            // CloseRequested path never reaches here. Reap the OmniRoute proxy
+            // we spawned, or it survives every app quit.
+            if let tauri::RunEvent::Exit = event {
+                app.state::<omniroute::OmniRouteState>().kill_now();
+            }
+        });
 }

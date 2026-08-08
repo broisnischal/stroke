@@ -24,6 +24,17 @@ impl OmniRouteState {
     pub fn new() -> Self {
         Self::default()
     }
+
+    /// Synchronously kill the child if this app started one. Called from the
+    /// `RunEvent::Exit` hook in lib.rs — the async `omniroute_stop` path never
+    /// runs on quit, so without this the proxy outlives the app.
+    pub fn kill_now(&self) {
+        if let Ok(mut slot) = self.child.lock() {
+            if let Some(mut c) = slot.take() {
+                let _ = c.start_kill();
+            }
+        }
+    }
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -204,6 +215,9 @@ pub async fn omniroute_start(
         .args(["--port", &port.to_string()])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        // Backstop for the exit hook: if the Child is ever dropped without an
+        // explicit kill, take the process down with it.
+        .kill_on_drop(true)
         .spawn()
         .map_err(|e| format!("Could not start OmniRoute: {e}"))?;
 
