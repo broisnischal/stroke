@@ -233,18 +233,44 @@ pub(crate) fn cell_to_json(row: &sqlx::postgres::PgRow, idx: usize) -> Value {
         };
     }
 
-    try_get!(bool);
-    try_get!(i16);
-    try_get!(i32);
-    try_get!(i64);
-    try_get!(f32);
-    try_get!(f64);
-    try_get_string!(Decimal);
-    try_get_string!(DateTime<Utc>);
-    try_get_string!(NaiveDateTime);
-    try_get_string!(NaiveDate);
-    try_get_string!(NaiveTime);
-    try_get_string!(Uuid);
+    // Fast path: route the common built-in types by name so a cell doesn't pay
+    // for a cascade of failed try_get attempts — every mismatch makes sqlx
+    // allocate a formatted "mismatched types" error, up to 12 per cell on a
+    // text column. A failed route falls through to the full chain below, so
+    // alias/unmatched types behave exactly as before.
+    match type_name {
+        "BOOL" => try_get!(bool),
+        "INT2" => try_get!(i16),
+        "INT4" => try_get!(i32),
+        "INT8" | "OID" => try_get!(i64),
+        "FLOAT4" => try_get!(f32),
+        "FLOAT8" => try_get!(f64),
+        "NUMERIC" => try_get_string!(Decimal),
+        "TIMESTAMPTZ" => try_get_string!(DateTime<Utc>),
+        "TIMESTAMP" => try_get_string!(NaiveDateTime),
+        "DATE" => try_get_string!(NaiveDate),
+        "TIME" => try_get_string!(NaiveTime),
+        "UUID" => try_get_string!(Uuid),
+        _ => {}
+    }
+
+    // Known text types skip the scalar chain entirely: every arm below would
+    // fail (allocating its error) before the raw-bytes branch decodes them.
+    let known_text = matches!(type_name, "TEXT" | "VARCHAR" | "BPCHAR" | "CHAR" | "NAME");
+    if !known_text {
+        try_get!(bool);
+        try_get!(i16);
+        try_get!(i32);
+        try_get!(i64);
+        try_get!(f32);
+        try_get!(f64);
+        try_get_string!(Decimal);
+        try_get_string!(DateTime<Utc>);
+        try_get_string!(NaiveDateTime);
+        try_get_string!(NaiveDate);
+        try_get_string!(NaiveTime);
+        try_get_string!(Uuid);
+    }
 
     if type_name == "JSON" || type_name == "JSONB" {
         if let Ok(raw) = row.try_get_raw(idx) {
