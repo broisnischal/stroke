@@ -100,19 +100,28 @@
   }
 
   // Live log (backup)
-  /** @type {{level:string,message:string,ts:number}[]} */
+  // Entries carry a monotonic id (ts alone collides when two identical lines
+  // land in the same millisecond) and are capped so a huge dump can't grow the
+  // buffers unbounded. Scroll-to-bottom is rAF-coalesced: one per frame.
+  let logSeq = 0;
+  const LOG_CAP = 1000;
+  /** @type {{level:string,message:string,ts:number,id:number}[]} */
   let exportLogs = $state([]);
   let exportLogEl = $state(/** @type {HTMLElement|null} */ (null));
   let unlistenExport = /** @type {(() => void)|null} */ (null);
+  let _exportScrollRaf = 0;
 
   async function startExportLog() {
     try {
       const { listen } = await import("@tauri-apps/api/event");
       unlistenExport = await listen("backup-log", (/** @type {any} */ e) => {
-        exportLogs = [...exportLogs, { ...e.payload, ts: Date.now() }];
-        setTimeout(() => {
+        const next = [...exportLogs, { ...e.payload, ts: Date.now(), id: logSeq++ }];
+        exportLogs = next.length > LOG_CAP ? next.slice(-LOG_CAP) : next;
+        if (_exportScrollRaf) return;
+        _exportScrollRaf = requestAnimationFrame(() => {
+          _exportScrollRaf = 0;
           if (exportLogEl) exportLogEl.scrollTop = exportLogEl.scrollHeight;
-        }, 0);
+        });
       });
     } catch {
       /* dev */
@@ -126,19 +135,23 @@
   }
 
   // Live log (restore)
-  /** @type {{level:string,message:string,ts:number}[]} */
+  /** @type {{level:string,message:string,ts:number,id:number}[]} */
   let restoreLogs = $state([]);
   let restoreLogEl = $state(/** @type {HTMLElement|null} */ (null));
   let unlistenRestore = /** @type {(() => void)|null} */ (null);
+  let _restoreScrollRaf = 0;
 
   async function startRestoreLog() {
     try {
       const { listen } = await import("@tauri-apps/api/event");
       unlistenRestore = await listen("restore-log", (/** @type {any} */ e) => {
-        restoreLogs = [...restoreLogs, { ...e.payload, ts: Date.now() }];
-        setTimeout(() => {
+        const next = [...restoreLogs, { ...e.payload, ts: Date.now(), id: logSeq++ }];
+        restoreLogs = next.length > LOG_CAP ? next.slice(-LOG_CAP) : next;
+        if (_restoreScrollRaf) return;
+        _restoreScrollRaf = requestAnimationFrame(() => {
+          _restoreScrollRaf = 0;
           if (restoreLogEl) restoreLogEl.scrollTop = restoreLogEl.scrollHeight;
-        }, 0);
+        });
       });
     } catch {
       /* dev */
@@ -154,6 +167,8 @@
   onDestroy(() => {
     stopExportLog();
     stopRestoreLog();
+    if (_exportScrollRaf) cancelAnimationFrame(_exportScrollRaf);
+    if (_restoreScrollRaf) cancelAnimationFrame(_restoreScrollRaf);
   });
 
   // ── Export ────────────────────────────────────────────────────────────────
@@ -397,7 +412,7 @@
           Run an export to see progress here.
         </p>
       {:else}
-        {#each exportLogs as entry (entry.ts + entry.message)}
+        {#each exportLogs as entry (entry.id)}
           <div
             class="mb-0.5 text-ui-2xs leading-relaxed {logColor[entry.level] ??
               'text-muted-foreground'}"
@@ -446,7 +461,7 @@
             : "Waiting for log entries…"}
         </p>
       {:else}
-        {#each restoreLogs as entry (entry.ts + entry.message)}
+        {#each restoreLogs as entry (entry.id)}
           <div
             class="mb-0.5 text-ui-2xs leading-relaxed {logColor[entry.level] ??
               'text-muted-foreground'}"
