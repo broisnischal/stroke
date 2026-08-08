@@ -2431,7 +2431,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // is the display order of column names; names absent from it keep their natural
   // order after the ordered ones. Persisted per table.
   let columnOrder = $state(/** @type {string[]} */ ([]));
-  const _colOrderKey = $derived(`stroke:colorder:${schema}\x00${tableName}`);
+  const _colOrderKey = $derived(`stroke:colorder:${connectionId}\x00${schema}\x00${tableName}`);
   $effect(() => {
     const key = _colOrderKey;
     untrack(() => {
