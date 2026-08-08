@@ -2,7 +2,7 @@
   // One-flow provider sign-in: authorize (OAuth) or paste a token, list every
   // database on the account, and hand a ready-to-connect spec to the parent.
   // Generalized from CloudflareLogin.svelte across all provider adapters.
-  import { onMount } from 'svelte'
+  import { onMount, onDestroy } from 'svelte'
   import Check from '@lucide/svelte/icons/check'
   import Loader2 from '@lucide/svelte/icons/loader-2'
   import LogOut from '@lucide/svelte/icons/log-out'
@@ -119,6 +119,13 @@
         await loadDatabases()
       }
     } catch { /* stay idle */ }
+  })
+
+  // Unmounting mid-authorize (dialog closed, provider switched via {#key}) must
+  // free the backend callback port, or the next sign-in attempt hits
+  // "Callback port in use" until the 5-minute timeout expires.
+  onDestroy(() => {
+    if (phase === 'authorizing') void providerCancelOAuth().catch(() => {})
   })
 
   async function startAuth() {

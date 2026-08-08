@@ -42,8 +42,12 @@
   let pollTimer = null
   /** @type {ReturnType<typeof setTimeout> | null} */
   let countdownTimer = null
+  /** Bumped by stopTimers so a doPoll awaiting the network can tell it was cancelled
+   *  and must not re-arm the timer or mutate state (cancel/unmount mid-request). */
+  let pollGeneration = 0
 
   function stopTimers() {
+    pollGeneration++
     if (pollTimer) { clearTimeout(pollTimer); pollTimer = null }
     if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null }
   }
@@ -98,8 +102,10 @@
   }
 
   async function doPoll() {
+    const gen = pollGeneration
     try {
       const result = await pollOAuthToken(deviceCode)
+      if (gen !== pollGeneration) return // cancelled while awaiting
       if (result.status === 'authorized' && result.token) {
         stopTimers()
         phase = 'verifying'
@@ -124,6 +130,7 @@
       }
       schedulePoll()
     } catch (e) {
+      if (gen !== pollGeneration) return // cancelled while awaiting
       stopTimers()
       phase = 'error'
       errorMsg = String(/** @type {any} */ (e)?.message ?? e)

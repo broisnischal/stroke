@@ -83,12 +83,14 @@
   const shownError = $derived(friendlyError(errorMsg))
 
   onMount(async () => {
-    const status = await cfOAuthStatus()
-    if (status.connected) {
-      email = status.email ?? ''
-      phase = 'fetching'
-      await loadAccounts()
-    }
+    try {
+      const status = await cfOAuthStatus()
+      if (status.connected) {
+        email = status.email ?? ''
+        phase = 'fetching'
+        await loadAccounts()
+      }
+    } catch { /* stay idle */ }
   })
 
   async function startAuth() {
@@ -136,6 +138,9 @@
       const token = await cfGetValidToken()
       databases = await cloudflareListD1Databases(token, id)
     } catch (e) {
+      // Show the error card - staying in 'selecting' rendered a misleading
+      // "No D1 databases in this account" empty state over a real failure.
+      phase = 'error'
       errorMsg = String(e)
     } finally {
       loadingDbs = false
@@ -156,6 +161,7 @@
         token,
       })
     } catch (e) {
+      phase = 'error'
       errorMsg = String(e)
     }
   }
