@@ -82,17 +82,31 @@ export function formatModelSize(bytes) {
  * the plain instructions rather than a stale name that fails in their terminal.
  * @param {number} [timeoutMs]
  */
-export async function fetchOllamaRegistry(timeoutMs = 6000) {
-  const ac = new AbortController()
-  const timer = setTimeout(() => ac.abort(), timeoutMs)
+export async function fetchOllamaRegistry(timeoutMs = 8000) {
   try {
-    const res = await fetch('https://ollama.com/api/tags', { signal: ac.signal })
-    if (!res.ok) throw new Error(`registry returned ${res.status}`)
-    const body = await res.json()
-    return classifyOllamaModels(body?.models ?? [])
+    // In the app this goes through Rust. ollama.com sends no
+    // `Access-Control-Allow-Origin`, so a webview fetch is refused outright —
+    // and the packaged origin differs per platform (`tauri://localhost` on
+    // macOS, `http://tauri.localhost` on Windows and Linux), so a CORS
+    // dependency would fail three different ways. The browser path below only
+    // runs under `npm run dev` in a real browser.
+    if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const body = /** @type {any} */ (await invoke('ollama_registry'))
+      return classifyOllamaModels(body?.models ?? [])
+    }
+
+    const ac = new AbortController()
+    const timer = setTimeout(() => ac.abort(), timeoutMs)
+    try {
+      const res = await fetch('https://ollama.com/api/tags', { signal: ac.signal })
+      if (!res.ok) throw new Error(`registry returned ${res.status}`)
+      const body = await res.json()
+      return classifyOllamaModels(body?.models ?? [])
+    } finally {
+      clearTimeout(timer)
+    }
   } catch {
     return { local: [], cloud: [] }
-  } finally {
-    clearTimeout(timer)
   }
 }

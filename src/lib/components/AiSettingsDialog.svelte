@@ -127,6 +127,7 @@
   let ollamaSuggestions = $state(/** @type {{ local: any[], cloud: any[] }} */ ({ local: [], cloud: [] }));
   let suggestionsLoading = $state(false);
   let cloudOpen = $state(false);
+  let suggestionsTried = $state(false);
   /** @type {ReturnType<typeof setTimeout> | null} */
   let emptyCopyTimer = null;
 
@@ -216,11 +217,17 @@
     } finally { omniBusy = ''; omniLog = ""; }
   }
 
-  // The suggestion list is only worth a network call once we know the server has
-  // nothing to offer. One fetch per dialog session.
+  // Latched, not guarded on the result. A failed fetch leaves the lists empty,
+  // so a guard on emptiness re-enters the moment it settles and the spinner
+  // never stops — the same loop the Copilot model fetch had, a few lines up.
+  // One attempt per dialog session; Recheck is the retry.
+  //
+  // Runs for any Ollama setup rather than only the empty state: /v1/models
+  // lists what is on disk, so a cloud model can never appear there, and without
+  // this there is no path to one at all.
   $effect(() => {
-    if (!isOllama || !localModelsEmpty || suggestionsLoading) return;
-    if (ollamaSuggestions.local.length || ollamaSuggestions.cloud.length) return;
+    if (!isOllama || step !== 1 || suggestionsTried) return;
+    suggestionsTried = true;
     suggestionsLoading = true;
     void fetchOllamaRegistry()
       .then((r) => { ollamaSuggestions = r; })
@@ -329,6 +336,8 @@
     // of showing the previous session's env/serving status.
     omniEnv = null;
     omniServing = false;
+    suggestionsTried = false;
+    ollamaSuggestions = { local: [], cloud: [] };
     omniError = "";
   }
 
@@ -791,8 +800,8 @@
                   <button
                     type="button"
                     class="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-border/50 px-2 text-ui-3xs text-muted-foreground transition-colors hover:text-foreground"
-                    onclick={() => void loadLocalModels()}
-                  ><RefreshCw class={cn("size-3", localModelsLoading && "animate-spin")} />Recheck</button>
+                    onclick={() => { suggestionsTried = false; void loadLocalModels(); }}
+                  ><RefreshCw class={cn("size-3", (localModelsLoading || suggestionsLoading) && "animate-spin")} />Recheck</button>
                 </div>
                 {#if isOmniroute}
                   <p class="text-ui-3xs text-muted-foreground/60">

@@ -137,12 +137,39 @@ pub fn ai_device_id() -> String {
     crate::license::device_id()
 }
 
-/// List the model IDs an OpenAI-compatible endpoint exposes (`GET {base}/models`).
+/// The models ollama.com currently offers, name and size.
 ///
-/// Local servers (Ollama, LM Studio) only know their installed models at runtime —
-/// a hardcoded preset like `llama3.1` fails against an install that has `llama3.1:8b`.
-/// Goes through Rust for the same reason `ai_fetch` does: the WebView can't reach
-/// localhost cross-origin.
+/// Fetched here rather than from the webview because ollama.com sends no
+/// `Access-Control-Allow-Origin`, so a browser fetch fails outright — and the
+/// packaged app's origin differs per platform (`tauri://localhost` on macOS,
+/// `http://tauri.localhost` on Windows and Linux), which would make a CORS
+/// dependency fail differently on each. Going through Rust removes the question
+/// on every OS, the same reason `ai_list_models` exists.
+#[tauri::command]
+pub async fn ollama_registry() -> Result<serde_json::Value, String> {
+    let response = ai_http_client()
+        .get("https://ollama.com/api/tags")
+        .timeout(std::time::Duration::from_secs(8))
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                "Timed out reaching ollama.com".to_string()
+            } else {
+                format!("Could not reach ollama.com: {e}")
+            }
+        })?;
+
+    if !response.status().is_success() {
+        return Err(format!("ollama.com returned {}", response.status().as_u16()));
+    }
+    response.json().await.map_err(|e| e.to_string())
+}
+
+/// The models a server actually has, so the picker never guesses a tag —
+/// a hardcoded preset like `llama3.1` fails against an install that has
+/// `llama3.1:8b`. Goes through Rust for the same reason `ai_fetch` does: the
+/// WebView can't reach localhost cross-origin.
 #[tauri::command]
 pub async fn ai_list_models(url: String, api_key: Option<String>) -> Result<Vec<String>, String> {
     let mut builder = ai_http_client()

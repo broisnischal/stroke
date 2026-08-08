@@ -320,6 +320,7 @@ pub fn run() {
             commands::ai_fetch,
             commands::ai_fetch_cancel,
             commands::ai_list_models,
+            commands::ollama_registry,
             commands::ai_device_id,
             commands::save_file,
             commands::save_file_bytes,
