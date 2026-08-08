@@ -670,6 +670,26 @@ fn resolve_drizzle(p: &StudioProcess, env: &HashMap<String, String>) -> Target {
         .or_else(|| assign_value(&text, "connectionString", env))
         .or_else(|| drizzle_url_from_parts(&text, &dialect, env));
     let Some(url) = url else {
+        // A sqlite `url` computed by a helper (the Cloudflare D1 local-dev
+        // pattern: `url: localD1File()`, resolved at runtime from the file
+        // miniflare creates) can't be evaluated without a JS runtime. The
+        // location is fixed, so find the file the way the tooling does.
+        if dialect.contains("sqlite") {
+            if let Some(file) = resolve_local_d1_sqlite(&p.cwd) {
+                return Target {
+                    engine: Some("sqlite".into()),
+                    file_path: Some(file),
+                    source,
+                    ..Default::default()
+                };
+            }
+            if text.contains("miniflare-D1DatabaseObject") || text.contains(".wrangler") {
+                return Target::failed(
+                    source,
+                    "This is a Cloudflare D1 local database, but miniflare hasn't created its SQLite file yet — start your dev server (or run `wrangler d1 migrations apply <db> --local`), then refresh.",
+                );
+            }
+        }
         return Target::failed(
             source,
             "Couldn't resolve dbCredentials — the env var this config points at isn't set in the project's .env.",
@@ -690,6 +710,49 @@ fn resolve_drizzle(p: &StudioProcess, env: &HashMap<String, String>) -> Target {
             format!("Stroke can't open a `{}` URL directly.", short_scheme(&url)),
         ),
     }
+}
+
+/// The SQLite file `wrangler ... --local` (miniflare) creates for a D1 binding.
+/// Configs that read this at runtime — a helper returning the path — can't be
+/// evaluated statically, but the location is fixed relative to the project, so
+/// resolve it directly.
+///
+/// The directory holds the user's database as `<sha256>.sqlite` alongside
+/// miniflare's own `metadata.sqlite` (internal `_cf_*` bookkeeping). Selecting
+/// by name — the hash-stemmed file — is what avoids opening the metadata store
+/// and showing empty `_cf_ALARM` tables instead of the real data.
+fn resolve_local_d1_sqlite(cwd: &Path) -> Option<String> {
+    let dir = cwd.join(".wrangler/state/v3/d1/miniflare-D1DatabaseObject");
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|f| {
+            f.extension().is_some_and(|e| e == "sqlite")
+                && f.file_stem()
+                    .and_then(|s| s.to_str())
+                    .is_some_and(is_d1_database_name)
+        })
+        .collect();
+    // One per binding in practice; if miniflare kept several, the one holding
+    // the most data is the one being used. A just-written database can have a
+    // near-empty main file with every row still in its `-wal`, so weigh the
+    // sidecar too — otherwise an idle binding outranks the live one. SQLite
+    // merges the WAL on open, so the main file is still the path to hand back.
+    files.sort_by_key(|f| d1_stored_bytes(f));
+    files.pop().map(|f| f.to_string_lossy().to_string())
+}
+
+/// Bytes a SQLite database occupies: the main file plus its write-ahead log.
+fn d1_stored_bytes(main: &Path) -> u64 {
+    let len = |p: &Path| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
+    len(main) + len(&PathBuf::from(format!("{}-wal", main.display())))
+}
+
+/// A miniflare D1 database file is stemmed with the database's SHA-256 hash;
+/// `metadata.sqlite` and any other named file is miniflare's own, not the data.
+fn is_d1_database_name(stem: &str) -> bool {
+    stem.len() >= 16 && stem.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 /// `dbCredentials: { host, port, user, password, database }` — the field form.
@@ -1199,6 +1262,37 @@ mod tests {
         assert!(combined.contains("d1"));
         // Left to the dialect alone this would have gone down the file path.
         assert!(target_from_url("", "sqlite", Path::new("/proj")).is_none());
+    }
+
+    #[test]
+    fn resolves_the_local_d1_sqlite_file_for_a_helper_computed_url() {
+        // The Cloudflare D1 local-dev config from the wild: `url: localD1File()`
+        // computes the miniflare path at runtime. Static parsing can't reach it,
+        // so the fallback must find the file itself — under whatever name
+        // miniflare gave it, since the stem is a hash of the user's database.
+        let root = std::env::temp_dir().join(format!("stroke_d1_scan_{}", std::process::id()));
+        let d1_dir = root.join(".wrangler/state/v3/d1/miniflare-D1DatabaseObject");
+        std::fs::create_dir_all(&d1_dir).unwrap();
+
+        // A second binding, idle but with a fatter main file.
+        let idle = d1_dir.join(format!("{}.sqlite", "e4".repeat(32)));
+        std::fs::write(&idle, vec![0u8; 16384]).unwrap();
+        // The live one: header-sized main file, every row still in the WAL.
+        let db = d1_dir.join("0f3b9c7e2d1a4b56.sqlite");
+        std::fs::write(&db, b"the real database with user tables").unwrap();
+        std::fs::write(format!("{}-wal", db.display()), vec![0u8; 65536]).unwrap();
+        // miniflare's own metadata store must NOT be picked, even though it
+        // outweighs both — its stem isn't a hash.
+        std::fs::write(d1_dir.join("metadata.sqlite"), vec![0u8; 1 << 20]).unwrap();
+
+        let found = resolve_local_d1_sqlite(&root);
+        assert_eq!(found.as_deref(), Some(db.to_string_lossy().as_ref()));
+
+        // Missing directory (db not created yet) resolves to nothing, so the
+        // caller can show the "start your dev server" hint instead.
+        assert!(resolve_local_d1_sqlite(Path::new("/no/such/project")).is_none());
+
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]
