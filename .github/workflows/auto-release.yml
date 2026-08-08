@@ -30,11 +30,12 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          # Push the version-bump commit + tag with the RELEASES_TOKEN PAT, not
-          # the default GITHUB_TOKEN: tags pushed by GITHUB_TOKEN never trigger
-          # other workflows (GitHub Actions rule), which is why release.yml had
-          # to be dispatched manually after every auto-release. With the PAT,
-          # the tag push starts the Release build automatically.
+          # Push the version-bump commit + tag with a PAT, not the default
+          # GITHUB_TOKEN: tags pushed by GITHUB_TOKEN never trigger other
+          # workflows (a GitHub Actions rule), which would leave release.yml
+          # needing a manual dispatch after every auto-release. Only the tag
+          # push needs this — release.yml itself publishes with GITHUB_TOKEN
+          # now that the releases live in this repo.
           token: ${{ secrets.RELEASES_TOKEN }}
 
       - uses: actions/setup-node@v5
