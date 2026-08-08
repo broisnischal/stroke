@@ -54,8 +54,24 @@ export async function recordQueryExecution(connectionId, sql, meta = {}) {
   if (!connectionId || !trimmed) return
 
   const db = await getStudioDb()
-  const existing = await db.getAllFromIndex(HISTORY_STORE, 'connectionId', connectionId)
-  const latest = existing.sort((a, b) => b.executedAt - a.executedAt)[0]
+
+  // Newest entry for this connection via a reverse cursor on the executedAt
+  // index - avoids loading + sorting the whole per-connection history (the cap
+  // is user-settable up to 100k) on every Run. The walk stops at the first
+  // match, i.e. after only the entries other connections recorded since this
+  // one last ran.
+  /** @type {QueryHistoryEntry | null} */
+  let latest = null
+  for (
+    let cursor = await db.transaction(HISTORY_STORE).store.index('executedAt').openCursor(null, 'prev');
+    cursor;
+    cursor = await cursor.continue()
+  ) {
+    if (cursor.value.connectionId === connectionId) {
+      latest = cursor.value
+      break
+    }
+  }
 
   if (latest?.sql === trimmed) {
     await db.put(HISTORY_STORE, {
@@ -79,9 +95,11 @@ export async function recordQueryExecution(connectionId, sql, meta = {}) {
   })
   await db.put(HISTORY_STORE, entry)
 
-  // Cap the ring buffer - but favorites are pinned and never evicted.
-  const merged = [entry, ...existing].sort((a, b) => b.executedAt - a.executedAt)
-  const evictable = merged.filter((e) => !e.favorite)
+  // Cap the ring buffer - but favorites are pinned and never evicted. Loading
+  // the full list is fine here: this branch only runs when a distinct new
+  // statement was inserted, not on every re-run of the same one.
+  const all = await db.getAllFromIndex(HISTORY_STORE, 'connectionId', connectionId)
+  const evictable = all.sort((a, b) => b.executedAt - a.executedAt).filter((e) => !e.favorite)
   const cap = maxHistoryPerConnection()
   if (evictable.length > cap) {
     await Promise.all(
