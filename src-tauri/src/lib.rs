@@ -314,13 +314,11 @@ pub fn run() {
                 _ => {}
             });
 
-            // Suppress unused-variable warning in release builds
-            let _ = &window;
-
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::ai_fetch,
+            commands::ai_fetch_cancel,
             commands::ai_list_models,
             commands::ai_device_id,
             commands::save_file,

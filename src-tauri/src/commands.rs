@@ -18,6 +18,34 @@ fn ai_http_client() -> &'static reqwest::Client {
     })
 }
 
+// ── Streaming cancellation ────────────────────────────────────────────────────
+// In-flight streaming requests, keyed by request_id. Stop in the UI fires
+// `ai_fetch_cancel`, which breaks the drain loop below; dropping the byte
+// stream closes the connection, so a local model server (Ollama, LM Studio)
+// stops generating instead of finishing the whole completion into the void.
+static AI_CANCELS: OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<()>>>,
+> = OnceLock::new();
+
+fn ai_cancel_senders(
+) -> &'static std::sync::Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<()>>>
+{
+    AI_CANCELS.get_or_init(Default::default)
+}
+
+/// Cancel an in-flight streaming `ai_fetch`. Fires the request's oneshot, which
+/// interrupts the drain loop even while it is parked awaiting the next chunk.
+#[tauri::command]
+pub fn ai_fetch_cancel(request_id: String) {
+    let sender = ai_cancel_senders()
+        .lock()
+        .ok()
+        .and_then(|mut map| map.remove(&request_id));
+    if let Some(tx) = sender {
+        tx.send(()).ok();
+    }
+}
+
 /// Proxy an OpenAI-compatible chat completions request through the Rust backend,
 /// bypassing WebView CORS restrictions for local AI models (Ollama, LM Studio, etc.).
 ///
@@ -63,8 +91,20 @@ pub async fn ai_fetch(
 
     if stream {
         use futures::StreamExt;
+        let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel::<()>();
+        if let Ok(mut map) = ai_cancel_senders().lock() {
+            map.insert(request_id.clone(), cancel_tx);
+        }
         let mut byte_stream = response.bytes_stream();
-        while let Some(chunk) = byte_stream.next().await {
+        loop {
+            let chunk = tokio::select! {
+                _ = &mut cancel_rx => break,
+                chunk = byte_stream.next() => chunk,
+            };
+            let Some(chunk) = chunk else {
+                app.emit(&format!("ai-stream-done-{}", request_id), true).ok();
+                break;
+            };
             match chunk {
                 Ok(bytes) => {
                     let text = String::from_utf8_lossy(&bytes).into_owned();
@@ -72,11 +112,13 @@ pub async fn ai_fetch(
                 }
                 Err(e) => {
                     app.emit(&format!("ai-stream-error-{}", request_id), e.to_string()).ok();
-                    return Ok(None);
+                    break;
                 }
             }
         }
-        app.emit(&format!("ai-stream-done-{}", request_id), true).ok();
+        if let Ok(mut map) = ai_cancel_senders().lock() {
+            map.remove(&request_id);
+        }
         Ok(None)
     } else {
         let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
