@@ -1213,12 +1213,14 @@
   // Monotonic id so an out-of-order / superseded row fetch can't clobber a
   // newer one when the user pages rapidly.
   let _loadSeq = 0
-  // Infinite scroll - accumulated rows across all "load more" fetches.
-  // Kept as deep $state (not .raw): handleLoadMore appends in place with .push()
-  // (O(1) amortised) and DataTable's rowTops/contentHeight $derived reads rows.length
-  // to grow the scroll extent - it needs the proxy's length signal to fire on the
-  // in-place push. .raw would lose that notify without an O(n²) whole-array copy.
-  let _infiniteRows = $state(/** @type {any[]} */ ([]))
+  // Infinite scroll - accumulated rows across all "load more" fetches. Plain
+  // (non-reactive) array: handing a deep proxy to the grid would put get-traps
+  // on every rows[r][c] read in the per-frame canvas draw (the scroll-lag
+  // regression). handleLoadMore appends in place (O(1) amortised) and then
+  // assigns `rows = _infiniteRows.slice()` - the fresh identity is what notifies
+  // the grid's rows.length deriveds, and a shallow page-sized-growth copy is far
+  // cheaper than proxy traps on the draw hot path.
+  let _infiniteRows = /** @type {any[]} */ ([])
   // Hard ceiling on accumulated infinite-scroll rows. Without it, scrolling a
   // huge table in infinite mode would keep appending until the entire result set
   // was resident (and deep-proxied) - unbounded memory. At the cap we stop
@@ -4464,9 +4466,10 @@ let rowSearch = $state('')
       if (!fetched.length) return
       // Append in place - spreading the whole accumulated array on every page was
       // O(n) per load (O(n²) over a scroll session). Pages are page-size (small),
-      // so push() is cheap and the proxied $state array still notifies the grid.
+      // so push() is cheap; the slice() below gives `rows` (which is $state.raw)
+      // a fresh raw identity so the grid's rows.length deriveds fire.
       for (let i = 0; i < fetched.length; i++) _infiniteRows.push(fetched[i])
-      rows = _infiniteRows
+      rows = _infiniteRows.slice()
       total = Number(data.total ?? total)
     } catch (e) {
       error = String(e)
@@ -6585,7 +6588,7 @@ let rowSearch = $state('')
                 loading={loadingRows}
                 {loadingMore}
                 {infiniteScroll}
-                endOfResults={infiniteScroll && total > 0 && _infiniteRows.length >= total}
+                endOfResults={infiniteScroll && !windowed && total > 0 && rows.length >= total}
                 onloadmore={handleLoadMore}
                 saving={savingCell || deletingRows || insertingRow}
                 bind:selected
