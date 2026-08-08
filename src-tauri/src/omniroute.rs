@@ -53,31 +53,171 @@ fn emit(app: &tauri::AppHandle, line: &str, kind: &str) {
     );
 }
 
+// ── Finding the user's toolchain ─────────────────────────────────────────────
+//
+// A windowed app does not get the PATH a terminal gets. macOS starts a .app
+// from launchd, which hands it `/usr/bin:/bin:/usr/sbin:/sbin` and nothing
+// else — no Homebrew, no nvm, no fnm, no Volta. Node lives in exactly those
+// places, so every lookup here missed and the app told users who plainly had
+// Node installed that they had none, with no way to act on it. Linux .desktop
+// launches have the same gap; Windows GUI processes do inherit the user PATH.
+
+static USER_PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// PATH to run tool lookups under. Resolved once per process.
+async fn user_path() -> String {
+    if let Some(p) = USER_PATH.get() {
+        return p.clone();
+    }
+    let built = build_user_path().await;
+    USER_PATH.get_or_init(|| built).clone()
+}
+
+async fn build_user_path() -> String {
+    let sep = if cfg!(target_os = "windows") { ';' } else { ':' };
+    let mut dirs: Vec<String> = Vec::new();
+    fn add(dirs: &mut Vec<String>, d: &str) {
+        if !d.is_empty() && !dirs.iter().any(|x| x == d) {
+            dirs.push(d.to_string());
+        }
+    }
+
+    if let Ok(p) = std::env::var("PATH") {
+        for d in p.split(sep) {
+            add(&mut dirs, d);
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Some(p) = login_shell_path().await {
+            for d in p.split(':') {
+                add(&mut dirs, d);
+            }
+        }
+        for d in fallback_dirs() {
+            add(&mut dirs, &d);
+        }
+    }
+
+    dirs.join(&sep.to_string())
+}
+
+/// Ask the user's login shell what its PATH is.
+///
+/// This is the only approach that survives version managers: nvm and fnm create
+/// their bin directory from an rc file, so it is written down nowhere a process
+/// can read. Editors shell out for the same reason.
+#[cfg(not(target_os = "windows"))]
+async fn login_shell_path() -> Option<String> {
+    let shell = std::env::var("SHELL").ok()?;
+    // -i so the rc file that defines the version manager actually runs. stdin
+    // closed and a hard timeout because an interactive shell is entitled to
+    // wait for input, and the app must not wait with it.
+    let out = tokio::time::timeout(
+        std::time::Duration::from_secs(4),
+        Cmd::new(&shell)
+            .args(["-ilc", "printf %s \"$PATH\""])
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output(),
+    )
+    .await
+    .ok()?
+    .ok()?;
+    // `printf` emits no newline, so the PATH is whatever follows the last one —
+    // login shells are free to print a banner ahead of it.
+    let text = String::from_utf8_lossy(&out.stdout);
+    let p = text.rsplit('\n').next().unwrap_or("").trim().to_string();
+    if p.contains('/') && !p.is_empty() { Some(p) } else { None }
+}
+
+/// Where toolchains live when the shell could not be asked.
+#[cfg(not(target_os = "windows"))]
+fn fallback_dirs() -> Vec<String> {
+    let mut out: Vec<String> = ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"]
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
+
+    let Ok(home) = std::env::var("HOME") else {
+        return out;
+    };
+    for rel in [".local/bin", ".bun/bin", ".volta/bin", ".cargo/bin", ".asdf/shims"] {
+        out.push(format!("{home}/{rel}"));
+    }
+    // Version managers keep every Node release in its own directory, so the bin
+    // path cannot be written down — enumerate, newest first.
+    out.extend(node_version_bins(&format!("{home}/.nvm/versions/node"), "bin"));
+    out.extend(node_version_bins(
+        &format!("{home}/Library/Application Support/fnm/node-versions"),
+        "installation/bin",
+    ));
+    out.extend(node_version_bins(
+        &format!("{home}/.local/share/fnm/node-versions"),
+        "installation/bin",
+    ));
+    out
+}
+
+/// The newest few `vMAJOR.MINOR.PATCH` directories under `root`, as bin paths.
+/// Sorted numerically: lexically, v9 sorts above v24.
+#[cfg(not(target_os = "windows"))]
+fn node_version_bins(root: &str, suffix: &str) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut versions: Vec<(u32, u32, u32, String)> = entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().into_string().ok()?;
+            let mut parts = name.trim_start_matches('v').split('.');
+            let major = parts.next()?.parse().ok()?;
+            let minor = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+            let patch = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+            Some((major, minor, patch, name))
+        })
+        .collect();
+    versions.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)).then(b.2.cmp(&a.2)));
+    versions
+        .into_iter()
+        .take(3)
+        .map(|(_, _, _, name)| format!("{root}/{name}/{suffix}"))
+        .collect()
+}
+
+/// A tool invocation that can actually find the tool.
+async fn tool(program: &str) -> Cmd {
+    let mut c = Cmd::new(program);
+    c.env("PATH", user_path().await);
+    c
+}
+
 /// npm ships as a shell script on Windows, so it is not directly executable
 /// there - it has to go through cmd.exe. Everything else runs it directly.
-fn npm_command() -> Cmd {
+async fn npm_command() -> Cmd {
     #[cfg(target_os = "windows")]
     {
-        let mut c = Cmd::new("cmd");
+        let mut c = tool("cmd").await;
         c.args(["/C", "npm"]);
         c
     }
     #[cfg(not(target_os = "windows"))]
     {
-        Cmd::new("npm")
+        tool("npm").await
     }
 }
 
-fn omniroute_command() -> Cmd {
+async fn omniroute_command() -> Cmd {
     #[cfg(target_os = "windows")]
     {
-        let mut c = Cmd::new("cmd");
+        let mut c = tool("cmd").await;
         c.args(["/C", "omniroute"]);
         c
     }
     #[cfg(not(target_os = "windows"))]
     {
-        Cmd::new("omniroute")
+        tool("omniroute").await
     }
 }
 
@@ -102,9 +242,9 @@ pub async fn omniroute_env() -> Result<NodeStatus, String> {
     }
 
     Ok(NodeStatus {
-        node: version(Cmd::new("node")).await,
-        npm: version(npm_command()).await,
-        omniroute: version(omniroute_command()).await,
+        node: version(tool("node").await).await,
+        npm: version(npm_command().await).await,
+        omniroute: version(omniroute_command().await).await,
     })
 }
 
@@ -126,7 +266,7 @@ pub async fn omniroute_install(app: tauri::AppHandle) -> Result<String, String> 
     }
 
     emit(&app, "npm install -g omniroute", "cmd");
-    let mut child = npm_command()
+    let mut child = npm_command().await
         .args(["install", "-g", "omniroute"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -211,7 +351,7 @@ pub async fn omniroute_start(
     }
 
     emit(&app, &format!("omniroute --port {port}"), "cmd");
-    let mut child = omniroute_command()
+    let mut child = omniroute_command().await
         .args(["--port", &port.to_string()])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
