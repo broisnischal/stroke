@@ -538,22 +538,40 @@
    */
   async function pasteConnectionUri() {
     try {
-      const text = (await navigator.clipboard.readText()).trim()
-      if (!text) { uriHint = 'Clipboard is empty'; return }
-      connectionUri = text
-      if (!applyConnectionUri() && !uriHint) uriHint = "That doesn't look like a connection string"
+      const text = (await navigator.clipboard.readText()).trim();
+      if (!text) {
+        uriHint = "Clipboard is empty";
+        return;
+      }
+      connectionUri = text;
+      if (!applyConnectionUri() && !uriHint)
+        uriHint = "That doesn't look like a connection string";
     } catch {
       // Clipboard read can be refused; fall back to letting them paste by hand.
-      uriHint = 'Paste into the field with ⌘V'
-      document.getElementById('cn-paste-uri')?.focus()
+      uriHint = "Paste into the field with ⌘V";
+      document.getElementById("cn-paste-uri")?.focus();
     }
   }
 
   /** @param {string} id */
   function focusField(id) {
-    const el = /** @type {HTMLInputElement | null} */ (document.getElementById(id))
-    el?.focus()
-    el?.select?.()
+    // Some engine forms prefix their field ids (cn-ch-*, cn-mssql-*, cn-redis-*);
+    // fall through to the visible engine's variant so the one-click error fixes
+    // land on every form instead of silently no-oping.
+    const suffix = id.replace(/^cn-/, "");
+    for (const cid of [
+      id,
+      ...["ch", "mssql", "redis"].map((p) => `cn-${p}-${suffix}`),
+    ]) {
+      const el = /** @type {HTMLInputElement | null} */ (
+        document.getElementById(cid)
+      );
+      if (el) {
+        el.focus();
+        el.select?.();
+        return;
+      }
+    }
   }
 
   /**
