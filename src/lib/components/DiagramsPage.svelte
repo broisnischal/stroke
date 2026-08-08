@@ -20,6 +20,7 @@
   import Check from '@lucide/svelte/icons/check'
   import Search from '@lucide/svelte/icons/search'
   import { cn } from '$lib/utils.js'
+  import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
 
   /**
    * Run one of the viewer's exports and name the file it landed in.
@@ -38,7 +39,6 @@
       toast.error('Export failed', { description: String(e) })
     }
   }
-  import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
 
   /** Copy the rendered diagram to the clipboard as a PNG. */
   async function copyDiagram() {
@@ -52,7 +52,6 @@
   }
 
   let {
-    onopendiagram = undefined,
     /** @type {import('$lib/stores/connections.js').SavedConnection | null} */
     connection = null,
   } = $props()
@@ -164,11 +163,6 @@
     selectedId = null
     confirmingDelete = false
     toast.success('Diagram deleted')
-  }
-
-  /** @param {HTMLDivElement} node */
-  function dispatchZoom(node, name) {
-    node.dispatchEvent(new CustomEvent(name))
   }
 
   /** @param {KeyboardEvent} e */

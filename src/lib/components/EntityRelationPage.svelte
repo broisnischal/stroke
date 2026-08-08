@@ -1,5 +1,5 @@
 <script>
-  import { tick, untrack } from 'svelte'
+  import { onDestroy, tick, untrack } from 'svelte'
   import dagre from '@dagrejs/dagre'
   import { getSchemaColumnStructure, listIndexes, getTableDdl, saveExportAs } from '$lib/api.js'
   import ErdCanvas from './ErdCanvas.svelte'
@@ -19,7 +19,7 @@
   import LayoutGrid from '@lucide/svelte/icons/layout-grid'
   import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal'
   import { toast } from "$lib/components/ui/sonner/toast.svelte.js"
-  import { svgStringToPngBlob } from '$lib/svg-png.js'
+  import { svgStringToPngBlob, copyPngToClipboard } from '$lib/svg-png.js'
   import { Popover, PopoverTrigger, PopoverContent } from '$lib/components/ui/popover/index.js'
   import { isCurrentThemeDark } from '$lib/stores/settings.js'
   import { loadErdSettings, saveErdSettings, SPACING_PRESETS, SCOPE_DEFAULTS } from '$lib/stores/erd-settings.js'
@@ -72,8 +72,6 @@
 
   // ── State ─────────────────────────────────────────────────────────────────
   let loading       = $state(false)
-  let loadedCount   = $state(0)
-  let totalCount    = $state(0)
   let error         = $state('')
   let search        = $state('')
   let searchEl      = $state(/** @type {HTMLInputElement | null} */ (null))
@@ -481,24 +479,17 @@
   })
 
   // ── Search ────────────────────────────────────────────────────────────────
-  /** @param {string} q */
-  function _applySearch(q) {
-    if (!q) {
-      nodes = nodes.map(n => ({ ...n, data: { ...n.data, highlighted: true } }))
-      return
-    }
-    const hi = new Set()
-    for (const [name, t] of tableMeta) {
-      if (name.toLowerCase().includes(q) || t.columns.some(c => c.name.toLowerCase().includes(q)))
-        hi.add(name)
-    }
-    nodes = nodes.map(n => ({ ...n, data: { ...n.data, highlighted: hi.has(n.id) } }))
+  /** Highlight rule: the table name or any of its columns matches the query.
+   *  @param {string} id @param {string} q */
+  function matchesQuery(id, q) {
+    if (!q) return true
+    const t = tableMeta.get(id)
+    return id.toLowerCase().includes(q) || (t?.columns.some(c => c.name.toLowerCase().includes(q)) ?? false)
   }
 
-  let _rebuildTimer = /** @type {ReturnType<typeof setTimeout>|null} */ (null)
-  function scheduleRebuild() {
-    if (_rebuildTimer) clearTimeout(_rebuildTimer)
-    _rebuildTimer = setTimeout(() => { buildGraph(); _rebuildTimer = null }, 80)
+  /** @param {string} q */
+  function _applySearch(q) {
+    nodes = nodes.map(n => ({ ...n, data: { ...n.data, highlighted: matchesQuery(n.id, q) } }))
   }
 
   function reLayout() {
@@ -520,21 +511,17 @@
   // ── Load ──────────────────────────────────────────────────────────────────
   async function load() {
     loading     = true
-    loadedCount = 0
-    totalCount  = 0
     error       = ''
     tableMeta   = new Map()
     nodes       = []
     edges       = []
     _posCache.clear()
-    if (_rebuildTimer) { clearTimeout(_rebuildTimer); _rebuildTimer = null }
 
     try {
       // One call for the whole schema. This used to fan out one request per
       // table, which meant the diagram couldn't start drawing until N round
       // trips had completed — the dominant cost on any non-trivial schema.
       const schemaCols = await getSchemaColumnStructure(activeSchema)
-      totalCount = schemaCols.length
       autoConnected = schemaCols.length > WARN_MANY
 
       for (const { table, columns } of schemaCols) {
@@ -549,7 +536,6 @@
         )
         tableMeta.set(table, /** @type {TableMeta} */ ({ name: table, columns: cols, pkCols }))
       }
-      loadedCount = schemaCols.length
       tableMeta = new Map(tableMeta)
       await tick()
       buildGraph(true)
@@ -595,14 +581,7 @@
       if (!nodes.length) return
       nodes = nodes.map(n => ({
         ...n,
-        data: {
-          ...n.data,
-          selected: n.id === sel,
-          highlighted: q
-            ? (n.id.toLowerCase().includes(q) ||
-               (tableMeta.get(n.id)?.columns.some(c => c.name.toLowerCase().includes(q)) ?? false))
-            : true,
-        },
+        data: { ...n.data, selected: n.id === sel, highlighted: matchesQuery(n.id, q) },
       }))
     })
   })
@@ -629,6 +608,7 @@
   let copiedDdl = $state('')
   /** @type {ReturnType<typeof setTimeout>|null} */
   let _copiedTimer = null
+  onDestroy(() => { if (_copiedTimer) clearTimeout(_copiedTimer) })
 
   /** Copy a table's CREATE statement straight from the inspector. @param {string} name */
   async function copyDdl(name) {
@@ -838,7 +818,6 @@
     o.push(`<path d="${lineD.join(' ')}" fill="none" stroke="${c.edge}" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>`)
     o.push(`<path d="${markD.join(' ')}" fill="none" stroke="${c.edge}" stroke-width="1.2" stroke-linecap="round"/>`)
 
-    // nodes
     for (const n of vis) {
       const cols = n.data?.columns ?? []
       const pkCols = n.data?.pkCols ?? new Set()
@@ -848,15 +827,12 @@
       const isSel = n.data?.selected
       const isFocus = n.data?.isFocus
 
-      // shadow
       o.push(`<rect x="${nx+3}" y="${ny+4}" width="${NODE_W}" height="${h}" rx="8" fill="${c.shadow}"/>`)
       // focus halo - marks the table the diagram was scoped to
       if (isFocus) {
         o.push(`<rect x="${nx-6}" y="${ny-6}" width="${NODE_W+12}" height="${h+12}" rx="13" fill="${c.focus}" fill-opacity="0.10" stroke="${c.focus}" stroke-opacity="0.4" stroke-width="1.5"/>`)
       }
-      // card bg
       o.push(`<rect x="${nx}" y="${ny}" width="${NODE_W}" height="${h}" rx="8" fill="${c.card}" stroke="${isFocus || isSel ? c.accent : c.border}" stroke-width="${isFocus ? 2 : isSel ? 1.5 : 1}"/>`)
-      // header
       o.push(`<clipPath id="hc${n.id.replace(/\W/g,'_')}"><rect x="${nx}" y="${ny}" width="${NODE_W}" height="${HDR_H + 8}" rx="8"/></clipPath>`)
       o.push(`<rect x="${nx}" y="${ny}" width="${NODE_W}" height="${HDR_H + 8}" fill="${c.header}" clip-path="url(#hc${n.id.replace(/\W/g,'_')})"/>`)
       o.push(`<line x1="${nx}" y1="${ny+HDR_H}" x2="${nx+NODE_W}" y2="${ny+HDR_H}" stroke="${isFocus ? c.accent : c.border}" stroke-opacity="${isFocus ? 0.55 : 1}" stroke-width="1"/>`)
@@ -913,14 +889,12 @@
   async function exportMermaid() {
     const visIds = new Set(nodes.map(n => n.id))
     const lines = ['# ER Diagram', '', '```mermaid', 'erDiagram']
-    // relationships
     for (const e of edges) {
       if (!visIds.has(e.source) || !visIds.has(e.target)) continue
       const sm = tableMeta.get(e.source)
       const fkCol = sm?.columns.find(c => `src-${c.name}` === e.sourceHandle)
       lines.push(`    ${e.source} }|--|| ${e.target} : "${fkCol?.name ?? ''}"`)
     }
-    // entities
     for (const n of nodes) {
       const t = tableMeta.get(n.id)
       if (!t) continue
@@ -1126,14 +1100,7 @@
     {/if}
 
     <div class="ml-auto flex shrink-0 items-center gap-1.5">
-      {#if loading && totalCount > 0}
-        <div class="flex items-center gap-2 pr-1">
-          <div class="h-1 w-24 overflow-hidden rounded-full bg-muted/40">
-            <div class="h-full rounded-full bg-primary/60 transition-all duration-200" style="width:{Math.round(loadedCount/totalCount*100)}%"></div>
-          </div>
-          <span class="font-mono text-ui-2xs text-muted-foreground/50">{loadedCount}/{totalCount}</span>
-        </div>
-      {:else if tableMeta.size > 0 && !loading}
+      {#if tableMeta.size > 0 && !loading}
         <span class="whitespace-nowrap pr-1 font-mono text-ui-2xs tabular-nums text-muted-foreground/55">
           {nodes.length}/{tableMeta.size} tables · {edges.length} fk
         </span>
@@ -1254,17 +1221,6 @@
       <div class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background">
         <Loader class="size-6 animate-spin text-muted-foreground/30" />
         <p class="font-mono text-ui-xs text-muted-foreground/50">Loading schema structure…</p>
-      </div>
-
-    {:else if loading && totalCount > 0}
-      <div class="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-background">
-        <div class="flex flex-col items-center gap-2">
-          <Loader class="size-5 animate-spin text-muted-foreground/40" />
-          <p class="font-mono text-ui-xs text-muted-foreground/50">Loading {loadedCount}/{totalCount} tables…</p>
-        </div>
-        <div class="h-1 w-48 overflow-hidden rounded-full bg-muted/40">
-          <div class="h-full rounded-full bg-primary/60 transition-all duration-200" style="width:{Math.round(loadedCount/totalCount*100)}%"></div>
-        </div>
       </div>
 
     {:else if error}

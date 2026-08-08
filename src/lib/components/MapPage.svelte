@@ -1160,7 +1160,7 @@
               <span class="text-ui-3xs uppercase tracking-[0.08em] text-muted-foreground/60">Density</span>
               <span
                 class="h-1.5 w-24 rounded-full"
-                style="background:linear-gradient(90deg, rgba({heatRamp[0].rgb},0.35), rgb({heatRamp[1].rgb}), rgb({heatRamp[2].rgb}))"
+                style="background:linear-gradient(90deg, rgba({palette.accent},0.35), rgba({palette.accent},0.65), rgb({palette.accent}))"
               ></span>
               <span class="font-mono text-ui-3xs tabular-nums text-muted-foreground/60">
                 {peakCount.toLocaleString()}

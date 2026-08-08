@@ -215,8 +215,12 @@
     } catch { toast.error('Could not copy') }
   }
 
+  /** This instance's canvas host - a document-wide query can grab another
+   *  ChartView's canvas when several are mounted (split panes, SQL console). */
+  let hostEl = $state(/** @type {HTMLDivElement|null} */ (null))
+
   function chartCanvas() {
-    return /** @type {HTMLCanvasElement|null} */ (document.querySelector('.chart-canvas-host canvas'))
+    return /** @type {HTMLCanvasElement|null} */ (hostEl?.querySelector('canvas') ?? null)
   }
 
   async function downloadPng() {
@@ -542,7 +546,7 @@
     {/if}
 
     <!-- ── Chart ──────────────────────────────────────────────────────── -->
-    <div class="chart-canvas-host relative min-h-0 flex-1">
+    <div bind:this={hostEl} class="chart-canvas-host relative min-h-0 flex-1">
       <!-- Contain any render/ECharts throw to this panel so a bad chart shows an
            inline message instead of taking down the tab / app. -->
       <svelte:boundary>
