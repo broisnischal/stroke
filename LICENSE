@@ -1,30 +1,79 @@
-MIT License
+Stroke Sustainable Use License
+Version 1.0
 
-Copyright (c) 2024 Stroke Contributors
+Copyright (c) 2026 Nischal Dahal and Stroke contributors
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+-------------------------------------------------------------------------------
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Plain-English summary (not legally binding — the terms below govern):
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+  - You CAN use Stroke for free — personally, in your company, in schools,
+    anywhere — and you can read, modify, and build the entire source code,
+    including the Pro features.
+  - You CANNOT sell Stroke, charge money for it, rebrand it as your own
+    product, or offer it to others as a paid product or hosted service.
+  - Pro features are key-gated in official builds. The source is public so you
+    can audit and contribute to it, but removing or bypassing the license-key
+    checks in builds you distribute is not permitted.
+  - Official builds and updates come from this repository and stroke.click.
 
----
+-------------------------------------------------------------------------------
 
-NOTICE: Certain features of this software ("Pro Features") are not covered by
-the MIT License above and are subject to a separate commercial license. Pro
-Features are clearly identified in the application and include: AI assistant,
-Dashboard, ORM Runner, Security, Logs, Charts, Diagrams, Schema Timeline,
-Data Diff, Extensions, and SQL Notebooks. Use of Pro Features in production
-requires a valid Stroke Pro license. See https://stroke.click/pricing for details.
+Terms
+
+1. Grant. Subject to the conditions below, you are granted a worldwide,
+   royalty-free, non-exclusive, non-transferable license to use, copy, modify,
+   and create derivative works of this software, and to distribute copies of
+   it, in source or compiled form, for any Permitted Purpose.
+
+2. Permitted Purposes. A Permitted Purpose is any use EXCEPT:
+
+   a. selling the software, charging any fee for it, or including it in a
+      product or bundle that is sold or licensed for a fee;
+
+   b. providing the software to third parties as a hosted, managed, or
+      embedded service, whether paid or as part of a paid offering;
+
+   c. distributing the software, modified or unmodified, under a different
+      name or brand, or in a way that suggests it is your own product;
+
+   d. removing, disabling, modifying, or circumventing the license-key
+      functionality that gates Pro features, in any copy you distribute or
+      provide to others. (You may study and modify that code — including for
+      local development, testing, and contribution — but builds you give to
+      anyone else must leave the key gating intact.)
+
+3. Conditions. Any copy or substantial portion you distribute must retain this
+   license text, the copyright notice above, and a link to the official
+   repository. Modified copies must be clearly marked as modified.
+
+4. Pro features and updates. Activation of Pro features in official builds
+   requires a valid license from stroke.click. Official releases and updates
+   are distributed only through the official repository and stroke.click;
+   this license grants no right to operate a competing update or distribution
+   channel for the software.
+
+5. Trademarks. This license grants no rights to the "Stroke" name, logo, or
+   other trademarks of the copyright holder.
+
+6. Contributions. Unless you and the copyright holder agree otherwise in
+   writing, contributions you submit to the official repository are governed
+   by the project's Contributor License Agreement (.github/cla/cla.md) and may
+   be distributed under this license.
+
+7. Termination. Your rights under this license end automatically if you
+   breach it. Rights are reinstated if the breach is fully cured within 30
+   days of you becoming aware of it, unless the copyright holder notifies you
+   otherwise.
+
+8. Warranty and liability. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY
+   OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+   WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+   NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+   LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+   CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+   SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+For uses outside these terms (reselling, OEM bundling, managed hosting, or
+anything you are unsure about), contact the copyright holder via
+https://stroke.click.
