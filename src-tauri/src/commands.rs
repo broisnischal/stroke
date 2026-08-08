@@ -1128,7 +1128,6 @@ pub fn debug_reset_trial(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn init_sample_db(app: tauri::AppHandle) -> Result<String, String> {
     use sqlx::sqlite::SqlitePoolOptions;
-    use tauri::Manager;
 
     let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;

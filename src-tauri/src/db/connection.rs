@@ -548,27 +548,17 @@ const STALE_AFTER: Duration = Duration::from_secs(25);
 
 fn pg_pool_builder() -> PgPoolOptions {
     PgPoolOptions::new()
-        // Desktop app: steady-state use only needs ~4 connections. But the FIRST
-        // open of a table bursts 6 concurrent queries — rows + count + the four
-        // catalog-metadata lookups (enums/nullable/pk/fk), which now run in
-        // parallel with the row fetch. Cap at 8 so that burst never queues behind
-        // a 4-connection ceiling (which would serialize metadata after the rows
-        // and stall the first open); the extras stay idle and close after
-        // idle_timeout, so steady state still settles back to ~4.
         // Headroom for the first-open burst (6 concurrent: rows + count + four
         // catalog lookups) PLUS the background warm, which HOLDS its connections
         // until it has opened them all. Sized at 8 with a warm of 6, the burst
         // found 2 free and queued the rest until acquire_timeout - surfacing as
         // "pool timed out while waiting for an open connection" on every connect.
+        // The extras stay idle and close after idle_timeout, so steady state
+        // still settles back to ~4.
         .max_connections(10)
-        // Keep four connections standing by. The pool's maintenance task opens
-        // them in the BACKGROUND and replaces any that die, so a burst finds
-        // them ready instead of opening its own mid-flight - which is what made
-        // "pool timed out while waiting for an open connection" reachable on a
-        // link that drops ~20% of SYNs (a lost SYN costs the kernel's ~4s
-        // retransmit, and several at once outran acquire_timeout).
-        //
-        // Two, not four. Idle connections coming back dead after sleep/wake is
+        // Two, not four. The pool's maintenance task opens these in the
+        // BACKGROUND so a burst finds them ready instead of opening its own
+        // mid-flight. Idle connections coming back dead after sleep/wake is
         // handled by the idle-gated ping below, so this only has to cover the
         // burst — and on a host where one handshake costs seconds (a proxied
         // serverless Postgres measured at ~5.7s) four background opens raced the
@@ -576,12 +566,6 @@ fn pg_pool_builder() -> PgPoolOptions {
         // lost that race, which is exactly what "pool timed out while waiting for
         // an open connection" was in the log.
         .min_connections(2)
-        // The preflight already filtered definitively unreachable hosts, so a
-        // short acquire timeout keeps auth/handshake failures snappy. It must
-        // still clear a cold-pool handshake on a slow remote link (TCP + TLS +
-        // auth is ~6 round trips), hence 10 s rather than something tighter —
-        // `min_connections` is what keeps the common path off this ceiling.
-        //
         // 20s, not 10: a single handshake to a proxied serverless host measured
         // 5.7s, so a query queued behind two of them blew a 10s ceiling and failed
         // as "pool timed out" — reporting a timeout for a connection that was

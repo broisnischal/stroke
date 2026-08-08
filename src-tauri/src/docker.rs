@@ -223,12 +223,6 @@ pub async fn docker_run_db(
         "info",
     );
 
-    // ── Wait for DB-level readiness ───────────────────────────────────────────
-    // TCP-open is not enough — the database process needs more time to finish
-    // initialization after the port starts accepting connections. We retry actual
-    // SQL connections so the caller gets a fully usable database, not just an open port.
-    emit_log(&app, &evt, "Waiting for database to accept connections…", "info");
-
     let ready = match db_type.as_str() {
         "mysql"    => wait_mysql_ready(host_port, password).await,
         "postgres" => wait_postgres_ready(host_port, password).await,
