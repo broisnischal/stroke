@@ -1,11 +1,8 @@
 # Build Stroke for Linux, Windows, and macOS and publish to GitHub Releases.
 #
-# The source repo is PRIVATE, so releases are published to a separate PUBLIC
-# repo (RELEASES_REPO below) that anonymous users, the in-app updater, Scoop,
-# and Homebrew can all reach. Publishing cross-repo requires a fine-grained
-# PAT with "Contents: read/write" on RELEASES_REPO, stored as the
-# RELEASES_TOKEN secret in this repo (the default GITHUB_TOKEN only works
-# within this repo).
+# Releases, the updater's latest.json and the Scoop bucket all live in THIS
+# repo. Every URL baked into a shipped app points at github.com/broisnischal/
+# stroke, so that name has to keep resolving here — see RELEASES_REPO below.
 #
 # Create a release:
 #   git tag v0.1.0
@@ -31,10 +28,10 @@ permissions:
 
 env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
-  # Public repo that hosts release assets, latest.json, and the Scoop bucket.
-  # Keeping the old "stroke" name means updater endpoints and package-manager
-  # URLs baked into already-shipped versions continue to resolve.
-  RELEASES_REPO: broisnischal/stroke
+  # This repo hosts the release assets, latest.json and the Scoop bucket. It is
+  # named `stroke` because that name is baked into every shipped updater
+  # endpoint and package-manager URL, and those cannot be changed retroactively.
+  RELEASES_REPO: ${{ github.repository }}
 
 # ── 1. Create the release as a DRAFT before builds ───────────────────────────
 #      A draft is private and unannounced, so users never see an empty/partial
@@ -49,7 +46,7 @@ jobs:
 
       - name: Create GitHub release
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ env.RELEASE_TAG }}
           SHA: ${{ github.sha }}
         run: |
@@ -197,7 +194,7 @@ jobs:
         if: matrix.name == 'macos-aarch64'
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ env.RELEASE_TAG }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -223,7 +220,7 @@ jobs:
         if: matrix.name == 'macos-x64'
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ env.RELEASE_TAG }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -249,7 +246,7 @@ jobs:
         if: matrix.name == 'linux'
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ env.RELEASE_TAG }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -287,7 +284,7 @@ jobs:
         if: matrix.name == 'windows'
         shell: pwsh
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ env.RELEASE_TAG }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -413,14 +410,14 @@ jobs:
 
       - name: Upload latest.json
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ env.RELEASE_TAG }}
         run: gh release upload "$TAG" --repo "$RELEASES_REPO" latest.json --clobber
 
-# ── 4. Refresh the Scoop manifest + changelog in the public releases repo ────
-#      Scoop clones the bucket repo anonymously, and the website reads the
-#      changelog from the public repo — both must live in RELEASES_REPO, not
-#      in this private source repo.
+# ── 4. Refresh the Scoop manifest ────────────────────────────────────────────
+#      `scoop bucket add stroke https://github.com/broisnischal/stroke` clones
+#      THIS repo anonymously and reads bucket/stroke.json, so the manifest is
+#      committed straight to the default branch.
   update-scoop:
     # Runs AFTER publish-release: it downloads the installer from the public
     # releases/download/ URL to hash it, which 404s while the release is a draft.
@@ -429,12 +426,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          repository: broisnischal/stroke
-          token: ${{ secrets.RELEASES_TOKEN }}
+          ref: ${{ github.event.repository.default_branch }}
 
       - name: Update bucket/stroke.json
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ env.RELEASE_TAG }}
         run: |
           VERSION="${TAG#v}"
@@ -483,26 +479,6 @@ jobs:
             git push origin HEAD
           fi
 
-      # Mirror the changelog into the public repo so the website (and anyone
-      # browsing github.com/broisnischal/stroke) sees release history without
-      # access to the private source repo. Fetched at the release tag so it
-      # includes the entry auto-release just folded in.
-      - name: Sync CHANGELOG.md
-        env:
-          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
-          TAG: ${{ env.RELEASE_TAG }}
-        run: |
-          gh api "repos/${{ github.repository }}/contents/CHANGELOG.md?ref=${TAG}" \
-            --jq .content | base64 -d > CHANGELOG.md
-
-          git add CHANGELOG.md
-          if git diff --cached --quiet; then
-            echo "Changelog already current."
-          else
-            git commit -m "docs(changelog): stroke ${TAG}"
-            git push origin HEAD
-          fi
-
       # Optional instant Homebrew tap refresh. Without a PAT this is skipped and
       # the tap updates itself on its own schedule instead (see homebrew-tap repo).
       # (secrets can't be used in an `if:`, so the check lives in the script.)
@@ -527,6 +503,6 @@ jobs:
     steps:
       - name: Un-draft the release
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ env.RELEASE_TAG }}
         run: gh release edit "$TAG" --repo "$RELEASES_REPO" --draft=false
