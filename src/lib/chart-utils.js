@@ -1445,6 +1445,77 @@ function makeSeries(type, name, data, color, n = 0) {
  * Detect if a column set is suitable for a chart (at least 2 columns).
  * @param {ColInfo[]} columns
  */
+/**
+ * Make a saved chart option safe to render right now.
+ *
+ * `previewOption` is a JSON snapshot of a built option, so it carries whatever
+ * was true when it was saved: theme colours baked into every axis label and
+ * text style, a legend laid out for a full-size chart, and — because
+ * JSON.stringify drops functions — no formatters at all. Rendered months later
+ * in the other theme, the axis labels are dark text on a dark card, which is
+ * why a saved chart could come back with no readable axes.
+ *
+ * Rebuilding from the data would be better, but the data is a query result that
+ * is not saved with the chart. Re-theming what we have is what can actually be
+ * done, and it is enough: colours come from the live theme, the title is
+ * dropped (the card already shows it), and a timestamp axis gets its formatter
+ * back.
+ *
+ * @param {any} option A saved previewOption.
+ * @param {{ isDark: boolean, compact?: boolean }} ctx
+ *   `compact` is for dashboard tiles, where a legend positioned for a full
+ *   chart lands on top of the plot.
+ */
+export function restyleSavedOption(option, { isDark, compact = false }) {
+  if (!option || typeof option !== 'object' || !Object.keys(option).length) return option
+
+  const themed = baseOption(isDark, true)
+  const axis = axisStyle(isDark)
+
+  /** Re-colour one axis (or an array of them) without touching its data. */
+  const reAxis = (a) => {
+    if (Array.isArray(a)) return a.map(reAxis)
+    if (!a || typeof a !== 'object') return a
+    const next = {
+      ...a,
+      axisLabel: { ...a.axisLabel, color: axis.axisLabel.color },
+      axisLine: { ...a.axisLine, lineStyle: { ...a.axisLine?.lineStyle, ...axis.axisLine.lineStyle } },
+      splitLine: { ...a.splitLine, lineStyle: { ...a.splitLine?.lineStyle, ...axis.splitLine.lineStyle } },
+    }
+    // A timestamp axis loses its formatter to JSON.stringify and renders as
+    // raw epoch numbers; put it back.
+    if (Array.isArray(a.data) && isTimestampAxis(a.data)) {
+      next.axisLabel = { ...next.axisLabel, formatter: fmtAxisLabel }
+    }
+    return next
+  }
+
+  const out = {
+    ...option,
+    title: undefined,
+    textStyle: { ...option.textStyle, ...themed.textStyle },
+    tooltip: { ...option.tooltip, ...themed.tooltip },
+    xAxis: option.xAxis ? reAxis(option.xAxis) : option.xAxis,
+    yAxis: option.yAxis ? reAxis(option.yAxis) : option.yAxis,
+  }
+
+  if (option.legend) {
+    out.legend = { ...option.legend, textStyle: { ...option.legend.textStyle, color: themed.textStyle.color } }
+    // A tile is a few hundred pixels wide. A legend that was fine beside a
+    // full-size chart covers the plot here, and its labels get clipped — so at
+    // this size the chart itself is worth more than its key.
+    if (compact) out.legend = { ...out.legend, show: false }
+  }
+
+  // Titles were drawn inside the canvas; without one, that reserved space is
+  // just a gap at the top of an already small tile.
+  if (compact && out.grid && !Array.isArray(out.grid)) {
+    out.grid = { ...out.grid, top: 12, left: 8, right: 12, bottom: 8, containLabel: true }
+  }
+
+  return out
+}
+
 export function isChartable(columns) {
   return columns.length >= 2
 }

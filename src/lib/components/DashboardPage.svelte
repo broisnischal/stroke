@@ -4,6 +4,8 @@
   import EChartPanel from "./EChartPanel.svelte";
   import AiChartRenderer from "./AiChartRenderer.svelte";
   import { savedCharts } from "$lib/stores/saved-charts.js";
+  import { isCurrentThemeDark } from "$lib/stores/settings.js";
+  import { restyleSavedOption } from "$lib/chart-utils.js";
   import {
     dashboards,
     activeDashboardId,
@@ -545,7 +547,7 @@
               <!-- Chart body -->
               <div class="relative min-h-0 flex-1">
                 {#if chart?.previewOption && Object.keys(chart.previewOption).length > 0}
-                  <EChartPanel option={chart.previewOption} class="absolute inset-0" />
+                  <EChartPanel option={restyleSavedOption(chart.previewOption, { isDark: $isCurrentThemeDark, compact: true })} class="absolute inset-0" />
                 {:else if chart?.aiSpec}
                   <div class="absolute inset-0">
                     <AiChartRenderer spec={chart.aiSpec} noTitle={true} />
@@ -596,7 +598,7 @@
               >
                 <div class="relative h-[100px] border-b border-border/30 bg-muted/20">
                   {#if chart.previewOption && Object.keys(chart.previewOption).length > 0}
-                    <EChartPanel option={chart.previewOption} class="absolute inset-0" />
+                    <EChartPanel option={restyleSavedOption(chart.previewOption, { isDark: $isCurrentThemeDark, compact: true })} class="absolute inset-0" />
                   {:else if chart.aiSpec}
                     <div class="absolute inset-0">
                       <AiChartRenderer spec={chart.aiSpec} noTitle={true} />

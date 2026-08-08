@@ -16,7 +16,8 @@
     activeDashboardId,
     createDashboard,
   } from "$lib/stores/dashboards.js";
-  import { CHART_CATALOG, isTimestampAxis, fmtAxisLabel } from "$lib/chart-utils.js";
+  import { CHART_CATALOG, restyleSavedOption } from "$lib/chart-utils.js";
+  import { isCurrentThemeDark } from "$lib/stores/settings.js";
   import { cn } from "$lib/utils.js";
   import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
   import BarChart2 from "@lucide/svelte/icons/bar-chart-2";
@@ -89,18 +90,10 @@
    * @param {any} option
    */
   function cleanPreviewOption(option) {
-    if (!option || !Object.keys(option).length) return option
-    const o = { ...option, title: undefined }
-    // x-axis formatter is a function - stripped by JSON.stringify when saved.
-    // Re-attach it if the axis data looks like timestamps.
-    const xData = Array.isArray(o.xAxis?.data) ? o.xAxis.data : null
-    if (xData && isTimestampAxis(xData)) {
-      o.xAxis = {
-        ...o.xAxis,
-        axisLabel: { ...o.xAxis?.axisLabel, formatter: fmtAxisLabel },
-      }
-    }
-    return o
+    // Shared with the dashboard: a saved option also carries the theme colours
+    // it was built in, so re-theming has to happen here too — a chart saved in
+    // light mode used to render its axis labels as dark text on a dark card.
+    return restyleSavedOption(option, { isDark: $isCurrentThemeDark })
   }
 
   /** @param {number} ts */
