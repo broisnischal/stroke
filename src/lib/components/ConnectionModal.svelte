@@ -1954,7 +1954,9 @@
                         role="button"
                         tabindex="0"
                         onclick={() => resetForm(conn)}
+                        ondblclick={() => { if (!connecting) void connectWith(conn); }}
                         onkeydown={(e) => e.key === "Enter" && resetForm(conn)}
+                        title="Click to edit · double-click to connect"
                       >
                         {#if isSel}
                           <span
@@ -2100,8 +2102,8 @@
           {#if step === "pick"}
             <!-- Search sits outside the scroller: it is how you get to an engine
                without reading six groups, so it must never scroll away. -->
-            <div class="shrink-0 px-8 pt-4">
-              <div class="relative max-w-[720px]">
+            <div class="flex shrink-0 items-center gap-2 px-8 pt-4">
+              <div class="relative max-w-[720px] flex-1">
                 <Icon
                   name="search"
                   class="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/40"
@@ -2131,6 +2133,20 @@
                   >
                 {/if}
               </div>
+              <!-- The rescan already existed as a size-3 glyph at 35% opacity beside a
+                   section heading — findable only if you knew it was there. This is the
+                   same action, where you would look for it. -->
+              <button
+                type="button"
+                title="Rescan local databases (⌘R)"
+                aria-label="Rescan local databases"
+                disabled={localPhase === "scanning"}
+                onclick={() => { saved = loadSavedConnections().sort(byLastConnected); void refreshLocal(); }}
+                class="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-border/60 px-2.5 text-ui-xs text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground disabled:opacity-50"
+              >
+                <Icon name="refresh-cw" class={cn("size-3.5 shrink-0", localPhase === "scanning" && "animate-spin")} />
+                Refresh
+              </button>
             </div>
             <ScrollArea type="auto" class="min-h-0 flex-1 scroll-smooth">
               <div class="flex flex-col gap-5 px-8 py-5">
