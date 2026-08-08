@@ -4,7 +4,7 @@
 
 **A fast, minimal desktop database client.**
 
-Connect to PostgreSQL, MySQL, SQLite, Turso/LibSQL, Cloudflare D1, ClickHouse, DuckDB, and SQL Server —
+Connect to PostgreSQL, MySQL, SQLite, Turso/LibSQL, Cloudflare D1, ClickHouse, DuckDB, SQL Server, and Redis —
 browse schemas, edit data, write SQL, visualize results, and let AI tools talk to your database through a built-in MCP server.
 
 [Download](#install) · [Features](#features) · [Build from source](#build-from-source) · [Website](https://stroke.click)
@@ -41,6 +41,7 @@ Built with **Rust + Svelte** — a native backend paired with a reactive UI — 
 | **ClickHouse** | Columnar OLAP over HTTP(S) |
 | **DuckDB** | Embedded analytical database (local file) |
 | **Microsoft SQL Server** | Host/port connections |
+| **Redis** | Keyspace browser + command console (key-value; SQL surfaces hidden) |
 
 **One-click providers**
 
@@ -216,6 +217,21 @@ AI keys and provider OAuth tokens are stored in the **OS keychain** (macOS Keych
 
 ---
 
+## License
+
+Stroke is **source-available** under the [Stroke Sustainable Use License](LICENSE).
+The entire source — Pro features included — lives in this repository:
+
+- **Free to use** — personally, in your company, anywhere
+- **Read, modify, and contribute** to all of it
+- **Not for resale** — you can't sell Stroke, rebrand it, or offer it as a paid product or hosted service
+- **Pro features** are key-gated in official builds — after the built-in trial they
+  require a [Stroke Pro](https://stroke.click/pricing) license, which is what funds development
+
+Official builds and updates ship from this repository and [stroke.click](https://stroke.click).
+
+---
+
 ## Install
 
 ### Recommended: package managers
@@ -278,6 +294,7 @@ Pick a database type and fill in your credentials. Hit **Test connection**, then
 - **Cloudflare D1** — sign in with Cloudflare, or enter Account ID, Database ID, and an API token.
 - **ClickHouse** — host, port, database, user, password, optional TLS.
 - **SQL Server** — host, port, database, user, password.
+- **Redis** — host, port, optional password, database number, optional TLS.
 - **Neon / Supabase / Prisma / PlanetScale** — sign in with the provider and pick a database.
 - **SSH tunnel** — any connection type can go through an SSH tunnel for databases in private networks.
 
@@ -290,28 +307,28 @@ Connections are saved locally. Stroke reopens your last connection on launch.
 | Shortcut | Action |
 |----------|--------|
 | `Cmd/Ctrl+K` | Command palette |
-| `Ctrl+T` | Quick access |
+| `Cmd/Ctrl+N` | Quick access |
+| `Cmd/Ctrl+T` | Search tables |
 | `Cmd/Ctrl+Shift+D` | Table data view |
 | `Cmd/Ctrl+Shift+S` | SQL console |
-| `Cmd/Ctrl+Shift+A` | AI chat |
+| `Cmd/Ctrl+Shift+E` | AI chat |
 | `Cmd/Ctrl+Enter` | Run SQL query |
-| `Cmd/Ctrl+⌥+←/→` | Switch tabs |
-| `Ctrl+B` | Toggle sidebar |
-| `Ctrl+W` | Close tab |
+| `Cmd/Ctrl+Tab` | Switch tabs |
+| `Alt+←/→` | Back / forward |
+| `Cmd/Ctrl+B` | Toggle sidebar |
+| `Cmd/Ctrl+W` | Close tab |
 | `Cmd/Ctrl+?` | Show all shortcuts |
 
 ---
 
 ## Build from source
 
-The source repo is private — `github.com/broisnischal/stroke` is the public
-releases/bucket repo. Collaborators clone the source repo:
-
-Requires [Node.js](https://nodejs.org) 18+ and the [Rust toolchain](https://rustup.rs).
+This repository is the complete source. Requires [Node.js](https://nodejs.org) 20.19+
+(or 22.12+; CI builds on 22) and the [Rust toolchain](https://rustup.rs).
 
 ```bash
-git clone https://github.com/broisnischal/stroke-app
-cd stroke-app
+git clone https://github.com/broisnischal/stroke
+cd stroke
 npm install
 npm run tauri        # dev
 npm run tauri:build  # release binary
@@ -331,7 +348,11 @@ npm run tauri:build:arch
 
 ---
 
-## Issues
+## Contributing
+
+Bug reports, fixes, features, and docs are all welcome — see
+[CONTRIBUTING.md](CONTRIBUTING.md) for the dev setup (including one-command
+Docker test databases), code conventions, and the PR checklist.
 
 Found a bug or have a feature request? Open an issue at
 [github.com/broisnischal/stroke/issues](https://github.com/broisnischal/stroke/issues).
