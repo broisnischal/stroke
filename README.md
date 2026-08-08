@@ -304,14 +304,12 @@ Connections are saved locally. Stroke reopens your last connection on launch.
 
 ## Build from source
 
-The source repo is private — `github.com/broisnischal/stroke` is the public
-releases/bucket repo. Collaborators clone the source repo:
-
-Requires [Node.js](https://nodejs.org) 18+ and the [Rust toolchain](https://rustup.rs).
+This repository is the complete source. Requires [Node.js](https://nodejs.org) 20.19+
+(or 22.12+; CI builds on 22) and the [Rust toolchain](https://rustup.rs).
 
 ```bash
-git clone https://github.com/broisnischal/stroke-app
-cd stroke-app
+git clone https://github.com/broisnischal/stroke
+cd stroke
 npm install
 npm run tauri        # dev
 npm run tauri:build  # release binary
