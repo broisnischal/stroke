@@ -304,7 +304,7 @@
   /** Shared icon-only button classes */
   const iconBtn = 'inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-muted/50 hover:text-foreground'
   /** Shared label+icon button */
-  const labelBtn = 'flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors hover:bg-muted/50 hover:text-foreground data-[state=open]:bg-muted/50 data-[state=open]:text-foreground'
+  const labelBtn = 'flex h-6 items-center gap-1.5 rounded-md px-2 transition-colors hover:bg-muted/50 hover:text-foreground data-[state=open]:bg-muted/50 data-[state=open]:text-foreground'
 
   let aiModelMenuOpen = $state(false)
 
@@ -412,7 +412,7 @@
             <div class="border-t border-border/50 p-1">
               <button
                 type="button"
-                class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                class="flex w-full items-center gap-2 rounded-lg px-2 h-6.5 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                 onclick={() => { connOpen = false; onconnect() }}
               >
                 <Icon name="wifi-off" class="size-3.5 shrink-0 text-muted-foreground/50" />
@@ -468,7 +468,7 @@
             <!-- Always mounted (not gated on list size) so the search box is
                  active the moment the switcher opens and arrows/Tab/Enter work
                  for any number of databases. -->
-            <div class="border-b border-border/50 px-2 py-1.5">
+            <div class="border-b border-border/50 px-2 h-6.5">
               <input
                 bind:this={dbInputEl}
                 type="text"
@@ -520,7 +520,7 @@
             </div>
 
             {#if canSwitchDb}
-              <div class="flex items-center justify-between border-t border-border/50 px-2.5 py-1.5">
+              <div class="flex items-center justify-between border-t border-border/50 px-2.5 h-6.5">
                 <span class="text-ui-3xs text-muted-foreground/40">
                   {dbList.length} database{dbList.length === 1 ? '' : 's'}
                 </span>
@@ -591,7 +591,7 @@
         <button
           type="button"
           class={cn(
-            'flex items-center gap-1.5 rounded-md px-2 py-1 transition-[background-color,color] duration-150',
+            'flex h-6 items-center gap-1.5 rounded-md px-2 transition-[background-color,color] duration-150',
             live
               ? 'font-medium text-success bg-success/10 hover:bg-success/16'
               : 'text-muted-foreground/50 hover:bg-muted/50 hover:text-foreground',
@@ -632,7 +632,7 @@
       <!-- Not connected -->
       <button
         type="button"
-        class="flex items-center gap-1.5 rounded-md px-2 py-1 text-muted-foreground/50 transition-colors hover:bg-muted/50 hover:text-foreground"
+        class="flex items-center gap-1.5 rounded-md px-2 h-6 text-muted-foreground/50 transition-colors hover:bg-muted/50 hover:text-foreground"
         onclick={onconnect}
         title="No connection, click to connect"
       >
@@ -649,7 +649,7 @@
     {#if $appVimMode}
       <span
         class={cn(
-          'inline-flex h-5 items-center rounded-md px-1.5 font-mono text-ui-3xs font-semibold uppercase tracking-wider',
+          'inline-flex h-6 items-center rounded-md px-1.5 font-mono text-ui-3xs font-semibold uppercase tracking-wider',
           $vimSubMode === 'insert' && 'bg-success/15 text-success',
           $vimSubMode === 'visual' && 'bg-warning/15 text-warning',
           $vimSubMode === 'command' && 'bg-primary/15 text-primary',
@@ -661,14 +661,14 @@
 
     <!-- App version -->
     {#if appVersion}
-      <span class="inline-flex h-5 items-center rounded-md px-1.5 font-mono text-ui-3xs tabular-nums text-muted-foreground/45" title="Stroke v{appVersion}">v{appVersion}</span>
+      <span class="inline-flex h-6 items-center rounded-md px-1.5 font-mono text-ui-3xs tabular-nums text-muted-foreground/45" title="Stroke v{appVersion}">v{appVersion}</span>
     {/if}
 
     <!-- Pending edits -->
     {#if pendingEditCount > 0}
       <button
         type="button"
-        class="inline-flex h-5 items-center gap-1 rounded-md bg-primary px-2 text-ui-2xs font-medium text-primary-foreground transition-opacity hover:opacity-85 disabled:opacity-60"
+        class="inline-flex h-6 items-center gap-1 rounded-md bg-primary px-2 text-ui-2xs font-medium text-primary-foreground transition-opacity hover:opacity-85 disabled:opacity-60"
         onclick={onapplyedits}
         disabled={applying}
         title="Apply {pendingEditCount} unsaved change{pendingEditCount === 1 ? '' : 's'}"
@@ -683,7 +683,7 @@
       </button>
       <button
         type="button"
-        class="inline-flex h-5 items-center gap-1 rounded-md px-2 text-ui-2xs text-muted-foreground/50 transition-colors hover:bg-muted/50 hover:text-foreground disabled:opacity-40"
+        class="inline-flex h-6 items-center gap-1 rounded-md px-2 text-ui-2xs text-muted-foreground/50 transition-colors hover:bg-muted/50 hover:text-foreground disabled:opacity-40"
         onclick={onresetedits}
         disabled={applying}
         title="Discard unsaved changes"
@@ -703,7 +703,7 @@
         title="Go to page (⌘P)"
         aria-label="Go to page"
       >
-        <Icon name="plus" class="size-3.5" />
+        <Icon name="layout-template" class="size-3.5" />
       </button>
       {@render sep()}
     {/if}
@@ -787,7 +787,7 @@
     {#if hasUpdate}
       <button
         type="button"
-        class="flex items-center gap-1 rounded-md px-2 py-1 text-ui-2xs font-medium text-warning transition-colors hover:bg-muted/50 hover:text-warning/80"
+        class="flex items-center gap-1 rounded-md px-2 h-6 text-ui-2xs font-medium text-warning transition-colors hover:bg-muted/50 hover:text-warning/80"
         onclick={oncheckupdate}
         title="Update available"
       >
@@ -848,7 +848,7 @@
         <div class="border-t border-border/50 p-1">
           <button
             type="button"
-            class="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            class="flex w-full items-center gap-1.5 rounded-md px-2 h-6.5 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             onclick={() => { aiModelMenuOpen = false; onopenmodelsettings() }}
           >
             <Icon name="settings-2" class="size-3.5 shrink-0 text-muted-foreground/50" />
