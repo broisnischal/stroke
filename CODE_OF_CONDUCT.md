@@ -21,7 +21,7 @@ participant in this project.
 
 ## Reporting
 
-Email **nischal.dahal@aitc.ai**. Reports are read by the maintainer and kept
+Email **nischaldahal01395@gmail.com**. Reports are read by the maintainer and kept
 private. If a report concerns the maintainer and you would rather not send it
 there, say so in a GitHub issue without details and a way to talk privately will
 be arranged.

@@ -8,7 +8,7 @@ it is patched.
 
 Report privately through
 [GitHub Security Advisories](https://github.com/broisnischal/stroke/security/advisories/new),
-or email **nischal.dahal@aitc.ai**.
+or email **nischaldahal01395@gmail.com**.
 
 Please include what you can: the version, your OS, what an attacker gains, and
 the smallest set of steps that shows it. A proof of concept helps but is not
