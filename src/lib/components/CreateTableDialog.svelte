@@ -4,7 +4,6 @@
   import * as Dialog from '$lib/components/ui/dialog/index.js'
   import Plus from '@lucide/svelte/icons/plus'
   import Trash2 from '@lucide/svelte/icons/trash-2'
-  import GripVertical from '@lucide/svelte/icons/grip-vertical'
   import { cn } from '$lib/utils.js'
 
   let {

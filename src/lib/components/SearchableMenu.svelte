@@ -38,7 +38,6 @@
   } = $props();
 
   let search = $state("");
-  // Search box only materializes for longer lists; short menus are already scannable.
   const showSearch = $derived(searchThreshold < 0 || items.length > searchThreshold);
   /** @type {HTMLInputElement | null} */
   let inputEl = $state(null);

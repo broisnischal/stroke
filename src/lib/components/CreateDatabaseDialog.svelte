@@ -139,7 +139,7 @@
           id="cdb-name"
           bind:this={nameInputEl}
           type="text"
-          placeholder={isMySQL ? 'my_database' : 'my_database'}
+          placeholder="my_database"
           bind:value={name}
           maxlength="63"
           class={cn(inputCls, 'font-mono text-ui-sm')}

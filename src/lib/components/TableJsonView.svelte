@@ -26,9 +26,6 @@
     rows = [],
     /** Identity of the table shown - scopes the JSONPath filter to this tab. */
     tableKey = '',
-    // Kept in the API for the parent; the view toolbar owns these actions now.
-    onshowtable = () => {},
-    ondownload = /** @type {(() => void) | undefined} */ (undefined),
   } = $props()
 
   const records = $derived(rows.map((r) => rowToRecord(columns, r)))

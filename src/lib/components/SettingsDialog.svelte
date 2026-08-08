@@ -34,10 +34,9 @@
   } from "$lib/stores/settings.js";
   import { aiProfiles, activeProfileId, setActiveProfile } from "$lib/stores/ai-settings.js";
   import PenTool from "@lucide/svelte/icons/pen-tool";
-  import LucideSearch from "@lucide/svelte/icons/search";
   import LucideSparkles from "@lucide/svelte/icons/sparkles";
   import { HugeiconsIcon } from "@hugeicons/svelte";
-  import { Search01Icon, SparklesIcon } from "@hugeicons/core-free-icons";
+  import { SparklesIcon } from "@hugeicons/core-free-icons";
   import PhosphorSparkle from "phosphor-svelte/lib/Sparkle";
   import Icon from "./Icon.svelte";
   import { cn } from "$lib/utils.js";
@@ -570,7 +569,7 @@
     </div>
   {/if}
   {#if show('Models & API keys', 'Add providers, models and API keys')}
-    {@render actionRow('Models & API keys', 'Add providers, choose models and store API keys for OpenAI, Google Gemini, Anthropic and OpenRouter.', 'Manage', () => { open = false; onopenmodelconfiguration(); })}
+    {@render actionRow('Models & API keys', 'Add providers, choose models and store API keys for OpenAI, Google Gemini, Anthropic and OpenRouter.', 'Manage', openModelConfiguration)}
   {/if}
 
   {@render secLabel('Chat UI')}

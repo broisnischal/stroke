@@ -13,7 +13,7 @@
 
   let {
     open = $bindable(false),
-    /** Pre-select a db type when opening */
+    /** Accepted for call-site compatibility; the pick list renders no pre-selection. */
     initialDbType = /** @type {string | null} */ (null),
     /** Called with connection info when user clicks Connect */
     onconnect = /** @type {(info: { db_type: string, host: string, port: number, user: string, password: string, database: string, name: string }) => void} */ (() => {}),
@@ -28,12 +28,6 @@
   let logEl = $state(/** @type {HTMLDivElement | null} */ (null))
 
   let _unlisten = /** @type {(() => void) | null} */ (null)
-
-  $effect(() => {
-    if (open && initialDbType && phase === 'pick') {
-      selectedDb = initialDbType
-    }
-  })
 
   $effect(() => {
     if (!open) reset()
@@ -147,7 +141,7 @@
           bind:this={logEl}
           class="h-52 overflow-y-auto rounded-md border border-border bg-black/5 dark:bg-white/5 p-3 font-mono text-ui-2xs leading-relaxed text-muted-foreground"
         >
-          {#each logs as line (line)}
+          {#each logs as line, i (i)}
             <div class="whitespace-pre-wrap break-all">{line}</div>
           {/each}
           {#if logs.length === 0}

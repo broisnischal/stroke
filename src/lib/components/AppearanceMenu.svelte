@@ -22,11 +22,9 @@
     ontogglestatusbar     = () => {},
     class: extraClass      = '',
   } = $props()
-
-  let open = $state(false)
 </script>
 
-<DropdownMenu.Root bind:open>
+<DropdownMenu.Root>
   <DropdownMenu.Trigger
     class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-muted/50 hover:text-foreground data-[state=open]:bg-muted/50 data-[state=open]:text-foreground {extraClass}"
     title="Appearance"
