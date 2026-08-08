@@ -726,8 +726,43 @@ export function describeAiError(err) {
     : status ? `The AI provider returned ${status}`
     : 'The AI request failed'
 
-  const hint = [diagnosis, hintFor()].filter(Boolean).join(' ')
-  return { title, hint: hint || message, detail: message && hint ? `${message}\n\n${payload}` : payload, status }
+  // The provider's own sentence beats ours whenever it has one. "They reset at
+  // midnight UTC — or add your own API key in Settings → AI" is something the
+  // user can act on; "check your plan and usage limits" is not. Preferring the
+  // canned line put the useful one behind a "Details" toggle, next to a copy of
+  // itself wrapped in JSON.
+  // Order of preference: the router diagnosis (it explains *why*, which nothing
+  // else here can), then the provider's own sentence, then our canned line.
+  // A diagnosis is worth more than the message it wraps — "none of the 6
+  // endpoints were tried, all cooling down after 429" beats "Upstream request
+  // failed" — so where one exists the shape is unchanged.
+  const hint = diagnosis
+    ? [diagnosis, hintFor()].filter(Boolean).join(' ')
+    : message || hintFor()
+  return { title, hint, detail: payloadAddsNothing(payload, hint) ? '' : payload, status }
+}
+
+/**
+ * Is the raw payload just the message we are already showing, in an envelope?
+ *
+ * `{"error":{"code":"…","message":"X","type":"…"}}` under a banner that already
+ * says X is noise dressed as detail — it invites the user to expand it and
+ * learn nothing. Anything outside the standard envelope keys is real detail and
+ * stays.
+ * @param {string} payload @param {string} shown
+ */
+function payloadAddsNothing(payload, shown) {
+  if (!payload) return true
+  const norm = (/** @type {string} */ s) => s.replace(/\s+/g, ' ').trim()
+  if (norm(payload) === norm(shown)) return true
+  try {
+    const parsed = JSON.parse(payload)
+    const body = parsed?.error ?? parsed
+    if (!body || norm(String(body.message ?? '')) !== norm(shown)) return false
+    return Object.keys(body).every((k) => ['message', 'code', 'type', 'param', 'status'].includes(k))
+  } catch {
+    return false
+  }
 }
 
 /** @param {number} status @param {string} body */

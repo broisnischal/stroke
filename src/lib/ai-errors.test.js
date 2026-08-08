@@ -86,3 +86,31 @@ describe('describeAiError', () => {
     expect(describeAiError('boom').title).toBe('The AI request failed')
   })
 })
+
+describe('describeAiError · quota', () => {
+  const QUOTA_MESSAGE =
+    "You've used today's free AI requests. They reset at midnight UTC — or add your own API key in Settings → AI."
+  const QUOTA = `AI API 429: ${JSON.stringify({
+    error: { code: 'device_quota_exhausted', message: QUOTA_MESSAGE, type: 'rate_limit_error' },
+  })}`
+
+  it('leads with the provider\'s own sentence, not the canned one', () => {
+    const d = describeAiError(QUOTA)
+    expect(d.title).toBe('Rate limit reached')
+    expect(d.hint).toBe(QUOTA_MESSAGE)
+    expect(d.hint).not.toContain('check your plan and usage limits')
+  })
+
+  it('hides an envelope that only repeats the message', () => {
+    // The banner already says it; a Details toggle that reveals the same
+    // sentence wrapped in JSON invites a click and teaches nothing.
+    expect(describeAiError(QUOTA).detail).toBe('')
+  })
+
+  it('keeps a payload that carries more than the message', () => {
+    const extra = `AI API 429: ${JSON.stringify({
+      error: { message: QUOTA_MESSAGE, retry_after_seconds: 900 },
+    })}`
+    expect(describeAiError(extra).detail).toContain('retry_after_seconds')
+  })
+})

@@ -444,33 +444,6 @@
     errorDetailOpen = false;
   });
 
-  /** Start a new chat with a short summary of the current one as opening context. */
-  async function continueInNewChat() {
-    const turnCount = apiHistory.filter((m) => m.role === "user").length;
-    if (turnCount === 0) {
-      await newConversation();
-      return;
-    }
-
-    // Build a brief handoff message
-    const summary = items
-      .filter((i) => i.kind === "user" || i.kind === "assistant")
-      .slice(-6)
-      .map((i) =>
-        i.kind === "user"
-          ? `User: ${/** @type {any} */ (i).text?.slice(0, 120) ?? ""}`
-          : `AI: ${/** @type {any} */ (i).parts?.find((p) => p.type === "text")?.content?.slice(0, 200) ?? "…"}`,
-      )
-      .join("\n");
-
-    await newConversation();
-    await tick();
-    inputText = `[Continuing from previous conversation]\n\n${summary}\n\nPlease continue from where we left off.`;
-    await tick();
-    resizeInput();
-    inputRef?.focus();
-  }
-
   async function removeConversation(/** @type {string} */ id) {
     closeContextMenu();
     await deleteConversation(id);
@@ -4139,20 +4112,23 @@
       </div>
     </div>
 
-    <!-- Error bar -->
+    <!-- Error bar.
+         Red is the signal, not the whole surface: the icon and the hairline
+         carry it, and the words stay in the normal text colours so the message
+         is read rather than braced against. The provider's own sentence is the
+         message now (see describeAiError), so most failures have nothing left
+         to hide behind a Details toggle. -->
     {#if error}
       {@const failure = describeAiError(error)}
-      <div
-        class="shrink-0 border-t border-destructive/20 bg-destructive/6 px-3 py-2"
-      >
-        <div class="flex items-start gap-2">
-          <AlertTriangle class="mt-0.5 size-3.5 shrink-0 text-destructive/70" />
+      <div class="shrink-0 border-t border-destructive/25 bg-destructive/[0.04] px-3 py-2.5">
+        <div class="flex items-start gap-2.5">
+          <AlertTriangle class="mt-px size-3.5 shrink-0 text-destructive" />
           <div class="min-w-0 flex-1">
-            <p class="text-ui-xs font-medium text-destructive/90 leading-relaxed">
+            <p class="text-ui-xs font-medium leading-relaxed text-foreground">
               {failure.title}
             </p>
             {#if failure.hint}
-              <p class="mt-0.5 text-ui-2xs leading-relaxed text-destructive/65">
+              <p class="mt-0.5 text-ui-2xs leading-relaxed text-muted-foreground">
                 {failure.hint}
               </p>
             {/if}
@@ -4160,19 +4136,19 @@
               <button
                 type="button"
                 onclick={() => (errorDetailOpen = !errorDetailOpen)}
-                class="mt-1 inline-flex items-center gap-1 rounded text-ui-2xs text-destructive/50 transition-colors hover:text-destructive/80"
+                class="mt-1 inline-flex items-center gap-1 rounded text-ui-2xs text-muted-foreground/60 transition-colors hover:text-foreground"
               >
-                <ChevronRight class={cn('size-3 transition-transform', errorDetailOpen && 'rotate-90')} />
+                <ChevronRight class={cn('size-3 transition-transform duration-150', errorDetailOpen && 'rotate-90')} />
                 {errorDetailOpen ? 'Hide details' : 'Details'}
               </button>
               {#if errorDetailOpen}
                 <div class="mt-1.5 flex items-start gap-2">
-                  <pre class="max-h-28 min-w-0 flex-1 overflow-auto whitespace-pre-wrap break-all rounded-md border border-destructive/15 bg-destructive/5 p-2 font-mono text-ui-3xs leading-relaxed text-destructive/70">{failure.detail}</pre>
+                  <pre class="max-h-28 min-w-0 flex-1 overflow-auto whitespace-pre-wrap break-all rounded-md border border-border/50 bg-muted/30 p-2 font-mono text-ui-3xs leading-relaxed text-muted-foreground">{failure.detail}</pre>
                   <button
                     type="button"
                     onclick={() => copyErrorDetail(failure.detail)}
                     title="Copy the provider's response"
-                    class="inline-flex size-6 shrink-0 items-center justify-center rounded text-destructive/45 transition-colors hover:bg-destructive/10 hover:text-destructive"
+                    class="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-muted hover:text-foreground"
                   >
                     <Copy class="size-3" />
                   </button>
@@ -4180,24 +4156,14 @@
               {/if}
             {/if}
           </div>
-          <div class="flex shrink-0 items-center gap-1">
-            <button
-              type="button"
-              class="inline-flex h-6 items-center gap-1 rounded-md border border-destructive/20 px-2 text-ui-xs text-destructive/70 transition-colors hover:bg-destructive/8 hover:text-destructive"
-              onclick={continueInNewChat}
-              title="Open a new chat pre-seeded with a summary of this conversation"
-            >
-              Continue in new chat →
-            </button>
-            <button
-              type="button"
-              class="inline-flex size-5 items-center justify-center rounded text-destructive/40 transition-colors hover:text-destructive/70"
-              onclick={() => (error = "")}
-              title="Dismiss"
-            >
-              <X class="size-3" />
-            </button>
-          </div>
+          <button
+            type="button"
+            class="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-muted hover:text-foreground"
+            onclick={() => (error = "")}
+            title="Dismiss"
+          >
+            <X class="size-3" />
+          </button>
         </div>
       </div>
     {/if}
