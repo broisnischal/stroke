@@ -95,11 +95,6 @@
   let lSqlEl = $state(null)
   /** @type {HTMLElement|null} */
   let rSqlEl = $state(null)
-  /** @type {monaco.editor.IStandaloneCodeEditor|null} */
-  let lMonaco = null
-  /** @type {monaco.editor.IStandaloneCodeEditor|null} */
-  let rMonaco = null
-
   /** The app theme these editors should paint in. */
   function currentDiffTheme() {
     return normalizeThemeId(document.documentElement.dataset.theme)
@@ -140,10 +135,9 @@
     const ed = monaco.editor.create(el, { ...MONACO_OPTS, value: untrack(() => L.sql) })
     applyMonacoTheme(currentDiffTheme())
     ed.onDidChangeModelContent(() => { L = { ...L, sql: ed.getValue() } })
-    lMonaco = ed
     const ro = new ResizeObserver(() => ed.layout())
     ro.observe(el)
-    return () => { ro.disconnect(); ed.dispose(); lMonaco = null }
+    return () => { ro.disconnect(); ed.dispose() }
   })
 
   $effect(() => {
@@ -153,10 +147,9 @@
     const ed = monaco.editor.create(el, { ...MONACO_OPTS, value: untrack(() => R.sql) })
     applyMonacoTheme(currentDiffTheme())
     ed.onDidChangeModelContent(() => { R = { ...R, sql: ed.getValue() } })
-    rMonaco = ed
     const ro = new ResizeObserver(() => ed.layout())
     ro.observe(el)
-    return () => { ro.disconnect(); ed.dispose(); rMonaco = null }
+    return () => { ro.disconnect(); ed.dispose() }
   })
 
   // ── Key columns ───────────────────────────────────────────────────────────────
@@ -177,6 +170,14 @@
   /** @type {'all'|'changed'|'added'|'modified'|'removed'|'unchanged'} */
   let activeFilter = $state('changed')
   let searchQuery = $state('')
+  // Debounced copy that feeds the row filter - filtering rescans every cell of
+  // every diff row (up to ~20k × N cols), far too heavy to run per keystroke.
+  let debouncedQuery = $state('')
+  $effect(() => {
+    const q = searchQuery
+    const id = setTimeout(() => { debouncedQuery = q }, 150)
+    return () => clearTimeout(id)
+  })
 
   // ── Virtual scroll ────────────────────────────────────────────────────────────
   const ROW_HEIGHT = 36
@@ -215,15 +216,14 @@
   }
   function onResizeUp() { resizingCol = -1 }
 
-  const stats = $derived.by(() => ({
-    added:     diffRows.filter((r) => r.status === 'added').length,
-    removed:   diffRows.filter((r) => r.status === 'removed').length,
-    modified:  diffRows.filter((r) => r.status === 'modified').length,
-    unchanged: diffRows.filter((r) => r.status === 'unchanged').length,
-  }))
+  const stats = $derived.by(() => {
+    const s = { added: 0, removed: 0, modified: 0, unchanged: 0 }
+    for (const r of diffRows) s[r.status]++
+    return s
+  })
 
   const displayRows = $derived.by(() => {
-    const q = searchQuery.trim().toLowerCase()
+    const q = debouncedQuery.trim().toLowerCase()
     return diffRows.filter((r) => {
       const pass =
         activeFilter === 'all' ? true :
@@ -381,9 +381,10 @@
       const keyNames = selectedKeyCols.size ? [...selectedKeyCols] : null
       const keyIdx = keyNames ? keyNames.map((n) => columns.findIndex((c) => c.name === n)).filter((i) => i >= 0) : [0]
       if (!keyIdx.length) { error = 'Key columns not found in result set.'; return }
-      diffRows = computeDiff(lRes.rows, rRes.rows, columns.length, keyIdx)
+      diffRows = await computeDiff(lRes.rows, rRes.rows, columns.length, keyIdx)
       activeFilter = 'changed'
       searchQuery = ''
+      debouncedQuery = ''
     } catch (e) {
       error = String(/** @type {Error} */ (e).message ?? e)
     } finally { comparing = false }
@@ -397,7 +398,7 @@
     try { return JSON.stringify(v) } catch { return String(v) }
   }
 
-  function computeDiff(/** @type {unknown[][]} */ lRows, /** @type {unknown[][]} */ rRows, /** @type {number} */ colCount, /** @type {number[]} */ keyIdx) {
+  async function computeDiff(/** @type {unknown[][]} */ lRows, /** @type {unknown[][]} */ rRows, /** @type {number} */ colCount, /** @type {number[]} */ keyIdx) {
     const key = (/** @type {unknown[]} */ r) => keyIdx.map((i) => cellCompareText(r[i])).join('\0')
     // Bucket rows per key so duplicate keys aren't silently dropped; pair the
     // buckets positionally (index 0↔0, 1↔1, …), extras become added/removed.
@@ -409,7 +410,11 @@
     for (const r of rRows) { const k = key(r); (rMap.get(k) ?? rMap.set(k, []).get(k)).push(r) }
     /** @type {DiffRow[]} */
     const out = []
+    let processed = 0
     for (const [k, lBucket] of lMap) {
+      // Yield to the event loop periodically so a 10k+10k compare doesn't
+      // freeze the UI - compare() keeps the spinner up around the await.
+      if (++processed % 500 === 0) await new Promise((r) => setTimeout(r))
       const rBucket = rMap.get(k) ?? []
       const n = Math.max(lBucket.length, rBucket.length)
       for (let p = 0; p < n; p++) {
@@ -417,7 +422,8 @@
         const rr = rBucket[p]
         if (!rr) { out.push({ status: 'removed', left: lr, right: null }); continue }
         if (!lr) { out.push({ status: 'added', left: null, right: rr }); continue }
-        const changed = new Set(Array.from({ length: colCount }, (_, i) => i).filter((i) => cellCompareText(lr[i]) !== cellCompareText(rr[i])))
+        const changed = new Set()
+        for (let i = 0; i < colCount; i++) if (cellCompareText(lr[i]) !== cellCompareText(rr[i])) changed.add(i)
         out.push({ status: changed.size ? 'modified' : 'unchanged', left: lr, right: rr, changedCols: changed })
       }
     }
@@ -807,9 +813,9 @@
                     </div>
                   {:else if dispVal === null}
                     <span class="italic text-muted-foreground/15">NULL</span>
-                  {:else if searchQuery}
+                  {:else if debouncedQuery}
                     <span class="block overflow-hidden text-ellipsis whitespace-nowrap {isAdded ? 'text-success/80' : isRemoved ? 'text-destructive/60' : ''}">
-                      {#each splitHighlight(dispStr, searchQuery) as seg}
+                      {#each splitHighlight(dispStr, debouncedQuery) as seg}
                         {#if seg.match}<mark class="rounded-[2px] bg-primary/20 text-primary not-italic">{seg.text}</mark>{:else}{seg.text}{/if}
                       {/each}
                     </span>
