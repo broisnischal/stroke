@@ -299,7 +299,8 @@ pub async fn get_table_rows(
     // nullable map and the empty-table column fallback (instead of a second
     // information_schema.COLUMNS query inside the join).
     let meta_rows = sqlx::query(
-        "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM information_schema.COLUMNS \
+        "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, EXTRA, COLUMN_DEFAULT \
+         FROM information_schema.COLUMNS \
          WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION",
     )
     .bind(schema)
@@ -361,13 +362,25 @@ pub async fn get_table_rows(
     let total: i64 = total_res.map_err(|e| format!("Failed to count rows: {e}"))?;
     let rows = rows_res.map_err(|e| format!("Failed to fetch rows: {e}"))?;
 
-    // Build nullable map from information_schema
-    let nullable_map: HashMap<String, bool> = meta_rows
+    // Column flags from information_schema. EXTRA carries `auto_increment` and
+    // the generated-column markers; a column with either of those, or with any
+    // DEFAULT, is one the insert row must not demand a value for.
+    let flags_map: HashMap<String, super::query::ColumnFlags> = meta_rows
         .iter()
         .filter_map(|r| {
             let name = r.try_get::<String, _>(0).ok()?;
             let nullable = r.try_get::<String, _>(2).ok()?;
-            Some((name, nullable.eq_ignore_ascii_case("YES")))
+            let extra = r.try_get::<String, _>(3).unwrap_or_default().to_ascii_lowercase();
+            let default = r.try_get::<Option<String>, _>(4).ok().flatten();
+            let auto_generated = extra.contains("auto_increment") || extra.contains("generated");
+            Some((
+                name,
+                super::query::ColumnFlags {
+                    nullable: nullable.eq_ignore_ascii_case("YES"),
+                    auto_generated,
+                    has_default: auto_generated || default.is_some(),
+                },
+            ))
         })
         .collect();
 
@@ -390,10 +403,11 @@ pub async fn get_table_rows(
             .collect()
     };
 
-    // Apply nullable info
     for col in &mut columns {
-        if let Some(&is_nullable) = nullable_map.get(&col.name) {
-            col.nullable = is_nullable;
+        if let Some(f) = flags_map.get(&col.name) {
+            col.nullable = f.nullable;
+            col.auto_generated = f.auto_generated;
+            col.has_default = f.has_default;
         }
     }
 

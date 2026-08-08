@@ -1,4 +1,5 @@
 import {
+  isAutoColumn,
   isBooleanType,
   isDateOnlyType,
   isDateTimeType,
@@ -123,7 +124,9 @@ export function generateCuid() {
  */
 export function defaultInsertDraft(col, primaryKey) {
   const dataType = col.dataType ?? col.data_type ?? 'text'
-  if (isLikelyAutoColumn(dataType, col.name, primaryKey)) return ''
+  // A generated column takes no draft: the value the database will assign is
+  // not one we can predict, and sending anything overrides it.
+  if (isAutoColumn(col, primaryKey)) return ''
 
   const role = columnTimestampRole(col.name)
   if (role && shouldUseDateTimePicker(dataType, col.name)) {

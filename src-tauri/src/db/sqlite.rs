@@ -208,13 +208,26 @@ pub async fn get_table_rows(
         .await
         .map_err(|e| format!("PRAGMA table_info: {e}"))?;
 
-    // col_name -> nullable (notnull=0 means nullable)
-    let pragma_nullable: std::collections::HashMap<String, bool> = pragma_rows
+    // col_name -> flags. `INTEGER PRIMARY KEY` is the rowid alias SQLite fills in
+    // itself, which is the closest thing it has to AUTO_INCREMENT and is exactly
+    // the column the insert row must not demand a value for.
+    let pragma_flags: std::collections::HashMap<String, super::query::ColumnFlags> = pragma_rows
         .iter()
         .filter_map(|r| {
             let name = r.try_get::<Option<String>, _>(1).ok().flatten()?;
+            let col_type = r.try_get::<Option<String>, _>(2).ok().flatten().unwrap_or_default();
             let notnull: i64 = r.try_get(3).ok()?;
-            Some((name, notnull == 0))
+            let dflt = r.try_get::<Option<String>, _>(4).ok().flatten();
+            let pk: i64 = r.try_get(5).ok().unwrap_or(0);
+            let auto_generated = pk > 0 && col_type.to_ascii_lowercase().contains("int");
+            Some((
+                name,
+                super::query::ColumnFlags {
+                    nullable: notnull == 0,
+                    auto_generated,
+                    has_default: auto_generated || dflt.is_some(),
+                },
+            ))
         })
         .collect();
 
@@ -355,8 +368,10 @@ pub async fn get_table_rows(
                 .iter()
                 .map(|c| {
                     let mut col = ColumnInfo::new(c.name(), c.type_info().name().to_lowercase());
-                    if let Some(&nullable) = pragma_nullable.get(c.name()) {
-                        col.nullable = nullable;
+                    if let Some(f) = pragma_flags.get(c.name()) {
+                        col.nullable = f.nullable;
+                        col.auto_generated = f.auto_generated;
+                        col.has_default = f.has_default;
                     }
                     col
                 })
@@ -368,8 +383,10 @@ pub async fn get_table_rows(
                 .map(|n| {
                     let dt = pragma_types.get(n).cloned().unwrap_or_else(|| "text".into());
                     let mut col = ColumnInfo::new(n.clone(), dt);
-                    if let Some(&nullable) = pragma_nullable.get(n.as_str()) {
-                        col.nullable = nullable;
+                    if let Some(f) = pragma_flags.get(n.as_str()) {
+                        col.nullable = f.nullable;
+                        col.auto_generated = f.auto_generated;
+                        col.has_default = f.has_default;
                     }
                     col
                 })

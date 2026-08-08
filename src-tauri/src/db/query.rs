@@ -19,6 +19,23 @@ pub struct ColumnInfo {
     pub nullable: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enum_values: Option<Vec<String>>,
+    /// The database fills this in for you: a Postgres identity/serial/generated
+    /// column, a MySQL AUTO_INCREMENT, or a SQLite INTEGER PRIMARY KEY rowid
+    /// alias. The insert row must not ask for a value it would be wrong to send.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub auto_generated: bool,
+    /// Omitting the column is legal because a DEFAULT will fill it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub has_default: bool,
+}
+
+/// What the catalog knows about a column beyond its type — the three facts the
+/// insert row needs to decide between "required", "optional", and "don't ask".
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct ColumnFlags {
+    pub nullable: bool,
+    pub auto_generated: bool,
+    pub has_default: bool,
 }
 
 impl ColumnInfo {
@@ -28,22 +45,32 @@ impl ColumnInfo {
             data_type: data_type.into(),
             nullable: true,
             enum_values: None,
+            auto_generated: false,
+            has_default: false,
         }
     }
 }
 
-async fn fetch_table_column_nullable(
+async fn fetch_table_column_flags(
     pool: &sqlx::PgPool,
     schema: &str,
     table: &str,
-) -> Result<HashMap<String, bool>, String> {
-    // pg_attribute is much faster than information_schema.columns for this lookup
+) -> Result<HashMap<String, ColumnFlags>, String> {
+    // pg_attribute is much faster than information_schema.columns for this lookup.
+    // `attidentity` covers GENERATED … AS IDENTITY, `attgenerated` covers stored
+    // generated columns, and a `nextval(` default is what `serial` actually is —
+    // its data_type reads as `bigint`, so the type alone can never identify one.
     let rows = sqlx::query(
         r#"
-        SELECT a.attname::text, NOT a.attnotnull AS is_nullable
+        SELECT a.attname::text,
+               NOT a.attnotnull AS is_nullable,
+               (a.attidentity <> '' OR a.attgenerated <> ''
+                OR COALESCE(pg_get_expr(d.adbin, d.adrelid), '') LIKE 'nextval(%') AS auto_generated,
+               (a.atthasdef OR a.attidentity <> '') AS has_default
         FROM pg_attribute a
         JOIN pg_class c ON c.oid = a.attrelid
         JOIN pg_namespace n ON n.oid = c.relnamespace
+        LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
         WHERE n.nspname = $1 AND c.relname = $2 AND a.attnum > 0 AND NOT a.attisdropped
         "#,
     )
@@ -51,24 +78,30 @@ async fn fetch_table_column_nullable(
     .bind(table)
     .fetch_all(pool)
     .await
-    .map_err(|e| format!("Failed to load nullable info: {e}"))?;
+    .map_err(|e| format!("Failed to load column info: {e}"))?;
 
-    let mut map: HashMap<String, bool> = HashMap::new();
+    let mut map: HashMap<String, ColumnFlags> = HashMap::new();
     for row in rows {
-        if let (Ok(name), Ok(is_nullable)) = (
-            row.try_get::<String, _>(0),
-            row.try_get::<bool, _>(1),
-        ) {
-            map.insert(name, is_nullable);
+        if let (Ok(name), Ok(nullable)) = (row.try_get::<String, _>(0), row.try_get::<bool, _>(1)) {
+            map.insert(
+                name,
+                ColumnFlags {
+                    nullable,
+                    auto_generated: row.try_get::<bool, _>(2).unwrap_or(false),
+                    has_default: row.try_get::<bool, _>(3).unwrap_or(false),
+                },
+            );
         }
     }
     Ok(map)
 }
 
-fn apply_column_nullable(columns: &mut [ColumnInfo], nullable: &HashMap<String, bool>) {
+fn apply_column_flags(columns: &mut [ColumnInfo], flags: &HashMap<String, ColumnFlags>) {
     for col in columns.iter_mut() {
-        if let Some(&is_nullable) = nullable.get(&col.name) {
-            col.nullable = is_nullable;
+        if let Some(f) = flags.get(&col.name) {
+            col.nullable = f.nullable;
+            col.auto_generated = f.auto_generated;
+            col.has_default = f.has_default;
         }
     }
 }
@@ -1496,10 +1529,10 @@ pub async fn get_table_rows(
     // fall back to OFFSET, which is always correct.
     let keyset_ok = match keyset_ok {
         Some(k) => {
-            let nullable = fetch_table_column_nullable(&pool, &schema, &table).await?;
+            let flags = fetch_table_column_flags(&pool, &schema, &table).await?;
             // Require the column to be known AND non-nullable. Unknown column =>
             // don't fast-path (stay safe).
-            match nullable.get(&k.column) {
+            match flags.get(&k.column).map(|f| f.nullable) {
                 Some(false) => Some(k),
                 _ => None,
             }
@@ -1555,7 +1588,7 @@ pub async fn get_table_rows(
         Some(tokio::spawn(async move {
             tokio::join!(
                 fetch_table_column_enums(&pool, &schema, &table),
-                fetch_table_column_nullable(&pool, &schema, &table),
+                fetch_table_column_flags(&pool, &schema, &table),
                 fetch_primary_key(&pool, &schema, &table),
                 fetch_foreign_keys(&pool, &schema, &table),
             )
@@ -1700,10 +1733,10 @@ pub async fn get_table_rows(
     // Metadata was fired off above (concurrent with the row/count fetch); collect
     // it now that the columns are built so enum/nullable info can be applied.
     let (primary_key, foreign_keys) = if let Some(task) = meta_task {
-        let (enums_result, nullable_result, pk_result, fk_result) =
+        let (enums_result, flags_result, pk_result, fk_result) =
             task.await.map_err(|e| format!("Failed to load table metadata: {e}"))?;
         if let Ok(enums) = enums_result { apply_column_enums(&mut columns, &enums); }
-        if let Ok(nullable) = nullable_result { apply_column_nullable(&mut columns, &nullable); }
+        if let Ok(flags) = flags_result { apply_column_flags(&mut columns, &flags); }
         (pk_result?, fk_result?)
     } else {
         (Vec::new(), Vec::new())
