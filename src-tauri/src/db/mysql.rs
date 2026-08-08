@@ -657,16 +657,24 @@ pub async fn insert_table_row(
             .ok_or_else(|| format!("Missing value for column: {col}"))?;
         q = bind_value(q, value);
     }
-    q.execute(pool).await.map_err(|e| format!("Insert failed: {e}"))?;
+    // Run the INSERT and the LAST_INSERT_ID()/re-fetch on ONE pinned connection:
+    // LAST_INSERT_ID() is connection-scoped, and a second pool acquire can land
+    // on a different connection (returning 0 or a stale id) whenever background
+    // work is also using the pool.
+    let mut conn = pool
+        .acquire()
+        .await
+        .map_err(|e| format!("Failed to acquire connection: {e}"))?;
+    q.execute(&mut *conn).await.map_err(|e| format!("Insert failed: {e}"))?;
 
     // Re-fetch the inserted row
     let fetched = if let Some(ai_col) = &auto_increment_col {
         let last_id: u64 = sqlx::query_scalar("SELECT LAST_INSERT_ID()")
-            .fetch_one(pool)
+            .fetch_one(&mut *conn)
             .await
             .map_err(|e| format!("Failed to get last insert ID: {e}"))?;
         let sel = format!("SELECT * FROM {}.{} WHERE {} = ? LIMIT 1", bt(schema), bt(table), bt(ai_col));
-        sqlx::query(&sel).bind(last_id as i64).fetch_optional(pool).await
+        sqlx::query(&sel).bind(last_id as i64).fetch_optional(&mut *conn).await
             .map_err(|e| format!("Failed to fetch inserted row: {e}"))?
     } else {
         let pk_cols = fetch_primary_key(pool, schema, table).await.unwrap_or_default();
@@ -680,7 +688,7 @@ pub async fn insert_table_row(
                     .ok_or_else(|| format!("Missing value for column: {pk_col}"))?;
                 sel_q = bind_value(sel_q, value);
             }
-            sel_q.fetch_optional(pool).await.map_err(|e| format!("Failed to fetch inserted row: {e}"))?
+            sel_q.fetch_optional(&mut *conn).await.map_err(|e| format!("Failed to fetch inserted row: {e}"))?
         } else {
             None
         }
