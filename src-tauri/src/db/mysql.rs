@@ -148,20 +148,6 @@ pub async fn fetch_primary_key(pool: &MySqlPool, schema: &str, table: &str) -> R
     Ok(rows.iter().filter_map(|r| r.try_get::<String, _>(0).ok()).collect())
 }
 
-async fn fetch_column_names(pool: &MySqlPool, schema: &str, table: &str) -> Result<Vec<String>, String> {
-    let rows = sqlx::query(
-        "SELECT COLUMN_NAME FROM information_schema.COLUMNS \
-         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? \
-         ORDER BY ORDINAL_POSITION",
-    )
-    .bind(schema)
-    .bind(table)
-    .fetch_all(pool)
-    .await
-    .map_err(|e| format!("Failed to load columns: {e}"))?;
-    Ok(rows.iter().filter_map(|r| r.try_get::<String, _>(0).ok()).collect())
-}
-
 fn escape_like(input: &str) -> String {
     super::sql_util::escape_like_backslash(input)
 }
@@ -307,7 +293,24 @@ pub async fn get_table_rows(
     nulls_order: Option<String>,
 ) -> Result<TableRows, String> {
     let started = Instant::now();
-    let table_columns = fetch_column_names(pool, schema, table).await?;
+    // One catalog round-trip per fetch: the WHERE/sort builders need the column
+    // names before the count/data queries can be built, so fetch the full
+    // name/type/nullability projection upfront and reuse it below for the
+    // nullable map and the empty-table column fallback (instead of a second
+    // information_schema.COLUMNS query inside the join).
+    let meta_rows = sqlx::query(
+        "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM information_schema.COLUMNS \
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION",
+    )
+    .bind(schema)
+    .bind(table)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("Failed to load columns: {e}"))?;
+    let table_columns: Vec<String> = meta_rows
+        .iter()
+        .filter_map(|r| r.try_get::<String, _>(0).ok())
+        .collect();
     let filters = filters.unwrap_or_default();
     let where_clause = build_where(&table_columns, search.as_deref(), search_is_regex, search_case_sensitive, &filters)?;
 
@@ -351,21 +354,12 @@ pub async fn get_table_rows(
     }
     data_q = data_q.bind(limit).bind(offset);
 
-    let meta_q = sqlx::query(
-        "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM information_schema.COLUMNS \
-         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION",
-    )
-    .bind(schema)
-    .bind(table);
-
-    let (total_res, rows_res, meta_res) = tokio::join!(
+    let (total_res, rows_res) = tokio::join!(
         count_q.fetch_one(pool),
         data_q.fetch_all(pool),
-        meta_q.fetch_all(pool),
     );
     let total: i64 = total_res.map_err(|e| format!("Failed to count rows: {e}"))?;
     let rows = rows_res.map_err(|e| format!("Failed to fetch rows: {e}"))?;
-    let meta_rows = meta_res.unwrap_or_default();
 
     // Build nullable map from information_schema
     let nullable_map: HashMap<String, bool> = meta_rows
