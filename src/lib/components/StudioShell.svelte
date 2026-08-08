@@ -1340,10 +1340,16 @@ let rowSearch = $state('')
   // sqlSchemaHints (a $derived) picks them up automatically once they arrive.
   let _sqlEnumValues = $state(/** @type {Record<string, string[]>} */ ({}))
   let _sqlUserFunctions = $state(/** @type {Array<{name:string,signature:string,returnType:string,kind:string}>} */ ([]))
+  // Which connection+schema the hints reflect - enums/functions only change with
+  // those, so don't re-run the catalog round-trips on every switch into SQL.
+  let _sqlHintsLoadedFor = ''
 
   $effect(() => {
     if (activeView !== 'sql' || !connection || !activeSchema) return
     const schema = activeSchema
+    const key = `${persistConnectionId}:${schema}`
+    if (key === _sqlHintsLoadedFor) return
+    _sqlHintsLoadedFor = key
     // Enum/function completion hints are PostgreSQL-only - skip the round-trips
     // (which would just return empty) on every other engine.
     if (engineSupports('enums', connection?.type)) {
@@ -5119,6 +5125,7 @@ let rowSearch = $state('')
   async function handleRefresh() {
     // A manual refresh should also recover a dropped connection.
     if (connectionLost) await reconnectPool()
+    _sqlHintsLoadedFor = '' // re-fetch enum/function hints on next SQL view
     await loadSchemas()
     await loadTables({ force: true })
     if (activeTab?.kind === 'table' && activeTable) {
