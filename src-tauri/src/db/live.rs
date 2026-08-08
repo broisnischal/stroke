@@ -84,6 +84,12 @@ pub fn stop(live: &LiveState) {
     }
 }
 
+/// A watcher whose pool keeps failing is polling a connection that no longer
+/// exists (the app connected elsewhere without stopping live mode) — after this
+/// many straight failures the task self-terminates instead of holding the
+/// closed pool alive and erroring every tick forever.
+const MAX_CONSECUTIVE_ERRORS: u32 = 10;
+
 // ── SQLite: poll PRAGMA data_version ──────────────────────────────────────────
 
 fn spawn_sqlite(
@@ -94,6 +100,7 @@ fn spawn_sqlite(
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut last: Option<i64> = None;
+        let mut consecutive_errors = 0u32;
         let mut ticker = tokio::time::interval(Duration::from_millis(1000));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
@@ -105,12 +112,20 @@ fn spawn_sqlite(
                 .await
             {
                 Ok(v) => {
+                    consecutive_errors = 0;
                     if last.is_some_and(|prev| prev != v) {
                         emit(&app, &schema, &table);
                     }
                     last = Some(v);
                 }
-                Err(_) => {} // transient (pool busy / closing) — retry next tick
+                // Transient (pool busy) — retry next tick. But a run of straight
+                // failures means the pool is gone (connection switched away
+                // without live::stop): a closed pool fails instantly and
+                // permanently, so stop instead of erroring forever.
+                Err(_) => {
+                    consecutive_errors += 1;
+                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS { break; }
+                }
             }
         }
     })
@@ -126,6 +141,7 @@ fn spawn_pg(
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut last: Option<i64> = None;
+        let mut consecutive_errors = 0u32;
         let mut ticker = tokio::time::interval(Duration::from_millis(1500));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
@@ -140,6 +156,7 @@ fn spawn_pg(
             .await;
             match result {
                 Ok(Some(v)) => {
+                    consecutive_errors = 0;
                     if last.is_some_and(|prev| prev != v) {
                         emit(&app, &schema, &table);
                     }
@@ -147,8 +164,13 @@ fn spawn_pg(
                 }
                 // No stats row yet (table never modified, or track_counts off) —
                 // keep polling; the row appears once activity is recorded.
-                Ok(None) => {}
-                Err(_) => {}
+                Ok(None) => { consecutive_errors = 0; }
+                // See MAX_CONSECUTIVE_ERRORS — a permanently failing pool means
+                // the connection was switched away; stop polling it.
+                Err(_) => {
+                    consecutive_errors += 1;
+                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS { break; }
+                }
             }
         }
     })
