@@ -218,10 +218,12 @@
   import { loadLayout, saveLayout } from '$lib/stores/layout.js'
   import {
     getLastConnection,
+    getLastSchema,
     loadSavedConnections,
     removeConnection,
     setConnectionGroup,
     setLastConnectionId,
+    setLastSchema,
     upsertConnection,
     engineFamily,
   } from '$lib/stores/connections.js'
@@ -3474,6 +3476,7 @@ let rowSearch = $state('')
     hiddenColumns = loadHiddenCols(persistConnectionId, schema, table)
     if (schema !== activeSchema) {
       activeSchema = schema
+      setLastSchema(persistConnectionId, schema)
       await loadTables()
     }
     // Fire the fetch in background - caller can open more tabs without waiting
@@ -4631,13 +4634,23 @@ let rowSearch = $state('')
     activeTable = null
     tables = []
     schemas = []
-    activeSchema = 'public'
+    // Land on the schema the user was on last time for this connection.
+    // loadSchemas() falls back to public/first if it no longer exists.
+    activeSchema = (savedId && getLastSchema(savedId)) || 'public'
+    // Schema caches are keyed by "schema.table" only, so entries from the old
+    // database would be served for same-named tables on the new one (and stay
+    // resident forever). The ConnectionModal connect path lands here without
+    // going through clearConnectionState, so reset them in both places.
+    tableColumnsCache = new Map()
+    incomingFkCache = new Map()
     // The connection is live: render the shell NOW (setting `connection` above
     // dropped the reconnect overlay) with the welcome tab open and the sidebar
     // in its skeleton state, and let the catalog stream in below. This is what
     // makes reconnect feel instant - the overlay no longer waits on the
     // schema/table/row-count round trips.
     tabs = []
+    _liveRowsByTab.clear()
+    _tabRowsMru = []
     resetNav(_nav)
     syncNavFlags()
     // Redis has no relational catalog: skip schema/table loading entirely and
@@ -4824,6 +4837,7 @@ let rowSearch = $state('')
     if (!schema || schema === activeSchema) return
     if (connectionLost) await reconnectPool()
     activeSchema = schema
+    setLastSchema(persistConnectionId, schema)
     activeTable = null
     page = 1
     tableFilter = ''
@@ -4945,6 +4959,8 @@ let rowSearch = $state('')
   }
 
   async function handleDisconnect() {
+    // Remember where the user was so reconnecting restores this schema.
+    if (persistConnectionId && activeSchema) setLastSchema(persistConnectionId, activeSchema)
     recordActivity({ type: 'disconnect', title: `Disconnected from ${connection?.name ?? 'database'}`, success: true })
     try { await disconnectPostgres() } catch { /* ignore */ }
     try { await mcpStop() } catch { /* ignore */ }
