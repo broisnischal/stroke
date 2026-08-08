@@ -1,4 +1,5 @@
 <script>
+  import { startTelemetry, stopTelemetry } from "$lib/telemetry.js";
   import Minus from "@lucide/svelte/icons/minus";
   import Plus from "@lucide/svelte/icons/plus";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
@@ -252,6 +253,13 @@
   }
   function toggleAgentWebAccess() {
     settings = updateSettings({ agentWebAccess: !settings.agentWebAccess });
+  }
+  function toggleTelemetry() {
+    settings = updateSettings({ telemetry: !settings.telemetry });
+    // Takes effect immediately rather than at next launch: a privacy switch
+    // that needs a restart to mean anything is not a privacy switch.
+    if (!settings.telemetry) stopTelemetry();
+    else startTelemetry();
   }
   const thinkingStyleOption = $derived(
     THINKING_STYLES.find((s) => s.id === settings.agentThinkingStyle) ?? THINKING_STYLES[0],
@@ -621,6 +629,14 @@
       'Let the agent search the web and read pages for things your database cannot answer — error codes, function syntax, current docs. Your search terms leave your machine when it does.',
       settings.agentWebAccess,
       toggleAgentWebAccess,
+    )}
+  {/if}
+  {#if show('Anonymous usage data', 'Help decide what to build next')}
+    {@render switchRow(
+      'Anonymous usage data',
+      'Sends which features you use, how often, the app version and your OS — nothing else. No queries, no table or database names, no connection details, and nothing about the data you browse. Turning it off takes effect immediately.',
+      settings.telemetry,
+      toggleTelemetry,
     )}
   {/if}
   {#if show('Show query cards', 'Display the SQL the agent ran and the rows it returned')}

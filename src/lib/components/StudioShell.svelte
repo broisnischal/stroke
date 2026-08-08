@@ -30,6 +30,7 @@
     loadQueryHistoryPref, saveQueryHistoryPref, loadInfiniteScroll, saveInfiniteScroll,
   } from '$lib/stores/table-prefs.js'
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
+  import { startTelemetry, track } from '$lib/telemetry.js'
   import Sidebar from './Sidebar.svelte'
   import TabBar from './TabBar.svelte'
   import PaneLayout from './PaneLayout.svelte'
@@ -637,6 +638,9 @@
   }
 
   onMount(() => {
+    // Anonymous, opt-out, and a no-op when the setting is off. See telemetry.js
+    // for what it does and does not send.
+    startTelemetry()
     let unlisten = () => {}
     void (async () => {
       try {
@@ -3416,6 +3420,7 @@ let rowSearch = $state('')
    *   duplicate?: boolean, viewMode?: string }} [options]
    */
   async function openTableTab(schema, table, options = {}) {
+    track('table_open')
     const { filters = null, resetQuery = false, search = null, duplicate = false, viewMode = null } = options
     // `duplicate` forces a second tab for a table that is already open - used when
     // the request comes from inside that table's own tab (e.g. "Open table" in the
@@ -4590,6 +4595,7 @@ let rowSearch = $state('')
    * @param {string} [overrideSql]
    */
   async function runSql(overrideSql) {
+    track('sql_run')
     const sqlRan = typeof overrideSql === 'string' && overrideSql.trim() ? overrideSql : sqlText
     if (!connection || !sqlRan.trim()) return
     if (tableReadonly && isWriteSql(sqlRan)) {
@@ -5044,6 +5050,9 @@ let rowSearch = $state('')
    * @param {import('$lib/stores/connections.js').SavedConnection} conn
    */
   async function connectByType(conn) {
+    // Which engines get used, never which servers. The event name is the whole
+    // payload — there is no field here that could carry a host or a database.
+    track(`connect_${conn.type === 'cockroachdb' ? 'cockroachdb' : conn.type}`)
     if (conn.type === 'sqlite') await connectSqlite(conn)
     else if (conn.type === 'd1') await connectD1(conn)
     else if (conn.type === 'libsql') await connectLibSql(conn)
