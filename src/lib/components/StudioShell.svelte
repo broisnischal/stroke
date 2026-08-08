@@ -8,11 +8,9 @@
   import Boxes from '@lucide/svelte/icons/boxes'
   import FileCode2 from '@lucide/svelte/icons/file-code-2'
   import Terminal from '@lucide/svelte/icons/terminal'
-  import Table2 from '@lucide/svelte/icons/table-2'
   import Sparkles from '@lucide/svelte/icons/sparkles'
   import LayoutTemplate from '@lucide/svelte/icons/layout-template'
   import Command from '@lucide/svelte/icons/command'
-  import Lightbulb from '@lucide/svelte/icons/lightbulb'
   import Code2 from '@lucide/svelte/icons/code-2'
   import ShieldCheck from '@lucide/svelte/icons/shield-check'
   import ScrollText from '@lucide/svelte/icons/scroll-text'
@@ -24,14 +22,13 @@
   import History from '@lucide/svelte/icons/history'
   import Plus from '@lucide/svelte/icons/plus'
   import { createHotkey, createHotkeySequence } from '@tanstack/svelte-hotkeys'
-  import { cycleTheme, restorePreviousTheme, isCurrentThemeDark, loadSettings, updateSettings, appPaginationMode, appVimMode } from '$lib/stores/settings.js'
+  import { cycleTheme, restorePreviousTheme, isCurrentThemeDark, loadSettings, appPaginationMode, appVimMode } from '$lib/stores/settings.js'
   import { isTextEntryTarget, setVimSubMode } from '$lib/vim/vim.js'
   import { normalizeColumn, columnType } from '$lib/column.js'
   import {
     loadAiMode, saveAiMode, loadHiddenCols, saveHiddenCols,
     loadQueryHistoryPref, saveQueryHistoryPref, loadInfiniteScroll, saveInfiniteScroll,
   } from '$lib/stores/table-prefs.js'
-  import { pickRandomTip } from '$lib/insider-tips.js'
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import Sidebar from './Sidebar.svelte'
   import TabBar from './TabBar.svelte'
@@ -76,7 +73,6 @@
   import QueryLogConsole from './QueryLogConsole.svelte'
   import DisconnectDialog from './DisconnectDialog.svelte'
   import SwitchDatabaseDialog from './SwitchDatabaseDialog.svelte'
-  // InsertRowDialog removed - replaced by inline draft row in DataTable
   import McpPanel from './McpPanel.svelte'
   import SearchPage from './SearchPage.svelte'
   // NotebookEditor (pulls Monaco via SqlCell + marked via MarkdownCell) is lazy-loaded
@@ -129,7 +125,6 @@
     createSqlTab,
     createDdlTab,
     createWelcomeTab,
-    createAiTab,
     createSchemaTab,
     createOrmTab,
     createOrmSchemaTab,
@@ -167,7 +162,6 @@
     findLicenseTab,
     findTableTab,
     findSqlTab,
-    findAiTab,
     findSchemaTab,
     findOrmTab,
     findSecurityTab,
@@ -192,7 +186,7 @@
     clearPendingChanges,
     anyPendingChanges,
   } from '$lib/stores/pending-table-edits.js'
-  import { createNotebook, deserializeNotebook, titleFromPath } from '$lib/notebook.js'
+  import { createNotebook, deserializeNotebook } from '$lib/notebook.js'
   import { openNotebookFile } from '$lib/api.js'
   import { formatCompactCount, normalizeTableRowCount } from '$lib/table-list.js'
   import { humanizeDbError } from '$lib/ai.js'
@@ -653,8 +647,6 @@
     return () => { unlisten(); if (_liveRefetchTimer) clearTimeout(_liveRefetchTimer) }
   })
 
-  // AI mode, hidden columns, query-history visibility and infinite-scroll prefs
-  // are persisted via $lib/stores/table-prefs.js (imported above).
   let aiMode = $state(loadAiMode())
   let aiEverOpened = $state(loadAiMode())
   $effect(() => { if (aiMode) aiEverOpened = true })
@@ -684,7 +676,6 @@
   /** @type {{ focusEditor: () => void, openQuery?: (content: string) => void } | null} */
   let sqlConsoleRef = $state(null)
 
-  /** "Open in SQL editor" - generate a SELECT reflecting the current table view and open it in the SQL editor. */
   // ── Search options (match case / whole word / regex) ──────────────────────
   /** @type {import('$lib/search-options.js').SearchOptions} */
   let searchOptions = $state({ matchCase: false, wholeWord: false, regex: false })
@@ -892,6 +883,7 @@
     }
   }
 
+  /** "Open in SQL editor" - generate a SELECT reflecting the current table view and open it in the SQL editor. */
   function openTableInSqlEditor() {
     if (!activeTable) return
     const sql = buildSelectSql({
@@ -1317,15 +1309,6 @@ let rowSearch = $state('')
   )
   /** Structure view only makes sense for real tables, not views/materialized views */
   const canShowStructure = $derived(activeTableKind === 'table' || activeTableKind === 'foreign_table')
-
-  let welcomeTip = $state(pickRandomTip())
-  let _lastWelcomeTabId = ''
-  $effect(() => {
-    if (activeTab?.kind === 'welcome' && activeTab.id !== _lastWelcomeTabId) {
-      _lastWelcomeTabId = activeTab.id
-      welcomeTip = pickRandomTip()
-    }
-  })
 
   const activeView = $derived(activeTab?.kind === 'sql' ? 'sql' : 'table')
 
@@ -4561,7 +4544,6 @@ let rowSearch = $state('')
     const n = exportRows.length
     // Small exports build instantly; only large ones need the async/progress path.
     const LARGE = 20000
-    exportingData = true
     // A persistent toast that stays up for the whole build/save, dismissed on completion.
     const toastId = toast.info(`Exporting ${formatCompactCount(n)} rows…`, {
       description: `Preparing ${format.toUpperCase()}, please wait`,
@@ -4723,7 +4705,6 @@ let rowSearch = $state('')
     // MCP autostart is independent of the catalog - don't block first render on it.
     void (async () => {
       try {
-        const { loadSettings } = await import('$lib/stores/settings.js')
         if (loadSettings().mcpAutoStart) {
           const s = await mcpStart()
           mcpRunning = s.running
@@ -5063,7 +5044,6 @@ let rowSearch = $state('')
    * @param {import('$lib/stores/connections.js').SavedConnection} conn
    */
   async function connectByType(conn) {
-    const { connectPostgres, connectSqlite, connectD1, connectLibSql, connectMysql, connectClickhouse, connectDuckdb, connectMssql, connectRedis } = await import('$lib/api.js')
     if (conn.type === 'sqlite') await connectSqlite(conn)
     else if (conn.type === 'd1') await connectD1(conn)
     else if (conn.type === 'libsql') await connectLibSql(conn)
@@ -5429,13 +5409,6 @@ let rowSearch = $state('')
     await openQueryInEditor(sql)
   }
 
-  /** Run SQL from AI chat - writes to editor and executes. */
-  async function handleAiRunSql(sql) {
-    await focusSqlView()
-    sqlText = sql
-    await runSql()
-  }
-
   async function focusSqlView() {
     const existing = findSqlTab(tabs)
     if (existing) {
@@ -5746,23 +5719,7 @@ let rowSearch = $state('')
         ontableselect={handleTableSelect}
         ontablefilter={(v) => (tableFilter = v)}
         onrefresh={handleRefresh}
-        ondisconnect={requestDisconnect}
-        onopensettings={() => (showSettingsModal = true)}
-        onopencommand={() => (commandOpen = true)}
-        onopenSchema={openSchemaTab}
-        onopenorm={openOrmTab}
-        onopenbackup={openBackupTab}
-        onopendashboard={() => { if (aiMode) exitAiMode(); openDashboardTab() }}
-        onopenerd={() => { if (aiMode) exitAiMode(); openErdTab() }}
-              {aiMode}
-        onopenaimode={() => (aiMode ? exitAiMode() : enterAiMode())}
-        {queryHistory}
-        onqueryselect={(sql) => { if (aiMode) exitAiMode(); void openQueryInEditor(sql) }}
-        onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
-        onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
-        onopenextensions={() => { if (aiMode) exitAiMode(); openExtensionsTab() }}
         {connection}
-        onswitchtodb={switchToDb}
         onswitchdatabase={requestDatabaseSwitch}
         onnewtable={() => (showCreateTableDialog = true)}
         onnewschema={() => (showCreateSchemaDialog = true)}
@@ -5925,9 +5882,6 @@ let rowSearch = $state('')
             onreopenclosed={reopenLastClosedTab}
             canreopenclosed={closedTabStack.length > 0}
             onpintoggle={toggleTabPin}
-            onnew={openWelcomeTab}
-            {recentTabs}
-            onrecentselect={(schema, table) => { if (aiMode) exitAiMode(); void openTableTab(schema, table) }}
           />
         {/if}
         {@render sharedContent()}
@@ -5948,9 +5902,6 @@ let rowSearch = $state('')
             onreopenclosed={reopenLastClosedTab}
             canreopenclosed={closedTabStack.length > 0}
             onpintoggle={toggleTabPin}
-            onnew={() => { void focusGroup(group.id); openWelcomeTab() }}
-            {recentTabs}
-            onrecentselect={(schema, table) => { if (aiMode) exitAiMode(); void focusGroup(group.id).then(() => openTableTab(schema, table)) }}
             ondragtabstart={(id) => beginTabDrag(id)}
             ondragtabmove={(x, y) => moveTabDrag(x, y)}
             ondragtabend={() => endTabDrag()}
@@ -6668,8 +6619,6 @@ let rowSearch = $state('')
                   columns={dataViewColumns}
                   rows={dataViewRows}
                   tableKey={`${activeSchema}.${activeTable}`}
-                  onshowtable={() => (dataViewMode = 'table')}
-                  ondownload={() => void handleExport('json')}
                 />
               {:else if dataViewMode === 'record'}
                 <TableRecordView
@@ -6972,19 +6921,6 @@ let rowSearch = $state('')
   ontogglestatusbar={toggleStatusBar}
   {aiMode}
   onopenaimode={() => (aiMode ? exitAiMode() : openAiTab())}
-  hasPro={$hasPro}
-  onopenSchema={openSchemaTab}
-  onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
-  onopeninsights={() => { if (aiMode) exitAiMode(); openInsightsTab() }}
-  ontogglequerylog={() => { commandOpen = false; queryLogOpen = !queryLogOpen }}
-  onopenextensions={() => { if (aiMode) exitAiMode(); openExtensionsTab() }}
-  onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
-  onopenorm={openOrmTab}
-        onopenbackup={openBackupTab}
-  onopenchartspage={() => { if (aiMode) exitAiMode(); openChartsTab() }}
-  onopendashboard={() => { if (aiMode) exitAiMode(); openDashboardTab() }}
-  onopendiagrams={() => { if (aiMode) exitAiMode(); openDiagramsTab() }}
-  onopenerd={() => { if (aiMode) exitAiMode(); openErdTab() }}
   onopensettings={() => (showSettingsModal = true)}
   onopencommand={() => (commandOpen = true)}
   onopenpages={() => { commandPage = 'pages'; commandOpen = true }}
