@@ -5,7 +5,6 @@
    */
   import { saveExportAs } from '$lib/api.js'
   import { canvasToPngBlob } from '$lib/svg-png.js'
-  import { onDestroy } from 'svelte'
   import { buildOption } from '$lib/chart-utils.js'
   import { isCurrentThemeDark } from '$lib/stores/settings.js'
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
@@ -132,7 +131,7 @@
                 bubbles: false, cancelable: true,
               }))
             }
-          }, { capture: true, passive: false, signal: ac.signal })
+          }, { capture: true, passive: true, signal: ac.signal })
         }
         // Double-click → restore to initial view
         container.addEventListener('dblclick', () => {
@@ -166,8 +165,6 @@
       c.setOption(o, { notMerge: true, lazyUpdate: true })
     }
   })
-
-  onDestroy(() => { ro?.disconnect(); chart?.dispose() })
 
   export async function downloadPng(filename = 'chart.png') {
     const blob = await canvasToPngBlob(el?.querySelector('canvas') ?? null)

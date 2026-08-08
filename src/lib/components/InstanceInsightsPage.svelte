@@ -85,7 +85,11 @@
   let tick = $state(0)
   $effect(() => {
     if (!active) return
-    const id = setInterval(() => tick++, 1000)
+    const id = setInterval(() => {
+      // Skip while backgrounded - the label resyncs on the next visible tick.
+      if (typeof document !== 'undefined' && document.hidden) return
+      tick++
+    }, 1000)
     return () => clearInterval(id)
   })
   const agoLabel = $derived.by(() => {
