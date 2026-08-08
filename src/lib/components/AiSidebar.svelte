@@ -153,9 +153,6 @@
    *  into the next message's context. */
   let contextTables = $state(/** @type {string[]} */ ([]))
 
-  /** @type {HTMLDivElement | null} */
-  let mentionEl = $state(null)
-
   const allTables = $derived(schemaContext.tables ?? [])
 
   const mentionItems = $derived.by(() => {
@@ -598,7 +595,7 @@
       }
       if (chunk.toolCalls) toolCalls = chunk.toolCalls
     }
-    if (abortController?.signal.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' })
+    if (!abortController || abortController.signal.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' })
     flushStreamingContent()
     if (itemId && streamingId) {
       streamingId = null; streamingContent = ''; _pendingStreamContent = ''
@@ -840,7 +837,7 @@
   {/if}
 
   <!-- Messages -->
-  <div bind:this={scrollEl} onscroll={onScrollAreaScroll}
+  <div bind:this={scrollEl}
     class="app-scroll relative min-h-0 flex-1 overflow-y-auto [will-change:transform] [overflow-anchor:none]">
 
     {#if items.length === 0}
@@ -906,7 +903,7 @@
             </div>
 
           {:else if item.kind === 'streaming'}
-            <AiMarkdown content={displayStreamingContent} debounceMs={180} streaming class="text-ui-xs" />
+            <AiMarkdown content={displayStreamingContent} streaming class="text-ui-xs" />
 
           {:else if item.kind === 'assistant'}
             <div class="flex flex-col gap-2">
@@ -1075,7 +1072,7 @@
 
     <!-- @ mention popup -->
     {#if mentionOpen && mentionItems.length > 0}
-      <div bind:this={mentionEl}
+      <div
         class="absolute bottom-full left-2.5 right-2.5 z-50 mb-1.5 overflow-hidden rounded-[10px] border border-border/60 bg-popover elevate-2-rim">
         <div class="app-scroll max-h-56 overflow-y-auto p-1">
           {#each mentionItems as item, idx (item.insert)}

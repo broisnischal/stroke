@@ -1,8 +1,6 @@
 <script>
   import { tick, onMount, onDestroy } from "svelte";
   import Sparkles from "@lucide/svelte/icons/sparkles";
-  import Loader2 from "@lucide/svelte/icons/loader-2";
-  import Bot from "@lucide/svelte/icons/bot";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
   import Reply from "@lucide/svelte/icons/reply";
   import Square from "@lucide/svelte/icons/square";
@@ -69,7 +67,6 @@
     describeAiError,
     humanizeDbError,
     filterSchemaForQuery,
-    stripThinkTags,
   } from "$lib/ai.js";
   import {
     loadSkills,
@@ -97,7 +94,6 @@
   import { isCurrentThemeDark, appAgentQueryCards, appAgentWebAccess } from "$lib/stores/settings.js";
   import Save from "@lucide/svelte/icons/save";
   import Check from "@lucide/svelte/icons/check";
-  import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import Search from "@lucide/svelte/icons/search";
   import TrendingUp from "@lucide/svelte/icons/trending-up";
   import Layers from "@lucide/svelte/icons/layers";
@@ -125,6 +121,7 @@
    *   | { id: string, kind: 'thinking' }
    *   | { id: string, kind: 'executing', sql: string, op: 'query' | 'schema' | 'describe' | 'run' | 'diagram' }
    *   | { id: string, kind: 'diagram', code: string, title: string }
+   *   | { id: string, kind: 'web', mode: 'search'|'fetch', label: string, hits: {title:string,url:string,snippet:string}[], error: string|null, loading: boolean }
    * } ChatItem
    */
 
@@ -253,31 +250,13 @@
     $appAgentWebAccess ? [...AI_TOOLS, ...AI_WEB_TOOLS] : AI_TOOLS,
   );
   let settingsOpen = $state(false);
-  /** @type {string | null} */
-  let imageViewerSrc = $state(null);
   /** @type {'model'|'skills'|'context'|'chat'} */
   let settingsTab = $state("model");
   const SETTINGS_TABS = /** @type {const} */ ([
-    {
-      id: "model",
-      // label: 'Model',
-      icon: Cpu,
-    },
-    {
-      id: "chat",
-      // label: 'Chat',
-      icon: MessageSquare,
-    },
-    {
-      id: "skills",
-      // label: 'Skills',
-      icon: Zap,
-    },
-    {
-      id: "context",
-      //  label: 'Context',
-      icon: Database,
-    },
+    { id: "model", icon: Cpu },
+    { id: "chat", icon: MessageSquare },
+    { id: "skills", icon: Zap },
+    { id: "context", icon: Database },
   ]);
 
   // ── Skills ────────────────────────────────────────────────────────────────
@@ -325,7 +304,8 @@
         saveSkills(skills);
       };
       reader.readAsText(file);
-    })(/** @type {HTMLInputElement} */ e.target).value = "";
+    });
+    /** @type {HTMLInputElement} */ (e.target).value = "";
   }
 
   // ── Conversations list (IndexedDB) ─────────────────────────────────────────
@@ -1160,7 +1140,7 @@
     fullscreenCanvasEl?.dispatchEvent(new CustomEvent(name));
   }
 
-  async function exportDiagramSvg(code) {
+  async function exportDiagramSvg() {
     const canvas =
       fullscreenCanvasEl ?? document.querySelector(".mermaid-canvas");
     const svgEl =
@@ -1186,7 +1166,7 @@
     }
   }
 
-  async function exportDiagramPng(code) {
+  async function exportDiagramPng() {
     const canvas =
       fullscreenCanvasEl ?? document.querySelector(".mermaid-canvas");
     const svgEl =
@@ -1884,7 +1864,7 @@
     }
 
     // Bail out immediately if the user stopped generation - stop() already finalized UI
-    if (abortController?.signal.aborted) {
+    if (!abortController || abortController.signal.aborted) {
       throw Object.assign(new Error("Aborted"), { name: "AbortError" });
     }
 
@@ -3245,7 +3225,6 @@
       onmouseup={syncSelectionToolbar}
       onkeyup={syncSelectionToolbar}
       class="app-scroll ai-transcript min-h-0 flex-1 overflow-y-auto relative [overflow-anchor:none] overscroll-contain [contain:layout_paint] [-webkit-overflow-scrolling:touch]"
-      onclick={undefined}
       role="region"
       aria-label="Chat messages"
     >
@@ -3409,7 +3388,6 @@
                 <div class="min-w-0 px-3.5">
                   <AiMarkdown
                     content={displayStreamingContent}
-                    debounceMs={180}
                     streaming
                     onrender={scrollBottomSoon}
                   />
@@ -3475,15 +3453,14 @@
                               <button
                                 type="button"
                                 class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-ui-3xs text-muted-foreground hover:bg-accent hover:text-foreground"
-                                onclick={() => void exportDiagramSvg(part.content)}
+                                onclick={() => void exportDiagramSvg()}
                                 title="Export SVG"
                                 ><ArrowDownToLine class="size-3" />SVG</button
                               >
                               <button
                                 type="button"
                                 class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-ui-3xs text-muted-foreground hover:bg-accent hover:text-foreground"
-                                onclick={() =>
-                                  void exportDiagramPng(part.content)}
+                                onclick={() => void exportDiagramPng()}
                                 title="Export PNG"
                                 ><ArrowDownToLine class="size-3" />PNG</button
                               >
@@ -4101,14 +4078,14 @@
                       <button
                         type="button"
                         class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-ui-3xs text-muted-foreground hover:bg-accent hover:text-foreground"
-                        onclick={() => void exportDiagramSvg(item.code)}
+                        onclick={() => void exportDiagramSvg()}
                         title="Export SVG"
                         ><ArrowDownToLine class="size-3" />SVG</button
                       >
                       <button
                         type="button"
                         class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-ui-3xs text-muted-foreground hover:bg-accent hover:text-foreground"
-                        onclick={() => void exportDiagramPng(item.code)}
+                        onclick={() => void exportDiagramPng()}
                         title="Export PNG"
                         ><ArrowDownToLine class="size-3" />PNG</button
                       >
@@ -4416,7 +4393,7 @@
           >
             <Icon class="size-3 shrink-0" />
             <span
-              >{tab.label}{tab.id === "skills" && skills.length
+              >{tab.id === "skills" && skills.length
                 ? ` ${skills.length}`
                 : ""}</span
             >
@@ -4722,7 +4699,7 @@
                   >
                   <textarea
                     id="skill-content"
-                    class="min-h-[90px] w-full resize-y rounded-lg border-2 border-border bg-background px-2.5 py-2 font-mono text-ui-xs leading-relaxed text-foreground outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 placeholder:text-muted-foreground/40"
+                    class="min-h-[90px] w-full resize-y rounded-lg border-2 border-border bg-background px-2.5 py-2 font-mono text-ui-xs leading-relaxed text-foreground outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15 placeholder:text-muted-foreground/40"
                     placeholder="# My Skill&#10;&#10;Guidelines in Markdown..."
                     bind:value={newSkillContent}
                   ></textarea>
@@ -4974,48 +4951,6 @@
   </div>
 {/if}
 
-<!-- ── Image viewer ──────────────────────────────────────────────────────── -->
-{#if imageViewerSrc}
-  <div
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/65"
-    onclick={() => (imageViewerSrc = null)}
-    onkeydown={(e) => e.key === "Escape" && (imageViewerSrc = null)}
-    role="dialog"
-    aria-modal="true"
-    tabindex="-1"
-  >
-    <div
-      class="relative flex flex-col items-center gap-3"
-      onclick={(e) => e.stopPropagation()}
-      onkeydown={(e) => e.stopPropagation()}
-      role="presentation"
-    >
-      <img
-        src={imageViewerSrc}
-        alt="Preview"
-        class="max-h-[80vh] max-w-[90vw] rounded-xl border border-border/40 object-contain elevate-3-rim"
-      />
-      <div class="flex items-center gap-2">
-        <a
-          href={imageViewerSrc}
-          target="_blank"
-          rel="noopener noreferrer"
-          class="inline-flex items-center gap-1.5 rounded-full border border-border/50 bg-background/80 px-3 py-1.5 text-ui-xs text-muted-foreground backdrop-blur-sm transition-colors hover:border-border hover:text-foreground"
-          onclick={(e) => e.stopPropagation()}
-        >
-          <ZoomIn class="size-3" /> Open full size
-        </a>
-        <button
-          class="inline-flex items-center gap-1.5 rounded-full border border-border/50 bg-background/80 px-3 py-1.5 text-ui-xs text-muted-foreground backdrop-blur-sm transition-colors hover:border-border hover:text-foreground"
-          onclick={() => (imageViewerSrc = null)}
-        >
-          <X class="size-3" /> Close
-        </button>
-      </div>
-    </div>
-  </div>
-{/if}
-
 <!-- ── Diagram fullscreen modal ──────────────────────────────────────────── -->
 {#if fullscreenChart}
   <!-- Chart fullscreen overlay -->
@@ -5117,7 +5052,7 @@
         <button
           type="button"
           class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-          onclick={() => void exportDiagramSvg(fullscreenDiagramCode ?? "")}
+          onclick={() => void exportDiagramSvg()}
           title="Export as SVG"
         >
           <ArrowDownToLine class="size-3" />SVG
@@ -5125,7 +5060,7 @@
         <button
           type="button"
           class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-          onclick={() => void exportDiagramPng(fullscreenDiagramCode ?? "")}
+          onclick={() => void exportDiagramPng()}
           title="Export as PNG"
         >
           <ArrowDownToLine class="size-3" />PNG
