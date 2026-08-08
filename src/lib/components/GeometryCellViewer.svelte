@@ -11,8 +11,9 @@
   import { Button } from '$lib/components/ui/button/index.js'
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import {
-    parseGeometry, projectGeometry, sridLabel, lonLatOf, formatLonLat, shortCoord,
+    parseGeometry, projectGeometry, geoShapeOf, sridLabel, lonLatOf, formatLonLat, shortCoord,
   } from '$lib/geometry-cell.js'
+  import GeoMiniMap from './GeoMiniMap.svelte'
   import { cn } from '$lib/utils.js'
 
   let {
@@ -48,6 +49,12 @@
   // doesn't have to.
   const W = 600, H = 260
   const proj = $derived(geom && !geom.empty ? projectGeometry(geom, W, H) : null)
+  /**
+   * The geometry as lon/lat, when it is on Earth. Non-null is what promotes the
+   * preview from an abstract plot to a real map — a projected local CRS has no
+   * place on one, so those keep the plot.
+   */
+  const geoShape = $derived(geom ? geoShapeOf(geom) : null)
   // Vertex dots stop earning their pixels on dense geometries; hover lookup
   // stays useful a while longer.
   const showVertexDots = $derived(!!geom && geom.vertexCount <= 400)
@@ -56,11 +63,16 @@
   /** The one-line human reading of the position: lon/lat when derivable. */
   const position = $derived.by(() => {
     if (!geom || !geom.bbox) return null
+    const label = geom.type === 'Point' ? 'position' : 'center'
+    if (geoShape) {
+      const [minLon, minLat, maxLon, maxLat] = geoShape.extent
+      return { label, text: formatLonLat((minLon + maxLon) / 2, (minLat + maxLat) / 2) }
+    }
     const cx = (geom.bbox.minX + geom.bbox.maxX) / 2
     const cy = (geom.bbox.minY + geom.bbox.maxY) / 2
     const ll = lonLatOf({ x: cx, y: cy }, geom.srid)
     if (!ll) return null
-    return { label: geom.type === 'Point' ? 'position' : 'center', text: formatLonLat(ll.lon, ll.lat) }
+    return { label, text: formatLonLat(ll.lon, ll.lat) }
   })
 
   const stats = $derived.by(() => {
@@ -181,6 +193,8 @@
             <div class="flex h-40 items-center justify-center rounded-md border border-border/40 bg-muted/10">
               <p class="font-mono text-ui-sm text-muted-foreground/60">{geom.type} EMPTY</p>
             </div>
+          {:else if geoShape}
+            <GeoMiniMap shape={geoShape} height={260} />
           {:else if proj}
             <!-- The SVG keeps a fixed aspect box and the hover chip is absolutely
                  positioned inside this wrapper, so hovering never reflows the
@@ -239,7 +253,9 @@
               <Icon name="crosshair" class="size-3.5 shrink-0 text-primary/60" />
               <span class="text-ui-3xs uppercase tracking-wider text-muted-foreground/45">{position.label}</span>
               <span class="ml-1 truncate font-mono text-ui-sm tabular-nums text-foreground/90">{position.text}</span>
-              {#if geom.srid === 3857}
+              {#if geoShape?.assumed}
+                <span class="ml-auto shrink-0 text-ui-3xs text-warning/70">no SRID · read as WGS 84</span>
+              {:else if geom.srid === 3857}
                 <span class="ml-auto shrink-0 text-ui-3xs text-muted-foreground/40">from mercator meters</span>
               {/if}
             </div>

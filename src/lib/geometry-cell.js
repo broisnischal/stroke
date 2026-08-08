@@ -346,6 +346,67 @@ export function projectGeometry(g, width, height, padding = 24) {
   }
 }
 
+// ── Geographic projection ─────────────────────────────────────────────────────
+
+/**
+ * @typedef {Object} GeoShape
+ * @property {[number, number][]} points        Standalone points as [lon, lat].
+ * @property {[number, number][][]} lines       Linestrings.
+ * @property {[number, number][][][]} polygons  Polygons: [rings][vertices].
+ * @property {[number, number, number, number]} extent  [minLon, minLat, maxLon, maxLat].
+ * @property {boolean} assumed  True when the SRID was absent and WGS 84 was inferred.
+ */
+
+/** Degrees that are at least plausibly a lon/lat pair. */
+function inDegreeRange(/** @type {{minX:number,minY:number,maxX:number,maxY:number}} */ b) {
+  return b.minX >= -180 && b.maxX <= 180 && b.minY >= -90 && b.maxY <= 90
+}
+
+/**
+ * The geometry as lon/lat, ready to draw on a world map — or null when the SRID
+ * says it isn't on Earth (a local/engineering CRS, or a projected one we can't
+ * invert without a projection database).
+ *
+ * A missing SRID is treated as WGS 84 *only* when every coordinate falls inside
+ * the degree ranges, and the result says so: unlabelled 4326 is by far the most
+ * common case in the wild, but placing a value on a map is a claim, so a
+ * geometry that could be anything else is left off it.
+ *
+ * @param {ParsedGeometry} g
+ * @returns {GeoShape | null}
+ */
+export function geoShapeOf(g) {
+  if (!g || g.empty || !g.bbox) return null
+  const assumed = g.srid == null || g.srid === 0
+  if (assumed && !inDegreeRange(g.bbox)) return null
+  const srid = assumed ? 4326 : g.srid
+  if (srid !== 4326 && srid !== 3857) return null
+
+  const conv = (/** @type {Vertex} */ v) => {
+    const ll = lonLatOf(v, srid)
+    return /** @type {[number, number]} */ ([ll?.lon ?? 0, ll?.lat ?? 0])
+  }
+  const ring = (/** @type {Vertex[]} */ vs) => vs.map(conv)
+
+  let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity
+  const track = (/** @type {[number, number]} */ p) => {
+    if (p[0] < minLon) minLon = p[0]
+    if (p[0] > maxLon) maxLon = p[0]
+    if (p[1] < minLat) minLat = p[1]
+    if (p[1] > maxLat) maxLat = p[1]
+  }
+
+  const points = g.points.map(([v]) => conv(v))
+  const lines = g.lines.map(ring)
+  const polygons = g.polygons.map((rings) => rings.map(ring))
+  points.forEach(track)
+  for (const l of lines) l.forEach(track)
+  for (const poly of polygons) for (const r of poly) r.forEach(track)
+  if (!Number.isFinite(minLon)) return null
+
+  return { points, lines, polygons, extent: [minLon, minLat, maxLon, maxLat], assumed }
+}
+
 /** @param {ParsedGeometry} g @returns {Vertex[]} */
 export function allVertices(g) {
   const out = []
