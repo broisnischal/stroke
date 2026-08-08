@@ -1,5 +1,6 @@
 <script>
   import { onDestroy } from "svelte";
+  import { fetchOllamaRegistry, formatModelSize } from "$lib/ollama-registry.js";
   import Check from "@lucide/svelte/icons/check";
   import Plus from "@lucide/svelte/icons/plus";
   import Trash2 from "@lucide/svelte/icons/trash-2";
@@ -120,7 +121,11 @@
   /** The server answered and has nothing installed — an empty state, not a
    *  failure. Holds the command that fixes it, or "" when not applicable. */
   let localModelsEmpty = $state("");
-  let emptyCopied = $state(false);
+  let emptyCopied = $state("");
+  /** What ollama.com currently offers. Fetched only when the empty state is on
+   *  screen — the user is configuring Ollama at that moment — never at startup. */
+  let ollamaSuggestions = $state(/** @type {{ local: any[], cloud: any[] }} */ ({ local: [], cloud: [] }));
+  let suggestionsLoading = $state(false);
   /** @type {ReturnType<typeof setTimeout> | null} */
   let emptyCopyTimer = null;
 
@@ -152,6 +157,14 @@
         if (line) omniLog = line.slice(0, 160);
       });
     } catch { /* dev / non-Tauri: the spinner simply has no detail line */ }
+  }
+
+  /** @param {string} text */
+  function copyCommand(text) {
+    void navigator.clipboard.writeText(text);
+    emptyCopied = text;
+    if (emptyCopyTimer) clearTimeout(emptyCopyTimer);
+    emptyCopyTimer = setTimeout(() => (emptyCopied = ""), 1200);
   }
 
   onDestroy(() => {
@@ -202,6 +215,17 @@
     } finally { omniBusy = ''; omniLog = ""; }
   }
 
+  // The suggestion list is only worth a network call once we know the server has
+  // nothing to offer. One fetch per dialog session.
+  $effect(() => {
+    if (!isOllama || !localModelsEmpty || suggestionsLoading) return;
+    if (ollamaSuggestions.local.length || ollamaSuggestions.cloud.length) return;
+    suggestionsLoading = true;
+    void fetchOllamaRegistry()
+      .then((r) => { ollamaSuggestions = r; })
+      .finally(() => { suggestionsLoading = false; });
+  });
+
   // Probe once the user lands on the OmniRoute steps, so the panel opens with
   // the real state instead of an empty shell.
   $effect(() => {
@@ -230,11 +254,11 @@
         // Answered, with nothing to offer. That is not a failure and must not be
         // dressed as one — telling someone to start a server that just replied
         // is worse than saying nothing.
-        localModelsEmpty = isOllama
-          ? "ollama pull llama3.1:8b"
-          : isOmniroute
-            ? "omniroute"
-            : "";
+        // A marker, not a command: the suggestions below come from Ollama's
+        // registry, and a model name written down here would be wrong within
+        // months — llama3.1:8b, which used to live on this line, is no longer
+        // on the registry at all.
+        localModelsEmpty = isOllama ? "ollama" : isOmniroute ? "omniroute" : "server";
       } else if (!ids.includes(formModel)) {
         formModel = ids[0];
       }
@@ -744,18 +768,76 @@
                     Connect a provider in the OmniRoute dashboard, then recheck.
                   </p>
                 {:else}
-                  <div class="flex items-center gap-2 rounded-md border border-border/40 bg-background/60 px-2.5 py-1.5">
-                    <code class="min-w-0 flex-1 truncate font-mono text-ui-2xs text-foreground/90">{localModelsEmpty}</code>
-                    <button
-                      type="button"
-                      class="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground"
-                      aria-label="Copy command"
-                      onclick={() => { void navigator.clipboard.writeText(localModelsEmpty); emptyCopied = true; if (emptyCopyTimer) clearTimeout(emptyCopyTimer); emptyCopyTimer = setTimeout(() => (emptyCopied = false), 1200); }}
-                    >
-                      {#if emptyCopied}<Check class="size-3 text-success" />{:else}<Copy class="size-3" />{/if}
-                    </button>
-                  </div>
-                  <p class="text-ui-3xs text-muted-foreground/50">Run it in a terminal, then Recheck.</p>
+                  <!-- Suggestions come from ollama.com's own registry, not a
+                       literal: the lineup turns over fast enough that a name in
+                       the source is wrong within months. Picking one fills the
+                       Model ID below, so Continue works without retyping it. -->
+                  {#snippet suggestion(/** @type {any} */ m)}
+                    {@const chosen = formModel === m.id}
+                    <div class={cn(
+                      "flex items-center gap-2 rounded-md border px-2.5 py-1.5 transition-colors",
+                      chosen ? "border-primary/50 bg-primary/5" : "border-border/40 bg-background/60",
+                    )}>
+                      <button
+                        type="button"
+                        class="flex min-w-0 flex-1 items-center gap-2 text-left"
+                        onclick={() => { formModel = m.id; testState = "idle"; }}
+                      >
+                        <code class="min-w-0 truncate font-mono text-ui-2xs text-foreground/90">{m.id}</code>
+                        {#if formatModelSize(m.bytes)}
+                          <span class="shrink-0 font-mono text-ui-3xs tabular-nums text-muted-foreground/45">{formatModelSize(m.bytes)}</span>
+                        {/if}
+                      </button>
+                      <button
+                        type="button"
+                        class="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground"
+                        aria-label="Copy {m.pull}"
+                        title={m.pull}
+                        onclick={() => copyCommand(m.pull)}
+                      >
+                        {#if emptyCopied === m.pull}<Check class="size-3 text-success" />{:else}<Copy class="size-3" />{/if}
+                      </button>
+                    </div>
+                  {/snippet}
+
+                  {#if suggestionsLoading}
+                    <div class="flex items-center gap-2 py-1 text-ui-3xs text-muted-foreground/60">
+                      <Loader2 class="size-3 animate-spin" />Loading what Ollama offers…
+                    </div>
+                  {:else if ollamaSuggestions.local.length || ollamaSuggestions.cloud.length}
+                    {#if ollamaSuggestions.local.length}
+                      <p class="text-ui-3xs uppercase tracking-wider text-muted-foreground/40">Runs on this machine</p>
+                      <div class="flex flex-col gap-1">
+                        {#each ollamaSuggestions.local.slice(0, 3) as m (m.id)}{@render suggestion(m)}{/each}
+                      </div>
+                    {/if}
+                    {#if ollamaSuggestions.cloud.length}
+                      <p class="mt-0.5 text-ui-3xs uppercase tracking-wider text-muted-foreground/40">
+                        Ollama Cloud · runs on their hardware
+                      </p>
+                      <div class="flex flex-col gap-1">
+                        {#each ollamaSuggestions.cloud.slice(0, 5) as m (m.id)}{@render suggestion(m)}{/each}
+                      </div>
+                      <p class="text-ui-3xs text-muted-foreground/50">
+                        Cloud models need <code class="font-mono">ollama signin</code> once — no download, and they are far
+                        larger than anything local.
+                      </p>
+                    {/if}
+                  {:else}
+                    <!-- Registry unreachable. Rather than name a model that may
+                         not exist any more, point at the list that is always right. -->
+                    <p class="text-ui-3xs text-muted-foreground/60">
+                      Couldn't reach Ollama's model list. Pick one at
+                      <button
+                        type="button"
+                        class="underline underline-offset-2 hover:text-foreground"
+                        onclick={() => void openExternal("https://ollama.com/library")}
+                      >ollama.com/library</button>, pull it, then Recheck.
+                    </p>
+                  {/if}
+                  {#if ollamaSuggestions.local.length || ollamaSuggestions.cloud.length}
+                    <p class="text-ui-3xs text-muted-foreground/50">Copy a command, run it in a terminal, then Recheck.</p>
+                  {/if}
                 {/if}
               </div>
             {:else if localModelsError}
@@ -841,7 +923,11 @@
             <Input
               id="form-model"
               class="h-8 font-mono text-ui-xs"
-              placeholder={isOmniroute ? "auto" : isLocalEndpoint ? "llama3.1:8b" : "provider/model-name"}
+              placeholder={isOmniroute
+                ? "auto"
+                : isLocalEndpoint
+                  ? (ollamaSuggestions.local[0]?.id ?? ollamaSuggestions.cloud[0]?.id ?? "model:tag")
+                  : "provider/model-name"}
               bind:value={formModel}
             />
           </div>
