@@ -8,7 +8,6 @@
   import { increaseZoom, decreaseZoom, resetZoom, appPreviewDml, appTableStyle, TABLE_STYLES, normalizeTableStyle, appVimMode, appTableAlign } from '$lib/stores/settings.js'
   import { setVimSubMode } from '$lib/vim/vim.js'
   import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
-  import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
   import ArrowUpDown from "@lucide/svelte/icons/arrow-up-down";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
@@ -18,13 +17,7 @@
 import FilterX from "@lucide/svelte/icons/filter-x";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import KeyRound from "@lucide/svelte/icons/key-round";
-  import Link2 from "@lucide/svelte/icons/link-2";
-  import Zap from "@lucide/svelte/icons/zap";
-  import Fingerprint from "@lucide/svelte/icons/fingerprint";
-  import Circle from "@lucide/svelte/icons/circle";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
-  import ChevronDown from "@lucide/svelte/icons/chevron-down";
-  import ChevronsDownUp from "@lucide/svelte/icons/chevrons-down-up";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
   import ChevronsLeft from "@lucide/svelte/icons/chevrons-left";
   import ChevronsRight from "@lucide/svelte/icons/chevrons-right";
@@ -81,9 +74,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import {
     defaultInsertDraft,
     shouldUseDateTimePicker,
-    nowDateTimeLocal,
-    nowDateOnly,
-    nowTimeOnly,
   } from "$lib/insert-field.js";
   import { cellLinkHref, cellUrlType } from "$lib/cell-display.js";
   import {
@@ -133,8 +123,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     drawIcon,
     roundRect,
     drawCheckbox,
-    drawBadge,
-    drawTriangle,
     computeColumnGeometry,
     colDrawnX,
     colAtX,
@@ -548,14 +536,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   /**
    * Rectangular cell-range selection (spreadsheet-style). The fixed corner is
    * `selAnchor`; the moving corner is `focusedRow`/`focusedCol` (visible-column
-   * space). null = plain single-cell focus. Extended via Shift+Arrow or drag.
+   * space). null = plain single-cell focus.
+   *
+   * NOTE: nothing currently sets this non-null - the shift+click / drag-select
+   * sources were removed while the feature is parked. The draw/copy plumbing
+   * (computeCellRange, copyCellRange, range tint in drawCell) is kept so the
+   * feature can be re-enabled by adding a setter.
    * @type {{ row: number, col: number } | null}
    */
   let selAnchor = $state(null);
-  /** True while a click-drag range selection is in progress. */
-  let _rangeDragging = false;
-  /** Pointer-down cell + position, to distinguish a click from a drag-select. */
-  let _rangeDownCell = /** @type {{ row: number, col: number, x: number, y: number } | null} */ (null);
 
   /**
    * The active rectangular range in visible-column space, or null for a single
@@ -651,9 +640,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let _resizeHoverCol = $state(/** @type {string | null} */ (null))
   /** Swallow the click that fires right after a resize-drag pointerup. */
   let _suppressNextClick = false
-  /** Synchronous wheel-zoom guard - updated in pointer handlers so the wheel
-   *  listener never reads stale $state through a closed-over $effect closure. */
-  const _zoomGuard = { block: false, resizing: false }
   /** Right-click target kind, so one ContextMenu can show header vs body items. */
   let contextIsHeader = $state(false)
   let contextHeaderCol = $state("")
@@ -754,7 +740,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         window.open(url, "_blank", "noopener,noreferrer");
       }
     } catch (err) {
-      const { toast } = await import("$lib/components/ui/sonner/toast.svelte.js");
       toast.error(`Could not open URL: ${String(err)}`);
     }
   }
@@ -769,9 +754,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   const menuColName = $derived(columns[contextColIdx]?.name ?? "cell");
   const menuForeignKey = $derived(
     menuColName ? findForeignKeyForColumn(foreignKeys, menuColName) : null,
-  );
-  const menuForeignKeyLabel = $derived(
-    menuForeignKey ? foreignKeyTargetLabel(menuForeignKey) : "",
   );
   const menuEditable = $derived(canEditColumn(contextColIdx));
   const menuColPinned = $derived(pinnedColumns.has(menuColName));
@@ -1382,7 +1364,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     return false;
   }
 
-  /** @param {'down' | 'right' | 'left' | null} afterAction */
   /** @param {'down'|'right'|'left'|null} afterAction @param {boolean} [autoEdit] */
   async function commitEditWithAction(afterAction, autoEdit = false) {
     if (!editingCell || saving) return;
@@ -2041,7 +2022,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     });
   }
 
-  /** Open the dedicated array editor for a cell (from the context menu). */
   /** Open the vector viewer for a cell. Returns false when it isn't a vector. */
   function openVectorViewer(rowIdx, colIdx) {
     const col = columns[colIdx];
@@ -2426,9 +2406,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (expandedRowHeights.size > 0) expandedRowHeights = new Map();
   }
 
-  const ROW_EXPAND_COL_WIDTH = 40;
-  /** Fits 16px checkbox with equal inset; no extra horizontal padding in cells */
-  const ROW_SELECT_COL_WIDTH = 40;
   // ── Column reorder (display-only) ──────────────────────────────────────────
   // Rows are position-indexed arrays and cells resolve by column *name* (see
   // _nameToActualIdx), so reordering the visible-column list moves NOTHING in the
@@ -2919,11 +2896,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     gutterWidth + columns.reduce((acc, c) => acc + widthForColumn(c.name, c.dataType ?? c.data_type ?? ''), 0)
   )
 
-  // +1 for the trailing auto-width spacer column (keeps real columns stable).
-  const dataColSpan = $derived(visibleColumns.length + 1);
-  const totalColSpan = $derived(
-    (showRowExpand ? 1 : 0) + (showSelection ? 1 : 0) + visibleColumns.length + 1,
-  )
   const navigableColumns = $derived(visibleColumns)
 
   // ── Accessibility: focused-cell announcement ────────────────────────────────
@@ -2944,19 +2916,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const editing = editingCell && editingCell.rowIdx === focusedRow && editingCell.colIdx === ai
     return `Row ${focusedRow + 1} of ${rows.length}, ${col.name}: ${val}${editing ? ', editing' : ''}`
   })
-  /** Map of pinned column name → sticky left offset in px. Gutters are not
-   *  sticky, so pinned columns stick from the left edge (0). */
-  const pinnedOffsets = $derived.by(() => {
-    const map = new Map()
-    let left = 0
-    for (const col of visibleColumns) {
-      if (!pinnedColumns.has(col.name)) continue
-      map.set(col.name, left)
-      left += widthForColumn(col.name, col.dataType ?? col.data_type ?? '')
-    }
-    return map
-  })
-
   // ── Canvas geometry (single source of truth for draw + hit-test) ───────────
   const gutterWidth = $derived(
     (showRowExpand ? GUTTER_EXPAND_W : 0) + (showSelection ? GUTTER_SELECT_W : 0),
@@ -3221,16 +3180,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     return map
   })
 
-  /** Build FK tooltip text for a column. */
-  function fkTooltip(colName) {
-    const fk = findForeignKeyForColumn(foreignKeys, colName)
-    if (!fk) return 'Foreign key'
-    const label = foreignKeyTargetLabel(fk)
-    return label ? `Foreign key → ${label}` : 'Foreign key'
-  }
-
-  /** @param {string} name @param {string} dataType */
-  /** Returns the display width of a column in canvas px (logical × canvasZoom). */
+  /** Returns the display width of a column in canvas px (logical × canvasZoom).
+   *  @param {string} name @param {string} dataType */
   function widthForColumn(name, dataType) {
     const logical = columnWidths[name] ?? defaultColumnWidth(dataType)
     return Math.round(logical * canvasZoom)
@@ -3262,8 +3213,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   /** @param {string} colName */
   function startColumnResize(colName) {
     resizingColName = colName;
-    _zoomGuard.resizing = true
-    _zoomGuard.block = true
     if (colName.startsWith('__vcol__')) {
       const id = colName.slice(8)
       resizeStartWidth = _vexprWidths[id] ?? VEXPR_COL_DEFAULT_W
@@ -3323,11 +3272,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       else saveColumnWidths(columnWidthsKey, columnWidths);
     }
     resizingColName = null;
-    _zoomGuard.resizing = false
-    _zoomGuard.block = false
   }
 
-  /** Cycle sort: none → asc → desc → none */
   /** Current sort keys in priority order: primary (rowSort) then secondary. */
   function currentSortList() {
     return (rowSort ? [rowSort] : []).concat(rowSortMore ?? [])
@@ -3499,7 +3445,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     return () => ro.disconnect()
   })
 
-  /** @param {Event & { currentTarget: HTMLElement }} e */
   // Continuous rAF loop that drives canvas redraws during scroll.
   // Reading scrollTop/scrollLeft inside rAF gives the compositor-synchronized
   // position for the frame being painted, eliminating the 1-frame lag that
@@ -3561,6 +3506,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     _scrollLoopId = requestAnimationFrame(loop)
   }
 
+  /** @param {Event & { currentTarget: HTMLElement }} e */
   function onContainerScroll(e) {
     const el = e.currentTarget
     invalidateCanvasRect()
@@ -3669,7 +3615,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // The focused-cell highlight is painted directly on the canvas by draw(),
   // which depends on focusedRow/focusedCol and so repaints on focus changes.
 
-  /** @param {KeyboardEvent} e */
   // ── Experimental Vim mode (grid normal-mode navigation) ─────────────────────
   // Active only while $appVimMode is on and no cell is being edited. Reflects the
   // grid's mode into the shared status-bar indicator.
@@ -3740,6 +3685,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     setVimSubMode(editingCell ? 'insert' : 'normal')
   })
 
+  /** @param {KeyboardEvent} e */
   function handleTableKeydown(e) {
     // Ctrl/Cmd + / - / 0: zoom the whole app (canvas scales in lockstep).
     if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
@@ -3822,7 +3768,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
     // Range selection is disabled - a plain arrow / Tab just collapses any stray
     // range back to the single focused cell. (Shift+Arrow no longer extends a
-    // rectangular range; see the commented range sources below.)
+    // rectangular range; nothing sets selAnchor - see its declaration.)
     if (
       e.key === "ArrowDown" || e.key === "ArrowUp" ||
       e.key === "ArrowRight" || e.key === "ArrowLeft" || e.key === "Tab"
@@ -5105,18 +5051,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     clearActiveResizeListeners()
   })
 
-  // End a drag-select on pointer-up anywhere (the release often lands outside the
-  // canvas). Registered on window so it fires regardless of where the pointer is.
-  $effect(() => {
-    const up = () => onCanvasPointerUp()
-    window.addEventListener('pointerup', up)
-    window.addEventListener('pointercancel', up)
-    return () => {
-      window.removeEventListener('pointerup', up)
-      window.removeEventListener('pointercancel', up)
-    }
-  })
-
   // Shift+wheel → horizontal scroll. Non-passive so we can call preventDefault,
   // but bails out immediately on non-Shift events so the compositor waits <0.05ms.
   // Wheel handling is split so PLAIN vertical scrolling stays on the compositor
@@ -5399,25 +5333,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         }
         if (editingCell) cancelEdit()
 
-        // Shift+Click range selection is DISABLED (no current use). The `false &&`
-        // keeps the block intact for easy re-enable; shift+click now falls through
-        // to plain single-cell focus below.
-        if (false && e.shiftKey) {
-          const vi2 = actualToVisColIdx(actualIdx)
-          if (vi2 >= 0) {
-            if (selAnchor === null) {
-              selAnchor = (focusedRow !== null && focusedCol !== null)
-                ? { row: focusedRow, col: focusedCol }
-                : { row: idx, col: vi2 }
-            }
-            focusedRow = idx
-            focusedCol = vi2
-            scheduleDraw()
-          }
-          tableContainer?.focus({ preventScroll: true })
-          return
-        }
-
         clearCellRange() // plain click collapses any rectangular range
         focusedRow = idx
         const vi = actualToVisColIdx(actualIdx)
@@ -5545,7 +5460,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   /** @param {string} colName */
   function onResizeHandleEnter(colName) {
     _resizeHoverCol = colName
-    _zoomGuard.block = true
     void import('@tauri-apps/api/webview')
       .then(({ getCurrentWebview }) => getCurrentWebview().setZoom(1))
       .catch(() => {})
@@ -5554,70 +5468,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   function onResizeHandleLeave() {
     if (!resizingColName) {
       _resizeHoverCol = null
-      _zoomGuard.block = false
     }
-  }
-
-  function onCanvasPointerDown(/** @type {PointerEvent} */ e) {
-    if (e.button !== 0) return
-    const { x, y } = canvasXY(e)
-    // Header resize is handled by the DOM overlay - canvas only handles body.
-    if (y < HEADER_H) return
-    // Record the cell for a potential drag-select; the range only begins once the
-    // pointer moves past a small threshold (so plain clicks keep their behavior).
-    const t = hitTest(x, y)
-    if (t.kind === 'cell') {
-      const vi = actualToVisColIdx(/** @type {number} */ (t.actualIdx))
-      if (vi >= 0) _rangeDownCell = { row: /** @type {number} */ (t.idx), col: vi, x, y }
-    } else {
-      _rangeDownCell = null
-    }
-  }
-
-  function onCanvasPointerUp() {
-    if (_rangeDragging) {
-      _rangeDragging = false
-      _suppressNextClick = true // the drag already set focus/range; don't run the click action
-      // Focus the grid so ⌘C (copy range as TSV) and Shift+Arrow are captured.
-      tableContainer?.focus({ preventScroll: true })
-    }
-    _rangeDownCell = null
   }
 
   function onCanvasPointerMove(/** @type {PointerEvent} */ e) {
     const { x, y } = canvasXY(e)
     if (resizingColName) return
-
-    // Drag-select of a rectangular cell range is DISABLED (no current use). The
-    // `false &&` keeps the block for easy re-enable; drag now does nothing here
-    // and falls through to the hover logic below.
-    if (false && _rangeDownCell && (e.buttons & 1)) {
-      if (!_rangeDragging) {
-        if (Math.abs(x - _rangeDownCell.x) > 4 || Math.abs(y - _rangeDownCell.y) > 4) {
-          _rangeDragging = true
-          selAnchor = { row: _rangeDownCell.row, col: _rangeDownCell.col }
-          focusedRow = _rangeDownCell.row
-          focusedCol = _rangeDownCell.col
-          if (selectedCols.size) { selectedCols = new Set(); _lastHeaderClickedCol = null }
-        }
-      }
-      if (_rangeDragging) {
-        const t = hitTest(x, y)
-        if (t.kind === 'cell') {
-          const vi = actualToVisColIdx(/** @type {number} */ (t.actualIdx))
-          if (vi >= 0) {
-            focusedRow = /** @type {number} */ (t.idx)
-            focusedCol = vi
-            scrollRowIntoView(/** @type {number} */ (t.idx))
-          }
-        }
-        scheduleDraw()
-        return
-      }
-    }
     if (y < HEADER_H) {
       _resizeHoverCol = null
-      _zoomGuard.block = false
       const cx = x + _scrollLeft
       const hit = cx >= gutterWidth ? colAtX(x, geom, _scrollLeft, 0) : null
       hoveredRow = null
@@ -5625,7 +5483,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       return
     }
     _resizeHoverCol = null
-    _zoomGuard.block = false
     // Check virtual expr columns (between real cols and vrel cols)
     if (y >= HEADER_H && _vexprLayout.length > 0) {
       const cx = x + _scrollLeft
@@ -5633,7 +5490,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         if (cx >= vc.x && cx < vc.x + vc.w) {
           const bodyY = y + _scrollTop - HEADER_H - insertRowOffset
           const r = rowAtContentY(rowTops, rows.length, ROW_HEIGHT, bodyY)
-          if (r?.inRowBody) { hoveredRow = r.idx; hoveredColName = `__vcol__${vc.id}` }
+          if (r?.inRowBody) { hoveredRow = r.idx; hoveredColName = vc.hoverKey }
           return
         }
       }
@@ -5645,7 +5502,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (vi >= 0) {
         const bodyY = y + _scrollTop - HEADER_H - insertRowOffset
         const r = rowAtContentY(rowTops, rows.length, ROW_HEIGHT, bodyY)
-        if (r?.inRowBody) { hoveredRow = r.idx; hoveredColName = `__vrel__${vi}` }
+        if (r?.inRowBody) { hoveredRow = r.idx; hoveredColName = _vrelHoverKeys[vi] }
         return
       }
     }
@@ -5665,12 +5522,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
   }
 
-  /** Right-click: record the target so the single ContextMenu shows the right items. */
   function onCanvasPointerLeave() {
     hoveredRow = null
     hoveredColName = null
     _resizeHoverCol = null
-    _zoomGuard.block = false
   }
 
   // Re-sync canvas backing store when devicePixelRatio changes (stray webview
@@ -5693,6 +5548,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
   })
 
+  /** Right-click: record the target so the single ContextMenu shows the right items. */
   function onCanvasContextMenu(/** @type {MouseEvent} */ e, /** @type {((e: MouseEvent) => void) | undefined} */ bitsOpen) {
     const { x, y } = canvasXY(e)
     // Check virtual expr column header right-click (not caught by hitTest)
@@ -5701,7 +5557,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       for (const vc of _vexprLayout) {
         if (cx >= vc.x && cx < vc.x + vc.w) {
           contextIsHeader = true
-          contextHeaderCol = `__vcol__${vc.id}`
+          contextHeaderCol = vc.hoverKey
           bitsOpen?.(e)
           return
         }
@@ -5718,7 +5574,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       contextIsHeader = false
       contextRowIdx = /** @type {number} */ (t.idx)
       contextColIdx = t.kind === 'cell' ? /** @type {number} */ (t.actualIdx) : 0
-      pendingContextMenu = true
       bitsOpen?.(e)
       return
     }
@@ -5773,7 +5628,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (open) {
         armMenuSelectGuard();
       } else {
-        pendingContextMenu = false;
         suppressMenuSelect = false;
       }
     }}
@@ -5836,7 +5690,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               onclick={guarded(onCanvasClick)}
               ondblclick={guarded(onCanvasDblClick)}
               onauxclick={guarded(onCanvasAuxClick)}
-              onpointerdown={guarded(onCanvasPointerDown)}
               onpointermove={guarded(onCanvasPointerMove)}
               onpointerleave={guarded(onCanvasPointerLeave)}
             ></canvas>
