@@ -2,6 +2,16 @@
   "name": "stroke",
   "private": true,
   "version": "1.20.0",
+  "description": "Fast, minimal desktop database client for PostgreSQL, MySQL, SQLite, D1, and more",
+  "license": "SEE LICENSE IN LICENSE",
+  "homepage": "https://stroke.click",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/broisnischal/stroke"
+  },
+  "engines": {
+    "node": ">=20.19"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
