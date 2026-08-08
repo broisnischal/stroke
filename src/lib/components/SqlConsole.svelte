@@ -54,7 +54,6 @@
     saveLayout,
   } from "$lib/stores/layout.js";
   import { untrack, onDestroy } from "svelte";
-  import { buildSystemPrompt } from "$lib/ai.js";
   import { formatCompactCount } from "$lib/table-list.js";
 
   /** @typedef {import('$lib/monaco-sql-complete.js').SqlSchemaHints} SqlSchemaHints */
@@ -72,7 +71,6 @@
     /** @type {any[]} */
     multiResults = [],
     schemaHints = /** @type {SqlSchemaHints} */ ({}),
-    schemaContext = /** @type {Parameters<typeof buildSystemPrompt>[0] | null} */ (null),
     /** Run SQL - receives a single-statement override, or undefined to run the whole buffer. */
     onrun = (/** @type {string | undefined} */ statementSql) => {},
     onmodk = undefined,
@@ -443,8 +441,6 @@
   let ormCopied = $state(/** @type {'drizzle' | 'prisma' | null} */ (null))
   /** @type {ReturnType<typeof setTimeout> | null} */
   let ormCopiedTimer = null
-  /** @type {AbortController | null} */
-  let fixAbort = null
 
   /** @param {'drizzle' | 'prisma'} kind */
   function copyAsOrm(kind) {
@@ -468,10 +464,9 @@
   }
 
   onDestroy(() => {
-    // Abort any in-flight AI fix request so it doesn't stream into a dead component
-    fixAbort?.abort()
-    // Clear ORM copy feedback timer so it doesn't fire after unmount
+    // Clear copy-feedback timers so they don't fire state writes after unmount
     if (ormCopiedTimer) clearTimeout(ormCopiedTimer)
+    if (errorCopyTimer) clearTimeout(errorCopyTimer)
   })
 </script>
 

@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import * as monaco from 'monaco-editor'
   import { configureMonacoWorkers, editorFontFamily } from '$lib/monaco-env.js'
-  import { defineStrokeMonacoThemes, applyMonacoTheme, monacoThemeId, readEditorFontOptions } from '$lib/monaco-themes.js'
+  import { defineStrokeMonacoThemes, monacoThemeId, readEditorFontOptions } from '$lib/monaco-themes.js'
   import { normalizeThemeId } from '$lib/themes/registry.js'
 
   /**
@@ -104,20 +104,13 @@
       stickyScroll: { enabled: false },
     })
 
-    const themeObs = new MutationObserver(() => {
-      applyMonacoTheme(currentTheme())
-    })
-    themeObs.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['class', 'data-theme'],
-    })
-
+    // Theme changes are handled by the single shared <html> observer installed
+    // in configureMonacoWorkers() - no per-instance observer needed.
     const ro = new ResizeObserver(() => editor?.layout())
     ro.observe(container)
 
     return () => {
       ro.disconnect()
-      themeObs.disconnect()
       editor?.dispose()
       editor = null
       model?.dispose()
