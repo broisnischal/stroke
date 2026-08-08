@@ -2812,6 +2812,12 @@
       closeDiagramFullscreen();
       return;
     }
+    // The Stop button advertises "Stop (Esc)" - honor it after the fullscreen closers.
+    if (e.key === "Escape" && loading) {
+      e.preventDefault();
+      stop();
+      return;
+    }
     const mod = e.ctrlKey || e.metaKey;
     if (!mod || !e.shiftKey) return;
     const key = e.key.toLowerCase();
@@ -2836,6 +2842,7 @@
     apiHistory = [];
     rawApiHistory = [];
     fetchedSchemas = {}; // drop the previous DB's cached schema columns (avoids cross-connection growth)
+    sampledRows = {}; // keys are `schema.table` - a colliding key would leak the old DB's rows into new prompts
     error = "";
     openTabIds = loadOpenTabs(id); // reset + reload the open-tab set for the new connection
     loadConvList();
