@@ -166,11 +166,6 @@ export function normalizeTableStyle(/** @type {unknown} */ id) {
 // Numeric/text knobs surfaced under Settings → Database. `maxQueryHistory` is
 // consumed by the query-history store; the connector values (packet/timeouts/
 // timezone) are persisted as MySQL connection defaults.
-/** Data-view modes for a table tab (kept in sync with TableToolbar's DATA_VIEW_MODES). */
-// Must stay in step with DATA_VIEW_MODES in TableToolbar.svelte — that list is
-// what a tab can actually switch to, this one is what you may pick as the
-// default. 'erd' was added to the toolbar without being added here, so it was
-// the one view you could open but never default to.
 /**
  * Grid cell alignment.
  * 'numbers' is the convention every spreadsheet and DB client uses: digits line
@@ -185,6 +180,10 @@ export const TABLE_ALIGN_OPTIONS = /** @type {const} */ ([
 export const TABLE_ALIGN_IDS = TABLE_ALIGN_OPTIONS.map((o) => o.id)
 export const DEFAULT_TABLE_ALIGN = 'left'
 
+// Must stay in step with DATA_VIEW_MODES in TableToolbar.svelte — that list is
+// what a tab can actually switch to, this one is what you may pick as the
+// default. 'erd' was added to the toolbar without being added here, so it was
+// the one view you could open but never default to.
 export const DATA_VIEW_IDS = /** @type {const} */ (['table', 'json', 'record', 'text', 'chart', 'erd'])
 export const DEFAULT_DATA_VIEW = 'table'
 
