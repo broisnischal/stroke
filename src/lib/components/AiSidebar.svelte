@@ -383,15 +383,21 @@
   onDestroy(() => {
     void persistCurrent()
     if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null }
+    if (_streamTimer !== null) { clearTimeout(_streamTimer); _streamTimer = null }
+    // Decline pending confirms and abort the in-flight stream/tool loop -
+    // otherwise they keep running against a destroyed component.
+    for (const i of items.filter((i) => i.kind === 'confirm')) i.resolve(false)
+    abortController?.abort()
+    abortController = null
   })
 
   function scrollBottomSoon() {
     if (userScrolledUp || rafId !== null) return
-    rafId = requestAnimationFrame(() => { rafId = null; if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight })
+    rafId = requestAnimationFrame(() => { rafId = null; pinToBottom() })
   }
   async function scrollBottom() {
     await tick(); userScrolledUp = false
-    if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight
+    pinToBottom()
   }
 
   function toggleCollapse(key) { const n = new Set(collapsed); n.has(key) ? n.delete(key) : n.add(key); collapsed = n }
@@ -403,7 +409,12 @@
     activeConvId = null; items = []; apiHistory = []; rawApiHistory = []; error = ''; aiStatusHint = ''; inputText = ''; historyOpen = false
     await tick(); inputRef?.focus()
   }
-  function abortCurrentRequest() { abortController?.abort(); abortController = null; loading = false }
+  function abortCurrentRequest() {
+    // Decline pending confirms first so their awaiting tool loops resolve and
+    // can observe the abort (snapshot: resolve() splices the item out of `items`).
+    for (const i of items.filter((i) => i.kind === 'confirm')) i.resolve(false)
+    abortController?.abort(); abortController = null; loading = false
+  }
   function stop() { flushStreamingContent(); abortController?.abort() }
   async function copyText(text) { await navigator.clipboard.writeText(text).catch(() => {}) }
 
@@ -548,10 +559,12 @@
 
   async function runAiTurn(depth) {
     if (depth > 40) throw new Error('Too many AI iterations')
-    if (abortController?.signal.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' })
+    // A null controller means the turn was aborted or finalized - the chain can
+    // resume here after a declined confirm, so treat it the same as an abort.
+    if (!abortController || abortController.signal.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' })
     if (depth > 0) {
       await new Promise(r => setTimeout(r, 300))
-      if (abortController?.signal.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' })
+      if (!abortController || abortController.signal.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' })
     }
     let fullContent = ''; /** @type {import('$lib/ai.js').ToolCall[]} */ let toolCalls = []; let itemId = /** @type {string | null} */ (null)
     for await (const chunk of chatCompletionStream($aiSettings, [{ role: 'system', content: turnSystemPrompt }, ...apiHistory], AI_TOOLS, abortController?.signal, ({ attempt, waitMs }) => { aiStatusHint = `Rate limited, retrying in ${Math.ceil(waitMs/1000)}s…` })) {
@@ -585,6 +598,12 @@
   }
 
   async function runToolCall(call) {
+    // The tool loop can resume here after an abort resolves a pending confirm -
+    // answer the call as cancelled instead of executing it for a dead turn.
+    if (!abortController || abortController.signal.aborted) {
+      apiHistory.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ cancelled: true }) })
+      return
+    }
     const callKey = `${call.function.name}:${call.function.arguments}`
     if (executedCalls.has(callKey)) { apiHistory.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ error: 'Duplicate call.' }) }); return }
     const prior = failureTracker.get(callKey); if (prior && prior.count >= 2) { apiHistory.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ error: `Failed ${prior.count} times. Do not retry.`, last_error: prior.lastError }) }); return }

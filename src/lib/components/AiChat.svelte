@@ -873,6 +873,12 @@
       clearTimeout(_streamTimer);
       _streamTimer = null;
     }
+    // Answer pending destructive-confirm prompts as declined; otherwise their
+    // promises never resolve and the awaiting tool loop is retained forever.
+    // Snapshot first: resolve() splices the item out of `items`.
+    for (const i of items.filter((i) => i.kind === "confirm")) {
+      i.resolve(false);
+    }
     if (abortController) {
       abortController.abort();
       abortController = null;
@@ -1825,13 +1831,15 @@
   async function runAiTurn(depth) {
     if (depth > 40)
       throw new Error("Too many AI iterations, aborting runaway execution");
-    if (abortController?.signal.aborted)
+    // A null controller means the turn was aborted or finalized - the chain can
+    // resume here after a declined confirm, so treat it the same as an abort.
+    if (!abortController || abortController.signal.aborted)
       throw Object.assign(new Error("Aborted"), { name: "AbortError" });
 
     // Space out follow-up turns after tool calls to avoid burst rate limits
     if (depth > 0) {
       await new Promise((r) => setTimeout(r, 300));
-      if (abortController?.signal.aborted)
+      if (!abortController || abortController.signal.aborted)
         throw Object.assign(new Error("Aborted"), { name: "AbortError" });
     }
 
@@ -1937,6 +1945,16 @@
 
   /** @param {import('$lib/ai.js').ToolCall} call */
   async function runToolCall(call) {
+    // The tool loop can resume here after an abort resolves a pending confirm -
+    // answer the call as cancelled instead of executing it for a dead turn.
+    if (!abortController || abortController.signal.aborted) {
+      apiHistory.push({
+        role: "tool",
+        tool_call_id: call.id,
+        content: JSON.stringify({ cancelled: true }),
+      });
+      return;
+    }
     const callKey = `${call.function.name}:${call.function.arguments}`;
     if (executedCalls.has(callKey)) {
       apiHistory.push({
