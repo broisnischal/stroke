@@ -1771,7 +1771,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Shift+Tab moves left. Enter at the last cell submits.
     if (e.key === 'Tab' || e.key === 'Enter') {
       e.preventDefault()
-      const editableCols = columns.filter((c) => !isAutoColumn(c, primaryKey))
+      // Every column takes a value now, including generated ones, so Tab must
+      // be able to reach them — initial focus still skips them (see beginInsertRow),
+      // because overriding a sequence is the exception rather than the flow.
+      const editableCols = columns
       if (!editableCols.length) return
       const curIdx = editableCols.findIndex(c => c.name === newRowFocusCol)
       if (e.shiftKey) {
@@ -5772,6 +5775,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                     {@const omit = insertOmitBehaviour(col, primaryKey)}
                     {@const isAuto = omit === 'auto'}
                     {@const blankLabel = omit === 'default' ? 'default' : omit === 'null' ? 'NULL' : 'Required'}
+                    <!-- Only a Required blank stops the insert, so only it is
+                         worth noticing before you submit. The rest describe a
+                         value the database will supply and recede accordingly —
+                         nothing is wrong yet, so nothing is coloured as wrong. -->
+                    {@const blankClass = omit === 'required'
+                      ? 'placeholder:text-muted-foreground/60'
+                      : 'placeholder:italic placeholder:text-muted-foreground/35'}
                     {@const enumValues = getColumnEnumValues(col)}
                     {@const isBoolean = isBooleanType(dt)}
                     {@const isDateTime = shouldUseDateTimePicker(dt, col.name)}
@@ -5780,19 +5790,27 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                     {@const colWidth = widthForColumn(col.name, dt)}
                     <div class="flex shrink-0 items-center overflow-hidden border-r border-border/20 px-2" style="width:{colWidth}px">
                       {#if isAuto}
-                        <!-- Naming what the database will do is the whole point:
-                             "Required" on an identity column asks for a value
-                             that would be wrong to send. Integer generated
-                             columns are counters; anything else is an
-                             expression, and the two read differently. -->
-                        <span class="inline-flex select-none items-center gap-1 text-muted-foreground/45">
-                          <KeyRound class="size-3 shrink-0 opacity-60" />
-                          <span class="truncate font-mono text-ui-2xs">
-                            {dt.toLowerCase().includes('int') || dt.toLowerCase().includes('serial')
-                              ? 'auto-increment'
-                              : 'generated'}
-                          </span>
-                        </span>
+                        <!-- Writable, with the generated value as the placeholder.
+                             Leaving it blank is the normal path and the label says
+                             so; typing an explicit id is legitimate (importing a
+                             row that must keep its key, backfilling a gap) and
+                             refusing it means dropping to raw SQL for a one-cell
+                             exception. Empty still omits the column entirely, so
+                             the sequence is untouched unless you overrule it. -->
+                        <KeyRound class="mr-1 size-3 shrink-0 text-muted-foreground/40" />
+                        <input
+                          data-new-row-input={col.name}
+                          type="text"
+                          disabled={insertSaving}
+                          placeholder={dt.toLowerCase().includes('int') || dt.toLowerCase().includes('serial')
+                            ? 'auto-increment'
+                            : 'generated'}
+                          title="The database fills this in. Type a value only to override it."
+                          class="w-full min-w-0 bg-transparent font-mono text-ui-sm text-foreground outline-none placeholder:italic placeholder:text-muted-foreground/35 disabled:opacity-50"
+                          value={newRowDrafts[col.name] ?? ''}
+                          oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
+                          onfocus={() => (newRowFocusCol = col.name)}
+                        />
                       {:else if enumValues}
                         <InsertValuePicker
                           colName={col.name}
@@ -5800,6 +5818,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                           value={newRowDrafts[col.name] ?? ''}
                           emptyLabel={blankLabel}
                           placeholder={blankLabel}
+                          placeholderClass={blankClass}
                           disabled={insertSaving}
                           onchange={(v) => setNewRowDraft(col.name, v)}
                           onfocus={() => (newRowFocusCol = col.name)}
@@ -5811,6 +5830,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                           value={newRowDrafts[col.name] ?? ''}
                           emptyLabel={blankLabel}
                           placeholder={blankLabel}
+                          placeholderClass={blankClass}
                           disabled={insertSaving}
                           onchange={(v) => setNewRowDraft(col.name, v)}
                           onfocus={() => (newRowFocusCol = col.name)}
@@ -5849,7 +5869,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                           type="text"
                           disabled={insertSaving}
                           placeholder={blankLabel}
-                          class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none placeholder:text-muted-foreground/40 disabled:opacity-50"
+                          class={cn(
+                            "w-full bg-transparent font-mono text-ui-sm text-foreground outline-none disabled:opacity-50",
+                            blankClass,
+                          )}
                           value={newRowDrafts[col.name] ?? ''}
                           oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
                           onfocus={() => (newRowFocusCol = col.name)}

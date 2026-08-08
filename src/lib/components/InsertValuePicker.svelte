@@ -23,6 +23,8 @@
     emptyLabel = 'NULL',
     /** Placeholder for the input when empty. */
     placeholder = '',
+    /** Extra placeholder styling — required blanks read louder than optional ones. */
+    placeholderClass = 'placeholder:text-muted-foreground/40',
     disabled = false,
     /** Grid wiring: identifies the field for focus restoration. */
     colName = '',
@@ -123,7 +125,10 @@
       value={query || value}
       autocomplete="off"
       spellcheck="false"
-      class="w-full min-w-0 bg-transparent pr-5 font-mono text-ui-sm text-foreground outline-none placeholder:text-muted-foreground/40 disabled:opacity-50"
+      class={cn(
+        'w-full min-w-0 bg-transparent pr-5 font-mono text-ui-sm text-foreground outline-none disabled:opacity-50',
+        placeholderClass,
+      )}
       oninput={onInput}
       onkeydown={onKeydown}
       onfocus={onfocus}
