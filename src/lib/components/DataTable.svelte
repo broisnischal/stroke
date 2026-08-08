@@ -112,6 +112,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import ArrayCellEditor from "./ArrayCellEditor.svelte";
   import VectorCellViewer from "./VectorCellViewer.svelte";
   import { vectorSummary } from "$lib/vector-cell.js";
+  import GeometryCellViewer from "./GeometryCellViewer.svelte";
+  import { isGeometryType, geometrySummary } from "$lib/geometry-cell.js";
   import FkSubviewPanel from "./FkSubviewPanel.svelte";
   // JsonCellLightbox (Monaco-based) is imported lazily at its render site below.
   import CellQuickLook from "./CellQuickLook.svelte";
@@ -505,13 +507,20 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let vectorViewerNullable = $state(false);
   let vectorViewerValue = $state("");
 
+  let geomViewerOpen = $state(false);
+  let geomViewerRow = $state(0);
+  let geomViewerCol = $state(0);
+  let geomViewerColName = $state("");
+  let geomViewerType = $state("geometry");
+  let geomViewerNullable = $state(false);
+  let geomViewerValue = $state("");
+
   let arrayEditorOpen = $state(false);
   let arrayEditorRow = $state(0);
   let arrayEditorCol = $state(0);
   let arrayEditorColName = $state("");
   let arrayEditorType = $state("");
   let arrayEditorValue = $state(/** @type {any[]} */ ([]));
-  let pendingContextMenu = $state(false);
   /** Block item activation from the right-click pointerup that opened the menu */
   let suppressMenuSelect = $state(false);
   /** Row indices with inline JSON detail open. Seeded from initialExpandedRows
@@ -1223,9 +1232,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
 
     focusedRow = rowIdx;
-    // A vector opens its own viewer rather than an inline text box: 1,500
-    // characters of `0.1,0.1,…` in a one-line input is not an edit surface.
+    // Vectors and geometries open their own viewers rather than an inline text
+    // box: 1,500 characters of `0.1,0.1,…` (or a 500-vertex EWKT polygon) in a
+    // one-line input is not an edit surface.
     if (openVectorViewer(rowIdx, colIdx)) return;
+    if (openGeometryViewer(rowIdx, colIdx)) return;
     const startValue = effectiveCellValue(rowIdx, colIdx);
     const oversize = oversizeCellInfo(startValue);
     if (oversize) {
@@ -1258,8 +1269,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   /** @param {number} rowIdx @param {number} colIdx */
   function openQuickLook(rowIdx, colIdx) {
-    // Vectors have a viewer that says something; the generic preview doesn't.
+    // Vectors and geometries have viewers that say something; the generic
+    // preview doesn't.
     if (openVectorViewer(rowIdx, colIdx)) return;
+    if (openGeometryViewer(rowIdx, colIdx)) return;
     const col = columns[colIdx];
     if (!col) return;
     const dataType = col.dataType ?? col.data_type ?? "";
@@ -2052,6 +2065,35 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     futureEdits = [];
   }
 
+  /** Open the geometry viewer for a cell. Returns false when it isn't geometry. */
+  function openGeometryViewer(rowIdx, colIdx) {
+    const col = columns[colIdx];
+    if (!col) return false;
+    const type = String(col.dataType ?? col.data_type ?? _colCache[colIdx]?.colType ?? "");
+    if (!isGeometryType(type)) return false;
+    const v = effectiveCellValue(rowIdx, colIdx);
+    if (typeof v !== "string") return false;
+    geomViewerRow = rowIdx;
+    geomViewerCol = colIdx;
+    geomViewerColName = col.name ?? "geometry";
+    geomViewerType = type;
+    geomViewerNullable = col.isNullable ?? col.is_nullable ?? true;
+    geomViewerValue = v;
+    geomViewerOpen = true;
+    return true;
+  }
+
+  /** @param {string | null} next */
+  function commitGeometryViewer(next) {
+    const rowIdx = geomViewerRow, colIdx = geomViewerCol;
+    if (!canEditColumn(colIdx)) return;
+    const prevValue = effectiveCellValue(rowIdx, colIdx);
+    stageEdit(rowIdx, colIdx, next);
+    pastEdits = [...pastEdits.slice(-49), { rowIdx, colIdx, oldValue: prevValue, newValue: next }];
+    futureEdits = [];
+  }
+
+  /** Open the dedicated array editor for a cell (from the context menu). */
   function openArrayEditor(rowIdx, colIdx) {
     const col = columns[colIdx];
     if (!col) return;
@@ -4453,6 +4495,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // SQL array columns render pgAdmin-style ({a,b}); jsonb arrays stay JSON.
     const isArrayCol = Array.isArray(value) && isSqlArrayType(cached?.colType)
     const isVectorCol = typeof value === "string" && isVectorType(cached?.colType)
+    // Geometry gets the same treatment as vectors: the type + SRID (+ point
+    // coords) read better than a row of EWKT. geometrySummary only inspects
+    // the header, so it is cheap enough for the draw path.
+    const isGeomCol = typeof value === "string" && isGeometryType(cached?.colType)
     const text = colTf
       ? colTransformText(idx, actualIdx, value, colTf)
       : dir
@@ -4461,7 +4507,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           ? arrayDisplay(value)
           : isVectorCol
             ? vectorDisplay(value, vectorHeads(w))
-            : staged || !rows[idx]
+            : isGeomCol
+              ? geometrySummary(value)
+              : staged || !rows[idx]
             ? displayCell(value)
             : cellDisplayText(idx, actualIdx, value)
     // NULL glyph when the Empty & NULL Markers plugin is on (formatters skip null).
@@ -6744,6 +6792,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   readOnly={readonly}
   value={vectorViewerValue}
   onsave={commitVectorViewer}
+/>
+
+<GeometryCellViewer
+  bind:open={geomViewerOpen}
+  column={geomViewerColName}
+  dataType={geomViewerType}
+  nullable={geomViewerNullable}
+  readOnly={readonly}
+  value={geomViewerValue}
+  onsave={commitGeometryViewer}
 />
 
 <ArrayCellEditor
