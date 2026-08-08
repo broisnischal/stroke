@@ -12,7 +12,7 @@
   import * as Dialog from '$lib/components/ui/dialog/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
-  import { parseVector, vectorBars, short } from '$lib/vector-cell.js'
+  import { parseVector, vectorBars, vectorHistogram, short } from '$lib/vector-cell.js'
   import { cn } from '$lib/utils.js'
 
   let {
@@ -42,6 +42,7 @@
     draft = String(value ?? '')
     tab = 'chart'
     hovered = null
+    histHovered = null
   })
 
   // 96 bars is about one per 3px of dialog width — dense enough to read as a
@@ -52,6 +53,13 @@
   const scale = $derived(Math.max(...bars.map((b) => Math.abs(b)), 1e-9))
   const perBar = $derived(info && bars.length ? info.values.length / bars.length : 1)
 
+  // The strip is indexed by dimension; the histogram is indexed by value. A
+  // healthy embedding reads roughly gaussian around zero here — spikes and
+  // heavy tails are the "something is wrong with this vector" signal.
+  const HIST_BINS = 48
+  const hist = $derived(info ? vectorHistogram(info.values, HIST_BINS) : { counts: [], from: 0, to: 0, max: 0 })
+  let histHovered = $state(/** @type {number | null} */ (null))
+
   const stats = $derived(
     info
       ? [
@@ -60,6 +68,7 @@
           { label: 'min', value: short(info.min), hint: `at ${info.minIndex}` },
           { label: 'max', value: short(info.max), hint: `at ${info.maxIndex}` },
           { label: 'mean', value: short(info.mean) },
+          { label: 'std', value: short(info.std) },
           ...(info.zeros ? [{ label: 'zeros', value: String(info.zeros) }] : []),
         ]
       : [],
@@ -159,6 +168,40 @@
               </div>
             {/if}
           </div>
+
+          <!-- Value histogram: distribution across the value range, not the
+               index. Gaussian-around-zero is the healthy shape for a dense
+               embedding; anything else is worth noticing. -->
+          {#if hist.counts.length}
+            <div class="relative mt-2 h-14 w-full overflow-hidden rounded-md border border-border/40 bg-muted/10">
+              <div class="flex h-full items-end gap-px px-1 pb-3.5">
+                {#each hist.counts as c, i (i)}
+                  <!-- svelte-ignore a11y_no_static_element_interactions -->
+                  <div
+                    class="flex h-full flex-1 cursor-default items-end"
+                    onmouseenter={() => (histHovered = i)}
+                    onmouseleave={() => (histHovered = null)}
+                  >
+                    <div
+                      class={cn('w-full rounded-t-[1px]', histHovered === i ? 'bg-foreground/80' : 'bg-primary/50')}
+                      style="height: {c ? Math.max(4, (c / hist.max) * 100) : 0}%"
+                    ></div>
+                  </div>
+                {/each}
+              </div>
+              <div class="pointer-events-none absolute inset-x-1.5 bottom-0.5 flex justify-between font-mono text-ui-3xs text-muted-foreground/40">
+                <span>{short(hist.from)}</span>
+                <span>value distribution</span>
+                <span>{short(hist.to)}</span>
+              </div>
+              {#if histHovered !== null}
+                {@const binW = (hist.to - hist.from) / hist.counts.length}
+                <div class="pointer-events-none absolute right-1.5 top-1 rounded bg-background/90 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground">
+                  {short(hist.from + binW * histHovered)}…{short(hist.from + binW * (histHovered + 1))} · {hist.counts[histHovered]}×
+                </div>
+              {/if}
+            </div>
+          {/if}
 
           <!-- The figures that tell you whether this vector is what you expect. -->
           <div class="mt-3 grid grid-cols-[repeat(auto-fit,minmax(96px,1fr))] gap-2">

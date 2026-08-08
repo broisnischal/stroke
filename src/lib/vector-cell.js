@@ -87,11 +87,15 @@ function stats(values) {
   }
   const n = values.length
   const norm = Math.sqrt(sumSq)
+  const mean = n ? sum / n : 0
   return {
     dim: n,
     min: n ? min : 0,
     max: n ? max : 0,
-    mean: n ? sum / n : 0,
+    mean,
+    // Population std from the running sums; clamp guards float error when the
+    // values are all identical.
+    std: n ? Math.sqrt(Math.max(0, sumSq / n - mean * mean)) : 0,
     norm,
     zeros,
     minIndex,
@@ -100,6 +104,31 @@ function stats(values) {
     // the values were stored raw, which changes how distance behaves.
     unit: n > 0 && Math.abs(norm - 1) < 1e-3,
   }
+}
+
+/**
+ * Histogram of the values themselves (the strip above is indexed by dimension;
+ * this answers "how are the values distributed?" — roughly gaussian around 0
+ * for a healthy embedding, spikes or heavy tails when something is off).
+ * @param {number[]} values @param {number} bins
+ * @returns {{ counts: number[], from: number, to: number, max: number }}
+ */
+export function vectorHistogram(values, bins) {
+  if (!values.length || bins < 1) return { counts: [], from: 0, to: 0, max: 0 }
+  let from = Infinity, to = -Infinity
+  for (const v of values) {
+    if (v < from) from = v
+    if (v > to) to = v
+  }
+  // All-equal vectors get one centered bucket instead of a zero-width range.
+  if (from === to) { from -= 0.5; to += 0.5 }
+  const counts = new Array(bins).fill(0)
+  const span = to - from
+  for (const v of values) {
+    const b = Math.min(bins - 1, Math.floor(((v - from) / span) * bins))
+    counts[b]++
+  }
+  return { counts, from, to, max: Math.max(...counts) }
 }
 
 /**
