@@ -57,16 +57,33 @@
     el.setPointerCapture(e.pointerId)
     const startX = e.clientX
     const startW = colWidths[idx]
-    /** @param {PointerEvent} ev */
-    function onMove(ev) {
+    let raf = 0
+    let lastX = startX
+    function applyWidth() {
       // Right-only: only allow increasing the column width
-      const delta = Math.max(0, ev.clientX - startX)
+      const delta = Math.max(0, lastX - startX)
       colWidths = colWidths.map((w, i) => i === idx ? Math.max(40, startW + delta) : w)
     }
     /** @param {PointerEvent} ev */
-    function onUp(ev) { el.releasePointerCapture(ev.pointerId); el.removeEventListener('pointermove', onMove); el.removeEventListener('pointerup', onUp) }
+    function onMove(ev) {
+      // rAF-coalesced: rebuilding colWidths relayouts the whole table, so
+      // apply at most one width per frame instead of per raw pointermove.
+      lastX = ev.clientX
+      if (raf) return
+      raf = requestAnimationFrame(() => { raf = 0; applyWidth() })
+    }
+    /** @param {PointerEvent} ev */
+    function onUp(ev) {
+      if (raf) { cancelAnimationFrame(raf); raf = 0; applyWidth() }
+      // Capture is already released on pointercancel - releasing again throws.
+      try { el.releasePointerCapture(ev.pointerId) } catch {}
+      el.removeEventListener('pointermove', onMove)
+      el.removeEventListener('pointerup', onUp)
+      el.removeEventListener('pointercancel', onUp)
+    }
     el.addEventListener('pointermove', onMove)
     el.addEventListener('pointerup', onUp)
+    el.addEventListener('pointercancel', onUp)
   }
 
   // ── Pending DDL state (staged changes, applied on explicit Apply) ─────────
