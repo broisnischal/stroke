@@ -15,29 +15,6 @@
 import { formatCompactCount } from '$lib/table-list.js'
 
 /**
- * Trim API message history to stay within token budget.
- * Keeps tool messages paired with their assistant calls.
- * Never drops the most recent user/assistant exchange.
- * @param {ApiMessage[]} history
- * @param {number} [maxChars]
- * @returns {ApiMessage[]}
- */
-export function trimApiHistory(history, maxChars = 80_000) {
-  const totalChars = (msgs) => msgs.reduce((sum, m) => sum + (typeof m.content === 'string' ? m.content.length : JSON.stringify(m.content ?? '').length), 0)
-  if (totalChars(history) <= maxChars) return history
-
-  // Find groups: each group is a user message + all responses up to next user message
-  let i = 0
-  while (i < history.length && totalChars(history.slice(i)) > maxChars) {
-    // Skip forward past the oldest group (user msg + its replies)
-    i++
-    while (i < history.length && history[i]?.role !== 'user') i++
-  }
-  // Never drop everything; keep at minimum the last 4 messages
-  return history.slice(Math.min(i, Math.max(0, history.length - 4)))
-}
-
-/**
  * Reduce a driver error to the sentence a human needs.
  *
  * Engines wrap the useful part in transport noise: D1 returns the whole HTTP
@@ -499,6 +476,9 @@ function isTauriApp() {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 }
 
+/** Shared encoder for stream chunks — one instance instead of one per chunk. */
+const STREAM_ENCODER = new TextEncoder()
+
 /**
  * Proxy a fetch through the Tauri Rust backend to bypass CORS for local models.
  * For streaming, response chunks arrive as Tauri events instead of a response body stream.
@@ -538,7 +518,7 @@ async function tauriFetch(url, init, signal) {
 
     const unlistens = await Promise.all([
       listen(`ai-stream-${requestId}`, (/** @type {{ payload: string }} */ e) => {
-        if (!cleanedUp) controller.enqueue(new TextEncoder().encode(e.payload))
+        if (!cleanedUp) controller.enqueue(STREAM_ENCODER.encode(e.payload))
       }),
       listen(`ai-stream-done-${requestId}`, () => {
         cleanup()
@@ -554,9 +534,21 @@ async function tauriFetch(url, init, signal) {
       if (cleanedUp) return
       cleanedUp = true
       unlistens.forEach((fn) => fn())
+      // One send() turn reuses the same signal across many streams; drop the
+      // listener so they don't accumulate for the whole turn.
+      signal?.removeEventListener('abort', onAbort)
     }
 
-    signal?.addEventListener('abort', () => { if (!cleanedUp) { cleanup(); controller.close() } }, { once: true })
+    function onAbort() {
+      if (cleanedUp) return
+      // Tell Rust to stop downloading — closing the JS stream alone leaves the
+      // backend fetching the full completion.
+      invoke('ai_fetch_cancel', { requestId }).catch(() => {})
+      cleanup()
+      controller.close()
+    }
+
+    signal?.addEventListener('abort', onAbort, { once: true })
 
     invoke('ai_fetch', { url, apiKey, body, stream: true, requestId, ...(hasExtra ? { extraHeaders } : {}) })
       .then(cleanup)
