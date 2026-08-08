@@ -126,6 +126,7 @@
    *  screen — the user is configuring Ollama at that moment — never at startup. */
   let ollamaSuggestions = $state(/** @type {{ local: any[], cloud: any[] }} */ ({ local: [], cloud: [] }));
   let suggestionsLoading = $state(false);
+  let cloudOpen = $state(false);
   /** @type {ReturnType<typeof setTimeout> | null} */
   let emptyCopyTimer = null;
 
@@ -441,6 +442,36 @@
   <span class="flex size-4 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-[0_1px_2px_rgba(0,0,0,0.25)]">
     <Check class="size-2.5" strokeWidth={3.5} />
   </span>
+{/snippet}
+
+<!-- One row of the model suggestion list: pick it, or copy the command
+     that makes it available. Shared by the empty state and the cloud section. -->
+{#snippet suggestionRow(/** @type {any} */ m)}
+  {@const chosen = formModel === m.id}
+  <div class={cn(
+    "flex items-center gap-2 rounded-md border px-2.5 py-1.5 transition-colors",
+    chosen ? "border-primary/50 bg-primary/5" : "border-border/40 bg-background/60",
+  )}>
+    <button
+      type="button"
+      class="flex min-w-0 flex-1 items-center gap-2 text-left"
+      onclick={() => { formModel = m.id; testState = "idle"; }}
+    >
+      <code class="min-w-0 truncate font-mono text-ui-2xs text-foreground/90">{m.id}</code>
+      {#if formatModelSize(m.bytes)}
+        <span class="shrink-0 font-mono text-ui-3xs tabular-nums text-muted-foreground/45">{formatModelSize(m.bytes)}</span>
+      {/if}
+    </button>
+    <button
+      type="button"
+      class="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground"
+      aria-label="Copy {m.pull}"
+      title={m.pull}
+      onclick={() => copyCommand(m.pull)}
+    >
+      {#if emptyCopied === m.pull}<Check class="size-3 text-success" />{:else}<Copy class="size-3" />{/if}
+    </button>
+  </div>
 {/snippet}
 
 <Dialog.Root bind:open onOpenChange={handleOpenChange}>
@@ -772,33 +803,6 @@
                        literal: the lineup turns over fast enough that a name in
                        the source is wrong within months. Picking one fills the
                        Model ID below, so Continue works without retyping it. -->
-                  {#snippet suggestion(/** @type {any} */ m)}
-                    {@const chosen = formModel === m.id}
-                    <div class={cn(
-                      "flex items-center gap-2 rounded-md border px-2.5 py-1.5 transition-colors",
-                      chosen ? "border-primary/50 bg-primary/5" : "border-border/40 bg-background/60",
-                    )}>
-                      <button
-                        type="button"
-                        class="flex min-w-0 flex-1 items-center gap-2 text-left"
-                        onclick={() => { formModel = m.id; testState = "idle"; }}
-                      >
-                        <code class="min-w-0 truncate font-mono text-ui-2xs text-foreground/90">{m.id}</code>
-                        {#if formatModelSize(m.bytes)}
-                          <span class="shrink-0 font-mono text-ui-3xs tabular-nums text-muted-foreground/45">{formatModelSize(m.bytes)}</span>
-                        {/if}
-                      </button>
-                      <button
-                        type="button"
-                        class="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground"
-                        aria-label="Copy {m.pull}"
-                        title={m.pull}
-                        onclick={() => copyCommand(m.pull)}
-                      >
-                        {#if emptyCopied === m.pull}<Check class="size-3 text-success" />{:else}<Copy class="size-3" />{/if}
-                      </button>
-                    </div>
-                  {/snippet}
 
                   {#if suggestionsLoading}
                     <div class="flex items-center gap-2 py-1 text-ui-3xs text-muted-foreground/60">
@@ -808,7 +812,7 @@
                     {#if ollamaSuggestions.local.length}
                       <p class="text-ui-3xs uppercase tracking-wider text-muted-foreground/40">Runs on this machine</p>
                       <div class="flex flex-col gap-1">
-                        {#each ollamaSuggestions.local.slice(0, 3) as m (m.id)}{@render suggestion(m)}{/each}
+                        {#each ollamaSuggestions.local.slice(0, 3) as m (m.id)}{@render suggestionRow(m)}{/each}
                       </div>
                     {/if}
                     {#if ollamaSuggestions.cloud.length}
@@ -816,7 +820,7 @@
                         Ollama Cloud · runs on their hardware
                       </p>
                       <div class="flex flex-col gap-1">
-                        {#each ollamaSuggestions.cloud.slice(0, 5) as m (m.id)}{@render suggestion(m)}{/each}
+                        {#each ollamaSuggestions.cloud.slice(0, 5) as m (m.id)}{@render suggestionRow(m)}{/each}
                       </div>
                       <p class="text-ui-3xs text-muted-foreground/50">
                         Cloud models need <code class="font-mono">ollama signin</code> once — no download, and they are far
@@ -840,7 +844,32 @@
                   {/if}
                 {/if}
               </div>
-            {:else if localModelsError}
+            {/if}
+            <!-- Cloud models never appear in /v1/models — Ollama only lists what
+                 is on disk — so without this there is no path to one from the
+                 picker at all, however many local models exist. -->
+            {#if isOllama && !localModelsEmpty && ollamaSuggestions.cloud.length > 0}
+              <div class="mt-2 flex flex-col gap-1.5">
+                <button
+                  type="button"
+                  class="flex items-center gap-1.5 self-start text-ui-3xs uppercase tracking-wider text-muted-foreground/45 transition-colors hover:text-foreground"
+                  onclick={() => (cloudOpen = !cloudOpen)}
+                >
+                  <ChevronRight class={cn("size-3 transition-transform duration-150", cloudOpen && "rotate-90")} />
+                  Ollama Cloud · no download
+                </button>
+                {#if cloudOpen}
+                  <div class="flex flex-col gap-1">
+                    {#each ollamaSuggestions.cloud.slice(0, 6) as m (m.id)}{@render suggestionRow(m)}{/each}
+                  </div>
+                  <p class="text-ui-3xs text-muted-foreground/50">
+                    Runs on Ollama's hardware. Needs <code class="font-mono">ollama signin</code> once; some models need a paid plan.
+                  </p>
+                {/if}
+              </div>
+            {/if}
+
+            {#if localModelsError}
               <!-- One line, then the fix. A wall of red with the raw fetch error
                    pasted in reads as a crash; what the user needs is which server
                    is not answering and the button that starts it. -->

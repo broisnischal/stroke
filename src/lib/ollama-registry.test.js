@@ -26,6 +26,14 @@ describe('classifyOllamaModels', () => {
     expect(kimi?.pull).toBe('ollama run kimi-k2.6:cloud')
   })
 
+  it('puts the suffix on the tag when there is one', () => {
+    // `gemma4:31b:cloud` happens to work on 0.24.0, but the documented form —
+    // and the one older releases accept — is a suffixed tag.
+    const { cloud } = classifyOllamaModels([{ name: 'gemma4:31b', size: 62.5e9 }])
+    expect(cloud[0].id).toBe('gemma4:31b-cloud')
+    expect(cloud[0].pull).toBe('ollama run gemma4:31b-cloud')
+  })
+
   it('treats an unreported size as cloud, not as small', () => {
     const { local, cloud } = classifyOllamaModels(REGISTRY)
     expect(local.some((m) => m.id.startsWith('glm-5.2'))).toBe(false)
@@ -35,10 +43,18 @@ describe('classifyOllamaModels', () => {
   it('orders by size, so the cheapest option is first', () => {
     const { cloud } = classifyOllamaModels(REGISTRY.filter((m) => m.size > 20e9))
     expect(cloud.map((m) => m.id)).toEqual([
-      'gemma4:31b:cloud',
+      'gemma4:31b-cloud',
       'kimi-k2.6:cloud',
       'deepseek-v4-pro:cloud',
     ])
+  })
+
+  it('sorts an unreported size last, not as zero', () => {
+    const { cloud } = classifyOllamaModels([
+      { name: 'unknown-size', size: 0 },
+      { name: 'gemma4:31b', size: 62.5e9 },
+    ])
+    expect(cloud.map((m) => m.id)).toEqual(['gemma4:31b-cloud', 'unknown-size:cloud'])
   })
 
   it('survives a malformed registry', () => {

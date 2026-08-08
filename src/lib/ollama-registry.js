@@ -12,6 +12,20 @@
  * it — the user is configuring Ollama at that moment — never on app start.
  */
 
+/**
+ * How Ollama addresses a hosted model from a local instance.
+ *
+ * The suffix goes on the *tag*, not after it: `gpt-oss:120b` becomes
+ * `gpt-oss:120b-cloud`, while an untagged `kimi-k2.6` becomes `kimi-k2.6:cloud`.
+ * Verified against a live Ollama 0.24.0 — both forms return completions, and an
+ * untagged name with no suffix at all is rejected outright ("model
+ * 'gemma4:31b' not found"), which is why the suffix cannot be skipped.
+ * @param {string} id
+ */
+function cloudTag(id) {
+  return id.includes(':') ? `${id}-cloud` : `${id}:cloud`
+}
+
 /** Above this, a model is not going on someone's laptop. */
 const LOCAL_MAX_BYTES = 20e9
 
@@ -41,12 +55,19 @@ export function classifyOllamaModels(models) {
     // that it is small — treat unknown as cloud rather than tell someone to pull
     // something that might be a terabyte.
     const isLocal = bytes > 0 && bytes <= LOCAL_MAX_BYTES
-    if (isLocal) local.push({ id, bytes, cloud: false, pull: `ollama pull ${id}` })
-    else cloud.push({ id: `${id}:cloud`, bytes, cloud: true, pull: `ollama run ${id}:cloud` })
+    if (isLocal) {
+      local.push({ id, bytes, cloud: false, pull: `ollama pull ${id}` })
+    } else {
+      const tagged = cloudTag(id)
+      cloud.push({ id: tagged, bytes, cloud: true, pull: `ollama run ${tagged}` })
+    }
   }
 
+  // Smallest first, because size is the whole decision — but an unreported size
+  // sorts last rather than as zero, or the three models nobody can size lead a
+  // list meant to start with the cheapest thing that works.
   const bySize = (/** @type {OllamaSuggestion} */ a, /** @type {OllamaSuggestion} */ b) =>
-    a.bytes - b.bytes
+    (a.bytes || Infinity) - (b.bytes || Infinity)
   return { local: local.sort(bySize), cloud: cloud.sort(bySize) }
 }
 
