@@ -117,11 +117,19 @@ fn trial_paths(data_dir: &Path) -> Vec<PathBuf> {
 // ── Device fingerprint ────────────────────────────────────────────────────────
 
 /// Returns a stable SHA-256 hex fingerprint for this machine.
+///
+/// Cached for the process lifetime: computing it shells out to `ioreg`/`reg`
+/// on macOS/Windows, and callers hit this on every license and quota check.
 pub fn device_id() -> String {
-    let raw = machine_id_raw();
-    let mut h = Sha256::new();
-    h.update(raw.as_bytes());
-    hex::encode(h.finalize())
+    static DEVICE_ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    DEVICE_ID
+        .get_or_init(|| {
+            let raw = machine_id_raw();
+            let mut h = Sha256::new();
+            h.update(raw.as_bytes());
+            hex::encode(h.finalize())
+        })
+        .clone()
 }
 
 fn machine_id_raw() -> String {
@@ -415,16 +423,19 @@ fn hostname() -> String {
 
 // ── Remote API calls ──────────────────────────────────────────────────────────
 
-fn http_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        // 4s, not 10s. This call is fire-and-forget - it only catches server-side
-        // revocation, and a network failure already falls through to the offline
-        // grace path. On a flaky uplink the old timeout meant a request hanging
-        // around for ten seconds (visible as a 10s run_license_check in the
-        // waterfall) to reach a conclusion it was going to reach anyway.
-        .timeout(std::time::Duration::from_secs(4))
-        .build()
-        .unwrap_or_default()
+fn http_client() -> &'static reqwest::Client {
+    static LICENSE_CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    LICENSE_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            // 4s, not 10s. This call is fire-and-forget - it only catches server-side
+            // revocation, and a network failure already falls through to the offline
+            // grace path. On a flaky uplink the old timeout meant a request hanging
+            // around for ten seconds (visible as a 10s run_license_check in the
+            // waterfall) to reach a conclusion it was going to reach anyway.
+            .timeout(std::time::Duration::from_secs(4))
+            .build()
+            .unwrap_or_default()
+    })
 }
 
 /// POST /api/license/activate — registers this device with the server.

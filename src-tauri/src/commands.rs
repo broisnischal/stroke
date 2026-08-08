@@ -982,7 +982,9 @@ pub async fn cancel_query(state: State<'_, DbState>) -> Result<(), String> {
 
 // ── License ───────────────────────────────────────────────────────────────────
 
-#[tauri::command]
+// `async` so the first call (device-fingerprint subprocess + trial-file I/O)
+// runs off the main thread instead of blocking the UI during startup.
+#[tauri::command(async)]
 pub fn check_license_status(app: tauri::AppHandle) -> crate::license::LicenseStatus {
     match app.path().app_data_dir() {
         Ok(dir) => crate::license::check_status(&dir),
