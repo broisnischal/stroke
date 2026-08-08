@@ -5748,6 +5748,17 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     scrollToTop = () => {}
     scrollToBottom = () => {}
     beginInsertRow = () => {}
+    // Reset every other parent-bound closure too - StudioShell keeps these in
+    // its own $state, so a stale one would retain this destroyed instance's
+    // whole scope (display caches, expandedRows, FK sub-view rows).
+    scrollToLeft = () => {}
+    scrollToRight = () => {}
+    focusColumn = () => {}
+    focusCell = () => {}
+    getScroll = () => ({ left: 0, top: 0 })
+    getExpanded = () => []
+    applyScroll = () => {}
+    stageDeleteSelected = () => {}
   })
 </script>
 
