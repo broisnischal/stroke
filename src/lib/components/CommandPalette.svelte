@@ -11,7 +11,7 @@
 
   let {
     open = $bindable(false),
-    /** @type {'root' | 'docker' | 'connections' | 'tables' | 'pages'} */
+    /** @type {'root' | 'docker' | 'connections' | 'tables' | 'pages' | 'ask'} */
     page = $bindable('root'),
     connected = false,
     schemas = [],
@@ -344,8 +344,15 @@
 
   $effect(() => {
     if (!open) {
+      // Abort any in-flight quick-ask: closing mid-stream must stop the tool
+      // loop (which runs real queries), and the transcript is never shown
+      // again - reopening always starts back at root.
+      stopAsk()
       page = 'root'
       paletteSearch = ''  // clear search so it never persists between opens
+      askTurns = []
+      askApi = []
+      askError = ''
     }
   })
 

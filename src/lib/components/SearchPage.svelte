@@ -45,6 +45,15 @@
     }
   })
 
+  // Cancel an in-flight search when the page deactivates, so workers stop
+  // issuing per-table queries in the background.
+  $effect(() => {
+    if (!active && searching) {
+      searchGeneration++
+      searching = false
+    }
+  })
+
   function validateRegex(/** @type {string} */ pattern) {
     try {
       new RegExp(pattern)
@@ -83,7 +92,7 @@
 
     let index = 0
     async function worker() {
-      while (index < searchable.length) {
+      while (index < searchable.length && searchGeneration === gen) {
         const t = searchable[index++]
         if (!t) continue
         try {
