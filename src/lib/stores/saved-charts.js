@@ -87,6 +87,10 @@ if (typeof window !== 'undefined') {
  * @param {string} connectionId
  */
 export function switchChartsConnection(connectionId) {
+  // Write out any pending edit of the OLD connection first - the set()s below
+  // re-arm the debouncers with the new connection's data, dropping it otherwise.
+  persistCharts.flush()
+  persistGroups.flush()
   _connId = connectionId
   savedCharts.set(loadCharts(_connId))
   chartGroups.set(loadGroups(_connId))
