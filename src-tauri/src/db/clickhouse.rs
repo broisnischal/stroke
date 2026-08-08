@@ -116,7 +116,14 @@ pub async fn query(config: &ClickhouseConfig, sql: &str) -> Result<SqlResult, St
         .collect();
 
     let row_count = Some(parsed.data.len() as i64);
-    Ok(SqlResult { columns, rows: parsed.data, row_count, message: None, query_ms: elapsed, sql: sql.to_string() })
+    // Cap oversized cells — a multi-MB String/JSON value shipped whole freezes
+    // the webview (see sql_util::CELL_VALUE_CAP); small scalars pass through.
+    let rows: Vec<Vec<Value>> = parsed
+        .data
+        .into_iter()
+        .map(|row| row.into_iter().map(|v| super::sql_util::cap_json_value("text", v)).collect())
+        .collect();
+    Ok(SqlResult { columns, rows, row_count, message: None, query_ms: elapsed, sql: sql.to_string() })
 }
 
 /// Trim ClickHouse `Nullable(...)`/`LowCardinality(...)` wrappers for display.

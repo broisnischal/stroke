@@ -78,7 +78,15 @@ fn result_to_sql(result: D1QueryResult, elapsed: u64) -> Result<SqlResult, Strin
         .map(|row| {
             columns
                 .iter()
-                .map(|c| row.get(&c.name).cloned().unwrap_or(Value::Null))
+                // Cap oversized cells — a multi-MB TEXT/JSON value shipped whole
+                // freezes the webview (see sql_util::CELL_VALUE_CAP); small
+                // scalars pass through untouched.
+                .map(|c| {
+                    super::sql_util::cap_json_value(
+                        "text",
+                        row.get(&c.name).cloned().unwrap_or(Value::Null),
+                    )
+                })
                 .collect()
         })
         .collect();

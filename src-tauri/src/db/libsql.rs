@@ -91,7 +91,12 @@ impl TypedValue {
                 .and_then(|s| s.parse::<f64>().ok())
                 .map(|f| Value::from(f))
                 .unwrap_or(Value::Null),
-            "text" => self.value.clone().unwrap_or(Value::Null),
+            // Capped — a multi-MB text cell shipped whole freezes the webview
+            // (see sql_util::CELL_VALUE_CAP).
+            "text" => super::sql_util::cap_json_value(
+                "text",
+                self.value.clone().unwrap_or(Value::Null),
+            ),
             "blob" => self.base64.as_ref()
                 .map(|b| Value::String(format!("<blob:{}>", b.len())))
                 .unwrap_or(Value::Null),
