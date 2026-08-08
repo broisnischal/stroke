@@ -1,3 +1,5 @@
+import { saveSqlDraft } from '$lib/stores/sql-draft.js'
+
 const STORAGE_KEY = 'stroke:connections'
 const LAST_ID_KEY  = 'stroke:last-connection-id'
 
@@ -113,7 +115,59 @@ export function upsertConnection(conn) {
 export function removeConnection(id) {
   const list = loadSavedConnections().filter((c) => c.id !== id)
   saveConnections(list)
+  purgeConnectionData(id)
   return list
+}
+
+/**
+ * Remove every per-connection artifact a deleted connection leaves behind.
+ * Without this, its recents/charts/dashboards/diagrams and per-table prefs
+ * accumulate in localStorage forever (eventually exhausting the quota, which
+ * makes unrelated persists start failing), and IndexedDB keeps its query
+ * history, saved queries, conversations and schema snapshots.
+ * @param {string} id
+ */
+export function purgeConnectionData(id) {
+  if (!id) return
+  try {
+    for (const key of [
+      `stroke:recent-tabs:${id}`,
+      `stroke:saved-charts:${id}`,
+      `stroke:chart-groups:${id}`,
+      `stroke:dashboards:${id}`,
+      `stroke:active-dashboard:${id}`,
+      `stroke:saved-diagrams:${id}`,
+      `stroke:last-schema:${id}`,
+    ]) localStorage.removeItem(key)
+    // Per-table keys carry a `:<schema>.<table>` suffix - match by prefix,
+    // iterating backwards because removeItem reindexes localStorage.
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i)
+      if (key?.startsWith(`stroke:hidden-cols:${id}:`) || key?.startsWith(`stroke:table-views:${id}:`)) {
+        localStorage.removeItem(key)
+      }
+    }
+  } catch { /* storage failure must not block deleting the connection */ }
+  try { saveSqlDraft(id, '') } catch { /* ditto */ }
+  // IndexedDB rows are cleared fire-and-forget (dynamic imports keep this module
+  // free of a static cycle via schema-snapshots -> api -> connections). A
+  // failure only leaves orphaned rows behind, never an error in the delete flow.
+  void (async () => {
+    try {
+      const { clearQueryHistory, listSavedQueries, deleteSavedQuery } = await import('$lib/stores/query-history.js')
+      await clearQueryHistory(id)
+      await Promise.all((await listSavedQueries(id)).map((q) => deleteSavedQuery(q.id)))
+    } catch { /* ignore */ }
+    try {
+      const { clearConversations } = await import('$lib/stores/conversations.js')
+      await clearConversations(id)
+      await clearConversations(id, 'sidebar')
+    } catch { /* ignore */ }
+    try {
+      const { listSnapshots, deleteSnapshot } = await import('$lib/stores/schema-snapshots.js')
+      await Promise.all((await listSnapshots(id)).map((s) => deleteSnapshot(s.id)))
+    } catch { /* ignore */ }
+  })()
 }
 
 /**
