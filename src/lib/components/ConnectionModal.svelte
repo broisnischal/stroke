@@ -955,141 +955,147 @@
    */
   function handleSave() {
     if (!editingId && saved.length >= maxConnections) {
-      failWith(`Free plan allows ${maxConnections} saved connections. Upgrade to Stroke Pro for unlimited.`)
-      return
+      failWith(
+        `Free plan allows ${maxConnections} saved connections. Upgrade to Stroke Pro for unlimited.`,
+      );
+      return;
     }
-    error = ''
-    if (fieldMode === 'string' && URI_TOGGLE_ENGINES.includes(dbType) && !applyConnectionUri()) {
-      failWith(uriHint || 'Enter a valid connection string')
-      return
+    error = "";
+    if (
+      fieldMode === "string" &&
+      URI_TOGGLE_ENGINES.includes(dbType) &&
+      !applyConnectionUri()
+    ) {
+      failWith(uriHint || "Enter a valid connection string");
+      return;
     }
-    const payload = formPayload()
-    const existing = editingId ? saved.find(s => s.id === editingId) : null
-    const id = existing?.id ?? newConnectionId()
-    const hasHostPort = ['postgres', 'mysql', 'mariadb', 'cockroachdb', 'clickhouse', 'mssql', 'redis'].includes(payload.type)
-    const defaultPort = { mysql: 3306, mariadb: 3306, cockroachdb: 26257, postgres: 5432, clickhouse: 8123, mssql: 1433, redis: 6379 }[payload.type] ?? 5432
-    saved = upsertConnection({
-      id, ...payload,
-      port: hasHostPort ? (Number(payload.port) || defaultPort) : undefined,
-      // lastConnectedAt is deliberately NOT touched - nothing was connected, so
-      // this must not jump to the top of the recents list or become "Resume".
-      lastConnectedAt: existing?.lastConnectedAt,
-      readOnly: readOnly || undefined,
-    }).sort((a, b) => (b.lastConnectedAt ?? 0) - (a.lastConnectedAt ?? 0))
+    const payload = formPayload();
+    const existing = editingId ? saved.find((s) => s.id === editingId) : null;
+    const id = existing?.id ?? newConnectionId();
+    // lastConnectedAt is deliberately NOT touched - nothing was connected, so
+    // this must not jump to the top of the recents list or become "Resume".
+    saved = upsertConnection(
+      buildSavedConn(payload, id, existing?.lastConnectedAt),
+    ).sort(byLastConnected);
     // Keep editing the row we just saved, so a follow-up Connect updates it
     // instead of creating a duplicate.
-    editingId = id
-    baseline = snapshot()
-    justSaved = true
-    clearTimeout(justSavedTimer)
-    justSavedTimer = setTimeout(() => { justSaved = false }, 2000)
+    editingId = id;
+    baseline = snapshot();
+    justSaved = true;
+    clearTimeout(justSavedTimer);
+    justSavedTimer = setTimeout(() => {
+      justSaved = false;
+    }, 2000);
   }
 
   async function handleConnect() {
     if (!editingId && saved.length >= maxConnections) {
-      failWith(`Free plan allows ${maxConnections} saved connections. Upgrade to Stroke Pro for unlimited.`)
-      return
+      failWith(
+        `Free plan allows ${maxConnections} saved connections. Upgrade to Stroke Pro for unlimited.`,
+      );
+      return;
     }
-    const myOp = ++opId
-    connecting = editingId ?? '__new__'; error = ''
+    const myOp = ++opId;
+    connecting = editingId ?? "__new__";
+    error = "";
     try {
       // In connection-string mode the payload is built from the individual
       // fields, so parse the URI into them first (finally clears `connecting`).
-      if (fieldMode === 'string' && URI_TOGGLE_ENGINES.includes(dbType) && !applyConnectionUri()) {
-        failWith(uriHint || 'Enter a valid connection string')
-        return
+      if (
+        fieldMode === "string" &&
+        URI_TOGGLE_ENGINES.includes(dbType) &&
+        !applyConnectionUri()
+      ) {
+        failWith(uriHint || "Enter a valid connection string");
+        return;
       }
-      const payload = formPayload()
-      await openConnection(payload)
-      if (myOp !== opId) return // cancelled by the user
-      const existing = editingId ? saved.find(s => s.id === editingId) : null
-      const id = existing?.id ?? newConnectionId()
-      const hasHostPort = ['postgres', 'mysql', 'mariadb', 'cockroachdb', 'clickhouse', 'mssql', 'redis'].includes(payload.type)
-      const defaultPort = { mysql: 3306, mariadb: 3306, cockroachdb: 26257, postgres: 5432, clickhouse: 8123, mssql: 1433, redis: 6379 }[payload.type] ?? 5432
-      const saved_conn = {
-        id, ...payload,
-        port: hasHostPort ? (Number(payload.port) || defaultPort) : undefined,
-        lastConnectedAt: Date.now(),
-        readOnly: readOnly || undefined,
-      }
-      saved = upsertConnection(saved_conn).sort((a, b) => (b.lastConnectedAt ?? 0) - (a.lastConnectedAt ?? 0))
-      setLastConnectionId(id)
-      open = false
-      await onconnected(saved_conn, id)
-    } catch (e) { if (myOp === opId) failWith(friendlyError(e)) }
-    finally { if (myOp === opId) connecting = null }
+      const payload = formPayload();
+      await openConnection(payload);
+      if (myOp !== opId) return; // cancelled by the user
+      const existing = editingId ? saved.find((s) => s.id === editingId) : null;
+      const id = existing?.id ?? newConnectionId();
+      const saved_conn = buildSavedConn(payload, id, Date.now());
+      saved = upsertConnection(saved_conn).sort(byLastConnected);
+      setLastConnectionId(id);
+      open = false;
+      await onconnected(saved_conn, id);
+    } catch (e) {
+      if (myOp === opId) failWith(friendlyError(e));
+    } finally {
+      if (myOp === opId) connecting = null;
+    }
   }
 
-  const canTest = $derived(true)
-  const isBusy  = $derived(testing || !!connecting)
+  const isBusy = $derived(testing || !!connecting);
 
   // Transient "Saved" confirmation on the Save button (no toast - the dialog
   // stays open, so the feedback belongs on the control that was pressed).
-  let justSaved = $state(false)
+  let justSaved = $state(false);
   /** @type {ReturnType<typeof setTimeout> | undefined} */
-  let justSavedTimer
+  let justSavedTimer;
 
   // ── Dirty tracking + close guard ─────────────────────────────────────────────
   // A snapshot of every editable field; `baseline` is re-stamped each time a form
   // loads (resetForm), so isDirty flips true the moment the user changes anything.
-  let baseline = $state('')
-  let confirmDiscardOpen = $state(false)
+  let baseline = $state("");
+  let confirmDiscardOpen = $state(false);
   function snapshot() {
     return JSON.stringify([
-      dbType, name, host, port, database, user, password, ssl, secure, encrypt, trustCert,
-      filePath, accountId, databaseId, apiToken, libsqlUrl, libsqlToken, readOnly,
-      sshEnabled, sshHost, sshPort, sshUsername, sshKeyPath,
-    ])
+      dbType,
+      name,
+      host,
+      port,
+      database,
+      user,
+      password,
+      ssl,
+      secure,
+      encrypt,
+      trustCert,
+      filePath,
+      accountId,
+      databaseId,
+      apiToken,
+      libsqlUrl,
+      libsqlToken,
+      readOnly,
+      sshEnabled,
+      sshHost,
+      sshPort,
+      sshUsername,
+      sshKeyPath,
+    ]);
   }
-  const isDirty = $derived(snapshot() !== baseline)
+  const isDirty = $derived(snapshot() !== baseline);
 
   /** Full-width status-bar target for the current form. */
   const statusTarget = $derived.by(() => {
-    if (['sqlite', 'sqlite-memory', 'duckdb', 'duckdb-memory'].includes(dbType)) return filePath || ':memory:'
-    if (dbType === 'libsql') return libsqlUrl || '—'
-    if (dbType === 'd1') return databaseId ? `${databaseId.slice(0, 8)}…` : '—'
-    return `${host || '—'}:${port || '—'}/${database || ''}`
-  })
+    if (["sqlite", "sqlite-memory", "duckdb", "duckdb-memory"].includes(dbType))
+      return filePath || ":memory:";
+    if (dbType === "libsql") return libsqlUrl || "—";
+    if (dbType === "d1") return databaseId ? `${databaseId.slice(0, 8)}…` : "—";
+    return `${host || "—"}:${port || "—"}/${database || ""}`;
+  });
 
   /** Attempt to close the dialog - guard against discarding unsaved edits. */
   function requestClose() {
-    if (isBusy) return
-    if (isDirty) { confirmDiscardOpen = true; return }
-    open = false
+    if (isBusy) return;
+    if (isDirty) {
+      confirmDiscardOpen = true;
+      return;
+    }
+    open = false;
   }
   function discardAndClose() {
-    confirmDiscardOpen = false
-    baseline = snapshot() // stop isDirty re-firing during the close animation
-    open = false
-  }
-
-  async function d1Discover() {
-    if (!apiToken.trim()) { d1DiscoverError = 'Enter your API token first.'; return }
-    d1DiscoverPhase = 'loading'; d1DiscoverError = ''
-    d1Accounts = []; d1Databases = []; d1SelectedAccountId = ''; accountId = ''; databaseId = ''
-    try {
-      d1Accounts = await cloudflareListAccounts(apiToken)
-      d1DiscoverPhase = 'done'
-      if (d1Accounts.length === 1) await d1SelectAccount(d1Accounts[0].id)
-    } catch (e) { d1DiscoverPhase = 'error'; d1DiscoverError = String(e) }
-  }
-
-  async function d1SelectAccount(id) {
-    d1SelectedAccountId = id; accountId = id; d1Databases = []; databaseId = ''; d1DbLoadPhase = 'loading'
-    try { d1Databases = await cloudflareListD1Databases(apiToken, id) }
-    catch (e) { d1DiscoverError = String(e) }
-    finally { d1DbLoadPhase = 'idle' }
-  }
-
-  function d1Reset() {
-    d1DiscoverPhase = 'idle'; d1DiscoverError = ''; d1Accounts = []
-    d1Databases = []; d1SelectedAccountId = ''; d1DbLoadPhase = 'idle'
+    confirmDiscardOpen = false;
+    baseline = snapshot(); // stop isDirty re-firing during the close animation
+    open = false;
   }
 
   // Field labels are sentence case, not uppercase micro-labels: a form with
   // eight of those stacked reads as shouting, and DESIGN_SYSTEM reserves the
   // uppercase treatment for section headings (§10).
-  const lbl = 'mb-1.5 block text-ui-xs font-medium text-foreground/75'
+  const lbl = "mb-1.5 block text-ui-xs font-medium text-foreground/75";
   // Segmented pill switch (entry-mode + field-mode) - shared base for consistency.
   // A quiet segmented pair, right-aligned beside its section heading - not the
   // full-width bordered block it used to be, which competed with the fields it
@@ -1259,14 +1265,19 @@
       data-connection-modal
       style="top: var(--app-titlebar-h, 38px); bottom: var(--app-statusbar-h, 0px);"
       class="fixed inset-x-0 z-50 flex bg-background text-foreground outline-none data-open:animate-in data-closed:animate-out data-open:fade-in-0 data-closed:fade-out-0 data-open:zoom-in-[0.98] data-closed:zoom-out-[0.98] ease-out duration-200"
-      onEscapeKeydown={(e) => { if (isDirty && !isBusy) { e.preventDefault(); confirmDiscardOpen = true } }}
+      onEscapeKeydown={(e) => {
+        if (isDirty && !isBusy) {
+          e.preventDefault();
+          confirmDiscardOpen = true;
+        }
+      }}
       onFocusOutside={(e) => {
         // Never let focus leaving the content dismiss the modal. Starting a native
         // window drag/resize from the titlebar makes the webview lose focus, which
         // bits-ui treats as focus-outside and closes the dialog. The modal is only
         // meant to close via ×, Escape, or a genuine outside pointer interaction
         // (handled below) - not because the OS took focus for a window drag.
-        e.preventDefault()
+        e.preventDefault();
       }}
       onInteractOutside={(e) => {
         // Nothing outside the content dismisses this dialog. It is inset to leave
@@ -1661,584 +1672,1007 @@
                      Fields/URI switch used to ride in the right-hand label and
                      pushed that label down a few pixels, which is the kind of
                      misalignment you feel without being able to name. -->
-                <div class={cn(row6, 'gap-y-4')}>
-                  <div class="col-span-6 lg:col-span-3">
-                    <label for="cn-name" class={lbl}>
-                      Name
-                      <span class="font-normal text-muted-foreground/45">· optional</span>
-                    </label>
-                    <Input id="cn-name" bind:value={name} class={inp} placeholder={autoName} />
-                  </div>
+                      <div class={cn(row6, "gap-y-4")}>
+                        <div class="col-span-6 lg:col-span-3">
+                          <label for="cn-name" class={lbl}>
+                            Name
+                            <span class="font-normal text-muted-foreground/45"
+                              >· optional</span
+                            >
+                          </label>
+                          <Input
+                            id="cn-name"
+                            bind:value={name}
+                            class={inp}
+                            placeholder={autoName}
+                          />
+                        </div>
 
-                  {#if hasFieldToggle}
-                    <!-- A URI-only mode was redundant once this field fills the
+                        {#if hasFieldToggle}
+                          <!-- A URI-only mode was redundant once this field fills the
                          ones below: paste here and everything downstream is
                          populated, so there is nothing a separate view added. -->
-                    <div class="col-span-6 min-w-0 lg:col-span-3">
-                      <label for="cn-paste-uri" class={lbl}>
-                        Connection string
-                        <span class="font-normal text-muted-foreground/45">· fills the fields below</span>
-                      </label>
-                      <div class="flex gap-2">
-                        <Input
-                          id="cn-paste-uri"
-                          bind:value={connectionUri}
-                          placeholder="postgresql://…"
-                          class={cn(inp, 'min-w-0 flex-1 font-mono text-ui-2xs')}
-                          onpaste={() => requestAnimationFrame(applyConnectionUri)}
-                          onblur={() => connectionUri.trim() && applyConnectionUri()}
-                          onkeydown={(e) => e.key === 'Enter' && (e.preventDefault(), applyConnectionUri())}
-                        />
-                        <button
-                          type="button"
-                          onclick={pasteConnectionUri}
-                          title="Paste from clipboard"
-                          aria-label="Paste from clipboard"
-                          class="inline-flex size-8 shrink-0 items-center justify-center rounded-md border-2 border-foreground/15 bg-muted/20 text-muted-foreground/70 transition-[color,border-color] hover:border-foreground/40 hover:text-foreground"
-                        >
-                          <Icon name="clipboard-copy" class="size-3.5" />
-                        </button>
+                          <div class="col-span-6 min-w-0 lg:col-span-3">
+                            <label for="cn-paste-uri" class={lbl}>
+                              Connection string
+                              <span class="font-normal text-muted-foreground/45"
+                                >· fills the fields below</span
+                              >
+                            </label>
+                            <div class="flex gap-2">
+                              <Input
+                                id="cn-paste-uri"
+                                bind:value={connectionUri}
+                                placeholder="postgresql://…"
+                                class={cn(
+                                  inp,
+                                  "min-w-0 flex-1 font-mono text-ui-2xs",
+                                )}
+                                onpaste={() =>
+                                  requestAnimationFrame(applyConnectionUri)}
+                                onblur={() =>
+                                  connectionUri.trim() && applyConnectionUri()}
+                                onkeydown={(e) =>
+                                  e.key === "Enter" &&
+                                  (e.preventDefault(), applyConnectionUri())}
+                              />
+                              <button
+                                type="button"
+                                onclick={pasteConnectionUri}
+                                title="Paste from clipboard"
+                                aria-label="Paste from clipboard"
+                                class="inline-flex size-8 shrink-0 items-center justify-center rounded-md border-2 border-foreground/15 bg-muted/20 text-muted-foreground/70 transition-[color,border-color] hover:border-foreground/40 hover:text-foreground"
+                              >
+                                <Icon name="clipboard-copy" class="size-3.5" />
+                              </button>
+                            </div>
+                            {#if uriHint}
+                              <p
+                                class="mt-1.5 flex items-center gap-1 text-ui-2xs"
+                              >
+                                {#if uriHint.includes("Could") || uriHint.includes("Expected") || uriHint.includes("doesn't") || uriHint.includes("empty")}
+                                  <Icon
+                                    name="alert-circle"
+                                    class="size-3 shrink-0 text-destructive"
+                                  />
+                                  <span class="text-destructive">{uriHint}</span
+                                  >
+                                {:else}
+                                  <Icon
+                                    name="check-circle-2"
+                                    class="size-3 shrink-0 text-success"
+                                  />
+                                  <span class="text-success">{uriHint}</span>
+                                {/if}
+                              </p>
+                            {/if}
+                          </div>
+                        {/if}
                       </div>
-                      {#if uriHint}
-                        <p class="mt-1.5 flex items-center gap-1 text-ui-2xs">
-                          {#if uriHint.includes('Could') || uriHint.includes('Expected') || uriHint.includes("doesn't") || uriHint.includes('empty')}
-                            <Icon name="alert-circle" class="size-3 shrink-0 text-destructive" />
-                            <span class="text-destructive">{uriHint}</span>
-                          {:else}
-                            <Icon name="check-circle-2" class="size-3 shrink-0 text-success" />
-                            <span class="text-success">{uriHint}</span>
+
+                      <!-- Driver-specific fields -->
+                      {#key dbType}
+                        <div class="flex flex-col gap-3.5">
+                          <!-- ── PostgreSQL / CockroachDB / MySQL / MariaDB ── -->
+                          {#if dbType === "postgres" || dbType === "cockroachdb" || dbType === "mysql" || dbType === "mariadb"}
+                            <!-- Host, port and database are one address, so they share a row -
+              and the Host+Port pair spans exactly the three columns Name spans
+              above it, so the two rows break on the same line. -->
+                            <div class={row6}>
+                              <div class="col-span-3 sm:col-span-2">
+                                <label for="cn-host" class={lbl}>Host</label>
+                                <Input
+                                  id="cn-host"
+                                  bind:value={host}
+                                  class={cn(
+                                    inp,
+                                    flashedFields.has("host") && flashCls,
+                                  )}
+                                />
+                              </div>
+                              <div class="col-span-3 sm:col-span-1">
+                                <label for="cn-port" class={lbl}>Port</label>
+                                <Input
+                                  id="cn-port"
+                                  bind:value={port}
+                                  type="text"
+                                  inputmode="numeric"
+                                  class={cn(
+                                    inpNum,
+                                    flashedFields.has("port") && flashCls,
+                                  )}
+                                />
+                              </div>
+                              <div class="col-span-6 sm:col-span-3">
+                                <label for="cn-db" class={lbl}>Database</label>
+                                <Input
+                                  id="cn-db"
+                                  bind:value={database}
+                                  class={cn(
+                                    inp,
+                                    flashedFields.has("database") && flashCls,
+                                  )}
+                                />
+                              </div>
+                            </div>
+
+                            <div class={row6}>
+                              <div class="col-span-6 sm:col-span-3">
+                                <label for="cn-user" class={lbl}>Username</label
+                                >
+                                <Input
+                                  id="cn-user"
+                                  bind:value={user}
+                                  autocomplete="username"
+                                  class={cn(
+                                    inp,
+                                    flashedFields.has("user") && flashCls,
+                                  )}
+                                />
+                              </div>
+                              <div class="col-span-6 sm:col-span-3">
+                                <label for="cn-pass" class={lbl}>Password</label
+                                >
+                                <Input
+                                  id="cn-pass"
+                                  bind:value={password}
+                                  type="password"
+                                  autocomplete="current-password"
+                                  class={cn(
+                                    inp,
+                                    flashedFields.has("password") && flashCls,
+                                  )}
+                                />
+                              </div>
+                            </div>
+
+                            <!-- ── SQLite ────────────────────────────────── -->
+                          {:else if dbType === "sqlite"}
+                            <!-- Local file vs remote SQLite (Turso / libSQL). Remote reuses the
+                   dedicated libsql driver + backend by switching dbType. -->
+                            <div
+                              class="flex gap-0.5 rounded-md border border-border/25 bg-muted/30 p-0.5 text-ui-2xs"
+                            >
+                              <button
+                                type="button"
+                                class="flex-1 rounded bg-background px-2 py-1 font-medium text-foreground"
+                                >Local file</button
+                              >
+                              <button
+                                type="button"
+                                onclick={() => (dbType = "libsql")}
+                                class="flex-1 rounded px-2 py-1 text-muted-foreground/60 transition-colors hover:text-foreground"
+                                >Remote (Turso / libSQL)</button
+                              >
+                            </div>
+
+                            <div>
+                              <label for="cn-path" class={lbl}>File</label>
+                              <div class="flex gap-1.5">
+                                <Input
+                                  id="cn-path"
+                                  bind:value={filePath}
+                                  placeholder="/path/to/database.db"
+                                  class={cn(inp, "font-mono text-ui-2xs")}
+                                />
+                                <button
+                                  type="button"
+                                  onclick={pickSqliteFile}
+                                  class="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-border/25 px-2.5 text-ui-2xs text-muted-foreground/60 transition-[color,background-color,border-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.97]"
+                                >
+                                  <Icon name="folder-open" class="size-3" />
+                                  Browse
+                                </button>
+                              </div>
+                            </div>
+
+                            <!-- ── In-Memory ─────────────────────────────── -->
+                          {:else if dbType === "sqlite-memory"}
+                            <div
+                              class="flex flex-col gap-1.5 rounded-lg border border-border/15 bg-muted/[0.04] px-4 py-3.5"
+                            >
+                              <p
+                                class="text-ui-xs font-medium text-foreground/70"
+                              >
+                                Ephemeral in-memory database
+                              </p>
+                              <p
+                                class="text-ui-2xs leading-relaxed text-muted-foreground/45"
+                              >
+                                Data lives only for this session. Nothing is
+                                written to disk, closing the connection discards
+                                everything.
+                              </p>
+                            </div>
+
+                            <!-- ── LibSQL / Turso ─────────────────────────── -->
+                          {:else if dbType === "libsql"}
+                            <div
+                              class="flex gap-0.5 rounded-md border border-border/25 bg-muted/30 p-0.5 text-ui-2xs"
+                            >
+                              <button
+                                type="button"
+                                onclick={() => (dbType = "sqlite")}
+                                class="flex-1 rounded px-2 py-1 text-muted-foreground/60 transition-colors hover:text-foreground"
+                                >Local file</button
+                              >
+                              <button
+                                type="button"
+                                class="flex-1 rounded bg-background px-2 py-1 font-medium text-foreground"
+                                >Remote (Turso / libSQL)</button
+                              >
+                            </div>
+
+                            <div>
+                              <label for="cn-libsql-url" class={lbl}>URL</label>
+                              <Input
+                                id="cn-libsql-url"
+                                bind:value={libsqlUrl}
+                                placeholder="libsql://your-db.turso.io"
+                                class={cn(inp, "font-mono text-ui-2xs")}
+                              />
+                              <p
+                                class="mt-1 text-ui-3xs text-muted-foreground/30"
+                              >
+                                libsql:// · https:// · http://localhost:PORT
+                              </p>
+                            </div>
+
+                            <div>
+                              <label for="cn-libsql-token" class={lbl}
+                                >Auth token <span
+                                  class="normal-case font-normal opacity-50"
+                                  >(optional)</span
+                                ></label
+                              >
+                              <Input
+                                id="cn-libsql-token"
+                                bind:value={libsqlToken}
+                                type="password"
+                                placeholder="eyJhbGciOiJFZERTQSJ9…"
+                                class={cn(inp, "font-mono text-ui-2xs")}
+                              />
+                            </div>
+
+                            <!-- ── ClickHouse ─────────────────────────────── -->
+                          {:else if dbType === "clickhouse"}
+                            <div>
+                              <label for="cn-ch-uri" class={lbl}
+                                >Connection string</label
+                              >
+                              <div class="flex gap-1.5">
+                                <Input
+                                  id="cn-ch-uri"
+                                  bind:value={connectionUri}
+                                  placeholder="clickhouse://user:pass@host:8123/db"
+                                  class={cn(inp, "font-mono text-ui-2xs")}
+                                  onpaste={() =>
+                                    requestAnimationFrame(applyConnectionUri)}
+                                  onkeydown={(e) =>
+                                    e.key === "Enter" &&
+                                    (e.preventDefault(), applyConnectionUri())}
+                                />
+                                <button
+                                  type="button"
+                                  onclick={applyConnectionUri}
+                                  disabled={!connectionUri.trim()}
+                                  class="h-8 shrink-0 rounded-md border border-border/25 px-2.5 text-ui-2xs text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-25"
+                                >
+                                  Parse
+                                </button>
+                              </div>
+                              {#if uriHint}
+                                <p
+                                  class={cn(
+                                    "mt-1 flex items-center gap-1 text-ui-3xs",
+                                    uriHint.includes("Could") ||
+                                      uriHint.includes("Expected")
+                                      ? "text-destructive"
+                                      : "text-success",
+                                  )}
+                                >
+                                  {#if uriHint.includes("Could") || uriHint.includes("Expected")}
+                                    <Icon
+                                      name="alert-circle"
+                                      class="size-2.5"
+                                    />
+                                  {:else}
+                                    <Icon
+                                      name="check-circle-2"
+                                      class="size-2.5"
+                                    />
+                                  {/if}
+                                  {uriHint}
+                                </p>
+                              {/if}
+                            </div>
+
+                            <div class="grid grid-cols-[1fr_110px] gap-2">
+                              <div>
+                                <label for="cn-ch-host" class={lbl}>Host</label>
+                                <Input
+                                  id="cn-ch-host"
+                                  bind:value={host}
+                                  class={cn(
+                                    inp,
+                                    flashedFields.has("host") && flashCls,
+                                  )}
+                                />
+                              </div>
+                              <div>
+                                <label for="cn-ch-port" class={lbl}>Port</label>
+                                <Input
+                                  id="cn-ch-port"
+                                  bind:value={port}
+                                  type="text"
+                                  inputmode="numeric"
+                                  class={cn(
+                                    inpNum,
+                                    flashedFields.has("port") && flashCls,
+                                  )}
+                                />
+                              </div>
+                            </div>
+
+                            <div>
+                              <label for="cn-ch-db" class={lbl}>Database</label>
+                              <Input
+                                id="cn-ch-db"
+                                bind:value={database}
+                                class={cn(
+                                  inp,
+                                  flashedFields.has("database") && flashCls,
+                                )}
+                              />
+                            </div>
+
+                            <div class="grid grid-cols-2 gap-2">
+                              <div>
+                                <label for="cn-ch-user" class={lbl}
+                                  >Username</label
+                                >
+                                <Input
+                                  id="cn-ch-user"
+                                  bind:value={user}
+                                  autocomplete="username"
+                                  class={cn(
+                                    inp,
+                                    flashedFields.has("user") && flashCls,
+                                  )}
+                                />
+                              </div>
+                              <div>
+                                <label for="cn-ch-pass" class={lbl}
+                                  >Password</label
+                                >
+                                <Input
+                                  id="cn-ch-pass"
+                                  bind:value={password}
+                                  type="password"
+                                  autocomplete="current-password"
+                                  class={cn(
+                                    inp,
+                                    flashedFields.has("password") && flashCls,
+                                  )}
+                                />
+                              </div>
+                            </div>
+
+                            <!-- ── DuckDB (file) ──────────────────────────── -->
+                          {:else if dbType === "duckdb"}
+                            <div>
+                              <label for="cn-duck-path" class={lbl}>File</label>
+                              <div class="flex gap-1.5">
+                                <Input
+                                  id="cn-duck-path"
+                                  bind:value={filePath}
+                                  placeholder="/path/to/database.duckdb"
+                                  class={cn(inp, "font-mono text-ui-2xs")}
+                                />
+                                <button
+                                  type="button"
+                                  onclick={pickDuckdbFile}
+                                  class="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-border/25 px-2.5 text-ui-2xs text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
+                                >
+                                  <Icon name="folder-open" class="size-3" />
+                                  Browse
+                                </button>
+                              </div>
+                              <p
+                                class="mt-1 text-ui-3xs text-muted-foreground/30"
+                              >
+                                A new file is created if it doesn't exist.
+                              </p>
+                            </div>
+
+                            <!-- ── DuckDB (in-memory) ─────────────────────── -->
+                          {:else if dbType === "duckdb-memory"}
+                            <div
+                              class="flex flex-col gap-1.5 rounded-lg border border-border/15 bg-muted/[0.04] px-4 py-3.5"
+                            >
+                              <p
+                                class="text-ui-xs font-medium text-foreground/70"
+                              >
+                                Ephemeral in-memory DuckDB
+                              </p>
+                              <p
+                                class="text-ui-2xs leading-relaxed text-muted-foreground/45"
+                              >
+                                A columnar analytical database that lives only
+                                for this session. Nothing is written to disk,
+                                closing the connection discards everything.
+                              </p>
+                            </div>
+
+                            <!-- ── MS SQL Server ──────────────────────────── -->
+                          {:else if dbType === "mssql"}
+                            <div>
+                              <label for="cn-mssql-uri" class={lbl}
+                                >Connection string</label
+                              >
+                              <div class="flex gap-1.5">
+                                <Input
+                                  id="cn-mssql-uri"
+                                  bind:value={connectionUri}
+                                  placeholder="sqlserver://sa:pass@host:1433/db"
+                                  class={cn(inp, "font-mono text-ui-2xs")}
+                                  onpaste={() =>
+                                    requestAnimationFrame(applyConnectionUri)}
+                                  onkeydown={(e) =>
+                                    e.key === "Enter" &&
+                                    (e.preventDefault(), applyConnectionUri())}
+                                />
+                                <button
+                                  type="button"
+                                  onclick={applyConnectionUri}
+                                  disabled={!connectionUri.trim()}
+                                  class="h-8 shrink-0 rounded-md border border-border/25 px-2.5 text-ui-2xs text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-25"
+                                >
+                                  Parse
+                                </button>
+                              </div>
+                              {#if uriHint}
+                                <p
+                                  class={cn(
+                                    "mt-1 flex items-center gap-1 text-ui-3xs",
+                                    uriHint.includes("Could") ||
+                                      uriHint.includes("Expected")
+                                      ? "text-destructive"
+                                      : "text-success",
+                                  )}
+                                >
+                                  {#if uriHint.includes("Could") || uriHint.includes("Expected")}
+                                    <Icon
+                                      name="alert-circle"
+                                      class="size-2.5"
+                                    />
+                                  {:else}
+                                    <Icon
+                                      name="check-circle-2"
+                                      class="size-2.5"
+                                    />
+                                  {/if}
+                                  {uriHint}
+                                </p>
+                              {/if}
+                            </div>
+
+                            <div class="grid grid-cols-[1fr_110px] gap-2">
+                              <div>
+                                <label for="cn-mssql-host" class={lbl}
+                                  >Host</label
+                                >
+                                <Input
+                                  id="cn-mssql-host"
+                                  bind:value={host}
+                                  class={cn(
+                                    inp,
+                                    flashedFields.has("host") && flashCls,
+                                  )}
+                                />
+                              </div>
+                              <div>
+                                <label for="cn-mssql-port" class={lbl}
+                                  >Port</label
+                                >
+                                <Input
+                                  id="cn-mssql-port"
+                                  bind:value={port}
+                                  type="text"
+                                  inputmode="numeric"
+                                  class={cn(
+                                    inpNum,
+                                    flashedFields.has("port") && flashCls,
+                                  )}
+                                />
+                              </div>
+                            </div>
+
+                            <div>
+                              <label for="cn-mssql-db" class={lbl}
+                                >Database</label
+                              >
+                              <Input
+                                id="cn-mssql-db"
+                                bind:value={database}
+                                class={cn(
+                                  inp,
+                                  flashedFields.has("database") && flashCls,
+                                )}
+                              />
+                            </div>
+
+                            <div class="grid grid-cols-2 gap-2">
+                              <div>
+                                <label for="cn-mssql-user" class={lbl}
+                                  >Username</label
+                                >
+                                <Input
+                                  id="cn-mssql-user"
+                                  bind:value={user}
+                                  autocomplete="username"
+                                  class={cn(
+                                    inp,
+                                    flashedFields.has("user") && flashCls,
+                                  )}
+                                />
+                              </div>
+                              <div>
+                                <label for="cn-mssql-pass" class={lbl}
+                                  >Password</label
+                                >
+                                <Input
+                                  id="cn-mssql-pass"
+                                  bind:value={password}
+                                  type="password"
+                                  autocomplete="current-password"
+                                  class={cn(
+                                    inp,
+                                    flashedFields.has("password") && flashCls,
+                                  )}
+                                />
+                              </div>
+                            </div>
+
+                            <!-- ── Redis ──────────────────────────────────── -->
+                          {:else if dbType === "redis"}
+                            <div class="grid grid-cols-[1fr_110px] gap-2">
+                              <div>
+                                <label for="cn-redis-host" class={lbl}
+                                  >Host</label
+                                >
+                                <Input
+                                  id="cn-redis-host"
+                                  bind:value={host}
+                                  class={cn(
+                                    inp,
+                                    flashedFields.has("host") && flashCls,
+                                  )}
+                                />
+                              </div>
+                              <div>
+                                <label for="cn-redis-port" class={lbl}
+                                  >Port</label
+                                >
+                                <Input
+                                  id="cn-redis-port"
+                                  bind:value={port}
+                                  type="text"
+                                  inputmode="numeric"
+                                  class={cn(
+                                    inpNum,
+                                    flashedFields.has("port") && flashCls,
+                                  )}
+                                />
+                              </div>
+                            </div>
+
+                            <div>
+                              <label for="cn-redis-pass" class={lbl}
+                                >Password <span
+                                  class="normal-case font-normal opacity-50"
+                                  >(optional)</span
+                                ></label
+                              >
+                              <Input
+                                id="cn-redis-pass"
+                                bind:value={password}
+                                type="password"
+                                autocomplete="current-password"
+                                class={cn(
+                                  inp,
+                                  flashedFields.has("password") && flashCls,
+                                )}
+                              />
+                            </div>
+
+                            <div>
+                              <label for="cn-redis-db" class={lbl}
+                                >Database index</label
+                              >
+                              <Input
+                                id="cn-redis-db"
+                                bind:value={database}
+                                type="text"
+                                inputmode="numeric"
+                                min="0"
+                                max="15"
+                                class={inpNum}
+                              />
+                              <p
+                                class="mt-1 text-ui-3xs text-muted-foreground/30"
+                              >
+                                Logical database number (0–15).
+                              </p>
+                            </div>
+
+                            <label
+                              class="flex cursor-pointer select-none items-center gap-2"
+                            >
+                              <Checkbox
+                                id="cn-redis-tls"
+                                checked={secure}
+                                onCheckedChange={(v) => (secure = v === true)}
+                              />
+                              <span class="text-ui-xs text-muted-foreground/70"
+                                >Use TLS</span
+                              >
+                            </label>
                           {/if}
+                        </div>
+                      {/key}
+
+                      <!-- Advanced, full-width section at the bottom -->
+                      <div class="border-t border-border/40 pt-5">
+                        <p
+                          class="mb-4 flex items-center gap-1.5 text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground/45"
+                        >
+                          <Icon
+                            name="sliders-horizontal"
+                            class="size-3 shrink-0"
+                          />
+                          Advanced
                         </p>
-                      {/if}
+                        {@render advancedFields()}
+                      </div>
+                    </div>
+                    <!-- /manual column -->
+                  {:else if isProvider}
+                    <div class="mt-6 flex flex-col gap-4">
+                      <!-- Keyed on the provider so switching fully remounts the flow:
+                         re-checks sign-in status and clears the previous provider's
+                         database list (otherwise a stale pick hits the wrong account). -->
+                      {#key dbType}
+                        <ProviderConnect
+                          provider={dbType}
+                          resolvePassword={(host, user) =>
+                            saved.find(
+                              (s) =>
+                                s.host === host &&
+                                s.user === user &&
+                                s.password,
+                            )?.password}
+                          resolveSavedConnection={(dbName) => {
+                            const hit = saved.find(
+                              (s) =>
+                                s.provider === dbType &&
+                                s.password &&
+                                (s.database === dbName ||
+                                  s.name?.endsWith(dbName)),
+                            );
+                            return hit
+                              ? {
+                                  host: hit.host ?? "",
+                                  user: hit.user ?? "",
+                                  password: hit.password ?? "",
+                                  database: hit.database ?? dbName,
+                                }
+                              : undefined;
+                          }}
+                          onselect={(conn) => connectProviderConnection(conn)}
+                        />
+                      {/key}
+                      {@render advancedSection()}
+                    </div>
+                  {:else if dbType === "d1"}
+                    <div class="mt-6 flex flex-col gap-4">
+                      {#key dbType}
+                        <CloudflareLogin
+                          onselect={connectD1Selection}
+                          ondisconnect={() => {
+                            accountId = "";
+                            databaseId = "";
+                            apiToken = "";
+                          }}
+                          initialAccountId={accountId}
+                          initialDatabaseId={databaseId}
+                          initialDatabaseName={editingId ? name : ""}
+                        />
+                      {/key}
+
+                      <details class="group">
+                        <summary
+                          class="flex cursor-pointer list-none select-none items-center gap-1 text-ui-2xs text-muted-foreground/45 transition-colors hover:text-muted-foreground"
+                        >
+                          <Icon
+                            name="chevron-right"
+                            class="size-3 transition-transform duration-150 group-open:rotate-90"
+                          />
+                          Enter account &amp; token manually
+                        </summary>
+                        <div class="mt-3 flex flex-col gap-2.5">
+                          <div class="grid grid-cols-2 gap-2">
+                            <div>
+                              <label for="cn-d1-account" class={lbl}
+                                >Account ID</label
+                              >
+                              <Input
+                                id="cn-d1-account"
+                                bind:value={accountId}
+                                placeholder="abcdef…"
+                                class={cn(inp, "font-mono text-ui-2xs")}
+                              />
+                            </div>
+                            <div>
+                              <label for="cn-d1-dbid" class={lbl}
+                                >Database ID</label
+                              >
+                              <Input
+                                id="cn-d1-dbid"
+                                bind:value={databaseId}
+                                placeholder="xxxxxxxx-…"
+                                class={cn(inp, "font-mono text-ui-2xs")}
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <label for="cn-d1-token" class={lbl}
+                              >API token</label
+                            >
+                            <Input
+                              id="cn-d1-token"
+                              bind:value={apiToken}
+                              type="password"
+                              class={inp}
+                            />
+                          </div>
+                        </div>
+                      </details>
+                      {@render advancedSection()}
                     </div>
                   {/if}
                 </div>
-
-                <!-- Driver-specific fields -->
-                {#key dbType}
-                <div class="flex flex-col gap-3.5">
-
-            <!-- ── PostgreSQL / CockroachDB ────────────────── -->
-            {#if dbType === 'postgres' || dbType === 'cockroachdb'}
-
-              <!-- Host, port and database are one address, so they share a row -
-              and the Host+Port pair spans exactly the three columns Name spans
-              above it, so the two rows break on the same line. -->
-              <div class={row6}>
-                <div class="col-span-3 sm:col-span-2">
-                  <label for="cn-host" class={lbl}>Host</label>
-                  <Input id="cn-host" bind:value={host} class={cn(inp, flashedFields.has('host') && flashCls)} />
-                </div>
-                <div class="col-span-3 sm:col-span-1">
-                  <label for="cn-port" class={lbl}>Port</label>
-                  <Input id="cn-port" bind:value={port} type="text" inputmode="numeric" class={cn(inpNum, flashedFields.has('port') && flashCls)} />
-                </div>
-                <div class="col-span-6 sm:col-span-3">
-                  <label for="cn-db" class={lbl}>Database</label>
-                  <Input id="cn-db" bind:value={database} class={cn(inp, flashedFields.has('database') && flashCls)} />
-                </div>
               </div>
+            </ScrollArea>
+          {/if}
 
-              <div class={row6}>
-                <div class="col-span-6 sm:col-span-3">
-                  <label for="cn-user" class={lbl}>Username</label>
-                  <Input id="cn-user" bind:value={user} autocomplete="username" class={cn(inp, flashedFields.has('user') && flashCls)} />
-                </div>
-                <div class="col-span-6 sm:col-span-3">
-                  <label for="cn-pass" class={lbl}>Password</label>
-                  <Input id="cn-pass" bind:value={password} type="password" autocomplete="current-password" class={cn(inp, flashedFields.has('password') && flashCls)} />
-                </div>
-              </div>
-
-            <!-- ── MySQL / MariaDB ──────────────────────── -->
-            {:else if dbType === 'mysql' || dbType === 'mariadb'}
-
-              <div class={row6}>
-                <div class="col-span-3 sm:col-span-2">
-                  <label for="cn-mysql-host" class={lbl}>Host</label>
-                  <Input id="cn-mysql-host" bind:value={host} class={cn(inp, flashedFields.has('host') && flashCls)} />
-                </div>
-                <div class="col-span-3 sm:col-span-1">
-                  <label for="cn-mysql-port" class={lbl}>Port</label>
-                  <Input id="cn-mysql-port" bind:value={port} type="text" inputmode="numeric" class={cn(inpNum, flashedFields.has('port') && flashCls)} />
-                </div>
-                <div class="col-span-6 sm:col-span-3">
-                  <label for="cn-mysql-db" class={lbl}>Database</label>
-                  <Input id="cn-mysql-db" bind:value={database} class={cn(inp, flashedFields.has('database') && flashCls)} />
-                </div>
-              </div>
-
-              <div class={row6}>
-                <div class="col-span-6 sm:col-span-3">
-                  <label for="cn-mysql-user" class={lbl}>Username</label>
-                  <Input id="cn-mysql-user" bind:value={user} autocomplete="username" class={cn(inp, flashedFields.has('user') && flashCls)} />
-                </div>
-                <div class="col-span-6 sm:col-span-3">
-                  <label for="cn-mysql-pass" class={lbl}>Password</label>
-                  <Input id="cn-mysql-pass" bind:value={password} type="password" autocomplete="current-password" class={cn(inp, flashedFields.has('password') && flashCls)} />
-                </div>
-              </div>
-
-            <!-- ── SQLite ────────────────────────────────── -->
-            {:else if dbType === 'sqlite'}
-
-              <!-- Local file vs remote SQLite (Turso / libSQL). Remote reuses the
-                   dedicated libsql driver + backend by switching dbType. -->
-              <div class="flex gap-0.5 rounded-md border border-border/25 bg-muted/30 p-0.5 text-ui-2xs">
-                <button type="button" class="flex-1 rounded bg-background px-2 py-1 font-medium text-foreground">Local file</button>
-                <button type="button" onclick={() => (dbType = 'libsql')}
-                  class="flex-1 rounded px-2 py-1 text-muted-foreground/60 transition-colors hover:text-foreground">Remote (Turso / libSQL)</button>
-              </div>
-
-              <div>
-                <label for="cn-path" class={lbl}>File</label>
-                <div class="flex gap-1.5">
-                  <Input id="cn-path" bind:value={filePath}
-                    placeholder="/path/to/database.db"
-                    class={cn(inp, 'font-mono text-ui-2xs')} />
-                  <button type="button" onclick={pickSqliteFile}
-                    class="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-border/25 px-2.5 text-ui-2xs text-muted-foreground/60 transition-[color,background-color,border-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.97]">
-                    <Icon name="folder-open" class="size-3" />
-                    Browse
-                  </button>
-                </div>
-              </div>
-
-            <!-- ── In-Memory ─────────────────────────────── -->
-            {:else if dbType === 'sqlite-memory'}
-
-              <div class="flex flex-col gap-1.5 rounded-lg border border-border/15 bg-muted/[0.04] px-4 py-3.5">
-                <p class="text-ui-xs font-medium text-foreground/70">Ephemeral in-memory database</p>
-                <p class="text-ui-2xs leading-relaxed text-muted-foreground/45">
-                  Data lives only for this session. Nothing is written to disk, closing the connection discards everything.
-                </p>
-              </div>
-
-            <!-- ── LibSQL / Turso ─────────────────────────── -->
-            {:else if dbType === 'libsql'}
-
-              <div class="flex gap-0.5 rounded-md border border-border/25 bg-muted/30 p-0.5 text-ui-2xs">
-                <button type="button" onclick={() => (dbType = 'sqlite')}
-                  class="flex-1 rounded px-2 py-1 text-muted-foreground/60 transition-colors hover:text-foreground">Local file</button>
-                <button type="button" class="flex-1 rounded bg-background px-2 py-1 font-medium text-foreground">Remote (Turso / libSQL)</button>
-              </div>
-
-              <div>
-                <label for="cn-libsql-url" class={lbl}>URL</label>
-                <Input id="cn-libsql-url" bind:value={libsqlUrl}
-                  placeholder="libsql://your-db.turso.io"
-                  class={cn(inp, 'font-mono text-ui-2xs')} />
-                <p class="mt-1 text-ui-3xs text-muted-foreground/30">libsql:// · https:// · http://localhost:PORT</p>
-              </div>
-
-              <div>
-                <label for="cn-libsql-token" class={lbl}>Auth token <span class="normal-case font-normal opacity-50">(optional)</span></label>
-                <Input id="cn-libsql-token" bind:value={libsqlToken} type="password"
-                  placeholder="eyJhbGciOiJFZERTQSJ9…"
-                  class={cn(inp, 'font-mono text-ui-2xs')} />
-              </div>
-
-            <!-- ── ClickHouse ─────────────────────────────── -->
-            {:else if dbType === 'clickhouse'}
-
-              <div>
-                <label for="cn-ch-uri" class={lbl}>Connection string</label>
-                <div class="flex gap-1.5">
-                  <Input id="cn-ch-uri" bind:value={connectionUri}
-                    placeholder="clickhouse://user:pass@host:8123/db"
-                    class={cn(inp, 'font-mono text-ui-2xs')}
-                    onpaste={() => requestAnimationFrame(applyConnectionUri)}
-                    onkeydown={(e) => e.key === 'Enter' && (e.preventDefault(), applyConnectionUri())}
-                  />
-                  <button type="button" onclick={applyConnectionUri} disabled={!connectionUri.trim()}
-                    class="h-8 shrink-0 rounded-md border border-border/25 px-2.5 text-ui-2xs text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-25">
-                    Parse
-                  </button>
-                </div>
-                {#if uriHint}
-                  <p class={cn('mt-1 flex items-center gap-1 text-ui-3xs',
-                    uriHint.includes('Could') || uriHint.includes('Expected') ? 'text-destructive' : 'text-success')}>
-                    {#if uriHint.includes('Could') || uriHint.includes('Expected')}
-                      <Icon name="alert-circle" class="size-2.5" />
-                    {:else}
-                      <Icon name="check-circle-2" class="size-2.5" />
-                    {/if}
-                    {uriHint}
-                  </p>
-                {/if}
-              </div>
-
-              <div class="grid grid-cols-[1fr_110px] gap-2">
-                <div>
-                  <label for="cn-ch-host" class={lbl}>Host</label>
-                  <Input id="cn-ch-host" bind:value={host} class={cn(inp, flashedFields.has('host') && flashCls)} />
-                </div>
-                <div>
-                  <label for="cn-ch-port" class={lbl}>Port</label>
-                  <Input id="cn-ch-port" bind:value={port} type="text" inputmode="numeric" class={cn(inpNum, flashedFields.has('port') && flashCls)} />
-                </div>
-              </div>
-
-              <div>
-                <label for="cn-ch-db" class={lbl}>Database</label>
-                <Input id="cn-ch-db" bind:value={database} class={cn(inp, flashedFields.has('database') && flashCls)} />
-              </div>
-
-              <div class="grid grid-cols-2 gap-2">
-                <div>
-                  <label for="cn-ch-user" class={lbl}>Username</label>
-                  <Input id="cn-ch-user" bind:value={user} autocomplete="username" class={cn(inp, flashedFields.has('user') && flashCls)} />
-                </div>
-                <div>
-                  <label for="cn-ch-pass" class={lbl}>Password</label>
-                  <Input id="cn-ch-pass" bind:value={password} type="password" autocomplete="current-password" class={cn(inp, flashedFields.has('password') && flashCls)} />
-                </div>
-              </div>
-
-            <!-- ── DuckDB (file) ──────────────────────────── -->
-            {:else if dbType === 'duckdb'}
-
-              <div>
-                <label for="cn-duck-path" class={lbl}>File</label>
-                <div class="flex gap-1.5">
-                  <Input id="cn-duck-path" bind:value={filePath}
-                    placeholder="/path/to/database.duckdb"
-                    class={cn(inp, 'font-mono text-ui-2xs')} />
-                  <button type="button" onclick={pickDuckdbFile}
-                    class="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-border/25 px-2.5 text-ui-2xs text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground">
-                    <Icon name="folder-open" class="size-3" />
-                    Browse
-                  </button>
-                </div>
-                <p class="mt-1 text-ui-3xs text-muted-foreground/30">A new file is created if it doesn't exist.</p>
-              </div>
-
-            <!-- ── DuckDB (in-memory) ─────────────────────── -->
-            {:else if dbType === 'duckdb-memory'}
-
-              <div class="flex flex-col gap-1.5 rounded-lg border border-border/15 bg-muted/[0.04] px-4 py-3.5">
-                <p class="text-ui-xs font-medium text-foreground/70">Ephemeral in-memory DuckDB</p>
-                <p class="text-ui-2xs leading-relaxed text-muted-foreground/45">
-                  A columnar analytical database that lives only for this session. Nothing is written to disk, closing the connection discards everything.
-                </p>
-              </div>
-
-            <!-- ── MS SQL Server ──────────────────────────── -->
-            {:else if dbType === 'mssql'}
-
-              <div>
-                <label for="cn-mssql-uri" class={lbl}>Connection string</label>
-                <div class="flex gap-1.5">
-                  <Input id="cn-mssql-uri" bind:value={connectionUri}
-                    placeholder="sqlserver://sa:pass@host:1433/db"
-                    class={cn(inp, 'font-mono text-ui-2xs')}
-                    onpaste={() => requestAnimationFrame(applyConnectionUri)}
-                    onkeydown={(e) => e.key === 'Enter' && (e.preventDefault(), applyConnectionUri())}
-                  />
-                  <button type="button" onclick={applyConnectionUri} disabled={!connectionUri.trim()}
-                    class="h-8 shrink-0 rounded-md border border-border/25 px-2.5 text-ui-2xs text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-25">
-                    Parse
-                  </button>
-                </div>
-                {#if uriHint}
-                  <p class={cn('mt-1 flex items-center gap-1 text-ui-3xs',
-                    uriHint.includes('Could') || uriHint.includes('Expected') ? 'text-destructive' : 'text-success')}>
-                    {#if uriHint.includes('Could') || uriHint.includes('Expected')}
-                      <Icon name="alert-circle" class="size-2.5" />
-                    {:else}
-                      <Icon name="check-circle-2" class="size-2.5" />
-                    {/if}
-                    {uriHint}
-                  </p>
-                {/if}
-              </div>
-
-              <div class="grid grid-cols-[1fr_110px] gap-2">
-                <div>
-                  <label for="cn-mssql-host" class={lbl}>Host</label>
-                  <Input id="cn-mssql-host" bind:value={host} class={cn(inp, flashedFields.has('host') && flashCls)} />
-                </div>
-                <div>
-                  <label for="cn-mssql-port" class={lbl}>Port</label>
-                  <Input id="cn-mssql-port" bind:value={port} type="text" inputmode="numeric" class={cn(inpNum, flashedFields.has('port') && flashCls)} />
-                </div>
-              </div>
-
-              <div>
-                <label for="cn-mssql-db" class={lbl}>Database</label>
-                <Input id="cn-mssql-db" bind:value={database} class={cn(inp, flashedFields.has('database') && flashCls)} />
-              </div>
-
-              <div class="grid grid-cols-2 gap-2">
-                <div>
-                  <label for="cn-mssql-user" class={lbl}>Username</label>
-                  <Input id="cn-mssql-user" bind:value={user} autocomplete="username" class={cn(inp, flashedFields.has('user') && flashCls)} />
-                </div>
-                <div>
-                  <label for="cn-mssql-pass" class={lbl}>Password</label>
-                  <Input id="cn-mssql-pass" bind:value={password} type="password" autocomplete="current-password" class={cn(inp, flashedFields.has('password') && flashCls)} />
-                </div>
-              </div>
-
-            <!-- ── Redis ──────────────────────────────────── -->
-            {:else if dbType === 'redis'}
-
-              <div class="grid grid-cols-[1fr_110px] gap-2">
-                <div>
-                  <label for="cn-redis-host" class={lbl}>Host</label>
-                  <Input id="cn-redis-host" bind:value={host} class={cn(inp, flashedFields.has('host') && flashCls)} />
-                </div>
-                <div>
-                  <label for="cn-redis-port" class={lbl}>Port</label>
-                  <Input id="cn-redis-port" bind:value={port} type="text" inputmode="numeric" class={cn(inpNum, flashedFields.has('port') && flashCls)} />
-                </div>
-              </div>
-
-              <div>
-                <label for="cn-redis-pass" class={lbl}>Password <span class="normal-case font-normal opacity-50">(optional)</span></label>
-                <Input id="cn-redis-pass" bind:value={password} type="password" autocomplete="current-password" class={cn(inp, flashedFields.has('password') && flashCls)} />
-              </div>
-
-              <div>
-                <label for="cn-redis-db" class={lbl}>Database index</label>
-                <Input id="cn-redis-db" bind:value={database} type="text" inputmode="numeric" min="0" max="15" class={inpNum} />
-                <p class="mt-1 text-ui-3xs text-muted-foreground/30">Logical database number (0–15).</p>
-              </div>
-
-              <label class="flex cursor-pointer select-none items-center gap-2">
-                <Checkbox id="cn-redis-tls" checked={secure} onCheckedChange={(v) => (secure = v === true)} />
-                <span class="text-ui-xs text-muted-foreground/70">Use TLS</span>
-              </label>
-
-            {/if}
-
-                </div>
-                {/key}
-
-                <!-- Advanced, full-width section at the bottom -->
-                <div class="border-t border-border/40 pt-5">
-                  <p class="mb-4 flex items-center gap-1.5 text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground/45">
-                    <Icon name="sliders-horizontal" class="size-3 shrink-0" />
-                    Advanced
-                  </p>
-                  {@render advancedFields()}
-                </div>
-
-                </div><!-- /manual column -->
-
-              {:else}
-
-                {#if isProvider}
-                  <div class="mt-6 flex flex-col gap-4">
-                    <!-- Keyed on the provider so switching fully remounts the flow:
-                         re-checks sign-in status and clears the previous provider's
-                         database list (otherwise a stale pick hits the wrong account). -->
-                    {#key dbType}
-                      <ProviderConnect
-                        provider={dbType}
-                        resolvePassword={(host, user) => saved.find((s) => s.host === host && s.user === user && s.password)?.password}
-                        resolveSavedConnection={(dbName) => {
-                          const hit = saved.find(
-                            (s) => s.provider === dbType && s.password && (s.database === dbName || s.name?.endsWith(dbName)),
-                          )
-                          return hit
-                            ? { host: hit.host ?? '', user: hit.user ?? '', password: hit.password ?? '', database: hit.database ?? dbName }
-                            : undefined
-                        }}
-                        onselect={(conn) => connectProviderConnection(conn)}
-                      />
-                    {/key}
-                    {@render advancedSection()}
-                  </div>
-                {:else if dbType === 'd1'}
-                  <div class="mt-6 flex flex-col gap-4">
-                    {#key dbType}
-                      <CloudflareLogin
-                        onselect={connectD1Selection}
-                        ondisconnect={() => { accountId = ''; databaseId = ''; apiToken = '' }}
-                        initialAccountId={accountId}
-                        initialDatabaseId={databaseId}
-                        initialDatabaseName={editingId ? name : ''}
-                      />
-                    {/key}
-
-                    <details class="group">
-                      <summary class="flex cursor-pointer list-none select-none items-center gap-1 text-ui-2xs text-muted-foreground/45 transition-colors hover:text-muted-foreground">
-                        <Icon name="chevron-right" class="size-3 transition-transform duration-150 group-open:rotate-90" />
-                        Enter account &amp; token manually
-                      </summary>
-                      <div class="mt-3 flex flex-col gap-2.5">
-                        <div class="grid grid-cols-2 gap-2">
-                          <div>
-                            <label for="cn-d1-account" class={lbl}>Account ID</label>
-                            <Input id="cn-d1-account" bind:value={accountId} placeholder="abcdef…" class={cn(inp, 'font-mono text-ui-2xs')} />
-                          </div>
-                          <div>
-                            <label for="cn-d1-dbid" class={lbl}>Database ID</label>
-                            <Input id="cn-d1-dbid" bind:value={databaseId} placeholder="xxxxxxxx-…" class={cn(inp, 'font-mono text-ui-2xs')} />
-                          </div>
-                        </div>
-                        <div>
-                          <label for="cn-d1-token" class={lbl}>API token</label>
-                          <Input id="cn-d1-token" bind:value={apiToken} type="password" class={inp} />
-                        </div>
-                      </div>
-                    </details>
-                    {@render advancedSection()}
-                  </div>
-                {/if}
-
-              {/if}
-
-            </div>
-          </div>
-        </ScrollArea>
-        {/if}
-
-        <!-- ── Footer: inline error alert, status chip, then actions ── -->
-        <div class="shrink-0 border-t border-border/15 px-8 py-4">
-          <div class="mx-auto max-w-none">
-
-            <!-- The alert itself is a toast (see failWith). What stays here is the
+          <!-- ── Footer: inline error alert, status chip, then actions ── -->
+          <div class="shrink-0 border-t border-border/15 px-8 py-4">
+            <div class="mx-auto max-w-none">
+              <!-- The alert itself is a toast (see failWith). What stays here is the
                  one-line record of it, so the driver's own words are still
                  readable after the toast has gone - without a panel that shoves
                  the form upward every time a connection fails. -->
 
-            <div class="flex items-center gap-3">
-              <!-- Status chip + subtle target preview. Step 1 has no target yet,
+              <div class="flex items-center gap-3">
+                <!-- Status chip + subtle target preview. Step 1 has no target yet,
                    so it shows nothing rather than "Ready" for a database nobody
                    has chosen. -->
-              <div class="flex min-w-0 flex-1 items-center gap-2 text-ui-2xs">
-                {#if step === 'pick'}
-                  <span class="text-ui-2xs text-muted-foreground/40">
-                    {saved.length === 0 ? 'Everything stays on this machine' : railOpen ? 'Or pick a saved connection on the left' : 'Saved connections are hidden — reopen them from the top left'}
-                  </span>
-                {:else if connecting}
-                  <span class="flex shrink-0 items-center gap-1.5 font-medium text-muted-foreground/70"><Icon name="loader-2" class="size-3 animate-spin" />Connecting…</span>
-                {:else if testing}
-                  <span class="flex shrink-0 items-center gap-1.5 font-medium text-muted-foreground/70"><Icon name="loader-2" class="size-3 animate-spin" />Testing…</span>
-                {:else if error}
-                  <span class="flex shrink-0 items-center gap-1.5 font-medium text-destructive"><span class="size-1.5 rounded-full bg-destructive"></span>Failed</span>
-                  <span
-                    class="min-w-0 flex-1 truncate font-mono text-ui-3xs text-muted-foreground/50 select-text"
-                    title={error}
-                    data-studio-selectable="text">{error}</span
-                  >
-                {:else if testOk}
-                  <span class="flex shrink-0 items-center gap-1.5 font-medium text-success"><span class="size-1.5 rounded-full bg-success"></span>Connection OK</span>
-                {:else if isDirty}
-                  <span class="flex shrink-0 items-center gap-1.5 font-medium text-warning"><span class="size-1.5 rounded-full bg-warning"></span>Unsaved</span>
-                {:else}
-                  <span class="flex shrink-0 items-center gap-1.5 text-muted-foreground/50"><span class="size-1.5 rounded-full bg-muted-foreground/30"></span>Ready</span>
-                {/if}
-                {#if step !== 'pick' && !error}
-                  <span class="min-w-0 truncate font-mono text-ui-3xs text-muted-foreground/40" title={statusTarget}>{statusTarget}</span>
-                {/if}
-              </div>
-
-              <!-- Actions, shared Button variants (Resume ghost · Stop soft-destructive
-                   · Test outline · Connect solid primary), one system app-wide. -->
-              <div class="ml-auto flex shrink-0 items-center gap-2">
-                <!-- Ending the live session belongs next to resuming it: both act
-                     on the current connection rather than on the form. -->
-                {#if activeConnectionName}
-                  <Button
-                    variant="ghost"
-                    class="max-w-[220px] text-muted-foreground hover:text-destructive"
-                    disabled={isBusy}
-                    title="Disconnect {activeConnectionName}"
-                    onclick={() => { open = false; ondisconnect() }}
-                  >
-                    <Icon name="unplug" class="size-3.5" />Disconnect
-                  </Button>
-                {/if}
-                {#if lastId && saved.find(c => c.id === lastId)}
-                  {@const lastConn = saved.find(c => c.id === lastId)}
-                  <Button variant="ghost" class="max-w-[200px] text-muted-foreground" disabled={isBusy} onclick={() => connectWith(lastConn)}>
-                    {#if connecting === lastConn.id}
-                      <Icon name="loader-2" class="size-3.5 animate-spin" />Resuming…
-                    {:else}
-                      Resume <span class="min-w-0 truncate text-foreground/80">{lastConn.name}</span>
-                    {/if}
-                  </Button>
-                {/if}
-                {#if isBusy}
-                  <Button variant="destructive" onclick={stopOp}>
-                    <Icon name="x" class="size-3.5" />Stop
-                  </Button>
-                {/if}
-                <!-- Test / Save / Connect belong to a chosen database. On step 1
-                     the only action that makes sense is resuming the last one. -->
-                {#if step === 'form'}
-                {#if canTest}
-                  <Button variant="outline" disabled={isBusy} onclick={handleTest}>
-                    {#if testing}<Icon name="loader-2" class="size-3.5 animate-spin" />Testing…{:else}Test{/if}
-                  </Button>
-                {/if}
-                <!-- Save only: persists the form and leaves the active session
-                     alone. Paired with the solid Connect button beside it. -->
-                <Button variant="outline" disabled={isBusy} onclick={handleSave}>
-                  {#if justSaved}<Icon name="check" class="size-3.5 text-success" />Saved{:else}Save{/if}
-                </Button>
-                <Button
-                  class={cn('px-5', connecting === (editingId ?? '__new__') && 'disabled:opacity-90')}
-                  disabled={isBusy}
-                  title="Connect (↵)"
-                  onclick={handleConnect}
-                >
-                  {#if connecting === (editingId ?? '__new__')}
-                    <Icon name="loader-2" class="size-3.5 animate-spin" />Connecting…
+                <div class="flex min-w-0 flex-1 items-center gap-2 text-ui-2xs">
+                  {#if step === "pick"}
+                    <span class="text-ui-2xs text-muted-foreground/40">
+                      {saved.length === 0
+                        ? "Everything stays on this machine"
+                        : railOpen
+                          ? "Or pick a saved connection on the left"
+                          : "Saved connections are hidden — reopen them from the top left"}
+                    </span>
+                  {:else if connecting}
+                    <span
+                      class="flex shrink-0 items-center gap-1.5 font-medium text-muted-foreground/70"
+                      ><Icon
+                        name="loader-2"
+                        class="size-3 animate-spin"
+                      />Connecting…</span
+                    >
+                  {:else if testing}
+                    <span
+                      class="flex shrink-0 items-center gap-1.5 font-medium text-muted-foreground/70"
+                      ><Icon
+                        name="loader-2"
+                        class="size-3 animate-spin"
+                      />Testing…</span
+                    >
+                  {:else if error}
+                    <span
+                      class="flex shrink-0 items-center gap-1.5 font-medium text-destructive"
+                      ><span class="size-1.5 rounded-full bg-destructive"
+                      ></span>Failed</span
+                    >
+                    <span
+                      class="min-w-0 flex-1 truncate font-mono text-ui-3xs text-muted-foreground/50 select-text"
+                      title={error}
+                      data-studio-selectable="text">{error}</span
+                    >
+                  {:else if testOk}
+                    <span
+                      class="flex shrink-0 items-center gap-1.5 font-medium text-success"
+                      ><span class="size-1.5 rounded-full bg-success"
+                      ></span>Connection OK</span
+                    >
+                  {:else if isDirty}
+                    <span
+                      class="flex shrink-0 items-center gap-1.5 font-medium text-warning"
+                      ><span class="size-1.5 rounded-full bg-warning"
+                      ></span>Unsaved</span
+                    >
                   {:else}
-                    {editingId ? 'Save & connect' : 'Connect'}
+                    <span
+                      class="flex shrink-0 items-center gap-1.5 text-muted-foreground/50"
+                      ><span
+                        class="size-1.5 rounded-full bg-muted-foreground/30"
+                      ></span>Ready</span
+                    >
                   {/if}
-                </Button>
-                {/if}
+                  {#if step !== "pick" && !error}
+                    <span
+                      class="min-w-0 truncate font-mono text-ui-3xs text-muted-foreground/40"
+                      title={statusTarget}>{statusTarget}</span
+                    >
+                  {/if}
+                </div>
+
+                <!-- Actions, shared Button variants (Resume ghost · Stop soft-destructive
+                   · Test outline · Connect solid primary), one system app-wide. -->
+                <div class="ml-auto flex shrink-0 items-center gap-2">
+                  <!-- Ending the live session belongs next to resuming it: both act
+                     on the current connection rather than on the form. -->
+                  {#if activeConnectionName}
+                    <Button
+                      variant="ghost"
+                      class="max-w-[220px] text-muted-foreground hover:text-destructive"
+                      disabled={isBusy}
+                      title="Disconnect {activeConnectionName}"
+                      onclick={() => {
+                        open = false;
+                        ondisconnect();
+                      }}
+                    >
+                      <Icon name="unplug" class="size-3.5" />Disconnect
+                    </Button>
+                  {/if}
+                  {#if lastId && saved.find((c) => c.id === lastId)}
+                    {@const lastConn = saved.find((c) => c.id === lastId)}
+                    <Button
+                      variant="ghost"
+                      class="max-w-[200px] text-muted-foreground"
+                      disabled={isBusy}
+                      onclick={() => connectWith(lastConn)}
+                    >
+                      {#if connecting === lastConn.id}
+                        <Icon
+                          name="loader-2"
+                          class="size-3.5 animate-spin"
+                        />Resuming…
+                      {:else}
+                        Resume <span class="min-w-0 truncate text-foreground/80"
+                          >{lastConn.name}</span
+                        >
+                      {/if}
+                    </Button>
+                  {/if}
+                  {#if isBusy}
+                    <Button variant="destructive" onclick={stopOp}>
+                      <Icon name="x" class="size-3.5" />Stop
+                    </Button>
+                  {/if}
+                  <!-- Test / Save / Connect belong to a chosen database. On step 1
+                     the only action that makes sense is resuming the last one. -->
+                  {#if step === "form"}
+                    <Button
+                      variant="outline"
+                      disabled={isBusy}
+                      onclick={handleTest}
+                    >
+                      {#if testing}<Icon
+                          name="loader-2"
+                          class="size-3.5 animate-spin"
+                        />Testing…{:else}Test{/if}
+                    </Button>
+                    <!-- Save only: persists the form and leaves the active session
+                     alone. Paired with the solid Connect button beside it. -->
+                    <Button
+                      variant="outline"
+                      disabled={isBusy}
+                      onclick={handleSave}
+                    >
+                      {#if justSaved}<Icon
+                          name="check"
+                          class="size-3.5 text-success"
+                        />Saved{:else}Save{/if}
+                    </Button>
+                    <Button
+                      class={cn(
+                        "px-5",
+                        connecting === (editingId ?? "__new__") &&
+                          "disabled:opacity-90",
+                      )}
+                      disabled={isBusy}
+                      title="Connect (↵)"
+                      onclick={handleConnect}
+                    >
+                      {#if connecting === (editingId ?? "__new__")}
+                        <Icon
+                          name="loader-2"
+                          class="size-3.5 animate-spin"
+                        />Connecting…
+                      {:else}
+                        {editingId ? "Save & connect" : "Connect"}
+                      {/if}
+                    </Button>
+                  {/if}
+                </div>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-    </div>
+      <!-- Close button, routes through the unsaved-changes guard -->
+      <button
+        type="button"
+        onclick={requestClose}
+        class="absolute right-4 top-4 inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground/40 transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted/60 hover:text-foreground active:scale-[0.92] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      >
+        <Icon name="x" class="size-4" />
+        <span class="sr-only">Close</span>
+      </button>
 
-    <!-- Close button, routes through the unsaved-changes guard -->
-    <button
-      type="button"
-      onclick={requestClose}
-      class="absolute right-4 top-4 inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground/40 transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted/60 hover:text-foreground active:scale-[0.92] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-    >
-      <Icon name="x" class="size-4" />
-      <span class="sr-only">Close</span>
-    </button>
-
-    <!-- Discard-changes confirmation (styled, blocks close until answered) -->
-    {#if confirmDiscardOpen}
-      <div class="absolute inset-0 z-[60] flex items-center justify-center bg-black/65 p-6">
-        <div class="w-full max-w-sm rounded-[10px] border border-border/40 bg-background p-5 elevate-3-rim">
-          <div class="flex items-start gap-3">
-            <div class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-warning/10 text-warning">
-              <Icon name="alert-circle" class="size-4" />
+      <!-- Discard-changes confirmation (styled, blocks close until answered) -->
+      {#if confirmDiscardOpen}
+        <div
+          class="absolute inset-0 z-[60] flex items-center justify-center bg-black/65 p-6"
+        >
+          <div
+            class="w-full max-w-sm rounded-[10px] border border-border/40 bg-background p-5 elevate-3-rim"
+          >
+            <div class="flex items-start gap-3">
+              <div
+                class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-warning/10 text-warning"
+              >
+                <Icon name="alert-circle" class="size-4" />
+              </div>
+              <div class="min-w-0">
+                <h3 class="text-ui-sm font-semibold text-foreground">
+                  Discard unsaved changes?
+                </h3>
+                <p
+                  class="mt-1 text-ui-xs leading-relaxed text-muted-foreground/70"
+                >
+                  You have unsaved edits in this connection. Closing now will
+                  lose them.
+                </p>
+              </div>
             </div>
-            <div class="min-w-0">
-              <h3 class="text-ui-sm font-semibold text-foreground">Discard unsaved changes?</h3>
-              <p class="mt-1 text-ui-xs leading-relaxed text-muted-foreground/70">
-                You have unsaved edits in this connection. Closing now will lose them.
-              </p>
+            <div class="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onclick={() => (confirmDiscardOpen = false)}
+                class="inline-flex h-8 items-center rounded-lg border border-border/40 px-3.5 text-ui-xs text-muted-foreground/80 transition-[color,background-color,border-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.97]"
+              >
+                Keep editing
+              </button>
+              <button
+                type="button"
+                onclick={discardAndClose}
+                class="inline-flex h-8 items-center rounded-lg bg-destructive px-3.5 text-ui-xs font-semibold text-white transition-[opacity,transform] duration-150 ease-out hover:opacity-90 active:scale-[0.97]"
+              >
+                Discard
+              </button>
             </div>
-          </div>
-          <div class="mt-4 flex justify-end gap-2">
-            <button type="button" onclick={() => (confirmDiscardOpen = false)}
-              class="inline-flex h-8 items-center rounded-lg border border-border/40 px-3.5 text-ui-xs text-muted-foreground/80 transition-[color,background-color,border-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.97]">
-              Keep editing
-            </button>
-            <button type="button" onclick={discardAndClose}
-              class="inline-flex h-8 items-center rounded-lg bg-destructive px-3.5 text-ui-xs font-semibold text-white transition-[opacity,transform] duration-150 ease-out hover:opacity-90 active:scale-[0.97]">
-              Discard
-            </button>
           </div>
         </div>
-      </div>
-    {/if}
+      {/if}
     </DialogPrimitive.Content>
   </DialogPrimitive.Portal>
 </DialogPrimitive.Root>
