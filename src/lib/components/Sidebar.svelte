@@ -62,9 +62,6 @@
     onrefresh = () => {},
     onnewtable = () => {},
     onnewschema = () => {},
-    /** @type {import('$lib/stores/query-history.js').QueryHistoryEntry[]} */
-    queryHistory = [],
-    onqueryselect = /** @type {(sql: string) => void} */ (() => {}),
     /** @type {import('$lib/stores/connections.js').SavedConnection | null} */
     connection = null,
     ontruncatetable = /** @type {(table: string) => void} */ (() => {}),
@@ -136,6 +133,7 @@
   let dbEntries = $state([]);
   let dbEntriesLoading = $state(false);
   let dbEntriesLoaded = $state(false);
+  let dbEntriesError = $state('');
   let tablesOpen = $state(_initial.tables ?? true);
   let viewsOpen = $state(_initial.views ?? false);
   let matViewsOpen = $state(_initial.matViews ?? false);
@@ -148,9 +146,12 @@
   async function loadDatabases() {
     if (dbEntriesLoading) return
     dbEntriesLoading = true
+    dbEntriesError = ''
     try {
       dbEntries = await listDatabases(connection)
       dbEntriesLoaded = true
+    } catch (e) {
+      dbEntriesError = String(e)
     } finally {
       dbEntriesLoading = false
     }
@@ -179,6 +180,7 @@
     connection
     dbEntries = []
     dbEntriesLoaded = false
+    dbEntriesError = ''
   })
 
   const canSwitchDb = $derived(canSwitchDatabase(connection))
@@ -431,10 +433,7 @@
         return
       }
     }
-    const next = new Set(selectedItems)
-    if (next.has(name)) next.delete(name)
-    else next.add(name)
-    selectedItems = next
+    toggleSelect(name)
     lastSelectedName = name
   }
 
@@ -550,7 +549,6 @@
   function onSidebarScroll() {
     if (!scrollContainerEl) return
     sidebarScrollTop = scrollContainerEl.scrollTop
-    measureListOffset()
   }
   /** Offset of the tables <ul> from the top of the scroll container. Re-measured
    *  whenever sections above it open/close (recent, pinned) or refs change. */
@@ -608,14 +606,17 @@
 </script>
 
 <svelte:window onkeydown={(e) => {
+  // Cheap key checks first: reading offsetParent can force layout, and this
+  // handler runs on every keystroke app-wide (Monaco, cell editors included).
+  const isFilterKey = (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key === 'f'
+  const isEscClear = e.key === 'Escape' && selectedItems.size > 0
+  if (!isFilterKey && !isEscClear) return
   // Guard: filterEl.offsetParent is null when sidebar is hidden via display:none
   if (!filterEl || !filterEl.offsetParent) return
-  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key === 'f') {
+  if (isFilterKey) {
     e.preventDefault(); filterEl.focus(); filterEl.select()
   }
-  if (e.key === 'Escape' && selectedItems.size > 0) {
-    clearSelection()
-  }
+  if (isEscClear) clearSelection()
 }} />
 
 <!-- Section count badge: shows "visible/total" when filters hide rows, else just the total. -->
@@ -639,7 +640,6 @@
     class="studio-chrome flex h-full min-w-0 flex-1 flex-col bg-sidebar text-sidebar-foreground"
     data-studio-chrome
   >
-    <!-- Traffic lights moved to TitleBar (full-width) -->
     {#if navSidebarPanel === "tables"}
     <div class="flex min-h-0 flex-1 flex-col">
 
@@ -935,6 +935,8 @@
               {#if databasesOpen}
                 {#if dbEntriesLoading && dbEntries.length === 0}
                   <p class="px-4 pb-1.5 text-ui-2xs text-muted-foreground/40">Loading…</p>
+                {:else if dbEntriesError && dbEntries.length === 0}
+                  <p class="px-4 pb-1.5 text-ui-2xs text-destructive/70">{dbEntriesError}</p>
                 {:else if filteredDbEntries.length === 0}
                   <p class="px-4 pb-1.5 text-ui-2xs text-muted-foreground/40">
                     {!dbEntriesLoaded ? 'Loading…' : lf ? 'No matching databases' : 'No other databases'}
@@ -1501,9 +1503,9 @@
                                 {/if}
                               </span>
                               <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{view.name}</span>
-                              {#if showRowCount}
-                                <span class="shrink-0 text-right font-mono text-ui-xs leading-4 tabular-nums text-muted-foreground">{formatTableRowCount(view.rowCount)}</span>
-                              {/if}
+                              <!-- No row count: plain views have no entry in the row-statistics
+                                   source, so this only ever rendered a misleading 0. Materialized
+                                   views are physical tables and keep theirs. -->
                             </button>
                           </ContextMenu.Trigger>
                           <ContextMenu.Content class="min-w-44 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
