@@ -1073,7 +1073,22 @@ async fn export_mysql(
 }
 
 fn mysql_val(row: &sqlx::mysql::MySqlRow, idx: usize) -> String {
+    // DECIMAL/NEWDECIMAL must decode as an exact Decimal *first*: the generic
+    // integer arm below would otherwise consume the value and keep only its
+    // integer part (9.99 → 9), silently corrupting the dump (same warning as
+    // mysql.rs cell_to_json). DATETIME/DATE/TIME need their own arms too —
+    // they match none of the numeric/bytes decoders and used to export as NULL.
+    let type_name = row.column(idx).type_info().name();
+    if type_name.eq_ignore_ascii_case("DECIMAL") || type_name.eq_ignore_ascii_case("NEWDECIMAL") {
+        if let Ok(v) = row.try_get::<Option<rust_decimal::Decimal>, _>(idx) {
+            return v.map_or_else(|| "NULL".into(), |d| d.to_string());
+        }
+    }
     if let Ok(v) = row.try_get::<Option<i64>, _>(idx) {
+        return v.map_or_else(|| "NULL".into(), |n| n.to_string());
+    }
+    // BIGINT UNSIGNED — the signed arm rejects the UNSIGNED flag.
+    if let Ok(v) = row.try_get::<Option<u64>, _>(idx) {
         return v.map_or_else(|| "NULL".into(), |n| n.to_string());
     }
     if let Ok(v) = row.try_get::<Option<f64>, _>(idx) {
@@ -1083,9 +1098,18 @@ fn mysql_val(row: &sqlx::mysql::MySqlRow, idx: usize) -> String {
     if let Ok(v) = row.try_get::<Option<bool>, _>(idx) {
         return v.map_or_else(|| "NULL".into(), |b| if b { "1" } else { "0" }.into());
     }
+    if let Ok(v) = row.try_get::<Option<chrono::NaiveDateTime>, _>(idx) {
+        return v.map_or_else(|| "NULL".into(), |d| format!("'{d}'"));
+    }
+    if let Ok(v) = row.try_get::<Option<chrono::NaiveDate>, _>(idx) {
+        return v.map_or_else(|| "NULL".into(), |d| format!("'{d}'"));
+    }
+    if let Ok(v) = row.try_get::<Option<chrono::NaiveTime>, _>(idx) {
+        return v.map_or_else(|| "NULL".into(), |t| format!("'{t}'"));
+    }
     if let Ok(v) = row.try_get::<Option<Vec<u8>>, _>(idx) {
         return v.map_or_else(|| "NULL".into(), |b| {
-            if let Ok(s) = String::from_utf8(b.clone()) {
+            if let Ok(s) = std::str::from_utf8(&b) {
                 format!("'{}'", s.replace('\\', "\\\\").replace('\'', "\\'"))
             } else {
                 format!("0x{}", hex::encode(b))
