@@ -8,6 +8,7 @@
   import EyeOff from "@lucide/svelte/icons/eye-off";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import Copy from "@lucide/svelte/icons/copy";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Sparkles from "@lucide/svelte/icons/sparkles";
   import Route from "@lucide/svelte/icons/route";
@@ -115,6 +116,12 @@
   let localModels = $state(/** @type {string[]} */ ([]));
   let localModelsLoading = $state(false);
   let localModelsError = $state("");
+  /** The server answered and has nothing installed — an empty state, not a
+   *  failure. Holds the command that fixes it, or "" when not applicable. */
+  let localModelsEmpty = $state("");
+  let emptyCopied = $state(false);
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let emptyCopyTimer = null;
 
   const isLocalEndpoint = $derived(
     isOllama || isOmniroute || (isCustom && /localhost|127\.0\.0\.1/.test(formBaseUrl)),
@@ -128,6 +135,29 @@
   let omniBusy = $state(/** @type {'' | 'checking' | 'installing' | 'starting'} */ (''));
   let omniError = $state("");
   let omniServing = $state(false);
+  /** Last line the backend printed. `npm i -g` can run for a minute; a spinner
+   *  with no output is indistinguishable from a hang, which is what it looked
+   *  like. The Rust side has been streaming these all along — nothing listened. */
+  let omniLog = $state("");
+  /** @type {(() => void) | null} */
+  let omniUnlisten = null;
+
+  async function watchOmniLog() {
+    if (omniUnlisten) return;
+    try {
+      const { listen } = await import("@tauri-apps/api/event");
+      omniUnlisten = await listen("omniroute-log", (/** @type {any} */ e) => {
+        const line = String(e.payload?.line ?? "").trim();
+        if (line) omniLog = line.slice(0, 160);
+      });
+    } catch { /* dev / non-Tauri: the spinner simply has no detail line */ }
+  }
+
+  onDestroy(() => {
+    omniUnlisten?.();
+    omniUnlisten = null;
+    if (emptyCopyTimer) clearTimeout(emptyCopyTimer);
+  });
   /** Port comes from the provider's own URL (20128), never a literal. Hardcoding
    *  4000 meant the status line probed a port OmniRoute never uses, so whatever
    *  else was listening there showed a green "Running" next to a failed fetch. */
@@ -147,17 +177,19 @@
   }
 
   async function installOmni() {
-    omniBusy = 'installing'; omniError = "";
+    omniBusy = 'installing'; omniError = ""; omniLog = "resolving package…";
+    void watchOmniLog();
     try {
       await omniRouteInstall();
       omniEnv = await omniRouteEnv();
     } catch (e) {
       omniError = String(/** @type {any} */ (e)?.message ?? e);
-    } finally { omniBusy = ''; }
+    } finally { omniBusy = ''; omniLog = ""; }
   }
 
   async function startOmni() {
-    omniBusy = 'starting'; omniError = "";
+    omniBusy = 'starting'; omniError = ""; omniLog = "starting gateway…";
+    void watchOmniLog();
     try {
       const url = await omniRouteStart(OMNI_PORT);
       formBaseUrl = `${url}/v1`;
@@ -166,7 +198,7 @@
       await loadLocalModels();
     } catch (e) {
       omniError = String(/** @type {any} */ (e)?.message ?? e);
-    } finally { omniBusy = ''; }
+    } finally { omniBusy = ''; omniLog = ""; }
   }
 
   // Probe once the user lands on the OmniRoute steps, so the panel opens with
@@ -179,6 +211,7 @@
     localModels = [];
     localModelsLoading = false;
     localModelsError = "";
+    localModelsEmpty = "";
   }
 
   /**
@@ -188,15 +221,19 @@
   async function loadLocalModels() {
     localModelsLoading = true;
     localModelsError = "";
+    localModelsEmpty = "";
     try {
       const ids = await fetchModelIds(formBaseUrl || (provider?.url ?? ""), formApiKey);
       localModels = ids;
       if (ids.length === 0) {
-        localModelsError = isOllama
-          ? "No models installed. Pull one first — e.g. `ollama pull llama3.1:8b`."
+        // Answered, with nothing to offer. That is not a failure and must not be
+        // dressed as one — telling someone to start a server that just replied
+        // is worse than saying nothing.
+        localModelsEmpty = isOllama
+          ? "ollama pull llama3.1:8b"
           : isOmniroute
-            ? "No models available. Connect a provider in the OmniRoute dashboard first."
-            : "The server reported no models.";
+            ? "omniroute"
+            : "";
       } else if (!ids.includes(formModel)) {
         formModel = ids[0];
       }
@@ -210,7 +247,7 @@
 
   /** Discover local models when entering step 1; retry is manual after that. */
   $effect(() => {
-    if (isLocalEndpoint && step === 1 && localModels.length === 0 && !localModelsLoading && !localModelsError) {
+    if (isLocalEndpoint && step === 1 && localModels.length === 0 && !localModelsLoading && !localModelsError && !localModelsEmpty) {
       void loadLocalModels();
     }
   });
@@ -596,7 +633,9 @@
                   </button>
                 </div>
 
-                <div class="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-ui-3xs text-muted-foreground/60">
+                <!-- min-h holds the row at one line whether or not the probe
+                     has answered, so Recheck doesn't jog everything below it. -->
+                <div class="flex min-h-4 flex-wrap items-center gap-x-3 gap-y-1 font-mono text-ui-3xs text-muted-foreground/60">
                   <span>node {omniEnv?.node ?? "—"}</span>
                   <span>npm {omniEnv?.npm ?? "—"}</span>
                   <span>omniroute {omniEnv?.omniroute ?? "—"}</span>
@@ -615,7 +654,7 @@
                 {:else if omniEnv && !omniEnv.omniroute}
                   <button
                     type="button"
-                    class="flex items-center justify-center gap-1.5 rounded-md border border-border/40 bg-background/60 py-1.5 text-ui-xs text-foreground transition-colors hover:bg-muted/40 disabled:opacity-50"
+                    class="flex h-8 items-center justify-center gap-1.5 rounded-md border border-border/40 bg-background/60 text-ui-xs text-foreground transition-colors hover:bg-muted/40 disabled:opacity-50"
                     onclick={() => void installOmni()}
                     disabled={omniBusy !== ''}
                   >
@@ -628,7 +667,7 @@
                 {:else if omniEnv && !omniServing}
                   <button
                     type="button"
-                    class="flex items-center justify-center gap-1.5 rounded-md border border-border/40 bg-background/60 py-1.5 text-ui-xs text-foreground transition-colors hover:bg-muted/40 disabled:opacity-50"
+                    class="flex h-8 items-center justify-center gap-1.5 rounded-md border border-border/40 bg-background/60 text-ui-xs text-foreground transition-colors hover:bg-muted/40 disabled:opacity-50"
                     onclick={() => void startOmni()}
                     disabled={omniBusy !== ''}
                   >
@@ -638,6 +677,16 @@
                       <Waypoints class="size-3.5" />Start the gateway
                     {/if}
                   </button>
+                {/if}
+
+                <!-- `npm i -g` runs for tens of seconds. A spinner alone is
+                     indistinguishable from a hang — which is exactly what it
+                     looked like — so show what the process is actually saying.
+                     Reserved height, so lines arriving don't push the dialog. -->
+                {#if omniBusy === 'installing' || omniBusy === 'starting'}
+                  <p class="min-h-4 truncate font-mono text-ui-3xs text-muted-foreground/50" title={omniLog}>
+                    {omniLog || "working…"}
+                  </p>
                 {/if}
 
                 {#if omniError}
@@ -672,11 +721,47 @@
               </div>
             {/if}
 
-            {#if localModelsError}
+            <!-- Reachable-but-empty is a different fact from unreachable, and
+                 conflating them is what produced "is the server running?" under
+                 a server that had just answered. Empty is neutral and carries
+                 the one command that fixes it; only unreachable is destructive. -->
+            {#if localModelsEmpty}
+              <div class="flex flex-col gap-2.5 rounded-lg border border-border/40 bg-muted/20 px-3 py-2.5">
+                <div class="flex items-center gap-2">
+                  <span class="size-1.5 shrink-0 rounded-full bg-success/70"></span>
+                  <p class="min-w-0 flex-1 text-ui-xs text-foreground/80">
+                    {isOllama ? "Ollama is running, with no models yet" : "Connected, with no models yet"}
+                  </p>
+                  <button
+                    type="button"
+                    class="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-border/50 px-2 text-ui-3xs text-muted-foreground transition-colors hover:text-foreground"
+                    onclick={() => void loadLocalModels()}
+                  ><RefreshCw class={cn("size-3", localModelsLoading && "animate-spin")} />Recheck</button>
+                </div>
+                {#if isOmniroute}
+                  <p class="text-ui-3xs text-muted-foreground/60">
+                    Connect a provider in the OmniRoute dashboard, then recheck.
+                  </p>
+                {:else}
+                  <div class="flex items-center gap-2 rounded-md border border-border/40 bg-background/60 px-2.5 py-1.5">
+                    <code class="min-w-0 flex-1 truncate font-mono text-ui-2xs text-foreground/90">{localModelsEmpty}</code>
+                    <button
+                      type="button"
+                      class="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground"
+                      aria-label="Copy command"
+                      onclick={() => { void navigator.clipboard.writeText(localModelsEmpty); emptyCopied = true; if (emptyCopyTimer) clearTimeout(emptyCopyTimer); emptyCopyTimer = setTimeout(() => (emptyCopied = false), 1200); }}
+                    >
+                      {#if emptyCopied}<Check class="size-3 text-success" />{:else}<Copy class="size-3" />{/if}
+                    </button>
+                  </div>
+                  <p class="text-ui-3xs text-muted-foreground/50">Run it in a terminal, then Recheck.</p>
+                {/if}
+              </div>
+            {:else if localModelsError}
               <!-- One line, then the fix. A wall of red with the raw fetch error
                    pasted in reads as a crash; what the user needs is which server
                    is not answering and the button that starts it. -->
-              <div class="flex flex-col gap-2 rounded-lg border border-border/40 bg-muted/20 px-3 py-2.5">
+              <div class="flex flex-col gap-2 rounded-lg border border-destructive/25 bg-destructive/5 px-3 py-2.5">
                 <div class="flex items-center gap-2">
                   <span class="size-1.5 shrink-0 rounded-full bg-destructive/70"></span>
                   <p class="min-w-0 flex-1 truncate text-ui-xs text-foreground/80" title={localModelsError}>
