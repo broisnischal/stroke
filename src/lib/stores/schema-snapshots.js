@@ -71,6 +71,8 @@ export async function captureSnapshot(connectionId, connectionLabel, dbType = 'p
     ? (/** @type {string} */ sql) => executeSqlOnConnection(savedConnection, sql)
     : (/** @type {string} */ sql) => executeSql(sql)
 
+  /** @type {unknown} */
+  let captureError = null
   try {
     if (dbType === 'postgres') {
       const colsResult = await runSql(`
@@ -120,7 +122,9 @@ export async function captureSnapshot(connectionId, connectionLabel, dbType = 'p
         const kind = String(row[1])
         const cols = /** @type {SnapshotColumn[]} */ ([])
         try {
-          const pragma = await runSql(`PRAGMA table_info(${JSON.stringify(name)})`)
+          // SQL identifier escaping: double any embedded double-quote
+          // (JSON.stringify's backslash escapes are not valid SQL).
+          const pragma = await runSql(`PRAGMA table_info("${name.replace(/"/g, '""')}")`)
           for (const cr of pragma.rows ?? []) {
             cols.push({
               name: String(cr[1]),
@@ -134,7 +138,15 @@ export async function captureSnapshot(connectionId, connectionLabel, dbType = 'p
         tables[schema].push({ name, kind, columns: cols })
       }
     }
-  } catch { /* if snapshot fails, store with empty tables */ }
+  } catch (err) { captureError = err }
+
+  // A total capture failure must not persist an empty snapshot - the Schema
+  // Timeline would diff it against a real one and report every table as
+  // removed. Partial per-table failures above are legitimate and kept.
+  if (captureError && Object.keys(tables).length === 0) {
+    const msg = captureError instanceof Error ? captureError.message : String(captureError)
+    throw new Error(`Snapshot capture failed: ${msg}`)
+  }
 
   // Apply schema filter (client-side, no extra query)
   if (schemasFilter && schemasFilter.size > 0) {
