@@ -3505,10 +3505,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let _scrollLoopDeadline = 0
   // Last position the loop actually painted - lets it skip identical frames during
   // the momentum tail / step scrolling instead of re-running a full redraw for a
-  // frame where nothing moved. Content changes (hover/edits) go through
-  // scheduleDraw(), not this loop, so skipping unchanged-position frames is safe.
+  // frame where nothing moved. Content changes (hover/edits) arrive through
+  // scheduleDraw(), which folds into this loop via _loopNeedsDraw while it runs,
+  // so skipping unchanged-position frames never drops a requested repaint.
   let _loopLastTop = -1
   let _loopLastLeft = -1
+  // Repaint requested (via scheduleDraw) while the scroll loop owns the frame -
+  // the loop draws it instead of a second rAF double-painting the same frame.
+  let _loopNeedsDraw = false
 
   function startScrollLoop() {
     _scrollLoopDeadline = performance.now() + 200
@@ -3521,6 +3525,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (!el || !_ctx || _fatalError || performance.now() > _scrollLoopDeadline) {
         _scrollLoopId = 0
         _isScrolling = false
+        // A repaint requested on the loop's last frame must not be dropped.
+        if (_loopNeedsDraw) { _loopNeedsDraw = false; scheduleDraw() }
         return
       }
       // Snap to whole CSS pixels. The canvas is sticky-pinned at the viewport's
@@ -3529,12 +3535,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       // which reads as horizontal "vibration". Integer offsets render stably.
       const st = Math.round(el.scrollTop)
       const sl = Math.round(el.scrollLeft)
-      if (st !== _loopLastTop || sl !== _loopLastLeft) {
+      if (st !== _loopLastTop || sl !== _loopLastLeft || _loopNeedsDraw) {
         _physScrollTop = st
         _scrollTop = physToVirt(st)
         _scrollLeft = sl
         _loopLastTop = st
         _loopLastLeft = sl
+        _loopNeedsDraw = false
         try {
           draw()
         } catch (err) {
@@ -5066,6 +5073,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // ProMotion) never queues multiple synchronous repaints and tears/janks.
   let _drawRafId = 0
   function scheduleDraw() {
+    // While the scroll loop owns the frame, hand the request to it instead of
+    // scheduling a second rAF - both call draw(), and letting them race painted
+    // the entire canvas twice per frame during scrolling.
+    if (_scrollLoopId) { _loopNeedsDraw = true; return }
     if (_drawRafId) return
     _drawRafId = requestAnimationFrame(() => {
       _drawRafId = 0
