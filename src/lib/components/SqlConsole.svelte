@@ -253,6 +253,10 @@
   // work n·log n times and stall on large JSON cells.
   /** @type {WeakMap<object, string>} */
   const _sortTextCache = new WeakMap()
+
+  // One collator for the whole sort - localeCompare with an options object
+  // resolves locale/options once per comparison, the slow path on big results.
+  const cellCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
   /** @param {unknown} v */
   function cellSortText(v) {
     if (v === null || typeof v !== 'object') return String(v)
@@ -275,7 +279,7 @@
       const nb = Number(sb)
       if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb
     }
-    return sa.localeCompare(sb, undefined, { numeric: true, sensitivity: 'base' })
+    return cellCollator.compare(sa, sb)
   }
 
   const currentDisplay = $derived.by(() => {
