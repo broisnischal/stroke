@@ -2464,7 +2464,10 @@ pub async fn execute_sql_on_conn(
     result
 }
 
-/// Hard row cap for ad-hoc SQL execution. Prevents OOM on tables with millions of rows.
+/// Row cap for ad-hoc SQL execution. Deliberately set beyond any realistic
+/// result (effectively uncapped — the user asked for these rows); it remains
+/// only as a last-resort circuit breaker whose "add a LIMIT" message tells the
+/// user what happened.
 const EXECUTE_SQL_MAX_ROWS: usize = 1_000_000_000;
 /// Statement timeout for ad-hoc queries (milliseconds). Generous enough for
 /// heavier scans (e.g. tables with large TOASTed JSON columns) to finish.
@@ -2533,9 +2536,13 @@ async fn execute_sql_pg(
         if i == last_idx && is_row_returning_sql(stmt) {
             // Last statement returns rows — stream and return. `executed` is the
             // statement actually run: the user's, or a text-projecting rewrite of
-            // it after a column turned out to have no binary output.
+            // it after a column turned out to have no binary output. Each row is
+            // converted to JSON as it streams in and the driver row dropped
+            // immediately — retaining the full Vec<PgRow> alongside the JSON rows
+            // would double peak memory on a large result.
             let mut executed = stmt.to_string();
-            let mut pg_rows: Vec<sqlx::postgres::PgRow> = Vec::new();
+            let mut columns: Vec<ColumnInfo> = Vec::new();
+            let mut data: Vec<Vec<Value>> = Vec::new();
             let mut capped = false;
             let mut rewritten = false;
 
@@ -2545,8 +2552,15 @@ async fn execute_sql_pg(
                 loop {
                     match stream.try_next().await {
                         Ok(Some(row)) => {
-                            pg_rows.push(row);
-                            if pg_rows.len() >= EXECUTE_SQL_MAX_ROWS {
+                            if data.is_empty() {
+                                columns = row
+                                    .columns()
+                                    .iter()
+                                    .map(|c| ColumnInfo::new(c.name(), pg_type_label(c.type_info().name())))
+                                    .collect();
+                            }
+                            data.push((0..row.len()).map(|i| cell_to_json(&row, i)).collect());
+                            if data.len() >= EXECUTE_SQL_MAX_ROWS {
                                 capped = true;
                                 break;
                             }
@@ -2571,7 +2585,8 @@ async fn execute_sql_pg(
                 };
                 executed = wrapped;
                 rewritten = true;
-                pg_rows.clear();
+                columns.clear();
+                data.clear();
                 capped = false;
                 tx = pool
                     .begin()
@@ -2584,21 +2599,6 @@ async fn execute_sql_pg(
                 .await;
             }
             let _ = tx.rollback().await;
-
-            let columns: Vec<ColumnInfo> = pg_rows
-                .first()
-                .map(|r| {
-                    r.columns()
-                        .iter()
-                        .map(|c| ColumnInfo::new(c.name(), pg_type_label(c.type_info().name())))
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            let data: Vec<Vec<Value>> = pg_rows
-                .iter()
-                .map(|row| (0..row.len()).map(|i| cell_to_json(row, i)).collect())
-                .collect();
 
             let row_count = data.len() as i64;
             return Ok(SqlResult {
@@ -2769,14 +2769,24 @@ async fn execute_sql_multi_pg(pool: &sqlx::PgPool, stmts: &[String]) -> Result<V
 
         if is_row_returning_sql(stmt) {
             let mut stream = sqlx::query(stmt).fetch(&mut *tx);
-            let mut pg_rows: Vec<sqlx::postgres::PgRow> = Vec::new();
+            // Stream-convert rows (see execute_sql_pg) so the driver rows aren't
+            // retained alongside the JSON rows.
+            let mut columns: Vec<ColumnInfo> = Vec::new();
+            let mut data: Vec<Vec<Value>> = Vec::new();
             let mut capped = false;
 
             loop {
                 match stream.try_next().await {
                     Ok(Some(row)) => {
-                        pg_rows.push(row);
-                        if pg_rows.len() >= EXECUTE_SQL_MAX_ROWS {
+                        if data.is_empty() {
+                            columns = row
+                                .columns()
+                                .iter()
+                                .map(|c| ColumnInfo::new(c.name(), pg_type_label(c.type_info().name())))
+                                .collect();
+                        }
+                        data.push((0..row.len()).map(|i| cell_to_json(&row, i)).collect());
+                        if data.len() >= EXECUTE_SQL_MAX_ROWS {
                             capped = true;
                             break;
                         }
@@ -2790,21 +2800,6 @@ async fn execute_sql_multi_pg(pool: &sqlx::PgPool, stmts: &[String]) -> Result<V
                 }
             }
             drop(stream);
-
-            let columns: Vec<ColumnInfo> = pg_rows
-                .first()
-                .map(|r| {
-                    r.columns()
-                        .iter()
-                        .map(|c| ColumnInfo::new(c.name(), pg_type_label(c.type_info().name())))
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            let data: Vec<Vec<Value>> = pg_rows
-                .iter()
-                .map(|row| (0..row.len()).map(|i| cell_to_json(row, i)).collect())
-                .collect();
 
             let row_count = data.len() as i64;
             results.push(SqlResult {

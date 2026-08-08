@@ -114,14 +114,25 @@ pub async fn execute_sql(pool: &SqlitePool, sql: &str) -> Result<SqlResult, Stri
 
     if matches!(head.as_str(), "select" | "with" | "pragma" | "explain" | "values") {
         let mut stream = sqlx::query(sql).fetch(pool);
-        let mut sqlite_rows: Vec<sqlx::sqlite::SqliteRow> = Vec::new();
+        // Convert each row to JSON as it streams in and drop the driver row
+        // immediately — retaining the full Vec<SqliteRow> alongside the JSON
+        // rows would double peak memory on a large result.
+        let mut columns: Vec<ColumnInfo> = Vec::new();
+        let mut data: Vec<Vec<Value>> = Vec::new();
         let mut capped = false;
 
         loop {
             match stream.try_next().await {
                 Ok(Some(row)) => {
-                    sqlite_rows.push(row);
-                    if sqlite_rows.len() >= EXECUTE_SQL_MAX_ROWS {
+                    if data.is_empty() {
+                        columns = row
+                            .columns()
+                            .iter()
+                            .map(|c| ColumnInfo::new(c.name(), c.type_info().name().to_lowercase()))
+                            .collect();
+                    }
+                    data.push((0..columns.len()).map(|i| cell_to_json(&row, i)).collect());
+                    if data.len() >= EXECUTE_SQL_MAX_ROWS {
                         capped = true;
                         break;
                     }
@@ -134,21 +145,6 @@ pub async fn execute_sql(pool: &SqlitePool, sql: &str) -> Result<SqlResult, Stri
             }
         }
         drop(stream);
-
-        let columns: Vec<ColumnInfo> = sqlite_rows
-            .first()
-            .map(|r| {
-                r.columns()
-                    .iter()
-                    .map(|c| ColumnInfo::new(c.name(), c.type_info().name().to_lowercase()))
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        let data: Vec<Vec<Value>> = sqlite_rows
-            .iter()
-            .map(|r| (0..columns.len()).map(|i| cell_to_json(r, i)).collect())
-            .collect();
 
         let n = data.len() as i64;
         Ok(SqlResult {

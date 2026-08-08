@@ -508,14 +508,25 @@ pub async fn execute_sql(
 
     if is_select {
         let mut stream = sqlx::query(sql).fetch(&mut *conn);
-        let mut mysql_rows: Vec<sqlx::mysql::MySqlRow> = Vec::new();
+        // Convert each row to JSON as it streams in and drop the driver row
+        // immediately — retaining the full Vec<MySqlRow> alongside the JSON rows
+        // would double peak memory on a large result.
+        let mut columns: Vec<ColumnInfo> = Vec::new();
+        let mut data: Vec<Vec<Value>> = Vec::new();
         let mut capped = false;
 
         loop {
             match stream.try_next().await {
                 Ok(Some(row)) => {
-                    mysql_rows.push(row);
-                    if mysql_rows.len() >= EXECUTE_SQL_MAX_ROWS {
+                    if data.is_empty() {
+                        columns = row
+                            .columns()
+                            .iter()
+                            .map(|c| ColumnInfo::new(c.name(), c.type_info().name().to_lowercase()))
+                            .collect();
+                    }
+                    data.push((0..row.len()).map(|i| cell_to_json(&row, i)).collect());
+                    if data.len() >= EXECUTE_SQL_MAX_ROWS {
                         capped = true;
                         break;
                     }
@@ -529,19 +540,6 @@ pub async fn execute_sql(
         }
         drop(stream);
 
-        let columns: Vec<ColumnInfo> = mysql_rows
-            .first()
-            .map(|r| {
-                r.columns()
-                    .iter()
-                    .map(|c| ColumnInfo::new(c.name(), c.type_info().name().to_lowercase()))
-                    .collect()
-            })
-            .unwrap_or_default();
-        let data: Vec<Vec<Value>> = mysql_rows
-            .iter()
-            .map(|row| (0..row.len()).map(|i| cell_to_json(row, i)).collect())
-            .collect();
         let row_count = data.len() as i64;
         return Ok(SqlResult {
             columns,
