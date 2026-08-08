@@ -721,6 +721,25 @@ pub async fn delete_table_rows(
         return Err("Cannot delete rows: table has no primary key".into());
     }
 
+    // Single-column PK: batch into `IN (…)` chunks so deleting N selected rows
+    // doesn't cost N round-trips. Composite PKs keep the per-row loop.
+    if pk_columns.len() == 1 {
+        let col = &pk_columns[0];
+        let mut total = 0u64;
+        for chunk in primary_keys.chunks(100) {
+            let placeholders = vec!["?"; chunk.len()].join(", ");
+            let sql = format!("DELETE FROM {}.{} WHERE {} IN ({placeholders})", bt(schema), bt(table), bt(col));
+            let mut q = sqlx::query(&sql);
+            for pk_map in chunk {
+                let val = pk_map.get(col).ok_or_else(|| format!("Missing primary key: {col}"))?;
+                q = bind_value(q, val);
+            }
+            let res = q.execute(pool).await.map_err(|e| format!("Delete failed: {e}"))?;
+            total += res.rows_affected();
+        }
+        return Ok(total);
+    }
+
     let where_parts: Vec<String> = pk_columns.iter().map(|c| format!("{} = ?", bt(c))).collect();
     let sql = format!("DELETE FROM {}.{} WHERE {}", bt(schema), bt(table), where_parts.join(" AND "));
 

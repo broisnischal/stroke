@@ -3212,6 +3212,24 @@ async fn delete_table_rows_remote<C: RemoteSqlite>(
     if pk.is_empty() { return Err("Cannot delete rows: table has no primary key".into()); }
 
     let tq = format!("\"{}\"", table.replace('"', "\"\""));
+
+    // Single-column PK: batch into `IN (…)` chunks — each request here is a full
+    // HTTPS round-trip to Cloudflare/Turso, so deleting N selected rows must not
+    // cost N requests. Composite PKs keep the per-row loop.
+    if pk.len() == 1 {
+        let col = &pk[0].1;
+        let qcol = format!("\"{}\"", col.replace('"', "\"\""));
+        let mut total = 0u64;
+        for chunk in primary_keys.chunks(100) {
+            let placeholders = vec!["?"; chunk.len()].join(", ");
+            let sql = format!("DELETE FROM {tq} WHERE {qcol} IN ({placeholders})");
+            let params: Vec<Value> = chunk.iter().map(|m| m.get(col).cloned().unwrap_or(Value::Null)).collect();
+            let res = cfg.run(&sql, params).await?;
+            total += res.row_count.unwrap_or(0).max(0) as u64;
+        }
+        return Ok(total);
+    }
+
     let where_parts: Vec<String> = pk.iter().map(|(_, c)| format!("\"{}\" = ?", c.replace('"', "\"\""))).collect();
     let sql = format!("DELETE FROM {tq} WHERE {}", where_parts.join(" AND "));
 
