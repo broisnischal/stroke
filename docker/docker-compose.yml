@@ -50,7 +50,9 @@ services:
       start_period: 300s
 
   postgis:
-    image: postgis/postgis:17-3.5
+    # postgis/postgis publishes amd64 only; this is the multi-arch mirror of the
+    # same build, so the fixture works natively on arm64 too.
+    image: imresamu/postgis:17-3.5
     container_name: stroke-postgis
     restart: unless-stopped
     environment:
