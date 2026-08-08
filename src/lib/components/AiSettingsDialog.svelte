@@ -16,8 +16,6 @@
   import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   import BrandIcon from "$lib/components/BrandIcon.svelte";
   import { hasBrand } from "$lib/brand-icons.js";
-  import { Button } from "$lib/components/ui/button/index.js";
-  import { Badge } from "$lib/components/ui/badge/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
@@ -220,22 +218,26 @@
   /** Dynamic models fetched from Copilot API after login */
   let copilotModels = $state(/** @type {{id:string,name:string}[]} */ ([]));
   let copilotModelsLoading = $state(false);
+  let copilotModelsError = $state("");
 
   /** Called when CopilotLogin completes with a fresh model list */
   function onCopilotConnect(models) {
     copilotModels = models;
+    copilotModelsError = "";
     if (models.length > 0 && !formModel) formModel = models[0].id;
     testState = "ok";
     testMsg = "Connected to GitHub Copilot";
   }
 
-  /** Load dynamic Copilot models when entering step 1 for the Copilot provider */
+  /** Load dynamic Copilot models when entering step 1 for the Copilot provider.
+   *  The error latch matters: fetch fails instantly when not logged in, and
+   *  without it the effect would refetch in a hot loop. Retry is manual. */
   $effect(() => {
-    if (isCopilot && step === 1 && copilotModels.length === 0 && !copilotModelsLoading) {
+    if (isCopilot && step === 1 && copilotModels.length === 0 && !copilotModelsLoading && !copilotModelsError) {
       copilotModelsLoading = true;
       fetchCopilotModels()
         .then((m) => { copilotModels = m; if (!formModel && m.length > 0) formModel = m[0].id; })
-        .catch(() => { /* fallback to static presets */ })
+        .catch((e) => { copilotModelsError = String(/** @type {any} */ (e)?.message ?? e); /* fallback to static presets */ })
         .finally(() => { copilotModelsLoading = false; });
     }
   });
@@ -257,6 +259,14 @@
     testMsg = "";
     step = 0;
     resetLocalModels();
+    copilotModels = [];
+    copilotModelsError = "";
+    freeOnly = false;
+    // Drop cached probe results so each open re-checks the real state instead
+    // of showing the previous session's env/serving status.
+    omniEnv = null;
+    omniServing = false;
+    omniError = "";
   }
 
   function handleOpenChange(/** @type {boolean} */ next) {
@@ -292,6 +302,7 @@
     formModel = presets[0]?.model ?? "";
     testState = "idle";
     resetLocalModels();
+    copilotModelsError = "";
   }
 
   function nextStep() { if (step < STEPS.length - 1) step++; }
@@ -310,6 +321,11 @@
       // Adding a model is a finished errand - the new model is already active,
       // so bouncing back to the list just asks for a second dismissal.
       if (isNew) open = false;
+    } catch (e) {
+      // Stay on the form and surface the failure in the step-2 banner —
+      // otherwise the spinner just stops and the click appears to do nothing.
+      testState = "error";
+      testMsg = String(/** @type {any} */ (e)?.message ?? e).slice(0, 200);
     } finally { saving = false; }
   }
 
