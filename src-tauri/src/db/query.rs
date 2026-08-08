@@ -1412,14 +1412,14 @@ pub async fn get_table_rows(
     match require_conn(&state)? {
         ActiveConnection::Sqlite(pool) => {
             return super::sqlite::get_table_rows(
-                &pool, &table, limit, offset, search, search_case_sensitive, sort_column, sort_direction, filters, nulls_order,
+                &pool, &table, limit, offset, search, search_case_sensitive, sort_column, sort_direction, filters, include_meta, nulls_order,
             ).await;
         }
         ActiveConnection::D1(cfg) => {
-            return get_table_rows_remote(&cfg, &table, limit, offset, search, search_case_sensitive, sort_column, sort_direction, filters, nulls_order).await;
+            return get_table_rows_remote(&cfg, &table, limit, offset, search, search_case_sensitive, sort_column, sort_direction, filters, include_meta, nulls_order).await;
         }
         ActiveConnection::LibSql(cfg) => {
-            return get_table_rows_remote(&cfg, &table, limit, offset, search, search_case_sensitive, sort_column, sort_direction, filters, nulls_order).await;
+            return get_table_rows_remote(&cfg, &table, limit, offset, search, search_case_sensitive, sort_column, sort_direction, filters, include_meta, nulls_order).await;
         }
         ActiveConnection::Mysql(pool) => {
             return super::mysql::get_table_rows(
@@ -2921,60 +2921,81 @@ async fn get_table_rows_remote<C: RemoteSqlite>(
     sort_column: Option<String>,
     sort_direction: Option<String>,
     filters: Option<Vec<RowFilter>>,
+    // When false, skip the PRAGMA round-trips (each is a full HTTPS request to
+    // Cloudflare/Turso) — the frontend already holds PK/FK metadata on repeat
+    // fetches (pagination/sort/filter/live) and keeps its cached values.
+    include_meta: bool,
     nulls_order: Option<String>,
 ) -> Result<TableRows, String> {
     let t0 = std::time::Instant::now();
     let tq = format!("\"{}\"", table.replace('"', "\"\""));
 
-    // ── Phase 1: PRAGMA queries — run concurrently ────────────────────────────
-    // Both are independent so we fire them at the same time. The shared HTTP
-    // client reuses the pooled TLS connection for the second request.
+    // ── Phase 1: PRAGMA queries ───────────────────────────────────────────────
+    // table_info is also needed on metadata-skipping fetches whenever a search
+    // or filter has to be built across the column list.
     let pragma_sql = format!("PRAGMA table_info({tq})");
     let fk_sql     = format!("PRAGMA foreign_key_list({tq})");
-    let (pragma_res, fk_res) = tokio::join!(
-        cfg.run(&pragma_sql, vec![]),
-        cfg.run(&fk_sql, vec![]),
-    );
-    let pragma = pragma_res?;
-    let fk_res = fk_res?;
+    let has_search  = search.as_ref().is_some_and(|s| !s.is_empty());
+    let has_filters = filters.as_ref().is_some_and(|f| !f.is_empty());
 
-    let name_idx = pragma.columns.iter().position(|c| c.name == "name").unwrap_or(1);
-    let pk_idx   = pragma.columns.iter().position(|c| c.name == "pk").unwrap_or(5);
+    let extract_col_names = |pragma: &SqlResult| -> Vec<String> {
+        let name_idx = pragma.columns.iter().position(|c| c.name == "name").unwrap_or(1);
+        pragma.rows.iter()
+            .filter_map(|r| r.get(name_idx)?.as_str().map(|s| s.to_string()))
+            .collect()
+    };
 
-    let col_names: Vec<String> = pragma.rows.iter()
-        .filter_map(|r| r.get(name_idx)?.as_str().map(|s| s.to_string()))
-        .collect();
+    let (col_names, primary_key, foreign_keys) = if include_meta {
+        // Both are independent so we fire them at the same time. The shared HTTP
+        // client reuses the pooled TLS connection for the second request.
+        let (pragma_res, fk_res) = tokio::join!(
+            cfg.run(&pragma_sql, vec![]),
+            cfg.run(&fk_sql, vec![]),
+        );
+        let pragma = pragma_res?;
+        let fk_res = fk_res?;
 
-    let mut pk: Vec<(i64, String)> = pragma.rows.iter().filter_map(|r| {
-        let pos = r.get(pk_idx)?.as_i64().unwrap_or(0);
-        if pos == 0 { return None; }
-        let n = r.get(name_idx)?.as_str()?.to_string();
-        Some((pos, n))
-    }).collect();
-    pk.sort_by_key(|(p, _)| *p);
-    let primary_key: Vec<String> = pk.into_iter().map(|(_, n)| n).collect();
+        let name_idx = pragma.columns.iter().position(|c| c.name == "name").unwrap_or(1);
+        let pk_idx   = pragma.columns.iter().position(|c| c.name == "pk").unwrap_or(5);
 
-    let mut fk_map: std::collections::BTreeMap<i64, ForeignKeyInfo> = Default::default();
-    if let (Some(id_col), Some(tbl_col), Some(from_col), Some(to_col)) = (
-        fk_res.columns.iter().position(|c| c.name == "id"),
-        fk_res.columns.iter().position(|c| c.name == "table"),
-        fk_res.columns.iter().position(|c| c.name == "from"),
-        fk_res.columns.iter().position(|c| c.name == "to"),
-    ) {
-        for r in &fk_res.rows {
-            let id = r.get(id_col).and_then(|v| v.as_i64()).unwrap_or(0);
-            let ref_tbl = r.get(tbl_col).and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let from = r.get(from_col).and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let to = r.get(to_col).and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let e = fk_map.entry(id).or_insert(ForeignKeyInfo {
-                columns: vec![], referenced_schema: "main".to_string(),
-                referenced_table: ref_tbl, referenced_columns: vec![],
-            });
-            e.columns.push(from);
-            e.referenced_columns.push(to);
+        let col_names = extract_col_names(&pragma);
+
+        let mut pk: Vec<(i64, String)> = pragma.rows.iter().filter_map(|r| {
+            let pos = r.get(pk_idx)?.as_i64().unwrap_or(0);
+            if pos == 0 { return None; }
+            let n = r.get(name_idx)?.as_str()?.to_string();
+            Some((pos, n))
+        }).collect();
+        pk.sort_by_key(|(p, _)| *p);
+        let primary_key: Vec<String> = pk.into_iter().map(|(_, n)| n).collect();
+
+        let mut fk_map: std::collections::BTreeMap<i64, ForeignKeyInfo> = Default::default();
+        if let (Some(id_col), Some(tbl_col), Some(from_col), Some(to_col)) = (
+            fk_res.columns.iter().position(|c| c.name == "id"),
+            fk_res.columns.iter().position(|c| c.name == "table"),
+            fk_res.columns.iter().position(|c| c.name == "from"),
+            fk_res.columns.iter().position(|c| c.name == "to"),
+        ) {
+            for r in &fk_res.rows {
+                let id = r.get(id_col).and_then(|v| v.as_i64()).unwrap_or(0);
+                let ref_tbl = r.get(tbl_col).and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let from = r.get(from_col).and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let to = r.get(to_col).and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let e = fk_map.entry(id).or_insert(ForeignKeyInfo {
+                    columns: vec![], referenced_schema: "main".to_string(),
+                    referenced_table: ref_tbl, referenced_columns: vec![],
+                });
+                e.columns.push(from);
+                e.referenced_columns.push(to);
+            }
         }
-    }
-    let foreign_keys: Vec<ForeignKeyInfo> = fk_map.into_values().collect();
+        (col_names, primary_key, fk_map.into_values().collect())
+    } else if has_search || has_filters {
+        let pragma = cfg.run(&pragma_sql, vec![]).await?;
+        (extract_col_names(&pragma), Vec::new(), Vec::new())
+    } else {
+        (Vec::new(), Vec::new(), Vec::new())
+    };
 
     // ── WHERE / ORDER build ───────────────────────────────────────────────────
     // Each entry: (conjunct — None for first, Some("AND"/"OR") for rest, condition SQL)

@@ -192,6 +192,9 @@ pub async fn get_table_rows(
     sort_column: Option<String>,
     sort_direction: Option<String>,
     filters: Option<Vec<crate::db::RowFilter>>,
+    // When false, skip the primary-key/foreign-key PRAGMA round-trips — the
+    // frontend already holds them for repeat fetches (pagination/sort/filter/live).
+    include_meta: bool,
     // Null placement ("first"/"last"); None keeps the historical NULLS LAST default.
     nulls_order: Option<String>,
 ) -> Result<TableRows, String> {
@@ -378,8 +381,16 @@ pub async fn get_table_rows(
         .map(|r| (0..columns.len()).map(|i| cell_to_json(r, i)).collect())
         .collect();
 
-    let primary_key = fetch_primary_key(pool, table).await.unwrap_or_default();
-    let foreign_keys = fetch_foreign_keys(pool, table).await.unwrap_or_default();
+    // Two extra PRAGMA statements serialized on the single-connection pool —
+    // skip them on metadata-skipping fetches; the frontend keeps its cached values.
+    let (primary_key, foreign_keys) = if include_meta {
+        (
+            fetch_primary_key(pool, table).await.unwrap_or_default(),
+            fetch_foreign_keys(pool, table).await.unwrap_or_default(),
+        )
+    } else {
+        (Vec::new(), Vec::new())
+    };
 
     Ok(TableRows {
         columns,
