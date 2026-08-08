@@ -4,8 +4,9 @@
 
 **A fast, minimal desktop database client.**
 
-Connect to PostgreSQL, MySQL, SQLite, Turso/LibSQL, Cloudflare D1, ClickHouse, DuckDB, SQL Server, and Redis —
-browse schemas, edit data, write SQL, visualize results, and let AI tools talk to your database through a built-in MCP server.
+Eleven engines and four one-click providers, in one window. Browse and edit data, write SQL, draw
+diagrams and maps of what you find, back it up, and let your AI tools query it through a built-in
+MCP server.
 
 [Download](#install) · [Features](#features) · [Build from source](#build-from-source) · [Website](https://stroke.click)
 
@@ -33,11 +34,13 @@ Built with **Rust + Svelte** — a native backend paired with a reactive UI — 
 
 | Database | Notes |
 |----------|-------|
-| **PostgreSQL** | Full schema, enums, sequences, triggers, indexes |
-| **MySQL / MariaDB** | Standard host/port connections |
+| **PostgreSQL** | Full schema, enums, sequences, triggers, indexes, extensions |
+| **MySQL** | Standard host/port connections |
+| **MariaDB** | Its own driver, not a MySQL alias |
+| **CockroachDB** | Distributed SQL, Postgres wire protocol |
 | **SQLite** | Local file or `:memory:` |
 | **Turso / LibSQL** | Serverless SQLite at the edge |
-| **Cloudflare D1** | OAuth sign-in or API token |
+| **Cloudflare D1** | OAuth sign-in or API token; local `wrangler` databases are found automatically |
 | **ClickHouse** | Columnar OLAP over HTTP(S) |
 | **DuckDB** | Embedded analytical database (local file) |
 | **Microsoft SQL Server** | Host/port connections |
@@ -54,9 +57,12 @@ Sign in and pick a database — no connection string to assemble:
 | **Prisma Postgres** | Serverless Postgres |
 | **PlanetScale** | MySQL-compatible serverless |
 
-**CockroachDB** and other PostgreSQL-compatible databases connect through the PostgreSQL option.
+Other PostgreSQL-compatible databases connect through the PostgreSQL option.
 
 Connect directly or through an **SSH tunnel** for databases behind a bastion host or private network.
+Stroke also **finds databases already running on your machine** — Docker containers, local
+Postgres/MySQL instances, and the SQLite files your project's ORM config points at — so a local
+connection is usually one click, not a form.
 
 ---
 
@@ -184,14 +190,79 @@ Spin up a local PostgreSQL or MySQL container in one click without leaving the a
 
 Install community and first-party extensions to add new panels, query tools, or integrations.
 
+### Cell viewers
+
+Values that don't fit a grid cell get a real viewer instead of being truncated into nonsense:
+
+- **JSON / JSONB** — a collapsible tree, with search and a full-screen editor
+- **Vectors** (`pgvector`) — dimension, norm, mean, standard deviation, a per-dimension strip
+  and a value histogram, so you can see whether an embedding is shaped the way you expect
+- **Geometry** (PostGIS) — the shape drawn on a pannable, zoomable map, with type, SRID and
+  vertex list. Offline by default; tiled basemaps are one click away
+- **Arrays**, long text, and oversized values (multi-MB cells are capped before they reach the
+  UI, so one big blob can't freeze the window)
+
+### Views of the same rows
+
+Every table tab can render its rows as a **grid**, **JSON**, a **record card**, plain **text**,
+a **chart**, or an **ER diagram** — switchable per tab, with a default you can set globally.
+
+### Map view
+
+Spatial columns drawn on a map: every PostGIS layer in the database, clustered when there are
+too many features to draw individually, filterable with the same operators as the grid. The
+basemap ships with the app, so the default view makes no network requests.
+
+### Instance insights
+
+What the server itself is doing — version, uptime, connections, replication state, cache hit
+rates, and the configuration values that matter. Settings that are safe to change can be edited
+in place.
+
+### Database objects
+
+Every enum, sequence, trigger, function and index in one browsable list, rather than scattered
+across the schema tree.
+
+### Notebooks
+
+Interleave SQL cells and Markdown in a `.sqlnb` file — run cells independently, keep the results
+with the prose. Useful for an analysis you want to hand to someone else.
+
+### Codegen
+
+Read the live schema back out as **Prisma** or **Drizzle** source. Introspects once and re-renders
+locally, so switching between the two is instant even on a large schema.
+
+### Split panes
+
+Drag a tab to either edge to split the window. Compare two tables, or keep a query beside the
+rows it returns.
+
+### Activity log
+
+Every statement the app has run, with duration and outcome — including the ones it ran on your
+behalf, so nothing the UI does is invisible.
+
 ### Read-only mode
 
 Lock any connection so writes are blocked entirely — safe for browsing production.
 
 ### AI chat
 
-An AI assistant with direct database access that runs queries, explains schemas, generates SQL, and renders diagrams and charts inline.
-Works with any OpenAI-compatible API — configure a base URL, model, and API key in **Settings**.
+An assistant with real database access: it runs queries, reads schemas, explains what it found,
+and renders charts and diagrams inline. Destructive statements always ask first.
+
+- **Free tier built in** — a shared daily allowance, no key required, nothing to configure
+- **Your own key** — any OpenAI-compatible provider (OpenAI, Anthropic, Google, OpenRouter, …)
+- **Local models** — Ollama and LM Studio, including Ollama Cloud models that run on their
+  hardware with nothing to download. The picker lists what your server actually has, so it can
+  never suggest a model you haven't installed
+- **GitHub Copilot** — sign in with your existing subscription
+- **OmniRoute** — install and start the local gateway from inside the app
+- **Skills** — Markdown files that shape how the agent works on your schema
+- **Web search** — off by default; when on, the agent can look up an error code or a function's
+  syntax that your database can't answer
 
 ### MCP server
 
@@ -288,7 +359,8 @@ chmod +x stroke_*_amd64.AppImage
 
 Pick a database type and fill in your credentials. Hit **Test connection**, then **Connect**.
 
-- **PostgreSQL / MySQL** — host, port, database, user, password, optional SSL. Paste a full connection string and click **Parse** to fill the form automatically.
+- **Discovered automatically** — Docker containers, local Postgres/MySQL, and the SQLite or D1 database your project's ORM config points at. Pick it from the list; no form.
+- **PostgreSQL / MySQL / MariaDB / CockroachDB** — host, port, database, user, password, optional SSL. Paste a full connection string and click **Parse** to fill the form automatically.
 - **SQLite / DuckDB** — point to a database file (`.db`, `.sqlite`, `.duckdb`), or use `:memory:` for SQLite.
 - **Turso / LibSQL** — database URL and optional auth token.
 - **Cloudflare D1** — sign in with Cloudflare, or enter Account ID, Database ID, and an API token.
