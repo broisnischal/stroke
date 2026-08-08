@@ -63,7 +63,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     isEditableType,
     parseCellInput,
     valueToEditString,
-    isLikelyAutoColumn,
+    isAutoColumn,
+    insertOmitBehaviour,
     buildInsertPayload,
     isDateOnlyType,
     isTimeOnlyType,
@@ -76,6 +77,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     shouldUseDateTimePicker,
   } from "$lib/insert-field.js";
   import { cellLinkHref, cellUrlType } from "$lib/cell-display.js";
+  import InsertValuePicker from "./InsertValuePicker.svelte";
   import {
     buildUpdateStatements,
     buildDeleteStatements,
@@ -1696,10 +1698,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       }
       newRowDrafts = drafts
       // Focus first non-auto column (all columns, including hidden ones)
-      const first = columns.find(c => {
-        const dt = c.dataType ?? c.data_type ?? ''
-        return !isLikelyAutoColumn(dt, c.name, primaryKey)
-      })
+      const first = columns.find((c) => !isAutoColumn(c, primaryKey))
       newRowFocusCol = first?.name ?? columns[0]?.name ?? null
       // Scroll to top so the draft row is visible
       tableContainer?.scrollTo({ top: 0, behavior: 'smooth' })
@@ -1772,10 +1771,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Shift+Tab moves left. Enter at the last cell submits.
     if (e.key === 'Tab' || e.key === 'Enter') {
       e.preventDefault()
-      const editableCols = columns.filter(c => {
-        const dt = c.dataType ?? c.data_type ?? ''
-        return !isLikelyAutoColumn(dt, c.name, primaryKey)
-      })
+      const editableCols = columns.filter((c) => !isAutoColumn(c, primaryKey))
       if (!editableCols.length) return
       const curIdx = editableCols.findIndex(c => c.name === newRowFocusCol)
       if (e.shiftKey) {
@@ -5773,7 +5769,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                   {/if}
                   {#each columns as col (col.name)}
                     {@const dt = col.dataType ?? col.data_type ?? ''}
-                    {@const isAuto = isLikelyAutoColumn(dt, col.name, primaryKey)}
+                    {@const omit = insertOmitBehaviour(col, primaryKey)}
+                    {@const isAuto = omit === 'auto'}
+                    {@const blankLabel = omit === 'default' ? 'default' : omit === 'null' ? 'NULL' : 'Required'}
                     {@const enumValues = getColumnEnumValues(col)}
                     {@const isBoolean = isBooleanType(dt)}
                     {@const isDateTime = shouldUseDateTimePicker(dt, col.name)}
@@ -5782,52 +5780,41 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                     {@const colWidth = widthForColumn(col.name, dt)}
                     <div class="flex shrink-0 items-center overflow-hidden border-r border-border/20 px-2" style="width:{colWidth}px">
                       {#if isAuto}
-                        <span class="select-none font-mono text-ui-sm text-muted-foreground/35 italic">auto</span>
+                        <!-- Naming what the database will do is the whole point:
+                             "Required" on an identity column asks for a value
+                             that would be wrong to send. Integer generated
+                             columns are counters; anything else is an
+                             expression, and the two read differently. -->
+                        <span class="inline-flex select-none items-center gap-1 text-muted-foreground/45">
+                          <KeyRound class="size-3 shrink-0 opacity-60" />
+                          <span class="truncate font-mono text-ui-2xs">
+                            {dt.toLowerCase().includes('int') || dt.toLowerCase().includes('serial')
+                              ? 'auto-increment'
+                              : 'generated'}
+                          </span>
+                        </span>
                       {:else if enumValues}
-                        <Select.Root
-                          type="single"
+                        <InsertValuePicker
+                          colName={col.name}
+                          options={enumValues}
                           value={newRowDrafts[col.name] ?? ''}
-                          onValueChange={(v) => setNewRowDraft(col.name, v ?? '')}
-                        >
-                          <Select.Trigger
-                            data-new-row-input={col.name}
-                            disabled={insertSaving}
-                            onfocus={() => (newRowFocusCol = col.name)}
-                            class="h-7 w-full min-w-0 rounded-md border-0 bg-transparent px-1 py-0 font-mono text-ui-sm text-foreground shadow-none focus-visible:ring-0 disabled:opacity-50"
-                          >
-                            <span data-slot="select-value" class={cn('truncate', !newRowDrafts[col.name] && 'text-muted-foreground/50')}>
-                              {newRowDrafts[col.name] || (col.nullable ? 'NULL / default' : 'Select…')}
-                            </span>
-                          </Select.Trigger>
-                          <Select.Content align="start" sideOffset={4} class="max-h-64 p-1">
-                            <Select.Item value="" label={col.nullable ? 'NULL / default' : 'Select…'} class="py-1.5 pl-2.5 pr-8 font-mono text-ui-sm text-muted-foreground">{col.nullable ? 'NULL / default' : 'Select…'}</Select.Item>
-                            {#each enumValues as opt (opt)}
-                              <Select.Item value={opt} label={opt} class="py-1.5 pl-2.5 pr-8 font-mono text-ui-sm">{opt}</Select.Item>
-                            {/each}
-                          </Select.Content>
-                        </Select.Root>
+                          emptyLabel={blankLabel}
+                          placeholder={blankLabel}
+                          disabled={insertSaving}
+                          onchange={(v) => setNewRowDraft(col.name, v)}
+                          onfocus={() => (newRowFocusCol = col.name)}
+                        />
                       {:else if isBoolean}
-                        <Select.Root
-                          type="single"
+                        <InsertValuePicker
+                          colName={col.name}
+                          options={['true', 'false']}
                           value={newRowDrafts[col.name] ?? ''}
-                          onValueChange={(v) => setNewRowDraft(col.name, v ?? '')}
-                        >
-                          <Select.Trigger
-                            data-new-row-input={col.name}
-                            disabled={insertSaving}
-                            onfocus={() => (newRowFocusCol = col.name)}
-                            class="h-7 w-full min-w-0 rounded-md border-0 bg-transparent px-1 py-0 font-mono text-ui-sm text-foreground shadow-none focus-visible:ring-0 disabled:opacity-50"
-                          >
-                            <span data-slot="select-value" class={cn('truncate', !newRowDrafts[col.name] && 'text-muted-foreground/50')}>
-                              {newRowDrafts[col.name] || (col.nullable ? 'NULL / default' : 'Default')}
-                            </span>
-                          </Select.Trigger>
-                          <Select.Content align="start" sideOffset={4} class="min-w-[8rem] p-1">
-                            <Select.Item value="" label={col.nullable ? 'NULL / default' : 'Default'} class="py-1.5 pl-2.5 pr-8 font-mono text-ui-sm text-muted-foreground">{col.nullable ? 'NULL / default' : 'Default'}</Select.Item>
-                            <Select.Item value="true" label="true" class="py-1.5 pl-2.5 pr-8 font-mono text-ui-sm">true</Select.Item>
-                            <Select.Item value="false" label="false" class="py-1.5 pl-2.5 pr-8 font-mono text-ui-sm">false</Select.Item>
-                          </Select.Content>
-                        </Select.Root>
+                          emptyLabel={blankLabel}
+                          placeholder={blankLabel}
+                          disabled={insertSaving}
+                          onchange={(v) => setNewRowDraft(col.name, v)}
+                          onfocus={() => (newRowFocusCol = col.name)}
+                        />
                       {:else if isDateTime}
                         <DateTimePicker
                           colName={col.name}
@@ -5861,7 +5848,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                           data-new-row-input={col.name}
                           type="text"
                           disabled={insertSaving}
-                          placeholder={col.nullable ? 'NULL or value' : 'Required'}
+                          placeholder={blankLabel}
                           class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none placeholder:text-muted-foreground/40 disabled:opacity-50"
                           value={newRowDrafts[col.name] ?? ''}
                           oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
@@ -5977,13 +5964,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                       </Select.Trigger>
                       <Select.Content align="start" sideOffset={2} class="max-h-64 min-w-[var(--bits-select-anchor-width)] p-1">
                         {#if eNullable}
-                          <Select.Item value="" label="NULL" class="py-1.5 pl-2.5 pr-8 font-mono text-ui-sm text-muted-foreground">NULL</Select.Item>
+                          <Select.Item value="" label="NULL" class="font-mono text-ui-xs text-muted-foreground">NULL</Select.Item>
                         {/if}
                         {#if editingCell?.original && !eEnum.includes(editingCell.original)}
-                          <Select.Item value={editingCell.original} label={editingCell.original} class="py-1.5 pl-2.5 pr-8 font-mono text-ui-sm">{editingCell.original}</Select.Item>
+                          <Select.Item value={editingCell.original} label={editingCell.original} class="font-mono text-ui-xs">{editingCell.original}</Select.Item>
                         {/if}
                         {#each eEnum as option (option)}
-                          <Select.Item value={option} label={option} class="py-1.5 pl-2.5 pr-8 font-mono text-ui-sm">{option}</Select.Item>
+                          <Select.Item value={option} label={option} class="font-mono text-ui-xs">{option}</Select.Item>
                         {/each}
                       </Select.Content>
                     </Select.Root>
