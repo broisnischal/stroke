@@ -132,6 +132,19 @@ export function rowsToJsonl(columns, rows) {
 }
 
 /**
+ * Convert positional rows to plain objects keyed by column name. Column names
+ * are resolved once up front (columns may be `{ name }` objects or strings),
+ * not once per row.
+ * @param {Array<{ name?: string } | string>} columns
+ * @param {unknown[][]} rows
+ * @returns {Record<string, unknown>[]}
+ */
+export function rowsToObjects(columns, rows) {
+  const names = columns.map((c) => /** @type {string} */ ((typeof c === 'object' && c !== null ? c.name : undefined) ?? c))
+  return rows.map((row) => Object.fromEntries(names.map((name, i) => [name, row[i]])))
+}
+
+/**
  * Convert columns + rows to a JSON array of objects.
  * @param {Array<{ name: string }>} columns
  * @param {unknown[][]} rows

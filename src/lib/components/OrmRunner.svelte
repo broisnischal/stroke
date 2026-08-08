@@ -27,6 +27,7 @@
   import JsonViewer from "./JsonViewer.svelte";
   import ResizeHandle from "./ResizeHandle.svelte";
   import { cn } from "$lib/utils.js";
+  import { rowsToObjects } from "$lib/export.js";
   import { evalDrizzleQuery, evalPrismaQuery } from "$lib/orm-builder.js";
   import {
     clampSqlEditorHeight,
@@ -176,16 +177,7 @@
 
   // ── JSON output ───────────────────────────────────────────────────────────
   const rowObjects = $derived(
-    columns.length > 0 && rows.length > 0
-      ? rows.map((row) =>
-          Object.fromEntries(
-            /** @type {any[]} */ (columns).map((col, i) => [
-              col.name ?? col,
-              /** @type {any[]} */ (row)[i],
-            ]),
-          ),
-        )
-      : [],
+    columns.length > 0 && rows.length > 0 ? rowsToObjects(columns, rows) : [],
   );
 
   const jsonText = $derived(

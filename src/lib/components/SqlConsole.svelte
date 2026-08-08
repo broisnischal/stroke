@@ -1,6 +1,6 @@
 <script>
   import FieldSelect from './FieldSelect.svelte';
-  import { rowsToCsv, rowsToJson, rowsToSql, rowsToTsv, rowsToMarkdown, rowsToJsonl, saveExportFile, buildExportFilename } from '$lib/export.js'
+  import { rowsToCsv, rowsToJson, rowsToSql, rowsToTsv, rowsToMarkdown, rowsToJsonl, rowsToObjects, saveExportFile, buildExportFilename } from '$lib/export.js'
   import Play from "@lucide/svelte/icons/play";
   import WifiOff from "@lucide/svelte/icons/wifi-off";
   import Braces from "@lucide/svelte/icons/braces";
@@ -363,27 +363,13 @@
 
   const rowObjects = $derived(
     currentDisplay.columns.length > 0 && currentDisplay.rows.length > 0
-      ? currentDisplay.rows.map((row) =>
-          Object.fromEntries(
-            /** @type {any[]} */ (currentDisplay.columns).map((col, i) => [col.name ?? col, /** @type {any[]} */ (row)[i]])
-          )
-        )
+      ? rowsToObjects(currentDisplay.columns, currentDisplay.rows)
       : []
   )
 
   const jsonText = $derived(rowObjects.length > 0 ? JSON.stringify(rowObjects, null, 2) : '[]')
 
   // ── Export helpers ──────────────────────────────────────────────────────────
-  /** Escape a value for CSV (RFC 4180). */
-  function _csvCell(v) {
-    if (v === null || v === undefined) return ''
-    const s = typeof v === 'object' ? JSON.stringify(v) : String(v)
-    if (s.includes(',') || s.includes('"') || s.includes('\n') || s.includes('\r')) {
-      return '"' + s.replace(/"/g, '""') + '"'
-    }
-    return s
-  }
-
   /** Unified export via the shared generators + native Save dialog.
    * @param {'csv'|'json'|'sql'|'tsv'|'md'|'jsonl'} format */
   async function exportAs(format) {
