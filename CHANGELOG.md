@@ -9,7 +9,9 @@ All notable changes to Stroke are listed here, newest first.
 ### New Features
 
 #### Data
-- **Geometry cells have a viewer.** A PostGIS column used to render as a wall of EWKT in a grid cell and open a one-line text input for editing. It now shows the geometry type and SRID (and the coordinates, for a point), and clicking through opens a real viewer — the same treatment vectors already had.
+- **Geometry cells have a viewer, and it's a real map.** A PostGIS column used to render as a wall of EWKT in a grid cell and open a one-line text input for editing. It now shows the geometry type and SRID in the grid, and clicking through opens a map you can pan and zoom — because "where is that" is the question you opened the value for, and it has an answer at a scale you have to choose. Offline by default (the country outlines ship with the app); the tiled basemaps are one click away and named with their provider, since turning one on sends the location to a third party.
+- **Inserting a row says what the database will do.** An identity column was labelled "Required" — backwards, since sending a value there overrides the sequence. No type string can identify one (a Postgres `serial` reports as `bigint`), so the catalog is asked directly, and each blank field now says `auto-increment`, `generated`, `default`, `NULL` or `Required`.
+- **Enum and boolean fields on the insert row take typing.** Type to filter, arrows to move, Enter to pick — and leaving the field empty is a real, captioned choice rather than a blank you have to guess at.
 - **Vectors show their standard deviation and value distribution.** The existing strip is indexed by dimension, which tells you where the spikes are but not whether the embedding is shaped right. The histogram reads roughly gaussian around zero for a healthy dense embedding; spikes and heavy tails are the signal that something is off.
 - **The status bar says how many rows you have selected.**
 
