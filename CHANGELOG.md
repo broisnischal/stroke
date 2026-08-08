@@ -6,14 +6,7 @@ All notable changes to Stroke are listed here, newest first.
 
 ## [1.21.0] - 2026-08-08
 
-### Changes
-- perf, correctness and UI sweep (#75)
-
-
-## [Unreleased]
-
 ### New Features
-
 #### Data
 - **Geometry cells have a viewer, and it's a real map.** A PostGIS column used to render as a wall of EWKT in a grid cell and open a one-line text input for editing. It now shows the geometry type and SRID in the grid, and clicking through opens a map you can pan and zoom — because "where is that" is the question you opened the value for, and it has an answer at a scale you have to choose. Offline by default (the country outlines ship with the app); the tiled basemaps are one click away and named with their provider, since turning one on sends the location to a third party.
 - **Inserting a row says what the database will do.** An identity column was labelled "Required" — backwards, since sending a value there overrides the sequence. No type string can identify one (a Postgres `serial` reports as `bigint`), so the catalog is asked directly, and each blank field now says `auto-increment`, `generated`, `default`, `NULL` or `Required`.
@@ -23,37 +16,30 @@ All notable changes to Stroke are listed here, newest first.
 - **Anonymous usage data**, off with one switch in Settings. It reports which features get used, the app version and the OS. It does not report queries, table or database names, connection details, or anything about the data you browse — events are names, not payloads.
 - **Vectors show their standard deviation and value distribution.** The existing strip is indexed by dimension, which tells you where the spikes are but not whether the embedding is shaped right. The histogram reads roughly gaussian around zero for a healthy dense embedding; spikes and heavy tails are the signal that something is off.
 - **The status bar says how many rows you have selected.**
-
 #### Connections
 - **Reconnecting lands on the schema you were last using** instead of resetting to `public`.
 - **The window title says which database you are in.** It preferred the file path, so a local D1 connection showed its whole miniflare path.
 - **Closing an edited connection form asks first** rather than throwing the edit away.
-
 #### AI
 - **The agent can read SQLite, D1 and libSQL schemas from the sidebar.** `describe_table`, `get_schema` and the schema cache all queried `information_schema`, which those engines don't have — every call failed and the agent worked blind.
 - **Stopping generation actually stops the download.** Aborting closed the browser side only, so a local model server kept generating the whole completion into nothing. `Esc` now stops it too, as the button has always claimed.
-
 ### Bug Fixes
-
 #### Data integrity
 - **MySQL inserts read back the right row.** `LAST_INSERT_ID()` is connection-scoped, and it was being read on a separate pooled connection — so whenever background work was also using the pool, the re-fetch came back with `0` or another statement's id.
 - **MySQL backups no longer corrupt decimals, dates and large ids.** `DECIMAL` was consumed by the integer decoder and written with its fraction dropped (`9.99` → `9`); `DATETIME`/`DATE`/`TIME` matched no decoder at all and exported as `NULL`; `BIGINT UNSIGNED` was rejected by the signed decoder.
 - **Restoring a MySQL dump can no longer write into the wrong database.** The dump's per-schema `USE …;` directives are connection-scoped, and the statements depending on them could land on a different pooled connection.
 - **A Postgres backup says what it couldn't export.** Every secondary-object query ended in `unwrap_or_default()`, so a permission error produced a dump silently missing its enums, sequences, foreign keys, views, functions or triggers.
 - **A failed schema capture is no longer stored as an empty snapshot** — the Schema Timeline diffed it against a real one and reported every table as removed.
-
 #### Storage
 - **Deleting a connection deletes its data.** Its recents, charts, dashboards, diagrams, per-table preferences, SQL draft, query history, saved queries, conversations and schema snapshots all stayed behind forever. Enough deleted connections eventually exhausted the storage quota, at which point unrelated saves started failing.
 - **An edit made just before switching connection is no longer lost** — or, worse, written under the new connection's key.
 - **Saved column order is scoped to the connection.** Two databases with a `public.users` shared one order.
 - **Switching database drops the cached table structure.** The caches are keyed by `schema.table` alone, so the old database's columns were served for same-named tables on the new one.
-
 #### Connections & providers
 - **Cloudflare and provider sign-in errors are visible.** A failed D1 listing left the picker showing "No D1 databases in this account" over a real error, and closing the dialog mid-authorize never released the callback port — so the next attempt hit "Callback port in use" until the five-minute timeout expired.
 - A saved connection with no port no longer defaults to `5432` regardless of engine.
 - The one-click fixes on a connection error now work on the ClickHouse, SQL Server and Redis forms, whose fields use prefixed ids.
 - Live mode stops polling a connection you have switched away from, instead of erroring every second forever.
-
 #### Interface
 - The keyboard-shortcuts dialog opens with an empty search box, focused, so the `⌘F`/`Esc` keys it advertises work without clicking into it first.
 - Leaving the search tab, or closing the command palette mid-question, stops the background queries it had running.
@@ -67,7 +53,6 @@ All notable changes to Stroke are listed here, newest first.
 - **OmniRoute finds your Node.** A `.app` is started by launchd with a minimal `PATH`, so Homebrew, nvm, fnm and Volta installs were invisible and the app told people who plainly had Node that they had none.
 - **The table toolbar stops clipping when zoomed in.** The pager ran off the right edge past about 250% zoom because the search box could not shrink.
 - **The status bar sits on one rhythm.** Three different control heights shared the row, so the spacing read as uneven however the gaps were set.
-
 ### Performance
 - **Reading cells is substantially cheaper on every engine.** Decoding tried each type in order, and every mismatch makes the driver allocate a formatted error — up to 12 per cell on a Postgres text column, 9 on MySQL. Common types are now routed by name first.
 - **Large results no longer double their peak memory.** Rows were collected from the driver and then mapped into JSON, so both copies were resident at once.
@@ -79,7 +64,6 @@ All notable changes to Stroke are listed here, newest first.
 - **Infinite scroll keeps its rows out of the reactive proxy** — the grid indexes `rows[row][col]` per visible cell per frame, and each of those reads was going through a proxy trap.
 - The AI agent fetches SQLite table info in parallel instead of one round-trip per table before it can answer.
 - Also: the schema timeline caps its diff matrix, the data diff debounces its filter and yields while comparing, the Redis keyspace bounds its `TYPE` fan-out, query history finds the last statement with a cursor instead of loading the whole log, and the sidebar stops forcing layout on every keystroke in the app.
-
 ### Changes
 - Release builds abort on panic instead of unwinding — every command returns a `Result`, so a panic is a bug rather than a recoverable error.
 - The OmniRoute proxy is killed when the app quits; it used to outlive it.
