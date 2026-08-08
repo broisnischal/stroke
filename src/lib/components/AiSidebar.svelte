@@ -269,14 +269,33 @@
   }
 
   // ── Scroll helpers ────────────────────────────────────────────────────────
-  function onScrollAreaScroll() {
-    if (!scrollEl) return
-    const distFromBottom = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight
-    userScrolledUp = distFromBottom > 80
+  /** Sentinel pinned to the end of the transcript; see the observer below. */
+  let bottomSentinel = $state(/** @type {HTMLElement | null} */ (null))
+
+  // "Am I at the bottom?" comes from an IntersectionObserver on the sentinel
+  // rather than reading scrollHeight/scrollTop in a scroll handler - with
+  // content-visibility:auto on the message rows, each such read forces layout
+  // of the off-screen subtrees it was meant to skip (same fix as AiChat).
+  $effect(() => {
+    const root = scrollEl
+    const target = bottomSentinel
+    if (!root || !target || typeof IntersectionObserver !== 'function') return
+    const io = new IntersectionObserver(
+      (entries) => { userScrolledUp = !entries[entries.length - 1].isIntersecting },
+      { root, rootMargin: '0px 0px 80px 0px', threshold: 0 },
+    )
+    io.observe(target)
+    return () => io.disconnect()
+  })
+
+  /** Scroll the transcript to its end without measuring it (no scrollHeight read). */
+  function pinToBottom() {
+    if (bottomSentinel) bottomSentinel.scrollIntoView({ block: 'end' })
+    else if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight
   }
   function jumpToBottom() {
     userScrolledUp = false
-    if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight
+    pinToBottom()
   }
 
   // ── Conversations ─────────────────────────────────────────────────────────
@@ -301,7 +320,7 @@
     apiHistory = /** @type {import('$lib/ai.js').ApiMessage[]} */ (latest.apiHistory ?? [])
     rawApiHistory = /** @type {import('$lib/ai.js').ApiMessage[]} */ (latest.apiHistory ?? [])
     await tick()
-    if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight
+    pinToBottom()
   }
 
   async function persistCurrent() {
@@ -332,7 +351,7 @@
     rawApiHistory = /** @type {import('$lib/ai.js').ApiMessage[]} */ (conv.apiHistory ?? [])
     error = ''; historyOpen = false
     await tick()
-    if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight
+    pinToBottom()
   }
 
   async function removeConversation(/** @type {string} */ id) {
@@ -1028,6 +1047,9 @@
           </div>
         {/if}
 
+        <!-- Watched by the observer above to decide whether the transcript is
+             pinned to the bottom. A zero-height element is enough. -->
+        <div bind:this={bottomSentinel} aria-hidden="true" class="h-px w-full shrink-0"></div>
       </div>
     {/if}
 
