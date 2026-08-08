@@ -7,6 +7,8 @@
  * (and the wordcloud plugin) into the startup bundle. See loadEcharts() in those files.
  */
 
+import { resolveColor } from '$lib/geo-basemap.js'
+
 /** @typedef {{ name: string, dataType?: string, data_type?: string }} ColInfo */
 /** @typedef {unknown[][]} Rows */
 
@@ -210,6 +212,49 @@ function shadowPointer(isDark) {
 }
 
 /** @param {boolean} isDark @param {boolean} [noTitle] */
+/**
+ * Chart text and rules, taken from the theme actually in use.
+ *
+ * These used to be `isDark ? 'rgba(255,255,255,…)' : 'rgba(0,0,0,…)'`, which
+ * knows only two themes. The app ships many — each with its own foreground,
+ * muted foreground and border — so on any of them the chart text was a generic
+ * white or black wash that matched nothing around it. Reading the real tokens
+ * is what makes a chart look like it belongs to the theme it is sitting in.
+ *
+ * The alpha values are kept: axis labels should be quieter than body text, and
+ * grid lines quieter still. What changes is the hue they are quiet *in*.
+ *
+ * Falls back to the old constants when there is no DOM to read (tests, SSR).
+ * @param {boolean} isDark
+ */
+function themeInk(isDark) {
+  const fallback = {
+    text: isDark ? 'rgba(255,255,255,0.50)' : 'rgba(0,0,0,0.42)',
+    axis: isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.45)',
+    line: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)',
+    strong: isDark ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.78)',
+    bg: isDark ? 'rgba(20,20,23,0.97)' : 'rgba(255,255,255,0.97)',
+  }
+  if (typeof document === 'undefined' || typeof getComputedStyle !== 'function') return fallback
+  try {
+    const cs = getComputedStyle(document.documentElement)
+    const rgb = (/** @type {string} */ name) => resolveColor(cs.getPropertyValue(name).trim())
+    const muted = rgb('--muted-foreground')
+    const fg = rgb('--foreground')
+    const bg = rgb('--popover') || rgb('--background')
+    if (!muted || !fg) return fallback
+    return {
+      text: `rgba(${muted},0.85)`,
+      axis: `rgba(${muted},0.95)`,
+      line: `rgba(${muted},0.15)`,
+      strong: `rgba(${fg},0.92)`,
+      bg: `rgba(${bg},0.97)`,
+    }
+  } catch {
+    return fallback
+  }
+}
+
 function baseOption(isDark, noTitle = false) {
   const textColor = isDark ? 'rgba(255,255,255,0.50)' : 'rgba(0,0,0,0.42)'
   const lineColor = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)'
@@ -222,7 +267,7 @@ function baseOption(isDark, noTitle = false) {
       borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
       borderWidth: 1,
       padding: [8, 12],
-      textStyle: { color: isDark ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.78)', fontSize: 12, fontFamily: 'Inter Variable, Inter, ui-sans-serif, system-ui, sans-serif' },
+      textStyle: { color: themeInk(isDark).strong, fontSize: 12, fontFamily: 'Inter Variable, Inter, ui-sans-serif, system-ui, sans-serif' },
       extraCssText: 'border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.20);',
       formatter(params) {
         const items = Array.isArray(params) ? params : [params]
