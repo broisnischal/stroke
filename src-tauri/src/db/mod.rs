@@ -9,6 +9,7 @@ pub mod insights;
 pub mod libsql;
 pub mod live;
 pub mod mysql;
+pub mod redis;
 mod query;
 mod schema;
 pub mod sql_util;
@@ -16,8 +17,8 @@ pub mod sqlite;
 pub mod ssh_tunnel;
 
 pub use connection::{
-    connect, connect_clickhouse, connect_d1, connect_duckdb, connect_libsql, connect_mssql, connect_mysql, connect_sqlite, disconnect,
-    test_clickhouse_connection, test_connection, test_d1_connection, test_duckdb_connection, test_libsql_connection, test_mssql_connection, test_mysql_connection, test_sqlite_connection,
+    connect, connect_clickhouse, connect_d1, connect_duckdb, connect_libsql, connect_mssql, connect_mysql, connect_redis, connect_sqlite, disconnect,
+    test_clickhouse_connection, test_connection, test_d1_connection, test_duckdb_connection, test_libsql_connection, test_mssql_connection, test_mysql_connection, test_redis_connection, test_sqlite_connection,
     ActiveConnection, AnyConnectionConfig, ConnectionConfig, D1Config, DbState, LibSqlConfig, SqliteConfig,
 };
 pub use explain::{explain_pg, explain_mysql, explain_sqlite, ExplainResult};

@@ -5264,12 +5264,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               class="relative"
               style="width:{resizingColName ? Math.max(totalContentWidth, _scrollLeft + _viewportWidth) : totalContentWidth}px; height:{spacerHeight}px"
             >
-              <!-- Inline insert-row form -->
+              <!-- Inline insert-row form. Pinned below the header with
+                   position:sticky so the compositor holds it at viewport-y
+                   HEADER_H (zero per-frame JS) — the old absolute + JS
+                   top:{HEADER_H + _physScrollTop} recomputed layout every scroll
+                   frame, which lagged the native scroll and produced the vertical
+                   jitter + ghost row. No `left` inset, so it still scrolls
+                   horizontally in lock-step with the columns via native scroll. -->
               {#if newRowDrafts}
                 <div
                   role="none"
-                  class="absolute left-0 z-20 flex border-b border-border/30 bg-panel ring-1 ring-inset ring-emerald-500/25"
-                  style="top:{HEADER_H + _physScrollTop}px; height:{ROW_HEIGHT}px; width:{insertRowTotalWidth}px"
+                  class="sticky z-20 flex border-b border-border/30 bg-panel ring-1 ring-inset ring-emerald-500/25"
+                  style="top:{HEADER_H}px; height:{ROW_HEIGHT}px; width:{insertRowTotalWidth}px"
                   onkeydown={onNewRowKeydown}
                 >
                   {#if showRowExpand}

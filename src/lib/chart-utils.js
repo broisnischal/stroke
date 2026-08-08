@@ -100,10 +100,33 @@ export function getRequiredAxes(chartType) {
   }
 }
 
-const PALETTE = [
+// Default categorical palette. The lead color is used for single-series charts;
+// buildOption replaces it with the live theme accent (see the `accent` param) so
+// charts follow whatever theme/primary color the app is set to.
+const DEFAULT_PALETTE = [
   '#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#3b82f6',
   '#a855f7', '#14b8a6', '#f97316', '#ec4899', '#64748b',
 ]
+
+/** Resolve the app's --primary token to a concrete rgb() string, so every chart
+ * across the app (table view, SQL editor, AI charts, previews) follows the active
+ * theme without each caller wiring it up. Returns '' when --primary can't resolve
+ * to a real color (unset, or unparseable in this engine — in which case the probe
+ * inherits the foreground and would paint bars white); callers then fall back to
+ * DEFAULT_PALETTE. */
+export function resolveChartAccent() {
+  if (typeof document === 'undefined') return ''
+  try {
+    const probe = document.createElement('span')
+    probe.style.cssText = 'position:absolute;visibility:hidden;color:var(--primary)'
+    document.body.appendChild(probe)
+    const c = getComputedStyle(probe).color
+    probe.style.color = 'var(--stroke-nonexistent-token)'
+    const fg = getComputedStyle(probe).color
+    probe.remove()
+    return (!c || c === fg) ? '' : c
+  } catch { return '' }
+}
 
 /**
  * Format a raw value for tooltip display.
@@ -211,6 +234,68 @@ function aggDataMap(rows, xi, yi) {
   return map
 }
 
+/** Aggregate rows into {name,value} pairs by x-key (summing y), sorted by value
+ * descending. Used by part-to-whole charts (pie/donut/funnel) so duplicate
+ * categories collapse into one slice instead of rendering repeated slices. */
+function aggPairs(rows, xi, yi) {
+  return Object.entries(aggDataMap(rows, xi, yi))
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value)
+}
+
+/** Max/min over an array WITHOUT spreading — `Math.max(...arr)` throws
+ * `RangeError: Maximum call stack size exceeded` once the array passes ~100k
+ * elements, which is exactly the large-result case we must survive. */
+function arrMax(arr, seed = -Infinity) {
+  let m = seed
+  for (let i = 0; i < arr.length; i++) { const v = arr[i]; if (v > m) m = v }
+  return m
+}
+function arrMin(arr, seed = Infinity) {
+  let m = seed
+  for (let i = 0; i < arr.length; i++) { const v = arr[i]; if (v < m) m = v }
+  return m
+}
+
+/** Build a strict, acyclic hierarchy (array with a single root) for tree /
+ * dendrogram from a name column (xi) and parent column (gi). The old inline
+ * build let one node attach to many parents (shared object refs) and had no
+ * cycle guard, so A→B / B→A crashed ECharts. Here each node is deduped by name,
+ * attached to at most one parent, self/cycle edges are skipped, and the node
+ * count is capped. */
+function buildTreeData(rows, xi, gi) {
+  const MAX_NODES = 2000
+  /** @type {Map<string, { name: string, children: any[] }>} */
+  const nodeMap = new Map()
+  for (const r of rows) {
+    const name = String(r[xi] ?? '')
+    if (!name || nodeMap.has(name)) continue
+    nodeMap.set(name, { name, children: [] })
+    if (nodeMap.size >= MAX_NODES) break
+  }
+  const parentOf = new Map()
+  const attached = new Set()
+  if (gi >= 0) {
+    for (const r of rows) {
+      const name = String(r[xi] ?? '')
+      const parent = String(r[gi] ?? '')
+      if (!name || !parent || parent === name || attached.has(name)) continue
+      if (!nodeMap.has(name) || !nodeMap.has(parent)) continue
+      // Cycle guard: parent must not already be a descendant of `name`.
+      let cur = parent, cyclic = false
+      while (cur !== undefined) { if (cur === name) { cyclic = true; break } cur = parentOf.get(cur) }
+      if (cyclic) continue
+      nodeMap.get(parent).children.push(nodeMap.get(name))
+      parentOf.set(name, parent)
+      attached.add(name)
+    }
+  }
+  const roots = [...nodeMap.values()].filter((n) => !attached.has(n.name))
+  if (roots.length === 0) return [{ name: 'Root', children: [...nodeMap.values()] }]
+  if (roots.length === 1) return roots
+  return [{ name: 'Root', children: roots }]
+}
+
 /** Detect if an array of strings looks like timestamps */
 /** Exported so chart previews in ChartsPage can re-apply the formatter after JSON round-trip */
 export function isTimestampAxis(xData) {
@@ -243,6 +328,7 @@ function categoryXAxis(isDark, xData) {
       ...axisStyle(isDark).axisLabel,
       rotate: !isTs && xData.length > 12 ? 30 : 0,
       overflow: isTs ? 'none' : 'truncate',
+      ellipsis: '…',
       width: isTs ? undefined : 80,
       ...(isTs ? { formatter: fmtAxisLabel } : {}),
     },
@@ -250,8 +336,20 @@ function categoryXAxis(isDark, xData) {
 }
 
 /** @param {boolean} isDark */
+/** Compact axis-tick number: 1_200_000 → "1.2M", 3500 → "3.5k". Keeps long value
+ * axes (counts, sizes) readable instead of printing raw 7-digit numbers. */
+function fmtCompact(v) {
+  if (typeof v !== 'number' || !isFinite(v)) return String(v)
+  const a = Math.abs(v)
+  if (a >= 1e9) return (v / 1e9).toFixed(a % 1e9 === 0 ? 0 : 1) + 'B'
+  if (a >= 1e6) return (v / 1e6).toFixed(a % 1e6 === 0 ? 0 : 1) + 'M'
+  if (a >= 1e3) return (v / 1e3).toFixed(a % 1e3 === 0 ? 0 : 1) + 'k'
+  return String(v)
+}
+
 function valueYAxis(isDark) {
-  return { type: 'value', ...axisStyle(isDark) }
+  const s = axisStyle(isDark)
+  return { type: 'value', ...s, axisLabel: { ...s.axisLabel, formatter: fmtCompact } }
 }
 
 /**
@@ -270,7 +368,13 @@ function valueYAxis(isDark) {
  * }} cfg
  * @returns {import('echarts').EChartsOption}
  */
-export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, isDark = false, title, noTitle = false }) {
+export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, isDark = false, title, noTitle = false, accent = '' }) {
+  // Theme-aware palette: lead with the live accent (resolved from the app's
+  // --primary token by the caller) so single-series charts and accents follow
+  // the current theme; the rest of the categorical ramp stays fixed. Shadows the
+  // module DEFAULT_PALETTE so every PALETTE[...] reference below is themed.
+  const accentColor = accent || resolveChartAccent()
+  const PALETTE = accentColor ? [accentColor, ...DEFAULT_PALETTE.slice(1)] : DEFAULT_PALETTE
   const n = rows.length
   const base = { ...baseOption(isDark, noTitle), ...animOpts(n) }
   const xi = columns.findIndex((c) => c.name === xCol)
@@ -284,7 +388,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
 
   // ── Pie ────────────────────────────────────────────────────────────────────
   if (type === 'pie') {
-    const data = rows.map((r) => ({ name: String(r[xi] ?? ''), value: Number(r[yi]) || 0 }))
+    const data = aggPairs(rows, xi, yi)
     return {
       ...base,
       grid: undefined,
@@ -296,7 +400,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
 
   // ── Donut ──────────────────────────────────────────────────────────────────
   if (type === 'donut') {
-    const data = rows.map((r) => ({ name: String(r[xi] ?? ''), value: Number(r[yi]) || 0 }))
+    const data = aggPairs(rows, xi, yi)
     return {
       ...base,
       grid: undefined,
@@ -308,9 +412,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
 
   // ── Funnel ─────────────────────────────────────────────────────────────────
   if (type === 'funnel') {
-    const data = rows
-      .map((r) => ({ name: String(r[xi] ?? ''), value: Number(r[yi]) || 0 }))
-      .sort((a, b) => b.value - a.value)
+    const data = aggPairs(rows, xi, yi)
     return {
       ...base,
       grid: undefined,
@@ -330,7 +432,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
   // ── Gauge ──────────────────────────────────────────────────────────────────
   if (type === 'gauge') {
     const val = rows.length > 0 ? Number(rows[0][yi]) || 0 : 0
-    const maxVal = Math.max(...rows.map((r) => Number(r[yi]) || 0), 100)
+    const maxVal = Math.max(arrMax(rows.map((r) => Number(r[yi]) || 0)), 100)
     return {
       ...base,
       grid: undefined,
@@ -382,7 +484,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
       Number(r[yi]) || 0,
       zi >= 0 ? Number(r[zi]) || 0 : 10,
     ])
-    const maxZ = Math.max(...data.map((d) => d[2]), 1)
+    const maxZ = Math.max(arrMax(data.map((d) => d[2])), 1)
     return {
       ...base,
       xAxis: { type: 'value', name: xCol, nameLocation: 'middle', nameGap: 28, nameTextStyle: base.textStyle, ...axisStyle(isDark) },
@@ -440,7 +542,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
       },
       xAxis: { type: 'category', data: xVals, splitArea: { show: true }, ...axisStyle(isDark) },
       yAxis: { type: 'category', data: yVals, splitArea: { show: true }, ...axisStyle(isDark) },
-      visualMap: { min: 0, max: Math.max(...data.map((d) => d[2])), calculable: true, orient: 'horizontal', left: 'center', bottom: 4, textStyle: base.textStyle },
+      visualMap: { min: 0, max: arrMax(data.map((d) => d[2])), calculable: true, orient: 'horizontal', left: 'center', bottom: 4, textStyle: base.textStyle },
       series: [{ type: 'heatmap', data, label: { show: data.length < 100 } }],
       grid: { ...base.grid, bottom: 70 },
       splitLine: { lineStyle: { color: lineColor } },
@@ -454,10 +556,10 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
     const numCols = columns.filter((c) => c.name !== xCol && colType(c) === 'number')
     const indicators = numCols.map((c) => ({
       name: c.name,
-      max: Math.max(...rows.map((r) => {
+      max: Math.max(arrMax(rows.map((r) => {
         const i = columns.findIndex((cc) => cc.name === c.name)
         return Number(r[i]) || 0
-      }), 1) * 1.2,
+      })), 1) * 1.2,
     }))
     const seriesData = rows.map((r) => ({
       name: String(r[xi] ?? ''),
@@ -490,8 +592,8 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
     const vals = rows.map((r) => Number(r[yi >= 0 ? yi : xi]) || 0).filter(isFinite)
     const bins = 20
     if (vals.length === 0) return { ...base, series: [] }
-    const min = Math.min(...vals)
-    const max = Math.max(...vals)
+    const min = arrMin(vals)
+    const max = arrMax(vals)
     const step = (max - min) / bins || 1
     const counts = Array(bins).fill(0)
     vals.forEach((v) => {
@@ -543,7 +645,10 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
 
   // ── Word Cloud ─────────────────────────────────────────────────────────────
   if (type === 'word-cloud') {
-    const data = rows.map((r) => ({ name: String(r[xi] ?? ''), value: Number(r[yi]) || 1 }))
+    // Aggregate duplicate words (like pie/donut) and cap to the top 150 by
+    // weight — the layout is a synchronous canvas packer, so thousands of words
+    // would freeze the UI.
+    const data = aggPairs(rows, xi, yi).slice(0, 150).map((d) => ({ name: d.name, value: d.value || 1 }))
     return {
       ...base,
       grid: undefined,
@@ -558,7 +663,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
         rotationRange: [-45, 45],
         rotationStep: 45,
         drawOutOfBound: false,
-        textStyle: { color: PALETTE.concat(PALETTE) },
+        textStyle: { color: (p) => PALETTE[(p?.dataIndex ?? 0) % PALETTE.length] },
         emphasis: { textStyle: { fontWeight: 'bold' } },
         data,
       }],
@@ -606,27 +711,9 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
 
   // ── Tree ───────────────────────────────────────────────────────────────────
   if (type === 'tree') {
-    // Build adjacency list from xCol=name, groupCol=parent
-    /** @type {Map<string, { name: string, children: any[] }>} */
-    const nodeMap = new Map()
-    rows.forEach((r) => {
-      const name = String(r[xi] ?? '')
-      if (!nodeMap.has(name)) nodeMap.set(name, { name, children: [] })
-    })
-    /** @type {any[]} */
-    const roots = []
-    rows.forEach((r) => {
-      const name = String(r[xi] ?? '')
-      const parent = gi >= 0 ? String(r[gi] ?? '') : ''
-      const node = nodeMap.get(name)
-      if (!node) return
-      if (parent && nodeMap.has(parent)) {
-        nodeMap.get(parent)?.children.push(node)
-      } else {
-        roots.push(node)
-      }
-    })
-    const treeData = roots.length > 0 ? roots : [{ name: 'Root', children: [...nodeMap.values()] }]
+    // xCol=name, groupCol=parent. buildTreeData dedups, enforces a single parent
+    // per node, guards cycles, and caps node count.
+    const treeData = buildTreeData(rows, xi, gi)
     return {
       ...base,
       grid: undefined,
@@ -652,27 +739,9 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
 
   // ── Dendrogram ─────────────────────────────────────────────────────────────
   if (type === 'dendrogram') {
-    // Same adjacency-list data as 'tree', rendered as a radial dendrogram
-    /** @type {Map<string, { name: string, children: any[] }>} */
-    const nodeMap = new Map()
-    rows.forEach((r) => {
-      const name = String(r[xi] ?? '')
-      if (!nodeMap.has(name)) nodeMap.set(name, { name, children: [] })
-    })
-    /** @type {any[]} */
-    const roots = []
-    rows.forEach((r) => {
-      const name = String(r[xi] ?? '')
-      const parent = gi >= 0 ? String(r[gi] ?? '') : ''
-      const node = nodeMap.get(name)
-      if (!node) return
-      if (parent && nodeMap.has(parent)) {
-        nodeMap.get(parent)?.children.push(node)
-      } else {
-        roots.push(node)
-      }
-    })
-    const treeData = roots.length > 0 ? roots : [{ name: 'Root', children: [...nodeMap.values()] }]
+    // Same hierarchy as 'tree' (deduped, single-parent, cycle-guarded, capped),
+    // rendered as a radial dendrogram.
+    const treeData = buildTreeData(rows, xi, gi)
     return {
       ...base,
       grid: undefined,
@@ -861,17 +930,35 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
 
   // ── Sankey ─────────────────────────────────────────────────────────────────
   if (type === 'sankey') {
+    // Sankey needs a distinct Target (group) column; without it every link's
+    // target is empty and nothing renders.
+    if (gi < 0) return {}
+    // Aggregate duplicate source→target pairs. The old code emitted one link PER
+    // ROW, so N rows produced N overlapping links (8k rows → 8k links = the
+    // unreadable hairball). Sum values per unique pair instead.
+    const linkMap = new Map()
+    for (const r of rows) {
+      const s = String(r[xi] ?? ''), t = String(r[gi] ?? '')
+      if (!s || !t || s === t) continue
+      const key = s + '␟' + t
+      linkMap.set(key, (linkMap.get(key) ?? 0) + (Number(r[yi]) || 1))
+    }
+    // Strongest links first; drop the reverse edge of any 2-cycle (ECharts sankey
+    // requires a DAG and throws on cycles) and cap the count so it stays legible.
+    const seenPair = new Set()
+    const links = [...linkMap.entries()]
+      .map(([key, value]) => { const [source, target] = key.split('␟'); return { source, target, value } })
+      .sort((a, b) => b.value - a.value)
+      .filter((l) => {
+        if (seenPair.has(l.target + '␟' + l.source)) return false
+        seenPair.add(l.source + '␟' + l.target)
+        return true
+      })
+      .slice(0, 200)
     const nodeSet = new Set()
-    rows.forEach((r) => {
-      nodeSet.add(String(r[xi] ?? ''))
-      if (gi >= 0) nodeSet.add(String(r[gi] ?? ''))
-    })
+    for (const l of links) { nodeSet.add(l.source); nodeSet.add(l.target) }
     const nodes = [...nodeSet].map((name) => ({ name }))
-    const links = rows.map((r) => ({
-      source: String(r[xi] ?? ''),
-      target: gi >= 0 ? String(r[gi] ?? '') : '',
-      value: Number(r[yi]) || 1,
-    })).filter((l) => l.source && l.target && l.source !== l.target)
+    if (nodes.length === 0) return {}
     return {
       ...base,
       grid: undefined,
@@ -995,7 +1082,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
     const categories = rows.map((r) => String(r[xi] ?? ''))
     const actuals = rows.map((r) => Number(r[yi]) || 0)
     const targets = rows.map((r) => zi >= 0 ? Number(r[zi]) || 0 : 0)
-    const maxVal = Math.max(...actuals, ...targets, 1)
+    const maxVal = Math.max(arrMax(actuals), arrMax(targets), 1)
     return {
       ...base,
       tooltip: { ...base.tooltip, trigger: 'axis', axisPointer: { type: 'shadow' } },
@@ -1028,13 +1115,24 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
   if (type === 'bar-horizontal') {
     const xData = sortedXData(rows, xi)
     const dataMap = aggDataMap(rows, xi, yi)
+    // Categories are on the Y axis; past ~25 they overflow vertically. Add a
+    // vertical scroll/zoom (slider on the right + wheel/drag inside) so many
+    // categories stay usable instead of cramming — the generic dataZoom only
+    // covers the horizontal x-axis and this branch never reaches it.
+    const needsZoom = xData.length > 25
+    const dataZoom = needsZoom ? [
+      { type: 'slider', yAxisIndex: 0, right: 4, width: 12, start: 0, end: (25 / xData.length) * 100,
+        borderColor: 'transparent', fillerColor: 'rgba(127,127,127,0.14)', handleStyle: { color: PALETTE[0] }, textStyle: { color: 'transparent' } },
+      { type: 'inside', yAxisIndex: 0 },
+    ] : []
     return {
       ...base,
       tooltip: { ...base.tooltip, trigger: 'axis', axisPointer: { type: 'shadow' } },
       xAxis: { type: 'value', ...axisStyle(isDark) },
       yAxis: { type: 'category', data: xData, ...axisStyle(isDark) },
       series: [{ type: 'bar', name: yCol, data: xData.map((x) => dataMap[x] ?? null), itemStyle: { color: PALETTE[0], borderRadius: [0, 3, 3, 0] }, barMaxWidth: 32 }],
-      grid: { ...base.grid, left: 16 },
+      grid: { ...base.grid, left: 16, right: needsZoom ? 28 : base.grid.right },
+      ...(needsZoom ? { dataZoom } : {}),
       ...titleOpt(title ?? ''),
     }
   }
@@ -1169,7 +1267,16 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
   }
 
   // ── Bar / Line / Area (with optional group) ────────────────────────────────
-  const xData = sortedXData(rows, xi)
+  let xData = sortedXData(rows, xi)
+
+  // Plain bar charts read far better sorted by magnitude; ECharts otherwise
+  // keeps categorical x in arbitrary first-seen order. Skip for timestamps
+  // (chronological order is meaningful) and for line/area/step (sorting would
+  // scramble the connected path).
+  if (type === 'bar' && !isTimestampAxis(xData)) {
+    const totals = aggDataMap(rows, xi, yi)
+    xData = [...xData].sort((a, b) => (totals[b] ?? 0) - (totals[a] ?? 0))
+  }
 
   /** @type {any[]} */
   let series
@@ -1206,7 +1313,9 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
 
   return {
     ...base,
-    tooltip: { ...base.tooltip, trigger: 'axis' },
+    // Bars get a 'shadow' pointer (highlights the whole hovered category column —
+    // the expected bar-chart hover); line/area keep the thin crosshair line.
+    tooltip: { ...base.tooltip, trigger: 'axis', axisPointer: { type: type === 'bar' ? 'shadow' : 'line' } },
     legend: series.length > 1 ? { textStyle: base.textStyle, top: 4 } : undefined,
     xAxis: categoryXAxis(isDark, xData),
     yAxis: valueYAxis(isDark),
