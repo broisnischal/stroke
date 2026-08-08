@@ -249,16 +249,6 @@ pub async fn get_table_rows(
     };
     let where_clause = build_where(&cols, search.as_deref(), filters.as_deref());
 
-    // Total count (respecting filters).
-    let count_sql = format!("SELECT count() FROM {tq}{where_clause}");
-    let total = query(config, &count_sql)
-        .await?
-        .rows
-        .first()
-        .and_then(|r| r.first())
-        .and_then(json_to_i64)
-        .unwrap_or(0);
-
     let order = match (sort_column.as_deref(), sort_direction.as_deref()) {
         (Some(c), dir) if !c.trim().is_empty() => {
             let d = if dir.map(|d| d.eq_ignore_ascii_case("desc")).unwrap_or(false) { "DESC" } else { "ASC" };
@@ -267,8 +257,18 @@ pub async fn get_table_rows(
         _ => String::new(),
     };
 
+    // Count (respecting filters) and page are independent — run the two HTTP
+    // round-trips concurrently, matching the pg and D1 paths.
+    let count_sql = format!("SELECT count() FROM {tq}{where_clause}");
     let data_sql = format!("SELECT * FROM {tq}{where_clause}{order} LIMIT {limit} OFFSET {offset}");
-    let result = query(config, &data_sql).await?;
+    let (count_res, data_res) = tokio::join!(query(config, &count_sql), query(config, &data_sql));
+    let total = count_res?
+        .rows
+        .first()
+        .and_then(|r| r.first())
+        .and_then(json_to_i64)
+        .unwrap_or(0);
+    let result = data_res?;
 
     Ok(TableRows {
         columns: result.columns,
