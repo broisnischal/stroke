@@ -188,6 +188,7 @@
 
   onDestroy(() => {
     swapyInstance?.destroy();
+    if (confirmTimer) clearTimeout(confirmTimer);
   });
 
   // ── Grid layout ────────────────────────────────────────────────────────────
@@ -212,6 +213,8 @@
 
   // ── Delete active dashboard ────────────────────────────────────────────────
   let confirmDeleteDash = $state(false);
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let confirmTimer = null;
 
   function handleDeleteDashboard() {
     if (!activeDash) return;
@@ -220,7 +223,8 @@
       confirmDeleteDash = false;
     } else {
       confirmDeleteDash = true;
-      setTimeout(() => { confirmDeleteDash = false; }, 3000);
+      if (confirmTimer) clearTimeout(confirmTimer);
+      confirmTimer = setTimeout(() => { confirmDeleteDash = false; }, 3000);
     }
   }
 </script>

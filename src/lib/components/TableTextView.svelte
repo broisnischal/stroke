@@ -1,4 +1,5 @@
 <script>
+  import { onDestroy } from 'svelte'
   import Icon from './Icon.svelte'
   import { cn } from '$lib/utils.js'
   import MonacoTextView from './MonacoTextView.svelte'
@@ -76,6 +77,10 @@
   let copied = $state(false)
   /** @type {ReturnType<typeof setTimeout> | null} */
   let copiedTimer = null
+
+  onDestroy(() => {
+    if (copiedTimer) clearTimeout(copiedTimer)
+  })
 
   function handleCopy() {
     navigator.clipboard.writeText(text).then(() => {

@@ -27,7 +27,7 @@
     createFilter,
     ANY_COLUMN,
   } from "$lib/table-query.js";
-  import { untrack } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import { formatCompactCount } from "$lib/table-list.js";
   import { describeTableView } from "$lib/stores/table-views.js";
 
@@ -260,6 +260,13 @@
   let searchDebounce = /** @type {ReturnType<typeof setTimeout> | null} */ (
     null
   );
+
+  // A debounce surviving unmount would fire onsearchchange into whatever table
+  // is active 250ms later; kill both pending timers with the component.
+  onDestroy(() => {
+    if (searchDebounce) clearTimeout(searchDebounce);
+    if (_deleteConfirmTimer) clearTimeout(_deleteConfirmTimer);
+  });
 
   // Sync from parent only when the prop changes from outside (e.g. table switch resets to '').
   $effect(() => {
@@ -515,20 +522,6 @@
     const f = rowFilters.find((x) => x.id === id);
     if (!f) return true;
     return FILTER_OPS.find((o) => o.value === f.op)?.needsValue ?? true;
-  }
-
-  // ── between helpers (value stored as "from,to") ──────────────────────────
-  /** @param {string} val */
-  function betweenFrom(val) {
-    return val.split(",")[0] ?? "";
-  }
-  /** @param {string} val */
-  function betweenTo(val) {
-    return val.split(",")[1] ?? "";
-  }
-  /** @param {string} from @param {string} to */
-  function betweenJoin(from, to) {
-    return `${from},${to}`;
   }
 
   /** @param {string} value */

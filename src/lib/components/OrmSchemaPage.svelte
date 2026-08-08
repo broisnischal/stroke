@@ -6,6 +6,7 @@
   // sides. It introspects once (three schema-wide calls, no per-table fan-out)
   // and re-renders locally when you switch between Prisma and Drizzle, so the
   // toggle is instant even on a hundred-table schema.
+  import { onDestroy } from 'svelte'
   import MonacoTextView from './MonacoTextView.svelte'
   import Icon from './Icon.svelte'
   import DbIcon from './DbIcon.svelte'
@@ -40,6 +41,7 @@
   let copied  = $state(false)
   /** @type {ReturnType<typeof setTimeout> | undefined} */
   let copyTimer
+  onDestroy(() => clearTimeout(copyTimer))
 
   const active    = $derived(TARGETS.find((t) => t.id === target) ?? TARGETS[0])
   const supported = $derived(active.engines.includes(dbType))

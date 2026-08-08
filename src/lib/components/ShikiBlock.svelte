@@ -1,5 +1,5 @@
 <script>
-  import { tick } from 'svelte'
+  import { tick, onDestroy } from 'svelte'
   import { cn } from '$lib/utils.js'
   import { appThemeId } from '$lib/stores/settings.js'
   import {
@@ -32,11 +32,19 @@
   /** @type {HTMLDivElement | null} */
   let rootEl = $state(null)
 
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let copyTimer = null
+
   async function copyCode() {
     await navigator.clipboard.writeText(code ?? '').catch(() => {})
     copied = true
-    setTimeout(() => { copied = false }, 1500)
+    if (copyTimer) clearTimeout(copyTimer)
+    copyTimer = setTimeout(() => { copied = false }, 1500)
   }
+
+  onDestroy(() => {
+    if (copyTimer) clearTimeout(copyTimer)
+  })
 
   const appTheme = $derived($appThemeId)
   const isJsonInteractive = $derived(jsonInteractive && lang === 'json')
