@@ -3071,23 +3071,31 @@ let rowSearch = $state('')
 
   function navForward() { navStepBy(1) }
 
+  /**
+   * Guard: closing a tab discards its unsaved edits/deletes - ask first when it
+   * has staged changes. Returns false when the close should be aborted.
+   * @param {StudioTab} closing
+   */
+  async function confirmDiscardTabChanges(closing) {
+    const count = tabPendingCount(closing)
+    if (count === 0) return true
+    const ok = await askConfirm(
+      `This table has ${count} unsaved change${count === 1 ? '' : 's'}. Close the tab and discard them?`,
+      'Close & discard',
+    )
+    if (!ok) return false
+    if (closing.id === activeTabId) resetEdits()
+    const key = tabTableKey(closing)
+    if (key) clearPendingChanges(key)
+    return true
+  }
+
   /** @param {string} id */
   async function closeTab(id) {
     const idx = tabs.findIndex((t) => t.id === id)
     if (idx < 0) return
-    // Guard: closing a tab discards its unsaved edits/deletes.
     const closing = tabs[idx]
-    const count = tabPendingCount(closing)
-    if (count > 0) {
-      const ok = await askConfirm(
-        `This table has ${count} unsaved change${count === 1 ? '' : 's'}. Close the tab and discard them?`,
-        'Close & discard',
-      )
-      if (!ok) return
-      if (id === activeTabId) resetEdits()
-      const key = tabTableKey(closing)
-      if (key) clearPendingChanges(key)
-    }
+    if (!(await confirmDiscardTabChanges(closing))) return
     rememberClosedTab(closing)
     const nextTabs = tabs.filter((t) => t.id !== id)
     if (nextTabs.length === 0) {
@@ -3314,19 +3322,8 @@ let rowSearch = $state('')
     const g = PaneTree.findGroup(paneRoot, groupId)
     const idx = tabs.findIndex((t) => t.id === id)
     if (idx < 0) return
-    // Guard: closing a tab discards its unsaved edits/deletes (same as closeTab).
     const closing = tabs[idx]
-    const pending = tabPendingCount(closing)
-    if (pending > 0) {
-      const ok = await askConfirm(
-        `This table has ${pending} unsaved change${pending === 1 ? '' : 's'}. Close the tab and discard them?`,
-        'Close & discard',
-      )
-      if (!ok) return
-      if (id === activeTabId) resetEdits()
-      const key = tabTableKey(closing)
-      if (key) clearPendingChanges(key)
-    }
+    if (!(await confirmDiscardTabChanges(closing))) return
     // Remember it so Reopen Closed Tab (⌘⇧T) can restore it - mirrors closeTab().
     rememberClosedTab(closing)
     const nextTabs = tabs.filter((t) => t.id !== id)
