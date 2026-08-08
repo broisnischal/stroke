@@ -5196,18 +5196,10 @@ let rowSearch = $state('')
       const cols = result.columns ?? []
       const rows = result.rows ?? []
 
-      const inserts = rows.map((row) => {
-        const vals = cols.map((col, i) => {
-          const v = row[i]
-          if (v === null || v === undefined) return 'NULL'
-          if (typeof v === 'number' || typeof v === 'boolean') return String(v)
-          if (typeof v === 'object') return `'${JSON.stringify(v).replace(/'/g, "''")}'`
-          return `'${String(v).replace(/'/g, "''")}'`
-        })
-        return `INSERT INTO "${tableName}" (${cols.map((c) => `"${c.name}"`).join(', ')}) VALUES (${vals.join(', ')});`
-      }).join('\n')
-
-      const sql = inserts.length ? `${ddl}\n\n${inserts}` : ddl
+      // Gate on rows.length: rowsToSql returns a "-- no rows" comment for empty
+      // input, but an empty table should export as DDL only.
+      const inserts = rows.length ? rowsToSql(cols, rows, tableName) : ''
+      const sql = inserts ? `${ddl}\n\n${inserts}` : ddl
       const filename = `${tableName}_${new Date().toISOString().slice(0, 10)}.sql`
       await saveExportFile(sql, filename, 'sql')
     } catch (e) {
@@ -5390,16 +5382,8 @@ let rowSearch = $state('')
     const col = columns[detail.colIdx]
     if (!col) return
 
-    const row = rows[detail.rowIdx]
-    if (!row) return
-
-    /** @type {Record<string, unknown>} */
-    const pk = {}
-    for (const key of primaryKey) {
-      const keyIdx = columns.findIndex((c) => c.name === key)
-      if (keyIdx < 0) throw new Error(`Primary key column not found: ${key}`)
-      pk[key] = row[keyIdx]
-    }
+    const pk = primaryKeyForRow(detail.rowIdx)
+    if (!pk) return
 
     savingCell = true
     const _saveStart = Date.now()
