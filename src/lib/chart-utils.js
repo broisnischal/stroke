@@ -382,7 +382,6 @@ function categoryXAxis(isDark, xData) {
   }
 }
 
-/** @param {boolean} isDark */
 /** Compact axis-tick number: 1_200_000 → "1.2M", 3500 → "3.5k". Keeps long value
  * axes (counts, sizes) readable instead of printing raw 7-digit numbers. */
 function fmtCompact(v) {
@@ -566,9 +565,12 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
   if (type === 'heatmap') {
     const xVals = [...new Set(rows.map((r) => String(r[xi])))]
     const yVals = gi >= 0 ? [...new Set(rows.map((r) => String(r[gi])))] : [yCol]
+    // Index lookups via Map: indexOf per row is O(n²) on high-cardinality data.
+    const xIdx = new Map(xVals.map((v, i) => [v, i]))
+    const yIdx = new Map(yVals.map((v, i) => [v, i]))
     const data = rows.map((r) => [
-      xVals.indexOf(String(r[xi])),
-      gi >= 0 ? yVals.indexOf(String(r[gi])) : 0,
+      xIdx.get(String(r[xi])) ?? -1,
+      gi >= 0 ? (yIdx.get(String(r[gi])) ?? 0) : 0,
       Number(r[yi]) || 0,
     ])
     const lineColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)'
@@ -601,19 +603,14 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
   if (type === 'radar') {
     // Each non-xCol numeric column becomes an indicator; each row becomes a series
     const numCols = columns.filter((c) => c.name !== xCol && colType(c) === 'number')
-    const indicators = numCols.map((c) => ({
+    const numIdx = numCols.map((c) => columns.findIndex((cc) => cc.name === c.name))
+    const indicators = numCols.map((c, k) => ({
       name: c.name,
-      max: Math.max(arrMax(rows.map((r) => {
-        const i = columns.findIndex((cc) => cc.name === c.name)
-        return Number(r[i]) || 0
-      })), 1) * 1.2,
+      max: Math.max(arrMax(rows.map((r) => Number(r[numIdx[k]]) || 0)), 1) * 1.2,
     }))
     const seriesData = rows.map((r) => ({
       name: String(r[xi] ?? ''),
-      value: numCols.map((c) => {
-        const i = columns.findIndex((cc) => cc.name === c.name)
-        return Number(r[i]) || 0
-      }),
+      value: numIdx.map((i) => Number(r[i]) || 0),
     }))
     return {
       ...base,
@@ -923,23 +920,36 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
 
   // ── Sunburst ──────────────────────────────────────────────────────────────
   if (type === 'sunburst') {
+    // Same guards as buildTreeData: dedupe by name, attach each node to at most
+    // one parent, skip self/cycle edges and cap the count — duplicate rows or
+    // cyclic parent data otherwise build a graph that hangs/crashes ECharts.
+    const MAX_NODES = 2000
     /** @type {Map<string, any>} */
     const nodeMap = new Map()
-    rows.forEach(r => {
+    for (const r of rows) {
       const name = String(r[xi] ?? '')
-      if (!nodeMap.has(name)) nodeMap.set(name, { name, value: Number(r[yi]) || 0, children: [] })
-    })
+      if (!name || nodeMap.has(name)) continue
+      nodeMap.set(name, { name, value: Number(r[yi]) || 0, children: [] })
+      if (nodeMap.size >= MAX_NODES) break
+    }
     /** @type {any[]} */ let roots = []
     if (gi >= 0) {
-      rows.forEach(r => {
+      const parentOf = new Map()
+      const attached = new Set()
+      for (const r of rows) {
         const name = String(r[xi] ?? '')
         const parent = String(r[gi] ?? '')
-        const node = nodeMap.get(name)
-        if (!node) return
-        if (parent && nodeMap.has(parent)) {
-          nodeMap.get(parent).children.push(node)
-        } else { roots.push(node) }
-      })
+        if (!name || !parent || parent === name || attached.has(name)) continue
+        if (!nodeMap.has(name) || !nodeMap.has(parent)) continue
+        // Cycle guard: parent must not already be a descendant of `name`.
+        let cur = parent, cyclic = false
+        while (cur !== undefined) { if (cur === name) { cyclic = true; break } cur = parentOf.get(cur) }
+        if (cyclic) continue
+        nodeMap.get(parent).children.push(nodeMap.get(name))
+        parentOf.set(name, parent)
+        attached.add(name)
+      }
+      roots = [...nodeMap.values()].filter((n) => !attached.has(n.name))
       roots = roots.length > 0 ? roots : [{ name: 'Root', children: [...nodeMap.values()] }]
     } else {
       roots = [...nodeMap.values()]
@@ -1050,7 +1060,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
         },
         {
           type: 'bar',
-          data: yData.map((v) => [v, 0]),
+          data: yData,
           barMaxWidth: 2,
           itemStyle: { color: PALETTE[0] },
           silent: true,
