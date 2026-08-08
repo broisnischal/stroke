@@ -4,7 +4,7 @@
   import { engineFamily } from '$lib/stores/connections.js'
   import { cn } from '$lib/utils.js'
   import { readOnlyMode, guardWrite, READ_ONLY_HINT } from '$lib/stores/read-only.js'
-  import { tick } from 'svelte'
+  import { tick, onDestroy } from 'svelte'
   import ResizeHandle from './ResizeHandle.svelte'
   import Search from '@lucide/svelte/icons/search'
   import X from '@lucide/svelte/icons/x'
@@ -177,16 +177,24 @@
     }
     typesLoading = true
     try {
-      const entries = await Promise.all(
-        subset.map(async (k) => {
+      // Bounded worker pool - firing all 500 TYPE commands at once floods the
+      // IPC bridge with simultaneous invokes (each opens a Redis command).
+      const CONCURRENCY = 8
+      /** @type {[string, string][]} */
+      const entries = []
+      let i = 0
+      async function worker() {
+        while (i < subset.length) {
+          const k = subset[i++]
           try {
             const t = String(replyValues(await executeSql(`TYPE ${quoteArg(k)}`))[0] ?? '')
-            return /** @type {[string, string]} */ ([k, t])
+            entries.push([k, t])
           } catch {
-            return /** @type {[string, string]} */ ([k, ''])
+            entries.push([k, ''])
           }
-        }),
-      )
+        }
+      }
+      await Promise.all(Array.from({ length: Math.min(CONCURRENCY, subset.length) }, worker))
       typeMap = new Map(entries)
     } finally {
       typesLoading = false
@@ -586,6 +594,7 @@
   let copiedId = $state('')
   /** @type {ReturnType<typeof setTimeout> | null} */
   let copiedTimer = null
+  onDestroy(() => { if (copiedTimer) clearTimeout(copiedTimer) })
   /** @param {string} text @param {string} id */
   function copyText(text, id) {
     navigator.clipboard
@@ -1028,10 +1037,13 @@
               {#if !isCollapsed}
                 {#each group.items as key (key)}
                   {@const meta = TYPE_META[typeMap.get(key) ?? '']}
+                  <!-- content-visibility keeps huge keyspaces (up to 100k rows) cheap
+                       to paint - offscreen rows skip layout entirely. -->
                   <button
                     type="button"
                     class={cn(
                       'group/key flex w-full items-center gap-2 py-1 pl-7 pr-2 text-left transition-colors',
+                      '[contain-intrinsic-size:auto_26px] [content-visibility:auto]',
                       selectedKey === key
                         ? 'bg-accent text-foreground'
                         : 'text-foreground/80 hover:bg-accent/50',
