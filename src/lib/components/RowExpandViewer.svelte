@@ -252,11 +252,12 @@
 <!-- Elevated card so the expanded row reads as a distinct section over the grid
      (bg-background matched the grid and had no bottom edge, so it blended in).
      It lines up with the grid rather than fighting it: content starts where the
-     first column starts, and the grid's own gutter rule carries on down the left
-     of that content — no coloured accent rail. -->
+     first column starts, and the frozen gutter continues down the left as a
+     filled strip (matching the grid's row-number column) so its right edge reads
+     as the gutter rule — not a hairline floating in empty space. -->
 <div class="relative border-y border-border/40 bg-card">
   {#if indent > 0}
-    <span class="pointer-events-none absolute inset-y-0 w-px bg-border/40" style="left:{indent}px"></span>
+    <div class="pointer-events-none absolute inset-y-0 left-0 border-r border-border/40 bg-muted/20" style="width:{indent}px"></div>
   {/if}
   <div style={indent > 0 ? `padding-left:${indent}px` : undefined}>
   <!-- Toolbar -->
