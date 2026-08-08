@@ -2539,6 +2539,11 @@ let rowSearch = $state('')
   function resetTabs() {
     tabs = []
     activeTabId = null
+    // Every tab id in the map/MRU/stack just died with the tab list - drop them
+    // so old connections' row arrays and reopen descriptors can't be retained.
+    _liveRowsByTab.clear()
+    _tabRowsMru = []
+    closedTabStack = []
     // Every tab id in the history just died with the tab list.
     resetNav(_nav)
     syncNavFlags()
@@ -2865,8 +2870,10 @@ let rowSearch = $state('')
   const TAB_EVICT_ROW_THRESHOLD = 5_000
   let _tabRowsMru = /** @type {string[]} */ ([])
   function evictColdTabRows(activeId) {
-    _tabRowsMru = [..._tabRowsMru.filter((x) => x !== activeId), activeId]
-    const keep = new Set(_tabRowsMru.slice(-TAB_ROWS_MRU_MAX))
+    // Trim to the window we actually read - entries past it are never consulted,
+    // so without the slice the MRU grows by one id per distinct tab ever opened.
+    _tabRowsMru = [..._tabRowsMru.filter((x) => x !== activeId), activeId].slice(-TAB_ROWS_MRU_MAX)
+    const keep = new Set(_tabRowsMru)
     // Never evict a tab that is the active tab of a visible split pane - its rows
     // are on screen in that pane's snapshot, so blanking them would flip the pane
     // to the empty "Focus this pane to load" placeholder.
