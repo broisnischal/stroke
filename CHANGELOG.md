@@ -4,6 +4,12 @@ All notable changes to Stroke are listed here, newest first.
 
 ---
 
+## [1.21.0] - 2026-08-08
+
+### Changes
+- perf, correctness and UI sweep (#75)
+
+
 ## [Unreleased]
 
 ### New Features
