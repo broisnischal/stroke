@@ -1537,26 +1537,29 @@
       const byTable = {};
 
       if (isSqliteFamilySC) {
-        // SQLite/D1/LibSQL: PRAGMA per table (no information_schema)
-        for (const t of missing) {
-          try {
-            const tq = `"${t.name.replace(/"/g, '""')}"`;
-            const data = await executeSql(`PRAGMA table_info(${tq})`);
-            const c = data.columns ?? [],
-              r = data.rows ?? [];
-            const nameI = c.findIndex((x) => x.name === "name"),
-              typeI = c.findIndex((x) => x.name === "type");
-            const nnI = c.findIndex((x) => x.name === "notnull");
-            const key = `${sc}.${t.name}`;
-            byTable[key] = r.map((row) => ({
-              name: String(row[nameI] ?? row[1] ?? ""),
-              dataType: String(row[typeI] ?? row[2] ?? "text"),
-              nullable: !(row[nnI] ?? row[3]),
-            }));
-          } catch {
-            /* skip this table */
-          }
-        }
+        // SQLite/D1/LibSQL: PRAGMA per table (no information_schema).
+        // In parallel - N serial IPC round-trips would stall the first message.
+        await Promise.all(
+          missing.map(async (t) => {
+            try {
+              const tq = `"${t.name.replace(/"/g, '""')}"`;
+              const data = await executeSql(`PRAGMA table_info(${tq})`);
+              const c = data.columns ?? [],
+                r = data.rows ?? [];
+              const nameI = c.findIndex((x) => x.name === "name"),
+                typeI = c.findIndex((x) => x.name === "type");
+              const nnI = c.findIndex((x) => x.name === "notnull");
+              const key = `${sc}.${t.name}`;
+              byTable[key] = r.map((row) => ({
+                name: String(row[nameI] ?? row[1] ?? ""),
+                dataType: String(row[typeI] ?? row[2] ?? "text"),
+                nullable: !(row[nnI] ?? row[3]),
+              }));
+            } catch {
+              /* skip this table */
+            }
+          }),
+        );
       } else {
         const scSafe = sc.replace(/'/g, "''");
         const sql = isMysql
@@ -2413,24 +2416,26 @@
               // All tables - use already-loaded context, fall back to sqlite_master
               const tableNames = schemaContext.tables.map((t) => t.name);
               const byTable = /** @type {Record<string, unknown[]>} */ ({});
-              for (const tbl of tableNames) {
-                const tq = `"${tbl.replace(/"/g, '""')}"`;
-                try {
-                  const data = await executeSql(`PRAGMA table_info(${tq})`);
-                  const c = data.columns ?? [],
-                    r = data.rows ?? [];
-                  const nameI = c.findIndex((x) => x.name === "name"),
-                    typeI = c.findIndex((x) => x.name === "type");
-                  const nnI = c.findIndex((x) => x.name === "notnull");
-                  byTable[tbl] = r.map((row) => ({
-                    name: row[nameI] ?? row[1],
-                    type: row[typeI] ?? row[2] ?? "text",
-                    nullable: (row[nnI] ?? row[3]) ? "NO" : "YES",
-                  }));
-                } catch {
-                  byTable[tbl] = [];
-                }
-              }
+              await Promise.all(
+                tableNames.map(async (tbl) => {
+                  const tq = `"${tbl.replace(/"/g, '""')}"`;
+                  try {
+                    const data = await executeSql(`PRAGMA table_info(${tq})`);
+                    const c = data.columns ?? [],
+                      r = data.rows ?? [];
+                    const nameI = c.findIndex((x) => x.name === "name"),
+                      typeI = c.findIndex((x) => x.name === "type");
+                    const nnI = c.findIndex((x) => x.name === "notnull");
+                    byTable[tbl] = r.map((row) => ({
+                      name: row[nameI] ?? row[1],
+                      type: row[typeI] ?? row[2] ?? "text",
+                      nullable: (row[nnI] ?? row[3]) ? "NO" : "YES",
+                    }));
+                  } catch {
+                    byTable[tbl] = [];
+                  }
+                }),
+              );
               const execIdx = items.findIndex((i) => i.id === execId);
               if (execIdx >= 0) items.splice(execIdx, 1);
               toolResult = JSON.stringify({

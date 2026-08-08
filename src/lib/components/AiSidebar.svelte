@@ -434,23 +434,42 @@
 
   async function ensureFullSchemaCache() {
     if (!schemaContext.tables?.length) return
-    const isMysql = schemaContext.dbType === 'mysql'
+    const dbType = schemaContext.dbType ?? 'postgres'
+    const isMysql = dbType === 'mysql'
+    const isSqliteFamily = dbType === 'sqlite' || dbType === 'd1' || dbType === 'libsql'
     const sc = schemaContext.activeSchema
     const combined = { ...schemaContext.allTableColumns, ...fetchedSchemas }
     const missing = schemaContext.tables.filter(t => !combined[`${sc}.${t.name}`])
     if (!missing.length) return
     try {
-      const scSafe = sc.replace(/'/g, "''")
-      const sql = isMysql
-        ? `SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '${scSafe}' ORDER BY TABLE_NAME, ORDINAL_POSITION`
-        : `SELECT table_name, column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema = '${scSafe}' ORDER BY table_name, ordinal_position`
-      const data = await executeSql(sql)
       /** @type {Record<string, {name:string, dataType:string, nullable:boolean}[]>} */
       const byTable = {}
-      for (const row of data.rows ?? []) {
-        const key = `${sc}.${String(row[0])}`
-        if (!byTable[key]) byTable[key] = []
-        byTable[key].push({ name: String(row[1]), dataType: String(row[2]), nullable: String(row[3]).toUpperCase() === 'YES' })
+      if (isSqliteFamily) {
+        // SQLite/D1/LibSQL: PRAGMA per table (no information_schema), in parallel.
+        await Promise.all(missing.map(async (t) => {
+          try {
+            const data = await executeSql(`PRAGMA table_info("${t.name.replace(/"/g, '""')}")`)
+            const c = data.columns ?? [], r = data.rows ?? []
+            const nameI = c.findIndex((x) => x.name === 'name'), typeI = c.findIndex((x) => x.name === 'type')
+            const nnI = c.findIndex((x) => x.name === 'notnull')
+            byTable[`${sc}.${t.name}`] = r.map((row) => ({
+              name: String(row[nameI] ?? row[1] ?? ''),
+              dataType: String(row[typeI] ?? row[2] ?? 'text'),
+              nullable: !(row[nnI] ?? row[3]),
+            }))
+          } catch { /* skip this table */ }
+        }))
+      } else {
+        const scSafe = sc.replace(/'/g, "''")
+        const sql = isMysql
+          ? `SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '${scSafe}' ORDER BY TABLE_NAME, ORDINAL_POSITION`
+          : `SELECT table_name, column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema = '${scSafe}' ORDER BY table_name, ordinal_position`
+        const data = await executeSql(sql)
+        for (const row of data.rows ?? []) {
+          const key = `${sc}.${String(row[0])}`
+          if (!byTable[key]) byTable[key] = []
+          byTable[key].push({ name: String(row[1]), dataType: String(row[2]), nullable: String(row[3]).toUpperCase() === 'YES' })
+        }
       }
       fetchedSchemas = { ...fetchedSchemas, ...byTable }
     } catch {}
