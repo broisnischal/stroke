@@ -1494,6 +1494,22 @@ let rowSearch = $state('')
 
   const persistConnectionId = $derived(activeConnectionId || connectionId)
 
+  /**
+   * Title-bar label for the current connection. A file-backed connection would
+   * otherwise show its whole path — and a D1 local database's miniflare path
+   * (`…/.wrangler/state/v3/d1/miniflare-D1DatabaseObject/<hash>.sqlite`) both
+   * overflows the bar and says nothing. Prefer the SQL database name, then the
+   * connection's own label, and only fall back to the file's basename.
+   */
+  const windowTitle = $derived.by(() => {
+    const c = connection
+    if (!c) return 'studio'
+    if (c.database) return c.database
+    if (c.name) return c.name
+    if (c.filePath) return c.filePath.split(/[\\/]/).pop() || c.filePath
+    return 'studio'
+  })
+
   // Keep MCP layer in sync with saved connections + active connection (no passwords sent).
   $effect(() => {
     void mcpUpdateConnections(savedConnections, activeConnectionId || null)
@@ -5684,7 +5700,7 @@ let rowSearch = $state('')
 
 <div class="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
 <TitleBar
-  title={connection?.database ?? connection?.filePath ?? connection?.name ?? 'studio'}
+  title={windowTitle}
   {sidebarOpen}
   connected={!!connection}
   {aiMode}
