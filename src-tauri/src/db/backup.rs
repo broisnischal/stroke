@@ -1128,9 +1128,18 @@ async fn import_mysql(app: &AppHandle, pool: &sqlx::MySqlPool, sql: &str) -> Res
     let mut ok = 0usize;
     let mut errors: Vec<String> = Vec::new();
 
+    // One connection for the whole restore: the dump carries per-schema `USE …;`
+    // directives, which are connection-scoped — on a pool, the USE and the
+    // unqualified statements that depend on it could land on different
+    // connections, restoring tables into the wrong database.
+    let mut conn = pool
+        .acquire()
+        .await
+        .map_err(|e| format!("Failed to acquire connection: {e}"))?;
+
     for (i, stmt) in stmts.iter().enumerate() {
         if is_cancelled() { break; }
-        match sqlx::query(stmt).execute(pool).await {
+        match sqlx::query(stmt).execute(&mut *conn).await {
             Ok(_) => {
                 ok += 1;
                 if (i + 1) % 50 == 0 {
