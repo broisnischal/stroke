@@ -24,6 +24,55 @@ pub fn cell_to_json(row: &sqlx::mysql::MySqlRow, idx: usize) -> Value {
             return v.map(|d| json!(d.to_string())).unwrap_or(Value::Null);
         }
     }
+    // Fast path: route the common column types by name so a plain text/date cell
+    // doesn't pay for a cascade of failed try_get attempts (each mismatch makes
+    // sqlx allocate a boxed "mismatched types" error — up to 9 per text cell).
+    // A failed route falls through to the full chain below, so unmatched or
+    // alias types behave exactly as before.
+    match type_name {
+        "VARCHAR" | "CHAR" | "TEXT" | "TINYTEXT" | "MEDIUMTEXT" | "LONGTEXT" | "ENUM" | "SET" => {
+            if let Ok(v) = row.try_get::<Option<String>, _>(idx) {
+                return text_cell(row, idx, v);
+            }
+        }
+        "TINYINT" | "SMALLINT" | "MEDIUMINT" | "INT" | "BIGINT" => {
+            if let Ok(v) = row.try_get::<Option<i64>, _>(idx) {
+                return v.map(|n| json!(n)).unwrap_or(Value::Null);
+            }
+        }
+        "TINYINT UNSIGNED" | "SMALLINT UNSIGNED" | "MEDIUMINT UNSIGNED" | "INT UNSIGNED"
+        | "BIGINT UNSIGNED" => {
+            if let Ok(v) = row.try_get::<Option<u64>, _>(idx) {
+                return v.map(|n| json!(n)).unwrap_or(Value::Null);
+            }
+        }
+        "FLOAT" | "DOUBLE" => {
+            if let Ok(v) = row.try_get::<Option<f64>, _>(idx) {
+                return v.map(|n| json!(n)).unwrap_or(Value::Null);
+            }
+        }
+        "DATETIME" | "TIMESTAMP" => {
+            if let Ok(v) = row.try_get::<Option<NaiveDateTime>, _>(idx) {
+                return v.map(|d| json!(d.to_string())).unwrap_or(Value::Null);
+            }
+        }
+        "DATE" => {
+            if let Ok(v) = row.try_get::<Option<NaiveDate>, _>(idx) {
+                return v.map(|d| json!(d.to_string())).unwrap_or(Value::Null);
+            }
+        }
+        "TIME" => {
+            if let Ok(v) = row.try_get::<Option<NaiveTime>, _>(idx) {
+                return v.map(|t| json!(t.to_string())).unwrap_or(Value::Null);
+            }
+        }
+        "JSON" => {
+            if let Ok(v) = row.try_get::<Option<serde_json::Value>, _>(idx) {
+                return json_cell(row, idx, v);
+            }
+        }
+        _ => {}
+    }
     if let Ok(v) = row.try_get::<Option<i64>, _>(idx) {
         return v.map(|n| json!(n)).unwrap_or(Value::Null);
     }
@@ -49,31 +98,40 @@ pub fn cell_to_json(row: &sqlx::mysql::MySqlRow, idx: usize) -> Value {
         return v.map(|t| json!(t.to_string())).unwrap_or(Value::Null);
     }
     if let Ok(v) = row.try_get::<Option<serde_json::Value>, _>(idx) {
-        return match v {
-            // Cap oversized JSON documents — a multi-MB cell shipped whole
-            // freezes the webview (see sql_util::CELL_VALUE_CAP).
-            Some(val) => super::sql_util::cap_json_value(
-                &row.column(idx).type_info().name().to_lowercase(),
-                val,
-            ),
-            None => Value::Null,
-        };
+        return json_cell(row, idx, v);
     }
     if let Ok(v) = row.try_get::<Option<String>, _>(idx) {
-        return match v {
-            Some(s) if s.len() > super::sql_util::CELL_VALUE_CAP => super::sql_util::oversize_cell(
-                &row.column(idx).type_info().name().to_lowercase(),
-                s.len(),
-                s.as_bytes(),
-            ),
-            Some(s) => json!(s),
-            None => Value::Null,
-        };
+        return text_cell(row, idx, v);
     }
     if let Ok(v) = row.try_get::<Option<Vec<u8>>, _>(idx) {
         return v.map(|b| json!(format!("[{} bytes]", b.len()))).unwrap_or(Value::Null);
     }
     Value::Null
+}
+
+/// String cell, capped — a multi-MB cell shipped whole freezes the webview
+/// (see sql_util::CELL_VALUE_CAP).
+fn text_cell(row: &sqlx::mysql::MySqlRow, idx: usize, v: Option<String>) -> Value {
+    match v {
+        Some(s) if s.len() > super::sql_util::CELL_VALUE_CAP => super::sql_util::oversize_cell(
+            &row.column(idx).type_info().name().to_lowercase(),
+            s.len(),
+            s.as_bytes(),
+        ),
+        Some(s) => json!(s),
+        None => Value::Null,
+    }
+}
+
+/// JSON document cell, capped the same way as text.
+fn json_cell(row: &sqlx::mysql::MySqlRow, idx: usize, v: Option<serde_json::Value>) -> Value {
+    match v {
+        Some(val) => super::sql_util::cap_json_value(
+            &row.column(idx).type_info().name().to_lowercase(),
+            val,
+        ),
+        None => Value::Null,
+    }
 }
 
 pub async fn fetch_primary_key(pool: &MySqlPool, schema: &str, table: &str) -> Result<Vec<String>, String> {
