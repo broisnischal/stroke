@@ -42,9 +42,10 @@ async fn get(token: &str, path: &str) -> Result<Value, String> {
 pub async fn list_databases(token: &str) -> Result<Vec<ProviderDatabase>, String> {
     // /v1/projects returns a top-level array.
     let body = get(token, "/projects").await?;
-    let projects = body.as_array().cloned().unwrap_or_default();
-    Ok(projects
-        .iter()
+    Ok(body
+        .as_array()
+        .into_iter()
+        .flatten()
         .filter_map(|p| {
             let id = p["id"].as_str()?; // project ref
             Some(ProviderDatabase {
@@ -61,7 +62,6 @@ pub async fn list_databases(token: &str) -> Result<Vec<ProviderDatabase>, String
 pub async fn build_connection(token: &str, project_ref: &str) -> Result<ProviderConnection, String> {
     let proj = get(token, &format!("/projects/{project_ref}")).await?;
     let name = proj["name"].as_str().unwrap_or(project_ref);
-    let region = proj["region"].as_str().unwrap_or("");
 
     // Use the Supavisor pooler, NOT the direct host. The direct connection
     // `db.<ref>.supabase.co:5432` is IPv6-only, so it fails with "network
@@ -70,9 +70,6 @@ pub async fn build_connection(token: &str, project_ref: &str) -> Result<Provider
     // (`postgres.<ref>`), and session mode (port 5432) behaves like a normal
     // Postgres connection — the right choice for a GUI client.
     //
-    // Fetch the exact pooler host from the Management API when we can (avoids
-    // guessing the region prefix); otherwise construct the conventional host.
-    let _ = region;
     // Ask the Management API for the exact pooler host — never guess the region
     // prefix (aws-0 vs aws-1), since a wrong host connects to a pooler node that
     // doesn't host this project's tenant → "tenant/user … not found".

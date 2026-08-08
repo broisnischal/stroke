@@ -48,10 +48,10 @@ async fn get(token: &str, path: &str) -> Result<Value, String> {
 pub async fn list_databases(token: &str) -> Result<Vec<ProviderDatabase>, String> {
     let orgs = get(token, "/organizations").await?;
     let mut out = Vec::new();
-    for org in orgs["data"].as_array().cloned().unwrap_or_default() {
+    for org in orgs["data"].as_array().into_iter().flatten() {
         let Some(org_name) = org["name"].as_str() else { continue };
         let dbs = get(token, &format!("/organizations/{org_name}/databases")).await?;
-        for db in dbs["data"].as_array().cloned().unwrap_or_default() {
+        for db in dbs["data"].as_array().into_iter().flatten() {
             let Some(name) = db["name"].as_str() else { continue };
             out.push(ProviderDatabase {
                 db_ref: format!("{org_name}/{name}"),

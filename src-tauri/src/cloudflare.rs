@@ -386,10 +386,8 @@ pub async fn cloudflare_start_oauth(app: tauri::AppHandle) -> Result<CfOAuthStat
     let (verifier, challenge) = pkce_pair();
     let state = random_base64url(16);
 
-    // Bind one of the pre-registered callback ports (Wrangler-compatible)
     let (listener, redirect_uri) = bind_callback_listener().await?;
 
-    // Build the authorization URL
     let auth_url = format!(
         "{CF_AUTH_URL}?response_type=code&client_id={CF_CLIENT_ID}&redirect_uri={}&scope={}&state={}&code_challenge={}&code_challenge_method=S256",
         urlencoding::encode(&redirect_uri),
@@ -398,11 +396,9 @@ pub async fn cloudflare_start_oauth(app: tauri::AppHandle) -> Result<CfOAuthStat
         challenge,
     );
 
-    // Open in system browser
     tauri_plugin_opener::open_url(&auth_url, None::<&str>)
         .map_err(|e| format!("Failed to open browser: {e}"))?;
 
-    // Wait for callback (with timeout)
     let code = tokio::time::timeout(
         std::time::Duration::from_secs(AUTH_TIMEOUT_SECS),
         await_oauth_callback(listener, &state),
@@ -410,13 +406,10 @@ pub async fn cloudflare_start_oauth(app: tauri::AppHandle) -> Result<CfOAuthStat
     .await
     .map_err(|_| "Authorization timed out — please try again.".to_string())??;
 
-    // Exchange code for tokens
     let token = exchange_code(&code, &verifier, &redirect_uri).await?;
 
-    // Fetch user email for display
     let email = fetch_user_email(&token.access_token).await;
 
-    // Persist to keychain
     store_tokens(
         &app,
         &token.access_token,
@@ -503,7 +496,6 @@ pub async fn cloudflare_get_valid_token(app: tauri::AppHandle) -> Result<String,
         return Err("Not connected to Cloudflare — please authorize first.".to_string());
     }
 
-    // Check expiry
     let expires_at = map
         .get(KEY_EXPIRES)
         .and_then(|s| s.parse::<u64>().ok())
@@ -513,7 +505,6 @@ pub async fn cloudflare_get_valid_token(app: tauri::AppHandle) -> Result<String,
         return Ok(access);
     }
 
-    // Token expired — try to refresh
     let refresh = map.get(KEY_REFRESH).cloned().unwrap_or_default();
     if refresh.is_empty() {
         return Err(
@@ -542,7 +533,6 @@ pub async fn cloudflare_logout(app: tauri::AppHandle) -> Result<(), String> {
     let map = crate::secrets::read_all_async(&app).await;
     let token = map.get(KEY_ACCESS).cloned().unwrap_or_default();
 
-    // Best-effort revoke
     if !token.is_empty() {
         let _ = http()
             .post(CF_REVOKE_URL)
@@ -554,7 +544,7 @@ pub async fn cloudflare_logout(app: tauri::AppHandle) -> Result<(), String> {
     clear_tokens(&app).await
 }
 
-// ── Discovery commands (reused from before) ───────────────────────────────────
+// ── Discovery commands ────────────────────────────────────────────────────────
 
 /// List all Cloudflare accounts accessible with the given API token.
 #[tauri::command]
@@ -587,9 +577,8 @@ pub async fn cloudflare_list_accounts(api_token: String) -> Result<Vec<CfAccount
 
     let accounts: Vec<CfAccount> = body["result"]
         .as_array()
-        .cloned()
-        .unwrap_or_default()
-        .iter()
+        .into_iter()
+        .flatten()
         .filter_map(|a| {
             Some(CfAccount {
                 id: a["id"].as_str()?.to_string(),
@@ -643,9 +632,8 @@ pub async fn cloudflare_list_d1_databases(
 
     Ok(body["result"]
         .as_array()
-        .cloned()
-        .unwrap_or_default()
-        .iter()
+        .into_iter()
+        .flatten()
         .filter_map(|d| {
             Some(CfD1Database {
                 uuid: d["uuid"].as_str()?.to_string(),
