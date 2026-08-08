@@ -1782,10 +1782,31 @@ pub async fn count_table_rows(
     for value in &where_clause.binds {
         count_query = count_query.bind(value.as_str());
     }
-    count_query
-        .fetch_one(&pool)
+
+    // This runs in the background, so it must not inherit the session's
+    // 10-minute statement_timeout (see open_pg) — a filtered COUNT(*) on a big
+    // table would pin a pooled connection for minutes, the exact starvation the
+    // sidebar counts guard against (schema.rs). Budget is larger than the
+    // sidebar's 4s since this count is user-visible in the grid. SET LOCAL
+    // needs a transaction; rollback hands the connection back with the session
+    // default intact.
+    const GRID_COUNT_TIMEOUT: &str = "30s";
+    let mut tx = pool
+        .begin()
         .await
-        .map_err(|e| format!("Failed to count rows: {e}"))
+        .map_err(|e| format!("Failed to count rows: {e}"))?;
+    let _ = sqlx::query(&format!("SET LOCAL statement_timeout = '{GRID_COUNT_TIMEOUT}'"))
+        .execute(&mut *tx)
+        .await;
+    let count = count_query.fetch_one(&mut *tx).await;
+    let _ = tx.rollback().await;
+    match count {
+        Ok(n) => Ok(n),
+        // 57014 = query_canceled (statement timeout). A count that can't finish
+        // in budget degrades to -1 ("unknown") instead of an error toast.
+        Err(sqlx::Error::Database(db)) if db.code().as_deref() == Some("57014") => Ok(-1),
+        Err(e) => Err(format!("Failed to count rows: {e}")),
+    }
 }
 
 pub async fn update_table_cell(
