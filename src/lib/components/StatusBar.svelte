@@ -2,6 +2,7 @@
   import Icon         from './Icon.svelte'
   import { tick, onMount } from 'svelte'
   import { cn }       from '$lib/utils.js'
+  import { toast }    from '$lib/components/ui/sonner/toast.svelte.js'
   import { readOnlyMode, READ_ONLY_HINT } from '$lib/stores/read-only.js'
   import { aiProfiles, activeProfileId, setActiveProfile } from '$lib/stores/ai-settings.js'
   import { toggleLightDark, isCurrentThemeDark, appVimMode, appLiveMode } from '$lib/stores/settings.js'
@@ -41,14 +42,6 @@
     onopenmodelsettings = /** @type {() => void} */ (() => {}),
     aiMode = false,
     onopenaimode = /** @type {() => void} */ (() => {}),
-    onopenSchema = /** @type {() => void} */ (() => {}),
-    onopenlogs = /** @type {() => void} */ (() => {}),
-    onopensecurity = /** @type {() => void} */ (() => {}),
-    onopenorm = /** @type {() => void} */ (() => {}),
-    onopenbackup = /** @type {() => void} */ (() => {}),
-    onopenchartspage = /** @type {() => void} */ (() => {}),
-    onopendashboard = /** @type {() => void} */ (() => {}),
-    onopendiagrams = /** @type {() => void} */ (() => {}),
     onopensettings = /** @type {() => void} */ (() => {}),
     onopencommand = /** @type {() => void} */ (() => {}),
     onopenpages = /** @type {() => void} */ (() => {}),
@@ -67,6 +60,8 @@
     onscrolltableright = /** @type {() => void} */ (() => {}),
     /** Duration of the last data fetch (table load / refresh / query), in ms. */
     queryMs = 0,
+    /** Rows currently check-selected in the grid. 0 hides the indicator. */
+    selectedCount = 0,
     /** Live mode (auto-refresh active table) - Postgres/SQLite only. */
     live = false,
     liveSupported = false,
@@ -82,7 +77,6 @@
     ontoggletabbar        = /** @type {() => void} */ (() => {}),
     ontoggletabletoolbar  = /** @type {() => void} */ (() => {}),
     ontogglestatusbar     = /** @type {() => void} */ (() => {}),
-    hasPro = true,
   } = $props()
 
   const activeProfile = $derived($aiProfiles.find((p) => p.id === $activeProfileId) ?? $aiProfiles[0])
@@ -241,7 +235,9 @@
 
   async function fetchDatabases() {
     dbLoading = true
-    try { dbList = await listDatabases(connection) } finally { dbLoading = false }
+    try { dbList = await listDatabases(connection) }
+    catch (e) { toast.error('Failed to list databases: ' + String(e)) }
+    finally { dbLoading = false }
   }
 
   function switchDb(/** @type {{ key: string, label: string }} */ db) {
@@ -621,6 +617,15 @@
           class="shrink-0 px-1 font-mono text-ui-2xs tabular-nums text-muted-foreground/55"
           title="Last data fetch took {queryMs.toLocaleString('en-US')}ms"
         >{queryMsLabel}</span>
+      {/if}
+
+      <!-- Selected row count, sits to the right of the fetch timing -->
+      {#if selectedCount > 0}
+        {@render sep()}
+        <span
+          class="shrink-0 px-1 font-mono text-ui-2xs tabular-nums text-foreground/70"
+          title="{selectedCount.toLocaleString('en-US')} row{selectedCount === 1 ? '' : 's'} selected"
+        >{selectedCount.toLocaleString('en-US')} selected</span>
       {/if}
 
     {:else}

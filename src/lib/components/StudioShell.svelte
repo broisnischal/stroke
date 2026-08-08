@@ -6938,6 +6938,7 @@ let rowSearch = $state('')
   {savedConnections}
   {activeConnectionId}
   {queryMs}
+  selectedCount={selected.size}
   {pendingEditCount}
   applying={savingCell || deletingRows || insertingRow}
   onapplyedits={() => void applyEdits()}
