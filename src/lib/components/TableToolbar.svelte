@@ -595,15 +595,28 @@
 </script>
 
 <div class="flex shrink-0 flex-col">
+  <!-- overflow-x-auto is the floor, not the plan: the breakpoints below hide
+       optional controls first and the search gives way after that. It exists so
+       that when a window is narrow enough (or zoomed far enough) that even the
+       essentials don't fit, they stay reachable by scrolling instead of being
+       clipped off the edge. Menus are portaled, so nothing is trapped by it, and
+       app.css already gives this class a 4px overlay scrollbar. -->
   <header
-    class="@container/tb studio-chrome studio-table-toolbar flex h-9 shrink-0 items-center gap-1 border-b border-border bg-panel px-2"
+    class="@container/tb studio-chrome studio-table-toolbar flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b border-border bg-panel px-2"
     data-studio-chrome
   >
     <!-- Search, far left, expands on focus (wider when option toggles show) -->
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <div
       class={cn(
-        "relative flex h-7 shrink-0 items-center transition-[width] duration-200",
+        // Shrinkable, deliberately. Everything else on this row is shrink-0, so
+        // with a fixed width here the row could only overflow — which is what
+        // happened at high zoom: the ten container-query breakpoints below had
+        // already hidden every optional control, and the search still demanded
+        // its full 13rem, so the pager clipped off the right edge. A search
+        // field is the most shrinkable thing here; it gives way first, down to
+        // a floor where the icon and a word of text still fit.
+        "relative flex h-7 min-w-[7.5rem] shrink items-center transition-[width] duration-200",
         searchExpanded ? "w-72" : "w-52",
       )}
       role="search"
