@@ -4151,9 +4151,19 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (gex > 0 && gex < W) vSeps.push(gex)
     }
 
+    // First non-pinned column not entirely left of the viewport - columns are
+    // laid out sequentially (contentX ascending, adjacent), so the index depends
+    // only on scroll, not the row. Computed once per frame so drawBodyRow never
+    // re-scans the off-screen-left tail for every visible row.
+    let firstColIdx = 0
+    for (const col of geom.cols) {
+      if (!col.pinned && col.contentX + col.w - _scrollLeft > 0) break
+      firstColIdx++
+    }
+
     const bodyC = {
       cFg, cText, cMuted, cGrid, cBorder, cMutedBg, cRing, cAccent, cPanel, usedW, navName,
-      AMBER, BLUE_FG, RED, cPrimary, frozenW, tableStyle, dotSize, vSeps,
+      AMBER, BLUE_FG, RED, cPrimary, frozenW, tableStyle, dotSize, vSeps, firstColIdx,
       rangeColNames, rangeFirstCol, rangeLastCol, rangeR0, rangeR1,
     }
 
@@ -4241,10 +4251,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ctx.fillRect(0, ry, c.usedW, rh)
     }
 
-    // Non-pinned cells. geom.cols is ordered by ascending contentX, so once a
-    // column starts past the right viewport edge every later one does too - break
-    // instead of iterating the off-screen tail (matters for very wide tables).
-    for (const col of geom.cols) {
+    // Non-pinned cells. geom.cols is ordered by ascending contentX: start at the
+    // frame's precomputed first visible index (c.firstColIdx) and break once a
+    // column starts past the right viewport edge, so neither off-screen tail is
+    // iterated per row (matters for very wide tables).
+    for (let ci = c.firstColIdx; ci < geom.cols.length; ci++) {
+      const col = geom.cols[ci]
       if (col.pinned) continue
       const dx = col.contentX - _scrollLeft
       if (dx >= _viewportWidth) break
