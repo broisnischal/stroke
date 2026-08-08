@@ -6,12 +6,9 @@
   import ChevronDown from '@lucide/svelte/icons/chevron-down'
   import ChevronRight from '@lucide/svelte/icons/chevron-right'
   import Loader2 from '@lucide/svelte/icons/loader-2'
-  import Database from '@lucide/svelte/icons/database'
   import Check from '@lucide/svelte/icons/check'
   import X from '@lucide/svelte/icons/x'
   import Ellipsis from '@lucide/svelte/icons/ellipsis'
-  import Clock from '@lucide/svelte/icons/clock'
-  import Tag from '@lucide/svelte/icons/tag'
   import { onMount } from 'svelte'
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import { cn } from '$lib/utils.js'
@@ -302,7 +299,12 @@
 
   /** @param {string} id */
   async function remove(id) {
-    await deleteSnapshot(id)
+    try {
+      await deleteSnapshot(id)
+    } catch (err) {
+      toast.error(`Delete failed: ${/** @type {Error} */ (err).message}`)
+      return
+    }
     snapshots = snapshots.filter((s) => s.id !== id)
     if (beforeId === id) beforeId = null
     if (afterId === id) afterId = null
@@ -370,7 +372,16 @@
     const norm = (/** @type {string} */ s) => s.trimEnd().replace(/,$/, '')
     const na = a.map(norm), nb = b.map(norm)
     const m = a.length, n = b.length
-    const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0))
+    // Pathological pairs (m×n in the millions) would allocate a huge LCS matrix
+    // and stall the UI - render those as remove-all/add-all instead.
+    if (m * n > 4_000_000) {
+      return [
+        ...a.map((content, i) => /** @type {DiffLine} */ ({ type: 'remove', content, lineA: i + 1 })),
+        ...b.map((content, i) => /** @type {DiffLine} */ ({ type: 'add', content, lineB: i + 1 })),
+      ]
+    }
+    // Typed-array rows (zero-initialized) - plain arrays box every slot.
+    const dp = Array.from({ length: m + 1 }, () => new Uint32Array(n + 1))
     for (let i = 1; i <= m; i++)
       for (let j = 1; j <= n; j++)
         dp[i][j] = na[i-1] === nb[j-1] ? dp[i-1][j-1] + 1 : Math.max(dp[i-1][j], dp[i][j-1])

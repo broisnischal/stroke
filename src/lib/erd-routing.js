@@ -44,11 +44,21 @@ const SHARE_COST = 46
 /** Grids larger than this fall back to a direct elbow (pathological schemas). */
 const MAX_CELLS = 160_000
 /**
- * Above this many cards the routing pass costs more than it buys: the search is
- * ~200ms at 100 cards and grows super-linearly, so bigger diagrams draw direct
- * elbows instead. Callers check this before calling `routeEdges`.
+ * Above this many cards routing is skipped entirely. It used to be 120 because
+ * the router built ONE grid over the whole diagram — O(cards²) cells — which
+ * blew the cell budget at around a hundred tables, returned nothing, and left
+ * every relationship drawn as a direct elbow straight through the cards in its
+ * way. Edges are now routed against only the cards near them, so the cost no
+ * longer depends on how big the rest of the diagram is.
  */
-export const MAX_ROUTED_NODES = 120
+export const MAX_ROUTED_NODES = 600
+
+/**
+ * How far past a link's own endpoints to look for cards when routing it alone.
+ * Wide enough that the detour room around a card is inside the window, including
+ * the ring the grid adds beyond the outermost obstacle.
+ */
+const WINDOW_PAD = STUB * 3 + CLEAR
 
 /**
  * @typedef {{ id: string, x0: number, y0: number, x1: number, y1: number }} Rect
@@ -309,6 +319,69 @@ function tidy(pts) {
   return out
 }
 
+/** True when segment a→b passes through rect r. Touching an edge is allowed. */
+function hits(/** @type {Pt} */ a, /** @type {Pt} */ b, /** @type {Rect} */ r) {
+  if (a.y === b.y) {
+    if (a.y <= r.y0 || a.y >= r.y1) return false
+    const lo = Math.min(a.x, b.x), hi = Math.max(a.x, b.x)
+    return hi > r.x0 && lo < r.x1
+  }
+  if (a.x <= r.x0 || a.x >= r.x1) return false
+  const lo = Math.min(a.y, b.y), hi = Math.max(a.y, b.y)
+  return hi > r.y0 && lo < r.y1
+}
+
+/**
+ * The promise this module makes: a route crosses no card, or there is no route.
+ * The endpoints' own cards are exempt — the last stub lands on their edge by
+ * definition. Checked against the raw card rects, so a line legitimately running
+ * through the clearance band is not thrown away.
+ * @param {Pt[]} pts @param {Rect[]} cards @param {string} from @param {string} to
+ */
+function clearOfCards(pts, cards, from, to) {
+  for (let i = 1; i < pts.length; i++) {
+    for (const r of cards) {
+      if (r.id === from || r.id === to) continue
+      if (hits(pts[i - 1], pts[i], r)) return false
+    }
+  }
+  return true
+}
+
+/**
+ * Route one link on its own small grid, built from the cards near it.
+ *
+ * This is what makes a hundred-table diagram routable: the search space is set
+ * by the link's own neighbourhood, not by the size of the schema, so the lane
+ * pitch stays tight instead of being coarsened until the grid fits a budget.
+ * @param {Link} l @param {Rect[]} obs @param {Rect[]} cards @param {number} pad
+ */
+function routeOne(l, obs, cards, pad) {
+  const x0 = Math.min(l.sx, l.tx) - pad, x1 = Math.max(l.sx, l.tx) + pad
+  const y0 = Math.min(l.sy, l.ty) - pad, y1 = Math.max(l.sy, l.ty) + pad
+  const near = obs.filter(
+    (r) => r.x1 > x0 && r.x0 < x1 && r.y1 > y0 && r.y0 < y1,
+  )
+  const grid = buildGrid(near, [l])
+  if (!grid) return null
+  const states = grid.nx * grid.ny * 4
+  const path = search(
+    grid,
+    {
+      gScore: new Float32Array(states),
+      cameFrom: new Int32Array(states),
+      closed: new Uint8Array(states),
+    },
+    indexOf(grid.xs, Math.round(l.sx + l.sdir * STUB)),
+    indexOf(grid.ys, Math.round(l.sy)),
+    indexOf(grid.xs, Math.round(l.tx + l.tdir * STUB)),
+    indexOf(grid.ys, Math.round(l.ty)),
+  )
+  if (!path) return null
+  const pts = tidy([{ x: l.sx, y: l.sy }, ...path, { x: l.tx, y: l.ty }])
+  return clearOfCards(pts, cards, l.source, l.target) ? pts : null
+}
+
 /**
  * Route every link around the given cards.
  * @param {Box[]} boxes
@@ -328,8 +401,18 @@ export function routeEdges(boxes, links) {
     x1: Math.round(b.x + b.w + CLEAR),
     y1: Math.round(b.y + b.h + CLEAR),
   }))
+  /** Raw card rects, for the final "does this cross anything" check. */
+  const cards = boxes.map((b) => ({ id: b.id, x0: b.x, y0: b.y, x1: b.x + b.w, y1: b.y + b.h }))
+
   const grid = buildGrid(obs, links)
-  if (!grid) return out
+  if (!grid) {
+    // No global grid (too many cards for one): route each link on its own.
+    for (const l of links) {
+      const pts = routeOne(l, obs, cards, WINDOW_PAD) ?? routeOne(l, obs, cards, WINDOW_PAD * 3)
+      if (pts) out.set(l.id, pts)
+    }
+    return out
+  }
   const states = grid.nx * grid.ny * 4
   const buf = {
     gScore: new Float32Array(states),
@@ -350,8 +433,15 @@ export function routeEdges(boxes, links) {
     const tix = indexOf(grid.xs, bx), tiy = indexOf(grid.ys, l.ty)
     if (six < 0 || siy < 0 || tix < 0 || tiy < 0) continue
     const path = search(grid, buf, six, siy, tix, tiy)
-    if (!path) continue
-    out.set(l.id, tidy([{ x: l.sx, y: l.sy }, ...path, { x: l.tx, y: l.ty }]))
+    const pts = path ? tidy([{ x: l.sx, y: l.sy }, ...path, { x: l.tx, y: l.ty }]) : null
+    // The global grid coarsens its lanes to fit the cell budget, which can leave
+    // a link with no clean route through it. Give that link its own tight grid
+    // rather than handing the renderer a line through a card.
+    const clean =
+      pts && clearOfCards(pts, cards, l.source, l.target)
+        ? pts
+        : routeOne(l, obs, cards, WINDOW_PAD) ?? routeOne(l, obs, cards, WINDOW_PAD * 3)
+    if (clean) out.set(l.id, clean)
   }
   return out
 }

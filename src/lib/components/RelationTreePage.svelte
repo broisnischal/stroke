@@ -223,7 +223,7 @@
         bind:this={listSearchEl}
         bind:value={listSearch}
         placeholder="Filter tables…"
-        class="h-7 w-full rounded-lg border border-border bg-background/60 pl-7 pr-2 font-mono text-ui-xs outline-none placeholder:text-muted-foreground/30 focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+        class="h-7 w-full rounded-lg border-2 border-border bg-background/60 pl-7 pr-2 font-mono text-ui-xs outline-none placeholder:text-muted-foreground/30 focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
       />
     </div>
 

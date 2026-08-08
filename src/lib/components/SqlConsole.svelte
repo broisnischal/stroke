@@ -1,5 +1,6 @@
 <script>
-  import { rowsToCsv, rowsToJson, rowsToSql, rowsToTsv, rowsToMarkdown, rowsToJsonl, saveExportFile, buildExportFilename } from '$lib/export.js'
+  import FieldSelect from './FieldSelect.svelte';
+  import { rowsToCsv, rowsToJson, rowsToSql, rowsToTsv, rowsToMarkdown, rowsToJsonl, rowsToObjects, saveExportFile, buildExportFilename } from '$lib/export.js'
   import Play from "@lucide/svelte/icons/play";
   import WifiOff from "@lucide/svelte/icons/wifi-off";
   import Braces from "@lucide/svelte/icons/braces";
@@ -53,7 +54,6 @@
     saveLayout,
   } from "$lib/stores/layout.js";
   import { untrack, onDestroy } from "svelte";
-  import { buildSystemPrompt } from "$lib/ai.js";
   import { formatCompactCount } from "$lib/table-list.js";
 
   /** @typedef {import('$lib/monaco-sql-complete.js').SqlSchemaHints} SqlSchemaHints */
@@ -71,7 +71,6 @@
     /** @type {any[]} */
     multiResults = [],
     schemaHints = /** @type {SqlSchemaHints} */ ({}),
-    schemaContext = /** @type {Parameters<typeof buildSystemPrompt>[0] | null} */ (null),
     /** Run SQL - receives a single-statement override, or undefined to run the whole buffer. */
     onrun = (/** @type {string | undefined} */ statementSql) => {},
     onmodk = undefined,
@@ -252,6 +251,10 @@
   // work n·log n times and stall on large JSON cells.
   /** @type {WeakMap<object, string>} */
   const _sortTextCache = new WeakMap()
+
+  // One collator for the whole sort - localeCompare with an options object
+  // resolves locale/options once per comparison, the slow path on big results.
+  const cellCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
   /** @param {unknown} v */
   function cellSortText(v) {
     if (v === null || typeof v !== 'object') return String(v)
@@ -274,7 +277,7 @@
       const nb = Number(sb)
       if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb
     }
-    return sa.localeCompare(sb, undefined, { numeric: true, sensitivity: 'base' })
+    return cellCollator.compare(sa, sb)
   }
 
   const currentDisplay = $derived.by(() => {
@@ -362,27 +365,13 @@
 
   const rowObjects = $derived(
     currentDisplay.columns.length > 0 && currentDisplay.rows.length > 0
-      ? currentDisplay.rows.map((row) =>
-          Object.fromEntries(
-            /** @type {any[]} */ (currentDisplay.columns).map((col, i) => [col.name ?? col, /** @type {any[]} */ (row)[i]])
-          )
-        )
+      ? rowsToObjects(currentDisplay.columns, currentDisplay.rows)
       : []
   )
 
   const jsonText = $derived(rowObjects.length > 0 ? JSON.stringify(rowObjects, null, 2) : '[]')
 
   // ── Export helpers ──────────────────────────────────────────────────────────
-  /** Escape a value for CSV (RFC 4180). */
-  function _csvCell(v) {
-    if (v === null || v === undefined) return ''
-    const s = typeof v === 'object' ? JSON.stringify(v) : String(v)
-    if (s.includes(',') || s.includes('"') || s.includes('\n') || s.includes('\r')) {
-      return '"' + s.replace(/"/g, '""') + '"'
-    }
-    return s
-  }
-
   /** Unified export via the shared generators + native Save dialog.
    * @param {'csv'|'json'|'sql'|'tsv'|'md'|'jsonl'} format */
   async function exportAs(format) {
@@ -452,8 +441,6 @@
   let ormCopied = $state(/** @type {'drizzle' | 'prisma' | null} */ (null))
   /** @type {ReturnType<typeof setTimeout> | null} */
   let ormCopiedTimer = null
-  /** @type {AbortController | null} */
-  let fixAbort = null
 
   /** @param {'drizzle' | 'prisma'} kind */
   function copyAsOrm(kind) {
@@ -477,10 +464,9 @@
   }
 
   onDestroy(() => {
-    // Abort any in-flight AI fix request so it doesn't stream into a dead component
-    fixAbort?.abort()
-    // Clear ORM copy feedback timer so it doesn't fire after unmount
+    // Clear copy-feedback timers so they don't fire state writes after unmount
     if (ormCopiedTimer) clearTimeout(ormCopiedTimer)
+    if (errorCopyTimer) clearTimeout(errorCopyTimer)
   })
 </script>
 
@@ -706,18 +692,19 @@
               title=":{p.name}"
             ><span class="text-muted-foreground/50">:</span>{p.name}</span>
             <div class="relative">
-              <select
-                value={v.mode}
+              <FieldSelect
+                size="sm"
+                class="w-full bg-input/30 text-ui-xs"
                 aria-label="Parameter type for {p.name}"
-                class="h-7 w-full appearance-none rounded-md border border-border/60 bg-input/30 pl-2 pr-6 text-ui-xs text-foreground/80 transition-colors hover:border-border focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none"
-                onchange={(e) => setParam(p.name, { ...v, mode: /** @type {any} */ (e.currentTarget.value) })}
-              >
-                <option value="auto">Auto</option>
-                <option value="text">Text</option>
-                <option value="raw">Raw SQL</option>
-                <option value="null">NULL</option>
-              </select>
-              <ChevronDown class="pointer-events-none absolute right-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/50" />
+                value={v.mode}
+                onchange={(mode) => setParam(p.name, { ...v, mode: /** @type {any} */ (mode) })}
+                options={[
+                  { value: 'auto', label: 'Auto' },
+                  { value: 'text', label: 'Text' },
+                  { value: 'raw', label: 'Raw SQL' },
+                  { value: 'null', label: 'NULL' },
+                ]}
+              />
             </div>
             <input
               type="text"

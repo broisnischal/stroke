@@ -1,4 +1,4 @@
-import { writable, get } from 'svelte/store'
+import { writable } from 'svelte/store'
 
 const KEY = 'stroke:vcols-v1'
 
@@ -19,9 +19,7 @@ function create() {
 
   return {
     subscribe,
-    /** @param {string} tk - "schema.table" @returns {VColDef[]} */
-    forTable: (tk) => (get({ subscribe })[tk] ?? []),
-    /** @param {string} tk @param {Omit<VColDef,'id'>} def */
+    /** @param {string} tk - "schema.table" @param {Omit<VColDef,'id'>} def */
     add(tk, def) {
       update(d => {
         const next = { ...d, [tk]: [...(d[tk] ?? []), { ...def, id: crypto.randomUUID() }] }

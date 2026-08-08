@@ -15,7 +15,7 @@ const STORAGE_KEY = 'stroke:settings'
 /** @typedef {'geist' | 'serif' | 'apple' | 'inter' | 'mono' | 'fira' | 'plex' | 'space' | 'source'} FontId */
 /** @typedef {'regular' | 'light' | 'bold'} IconStyleId */
 /** @typedef {'lucide' | 'hugeicons' | 'phosphor'} IconSetId */
-/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean, defaultDataView: string, paginationMode: string, maxQueryHistory: number, connectTimeoutMs: number, socketTimeoutMs: number, maxAllowedPacket: number, sessionTimezone: string, vimMode: boolean, cmdkAiEnabled: boolean, liveModeEnabled: boolean, nullSortOrder: string, agentChatFontSize: number, agentCodeFontSize: number, agentThinkingStyle: string, agentShowQueryCards: boolean, agentWebAccess: boolean, tableTextAlign: string }} AppSettings */
+/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean, defaultDataView: string, paginationMode: string, maxQueryHistory: number, connectTimeoutMs: number, socketTimeoutMs: number, maxAllowedPacket: number, sessionTimezone: string, vimMode: boolean, cmdkAiEnabled: boolean, liveModeEnabled: boolean, nullSortOrder: string, agentChatFontSize: number, agentCodeFontSize: number, agentThinkingStyle: string, agentShowQueryCards: boolean, agentWebAccess: boolean, tableTextAlign: string, telemetry: boolean }} AppSettings */
 
 /** UI zoom scale (font + layout). 1 = 100%. */
 export const ZOOM_STEPS = [0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.25, 1.5]
@@ -166,11 +166,6 @@ export function normalizeTableStyle(/** @type {unknown} */ id) {
 // Numeric/text knobs surfaced under Settings → Database. `maxQueryHistory` is
 // consumed by the query-history store; the connector values (packet/timeouts/
 // timezone) are persisted as MySQL connection defaults.
-/** Data-view modes for a table tab (kept in sync with TableToolbar's DATA_VIEW_MODES). */
-// Must stay in step with DATA_VIEW_MODES in TableToolbar.svelte — that list is
-// what a tab can actually switch to, this one is what you may pick as the
-// default. 'erd' was added to the toolbar without being added here, so it was
-// the one view you could open but never default to.
 /**
  * Grid cell alignment.
  * 'numbers' is the convention every spreadsheet and DB client uses: digits line
@@ -185,6 +180,10 @@ export const TABLE_ALIGN_OPTIONS = /** @type {const} */ ([
 export const TABLE_ALIGN_IDS = TABLE_ALIGN_OPTIONS.map((o) => o.id)
 export const DEFAULT_TABLE_ALIGN = 'left'
 
+// Must stay in step with DATA_VIEW_MODES in TableToolbar.svelte — that list is
+// what a tab can actually switch to, this one is what you may pick as the
+// default. 'erd' was added to the toolbar without being added here, so it was
+// the one view you could open but never default to.
 export const DATA_VIEW_IDS = /** @type {const} */ (['table', 'json', 'record', 'text', 'chart', 'erd'])
 export const DEFAULT_DATA_VIEW = 'table'
 
@@ -251,6 +250,10 @@ export const DEFAULT_SETTINGS = {
   sessionTimezone: DEFAULT_SESSION_TIMEZONE,
   vimMode: false,
   cmdkAiEnabled: false,
+  // On by default, and stated plainly in Settings. What it sends is a fixed
+  // list of event names, the version and the OS — never a query, a table name
+  // or anything about a connection. See src/lib/telemetry.js.
+  telemetry: true,
   liveModeEnabled: false,
   nullSortOrder: DEFAULT_NULL_SORT,
   agentChatFontSize: DEFAULT_AGENT_CHAT_FONT,
@@ -430,6 +433,8 @@ export function loadSettings() {
         ? parsed.sessionTimezone.trim()
         : DEFAULT_SESSION_TIMEZONE
     const vimMode = parsed.vimMode === true
+    // Absent means on: only an explicit false opts out.
+    const telemetry = parsed.telemetry !== false
     const cmdkAiEnabled = parsed.cmdkAiEnabled === true
     const liveModeEnabled = parsed.liveModeEnabled === true
     const nullSortOrder = NULL_SORT_IDS.includes(parsed.nullSortOrder) ? parsed.nullSortOrder : DEFAULT_NULL_SORT
@@ -439,7 +444,7 @@ export function loadSettings() {
     const agentShowQueryCards = parsed.agentShowQueryCards !== false
     const agentWebAccess = parsed.agentWebAccess === true
     const tableTextAlign = TABLE_ALIGN_IDS.includes(parsed.tableTextAlign) ? parsed.tableTextAlign : DEFAULT_TABLE_ALIGN
-    _settingsCache = { theme, zoom, font, iconStyle, iconSet, tableStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply, defaultDataView, paginationMode, maxQueryHistory, connectTimeoutMs, socketTimeoutMs, maxAllowedPacket, sessionTimezone, vimMode, cmdkAiEnabled, liveModeEnabled, nullSortOrder, agentChatFontSize, agentCodeFontSize, agentThinkingStyle, agentShowQueryCards, agentWebAccess, tableTextAlign }
+    _settingsCache = { theme, zoom, font, iconStyle, iconSet, tableStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply, defaultDataView, paginationMode, maxQueryHistory, connectTimeoutMs, socketTimeoutMs, maxAllowedPacket, sessionTimezone, vimMode, cmdkAiEnabled, liveModeEnabled, nullSortOrder, agentChatFontSize, agentCodeFontSize, agentThinkingStyle, agentShowQueryCards, agentWebAccess, tableTextAlign, telemetry }
     return { ..._settingsCache }
   } catch {
     return { ...DEFAULT_SETTINGS }

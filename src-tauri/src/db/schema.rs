@@ -176,7 +176,7 @@ async fn exact_row_count(pool: &PgPool, schema: &str, table: &str) -> Result<i64
 /// 70+ acquires queue for seconds each ("time to acquire exceeded slow
 /// threshold") and starve interactive queries.
 ///
-/// Deliberately BELOW the pool's max_connections (8, see open_pg) so the
+/// Deliberately BELOW the pool's max_connections (10, see open_pg) so the
 /// background pass can never consume the whole pool: a table open bursts ~6
 /// concurrent queries and must still find connections while counts are running.
 const COUNT_CONCURRENCY: usize = 3;
@@ -1829,6 +1829,76 @@ fn incoming_fks_from_pragma_json(
     }).collect()
 }
 
+/// One batched query for a chunk of tables, replacing one `PRAGMA
+/// foreign_key_list` HTTP round-trip per table: SQLite >= 3.16 (both D1 and
+/// libSQL) exposes the pragma as a table-valued function, so a chunk of tables
+/// UNION ALLs into a single scan. `ORDER BY src, id, seq` keeps each
+/// constraint's columns in key order regardless of how the engine merges the
+/// branches.
+fn batched_incoming_fk_sql(tables: &[String]) -> String {
+    let mut sql = tables
+        .iter()
+        .map(|t| {
+            let lit = t.replace('\'', "''");
+            format!(
+                "SELECT fk.id AS id, fk.seq AS seq, fk.\"table\" AS \"table\", \
+                 fk.\"from\" AS \"from\", fk.\"to\" AS \"to\", '{lit}' AS src \
+                 FROM pragma_foreign_key_list('{lit}') fk"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" UNION ALL ");
+    sql.push_str(" ORDER BY src, id, seq");
+    sql
+}
+
+/// Group the batched scan's rows into per-constraint entries, keeping `chunk`
+/// (table-list) order like the per-table loop did. Returns `None` when the
+/// expected columns are missing, so the caller can fall back to per-table
+/// PRAGMAs.
+fn incoming_fks_from_batched(
+    res: &super::query::SqlResult,
+    chunk: &[String],
+    target: &str,
+) -> Option<Vec<IncomingForeignKey>> {
+    // A successful empty result means "no FKs in this chunk" — it must not fall
+    // back: D1 derives column names from row keys, so zero rows = zero columns.
+    if res.rows.is_empty() {
+        return Some(Vec::new());
+    }
+    let idx = |n: &str| res.columns.iter().position(|c| c.name == n);
+    let (src_i, id_i, tbl_i, from_i, to_i) =
+        (idx("src")?, idx("id")?, idx("table")?, idx("from")?, idx("to")?);
+
+    // Rows per source table, in arrival (id, seq) order.
+    let mut by_src: std::collections::HashMap<&str, Vec<&Vec<serde_json::Value>>> = Default::default();
+    for r in &res.rows {
+        if let Some(src) = r.get(src_i).and_then(|v| v.as_str()) {
+            by_src.entry(src).or_default().push(r);
+        }
+    }
+
+    let mut result = Vec::new();
+    for from_table in chunk {
+        let mut fk_map: std::collections::BTreeMap<i64, (Vec<String>, Vec<String>)> = Default::default();
+        for r in by_src.get(from_table.as_str()).map(|v| v.as_slice()).unwrap_or(&[]) {
+            let ref_table = r.get(tbl_i).and_then(|v| v.as_str()).unwrap_or("");
+            if !ref_table.eq_ignore_ascii_case(target) { continue; }
+            let id = r.get(id_i).and_then(|v| v.as_i64()).unwrap_or(0);
+            let fc = r.get(from_i).and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let tc = r.get(to_i).and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let e = fk_map.entry(id).or_default(); e.0.push(fc); e.1.push(tc);
+        }
+        for (_, (from_columns, to_columns)) in fk_map {
+            result.push(IncomingForeignKey {
+                from_schema: "main".to_string(), from_table: from_table.clone(),
+                from_columns, to_columns, constraint_name: String::new(),
+            });
+        }
+    }
+    Some(result)
+}
+
 async fn get_incoming_fks_d1(cfg: &super::connection::D1Config, table: &str) -> Result<Vec<IncomingForeignKey>, String> {
     let tables: Vec<String> = super::d1::query(
         cfg,
@@ -1840,11 +1910,22 @@ async fn get_incoming_fks_d1(cfg: &super::connection::D1Config, table: &str) -> 
     .rows.iter().filter_map(|r| r.first().and_then(|v| v.as_str()).map(String::from)).collect();
 
     let mut result = Vec::new();
-    for from_table in tables {
-        let tq = format!("\"{}\"", from_table.replace('"', "\"\""));
-        let fk_rows = super::d1::query(cfg, &format!("PRAGMA foreign_key_list({tq})"), vec![])
-            .await.map(|r| r.rows).unwrap_or_default();
-        result.extend(incoming_fks_from_pragma_json(&from_table, &fk_rows, table));
+    for chunk in tables.chunks(SQLITE_COUNT_BATCH) {
+        let batched = super::d1::query(cfg, &batched_incoming_fk_sql(chunk), vec![])
+            .await.ok()
+            .and_then(|res| incoming_fks_from_batched(&res, chunk, table));
+        match batched {
+            Some(mut fks) => result.append(&mut fks),
+            // Table-valued pragma unavailable — per-table PRAGMA fallback.
+            None => {
+                for from_table in chunk {
+                    let tq = format!("\"{}\"", from_table.replace('"', "\"\""));
+                    let fk_rows = super::d1::query(cfg, &format!("PRAGMA foreign_key_list({tq})"), vec![])
+                        .await.map(|r| r.rows).unwrap_or_default();
+                    result.extend(incoming_fks_from_pragma_json(from_table, &fk_rows, table));
+                }
+            }
+        }
     }
     Ok(result)
 }
@@ -1860,11 +1941,22 @@ async fn get_incoming_fks_libsql(cfg: &super::connection::LibSqlConfig, table: &
     .rows.iter().filter_map(|r| r.first().and_then(|v| v.as_str()).map(String::from)).collect();
 
     let mut result = Vec::new();
-    for from_table in tables {
-        let tq = format!("\"{}\"", from_table.replace('"', "\"\""));
-        let fk_rows = super::libsql::query(cfg, &format!("PRAGMA foreign_key_list({tq})"), vec![])
-            .await.map(|r| r.rows).unwrap_or_default();
-        result.extend(incoming_fks_from_pragma_json(&from_table, &fk_rows, table));
+    for chunk in tables.chunks(SQLITE_COUNT_BATCH) {
+        let batched = super::libsql::query(cfg, &batched_incoming_fk_sql(chunk), vec![])
+            .await.ok()
+            .and_then(|res| incoming_fks_from_batched(&res, chunk, table));
+        match batched {
+            Some(mut fks) => result.append(&mut fks),
+            // Table-valued pragma unavailable — per-table PRAGMA fallback.
+            None => {
+                for from_table in chunk {
+                    let tq = format!("\"{}\"", from_table.replace('"', "\"\""));
+                    let fk_rows = super::libsql::query(cfg, &format!("PRAGMA foreign_key_list({tq})"), vec![])
+                        .await.map(|r| r.rows).unwrap_or_default();
+                    result.extend(incoming_fks_from_pragma_json(from_table, &fk_rows, table));
+                }
+            }
+        }
     }
     Ok(result)
 }

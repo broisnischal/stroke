@@ -11,7 +11,7 @@
 
   let {
     open = $bindable(false),
-    /** @type {'root' | 'docker' | 'connections' | 'tables' | 'pages'} */
+    /** @type {'root' | 'docker' | 'connections' | 'tables' | 'pages' | 'ask'} */
     page = $bindable('root'),
     connected = false,
     schemas = [],
@@ -44,16 +44,20 @@
     hasSecurity = true,
     /** Redis (key-value) connection - hides SQL-only pages, shows the keyspace. */
     isRedis = false,
+    /** PostGIS present on this connection — gates the Map entry. */
+    geoAvailable = false,
     onopenredis = () => {},
     onopenlogs = () => {},
     onopeninsights = () => {},
     onopenobjects = () => {},
+    onopenormschema = () => {},
     onopendashboard = () => {},
     onopencharts = () => {},
     onopendiagrams = () => {},
     onopenbackup = () => {},
     ontogglequerylog = () => {},
     onopenextensions = () => {},
+    onopenmap = () => {},
     onopenJsonViewer = () => {},
     onopenshortcuts = () => {},
     onopenabout = () => {},
@@ -108,8 +112,10 @@
     { icon: 'bar-chart-2',     label: 'Charts',                        action: onopencharts,     show: connected && !isRedis, value: 'open charts visualize query results graphs plots' },
     { icon: 'git-branch',      label: 'Diagrams',                      action: onopendiagrams,   show: connected && !isRedis, value: 'open diagrams draw erd relationship map' },
     { icon: 'table-2',         label: 'Database Objects',              action: onopenobjects,    show: connected && !isRedis, value: 'open database objects overview tables views functions routines triggers sizes rows stats' },
+    { icon: 'code-2',          label: 'Codegen',                       action: onopenormschema,  show: connected && !isRedis, value: 'codegen open schema as code prisma drizzle orm model relations types generate dml psl' },
     { icon: 'history',         label: 'Activity Log',                  action: onopenlogs,       show: connected, value: 'open activity log events history operations' },
     { icon: 'terminal',        label: 'Query Log console', keys: '⌘⇧K', action: ontogglequerylog, show: connected && !isRedis, value: 'toggle query log console sql executed statements bottom panel' },
+    { icon: 'globe',           label: 'Map',                           action: onopenmap, show: connected && geoAvailable, value: 'open map geo postgis spatial geometry geography world plot points' },
     { icon: 'blocks',          label: 'Extensions',                    action: onopenextensions, show: connected && !isRedis, value: 'open extensions plugins formatters generators transforms better time uuid' },
     { icon: 'archive',         label: 'Backup & Restore',              action: onopenbackup,     show: connected && !isRedis, value: 'backup restore export import dump data' },
     { icon: 'braces',          label: 'JSON Viewer',                   action: onopenJsonViewer, show: connected, value: 'open json viewer explorer jsonpath tool' },
@@ -338,8 +344,15 @@
 
   $effect(() => {
     if (!open) {
+      // Abort any in-flight quick-ask: closing mid-stream must stop the tool
+      // loop (which runs real queries), and the transcript is never shown
+      // again - reopening always starts back at root.
+      stopAsk()
       page = 'root'
       paletteSearch = ''  // clear search so it never persists between opens
+      askTurns = []
+      askApi = []
+      askError = ''
     }
   })
 
@@ -504,7 +517,9 @@
   shouldFilter={shouldFilter}
   title="Command menu"
   description="Search tables, schemas, and commands"
-  class="w-[min(540px,calc(100vw-2rem))] sm:max-w-none"
+  class={page === 'ask'
+    ? 'w-[min(820px,calc(100vw-3rem))] sm:max-w-none'
+    : 'w-[min(540px,calc(100vw-2rem))] sm:max-w-none'}
 >
   {#snippet children()}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -539,7 +554,9 @@
         </div>
       {/if}
 
-      <Command.List class="max-h-[min(440px,58vh)]">
+      <!-- Taller on the Ask AI page: a transcript scrolled inside 440px shows about
+           one exchange at a time, so answers and their result tables get clipped. -->
+      <Command.List class={page === 'ask' ? 'max-h-[min(640px,74vh)]' : 'max-h-[min(440px,58vh)]'}>
         {#if page !== 'ask'}
           <Command.Empty class="py-8 text-center text-ui-xs text-muted-foreground/40">No results.</Command.Empty>
         {/if}

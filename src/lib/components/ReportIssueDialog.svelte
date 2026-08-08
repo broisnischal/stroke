@@ -10,13 +10,38 @@
   import X from "@lucide/svelte/icons/x";
   import ExternalLink from "@lucide/svelte/icons/external-link";
 
-  let { open = $bindable(false) } = $props();
+  let {
+    open = $bindable(false),
+    /** Pre-selected report type, e.g. 'crash' when opened from the error screen. */
+    initialType = /** @type {'bug'|'crash'|'feature'} */ ("bug"),
+    /** Pre-filled title. */
+    initialTitle = "",
+    /** Pre-filled description. */
+    initialBody = "",
+    /** Verbatim technical detail (stack trace, …) appended as a code block. */
+    details = "",
+  } = $props();
 
   /** @type {'bug'|'crash'|'feature'} */
   let issueType = $state("bug");
   let title = $state("");
   let body = $state("");
   let copied = $state(false);
+
+  // Seed the form once per open so a caller-supplied report (the crash screen)
+  // arrives submit-ready, without clobbering edits while the dialog is open.
+  let seeded = false;
+  $effect(() => {
+    if (!open) {
+      seeded = false;
+      return;
+    }
+    if (seeded) return;
+    seeded = true;
+    issueType = initialType;
+    if (initialTitle) title = initialTitle;
+    if (initialBody) body = initialBody;
+  });
 
   let appVersion = $state("dev");
   let platform = $state("");
@@ -55,10 +80,14 @@
     `**App version:** ${appVersion}\n**Platform:** ${platform || "unknown"}\n**Reported via:** in-app`,
   );
 
+  const detailsBlock = $derived(
+    details ? `\n## Error details\n\n\`\`\`\n${details.trim()}\n\`\`\`\n` : "",
+  );
+
   const fullBody = $derived(
     issueType === "feature"
       ? `## Feature request\n\n${body || "_Describe the feature you would like..._"}\n\n---\n${systemInfo}`
-      : `## Description\n\n${body || "_Describe what happened..._"}\n\n## Steps to reproduce\n\n1. \n2. \n\n## Expected behavior\n\n\n\n---\n${systemInfo}`,
+      : `## Description\n\n${body || "_Describe what happened..._"}\n${detailsBlock}\n## Steps to reproduce\n\n1. \n2. \n\n## Expected behavior\n\n\n\n---\n${systemInfo}`,
   );
 
   function buildGithubUrl() {
@@ -175,7 +204,9 @@
       >
         <span class="text-ui-3xs text-muted-foreground/35">Auto-included:</span>
         <span class="font-mono text-ui-3xs text-muted-foreground/45"
-          >v{appVersion} · {platform || "unknown"}</span
+          >v{appVersion} · {platform || "unknown"}{details
+            ? " · error details"
+            : ""}</span
         >
       </div>
     </div>

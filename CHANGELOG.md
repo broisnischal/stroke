@@ -4,6 +4,82 @@ All notable changes to Stroke are listed here, newest first.
 
 ---
 
+## [Unreleased]
+
+### New Features
+
+#### Data
+- **Geometry cells have a viewer, and it's a real map.** A PostGIS column used to render as a wall of EWKT in a grid cell and open a one-line text input for editing. It now shows the geometry type and SRID in the grid, and clicking through opens a map you can pan and zoom — because "where is that" is the question you opened the value for, and it has an answer at a scale you have to choose. Offline by default (the country outlines ship with the app); the tiled basemaps are one click away and named with their provider, since turning one on sends the location to a third party.
+- **Inserting a row says what the database will do.** An identity column was labelled "Required" — backwards, since sending a value there overrides the sequence. No type string can identify one (a Postgres `serial` reports as `bigint`), so the catalog is asked directly, and each blank field now says `auto-increment`, `generated`, `default`, `NULL` or `Required`.
+- **Enum and boolean fields on the insert row take typing.** Type to filter, arrows to move, Enter to pick — and leaving the field empty is a real, captioned choice rather than a blank you have to guess at.
+- **Every insert field takes typing, including generated ones.** A generated column rendered as a static label, so importing a row that must keep its key, or backfilling a gap in a sequence, meant leaving the grid for raw SQL over one cell. It shows `auto-increment` as a placeholder now — blank still omits the column, so the sequence is untouched unless you overrule it. The timestamp field pairs an input with the calendar, and shows the column's own text, so an epoch column stays editable as digits.
+- **Ollama Cloud models are pickable without pulling anything.** `/v1/models` lists only what's on disk, so a cloud model could never appear in the picker. Suggestions now come from Ollama's own registry — a model name written in the source is wrong within months — split into what fits on your machine and what runs on theirs.
+- **Anonymous usage data**, off with one switch in Settings. It reports which features get used, the app version and the OS. It does not report queries, table or database names, connection details, or anything about the data you browse — events are names, not payloads.
+- **Vectors show their standard deviation and value distribution.** The existing strip is indexed by dimension, which tells you where the spikes are but not whether the embedding is shaped right. The histogram reads roughly gaussian around zero for a healthy dense embedding; spikes and heavy tails are the signal that something is off.
+- **The status bar says how many rows you have selected.**
+
+#### Connections
+- **Reconnecting lands on the schema you were last using** instead of resetting to `public`.
+- **The window title says which database you are in.** It preferred the file path, so a local D1 connection showed its whole miniflare path.
+- **Closing an edited connection form asks first** rather than throwing the edit away.
+
+#### AI
+- **The agent can read SQLite, D1 and libSQL schemas from the sidebar.** `describe_table`, `get_schema` and the schema cache all queried `information_schema`, which those engines don't have — every call failed and the agent worked blind.
+- **Stopping generation actually stops the download.** Aborting closed the browser side only, so a local model server kept generating the whole completion into nothing. `Esc` now stops it too, as the button has always claimed.
+
+### Bug Fixes
+
+#### Data integrity
+- **MySQL inserts read back the right row.** `LAST_INSERT_ID()` is connection-scoped, and it was being read on a separate pooled connection — so whenever background work was also using the pool, the re-fetch came back with `0` or another statement's id.
+- **MySQL backups no longer corrupt decimals, dates and large ids.** `DECIMAL` was consumed by the integer decoder and written with its fraction dropped (`9.99` → `9`); `DATETIME`/`DATE`/`TIME` matched no decoder at all and exported as `NULL`; `BIGINT UNSIGNED` was rejected by the signed decoder.
+- **Restoring a MySQL dump can no longer write into the wrong database.** The dump's per-schema `USE …;` directives are connection-scoped, and the statements depending on them could land on a different pooled connection.
+- **A Postgres backup says what it couldn't export.** Every secondary-object query ended in `unwrap_or_default()`, so a permission error produced a dump silently missing its enums, sequences, foreign keys, views, functions or triggers.
+- **A failed schema capture is no longer stored as an empty snapshot** — the Schema Timeline diffed it against a real one and reported every table as removed.
+
+#### Storage
+- **Deleting a connection deletes its data.** Its recents, charts, dashboards, diagrams, per-table preferences, SQL draft, query history, saved queries, conversations and schema snapshots all stayed behind forever. Enough deleted connections eventually exhausted the storage quota, at which point unrelated saves started failing.
+- **An edit made just before switching connection is no longer lost** — or, worse, written under the new connection's key.
+- **Saved column order is scoped to the connection.** Two databases with a `public.users` shared one order.
+- **Switching database drops the cached table structure.** The caches are keyed by `schema.table` alone, so the old database's columns were served for same-named tables on the new one.
+
+#### Connections & providers
+- **Cloudflare and provider sign-in errors are visible.** A failed D1 listing left the picker showing "No D1 databases in this account" over a real error, and closing the dialog mid-authorize never released the callback port — so the next attempt hit "Callback port in use" until the five-minute timeout expired.
+- A saved connection with no port no longer defaults to `5432` regardless of engine.
+- The one-click fixes on a connection error now work on the ClickHouse, SQL Server and Redis forms, whose fields use prefixed ids.
+- Live mode stops polling a connection you have switched away from, instead of erroring every second forever.
+
+#### Interface
+- The keyboard-shortcuts dialog opens with an empty search box, focused, so the `⌘F`/`Esc` keys it advertises work without clicking into it first.
+- Leaving the search tab, or closing the command palette mid-question, stops the background queries it had running.
+- Backup log lines emitted in the same millisecond no longer collide, and the log stops at 1000 lines.
+- Chart export takes the panel's own canvas rather than the first one on the page.
+- Plain views no longer show a row count — they have no entry in the row-statistics source, so it was always `0`.
+- **AI errors say what the provider said, once.** A rate limit led with "check your plan and usage limits" while the sentence that mattered — "they reset at midnight UTC, or add your own API key" — sat behind a Details toggle next to a second copy of itself wrapped in JSON.
+- **The AI model picker no longer spins forever.** It fetched Ollama's registry from the webview, which can never work — ollama.com sends no CORS header — and retried on failure, so the spinner never stopped. It goes through the backend now, which also makes it behave identically on macOS, Linux and Windows.
+- **"No models installed" is no longer dressed as a crash.** Ollama running with nothing pulled rendered as a red failure card advising you to start a server that had just answered.
+- **Installing OmniRoute no longer looks hung.** The backend had been streaming every npm line all along and nothing was listening, so a legitimate 30-second install showed a bare spinner.
+- **OmniRoute finds your Node.** A `.app` is started by launchd with a minimal `PATH`, so Homebrew, nvm, fnm and Volta installs were invisible and the app told people who plainly had Node that they had none.
+- **The table toolbar stops clipping when zoomed in.** The pager ran off the right edge past about 250% zoom because the search box could not shrink.
+- **The status bar sits on one rhythm.** Three different control heights shared the row, so the spacing read as uneven however the gaps were set.
+
+### Performance
+- **Reading cells is substantially cheaper on every engine.** Decoding tried each type in order, and every mismatch makes the driver allocate a formatted error — up to 12 per cell on a Postgres text column, 9 on MySQL. Common types are now routed by name first.
+- **Large results no longer double their peak memory.** Rows were collected from the driver and then mapped into JSON, so both copies were resident at once.
+- **Deleting many rows is one statement per 100, not one per row** — against D1 and Turso that was one HTTPS round-trip each.
+- **Paging, sorting and filtering skip the primary/foreign-key lookups.** They can't have changed since the table was opened, and they cost two serialized statements on SQLite and two full requests on D1/Turso, every fetch.
+- **Finding what references a table is one query for D1 and libSQL**, not one round-trip per table in the database.
+- **A background row count can't starve the pool.** It inherited the session's 10-minute statement timeout; it now gets 30 seconds and degrades to "unknown".
+- **The grid stops painting each frame twice** while scrolling, and stops walking the columns scrolled off to the left once per visible row.
+- **Infinite scroll keeps its rows out of the reactive proxy** — the grid indexes `rows[row][col]` per visible cell per frame, and each of those reads was going through a proxy trap.
+- The AI agent fetches SQLite table info in parallel instead of one round-trip per table before it can answer.
+- Also: the schema timeline caps its diff matrix, the data diff debounces its filter and yields while comparing, the Redis keyspace bounds its `TYPE` fan-out, query history finds the last statement with a cursor instead of loading the whole log, and the sidebar stops forcing layout on every keystroke in the app.
+
+### Changes
+- Release builds abort on panic instead of unwinding — every command returns a `Result`, so a panic is a bug rather than a recoverable error.
+- The OmniRoute proxy is killed when the app quits; it used to outlive it.
+- `AGENT.md` and `.sqlnb` notebooks are no longer tracked — a notebook stores its query results inline, so it can carry real rows.
+
+
 ## [1.20.0] - 2026-08-05
 
 ### New Features
@@ -290,9 +366,6 @@ All notable changes to Stroke are listed here, newest first.
 - Release notes / changelog now open on the website instead of an in-app page
 - Performance: heavy views are torn down after being hidden a while to reclaim memory, background polling (live mode, insights, Redis TTL) pauses while the window is hidden, and Monaco editors share a single theme observer
 - Design system: refined font-size tokens, radii, accent selection, focus rings, and accessibility; ORM SQL highlighting; updated input borders; window maximizes on launch
-
-
-## [Unreleased]
 
 
 ## [1.13.0] - 2026-07-22

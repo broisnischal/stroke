@@ -436,6 +436,27 @@ async fn import_sqlite(app: &AppHandle, pool: &sqlx::SqlitePool, sql: &str) -> R
 
 // ── PostgreSQL export ─────────────────────────────────────────────────────────
 
+/// Unwrap a secondary-object catalog query for the Postgres export. On failure
+/// (permission error, catalog incompatibility) the export continues without
+/// those objects, but says so — both in the log and as a WARNING line in the
+/// dump — instead of silently producing an incomplete backup.
+fn catalog_or_warn<T>(
+    res: Result<Vec<T>, sqlx::Error>,
+    app: &AppHandle,
+    out: &mut String,
+    kind: &str,
+    schema: &str,
+) -> Vec<T> {
+    match res {
+        Ok(v) => v,
+        Err(e) => {
+            emit_log(app, "backup-log", "warn", format!("  ! could not export {kind} from {schema}: {e}"));
+            out.push_str(&format!("-- WARNING: could not export {kind} from {schema}: {e}\n\n"));
+            Vec::new()
+        }
+    }
+}
+
 async fn export_postgres(
     app: &AppHandle,
     pool: &sqlx::PgPool,
@@ -470,7 +491,7 @@ async fn export_postgres(
 
         // ── Enums ──
         if opts.include_enums {
-            let enums: Vec<(String, String)> = sqlx::query_as(
+            let enums_res = sqlx::query_as::<_, (String, String)>(
                 "SELECT t.typname::text, \
                         string_agg(e.enumlabel::text, ',' ORDER BY e.enumsortorder) \
                  FROM pg_catalog.pg_type t \
@@ -480,7 +501,8 @@ async fn export_postgres(
                  GROUP BY t.typname ORDER BY t.typname"
             )
             .bind(schema)
-            .fetch_all(pool).await.unwrap_or_default();
+            .fetch_all(pool).await;
+            let enums = catalog_or_warn(enums_res, app, &mut out, "enum types", schema);
 
             if !enums.is_empty() {
                 emit_log(app, "backup-log", "info", format!("  Exporting {} enum(s) from {schema}…", enums.len()));
@@ -498,7 +520,7 @@ async fn export_postgres(
 
         // ── Sequences ──
         if opts.include_sequences {
-            let seqs: Vec<(String, String, i64, i64, i64, i64, bool)> = sqlx::query_as(
+            let seqs_res = sqlx::query_as::<_, (String, String, i64, i64, i64, i64, bool)>(
                 "SELECT sequence_name::text, data_type::text, \
                         start_value::bigint, minimum_value::bigint, \
                         maximum_value::bigint, increment::bigint, \
@@ -508,7 +530,8 @@ async fn export_postgres(
                  ORDER BY sequence_name"
             )
             .bind(schema)
-            .fetch_all(pool).await.unwrap_or_default();
+            .fetch_all(pool).await;
+            let seqs = catalog_or_warn(seqs_res, app, &mut out, "sequences", schema);
 
             if !seqs.is_empty() {
                 emit_log(app, "backup-log", "info", format!("  Exporting {} sequence(s) from {schema}…", seqs.len()));
@@ -558,7 +581,7 @@ async fn export_postgres(
                 }
 
                 // Foreign keys
-                let fk_defs: Vec<String> = sqlx::query_scalar(
+                let fk_res = sqlx::query_scalar::<_, String>(
                     "SELECT format('ALTER TABLE %I.%I ADD CONSTRAINT %I %s',\
                             n.nspname, t.relname, c.conname, pg_get_constraintdef(c.oid))\
                      FROM pg_catalog.pg_constraint c\
@@ -567,7 +590,8 @@ async fn export_postgres(
                      WHERE c.contype = 'f' AND n.nspname = $1\
                      ORDER BY t.relname, c.conname"
                 )
-                .bind(schema).fetch_all(pool).await.unwrap_or_default();
+                .bind(schema).fetch_all(pool).await;
+                let fk_defs = catalog_or_warn(fk_res, app, &mut out, "foreign keys", schema);
 
                 if !fk_defs.is_empty() {
                     out.push_str(&format!("-- Foreign keys — {schema}\n"));
@@ -579,14 +603,15 @@ async fn export_postgres(
 
         // ── Views ──
         if opts.include_views {
-            let views: Vec<(String, String)> = sqlx::query_as(
+            let views_res = sqlx::query_as::<_, (String, String)>(
                 "SELECT c.relname::text, pg_get_viewdef(c.oid, true) \
                  FROM pg_catalog.pg_class c \
                  JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
                  WHERE n.nspname = $1 AND c.relkind = 'v' \
                  ORDER BY c.relname"
             )
-            .bind(schema).fetch_all(pool).await.unwrap_or_default();
+            .bind(schema).fetch_all(pool).await;
+            let views = catalog_or_warn(views_res, app, &mut out, "views", schema);
 
             if !views.is_empty() {
                 emit_log(app, "backup-log", "info", format!("  Exporting {} view(s) from {schema}…", views.len()));
@@ -602,14 +627,15 @@ async fn export_postgres(
 
         // ── Functions & Procedures ──
         if opts.include_functions {
-            let funcs: Vec<(String, String)> = sqlx::query_as(
+            let funcs_res = sqlx::query_as::<_, (String, String)>(
                 "SELECT p.proname::text, pg_get_functiondef(p.oid) \
                  FROM pg_catalog.pg_proc p \
                  JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace \
                  WHERE n.nspname = $1 AND p.prokind IN ('f', 'p') \
                  ORDER BY p.proname"
             )
-            .bind(schema).fetch_all(pool).await.unwrap_or_default();
+            .bind(schema).fetch_all(pool).await;
+            let funcs = catalog_or_warn(funcs_res, app, &mut out, "functions/procedures", schema);
 
             if !funcs.is_empty() {
                 emit_log(app, "backup-log", "info", format!("  Exporting {} function(s)/procedure(s) from {schema}…", funcs.len()));
@@ -625,7 +651,7 @@ async fn export_postgres(
 
         // ── Triggers ──
         if opts.include_triggers {
-            let triggers: Vec<String> = sqlx::query_scalar(
+            let triggers_res = sqlx::query_scalar::<_, String>(
                 "SELECT pg_get_triggerdef(t.oid) \
                  FROM pg_catalog.pg_trigger t \
                  JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid \
@@ -633,7 +659,8 @@ async fn export_postgres(
                  WHERE n.nspname = $1 AND NOT t.tgisinternal \
                  ORDER BY c.relname, t.tgname"
             )
-            .bind(schema).fetch_all(pool).await.unwrap_or_default();
+            .bind(schema).fetch_all(pool).await;
+            let triggers = catalog_or_warn(triggers_res, app, &mut out, "triggers", schema);
 
             if !triggers.is_empty() {
                 emit_log(app, "backup-log", "info", format!("  Exporting {} trigger(s) from {schema}…", triggers.len()));
@@ -1046,7 +1073,22 @@ async fn export_mysql(
 }
 
 fn mysql_val(row: &sqlx::mysql::MySqlRow, idx: usize) -> String {
+    // DECIMAL/NEWDECIMAL must decode as an exact Decimal *first*: the generic
+    // integer arm below would otherwise consume the value and keep only its
+    // integer part (9.99 → 9), silently corrupting the dump (same warning as
+    // mysql.rs cell_to_json). DATETIME/DATE/TIME need their own arms too —
+    // they match none of the numeric/bytes decoders and used to export as NULL.
+    let type_name = row.column(idx).type_info().name();
+    if type_name.eq_ignore_ascii_case("DECIMAL") || type_name.eq_ignore_ascii_case("NEWDECIMAL") {
+        if let Ok(v) = row.try_get::<Option<rust_decimal::Decimal>, _>(idx) {
+            return v.map_or_else(|| "NULL".into(), |d| d.to_string());
+        }
+    }
     if let Ok(v) = row.try_get::<Option<i64>, _>(idx) {
+        return v.map_or_else(|| "NULL".into(), |n| n.to_string());
+    }
+    // BIGINT UNSIGNED — the signed arm rejects the UNSIGNED flag.
+    if let Ok(v) = row.try_get::<Option<u64>, _>(idx) {
         return v.map_or_else(|| "NULL".into(), |n| n.to_string());
     }
     if let Ok(v) = row.try_get::<Option<f64>, _>(idx) {
@@ -1056,9 +1098,18 @@ fn mysql_val(row: &sqlx::mysql::MySqlRow, idx: usize) -> String {
     if let Ok(v) = row.try_get::<Option<bool>, _>(idx) {
         return v.map_or_else(|| "NULL".into(), |b| if b { "1" } else { "0" }.into());
     }
+    if let Ok(v) = row.try_get::<Option<chrono::NaiveDateTime>, _>(idx) {
+        return v.map_or_else(|| "NULL".into(), |d| format!("'{d}'"));
+    }
+    if let Ok(v) = row.try_get::<Option<chrono::NaiveDate>, _>(idx) {
+        return v.map_or_else(|| "NULL".into(), |d| format!("'{d}'"));
+    }
+    if let Ok(v) = row.try_get::<Option<chrono::NaiveTime>, _>(idx) {
+        return v.map_or_else(|| "NULL".into(), |t| format!("'{t}'"));
+    }
     if let Ok(v) = row.try_get::<Option<Vec<u8>>, _>(idx) {
         return v.map_or_else(|| "NULL".into(), |b| {
-            if let Ok(s) = String::from_utf8(b.clone()) {
+            if let Ok(s) = std::str::from_utf8(&b) {
                 format!("'{}'", s.replace('\\', "\\\\").replace('\'', "\\'"))
             } else {
                 format!("0x{}", hex::encode(b))
@@ -1077,9 +1128,18 @@ async fn import_mysql(app: &AppHandle, pool: &sqlx::MySqlPool, sql: &str) -> Res
     let mut ok = 0usize;
     let mut errors: Vec<String> = Vec::new();
 
+    // One connection for the whole restore: the dump carries per-schema `USE …;`
+    // directives, which are connection-scoped — on a pool, the USE and the
+    // unqualified statements that depend on it could land on different
+    // connections, restoring tables into the wrong database.
+    let mut conn = pool
+        .acquire()
+        .await
+        .map_err(|e| format!("Failed to acquire connection: {e}"))?;
+
     for (i, stmt) in stmts.iter().enumerate() {
         if is_cancelled() { break; }
-        match sqlx::query(stmt).execute(pool).await {
+        match sqlx::query(stmt).execute(&mut *conn).await {
             Ok(_) => {
                 ok += 1;
                 if (i + 1) % 50 == 0 {

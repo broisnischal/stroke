@@ -5,6 +5,7 @@ mod db;
 mod docker;
 mod license;
 mod mcp;
+mod omniroute;
 mod metrics;
 mod providers;
 mod secrets;
@@ -125,6 +126,7 @@ pub fn run() {
         .manage(db_state)
         .manage(mcp_state)
         .manage(TunnelState::new())
+        .manage(omniroute::OmniRouteState::new())
         .manage(db::live::LiveState::default())
         .setup(move |app| {
             // Load or generate a stable MCP token from the app data directory.
@@ -312,14 +314,13 @@ pub fn run() {
                 _ => {}
             });
 
-            // Suppress unused-variable warning in release builds
-            let _ = &window;
-
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::ai_fetch,
+            commands::ai_fetch_cancel,
             commands::ai_list_models,
+            commands::ollama_registry,
             commands::ai_device_id,
             commands::save_file,
             commands::save_file_bytes,
@@ -369,10 +370,13 @@ pub fn run() {
             commands::pg_get_table_rows,
             commands::pg_count_table_rows,
             commands::pg_get_column_stats,
+            commands::geo_overview,
+            commands::geo_features,
             commands::instance_version,
             commands::instance_activity,
             commands::instance_state,
             commands::instance_config,
+            commands::instance_set_config,
             commands::instance_replication,
             commands::pg_execute_sql,
             commands::pg_execute_sql_multi,
@@ -390,8 +394,17 @@ pub fn run() {
             mcp::mcp_status,
             mcp::mcp_update_connections,
             mcp::mcp_set_readonly,
+            db::connection::prewarm_dns,
+            omniroute::omniroute_env,
+            omniroute::omniroute_install,
+            omniroute::omniroute_start,
+            omniroute::omniroute_stop,
+            omniroute::omniroute_running,
             docker::docker_check,
             docker::docker_run_db,
+            docker::scan_docker_databases,
+            db::local_scan::scan_local_studios,
+            db::local_scan::scan_machine_databases,
             secrets::ai_store_key,
             secrets::ai_load_key,
             secrets::ai_delete_key,
@@ -431,6 +444,14 @@ pub fn run() {
             #[cfg(debug_assertions)]
             commands::debug_reset_trial,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            // Real exit only (tray Quit / OS shutdown) — the hide-to-tray
+            // CloseRequested path never reaches here. Reap the OmniRoute proxy
+            // we spawned, or it survives every app quit.
+            if let tauri::RunEvent::Exit = event {
+                app.state::<omniroute::OmniRouteState>().kill_now();
+            }
+        });
 }

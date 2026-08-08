@@ -1,4 +1,4 @@
-import { writable, get } from 'svelte/store'
+import { writable } from 'svelte/store'
 import { debounce } from '$lib/utils.js'
 
 const KEY = 'stroke:ai-chat-params'
@@ -52,8 +52,4 @@ export function updateChatParams(patch) {
 
 export function resetChatParams() {
   aiChatParams.set(defaults())
-}
-
-export function getChatParams() {
-  return get(aiChatParams)
 }

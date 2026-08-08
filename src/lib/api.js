@@ -468,6 +468,44 @@ export async function connectMssql(config) {
   return connectInv('connect_mssql_db', { config: normalizeMssql(config) })
 }
 
+/**
+ * Resolve saved-connection hostnames into the OS resolver cache ahead of time.
+ *
+ * A cold lookup measured 4147ms against a cached 58ms, and the connect tracked
+ * it almost exactly - so paying it while the user is still choosing is the
+ * difference between a 4s connect and a 300ms one. Fire-and-forget.
+ * @param {string[]} hosts
+ */
+export function prewarmDns(hosts) {
+  return inv('prewarm_dns', { hosts }).catch(() => {})
+}
+
+// ── OmniRoute (local OpenAI-compatible proxy) ────────────────────────────────
+
+/** What's on this machine: `{ node, npm, omniroute }`, each a version or null. */
+export async function omniRouteEnv() {
+  return inv('omniroute_env')
+}
+
+/** `npm i -g omniroute`. Streams progress as `omniroute-log` events. */
+export async function omniRouteInstall() {
+  return inv('omniroute_install')
+}
+
+/** Start the proxy and wait until the port serves. Returns its base URL. */
+export async function omniRouteStart(port) {
+  return inv('omniroute_start', { port })
+}
+
+export async function omniRouteStop() {
+  return inv('omniroute_stop')
+}
+
+/** True when something is serving on the port - ours or the user's own. */
+export async function omniRouteRunning(port) {
+  return inv('omniroute_running', { port })
+}
+
 // ── Docker ────────────────────────────────────────────────────────────────────
 
 /** Returns Docker server version string, or throws a user-facing error. */
@@ -484,6 +522,59 @@ export async function dockerRunDb(dbType, eventId) {
   return inv('docker_run_db', { dbType, eventId })
 }
 
+// ── Local ORM studios ─────────────────────────────────────────────────────────
+
+/**
+ * Prisma Studio / Drizzle Studio instances running on this machine, each with
+ * the database it is pointed at - read from that project's own schema/config, so
+ * a row can be connected to without anyone typing a connection string.
+ *
+ * @typedef {{
+ *   id: string, tool: 'prisma'|'drizzle', toolLabel: string, pid: number,
+ *   port: number, listening: boolean, projectDir: string, projectName: string,
+ *   engine: string | null, url: string | null, filePath: string | null,
+ *   authToken: string | null, accountId: string | null, databaseId: string | null,
+ *   apiToken: string | null, target: string, source: string, reason: string | null,
+ * }} DetectedStudio
+ *
+ * @returns {Promise<DetectedStudio[]>}
+ */
+export async function scanLocalStudios() {
+  return inv('scan_local_studios')
+}
+
+/**
+ * Database containers running in Docker, with the credentials they were started
+ * with - read from the container's own environment, so nothing has to be typed.
+ * Docker missing or stopped comes back as an empty list, never an error.
+ *
+ * @typedef {{
+ *   name: string, containerId: string, image: string, engine: string,
+ *   host: string, port: number, user: string, password: string,
+ *   database: string, target: string, reason: string | null,
+ * }} DockerDatabase
+ *
+ * @returns {Promise<DockerDatabase[]>}
+ */
+export async function scanDockerDatabases() {
+  return inv('scan_docker_databases')
+}
+
+/**
+ * Database servers installed natively on this machine. There is no password to
+ * recover for these - the row carries the engine's conventional local superuser.
+ *
+ * @typedef {{
+ *   id: string, name: string, pid: number, engine: string, host: string,
+ *   port: number, user: string, database: string, target: string,
+ * }} MachineDatabase
+ *
+ * @returns {Promise<MachineDatabase[]>}
+ */
+export async function scanMachineDatabases() {
+  return inv('scan_machine_databases')
+}
+
 // ── Shared disconnect ─────────────────────────────────────────────────────────
 
 export async function disconnectPostgres() {
@@ -491,20 +582,12 @@ export async function disconnectPostgres() {
 }
 
 export async function listSchemas() {
-  try {
-    return await invoke('pg_list_schemas')
-  } catch (err) {
-    throw new Error(formatInvokeError(err))
-  }
+  return inv('pg_list_schemas')
 }
 
 /** @param {string} schema */
 export async function listTables(schema) {
-  try {
-    return await invoke('pg_list_tables', { schema })
-  } catch (err) {
-    throw new Error(formatInvokeError(err))
-  }
+  return inv('pg_list_tables', { schema })
 }
 
 /**
@@ -516,20 +599,12 @@ export async function listTables(schema) {
  * @returns {Promise<{ name: string, rowCount: number }[]>}
  */
 export async function getTableRowCounts(schema, tables) {
-  try {
-    return await invoke('pg_table_row_counts', { schema, tables })
-  } catch (err) {
-    throw new Error(formatInvokeError(err))
-  }
+  return inv('pg_table_row_counts', { schema, tables })
 }
 
 /** @param {string} schema */
 export async function listIndexes(schema) {
-  try {
-    return await invoke('pg_list_indexes', { schema })
-  } catch (err) {
-    throw new Error(formatInvokeError(err))
-  }
+  return inv('pg_list_indexes', { schema })
 }
 
 /**
@@ -537,11 +612,7 @@ export async function listIndexes(schema) {
  * @param {string} table
  */
 export async function getTableColumnStructure(schema, table) {
-  try {
-    return await invoke('pg_get_table_column_structure', { schema, table })
-  } catch (err) {
-    throw new Error(formatInvokeError(err))
-  }
+  return inv('pg_get_table_column_structure', { schema, table })
 }
 
 /**
@@ -552,11 +623,7 @@ export async function getTableColumnStructure(schema, table) {
  * @returns {Promise<{ table: string, columns: any[] }[]>}
  */
 export async function getSchemaColumnStructure(schema) {
-  try {
-    return await invoke('pg_get_schema_column_structure', { schema })
-  } catch (err) {
-    throw new Error(formatInvokeError(err))
-  }
+  return inv('pg_get_schema_column_structure', { schema })
 }
 
 /**
@@ -565,56 +632,32 @@ export async function getSchemaColumnStructure(schema) {
  * @returns {Promise<Array<{ fromSchema:string, fromTable:string, fromColumns:string[], toColumns:string[], constraintName:string }>>}
  */
 export async function getIncomingForeignKeys(schema, table) {
-  try {
-    return await invoke('pg_get_incoming_foreign_keys', { schema, table })
-  } catch (err) {
-    throw new Error(formatInvokeError(err))
-  }
+  return inv('pg_get_incoming_foreign_keys', { schema, table })
 }
 
 /** @param {string} schema */
 export async function listEnums(schema) {
-  try {
-    return await invoke('pg_list_enums', { schema })
-  } catch (err) {
-    throw new Error(formatInvokeError(err))
-  }
+  return inv('pg_list_enums', { schema })
 }
 
 /** @param {string} schema */
 export async function listTriggers(schema) {
-  try {
-    return await invoke('pg_list_triggers', { schema })
-  } catch (err) {
-    throw new Error(formatInvokeError(err))
-  }
+  return inv('pg_list_triggers', { schema })
 }
 
 /** @param {string} schema */
 export async function listSequences(schema) {
-  try {
-    return await invoke('pg_list_sequences', { schema })
-  } catch (err) {
-    throw new Error(formatInvokeError(err))
-  }
+  return inv('pg_list_sequences', { schema })
 }
 
 /** @param {string} schema */
 export async function listFunctions(schema) {
-  try {
-    return await invoke('pg_list_functions', { schema })
-  } catch (err) {
-    throw new Error(formatInvokeError(err))
-  }
+  return inv('pg_list_functions', { schema })
 }
 
 /** @returns {Promise<void>} */
 export async function pingConnection() {
-  try {
-    await invoke('ping_db_connection')
-  } catch (err) {
-    throw new Error(formatInvokeError(err))
-  }
+  await inv('ping_db_connection')
 }
 
 /**
@@ -642,11 +685,7 @@ export async function getTableDdlOnConnection(connectionConfig, schema, table) {
  */
 export async function truncateTable(schema, table) {
   assertWritable('truncate a table')
-  try {
-    return await invoke('pg_truncate_table', { schema, table })
-  } catch (err) {
-    throw new Error(formatInvokeError(err))
-  }
+  return inv('pg_truncate_table', { schema, table })
 }
 
 /**
@@ -656,11 +695,7 @@ export async function truncateTable(schema, table) {
  */
 export async function dropTable(schema, table, cascade = false) {
   assertWritable('drop a table')
-  try {
-    return await invoke('pg_drop_table', { schema, table, cascade })
-  } catch (err) {
-    throw new Error(formatInvokeError(err))
-  }
+  return inv('pg_drop_table', { schema, table, cascade })
 }
 
 /**
@@ -684,35 +719,31 @@ export async function dropTable(schema, table, cascade = false) {
  */
 export async function getTableRows(schema, table, limit, offset, query = {}) {
   const _t0 = performance.now()
-  try {
-    const r = await invoke('pg_get_table_rows', {
-      schema,
-      table,
-      limit,
-      offset,
-      search: query.search?.trim() || null,
-      searchIsRegex: query.searchIsRegex ?? false,
-      searchCaseSensitive: query.searchCaseSensitive ?? false,
-      sortColumn: query.sortColumn || null,
-      sortDirection: query.sortDirection || null,
-      // Multi-column sort keys (Postgres). Primary key stays in sortColumn above
-      // so other engines still sort by it when they ignore `sorts`.
-      sorts: query.sorts?.length ? query.sorts : null,
-      filters: query.filters?.length ? query.filters : null,
-      // Keyset (cursor) pagination anchor - null = classic OFFSET (Postgres only).
-      keyset: query.keyset ?? null,
-      includeMeta: query.includeMeta !== false,
-      // Default true. Pass false to skip COUNT(*) (returns total = -1) and paint
-      // rows immediately; fetch the total separately with countTableRows().
-      includeCount: query.includeCount !== false,
-      // Null placement for the ORDER BY (dialects that support it); unset → default.
-      nullsOrder: (() => { try { const v = loadSettings().nullSortOrder; return v === 'first' || v === 'last' ? v : null } catch { return null } })(),
-    })
-    recordQuery({ sql: r?.sql, durationMs: r?.queryMs ?? Math.round(performance.now() - _t0), schema, table, source: 'browse', success: true })
-    return r
-  } catch (err) {
-    throw new Error(formatInvokeError(err))
-  }
+  const r = await inv('pg_get_table_rows', {
+    schema,
+    table,
+    limit,
+    offset,
+    search: query.search?.trim() || null,
+    searchIsRegex: query.searchIsRegex ?? false,
+    searchCaseSensitive: query.searchCaseSensitive ?? false,
+    sortColumn: query.sortColumn || null,
+    sortDirection: query.sortDirection || null,
+    // Multi-column sort keys (Postgres). Primary key stays in sortColumn above
+    // so other engines still sort by it when they ignore `sorts`.
+    sorts: query.sorts?.length ? query.sorts : null,
+    filters: query.filters?.length ? query.filters : null,
+    // Keyset (cursor) pagination anchor - null = classic OFFSET (Postgres only).
+    keyset: query.keyset ?? null,
+    includeMeta: query.includeMeta !== false,
+    // Default true. Pass false to skip COUNT(*) (returns total = -1) and paint
+    // rows immediately; fetch the total separately with countTableRows().
+    includeCount: query.includeCount !== false,
+    // Null placement for the ORDER BY (dialects that support it); unset → default.
+    nullsOrder: (() => { try { const v = loadSettings().nullSortOrder; return v === 'first' || v === 'last' ? v : null } catch { return null } })(),
+  })
+  recordQuery({ sql: r?.sql, durationMs: r?.queryMs ?? Math.round(performance.now() - _t0), schema, table, source: 'browse', success: true })
+  return r
 }
 
 /**
@@ -726,18 +757,14 @@ export async function getTableRows(schema, table, limit, offset, query = {}) {
  * @returns {Promise<number>}
  */
 export async function countTableRows(schema, table, query = {}) {
-  try {
-    const n = await invoke('pg_count_table_rows', {
-      schema,
-      table,
-      search: query.search?.trim() || null,
-      searchIsRegex: query.searchIsRegex ?? false,
-      filters: query.filters?.length ? query.filters : null,
-    })
-    return Number(n)
-  } catch (err) {
-    throw new Error(formatInvokeError(err))
-  }
+  const n = await inv('pg_count_table_rows', {
+    schema,
+    table,
+    search: query.search?.trim() || null,
+    searchIsRegex: query.searchIsRegex ?? false,
+    filters: query.filters?.length ? query.filters : null,
+  })
+  return Number(n)
 }
 
 /**
@@ -746,11 +773,7 @@ export async function countTableRows(schema, table, query = {}) {
  * @param {string} column
  */
 export async function getColumnStats(schema, table, column) {
-  try {
-    return await invoke('pg_get_column_stats', { schema, table, column })
-  } catch (err) {
-    throw new Error(formatInvokeError(err))
-  }
+  return inv('pg_get_column_stats', { schema, table, column })
 }
 
 /** Cancel the currently-running SQL query (no-op if none is running). */
@@ -763,12 +786,12 @@ export async function executeSql(sql) {
   if (isWriteSql(sql)) assertWritable('run that statement')
   const _t0 = performance.now()
   try {
-    const r = await invoke('pg_execute_sql', { sql })
+    const r = await inv('pg_execute_sql', { sql })
     recordQuery({ sql: r?.sql || sql, durationMs: r?.queryMs ?? Math.round(performance.now() - _t0), source: 'sql', success: true })
     return r
   } catch (err) {
-    recordQuery({ sql, durationMs: Math.round(performance.now() - _t0), source: 'sql', success: false, error: String(err) })
-    throw new Error(formatInvokeError(err))
+    recordQuery({ sql, durationMs: Math.round(performance.now() - _t0), source: 'sql', success: false, error: /** @type {Error} */ (err).message })
+    throw err
   }
 }
 
@@ -779,11 +802,75 @@ export async function executeSqlMulti(sql) {
 }
 
 // ── Instance Insights (PostgreSQL + MySQL monitoring) ───────────────────────
+// ── Geo view (PostGIS) ────────────────────────────────────────────────────────
+
+/**
+ * Is this connection spatial, and what can be mapped? Never throws for a
+ * non-spatial database — it answers `{ available: false, layers: [] }`, so the
+ * caller can ask on every connect without special-casing the engine.
+ * @returns {Promise<{ available: boolean, version: string|null, layers: any[] }>}
+ */
+export async function geoOverview() {
+  return await inv('geo_overview')
+}
+
+/**
+ * Features for one viewport of one spatial column.
+ *
+ * `bbox` is `{ minX, minY, maxX, maxY }` in WGS84 degrees, or null for the whole
+ * layer. When the viewport holds more rows than `limit`, the server returns
+ * grid clusters instead (`mode: 'clusters'`, each feature carrying a `count`)
+ * rather than an arbitrary truncation of the real rows.
+ *
+ * @param {{
+ *   schema: string, table: string, column: string, kind: string,
+ *   srid: number, geomType: string,
+ *   bbox?: { minX: number, minY: number, maxX: number, maxY: number }|null,
+ *   limit?: number, simplify?: number, clusterCell?: number,
+ *   filters?: any[]|null, includeExtent?: boolean,
+ * }} opts
+ */
+export async function geoFeatures(opts) {
+  return await inv('geo_features', {
+    schema: opts.schema,
+    table: opts.table,
+    column: opts.column,
+    kind: opts.kind,
+    srid: opts.srid,
+    geomType: opts.geomType,
+    bbox: opts.bbox
+      ? {
+          minX: opts.bbox.minX,
+          minY: opts.bbox.minY,
+          maxX: opts.bbox.maxX,
+          maxY: opts.bbox.maxY,
+        }
+      : null,
+    limit: opts.limit ?? 4000,
+    simplify: opts.simplify ?? 0,
+    clusterCell: opts.clusterCell ?? 1,
+    filters: opts.filters ?? null,
+    includeExtent: opts.includeExtent ?? false,
+  })
+}
+
 export async function instanceVersion() { return await inv('instance_version') }
 export async function instanceActivity() { return await inv('instance_activity') }
 export async function instanceState() { return await inv('instance_state') }
 export async function instanceConfig() { return await inv('instance_config') }
 export async function instanceReplication() { return await inv('instance_replication') }
+
+/**
+ * Change one server setting. Postgres persists it with `ALTER SYSTEM` and
+ * reloads; MySQL uses `SET PERSIST` (falling back to `SET GLOBAL`).
+ * @param {string} name
+ * @param {string | null} value `null` resets the setting to its default
+ * @returns {Promise<{ name: string, value: string, requiresRestart: boolean, reloaded: boolean, message: string }>}
+ */
+export async function instanceSetConfig(name, value) {
+  assertWritable('change server configuration')
+  return await inv('instance_set_config', { name, value })
+}
 
 /**
  * Run EXPLAIN ANALYZE on `sql` and return the parsed plan tree.
@@ -833,11 +920,7 @@ export async function listTablesOnConnection(connectionConfig, schema) {
 /** Execute a DDL statement outside a transaction (CREATE/DROP DATABASE, etc.). */
 export async function executeDdl(sql) {
   assertWritable('run that statement')
-  try {
-    return await invoke('pg_execute_ddl', { sql })
-  } catch (err) {
-    throw new Error(formatInvokeError(err))
-  }
+  return inv('pg_execute_ddl', { sql })
 }
 
 /**
@@ -849,17 +932,7 @@ export async function executeDdl(sql) {
  */
 export async function updateTableCell(schema, table, primaryKey, column, value) {
   assertWritable('edit a cell')
-  try {
-    return await invoke('pg_update_table_cell', {
-      schema,
-      table,
-      primaryKey,
-      column,
-      value,
-    })
-  } catch (err) {
-    throw new Error(formatInvokeError(err))
-  }
+  return inv('pg_update_table_cell', { schema, table, primaryKey, column, value })
 }
 
 /**
@@ -869,15 +942,7 @@ export async function updateTableCell(schema, table, primaryKey, column, value) 
  */
 export async function deleteTableRow(schema, table, primaryKey) {
   assertWritable('delete a row')
-  try {
-    return await invoke('pg_delete_table_row', {
-      schema,
-      table,
-      primaryKey,
-    })
-  } catch (err) {
-    throw new Error(formatInvokeError(err))
-  }
+  return inv('pg_delete_table_row', { schema, table, primaryKey })
 }
 
 /**
@@ -887,15 +952,7 @@ export async function deleteTableRow(schema, table, primaryKey) {
  */
 export async function deleteTableRows(schema, table, primaryKeys) {
   assertWritable('delete rows')
-  try {
-    return await invoke('pg_delete_table_rows', {
-      schema,
-      table,
-      primaryKeys,
-    })
-  } catch (err) {
-    throw new Error(formatInvokeError(err))
-  }
+  return inv('pg_delete_table_rows', { schema, table, primaryKeys })
 }
 
 /**
@@ -906,15 +963,7 @@ export async function deleteTableRows(schema, table, primaryKeys) {
  */
 export async function insertTableRow(schema, table, values) {
   assertWritable('insert a row')
-  try {
-    return await invoke('pg_insert_table_row', {
-      schema,
-      table,
-      values,
-    })
-  } catch (err) {
-    throw new Error(formatInvokeError(err))
-  }
+  return inv('pg_insert_table_row', { schema, table, values })
 }
 
 // ── MCP Server ────────────────────────────────────────────────────────────────
@@ -958,24 +1007,6 @@ export async function mcpSetReadonly(readonly) {
   return inv('mcp_set_readonly', { readonly })
 }
 
-// ── AI Secrets (secure key storage in app data dir, not localStorage) ────────
-
-/** @param {string} profileId @param {string} apiKey */
-export async function aiStoreKey(profileId, apiKey) {
-  return inv('ai_store_key', { profileId, apiKey })
-}
-
-/** @param {string} profileId @returns {Promise<string>} */
-export async function aiLoadKey(profileId) {
-  return inv('ai_load_key', { profileId })
-}
-
-/** @param {string} profileId */
-export async function aiDeleteKey(profileId) {
-  return inv('ai_delete_key', { profileId })
-}
-
-
 // ── Backup / Restore ──────────────────────────────────────────────────────────
 
 /**
@@ -1009,20 +1040,6 @@ export async function backupImport(sql) {
  */
 export async function backupCancel() {
   return inv('backup_cancel')
-}
-
-/**
- * @typedef {{ pid: number, rssBytes: number, virtualBytes: number, cpuPercent: number, processName: string }} AppMetrics
- */
-
-/** Sample this process's PID, memory (RSS + virtual), and CPU usage. */
-export async function getAppMetrics() {
-  return /** @type {Promise<AppMetrics>} */ (invoke('get_app_metrics'))
-}
-
-/** Rename the OS process so it appears as `name` in htop / ps / Activity Monitor. */
-export async function setProcessTitle(name) {
-  return invoke('set_process_title', { name })
 }
 
 // ── Autostart ─────────────────────────────────────────────────────────────────

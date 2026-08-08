@@ -33,6 +33,9 @@ if (typeof window !== 'undefined') {
 
 /** Switch active connection. Loads diagrams for the given connection. */
 export function switchDiagramsConnection(connectionId) {
+  // Write out any pending edit of the OLD connection first - the set() below
+  // re-arms the debounce with the new connection's data, dropping it otherwise.
+  persistDebounced.flush()
   _connId = connectionId ?? ''
   savedDiagrams.set(load(_connId))
 }
@@ -51,8 +54,4 @@ export function updateDiagram(id, patch) {
 
 export function deleteDiagram(id) {
   savedDiagrams.update((all) => all.filter((d) => d.id !== id))
-}
-
-export function getDiagramGroups(diagrams) {
-  return ['Default', ...new Set(diagrams.filter((d) => d.group !== 'Default').map((d) => d.group))]
 }

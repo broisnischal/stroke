@@ -180,7 +180,7 @@
                     placeholder="value"
                     spellcheck="false"
                     autocomplete="off"
-                    class="h-8 min-w-0 flex-1 rounded-lg border border-border bg-muted/15 px-2.5 font-mono text-ui-xs leading-none text-foreground outline-none transition-[border-color,box-shadow] duration-150 placeholder:text-muted-foreground/30 hover:border-border/60 focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+                    class="h-8 min-w-0 flex-1 rounded-lg border-2 border-border bg-muted/15 px-2.5 font-mono text-ui-xs leading-none text-foreground outline-none transition-[border-color,box-shadow] duration-150 placeholder:text-muted-foreground/30 hover:border-border/60 focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
                     onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addItem() } }}
                   />
                 {/if}

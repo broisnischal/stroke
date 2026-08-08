@@ -18,6 +18,34 @@ fn ai_http_client() -> &'static reqwest::Client {
     })
 }
 
+// ── Streaming cancellation ────────────────────────────────────────────────────
+// In-flight streaming requests, keyed by request_id. Stop in the UI fires
+// `ai_fetch_cancel`, which breaks the drain loop below; dropping the byte
+// stream closes the connection, so a local model server (Ollama, LM Studio)
+// stops generating instead of finishing the whole completion into the void.
+static AI_CANCELS: OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<()>>>,
+> = OnceLock::new();
+
+fn ai_cancel_senders(
+) -> &'static std::sync::Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<()>>>
+{
+    AI_CANCELS.get_or_init(Default::default)
+}
+
+/// Cancel an in-flight streaming `ai_fetch`. Fires the request's oneshot, which
+/// interrupts the drain loop even while it is parked awaiting the next chunk.
+#[tauri::command]
+pub fn ai_fetch_cancel(request_id: String) {
+    let sender = ai_cancel_senders()
+        .lock()
+        .ok()
+        .and_then(|mut map| map.remove(&request_id));
+    if let Some(tx) = sender {
+        tx.send(()).ok();
+    }
+}
+
 /// Proxy an OpenAI-compatible chat completions request through the Rust backend,
 /// bypassing WebView CORS restrictions for local AI models (Ollama, LM Studio, etc.).
 ///
@@ -63,8 +91,20 @@ pub async fn ai_fetch(
 
     if stream {
         use futures::StreamExt;
+        let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel::<()>();
+        if let Ok(mut map) = ai_cancel_senders().lock() {
+            map.insert(request_id.clone(), cancel_tx);
+        }
         let mut byte_stream = response.bytes_stream();
-        while let Some(chunk) = byte_stream.next().await {
+        loop {
+            let chunk = tokio::select! {
+                _ = &mut cancel_rx => break,
+                chunk = byte_stream.next() => chunk,
+            };
+            let Some(chunk) = chunk else {
+                app.emit(&format!("ai-stream-done-{}", request_id), true).ok();
+                break;
+            };
             match chunk {
                 Ok(bytes) => {
                     let text = String::from_utf8_lossy(&bytes).into_owned();
@@ -72,11 +112,13 @@ pub async fn ai_fetch(
                 }
                 Err(e) => {
                     app.emit(&format!("ai-stream-error-{}", request_id), e.to_string()).ok();
-                    return Ok(None);
+                    break;
                 }
             }
         }
-        app.emit(&format!("ai-stream-done-{}", request_id), true).ok();
+        if let Ok(mut map) = ai_cancel_senders().lock() {
+            map.remove(&request_id);
+        }
         Ok(None)
     } else {
         let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
@@ -95,12 +137,39 @@ pub fn ai_device_id() -> String {
     crate::license::device_id()
 }
 
-/// List the model IDs an OpenAI-compatible endpoint exposes (`GET {base}/models`).
+/// The models ollama.com currently offers, name and size.
 ///
-/// Local servers (Ollama, LM Studio) only know their installed models at runtime —
-/// a hardcoded preset like `llama3.1` fails against an install that has `llama3.1:8b`.
-/// Goes through Rust for the same reason `ai_fetch` does: the WebView can't reach
-/// localhost cross-origin.
+/// Fetched here rather than from the webview because ollama.com sends no
+/// `Access-Control-Allow-Origin`, so a browser fetch fails outright — and the
+/// packaged app's origin differs per platform (`tauri://localhost` on macOS,
+/// `http://tauri.localhost` on Windows and Linux), which would make a CORS
+/// dependency fail differently on each. Going through Rust removes the question
+/// on every OS, the same reason `ai_list_models` exists.
+#[tauri::command]
+pub async fn ollama_registry() -> Result<serde_json::Value, String> {
+    let response = ai_http_client()
+        .get("https://ollama.com/api/tags")
+        .timeout(std::time::Duration::from_secs(8))
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                "Timed out reaching ollama.com".to_string()
+            } else {
+                format!("Could not reach ollama.com: {e}")
+            }
+        })?;
+
+    if !response.status().is_success() {
+        return Err(format!("ollama.com returned {}", response.status().as_u16()));
+    }
+    response.json().await.map_err(|e| e.to_string())
+}
+
+/// The models a server actually has, so the picker never guesses a tag —
+/// a hardcoded preset like `llama3.1` fails against an install that has
+/// `llama3.1:8b`. Goes through Rust for the same reason `ai_fetch` does: the
+/// WebView can't reach localhost cross-origin.
 #[tauri::command]
 pub async fn ai_list_models(url: String, api_key: Option<String>) -> Result<Vec<String>, String> {
     let mut builder = ai_http_client()
@@ -760,6 +829,39 @@ pub async fn pg_get_column_stats(
     crate::db::get_column_stats(state, schema, table, column).await
 }
 
+// ── Geo view (PostGIS) ────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn geo_overview(
+    state: State<'_, DbState>,
+) -> Result<crate::db::GeoOverview, String> {
+    crate::db::geo_overview(state).await
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn geo_features(
+    state: State<'_, DbState>,
+    schema: String,
+    table: String,
+    column: String,
+    kind: String,
+    srid: i32,
+    geom_type: String,
+    bbox: Option<crate::db::GeoBbox>,
+    limit: i64,
+    simplify: f64,
+    cluster_cell: f64,
+    filters: Option<Vec<crate::db::RowFilter>>,
+    include_extent: bool,
+) -> Result<crate::db::GeoFeatures, String> {
+    crate::db::geo_features(
+        state, schema, table, column, kind, srid, geom_type, bbox, limit, simplify, cluster_cell,
+        filters, include_extent,
+    )
+    .await
+}
+
 // ── Instance Insights (PostgreSQL + MySQL monitoring dashboard) ────────────────
 
 #[tauri::command]
@@ -788,6 +890,17 @@ pub async fn instance_config(
     state: State<'_, DbState>,
 ) -> Result<Vec<crate::db::ConfigSetting>, String> {
     crate::db::instance_config(state).await
+}
+
+/// Write one server setting (Postgres `ALTER SYSTEM`, MySQL `SET PERSIST`).
+/// `value = None` resets it to the server default.
+#[tauri::command]
+pub async fn instance_set_config(
+    state: State<'_, DbState>,
+    name: String,
+    value: Option<String>,
+) -> Result<crate::db::SetConfigResult, String> {
+    crate::db::instance_set_config(state, name, value).await
 }
 
 #[tauri::command]
@@ -896,7 +1009,9 @@ pub async fn cancel_query(state: State<'_, DbState>) -> Result<(), String> {
 
 // ── License ───────────────────────────────────────────────────────────────────
 
-#[tauri::command]
+// `async` so the first call (device-fingerprint subprocess + trial-file I/O)
+// runs off the main thread instead of blocking the UI during startup.
+#[tauri::command(async)]
 pub fn check_license_status(app: tauri::AppHandle) -> crate::license::LicenseStatus {
     match app.path().app_data_dir() {
         Ok(dir) => crate::license::check_status(&dir),
@@ -1040,7 +1155,6 @@ pub fn debug_reset_trial(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn init_sample_db(app: tauri::AppHandle) -> Result<String, String> {
     use sqlx::sqlite::SqlitePoolOptions;
-    use tauri::Manager;
 
     let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;

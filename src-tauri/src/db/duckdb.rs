@@ -50,7 +50,17 @@ fn valueref_to_json(v: ValueRef<'_>) -> Value {
         ValueRef::Float(f) => serde_json::Number::from_f64(f as f64).map(Value::Number).unwrap_or(Value::Null),
         ValueRef::Double(f) => serde_json::Number::from_f64(f).map(Value::Number).unwrap_or(Value::Null),
         ValueRef::Decimal(d) => Value::String(d.to_string()),
-        ValueRef::Text(bytes) => Value::String(String::from_utf8_lossy(bytes).into_owned()),
+        ValueRef::Text(bytes) => {
+            // Cap oversized text/JSON — a multi-MB cell shipped whole freezes
+            // the webview (see sql_util::CELL_VALUE_CAP), same guard as the
+            // other engines.
+            let s = String::from_utf8_lossy(bytes);
+            if s.len() > super::sql_util::CELL_VALUE_CAP {
+                super::sql_util::oversize_cell("text", s.len(), s.as_bytes())
+            } else {
+                Value::String(s.into_owned())
+            }
+        }
         ValueRef::Blob(bytes) => Value::String(format!("<blob: {} bytes>", bytes.len())),
         ValueRef::Date32(days) => Value::String(fmt_date(days as i64)),
         ValueRef::Timestamp(unit, v) => Value::String(fmt_timestamp(unit, v)),

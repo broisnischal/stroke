@@ -82,7 +82,19 @@ fn cell_to_json(row: &Row, i: usize) -> Value {
         };
     }
 
-    try_scalar!(&str, |s: &str| Value::String(s.to_string()));
+    // Cap oversized strings (NVARCHAR(MAX) etc.) — a multi-MB cell shipped
+    // whole freezes the webview (see sql_util::CELL_VALUE_CAP).
+    if let Ok(v) = row.try_get::<&str, usize>(i) {
+        return v
+            .map(|s| {
+                if s.len() > super::sql_util::CELL_VALUE_CAP {
+                    super::sql_util::oversize_cell("nvarchar", s.len(), s.as_bytes())
+                } else {
+                    Value::String(s.to_string())
+                }
+            })
+            .unwrap_or(Value::Null);
+    }
     try_scalar!(i32, Value::from);
     try_scalar!(i64, Value::from);
     try_scalar!(i16, Value::from);

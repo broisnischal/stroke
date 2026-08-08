@@ -1,4 +1,5 @@
 <script>
+  import { tick } from "svelte";
   import { cn } from "$lib/utils.js";
   import Keyboard from "@lucide/svelte/icons/keyboard";
   import Search from "@lucide/svelte/icons/search";
@@ -154,6 +155,16 @@
   /** @type {HTMLInputElement | null} */
   let searchEl = $state(null);
 
+  // The component stays mounted across opens, so clear the stale query each
+  // time — and focus the search box so the advertised ⌘F/Esc keys work without
+  // first clicking inside the overlay. selectedGroup deliberately persists.
+  $effect(() => {
+    if (open) {
+      query = "";
+      tick().then(() => searchEl?.focus());
+    }
+  });
+
   const isSearching = $derived(query.trim().length > 0);
 
   const filteredGroups = $derived.by(() => {
@@ -222,7 +233,7 @@
           type="text"
           placeholder="Search shortcuts…"
           bind:value={query}
-          class="h-7 w-full rounded-lg border border-border bg-muted/25 pl-7 pr-3 text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/30 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:bg-muted/50 transition-colors"
+          class="h-7 w-full rounded-lg border-2 border-border bg-muted/25 pl-7 pr-3 text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/30 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:bg-muted/50 transition-colors"
         />
         {#if query}
           <button

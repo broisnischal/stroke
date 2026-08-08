@@ -2,7 +2,7 @@
   import { renderMermaidSync, THEMES } from 'beautiful-mermaid'
   import { mermaidThemeFor, normalizeThemeId } from '$lib/themes/registry.js'
   import { cn } from '$lib/utils.js'
-  import { svgToPngBlob, downloadBlob } from '$lib/svg-png.js'
+  import { svgToPngBlob, downloadBlob, copyPngToClipboard } from '$lib/svg-png.js'
 
   /** @type {{ code: string, class?: string }} */
   let { code, class: className = '' } = $props()
@@ -264,6 +264,19 @@
     if (!svg) return null
     const blob = await svgToPngBlob(svg, { scale: window.devicePixelRatio || 2 })
     return await downloadBlob(blob, filename)
+  }
+
+  /**
+   * Put the diagram on the clipboard as a PNG, at the same density the file
+   * export uses - a diagram pasted into a doc should not be softer than one
+   * saved to disk.
+   * @returns {Promise<boolean>} false when there is no diagram rendered yet
+   */
+  export async function copyPng() {
+    const svg = /** @type {SVGSVGElement|null} */ (container?.querySelector('svg'))
+    if (!svg) return false
+    await copyPngToClipboard(await svgToPngBlob(svg, { scale: window.devicePixelRatio || 2 }))
+    return true
   }
 </script>
 

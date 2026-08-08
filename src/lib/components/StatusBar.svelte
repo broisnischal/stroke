@@ -2,12 +2,12 @@
   import Icon         from './Icon.svelte'
   import { tick, onMount } from 'svelte'
   import { cn }       from '$lib/utils.js'
+  import { toast }    from '$lib/components/ui/sonner/toast.svelte.js'
   import { readOnlyMode, READ_ONLY_HINT } from '$lib/stores/read-only.js'
   import { aiProfiles, activeProfileId, setActiveProfile } from '$lib/stores/ai-settings.js'
   import { toggleLightDark, isCurrentThemeDark, appVimMode, appLiveMode } from '$lib/stores/settings.js'
   import { vimSubMode, VIM_MODE_LABEL } from '$lib/vim/vim.js'
-  import { executeSql, cloudflareListD1Databases } from '$lib/api.js'
-  import { providerListDatabases } from '$lib/providers.js'
+  import { listDatabases, canSwitchDatabase, currentDatabaseKey } from '$lib/databases.js'
   import { engineFamily } from '$lib/stores/connections.js'
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js'
   import AppearanceMenu from './AppearanceMenu.svelte'
@@ -42,14 +42,6 @@
     onopenmodelsettings = /** @type {() => void} */ (() => {}),
     aiMode = false,
     onopenaimode = /** @type {() => void} */ (() => {}),
-    onopenSchema = /** @type {() => void} */ (() => {}),
-    onopenlogs = /** @type {() => void} */ (() => {}),
-    onopensecurity = /** @type {() => void} */ (() => {}),
-    onopenorm = /** @type {() => void} */ (() => {}),
-    onopenbackup = /** @type {() => void} */ (() => {}),
-    onopenchartspage = /** @type {() => void} */ (() => {}),
-    onopendashboard = /** @type {() => void} */ (() => {}),
-    onopendiagrams = /** @type {() => void} */ (() => {}),
     onopensettings = /** @type {() => void} */ (() => {}),
     onopencommand = /** @type {() => void} */ (() => {}),
     onopenpages = /** @type {() => void} */ (() => {}),
@@ -68,6 +60,8 @@
     onscrolltableright = /** @type {() => void} */ (() => {}),
     /** Duration of the last data fetch (table load / refresh / query), in ms. */
     queryMs = 0,
+    /** Rows currently check-selected in the grid. 0 hides the indicator. */
+    selectedCount = 0,
     /** Live mode (auto-refresh active table) - Postgres/SQLite only. */
     live = false,
     liveSupported = false,
@@ -83,7 +77,6 @@
     ontoggletabbar        = /** @type {() => void} */ (() => {}),
     ontoggletabletoolbar  = /** @type {() => void} */ (() => {}),
     ontogglestatusbar     = /** @type {() => void} */ (() => {}),
-    hasPro = true,
   } = $props()
 
   const activeProfile = $derived($aiProfiles.find((p) => p.id === $activeProfileId) ?? $aiProfiles[0])
@@ -217,7 +210,7 @@
   const isProvider = $derived(!isRedis && !!connection?.provider)
   /** Whether this connection supports switching databases in-place. Redis uses
    * numbered logical DBs (no in-place switch yet), so it shows a static label. */
-  const canSwitchDb = $derived(!isRedis && (isPostgres || isD1 || isProvider))
+  const canSwitchDb = $derived(canSwitchDatabase(connection))
   /** The numeric logical DB Redis actually connects to - matches api.js
    * normalizeRedis (`Number(config.db) || 0`), so a stale non-numeric `db`
    * ("postgres") correctly reads as 0 rather than being shown verbatim. */
@@ -232,7 +225,7 @@
     : currentDb,
   )
   /** Key of the active db, used to mark the current row. */
-  const currentDbKey = $derived(isD1 ? (connection?.databaseId ?? '') : currentDb)
+  const currentDbKey = $derived(currentDatabaseKey(connection))
 
   const dbFiltered = $derived(
     dbSearch.trim()
@@ -241,52 +234,10 @@
   )
 
   async function fetchDatabases() {
-    // Provider connections list the account's other databases/projects via the
-    // provider API (checked first - a Supabase/Neon connection is also postgres).
-    if (isProvider && connection?.provider) {
-      dbLoading = true
-      try {
-        const dbs = await providerListDatabases(connection.provider)
-        dbList = (dbs ?? []).map((/** @type {{ db_ref: string, name: string }} */ d) => ({ key: d.db_ref, label: d.name }))
-      } catch {
-        dbList = []
-      } finally {
-        dbLoading = false
-      }
-      return
-    }
-    if (isPostgres) {
-      dbLoading = true
-      try {
-        const result = await executeSql(
-          `SELECT datname FROM pg_catalog.pg_database WHERE datistemplate = false ORDER BY datname`,
-        )
-        dbList = (result?.rows ?? []).map((r) => ({ key: String(r[0]), label: String(r[0]) }))
-      } catch {
-        dbList = []
-      } finally {
-        dbLoading = false
-      }
-    } else if (isD1 && connection?.accountId) {
-      dbLoading = true
-      try {
-        // OAuth D1 connections keep the token in the Cloudflare token store
-        // rather than on the connection, so fall back to it when absent.
-        let token = connection.apiToken
-        if (!token) {
-          const { cfGetValidToken } = await import('$lib/cloudflare.js')
-          token = await cfGetValidToken()
-        }
-        const dbs = await cloudflareListD1Databases(token, connection.accountId)
-        dbList = (dbs ?? [])
-          .map((/** @type {{ uuid: string, name: string }} */ d) => ({ key: d.uuid, label: d.name }))
-          .sort((a, b) => a.label.localeCompare(b.label))
-      } catch {
-        dbList = []
-      } finally {
-        dbLoading = false
-      }
-    }
+    dbLoading = true
+    try { dbList = await listDatabases(connection) }
+    catch (e) { toast.error('Failed to list databases: ' + String(e)) }
+    finally { dbLoading = false }
   }
 
   function switchDb(/** @type {{ key: string, label: string }} */ db) {
@@ -353,9 +304,24 @@
   /** Shared icon-only button classes */
   const iconBtn = 'inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-muted/50 hover:text-foreground'
   /** Shared label+icon button */
-  const labelBtn = 'flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors hover:bg-muted/50 hover:text-foreground data-[state=open]:bg-muted/50 data-[state=open]:text-foreground'
+  const labelBtn = 'flex h-6 items-center gap-1.5 rounded-md px-2 transition-colors hover:bg-muted/50 hover:text-foreground data-[state=open]:bg-muted/50 data-[state=open]:text-foreground'
 
   let aiModelMenuOpen = $state(false)
+
+  /**
+   * Double-clicking the connection pill jumps straight to the connection
+   * manager. A single click only opens the switcher menu, so reaching "Manage
+   * connections…" otherwise costs an extra hop.
+   * @param {MouseEvent} e
+   */
+  function openConnectionManager(e) {
+    e.preventDefault()
+    e.stopPropagation()
+    connOpen = false
+    // The menu returns focus to its trigger as it closes; opening the dialog in
+    // the same frame would lose that race and leave the modal unfocused.
+    tick().then(onconnect)
+  }
 
   /** "132ms" under a second, "1.24s" above - always tabular so it never jitters. */
   const queryMsLabel = $derived(
@@ -408,7 +374,13 @@
           onselect={(it) => { const c = savedConnections.find((x) => x.id === it.value); if (c && c.id !== activeConnectionId) onswitchconnection(c) }}
         >
           {#snippet trigger(props)}
-            <button {...props} type="button" class={cn(labelBtn, 'text-muted-foreground/80')} title="Switch connection (⇧⌘C)">
+            <button
+              {...props}
+              type="button"
+              class={cn(labelBtn, 'text-muted-foreground/80')}
+              title="Switch connection (⇧⌘C) · double-click to manage"
+              ondblclick={openConnectionManager}
+            >
               {@render connTriggerInner(true)}
             </button>
           {/snippet}
@@ -440,7 +412,7 @@
             <div class="border-t border-border/50 p-1">
               <button
                 type="button"
-                class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                class="flex w-full items-center gap-2 rounded-lg px-2 h-6.5 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                 onclick={() => { connOpen = false; onconnect() }}
               >
                 <Icon name="wifi-off" class="size-3.5 shrink-0 text-muted-foreground/50" />
@@ -455,6 +427,7 @@
           class={cn(labelBtn, 'text-muted-foreground/80')}
           title="Manage connections (⇧⌘C)"
           onclick={onconnect}
+          ondblclick={openConnectionManager}
         >
           {@render connTriggerInner(false)}
         </button>
@@ -495,7 +468,7 @@
             <!-- Always mounted (not gated on list size) so the search box is
                  active the moment the switcher opens and arrows/Tab/Enter work
                  for any number of databases. -->
-            <div class="border-b border-border/50 px-2 py-1.5">
+            <div class="border-b border-border/50 px-2 h-6.5">
               <input
                 bind:this={dbInputEl}
                 type="text"
@@ -547,7 +520,7 @@
             </div>
 
             {#if canSwitchDb}
-              <div class="flex items-center justify-between border-t border-border/50 px-2.5 py-1.5">
+              <div class="flex items-center justify-between border-t border-border/50 px-2.5 h-6.5">
                 <span class="text-ui-3xs text-muted-foreground/40">
                   {dbList.length} database{dbList.length === 1 ? '' : 's'}
                 </span>
@@ -618,7 +591,7 @@
         <button
           type="button"
           class={cn(
-            'flex items-center gap-1.5 rounded-md px-2 py-1 transition-[background-color,color] duration-150',
+            'flex h-6 items-center gap-1.5 rounded-md px-2 transition-[background-color,color] duration-150',
             live
               ? 'font-medium text-success bg-success/10 hover:bg-success/16'
               : 'text-muted-foreground/50 hover:bg-muted/50 hover:text-foreground',
@@ -646,11 +619,20 @@
         >{queryMsLabel}</span>
       {/if}
 
+      <!-- Selected row count, sits to the right of the fetch timing -->
+      {#if selectedCount > 0}
+        {@render sep()}
+        <span
+          class="shrink-0 px-1 font-mono text-ui-2xs tabular-nums text-foreground/70"
+          title="{selectedCount.toLocaleString('en-US')} row{selectedCount === 1 ? '' : 's'} selected"
+        >{selectedCount.toLocaleString('en-US')} selected</span>
+      {/if}
+
     {:else}
       <!-- Not connected -->
       <button
         type="button"
-        class="flex items-center gap-1.5 rounded-md px-2 py-1 text-muted-foreground/50 transition-colors hover:bg-muted/50 hover:text-foreground"
+        class="flex items-center gap-1.5 rounded-md px-2 h-6 text-muted-foreground/50 transition-colors hover:bg-muted/50 hover:text-foreground"
         onclick={onconnect}
         title="No connection, click to connect"
       >
@@ -667,7 +649,7 @@
     {#if $appVimMode}
       <span
         class={cn(
-          'inline-flex h-5 items-center rounded-md px-1.5 font-mono text-ui-3xs font-semibold uppercase tracking-wider',
+          'inline-flex h-6 items-center rounded-md px-1.5 font-mono text-ui-3xs font-semibold uppercase tracking-wider',
           $vimSubMode === 'insert' && 'bg-success/15 text-success',
           $vimSubMode === 'visual' && 'bg-warning/15 text-warning',
           $vimSubMode === 'command' && 'bg-primary/15 text-primary',
@@ -679,14 +661,14 @@
 
     <!-- App version -->
     {#if appVersion}
-      <span class="inline-flex h-5 items-center rounded-md px-1.5 font-mono text-ui-3xs tabular-nums text-muted-foreground/45" title="Stroke v{appVersion}">v{appVersion}</span>
+      <span class="inline-flex h-6 items-center rounded-md px-1.5 font-mono text-ui-3xs tabular-nums text-muted-foreground/45" title="Stroke v{appVersion}">v{appVersion}</span>
     {/if}
 
     <!-- Pending edits -->
     {#if pendingEditCount > 0}
       <button
         type="button"
-        class="inline-flex h-5 items-center gap-1 rounded-md bg-primary px-2 text-ui-2xs font-medium text-primary-foreground transition-opacity hover:opacity-85 disabled:opacity-60"
+        class="inline-flex h-6 items-center gap-1 rounded-md bg-primary px-2 text-ui-2xs font-medium text-primary-foreground transition-opacity hover:opacity-85 disabled:opacity-60"
         onclick={onapplyedits}
         disabled={applying}
         title="Apply {pendingEditCount} unsaved change{pendingEditCount === 1 ? '' : 's'}"
@@ -701,7 +683,7 @@
       </button>
       <button
         type="button"
-        class="inline-flex h-5 items-center gap-1 rounded-md px-2 text-ui-2xs text-muted-foreground/50 transition-colors hover:bg-muted/50 hover:text-foreground disabled:opacity-40"
+        class="inline-flex h-6 items-center gap-1 rounded-md px-2 text-ui-2xs text-muted-foreground/50 transition-colors hover:bg-muted/50 hover:text-foreground disabled:opacity-40"
         onclick={onresetedits}
         disabled={applying}
         title="Discard unsaved changes"
@@ -721,7 +703,7 @@
         title="Go to page (⌘P)"
         aria-label="Go to page"
       >
-        <Icon name="plus" class="size-3.5" />
+        <Icon name="layout-template" class="size-3.5" />
       </button>
       {@render sep()}
     {/if}
@@ -805,7 +787,7 @@
     {#if hasUpdate}
       <button
         type="button"
-        class="flex items-center gap-1 rounded-md px-2 py-1 text-ui-2xs font-medium text-warning transition-colors hover:bg-muted/50 hover:text-warning/80"
+        class="flex items-center gap-1 rounded-md px-2 h-6 text-ui-2xs font-medium text-warning transition-colors hover:bg-muted/50 hover:text-warning/80"
         onclick={oncheckupdate}
         title="Update available"
       >
@@ -866,7 +848,7 @@
         <div class="border-t border-border/50 p-1">
           <button
             type="button"
-            class="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            class="flex w-full items-center gap-1.5 rounded-md px-2 h-6.5 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             onclick={() => { aiModelMenuOpen = false; onopenmodelsettings() }}
           >
             <Icon name="settings-2" class="size-3.5 shrink-0 text-muted-foreground/50" />

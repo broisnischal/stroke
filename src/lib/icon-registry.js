@@ -45,6 +45,7 @@ import Bot from '@lucide/svelte/icons/bot'
 import AlertTriangle from '@lucide/svelte/icons/alert-triangle'
 import AlertCircle from '@lucide/svelte/icons/alert-circle'
 import ShieldCheck from '@lucide/svelte/icons/shield-check'
+import Globe from '@lucide/svelte/icons/globe'
 import Pencil from '@lucide/svelte/icons/pencil'
 import Braces from '@lucide/svelte/icons/braces'
 import Lock from '@lucide/svelte/icons/lock'
@@ -137,7 +138,7 @@ import {
   ArrowRight01Icon, ArrowLeft01Icon, Add01Icon, MinusSignIcon, Search01Icon,
   Delete02Icon, Table01Icon, GridTableIcon, RefreshIcon, Copy01Icon, Loading03Icon, Key01Icon,
   LinkSquare01Icon, Database01Icon, SourceCodeIcon, TerminalIcon, ChartLineData02Icon,
-  SparklesIcon, GitBranchIcon, Download04Icon, PlayIcon, ViewIcon, ViewOffSlashIcon,
+  SparklesIcon, GitBranchIcon, Download04Icon, PlayIcon, EyeIcon, EyeOffIcon,
   AiBrain01Icon, Alert02Icon, AlertCircleIcon, Shield01Icon, PencilEdit01Icon,
   BracketsIcon, SquareLock01Icon, DashboardSquare01Icon, HistoryIcon, Clock01Icon,
   FlashIcon, Settings01Icon, Maximize01Icon, FilterIcon, MoreHorizontalIcon,
@@ -146,7 +147,7 @@ import {
   HardDriveIcon, DashboardSquare02Icon, SquareUnlock01Icon, Moon02Icon, RadioIcon,
   ServerStack01Icon, Settings02Icon, Sun03Icon, ArrowTurnBackwardIcon, Unlink01Icon,
   WifiConnected01Icon, WifiDisconnected01Icon, TestTubeIcon, WorkflowSquare02Icon,
-  Share08Icon, GitCompareIcon, PuzzleIcon, PlugSocketIcon, NoteEditIcon, ChartBarLineIcon,
+  Share08Icon, GitCompareIcon, PuzzleIcon, PlugSocketIcon, NoteEditIcon, ChartBarLineIcon, GlobalIcon,
   InformationCircleIcon, ArrowUpDownIcon, ArrowLeftRightIcon, Bookmark01Icon, BugIcon,
   UnavailableIcon, Target01Icon, EraserIcon, FileDownloadIcon, File01Icon, FunctionSquareIcon,
   HashIcon, InfinityIcon, KeyboardIcon, Layers01Icon, LeftToRightListBulletIcon, Link01Icon,
@@ -169,6 +170,10 @@ export const ICON_MAP = {
   'search':         { lucide: Search,        huge: Search01Icon },
   'trash-2':        { lucide: Trash2,        huge: Delete02Icon },
   'table-2':        { lucide: Table2,        huge: GridTableIcon },
+  // A view is an eye everywhere in the app - TabBar picks 'eye' for view tabs,
+  // so the sidebar has to agree. Plain table glyphs made views indistinguishable
+  // from tables at size-3.
+  'table-view':     { lucide: Eye,           huge: EyeIcon },
   'refresh-cw':     { lucide: RefreshCw,     huge: RefreshIcon },
   'copy':           { lucide: Copy,          huge: Copy01Icon },
   'loader-2':       { lucide: Loader2,       huge: Loading03Icon },
@@ -182,8 +187,8 @@ export const ICON_MAP = {
   'git-branch':     { lucide: GitBranch,     huge: GitBranchIcon },
   'download':       { lucide: Download,      huge: Download04Icon },
   'play':           { lucide: Play,          huge: PlayIcon },
-  'eye':            { lucide: Eye,           huge: ViewIcon },
-  'eye-off':        { lucide: EyeOff,        huge: ViewOffSlashIcon },
+  'eye':            { lucide: Eye,           huge: EyeIcon },
+  'eye-off':        { lucide: EyeOff,        huge: EyeOffIcon },
   'bot':            { lucide: Bot,           huge: AiBrain01Icon },
   'alert-triangle': { lucide: AlertTriangle, huge: Alert02Icon },
   'alert-circle':   { lucide: AlertCircle,   huge: AlertCircleIcon },
@@ -228,6 +233,7 @@ export const ICON_MAP = {
   'share-2':        { lucide: Share2,        huge: Share08Icon },
   'git-compare':    { lucide: GitCompare,    huge: GitCompareIcon },
   'blocks':         { lucide: Blocks,        huge: PuzzleIcon },
+  'globe':          { lucide: Globe,         huge: GlobalIcon },
   'plug':           { lucide: Plug,          huge: PlugSocketIcon },
   'notebook-pen':   { lucide: NotebookPen,   huge: NoteEditIcon },
   'bar-chart-3':    { lucide: BarChart3,     huge: ChartBarLineIcon },
@@ -310,6 +316,7 @@ import PhRobot from 'phosphor-svelte/lib/Robot'
 import PhWarning from 'phosphor-svelte/lib/Warning'
 import PhWarningCircle from 'phosphor-svelte/lib/WarningCircle'
 import PhShieldCheck from 'phosphor-svelte/lib/ShieldCheck'
+import PhGlobe from 'phosphor-svelte/lib/Globe'
 import PhPencilSimple from 'phosphor-svelte/lib/PencilSimple'
 import PhBracketsCurly from 'phosphor-svelte/lib/BracketsCurly'
 import PhLock from 'phosphor-svelte/lib/Lock'
@@ -374,6 +381,7 @@ export const PHOSPHOR_MAP = {
   'search': PhMagnifyingGlass,
   'trash-2': PhTrash,
   'table-2': PhTable,
+  'table-view': PhEye,
   'refresh-cw': PhArrowsClockwise,
   'copy': PhCopy,
   'loader-2': PhCircleNotch,
@@ -442,6 +450,7 @@ export const PHOSPHOR_MAP = {
   'layout-dashboard': PhSquaresFour,
   'layers': PhStack,
   'blocks': PhPuzzlePiece,
+  'globe': PhGlobe,
   'wifi': PhWifiHigh,
   'wifi-off': PhWifiSlash,
   'columns-3': PhColumns,

@@ -4,7 +4,6 @@
   import { configureMonacoWorkers, editorFontFamily } from "$lib/monaco-env.js";
   import {
     defineStrokeMonacoThemes,
-    applyMonacoTheme,
     monacoThemeId,
     readEditorFontOptions,
   } from "$lib/monaco-themes.js";
@@ -15,10 +14,8 @@
   import Code2 from "@lucide/svelte/icons/code-2";
   import Copy from "@lucide/svelte/icons/copy";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
-  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import CheckCheck from "@lucide/svelte/icons/check-check";
   import Loader2 from "@lucide/svelte/icons/loader-2";
-  import Table2 from "@lucide/svelte/icons/table-2";
   import Braces from "@lucide/svelte/icons/braces";
   import { Button } from "$lib/components/ui/button/index.js";
   import DataTable from "./DataTable.svelte";
@@ -27,6 +24,7 @@
   import JsonViewer from "./JsonViewer.svelte";
   import ResizeHandle from "./ResizeHandle.svelte";
   import { cn } from "$lib/utils.js";
+  import { rowsToObjects } from "$lib/export.js";
   import { evalDrizzleQuery, evalPrismaQuery } from "$lib/orm-builder.js";
   import {
     clampSqlEditorHeight,
@@ -56,7 +54,6 @@
     onmodt = undefined,
     onmodshifte = undefined,
     onmodshiftd = undefined,
-    onmodshifts = undefined,
   } = $props();
 
   /** @type {HTMLElement | null} */
@@ -124,12 +121,12 @@
   /** @param {monaco.editor.IStandaloneCodeEditor} ed */
   function registerShortcuts(ed) {
     const { CtrlCmd, Shift } = monaco.KeyMod
-    const { Enter, KeyS, KeyI, KeyB, KeyW, KeyN, KeyM, KeyT, KeyD, KeyE, KeyO } = monaco.KeyCode
+    const { Enter, KeyS, KeyI, KeyB, KeyW, KeyN, KeyM, KeyT, KeyD, KeyE } = monaco.KeyCode
     const run = (/** @type {(() => void) | undefined} */ fn) => fn?.()
 
     // Editor-local
     ed.addCommand(CtrlCmd | Enter, () => void handleRun())
-    ed.addCommand(CtrlCmd | KeyS,  () => { ed.getAction("editor.action.formatDocument")?.run(); run(onmodshifts) })
+    ed.addCommand(CtrlCmd | KeyS,  () => { ed.getAction("editor.action.formatDocument")?.run() })
 
     // Global app shortcuts
     ed.addCommand(CtrlCmd | KeyI,         () => run(onmodi))
@@ -140,7 +137,6 @@
     ed.addCommand(CtrlCmd | KeyT,         () => run(onmodt))
     ed.addCommand(CtrlCmd | Shift | KeyD, () => run(onmodshiftd))
     ed.addCommand(CtrlCmd | Shift | KeyE, () => run(onmodshifte))
-    ed.addCommand(CtrlCmd | Shift | KeyO, () => run(onrun.bind(null, { sql: '', mode })))
   }
 
   // ── Valid JS identifier table names only ──────────────────────────────────
@@ -176,16 +172,7 @@
 
   // ── JSON output ───────────────────────────────────────────────────────────
   const rowObjects = $derived(
-    columns.length > 0 && rows.length > 0
-      ? rows.map((row) =>
-          Object.fromEntries(
-            /** @type {any[]} */ (columns).map((col, i) => [
-              col.name ?? col,
-              /** @type {any[]} */ (row)[i],
-            ]),
-          ),
-        )
-      : [],
+    columns.length > 0 && rows.length > 0 ? rowsToObjects(columns, rows) : [],
   );
 
   const jsonText = $derived(
@@ -392,11 +379,15 @@
     }
   }
 
-  // Live SQL preview on every code/mode change
+  // Live SQL preview - debounced so typing doesn't compile a new Function and
+  // re-highlight the preview on every keystroke. Run/Copy SQL call parseQuery()
+  // synchronously themselves, so they never see stale output.
   $effect(() => {
     void code;
     void mode;
-    parseQuery();
+    void schemaHints;
+    const t = setTimeout(parseQuery, 200);
+    return () => clearTimeout(t);
   });
 
   async function handleRun() {
@@ -520,21 +511,13 @@
       if (next !== code) code = next;
     });
 
-    const themeObs = new MutationObserver(() => {
-      applyMonacoTheme(currentTheme());
-    });
-    themeObs.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class", "data-theme"],
-    });
-
     return () => {
       ro.disconnect();
       editor?.dispose();
       editor = null;
       // Dispose the Monaco extra-lib - it lives on javascriptDefaults globally.
       if (_extraLibDisposable) { _extraLibDisposable.dispose(); _extraLibDisposable = null; }
-      themeObs.disconnect();
+      if (copiedTimer) clearTimeout(copiedTimer);
     };
   });
 

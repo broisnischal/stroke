@@ -1,5 +1,5 @@
 <script>
-  import { tick, untrack } from 'svelte'
+  import { onDestroy, tick, untrack } from 'svelte'
   import dagre from '@dagrejs/dagre'
   import { getSchemaColumnStructure, listIndexes, getTableDdl, saveExportAs } from '$lib/api.js'
   import ErdCanvas from './ErdCanvas.svelte'
@@ -19,11 +19,12 @@
   import LayoutGrid from '@lucide/svelte/icons/layout-grid'
   import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal'
   import { toast } from "$lib/components/ui/sonner/toast.svelte.js"
-  import { svgStringToPngBlob } from '$lib/svg-png.js'
+  import { svgStringToPngBlob, copyPngToClipboard } from '$lib/svg-png.js'
   import { Popover, PopoverTrigger, PopoverContent } from '$lib/components/ui/popover/index.js'
   import { isCurrentThemeDark } from '$lib/stores/settings.js'
   import { loadErdSettings, saveErdSettings, SPACING_PRESETS, SCOPE_DEFAULTS } from '$lib/stores/erd-settings.js'
   import { routeEdges, routeToSvgPath, MAX_ROUTED_NODES } from '$lib/erd-routing.js'
+  import { separateCards } from '$lib/erd-layout.js'
   import { cn } from '$lib/utils.js'
 
   let {
@@ -71,8 +72,6 @@
 
   // ── State ─────────────────────────────────────────────────────────────────
   let loading       = $state(false)
-  let loadedCount   = $state(0)
-  let totalCount    = $state(0)
   let error         = $state('')
   let search        = $state('')
   let searchEl      = $state(/** @type {HTMLInputElement | null} */ (null))
@@ -226,10 +225,33 @@
    * Connected nodes → Dagre LR.
    * Orphan nodes (no FK edges) → compact grid below connected graph.
    */
+  /**
+   * The one guarantee every layout has to keep: no card sits on another, and
+   * neighbours are far enough apart for the relationship lines between them to
+   * have somewhere to run. Dagre reserves that space for the cards it places,
+   * but a hand-dragged card, a re-flowed rank or a card that changed size since
+   * the layout ran can all break it — so the check happens here, once, on
+   * whatever the layout produced.
+   * @param {any[]} laid @param {string} [pin] a card that must not move
+   */
+  function enforceSpacing(laid, pin) {
+    if (laid.length < 2) return laid
+    const pos = separateCards(
+      laid.map((n) => ({ id: n.id, x: n.position.x, y: n.position.y, w: NODE_W, h: hOf(n) })),
+      {
+        // Wide enough for the routed lanes plus their clearance on both sides.
+        gapX: Math.max(gaps.colGap, 128),
+        gapY: Math.max(gaps.rowGap, 88),
+        fixed: pin ? new Set([pin]) : undefined,
+      },
+    )
+    return laid.map((n) => ({ ...n, position: pos.get(n.id) ?? n.position }))
+  }
+
   function layoutNodes(ns, es) {
     if (focusTable && scope === 'related' && ns.length > 1) {
       const laid = layoutFocus(ns, es, focusTable)
-      if (laid) return laid
+      if (laid) return enforceSpacing(laid, focusTable)
     }
     const linked = new Set()
     for (const e of es) { linked.add(e.source); linked.add(e.target) }
@@ -329,7 +351,7 @@
       },
     }))
 
-    return [...laidConn, ...laidOrphans]
+    return enforceSpacing([...laidConn, ...laidOrphans])
   }
 
   // ── Edge list ─────────────────────────────────────────────────────────────
@@ -457,24 +479,17 @@
   })
 
   // ── Search ────────────────────────────────────────────────────────────────
-  /** @param {string} q */
-  function _applySearch(q) {
-    if (!q) {
-      nodes = nodes.map(n => ({ ...n, data: { ...n.data, highlighted: true } }))
-      return
-    }
-    const hi = new Set()
-    for (const [name, t] of tableMeta) {
-      if (name.toLowerCase().includes(q) || t.columns.some(c => c.name.toLowerCase().includes(q)))
-        hi.add(name)
-    }
-    nodes = nodes.map(n => ({ ...n, data: { ...n.data, highlighted: hi.has(n.id) } }))
+  /** Highlight rule: the table name or any of its columns matches the query.
+   *  @param {string} id @param {string} q */
+  function matchesQuery(id, q) {
+    if (!q) return true
+    const t = tableMeta.get(id)
+    return id.toLowerCase().includes(q) || (t?.columns.some(c => c.name.toLowerCase().includes(q)) ?? false)
   }
 
-  let _rebuildTimer = /** @type {ReturnType<typeof setTimeout>|null} */ (null)
-  function scheduleRebuild() {
-    if (_rebuildTimer) clearTimeout(_rebuildTimer)
-    _rebuildTimer = setTimeout(() => { buildGraph(); _rebuildTimer = null }, 80)
+  /** @param {string} q */
+  function _applySearch(q) {
+    nodes = nodes.map(n => ({ ...n, data: { ...n.data, highlighted: matchesQuery(n.id, q) } }))
   }
 
   function reLayout() {
@@ -485,28 +500,28 @@
 
   /** Persist a dragged node's new position so rebuilds and exports keep it. */
   function onNodeMoved(/** @type {string} */ id, /** @type {number} */ x, /** @type {number} */ y) {
-    _posCache.set(id, { x, y })
-    nodes = nodes.map((n) => (n.id === id ? { ...n, position: { x, y } } : n))
+    // Snap to whole units: the drag divides by the camera zoom, so a card parked
+    // at x.37 renders its 1px borders across two device pixels (soft edges) and
+    // pushes fractional bounds into every export.
+    const p = { x: Math.round(x), y: Math.round(y) }
+    _posCache.set(id, p)
+    nodes = nodes.map((n) => (n.id === id ? { ...n, position: p } : n))
   }
 
   // ── Load ──────────────────────────────────────────────────────────────────
   async function load() {
     loading     = true
-    loadedCount = 0
-    totalCount  = 0
     error       = ''
     tableMeta   = new Map()
     nodes       = []
     edges       = []
     _posCache.clear()
-    if (_rebuildTimer) { clearTimeout(_rebuildTimer); _rebuildTimer = null }
 
     try {
       // One call for the whole schema. This used to fan out one request per
       // table, which meant the diagram couldn't start drawing until N round
       // trips had completed — the dominant cost on any non-trivial schema.
       const schemaCols = await getSchemaColumnStructure(activeSchema)
-      totalCount = schemaCols.length
       autoConnected = schemaCols.length > WARN_MANY
 
       for (const { table, columns } of schemaCols) {
@@ -521,7 +536,6 @@
         )
         tableMeta.set(table, /** @type {TableMeta} */ ({ name: table, columns: cols, pkCols }))
       }
-      loadedCount = schemaCols.length
       tableMeta = new Map(tableMeta)
       await tick()
       buildGraph(true)
@@ -567,14 +581,7 @@
       if (!nodes.length) return
       nodes = nodes.map(n => ({
         ...n,
-        data: {
-          ...n.data,
-          selected: n.id === sel,
-          highlighted: q
-            ? (n.id.toLowerCase().includes(q) ||
-               (tableMeta.get(n.id)?.columns.some(c => c.name.toLowerCase().includes(q)) ?? false))
-            : true,
-        },
+        data: { ...n.data, selected: n.id === sel, highlighted: matchesQuery(n.id, q) },
       }))
     })
   })
@@ -601,6 +608,7 @@
   let copiedDdl = $state('')
   /** @type {ReturnType<typeof setTimeout>|null} */
   let _copiedTimer = null
+  onDestroy(() => { if (_copiedTimer) clearTimeout(_copiedTimer) })
 
   /** Copy a table's CREATE statement straight from the inspector. @param {string} name */
   async function copyDdl(name) {
@@ -725,6 +733,7 @@
       .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
   }
 
+  /** @returns {{ xml: string, width: number, height: number } | null} */
   function generateSvg() {
     const vis = nodes.filter(n => n.data?.highlighted !== false)
     if (!vis.length) return null
@@ -738,6 +747,11 @@
       y1 = Math.max(y1, n.position.y + h)
     }
     const P = 56
+    // Dragged nodes carry sub-pixel positions (the drag divides by the camera
+    // zoom), so floor/ceil the bounds: whole numbers keep the raster grid-aligned
+    // and never clip a card by a fraction of a pixel.
+    x0 = Math.floor(x0); y0 = Math.floor(y0)
+    x1 = Math.ceil(x1); y1 = Math.ceil(y1)
     const W = x1 - x0 + P * 2
     const H = y1 - y0 + P * 2
     const dx = -x0 + P
@@ -747,7 +761,7 @@
     const c = exportPalette()
 
     const o = []
-    o.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">`)
+    o.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`)
     o.push(`<rect width="${W}" height="${H}" fill="${c.sheet}"/>`)
     o.push(`<defs><pattern id="dp" width="22" height="22" patternUnits="userSpaceOnUse">`)
     o.push(`<circle cx="1.2" cy="1.2" r="0.8" fill="${c.dot}"/></pattern></defs>`)
@@ -804,7 +818,6 @@
     o.push(`<path d="${lineD.join(' ')}" fill="none" stroke="${c.edge}" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>`)
     o.push(`<path d="${markD.join(' ')}" fill="none" stroke="${c.edge}" stroke-width="1.2" stroke-linecap="round"/>`)
 
-    // nodes
     for (const n of vis) {
       const cols = n.data?.columns ?? []
       const pkCols = n.data?.pkCols ?? new Set()
@@ -814,15 +827,12 @@
       const isSel = n.data?.selected
       const isFocus = n.data?.isFocus
 
-      // shadow
       o.push(`<rect x="${nx+3}" y="${ny+4}" width="${NODE_W}" height="${h}" rx="8" fill="${c.shadow}"/>`)
       // focus halo - marks the table the diagram was scoped to
       if (isFocus) {
         o.push(`<rect x="${nx-6}" y="${ny-6}" width="${NODE_W+12}" height="${h+12}" rx="13" fill="${c.focus}" fill-opacity="0.10" stroke="${c.focus}" stroke-opacity="0.4" stroke-width="1.5"/>`)
       }
-      // card bg
       o.push(`<rect x="${nx}" y="${ny}" width="${NODE_W}" height="${h}" rx="8" fill="${c.card}" stroke="${isFocus || isSel ? c.accent : c.border}" stroke-width="${isFocus ? 2 : isSel ? 1.5 : 1}"/>`)
-      // header
       o.push(`<clipPath id="hc${n.id.replace(/\W/g,'_')}"><rect x="${nx}" y="${ny}" width="${NODE_W}" height="${HDR_H + 8}" rx="8"/></clipPath>`)
       o.push(`<rect x="${nx}" y="${ny}" width="${NODE_W}" height="${HDR_H + 8}" fill="${c.header}" clip-path="url(#hc${n.id.replace(/\W/g,'_')})"/>`)
       o.push(`<line x1="${nx}" y1="${ny+HDR_H}" x2="${nx+NODE_W}" y2="${ny+HDR_H}" stroke="${isFocus ? c.accent : c.border}" stroke-opacity="${isFocus ? 0.55 : 1}" stroke-width="1"/>`)
@@ -860,7 +870,7 @@
       }
     }
     o.push('</svg>')
-    return o.join('')
+    return { xml: o.join(''), width: W, height: H }
   }
 
   /**
@@ -879,14 +889,12 @@
   async function exportMermaid() {
     const visIds = new Set(nodes.map(n => n.id))
     const lines = ['# ER Diagram', '', '```mermaid', 'erDiagram']
-    // relationships
     for (const e of edges) {
       if (!visIds.has(e.source) || !visIds.has(e.target)) continue
       const sm = tableMeta.get(e.source)
       const fkCol = sm?.columns.find(c => `src-${c.name}` === e.sourceHandle)
       lines.push(`    ${e.source} }|--|| ${e.target} : "${fkCol?.name ?? ''}"`)
     }
-    // entities
     for (const n of nodes) {
       const t = tableMeta.get(n.id)
       if (!t) continue
@@ -911,7 +919,7 @@
 
   async function exportSVG() {
     try {
-      const svg = generateSvg()
+      const svg = generateSvg()?.xml
       if (!svg) return
       await saveExport(
         svg, `erd-${activeSchema}.svg`,
@@ -936,9 +944,12 @@
     try {
       const svg = generateSvg()
       if (!svg) return
-      const m = svg.match(/width="(\d+)" height="(\d+)"/)
-      const W = m ? +m[1] : 1200
-      const H = m ? +m[2] : 800
+      // Dimensions come from the generator itself. They used to be scraped back
+      // out of the markup with a regex that only matched whole numbers, so one
+      // dragged (sub-pixel) node silently fell back to a 1200x800 box - which
+      // cropped the diagram to its top-left corner and blew that fragment up to
+      // fill the raster.
+      const { xml, width: W, height: H } = svg
       // 3x keeps 8px badge text legible when the diagram is viewed at 100%.
       // MAX_PX is the safety rail: WebKit refuses to allocate a canvas past
       // roughly 16k on a side, and a wide schema hits that well before 3x.
@@ -947,7 +958,7 @@
       // The sheet rect inside the SVG already covers this; the canvas fill is
       // the backstop so the PNG is never transparent where a viewer would
       // composite it against its own (possibly white) page.
-      const blob = await svgStringToPngBlob(svg, { width: W, height: H, scale, background: exportPalette().sheet })
+      const blob = await svgStringToPngBlob(xml, { width: W, height: H, scale, background: exportPalette().sheet })
       if (sink === 'download') {
         await saveExport(
           blob, `erd-${activeSchema}.png`,
@@ -964,27 +975,6 @@
     }
   }
 
-  /**
-   * Put a PNG on the OS clipboard. The webview's async Clipboard API is denied in
-   * WebKitGTW/WKWebView without a trusted gesture, so the native plugin is the
-   * primary path and the web API is only the fallback (browser dev).
-   * @param {Blob} blob
-   */
-  async function copyPngToClipboard(blob) {
-    const bytes = new Uint8Array(await blob.arrayBuffer())
-    try {
-      const { writeImage } = await import('@tauri-apps/plugin-clipboard-manager')
-      await writeImage(bytes)
-      return
-    } catch (nativeErr) {
-      const w = /** @type {any} */ (window)
-      if (typeof w.ClipboardItem === 'function' && navigator.clipboard?.write) {
-        await navigator.clipboard.write([new w.ClipboardItem({ 'image/png': blob })])
-        return
-      }
-      throw nativeErr
-    }
-  }
 </script>
 
 <svelte:window onkeydown={(e) => {
@@ -1110,14 +1100,7 @@
     {/if}
 
     <div class="ml-auto flex shrink-0 items-center gap-1.5">
-      {#if loading && totalCount > 0}
-        <div class="flex items-center gap-2 pr-1">
-          <div class="h-1 w-24 overflow-hidden rounded-full bg-muted/40">
-            <div class="h-full rounded-full bg-primary/60 transition-all duration-200" style="width:{Math.round(loadedCount/totalCount*100)}%"></div>
-          </div>
-          <span class="font-mono text-ui-2xs text-muted-foreground/50">{loadedCount}/{totalCount}</span>
-        </div>
-      {:else if tableMeta.size > 0 && !loading}
+      {#if tableMeta.size > 0 && !loading}
         <span class="whitespace-nowrap pr-1 font-mono text-ui-2xs tabular-nums text-muted-foreground/55">
           {nodes.length}/{tableMeta.size} tables · {edges.length} fk
         </span>
@@ -1238,17 +1221,6 @@
       <div class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background">
         <Loader class="size-6 animate-spin text-muted-foreground/30" />
         <p class="font-mono text-ui-xs text-muted-foreground/50">Loading schema structure…</p>
-      </div>
-
-    {:else if loading && totalCount > 0}
-      <div class="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-background">
-        <div class="flex flex-col items-center gap-2">
-          <Loader class="size-5 animate-spin text-muted-foreground/40" />
-          <p class="font-mono text-ui-xs text-muted-foreground/50">Loading {loadedCount}/{totalCount} tables…</p>
-        </div>
-        <div class="h-1 w-48 overflow-hidden rounded-full bg-muted/40">
-          <div class="h-full rounded-full bg-primary/60 transition-all duration-200" style="width:{Math.round(loadedCount/totalCount*100)}%"></div>
-        </div>
       </div>
 
     {:else if error}

@@ -1,4 +1,4 @@
-/** @typedef {'table' | 'sql' | 'ddl' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'extensions' | 'extension-detail' | 'backup' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search' | 'notebook' | 'schema-timeline' | 'data-diff' | 'insights' | 'objects' | 'redis' | 'license'} StudioTabKind */
+/** @typedef {'table' | 'sql' | 'ddl' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'extensions' | 'extension-detail' | 'backup' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search' | 'notebook' | 'schema-timeline' | 'data-diff' | 'insights' | 'objects' | 'redis' | 'license' | 'orm-schema' | 'map'} StudioTabKind */
 
 import { loadDefaultPageSize } from '$lib/table-query.js'
 
@@ -88,8 +88,7 @@ export function cloneSqlTabState(state) {
   return { ...state }
 }
 
-/** @returns {TableTabState} */
-/** @param {string} [schema] @param {string | null} [table] @param {'table'|'view'|'materialized_view'|'foreign_table'} [tableKind] */
+/** @param {string} [schema] @param {string | null} [table] @param {'table'|'view'|'materialized_view'|'foreign_table'} [tableKind] @returns {TableTabState} */
 export function createTableTabState(schema = 'public', table = null, tableKind = 'table') {
   return {
     schema,
@@ -186,106 +185,118 @@ export function createWelcomeTab() {
   })
 }
 
-export function createAiTab() {
+// ── Singleton tabs ────────────────────────────────────────────────────────────
+// One stateless instance per kind, looked up by kind alone. The kind → title
+// mapping lives here once; tabDisplayTitle falls back to the same map.
+/** @type {Partial<Record<StudioTabKind, string>>} */
+const SINGLETON_TAB_TITLES = {
+  ai: 'AI Chat',
+  schema: 'Schema Explorer',
+  orm: 'ORM Runner',
+  'orm-schema': 'Codegen',
+  security: 'Security',
+  logs: 'Activity Log',
+  insights: 'Instance Insights',
+  objects: 'Database Objects',
+  redis: 'Redis',
+  map: 'Map',
+  extensions: 'Extensions',
+  backup: 'Backup & Restore',
+  json: 'JSON Viewer',
+  charts: 'Charts',
+  dashboard: 'Dashboard',
+  reltree: 'Relation Tree',
+  diagrams: 'Diagrams',
+  erd: 'ER Diagram',
+  license: 'Stroke Pro',
+  search: 'Find in database',
+  'schema-timeline': 'Schema Timeline',
+  'data-diff': 'Data Diff',
+}
+
+/** @param {StudioTabKind} kind */
+function createKindTab(kind) {
   return /** @type {StudioTab} */ ({
     id: nextTabId(),
-    kind: 'ai',
-    title: 'AI Chat',
+    kind,
+    title: SINGLETON_TAB_TITLES[kind],
     state: null,
   })
 }
 
-export function createSchemaTab() {
-  return /** @type {StudioTab} */ ({
-    id: nextTabId(),
-    kind: 'schema',
-    title: 'Schema Explorer',
-    state: null,
-  })
+/** @param {StudioTab[]} tabs @param {StudioTabKind} kind */
+function findTabByKind(tabs, kind) {
+  return tabs.find((t) => t.kind === kind) ?? null
 }
 
-export function createOrmTab() {
-  return /** @type {StudioTab} */ ({
-    id: nextTabId(),
-    kind: 'orm',
-    title: 'ORM Runner',
-    state: null,
-  })
-}
+export const createAiTab = () => createKindTab('ai')
+export const createSchemaTab = () => createKindTab('schema')
+export const createOrmTab = () => createKindTab('orm')
+/** The connected schema rendered as Prisma / Drizzle source. */
+export const createOrmSchemaTab = () => createKindTab('orm-schema')
+export const createSecurityTab = () => createKindTab('security')
+export const createLogsTab = () => createKindTab('logs')
+export const createInsightsTab = () => createKindTab('insights')
+export const createObjectsTab = () => createKindTab('objects')
+export const createRedisTab = () => createKindTab('redis')
+export const createMapTab = () => createKindTab('map')
+export const createExtensionsTab = () => createKindTab('extensions')
+export const createBackupTab = () => createKindTab('backup')
+export const createJsonTab = () => createKindTab('json')
+export const createChartsTab = () => createKindTab('charts')
+export const createDashboardTab = () => createKindTab('dashboard')
+export const createRelTreeTab = () => createKindTab('reltree')
+export const createDiagramsTab = () => createKindTab('diagrams')
+export const createErdTab = () => createKindTab('erd')
+export const createLicenseTab = () => createKindTab('license')
+export const createSearchTab = () => createKindTab('search')
+export const createSchemaTimelineTab = () => createKindTab('schema-timeline')
+export const createDataDiffTab = () => createKindTab('data-diff')
 
-export function createSecurityTab() {
-  return /** @type {StudioTab} */ ({
-    id: nextTabId(),
-    kind: 'security',
-    title: 'Security',
-    state: null,
-  })
-}
-
-export function createLogsTab() {
-  return /** @type {StudioTab} */ ({
-    id: nextTabId(),
-    kind: 'logs',
-    title: 'Activity Log',
-    state: null,
-  })
-}
-
-export function createInsightsTab() {
-  return /** @type {StudioTab} */ ({
-    id: nextTabId(),
-    kind: 'insights',
-    title: 'Instance Insights',
-    state: null,
-  })
-}
-
-/** @param {StudioTab[]} tabs */
-export function findInsightsTab(tabs) {
-  return tabs.find((t) => t.kind === 'insights') ?? null
-}
-
-export function createObjectsTab() {
-  return /** @type {StudioTab} */ ({
-    id: nextTabId(),
-    kind: 'objects',
-    title: 'Database Objects',
-    state: null,
-  })
-}
-
-/** @param {StudioTab[]} tabs */
-export function findObjectsTab(tabs) {
-  return tabs.find((t) => t.kind === 'objects') ?? null
-}
-
-export function createRedisTab() {
-  return /** @type {StudioTab} */ ({
-    id: nextTabId(),
-    kind: 'redis',
-    title: 'Redis',
-    state: null,
-  })
-}
-
-/** @param {StudioTab[]} tabs */
-export function findRedisTab(tabs) {
-  return tabs.find((t) => t.kind === 'redis') ?? null
-}
-
-export function createExtensionsTab() {
-  return /** @type {StudioTab} */ ({
-    id: nextTabId(),
-    kind: 'extensions',
-    title: 'Extensions',
-    state: null,
-  })
-}
-
-/** @param {StudioTab[]} tabs */
-export function findExtensionsTab(tabs) {
-  return tabs.find((t) => t.kind === 'extensions') ?? null
-}
+/** @type {(tabs: StudioTab[]) => StudioTab | null} */
+export const findAiTab = (tabs) => findTabByKind(tabs, 'ai')
+/** @type {(tabs: StudioTab[]) => StudioTab | null} */
+export const findSchemaTab = (tabs) => findTabByKind(tabs, 'schema')
+/** @type {(tabs: StudioTab[]) => StudioTab | null} */
+export const findOrmTab = (tabs) => findTabByKind(tabs, 'orm')
+/** @type {(tabs: StudioTab[]) => StudioTab | null} */
+export const findOrmSchemaTab = (tabs) => findTabByKind(tabs, 'orm-schema')
+/** @type {(tabs: StudioTab[]) => StudioTab | null} */
+export const findSecurityTab = (tabs) => findTabByKind(tabs, 'security')
+/** @type {(tabs: StudioTab[]) => StudioTab | null} */
+export const findLogsTab = (tabs) => findTabByKind(tabs, 'logs')
+/** @type {(tabs: StudioTab[]) => StudioTab | null} */
+export const findInsightsTab = (tabs) => findTabByKind(tabs, 'insights')
+/** @type {(tabs: StudioTab[]) => StudioTab | null} */
+export const findObjectsTab = (tabs) => findTabByKind(tabs, 'objects')
+/** @type {(tabs: StudioTab[]) => StudioTab | null} */
+export const findRedisTab = (tabs) => findTabByKind(tabs, 'redis')
+/** @type {(tabs: StudioTab[]) => StudioTab | null} */
+export const findMapTab = (tabs) => findTabByKind(tabs, 'map')
+/** @type {(tabs: StudioTab[]) => StudioTab | null} */
+export const findExtensionsTab = (tabs) => findTabByKind(tabs, 'extensions')
+/** @type {(tabs: StudioTab[]) => StudioTab | null} */
+export const findBackupTab = (tabs) => findTabByKind(tabs, 'backup')
+/** @type {(tabs: StudioTab[]) => StudioTab | null} */
+export const findJsonTab = (tabs) => findTabByKind(tabs, 'json')
+/** @type {(tabs: StudioTab[]) => StudioTab | null} */
+export const findChartsTab = (tabs) => findTabByKind(tabs, 'charts')
+/** @type {(tabs: StudioTab[]) => StudioTab | null} */
+export const findDashboardTab = (tabs) => findTabByKind(tabs, 'dashboard')
+/** @type {(tabs: StudioTab[]) => StudioTab | null} */
+export const findRelTreeTab = (tabs) => findTabByKind(tabs, 'reltree')
+/** @type {(tabs: StudioTab[]) => StudioTab | null} */
+export const findDiagramsTab = (tabs) => findTabByKind(tabs, 'diagrams')
+/** @type {(tabs: StudioTab[]) => StudioTab | null} */
+export const findErdTab = (tabs) => findTabByKind(tabs, 'erd')
+/** @type {(tabs: StudioTab[]) => StudioTab | null} */
+export const findLicenseTab = (tabs) => findTabByKind(tabs, 'license')
+/** @type {(tabs: StudioTab[]) => StudioTab | null} */
+export const findSearchTab = (tabs) => findTabByKind(tabs, 'search')
+/** @type {(tabs: StudioTab[]) => StudioTab | null} */
+export const findSchemaTimelineTab = (tabs) => findTabByKind(tabs, 'schema-timeline')
+/** @type {(tabs: StudioTab[]) => StudioTab | null} */
+export const findDataDiffTab = (tabs) => findTabByKind(tabs, 'data-diff')
 
 /** @param {string} extensionId @param {string} name */
 export function createExtensionDetailTab(extensionId, name) {
@@ -302,143 +313,6 @@ export function findExtensionDetailTab(tabs, extensionId) {
   return tabs.find((t) => t.kind === 'extension-detail' && t.state?.extensionId === extensionId) ?? null
 }
 
-/** @param {StudioTab[]} tabs */
-export function findAiTab(tabs) {
-  return tabs.find((t) => t.kind === 'ai') ?? null
-}
-
-/** @param {StudioTab[]} tabs */
-export function findSchemaTab(tabs) {
-  return tabs.find((t) => t.kind === 'schema') ?? null
-}
-
-/** @param {StudioTab[]} tabs */
-export function findOrmTab(tabs) {
-  return tabs.find((t) => t.kind === 'orm') ?? null
-}
-
-/** @param {StudioTab[]} tabs */
-export function findSecurityTab(tabs) {
-  return tabs.find((t) => t.kind === 'security') ?? null
-}
-
-/** @param {StudioTab[]} tabs */
-export function findLogsTab(tabs) {
-  return tabs.find((t) => t.kind === 'logs') ?? null
-}
-
-export function createBackupTab() {
-  return /** @type {StudioTab} */ ({
-    id: nextTabId(),
-    kind: 'backup',
-    title: 'Backup & Restore',
-    state: null,
-  })
-}
-
-/** @param {StudioTab[]} tabs */
-export function findBackupTab(tabs) {
-  return tabs.find((t) => t.kind === 'backup') ?? null
-}
-
-export function createJsonTab() {
-  return /** @type {StudioTab} */ ({
-    id: nextTabId(),
-    kind: 'json',
-    title: 'JSON Viewer',
-    state: null,
-  })
-}
-
-/** @param {StudioTab[]} tabs */
-export function findJsonTab(tabs) {
-  return tabs.find((t) => t.kind === 'json') ?? null
-}
-
-export function createChartsTab() {
-  return /** @type {StudioTab} */ ({
-    id: nextTabId(),
-    kind: 'charts',
-    title: 'Charts',
-    state: null,
-  })
-}
-
-/** @param {StudioTab[]} tabs */
-export function findChartsTab(tabs) {
-  return tabs.find((t) => t.kind === 'charts') ?? null
-}
-
-export function createDashboardTab() {
-  return /** @type {StudioTab} */ ({
-    id: nextTabId(),
-    kind: 'dashboard',
-    title: 'Dashboard',
-    state: null,
-  })
-}
-
-/** @param {StudioTab[]} tabs */
-export function findDashboardTab(tabs) {
-  return tabs.find((t) => t.kind === 'dashboard') ?? null
-}
-
-export function createRelTreeTab() {
-  return /** @type {StudioTab} */ ({
-    id: nextTabId(),
-    kind: 'reltree',
-    title: 'Relation Tree',
-    state: null,
-  })
-}
-
-/** @param {StudioTab[]} tabs */
-export function findRelTreeTab(tabs) {
-  return tabs.find(t => t.kind === 'reltree') ?? null
-}
-
-export function createDiagramsTab() {
-  return /** @type {StudioTab} */ ({
-    id: nextTabId(),
-    kind: 'diagrams',
-    title: 'Diagrams',
-    state: null,
-  })
-}
-
-/** @param {StudioTab[]} tabs */
-export function findDiagramsTab(tabs) {
-  return tabs.find((t) => t.kind === 'diagrams') ?? null
-}
-
-export function createErdTab() {
-  return /** @type {StudioTab} */ ({
-    id: nextTabId(),
-    kind: 'erd',
-    title: 'ER Diagram',
-    state: null,
-  })
-}
-
-/** @param {StudioTab[]} tabs */
-export function findErdTab(tabs) {
-  return tabs.find((t) => t.kind === 'erd') ?? null
-}
-
-export function createLicenseTab() {
-  return /** @type {StudioTab} */ ({
-    id: nextTabId(),
-    kind: 'license',
-    title: 'Stroke Pro',
-    state: null,
-  })
-}
-
-/** @param {StudioTab[]} tabs */
-export function findLicenseTab(tabs) {
-  return tabs.find((t) => t.kind === 'license') ?? null
-}
-
 /** @param {TableTabState} state */
 export function tableTabTitle(state) {
   if (!state.table) return 'Table'
@@ -451,26 +325,9 @@ export function tabDisplayTitle(tab) {
   // Honour a custom title: a DDL viewer ("DDL · users") and the 2nd/3rd editor
   // ("Query Editor 2") are separate buffers and must not all read "Query Editor".
   if (tab.kind === 'sql') return tab.title || 'Query Editor'
-  if (tab.kind === 'ai') return 'AI Chat'
-  if (tab.kind === 'schema') return 'Schema Explorer'
-  if (tab.kind === 'orm') return 'ORM Runner'
-  if (tab.kind === 'security') return 'Security'
-  if (tab.kind === 'logs') return 'Activity Log'
-  if (tab.kind === 'json') return 'JSON Viewer'
-  if (tab.kind === 'charts') return 'Charts'
-  if (tab.kind === 'dashboard') return 'Dashboard'
-  if (tab.kind === 'erd') return 'ER Diagram'
-  if (tab.kind === 'reltree') return 'Relation Tree'
-  if (tab.kind === 'diagrams') return 'Diagrams'
-  if (tab.kind === 'search') return 'Find in database'
   if (tab.kind === 'notebook') return tab.title || 'Untitled Notebook'
-  if (tab.kind === 'schema-timeline') return 'Schema Timeline'
-  if (tab.kind === 'data-diff') return 'Data Diff'
-  if (tab.kind === 'objects') return 'Database Objects'
-  if (tab.kind === 'redis') return 'Redis'
   if (tab.kind === 'extension-detail') return tab.title || tab.state?.extensionId || 'Extension'
-  if (tab.kind === 'license') return 'Stroke Pro'
-  return tab.title
+  return SINGLETON_TAB_TITLES[tab.kind] ?? tab.title
 }
 
 /** @param {StudioTab[]} tabs @param {string} schema @param {string} table */
@@ -503,20 +360,6 @@ export function cycleTabIndex(tabs, fromIndex, direction) {
   return (fromIndex + direction + tabs.length) % tabs.length
 }
 
-export function createSearchTab() {
-  return /** @type {StudioTab} */ ({
-    id: nextTabId(),
-    kind: 'search',
-    title: 'Find in database',
-    state: null,
-  })
-}
-
-/** @param {StudioTab[]} tabs */
-export function findSearchTab(tabs) {
-  return tabs.find((t) => t.kind === 'search') ?? null
-}
-
 /**
  * @typedef {object} NotebookTabState
  * @property {string | null} filePath
@@ -535,32 +378,4 @@ export function createNotebookTab(notebook, filePath = null) {
     title: notebook.title || 'Untitled Notebook',
     state: /** @type {NotebookTabState} */ ({ filePath, notebook, dirty: false }),
   })
-}
-
-export function createSchemaTimelineTab() {
-  return /** @type {StudioTab} */ ({
-    id: nextTabId(),
-    kind: 'schema-timeline',
-    title: 'Schema Timeline',
-    state: null,
-  })
-}
-
-/** @param {StudioTab[]} tabs */
-export function findSchemaTimelineTab(tabs) {
-  return tabs.find((t) => t.kind === 'schema-timeline') ?? null
-}
-
-export function createDataDiffTab() {
-  return /** @type {StudioTab} */ ({
-    id: nextTabId(),
-    kind: 'data-diff',
-    title: 'Data Diff',
-    state: null,
-  })
-}
-
-/** @param {StudioTab[]} tabs */
-export function findDataDiffTab(tabs) {
-  return tabs.find((t) => t.kind === 'data-diff') ?? null
 }

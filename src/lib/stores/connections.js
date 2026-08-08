@@ -1,3 +1,5 @@
+import { saveSqlDraft } from '$lib/stores/sql-draft.js'
+
 const STORAGE_KEY = 'stroke:connections'
 const LAST_ID_KEY  = 'stroke:last-connection-id'
 
@@ -32,6 +34,9 @@ const LAST_ID_KEY  = 'stroke:last-connection-id'
  *   environment?: 'prod' | 'staging' | 'dev' | null
  *   provider?: 'neon' | 'supabase' | 'planetscale' | 'prisma'
  *   group?: string | null
+ *   origin?: 'studio' | 'docker'  - discovered locally rather than typed in
+ *   tool?: 'prisma' | 'drizzle'
+ *   toolLabel?: string
  * }} SavedConnection
  */
 
@@ -69,7 +74,10 @@ export function loadSavedConnections() {
         ...c,
         id:   c.id   ?? newConnectionId(),
         type,
-        port: c.port != null ? Number(c.port) : 5432,
+        // Only Postgres-family connections get 5432 as a fallback; for other
+        // engines the per-engine normalizers in api.js fill the right default
+        // (3306/6379/8123/1433) when port is left undefined.
+        port: c.port != null ? Number(c.port) : (engineFamily(type) === 'postgres' ? 5432 : undefined),
       }
       // Redis connections can carry stale Postgres-ish fields from an earlier
       // edit/clone (a `provider` and a non-numeric `db` like "postgres"), which
@@ -110,7 +118,59 @@ export function upsertConnection(conn) {
 export function removeConnection(id) {
   const list = loadSavedConnections().filter((c) => c.id !== id)
   saveConnections(list)
+  purgeConnectionData(id)
   return list
+}
+
+/**
+ * Remove every per-connection artifact a deleted connection leaves behind.
+ * Without this, its recents/charts/dashboards/diagrams and per-table prefs
+ * accumulate in localStorage forever (eventually exhausting the quota, which
+ * makes unrelated persists start failing), and IndexedDB keeps its query
+ * history, saved queries, conversations and schema snapshots.
+ * @param {string} id
+ */
+export function purgeConnectionData(id) {
+  if (!id) return
+  try {
+    for (const key of [
+      `stroke:recent-tabs:${id}`,
+      `stroke:saved-charts:${id}`,
+      `stroke:chart-groups:${id}`,
+      `stroke:dashboards:${id}`,
+      `stroke:active-dashboard:${id}`,
+      `stroke:saved-diagrams:${id}`,
+      `stroke:last-schema:${id}`,
+    ]) localStorage.removeItem(key)
+    // Per-table keys carry a `:<schema>.<table>` suffix - match by prefix,
+    // iterating backwards because removeItem reindexes localStorage.
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i)
+      if (key?.startsWith(`stroke:hidden-cols:${id}:`) || key?.startsWith(`stroke:table-views:${id}:`)) {
+        localStorage.removeItem(key)
+      }
+    }
+  } catch { /* storage failure must not block deleting the connection */ }
+  try { saveSqlDraft(id, '') } catch { /* ditto */ }
+  // IndexedDB rows are cleared fire-and-forget (dynamic imports keep this module
+  // free of a static cycle via schema-snapshots -> api -> connections). A
+  // failure only leaves orphaned rows behind, never an error in the delete flow.
+  void (async () => {
+    try {
+      const { clearQueryHistory, listSavedQueries, deleteSavedQuery } = await import('$lib/stores/query-history.js')
+      await clearQueryHistory(id)
+      await Promise.all((await listSavedQueries(id)).map((q) => deleteSavedQuery(q.id)))
+    } catch { /* ignore */ }
+    try {
+      const { clearConversations } = await import('$lib/stores/conversations.js')
+      await clearConversations(id)
+      await clearConversations(id, 'sidebar')
+    } catch { /* ignore */ }
+    try {
+      const { listSnapshots, deleteSnapshot } = await import('$lib/stores/schema-snapshots.js')
+      await Promise.all((await listSnapshots(id)).map((s) => deleteSnapshot(s.id)))
+    } catch { /* ignore */ }
+  })()
 }
 
 /**
@@ -151,6 +211,26 @@ export function setLastConnectionId(id) {
     if (id) localStorage.setItem(LAST_ID_KEY, id)
     else    localStorage.removeItem(LAST_ID_KEY)
   } catch {}
+}
+
+/**
+ * Last active schema per connection, so reconnecting lands where the user
+ * left off instead of resetting to `public`.
+ * @param {string} connectionId
+ * @returns {string | null}
+ */
+export function getLastSchema(connectionId) {
+  if (!connectionId) return null
+  try { return localStorage.getItem(`stroke:last-schema:${connectionId}`) } catch { return null }
+}
+
+/**
+ * @param {string} connectionId
+ * @param {string} schema
+ */
+export function setLastSchema(connectionId, schema) {
+  if (!connectionId || !schema) return
+  try { localStorage.setItem(`stroke:last-schema:${connectionId}`, schema) } catch {}
 }
 
 /** Returns the last-used connection if it still exists in the saved list. */

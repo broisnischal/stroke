@@ -103,16 +103,20 @@
           ),
         )
       })
-      // Tables need a positioned wrapper of their own: `.prose-ai table` is the
-      // scroll container (display:block; overflow-x:auto), so a button anchored
-      // inside it would scroll away with the columns.
+      // Two nested elements, deliberately: the OUTER wrap is positioned and does
+      // not scroll (it anchors the copy button), the INNER one scrolls. Anchoring
+      // the button inside the scroller sends it drifting into the middle of the
+      // table as soon as the user scrolls sideways.
       node.querySelectorAll('table:not([data-copy-injected])').forEach((el) => {
         const table = /** @type {HTMLTableElement} */ (el)
         table.setAttribute('data-copy-injected', '1')
         const wrap = document.createElement('div')
         wrap.className = 'ai-table-wrap'
+        const scroller = document.createElement('div')
+        scroller.className = 'ai-table-scroll'
         table.replaceWith(wrap)
-        wrap.appendChild(table)
+        scroller.appendChild(table)
+        wrap.appendChild(scroller)
         wrap.appendChild(
           makeCopyBtn('ai-block-copy ai-table-copy', () => tableToMarkdown(table), 'Copy table'),
         )
@@ -134,14 +138,24 @@
     function onWheelCapture(/** @type {WheelEvent} */ e) {
       if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return
       const target = e.target instanceof Element ? e.target : null
-      if (!target?.closest('pre')) return
+      const inner = target?.closest('pre, .ai-table-scroll')
+      if (!inner) return
+      // If the block itself can still scroll THIS way, it owns the gesture -
+      // stealing it made scrollable tables and tall code blocks unusable.
+      const canScrollSelf =
+        inner.scrollHeight > inner.clientHeight &&
+        (e.deltaY < 0 ? inner.scrollTop > 0 : inner.scrollTop + inner.clientHeight < inner.scrollHeight - 1)
+      if (canScrollSelf) return
       let parent = /** @type {HTMLElement | null} */ (node.parentElement)
       while (parent) {
         if (parent.scrollHeight > parent.clientHeight) {
           const oy = getComputedStyle(parent).overflowY
           if (oy === 'auto' || oy === 'scroll' || oy === 'overlay') {
             e.preventDefault()
-            parent.scrollTop += e.deltaY
+            // scrollBy goes through the scroll API rather than assigning
+            // scrollTop, so the engine can coalesce successive wheel events into
+            // one composited update instead of one layout write per event.
+            parent.scrollBy({ top: e.deltaY, behavior: 'instant' })
             return
           }
         }
@@ -291,8 +305,10 @@
   }
   :global(.ai-table-wrap) {
     position: relative;
-    width: fit-content;
+    /* Never wider than the message column. Without the min-width:0 a wide table
+       forces the flex parent open and the whole transcript scrolls sideways. */
     max-width: 100%;
+    min-width: 0;
   }
   :global(.ai-block-copy) {
     position: absolute;

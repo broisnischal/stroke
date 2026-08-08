@@ -68,6 +68,7 @@
 <div
   class="studio-chrome relative flex h-[38px] shrink-0 items-center border-b border-border/40 bg-background px-2.5 select-none"
   data-studio-chrome
+  data-studio-region="titlebar"
   data-tauri-drag-region
   role="toolbar"
   aria-label="Window title bar"
@@ -118,9 +119,11 @@
     <ChevronRight class="size-[13px]" />
   </button>
 
-  <!-- Center title -->
-  <div class="pointer-events-none absolute inset-x-0 flex items-center justify-center">
-    <span class="font-mono text-ui-2xs font-medium tracking-widest text-muted-foreground/30 lowercase select-none">
+  <!-- Center title. Capped and centered so an unexpectedly long label (a file
+       path, a verbose connection name) truncates instead of running under the
+       controls on either side. -->
+  <div class="pointer-events-none absolute inset-x-0 flex items-center justify-center px-40">
+    <span class="max-w-full truncate font-mono text-ui-2xs font-medium tracking-widest text-muted-foreground/30 lowercase select-none">
       {title}
     </span>
   </div>

@@ -331,6 +331,19 @@ html[data-os="linux"]   { --window-radius: 8px; }
   body.is-resizing-y,
   body.is-resizing-y * { cursor: row-resize !important; }
 
+  /* An open modal dialog locks `pointer-events: none` on <body> (bits-ui), and
+     only the dialog's own content/overlay opt back in. Dialogs that inset
+     themselves to leave the window chrome visible - the connection manager sits
+     between the titlebar and the status bar - would otherwise leave that chrome
+     dead: it renders, but minimize/maximize/close, the drag region and every
+     status-bar control stop responding. The two window-chrome regions opt back
+     in. Dialogs whose overlay covers the whole viewport are unaffected: the
+     overlay still sits above this chrome and takes the clicks. */
+  [data-studio-region='titlebar'],
+  [data-studio-region='statusbar'] {
+    pointer-events: auto;
+  }
+
   /* App chrome: no focus ring for mouse clicks; keep keyboard focus-visible */
   [data-studio-chrome] :focus:not(:focus-visible) {
     outline: none;
@@ -709,6 +722,16 @@ html[data-os="linux"]   { --window-radius: 8px; }
     scrollbar-color: color-mix(in oklch, var(--muted-foreground) 35%, transparent) transparent;
     /* Prevent scroll from chaining to the parent when this container hits its boundary */
     overscroll-behavior: contain;
+  }
+
+  /* …but a horizontal-only scroller must still let the page scroll under the
+     cursor. Any overflow value other than `visible` makes the box a scroll
+     container on BOTH axes, so a wide table sitting at scrollTop 0 would swallow
+     every wheel tick with `overscroll-behavior: contain` - the page just froze
+     wherever the pointer happened to be. Only the x axis is contained here. */
+  .overflow-x-auto:not(.overflow-auto):not(.overflow-y-auto) {
+    overscroll-behavior-x: contain;
+    overscroll-behavior-y: auto;
   }
 
   /* Reserve scrollbar gutter only on the actual scrollable list inside dropdowns/popovers */

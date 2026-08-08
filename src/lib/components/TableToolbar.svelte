@@ -27,7 +27,7 @@
     createFilter,
     ANY_COLUMN,
   } from "$lib/table-query.js";
-  import { untrack } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import { formatCompactCount } from "$lib/table-list.js";
   import { describeTableView } from "$lib/stores/table-views.js";
 
@@ -69,6 +69,9 @@
     /** Diagram exports, offered alongside the row formats while the ERD view is open. */
     /** @type {(kind: 'png' | 'copy-png' | 'svg' | 'mermaid') => void | Promise<void>} */
     onexportdiagram = () => {},
+    /** Chart image exports, offered alongside the row formats in the chart view. */
+    /** @type {(kind: 'png' | 'copy-png' | 'svg') => void | Promise<void>} */
+    onexportchart = () => {},
     onaddrow = () => {},
     onopeninsql = () => {},
     /** @type {Set<string>} */
@@ -258,6 +261,13 @@
     null
   );
 
+  // A debounce surviving unmount would fire onsearchchange into whatever table
+  // is active 250ms later; kill both pending timers with the component.
+  onDestroy(() => {
+    if (searchDebounce) clearTimeout(searchDebounce);
+    if (_deleteConfirmTimer) clearTimeout(_deleteConfirmTimer);
+  });
+
   // Sync from parent only when the prop changes from outside (e.g. table switch resets to '').
   $effect(() => {
     localSearch = rowSearch;
@@ -317,15 +327,30 @@
   const iconBtn =
     "inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30";
 
-  /** @type {Array<{ id: 'table' | 'json' | 'record' | 'text' | 'chart' | 'erd', icon: string, label: string, title?: string }>} */
+  /** @type {Array<{ id: 'table' | 'json' | 'record' | 'text' | 'chart' | 'erd' | 'map', icon: string, label: string, title?: string }>} */
   const DATA_VIEW_MODES = [
     { id: "table", icon: "table-2", label: "Table view" },
     { id: "json", icon: "braces", label: "JSON view" },
     { id: "record", icon: "layout-list", label: "Record view" },
     { id: "text", icon: "file-text", label: "Text view", title: "Text view, CSV / TSV / Markdown / JSON Lines" },
     { id: "chart", icon: "bar-chart-2", label: "Chart view", title: "Chart view, visualize the loaded rows" },
+    { id: "map", icon: "globe", label: "Map view", title: "Map view: plot this table's geometry" },
     { id: "erd", icon: "git-branch", label: "ERD view", title: "ERD view: this table and its related tables" },
   ];
+
+  /**
+   * Map view is offered only when the table has something to map. Listing it
+   * everywhere would make it the one view in the menu that opens onto nothing,
+   * on the overwhelming majority of tables.
+   */
+  const dataViewModes = $derived(
+    columns.some((c) => {
+      const t = String(c?.data_type ?? c?.dataType ?? "").toLowerCase();
+      return t === "geometry" || t === "geography";
+    })
+      ? DATA_VIEW_MODES
+      : DATA_VIEW_MODES.filter((m) => m.id !== "map"),
+  );
 
   /** Export formats offered under the "Export" submenu in the more-actions menu. */
   /** @type {Array<{ id: 'png' | 'copy-png' | 'svg' | 'mermaid', label: string, icon: string }>} */
@@ -334,6 +359,14 @@
     { id: "png", label: "PNG image", icon: "file-down" },
     { id: "svg", label: "SVG vector", icon: "code-2" },
     { id: "mermaid", label: "Mermaid markdown", icon: "file-text" },
+  ];
+
+  /** Same image actions for the chart view - it has no Mermaid equivalent. */
+  /** @type {Array<{ id: 'png' | 'copy-png' | 'svg', label: string, icon: string }>} */
+  const CHART_FORMATS = [
+    { id: "copy-png", label: "Copy as PNG", icon: "copy" },
+    { id: "png", label: "PNG image", icon: "file-down" },
+    { id: "svg", label: "SVG vector", icon: "code-2" },
   ];
 
   const EXPORT_FORMATS = [
@@ -491,20 +524,6 @@
     return FILTER_OPS.find((o) => o.value === f.op)?.needsValue ?? true;
   }
 
-  // ── between helpers (value stored as "from,to") ──────────────────────────
-  /** @param {string} val */
-  function betweenFrom(val) {
-    return val.split(",")[0] ?? "";
-  }
-  /** @param {string} val */
-  function betweenTo(val) {
-    return val.split(",")[1] ?? "";
-  }
-  /** @param {string} from @param {string} to */
-  function betweenJoin(from, to) {
-    return `${from},${to}`;
-  }
-
   /** @param {string} value */
   function handleSearchInput(value) {
     localSearch = value;
@@ -576,15 +595,28 @@
 </script>
 
 <div class="flex shrink-0 flex-col">
+  <!-- overflow-x-auto is the floor, not the plan: the breakpoints below hide
+       optional controls first and the search gives way after that. It exists so
+       that when a window is narrow enough (or zoomed far enough) that even the
+       essentials don't fit, they stay reachable by scrolling instead of being
+       clipped off the edge. Menus are portaled, so nothing is trapped by it, and
+       app.css already gives this class a 4px overlay scrollbar. -->
   <header
-    class="@container/tb studio-chrome studio-table-toolbar flex h-9 shrink-0 items-center gap-1 border-b border-border bg-panel px-2"
+    class="@container/tb studio-chrome studio-table-toolbar flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b border-border bg-panel px-2"
     data-studio-chrome
   >
     <!-- Search, far left, expands on focus (wider when option toggles show) -->
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <div
       class={cn(
-        "relative flex h-7 shrink-0 items-center transition-[width] duration-200",
+        // Shrinkable, deliberately. Everything else on this row is shrink-0, so
+        // with a fixed width here the row could only overflow — which is what
+        // happened at high zoom: the ten container-query breakpoints below had
+        // already hidden every optional control, and the search still demanded
+        // its full 13rem, so the pager clipped off the right edge. A search
+        // field is the most shrinkable thing here; it gives way first, down to
+        // a floor where the icon and a word of text still fit.
+        "relative flex h-7 min-w-[7.5rem] shrink items-center transition-[width] duration-200",
         searchExpanded ? "w-72" : "w-52",
       )}
       role="search"
@@ -1241,7 +1273,7 @@
             value={dataViewMode}
             onValueChange={(v) => (dataViewMode = /** @type {'table' | 'json' | 'record' | 'text' | 'chart' | 'erd'} */ (v))}
           >
-            {#each DATA_VIEW_MODES as m (m.id)}
+            {#each dataViewModes as m (m.id)}
               <DropdownMenu.RadioItem value={m.id} disabled={columns.length === 0}>
                 <Icon name={m.icon} class="size-3.5" />
                 {m.label}
@@ -1270,7 +1302,7 @@
             </DropdownMenu.Label>
           {/if}
           <DropdownMenu.Sub>
-            <DropdownMenu.SubTrigger disabled={total === 0 && dataViewMode !== 'erd'}>
+            <DropdownMenu.SubTrigger disabled={total === 0 && dataViewMode !== 'erd' && dataViewMode !== 'chart'}>
               <Icon name="file-down" class="size-3.5" />
               Export
             </DropdownMenu.SubTrigger>
@@ -1291,8 +1323,22 @@
                 </DropdownMenu.Group>
                 <DropdownMenu.Separator />
               {/if}
+              {#if dataViewMode === 'chart'}
+                <DropdownMenu.Group>
+                  <DropdownMenu.GroupHeading class="text-ui-2xs font-medium uppercase tracking-[0.06em] text-muted-foreground/50">
+                    Chart
+                  </DropdownMenu.GroupHeading>
+                  {#each CHART_FORMATS as fmt (fmt.id)}
+                    <DropdownMenu.Item onSelect={() => onexportchart(fmt.id)}>
+                      <Icon name={fmt.icon} class="size-3.5" />
+                      {fmt.label}
+                    </DropdownMenu.Item>
+                  {/each}
+                </DropdownMenu.Group>
+                <DropdownMenu.Separator />
+              {/if}
               <DropdownMenu.Group>
-                {#if dataViewMode === 'erd'}
+                {#if dataViewMode === 'erd' || dataViewMode === 'chart'}
                   <DropdownMenu.GroupHeading class="text-ui-2xs font-medium uppercase tracking-[0.06em] text-muted-foreground/50">
                     Rows
                   </DropdownMenu.GroupHeading>

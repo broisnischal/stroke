@@ -117,7 +117,8 @@
   }
 
   $effect(() => {
-    const opts = { capture: true }
+    // passive: hide() never preventDefaults, so scrolling must not wait on us.
+    const opts = { capture: true, passive: true }
     document.addEventListener('pointerover', onPointerOver, true)
     document.addEventListener('pointerout', onPointerOut, true)
     document.addEventListener('pointerdown', hide, true)

@@ -144,19 +144,48 @@
 </script>
 
 <Popover bind:open>
-  <PopoverTrigger
-    {disabled}
-    data-new-row-input={colName}
-    onfocus={onfocus}
-    class={cn(
-      "flex w-full items-center gap-1.5 rounded bg-transparent font-mono text-ui-sm outline-none",
-      !parsed && "text-muted-foreground/50",
-      disabled && "opacity-50 pointer-events-none"
-    )}
-  >
-    <CalendarIcon class="size-3 shrink-0 text-muted-foreground/60" />
-    <span class="truncate">{displayLabel}</span>
-  </PopoverTrigger>
+  <!-- Type or pick, not one or the other. A calendar is the wrong tool for
+       "same as the row above but a year earlier", and typing is the wrong tool
+       for "some Tuesday in March" — the field does both, and the value is the
+       column's own text either way, so an epoch column stays editable as digits
+       rather than being hidden behind a formatted label. -->
+  <div class="relative flex w-full min-w-0 items-center gap-1.5">
+    <!-- Anchor only: it spans the field so the calendar lines up with it, and
+         takes no pointer events so the input keeps every click. -->
+    <PopoverTrigger tabindex={-1} aria-hidden="true" class="pointer-events-none absolute inset-0 -z-10" />
+    <button
+      type="button"
+      {disabled}
+      tabindex={-1}
+      aria-label="Open calendar"
+      class="inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/60 transition-colors hover:text-foreground disabled:opacity-50"
+      onclick={() => (open = !open)}
+    >
+      <CalendarIcon class="size-3" />
+    </button>
+    <input
+      type="text"
+      {disabled}
+      data-new-row-input={colName}
+      value={value ?? ""}
+      placeholder={showTime ? "YYYY-MM-DD HH:mm" : "YYYY-MM-DD"}
+      autocomplete="off"
+      spellcheck="false"
+      title={parsed ? displayLabel : undefined}
+      class={cn(
+        "w-full min-w-0 bg-transparent font-mono text-ui-sm text-foreground outline-none",
+        "placeholder:text-muted-foreground/40 disabled:opacity-50",
+      )}
+      oninput={(e) => onchange(e.currentTarget.value)}
+      onfocus={onfocus}
+      onkeydown={(e) => {
+        // The calendar is opt-in from the keyboard too, and Escape closes it
+        // without the keystroke escaping to the row's cancel handler.
+        if (e.key === "ArrowDown" && !open) { e.preventDefault(); open = true }
+        else if (e.key === "Escape" && open) { e.preventDefault(); e.stopPropagation(); open = false }
+      }}
+    />
+  </div>
   <PopoverContent class="w-auto" align="start">
     <Calendar
       value={calValue}

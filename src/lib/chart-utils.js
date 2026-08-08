@@ -108,23 +108,62 @@ const DEFAULT_PALETTE = [
   '#a855f7', '#14b8a6', '#f97316', '#ec4899', '#64748b',
 ]
 
-/** Resolve the app's --primary token to a concrete rgb() string, so every chart
- * across the app (table view, SQL editor, AI charts, previews) follows the active
- * theme without each caller wiring it up. Returns '' when --primary can't resolve
- * to a real color (unset, or unparseable in this engine - in which case the probe
- * inherits the foreground and would paint bars white); callers then fall back to
- * DEFAULT_PALETTE. */
-export function resolveChartAccent() {
+/** Resolve any CSS custom property that holds a colour into a concrete string
+ * echarts can both paint and parse, so charts follow the active theme instead of
+ * hardcoding hexes. Returns '' when the token can't resolve to a real colour
+ * (unset, or unparseable in this engine - in which case the probe inherits the
+ * foreground and would paint bars white); callers then fall back to a literal.
+ * @param {string} varName e.g. '--primary', '--success' */
+export function resolveCssColor(varName) {
   if (typeof document === 'undefined') return ''
   try {
     const probe = document.createElement('span')
-    probe.style.cssText = 'position:absolute;visibility:hidden;color:var(--primary)'
+    probe.style.cssText = `position:absolute;visibility:hidden;color:var(${varName})`
     document.body.appendChild(probe)
     const c = getComputedStyle(probe).color
     probe.style.color = 'var(--stroke-nonexistent-token)'
     const fg = getComputedStyle(probe).color
     probe.remove()
-    return (!c || c === fg) ? '' : c
+    return (!c || c === fg) ? '' : toParseableColor(c)
+  } catch { return '' }
+}
+
+/** The app's --primary token as a concrete colour, for single-series charts
+ * across the app (table view, SQL editor, AI charts, previews). '' when unset —
+ * callers fall back to DEFAULT_PALETTE. */
+export function resolveChartAccent() {
+  return resolveCssColor('--primary')
+}
+
+/** Colours echarts can parse itself, not just paint: hex / rgb() / hsl(). */
+const ZR_PARSEABLE = /^(#|rgba?\(|hsla?\()/i
+
+/**
+ * Re-serialize a CSS colour into a notation echarts (zrender) can PARSE.
+ * Theme tokens are authored in `oklch()`, and `getComputedStyle().color` hands
+ * that notation straight back. Canvas paints it fine, so bars look right - but
+ * zrender's own colour parser only understands hex/rgb/hsl, and its liftColor()
+ * (which derives the emphasis/hover fill) returns `undefined` for anything else.
+ * The hovered bar then paints with NO fill and vanishes under the axis-pointer
+ * shadow. Normalising here keeps every derived state (hover, blur, gradients)
+ * working across themes.
+ */
+function toParseableColor(color) {
+  if (!color || ZR_PARSEABLE.test(color.trim())) return color
+  try {
+    const ctx = document.createElement('canvas').getContext('2d')
+    if (!ctx) return ''
+    ctx.fillStyle = '#010203' // sentinel: an unparseable value leaves it untouched
+    ctx.fillStyle = color
+    if (ctx.fillStyle === '#010203') return ''
+    if (ZR_PARSEABLE.test(String(ctx.fillStyle))) return String(ctx.fillStyle)
+    // Engine echoed a modern notation back (oklch/color()): rasterize one pixel
+    // and read the sRGB bytes - the one conversion every engine agrees on.
+    ctx.canvas.width = ctx.canvas.height = 1
+    ctx.fillStyle = color
+    ctx.fillRect(0, 0, 1, 1)
+    const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data
+    return a === 255 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`
   } catch { return '' }
 }
 
@@ -160,6 +199,14 @@ function fmtTooltipValue(val) {
 function animOpts(n) {
   if (n >= 2000) return { animation: false }
   return { animation: true, animationDuration: 400, animationThreshold: 2000 }
+}
+
+/** Hover band behind the focused category. The zrender default (30% mid-grey)
+ * paints a heavy slab across the whole plot - at that weight the highlight
+ * competes with the bars it is meant to point at. A whisper of the foreground
+ * reads as "this column" without repainting the chart. */
+function shadowPointer(isDark) {
+  return { type: 'shadow', shadowStyle: { color: isDark ? 'rgba(255,255,255,0.045)' : 'rgba(0,0,0,0.035)' } }
 }
 
 /** @param {boolean} isDark @param {boolean} [noTitle] */
@@ -335,7 +382,6 @@ function categoryXAxis(isDark, xData) {
   }
 }
 
-/** @param {boolean} isDark */
 /** Compact axis-tick number: 1_200_000 → "1.2M", 3500 → "3.5k". Keeps long value
  * axes (counts, sizes) readable instead of printing raw 7-digit numbers. */
 function fmtCompact(v) {
@@ -519,9 +565,12 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
   if (type === 'heatmap') {
     const xVals = [...new Set(rows.map((r) => String(r[xi])))]
     const yVals = gi >= 0 ? [...new Set(rows.map((r) => String(r[gi])))] : [yCol]
+    // Index lookups via Map: indexOf per row is O(n²) on high-cardinality data.
+    const xIdx = new Map(xVals.map((v, i) => [v, i]))
+    const yIdx = new Map(yVals.map((v, i) => [v, i]))
     const data = rows.map((r) => [
-      xVals.indexOf(String(r[xi])),
-      gi >= 0 ? yVals.indexOf(String(r[gi])) : 0,
+      xIdx.get(String(r[xi])) ?? -1,
+      gi >= 0 ? (yIdx.get(String(r[gi])) ?? 0) : 0,
       Number(r[yi]) || 0,
     ])
     const lineColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)'
@@ -554,19 +603,14 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
   if (type === 'radar') {
     // Each non-xCol numeric column becomes an indicator; each row becomes a series
     const numCols = columns.filter((c) => c.name !== xCol && colType(c) === 'number')
-    const indicators = numCols.map((c) => ({
+    const numIdx = numCols.map((c) => columns.findIndex((cc) => cc.name === c.name))
+    const indicators = numCols.map((c, k) => ({
       name: c.name,
-      max: Math.max(arrMax(rows.map((r) => {
-        const i = columns.findIndex((cc) => cc.name === c.name)
-        return Number(r[i]) || 0
-      })), 1) * 1.2,
+      max: Math.max(arrMax(rows.map((r) => Number(r[numIdx[k]]) || 0)), 1) * 1.2,
     }))
     const seriesData = rows.map((r) => ({
       name: String(r[xi] ?? ''),
-      value: numCols.map((c) => {
-        const i = columns.findIndex((cc) => cc.name === c.name)
-        return Number(r[i]) || 0
-      }),
+      value: numIdx.map((i) => Number(r[i]) || 0),
     }))
     return {
       ...base,
@@ -792,7 +836,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
       tooltip: {
         ...base.tooltip,
         trigger: 'axis',
-        axisPointer: { type: 'shadow' },
+        axisPointer: shadowPointer(isDark),
         formatter(params) {
           const all = Array.isArray(params) ? params : [params]
           const vis = all.filter(p => !String(p.seriesName ?? '').startsWith('__'))
@@ -876,23 +920,36 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
 
   // ── Sunburst ──────────────────────────────────────────────────────────────
   if (type === 'sunburst') {
+    // Same guards as buildTreeData: dedupe by name, attach each node to at most
+    // one parent, skip self/cycle edges and cap the count — duplicate rows or
+    // cyclic parent data otherwise build a graph that hangs/crashes ECharts.
+    const MAX_NODES = 2000
     /** @type {Map<string, any>} */
     const nodeMap = new Map()
-    rows.forEach(r => {
+    for (const r of rows) {
       const name = String(r[xi] ?? '')
-      if (!nodeMap.has(name)) nodeMap.set(name, { name, value: Number(r[yi]) || 0, children: [] })
-    })
+      if (!name || nodeMap.has(name)) continue
+      nodeMap.set(name, { name, value: Number(r[yi]) || 0, children: [] })
+      if (nodeMap.size >= MAX_NODES) break
+    }
     /** @type {any[]} */ let roots = []
     if (gi >= 0) {
-      rows.forEach(r => {
+      const parentOf = new Map()
+      const attached = new Set()
+      for (const r of rows) {
         const name = String(r[xi] ?? '')
         const parent = String(r[gi] ?? '')
-        const node = nodeMap.get(name)
-        if (!node) return
-        if (parent && nodeMap.has(parent)) {
-          nodeMap.get(parent).children.push(node)
-        } else { roots.push(node) }
-      })
+        if (!name || !parent || parent === name || attached.has(name)) continue
+        if (!nodeMap.has(name) || !nodeMap.has(parent)) continue
+        // Cycle guard: parent must not already be a descendant of `name`.
+        let cur = parent, cyclic = false
+        while (cur !== undefined) { if (cur === name) { cyclic = true; break } cur = parentOf.get(cur) }
+        if (cyclic) continue
+        nodeMap.get(parent).children.push(nodeMap.get(name))
+        parentOf.set(name, parent)
+        attached.add(name)
+      }
+      roots = [...nodeMap.values()].filter((n) => !attached.has(n.name))
       roots = roots.length > 0 ? roots : [{ name: 'Root', children: [...nodeMap.values()] }]
     } else {
       roots = [...nodeMap.values()]
@@ -1003,7 +1060,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
         },
         {
           type: 'bar',
-          data: yData.map((v) => [v, 0]),
+          data: yData,
           barMaxWidth: 2,
           itemStyle: { color: PALETTE[0] },
           silent: true,
@@ -1085,7 +1142,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
     const maxVal = Math.max(arrMax(actuals), arrMax(targets), 1)
     return {
       ...base,
-      tooltip: { ...base.tooltip, trigger: 'axis', axisPointer: { type: 'shadow' } },
+      tooltip: { ...base.tooltip, trigger: 'axis', axisPointer: shadowPointer(isDark) },
       xAxis: { type: 'value', max: maxVal * 1.1, ...axisStyle(isDark) },
       yAxis: { type: 'category', data: categories, ...axisStyle(isDark) },
       series: [
@@ -1127,7 +1184,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
     ] : []
     return {
       ...base,
-      tooltip: { ...base.tooltip, trigger: 'axis', axisPointer: { type: 'shadow' } },
+      tooltip: { ...base.tooltip, trigger: 'axis', axisPointer: shadowPointer(isDark) },
       xAxis: { type: 'value', ...axisStyle(isDark) },
       yAxis: { type: 'category', data: xData, ...axisStyle(isDark) },
       series: [{ type: 'bar', name: yCol, data: xData.map((x) => dataMap[x] ?? null), itemStyle: { color: PALETTE[0], borderRadius: [0, 3, 3, 0] }, barMaxWidth: 32 }],
@@ -1315,7 +1372,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
     ...base,
     // Bars get a 'shadow' pointer (highlights the whole hovered category column -
     // the expected bar-chart hover); line/area keep the thin crosshair line.
-    tooltip: { ...base.tooltip, trigger: 'axis', axisPointer: { type: type === 'bar' ? 'shadow' : 'line' } },
+    tooltip: { ...base.tooltip, trigger: 'axis', axisPointer: type === 'bar' ? shadowPointer(isDark) : { type: 'line' } },
     legend: series.length > 1 ? { textStyle: base.textStyle, top: 4 } : undefined,
     xAxis: categoryXAxis(isDark, xData),
     yAxis: valueYAxis(isDark),

@@ -1,4 +1,5 @@
 <script>
+  import FieldSelect from './FieldSelect.svelte';
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import CalendarClock from '@lucide/svelte/icons/calendar-clock'
   import Fingerprint from '@lucide/svelte/icons/fingerprint'
@@ -47,7 +48,7 @@
   )
 
   const fieldClass =
-    'h-8 w-full min-w-0 rounded-md border border-border bg-background/60 px-2.5 font-mono text-ui-sm shadow-none outline-none transition-colors placeholder:text-muted-foreground/45 focus-visible:border-ring/55 focus-visible:ring-1 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50'
+    'h-8 w-full min-w-0 rounded-md border-2 border-border bg-background/60 px-2.5 font-mono text-ui-sm shadow-none outline-none transition-colors placeholder:text-muted-foreground/45 focus-visible:border-ring/55 focus-visible:ring-1 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50'
 
   const actionBtnClass =
     'inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-border/70 bg-background/70 px-2 font-mono text-ui-2xs text-muted-foreground transition-colors hover:bg-accent/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50'
@@ -185,30 +186,30 @@
               </div>
 
               {#if enumValues}
-                <select
+                <FieldSelect
                   id="ins-{col.name}"
+                  class="w-full text-ui-xs"
                   value={drafts[col.name] ?? ''}
                   disabled={saving}
-                  class={fieldClass}
-                  onchange={(e) => setDraft(col.name, e.currentTarget.value)}
-                >
-                  <option value="">{col.nullable ? 'Default or NULL' : 'Default'}</option>
-                  {#each enumValues as option (option)}
-                    <option value={option}>{option}</option>
-                  {/each}
-                </select>
+                  onchange={(v) => setDraft(col.name, v)}
+                  options={[
+                    { value: '', label: col.nullable ? 'Default or NULL' : 'Default' },
+                    ...enumValues.map((/** @type {string} */ o) => ({ value: o, label: o })),
+                  ]}
+                />
               {:else if isBooleanType(dataType)}
-                <select
+                <FieldSelect
                   id="ins-{col.name}"
+                  class="w-full text-ui-xs"
                   value={drafts[col.name] ?? ''}
                   disabled={saving}
-                  class={fieldClass}
-                  onchange={(e) => setDraft(col.name, e.currentTarget.value)}
-                >
-                  <option value="">{col.nullable ? 'Default or NULL' : 'Default'}</option>
-                  <option value="true">true</option>
-                  <option value="false">false</option>
-                </select>
+                  onchange={(v) => setDraft(col.name, v)}
+                  options={[
+                    { value: '', label: col.nullable ? 'Default or NULL' : 'Default' },
+                    { value: 'true', label: 'true' },
+                    { value: 'false', label: 'false' },
+                  ]}
+                />
               {:else if dateTimePicker}
                 <div class="flex gap-1.5">
                   <Input

@@ -9,8 +9,9 @@
   import { chartGroups, saveChart, addGroup } from '$lib/stores/saved-charts.js'
   import { cn } from '$lib/utils.js'
   import { saveExportAs } from '$lib/api.js'
-  import { canvasToPngBlob } from '$lib/svg-png.js'
+  import { canvasToPngBlob, copyPngToClipboard } from '$lib/svg-png.js'
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
+  import * as Select from '$lib/components/ui/select/index.js'
   import ChevronDown  from '@lucide/svelte/icons/chevron-down'
   import Download     from '@lucide/svelte/icons/download'
   import Copy         from '@lucide/svelte/icons/copy'
@@ -214,11 +215,16 @@
     } catch { toast.error('Could not copy') }
   }
 
+  /** This instance's canvas host - a document-wide query can grab another
+   *  ChartView's canvas when several are mounted (split panes, SQL console). */
+  let hostEl = $state(/** @type {HTMLDivElement|null} */ (null))
+
+  function chartCanvas() {
+    return /** @type {HTMLCanvasElement|null} */ (hostEl?.querySelector('canvas') ?? null)
+  }
+
   async function downloadPng() {
-    const canvas = /** @type {HTMLCanvasElement|null} */ (
-      document.querySelector('.chart-canvas-host canvas')
-    )
-    const blob = await canvasToPngBlob(canvas)
+    const blob = await canvasToPngBlob(chartCanvas())
     if (!blob) { toast.error('Could not export chart'); return }
     try {
       const path = await saveExportAs(blob, `chart_${Date.now()}.png`, { name: 'PNG', extensions: ['png'] })
@@ -227,6 +233,55 @@
     } catch (e) {
       toast.error('Could not save the chart', { description: String(e) })
     }
+  }
+
+  async function copyPng() {
+    try {
+      await copyPngToClipboard(await canvasToPngBlob(chartCanvas()))
+      toast.success('Chart copied as PNG')
+    } catch (e) {
+      toast.error('Copy failed', { description: String(e) })
+    }
+  }
+
+  /**
+   * The on-screen chart is a canvas, which has no vector to hand out. Re-render
+   * the same option offscreen with the SVG renderer and serialize that - the
+   * output is true vector, so it stays sharp at any size.
+   */
+  async function downloadSvg() {
+    if (!Object.keys(option).length) { toast.error('Nothing to export'); return }
+    const host = document.createElement('div')
+    const live = chartCanvas()
+    host.style.cssText = `position:fixed;left:-10000px;top:0;width:${live?.clientWidth || 1200}px;height:${live?.clientHeight || 800}px`
+    document.body.appendChild(host)
+    try {
+      const { init } = await import('echarts')
+      await import('echarts-wordcloud')
+      const inst = init(host, null, { renderer: 'svg' })
+      inst.setOption(option, { notMerge: true })
+      const svg = host.querySelector('svg')?.outerHTML ?? ''
+      inst.dispose()
+      if (!svg) { toast.error('Could not export chart'); return }
+      const path = await saveExportAs(svg, `chart_${Date.now()}.svg`, { name: 'SVG image', extensions: ['svg'] })
+      if (!path) return  // dialog cancelled
+      toast.success('Chart saved as SVG', { description: `Saved to ${path}` })
+    } catch (e) {
+      toast.error('Could not save the chart', { description: String(e) })
+    } finally {
+      host.remove()
+    }
+  }
+
+  /**
+   * Image exports, driven from the table toolbar's Export submenu so the chart
+   * offers the same PNG / SVG / Copy set the ERD does.
+   * @param {'png' | 'svg' | 'copy-png'} kind
+   */
+  export function exportChart(kind) {
+    if (kind === 'png') return void downloadPng()
+    if (kind === 'svg') return void downloadSvg()
+    return void copyPng()
   }
 
   // ── Save panel ────────────────────────────────────────────────────────────
@@ -257,9 +312,15 @@
 
   const chartable = $derived(isChartable(effectiveColumns))
 
-  const axisToken = 'relative flex h-7 items-center overflow-hidden rounded-md border border-border/40 bg-muted/20 transition-colors hover:border-border/60 focus-within:border-ring/50'
-  const axisLabel = 'shrink-0 select-none border-r border-border/30 px-2 text-ui-2xs font-semibold uppercase tracking-widest text-muted-foreground/35'
-  const axisSelect = 'h-full cursor-pointer appearance-none bg-transparent pl-2 pr-5 font-mono text-ui-xs text-foreground outline-none'
+  // The axis pickers are one token: a label chip welded to the value. The whole
+  // token IS the Select trigger, so the border, hover and focus ring are drawn
+  // once by the primitive instead of a wrapper and a nested control each
+  // painting their own (which is what made the focused state look doubled).
+  const axisToken = 'group h-7 shrink-0 gap-0 overflow-hidden rounded-md border-border/40 bg-muted/20 p-0 pr-1.5 transition-colors hover:border-border/60 hover:bg-muted/30 [&_svg]:size-3 [&_svg]:text-muted-foreground/40'
+  const axisLabel = 'flex h-full shrink-0 select-none items-center border-r border-border/30 px-2 text-ui-2xs font-semibold uppercase tracking-widest text-muted-foreground/35'
+  const axisValue = 'truncate px-2 font-mono text-ui-xs text-foreground'
+  const axisContent = 'z-[120] max-h-[20rem] min-w-[11rem] p-1'
+  const axisItem = 'rounded-md py-1.5 pl-2 font-mono text-ui-xs'
   const iconBtn = 'inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground'
 </script>
 
@@ -358,52 +419,59 @@
       <span class="h-4 w-px shrink-0 bg-border/50"></span>
 
       <!-- Axis pickers, integrated label + select tokens -->
+      {#snippet axisPicker(
+        /** @type {string} */ label,
+        /** @type {string} */ value,
+        /** @type {string[]} */ options,
+        /** @type {(v: string) => void} */ onpick,
+        /** @type {boolean} */ optional,
+      )}
+        <Select.Root type="single" {value} onValueChange={(v) => onpick(v ?? '')}>
+          <Select.Trigger size="sm" class={axisToken} aria-label={label}>
+            <span class={axisLabel}>{label}</span>
+            <span class={axisValue}>{value || '—'}</span>
+          </Select.Trigger>
+          <Select.Content class={axisContent} sideOffset={6}>
+            {#if optional}<Select.Item value="" label="—" class={axisItem}>—</Select.Item>{/if}
+            {#each options as col (col)}
+              <Select.Item value={col} label={col} class={axisItem}>{col}</Select.Item>
+            {/each}
+          </Select.Content>
+        </Select.Root>
+      {/snippet}
+
       {#if requiredAxes.x}
-        <div class={axisToken}>
-          <span class={axisLabel}>{requiredAxes.x.split(' ')[0]}</span>
-          <select bind:value={xCol} class={axisSelect}>
-            {#each allCols as col (col)}<option value={col}>{col}</option>{/each}
-          </select>
-          <ChevronDown class="pointer-events-none absolute right-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/40" />
-        </div>
+        {@render axisPicker(requiredAxes.x.split(' ')[0], xCol, allCols, (v) => (xCol = v), false)}
       {/if}
 
       {#if requiredAxes.y}
-        <div class={axisToken}>
-          <span class={axisLabel}>{requiredAxes.y.split(' ')[0]}</span>
-          <select bind:value={yCol} class={axisSelect}>
-            {#each (['scatter','bubble'].includes(chartType) ? allCols : numericCols.map(c => c.name)) as col (col)}
-              <option value={col}>{col}</option>
-            {/each}
-          </select>
-          <ChevronDown class="pointer-events-none absolute right-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/40" />
-        </div>
+        {@render axisPicker(
+          requiredAxes.y.split(' ')[0],
+          yCol,
+          ['scatter', 'bubble'].includes(chartType) ? allCols : numericCols.map(c => c.name),
+          (v) => (yCol = v),
+          false,
+        )}
       {/if}
 
       {#if requiredAxes.z}
-        <div class={axisToken}>
-          <span class={axisLabel}>{requiredAxes.z.split(' ')[0]}</span>
-          <select bind:value={zCol} class={axisSelect}>
-            <option value="">—</option>
-            {#each numericCols.map(c => c.name).filter(n => n !== xCol && n !== yCol) as col (col)}
-              <option value={col}>{col}</option>
-            {/each}
-          </select>
-          <ChevronDown class="pointer-events-none absolute right-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/40" />
-        </div>
+        {@render axisPicker(
+          requiredAxes.z.split(' ')[0],
+          zCol,
+          numericCols.map(c => c.name).filter(n => n !== xCol && n !== yCol),
+          (v) => (zCol = v),
+          true,
+        )}
       {/if}
 
       {#if requiredAxes.group}
-        <div class={axisToken}>
-          <span class={axisLabel}>Group</span>
-          <select bind:value={groupCol} class={axisSelect}>
-            <option value="">—</option>
-            {#each allCols.filter(c => c !== xCol && c !== yCol) as col (col)}
-              <option value={col}>{col}</option>
-            {/each}
-          </select>
-          <ChevronDown class="pointer-events-none absolute right-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/40" />
-        </div>
+        {@render axisPicker(
+          'Group',
+          groupCol,
+          allCols.filter(c => c !== xCol && c !== yCol),
+          (v) => (groupCol = v),
+          true,
+        )}
       {/if}
 
       <!-- Right actions -->
@@ -429,16 +497,22 @@
           type="text"
           placeholder="Chart name…"
           bind:value={saveName}
-          class="h-6 w-40 rounded-lg border border-border bg-background/80 px-2 font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+          class="h-6 w-40 rounded-lg border-2 border-border bg-background/80 px-2 font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
         />
 
         {#if !newGroupMode}
-          <div class="relative">
-            <select bind:value={saveGroup} class="h-6 appearance-none rounded border border-border/50 bg-background/60 pl-2 pr-6 font-mono text-ui-xs text-foreground outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15">
-              {#each $chartGroups as g (g)}<option value={g}>{g}</option>{/each}
-            </select>
-            <ChevronDown class="pointer-events-none absolute right-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/50" />
-          </div>
+          <Select.Root type="single" value={saveGroup} onValueChange={(v) => v && (saveGroup = v)}>
+            <Select.Trigger
+              size="sm"
+              aria-label="Chart group"
+              class="h-6 gap-1.5 rounded-md border-border/50 bg-background/60 px-2 font-mono text-ui-xs [&_svg]:size-3 [&_svg]:text-muted-foreground/50"
+            >
+              <span class="truncate">{saveGroup}</span>
+            </Select.Trigger>
+            <Select.Content class={axisContent} sideOffset={6}>
+              {#each $chartGroups as g (g)}<Select.Item value={g} label={g} class={axisItem}>{g}</Select.Item>{/each}
+            </Select.Content>
+          </Select.Root>
           <button type="button" class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/50 hover:text-foreground" title="New group" onclick={() => { newGroupMode = true }}>
             <Plus class="size-3.5" />
           </button>
@@ -447,7 +521,7 @@
             type="text"
             placeholder="New group name…"
             bind:value={newGroupName}
-            class="h-6 w-36 rounded-lg border border-border bg-background/80 px-2 font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+            class="h-6 w-36 rounded-lg border-2 border-border bg-background/80 px-2 font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
           />
           <button type="button" class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/40 hover:text-foreground" onclick={() => (newGroupMode = false)}>
             <X class="size-3" />
@@ -472,7 +546,7 @@
     {/if}
 
     <!-- ── Chart ──────────────────────────────────────────────────────── -->
-    <div class="chart-canvas-host relative min-h-0 flex-1">
+    <div bind:this={hostEl} class="chart-canvas-host relative min-h-0 flex-1">
       <!-- Contain any render/ECharts throw to this panel so a bad chart shows an
            inline message instead of taking down the tab / app. -->
       <svelte:boundary>

@@ -1,10 +1,10 @@
 [package]
 name = "app"
 version = "0.1.4"
-description = "A Tauri App"
-authors = ["you"]
-license = ""
-repository = ""
+description = "Stroke — fast, minimal desktop database client"
+authors = ["Nischal Dahal"]
+license-file = "../LICENSE"
+repository = "https://github.com/broisnischal/stroke"
 edition = "2021"
 rust-version = "1.77.2"
 
@@ -74,6 +74,9 @@ tokio = { version = "1", features = ["test-util"] }
 strip = true
 lto = true
 codegen-units = 1
+# Every command returns Result; a panic is a bug, not a recoverable IPC error,
+# so drop the unwinding machinery for a smaller, faster binary.
+panic = "abort"
 
 # ── Dev-profile crypto optimization ───────────────────────────────────────────
 # Connect-time auth runs heavy crypto: Postgres SCRAM-SHA-256 (PBKDF2, 4096

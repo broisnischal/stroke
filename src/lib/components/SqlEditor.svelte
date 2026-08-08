@@ -60,6 +60,22 @@
   /** @type {monaco.editor.IEditorDecorationsCollection | null} */
   let execDecorations = null
 
+  // Statement splitting copies + scans the whole buffer, so cache it per model
+  // version: cursor-only moves (which don't bump the version) become O(1).
+  let stmtCacheVersion = -1
+  /** @type {import('$lib/sql-statements.js').SqlStatement[]} */
+  let stmtCache = []
+
+  /** @param {monaco.editor.ITextModel} model */
+  function getStatements(model) {
+    const v = model.getVersionId()
+    if (v !== stmtCacheVersion) {
+      stmtCache = splitSqlStatements(model.getValue())
+      stmtCacheVersion = v
+    }
+    return stmtCache
+  }
+
   /**
    * Mark statement(s) as successfully executed with a ✓ in the glyph margin.
    * Pass the single statement that ran (⌘R), or null to mark every statement
@@ -71,7 +87,7 @@
     if (!model || !execDecorations) return
     const target = typeof ranStatement === 'string' ? ranStatement.trim().replace(/;+\s*$/, '') : null
     const marks = []
-    for (const stmt of splitSqlStatements(model.getValue())) {
+    for (const stmt of getStatements(model)) {
       if (target !== null && stmt.text.replace(/;+\s*$/, '') !== target) continue
       const pos = model.getPositionAt(stmt.start)
       marks.push({
@@ -98,7 +114,7 @@
     const model = ed.getModel()
     const pos = ed.getPosition()
     if (!model || !pos) return null
-    return statementAtOffset(splitSqlStatements(model.getValue()), model.getOffsetAt(pos))
+    return statementAtOffset(getStatements(model), model.getOffsetAt(pos))
   }
 
   /** @param {monaco.editor.IStandaloneCodeEditor} ed */
@@ -271,7 +287,7 @@
       const model = editor?.getModel()
       const pos = editor?.getPosition()
       if (!model || !pos) return
-      const stmts = splitSqlStatements(model.getValue())
+      const stmts = getStatements(model)
       const stmt = stmts.length > 1 ? statementAtOffset(stmts, model.getOffsetAt(pos)) : null
       if (!stmt) {
         stmtDecorations.clear()

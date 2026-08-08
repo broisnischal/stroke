@@ -2,6 +2,7 @@
   import { savedDiagrams, saveDiagram, updateDiagram, deleteDiagram, switchDiagramsConnection } from '$lib/stores/saved-diagrams.js'
   import MermaidViewer from './MermaidViewer.svelte'
   import Download from '@lucide/svelte/icons/download'
+  import Copy from '@lucide/svelte/icons/copy'
   import GitBranch from '@lucide/svelte/icons/git-branch'
   import GitFork from '@lucide/svelte/icons/git-fork'
   import Grid2x2 from '@lucide/svelte/icons/grid-2x2'
@@ -19,6 +20,7 @@
   import Check from '@lucide/svelte/icons/check'
   import Search from '@lucide/svelte/icons/search'
   import { cn } from '$lib/utils.js'
+  import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
 
   /**
    * Run one of the viewer's exports and name the file it landed in.
@@ -37,10 +39,19 @@
       toast.error('Export failed', { description: String(e) })
     }
   }
-  import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
+
+  /** Copy the rendered diagram to the clipboard as a PNG. */
+  async function copyDiagram() {
+    try {
+      const ok = await viewerRef?.copyPng()
+      if (!ok) return  // nothing rendered yet
+      toast.success('Diagram copied as PNG')
+    } catch (e) {
+      toast.error('Copy failed', { description: String(e) })
+    }
+  }
 
   let {
-    onopendiagram = undefined,
     /** @type {import('$lib/stores/connections.js').SavedConnection | null} */
     connection = null,
   } = $props()
@@ -154,11 +165,6 @@
     toast.success('Diagram deleted')
   }
 
-  /** @param {HTMLDivElement} node */
-  function dispatchZoom(node, name) {
-    node.dispatchEvent(new CustomEvent(name))
-  }
-
   /** @param {KeyboardEvent} e */
   function handleFullscreenKey(e) {
     if (e.key === 'Escape') fullscreenCode = null
@@ -198,7 +204,7 @@
             type="text"
             placeholder="Search diagrams…"
             bind:value={searchQ}
-            class="h-7 w-full rounded-lg border border-border bg-background/50 pl-6 pr-2 text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none"
+            class="h-7 w-full rounded-lg border-2 border-border bg-background/50 pl-6 pr-2 text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none"
           />
         </div>
       </div>
@@ -255,13 +261,13 @@
             type="text"
             bind:value={draftName}
             placeholder="Diagram name…"
-            class="h-7 min-w-0 flex-1 rounded-lg border border-border bg-background/50 px-2.5 text-ui-sm text-foreground placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none"
+            class="h-7 min-w-0 flex-1 rounded-lg border-2 border-border bg-background/50 px-2.5 text-ui-sm text-foreground placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none"
           />
           <input
             type="text"
             bind:value={draftGroup}
             placeholder="Group"
-            class="h-7 w-24 rounded-lg border border-border bg-background/50 px-2.5 text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none"
+            class="h-7 w-24 rounded-lg border-2 border-border bg-background/50 px-2.5 text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none"
           />
           <button
             type="button"
@@ -308,7 +314,7 @@
             <textarea
               bind:value={draftCode}
               spellcheck="false"
-              class="min-h-0 flex-1 resize-none rounded-lg border border-border bg-background/40 p-3 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/30 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none [font-feature-settings:'liga'_0,'calt'_0] [font-variant-ligatures:none]"
+              class="min-h-0 flex-1 resize-none rounded-lg border-2 border-border bg-background/40 p-3 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/30 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none [font-feature-settings:'liga'_0,'calt'_0] [font-variant-ligatures:none]"
             ></textarea>
           </div>
           <div class="flex w-1/2 min-w-0 flex-col overflow-hidden">
@@ -370,6 +376,12 @@
               title="Reset view (double-click)"
             ><RefreshCw class="size-3.5" /></button>
             <div class="mx-1 h-4 w-px bg-border/40"></div>
+            <button
+              type="button"
+              onclick={() => void copyDiagram()}
+              class="inline-flex h-7 items-center gap-1 rounded-md px-2 text-ui-3xs text-muted-foreground hover:bg-accent hover:text-foreground"
+              title="Copy as PNG"
+            ><Copy class="size-3" />Copy</button>
             <button
               type="button"
               onclick={() => reportExport(viewerRef?.exportSvg(`${selected.name}.svg`), 'diagram as SVG', `${selected.name}.svg`)}

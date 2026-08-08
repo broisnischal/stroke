@@ -413,6 +413,20 @@ fn rows_to_json_objects(columns: &[String], rows: &[Value]) -> String {
 
 // ── execute_sql ───────────────────────────────────────────────────────────────
 
+/// Serialise a fully-materialised SqlResult, truncated to `max_rows`.
+/// `row_count` is the pre-truncation total, matching the streaming engines.
+fn truncated_result_json(result: &crate::db::SqlResult, max_rows: usize) -> String {
+    let truncated = result.rows.len() > max_rows;
+    let rows: Vec<_> = result.rows.iter().take(max_rows).collect();
+    json!({
+        "columns": result.columns.iter().map(|c| &c.name).collect::<Vec<_>>(),
+        "rows": rows,
+        "row_count": result.rows.len(),
+        "truncated": truncated
+    })
+    .to_string()
+}
+
 async fn execute_sql(
     conn: &ActiveConnection,
     sql: &str,
@@ -424,34 +438,24 @@ async fn execute_sql(
         ActiveConnection::D1(cfg) => execute_sql_d1(cfg, sql, max_rows).await,
         ActiveConnection::LibSql(cfg) => {
             let result = crate::db::libsql::query(cfg, sql, vec![]).await?;
-            let truncated = result.rows.len() > max_rows;
-            let rows: Vec<_> = result.rows.iter().take(max_rows).collect();
-            Ok(json!({"columns":result.columns.iter().map(|c|&c.name).collect::<Vec<_>>(),"rows":rows,"row_count":rows.len(),"truncated":truncated}).to_string())
+            Ok(truncated_result_json(&result, max_rows))
         }
         ActiveConnection::Mysql(pool) => execute_sql_mysql(pool, sql, max_rows).await,
         ActiveConnection::Clickhouse(cfg) => {
             let result = crate::db::clickhouse::query(cfg, sql).await?;
-            let truncated = result.rows.len() > max_rows;
-            let rows: Vec<_> = result.rows.iter().take(max_rows).collect();
-            Ok(json!({"columns":result.columns.iter().map(|c|&c.name).collect::<Vec<_>>(),"rows":rows,"row_count":rows.len(),"truncated":truncated}).to_string())
+            Ok(truncated_result_json(&result, max_rows))
         }
         ActiveConnection::Redis(cfg) => {
             let result = crate::db::redis::query(cfg, sql).await?;
-            let truncated = result.rows.len() > max_rows;
-            let rows: Vec<_> = result.rows.iter().take(max_rows).collect();
-            Ok(json!({"columns":result.columns.iter().map(|c|&c.name).collect::<Vec<_>>(),"rows":rows,"row_count":rows.len(),"truncated":truncated}).to_string())
+            Ok(truncated_result_json(&result, max_rows))
         }
         ActiveConnection::Duckdb(h) => {
             let result = crate::db::duckdb::execute_sql(h, sql).await?;
-            let truncated = result.rows.len() > max_rows;
-            let rows: Vec<_> = result.rows.iter().take(max_rows).collect();
-            Ok(json!({"columns":result.columns.iter().map(|c|&c.name).collect::<Vec<_>>(),"rows":rows,"row_count":rows.len(),"truncated":truncated}).to_string())
+            Ok(truncated_result_json(&result, max_rows))
         }
         ActiveConnection::Mssql(h) => {
             let result = crate::db::mssql::execute_sql(h, sql).await?;
-            let truncated = result.rows.len() > max_rows;
-            let rows: Vec<_> = result.rows.iter().take(max_rows).collect();
-            Ok(json!({"columns":result.columns.iter().map(|c|&c.name).collect::<Vec<_>>(),"rows":rows,"row_count":rows.len(),"truncated":truncated}).to_string())
+            Ok(truncated_result_json(&result, max_rows))
         }
     }
 }
@@ -551,15 +555,7 @@ async fn execute_sql_d1(
     max_rows: usize,
 ) -> Result<String, String> {
     let result = crate::db::d1::query(cfg, sql, vec![]).await?;
-    let truncated = result.rows.len() > max_rows;
-    let rows: Vec<_> = result.rows.iter().take(max_rows).collect();
-    Ok(json!({
-        "columns": result.columns.iter().map(|c| &c.name).collect::<Vec<_>>(),
-        "rows": rows,
-        "row_count": rows.len(),
-        "truncated": truncated
-    })
-    .to_string())
+    Ok(truncated_result_json(&result, max_rows))
 }
 
 // ── list_tables ───────────────────────────────────────────────────────────────

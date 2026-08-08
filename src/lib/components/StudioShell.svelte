@@ -6,12 +6,11 @@
   import Logo from './Logo.svelte'
   import Database from '@lucide/svelte/icons/database'
   import Boxes from '@lucide/svelte/icons/boxes'
+  import FileCode2 from '@lucide/svelte/icons/file-code-2'
   import Terminal from '@lucide/svelte/icons/terminal'
-  import Table2 from '@lucide/svelte/icons/table-2'
-  import Bot from '@lucide/svelte/icons/bot'
+  import Sparkles from '@lucide/svelte/icons/sparkles'
   import LayoutTemplate from '@lucide/svelte/icons/layout-template'
   import Command from '@lucide/svelte/icons/command'
-  import Lightbulb from '@lucide/svelte/icons/lightbulb'
   import Code2 from '@lucide/svelte/icons/code-2'
   import ShieldCheck from '@lucide/svelte/icons/shield-check'
   import ScrollText from '@lucide/svelte/icons/scroll-text'
@@ -23,15 +22,15 @@
   import History from '@lucide/svelte/icons/history'
   import Plus from '@lucide/svelte/icons/plus'
   import { createHotkey, createHotkeySequence } from '@tanstack/svelte-hotkeys'
-  import { cycleTheme, restorePreviousTheme, isCurrentThemeDark, loadSettings, updateSettings, appPaginationMode, appVimMode } from '$lib/stores/settings.js'
+  import { cycleTheme, restorePreviousTheme, isCurrentThemeDark, loadSettings, appPaginationMode, appVimMode } from '$lib/stores/settings.js'
   import { isTextEntryTarget, setVimSubMode } from '$lib/vim/vim.js'
   import { normalizeColumn, columnType } from '$lib/column.js'
   import {
     loadAiMode, saveAiMode, loadHiddenCols, saveHiddenCols,
     loadQueryHistoryPref, saveQueryHistoryPref, loadInfiniteScroll, saveInfiniteScroll,
   } from '$lib/stores/table-prefs.js'
-  import { pickRandomTip } from '$lib/insider-tips.js'
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
+  import { startTelemetry, track } from '$lib/telemetry.js'
   import Sidebar from './Sidebar.svelte'
   import TabBar from './TabBar.svelte'
   import PaneLayout from './PaneLayout.svelte'
@@ -74,7 +73,7 @@
   import StatusBar from './StatusBar.svelte'
   import QueryLogConsole from './QueryLogConsole.svelte'
   import DisconnectDialog from './DisconnectDialog.svelte'
-  // InsertRowDialog removed - replaced by inline draft row in DataTable
+  import SwitchDatabaseDialog from './SwitchDatabaseDialog.svelte'
   import McpPanel from './McpPanel.svelte'
   import SearchPage from './SearchPage.svelte'
   // NotebookEditor (pulls Monaco via SqlCell + marked via MarkdownCell) is lazy-loaded
@@ -100,6 +99,7 @@
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
   import {
     disconnectPostgres,
+    prewarmDns,
     listSchemas,
     listTables,
     getTableRowCounts,
@@ -119,15 +119,17 @@
     mcpStart,
     mcpStop,
     mcpUpdateConnections,
+    geoOverview,
   } from '$lib/api.js'
   import {
     createTableTab,
     createSqlTab,
     createDdlTab,
     createWelcomeTab,
-    createAiTab,
     createSchemaTab,
     createOrmTab,
+    createOrmSchemaTab,
+    findOrmSchemaTab,
     createSecurityTab,
     createLogsTab,
     createInsightsTab,
@@ -138,6 +140,8 @@
     findRedisTab,
     createExtensionsTab,
     findExtensionsTab,
+    createMapTab,
+    findMapTab,
     createExtensionDetailTab,
     findExtensionDetailTab,
     createJsonTab,
@@ -159,7 +163,6 @@
     findLicenseTab,
     findTableTab,
     findSqlTab,
-    findAiTab,
     findSchemaTab,
     findOrmTab,
     findSecurityTab,
@@ -184,7 +187,7 @@
     clearPendingChanges,
     anyPendingChanges,
   } from '$lib/stores/pending-table-edits.js'
-  import { createNotebook, deserializeNotebook, titleFromPath } from '$lib/notebook.js'
+  import { createNotebook, deserializeNotebook } from '$lib/notebook.js'
   import { openNotebookFile } from '$lib/api.js'
   import { formatCompactCount, normalizeTableRowCount } from '$lib/table-list.js'
   import { humanizeDbError } from '$lib/ai.js'
@@ -210,10 +213,12 @@
   import { loadLayout, saveLayout } from '$lib/stores/layout.js'
   import {
     getLastConnection,
+    getLastSchema,
     loadSavedConnections,
     removeConnection,
     setConnectionGroup,
     setLastConnectionId,
+    setLastSchema,
     upsertConnection,
     engineFamily,
   } from '$lib/stores/connections.js'
@@ -303,11 +308,28 @@
   /** @type {boolean} - true when the DB went away mid-session */
   let connectionLost = $state(false)
   let autoConnecting = $state(false)
-  /** Name of the connection the startup reconnect is waiting on, for the overlay. */
+  /** Name of the connection the overlay is waiting on. */
   let autoConnectName = $state('')
+  /** Overlay verb: resuming the last session reads "Reconnecting", every other
+   *  path (switching database, Docker, sample) is a fresh "Connecting". */
+  let autoConnectVerb = $state('Connecting')
+
+  /**
+   * Raise the full-screen connect overlay. Always name the connection being
+   * dialled - the name is what tells the user which database they are waiting
+   * on, and a stale one during a switch says the wrong database entirely.
+   * @param {string} name
+   * @param {'Connecting' | 'Reconnecting'} [verb]
+   */
+  function beginConnectOverlay(name, verb = 'Connecting') {
+    autoConnectName = name ?? ''
+    autoConnectVerb = verb
+    autoConnecting = true
+  }
+
   /**
    * Saved connections are often named `db@full.rds.host.name` - too long to read
-   * in the reconnect overlay. Keep the database and the host's first label.
+   * in the connect overlay. Keep the database and the host's first label.
    * @param {string} name
    */
   function shortConnLabel(name) {
@@ -335,6 +357,7 @@
   /** The mounted per-table ERD pane, so the tab bar's Export menu can drive its
    *  diagram exports (PNG / copy PNG / SVG / Mermaid). */
   let erdPane = $state(/** @type {any} */ (null))
+  let chartPane = $state(/** @type {any} */ (null))
   let showCreateTableDialog = $state(false)
   let showCreateSchemaDialog = $state(false)
   let savedConnections = $state(loadSavedConnections())
@@ -362,6 +385,22 @@
   const hasSchemaExplorer = $derived((dbType === 'postgres' || dbType === 'mysql') && !isRedis)
   /** Security (RLS, policies, roles) is PostgreSQL-only. */
   const hasSecurity = $derived(dbType === 'postgres' && !isRedis)
+  /**
+   * PostGIS present on this connection — gates the Map view, which has nothing
+   * to show without it. Asked once per connection: it is a single indexed
+   * catalog row, and the alternative (offering Map everywhere and dead-ending on
+   * a non-spatial database) is worse than one cheap query.
+   */
+  let geoAvailable = $state(false)
+  $effect(() => {
+    const conn = connection
+    const pg = dbType === 'postgres'
+    untrack(() => (geoAvailable = false))
+    if (!conn || !pg) return
+    void geoOverview()
+      .then((res) => untrack(() => (geoAvailable = Boolean(res?.available))))
+      .catch(() => {})
+  })
   /** @type {import('./UpdateDialog.svelte').default | null} */
   let updateDialog = $state(null)
   let statusBarHasUpdate = $state(false)
@@ -599,6 +638,9 @@
   }
 
   onMount(() => {
+    // Anonymous, opt-out, and a no-op when the setting is off. See telemetry.js
+    // for what it does and does not send.
+    startTelemetry()
     let unlisten = () => {}
     void (async () => {
       try {
@@ -609,8 +651,6 @@
     return () => { unlisten(); if (_liveRefetchTimer) clearTimeout(_liveRefetchTimer) }
   })
 
-  // AI mode, hidden columns, query-history visibility and infinite-scroll prefs
-  // are persisted via $lib/stores/table-prefs.js (imported above).
   let aiMode = $state(loadAiMode())
   let aiEverOpened = $state(loadAiMode())
   $effect(() => { if (aiMode) aiEverOpened = true })
@@ -626,6 +666,7 @@
   let objectsEverOpened = $state(false)
   let redisEverOpened = $state(false)
   let extensionsEverOpened = $state(false)
+  let mapEverOpened = $state(false)
   let jsonEverOpened = $state(false)
   let backupEverOpened = $state(false)
   let chartsEverOpened = $state(false)
@@ -635,10 +676,10 @@
   let searchEverOpened = $state(false)
   let schemaTimelineEverOpened = $state(false)
   let dataDiffEverOpened = $state(false)
+  let ormSchemaEverOpened = $state(false)
   /** @type {{ focusEditor: () => void, openQuery?: (content: string) => void } | null} */
   let sqlConsoleRef = $state(null)
 
-  /** "Open in SQL editor" - generate a SELECT reflecting the current table view and open it in the SQL editor. */
   // ── Search options (match case / whole word / regex) ──────────────────────
   /** @type {import('$lib/search-options.js').SearchOptions} */
   let searchOptions = $state({ matchCase: false, wholeWord: false, regex: false })
@@ -846,6 +887,7 @@
     }
   }
 
+  /** "Open in SQL editor" - generate a SELECT reflecting the current table view and open it in the SQL editor. */
   function openTableInSqlEditor() {
     if (!activeTable) return
     const sql = buildSelectSql({
@@ -881,6 +923,7 @@
     if (activeTab?.kind === 'objects') objectsEverOpened = true
     if (activeTab?.kind === 'redis') redisEverOpened = true
     if (activeTab?.kind === 'extensions') extensionsEverOpened = true
+    if (activeTab?.kind === 'map') mapEverOpened = true
     if (activeTab?.kind === 'json') jsonEverOpened = true
     if (activeTab?.kind === 'backup') backupEverOpened = true
     if (activeTab?.kind === 'charts') chartsEverOpened = true
@@ -890,6 +933,7 @@
     if (activeTab?.kind === 'search') searchEverOpened = true
     if (activeTab?.kind === 'schema-timeline') schemaTimelineEverOpened = true
     if (activeTab?.kind === 'data-diff') dataDiffEverOpened = true
+    if (activeTab?.kind === 'orm-schema') ormSchemaEverOpened = true
   })
 
   // ── Idle-based teardown of hidden heavy views ─────────────────────────────
@@ -915,6 +959,7 @@
     { kind: 'erd',             get: () => erdEverOpened,            set: (/** @type {boolean} */ v) => (erdEverOpened = v) },
     { kind: 'diagrams',        get: () => diagramsEverOpened,       set: (/** @type {boolean} */ v) => (diagramsEverOpened = v) },
     { kind: 'schema-timeline', get: () => schemaTimelineEverOpened, set: (/** @type {boolean} */ v) => (schemaTimelineEverOpened = v) },
+    { kind: 'orm-schema',      get: () => ormSchemaEverOpened,      set: (/** @type {boolean} */ v) => (ormSchemaEverOpened = v) },
   ])
   /** kind → Date.now() when it last became hidden; absent while active or unmounted. */
   let _hiddenSince = /** @type {Record<string, number>} */ ({})
@@ -1164,12 +1209,14 @@
   // Monotonic id so an out-of-order / superseded row fetch can't clobber a
   // newer one when the user pages rapidly.
   let _loadSeq = 0
-  // Infinite scroll - accumulated rows across all "load more" fetches.
-  // Kept as deep $state (not .raw): handleLoadMore appends in place with .push()
-  // (O(1) amortised) and DataTable's rowTops/contentHeight $derived reads rows.length
-  // to grow the scroll extent - it needs the proxy's length signal to fire on the
-  // in-place push. .raw would lose that notify without an O(n²) whole-array copy.
-  let _infiniteRows = $state(/** @type {any[]} */ ([]))
+  // Infinite scroll - accumulated rows across all "load more" fetches. Plain
+  // (non-reactive) array: handing a deep proxy to the grid would put get-traps
+  // on every rows[r][c] read in the per-frame canvas draw (the scroll-lag
+  // regression). handleLoadMore appends in place (O(1) amortised) and then
+  // assigns `rows = _infiniteRows.slice()` - the fresh identity is what notifies
+  // the grid's rows.length deriveds, and a shallow page-sized-growth copy is far
+  // cheaper than proxy traps on the draw hot path.
+  let _infiniteRows = /** @type {any[]} */ ([])
   // Hard ceiling on accumulated infinite-scroll rows. Without it, scrolling a
   // huge table in infinite mode would keep appending until the entire result set
   // was resident (and deep-proxied) - unbounded memory. At the cap we stop
@@ -1267,15 +1314,6 @@ let rowSearch = $state('')
   /** Structure view only makes sense for real tables, not views/materialized views */
   const canShowStructure = $derived(activeTableKind === 'table' || activeTableKind === 'foreign_table')
 
-  let welcomeTip = $state(pickRandomTip())
-  let _lastWelcomeTabId = ''
-  $effect(() => {
-    if (activeTab?.kind === 'welcome' && activeTab.id !== _lastWelcomeTabId) {
-      _lastWelcomeTabId = activeTab.id
-      welcomeTip = pickRandomTip()
-    }
-  })
-
   const activeView = $derived(activeTab?.kind === 'sql' ? 'sql' : 'table')
 
   // Stable name arrays derived separately so sqlSchemaHints doesn't rebuild
@@ -1289,10 +1327,16 @@ let rowSearch = $state('')
   // sqlSchemaHints (a $derived) picks them up automatically once they arrive.
   let _sqlEnumValues = $state(/** @type {Record<string, string[]>} */ ({}))
   let _sqlUserFunctions = $state(/** @type {Array<{name:string,signature:string,returnType:string,kind:string}>} */ ([]))
+  // Which connection+schema the hints reflect - enums/functions only change with
+  // those, so don't re-run the catalog round-trips on every switch into SQL.
+  let _sqlHintsLoadedFor = ''
 
   $effect(() => {
     if (activeView !== 'sql' || !connection || !activeSchema) return
     const schema = activeSchema
+    const key = `${persistConnectionId}:${schema}`
+    if (key === _sqlHintsLoadedFor) return
+    _sqlHintsLoadedFor = key
     // Enum/function completion hints are PostgreSQL-only - skip the round-trips
     // (which would just return empty) on every other engine.
     if (engineSupports('enums', connection?.type)) {
@@ -1436,6 +1480,22 @@ let rowSearch = $state('')
   )
 
   const persistConnectionId = $derived(activeConnectionId || connectionId)
+
+  /**
+   * Title-bar label for the current connection. A file-backed connection would
+   * otherwise show its whole path — and a D1 local database's miniflare path
+   * (`…/.wrangler/state/v3/d1/miniflare-D1DatabaseObject/<hash>.sqlite`) both
+   * overflows the bar and says nothing. Prefer the SQL database name, then the
+   * connection's own label, and only fall back to the file's basename.
+   */
+  const windowTitle = $derived.by(() => {
+    const c = connection
+    if (!c) return 'studio'
+    if (c.database) return c.database
+    if (c.name) return c.name
+    if (c.filePath) return c.filePath.split(/[\\/]/).pop() || c.filePath
+    return 'studio'
+  })
 
   // Keep MCP layer in sync with saved connections + active connection (no passwords sent).
   $effect(() => {
@@ -1869,6 +1929,10 @@ let rowSearch = $state('')
 
   createHotkey('Mod+B', (e) => {
     e.preventDefault()
+    // The connection dialog owns the screen while it's open, and it binds ⌘B to
+    // its own connections rail — toggling the workspace sidebar behind it would
+    // be an invisible edit the user only discovers after closing the dialog.
+    if (showConnectionModal) return
     toggleSidebar()
   })
 
@@ -2486,6 +2550,11 @@ let rowSearch = $state('')
   function resetTabs() {
     tabs = []
     activeTabId = null
+    // Every tab id in the map/MRU/stack just died with the tab list - drop them
+    // so old connections' row arrays and reopen descriptors can't be retained.
+    _liveRowsByTab.clear()
+    _tabRowsMru = []
+    closedTabStack = []
     // Every tab id in the history just died with the tab list.
     resetNav(_nav)
     syncNavFlags()
@@ -2620,6 +2689,11 @@ let rowSearch = $state('')
     openSingletonTab({ find: findOrmTab, create: createOrmTab })
   }
 
+  /** The live schema written out as Prisma / Drizzle source. */
+  function openOrmSchemaTab() {
+    openSingletonTab({ find: findOrmSchemaTab, create: createOrmSchemaTab, capability: () => !isRedis })
+  }
+
   function openSecurityTab() {
     openSingletonTab({ find: findSecurityTab, create: createSecurityTab, capability: () => hasSecurity, capabilityFirst: true })
   }
@@ -2655,6 +2729,10 @@ let rowSearch = $state('')
 
   function openExtensionsTab() {
     openSingletonTab({ find: findExtensionsTab, create: createExtensionsTab })
+  }
+
+  function openMapTab() {
+    openSingletonTab({ find: findMapTab, create: createMapTab })
   }
 
   /** Open (or focus) a per-extension detail tab. Non-singleton: one tab per id. */
@@ -2803,8 +2881,10 @@ let rowSearch = $state('')
   const TAB_EVICT_ROW_THRESHOLD = 5_000
   let _tabRowsMru = /** @type {string[]} */ ([])
   function evictColdTabRows(activeId) {
-    _tabRowsMru = [..._tabRowsMru.filter((x) => x !== activeId), activeId]
-    const keep = new Set(_tabRowsMru.slice(-TAB_ROWS_MRU_MAX))
+    // Trim to the window we actually read - entries past it are never consulted,
+    // so without the slice the MRU grows by one id per distinct tab ever opened.
+    _tabRowsMru = [..._tabRowsMru.filter((x) => x !== activeId), activeId].slice(-TAB_ROWS_MRU_MAX)
+    const keep = new Set(_tabRowsMru)
     // Never evict a tab that is the active tab of a visible split pane - its rows
     // are on screen in that pane's snapshot, so blanking them would flip the pane
     // to the empty "Focus this pane to load" placeholder.
@@ -2978,23 +3058,31 @@ let rowSearch = $state('')
 
   function navForward() { navStepBy(1) }
 
+  /**
+   * Guard: closing a tab discards its unsaved edits/deletes - ask first when it
+   * has staged changes. Returns false when the close should be aborted.
+   * @param {StudioTab} closing
+   */
+  async function confirmDiscardTabChanges(closing) {
+    const count = tabPendingCount(closing)
+    if (count === 0) return true
+    const ok = await askConfirm(
+      `This table has ${count} unsaved change${count === 1 ? '' : 's'}. Close the tab and discard them?`,
+      'Close & discard',
+    )
+    if (!ok) return false
+    if (closing.id === activeTabId) resetEdits()
+    const key = tabTableKey(closing)
+    if (key) clearPendingChanges(key)
+    return true
+  }
+
   /** @param {string} id */
   async function closeTab(id) {
     const idx = tabs.findIndex((t) => t.id === id)
     if (idx < 0) return
-    // Guard: closing a tab discards its unsaved edits/deletes.
     const closing = tabs[idx]
-    const count = tabPendingCount(closing)
-    if (count > 0) {
-      const ok = await askConfirm(
-        `This table has ${count} unsaved change${count === 1 ? '' : 's'}. Close the tab and discard them?`,
-        'Close & discard',
-      )
-      if (!ok) return
-      if (id === activeTabId) resetEdits()
-      const key = tabTableKey(closing)
-      if (key) clearPendingChanges(key)
-    }
+    if (!(await confirmDiscardTabChanges(closing))) return
     rememberClosedTab(closing)
     const nextTabs = tabs.filter((t) => t.id !== id)
     if (nextTabs.length === 0) {
@@ -3221,19 +3309,8 @@ let rowSearch = $state('')
     const g = PaneTree.findGroup(paneRoot, groupId)
     const idx = tabs.findIndex((t) => t.id === id)
     if (idx < 0) return
-    // Guard: closing a tab discards its unsaved edits/deletes (same as closeTab).
     const closing = tabs[idx]
-    const pending = tabPendingCount(closing)
-    if (pending > 0) {
-      const ok = await askConfirm(
-        `This table has ${pending} unsaved change${pending === 1 ? '' : 's'}. Close the tab and discard them?`,
-        'Close & discard',
-      )
-      if (!ok) return
-      if (id === activeTabId) resetEdits()
-      const key = tabTableKey(closing)
-      if (key) clearPendingChanges(key)
-    }
+    if (!(await confirmDiscardTabChanges(closing))) return
     // Remember it so Reopen Closed Tab (⌘⇧T) can restore it - mirrors closeTab().
     rememberClosedTab(closing)
     const nextTabs = tabs.filter((t) => t.id !== id)
@@ -3343,6 +3420,7 @@ let rowSearch = $state('')
    *   duplicate?: boolean, viewMode?: string }} [options]
    */
   async function openTableTab(schema, table, options = {}) {
+    track('table_open')
     const { filters = null, resetQuery = false, search = null, duplicate = false, viewMode = null } = options
     // `duplicate` forces a second tab for a table that is already open - used when
     // the request comes from inside that table's own tab (e.g. "Open table" in the
@@ -3414,6 +3492,7 @@ let rowSearch = $state('')
     hiddenColumns = loadHiddenCols(persistConnectionId, schema, table)
     if (schema !== activeSchema) {
       activeSchema = schema
+      setLastSchema(persistConnectionId, schema)
       await loadTables()
     }
     // Fire the fetch in background - caller can open more tabs without waiting
@@ -4290,15 +4369,22 @@ let rowSearch = $state('')
       } else if (wantsWindow) {
         // Below the windowing bar after counting - load the remainder in full.
         resetWindowing()
+        total = windowTotal
+        // Paint the first window NOW, before going back for the rest. The
+        // remainder is a second round-trip over tens of thousands of rows, and
+        // holding `rows` empty until it lands leaves the grid blank for all of
+        // it — with the columns already drawn, which reads as "this table is
+        // empty" rather than "this is still loading". Every table between
+        // WINDOW_FETCH and WINDOW_THRESHOLD rows opened on "All" comes through
+        // here, so that was the common case, not the rare one.
+        rows = fetched
+        _infiniteRows = fetched
         if (windowTotal > fetched.length) {
           const restData = await getTableRows(activeSchema, activeTable, Math.min(windowTotal - fetched.length, MAX_PAGE_SIZE), fetched.length, currentRowQuery(false))
           if (seq !== _loadSeq) return
           rows = [...fetched, ...(restData.rows ?? [])]
-        } else {
-          rows = fetched
+          _infiniteRows = rows
         }
-        _infiniteRows = rows
-        total = windowTotal
       } else {
         resetWindowing()
         rows = fetched
@@ -4387,9 +4473,10 @@ let rowSearch = $state('')
       if (!fetched.length) return
       // Append in place - spreading the whole accumulated array on every page was
       // O(n) per load (O(n²) over a scroll session). Pages are page-size (small),
-      // so push() is cheap and the proxied $state array still notifies the grid.
+      // so push() is cheap; the slice() below gives `rows` (which is $state.raw)
+      // a fresh raw identity so the grid's rows.length deriveds fire.
       for (let i = 0; i < fetched.length; i++) _infiniteRows.push(fetched[i])
-      rows = _infiniteRows
+      rows = _infiniteRows.slice()
       total = Number(data.total ?? total)
     } catch (e) {
       error = String(e)
@@ -4462,7 +4549,6 @@ let rowSearch = $state('')
     const n = exportRows.length
     // Small exports build instantly; only large ones need the async/progress path.
     const LARGE = 20000
-    exportingData = true
     // A persistent toast that stays up for the whole build/save, dismissed on completion.
     const toastId = toast.info(`Exporting ${formatCompactCount(n)} rows…`, {
       description: `Preparing ${format.toUpperCase()}, please wait`,
@@ -4509,6 +4595,7 @@ let rowSearch = $state('')
    * @param {string} [overrideSql]
    */
   async function runSql(overrideSql) {
+    track('sql_run')
     const sqlRan = typeof overrideSql === 'string' && overrideSql.trim() ? overrideSql : sqlText
     if (!connection || !sqlRan.trim()) return
     if (tableReadonly && isWriteSql(sqlRan)) {
@@ -4564,13 +4651,23 @@ let rowSearch = $state('')
     activeTable = null
     tables = []
     schemas = []
-    activeSchema = 'public'
+    // Land on the schema the user was on last time for this connection.
+    // loadSchemas() falls back to public/first if it no longer exists.
+    activeSchema = (savedId && getLastSchema(savedId)) || 'public'
+    // Schema caches are keyed by "schema.table" only, so entries from the old
+    // database would be served for same-named tables on the new one (and stay
+    // resident forever). The ConnectionModal connect path lands here without
+    // going through clearConnectionState, so reset them in both places.
+    tableColumnsCache = new Map()
+    incomingFkCache = new Map()
     // The connection is live: render the shell NOW (setting `connection` above
     // dropped the reconnect overlay) with the welcome tab open and the sidebar
     // in its skeleton state, and let the catalog stream in below. This is what
     // makes reconnect feel instant - the overlay no longer waits on the
     // schema/table/row-count round trips.
     tabs = []
+    _liveRowsByTab.clear()
+    _tabRowsMru = []
     resetNav(_nav)
     syncNavFlags()
     // Redis has no relational catalog: skip schema/table loading entirely and
@@ -4614,7 +4711,6 @@ let rowSearch = $state('')
     // MCP autostart is independent of the catalog - don't block first render on it.
     void (async () => {
       try {
-        const { loadSettings } = await import('$lib/stores/settings.js')
         if (loadSettings().mcpAutoStart) {
           const s = await mcpStart()
           mcpRunning = s.running
@@ -4666,6 +4762,25 @@ let rowSearch = $state('')
   })
 
   onMount(async () => {
+    // Resolve every saved host before the user can pick one. A cold DNS lookup
+    // measured 4147ms here against 58ms warm, and the connect waits on it, so
+    // this is the difference between a 4s connect and a 300ms one. Fire and
+    // forget - nothing downstream waits on it.
+    // Repeat on an interval, not just once: resolver cache entries expire, and a
+    // cold lookup on this machine has been measured stalling the full 5s DNS
+    // budget - for unrelated hosts at the same instant, so it is the resolver,
+    // not the database. Re-resolving every 60s keeps the entry hot so the connect
+    // lands on the ~260ms path instead of the ~6.9s one. Fire and forget.
+    const warmHosts = () => {
+      try {
+        const hosts = [...new Set(loadSavedConnections().map((c) => c.host).filter(Boolean))]
+        if (hosts.length) void prewarmDns(hosts)
+      } catch { /* best effort */ }
+    }
+    warmHosts()
+    const dnsWarmTimer = setInterval(warmHosts, 60_000)
+    onDestroy(() => clearInterval(dnsWarmTimer))
+
     // Seed the sample SQLite database once on first launch (any install, any user).
     // Uses a sentinel key so re-seeding is skipped if the user later deletes the connection.
     try {
@@ -4694,8 +4809,7 @@ let rowSearch = $state('')
     // to the connection modal instead of re-connecting silently.
     if (!loadSettings().autoReconnectOnStartup) { showConnectionModal = true; return }
 
-    autoConnecting = true
-    autoConnectName = last.name ?? ''
+    beginConnectOverlay(last.name ?? '', 'Reconnecting')
     // The backend already enforces its own per-engine deadlines (DNS + TCP preflight,
     // a 20s connect deadline for Postgres, HTTP timeouts for the REST engines) and
     // fails with a message the user can act on. This race is only a last-resort guard
@@ -4739,6 +4853,7 @@ let rowSearch = $state('')
     if (!schema || schema === activeSchema) return
     if (connectionLost) await reconnectPool()
     activeSchema = schema
+    setLastSchema(persistConnectionId, schema)
     activeTable = null
     page = 1
     tableFilter = ''
@@ -4773,8 +4888,71 @@ let rowSearch = $state('')
     saveAiMode(false)
   }
 
+  /** @param {{ provider: string, dbRef: string, name: string }} args */
+  async function switchProviderDb({ provider, dbRef, name }) {
+    if (!connection) return
+    try {
+      const { providerBuildConnection } = await import('$lib/providers.js')
+      const built = await providerBuildConnection(provider, dbRef)
+      if (built.needs_password) {
+        // Supabase needs a per-project password - can't switch silently, so
+        // send the user to the connect dialog to finish it.
+        toast.message(`${name} needs its database password, opening the connection dialog.`)
+        showConnectionModal = true
+        return
+      }
+      void handleSwitchDatabase({
+        ...connection,
+        type: built.db_type === 'mysql' ? 'mysql' : 'postgres',
+        host: built.host,
+        port: built.port,
+        user: built.username,
+        password: built.password,
+        database: built.database,
+        ssl: built.ssl,
+        name: built.name,
+        provider,
+      })
+    } catch (e) {
+      toast.error('Could not switch database', { description: String(e) })
+    }
+  }
+
+  /** @param {{ databaseId: string, name: string }} args */
+  function switchD1Database({ databaseId, name }) {
+    if (!connection) return
+    void handleSwitchDatabase({ ...connection, databaseId, database: name, name })
+  }
+
+  /** @param {string} dbName */
+  function switchToDb(dbName) {
+    if (!connection) return
+    void handleSwitchDatabase({ ...connection, database: dbName, name: `${connection.host ?? connection.name}/${dbName}` })
+  }
+
   function requestDisconnect() {
     showDisconnectDialog = true
+  }
+
+  // ── Switch database (sidebar) ──────────────────────────────────────────────
+  let showSwitchDbDialog = $state(false)
+  /** @type {{ key: string, label: string } | null} */
+  let pendingDbSwitch = $state(null)
+
+  /** Ask first: switching drops the pool, the catalog and every open tab. */
+  function requestDatabaseSwitch(/** @type {{ key: string, label: string }} */ entry) {
+    pendingDbSwitch = entry
+    showSwitchDbDialog = true
+  }
+
+  /** Same three dispatch paths the status-bar switcher uses, by engine. */
+  function commitDatabaseSwitch() {
+    const entry = pendingDbSwitch
+    pendingDbSwitch = null
+    if (!entry || !connection) return
+    if (connection.provider) return void switchProviderDb({ provider: connection.provider, dbRef: entry.key, name: entry.label })
+    if (connection.type === 'd1') return void switchD1Database({ databaseId: entry.key, name: entry.label })
+    switchToDb(entry.label)
   }
 
   /** Reset all connection-scoped UI state to blank. */
@@ -4785,6 +4963,9 @@ let rowSearch = $state('')
     enums = []
     triggers = []
     sequences = []
+    tableColumnsCache = new Map()
+    incomingFkCache = new Map()
+    _sqlHintsLoadedFor = ''
     activeSchema = 'public'
     activeTable = null
     tableFilter = ''
@@ -4797,6 +4978,8 @@ let rowSearch = $state('')
   }
 
   async function handleDisconnect() {
+    // Remember where the user was so reconnecting restores this schema.
+    if (persistConnectionId && activeSchema) setLastSchema(persistConnectionId, activeSchema)
     recordActivity({ type: 'disconnect', title: `Disconnected from ${connection?.name ?? 'database'}`, success: true })
     try { await disconnectPostgres() } catch { /* ignore */ }
     try { await mcpStop() } catch { /* ignore */ }
@@ -4823,7 +5006,7 @@ let rowSearch = $state('')
     await disconnectPostgres().catch(() => {})
     connection = null
     clearConnectionState()
-    autoConnecting = true
+    beginConnectOverlay(conn.name ?? '')
     try {
       if (conn.type === 'mysql' || conn.type === 'mariadb') await connectMysql(conn)
       else await connectPostgres(conn)
@@ -4842,7 +5025,7 @@ let rowSearch = $state('')
     await disconnectPostgres().catch(() => {})
     connection = null
     clearConnectionState()
-    autoConnecting = true
+    beginConnectOverlay('Sample Database')
     try {
       const filePath = await initSampleDb()
       const sample = /** @type {import('$lib/stores/connections.js').SavedConnection} */ ({
@@ -4867,7 +5050,9 @@ let rowSearch = $state('')
    * @param {import('$lib/stores/connections.js').SavedConnection} conn
    */
   async function connectByType(conn) {
-    const { connectPostgres, connectSqlite, connectD1, connectLibSql, connectMysql, connectClickhouse, connectDuckdb, connectMssql, connectRedis } = await import('$lib/api.js')
+    // Which engines get used, never which servers. The event name is the whole
+    // payload — there is no field here that could carry a host or a database.
+    track(`connect_${conn.type === 'cockroachdb' ? 'cockroachdb' : conn.type}`)
     if (conn.type === 'sqlite') await connectSqlite(conn)
     else if (conn.type === 'd1') await connectD1(conn)
     else if (conn.type === 'libsql') await connectLibSql(conn)
@@ -4887,7 +5072,7 @@ let rowSearch = $state('')
     connection = null
     clearConnectionState()
     // Connect to the chosen saved connection
-    autoConnecting = true
+    beginConnectOverlay(conn.name ?? conn.database ?? conn.host ?? '')
     try {
       await connectByType(conn)
       await onConnected(conn, conn.id)
@@ -4942,6 +5127,7 @@ let rowSearch = $state('')
   async function handleRefresh() {
     // A manual refresh should also recover a dropped connection.
     if (connectionLost) await reconnectPool()
+    _sqlHintsLoadedFor = '' // re-fetch enum/function hints on next SQL view
     await loadSchemas()
     await loadTables({ force: true })
     if (activeTab?.kind === 'table' && activeTable) {
@@ -4999,18 +5185,10 @@ let rowSearch = $state('')
       const cols = result.columns ?? []
       const rows = result.rows ?? []
 
-      const inserts = rows.map((row) => {
-        const vals = cols.map((col, i) => {
-          const v = row[i]
-          if (v === null || v === undefined) return 'NULL'
-          if (typeof v === 'number' || typeof v === 'boolean') return String(v)
-          if (typeof v === 'object') return `'${JSON.stringify(v).replace(/'/g, "''")}'`
-          return `'${String(v).replace(/'/g, "''")}'`
-        })
-        return `INSERT INTO "${tableName}" (${cols.map((c) => `"${c.name}"`).join(', ')}) VALUES (${vals.join(', ')});`
-      }).join('\n')
-
-      const sql = inserts.length ? `${ddl}\n\n${inserts}` : ddl
+      // Gate on rows.length: rowsToSql returns a "-- no rows" comment for empty
+      // input, but an empty table should export as DDL only.
+      const inserts = rows.length ? rowsToSql(cols, rows, tableName) : ''
+      const sql = inserts ? `${ddl}\n\n${inserts}` : ddl
       const filename = `${tableName}_${new Date().toISOString().slice(0, 10)}.sql`
       await saveExportFile(sql, filename, 'sql')
     } catch (e) {
@@ -5193,16 +5371,8 @@ let rowSearch = $state('')
     const col = columns[detail.colIdx]
     if (!col) return
 
-    const row = rows[detail.rowIdx]
-    if (!row) return
-
-    /** @type {Record<string, unknown>} */
-    const pk = {}
-    for (const key of primaryKey) {
-      const keyIdx = columns.findIndex((c) => c.name === key)
-      if (keyIdx < 0) throw new Error(`Primary key column not found: ${key}`)
-      pk[key] = row[keyIdx]
-    }
+    const pk = primaryKeyForRow(detail.rowIdx)
+    if (!pk) return
 
     savingCell = true
     const _saveStart = Date.now()
@@ -5248,13 +5418,6 @@ let rowSearch = $state('')
     await openQueryInEditor(sql)
   }
 
-  /** Run SQL from AI chat - writes to editor and executes. */
-  async function handleAiRunSql(sql) {
-    await focusSqlView()
-    sqlText = sql
-    await runSql()
-  }
-
   async function focusSqlView() {
     const existing = findSqlTab(tabs)
     if (existing) {
@@ -5288,7 +5451,19 @@ let rowSearch = $state('')
 </script>
 
 <Onboarding bind:open={showOnboarding} onconnect={() => (showConnectionModal = true)} onsample={handleSampleConnect} />
-<ConnectionModal bind:open={showConnectionModal} onconnected={(conn, id) => onConnected(conn, id)} maxConnections={$hasPro ? Infinity : FREE_CONNECTION_LIMIT} />
+<ConnectionModal
+  bind:open={showConnectionModal}
+  onconnected={(conn, id) => onConnected(conn, id)}
+  maxConnections={$hasPro ? Infinity : FREE_CONNECTION_LIMIT}
+  activeConnectionName={connection ? (connection.name || connection.database || connection.host || connection.filePath || 'Connected') : ''}
+  ondisconnect={requestDisconnect}
+/>
+<SwitchDatabaseDialog
+  bind:open={showSwitchDbDialog}
+  databaseName={pendingDbSwitch?.label ?? ''}
+  currentName={connection?.database ?? connection?.name ?? ''}
+  onconfirm={commitDatabaseSwitch}
+/>
 <DisconnectDialog bind:open={showDisconnectDialog} connectionName={connection ? (connection.name || connection.database || connection.host || connection.filePath || 'Connected') : ''} ondisconnect={handleDisconnect} />
 <CreateTableDialog
   bind:open={showCreateTableDialog}
@@ -5419,10 +5594,13 @@ let rowSearch = $state('')
   onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
   onopeninsights={() => { if (aiMode) exitAiMode(); openInsightsTab() }}
   onopenobjects={() => { if (aiMode) exitAiMode(); openObjectsTab() }}
+  onopenormschema={() => { if (aiMode) exitAiMode(); openOrmSchemaTab() }}
   ontogglequerylog={() => { commandOpen = false; queryLogOpen = !queryLogOpen }}
   onopenextensions={() => { if (aiMode) exitAiMode(); openExtensionsTab() }}
+  onopenmap={() => { if (aiMode) exitAiMode(); openMapTab() }}
   onopenredis={() => { if (aiMode) exitAiMode(); openRedisTab() }}
   {isRedis}
+  {geoAvailable}
   {hasSchemaExplorer}
   {hasSecurity}
   onopenJsonViewer={() => { if (aiMode) exitAiMode(); openJsonTab() }}
@@ -5469,7 +5647,7 @@ let rowSearch = $state('')
     <!-- Text -->
     <div class="flex max-w-sm flex-col items-center gap-1.5 text-center">
       <p class="max-w-full truncate text-ui-sm font-medium text-foreground/70">
-        Reconnecting{autoConnectName ? ` to ${shortConnLabel(autoConnectName)}` : ''}
+        {autoConnectVerb}{autoConnectName ? ` to ${shortConnLabel(autoConnectName)}` : ''}
       </p>
       <button
         type="button"
@@ -5485,7 +5663,7 @@ let rowSearch = $state('')
 
 <div class="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
 <TitleBar
-  title={connection?.database ?? connection?.filePath ?? connection?.name ?? 'studio'}
+  title={windowTitle}
   {sidebarOpen}
   connected={!!connection}
   {aiMode}
@@ -5550,26 +5728,8 @@ let rowSearch = $state('')
         ontableselect={handleTableSelect}
         ontablefilter={(v) => (tableFilter = v)}
         onrefresh={handleRefresh}
-        ondisconnect={requestDisconnect}
-        onopensettings={() => (showSettingsModal = true)}
-        onopencommand={() => (commandOpen = true)}
-        onopenSchema={openSchemaTab}
-        onopenorm={openOrmTab}
-        onopenbackup={openBackupTab}
-        onopendashboard={() => { if (aiMode) exitAiMode(); openDashboardTab() }}
-        onopenerd={() => { if (aiMode) exitAiMode(); openErdTab() }}
-              {aiMode}
-        onopenaimode={() => (aiMode ? exitAiMode() : enterAiMode())}
-        {queryHistory}
-        onqueryselect={(sql) => { if (aiMode) exitAiMode(); void openQueryInEditor(sql) }}
-        onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
-        onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
-        onopenextensions={() => { if (aiMode) exitAiMode(); openExtensionsTab() }}
         {connection}
-        onswitchtodb={(dbName) => {
-          if (!connection) return
-          void handleSwitchDatabase({ ...connection, database: dbName, name: `${connection.host ?? connection.name}/${dbName}` })
-        }}
+        onswitchdatabase={requestDatabaseSwitch}
         onnewtable={() => (showCreateTableDialog = true)}
         onnewschema={() => (showCreateSchemaDialog = true)}
         ontruncatetable={handleTruncateTable}
@@ -5731,9 +5891,6 @@ let rowSearch = $state('')
             onreopenclosed={reopenLastClosedTab}
             canreopenclosed={closedTabStack.length > 0}
             onpintoggle={toggleTabPin}
-            onnew={openWelcomeTab}
-            {recentTabs}
-            onrecentselect={(schema, table) => { if (aiMode) exitAiMode(); void openTableTab(schema, table) }}
           />
         {/if}
         {@render sharedContent()}
@@ -5754,9 +5911,6 @@ let rowSearch = $state('')
             onreopenclosed={reopenLastClosedTab}
             canreopenclosed={closedTabStack.length > 0}
             onpintoggle={toggleTabPin}
-            onnew={() => { void focusGroup(group.id); openWelcomeTab() }}
-            {recentTabs}
-            onrecentselect={(schema, table) => { if (aiMode) exitAiMode(); void focusGroup(group.id).then(() => openTableTab(schema, table)) }}
             ondragtabstart={(id) => beginTabDrag(id)}
             ondragtabmove={(x, y) => moveTabDrag(x, y)}
             ondragtabend={() => endTabDrag()}
@@ -5787,6 +5941,20 @@ let rowSearch = $state('')
             onrefresh={async () => { await loadSchemas(); await loadTables({ force: true }) }}
           />
         </svelte:boundary>
+      {/if}
+
+      <!-- Schema as ORM code - mount once, keep alive -->
+      {#if ormSchemaEverOpened}
+        <div
+          class={activeTab?.kind === 'orm-schema' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+          inert={activeTab?.kind !== 'orm-schema' || undefined}
+        >
+          <svelte:boundary failed={tabError}>
+            {#await import('./OrmSchemaPage.svelte')}<TabLoading />{:then { default: OrmSchemaPage }}
+              <OrmSchemaPage schema={activeSchema} dbType={connection?.type ?? 'postgres'} connectionId={persistConnectionId} />
+            {/await}
+          </svelte:boundary>
+        </div>
       {/if}
 
       <!-- Security tab - mount once, keep alive -->
@@ -5859,6 +6027,20 @@ let rowSearch = $state('')
         >
           <svelte:boundary failed={tabError}>
             <RedisKeyspacePage active={activeTab?.kind === 'redis'} {connection} />
+          </svelte:boundary>
+        </div>
+      {/if}
+
+      <!-- Map tab - mount once, keep alive (holds viewport + fetched features) -->
+      {#if mapEverOpened}
+        <div
+          class={activeTab?.kind === 'map' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+          inert={activeTab?.kind !== 'map' || undefined}
+        >
+          <svelte:boundary failed={tabError}>
+            {#await import('./MapPage.svelte')}<TabLoading />{:then { default: MapPage }}
+              <MapPage />
+            {/await}
           </svelte:boundary>
         </div>
       {/if}
@@ -6312,6 +6494,7 @@ let rowSearch = $state('')
             ondeleteselected={() => stageDeleteSelectedRows()}
             onexport={handleExport}
             onexportdiagram={(kind) => erdPane?.exportDiagram?.(kind)}
+            onexportchart={(kind) => chartPane?.exportChart?.(kind)}
             onaddrow={() => {
               // Row insertion happens on the canvas grid - jump back to it first.
               if (dataViewMode !== 'table') dataViewMode = 'table'
@@ -6372,7 +6555,7 @@ let rowSearch = $state('')
                 loading={loadingRows}
                 {loadingMore}
                 {infiniteScroll}
-                endOfResults={infiniteScroll && total > 0 && _infiniteRows.length >= total}
+                endOfResults={infiniteScroll && !windowed && total > 0 && rows.length >= total}
                 onloadmore={handleLoadMore}
                 saving={savingCell || deletingRows || insertingRow}
                 bind:selected
@@ -6445,8 +6628,6 @@ let rowSearch = $state('')
                   columns={dataViewColumns}
                   rows={dataViewRows}
                   tableKey={`${activeSchema}.${activeTable}`}
-                  onshowtable={() => (dataViewMode = 'table')}
-                  ondownload={() => void handleExport('json')}
                 />
               {:else if dataViewMode === 'record'}
                 <TableRecordView
@@ -6468,7 +6649,13 @@ let rowSearch = $state('')
               {:else if dataViewMode === 'text'}
                 <TableTextView columns={dataViewColumns} rows={dataViewRows} tableName={activeTable} />
               {:else if dataViewMode === 'chart'}
-                <ChartView columns={dataViewColumns} rows={dataViewRows} connectionId={persistConnectionId} />
+                <ChartView bind:this={chartPane} columns={dataViewColumns} rows={dataViewRows} connectionId={persistConnectionId} />
+              {:else if dataViewMode === 'map'}
+                <div class="flex min-h-0 min-w-0 flex-1">
+                  {#await import('./MapPage.svelte')}<TabLoading />{:then { default: MapPage }}
+                    <MapPage scopeSchema={activeSchema} scopeTable={activeTable ?? ''} />
+                  {/await}
+                </div>
               {:else if dataViewMode === 'erd'}
                 <div class="flex min-h-0 min-w-0 flex-1">
                   {#await import('./EntityRelationPage.svelte')}<TabLoading />{:then { default: EntityRelationPage }}
@@ -6504,13 +6691,52 @@ let rowSearch = $state('')
       {#if !activeTab || activeTab.kind === 'welcome'}
         {@const isMac = navigator.platform.toUpperCase().includes('MAC')}
         {@const mod = isMac ? '⌘' : 'Ctrl'}
-        {@const cell = 'group relative flex flex-col gap-3 rounded-lg border border-border/50 bg-card/60 p-3 text-left transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-[var(--ease-out)] hover:border-border hover:bg-accent/40 hover:shadow-sm active:scale-[0.98]'}
-        {@const proCell = 'group relative flex flex-col gap-3 rounded-lg border border-border/40 bg-card/40 p-3 text-left cursor-not-allowed transition-[color,background-color,border-color] duration-150 hover:border-warning/30 hover:bg-warning/[0.03]'}
-        {@const iconCls = 'size-4 text-muted-foreground transition-colors group-hover:text-foreground'}
-        {@const proIconCls = 'size-4 text-muted-foreground/40'}
-        {@const labelCls = 'text-ui-2xs font-medium leading-none text-foreground/70 transition-colors group-hover:text-foreground'}
-        {@const proLabelCls = 'text-ui-2xs font-medium leading-none text-foreground/35'}
-        {@const hotkeyCls = 'text-ui-3xs tabular-nums text-muted-foreground/50 group-hover:text-muted-foreground transition-colors self-end'}
+        <!-- Tile chrome. Every tile is the same fixed height with the icon row
+             pinned to the top and the label to the bottom, so labels stay on a
+             shared baseline whether or not a tile carries a chord or wraps to
+             two lines. Colors use solid tokens (not fractional alpha) - thinned
+             strokes read as fuzzy against the dark panel. -->
+        {@const cell = 'group relative flex h-[5.25rem] flex-col justify-between rounded-lg border border-border/60 bg-card/50 p-2.5 text-left transition-[background-color,border-color,box-shadow,transform] duration-150 ease-[var(--ease-out)] hover:border-border hover:bg-accent/40 hover:shadow-sm active:scale-[0.98]'}
+        {@const proCell = 'group relative flex h-[5.25rem] cursor-not-allowed flex-col justify-between rounded-lg border border-border/40 bg-card/30 p-2.5 text-left transition-[background-color,border-color] duration-150 hover:border-warning/30 hover:bg-warning/[0.04]'}
+        {@const iconCls = 'size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground'}
+        {@const proIconCls = 'size-4 shrink-0 text-muted-foreground/50'}
+        {@const labelCls = 'text-ui-2xs font-medium leading-[1.25] text-foreground/85 transition-colors group-hover:text-foreground'}
+        {@const proLabelCls = 'text-ui-2xs font-medium leading-[1.25] text-muted-foreground/60'}
+
+        <!-- Shift is spelled out off macOS: the bundled UI/mono webfonts have no
+             U+21E7, so "Ctrl⇧E" fell back mid-word and rendered as garbage.
+             Keys are separate spans - butted-together chords are unreadable at
+             this size. -->
+        {@const shiftKey = isMac ? '⇧' : 'Shift'}
+        {#snippet chord(/** @type {string[]} */ keys)}
+          <span class="flex shrink-0 items-center gap-1 font-mono text-ui-3xs leading-none text-muted-foreground/70 transition-colors group-hover:text-muted-foreground">
+            {#each keys as k (k)}<span>{k}</span>{/each}
+          </span>
+        {/snippet}
+
+        {#snippet tile(/** @type {any} */ Icon, /** @type {string} */ label, /** @type {() => void} */ onclick, /** @type {{ pro?: boolean, keys?: string[], hint?: string }} */ opts = {})}
+          {@const locked = !!opts.pro && !$hasPro}
+          <button
+            type="button"
+            {onclick}
+            title={opts.hint ? `${opts.hint}${locked ? ' — Pro' : ''}` : locked ? `${label} — Pro` : label}
+            class={locked ? proCell : cell}
+          >
+            <span class="flex w-full items-center justify-between gap-1.5">
+              <Icon class={locked ? proIconCls : iconCls} />
+              {#if locked}<Lock class="size-2.5 shrink-0 text-muted-foreground/30" />{/if}
+            </span>
+            <!-- Label + chord anchored to the bottom. The chord row is always
+                 present (empty when a tile has no shortcut) so every label in a
+                 row lands on the same baseline, wrapped or not. -->
+            <span class="mt-auto flex w-full flex-col gap-1">
+              <span class={locked ? proLabelCls : labelCls}>{label}</span>
+              <span class="flex h-[0.85rem] items-center">
+                {#if opts.keys && !locked}{@render chord(opts.keys)}{/if}
+              </span>
+            </span>
+          </button>
+        {/snippet}
 
         <!-- Scroll container keeps top/bottom padding reachable when the content
              outgrows the viewport (e.g. at high zoom); inner wrapper centers when it fits. -->
@@ -6522,151 +6748,84 @@ let rowSearch = $state('')
             <div class="flex size-11 items-center justify-center rounded-lg border border-border bg-muted">
               <Logo class="size-6" />
             </div>
-            <p class="text-ui-3xs font-medium uppercase tracking-[0.25em] text-muted-foreground/60">Quick access</p>
+            <p class="text-ui-3xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Quick access</p>
             {#if connection}
-              <div class="flex items-center gap-2 text-ui-sm font-medium text-foreground/80">
-                <span class="size-1.5 rounded-full bg-success shrink-0"></span>
-                <span class="font-mono">{connection.database ?? connection.filePath?.split('/').at(-1) ?? connection.name ?? connection.databaseId ?? 'connected'}</span>
-                <span class="text-muted-foreground/50 text-ui-xs">·</span>
-                <span class="capitalize text-muted-foreground/70 text-ui-xs font-normal">{dbType}</span>
+              <div class="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-ui-sm">
+                <span class="flex items-center gap-2 font-mono font-medium text-foreground">
+                  <span class="size-1.5 shrink-0 rounded-full bg-success"></span>
+                  {connection.database ?? connection.filePath?.split('/').at(-1) ?? connection.name ?? connection.databaseId ?? 'connected'}
+                </span>
+                <span class="text-ui-xs text-muted-foreground/60">·</span>
+                <span class="text-ui-xs capitalize text-muted-foreground">{dbType}</span>
                 {#if tables.length > 0}
-                  <span class="text-muted-foreground/50 text-ui-xs">·</span>
-                  <span class="text-ui-xs text-muted-foreground/60 font-normal">{tables.length} tables</span>
+                  <span class="text-ui-xs text-muted-foreground/60">·</span>
+                  <span class="text-ui-xs tabular-nums text-muted-foreground">{tables.length} {tables.length === 1 ? 'table' : 'tables'}</span>
                 {/if}
               </div>
             {/if}
           </div>
 
-          <!-- Action grid, max-w-sm keeps all sections aligned -->
-          <div class="grid w-full max-w-sm grid-cols-4 gap-1.5">
+          <!-- Action grid, max-w-md keeps all sections aligned -->
+          <div class="grid w-full max-w-md grid-cols-4 gap-2">
 
             {#if isRedis}
-              <button onclick={openRedisTab} class={cell}>
-                <KeyRound class={iconCls} />
-                <span class={labelCls}>Keyspace</span>
-              </button>
+              {@render tile(KeyRound, 'Keyspace', openRedisTab, {})}
+            {:else}
+              {@render tile(Terminal, 'SQL', openSqlTab, { keys: [mod, 'T'] })}
+              {@render tile(LayoutDashboard, 'Dashboard', openDashboardTab, { pro: true })}
             {/if}
 
-            {#if !isRedis}
-              <button onclick={openSqlTab} class={cell}>
-                <Terminal class={iconCls} />
-                <div class="flex items-end justify-between gap-1">
-                  <span class={labelCls}>SQL</span>
-                  <span class={hotkeyCls}>{mod}T</span>
-                </div>
-              </button>
-
-              <button onclick={openDashboardTab} class={$hasPro ? cell : proCell}>
-                {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
-                <LayoutDashboard class={$hasPro ? iconCls : proIconCls} />
-                <span class={$hasPro ? labelCls : proLabelCls}>Dashboard</span>
-              </button>
-            {/if}
-
-            <button onclick={openAiTab} class={$hasPro ? cell : proCell}>
-              {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
-              <Bot class={$hasPro ? iconCls : proIconCls} />
-              <div class="flex items-end justify-between gap-1">
-                <span class={$hasPro ? labelCls : proLabelCls}>AI</span>
-                {#if $hasPro}<span class={hotkeyCls}>{mod}⇧E</span>{/if}
-              </div>
-            </button>
+            {@render tile(Sparkles, 'AI', openAiTab, { pro: true, keys: [mod, shiftKey, 'E'] })}
 
             {#if !isRedis}
-              <button onclick={openOrmTab} class={$hasPro ? cell : proCell}>
-                {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
-                <Code2 class={$hasPro ? iconCls : proIconCls} />
-                <div class="flex items-end justify-between gap-1">
-                  <span class={$hasPro ? labelCls : proLabelCls}>ORM</span>
-                  {#if $hasPro}<span class={hotkeyCls}>{mod}⇧O</span>{/if}
-                </div>
-              </button>
+              {@render tile(Code2, 'ORM', openOrmTab, { pro: true, keys: [mod, shiftKey, 'O'] })}
             {/if}
 
             {#if hasSchemaExplorer}
-              <button onclick={openSchemaTab} class={$hasPro ? cell : proCell}>
-                {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
-                <LayoutTemplate class={$hasPro ? iconCls : proIconCls} />
-                <span class={$hasPro ? labelCls : proLabelCls}>Schema</span>
-              </button>
+              {@render tile(LayoutTemplate, 'Schema', openSchemaTab, { pro: true })}
             {/if}
 
             {#if hasSecurity}
-              <button onclick={openSecurityTab} class={$hasPro ? cell : proCell}>
-                {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
-                <ShieldCheck class={$hasPro ? iconCls : proIconCls} />
-                <span class={$hasPro ? labelCls : proLabelCls}>Security</span>
-              </button>
+              {@render tile(ShieldCheck, 'Security', openSecurityTab, { pro: true })}
             {/if}
 
-            <button onclick={openLogsTab} class={$hasPro ? cell : proCell}>
-              {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
-              <ScrollText class={$hasPro ? iconCls : proIconCls} />
-              <span class={$hasPro ? labelCls : proLabelCls}>Logs</span>
-            </button>
+            {@render tile(ScrollText, 'Logs', openLogsTab, { pro: true })}
 
             {#if !isRedis}
-              <button onclick={openInsightsTab} class={cell}>
-                <Database class={iconCls} />
-                <span class={labelCls}>Insights</span>
-              </button>
-
-              <button onclick={openObjectsTab} class={cell}>
-                <Boxes class={iconCls} />
-                <span class={labelCls}>Objects</span>
-              </button>
-
-              <button onclick={openChartsTab} class={$hasPro ? cell : proCell}>
-                {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
-                <BarChart2 class={$hasPro ? iconCls : proIconCls} />
-                <span class={$hasPro ? labelCls : proLabelCls}>Charts</span>
-              </button>
-
-              <button onclick={openDiagramsTab} class={$hasPro ? cell : proCell}>
-                {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
-                <GitBranch class={$hasPro ? iconCls : proIconCls} />
-                <span class={$hasPro ? labelCls : proLabelCls}>Diagrams</span>
-              </button>
-
-              <button onclick={openSchemaTimelineTab} class={$hasPro ? cell : proCell}>
-                {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
-                <History class={$hasPro ? iconCls : proIconCls} />
-                <span class={$hasPro ? labelCls : proLabelCls}>Timeline</span>
-              </button>
-
-              <button onclick={openDataDiffTab} class={$hasPro ? cell : proCell}>
-                {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
-                <GitCompare class={$hasPro ? iconCls : proIconCls} />
-                <span class={$hasPro ? labelCls : proLabelCls}>Data Diff</span>
-              </button>
-
-              <button onclick={openExtensionsTab} class={$hasPro ? cell : proCell}>
-                {#if !$hasPro}<Lock class="absolute right-1.5 top-1.5 size-2.5 text-muted-foreground/20" />{/if}
-                <Blocks class={$hasPro ? iconCls : proIconCls} />
-                <span class={$hasPro ? labelCls : proLabelCls}>Extensions</span>
-              </button>
+              {@render tile(Database, 'Insights', openInsightsTab, {})}
+              {@render tile(Boxes, 'Objects', openObjectsTab, {})}
+              {@render tile(FileCode2, 'Codegen', openOrmSchemaTab, { pro: true, hint: 'Codegen — schema as Prisma or Drizzle code' })}
+              {@render tile(BarChart2, 'Charts', openChartsTab, { pro: true })}
+              {@render tile(GitBranch, 'Diagrams', openDiagramsTab, { pro: true })}
+              {@render tile(History, 'Timeline', openSchemaTimelineTab, { pro: true })}
+              {@render tile(GitCompare, 'Data Diff', openDataDiffTab, { pro: true })}
+              {@render tile(Blocks, 'Extensions', openExtensionsTab, { pro: true })}
             {/if}
 
-            <button onclick={() => (showConnectionModal = true)} class={cell}>
-              <Database class={iconCls} />
-              <span class={labelCls}>Connect</span>
-            </button>
+            {@render tile(Database, 'Connect', () => (showConnectionModal = true), {})}
           </div>
 
 
           <!-- Footer -->
-          <div class="flex items-center gap-3 text-ui-3xs text-muted-foreground/50">
+          <div class="flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 text-ui-3xs text-muted-foreground/80">
             <button
+              type="button"
               onclick={() => showShortcutsModal = true}
-              class="flex items-center gap-1 transition-colors hover:text-muted-foreground"
+              class="flex items-center gap-1.5 rounded-md px-1 py-0.5 transition-colors hover:text-foreground"
             >
-              <Command size={12} />
-              <span>shortcuts</span>
+              <Command class="size-3 shrink-0" />
+              <span>Shortcuts</span>
             </button>
-            <span>·</span>
-            <span class="font-mono">{mod}B sidebar</span>
-            <span>·</span>
-            <span class="font-mono">{mod}W close tab</span>
+            <span class="text-muted-foreground/40">·</span>
+            <span class="flex items-center gap-1.5">
+              {@render chord([mod, 'B'])}
+              <span>sidebar</span>
+            </span>
+            <span class="text-muted-foreground/40">·</span>
+            <span class="flex items-center gap-1.5">
+              {@render chord([mod, 'W'])}
+              <span>close tab</span>
+            </span>
           </div>
           </div>
         </div>
@@ -6737,6 +6896,7 @@ let rowSearch = $state('')
   {savedConnections}
   {activeConnectionId}
   {queryMs}
+  selectedCount={selected.size}
   {pendingEditCount}
   applying={savingCell || deletingRows || insertingRow}
   onapplyedits={() => void applyEdits()}
@@ -6755,42 +6915,9 @@ let rowSearch = $state('')
   hasUpdate={statusBarHasUpdate}
   onopenmcp={() => (showMcpPanel = true)}
   onconnect={() => (showConnectionModal = true)}
-  onswitchtodb={(dbName) => {
-    if (!connection) return
-    void handleSwitchDatabase({ ...connection, database: dbName, name: `${connection.host ?? connection.name}/${dbName}` })
-  }}
-  onswitchd1database={({ databaseId, name }) => {
-    if (!connection) return
-    void handleSwitchDatabase({ ...connection, databaseId, database: name, name })
-  }}
-  onswitchproviderdb={async ({ provider, dbRef, name }) => {
-    if (!connection) return
-    try {
-      const { providerBuildConnection } = await import('$lib/providers.js')
-      const built = await providerBuildConnection(provider, dbRef)
-      if (built.needs_password) {
-        // Supabase needs a per-project password - can't switch silently, so
-        // send the user to the connect dialog to finish it.
-        toast.message(`${name} needs its database password, opening the connection dialog.`)
-        showConnectionModal = true
-        return
-      }
-      void handleSwitchDatabase({
-        ...connection,
-        type: built.db_type === 'mysql' ? 'mysql' : 'postgres',
-        host: built.host,
-        port: built.port,
-        user: built.username,
-        password: built.password,
-        database: built.database,
-        ssl: built.ssl,
-        name: built.name,
-        provider,
-      })
-    } catch (e) {
-      toast.error('Could not switch database', { description: String(e) })
-    }
-  }}
+  onswitchtodb={switchToDb}
+  onswitchd1database={switchD1Database}
+  onswitchproviderdb={switchProviderDb}
   oncheckupdate={() => updateDialog?.checkNow()}
   onopenmodelsettings={() => (showAiModelSettings = true)}
   sidebarVisible={sidebarOpen}
@@ -6803,19 +6930,6 @@ let rowSearch = $state('')
   ontogglestatusbar={toggleStatusBar}
   {aiMode}
   onopenaimode={() => (aiMode ? exitAiMode() : openAiTab())}
-  hasPro={$hasPro}
-  onopenSchema={openSchemaTab}
-  onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
-  onopeninsights={() => { if (aiMode) exitAiMode(); openInsightsTab() }}
-  ontogglequerylog={() => { commandOpen = false; queryLogOpen = !queryLogOpen }}
-  onopenextensions={() => { if (aiMode) exitAiMode(); openExtensionsTab() }}
-  onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
-  onopenorm={openOrmTab}
-        onopenbackup={openBackupTab}
-  onopenchartspage={() => { if (aiMode) exitAiMode(); openChartsTab() }}
-  onopendashboard={() => { if (aiMode) exitAiMode(); openDashboardTab() }}
-  onopendiagrams={() => { if (aiMode) exitAiMode(); openDiagramsTab() }}
-  onopenerd={() => { if (aiMode) exitAiMode(); openErdTab() }}
   onopensettings={() => (showSettingsModal = true)}
   onopencommand={() => (commandOpen = true)}
   onopenpages={() => { commandPage = 'pages'; commandOpen = true }}

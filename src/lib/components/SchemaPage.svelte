@@ -11,6 +11,7 @@
   import Search from '@lucide/svelte/icons/search'
   import Plus from '@lucide/svelte/icons/plus'
   import Trash2 from '@lucide/svelte/icons/trash-2'
+  import { readOnlyMode, READ_ONLY_HINT } from '$lib/stores/read-only.js'
   import { Button } from '$lib/components/ui/button/index.js'
   import { cn } from '$lib/utils.js'
   import Lock from '@lucide/svelte/icons/lock'
@@ -87,7 +88,15 @@
   let confirmDesc = $state('')
   let confirmAction = $state(/** @type {(() => Promise<void>) | null} */ (null))
 
+  /** Disabled buttons are the hint; this is what actually refuses the write. */
+  function guardWrite() {
+    if (!$readOnlyMode) return true
+    toast.warning('Read-only connection', { description: READ_ONLY_HINT, duration: 5000 })
+    return false
+  }
+
   function askDrop(title, desc, sql, action) {
+    if (!guardWrite()) return
     confirmTitle = title
     confirmDesc = desc
     confirmSql = sql
@@ -169,11 +178,11 @@
     <span class="font-mono text-ui-sm font-medium">Schema Explorer</span>
     <div class="ml-auto flex items-center gap-1">
       {#if activeType === 'triggers' && activeSupported}
-        <Button variant="ghost" size="sm" class="h-7 gap-1.5 px-2 text-muted-foreground hover:text-foreground" onclick={() => (createTriggerOpen = true)}>
+        <Button variant="ghost" size="sm" class="h-7 gap-1.5 px-2 text-muted-foreground hover:text-foreground" disabled={$readOnlyMode} title={$readOnlyMode ? READ_ONLY_HINT : ''} onclick={() => (createTriggerOpen = true)}>
           <Plus class="size-3.5" /><span class="text-ui-xs">New Trigger</span>
         </Button>
       {:else if activeType === 'sequences' && activeSupported}
-        <Button variant="ghost" size="sm" class="h-7 gap-1.5 px-2 text-muted-foreground hover:text-foreground" onclick={() => (createSequenceOpen = true)}>
+        <Button variant="ghost" size="sm" class="h-7 gap-1.5 px-2 text-muted-foreground hover:text-foreground" disabled={$readOnlyMode} title={$readOnlyMode ? READ_ONLY_HINT : ''} onclick={() => (createSequenceOpen = true)}>
           <Plus class="size-3.5" /><span class="text-ui-xs">New Sequence</span>
         </Button>
       {/if}
@@ -216,7 +225,7 @@
         placeholder="Filter…"
         bind:this={filterEl}
         bind:value={filter}
-        class="h-7 w-full rounded-lg border border-border bg-background/40 pl-7 pr-2.5 text-ui-xs text-foreground outline-none transition-colors hover:bg-background/60 focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+        class="h-7 w-full rounded-lg border-2 border-border bg-background/40 pl-7 pr-2.5 text-ui-xs text-foreground outline-none transition-colors hover:bg-background/60 focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
       />
     </div>
   </div>
@@ -332,8 +341,9 @@
                 <td class="border-b border-border/40 p-0 align-middle">
                   <button
                     type="button"
-                    class="flex h-full w-full items-center justify-center text-muted-foreground/20 transition-colors hover:text-destructive group-hover/row:text-muted-foreground/40"
-                    title="Drop trigger"
+                    class="flex h-full w-full items-center justify-center text-muted-foreground/20 transition-colors enabled:hover:text-destructive enabled:group-hover/row:text-muted-foreground/40 disabled:cursor-not-allowed disabled:opacity-40"
+                    disabled={$readOnlyMode}
+                    title={$readOnlyMode ? READ_ONLY_HINT : 'Drop trigger'}
                     onclick={() => dropTrigger(trig)}
                   ><Trash2 class="size-3.5" /></button>
                 </td>
@@ -394,8 +404,9 @@
                 <td class="border-b border-border/40 p-0 align-middle">
                   <button
                     type="button"
-                    class="flex h-full w-full items-center justify-center text-muted-foreground/20 transition-colors hover:text-destructive group-hover/row:text-muted-foreground/40"
-                    title="Drop sequence"
+                    class="flex h-full w-full items-center justify-center text-muted-foreground/20 transition-colors enabled:hover:text-destructive enabled:group-hover/row:text-muted-foreground/40 disabled:cursor-not-allowed disabled:opacity-40"
+                    disabled={$readOnlyMode}
+                    title={$readOnlyMode ? READ_ONLY_HINT : 'Drop sequence'}
                     onclick={() => dropSequence(seq)}
                   ><Trash2 class="size-3.5" /></button>
                 </td>

@@ -3,6 +3,7 @@
   import { createHotkey } from "@tanstack/svelte-hotkeys";
   import Icon from "./Icon.svelte";
   import SearchableMenu from "./SearchableMenu.svelte";
+  import { listDatabases, canSwitchDatabase, currentDatabaseKey } from "$lib/databases.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import DangerousActionDialog from "./DangerousActionDialog.svelte";
   import { readOnlyMode, guardWrite, READ_ONLY_HINT } from "$lib/stores/read-only.js";
@@ -61,9 +62,6 @@
     onrefresh = () => {},
     onnewtable = () => {},
     onnewschema = () => {},
-    /** @type {import('$lib/stores/query-history.js').QueryHistoryEntry[]} */
-    queryHistory = [],
-    onqueryselect = /** @type {(sql: string) => void} */ (() => {}),
     /** @type {import('$lib/stores/connections.js').SavedConnection | null} */
     connection = null,
     ontruncatetable = /** @type {(table: string) => void} */ (() => {}),
@@ -73,6 +71,9 @@
     onrecentselect = /** @type {(schema: string, table: string) => void} */ (() => {}),
     onrecentremove = /** @type {(schema: string, table: string) => void} */ (() => {}),
     onrecentclear = () => {},
+    /** Switch the live connection to another database on the same server.
+     *  @type {(entry: { key: string, label: string }) => void} */
+    onswitchdatabase = () => {},
     onviewddl = /** @type {(table: string) => void} */ (() => {}),
     onexportsql = /** @type {(table: string) => void} */ (() => {}),
     onexportdata = /** @type {(table: string) => void} */ (() => {}),
@@ -127,10 +128,63 @@
 
   const _initial = loadSidebarSections()
   let recentOpen = $state(_initial.recent ?? false);
+  let databasesOpen = $state(_initial.databases ?? false);
+  /** @type {import('$lib/databases.js').DatabaseEntry[]} */
+  let dbEntries = $state([]);
+  let dbEntriesLoading = $state(false);
+  let dbEntriesLoaded = $state(false);
+  let dbEntriesError = $state('');
   let tablesOpen = $state(_initial.tables ?? true);
   let viewsOpen = $state(_initial.views ?? false);
   let matViewsOpen = $state(_initial.matViews ?? false);
   $effect(() => { saveSidebarSection('recent', recentOpen) })
+  $effect(() => { saveSidebarSection('databases', databasesOpen) })
+
+  // Listing databases costs a round trip (a catalog query, or a Cloudflare /
+  // provider API call), so it waits for the section to be expanded rather than
+  // firing on every sidebar mount.
+  async function loadDatabases() {
+    if (dbEntriesLoading) return
+    dbEntriesLoading = true
+    dbEntriesError = ''
+    try {
+      dbEntries = await listDatabases(connection)
+      dbEntriesLoaded = true
+    } catch (e) {
+      dbEntriesError = String(e)
+    } finally {
+      dbEntriesLoading = false
+    }
+  }
+
+  function toggleDatabases() {
+    databasesOpen = !databasesOpen
+  }
+
+  // Load whenever the section is open and holds nothing for this connection.
+  // Hanging the fetch off the toggle alone missed both cases that matter: the
+  // section restoring already-expanded from the persisted prefs, and a
+  // connection switch invalidating the list while it stayed open - each showed
+  // an "empty" list that had never been fetched.
+  $effect(() => {
+    const conn = connection
+    const isOpen = databasesOpen
+    if (!isOpen || !conn) return
+    untrack(() => {
+      if (!dbEntriesLoaded && !dbEntriesLoading) void loadDatabases()
+    })
+  })
+
+  // A new connection invalidates the list - drop it so the next expand refetches.
+  $effect(() => {
+    connection
+    dbEntries = []
+    dbEntriesLoaded = false
+    dbEntriesError = ''
+  })
+
+  const canSwitchDb = $derived(canSwitchDatabase(connection))
+  const activeDbKey = $derived(currentDatabaseKey(connection))
   $effect(() => { saveSidebarSection('tables', tablesOpen) })
   $effect(() => { saveSidebarSection('views', viewsOpen) })
   $effect(() => { saveSidebarSection('matViews', matViewsOpen) })
@@ -179,7 +233,7 @@
       const raw = localStorage.getItem(DISPLAY_PREFS_KEY)
       if (raw) return JSON.parse(raw)
     } catch {}
-    return { showTables: true, showViews: true, showMatViews: true, showRecent: true, sortBy: 'name', showPins: true, showRowCount: true, sortDir: 'asc', hideEmpty: false, hideSystem: false }
+    return { showTables: true, showViews: true, showMatViews: true, showRecent: true, showDatabases: true, sortBy: 'name', showPins: true, showRowCount: true, sortDir: 'asc', hideEmpty: false, hideSystem: false }
   }
   function saveDisplayPrefs(prefs) {
     try { localStorage.setItem(DISPLAY_PREFS_KEY, JSON.stringify(prefs)) } catch {}
@@ -191,6 +245,7 @@
   let showMatViews = $state(_dp.showMatViews ?? true)
   let showRecent = $state(_dp.showRecent ?? true)
   let showPins = $state(_dp.showPins ?? true)
+  let showDatabases = $state(_dp.showDatabases ?? true)
   let showRowCount = $state(_dp.showRowCount ?? true)
   let hideEmpty = $state(_dp.hideEmpty ?? false)
   let hideSystem = $state(_dp.hideSystem ?? false)
@@ -199,7 +254,7 @@
   /** @type {'asc' | 'desc'} */
   let sortDir = $state(_dp.sortDir ?? 'asc')
 
-  $effect(() => { saveDisplayPrefs({ showTables, showViews, showMatViews, showRecent, sortBy, showPins, showRowCount, sortDir, hideEmpty, hideSystem }) })
+  $effect(() => { saveDisplayPrefs({ showTables, showViews, showMatViews, showRecent, showDatabases, sortBy, showPins, showRowCount, sortDir, hideEmpty, hideSystem }) })
 
   /** System / migration tables that are usually noise: `_prisma_migrations`, `pg_*`, `sqlite_*`, leading-underscore. */
   function isSystemTable(/** @type {string} */ name) {
@@ -306,6 +361,15 @@
   });
 
   const lf = $derived(debouncedFilter.toLowerCase());
+  // The filter box sits above every section, so it filters every section -
+  // databases and recents included. Scoping it to tables meant typing a database
+  // name emptied the table list and left the database sitting there unmatched.
+  const filteredDbEntries = $derived(
+    lf ? dbEntries.filter((d) => d.label.toLowerCase().includes(lf)) : dbEntries,
+  );
+  const filteredRecent = $derived(
+    lf ? recentTabs.filter((r) => r.table.toLowerCase().includes(lf)) : recentTabs,
+  );
   const pinnedSet = $derived(new Set(pinnedTables));
 
   const regularTables = $derived(
@@ -369,10 +433,7 @@
         return
       }
     }
-    const next = new Set(selectedItems)
-    if (next.has(name)) next.delete(name)
-    else next.add(name)
-    selectedItems = next
+    toggleSelect(name)
     lastSelectedName = name
   }
 
@@ -442,6 +503,7 @@
   let rowH = $state(27)
   $effect(() => {
     const el = tableListEl
+    void scrollContainerEl // re-attach the observer when the scroll host mounts
     if (!el || typeof ResizeObserver === 'undefined') return
     const measure = () => {
       // Spacer <li>s are aria-hidden - measure the stride between two real rows.
@@ -455,10 +517,17 @@
         const cur = untrack(() => rowH)
         if (stride > 10 && Math.abs(stride - cur) > 0.5) rowH = stride
       }
+      // Same observer covers the other half of the window maths: a layout change
+      // in the list also means its offset in the scroll container may have moved.
+      untrack(() => measureListOffset())
     }
     measure()
     const ro = new ResizeObserver(measure)
     ro.observe(el)
+    // Also watch the scrolled content: a section above the list (databases,
+    // recent, pinned) opening or closing moves the list without resizing it.
+    const content = scrollContainerEl?.firstElementChild
+    if (content) ro.observe(content)
     return () => ro.disconnect()
   })
   // The window shifts one row at a time: `virtStart` is floored to ROW_H, so the
@@ -478,24 +547,43 @@
   // hop would only push the rendered window one frame *behind* the scrollbar thumb,
   // which reads as lag while dragging.
   function onSidebarScroll() {
-    if (scrollContainerEl) sidebarScrollTop = scrollContainerEl.scrollTop
+    if (!scrollContainerEl) return
+    sidebarScrollTop = scrollContainerEl.scrollTop
   }
   /** Offset of the tables <ul> from the top of the scroll container. Re-measured
    *  whenever sections above it open/close (recent, pinned) or refs change. */
   let tableListOffsetTop = $state(0)
 
+  /**
+   * Distance from the top of the scrolled content to the tables <ul>.
+   *
+   * Measured from live rects rather than walked through `offsetParent`: that walk
+   * only terminated when an ancestor happened to be the scroll container, and it
+   * ran off an enumerated list of "things above the list". Anything else that
+   * grew above it - expanding the databases section, a filter that changes the
+   * pinned block - left the offset stale and small, which pushed `virtStart` far
+   * past the real first visible row: the list rendered its tail behind a giant
+   * empty spacer (the black gap).
+   */
+  function measureListOffset() {
+    const el = tableListEl
+    const container = scrollContainerEl
+    if (!el || !container) return
+    const off = el.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop
+    if (Math.abs(off - tableListOffsetTop) > 0.5) tableListOffsetTop = off
+  }
+
+  // Re-measure whenever anything that can move the list re-renders. Cheap: two
+  // rect reads, and only when one of these actually changes.
   $effect(() => {
-    // Dependencies that change the table-list's position in the scroll container
-    const _recentOpen = recentOpen
-    const _pins = visiblePinnedTables.length
-    const _showRecent = showRecent
-    const _el = tableListEl
-    const _container = scrollContainerEl
-    if (!_el || !_container) return
-    let node = /** @type {HTMLElement | null} */ (_el)
-    let off = 0
-    while (node && node !== _container) { off += node.offsetTop; node = /** @type {HTMLElement | null} */ (node.offsetParent) }
-    tableListOffsetTop = off
+    void recentOpen
+    void visiblePinnedTables.length
+    void showRecent
+    void filteredRegularTables.length
+    void tablesOpen
+    void tableListEl
+    void scrollContainerEl
+    measureListOffset()
   })
 
   const shouldVirtualize = $derived(filteredRegularTables.length > VIRT_THRESHOLD)
@@ -518,14 +606,17 @@
 </script>
 
 <svelte:window onkeydown={(e) => {
+  // Cheap key checks first: reading offsetParent can force layout, and this
+  // handler runs on every keystroke app-wide (Monaco, cell editors included).
+  const isFilterKey = (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key === 'f'
+  const isEscClear = e.key === 'Escape' && selectedItems.size > 0
+  if (!isFilterKey && !isEscClear) return
   // Guard: filterEl.offsetParent is null when sidebar is hidden via display:none
   if (!filterEl || !filterEl.offsetParent) return
-  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key === 'f') {
+  if (isFilterKey) {
     e.preventDefault(); filterEl.focus(); filterEl.select()
   }
-  if (e.key === 'Escape' && selectedItems.size > 0) {
-    clearSelection()
-  }
+  if (isEscClear) clearSelection()
 }} />
 
 <!-- Section count badge: shows "visible/total" when filters hide rows, else just the total. -->
@@ -549,7 +640,6 @@
     class="studio-chrome flex h-full min-w-0 flex-1 flex-col bg-sidebar text-sidebar-foreground"
     data-studio-chrome
   >
-    <!-- Traffic lights moved to TitleBar (full-width) -->
     {#if navSidebarPanel === "tables"}
     <div class="flex min-h-0 flex-1 flex-col">
 
@@ -609,6 +699,10 @@
               <DropdownMenu.Separator />
               <DropdownMenu.Label class="px-2 py-0.5 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Show</DropdownMenu.Label>
               <DropdownMenu.CheckboxItem
+                checked={showDatabases}
+                onCheckedChange={(v) => (showDatabases = v)}
+              ><Icon name="database" class="text-muted-foreground" />Databases</DropdownMenu.CheckboxItem>
+              <DropdownMenu.CheckboxItem
                 checked={showRecent}
                 onCheckedChange={(v) => (showRecent = v)}
               ><Icon name="clock" class="text-muted-foreground" />Recent</DropdownMenu.CheckboxItem>
@@ -619,7 +713,7 @@
               <DropdownMenu.CheckboxItem
                 checked={showViews}
                 onCheckedChange={(v) => (showViews = v)}
-              ><Icon name="eye" class="text-muted-foreground" />Views</DropdownMenu.CheckboxItem>
+              ><Icon name="table-view" class="text-muted-foreground" />Views</DropdownMenu.CheckboxItem>
               <DropdownMenu.CheckboxItem
                 checked={showMatViews}
                 onCheckedChange={(v) => (showMatViews = v)}
@@ -743,7 +837,7 @@
           <input
             type="search"
             bind:this={filterEl}
-            placeholder={connectionName ? "Filter tables…" : "Not connected"}
+            placeholder={connectionName ? "Filter…" : "Not connected"}
             value={localFilter}
             disabled={!connectionName}
             oninput={(e) => handleFilterInput(e.currentTarget.value)}
@@ -758,7 +852,7 @@
               }
             }}
             class={cn(sidebarFieldClass, "w-full pl-8 pr-2.5 outline-none disabled:opacity-40 disabled:cursor-not-allowed")}
-            aria-label="Filter tables"
+            aria-label="Filter sidebar"
             data-sidebar-filter
           />
           </div>
@@ -803,8 +897,82 @@
               </span>
             </div>
           {:else}
+            <!-- ── Databases ──────────────────────────────────────
+                 Other databases on the same server. Collapsed by default and
+                 only fetched once expanded - see loadDatabases(). Engines that
+                 cannot switch in place (SQLite, Redis) never render it. -->
+            {#if showDatabases && canSwitchDb && connectionName}
+              <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
+                <button
+                  type="button"
+                  class="flex min-w-0 flex-1 items-center gap-1 text-left"
+                  onclick={toggleDatabases}
+                >
+                  <Icon name="chevron-down"
+                    class={cn(
+                      "size-3 shrink-0 text-muted-foreground/60 transition-transform duration-150",
+                      !databasesOpen && "-rotate-90",
+                    )}
+                  />
+                  <Icon name="database" class="size-3 shrink-0 text-muted-foreground/60" />
+                  <span class="text-ui-2xs font-medium tracking-wider text-muted-foreground/55 uppercase">Databases</span>
+                  {#if filteredDbEntries.length > 0}
+                    <span class="ml-1 font-mono text-ui-2xs text-muted-foreground/60">{filteredDbEntries.length}</span>
+                  {/if}
+                </button>
+                {#if databasesOpen}
+                  <button
+                    type="button"
+                    class="ml-auto inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:text-foreground"
+                    onclick={() => void loadDatabases()}
+                    title="Refresh databases"
+                    disabled={dbEntriesLoading}
+                  >
+                    <Icon name="refresh-cw" class={cn("size-3", dbEntriesLoading && "animate-spin")} />
+                  </button>
+                {/if}
+              </div>
+              {#if databasesOpen}
+                {#if dbEntriesLoading && dbEntries.length === 0}
+                  <p class="px-4 pb-1.5 text-ui-2xs text-muted-foreground/40">Loading…</p>
+                {:else if dbEntriesError && dbEntries.length === 0}
+                  <p class="px-4 pb-1.5 text-ui-2xs text-destructive/70">{dbEntriesError}</p>
+                {:else if filteredDbEntries.length === 0}
+                  <p class="px-4 pb-1.5 text-ui-2xs text-muted-foreground/40">
+                    {!dbEntriesLoaded ? 'Loading…' : lf ? 'No matching databases' : 'No other databases'}
+                  </p>
+                {:else}
+                  <ul class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
+                    {#each filteredDbEntries as db (db.key)}
+                      {@const isCurrent = db.key === activeDbKey}
+                      <li>
+                        <button
+                          type="button"
+                          disabled={isCurrent}
+                          class={cn(
+                            "grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 text-left transition-colors",
+                            isCurrent
+                              ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                              : "text-foreground/70 hover:bg-sidebar-accent/50 hover:text-foreground",
+                          )}
+                          onclick={() => !isCurrent && onswitchdatabase(db)}
+                          title={isCurrent ? `${db.label} (current)` : `Switch to ${db.label}`}
+                        >
+                          <Icon name="database" class="size-3 shrink-0 opacity-50" />
+                          <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{db.label}</span>
+                          {#if isCurrent}
+                            <Icon name="check" class="size-3 shrink-0 text-success" />
+                          {/if}
+                        </button>
+                      </li>
+                    {/each}
+                  </ul>
+                {/if}
+              {/if}
+            {/if}
+
             <!-- ── Recent ─────────────────────────────────────────── -->
-            {#if showRecent && recentTabs.length > 0 && connectionName}
+            {#if showRecent && filteredRecent.length > 0 && connectionName}
               <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
                 <button
                   type="button"
@@ -819,7 +987,7 @@
                   />
                   <Icon name="clock" class="size-3 shrink-0 text-muted-foreground/60" />
                   <span class="text-ui-2xs font-medium tracking-wider text-muted-foreground/55 uppercase">Recent</span>
-                  <span class="ml-1 font-mono text-ui-2xs text-muted-foreground/60">{Math.min(recentTabs.length, 5)}</span>
+                  <span class="ml-1 font-mono text-ui-2xs text-muted-foreground/60">{Math.min(filteredRecent.length, 5)}</span>
                 </button>
                 <button
                   type="button"
@@ -830,7 +998,7 @@
               </div>
               {#if recentOpen}
                 <ul class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
-                  {#each recentTabs.slice(0, 5) as item (item.schema + '.' + item.table)}
+                  {#each filteredRecent.slice(0, 5) as item (item.schema + '.' + item.table)}
                     <li class="group/recent">
                       <div
                         class={cn(
@@ -845,7 +1013,7 @@
                         onkeydown={(e) => e.key === 'Enter' && onrecentselect(item.schema, item.table)}
                       >
                         {#if item.tableKind === 'view'}
-                          <Icon name="eye" class="size-3 shrink-0 opacity-50" />
+                          <Icon name="table-view" class="size-3 shrink-0 opacity-50" />
                         {:else if item.tableKind === 'materialized_view'}
                           <Icon name="layers" class="size-3 shrink-0 opacity-50" />
                         {:else}
@@ -870,7 +1038,7 @@
             <!-- ── Pinned ─────────────────────────────────────────── -->
             {#if showPins && visiblePinnedTables.length > 0 && connectionName}
               <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
-                <Icon name="pin" class="size-3 shrink-0 text-primary/60" />
+                <Icon name="pin" class="size-3 shrink-0 text-muted-foreground/60" />
                 <span class="text-ui-2xs font-medium tracking-wider text-muted-foreground/55 uppercase">Pinned</span>
                 <span class="ml-1 font-mono text-ui-2xs text-muted-foreground/60">{visiblePinnedTables.length}</span>
                 {#if pinnedTables.length > 5}
@@ -915,7 +1083,7 @@
                             {#if isSelected}
                               <Icon name="square-check" class="size-3 text-primary" />
                             {:else}
-                              <Icon name="pin" class="size-3 text-primary/50 group-hover:hidden" />
+                              <Icon name="pin" class="size-3 text-muted-foreground/45 group-hover:hidden" />
                               <Icon name="square" class="size-3 hidden opacity-40 group-hover:block" />
                             {/if}
                           </span>
@@ -1124,9 +1292,24 @@
                             <!-- Fixed min-width so the column doesn't grow (shifting
                                  every row) when lazy counts resolve from '…' to numbers. -->
                             <span
-                              class="min-w-[4ch] shrink-0 text-right font-mono text-ui-xs leading-4 tabular-nums text-muted-foreground"
-                              title={table.rowCount != null ? Number(table.rowCount).toLocaleString("en-US") : undefined}
-                            >{formatTableRowCount(table.rowCount)}</span>
+                              class="flex min-w-[4ch] shrink-0 items-center justify-end font-mono text-ui-xs leading-4 tabular-nums text-muted-foreground"
+                              title={table.rowCount != null ? Number(table.rowCount).toLocaleString("en-US") : "Counting rows…"}
+                            >
+                              {#if table.rowCount == null}
+                                <!-- A pending count is one static mark, not motion.
+                                     A pulsing pill per row turned a long table list
+                                     into thirty things blinking out of sync, which
+                                     reads as the app struggling; the counts arrive
+                                     in under a second anyway. A literal "…" sat on
+                                     the text baseline and hung low against the
+                                     numbers beside it, so this is an underscore
+                                     rule on the digits' own baseline — it holds the
+                                     column width and stays quiet. -->
+                                <span class="h-px w-3 rounded-full bg-muted-foreground/30" aria-hidden="true"></span>
+                              {:else}
+                                {formatTableRowCount(table.rowCount)}
+                              {/if}
+                            </span>
                             {/if}
                           </button>
                         </ContextMenu.Trigger>
@@ -1315,14 +1498,14 @@
                                 {#if isSelected}
                                   <Icon name="square-check" class="size-3 text-primary" />
                                 {:else}
-                                  <Icon name="eye" class="size-3 opacity-50 group-hover:hidden" />
+                                  <Icon name="table-view" class="size-3 opacity-50 group-hover:hidden" />
                                   <Icon name="square" class="size-3 hidden opacity-40 group-hover:block" />
                                 {/if}
                               </span>
                               <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{view.name}</span>
-                              {#if showRowCount}
-                                <span class="shrink-0 text-right font-mono text-ui-xs leading-4 tabular-nums text-muted-foreground">{formatTableRowCount(view.rowCount)}</span>
-                              {/if}
+                              <!-- No row count: plain views have no entry in the row-statistics
+                                   source, so this only ever rendered a misleading 0. Materialized
+                                   views are physical tables and keep theirs. -->
                             </button>
                           </ContextMenu.Trigger>
                           <ContextMenu.Content class="min-w-44 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">

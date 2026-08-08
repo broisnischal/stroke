@@ -1,4 +1,5 @@
 <script>
+  import FieldSelect from './FieldSelect.svelte';
   import { untrack } from 'svelte'
   import Icon from './Icon.svelte'
   import { cn } from '$lib/utils.js'
@@ -409,27 +410,18 @@
                     title={field.displayValue}
                   >{field.displayValue}</div>
                 {:else if field.isBoolean || field.enumValues}
-                  <select
+                  <FieldSelect
+                    class="w-full bg-muted/15 text-ui-xs"
                     value={field.initialEditStr}
                     disabled={savingFields[field.colIdx]}
-                    class="w-full appearance-none rounded-md border border-border/50 bg-muted/15 px-2.5 py-1.5 pr-7 font-mono text-ui-xs text-foreground transition-colors hover:border-border focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none disabled:opacity-50"
-                    onchange={(e) => void saveField(field.colIdx, /** @type {HTMLSelectElement} */ (e.target).value)}
-                  >
-                    {#if field.nullable}
-                      <option value="">NULL</option>
-                    {/if}
-                    {#if field.isBoolean}
-                      <option value="true">true</option>
-                      <option value="false">false</option>
-                    {:else}
-                      {#each field.enumValues as opt (opt)}
-                        <option value={opt}>{opt}</option>
-                      {/each}
-                    {/if}
-                  </select>
-                  <span class="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground/50">
-                    <Icon name="chevron-down" class="size-3" />
-                  </span>
+                    onchange={(v) => void saveField(field.colIdx, v)}
+                    options={[
+                      ...(field.nullable ? [{ value: '', label: 'NULL' }] : []),
+                      ...(field.isBoolean
+                        ? [{ value: 'true', label: 'true' }, { value: 'false', label: 'false' }]
+                        : field.enumValues.map((/** @type {string} */ opt) => ({ value: opt, label: opt }))),
+                    ]}
+                  />
                 {:else if field.isMultiline}
                   <textarea
                     value={field.initialEditStr}

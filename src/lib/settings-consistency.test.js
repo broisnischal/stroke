@@ -27,8 +27,14 @@ describe('settings option lists stay in step with their consumers', () => {
     // TableToolbar owns what a tab can switch to; DATA_VIEW_IDS owns what you
     // may pick as the default. 'erd' was added to the first and not the second,
     // so it was the one view you could open but never default to.
+    //
+    // 'map' is the deliberate exception: it is offered only on a table with a
+    // geometry column, so as a *default* it would open onto nothing on almost
+    // every table. Conditional views belong in the switcher, not the default.
+    const CONDITIONAL = ['map']
     const toolbarIds = [...listBlock(read('./components/TableToolbar.svelte'), 'DATA_VIEW_MODES')
       .matchAll(/id:\s*"([a-z-]+)"/g)].map((m) => m[1])
+      .filter((id) => !CONDITIONAL.includes(id))
     const settingIds = [...listBlock(settings, 'DATA_VIEW_IDS')
       .matchAll(/'([a-z-]+)'/g)].map((m) => m[1])
 

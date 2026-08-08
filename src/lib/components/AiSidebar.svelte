@@ -153,9 +153,6 @@
    *  into the next message's context. */
   let contextTables = $state(/** @type {string[]} */ ([]))
 
-  /** @type {HTMLDivElement | null} */
-  let mentionEl = $state(null)
-
   const allTables = $derived(schemaContext.tables ?? [])
 
   const mentionItems = $derived.by(() => {
@@ -269,14 +266,33 @@
   }
 
   // ── Scroll helpers ────────────────────────────────────────────────────────
-  function onScrollAreaScroll() {
-    if (!scrollEl) return
-    const distFromBottom = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight
-    userScrolledUp = distFromBottom > 80
+  /** Sentinel pinned to the end of the transcript; see the observer below. */
+  let bottomSentinel = $state(/** @type {HTMLElement | null} */ (null))
+
+  // "Am I at the bottom?" comes from an IntersectionObserver on the sentinel
+  // rather than reading scrollHeight/scrollTop in a scroll handler - with
+  // content-visibility:auto on the message rows, each such read forces layout
+  // of the off-screen subtrees it was meant to skip (same fix as AiChat).
+  $effect(() => {
+    const root = scrollEl
+    const target = bottomSentinel
+    if (!root || !target || typeof IntersectionObserver !== 'function') return
+    const io = new IntersectionObserver(
+      (entries) => { userScrolledUp = !entries[entries.length - 1].isIntersecting },
+      { root, rootMargin: '0px 0px 80px 0px', threshold: 0 },
+    )
+    io.observe(target)
+    return () => io.disconnect()
+  })
+
+  /** Scroll the transcript to its end without measuring it (no scrollHeight read). */
+  function pinToBottom() {
+    if (bottomSentinel) bottomSentinel.scrollIntoView({ block: 'end' })
+    else if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight
   }
   function jumpToBottom() {
     userScrolledUp = false
-    if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight
+    pinToBottom()
   }
 
   // ── Conversations ─────────────────────────────────────────────────────────
@@ -301,7 +317,7 @@
     apiHistory = /** @type {import('$lib/ai.js').ApiMessage[]} */ (latest.apiHistory ?? [])
     rawApiHistory = /** @type {import('$lib/ai.js').ApiMessage[]} */ (latest.apiHistory ?? [])
     await tick()
-    if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight
+    pinToBottom()
   }
 
   async function persistCurrent() {
@@ -332,7 +348,7 @@
     rawApiHistory = /** @type {import('$lib/ai.js').ApiMessage[]} */ (conv.apiHistory ?? [])
     error = ''; historyOpen = false
     await tick()
-    if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight
+    pinToBottom()
   }
 
   async function removeConversation(/** @type {string} */ id) {
@@ -383,15 +399,21 @@
   onDestroy(() => {
     void persistCurrent()
     if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null }
+    if (_streamTimer !== null) { clearTimeout(_streamTimer); _streamTimer = null }
+    // Decline pending confirms and abort the in-flight stream/tool loop -
+    // otherwise they keep running against a destroyed component.
+    for (const i of items.filter((i) => i.kind === 'confirm')) i.resolve(false)
+    abortController?.abort()
+    abortController = null
   })
 
   function scrollBottomSoon() {
     if (userScrolledUp || rafId !== null) return
-    rafId = requestAnimationFrame(() => { rafId = null; if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight })
+    rafId = requestAnimationFrame(() => { rafId = null; pinToBottom() })
   }
   async function scrollBottom() {
     await tick(); userScrolledUp = false
-    if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight
+    pinToBottom()
   }
 
   function toggleCollapse(key) { const n = new Set(collapsed); n.has(key) ? n.delete(key) : n.add(key); collapsed = n }
@@ -403,7 +425,12 @@
     activeConvId = null; items = []; apiHistory = []; rawApiHistory = []; error = ''; aiStatusHint = ''; inputText = ''; historyOpen = false
     await tick(); inputRef?.focus()
   }
-  function abortCurrentRequest() { abortController?.abort(); abortController = null; loading = false }
+  function abortCurrentRequest() {
+    // Decline pending confirms first so their awaiting tool loops resolve and
+    // can observe the abort (snapshot: resolve() splices the item out of `items`).
+    for (const i of items.filter((i) => i.kind === 'confirm')) i.resolve(false)
+    abortController?.abort(); abortController = null; loading = false
+  }
   function stop() { flushStreamingContent(); abortController?.abort() }
   async function copyText(text) { await navigator.clipboard.writeText(text).catch(() => {}) }
 
@@ -434,23 +461,42 @@
 
   async function ensureFullSchemaCache() {
     if (!schemaContext.tables?.length) return
-    const isMysql = schemaContext.dbType === 'mysql'
+    const dbType = schemaContext.dbType ?? 'postgres'
+    const isMysql = dbType === 'mysql'
+    const isSqliteFamily = dbType === 'sqlite' || dbType === 'd1' || dbType === 'libsql'
     const sc = schemaContext.activeSchema
     const combined = { ...schemaContext.allTableColumns, ...fetchedSchemas }
     const missing = schemaContext.tables.filter(t => !combined[`${sc}.${t.name}`])
     if (!missing.length) return
     try {
-      const scSafe = sc.replace(/'/g, "''")
-      const sql = isMysql
-        ? `SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '${scSafe}' ORDER BY TABLE_NAME, ORDINAL_POSITION`
-        : `SELECT table_name, column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema = '${scSafe}' ORDER BY table_name, ordinal_position`
-      const data = await executeSql(sql)
       /** @type {Record<string, {name:string, dataType:string, nullable:boolean}[]>} */
       const byTable = {}
-      for (const row of data.rows ?? []) {
-        const key = `${sc}.${String(row[0])}`
-        if (!byTable[key]) byTable[key] = []
-        byTable[key].push({ name: String(row[1]), dataType: String(row[2]), nullable: String(row[3]).toUpperCase() === 'YES' })
+      if (isSqliteFamily) {
+        // SQLite/D1/LibSQL: PRAGMA per table (no information_schema), in parallel.
+        await Promise.all(missing.map(async (t) => {
+          try {
+            const data = await executeSql(`PRAGMA table_info("${t.name.replace(/"/g, '""')}")`)
+            const c = data.columns ?? [], r = data.rows ?? []
+            const nameI = c.findIndex((x) => x.name === 'name'), typeI = c.findIndex((x) => x.name === 'type')
+            const nnI = c.findIndex((x) => x.name === 'notnull')
+            byTable[`${sc}.${t.name}`] = r.map((row) => ({
+              name: String(row[nameI] ?? row[1] ?? ''),
+              dataType: String(row[typeI] ?? row[2] ?? 'text'),
+              nullable: !(row[nnI] ?? row[3]),
+            }))
+          } catch { /* skip this table */ }
+        }))
+      } else {
+        const scSafe = sc.replace(/'/g, "''")
+        const sql = isMysql
+          ? `SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '${scSafe}' ORDER BY TABLE_NAME, ORDINAL_POSITION`
+          : `SELECT table_name, column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema = '${scSafe}' ORDER BY table_name, ordinal_position`
+        const data = await executeSql(sql)
+        for (const row of data.rows ?? []) {
+          const key = `${sc}.${String(row[0])}`
+          if (!byTable[key]) byTable[key] = []
+          byTable[key].push({ name: String(row[1]), dataType: String(row[2]), nullable: String(row[3]).toUpperCase() === 'YES' })
+        }
       }
       fetchedSchemas = { ...fetchedSchemas, ...byTable }
     } catch {}
@@ -529,10 +575,12 @@
 
   async function runAiTurn(depth) {
     if (depth > 40) throw new Error('Too many AI iterations')
-    if (abortController?.signal.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' })
+    // A null controller means the turn was aborted or finalized - the chain can
+    // resume here after a declined confirm, so treat it the same as an abort.
+    if (!abortController || abortController.signal.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' })
     if (depth > 0) {
       await new Promise(r => setTimeout(r, 300))
-      if (abortController?.signal.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' })
+      if (!abortController || abortController.signal.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' })
     }
     let fullContent = ''; /** @type {import('$lib/ai.js').ToolCall[]} */ let toolCalls = []; let itemId = /** @type {string | null} */ (null)
     for await (const chunk of chatCompletionStream($aiSettings, [{ role: 'system', content: turnSystemPrompt }, ...apiHistory], AI_TOOLS, abortController?.signal, ({ attempt, waitMs }) => { aiStatusHint = `Rate limited, retrying in ${Math.ceil(waitMs/1000)}s…` })) {
@@ -547,7 +595,7 @@
       }
       if (chunk.toolCalls) toolCalls = chunk.toolCalls
     }
-    if (abortController?.signal.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' })
+    if (!abortController || abortController.signal.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' })
     flushStreamingContent()
     if (itemId && streamingId) {
       streamingId = null; streamingContent = ''; _pendingStreamContent = ''
@@ -566,6 +614,12 @@
   }
 
   async function runToolCall(call) {
+    // The tool loop can resume here after an abort resolves a pending confirm -
+    // answer the call as cancelled instead of executing it for a dead turn.
+    if (!abortController || abortController.signal.aborted) {
+      apiHistory.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ cancelled: true }) })
+      return
+    }
     const callKey = `${call.function.name}:${call.function.arguments}`
     if (executedCalls.has(callKey)) { apiHistory.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ error: 'Duplicate call.' }) }); return }
     const prior = failureTracker.get(callKey); if (prior && prior.count >= 2) { apiHistory.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ error: `Failed ${prior.count} times. Do not retry.`, last_error: prior.lastError }) }); return }
@@ -598,11 +652,24 @@
         }
       } else if (call.function.name === 'describe_table') {
         const schema = String(args.schema ?? schemaContext.activeSchema).replace(/'/g, "''"); const table = String(args.table ?? '').replace(/'/g, "''")
-        const descSql = schemaContext.dbType === 'mysql' ? `SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '${schema}' AND TABLE_NAME = '${table}' ORDER BY ORDINAL_POSITION` : `SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema = '${schema}' AND table_name = '${table}' ORDER BY ordinal_position`
-        const data = await executeSql(descSql); const cols = data.columns ?? []; const rows = data.rows ?? []
+        const dbType = schemaContext.dbType ?? 'postgres'
+        const isSqliteFamily = dbType === 'sqlite' || dbType === 'd1' || dbType === 'libsql'
+        let cols, rows, colObjs
+        if (isSqliteFamily) {
+          // SQLite/D1/LibSQL: PRAGMA (no information_schema). Columns: cid, name, type, notnull, dflt_value, pk
+          const data = await executeSql(`PRAGMA table_info("${table.replace(/"/g, '""')}")`)
+          cols = data.columns ?? []; rows = data.rows ?? []
+          const nameI = cols.findIndex((c) => c.name === 'name'), typeI = cols.findIndex((c) => c.name === 'type')
+          const nnI = cols.findIndex((c) => c.name === 'notnull'), dfltI = cols.findIndex((c) => c.name === 'dflt_value')
+          colObjs = rows.map(r => ({ name: r[nameI] ?? r[1], type: r[typeI] ?? r[2] ?? 'text', nullable: !(r[nnI] ?? r[3]), default: r[dfltI] ?? r[4] ?? null }))
+        } else {
+          const descSql = dbType === 'mysql' ? `SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '${schema}' AND TABLE_NAME = '${table}' ORDER BY ORDINAL_POSITION` : `SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema = '${schema}' AND table_name = '${table}' ORDER BY ordinal_position`
+          const data = await executeSql(descSql); cols = data.columns ?? []; rows = data.rows ?? []
+          colObjs = rows.map(r => ({ name: r[0], type: r[1], nullable: r[2] === 'YES', default: r[3] ?? null }))
+        }
         const sid = uid(); items.push(/** @type {ChatItem} */ ({ id: sid, kind: 'result', sql: `${schema}.${table} schema`, columns: cols, rows, total: rows.length, error: null, isSchema: true }))
         autoOpenResult(sid, true); await scrollBottom()
-        toolResult = JSON.stringify({ table: `${schema}.${table}`, columns: rows.map(r => ({ name: r[0], type: r[1], nullable: r[2] === 'YES', default: r[3] ?? null })) })
+        toolResult = JSON.stringify({ table: `${schema}.${table}`, columns: colObjs })
       } else if (call.function.name === 'render_chart') {
         const chartId = uid()
         if (!args.data?.length) { items.push(/** @type {ChatItem} */ ({ id: chartId, kind: 'chart', spec: args, error: 'No data provided.' })); toolResult = JSON.stringify({ error: 'No data.' }) }
@@ -612,8 +679,29 @@
       } else if (call.function.name === 'get_schema') {
         const targetTable = String(args.table ?? '').trim()
         try {
-          const isMysql = schemaContext.dbType === 'mysql'; const sc = schemaContext.activeSchema.replace(/'/g, "''")
-          if (targetTable) {
+          const dbType = schemaContext.dbType ?? 'postgres'
+          const isMysql = dbType === 'mysql'
+          const isSqliteFamily = dbType === 'sqlite' || dbType === 'd1' || dbType === 'libsql'
+          const sc = schemaContext.activeSchema.replace(/'/g, "''")
+          if (isSqliteFamily && targetTable) {
+            const data = await executeSql(`PRAGMA table_info("${targetTable.replace(/"/g, '""')}")`)
+            const c = data.columns ?? [], r = data.rows ?? []
+            const nameI = c.findIndex((x) => x.name === 'name'), typeI = c.findIndex((x) => x.name === 'type')
+            const nnI = c.findIndex((x) => x.name === 'notnull'), dfltI = c.findIndex((x) => x.name === 'dflt_value')
+            toolResult = JSON.stringify({ table: `${schemaContext.activeSchema}.${targetTable}`, columns: r.map(row => ({ name: row[nameI] ?? row[1], type: row[typeI] ?? row[2] ?? 'text', nullable: !(row[nnI] ?? row[3]), default: row[dfltI] ?? row[4] ?? null })) })
+          } else if (isSqliteFamily) {
+            const byTable = /** @type {Record<string, unknown[]>} */ ({})
+            await Promise.all((schemaContext.tables ?? []).map(async (/** @type {{name: string}} */ t) => {
+              try {
+                const data = await executeSql(`PRAGMA table_info("${t.name.replace(/"/g, '""')}")`)
+                const c = data.columns ?? [], r = data.rows ?? []
+                const nameI = c.findIndex((x) => x.name === 'name'), typeI = c.findIndex((x) => x.name === 'type')
+                const nnI = c.findIndex((x) => x.name === 'notnull')
+                byTable[t.name] = r.map(row => ({ name: row[nameI] ?? row[1], type: row[typeI] ?? row[2] ?? 'text', nullable: !(row[nnI] ?? row[3]) }))
+              } catch { byTable[t.name] = [] }
+            }))
+            toolResult = JSON.stringify({ schema: schemaContext.activeSchema, tables: byTable })
+          } else if (targetTable) {
             const tt = targetTable.replace(/'/g, "''"); const sql = isMysql ? `SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '${sc}' AND TABLE_NAME = '${tt}' ORDER BY ORDINAL_POSITION` : `SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema = '${sc}' AND table_name = '${tt}' ORDER BY ordinal_position`
             const data = await executeSql(sql); toolResult = JSON.stringify({ table: `${schemaContext.activeSchema}.${targetTable}`, columns: (data.rows ?? []).map(r => ({ name: r[0], type: r[1], nullable: r[2] === 'YES', default: r[3] ?? null })) })
           } else {
@@ -749,7 +837,7 @@
   {/if}
 
   <!-- Messages -->
-  <div bind:this={scrollEl} onscroll={onScrollAreaScroll}
+  <div bind:this={scrollEl}
     class="app-scroll relative min-h-0 flex-1 overflow-y-auto [will-change:transform] [overflow-anchor:none]">
 
     {#if items.length === 0}
@@ -815,7 +903,7 @@
             </div>
 
           {:else if item.kind === 'streaming'}
-            <AiMarkdown content={displayStreamingContent} debounceMs={180} streaming class="text-ui-xs" />
+            <AiMarkdown content={displayStreamingContent} streaming class="text-ui-xs" />
 
           {:else if item.kind === 'assistant'}
             <div class="flex flex-col gap-2">
@@ -956,6 +1044,9 @@
           </div>
         {/if}
 
+        <!-- Watched by the observer above to decide whether the transcript is
+             pinned to the bottom. A zero-height element is enough. -->
+        <div bind:this={bottomSentinel} aria-hidden="true" class="h-px w-full shrink-0"></div>
       </div>
     {/if}
 
@@ -981,7 +1072,7 @@
 
     <!-- @ mention popup -->
     {#if mentionOpen && mentionItems.length > 0}
-      <div bind:this={mentionEl}
+      <div
         class="absolute bottom-full left-2.5 right-2.5 z-50 mb-1.5 overflow-hidden rounded-[10px] border border-border/60 bg-popover elevate-2-rim">
         <div class="app-scroll max-h-56 overflow-y-auto p-1">
           {#each mentionItems as item, idx (item.insert)}

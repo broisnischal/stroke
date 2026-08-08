@@ -304,14 +304,9 @@ export async function setActiveProfile(id) {
   await refreshActiveSettings()
 }
 
-// ── Legacy compat (still used by some consumers) ─────────────────────────────
+// ── Configured check ──────────────────────────────────────────────────────────
 
-export const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
-export const OPENROUTER_KEYS_URL = 'https://openrouter.ai/keys'
-export const DEFAULT_AI_SETTINGS = { baseUrl: OPENROUTER_BASE_URL, apiKey: '', model: '' }
-export function loadAiSettings() { return get(aiSettings) }
-export function saveAiSettings(s) { return setAiSettings(s) }
-export function setAiSettings(s) { aiSettings.set(s); return s }
+/** True when the given settings can reach a provider without further setup. */
 export function isAiConfigured(s) {
   return Boolean(s.apiKey) ||
     /localhost|127\.0\.0\.1/.test(s.baseUrl) ||
@@ -319,6 +314,3 @@ export function isAiConfigured(s) {
     (s.baseUrl ?? '').includes('stroke.click') ||
     (s.baseUrl ?? '').includes('githubcopilot.com')
 }
-
-// Legacy presets (kept for external references, now empty)
-export const AI_PROVIDER_PRESETS = []

@@ -161,3 +161,84 @@ describe('routeEdges', () => {
     if (pts) assertClear(pts, boxes, 'a', 'b')
   })
 })
+
+describe('routeEdges at diagram scale', () => {
+  /** A grid of cards, the shape a 100-table schema actually lays out in. */
+  function bigDiagram(cols = 10, rows = 10, w = 220, h = 260, gapX = 120, gapY = 140) {
+    const boxes = []
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        boxes.push({ id: `t${r}_${c}`, x: c * (w + gapX), y: r * (h + gapY), w, h })
+      }
+    }
+    return boxes
+  }
+
+  /** Does segment a→b pass through the interior of a card? */
+  function crosses(a, b, box) {
+    const x0 = box.x, y0 = box.y, x1 = box.x + box.w, y1 = box.y + box.h
+    if (a.y === b.y) {
+      if (a.y <= y0 || a.y >= y1) return false
+      return Math.max(a.x, b.x) > x0 && Math.min(a.x, b.x) < x1
+    }
+    if (a.x <= x0 || a.x >= x1) return false
+    return Math.max(a.y, b.y) > y0 && Math.min(a.y, b.y) < y1
+  }
+
+  it('routes a 100-card diagram without drawing through any card', () => {
+    const boxes = bigDiagram()
+    const byId = new Map(boxes.map((b) => [b.id, b]))
+    // Links that must cross the field: far-apart cards with cards in between.
+    const pairs = [
+      ['t0_0', 't0_9'], ['t0_0', 't9_9'], ['t5_0', 't5_9'],
+      ['t9_0', 't0_8'], ['t2_3', 't7_6'], ['t4_4', 't4_5'],
+    ]
+    const links = pairs.map(([source, target], i) => {
+      const s = byId.get(source), t = byId.get(target)
+      const rightward = t.x >= s.x
+      return {
+        id: `e${i}`, source, target,
+        sx: rightward ? s.x + s.w : s.x, sy: s.y + 60, sdir: rightward ? 1 : -1,
+        tx: rightward ? t.x : t.x + t.w, ty: t.y + 60, tdir: rightward ? -1 : 1,
+      }
+    })
+
+    const routes = routeEdges(boxes, links)
+    // Every link is routed — the old global grid returned nothing at this size.
+    expect(routes.size).toBe(links.length)
+
+    for (const l of links) {
+      const pts = routes.get(l.id)
+      expect(pts.length).toBeGreaterThan(1)
+      for (let i = 1; i < pts.length; i++) {
+        for (const box of boxes) {
+          // Endpoints legitimately land on their own cards' edges.
+          if (box.id === l.source || box.id === l.target) continue
+          expect(
+            crosses(pts[i - 1], pts[i], box),
+            `${l.id} segment ${i} crosses ${box.id}`,
+          ).toBe(false)
+        }
+      }
+    }
+  })
+
+  it('stays fast enough to run on a layout change', () => {
+    const boxes = bigDiagram()
+    const byId = new Map(boxes.map((b) => [b.id, b]))
+    // One link per card, to a card three columns over — a dense schema.
+    const links = boxes.slice(0, 60).map((s, i) => {
+      const t = byId.get(`t${Math.min(9, (i % 10) + 1)}_${Math.min(9, (i % 7) + 2)}`)
+      return {
+        id: `e${i}`, source: s.id, target: t.id,
+        sx: s.x + s.w, sy: s.y + 40, sdir: 1,
+        tx: t.x, ty: t.y + 40, tdir: -1,
+      }
+    })
+    const started = Date.now()
+    const routes = routeEdges(boxes, links)
+    const ms = Date.now() - started
+    expect(routes.size).toBeGreaterThan(links.length * 0.9)
+    expect(ms).toBeLessThan(4000)
+  })
+})

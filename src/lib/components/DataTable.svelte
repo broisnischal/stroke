@@ -8,7 +8,6 @@
   import { increaseZoom, decreaseZoom, resetZoom, appPreviewDml, appTableStyle, TABLE_STYLES, normalizeTableStyle, appVimMode, appTableAlign } from '$lib/stores/settings.js'
   import { setVimSubMode } from '$lib/vim/vim.js'
   import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
-  import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
   import ArrowUpDown from "@lucide/svelte/icons/arrow-up-down";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
@@ -18,13 +17,7 @@
 import FilterX from "@lucide/svelte/icons/filter-x";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import KeyRound from "@lucide/svelte/icons/key-round";
-  import Link2 from "@lucide/svelte/icons/link-2";
-  import Zap from "@lucide/svelte/icons/zap";
-  import Fingerprint from "@lucide/svelte/icons/fingerprint";
-  import Circle from "@lucide/svelte/icons/circle";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
-  import ChevronDown from "@lucide/svelte/icons/chevron-down";
-  import ChevronsDownUp from "@lucide/svelte/icons/chevrons-down-up";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
   import ChevronsLeft from "@lucide/svelte/icons/chevrons-left";
   import ChevronsRight from "@lucide/svelte/icons/chevrons-right";
@@ -70,7 +63,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     isEditableType,
     parseCellInput,
     valueToEditString,
-    isLikelyAutoColumn,
+    isAutoColumn,
+    insertOmitBehaviour,
     buildInsertPayload,
     isDateOnlyType,
     isTimeOnlyType,
@@ -81,11 +75,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import {
     defaultInsertDraft,
     shouldUseDateTimePicker,
-    nowDateTimeLocal,
-    nowDateOnly,
-    nowTimeOnly,
   } from "$lib/insert-field.js";
   import { cellLinkHref, cellUrlType } from "$lib/cell-display.js";
+  import InsertValuePicker from "./InsertValuePicker.svelte";
   import {
     buildUpdateStatements,
     buildDeleteStatements,
@@ -110,6 +102,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import MediaLightbox from "./MediaLightbox.svelte";
   import RowExpandViewer from "./RowExpandViewer.svelte";
   import ArrayCellEditor from "./ArrayCellEditor.svelte";
+  import VectorCellViewer from "./VectorCellViewer.svelte";
+  import { vectorSummary } from "$lib/vector-cell.js";
+  import GeometryCellViewer from "./GeometryCellViewer.svelte";
+  import { isGeometryType, geometrySummary } from "$lib/geometry-cell.js";
   import FkSubviewPanel from "./FkSubviewPanel.svelte";
   // JsonCellLightbox (Monaco-based) is imported lazily at its render site below.
   import CellQuickLook from "./CellQuickLook.svelte";
@@ -129,8 +125,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     drawIcon,
     roundRect,
     drawCheckbox,
-    drawBadge,
-    drawTriangle,
     computeColumnGeometry,
     colDrawnX,
     colAtX,
@@ -493,13 +487,30 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let contextMenuOpen = $state(false);
 
   // Array cell editor (Prisma-style add/remove for SQL array columns).
+  // Vector cells get their own viewer: a 1536-number literal in a textarea is
+  // the value without any of the meaning.
+  let vectorViewerOpen = $state(false);
+  let vectorViewerRow = $state(0);
+  let vectorViewerCol = $state(0);
+  let vectorViewerColName = $state("");
+  let vectorViewerType = $state("vector");
+  let vectorViewerNullable = $state(false);
+  let vectorViewerValue = $state("");
+
+  let geomViewerOpen = $state(false);
+  let geomViewerRow = $state(0);
+  let geomViewerCol = $state(0);
+  let geomViewerColName = $state("");
+  let geomViewerType = $state("geometry");
+  let geomViewerNullable = $state(false);
+  let geomViewerValue = $state("");
+
   let arrayEditorOpen = $state(false);
   let arrayEditorRow = $state(0);
   let arrayEditorCol = $state(0);
   let arrayEditorColName = $state("");
   let arrayEditorType = $state("");
   let arrayEditorValue = $state(/** @type {any[]} */ ([]));
-  let pendingContextMenu = $state(false);
   /** Block item activation from the right-click pointerup that opened the menu */
   let suppressMenuSelect = $state(false);
   /** Row indices with inline JSON detail open. Seeded from initialExpandedRows
@@ -527,14 +538,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   /**
    * Rectangular cell-range selection (spreadsheet-style). The fixed corner is
    * `selAnchor`; the moving corner is `focusedRow`/`focusedCol` (visible-column
-   * space). null = plain single-cell focus. Extended via Shift+Arrow or drag.
+   * space). null = plain single-cell focus.
+   *
+   * NOTE: nothing currently sets this non-null - the shift+click / drag-select
+   * sources were removed while the feature is parked. The draw/copy plumbing
+   * (computeCellRange, copyCellRange, range tint in drawCell) is kept so the
+   * feature can be re-enabled by adding a setter.
    * @type {{ row: number, col: number } | null}
    */
   let selAnchor = $state(null);
-  /** True while a click-drag range selection is in progress. */
-  let _rangeDragging = false;
-  /** Pointer-down cell + position, to distinguish a click from a drag-select. */
-  let _rangeDownCell = /** @type {{ row: number, col: number, x: number, y: number } | null} */ (null);
 
   /**
    * The active rectangular range in visible-column space, or null for a single
@@ -630,9 +642,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let _resizeHoverCol = $state(/** @type {string | null} */ (null))
   /** Swallow the click that fires right after a resize-drag pointerup. */
   let _suppressNextClick = false
-  /** Synchronous wheel-zoom guard - updated in pointer handlers so the wheel
-   *  listener never reads stale $state through a closed-over $effect closure. */
-  const _zoomGuard = { block: false, resizing: false }
   /** Right-click target kind, so one ContextMenu can show header vs body items. */
   let contextIsHeader = $state(false)
   let contextHeaderCol = $state("")
@@ -733,7 +742,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         window.open(url, "_blank", "noopener,noreferrer");
       }
     } catch (err) {
-      const { toast } = await import("$lib/components/ui/sonner/toast.svelte.js");
       toast.error(`Could not open URL: ${String(err)}`);
     }
   }
@@ -748,9 +756,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   const menuColName = $derived(columns[contextColIdx]?.name ?? "cell");
   const menuForeignKey = $derived(
     menuColName ? findForeignKeyForColumn(foreignKeys, menuColName) : null,
-  );
-  const menuForeignKeyLabel = $derived(
-    menuForeignKey ? foreignKeyTargetLabel(menuForeignKey) : "",
   );
   const menuEditable = $derived(canEditColumn(contextColIdx));
   const menuColPinned = $derived(pinnedColumns.has(menuColName));
@@ -877,6 +882,40 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     return /\[\]\s*$/.test(colType ?? "");
   }
 
+  /** pgvector column types, whose values arrive as `[0.1,0.2,…]` text. */
+  function isVectorType(colType) {
+    return /^(vector|halfvec|sparsevec)\b/i.test(String(colType ?? "").trim());
+  }
+
+  // An embedding printed in full fills the row with digits that say nothing at a
+  // glance. The dimension leads, then as much of the head as fits. Display only:
+  // editing, copy and the viewer all still see the real value.
+  /** @type {Map<string, { heads: number, out: string }>} */
+  const _vectorDisplayCache = new Map();
+  /**
+   * How many leading values to show, from the room the column actually has.
+   * A narrow column that renders `384d · 0.1, 0.1, 0.…` is worse than one that
+   * renders `384d`: the dimension is the part you can read, and half a number is
+   * noise. So the head count follows the width instead of being fixed at three.
+   * @param {number} cellW
+   */
+  function vectorHeads(cellW) {
+    const glyph = _glyphW > 0 ? _glyphW : Math.max(6, (_fonts?.cellPx ?? 12) * 0.6);
+    const fits = Math.floor((cellW - CELL_PAD_X * 2) / glyph);
+    // "384d · " is ~7 glyphs and each value with its separator is ~7 more.
+    if (fits < 14) return 0;
+    return Math.max(1, Math.min(6, Math.floor((fits - 7) / 7)));
+  }
+  /** @param {string} text @param {number} heads */
+  function vectorDisplay(text, heads) {
+    const hit = _vectorDisplayCache.get(text);
+    if (hit !== undefined && hit.heads === heads) return hit.out;
+    const out = vectorSummary(text, heads);
+    if (_vectorDisplayCache.size > 4096) _vectorDisplayCache.clear();
+    _vectorDisplayCache.set(text, { heads, out });
+    return out;
+  }
+
   /** Truncated version for DOM rendering - keeps long values out of the render tree */
   function displayCell(value) {
     const s = formatCell(value);
@@ -905,6 +944,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (_dispCacheRows !== rows) {
       _dispCacheRows = rows;
       _cellTextCache.clear(); _vexprTextCache.clear(); _colTfCache.clear();
+      // Keyed by the full vector literal (10-20KB each for big embeddings), so
+      // stale entries from previous pages/tables must not accumulate.
+      _vectorDisplayCache.clear();
     }
     if (_dispCacheVFns !== _vcolFns) { _dispCacheVFns = _vcolFns; _vexprTextCache.clear(); }
     if (_dispCacheTFns !== _colTransformFns) { _dispCacheTFns = _colTransformFns; _colTfCache.clear(); }
@@ -1177,6 +1219,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
 
     focusedRow = rowIdx;
+    // Vectors and geometries open their own viewers rather than an inline text
+    // box: 1,500 characters of `0.1,0.1,…` (or a 500-vertex EWKT polygon) in a
+    // one-line input is not an edit surface.
+    if (openVectorViewer(rowIdx, colIdx)) return;
+    if (openGeometryViewer(rowIdx, colIdx)) return;
     const startValue = effectiveCellValue(rowIdx, colIdx);
     const oversize = oversizeCellInfo(startValue);
     if (oversize) {
@@ -1209,6 +1256,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   /** @param {number} rowIdx @param {number} colIdx */
   function openQuickLook(rowIdx, colIdx) {
+    // Vectors and geometries have viewers that say something; the generic
+    // preview doesn't.
+    if (openVectorViewer(rowIdx, colIdx)) return;
+    if (openGeometryViewer(rowIdx, colIdx)) return;
     const col = columns[colIdx];
     if (!col) return;
     const dataType = col.dataType ?? col.data_type ?? "";
@@ -1315,7 +1366,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     return false;
   }
 
-  /** @param {'down' | 'right' | 'left' | null} afterAction */
   /** @param {'down'|'right'|'left'|null} afterAction @param {boolean} [autoEdit] */
   async function commitEditWithAction(afterAction, autoEdit = false) {
     if (!editingCell || saving) return;
@@ -1648,10 +1698,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       }
       newRowDrafts = drafts
       // Focus first non-auto column (all columns, including hidden ones)
-      const first = columns.find(c => {
-        const dt = c.dataType ?? c.data_type ?? ''
-        return !isLikelyAutoColumn(dt, c.name, primaryKey)
-      })
+      const first = columns.find((c) => !isAutoColumn(c, primaryKey))
       newRowFocusCol = first?.name ?? columns[0]?.name ?? null
       // Scroll to top so the draft row is visible
       tableContainer?.scrollTo({ top: 0, behavior: 'smooth' })
@@ -1724,10 +1771,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Shift+Tab moves left. Enter at the last cell submits.
     if (e.key === 'Tab' || e.key === 'Enter') {
       e.preventDefault()
-      const editableCols = columns.filter(c => {
-        const dt = c.dataType ?? c.data_type ?? ''
-        return !isLikelyAutoColumn(dt, c.name, primaryKey)
-      })
+      // Every column takes a value now, including generated ones, so Tab must
+      // be able to reach them — initial focus still skips them (see beginInsertRow),
+      // because overriding a sequence is the exception rather than the flow.
+      const editableCols = columns
       if (!editableCols.length) return
       const curIdx = editableCols.findIndex(c => c.name === newRowFocusCol)
       if (e.shiftKey) {
@@ -1846,9 +1893,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ? [...selected].sort((a, b) => a - b)
       : rows.map((_, i) => i)
     const header = activeCols.map((c) => csvCell(c.name)).join('\t')
+    // Resolve column indices once - indexOf inside the per-row loop is
+    // O(rows × selCols × totalCols) on wide tables.
+    const colIdxs = activeCols.map((c) => _nameToActualIdx.get(c.name) ?? columns.indexOf(c))
     const body = rowIndices
-      .map((i) => activeCols.map((c) => {
-        const ci = columns.indexOf(c)
+      .map((i) => colIdxs.map((ci) => {
         const v = rows[i]?.[ci]
         return v === null || v === undefined ? '' : typeof v === 'object' ? cellJsonString(v) : String(v)
       }).join('\t'))
@@ -1970,6 +2019,62 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     toast.success(`Staged ${col?.name ?? "value"} on ${batch.length} row${batch.length === 1 ? "" : "s"}`, {
       description: "Review in Apply, or undo per row.",
     });
+  }
+
+  /** Open the vector viewer for a cell. Returns false when it isn't a vector. */
+  function openVectorViewer(rowIdx, colIdx) {
+    const col = columns[colIdx];
+    if (!col) return false;
+    const type = String(col.dataType ?? col.data_type ?? _colCache[colIdx]?.colType ?? "");
+    if (!isVectorType(type)) return false;
+    const v = effectiveCellValue(rowIdx, colIdx);
+    if (typeof v !== "string") return false;
+    vectorViewerRow = rowIdx;
+    vectorViewerCol = colIdx;
+    vectorViewerColName = col.name ?? "vector";
+    vectorViewerType = type.replace(/\(.*$/, "").trim() || "vector";
+    vectorViewerNullable = col.isNullable ?? col.is_nullable ?? true;
+    vectorViewerValue = v;
+    vectorViewerOpen = true;
+    return true;
+  }
+
+  /** @param {string | null} next */
+  function commitVectorViewer(next) {
+    const rowIdx = vectorViewerRow, colIdx = vectorViewerCol;
+    if (!canEditColumn(colIdx)) return;
+    const prevValue = effectiveCellValue(rowIdx, colIdx);
+    stageEdit(rowIdx, colIdx, next);
+    pastEdits = [...pastEdits.slice(-49), { rowIdx, colIdx, oldValue: prevValue, newValue: next }];
+    futureEdits = [];
+  }
+
+  /** Open the geometry viewer for a cell. Returns false when it isn't geometry. */
+  function openGeometryViewer(rowIdx, colIdx) {
+    const col = columns[colIdx];
+    if (!col) return false;
+    const type = String(col.dataType ?? col.data_type ?? _colCache[colIdx]?.colType ?? "");
+    if (!isGeometryType(type)) return false;
+    const v = effectiveCellValue(rowIdx, colIdx);
+    if (typeof v !== "string") return false;
+    geomViewerRow = rowIdx;
+    geomViewerCol = colIdx;
+    geomViewerColName = col.name ?? "geometry";
+    geomViewerType = type;
+    geomViewerNullable = col.isNullable ?? col.is_nullable ?? true;
+    geomViewerValue = v;
+    geomViewerOpen = true;
+    return true;
+  }
+
+  /** @param {string | null} next */
+  function commitGeometryViewer(next) {
+    const rowIdx = geomViewerRow, colIdx = geomViewerCol;
+    if (!canEditColumn(colIdx)) return;
+    const prevValue = effectiveCellValue(rowIdx, colIdx);
+    stageEdit(rowIdx, colIdx, next);
+    pastEdits = [...pastEdits.slice(-49), { rowIdx, colIdx, oldValue: prevValue, newValue: next }];
+    futureEdits = [];
   }
 
   /** Open the dedicated array editor for a cell (from the context menu). */
@@ -2300,9 +2405,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (expandedRowHeights.size > 0) expandedRowHeights = new Map();
   }
 
-  const ROW_EXPAND_COL_WIDTH = 40;
-  /** Fits 16px checkbox with equal inset; no extra horizontal padding in cells */
-  const ROW_SELECT_COL_WIDTH = 40;
   // ── Column reorder (display-only) ──────────────────────────────────────────
   // Rows are position-indexed arrays and cells resolve by column *name* (see
   // _nameToActualIdx), so reordering the visible-column list moves NOTHING in the
@@ -2310,7 +2412,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // is the display order of column names; names absent from it keep their natural
   // order after the ordered ones. Persisted per table.
   let columnOrder = $state(/** @type {string[]} */ ([]));
-  const _colOrderKey = $derived(`stroke:colorder:${schema}\x00${tableName}`);
+  const _colOrderKey = $derived(`stroke:colorder:${connectionId}\x00${schema}\x00${tableName}`);
   $effect(() => {
     const key = _colOrderKey;
     untrack(() => {
@@ -2793,11 +2895,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     gutterWidth + columns.reduce((acc, c) => acc + widthForColumn(c.name, c.dataType ?? c.data_type ?? ''), 0)
   )
 
-  // +1 for the trailing auto-width spacer column (keeps real columns stable).
-  const dataColSpan = $derived(visibleColumns.length + 1);
-  const totalColSpan = $derived(
-    (showRowExpand ? 1 : 0) + (showSelection ? 1 : 0) + visibleColumns.length + 1,
-  )
   const navigableColumns = $derived(visibleColumns)
 
   // ── Accessibility: focused-cell announcement ────────────────────────────────
@@ -2818,19 +2915,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const editing = editingCell && editingCell.rowIdx === focusedRow && editingCell.colIdx === ai
     return `Row ${focusedRow + 1} of ${rows.length}, ${col.name}: ${val}${editing ? ', editing' : ''}`
   })
-  /** Map of pinned column name → sticky left offset in px. Gutters are not
-   *  sticky, so pinned columns stick from the left edge (0). */
-  const pinnedOffsets = $derived.by(() => {
-    const map = new Map()
-    let left = 0
-    for (const col of visibleColumns) {
-      if (!pinnedColumns.has(col.name)) continue
-      map.set(col.name, left)
-      left += widthForColumn(col.name, col.dataType ?? col.data_type ?? '')
-    }
-    return map
-  })
-
   // ── Canvas geometry (single source of truth for draw + hit-test) ───────────
   const gutterWidth = $derived(
     (showRowExpand ? GUTTER_EXPAND_W : 0) + (showSelection ? GUTTER_SELECT_W : 0),
@@ -3095,16 +3179,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     return map
   })
 
-  /** Build FK tooltip text for a column. */
-  function fkTooltip(colName) {
-    const fk = findForeignKeyForColumn(foreignKeys, colName)
-    if (!fk) return 'Foreign key'
-    const label = foreignKeyTargetLabel(fk)
-    return label ? `Foreign key → ${label}` : 'Foreign key'
-  }
-
-  /** @param {string} name @param {string} dataType */
-  /** Returns the display width of a column in canvas px (logical × canvasZoom). */
+  /** Returns the display width of a column in canvas px (logical × canvasZoom).
+   *  @param {string} name @param {string} dataType */
   function widthForColumn(name, dataType) {
     const logical = columnWidths[name] ?? defaultColumnWidth(dataType)
     return Math.round(logical * canvasZoom)
@@ -3136,8 +3212,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   /** @param {string} colName */
   function startColumnResize(colName) {
     resizingColName = colName;
-    _zoomGuard.resizing = true
-    _zoomGuard.block = true
     if (colName.startsWith('__vcol__')) {
       const id = colName.slice(8)
       resizeStartWidth = _vexprWidths[id] ?? VEXPR_COL_DEFAULT_W
@@ -3197,11 +3271,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       else saveColumnWidths(columnWidthsKey, columnWidths);
     }
     resizingColName = null;
-    _zoomGuard.resizing = false
-    _zoomGuard.block = false
   }
 
-  /** Cycle sort: none → asc → desc → none */
   /** Current sort keys in priority order: primary (rowSort) then secondary. */
   function currentSortList() {
     return (rowSort ? [rowSort] : []).concat(rowSortMore ?? [])
@@ -3373,7 +3444,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     return () => ro.disconnect()
   })
 
-  /** @param {Event & { currentTarget: HTMLElement }} e */
   // Continuous rAF loop that drives canvas redraws during scroll.
   // Reading scrollTop/scrollLeft inside rAF gives the compositor-synchronized
   // position for the frame being painted, eliminating the 1-frame lag that
@@ -3384,10 +3454,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let _scrollLoopDeadline = 0
   // Last position the loop actually painted - lets it skip identical frames during
   // the momentum tail / step scrolling instead of re-running a full redraw for a
-  // frame where nothing moved. Content changes (hover/edits) go through
-  // scheduleDraw(), not this loop, so skipping unchanged-position frames is safe.
+  // frame where nothing moved. Content changes (hover/edits) arrive through
+  // scheduleDraw(), which folds into this loop via _loopNeedsDraw while it runs,
+  // so skipping unchanged-position frames never drops a requested repaint.
   let _loopLastTop = -1
   let _loopLastLeft = -1
+  // Repaint requested (via scheduleDraw) while the scroll loop owns the frame -
+  // the loop draws it instead of a second rAF double-painting the same frame.
+  let _loopNeedsDraw = false
 
   function startScrollLoop() {
     _scrollLoopDeadline = performance.now() + 200
@@ -3400,6 +3474,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (!el || !_ctx || _fatalError || performance.now() > _scrollLoopDeadline) {
         _scrollLoopId = 0
         _isScrolling = false
+        // A repaint requested on the loop's last frame must not be dropped.
+        if (_loopNeedsDraw) { _loopNeedsDraw = false; scheduleDraw() }
         return
       }
       // Snap to whole CSS pixels. The canvas is sticky-pinned at the viewport's
@@ -3408,12 +3484,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       // which reads as horizontal "vibration". Integer offsets render stably.
       const st = Math.round(el.scrollTop)
       const sl = Math.round(el.scrollLeft)
-      if (st !== _loopLastTop || sl !== _loopLastLeft) {
+      if (st !== _loopLastTop || sl !== _loopLastLeft || _loopNeedsDraw) {
         _physScrollTop = st
         _scrollTop = physToVirt(st)
         _scrollLeft = sl
         _loopLastTop = st
         _loopLastLeft = sl
+        _loopNeedsDraw = false
         try {
           draw()
         } catch (err) {
@@ -3428,6 +3505,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     _scrollLoopId = requestAnimationFrame(loop)
   }
 
+  /** @param {Event & { currentTarget: HTMLElement }} e */
   function onContainerScroll(e) {
     const el = e.currentTarget
     invalidateCanvasRect()
@@ -3536,7 +3614,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // The focused-cell highlight is painted directly on the canvas by draw(),
   // which depends on focusedRow/focusedCol and so repaints on focus changes.
 
-  /** @param {KeyboardEvent} e */
   // ── Experimental Vim mode (grid normal-mode navigation) ─────────────────────
   // Active only while $appVimMode is on and no cell is being edited. Reflects the
   // grid's mode into the shared status-bar indicator.
@@ -3607,6 +3684,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     setVimSubMode(editingCell ? 'insert' : 'normal')
   })
 
+  /** @param {KeyboardEvent} e */
   function handleTableKeydown(e) {
     // Ctrl/Cmd + / - / 0: zoom the whole app (canvas scales in lockstep).
     if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
@@ -3689,7 +3767,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
     // Range selection is disabled - a plain arrow / Tab just collapses any stray
     // range back to the single focused cell. (Shift+Arrow no longer extends a
-    // rectangular range; see the commented range sources below.)
+    // rectangular range; nothing sets selAnchor - see its declaration.)
     if (
       e.key === "ArrowDown" || e.key === "ArrowUp" ||
       e.key === "ArrowRight" || e.key === "ArrowLeft" || e.key === "Tab"
@@ -4030,9 +4108,19 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (gex > 0 && gex < W) vSeps.push(gex)
     }
 
+    // First non-pinned column not entirely left of the viewport - columns are
+    // laid out sequentially (contentX ascending, adjacent), so the index depends
+    // only on scroll, not the row. Computed once per frame so drawBodyRow never
+    // re-scans the off-screen-left tail for every visible row.
+    let firstColIdx = 0
+    for (const col of geom.cols) {
+      if (!col.pinned && col.contentX + col.w - _scrollLeft > 0) break
+      firstColIdx++
+    }
+
     const bodyC = {
       cFg, cText, cMuted, cGrid, cBorder, cMutedBg, cRing, cAccent, cPanel, usedW, navName,
-      AMBER, BLUE_FG, RED, cPrimary, frozenW, tableStyle, dotSize, vSeps,
+      AMBER, BLUE_FG, RED, cPrimary, frozenW, tableStyle, dotSize, vSeps, firstColIdx,
       rangeColNames, rangeFirstCol, rangeLastCol, rangeR0, rangeR1,
     }
 
@@ -4120,10 +4208,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ctx.fillRect(0, ry, c.usedW, rh)
     }
 
-    // Non-pinned cells. geom.cols is ordered by ascending contentX, so once a
-    // column starts past the right viewport edge every later one does too - break
-    // instead of iterating the off-screen tail (matters for very wide tables).
-    for (const col of geom.cols) {
+    // Non-pinned cells. geom.cols is ordered by ascending contentX: start at the
+    // frame's precomputed first visible index (c.firstColIdx) and break once a
+    // column starts past the right viewport edge, so neither off-screen tail is
+    // iterated per row (matters for very wide tables).
+    for (let ci = c.firstColIdx; ci < geom.cols.length; ci++) {
+      const col = geom.cols[ci]
       if (col.pinned) continue
       const dx = col.contentX - _scrollLeft
       if (dx >= _viewportWidth) break
@@ -4194,7 +4284,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       const cw = _vrelLayout[vi].w
       const cellX = _vrelLayout[vi].x - _scrollLeft
       if (cellX + cw <= 0 || cellX >= _viewportWidth) continue
+      // Panel base, then the row's own tint on top: painting only the panel left
+      // the relationship columns dark while the rest of a selected row lit up,
+      // so the highlight stopped mid-row.
       ctx.fillStyle = c.cPanel; ctx.fillRect(cellX, ry, cw, rh)
+      if (_rowBg) { ctx.fillStyle = _rowBg; ctx.fillRect(cellX, ry, cw, rh) }
       const isActive = fkSubview?.rowIdx === idx && fkSubview?.kind === 'reverse' && fkSubview?.label === vc.label
       const isVHov = hoveredRow === idx && hoveredColName === _vrelHoverKeys[vi]
       if (!_fonts) return
@@ -4369,13 +4463,22 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const revealed = dir?.mask && isHover
     // SQL array columns render pgAdmin-style ({a,b}); jsonb arrays stay JSON.
     const isArrayCol = Array.isArray(value) && isSqlArrayType(cached?.colType)
+    const isVectorCol = typeof value === "string" && isVectorType(cached?.colType)
+    // Geometry gets the same treatment as vectors: the type + SRID (+ point
+    // coords) read better than a row of EWKT. geometrySummary only inspects
+    // the header, so it is cheap enough for the draw path.
+    const isGeomCol = typeof value === "string" && isGeometryType(cached?.colType)
     const text = colTf
       ? colTransformText(idx, actualIdx, value, colTf)
       : dir
         ? String(revealed ? (dir.reveal ?? dir.display) : (dir.display ?? displayCell(value)))
         : isArrayCol
           ? arrayDisplay(value)
-          : staged || !rows[idx]
+          : isVectorCol
+            ? vectorDisplay(value, vectorHeads(w))
+            : isGeomCol
+              ? geometrySummary(value)
+              : staged || !rows[idx]
             ? displayCell(value)
             : cellDisplayText(idx, actualIdx, value)
     // NULL glyph when the Empty & NULL Markers plugin is on (formatters skip null).
@@ -4403,9 +4506,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // collide, give up room, and only while the pointer is in the cell.
     const hoverW = isHover ? ICON_HIT + (canExpand ? ICON_HIT : 0) : 0
     const fkW = (activeFk && rowHover) ? 20 : 0
-    // Right-aligned text gets a real gap off the edge rather than the 4px
-    // margin that left-aligned values never actually reach.
-    const rightReserve = (alignRight ? CELL_PAD_X : 4) + (alignRight ? 0 : hoverW) + fkW + warnW
+    // The same gap on both sides. Left-aligned text used to reserve 4px on the
+    // assumption that a value never reaches the right edge — but a *truncated*
+    // value reaches it every time, which put the ellipsis hard against the column
+    // divider and made every long column read as congested.
+    const rightReserve = CELL_PAD_X + (alignRight ? 0 : hoverW) + fkW + warnW
     const hoverLeftReserve = alignRight ? hoverW : 0
 
     // Left-side decorations (color swatch / boolean dot) push the text right.
@@ -4918,6 +5023,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // ProMotion) never queues multiple synchronous repaints and tears/janks.
   let _drawRafId = 0
   function scheduleDraw() {
+    // While the scroll loop owns the frame, hand the request to it instead of
+    // scheduling a second rAF - both call draw(), and letting them race painted
+    // the entire canvas twice per frame during scrolling.
+    if (_scrollLoopId) { _loopNeedsDraw = true; return }
     if (_drawRafId) return
     _drawRafId = requestAnimationFrame(() => {
       _drawRafId = 0
@@ -4939,18 +5048,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     releaseCellImages()
     // Remove any window resize listeners still attached from a drag in progress.
     clearActiveResizeListeners()
-  })
-
-  // End a drag-select on pointer-up anywhere (the release often lands outside the
-  // canvas). Registered on window so it fires regardless of where the pointer is.
-  $effect(() => {
-    const up = () => onCanvasPointerUp()
-    window.addEventListener('pointerup', up)
-    window.addEventListener('pointercancel', up)
-    return () => {
-      window.removeEventListener('pointerup', up)
-      window.removeEventListener('pointercancel', up)
-    }
   })
 
   // Shift+wheel → horizontal scroll. Non-passive so we can call preventDefault,
@@ -5235,25 +5332,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         }
         if (editingCell) cancelEdit()
 
-        // Shift+Click range selection is DISABLED (no current use). The `false &&`
-        // keeps the block intact for easy re-enable; shift+click now falls through
-        // to plain single-cell focus below.
-        if (false && e.shiftKey) {
-          const vi2 = actualToVisColIdx(actualIdx)
-          if (vi2 >= 0) {
-            if (selAnchor === null) {
-              selAnchor = (focusedRow !== null && focusedCol !== null)
-                ? { row: focusedRow, col: focusedCol }
-                : { row: idx, col: vi2 }
-            }
-            focusedRow = idx
-            focusedCol = vi2
-            scheduleDraw()
-          }
-          tableContainer?.focus({ preventScroll: true })
-          return
-        }
-
         clearCellRange() // plain click collapses any rectangular range
         focusedRow = idx
         const vi = actualToVisColIdx(actualIdx)
@@ -5381,7 +5459,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   /** @param {string} colName */
   function onResizeHandleEnter(colName) {
     _resizeHoverCol = colName
-    _zoomGuard.block = true
     void import('@tauri-apps/api/webview')
       .then(({ getCurrentWebview }) => getCurrentWebview().setZoom(1))
       .catch(() => {})
@@ -5390,70 +5467,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   function onResizeHandleLeave() {
     if (!resizingColName) {
       _resizeHoverCol = null
-      _zoomGuard.block = false
     }
-  }
-
-  function onCanvasPointerDown(/** @type {PointerEvent} */ e) {
-    if (e.button !== 0) return
-    const { x, y } = canvasXY(e)
-    // Header resize is handled by the DOM overlay - canvas only handles body.
-    if (y < HEADER_H) return
-    // Record the cell for a potential drag-select; the range only begins once the
-    // pointer moves past a small threshold (so plain clicks keep their behavior).
-    const t = hitTest(x, y)
-    if (t.kind === 'cell') {
-      const vi = actualToVisColIdx(/** @type {number} */ (t.actualIdx))
-      if (vi >= 0) _rangeDownCell = { row: /** @type {number} */ (t.idx), col: vi, x, y }
-    } else {
-      _rangeDownCell = null
-    }
-  }
-
-  function onCanvasPointerUp() {
-    if (_rangeDragging) {
-      _rangeDragging = false
-      _suppressNextClick = true // the drag already set focus/range; don't run the click action
-      // Focus the grid so ⌘C (copy range as TSV) and Shift+Arrow are captured.
-      tableContainer?.focus({ preventScroll: true })
-    }
-    _rangeDownCell = null
   }
 
   function onCanvasPointerMove(/** @type {PointerEvent} */ e) {
     const { x, y } = canvasXY(e)
     if (resizingColName) return
-
-    // Drag-select of a rectangular cell range is DISABLED (no current use). The
-    // `false &&` keeps the block for easy re-enable; drag now does nothing here
-    // and falls through to the hover logic below.
-    if (false && _rangeDownCell && (e.buttons & 1)) {
-      if (!_rangeDragging) {
-        if (Math.abs(x - _rangeDownCell.x) > 4 || Math.abs(y - _rangeDownCell.y) > 4) {
-          _rangeDragging = true
-          selAnchor = { row: _rangeDownCell.row, col: _rangeDownCell.col }
-          focusedRow = _rangeDownCell.row
-          focusedCol = _rangeDownCell.col
-          if (selectedCols.size) { selectedCols = new Set(); _lastHeaderClickedCol = null }
-        }
-      }
-      if (_rangeDragging) {
-        const t = hitTest(x, y)
-        if (t.kind === 'cell') {
-          const vi = actualToVisColIdx(/** @type {number} */ (t.actualIdx))
-          if (vi >= 0) {
-            focusedRow = /** @type {number} */ (t.idx)
-            focusedCol = vi
-            scrollRowIntoView(/** @type {number} */ (t.idx))
-          }
-        }
-        scheduleDraw()
-        return
-      }
-    }
     if (y < HEADER_H) {
       _resizeHoverCol = null
-      _zoomGuard.block = false
       const cx = x + _scrollLeft
       const hit = cx >= gutterWidth ? colAtX(x, geom, _scrollLeft, 0) : null
       hoveredRow = null
@@ -5461,7 +5482,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       return
     }
     _resizeHoverCol = null
-    _zoomGuard.block = false
     // Check virtual expr columns (between real cols and vrel cols)
     if (y >= HEADER_H && _vexprLayout.length > 0) {
       const cx = x + _scrollLeft
@@ -5469,7 +5489,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         if (cx >= vc.x && cx < vc.x + vc.w) {
           const bodyY = y + _scrollTop - HEADER_H - insertRowOffset
           const r = rowAtContentY(rowTops, rows.length, ROW_HEIGHT, bodyY)
-          if (r?.inRowBody) { hoveredRow = r.idx; hoveredColName = `__vcol__${vc.id}` }
+          if (r?.inRowBody) { hoveredRow = r.idx; hoveredColName = vc.hoverKey }
           return
         }
       }
@@ -5481,7 +5501,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (vi >= 0) {
         const bodyY = y + _scrollTop - HEADER_H - insertRowOffset
         const r = rowAtContentY(rowTops, rows.length, ROW_HEIGHT, bodyY)
-        if (r?.inRowBody) { hoveredRow = r.idx; hoveredColName = `__vrel__${vi}` }
+        if (r?.inRowBody) { hoveredRow = r.idx; hoveredColName = _vrelHoverKeys[vi] }
         return
       }
     }
@@ -5501,12 +5521,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
   }
 
-  /** Right-click: record the target so the single ContextMenu shows the right items. */
   function onCanvasPointerLeave() {
     hoveredRow = null
     hoveredColName = null
     _resizeHoverCol = null
-    _zoomGuard.block = false
   }
 
   // Re-sync canvas backing store when devicePixelRatio changes (stray webview
@@ -5529,6 +5547,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
   })
 
+  /** Right-click: record the target so the single ContextMenu shows the right items. */
   function onCanvasContextMenu(/** @type {MouseEvent} */ e, /** @type {((e: MouseEvent) => void) | undefined} */ bitsOpen) {
     const { x, y } = canvasXY(e)
     // Check virtual expr column header right-click (not caught by hitTest)
@@ -5537,7 +5556,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       for (const vc of _vexprLayout) {
         if (cx >= vc.x && cx < vc.x + vc.w) {
           contextIsHeader = true
-          contextHeaderCol = `__vcol__${vc.id}`
+          contextHeaderCol = vc.hoverKey
           bitsOpen?.(e)
           return
         }
@@ -5554,7 +5573,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       contextIsHeader = false
       contextRowIdx = /** @type {number} */ (t.idx)
       contextColIdx = t.kind === 'cell' ? /** @type {number} */ (t.actualIdx) : 0
-      pendingContextMenu = true
       bitsOpen?.(e)
       return
     }
@@ -5584,6 +5602,17 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     scrollToTop = () => {}
     scrollToBottom = () => {}
     beginInsertRow = () => {}
+    // Reset every other parent-bound closure too - StudioShell keeps these in
+    // its own $state, so a stale one would retain this destroyed instance's
+    // whole scope (display caches, expandedRows, FK sub-view rows).
+    scrollToLeft = () => {}
+    scrollToRight = () => {}
+    focusColumn = () => {}
+    focusCell = () => {}
+    getScroll = () => ({ left: 0, top: 0 })
+    getExpanded = () => []
+    applyScroll = () => {}
+    stageDeleteSelected = () => {}
   })
 </script>
 
@@ -5598,7 +5627,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (open) {
         armMenuSelectGuard();
       } else {
-        pendingContextMenu = false;
         suppressMenuSelect = false;
       }
     }}
@@ -5661,7 +5689,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               onclick={guarded(onCanvasClick)}
               ondblclick={guarded(onCanvasDblClick)}
               onauxclick={guarded(onCanvasAuxClick)}
-              onpointerdown={guarded(onCanvasPointerDown)}
               onpointermove={guarded(onCanvasPointerMove)}
               onpointerleave={guarded(onCanvasPointerLeave)}
             ></canvas>
@@ -5745,7 +5772,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                   {/if}
                   {#each columns as col (col.name)}
                     {@const dt = col.dataType ?? col.data_type ?? ''}
-                    {@const isAuto = isLikelyAutoColumn(dt, col.name, primaryKey)}
+                    {@const omit = insertOmitBehaviour(col, primaryKey)}
+                    {@const isAuto = omit === 'auto'}
+                    {@const blankLabel = omit === 'default' ? 'default' : omit === 'null' ? 'NULL' : 'Required'}
+                    <!-- Only a Required blank stops the insert, so only it is
+                         worth noticing before you submit. The rest describe a
+                         value the database will supply and recede accordingly —
+                         nothing is wrong yet, so nothing is coloured as wrong. -->
+                    {@const blankClass = omit === 'required'
+                      ? 'placeholder:text-muted-foreground/60'
+                      : 'placeholder:italic placeholder:text-muted-foreground/35'}
                     {@const enumValues = getColumnEnumValues(col)}
                     {@const isBoolean = isBooleanType(dt)}
                     {@const isDateTime = shouldUseDateTimePicker(dt, col.name)}
@@ -5754,52 +5790,51 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                     {@const colWidth = widthForColumn(col.name, dt)}
                     <div class="flex shrink-0 items-center overflow-hidden border-r border-border/20 px-2" style="width:{colWidth}px">
                       {#if isAuto}
-                        <span class="select-none font-mono text-ui-sm text-muted-foreground/35 italic">auto</span>
+                        <!-- Writable, with the generated value as the placeholder.
+                             Leaving it blank is the normal path and the label says
+                             so; typing an explicit id is legitimate (importing a
+                             row that must keep its key, backfilling a gap) and
+                             refusing it means dropping to raw SQL for a one-cell
+                             exception. Empty still omits the column entirely, so
+                             the sequence is untouched unless you overrule it. -->
+                        <KeyRound class="mr-1 size-3 shrink-0 text-muted-foreground/40" />
+                        <input
+                          data-new-row-input={col.name}
+                          type="text"
+                          disabled={insertSaving}
+                          placeholder={dt.toLowerCase().includes('int') || dt.toLowerCase().includes('serial')
+                            ? 'auto-increment'
+                            : 'generated'}
+                          title="The database fills this in. Type a value only to override it."
+                          class="w-full min-w-0 bg-transparent font-mono text-ui-sm text-foreground outline-none placeholder:italic placeholder:text-muted-foreground/35 disabled:opacity-50"
+                          value={newRowDrafts[col.name] ?? ''}
+                          oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
+                          onfocus={() => (newRowFocusCol = col.name)}
+                        />
                       {:else if enumValues}
-                        <Select.Root
-                          type="single"
+                        <InsertValuePicker
+                          colName={col.name}
+                          options={enumValues}
                           value={newRowDrafts[col.name] ?? ''}
-                          onValueChange={(v) => setNewRowDraft(col.name, v ?? '')}
-                        >
-                          <Select.Trigger
-                            data-new-row-input={col.name}
-                            disabled={insertSaving}
-                            onfocus={() => (newRowFocusCol = col.name)}
-                            class="h-7 w-full min-w-0 rounded-md border-0 bg-transparent px-1 py-0 font-mono text-ui-sm text-foreground shadow-none focus-visible:ring-0 disabled:opacity-50"
-                          >
-                            <span data-slot="select-value" class={cn('truncate', !newRowDrafts[col.name] && 'text-muted-foreground/50')}>
-                              {newRowDrafts[col.name] || (col.nullable ? 'NULL / default' : 'Select…')}
-                            </span>
-                          </Select.Trigger>
-                          <Select.Content align="start" sideOffset={4} class="max-h-64 p-1">
-                            <Select.Item value="" label={col.nullable ? 'NULL / default' : 'Select…'} class="py-1.5 pl-2.5 pr-8 font-mono text-ui-sm text-muted-foreground">{col.nullable ? 'NULL / default' : 'Select…'}</Select.Item>
-                            {#each enumValues as opt (opt)}
-                              <Select.Item value={opt} label={opt} class="py-1.5 pl-2.5 pr-8 font-mono text-ui-sm">{opt}</Select.Item>
-                            {/each}
-                          </Select.Content>
-                        </Select.Root>
+                          emptyLabel={blankLabel}
+                          placeholder={blankLabel}
+                          placeholderClass={blankClass}
+                          disabled={insertSaving}
+                          onchange={(v) => setNewRowDraft(col.name, v)}
+                          onfocus={() => (newRowFocusCol = col.name)}
+                        />
                       {:else if isBoolean}
-                        <Select.Root
-                          type="single"
+                        <InsertValuePicker
+                          colName={col.name}
+                          options={['true', 'false']}
                           value={newRowDrafts[col.name] ?? ''}
-                          onValueChange={(v) => setNewRowDraft(col.name, v ?? '')}
-                        >
-                          <Select.Trigger
-                            data-new-row-input={col.name}
-                            disabled={insertSaving}
-                            onfocus={() => (newRowFocusCol = col.name)}
-                            class="h-7 w-full min-w-0 rounded-md border-0 bg-transparent px-1 py-0 font-mono text-ui-sm text-foreground shadow-none focus-visible:ring-0 disabled:opacity-50"
-                          >
-                            <span data-slot="select-value" class={cn('truncate', !newRowDrafts[col.name] && 'text-muted-foreground/50')}>
-                              {newRowDrafts[col.name] || (col.nullable ? 'NULL / default' : 'Default')}
-                            </span>
-                          </Select.Trigger>
-                          <Select.Content align="start" sideOffset={4} class="min-w-[8rem] p-1">
-                            <Select.Item value="" label={col.nullable ? 'NULL / default' : 'Default'} class="py-1.5 pl-2.5 pr-8 font-mono text-ui-sm text-muted-foreground">{col.nullable ? 'NULL / default' : 'Default'}</Select.Item>
-                            <Select.Item value="true" label="true" class="py-1.5 pl-2.5 pr-8 font-mono text-ui-sm">true</Select.Item>
-                            <Select.Item value="false" label="false" class="py-1.5 pl-2.5 pr-8 font-mono text-ui-sm">false</Select.Item>
-                          </Select.Content>
-                        </Select.Root>
+                          emptyLabel={blankLabel}
+                          placeholder={blankLabel}
+                          placeholderClass={blankClass}
+                          disabled={insertSaving}
+                          onchange={(v) => setNewRowDraft(col.name, v)}
+                          onfocus={() => (newRowFocusCol = col.name)}
+                        />
                       {:else if isDateTime}
                         <DateTimePicker
                           colName={col.name}
@@ -5833,8 +5868,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                           data-new-row-input={col.name}
                           type="text"
                           disabled={insertSaving}
-                          placeholder={col.nullable ? 'NULL or value' : 'Required'}
-                          class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none placeholder:text-muted-foreground/40 disabled:opacity-50"
+                          placeholder={blankLabel}
+                          class={cn(
+                            "w-full bg-transparent font-mono text-ui-sm text-foreground outline-none disabled:opacity-50",
+                            blankClass,
+                          )}
                           value={newRowDrafts[col.name] ?? ''}
                           oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
                           onfocus={() => (newRowFocusCol = col.name)}
@@ -5855,6 +5893,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                 <RowExpandViewer
                   record={rowToRecord(columns, rows[exIdx], hiddenColumns)}
                   rowLabel={"row " + (exIdx + 1)}
+                  indent={gutterWidth}
                   onclose={() => toggleRowExpand(exIdx)}
                   onopenjson={(value, label) => {
                     void prefetchJsonLightbox()
@@ -5948,13 +5987,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                       </Select.Trigger>
                       <Select.Content align="start" sideOffset={2} class="max-h-64 min-w-[var(--bits-select-anchor-width)] p-1">
                         {#if eNullable}
-                          <Select.Item value="" label="NULL" class="py-1.5 pl-2.5 pr-8 font-mono text-ui-sm text-muted-foreground">NULL</Select.Item>
+                          <Select.Item value="" label="NULL" class="font-mono text-ui-xs text-muted-foreground">NULL</Select.Item>
                         {/if}
                         {#if editingCell?.original && !eEnum.includes(editingCell.original)}
-                          <Select.Item value={editingCell.original} label={editingCell.original} class="py-1.5 pl-2.5 pr-8 font-mono text-ui-sm">{editingCell.original}</Select.Item>
+                          <Select.Item value={editingCell.original} label={editingCell.original} class="font-mono text-ui-xs">{editingCell.original}</Select.Item>
                         {/if}
                         {#each eEnum as option (option)}
-                          <Select.Item value={option} label={option} class="py-1.5 pl-2.5 pr-8 font-mono text-ui-sm">{option}</Select.Item>
+                          <Select.Item value={option} label={option} class="font-mono text-ui-xs">{option}</Select.Item>
                         {/each}
                       </Select.Content>
                     </Select.Root>
@@ -6103,10 +6142,21 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               </div>
             </div>
           {:else if rows.length === 0 && !newRowDrafts}
+            <!-- "No rows" is a claim about the data, so it must never be shown
+                 while a fetch is still running. The full-page skeleton above
+                 only covers the first load (no columns yet); every later fetch
+                 that empties the grid — a re-query, or the second half of a
+                 windowed load — lands here, and without this it would assert
+                 the table is empty for the whole of a multi-second read. -->
             <div class="pointer-events-none absolute inset-0 z-[3] flex items-center justify-center" role="status" aria-live="polite">
               <div class="flex flex-col items-center gap-2 px-4 text-center">
-                <Table2 class="size-8 text-muted-foreground/25" />
-                <p class="text-ui-sm text-muted-foreground">No rows in this table</p>
+                {#if loading}
+                  <Loader class="size-5 animate-spin text-muted-foreground/40" />
+                  <p class="text-ui-sm text-muted-foreground">Loading rows…</p>
+                {:else}
+                  <Table2 class="size-8 text-muted-foreground/25" />
+                  <p class="text-ui-sm text-muted-foreground">No rows in this table</p>
+                {/if}
               </div>
             </div>
           {/if}
@@ -6635,6 +6685,26 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     />
   {/await}
 {/if}
+
+<VectorCellViewer
+  bind:open={vectorViewerOpen}
+  column={vectorViewerColName}
+  dataType={vectorViewerType}
+  nullable={vectorViewerNullable}
+  readOnly={readonly}
+  value={vectorViewerValue}
+  onsave={commitVectorViewer}
+/>
+
+<GeometryCellViewer
+  bind:open={geomViewerOpen}
+  column={geomViewerColName}
+  dataType={geomViewerType}
+  nullable={geomViewerNullable}
+  readOnly={readonly}
+  value={geomViewerValue}
+  onsave={commitGeometryViewer}
+/>
 
 <ArrayCellEditor
   bind:open={arrayEditorOpen}

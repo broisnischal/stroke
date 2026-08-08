@@ -1,4 +1,5 @@
 <script>
+  import { startTelemetry, stopTelemetry } from "$lib/telemetry.js";
   import Minus from "@lucide/svelte/icons/minus";
   import Plus from "@lucide/svelte/icons/plus";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
@@ -34,10 +35,9 @@
   } from "$lib/stores/settings.js";
   import { aiProfiles, activeProfileId, setActiveProfile } from "$lib/stores/ai-settings.js";
   import PenTool from "@lucide/svelte/icons/pen-tool";
-  import LucideSearch from "@lucide/svelte/icons/search";
   import LucideSparkles from "@lucide/svelte/icons/sparkles";
   import { HugeiconsIcon } from "@hugeicons/svelte";
-  import { Search01Icon, SparklesIcon } from "@hugeicons/core-free-icons";
+  import { SparklesIcon } from "@hugeicons/core-free-icons";
   import PhosphorSparkle from "phosphor-svelte/lib/Sparkle";
   import Icon from "./Icon.svelte";
   import { cn } from "$lib/utils.js";
@@ -254,6 +254,13 @@
   function toggleAgentWebAccess() {
     settings = updateSettings({ agentWebAccess: !settings.agentWebAccess });
   }
+  function toggleTelemetry() {
+    settings = updateSettings({ telemetry: !settings.telemetry });
+    // Takes effect immediately rather than at next launch: a privacy switch
+    // that needs a restart to mean anything is not a privacy switch.
+    if (!settings.telemetry) stopTelemetry();
+    else startTelemetry();
+  }
   const thinkingStyleOption = $derived(
     THINKING_STYLES.find((s) => s.id === settings.agentThinkingStyle) ?? THINKING_STYLES[0],
   );
@@ -318,7 +325,7 @@
           <input
             bind:value={query}
             placeholder="Search settings…"
-            class="h-8 w-full rounded-lg border border-border bg-background pl-8 pr-2.5 text-ui-xs text-foreground outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+            class="h-8 w-full rounded-lg border-2 border-border bg-background pl-8 pr-2.5 text-ui-xs text-foreground outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
           />
         </div>
         <nav class="flex flex-col gap-0.5">
@@ -449,7 +456,7 @@
           aria-label={label}
           onchange={(e) => setNumber(/** @type {any} */ (key), e.currentTarget.value, def, min)}
           class={cn(
-            'h-8 w-48 rounded-lg border border-border bg-background pl-2.5 text-right font-mono text-ui-xs tabular-nums text-foreground outline-none transition-[border-color,box-shadow] focus:border-ring/55 focus:ring-2 focus:ring-ring/15',
+            'h-8 w-48 rounded-lg border-2 border-border bg-background pl-2.5 text-right font-mono text-ui-xs tabular-nums text-foreground outline-none transition-[border-color,box-shadow] focus:border-ring/55 focus:ring-2 focus:ring-ring/15',
             unit ? 'pr-11' : 'pr-2.5',
           )}
         />
@@ -472,7 +479,7 @@
         value={settings[key]}
         aria-label={label}
         onchange={(e) => setText(/** @type {any} */ (key), e.currentTarget.value, def)}
-        class="h-8 w-48 rounded-lg border border-border bg-background px-2.5 font-mono text-ui-xs text-foreground outline-none transition-[border-color,box-shadow] focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+        class="h-8 w-48 rounded-lg border-2 border-border bg-background px-2.5 font-mono text-ui-xs text-foreground outline-none transition-[border-color,box-shadow] focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
       />
       {@render resetBtn(key, def, settings[key] !== def)}
     </div>
@@ -570,7 +577,7 @@
     </div>
   {/if}
   {#if show('Models & API keys', 'Add providers, models and API keys')}
-    {@render actionRow('Models & API keys', 'Add providers, choose models and store API keys for OpenAI, Google Gemini, Anthropic and OpenRouter.', 'Manage', () => { open = false; onopenmodelconfiguration(); })}
+    {@render actionRow('Models & API keys', 'Add providers, choose models and store API keys for OpenAI, Google Gemini, Anthropic and OpenRouter.', 'Manage', openModelConfiguration)}
   {/if}
 
   {@render secLabel('Chat UI')}
@@ -622,6 +629,14 @@
       'Let the agent search the web and read pages for things your database cannot answer — error codes, function syntax, current docs. Your search terms leave your machine when it does.',
       settings.agentWebAccess,
       toggleAgentWebAccess,
+    )}
+  {/if}
+  {#if show('Anonymous usage data', 'Help decide what to build next')}
+    {@render switchRow(
+      'Anonymous usage data',
+      'Sends which features you use, how often, the app version and your OS — nothing else. No queries, no table or database names, no connection details, and nothing about the data you browse. Turning it off takes effect immediately.',
+      settings.telemetry,
+      toggleTelemetry,
     )}
   {/if}
   {#if show('Show query cards', 'Display the SQL the agent ran and the rows it returned')}
@@ -681,7 +696,7 @@
             type="button"
             aria-label="Color theme"
             class={cn(
-              "flex h-8 w-56 items-center justify-between gap-2 whitespace-nowrap rounded-[10px] border border-border/70 bg-background px-2.5 text-ui-xs font-normal shadow-none outline-none transition-colors hover:bg-muted/30 focus-visible:border-ring/55 focus-visible:ring-1 focus-visible:ring-ring/18 data-[state=open]:border-ring",
+              "flex h-8 w-56 items-center justify-between gap-2 whitespace-nowrap rounded-[10px] border-2 border-border/70 bg-background px-2.5 text-ui-xs font-normal shadow-none outline-none transition-colors hover:bg-muted/30 focus-visible:border-ring/55 focus-visible:ring-1 focus-visible:ring-ring/18 data-[state=open]:border-ring",
             )}
           >
             <span class="flex min-w-0 items-center gap-2">

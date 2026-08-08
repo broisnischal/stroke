@@ -1,4 +1,5 @@
 <script>
+  import FieldSelect from './FieldSelect.svelte';
   import { tick } from 'svelte'
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import { executeSql } from '$lib/api.js'
@@ -56,16 +57,33 @@
     el.setPointerCapture(e.pointerId)
     const startX = e.clientX
     const startW = colWidths[idx]
-    /** @param {PointerEvent} ev */
-    function onMove(ev) {
+    let raf = 0
+    let lastX = startX
+    function applyWidth() {
       // Right-only: only allow increasing the column width
-      const delta = Math.max(0, ev.clientX - startX)
+      const delta = Math.max(0, lastX - startX)
       colWidths = colWidths.map((w, i) => i === idx ? Math.max(40, startW + delta) : w)
     }
     /** @param {PointerEvent} ev */
-    function onUp(ev) { el.releasePointerCapture(ev.pointerId); el.removeEventListener('pointermove', onMove); el.removeEventListener('pointerup', onUp) }
+    function onMove(ev) {
+      // rAF-coalesced: rebuilding colWidths relayouts the whole table, so
+      // apply at most one width per frame instead of per raw pointermove.
+      lastX = ev.clientX
+      if (raf) return
+      raf = requestAnimationFrame(() => { raf = 0; applyWidth() })
+    }
+    /** @param {PointerEvent} ev */
+    function onUp(ev) {
+      if (raf) { cancelAnimationFrame(raf); raf = 0; applyWidth() }
+      // Capture is already released on pointercancel - releasing again throws.
+      try { el.releasePointerCapture(ev.pointerId) } catch {}
+      el.removeEventListener('pointermove', onMove)
+      el.removeEventListener('pointerup', onUp)
+      el.removeEventListener('pointercancel', onUp)
+    }
     el.addEventListener('pointermove', onMove)
     el.addEventListener('pointerup', onUp)
+    el.addEventListener('pointercancel', onUp)
   }
 
   // ── Pending DDL state (staged changes, applied on explicit Apply) ─────────
@@ -540,7 +558,11 @@
         </colgroup>
         <thead class="sticky top-0 z-20">
           <tr>
-            {#each ['#','column_name','data_type','is_nullable','column_default','foreign_key','comment'] as label, i}
+            <!-- Human labels, not catalog identifiers: `is_nullable` /
+                 `column_default` are the names of pg_catalog fields, not the names
+                 of the things in front of the user. The header row is already an
+                 uppercase micro-label, so the underscores added nothing but noise. -->
+            {#each ['#','Name','Type','Nullable','Default','Foreign key','Comment'] as label, i}
               <th class={TH} style="height:36px">
                 <span class="block truncate pr-3">{label}</span>
                 <!-- Resize handle: right-edge only, drag right to expand -->
@@ -647,18 +669,14 @@
               <!-- is_nullable -->
               <td class="{TD} {stagedValues['nullable:' + col.name] !== undefined ? 'ring-1 ring-inset ring-warning/50' : ''}">
                 <div class="relative flex h-full items-center px-3">
-                  <select
+                  <FieldSelect
+                    size="sm"
+                    class="w-full border-0 bg-transparent px-0 text-ui-sm {displayNullable ? 'text-foreground' : 'text-muted-foreground'} {stagedValues['nullable:' + col.name] !== undefined ? 'text-warning/90' : ''}"
                     value={displayNullable ? 'YES' : 'NO'}
                     disabled={isPk || !canEdit}
-                    class="w-full appearance-none border-0 bg-transparent py-0 font-mono text-ui-sm focus:outline-none disabled:cursor-not-allowed disabled:opacity-40 {displayNullable ? 'text-foreground' : 'text-muted-foreground'} {stagedValues['nullable:' + col.name] !== undefined ? 'text-warning/90' : ''}"
-                    onchange={(e) => stageNullable(col.name, /** @type {HTMLSelectElement} */ (e.target).value === 'YES')}
-                  >
-                    <option value="YES">YES</option>
-                    <option value="NO">NO</option>
-                  </select>
-                  <span class="pointer-events-none absolute right-1.5 text-muted-foreground/40">
-                    <svg class="size-3.5" viewBox="0 0 10 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4.5l3-3 3 3M2 7.5l3 3 3-3"/></svg>
-                  </span>
+                    onchange={(v) => stageNullable(col.name, v === 'YES')}
+                    options={[{ value: 'YES', label: 'YES' }, { value: 'NO', label: 'NO' }]}
+                  />
                 </div>
               </td>
 
@@ -801,14 +819,13 @@
               </td>
               <td class={TD}>
                 <div class="relative flex h-full items-center px-3">
-                  <select bind:value={newColumn.isNullable}
-                    class="w-full appearance-none border-0 bg-transparent py-0 font-mono text-ui-sm focus:outline-none {newColumn.isNullable ? 'text-foreground' : 'text-muted-foreground'}">
-                    <option value={true}>YES</option>
-                    <option value={false}>NO</option>
-                  </select>
-                  <span class="pointer-events-none absolute right-1.5 text-muted-foreground/40">
-                    <svg class="size-3.5" viewBox="0 0 10 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4.5l3-3 3 3M2 7.5l3 3 3-3"/></svg>
-                  </span>
+                  <FieldSelect
+                    size="sm"
+                    class="w-full border-0 bg-transparent px-0 text-ui-sm {newColumn.isNullable ? 'text-foreground' : 'text-muted-foreground'}"
+                    value={newColumn.isNullable ? 'YES' : 'NO'}
+                    onchange={(v) => (newColumn.isNullable = v === 'YES')}
+                    options={[{ value: 'YES', label: 'YES' }, { value: 'NO', label: 'NO' }]}
+                  />
                 </div>
               </td>
               <td class={TD}>

@@ -43,10 +43,6 @@
     /** Whether the closed-tab stack has anything to reopen. */
     canreopenclosed = false,
     onpintoggle = /** @param {string} _id */ (_id) => {},
-    onnew = () => {},
-    /** @type {import('$lib/stores/recent-tabs.js').RecentTab[]} */
-    recentTabs = [],
-    onrecentselect = /** @type {(schema: string, table: string) => void} */ (() => {}),
     /** Pointer-based tab drag → split panes. Start/move/end drive the drop hints. */
     ondragtabstart = /** @param {string} _id */ (_id) => {},
     ondragtabmove = /** @type {(clientX: number, clientY: number) => void} */ (() => {}),
@@ -65,6 +61,7 @@
     _tabDrag = { id, startX: e.clientX, startY: e.clientY, active: false }
     window.addEventListener('pointermove', tabPointerMove)
     window.addEventListener('pointerup', tabPointerUp)
+    window.addEventListener('pointercancel', tabPointerUp)
   }
   /** @param {PointerEvent} e */
   function tabPointerMove(e) {
@@ -79,6 +76,7 @@
   function tabPointerUp() {
     window.removeEventListener('pointermove', tabPointerMove)
     window.removeEventListener('pointerup', tabPointerUp)
+    window.removeEventListener('pointercancel', tabPointerUp)
     if (_tabDrag?.active) { _suppressTabClick = true; ondragtabend() }
     _tabDrag = null
   }
@@ -106,8 +104,10 @@
     if (tab.kind === 'ai') return 'bot'
     if (tab.kind === 'schema') return 'layout-template'
     if (tab.kind === 'orm') return 'code-2'
+    if (tab.kind === 'orm-schema') return 'file-text'
     if (tab.kind === 'security') return 'shield-check'
     if (tab.kind === 'extensions') return 'blocks'
+    if (tab.kind === 'map') return 'globe'
     if (tab.kind === 'search') return 'search'
     if (tab.kind === 'license') return 'key-round'
     return 'file-text'

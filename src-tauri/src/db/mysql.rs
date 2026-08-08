@@ -24,6 +24,55 @@ pub fn cell_to_json(row: &sqlx::mysql::MySqlRow, idx: usize) -> Value {
             return v.map(|d| json!(d.to_string())).unwrap_or(Value::Null);
         }
     }
+    // Fast path: route the common column types by name so a plain text/date cell
+    // doesn't pay for a cascade of failed try_get attempts (each mismatch makes
+    // sqlx allocate a boxed "mismatched types" error — up to 9 per text cell).
+    // A failed route falls through to the full chain below, so unmatched or
+    // alias types behave exactly as before.
+    match type_name {
+        "VARCHAR" | "CHAR" | "TEXT" | "TINYTEXT" | "MEDIUMTEXT" | "LONGTEXT" | "ENUM" | "SET" => {
+            if let Ok(v) = row.try_get::<Option<String>, _>(idx) {
+                return text_cell(row, idx, v);
+            }
+        }
+        "TINYINT" | "SMALLINT" | "MEDIUMINT" | "INT" | "BIGINT" => {
+            if let Ok(v) = row.try_get::<Option<i64>, _>(idx) {
+                return v.map(|n| json!(n)).unwrap_or(Value::Null);
+            }
+        }
+        "TINYINT UNSIGNED" | "SMALLINT UNSIGNED" | "MEDIUMINT UNSIGNED" | "INT UNSIGNED"
+        | "BIGINT UNSIGNED" => {
+            if let Ok(v) = row.try_get::<Option<u64>, _>(idx) {
+                return v.map(|n| json!(n)).unwrap_or(Value::Null);
+            }
+        }
+        "FLOAT" | "DOUBLE" => {
+            if let Ok(v) = row.try_get::<Option<f64>, _>(idx) {
+                return v.map(|n| json!(n)).unwrap_or(Value::Null);
+            }
+        }
+        "DATETIME" | "TIMESTAMP" => {
+            if let Ok(v) = row.try_get::<Option<NaiveDateTime>, _>(idx) {
+                return v.map(|d| json!(d.to_string())).unwrap_or(Value::Null);
+            }
+        }
+        "DATE" => {
+            if let Ok(v) = row.try_get::<Option<NaiveDate>, _>(idx) {
+                return v.map(|d| json!(d.to_string())).unwrap_or(Value::Null);
+            }
+        }
+        "TIME" => {
+            if let Ok(v) = row.try_get::<Option<NaiveTime>, _>(idx) {
+                return v.map(|t| json!(t.to_string())).unwrap_or(Value::Null);
+            }
+        }
+        "JSON" => {
+            if let Ok(v) = row.try_get::<Option<serde_json::Value>, _>(idx) {
+                return json_cell(row, idx, v);
+            }
+        }
+        _ => {}
+    }
     if let Ok(v) = row.try_get::<Option<i64>, _>(idx) {
         return v.map(|n| json!(n)).unwrap_or(Value::Null);
     }
@@ -49,31 +98,40 @@ pub fn cell_to_json(row: &sqlx::mysql::MySqlRow, idx: usize) -> Value {
         return v.map(|t| json!(t.to_string())).unwrap_or(Value::Null);
     }
     if let Ok(v) = row.try_get::<Option<serde_json::Value>, _>(idx) {
-        return match v {
-            // Cap oversized JSON documents — a multi-MB cell shipped whole
-            // freezes the webview (see sql_util::CELL_VALUE_CAP).
-            Some(val) => super::sql_util::cap_json_value(
-                &row.column(idx).type_info().name().to_lowercase(),
-                val,
-            ),
-            None => Value::Null,
-        };
+        return json_cell(row, idx, v);
     }
     if let Ok(v) = row.try_get::<Option<String>, _>(idx) {
-        return match v {
-            Some(s) if s.len() > super::sql_util::CELL_VALUE_CAP => super::sql_util::oversize_cell(
-                &row.column(idx).type_info().name().to_lowercase(),
-                s.len(),
-                s.as_bytes(),
-            ),
-            Some(s) => json!(s),
-            None => Value::Null,
-        };
+        return text_cell(row, idx, v);
     }
     if let Ok(v) = row.try_get::<Option<Vec<u8>>, _>(idx) {
         return v.map(|b| json!(format!("[{} bytes]", b.len()))).unwrap_or(Value::Null);
     }
     Value::Null
+}
+
+/// String cell, capped — a multi-MB cell shipped whole freezes the webview
+/// (see sql_util::CELL_VALUE_CAP).
+fn text_cell(row: &sqlx::mysql::MySqlRow, idx: usize, v: Option<String>) -> Value {
+    match v {
+        Some(s) if s.len() > super::sql_util::CELL_VALUE_CAP => super::sql_util::oversize_cell(
+            &row.column(idx).type_info().name().to_lowercase(),
+            s.len(),
+            s.as_bytes(),
+        ),
+        Some(s) => json!(s),
+        None => Value::Null,
+    }
+}
+
+/// JSON document cell, capped the same way as text.
+fn json_cell(row: &sqlx::mysql::MySqlRow, idx: usize, v: Option<serde_json::Value>) -> Value {
+    match v {
+        Some(val) => super::sql_util::cap_json_value(
+            &row.column(idx).type_info().name().to_lowercase(),
+            val,
+        ),
+        None => Value::Null,
+    }
 }
 
 pub async fn fetch_primary_key(pool: &MySqlPool, schema: &str, table: &str) -> Result<Vec<String>, String> {
@@ -87,20 +145,6 @@ pub async fn fetch_primary_key(pool: &MySqlPool, schema: &str, table: &str) -> R
     .fetch_all(pool)
     .await
     .map_err(|e| format!("Failed to load primary key: {e}"))?;
-    Ok(rows.iter().filter_map(|r| r.try_get::<String, _>(0).ok()).collect())
-}
-
-async fn fetch_column_names(pool: &MySqlPool, schema: &str, table: &str) -> Result<Vec<String>, String> {
-    let rows = sqlx::query(
-        "SELECT COLUMN_NAME FROM information_schema.COLUMNS \
-         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? \
-         ORDER BY ORDINAL_POSITION",
-    )
-    .bind(schema)
-    .bind(table)
-    .fetch_all(pool)
-    .await
-    .map_err(|e| format!("Failed to load columns: {e}"))?;
     Ok(rows.iter().filter_map(|r| r.try_get::<String, _>(0).ok()).collect())
 }
 
@@ -249,7 +293,25 @@ pub async fn get_table_rows(
     nulls_order: Option<String>,
 ) -> Result<TableRows, String> {
     let started = Instant::now();
-    let table_columns = fetch_column_names(pool, schema, table).await?;
+    // One catalog round-trip per fetch: the WHERE/sort builders need the column
+    // names before the count/data queries can be built, so fetch the full
+    // name/type/nullability projection upfront and reuse it below for the
+    // nullable map and the empty-table column fallback (instead of a second
+    // information_schema.COLUMNS query inside the join).
+    let meta_rows = sqlx::query(
+        "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, EXTRA, COLUMN_DEFAULT \
+         FROM information_schema.COLUMNS \
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION",
+    )
+    .bind(schema)
+    .bind(table)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("Failed to load columns: {e}"))?;
+    let table_columns: Vec<String> = meta_rows
+        .iter()
+        .filter_map(|r| r.try_get::<String, _>(0).ok())
+        .collect();
     let filters = filters.unwrap_or_default();
     let where_clause = build_where(&table_columns, search.as_deref(), search_is_regex, search_case_sensitive, &filters)?;
 
@@ -293,29 +355,32 @@ pub async fn get_table_rows(
     }
     data_q = data_q.bind(limit).bind(offset);
 
-    let meta_q = sqlx::query(
-        "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM information_schema.COLUMNS \
-         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION",
-    )
-    .bind(schema)
-    .bind(table);
-
-    let (total_res, rows_res, meta_res) = tokio::join!(
+    let (total_res, rows_res) = tokio::join!(
         count_q.fetch_one(pool),
         data_q.fetch_all(pool),
-        meta_q.fetch_all(pool),
     );
     let total: i64 = total_res.map_err(|e| format!("Failed to count rows: {e}"))?;
     let rows = rows_res.map_err(|e| format!("Failed to fetch rows: {e}"))?;
-    let meta_rows = meta_res.unwrap_or_default();
 
-    // Build nullable map from information_schema
-    let nullable_map: HashMap<String, bool> = meta_rows
+    // Column flags from information_schema. EXTRA carries `auto_increment` and
+    // the generated-column markers; a column with either of those, or with any
+    // DEFAULT, is one the insert row must not demand a value for.
+    let flags_map: HashMap<String, super::query::ColumnFlags> = meta_rows
         .iter()
         .filter_map(|r| {
             let name = r.try_get::<String, _>(0).ok()?;
             let nullable = r.try_get::<String, _>(2).ok()?;
-            Some((name, nullable.eq_ignore_ascii_case("YES")))
+            let extra = r.try_get::<String, _>(3).unwrap_or_default().to_ascii_lowercase();
+            let default = r.try_get::<Option<String>, _>(4).ok().flatten();
+            let auto_generated = extra.contains("auto_increment") || extra.contains("generated");
+            Some((
+                name,
+                super::query::ColumnFlags {
+                    nullable: nullable.eq_ignore_ascii_case("YES"),
+                    auto_generated,
+                    has_default: auto_generated || default.is_some(),
+                },
+            ))
         })
         .collect();
 
@@ -338,10 +403,11 @@ pub async fn get_table_rows(
             .collect()
     };
 
-    // Apply nullable info
     for col in &mut columns {
-        if let Some(&is_nullable) = nullable_map.get(&col.name) {
-            col.nullable = is_nullable;
+        if let Some(f) = flags_map.get(&col.name) {
+            col.nullable = f.nullable;
+            col.auto_generated = f.auto_generated;
+            col.has_default = f.has_default;
         }
     }
 
@@ -456,14 +522,25 @@ pub async fn execute_sql(
 
     if is_select {
         let mut stream = sqlx::query(sql).fetch(&mut *conn);
-        let mut mysql_rows: Vec<sqlx::mysql::MySqlRow> = Vec::new();
+        // Convert each row to JSON as it streams in and drop the driver row
+        // immediately — retaining the full Vec<MySqlRow> alongside the JSON rows
+        // would double peak memory on a large result.
+        let mut columns: Vec<ColumnInfo> = Vec::new();
+        let mut data: Vec<Vec<Value>> = Vec::new();
         let mut capped = false;
 
         loop {
             match stream.try_next().await {
                 Ok(Some(row)) => {
-                    mysql_rows.push(row);
-                    if mysql_rows.len() >= EXECUTE_SQL_MAX_ROWS {
+                    if data.is_empty() {
+                        columns = row
+                            .columns()
+                            .iter()
+                            .map(|c| ColumnInfo::new(c.name(), c.type_info().name().to_lowercase()))
+                            .collect();
+                    }
+                    data.push((0..row.len()).map(|i| cell_to_json(&row, i)).collect());
+                    if data.len() >= EXECUTE_SQL_MAX_ROWS {
                         capped = true;
                         break;
                     }
@@ -477,19 +554,6 @@ pub async fn execute_sql(
         }
         drop(stream);
 
-        let columns: Vec<ColumnInfo> = mysql_rows
-            .first()
-            .map(|r| {
-                r.columns()
-                    .iter()
-                    .map(|c| ColumnInfo::new(c.name(), c.type_info().name().to_lowercase()))
-                    .collect()
-            })
-            .unwrap_or_default();
-        let data: Vec<Vec<Value>> = mysql_rows
-            .iter()
-            .map(|row| (0..row.len()).map(|i| cell_to_json(row, i)).collect())
-            .collect();
         let row_count = data.len() as i64;
         return Ok(SqlResult {
             columns,
@@ -607,16 +671,24 @@ pub async fn insert_table_row(
             .ok_or_else(|| format!("Missing value for column: {col}"))?;
         q = bind_value(q, value);
     }
-    q.execute(pool).await.map_err(|e| format!("Insert failed: {e}"))?;
+    // Run the INSERT and the LAST_INSERT_ID()/re-fetch on ONE pinned connection:
+    // LAST_INSERT_ID() is connection-scoped, and a second pool acquire can land
+    // on a different connection (returning 0 or a stale id) whenever background
+    // work is also using the pool.
+    let mut conn = pool
+        .acquire()
+        .await
+        .map_err(|e| format!("Failed to acquire connection: {e}"))?;
+    q.execute(&mut *conn).await.map_err(|e| format!("Insert failed: {e}"))?;
 
     // Re-fetch the inserted row
     let fetched = if let Some(ai_col) = &auto_increment_col {
         let last_id: u64 = sqlx::query_scalar("SELECT LAST_INSERT_ID()")
-            .fetch_one(pool)
+            .fetch_one(&mut *conn)
             .await
             .map_err(|e| format!("Failed to get last insert ID: {e}"))?;
         let sel = format!("SELECT * FROM {}.{} WHERE {} = ? LIMIT 1", bt(schema), bt(table), bt(ai_col));
-        sqlx::query(&sel).bind(last_id as i64).fetch_optional(pool).await
+        sqlx::query(&sel).bind(last_id as i64).fetch_optional(&mut *conn).await
             .map_err(|e| format!("Failed to fetch inserted row: {e}"))?
     } else {
         let pk_cols = fetch_primary_key(pool, schema, table).await.unwrap_or_default();
@@ -630,7 +702,7 @@ pub async fn insert_table_row(
                     .ok_or_else(|| format!("Missing value for column: {pk_col}"))?;
                 sel_q = bind_value(sel_q, value);
             }
-            sel_q.fetch_optional(pool).await.map_err(|e| format!("Failed to fetch inserted row: {e}"))?
+            sel_q.fetch_optional(&mut *conn).await.map_err(|e| format!("Failed to fetch inserted row: {e}"))?
         } else {
             None
         }
@@ -661,6 +733,25 @@ pub async fn delete_table_rows(
     let pk_columns = fetch_primary_key(pool, schema, table).await?;
     if pk_columns.is_empty() {
         return Err("Cannot delete rows: table has no primary key".into());
+    }
+
+    // Single-column PK: batch into `IN (…)` chunks so deleting N selected rows
+    // doesn't cost N round-trips. Composite PKs keep the per-row loop.
+    if pk_columns.len() == 1 {
+        let col = &pk_columns[0];
+        let mut total = 0u64;
+        for chunk in primary_keys.chunks(100) {
+            let placeholders = vec!["?"; chunk.len()].join(", ");
+            let sql = format!("DELETE FROM {}.{} WHERE {} IN ({placeholders})", bt(schema), bt(table), bt(col));
+            let mut q = sqlx::query(&sql);
+            for pk_map in chunk {
+                let val = pk_map.get(col).ok_or_else(|| format!("Missing primary key: {col}"))?;
+                q = bind_value(q, val);
+            }
+            let res = q.execute(pool).await.map_err(|e| format!("Delete failed: {e}"))?;
+            total += res.rows_affected();
+        }
+        return Ok(total);
     }
 
     let where_parts: Vec<String> = pk_columns.iter().map(|c| format!("{} = ?", bt(c))).collect();

@@ -49,13 +49,12 @@ async fn get(token: &str, path: &str) -> Result<Value, String> {
 /// user's orgs first, then each org's projects, and flatten them.
 pub async fn list_databases(token: &str) -> Result<Vec<ProviderDatabase>, String> {
     let orgs_body = get(token, "/users/me/organizations").await?;
-    let orgs = orgs_body["organizations"].as_array().cloned().unwrap_or_default();
 
     let mut out = Vec::new();
-    for org in &orgs {
+    for org in orgs_body["organizations"].as_array().into_iter().flatten() {
         let Some(org_id) = org["id"].as_str() else { continue };
         let body = get(token, &format!("/projects?org_id={}", urlencoding::encode(org_id))).await?;
-        for p in body["projects"].as_array().cloned().unwrap_or_default() {
+        for p in body["projects"].as_array().into_iter().flatten() {
             if let Some(id) = p["id"].as_str() {
                 out.push(ProviderDatabase {
                     db_ref: id.to_string(),

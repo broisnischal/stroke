@@ -114,14 +114,25 @@ pub async fn execute_sql(pool: &SqlitePool, sql: &str) -> Result<SqlResult, Stri
 
     if matches!(head.as_str(), "select" | "with" | "pragma" | "explain" | "values") {
         let mut stream = sqlx::query(sql).fetch(pool);
-        let mut sqlite_rows: Vec<sqlx::sqlite::SqliteRow> = Vec::new();
+        // Convert each row to JSON as it streams in and drop the driver row
+        // immediately — retaining the full Vec<SqliteRow> alongside the JSON
+        // rows would double peak memory on a large result.
+        let mut columns: Vec<ColumnInfo> = Vec::new();
+        let mut data: Vec<Vec<Value>> = Vec::new();
         let mut capped = false;
 
         loop {
             match stream.try_next().await {
                 Ok(Some(row)) => {
-                    sqlite_rows.push(row);
-                    if sqlite_rows.len() >= EXECUTE_SQL_MAX_ROWS {
+                    if data.is_empty() {
+                        columns = row
+                            .columns()
+                            .iter()
+                            .map(|c| ColumnInfo::new(c.name(), c.type_info().name().to_lowercase()))
+                            .collect();
+                    }
+                    data.push((0..columns.len()).map(|i| cell_to_json(&row, i)).collect());
+                    if data.len() >= EXECUTE_SQL_MAX_ROWS {
                         capped = true;
                         break;
                     }
@@ -134,21 +145,6 @@ pub async fn execute_sql(pool: &SqlitePool, sql: &str) -> Result<SqlResult, Stri
             }
         }
         drop(stream);
-
-        let columns: Vec<ColumnInfo> = sqlite_rows
-            .first()
-            .map(|r| {
-                r.columns()
-                    .iter()
-                    .map(|c| ColumnInfo::new(c.name(), c.type_info().name().to_lowercase()))
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        let data: Vec<Vec<Value>> = sqlite_rows
-            .iter()
-            .map(|r| (0..columns.len()).map(|i| cell_to_json(r, i)).collect())
-            .collect();
 
         let n = data.len() as i64;
         Ok(SqlResult {
@@ -196,6 +192,9 @@ pub async fn get_table_rows(
     sort_column: Option<String>,
     sort_direction: Option<String>,
     filters: Option<Vec<crate::db::RowFilter>>,
+    // When false, skip the primary-key/foreign-key PRAGMA round-trips — the
+    // frontend already holds them for repeat fetches (pagination/sort/filter/live).
+    include_meta: bool,
     // Null placement ("first"/"last"); None keeps the historical NULLS LAST default.
     nulls_order: Option<String>,
 ) -> Result<TableRows, String> {
@@ -209,13 +208,26 @@ pub async fn get_table_rows(
         .await
         .map_err(|e| format!("PRAGMA table_info: {e}"))?;
 
-    // col_name -> nullable (notnull=0 means nullable)
-    let pragma_nullable: std::collections::HashMap<String, bool> = pragma_rows
+    // col_name -> flags. `INTEGER PRIMARY KEY` is the rowid alias SQLite fills in
+    // itself, which is the closest thing it has to AUTO_INCREMENT and is exactly
+    // the column the insert row must not demand a value for.
+    let pragma_flags: std::collections::HashMap<String, super::query::ColumnFlags> = pragma_rows
         .iter()
         .filter_map(|r| {
             let name = r.try_get::<Option<String>, _>(1).ok().flatten()?;
+            let col_type = r.try_get::<Option<String>, _>(2).ok().flatten().unwrap_or_default();
             let notnull: i64 = r.try_get(3).ok()?;
-            Some((name, notnull == 0))
+            let dflt = r.try_get::<Option<String>, _>(4).ok().flatten();
+            let pk: i64 = r.try_get(5).ok().unwrap_or(0);
+            let auto_generated = pk > 0 && col_type.to_ascii_lowercase().contains("int");
+            Some((
+                name,
+                super::query::ColumnFlags {
+                    nullable: notnull == 0,
+                    auto_generated,
+                    has_default: auto_generated || dflt.is_some(),
+                },
+            ))
         })
         .collect();
 
@@ -356,8 +368,10 @@ pub async fn get_table_rows(
                 .iter()
                 .map(|c| {
                     let mut col = ColumnInfo::new(c.name(), c.type_info().name().to_lowercase());
-                    if let Some(&nullable) = pragma_nullable.get(c.name()) {
-                        col.nullable = nullable;
+                    if let Some(f) = pragma_flags.get(c.name()) {
+                        col.nullable = f.nullable;
+                        col.auto_generated = f.auto_generated;
+                        col.has_default = f.has_default;
                     }
                     col
                 })
@@ -369,8 +383,10 @@ pub async fn get_table_rows(
                 .map(|n| {
                     let dt = pragma_types.get(n).cloned().unwrap_or_else(|| "text".into());
                     let mut col = ColumnInfo::new(n.clone(), dt);
-                    if let Some(&nullable) = pragma_nullable.get(n.as_str()) {
-                        col.nullable = nullable;
+                    if let Some(f) = pragma_flags.get(n.as_str()) {
+                        col.nullable = f.nullable;
+                        col.auto_generated = f.auto_generated;
+                        col.has_default = f.has_default;
                     }
                     col
                 })
@@ -382,8 +398,16 @@ pub async fn get_table_rows(
         .map(|r| (0..columns.len()).map(|i| cell_to_json(r, i)).collect())
         .collect();
 
-    let primary_key = fetch_primary_key(pool, table).await.unwrap_or_default();
-    let foreign_keys = fetch_foreign_keys(pool, table).await.unwrap_or_default();
+    // Two extra PRAGMA statements serialized on the single-connection pool —
+    // skip them on metadata-skipping fetches; the frontend keeps its cached values.
+    let (primary_key, foreign_keys) = if include_meta {
+        (
+            fetch_primary_key(pool, table).await.unwrap_or_default(),
+            fetch_foreign_keys(pool, table).await.unwrap_or_default(),
+        )
+    } else {
+        (Vec::new(), Vec::new())
+    };
 
     Ok(TableRows {
         columns,

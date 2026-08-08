@@ -1,9 +1,10 @@
 <script>
+  import FieldSelect from './FieldSelect.svelte';
   import { executeSql, connectRedis, redisScan } from '$lib/api.js'
   import { engineFamily } from '$lib/stores/connections.js'
   import { cn } from '$lib/utils.js'
   import { readOnlyMode, guardWrite, READ_ONLY_HINT } from '$lib/stores/read-only.js'
-  import { tick } from 'svelte'
+  import { tick, onDestroy } from 'svelte'
   import ResizeHandle from './ResizeHandle.svelte'
   import Search from '@lucide/svelte/icons/search'
   import X from '@lucide/svelte/icons/x'
@@ -176,16 +177,24 @@
     }
     typesLoading = true
     try {
-      const entries = await Promise.all(
-        subset.map(async (k) => {
+      // Bounded worker pool - firing all 500 TYPE commands at once floods the
+      // IPC bridge with simultaneous invokes (each opens a Redis command).
+      const CONCURRENCY = 8
+      /** @type {[string, string][]} */
+      const entries = []
+      let i = 0
+      async function worker() {
+        while (i < subset.length) {
+          const k = subset[i++]
           try {
             const t = String(replyValues(await executeSql(`TYPE ${quoteArg(k)}`))[0] ?? '')
-            return /** @type {[string, string]} */ ([k, t])
+            entries.push([k, t])
           } catch {
-            return /** @type {[string, string]} */ ([k, ''])
+            entries.push([k, ''])
           }
-        }),
-      )
+        }
+      }
+      await Promise.all(Array.from({ length: Math.min(CONCURRENCY, subset.length) }, worker))
       typeMap = new Map(entries)
     } finally {
       typesLoading = false
@@ -585,6 +594,7 @@
   let copiedId = $state('')
   /** @type {ReturnType<typeof setTimeout> | null} */
   let copiedTimer = null
+  onDestroy(() => { if (copiedTimer) clearTimeout(copiedTimer) })
   /** @param {string} text @param {string} id */
   function copyText(text, id) {
     navigator.clipboard
@@ -844,18 +854,16 @@
         <span class="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-ui-2xs tabular-nums text-muted-foreground">
           {#if keysLoading}…{:else}{totalKeys}{/if}
         </span>
-        <select
-          value={currentDb}
+        <FieldSelect
+          size="sm"
+          class="h-6 shrink-0 bg-input/30 px-1 text-ui-2xs"
+          value={String(currentDb)}
           disabled={switchingDb}
-          onchange={(e) => void switchDb(Number(e.currentTarget.value))}
+          onchange={(v) => void switchDb(Number(v))}
           title="Switch logical database"
           aria-label="Logical database"
-          class="h-6 shrink-0 rounded-md border border-input bg-input/30 px-1 font-mono text-ui-2xs text-foreground outline-none transition-colors focus:border-ring disabled:opacity-50"
-        >
-          {#each DB_OPTIONS as n (n)}
-            <option value={n}>db {n}</option>
-          {/each}
-        </select>
+          options={DB_OPTIONS.map((n) => ({ value: String(n), label: `db ${n}` }))}
+        />
         <button
           type="button"
           class={cn(iconBtn, 'ml-auto size-7', newKeyOpen && 'bg-accent text-foreground')}
@@ -889,7 +897,7 @@
             spellcheck="false"
             autocapitalize="off"
             autocomplete="off"
-            class="h-7 w-full rounded-lg border border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+            class="h-7 w-full rounded-lg border-2 border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
           />
           <div class="flex flex-wrap gap-1">
             {#each CREATABLE as t (t)}
@@ -916,7 +924,7 @@
               placeholder="field"
               spellcheck="false"
               autocomplete="off"
-              class="h-7 w-full rounded-lg border border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+              class="h-7 w-full rounded-lg border-2 border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
             />
           {:else if nkType === 'zset'}
             <input
@@ -925,7 +933,7 @@
               placeholder="score (e.g. 1)"
               spellcheck="false"
               autocomplete="off"
-              class="h-7 w-full rounded-lg border border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+              class="h-7 w-full rounded-lg border-2 border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
             />
           {/if}
           <input
@@ -935,7 +943,7 @@
             spellcheck="false"
             autocomplete="off"
             onkeydown={(e) => e.key === 'Enter' && void createKey()}
-            class="h-7 w-full rounded-lg border border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+            class="h-7 w-full rounded-lg border-2 border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
           />
           {#if newKeyError}
             <p class="font-mono text-ui-3xs text-destructive">{newKeyError}</p>
@@ -974,7 +982,7 @@
             spellcheck="false"
             autocapitalize="off"
             autocomplete="off"
-            class="h-7 w-full rounded-lg border border-border bg-input/30 pl-7 pr-7 text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+            class="h-7 w-full rounded-lg border-2 border-border bg-input/30 pl-7 pr-7 text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
           />
           {#if filter}
             <button
@@ -1029,10 +1037,13 @@
               {#if !isCollapsed}
                 {#each group.items as key (key)}
                   {@const meta = TYPE_META[typeMap.get(key) ?? '']}
+                  <!-- content-visibility keeps huge keyspaces (up to 100k rows) cheap
+                       to paint - offscreen rows skip layout entirely. -->
                   <button
                     type="button"
                     class={cn(
                       'group/key flex w-full items-center gap-2 py-1 pl-7 pr-2 text-left transition-colors',
+                      '[contain-intrinsic-size:auto_26px] [content-visibility:auto]',
                       selectedKey === key
                         ? 'bg-accent text-foreground'
                         : 'text-foreground/80 hover:bg-accent/50',
@@ -1181,7 +1192,7 @@
                     if (e.key === 'Enter') { e.preventDefault(); void applyTtl(false) }
                     else if (e.key === 'Escape') editingTtl = false
                   }}
-                  class="h-6 w-24 rounded-lg border border-border bg-input/30 px-1.5 text-ui-2xs tabular-nums text-foreground placeholder:text-muted-foreground/45 outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+                  class="h-6 w-24 rounded-lg border-2 border-border bg-input/30 px-1.5 text-ui-2xs tabular-nums text-foreground placeholder:text-muted-foreground/45 outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
                 />
                 <button
                   type="button"
@@ -1285,7 +1296,7 @@
                 <textarea
                   bind:value={stringEdit}
                   spellcheck="false"
-                  class="no-focus-ring app-scroll min-h-0 flex-1 resize-none rounded-lg border border-border bg-input/30 p-3 font-mono text-ui-sm leading-relaxed text-foreground outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+                  class="no-focus-ring app-scroll min-h-0 flex-1 resize-none rounded-lg border-2 border-border bg-input/30 p-3 font-mono text-ui-sm leading-relaxed text-foreground outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
                 ></textarea>
                 <div class="mt-2 flex shrink-0 items-center gap-1.5">
                   <button

@@ -167,9 +167,13 @@ Use `Button` from `ui/button`. Solid: `bg-primary text-primary-foreground
 hover:opacity-90`. Never hand-roll a primary button.
 
 ### Inputs / selects
-`h-9 rounded-lg border border-border bg-muted/30 px-3 text-ui`, focus:
+`h-9 rounded-lg border-2 border-border bg-muted/30 px-3 text-ui`, focus:
 `focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none`. Prefer
 the `Input` / `Select` wrappers in `ui/*`.
+
+**The border is 2px on every field** — inputs, textareas and select triggers
+alike. A 1px control sitting next to a 2px one reads as a different component,
+which is exactly what the select trigger used to do.
 
 ### Focus ring (one convention, everywhere)
 A focused control gets a **muted accent border plus a tight, low-alpha halo** —

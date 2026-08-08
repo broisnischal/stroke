@@ -73,6 +73,9 @@ activeDashboardId.subscribe(v => {
  * @param {string} connectionId
  */
 export function switchDashboardsConnection(connectionId) {
+  // Write out any pending edit of the OLD connection first - the set() below
+  // re-arms the debounce with the new connection's data, dropping it otherwise.
+  persistDashboards.flush()
   _connId = connectionId
   dashboards.set(loadDashboards(_connId))
   activeDashboardId.set(loadActiveId(_connId))

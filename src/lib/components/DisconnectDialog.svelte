@@ -1,6 +1,5 @@
 <script>
-  import Unplug from '@lucide/svelte/icons/unplug'
-  import * as Dialog from '$lib/components/ui/dialog/index.js'
+  import ConfirmDialog from './ConfirmDialog.svelte'
 
   let {
     open = $bindable(false),
@@ -8,44 +7,18 @@
     ondisconnect = () => {},
   } = $props()
 
-  function confirm() {
-    open = false
-    ondisconnect()
-  }
+  const question = $derived(
+    connectionName ? `Disconnect from ${connectionName}?` : 'Disconnect from the current database?',
+  )
 </script>
 
-<Dialog.Root bind:open>
-  <Dialog.Content showCloseButton={false} class="w-[min(380px,calc(100vw-2rem))] sm:max-w-none gap-0 overflow-hidden p-0">
-
-    <!-- Body -->
-    <div class="flex items-start gap-3.5 px-5 pt-5 pb-4">
-      <div class="mt-px shrink-0 rounded-lg bg-muted/50 p-2">
-        <Unplug class="size-3.5 text-muted-foreground/70" />
-      </div>
-      <div class="min-w-0">
-        <p class="text-ui-sm font-semibold text-foreground">Disconnect</p>
-        <p class="mt-0.5 text-ui-xs leading-[1.5] text-muted-foreground/70">
-          {#if connectionName}
-            Disconnect from <span class="font-medium text-foreground/80">{connectionName}</span>?
-          {:else}
-            Disconnect from the current database?
-          {/if}
-        </p>
-      </div>
-    </div>
-
-    <!-- Footer -->
-    <div class="flex items-center justify-end gap-2 border-t border-border/25 px-5 py-3">
-      <button
-        type="button"
-        class="inline-flex h-8 items-center rounded-md px-3.5 text-ui-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        onclick={() => (open = false)}
-      >Cancel</button>
-      <button
-        type="button"
-        class="inline-flex h-8 items-center rounded-md bg-destructive px-4 text-ui-sm font-medium text-destructive-foreground transition-opacity hover:opacity-90"
-        onclick={confirm}
-      >Disconnect</button>
-    </div>
-  </Dialog.Content>
-</Dialog.Root>
+<ConfirmDialog
+  bind:open
+  icon="unplug"
+  title="Disconnect"
+  description={question}
+  confirmLabel="Disconnect"
+  confirmIcon="unplug"
+  variant="destructive"
+  onconfirm={ondisconnect}
+/>

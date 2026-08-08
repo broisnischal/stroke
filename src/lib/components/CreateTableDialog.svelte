@@ -1,9 +1,9 @@
 <script>
+  import FieldSelect from './FieldSelect.svelte';
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import * as Dialog from '$lib/components/ui/dialog/index.js'
   import Plus from '@lucide/svelte/icons/plus'
   import Trash2 from '@lucide/svelte/icons/trash-2'
-  import GripVertical from '@lucide/svelte/icons/grip-vertical'
   import { cn } from '$lib/utils.js'
 
   let {
@@ -195,14 +195,12 @@
                 autocomplete="off"
                 spellcheck="false"
               />
-              <select
-                class={selectClass}
+              <FieldSelect
+                size="sm"
+                class="w-full text-ui-xs"
                 bind:value={col.type}
-              >
-                {#each typeOptions as t (t)}
-                  <option value={t}>{t}</option>
-                {/each}
-              </select>
+                options={typeOptions.map((t) => ({ value: t, label: t }))}
+              />
               <div class="flex justify-center">
                 <input
                   type="checkbox"

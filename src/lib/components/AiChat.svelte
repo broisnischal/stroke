@@ -1,8 +1,6 @@
 <script>
   import { tick, onMount, onDestroy } from "svelte";
   import Sparkles from "@lucide/svelte/icons/sparkles";
-  import Loader2 from "@lucide/svelte/icons/loader-2";
-  import Bot from "@lucide/svelte/icons/bot";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
   import Reply from "@lucide/svelte/icons/reply";
   import Square from "@lucide/svelte/icons/square";
@@ -66,9 +64,9 @@
     parseAssistantMessage,
     buildSystemPrompt,
     classifyDbError,
+    describeAiError,
     humanizeDbError,
     filterSchemaForQuery,
-    stripThinkTags,
   } from "$lib/ai.js";
   import {
     loadSkills,
@@ -96,7 +94,6 @@
   import { isCurrentThemeDark, appAgentQueryCards, appAgentWebAccess } from "$lib/stores/settings.js";
   import Save from "@lucide/svelte/icons/save";
   import Check from "@lucide/svelte/icons/check";
-  import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import Search from "@lucide/svelte/icons/search";
   import TrendingUp from "@lucide/svelte/icons/trending-up";
   import Layers from "@lucide/svelte/icons/layers";
@@ -124,6 +121,7 @@
    *   | { id: string, kind: 'thinking' }
    *   | { id: string, kind: 'executing', sql: string, op: 'query' | 'schema' | 'describe' | 'run' | 'diagram' }
    *   | { id: string, kind: 'diagram', code: string, title: string }
+   *   | { id: string, kind: 'web', mode: 'search'|'fetch', label: string, hits: {title:string,url:string,snippet:string}[], error: string|null, loading: boolean }
    * } ChatItem
    */
 
@@ -252,31 +250,13 @@
     $appAgentWebAccess ? [...AI_TOOLS, ...AI_WEB_TOOLS] : AI_TOOLS,
   );
   let settingsOpen = $state(false);
-  /** @type {string | null} */
-  let imageViewerSrc = $state(null);
   /** @type {'model'|'skills'|'context'|'chat'} */
   let settingsTab = $state("model");
   const SETTINGS_TABS = /** @type {const} */ ([
-    {
-      id: "model",
-      // label: 'Model',
-      icon: Cpu,
-    },
-    {
-      id: "chat",
-      // label: 'Chat',
-      icon: MessageSquare,
-    },
-    {
-      id: "skills",
-      // label: 'Skills',
-      icon: Zap,
-    },
-    {
-      id: "context",
-      //  label: 'Context',
-      icon: Database,
-    },
+    { id: "model", icon: Cpu },
+    { id: "chat", icon: MessageSquare },
+    { id: "skills", icon: Zap },
+    { id: "context", icon: Database },
   ]);
 
   // ── Skills ────────────────────────────────────────────────────────────────
@@ -324,7 +304,8 @@
         saveSkills(skills);
       };
       reader.readAsText(file);
-    })(/** @type {HTMLInputElement} */ e.target).value = "";
+    });
+    /** @type {HTMLInputElement} */ (e.target).value = "";
   }
 
   // ── Conversations list (IndexedDB) ─────────────────────────────────────────
@@ -458,59 +439,10 @@
   }
 
   /** Parse a raw error string into a human-friendly message. */
-  function parseErrorMessage(/** @type {string} */ raw) {
-    try {
-      // Strip leading "Error: " prefix if present
-      const body = raw.replace(/^Error:\s*/i, "");
-      // Try JSON parse (API errors are often JSON)
-      const json = JSON.parse(body);
-      const msg = json?.error?.message ?? json?.message ?? json?.detail ?? null;
-      if (msg) {
-        const code = json?.error?.code ?? json?.code ?? json?.type ?? null;
-        if (code === "rate_limit_exceeded" || json?.type === "rate_limited") {
-          return `Rate limit reached, wait a moment and try again.`;
-        }
-        return String(msg);
-      }
-    } catch {
-      /* not JSON */
-    }
-    if (/rate.limit/i.test(raw))
-      return `Rate limit reached, wait a moment and try again.`;
-    if (/429/.test(raw))
-      return `Too many requests (429), wait a moment and try again.`;
-    if (/401|unauthorized/i.test(raw))
-      return `Authentication failed, check your API key.`;
-    if (/timeout/i.test(raw)) return `Request timed out, try again.`;
-    return raw.replace(/^Error:\s*/i, "").slice(0, 200);
-  }
-
-  /** Start a new chat with a short summary of the current one as opening context. */
-  async function continueInNewChat() {
-    const turnCount = apiHistory.filter((m) => m.role === "user").length;
-    if (turnCount === 0) {
-      await newConversation();
-      return;
-    }
-
-    // Build a brief handoff message
-    const summary = items
-      .filter((i) => i.kind === "user" || i.kind === "assistant")
-      .slice(-6)
-      .map((i) =>
-        i.kind === "user"
-          ? `User: ${/** @type {any} */ (i).text?.slice(0, 120) ?? ""}`
-          : `AI: ${/** @type {any} */ (i).parts?.find((p) => p.type === "text")?.content?.slice(0, 200) ?? "…"}`,
-      )
-      .join("\n");
-
-    await newConversation();
-    await tick();
-    inputText = `[Continuing from previous conversation]\n\n${summary}\n\nPlease continue from where we left off.`;
-    await tick();
-    resizeInput();
-    inputRef?.focus();
-  }
+  $effect(() => {
+    void error;
+    errorDetailOpen = false;
+  });
 
   async function removeConversation(/** @type {string} */ id) {
     closeContextMenu();
@@ -670,6 +602,18 @@
   let rawApiHistory = $state([]);
   let loading = $state(false);
   let error = $state("");
+  /** Provider payload behind the error banner — collapsed until asked for. */
+  let errorDetailOpen = $state(false);
+
+  /** @param {string} detail */
+  async function copyErrorDetail(detail) {
+    try {
+      await navigator.clipboard.writeText(detail);
+      toast.success("Error details copied");
+    } catch {
+      toast.error("Could not copy");
+    }
+  }
   /** Shown on the thinking row while waiting on rate-limit retries */
   let aiStatusHint = $state("");
 
@@ -802,18 +746,26 @@
   /** True when user has manually scrolled away from bottom during streaming */
   let userScrolledUp = $state(false);
 
-  let _scrollRafId = /** @type {number | null} */ (null)
+  /** Sentinel pinned to the end of the transcript; see the observer below. */
+  let bottomSentinel = $state(/** @type {HTMLElement | null} */ (null))
 
-  function onScrollAreaScroll() {
-    if (_scrollRafId !== null) return
-    _scrollRafId = requestAnimationFrame(() => {
-      _scrollRafId = null
-      if (!scrollEl) return
-      const distFromBottom =
-        scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight
-      userScrolledUp = distFromBottom > 80
-    })
-  }
+  // "Am I at the bottom?" used to be measured in the scroll handler, which read
+  // scrollHeight/scrollTop/clientHeight on every scroll frame. Each of those
+  // reads forces a synchronous layout - and with content-visibility:auto on the
+  // messages, that layout has to resolve the off-screen subtrees it was meant to
+  // skip. An IntersectionObserver answers the same question from the compositor,
+  // costing nothing per frame.
+  $effect(() => {
+    const root = scrollEl
+    const target = bottomSentinel
+    if (!root || !target || typeof IntersectionObserver !== 'function') return
+    const io = new IntersectionObserver(
+      (entries) => { userScrolledUp = !entries[entries.length - 1].isIntersecting },
+      { root, rootMargin: '0px 0px 80px 0px', threshold: 0 },
+    )
+    io.observe(target)
+    return () => io.disconnect()
+  })
 
   /** Scroll to bottom on the next animation frame (throttled; skipped if user scrolled up). */
   function scrollBottomSoon() {
@@ -821,13 +773,26 @@
     if (rafId !== null) return;
     rafId = requestAnimationFrame(() => {
       rafId = null;
-      if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
+      pinToBottom();
     });
+  }
+
+  /**
+   * Scroll the transcript to its end.
+   *
+   * Uses the sentinel rather than `scrollTop = scrollHeight`: reading scrollHeight
+   * forces a synchronous layout of the whole transcript, and during streaming that
+   * happened on every flushed chunk. scrollIntoView asks the engine to do the same
+   * job without the app measuring anything.
+   */
+  function pinToBottom() {
+    if (bottomSentinel) bottomSentinel.scrollIntoView({ block: 'end' });
+    else if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
   }
 
   function jumpToBottom() {
     userScrolledUp = false;
-    if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
+    pinToBottom();
   }
 
   function stop() {
@@ -860,6 +825,12 @@
     if (_streamTimer !== null) {
       clearTimeout(_streamTimer);
       _streamTimer = null;
+    }
+    // Answer pending destructive-confirm prompts as declined; otherwise their
+    // promises never resolve and the awaiting tool loop is retained forever.
+    // Snapshot first: resolve() splices the item out of `items`.
+    for (const i of items.filter((i) => i.kind === "confirm")) {
+      i.resolve(false);
     }
     if (abortController) {
       abortController.abort();
@@ -1142,7 +1113,7 @@
     fullscreenCanvasEl?.dispatchEvent(new CustomEvent(name));
   }
 
-  async function exportDiagramSvg(code) {
+  async function exportDiagramSvg() {
     const canvas =
       fullscreenCanvasEl ?? document.querySelector(".mermaid-canvas");
     const svgEl =
@@ -1168,7 +1139,7 @@
     }
   }
 
-  async function exportDiagramPng(code) {
+  async function exportDiagramPng() {
     const canvas =
       fullscreenCanvasEl ?? document.querySelector(".mermaid-canvas");
     const svgEl =
@@ -1205,7 +1176,7 @@
     const content = msgListEl;
     if (!content) return;
     const ro = new ResizeObserver(() => {
-      if (!userScrolledUp && scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
+      if (!userScrolledUp) pinToBottom();
     });
     ro.observe(content);
     return () => ro.disconnect();
@@ -1458,7 +1429,7 @@
     const el = inputRef;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight, 160) + "px";
+    el.style.height = Math.max(60, Math.min(el.scrollHeight, 200)) + "px";
   }
 
   function resetInputHeight() {
@@ -1468,7 +1439,7 @@
   async function scrollBottom() {
     await tick();
     userScrolledUp = false;
-    if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
+    pinToBottom();
   }
 
   /** @param {KeyboardEvent} e */
@@ -1525,26 +1496,29 @@
       const byTable = {};
 
       if (isSqliteFamilySC) {
-        // SQLite/D1/LibSQL: PRAGMA per table (no information_schema)
-        for (const t of missing) {
-          try {
-            const tq = `"${t.name.replace(/"/g, '""')}"`;
-            const data = await executeSql(`PRAGMA table_info(${tq})`);
-            const c = data.columns ?? [],
-              r = data.rows ?? [];
-            const nameI = c.findIndex((x) => x.name === "name"),
-              typeI = c.findIndex((x) => x.name === "type");
-            const nnI = c.findIndex((x) => x.name === "notnull");
-            const key = `${sc}.${t.name}`;
-            byTable[key] = r.map((row) => ({
-              name: String(row[nameI] ?? row[1] ?? ""),
-              dataType: String(row[typeI] ?? row[2] ?? "text"),
-              nullable: !(row[nnI] ?? row[3]),
-            }));
-          } catch {
-            /* skip this table */
-          }
-        }
+        // SQLite/D1/LibSQL: PRAGMA per table (no information_schema).
+        // In parallel - N serial IPC round-trips would stall the first message.
+        await Promise.all(
+          missing.map(async (t) => {
+            try {
+              const tq = `"${t.name.replace(/"/g, '""')}"`;
+              const data = await executeSql(`PRAGMA table_info(${tq})`);
+              const c = data.columns ?? [],
+                r = data.rows ?? [];
+              const nameI = c.findIndex((x) => x.name === "name"),
+                typeI = c.findIndex((x) => x.name === "type");
+              const nnI = c.findIndex((x) => x.name === "notnull");
+              const key = `${sc}.${t.name}`;
+              byTable[key] = r.map((row) => ({
+                name: String(row[nameI] ?? row[1] ?? ""),
+                dataType: String(row[typeI] ?? row[2] ?? "text"),
+                nullable: !(row[nnI] ?? row[3]),
+              }));
+            } catch {
+              /* skip this table */
+            }
+          }),
+        );
       } else {
         const scSafe = sc.replace(/'/g, "''");
         const sql = isMysql
@@ -1810,13 +1784,15 @@
   async function runAiTurn(depth) {
     if (depth > 40)
       throw new Error("Too many AI iterations, aborting runaway execution");
-    if (abortController?.signal.aborted)
+    // A null controller means the turn was aborted or finalized - the chain can
+    // resume here after a declined confirm, so treat it the same as an abort.
+    if (!abortController || abortController.signal.aborted)
       throw Object.assign(new Error("Aborted"), { name: "AbortError" });
 
     // Space out follow-up turns after tool calls to avoid burst rate limits
     if (depth > 0) {
       await new Promise((r) => setTimeout(r, 300));
-      if (abortController?.signal.aborted)
+      if (!abortController || abortController.signal.aborted)
         throw Object.assign(new Error("Aborted"), { name: "AbortError" });
     }
 
@@ -1861,7 +1837,7 @@
     }
 
     // Bail out immediately if the user stopped generation - stop() already finalized UI
-    if (abortController?.signal.aborted) {
+    if (!abortController || abortController.signal.aborted) {
       throw Object.assign(new Error("Aborted"), { name: "AbortError" });
     }
 
@@ -1922,6 +1898,16 @@
 
   /** @param {import('$lib/ai.js').ToolCall} call */
   async function runToolCall(call) {
+    // The tool loop can resume here after an abort resolves a pending confirm -
+    // answer the call as cancelled instead of executing it for a dead turn.
+    if (!abortController || abortController.signal.aborted) {
+      apiHistory.push({
+        role: "tool",
+        tool_call_id: call.id,
+        content: JSON.stringify({ cancelled: true }),
+      });
+      return;
+    }
     const callKey = `${call.function.name}:${call.function.arguments}`;
     if (executedCalls.has(callKey)) {
       apiHistory.push({
@@ -2401,24 +2387,26 @@
               // All tables - use already-loaded context, fall back to sqlite_master
               const tableNames = schemaContext.tables.map((t) => t.name);
               const byTable = /** @type {Record<string, unknown[]>} */ ({});
-              for (const tbl of tableNames) {
-                const tq = `"${tbl.replace(/"/g, '""')}"`;
-                try {
-                  const data = await executeSql(`PRAGMA table_info(${tq})`);
-                  const c = data.columns ?? [],
-                    r = data.rows ?? [];
-                  const nameI = c.findIndex((x) => x.name === "name"),
-                    typeI = c.findIndex((x) => x.name === "type");
-                  const nnI = c.findIndex((x) => x.name === "notnull");
-                  byTable[tbl] = r.map((row) => ({
-                    name: row[nameI] ?? row[1],
-                    type: row[typeI] ?? row[2] ?? "text",
-                    nullable: (row[nnI] ?? row[3]) ? "NO" : "YES",
-                  }));
-                } catch {
-                  byTable[tbl] = [];
-                }
-              }
+              await Promise.all(
+                tableNames.map(async (tbl) => {
+                  const tq = `"${tbl.replace(/"/g, '""')}"`;
+                  try {
+                    const data = await executeSql(`PRAGMA table_info(${tq})`);
+                    const c = data.columns ?? [],
+                      r = data.rows ?? [];
+                    const nameI = c.findIndex((x) => x.name === "name"),
+                      typeI = c.findIndex((x) => x.name === "type");
+                    const nnI = c.findIndex((x) => x.name === "notnull");
+                    byTable[tbl] = r.map((row) => ({
+                      name: row[nameI] ?? row[1],
+                      type: row[typeI] ?? row[2] ?? "text",
+                      nullable: (row[nnI] ?? row[3]) ? "NO" : "YES",
+                    }));
+                  } catch {
+                    byTable[tbl] = [];
+                  }
+                }),
+              );
               const execIdx = items.findIndex((i) => i.id === execId);
               if (execIdx >= 0) items.splice(execIdx, 1);
               toolResult = JSON.stringify({
@@ -2777,6 +2765,12 @@
       closeDiagramFullscreen();
       return;
     }
+    // The Stop button advertises "Stop (Esc)" - honor it after the fullscreen closers.
+    if (e.key === "Escape" && loading) {
+      e.preventDefault();
+      stop();
+      return;
+    }
     const mod = e.ctrlKey || e.metaKey;
     if (!mod || !e.shiftKey) return;
     const key = e.key.toLowerCase();
@@ -2801,6 +2795,7 @@
     apiHistory = [];
     rawApiHistory = [];
     fetchedSchemas = {}; // drop the previous DB's cached schema columns (avoids cross-connection growth)
+    sampledRows = {}; // keys are `schema.table` - a colliding key would leak the old DB's rows into new prompts
     error = "";
     openTabIds = loadOpenTabs(id); // reset + reload the open-tab set for the new connection
     loadConvList();
@@ -2819,10 +2814,6 @@
     if (rafId !== null) {
       cancelAnimationFrame(rafId);
       rafId = null;
-    }
-    if (_scrollRafId !== null) {
-      cancelAnimationFrame(_scrollRafId);
-      _scrollRafId = null;
     }
     if (_streamTimer !== null) {
       clearTimeout(_streamTimer);
@@ -3199,7 +3190,6 @@
     <div
       bind:this={scrollEl}
       onscroll={() => {
-        onScrollAreaScroll();
         // The bar is anchored to a viewport rect, so scrolling would leave it
         // stranded away from its own text. Dismiss instead of re-measuring.
         if (selToolbar) clearSelectionToolbar();
@@ -3207,8 +3197,7 @@
       onmousedown={clearSelectionToolbar}
       onmouseup={syncSelectionToolbar}
       onkeyup={syncSelectionToolbar}
-      class="app-scroll min-h-0 flex-1 overflow-y-auto relative [overflow-anchor:none]"
-      onclick={undefined}
+      class="app-scroll ai-transcript min-h-0 flex-1 overflow-y-auto relative [overflow-anchor:none] overscroll-contain [contain:layout_paint] [-webkit-overflow-scrolling:touch]"
       role="region"
       aria-label="Chat messages"
     >
@@ -3372,7 +3361,6 @@
                 <div class="min-w-0 px-3.5">
                   <AiMarkdown
                     content={displayStreamingContent}
-                    debounceMs={180}
                     streaming
                     onrender={scrollBottomSoon}
                   />
@@ -3438,15 +3426,14 @@
                               <button
                                 type="button"
                                 class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-ui-3xs text-muted-foreground hover:bg-accent hover:text-foreground"
-                                onclick={() => void exportDiagramSvg(part.content)}
+                                onclick={() => void exportDiagramSvg()}
                                 title="Export SVG"
                                 ><ArrowDownToLine class="size-3" />SVG</button
                               >
                               <button
                                 type="button"
                                 class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-ui-3xs text-muted-foreground hover:bg-accent hover:text-foreground"
-                                onclick={() =>
-                                  void exportDiagramPng(part.content)}
+                                onclick={() => void exportDiagramPng()}
                                 title="Export PNG"
                                 ><ArrowDownToLine class="size-3" />PNG</button
                               >
@@ -4064,14 +4051,14 @@
                       <button
                         type="button"
                         class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-ui-3xs text-muted-foreground hover:bg-accent hover:text-foreground"
-                        onclick={() => void exportDiagramSvg(item.code)}
+                        onclick={() => void exportDiagramSvg()}
                         title="Export SVG"
                         ><ArrowDownToLine class="size-3" />SVG</button
                       >
                       <button
                         type="button"
                         class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-ui-3xs text-muted-foreground hover:bg-accent hover:text-foreground"
-                        onclick={() => void exportDiagramPng(item.code)}
+                        onclick={() => void exportDiagramPng()}
                         title="Export PNG"
                         ><ArrowDownToLine class="size-3" />PNG</button
                       >
@@ -4114,42 +4101,69 @@
             {#if showWorking}
               {@render agentIndicator()}
             {/if}
+
+            <!-- Watched by the observer above to decide whether the transcript is
+                 pinned to the bottom. A zero-height element is enough, and it
+                 costs nothing per frame. -->
+            <div bind:this={bottomSentinel} aria-hidden="true" class="h-px w-full shrink-0"></div>
           </div>
         {/if}
       </div>
       </div>
     </div>
 
-    <!-- Error bar -->
+    <!-- Error bar.
+         Red is the signal, not the whole surface: the icon and the hairline
+         carry it, and the words stay in the normal text colours so the message
+         is read rather than braced against. The provider's own sentence is the
+         message now (see describeAiError), so most failures have nothing left
+         to hide behind a Details toggle. -->
     {#if error}
-      <div
-        class="shrink-0 border-t border-destructive/20 bg-destructive/6 px-3 py-2"
-      >
-        <div class="flex items-start gap-2">
-          <AlertTriangle class="mt-0.5 size-3.5 shrink-0 text-destructive/70" />
-          <p
-            class="min-w-0 flex-1 text-ui-xs text-destructive/90 leading-relaxed"
-          >
-            {parseErrorMessage(error)}
-          </p>
-          <div class="flex shrink-0 items-center gap-1">
-            <button
-              type="button"
-              class="inline-flex h-6 items-center gap-1 rounded-md border border-destructive/20 px-2 text-ui-xs text-destructive/70 transition-colors hover:bg-destructive/8 hover:text-destructive"
-              onclick={continueInNewChat}
-              title="Open a new chat pre-seeded with a summary of this conversation"
-            >
-              Continue in new chat →
-            </button>
-            <button
-              type="button"
-              class="inline-flex size-5 items-center justify-center rounded text-destructive/40 transition-colors hover:text-destructive/70"
-              onclick={() => (error = "")}
-              title="Dismiss"
-            >
-              <X class="size-3" />
-            </button>
+      {@const failure = describeAiError(error)}
+      <div class="shrink-0 border-t border-destructive/25 bg-destructive/[0.04] px-3 py-2.5">
+        <div class="flex items-start gap-2.5">
+          <AlertTriangle class="mt-px size-3.5 shrink-0 text-destructive" />
+          <div class="min-w-0 flex-1">
+            <p class="text-ui-xs font-medium leading-relaxed text-foreground">
+              {failure.title}
+            </p>
+            {#if failure.hint}
+              <p class="mt-0.5 text-ui-2xs leading-relaxed text-muted-foreground">
+                {failure.hint}
+              </p>
+            {/if}
+            {#if failure.detail}
+              <button
+                type="button"
+                onclick={() => (errorDetailOpen = !errorDetailOpen)}
+                class="mt-1 inline-flex items-center gap-1 rounded text-ui-2xs text-muted-foreground/60 transition-colors hover:text-foreground"
+              >
+                <ChevronRight class={cn('size-3 transition-transform duration-150', errorDetailOpen && 'rotate-90')} />
+                {errorDetailOpen ? 'Hide details' : 'Details'}
+              </button>
+              {#if errorDetailOpen}
+                <div class="mt-1.5 flex items-start gap-2">
+                  <pre class="max-h-28 min-w-0 flex-1 overflow-auto whitespace-pre-wrap break-all rounded-md border border-border/50 bg-muted/30 p-2 font-mono text-ui-3xs leading-relaxed text-muted-foreground">{failure.detail}</pre>
+                  <button
+                    type="button"
+                    onclick={() => copyErrorDetail(failure.detail)}
+                    title="Copy the provider's response"
+                    class="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    <Copy class="size-3" />
+                  </button>
+                </div>
+              {/if}
+            {/if}
           </div>
+          <button
+            type="button"
+            class="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-muted hover:text-foreground"
+            onclick={() => (error = "")}
+            title="Dismiss"
+          >
+            <X class="size-3" />
+          </button>
         </div>
       </div>
     {/if}
@@ -4191,8 +4205,8 @@
                set at the size you'll read it back at. -->
           <textarea
             bind:this={inputRef}
-            class="ai-composer-input block w-full resize-none bg-transparent px-4 pt-3 pb-1 text-foreground outline-none placeholder:text-muted-foreground/30 disabled:cursor-not-allowed"
-            style="height:auto;min-height:38px;max-height:200px;overflow-y:auto;font-family:inherit"
+            class="ai-composer-input block w-full resize-none bg-transparent px-4 pt-3.5 pb-2 text-foreground outline-none placeholder:text-muted-foreground/30 disabled:cursor-not-allowed"
+            style="height:auto;min-height:60px;max-height:200px;overflow-y:auto;font-family:inherit"
             placeholder={hasPendingConfirm
               ? "Confirm or cancel the operation above…"
               : "Ask anything about your database…"}
@@ -4345,7 +4359,7 @@
           >
             <Icon class="size-3 shrink-0" />
             <span
-              >{tab.label}{tab.id === "skills" && skills.length
+              >{tab.id === "skills" && skills.length
                 ? ` ${skills.length}`
                 : ""}</span
             >
@@ -4651,7 +4665,7 @@
                   >
                   <textarea
                     id="skill-content"
-                    class="min-h-[90px] w-full resize-y rounded-lg border-2 border-border bg-background px-2.5 py-2 font-mono text-ui-xs leading-relaxed text-foreground outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 placeholder:text-muted-foreground/40"
+                    class="min-h-[90px] w-full resize-y rounded-lg border-2 border-border bg-background px-2.5 py-2 font-mono text-ui-xs leading-relaxed text-foreground outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15 placeholder:text-muted-foreground/40"
                     placeholder="# My Skill&#10;&#10;Guidelines in Markdown..."
                     bind:value={newSkillContent}
                   ></textarea>
@@ -4903,48 +4917,6 @@
   </div>
 {/if}
 
-<!-- ── Image viewer ──────────────────────────────────────────────────────── -->
-{#if imageViewerSrc}
-  <div
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/65"
-    onclick={() => (imageViewerSrc = null)}
-    onkeydown={(e) => e.key === "Escape" && (imageViewerSrc = null)}
-    role="dialog"
-    aria-modal="true"
-    tabindex="-1"
-  >
-    <div
-      class="relative flex flex-col items-center gap-3"
-      onclick={(e) => e.stopPropagation()}
-      onkeydown={(e) => e.stopPropagation()}
-      role="presentation"
-    >
-      <img
-        src={imageViewerSrc}
-        alt="Preview"
-        class="max-h-[80vh] max-w-[90vw] rounded-xl border border-border/40 object-contain elevate-3-rim"
-      />
-      <div class="flex items-center gap-2">
-        <a
-          href={imageViewerSrc}
-          target="_blank"
-          rel="noopener noreferrer"
-          class="inline-flex items-center gap-1.5 rounded-full border border-border/50 bg-background/80 px-3 py-1.5 text-ui-xs text-muted-foreground backdrop-blur-sm transition-colors hover:border-border hover:text-foreground"
-          onclick={(e) => e.stopPropagation()}
-        >
-          <ZoomIn class="size-3" /> Open full size
-        </a>
-        <button
-          class="inline-flex items-center gap-1.5 rounded-full border border-border/50 bg-background/80 px-3 py-1.5 text-ui-xs text-muted-foreground backdrop-blur-sm transition-colors hover:border-border hover:text-foreground"
-          onclick={() => (imageViewerSrc = null)}
-        >
-          <X class="size-3" /> Close
-        </button>
-      </div>
-    </div>
-  </div>
-{/if}
-
 <!-- ── Diagram fullscreen modal ──────────────────────────────────────────── -->
 {#if fullscreenChart}
   <!-- Chart fullscreen overlay -->
@@ -5046,7 +5018,7 @@
         <button
           type="button"
           class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-          onclick={() => void exportDiagramSvg(fullscreenDiagramCode ?? "")}
+          onclick={() => void exportDiagramSvg()}
           title="Export as SVG"
         >
           <ArrowDownToLine class="size-3" />SVG
@@ -5054,7 +5026,7 @@
         <button
           type="button"
           class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-          onclick={() => void exportDiagramPng(fullscreenDiagramCode ?? "")}
+          onclick={() => void exportDiagramPng()}
           title="Export as PNG"
         >
           <ArrowDownToLine class="size-3" />PNG
@@ -5133,13 +5105,10 @@
   }
 
   :global(.prose-ai) {
-    font-family:
-      "Inter Variable",
-      "Inter",
-      -apple-system,
-      BlinkMacSystemFont,
-      ui-sans-serif,
-      sans-serif;
+    /* Follow the app's font setting. This used to hardcode the Inter stack, so
+       picking another font changed the composer and the user's turns but left
+       every response in Inter - one conversation in two typefaces. */
+    font-family: var(--font-sans);
     font-size: var(--ai-chat-font-size, 0.9375rem);
     line-height: 1.65;
     color: var(--foreground);
@@ -5232,20 +5201,32 @@
   :global(.prose-ai-loading pre.shiki) {
     opacity: 0.7;
   }
+  /* The wrapper scrolls, the table doesn't. This used to set `overflow-x: auto`
+     and then `overflow: hidden` on the same element - the shorthand won, so a
+     table wider than the message was clipped with no way to reach the rest of
+     it. Rounding lives on the wrapper for the same reason. */
+  /* The inner element scrolls, the outer one anchors the copy button. This used
+     to be one element doing both, which sent the button sliding into the middle
+     of the table on horizontal scroll. */
+  :global(.ai-table-scroll) {
+    overflow: auto;
+    max-height: 26rem;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin: 0.6rem 0;
+  }
   :global(.prose-ai table) {
     border-collapse: collapse;
-    display: block;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    max-width: 100%;
     width: max-content;
+    min-width: 100%;
     font-size: 0.8125rem;
-    margin: 0.6rem 0;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    overflow: hidden;
   }
   :global(.prose-ai th) {
+    position: sticky;
+    top: 0;
+    z-index: 1;
     border-bottom: 1px solid var(--border);
     border-right: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
     padding: 0.45rem 1rem;
