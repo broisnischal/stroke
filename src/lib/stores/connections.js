@@ -74,7 +74,10 @@ export function loadSavedConnections() {
         ...c,
         id:   c.id   ?? newConnectionId(),
         type,
-        port: c.port != null ? Number(c.port) : 5432,
+        // Only Postgres-family connections get 5432 as a fallback; for other
+        // engines the per-engine normalizers in api.js fill the right default
+        // (3306/6379/8123/1433) when port is left undefined.
+        port: c.port != null ? Number(c.port) : (engineFamily(type) === 'postgres' ? 5432 : undefined),
       }
       // Redis connections can carry stale Postgres-ish fields from an earlier
       // edit/clone (a `provider` and a non-numeric `db` like "postgres"), which
