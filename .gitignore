@@ -35,6 +35,13 @@ packaging/aur/discerns/*.tar.zstlogs/
 .env.local
 .env.*.local
 
+# Local agent/editor notes — kept on disk, not shipped in the repo
+AGENT.md
+
+# Personal SQL notebooks — these can embed real query results (customer data);
+# they belong in your documents folder, never in the repo
+*.sqlnb
+
 # Build/tooling cruft that must never be committed
 squashfs-root/
 *.AppImage
