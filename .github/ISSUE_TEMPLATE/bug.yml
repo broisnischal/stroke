@@ -1,0 +1,55 @@
+name: Bug report
+description: Something behaves incorrectly
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please don't paste connection strings, credentials, or real data. A
+        redacted example that still reproduces the problem is more useful than a
+        real one you have to scrub afterwards.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+    validations: { required: true }
+  - type: input
+    id: version
+    attributes:
+      label: Stroke version
+      description: Shown at the right-hand end of the status bar.
+      placeholder: "1.21.0"
+    validations: { required: true }
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [macOS, Windows, Linux]
+    validations: { required: true }
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Database
+      description: Which engine, if the bug involves one.
+      options:
+        - Not database-specific
+        - PostgreSQL
+        - MySQL
+        - MariaDB
+        - CockroachDB
+        - SQLite
+        - Turso / libSQL
+        - Cloudflare D1
+        - ClickHouse
+        - DuckDB
+        - SQL Server
+        - Redis
+  - type: textarea
+    id: error
+    attributes:
+      label: Error text
+      description: >
+        Any message the app showed. If it hit the crash screen, "Report issue"
+        there fills this in for you.
+      render: text
