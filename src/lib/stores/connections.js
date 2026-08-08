@@ -213,6 +213,26 @@ export function setLastConnectionId(id) {
   } catch {}
 }
 
+/**
+ * Last active schema per connection, so reconnecting lands where the user
+ * left off instead of resetting to `public`.
+ * @param {string} connectionId
+ * @returns {string | null}
+ */
+export function getLastSchema(connectionId) {
+  if (!connectionId) return null
+  try { return localStorage.getItem(`stroke:last-schema:${connectionId}`) } catch { return null }
+}
+
+/**
+ * @param {string} connectionId
+ * @param {string} schema
+ */
+export function setLastSchema(connectionId, schema) {
+  if (!connectionId || !schema) return
+  try { localStorage.setItem(`stroke:last-schema:${connectionId}`, schema) } catch {}
+}
+
 /** Returns the last-used connection if it still exists in the saved list. */
 export function getLastConnection() {
   const id = getLastConnectionId()
