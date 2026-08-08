@@ -960,6 +960,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (_dispCacheRows !== rows) {
       _dispCacheRows = rows;
       _cellTextCache.clear(); _vexprTextCache.clear(); _colTfCache.clear();
+      // Keyed by the full vector literal (10-20KB each for big embeddings), so
+      // stale entries from previous pages/tables must not accumulate.
+      _vectorDisplayCache.clear();
     }
     if (_dispCacheVFns !== _vcolFns) { _dispCacheVFns = _vcolFns; _vexprTextCache.clear(); }
     if (_dispCacheTFns !== _colTransformFns) { _dispCacheTFns = _colTransformFns; _colTfCache.clear(); }
@@ -1910,9 +1913,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ? [...selected].sort((a, b) => a - b)
       : rows.map((_, i) => i)
     const header = activeCols.map((c) => csvCell(c.name)).join('\t')
+    // Resolve column indices once - indexOf inside the per-row loop is
+    // O(rows × selCols × totalCols) on wide tables.
+    const colIdxs = activeCols.map((c) => _nameToActualIdx.get(c.name) ?? columns.indexOf(c))
     const body = rowIndices
-      .map((i) => activeCols.map((c) => {
-        const ci = columns.indexOf(c)
+      .map((i) => colIdxs.map((ci) => {
         const v = rows[i]?.[ci]
         return v === null || v === undefined ? '' : typeof v === 'object' ? cellJsonString(v) : String(v)
       }).join('\t'))
