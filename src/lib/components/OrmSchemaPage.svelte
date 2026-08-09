@@ -12,10 +12,11 @@
   import DbIcon from './DbIcon.svelte'
   import TabLoading from './TabLoading.svelte'
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
-  import { getSchemaColumnStructure, listIndexes, listEnums, listTables, saveExportAs } from '$lib/api.js'
+  import { getSchemaColumnStructure, listIndexes, listEnums, listTables, listSchemas, saveExportAs } from '$lib/api.js'
   import {
     buildOrmSchemaModel, renderPrismaSchema, renderDrizzleSchema,
-    PRISMA_ENGINES, DRIZZLE_ENGINES,
+    renderSqlSchema, renderSqlDatabase,
+    PRISMA_ENGINES, DRIZZLE_ENGINES, SQL_ENGINES,
   } from '$lib/orm-schema.js'
   import { cn } from '$lib/utils.js'
 
@@ -32,9 +33,19 @@
   const TARGETS = [
     { id: 'prisma',  label: 'Prisma',  engines: PRISMA_ENGINES,  ext: 'prisma', file: 'schema.prisma' },
     { id: 'drizzle', label: 'Drizzle', engines: DRIZZLE_ENGINES, ext: 'ts',     file: 'schema.ts' },
+    // SQL describes every engine, because it is the engine's own language.
+    { id: 'sql',     label: 'SQL',     engines: SQL_ENGINES,     ext: 'sql',    file: 'schema.sql' },
   ]
 
-  let target  = $state(/** @type {'prisma'|'drizzle'} */ ('prisma'))
+  let target  = $state(/** @type {'prisma'|'drizzle'|'sql'} */ ('prisma'))
+  /** 'schema' = the schema in the sidebar; 'database' = every schema, one script.
+   *  Only offered for the SQL target: DDL names are schema-qualified, so two
+   *  schemas owning a `users` table produce two statements rather than a clash,
+   *  which is not true of a Prisma model or a Drizzle export. */
+  let scope = $state(/** @type {'schema'|'database'} */ ('schema'))
+  /** Models for every schema, loaded only when the database scope is picked. */
+  let dbModels = $state.raw(/** @type {import('$lib/orm-schema.js').OrmSchemaModel[]} */ ([]))
+  let dbLoading = $state(false)
   // $state.raw: the model is a whole introspected schema — every table, every
   // column, every index — and it is replaced wholesale by `load` and never
   // mutated. Deep $state proxied every one of those objects on a hundred-table
@@ -53,7 +64,7 @@
     e.preventDefault()
     const i = TARGETS.findIndex((t) => t.id === target)
     const next = TARGETS[(i + (e.key === 'ArrowRight' ? 1 : -1) + TARGETS.length) % TARGETS.length]
-    target = /** @type {'prisma'|'drizzle'} */ (next.id)
+    target = /** @type {'prisma'|'drizzle'|'sql'} */ (next.id)
     const list = /** @type {HTMLElement} */ (e.currentTarget)
     requestAnimationFrame(() =>
       /** @type {HTMLElement | null} */ (list.querySelector(`[data-target="${next.id}"]`))?.focus(),
@@ -63,21 +74,82 @@
   const active    = $derived(TARGETS.find((t) => t.id === target) ?? TARGETS[0])
   const supported = $derived(active.engines.includes(dbType))
 
+  /** The database scope is SQL-only, so anything else falls back to the schema. */
+  const effectiveScope = $derived(target === 'sql' ? scope : 'schema')
+
   const code = $derived.by(() => {
-    if (!model || !supported) return ''
+    if (!supported) return ''
     try {
+      if (target === 'sql' && effectiveScope === 'database') {
+        if (dbLoading) return '-- Reading every schema…\n'
+        return renderSqlDatabase(dbModels)
+      }
+      if (!model) return ''
+      if (target === 'sql') return renderSqlSchema(model)
       return target === 'prisma' ? renderPrismaSchema(model) : renderDrizzleSchema(model)
     } catch (e) {
       // A generator failure must not blank the tab — say so in the editor.
-      return `// Could not render this schema as ${active.label}: ${String(e)}\n`
+      const c = target === 'sql' ? '--' : '//'
+      return `${c} Could not render this schema as ${active.label}: ${String(e)}\n`
     }
   })
 
-  const tableCount = $derived(model?.tables.length ?? 0)
+  const tableCount = $derived(
+    effectiveScope === 'database'
+      ? dbModels.reduce((n, m) => n + m.tables.length, 0)
+      : (model?.tables.length ?? 0),
+  )
 
   // Monaco has no Prisma grammar; its DSL is close enough to Rust's block syntax
   // that the highlighter reads correctly, and far better than plaintext.
-  const language = $derived(target === 'prisma' ? 'rust' : 'typescript')
+  const language = $derived(
+    target === 'sql' ? 'sql' : target === 'prisma' ? 'rust' : 'typescript',
+  )
+
+  // Every schema, loaded only once the database scope is actually picked —
+  // it is N times the introspection of a single schema, and most sessions never
+  // ask for it.
+  let dbToken = ''
+  $effect(() => {
+    if (effectiveScope !== 'database') return
+    void loadDatabase(`${connectionId} ${dbType}`)
+  })
+
+  async function loadDatabase(key) {
+    if (key === dbToken) return
+    dbToken = key
+    dbLoading = true
+    error = ''
+    try {
+      const names = await listSchemas()
+      const list = (Array.isArray(names) ? names : [])
+        .map((n) => (typeof n === 'string' ? n : n?.name))
+        .filter(Boolean)
+      const wanted = list.length ? list : [schema]
+      const built = []
+      // Sequential on purpose: four calls per schema fired at once across
+      // twenty schemas is eighty concurrent round trips at the pool, which
+      // starves the rest of the app for the duration.
+      for (const name of wanted) {
+        const [structures, indexes, enums, tables] = await Promise.all([
+          getSchemaColumnStructure(name),
+          listIndexes(name).catch(() => []),
+          listEnums(name).catch(() => []),
+          listTables(name).catch(() => []),
+        ])
+        if (key !== dbToken) return // a newer load started
+        built.push(buildOrmSchemaModel({ schema: name, dbType, structures, indexes, enums, tables }))
+      }
+      if (key !== dbToken) return
+      dbModels = built
+    } catch (e) {
+      if (key !== dbToken) return
+      error = String(e)
+      dbModels = []
+    } finally {
+      if (key === dbToken) dbLoading = false
+    }
+  }
 
   $effect(() => {
     // Follows the connection, not just the schema name: switching databases
@@ -173,24 +245,66 @@
               : 'text-muted-foreground hover:text-foreground',
           )}
         >
-          <DbIcon id={t.id} class="size-3.5 shrink-0" />
+          <!-- DbIcon carries engine marks; SQL is not an engine, so it takes a
+               glyph from the icon set rather than rendering an empty box. -->
+          {#if t.id === 'sql'}
+            <Icon name="terminal" class="size-3.5 shrink-0" />
+          {:else}
+            <DbIcon id={t.id} class="size-3.5 shrink-0" />
+          {/if}
           {t.label}
         </button>
       {/each}
     </div>
 
+    {#if target === 'sql'}
+      <!-- Scope, SQL only. A Prisma model or a Drizzle export named `users`
+           can exist once per file; a CREATE TABLE is schema-qualified, so the
+           whole database concatenates without colliding. -->
+      <div
+        role="tablist"
+        aria-label="Scope"
+        class="flex shrink-0 items-center gap-0.5 rounded-lg bg-muted/40 p-0.5"
+      >
+        {#each [{ id: 'schema', label: schema }, { id: 'database', label: 'Whole database' }] as sc (sc.id)}
+          {@const on = scope === sc.id}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={on}
+            tabindex={on ? 0 : -1}
+            onclick={() => (scope = /** @type {'schema'|'database'} */ (sc.id))}
+            class={cn(
+              'inline-flex h-7 max-w-[12rem] items-center rounded-md px-2.5 text-ui-xs transition-[color,background-color,box-shadow,scale] duration-150 ease-out active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
+              on ? 'bg-background font-medium text-foreground elevate-1-rim' : 'text-muted-foreground hover:text-foreground',
+            )}
+          ><span class="truncate font-mono">{sc.label}</span></button>
+        {/each}
+      </div>
+    {/if}
+
     <span class="min-w-0 truncate font-mono text-ui-xs text-muted-foreground">
-      {schema}{#if tableCount}<span class="text-muted-foreground/50"> · {tableCount} {tableCount === 1 ? 'table' : 'tables'}</span>{/if}
+      {#if effectiveScope === 'database'}
+        {dbModels.length} {dbModels.length === 1 ? 'schema' : 'schemas'}
+      {:else}
+        {schema}
+      {/if}
+      {#if tableCount}<span class="text-muted-foreground/50"> · {tableCount} {tableCount === 1 ? 'table' : 'tables'}</span>{/if}
     </span>
 
     <span class="ml-auto flex shrink-0 items-center gap-1">
       <button
         type="button"
-        onclick={() => { loadToken = ''; void load(`${connectionId} ${schema} ${dbType} ${Date.now()}`) }}
+        onclick={() => {
+          const stamp = Date.now()
+          loadToken = ''
+          void load(`${connectionId} ${schema} ${dbType} ${stamp}`)
+          if (effectiveScope === 'database') { dbToken = ''; void loadDatabase(`${connectionId} ${dbType} ${stamp}`) }
+        }}
         title="Read the schema again"
         class="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
       >
-        <Icon name="refresh-cw" class={cn('size-3.5 shrink-0', loading && 'animate-spin')} />
+        <Icon name="refresh-cw" class={cn('size-3.5 shrink-0', (loading || dbLoading) && 'animate-spin')} />
         Refresh
       </button>
       <button
@@ -227,7 +341,11 @@
   {:else if !supported}
     <div class="flex min-h-0 flex-1 items-center justify-center p-8">
       <div class="max-w-md text-center">
-        <DbIcon id={active.id} class="mx-auto size-6 text-muted-foreground/40" />
+        {#if active.id === 'sql'}
+          <Icon name="terminal" class="mx-auto size-6 text-muted-foreground/40" />
+        {:else}
+          <DbIcon id={active.id} class="mx-auto size-6 text-muted-foreground/40" />
+        {/if}
         <p class="mt-2 text-ui-sm text-foreground">{active.label} doesn't support this engine</p>
         <p class="mt-1 text-ui-xs text-muted-foreground">
           {active.label} has no {dbType} driver, so there's no schema to write.
@@ -237,7 +355,7 @@
         </p>
       </div>
     </div>
-  {:else if loading && !model}
+  {:else if effectiveScope === 'database' ? (dbLoading && !dbModels.length) : (loading && !model)}
     <TabLoading />
   {:else if tableCount === 0}
     <div class="flex min-h-0 flex-1 items-center justify-center p-8">
