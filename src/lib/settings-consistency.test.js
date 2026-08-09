@@ -149,3 +149,23 @@ describe('JSON word wrap reaches every JSON view', () => {
     expect(dialog).toMatch(/settings\.jsonWordWrap/)
   })
 })
+
+describe('the JSONPath suggestion widget is shared', () => {
+  it('is used by every viewer that offers completions', () => {
+    // There were three copies. The JSON tab had a good one; the SQL and table
+    // views had a poorer one built from `getCompletions`, which discards the
+    // kind, detail and preview the completion engine already computed — so each
+    // row printed the same identifier twice and highlighted none of it.
+    for (const file of ['JsonViewer', 'JsonViewerPage', 'TableJsonView']) {
+      expect(read(`./components/${file}.svelte`), file).toMatch(/JsonPathSuggest/)
+    }
+  })
+
+  it('leaves no viewer on the lossy completion call', () => {
+    // getCompletions maps the rich items down to their insert strings. Anything
+    // still calling it is rendering a suggestion list it cannot describe.
+    for (const file of ['JsonViewer', 'JsonViewerPage', 'TableJsonView']) {
+      expect(read(`./components/${file}.svelte`), file).not.toMatch(/getCompletions\b/)
+    }
+  })
+})

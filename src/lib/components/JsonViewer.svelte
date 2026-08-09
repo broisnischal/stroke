@@ -9,8 +9,10 @@
   import Download from '@lucide/svelte/icons/download'
   import CheckCheck from '@lucide/svelte/icons/check-check'
   import JsonWrapToggle from './JsonWrapToggle.svelte'
+  import JsonPathSuggest from './JsonPathSuggest.svelte'
   import { appJsonWordWrap } from '$lib/stores/settings.js'
-  import { evalJsonPath, getCompletions, applyCompletion, describeResult } from '$lib/jsonpath.js'
+  import { cn } from '$lib/utils.js'
+  import { evalJsonPath, getCompletionItems, applyCompletion, describeResult } from '$lib/jsonpath.js'
 
   let {
     json = '[]',
@@ -67,14 +69,23 @@
     return JSON.stringify(pathResult.value, null, 2)
   })
 
+  // The rich items, not just their insert strings. `kind`, `detail` and
+  // `preview` were being computed and then thrown away, which is why every row
+  // read `.key auth_name .auth_name` — the widget was reconstructing a worse
+  // version of data it already had.
   const completions = $derived.by(() => {
     if (!pathFocused || parsedJson === null) return []
-    return getCompletions(parsedJson, jsonPath).slice(0, 8)
+    return getCompletionItems(parsedJson, jsonPath).slice(0, 12)
   })
 
+  // Nothing selected means Enter does nothing, which is the wrong default for a
+  // list that is already filtered to what you typed. The top match is armed, so
+  // Tab or Enter takes it straight away.
   $effect(() => {
-    if (!pathFocused || completions.length === 0) activeIdx = -1
+    void completions
+    activeIdx = completions.length ? 0 : -1
   })
+
 
   /** @param {string} completion */
   function pickCompletion(completion) {
@@ -94,7 +105,7 @@
       activeIdx = (activeIdx - 1 + completions.length) % completions.length
     } else if ((e.key === 'Tab' || e.key === 'Enter') && activeIdx >= 0) {
       e.preventDefault()
-      pickCompletion(completions[activeIdx])
+      pickCompletion(completions[activeIdx].insert)
     } else if (e.key === 'Escape') {
       activeIdx = -1
       pathFocused = false
@@ -213,31 +224,13 @@
       <span class="shrink-0 font-mono text-ui-2xs text-muted-foreground/50">{describeResult(pathResult.value)}</span>
     {/if}
 
-    <!-- Autocomplete dropdown -->
     {#if pathFocused && completions.length > 0}
-      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-      <ul
-        class="absolute left-0 top-full z-50 mt-px min-w-48 overflow-hidden rounded-b-md border border-border bg-popover elevate-2-rim"
-        onmousedown={(e) => e.preventDefault()}
-      >
-        {#each completions as completion, i (completion)}
-          <li>
-            <button
-              type="button"
-              class="flex w-full items-center gap-2 px-3 py-1.5 text-left font-mono text-ui-xs transition-colors {i === activeIdx ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'}"
-              onclick={() => pickCompletion(completion)}
-            >
-              {#if completion.startsWith('[')}
-                <span class="shrink-0 text-ui-3xs text-muted-foreground/50">[idx]</span>
-              {:else}
-                <span class="shrink-0 text-ui-3xs text-muted-foreground/50">.key</span>
-              {/if}
-              <span class="truncate">{completion.startsWith('.') ? completion.slice(1) : completion}</span>
-              <span class="ml-auto shrink-0 text-muted-foreground/40">{completion}</span>
-            </button>
-          </li>
-        {/each}
-      </ul>
+      <JsonPathSuggest
+        items={completions}
+        query={jsonPath}
+        bind:activeIdx
+        onpick={(insert) => pickCompletion(insert)}
+      />
     {/if}
 
     <!-- toolbar right side -->
