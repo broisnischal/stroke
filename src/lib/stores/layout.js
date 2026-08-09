@@ -19,6 +19,10 @@ export const DEFAULT_LAYOUT = {
   statusBarVisible: true,
   tabBarVisible: true,
   tableToolbarVisible: true,
+  /** JSON viewer soft-wrap. Off by default: wrapping keeps the structure
+   *  scannable, and a single embedding value can be tens of thousands of
+   *  characters, which wrapped would bury every row around it. */
+  jsonWordWrap: false,
 }
 
 export const NAV_SIDEBAR_MIN = 180
@@ -88,6 +92,7 @@ export function loadLayout() {
     const statusBarVisible = parsed.statusBarVisible !== false
     const tabBarVisible = parsed.tabBarVisible !== false
     const tableToolbarVisible = parsed.tableToolbarVisible !== false
+    const jsonWordWrap = parsed.jsonWordWrap === true
     return {
       navSidebarWidth: clampNavSidebarWidth(navSidebarWidth),
       navSidebarOpen,
@@ -103,6 +108,7 @@ export function loadLayout() {
       statusBarVisible,
       tabBarVisible,
       tableToolbarVisible,
+      jsonWordWrap,
     }
   } catch {
     return { ...DEFAULT_LAYOUT }
