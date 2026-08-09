@@ -27,6 +27,15 @@
 - **Filtering no longer replays the list's entrance animation on every keystroke.** Rows carried a staggered rise of up to half a second, which is a nice first impression and reads as lag when it fires on each character typed. Both the connections rail and the database picker opposite it were affected.
 - **The engine blurb is gone from the connection form header.** "Local file-based database" under a heading that says SQLite is describing a decision you have already made.
 
+#### SQL editor
+- **A running query survives leaving its tab.** Two Query Editor tabs share one editor component, and switching between them swapped its state out from under an in-flight query — the spinner stopped, the results pane showed the other tab's, and whatever came back landed in whichever tab happened to be in front. The query itself never stopped; only the app lost track of which tab had asked. A run now belongs to the tab that started it.
+- **The JSON view no longer freezes on a large result.** It built one object per row, flattened all of them to a single string, then parsed that string straight back into objects — three passes over the whole result and two copies of it in memory, with no limit. `SELECT *` over a million rows spent its time assembling text far too large to read. It now renders the first thousand rows, says so, and Export still carries everything.
+
+#### Codegen
+- **A SQL target, beside Prisma and Drizzle.** The schema as the statements that would rebuild it: enum types, `CREATE TABLE` with nullability, defaults and keys, the indexes, and the foreign keys as `ALTER TABLE` after every table exists — inline `REFERENCES` only works if the parent is created first, which no ordering can promise once the schema has a cycle. It covers every engine, because it is the engine's own language.
+- **The whole database in one script.** A scope switch on the SQL target emits every schema at once, schema-qualified, so two schemas owning a `users` table produce two statements rather than a collision. Read only when you ask for it.
+- **The Prisma/Drizzle switch is reachable from the keyboard.** It was two plain buttons — no tablist, no arrow keys, invisible to a screen reader — for the primary control on the page. Its pills were also 24px next to 28px buttons; they match now.
+
 #### Interface
 - **Dropdown menus were rebuilt to fit their own panel.** Item corners were rounder than the space they sat in, leaving a crescent of gap at each one; rows were small enough to mis-click; the highlight jumped from row to row with no transition, so running the pointer down a list strobed; and the selected value was marked only by a tick at the far right edge, away from the label you were reading. Fixed in the shared component, so every menu in the app gets it.
 
