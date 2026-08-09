@@ -167,14 +167,14 @@ fn machine_id_raw() -> String {
     }
     #[cfg(target_os = "windows")]
     {
-        if let Ok(out) = std::process::Command::new("reg")
-            .args([
-                "query",
-                "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography",
-                "/v",
-                "MachineGuid",
-            ])
-            .output()
+        // quiet_std: the machine-id lookup runs at startup for the licence check.
+        if let Ok(out) = crate::proc::quiet_std(std::process::Command::new("reg").args([
+            "query",
+            "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography",
+            "/v",
+            "MachineGuid",
+        ]))
+        .output()
         {
             if let Ok(s) = String::from_utf8(out.stdout) {
                 for line in s.lines() {
