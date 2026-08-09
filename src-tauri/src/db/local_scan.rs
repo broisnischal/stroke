@@ -284,7 +284,12 @@ fn listening_ports(pid: u32) -> Vec<u16> {
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn listening_ports(pid: u32) -> Vec<u16> {
-    let Ok(out) = std::process::Command::new("netstat").args(["-ano", "-p", "TCP"]).output() else {
+    // quiet_std: the local-database scan runs on the connection screen, so a bare
+    // spawn flashed a console window over the app on Windows.
+    let Ok(out) = crate::proc::quiet_std(
+        std::process::Command::new("netstat").args(["-ano", "-p", "TCP"]),
+    )
+    .output() else {
         return Vec::new();
     };
     let pid = pid.to_string();
