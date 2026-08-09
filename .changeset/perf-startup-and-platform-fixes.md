@@ -24,3 +24,9 @@
 - **The saved-connections filter is always there once you have more than one.** It only appeared past five connections, so it materialised out of nowhere as the list grew and the people most likely to want it had never seen it. It also gained Enter to take the top match, arrow keys into the list, and a clear button big enough to hit.
 - **Filtering no longer replays the list's entrance animation on every keystroke.** Rows carried a staggered rise of up to half a second, which is a nice first impression and reads as lag when it fires on each character typed. Both the connections rail and the database picker opposite it were affected.
 - **The engine blurb is gone from the connection form header.** "Local file-based database" under a heading that says SQLite is describing a decision you have already made.
+
+#### Ask AI
+- **You can select and copy an answer.** The command palette is rendered outside the app's DOM root, so the rule that makes dialog text selectable never applied to it — and a quick answer you cannot quote is most of the point of asking.
+- **The panel stops moving while you type.** It had a maximum height but no height, so the box grew as the answer streamed and as query results appeared, shifting everything already on screen out from under the cursor. A transcript wants a window that scrolls, not one that resizes.
+- **It follows the answer to the end.** Auto-scroll measured the page the instant new text arrived, but the markdown renders a moment later — so it scrolled to a bottom that did not exist yet, fell further behind with each token, and gave up entirely once it had drifted far enough, which is exactly when there was most left to read. It now waits for the text to actually land, and scrolling up to re-read something no longer fights the stream.
+- **Typing during an answer is smoother.** Every token re-ran a walk up the DOM asking the browser to recompute styles, for the whole length of the answer.
