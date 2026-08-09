@@ -27,6 +27,9 @@
 - **Filtering no longer replays the list's entrance animation on every keystroke.** Rows carried a staggered rise of up to half a second, which is a nice first impression and reads as lag when it fires on each character typed. Both the connections rail and the database picker opposite it were affected.
 - **The engine blurb is gone from the connection form header.** "Local file-based database" under a heading that says SQLite is describing a decision you have already made.
 
+#### Interface
+- **Dropdown menus were rebuilt to fit their own panel.** Item corners were rounder than the space they sat in, leaving a crescent of gap at each one; rows were small enough to mis-click; the highlight jumped from row to row with no transition, so running the pointer down a list strobed; and the selected value was marked only by a tick at the far right edge, away from the label you were reading. Fixed in the shared component, so every menu in the app gets it.
+
 #### Ask AI
 - **You can select and copy an answer.** The command palette is rendered outside the app's DOM root, so the rule that makes dialog text selectable never applied to it — and a quick answer you cannot quote is most of the point of asking.
 - **The panel stops moving while you type.** It had a maximum height but no height, so the box grew as the answer streamed and as query results appeared, shifting everything already on screen out from under the cursor. A transcript wants a window that scrolls, not one that resizes.
