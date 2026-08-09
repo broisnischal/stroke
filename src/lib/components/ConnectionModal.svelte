@@ -221,6 +221,18 @@
     (b.lastConnectedAt ?? 0) - (a.lastConnectedAt ?? 0);
 
   let saved = $state(loadSavedConnections().sort(byLastConnected));
+  /** Filter over the saved rail. Matches the things you would recognise a
+   *  connection by — its name, its engine, and where it points. */
+  let savedQuery = $state("");
+  const savedMatches = $derived.by(() => {
+    const q = savedQuery.trim().toLowerCase();
+    if (!q) return saved;
+    return saved.filter((c) =>
+      [c.name, c.type, c.database, c.host, c.filePath, c.libsqlUrl]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(q)),
+    );
+  });
   let lastId = $state(getLastConnectionId());
   let editingId = $state(/** @type {string|null} */ (null));
   let connecting = $state(/** @type {string|null} */ (null));
@@ -1121,6 +1133,21 @@
   );
   let localPhase = $state(/** @type {'idle'|'scanning'|'done'} */ ("idle"));
 
+  /**
+   * ⌘R / Ctrl+R — rescan. Reloads the saved list as well as the local scan, so
+   * one key means "show me what is actually there now".
+   * @param {KeyboardEvent} e
+   */
+  function onRefreshKey(e) {
+    if (!open) return;
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+    if (e.key.toLowerCase() !== "r") return;
+    e.preventDefault();
+    e.stopPropagation();
+    saved = loadSavedConnections().sort(byLastConnected);
+    void refreshLocal();
+  }
+
   async function refreshLocal() {
     localPhase = "scanning";
     // Discovery is a convenience on both sides. A failure means "nothing found",
@@ -1603,19 +1630,16 @@
 
 <!-- ⌘R / Ctrl+R rescans what's running locally while the dialog is open. The
      preventDefault matters: without it the webview reloads the whole app. -->
+<!-- ⌘R is registered in the CAPTURE phase, deliberately.
+     `svelte:window onkeydown` listens on the bubble, so any handler between the
+     focused element and window that calls stopPropagation swallows it — and the
+     dialog is full of inputs and a bits-ui overlay that do exactly that. Capture
+     runs before any of them, which is also the only way to be sure preventDefault
+     lands before the webview treats ⌘R as "reload the app". -->
 <svelte:window
+  onkeydowncapture={onRefreshKey}
   onkeydown={(e) => {
     if (!open) return;
-    if (
-      (e.ctrlKey || e.metaKey) &&
-      !e.altKey &&
-      !e.shiftKey &&
-      e.key.toLowerCase() === "r"
-    ) {
-      e.preventDefault();
-      saved = loadSavedConnections().sort(byLastConnected);
-      void refreshLocal();
-    }
     if (
       (e.ctrlKey || e.metaKey) &&
       !e.altKey &&
@@ -1897,7 +1921,7 @@
               {#if saved.length > 0}
                 <span
                   class="rounded-full bg-muted/60 px-1.5 py-px text-ui-3xs font-medium tabular-nums text-muted-foreground/70"
-                  >{saved.length}</span
+                  >{savedQuery ? `${savedMatches.length}/${saved.length}` : saved.length}</span
                 >
               {/if}
               <button
@@ -1931,11 +1955,56 @@
               </button>
             </div>
 
+            <!-- Search. Four connections fit on screen; forty do not, and the
+                 rail is the fastest way in for someone who already knows which
+                 database they want. Only shown once there are enough to hunt
+                 through — below that it is one more thing to look past. -->
+            {#if saved.length > 5}
+              <div class="shrink-0 px-2 pb-2">
+                <div class="relative">
+                  <Icon
+                    name="search"
+                    class="pointer-events-none absolute left-2.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/40"
+                  />
+                  <input
+                    type="text"
+                    bind:value={savedQuery}
+                    placeholder="Filter connections…"
+                    aria-label="Filter saved connections"
+                    autocomplete="off"
+                    spellcheck="false"
+                    class="h-7 w-full rounded-md border border-border/40 bg-background/60 pl-7 pr-6 text-ui-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-ring/55"
+                    onkeydown={(e) => {
+                      if (e.key !== "Escape" || !savedQuery) return;
+                      // Clear first, close the dialog second — Escape on a
+                      // non-empty filter should undo the filter, not the dialog.
+                      e.preventDefault();
+                      e.stopPropagation();
+                      savedQuery = "";
+                    }}
+                  />
+                  {#if savedQuery}
+                    <button
+                      type="button"
+                      aria-label="Clear filter"
+                      onclick={() => (savedQuery = "")}
+                      class="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground/40 transition-colors hover:text-foreground"
+                      ><Icon name="x" class="size-3" /></button
+                    >
+                  {/if}
+                </div>
+              </div>
+            {/if}
+
             <div class="min-h-0 flex-1 border-t border-border/15 pt-1">
-              {#if saved.length > 0}
+              {#if savedQuery && savedMatches.length === 0}
+                <p class="px-4 py-3 text-ui-2xs text-muted-foreground/50">
+                  No connection matches “{savedQuery}”.
+                </p>
+              {:else if saved.length > 0}
                 <ScrollArea type="auto" class="h-full scroll-smooth">
                   <div class="px-2 py-1 flex flex-col gap-0.5">
-                    {#each saved as conn, i (conn.id)}
+                    {#each savedMatches as conn, i (conn.id)}
                       {@const isSel = conn.id === editingId}
                       {@const busy2 = connecting === conn.id}
                       {@const cid =
