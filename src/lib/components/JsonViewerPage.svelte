@@ -1,4 +1,6 @@
 <script>
+  import JsonWrapToggle from './JsonWrapToggle.svelte'
+  import { appJsonWordWrap } from '$lib/stores/settings.js'
   import { onMount, tick, untrack } from 'svelte'
   import * as monaco from 'monaco-editor'
   import { configureMonacoWorkers, editorFontFamily } from '$lib/monaco-env.js'
@@ -226,7 +228,7 @@
     fontLigatures: false,
     fontWeight: 'normal',
     scrollBeyondLastLine: false,
-    wordWrap: 'off',
+    wordWrap: $appJsonWordWrap ? 'on' : 'off',
     lineNumbers: /** @type {'on'} */ ('on'),
     // 4 (not 3) so the right-aligned numbers get a character of inset instead of
     // sitting flush against the editor edge, and 6px (not Monaco's default 10)
@@ -327,6 +329,11 @@
       themeObs.disconnect()
     }
   })
+
+  // Wrap is an app setting: a change made in Settings, or from any other JSON
+  // view, reflows this editor too rather than leaving it on whatever it was
+  // created with.
+  $effect(() => { editor?.updateOptions({ wordWrap: $appJsonWordWrap ? 'on' : 'off' }) })
 </script>
 
 <div bind:this={pageEl} class="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -346,6 +353,7 @@
 
     <div class="ml-auto flex shrink-0 items-center gap-0.5">
       {#if parsedJson !== null}
+        <JsonWrapToggle />
         <button type="button"
           class="inline-flex items-center gap-1 rounded px-2 py-0.5 font-mono text-ui-2xs text-muted-foreground/55 transition-colors hover:bg-muted hover:text-foreground"
           onclick={formatJson}

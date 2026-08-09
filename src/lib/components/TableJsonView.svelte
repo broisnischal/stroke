@@ -9,6 +9,8 @@
   import { untrack } from 'svelte'
   import Icon from './Icon.svelte'
   import MonacoTextView from './MonacoTextView.svelte'
+  import JsonWrapToggle from './JsonWrapToggle.svelte'
+  import { appJsonWordWrap } from '$lib/stores/settings.js'
   import { cn } from '$lib/utils.js'
   import { rowToRecord, formatJsonValue } from '$lib/row-inspector.js'
   import { evalJsonPath, getCompletions, applyCompletion, describeResult } from '$lib/jsonpath.js'
@@ -196,6 +198,6 @@
       <p class="font-mono text-ui-sm text-muted-foreground/40">No data to display</p>
     </div>
   {:else}
-    <MonacoTextView text={displayedJson} language="json" />
+    <MonacoTextView text={displayedJson} language="json" wordWrap={$appJsonWordWrap ? 'on' : 'off'} />
   {/if}
 </div>

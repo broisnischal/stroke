@@ -1,4 +1,6 @@
 <script>
+  import JsonWrapToggle from './JsonWrapToggle.svelte'
+  import { appJsonWordWrap } from '$lib/stores/settings.js'
   import { untrack } from 'svelte'
   import X from '@lucide/svelte/icons/x'
   import Copy from '@lucide/svelte/icons/copy'
@@ -92,7 +94,7 @@
       fontWeight: 'normal',
       padding: { top: 12, bottom: 12 },
       scrollBeyondLastLine: false,
-      wordWrap: 'off',
+      wordWrap: $appJsonWordWrap ? 'on' : 'off',
       renderLineHighlight: 'none',
       lineNumbers: 'on',
       // Matches JsonViewer: one character of inset on the left, 6px on the
@@ -152,6 +154,11 @@
     if (!data) return
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onclose() }
   }
+
+  // Wrap is an app setting: a change made in Settings, or from any other JSON
+  // view, reflows this editor too rather than leaving it on whatever it was
+  // created with.
+  $effect(() => { editor?.updateOptions({ wordWrap: $appJsonWordWrap ? 'on' : 'off' }) })
 </script>
 
 <svelte:window onkeydown={handleKey} />
@@ -181,6 +188,7 @@
           <span class="font-mono text-ui-sm font-medium text-foreground">{data.colName}</span>
         </div>
         <div class="flex items-center gap-1">
+          <JsonWrapToggle />
           <button
             type="button"
             class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 font-mono text-ui-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"

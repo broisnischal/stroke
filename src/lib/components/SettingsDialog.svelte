@@ -167,6 +167,10 @@
     settings = updateSettings({ vimMode: !settings.vimMode });
   }
 
+  function toggleJsonWordWrap() {
+    settings = updateSettings({ jsonWordWrap: !settings.jsonWordWrap });
+  }
+
   function toggleCmdkAi() {
     settings = updateSettings({ cmdkAiEnabled: !settings.cmdkAiEnabled });
   }
@@ -651,6 +655,9 @@
   {/if}
   {#if show($t('settings.previewSql'), $t('settings.previewSql.desc'))}
     {@render switchRow($t('settings.previewSql'), $t('settings.previewSql.desc'), settings.previewDmlBeforeApply, togglePreviewDml)}
+  {/if}
+  {#if show('Wrap JSON', 'Soft-wrap long values in every JSON viewer instead of scrolling sideways')}
+    {@render switchRow('Wrap JSON', 'Soft-wrap long values — embeddings, document chunks — in every JSON view instead of running off the right edge. Off keeps the structure easier to scan.', settings.jsonWordWrap, toggleJsonWordWrap)}
   {/if}
   {#if show('Vim mode', 'Experimental modal keyboard navigation across the app, the data grid, and the SQL editor')}
     {@render switchRow('Vim mode', 'Experimental: modal keyboard navigation (hjkl, gg/G, i/Esc) across the grid, the SQL editor, and tabs', settings.vimMode, toggleVimMode)}

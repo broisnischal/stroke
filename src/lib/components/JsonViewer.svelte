@@ -8,9 +8,8 @@
   import Copy from '@lucide/svelte/icons/copy'
   import Download from '@lucide/svelte/icons/download'
   import CheckCheck from '@lucide/svelte/icons/check-check'
-  import WrapText from '@lucide/svelte/icons/wrap-text'
-  import { loadLayout, saveLayout } from '$lib/stores/layout.js'
-  import { cn } from '$lib/utils.js'
+  import JsonWrapToggle from './JsonWrapToggle.svelte'
+  import { appJsonWordWrap } from '$lib/stores/settings.js'
   import { evalJsonPath, getCompletions, applyCompletion, describeResult } from '$lib/jsonpath.js'
 
   let {
@@ -35,17 +34,6 @@
   /** True when the caller trimmed the result to keep this view responsive. */
   const truncated = $derived(shownRows > 0 && rowCount > shownRows)
 
-  // Soft wrap, remembered. Off by default: unwrapped keeps the structure
-  // scannable down the left edge, and one embedding value can run to tens of
-  // thousands of characters — wrapped, it buries every row around it. But a
-  // value you cannot see at all is worse, so this is a switch rather than a
-  // decision made for you.
-  let wordWrap = $state(loadLayout().jsonWordWrap === true)
-  function toggleWrap() {
-    wordWrap = !wordWrap
-    saveLayout({ jsonWordWrap: wordWrap })
-    editor?.updateOptions({ wordWrap: wordWrap ? 'on' : 'off' })
-  }
 
   /** @type {HTMLElement | null} */
   let container = $state(null)
@@ -149,7 +137,7 @@
       fontWeight: 'normal',
       padding: { top: 12, bottom: 12 },
       scrollBeyondLastLine: false,
-      wordWrap: wordWrap ? 'on' : 'off',
+      wordWrap: $appJsonWordWrap ? 'on' : 'off',
       renderLineHighlight: 'none',
       lineNumbers: 'on',
       // 4 (not 3) so the right-aligned numbers get a character of inset instead
@@ -197,6 +185,9 @@
     if (!editor) return
     if (editor.getValue() !== displayedJson) editor.setValue(displayedJson)
   })
+
+  // Wrap is an app setting, so a change made anywhere reflows this editor too.
+  $effect(() => { editor?.updateOptions({ wordWrap: $appJsonWordWrap ? 'on' : 'off' }) })
 </script>
 
 <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -263,21 +254,7 @@
         <div class="h-4 w-px bg-border/60"></div>
       {/if}
 
-      <button
-        type="button"
-        title={wordWrap ? 'Wrap long values: on' : 'Wrap long values: off'}
-        aria-pressed={wordWrap}
-        class={cn(
-          'inline-flex items-center gap-1.5 rounded-md px-2 py-1 font-mono text-ui-2xs transition-colors',
-          wordWrap
-            ? 'bg-muted text-foreground'
-            : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-        )}
-        onclick={toggleWrap}
-      >
-        <WrapText class="size-3 shrink-0" />
-        <span>Wrap</span>
-      </button>
+      <JsonWrapToggle />
 
       <button
         type="button"

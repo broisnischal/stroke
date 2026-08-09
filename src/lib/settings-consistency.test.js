@@ -106,3 +106,46 @@ describe('settings option lists stay in step with their consumers', () => {
     }
   })
 })
+
+describe('JSON word wrap reaches every JSON view', () => {
+  const settings = read('./stores/settings.js')
+
+  it('is a real setting, not just a store', () => {
+    // Each of these is a separate place the key has to appear: the defaults,
+    // the parse (absent means off), the reactive store, and the sync that
+    // pushes a loaded value into it. Miss one and the toggle silently forgets.
+    expect(settings).toMatch(/jsonWordWrap: false/)
+    expect(settings).toMatch(/parsed\.jsonWordWrap === true/)
+    expect(settings).toMatch(/export const appJsonWordWrap/)
+    expect(settings).toMatch(/setStore\(appJsonWordWrap/)
+  })
+
+  it('is honoured by all five JSON surfaces', () => {
+    // The app shows JSON in five places, each with its own editor. A wrap
+    // preference that only some of them read is worse than none: the switch
+    // appears to do nothing depending on where you are looking. RowExpandViewer
+    // in particular used to keep its own localStorage key for this.
+    for (const file of [
+      'JsonViewer',
+      'JsonViewerPage',
+      'JsonCellLightbox',
+      'TableJsonView',
+      'RowExpandViewer',
+    ]) {
+      expect(read(`./components/${file}.svelte`), file).toMatch(/appJsonWordWrap/)
+    }
+  })
+
+  it('has one home for the preference, not several', () => {
+    // The old per-component key, and the layout-store version that preceded the
+    // setting. Either coming back means two switches for one preference.
+    expect(read('./components/RowExpandViewer.svelte')).not.toContain('stroke:json-word-wrap')
+    expect(read('./stores/layout.js')).not.toContain('jsonWordWrap')
+  })
+
+  it('is offered in the settings panel', () => {
+    const dialog = read('./components/SettingsDialog.svelte')
+    expect(dialog).toMatch(/toggleJsonWordWrap/)
+    expect(dialog).toMatch(/settings\.jsonWordWrap/)
+  })
+})
